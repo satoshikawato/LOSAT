@@ -315,6 +315,19 @@ Scheduling (each value computed by one thread with the original function; order 
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
 - `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE`) tblastn query batches searched side by side, appended
   in input order.
+- `LOSAT_X_TBNOIDCHUNK=1` tblastn with 2+ threads and several subjects: one entry into the search
+  pool takes one chunk of NCBI's subject iterator per thread (a hundredth of the subjects, at
+  least one; `blast_engine.c:1409`) instead of one subject per thread. The subjects are searched
+  by the same call and their lists reach the collector in subject order, so only the scheduling
+  changes; with fewer than 200 subjects the entries are the same. Not in the set (off unless set
+  to any value). Without it 28,036 subjects at 8 threads are 3,505 entries, each shorter than
+  the wake-up of the workers; with it 13. Timed on those subjects (16S rRNA genes, 40.6 Mb
+  together) at 8 threads with other work on the machine: one query batch of 55 proteins 1.43-1.64 s
+  without it and 0.76-0.85 s with it (NCBI BLAST+ 2.17.0 `-db` 0.68-0.78 s), one protein 0.87-1.11 s
+  and 0.22-0.27 s; the same output and the same peak memory. Nothing changes at one thread, nor
+  where `TBNBATCH` searches the batches side by side (each batch on one thread). With
+  `LOSAT_WASI_THREADS_DEBUG=1` the `[losat-thread-activity]` line of the subject stage ends with
+  `pool_entries=` (the entries of one query batch); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.
 - `LOSAT_X_PAIRPAR=1` TBLASTX seed stage (scan, two-hit test, ungapped extension) of each subject
   as units of (subject frame, chunk, query context), 36 per one-query pair, on the search pool (in
   order on the calling thread with one thread); each unit scans with a lookup table holding only its

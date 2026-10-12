@@ -43,3 +43,15 @@ pub use cutoffs::calculate_link_hsp_cutoffs_ncbi;
 pub use linking::{
     apply_sum_stats_even_gap_linking, apply_sum_stats_even_gap_linking_with_parallel,
 };
+
+// EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW): the in-place HSP list path
+// (tblastx/x_hsp_inplace.rs, a child module of `linking`). `ungapped_hit_sort.rs` calls its sort
+// dispatch, `main` its summary.
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
+// ```c
+//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+//          s_RevCompareHSPsTbx);
+// ```
+pub(crate) use linking::x_hsp_inplace;
+pub use linking::x_hsp_inplace_print_summary;

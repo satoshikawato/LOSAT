@@ -1,6 +1,7 @@
 //! Stable index-replay sorting for TBLASTX `UngappedHit` records.
 
 use super::chaining::UngappedHit;
+use super::sum_stats_linking::x_hsp_inplace;
 use std::cmp::Ordering;
 
 pub(crate) type UngappedHitCompare = fn(&UngappedHit, &UngappedHit) -> Ordering;
@@ -37,6 +38,20 @@ pub(crate) fn sort_ungapped_hits_by_index_replay(
     compare: UngappedHitCompare,
 ) {
     if hits.len() <= 1 {
+        return;
+    }
+
+    // EXPERIMENT (LOSAT_X_HSPINPLACE / LOSAT_X_HSPINPLACESHADOW), dispatch: the same index sort,
+    // then the records moved into that order inside `hits` instead of copied out and cloned back
+    // (tblastx/x_hsp_inplace.rs, item 1 of its header). Without a switch the body below runs.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
+    // ```c
+    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+    //               ScoreCompareHSPs);
+    // ```
+    // NCBI's qsort also moves the entries inside the one array.
+    if x_hsp_inplace::mode() != 0 && x_hsp_inplace::sort_dispatch(hits, compare) {
         return;
     }
 

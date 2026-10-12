@@ -147,7 +147,7 @@ LOSAT makedb \
   -title "my proteins"
 ```
 
-`LOSAT makedb` writes the files of `makeblastdb -blastdb_version 4` (without `-parse_seqids`): the sequence and header files are the same bytes, and the index file differs only in its creation date. `-max_file_sz` splits the database into volumes as makeblastdb does. NCBI BLAST+ programs search such a database with `-db`. LOSAT's own `-db` search is not available yet; the makeblastdb options LOSAT does not implement (`-parse_seqids`, masks, taxonomy, `-blastdb_version 5`) are rejected by name.
+`LOSAT makedb` writes the sequence, header and index files of `makeblastdb -blastdb_version 4` (without `-parse_seqids`), and the alias file of a database in several volumes: the sequence and header files are the same bytes, and the index file differs only in its creation date. The JSON metadata file (`.pjs`, `.njs`) is not written. `-max_file_sz` splits the database into volumes as makeblastdb does. NCBI BLAST+ programs search such a database with `-db`. LOSAT's own `-db` search is not available yet; the makeblastdb options LOSAT does not implement (`-parse_seqids`, masks, taxonomy, `-blastdb_version 5`) are rejected by name.
 
 ---
 

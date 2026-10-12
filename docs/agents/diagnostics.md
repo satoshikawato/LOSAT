@@ -127,15 +127,16 @@ on it acts on the TBLASTX searches that `LOSAT_X_PAIRPAR` leaves to the scan loo
 diagonal table has at least 2^21 cells (a query of 524 kb or more): a query of 0.9-1.05,
 1.8-2.1, 3.6-4.2 or 7.2-8.4 Mb against a subject longer than the table's spare cells
 (`x_pair_par.rs` `guard`), and on threaded Wasm also a subject of more than one chunk (more than
-15 Mb) at more than one thread. Measured there on 2026-10-12 (pairs with and without the switch,
-the same output in every run; Linux x86_64, node 26 for Wasm, a machine shared with other work),
-as time with the switch over time without: a 1.0 Mb query against 1.0 Mb (the smallest table it
-acts on, 8 MiB) at 8 threads 0.62-0.89 natively in seven pairs of eight (one pair 1.44) and
-0.70-0.82 on threaded Wasm; at one thread between equal and much faster, depending on what else
-uses the cache (native 0.66-1.26 over seven pairs, best run against best run 1.07; serial Wasm
-0.40-1.34 over ten pairs, best against best 0.99); a 2.0 Mb query against 5.0 Mb about half the
-time (native, 8 threads); a 0.6 Mb query against a 15.1 Mb subject on threaded Wasm with a 4 GiB
-memory 0.76-0.85. The Wasm memory reaches the same size with and without it.
+15 Mb) at more than one thread. Measured there on 2026-10-12 (alternating pairs with and without
+the switch, the same output in every run; Linux x86_64 with a 36 MiB L3, node 26 for Wasm), as
+time with the switch over time without. On a quiet machine: a 1.0 Mb query against 1.0 Mb (the
+smallest table it acts on, 8 MiB) at 8 threads 0.84-1.12 natively (median 0.88 of five pairs) and
+0.77-0.98 on threaded Wasm, at one thread 0.85-1.09 natively (median 0.99) and 0.79-0.96 on
+serial Wasm; a 1.0 Mb query against 5.0 Mb 0.99 and 1.08 (native, 8 threads); a 2.0 Mb query
+against 5.0 Mb (16 MiB table) 0.62 and 0.67. With other work on the machine the scan order slows
+down more than the bucketed one: most pairs at 1.0 Mb were then between 0.40 and 0.89, single
+ones up to 1.44. A 0.6 Mb query against a 15.1 Mb subject on threaded Wasm with a 4 GiB memory:
+0.76 and 0.85 (loaded machine). The Wasm memory reaches the same size with and without it.
 
 `LOSAT_X_PAIRLUT` and `LOSAT_X_HSPINPLACE` were added after the default changed, as switches
 that were off unless set, and joined the set on 2026-10-12. Both lower the memory of TBLASTX:

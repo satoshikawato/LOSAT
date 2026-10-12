@@ -290,6 +290,35 @@ Rebuilding less:
   by HSP, every field, E-values by bits; the first difference stops the run and the search continues with the
   reference's result. One line at exit:
   `[X_SHADOW] HSPINPLACE sorts= linkings= hits_compared= replay_fallbacks=`.
+- `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the tables that only the scan reads are freed before the HSP list of
+  the batch's last subject is merged and linked, which is where the heap of a large search peaks
+  (`tblastx/x_seed_release.rs`, exactness argument in its header). A query batch keeps its tables in two
+  holders, each reached only through one stage per subject: the unit path of `LOSAT_X_PAIRPAR` with its group
+  tables, whose stage ends when the subject's units have run, before their lists are merged (the unit path
+  runs as two calls for this, `run_subject_units` and `merge_subject` in `x_pair_par.rs`, the same statements
+  in the same order); and the batch's lookup table, whose stage ends after the seed stage. The end of the
+  batch's last stage of a holder frees it. The worker's diagonal table, which only the reference frame loop
+  reads, is not created when the unit path takes the batch without its shadow, and is otherwise dropped by
+  the worker that ended the last lookup stage. Without the switch the same holders keep the tables until the
+  batch has been searched, as before. Measured once on AP027131 x AP027133 (genetic code 4, one thread, bytes
+  requested under massif), without -> with the switch: the end of the units 110.4 -> 102.4 MiB, the merge of
+  their lists 155.8 -> 81.0 MiB, the first linking call 167.6 -> 107.3 MiB, which is the peak of the run in
+  both; max RSS in one run each 167 -> 110 MiB at one thread and 221 -> 163 MiB at eight. Known limits: the
+  gain is for the last subject of a batch (the only one of a pairwise search), since earlier subjects are
+  merged and linked while later ones still need the tables; and with `LOSAT_X_PAIRLUT=0` the batch's full
+  lookup table, which the frame loop names, stays alive through the merge, so that path keeps the higher
+  seed-stage peak. `LOSAT_X_STATS=1` prints, only with the switch on,
+  `[X_STATS] SEEDRELEASE batches= tables_released= unit_tables_released= batches_without_worker_table= worker_tables_released=`
+  (batches searched; batches whose lookup table a stage end released; batches whose unit path a stage end
+  released; batches whose workers held no diagonal table; worker tables dropped at the release). There is no
+  shadow switch: the switch changes no value and no order of computation, only when three allocations are
+  freed, so there is no second result to compare. A read after a release is excluded by ownership instead:
+  a stage is the only way to its tables and ending it consumes it (the compiler rejects a later use), the
+  merge after the units stage is a function that cannot name a group table, an open stage keeps its tables
+  alive, a subject that arrives after a release stops the run, and an assertion that runs with and without
+  the switch stops a frame loop that would run without the worker's table
+  (`LOSAT/tests/tblastx_seed_release.rs` reads the counters).
 
 Scheduling (each value computed by one thread with the original function; order of output kept):
 

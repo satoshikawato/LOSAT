@@ -181,9 +181,18 @@ impl SeqDb {
     /// (`alias::resolve_one_name`). Everything else is as in [`SeqDb::open`],
     /// including NCBI's rule that a volume named in an alias file is looked
     /// for in the current directory first.
+    #[cfg(test)]
     pub(crate) fn open_one_name(name: &str, seqtype: SeqType) -> Result<Self, SeqDbError> {
         let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir)?;
         Self::open_tree(tree, name, seqtype)
+    }
+
+    /// Resolves the one database at the path `name` as [`SeqDb::open_one_name`]
+    /// does, without opening its volumes: the alias files are read and the
+    /// index file of every volume they name is located. No volume file is
+    /// read, so the cost does not grow with the number of sequences.
+    pub(crate) fn locate_one_name(name: &str, seqtype: SeqType) -> Result<(), SeqDbError> {
+        alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir).map(|_| ())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvolset.cpp:101-116

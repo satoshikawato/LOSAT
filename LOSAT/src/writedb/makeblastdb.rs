@@ -670,22 +670,28 @@ pub fn build_database(
 // `CSeqDB sdb(new_db, t)` throws a `CSeqDBException` when the reader cannot
 // open what was written; the usual cause is an alias file of an earlier
 // database of the same name that `DeleteBlastDb` could not resolve and
-// therefore left in place, which now hides the new single volume. The
-// database is opened here for that outcome alone.
+// therefore left in place, which now hides the new single volume. LOSAT
+// resolves the database here for that outcome alone, and it only resolves:
+// the alias files are read and every volume is located, but no volume is
+// opened. The volumes were written a moment ago, and LOSAT's reader holds the
+// index of an open volume in memory (12 bytes for each sequence). So the
+// error `CSeqDB` gives for more volumes than the process may hold open files
+// ("Too many open files, please raise the open file limit", exit status 2
+// after a complete build) is not reproduced.
 //
-// The path is one database name (`SeqDb::open_one_name`), which departs from
-// NCBI on purpose: `CSeqDB` splits the name at spaces and double quotes, so
-// for an output path with such a character makeblastdb ends here with exit
-// status 2 ("No alias or index file found ...") after every successful
-// build. Apart from that the reader follows NCBI's rules, the volume of the
-// same name in the current directory included.
+// The path is one database name (`SeqDb::locate_one_name`), which departs
+// from NCBI on purpose: `CSeqDB` splits the name at spaces and double quotes,
+// so for an output path with such a character makeblastdb ends here with
+// exit status 2 ("No alias or index file found ...") after every successful
+// build. Apart from that the resolution follows NCBI's rules, the volume of
+// the same name in the current directory included.
 //
 // LOSAT does not write the JSON file that makeblastdb writes next. A file of
 // that name left by an earlier database would describe a database that is
 // gone (the removal of an existing database takes the JSON file of a single
 // volume, but not `NAME.pjs` of a database of several volumes), so it is
-// removed where makeblastdb would overwrite it: after the open succeeded.
-/// The end of `x_BuildDatabase` after a successful build: opens the new
+// removed where makeblastdb would overwrite it: after the database resolved.
+/// The end of `x_BuildDatabase` after a successful build: resolves the new
 /// database and removes the JSON metadata file of an earlier one.
 fn open_new_database(output_dbname: &str, is_protein: bool) -> Result<(), MakedbError> {
     let seqtype = if is_protein {
@@ -693,7 +699,7 @@ fn open_new_database(output_dbname: &str, is_protein: bool) -> Result<(), Makedb
     } else {
         SeqType::Nucleotide
     };
-    SeqDb::open_one_name(output_dbname, seqtype).map_err(MakedbError::Database)?;
+    SeqDb::locate_one_name(output_dbname, seqtype).map_err(MakedbError::Database)?;
     let metadata_filename = format!("{output_dbname}.{}js", seqtype.letter());
     let _ = std::fs::remove_file(metadata_filename);
     Ok(())

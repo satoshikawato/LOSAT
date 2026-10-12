@@ -400,12 +400,17 @@ impl SequenceBlock {
         )
     }
 
-    /// Length of nucleotide `i` in bases.
-    pub fn nucleotide_len(&self, i: usize) -> usize {
+    /// Length of nucleotide `i` in bases. A length above NCBI's signed
+    /// 32-bit `int` is a format error.
+    pub fn nucleotide_len(&self, i: usize) -> Result<usize, SeqDbError> {
         let packed = self.nucleotide_packed(i);
         let whole_bytes = packed.len() - 1;
-        let remainder = usize::from(packed[whole_bytes] & 3);
-        whole_bytes * 4 + remainder
+        let remainder = u64::from(packed[whole_bytes] & 3);
+        let length = whole_bytes as u64 * 4 + remainder;
+        if length > i32::MAX as u64 {
+            return Err(self.format(i, "the sequence is longer than a signed 32-bit length"));
+        }
+        Ok(length as usize)
     }
 
     /// The ambiguity data of nucleotide `i` as stored (empty when the
@@ -585,12 +590,9 @@ impl SequenceBlock {
     /// buffer NCBI's traceback gets): `len + 2` bytes.
     pub fn nucleotide_blastna(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {
         let packed = self.nucleotide_packed(i);
-        let base_length = self.nucleotide_len(i);
+        let base_length = self.nucleotide_len(i)?;
         if base_length < 1 {
             return Err(self.format(i, "Error: could not get sequence or range."));
-        }
-        if base_length > i32::MAX as usize {
-            return Err(self.format(i, "the sequence is longer than a signed 32-bit length"));
         }
         let mut buffer = vec![0u8; base_length + 2];
         {

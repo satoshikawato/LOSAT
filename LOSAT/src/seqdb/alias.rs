@@ -31,9 +31,13 @@ pub(super) struct AliasTree {
 }
 
 /// Alias keys that LOSAT recognises and does not support: they select
-/// sequences (alias_files.txt "Type: filter"), replace the totals used for
-/// statistics ("meta-data"), or name data LOSAT does not read.
-const UNSUPPORTED_KEYS: [&str; 15] = [
+/// sequences (alias_files.txt "Type: filter"), replace the values used for
+/// statistics ("meta-data"), or name data LOSAT does not read. They are the
+/// keys NCBI's reader looks up (seqdbalias.cpp), except `MAX_SEQ_LENGTH`,
+/// which it never applies (seqdbimpl.cpp:972-976 takes the maximum from the
+/// volumes) and which is ignored here too, plus `VDBLIST` of
+/// blastdb_aliastool.
+const UNSUPPORTED_KEYS: [&str; 16] = [
     "FIRST_OID",
     "LAST_OID",
     "GILIST",
@@ -48,7 +52,8 @@ const UNSUPPORTED_KEYS: [&str; 15] = [
     "LENGTH",
     "STATS_NSEQ",
     "STATS_TOTLEN",
-    "MAX_SEQ_LENGTH",
+    "MIN_SEQ_LENGTH",
+    "OID_MASK_TYPE",
 ];
 
 fn exists(path: &Path) -> bool {
@@ -62,6 +67,40 @@ fn dir_name(path: &str) -> &str {
 fn base_name(path: &str) -> &str {
     path.rfind(MAIN_SEPARATOR)
         .map_or(path, |at| &path[at + 1..])
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:88-107
+// ```c++
+//     int slen = s.Size();
+//
+//     if (slen > 4) {
+//         string extn(s.GetEnd()-4, s.GetEnd());
+//         string extn2(extn, 2, 4);
+//         ...
+//         if (extn[0] == '.'     &&
+//             (extn[1] == 'n' || extn[1] == 'p') &&
+//             (extn2 == "al"  || extn2 == "in" || extn2 == "db")) {
+//             ...
+//             s.Resize(slen - 4);
+//         }
+//     }
+// ```
+// `CSeqDB_Path::FindBaseName` is `SeqDB_RemoveExtn(SeqDB_RemoveDirName(..))`
+// (seqdbgeneral.hpp:975-979): the file name without a final `.pal`, `.nal`,
+// `.pin`, `.nin`, `.pdb` or `.ndb`. `SeqDB_CompareVolume` compares these.
+fn path_base_name(path: &str) -> &str {
+    let name = base_name(path);
+    let bytes = name.as_bytes();
+    let len = bytes.len();
+    if len > 4
+        && bytes[len - 4] == b'.'
+        && (bytes[len - 3] == b'n' || bytes[len - 3] == b'p')
+        && matches!(&bytes[len - 2..], b"al" | b"in" | b"db")
+    {
+        &name[..len - 4]
+    } else {
+        name
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:284-295
@@ -363,15 +402,6 @@ impl Resolver {
             path: path.clone(),
             message,
         };
-        // NCBI reads the alias files of a directory from its group alias
-        // file when there is one (seqdbalias.cpp:206-247); LOSAT does not
-        // read group alias files.
-        let group = combine_path(dir_name(base), "index.alx");
-        if exists(Path::new(&group)) {
-            return Err(unsupported(format!(
-                "the directory has a group alias file ({group}); LOSAT does not read group alias files"
-            )));
-        }
         let bytes = std::fs::read(&path).map_err(|source| SeqDbError::Io {
             path: path.clone(),
             source,
@@ -509,6 +539,18 @@ impl Resolver {
                         .to_string(),
                 });
             }
+            // NCBI looks a name up in the group alias file of its directory
+            // before the alias file itself (`FindAliasPath` above,
+            // seqdbalias.cpp:206-247); LOSAT does not read group alias files.
+            let group = combine_path(dir_name(&base), "index.alx");
+            if exists(Path::new(&group)) {
+                return Err(SeqDbError::Unsupported {
+                    path: Path::new(&group).to_path_buf(),
+                    message: "the directory has a group alias file; LOSAT does not read group \
+                              alias files"
+                        .to_string(),
+                });
+            }
             if exists(&new_db_path) {
                 let subnode = self.alias_node(&base)?;
                 node.subnodes.push(subnode);
@@ -611,8 +653,8 @@ fn collect_volumes(node: &AliasNode, out: &mut Vec<String>) {
 // (current directory, `BLASTDB`, `.ncbirc`; seqdbcommon.cpp:378-391) is not
 // consulted here. Two cases are rejected because LOSAT does not reproduce
 // what NCBI derives from them: a volume reached more than once (NCBI's alias
-// walk counts it once per mention, seqdbalias.cpp:1588-1592), and two
-// different volume names with the same file name (their order would depend
+// walk counts it once per mention, seqdbalias.cpp:1588-1592), and two volumes
+// of the same base name in different directories (their order would depend
 // on the normalised directory names).
 /// Resolves the database `db_base` (a path without extension): an alias file
 /// when `db_base.{p|n}al` exists, else the single volume `db_base.{p|n}in`.
@@ -621,7 +663,26 @@ pub(super) fn resolve(db_base: &str, seqtype: SeqType) -> Result<AliasTree, SeqD
         seqtype,
         recurse: Vec::new(),
     };
-    let db_base = fix_delimiters(db_base);
+    // NCBI reads the name as a list (seqdbalias.cpp:114-116, `x_Tokenize`):
+    // spaces separate databases and double quotes keep a name with spaces
+    // together. LOSAT searches one database.
+    let names = split_quoted(db_base.as_bytes());
+    let db_base = match names.as_slice() {
+        [] => {
+            return Err(SeqDbError::NotFound(
+                "No database names were passed to CSeqDB::CSeqDB().".to_string(),
+            ));
+        }
+        [name] => fix_delimiters(&String::from_utf8_lossy(name)),
+        _ => {
+            return Err(SeqDbError::Unsupported {
+                path: Path::new(db_base).to_path_buf(),
+                message: "the name lists several databases; LOSAT searches one database \
+                          (a name with spaces goes between double quotes)"
+                    .to_string(),
+            });
+        }
+    };
     if !exists(&resolver.alias_path(&db_base)) && !exists(&resolver.index_path(&db_base)) {
         return Err(SeqDbError::NotFound(format!(
             "No alias or index file found for {} database [{db_base}].",
@@ -635,7 +696,11 @@ pub(super) fn resolve(db_base: &str, seqtype: SeqType) -> Result<AliasTree, SeqD
     let mut mentions = Vec::new();
     collect_volumes(&root, &mut mentions);
     let mut volumes = mentions.clone();
-    volumes.sort_by(|a, b| base_name(a).cmp(base_name(b)).then_with(|| a.cmp(b)));
+    volumes.sort_by(|a, b| {
+        path_base_name(a)
+            .cmp(path_base_name(b))
+            .then_with(|| a.cmp(b))
+    });
     volumes.dedup();
     let unsupported = |volume: &str, message: &str| SeqDbError::Unsupported {
         path: Path::new(volume).to_path_buf(),
@@ -651,13 +716,13 @@ pub(super) fn resolve(db_base: &str, seqtype: SeqType) -> Result<AliasTree, SeqD
             "the volume is listed more than once by the alias files",
         ));
     }
-    if let Some(pair) = volumes
-        .windows(2)
-        .find(|pair| base_name(&pair[0]) == base_name(&pair[1]))
-    {
+    if let Some(pair) = volumes.windows(2).find(|pair| {
+        path_base_name(&pair[0]) == path_base_name(&pair[1])
+            && dir_name(&pair[0]) != dir_name(&pair[1])
+    }) {
         return Err(unsupported(
             &pair[1],
-            "two volumes of the database have the same file name in different directories",
+            "two volumes of the database have the same name in different directories",
         ));
     }
     Ok(AliasTree { root, volumes })

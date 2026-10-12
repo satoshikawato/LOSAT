@@ -47,6 +47,8 @@ const TAG_SEQUENCE: u8 = (1 << 5) | 16;
 const TAG_CONTEXT_CONSTRUCTED: u8 = (2 << 6) | (1 << 5);
 const TAG_NUMBER_MASK: u8 = 31;
 const INDEFINITE_LENGTH_BYTE: u8 = 0x80;
+/// Deepest nesting accepted inside a skipped member.
+const MAX_SKIP_DEPTH: u32 = 8;
 
 /// Member tags of `Blast-def-line` (blastdb.asn:34-46, in order).
 const DEFLINE_TITLE: u8 = 0;
@@ -227,13 +229,17 @@ impl<'a> Ber<'a> {
         }
     }
 
-    /// Skips one value of any type.
-    fn skip_value(&mut self) -> Result<(), SeqDbError> {
+    /// Skips one value of any type. `depth` bounds the nesting: the skipped
+    /// members of `Blast-def-line` are an INTEGER or a SEQUENCE OF INTEGER.
+    fn skip_value(&mut self, depth: u32) -> Result<(), SeqDbError> {
         let tag = self.tag()?;
         if tag & (1 << 5) != 0 {
+            if depth >= MAX_SKIP_DEPTH {
+                return Err(self.format("values nested too deeply"));
+            }
             let end = self.open()?;
             while !self.at_end(end)? {
-                self.skip_value()?;
+                self.skip_value(depth + 1)?;
             }
         } else {
             let first = self.byte()?;
@@ -309,6 +315,30 @@ impl<'a> Ber<'a> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:724-738
+// ```c++
+//         for(string::iterator i = str.begin(); i < to; ++i) {
+//             if ( BadVisibleChar(*i) ) {
+//                 ...
+//                 {
+//                     char c = ReplaceVisibleChar(*i, fix_method, this, str, subst);
+//                     if (c != '\0') {
+//                         *i = subst;
+// ```
+// A VisibleString is read with the method `eFNP_ReplaceAndWarn` unless the
+// parameter SERIAL / WRONG_CHARS_READ says otherwise (objistr.cpp:302-303):
+// every byte outside ' ' ..= '~' (`GoodVisibleChar`, objistr.inl:456-459)
+// becomes the substitute '#', UTF-8 included
+// (`SERIAL_ALLOW_UTF8_IN_VISIBLESTRING_ON_READING` is 0, objistr.hpp:1163).
+// NCBI also writes a warning for each such string; this reader reports none.
+// makeblastdb stores titles already repaired this way.
+fn fix_visible_chars(value: &[u8]) -> Vec<u8> {
+    value
+        .iter()
+        .map(|&c| if (b' '..=b'~').contains(&c) { c } else { b'#' })
+        .collect()
+}
+
 const PARSED_SEQIDS: &str = "the database stores parsed Seq-ids (makeblastdb -parse_seqids, or a \
      database distributed by NCBI); LOSAT reads databases built without -parse_seqids only";
 
@@ -352,7 +382,7 @@ pub fn decode_defline_set(record: &[u8], path: &Path) -> Result<Vec<Defline>, Se
 fn decode_defline(ber: &mut Ber<'_>) -> Result<Defline, SeqDbError> {
     ber.expect_tag(TAG_SEQUENCE, "Blast-def-line")?;
     let defline_end = ber.open()?;
-    let mut title: &[u8] = &[];
+    let mut title = Vec::new();
     let mut volume_ordinal = None;
     let mut next_member = DEFLINE_TITLE;
     while !ber.at_end(defline_end)? {
@@ -368,7 +398,7 @@ fn decode_defline(ber: &mut Ber<'_>) -> Result<Defline, SeqDbError> {
         let member_end = ber.open()?;
         match member {
             DEFLINE_TITLE => {
-                title = ber.visible_string()?;
+                title = fix_visible_chars(ber.visible_string()?);
                 ber.close(member_end, "the title")?;
             }
             DEFLINE_SEQID => {
@@ -385,7 +415,7 @@ fn decode_defline(ber: &mut Ber<'_>) -> Result<Defline, SeqDbError> {
             // taxid, memberships, links, other-info: not used by LOSAT.
             _ => {
                 while !ber.at_end(member_end)? {
-                    ber.skip_value()?;
+                    ber.skip_value(0)?;
                 }
             }
         }
@@ -394,7 +424,7 @@ fn decode_defline(ber: &mut Ber<'_>) -> Result<Defline, SeqDbError> {
         return Err(ber.unsupported(PARSED_SEQIDS));
     };
     Ok(Defline {
-        title: title.to_vec(),
+        title,
         volume_ordinal,
     })
 }

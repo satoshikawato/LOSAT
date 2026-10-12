@@ -108,6 +108,17 @@ impl DbFile {
                 message: format!("byte range {start}..{end} ends before it starts"),
             });
         }
+        // Checked before the buffer is allocated: a corrupt offset must not
+        // ask for gigabytes.
+        if end > self.len {
+            return Err(SeqDbError::Format {
+                path: self.path.clone(),
+                message: format!(
+                    "byte range {start}..{end} passes the end of the file ({} bytes)",
+                    self.len
+                ),
+            });
+        }
         let len = usize::try_from(end - start).map_err(|_| SeqDbError::Format {
             path: self.path.clone(),
             message: format!("byte range {start}..{end} does not fit in memory"),

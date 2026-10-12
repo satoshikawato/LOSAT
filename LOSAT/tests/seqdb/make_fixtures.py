@@ -9,8 +9,9 @@ never run an NCBI program.
 usage: make_fixtures.py --ncbi-bin DIR --work DIR [--out LOSAT/tests/seqdb]
 
 Committed per database: the files LOSAT reads (.pin .psq .phr / .nin .nsq .nhr,
-.pal / .nal). The other files of a version 5 database (LMDB, .pot/.ptf/.pto,
-.pos, .pog, .pjs) and the ISAM files of -parse_seqids stay in the work directory.
+.pal / .nal) and the LMDB file of a version 5 database (.pdb / .ndb), which must
+exist. The other files of a version 5 database (.pot/.ptf/.pto, .pos, .pog, .pjs)
+and the ISAM files of -parse_seqids stay in the work directory.
 Rerunning changes the dates stored in the index files and in expected/*.info.tsv.
 """
 import argparse
@@ -20,7 +21,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-KEEP = {".pin", ".psq", ".phr", ".nin", ".nsq", ".nhr", ".pal", ".nal"}
+# The LMDB file of a version 5 database (.pdb / .ndb) must exist for NCBI and for LOSAT.
+KEEP = {".pin", ".psq", ".phr", ".nin", ".nsq", ".nhr", ".pal", ".nal", ".pdb", ".ndb"}
 
 
 # Date strings of a first and a second volume (at most 27 bytes each).
@@ -163,11 +165,36 @@ def main():
     makedb("prot_ids_v4", "prot.faa", "prot", 4, "-parse_seqids")
     makedb("prot_ids_v5", "prot.faa", "prot", 5, "-parse_seqids")
 
-    # A copy of prot_v4 with an earlier date and another title: volumes of one
-    # database with different dates.
+    # A copy of prot_v4 with an earlier date: volumes of one database with
+    # different dates.
     for ext in (".pin", ".psq", ".phr"):
         shutil.copyfile(work / f"prot_v4{ext}", work / f"prot_old{ext}")
     patch_date(work / "prot_old.pin", "Jan 5, 2020  11:07 PM")
+
+    # Volume order. NCBI sorts volumes by file name without a final .pal/.nal/
+    # .pin/.nin/.pdb/.ndb, so "ord.pdb" (compared as "ord") comes before
+    # "ord-extra" although '-' sorts before '.'. The two volumes hold different
+    # proteins, and the second one is named with a directory.
+    records = protein_records()
+    write_fasta(work / "ord_a.faa", records[:4])
+    write_fasta(work / "ord_b.faa", records[4:7])
+    makedb("ord_a", "ord_a.faa", "prot", 4, "-title", "first four proteins")
+    makedb("ord_b", "ord_b.faa", "prot", 4, "-title", "next three proteins")
+    (work / "sub").mkdir()
+    for ext in (".pin", ".psq", ".phr"):
+        (work / f"ord_a{ext}").rename(work / f"ord.pdb{ext}")
+        (work / f"ord_b{ext}").rename(work / "sub" / f"ord-extra{ext}")
+    (work / "alias_order.pal").write_bytes(b"DBLIST sub/ord-extra ord.pdb\n")
+
+    # A volume without sequences (NCBI allows it), first in the volume order.
+    index = (work / "prot_v4.pin").read_bytes()
+    title_len = int.from_bytes(index[8:12], "big")
+    date_end = 12 + title_len + 4 + int.from_bytes(index[12 + title_len:16 + title_len], "big")
+    (work / "empty.pin").write_bytes(index[:date_end] + bytes(4) + bytes(8) + bytes(4)
+                                     + (0).to_bytes(4, "big") + (1).to_bytes(4, "big"))
+    (work / "empty.psq").write_bytes(b"\0")
+    (work / "empty.phr").write_bytes(b"")
+    (work / "alias_emptyvol.pal").write_bytes(b"TITLE with an empty volume\nDBLIST prot_v4 empty\n")
 
     run([bin_dir / "blastdb_aliastool", "-dblist", "prot_v4 prot_old", "-dbtype", "prot",
          "-out", "alias_nseq", "-title", "alias with NSEQ and LENGTH"], work)
@@ -193,7 +220,8 @@ def main():
     db.mkdir(parents=True)
     readable = [("prot_v4", "prot"), ("prot_v5", "prot"), ("nucl_v4", "nucl"), ("nucl_v5", "nucl"),
                 ("prot_mv", "prot"), ("nucl_mv", "nucl"), ("alias_nested", "prot"),
-                ("alias_titled", "prot"), ("prot_old", "prot")]
+                ("alias_titled", "prot"), ("prot_old", "prot"), ("alias_order", "prot"),
+                ("alias_emptyvol", "prot")]
     for name, dbtype in readable:
         info = run([bin_dir / "blastdbcmd", "-db", name, "-dbtype", dbtype, "-info"], work).decode("ascii")
         m = re.search(r"Database: (.*?)\n\t([\d,]+) sequences; ([\d,]+) total (?:residues|bases)\n\n"
@@ -234,9 +262,10 @@ def main():
         rows.append(f"{first}\t{second}\t{reported}\n")
     (expected / "date_pairs.tsv").write_text("".join(rows))
 
-    for path in sorted(work.iterdir()):
-        if path.suffix in KEEP:
-            shutil.copyfile(path, db / path.name)
+    (db / "sub").mkdir()
+    for path in sorted(work.iterdir()) + sorted((work / "sub").iterdir()):
+        if path.is_file() and path.suffix in KEEP:
+            shutil.copyfile(path, db / path.relative_to(work))
     shutil.copyfile(work / "prot.faa", out / "prot.faa")
     shutil.copyfile(work / "nucl.fna", out / "nucl.fna")
     total = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())

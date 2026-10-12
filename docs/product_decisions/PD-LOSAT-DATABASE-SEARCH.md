@@ -99,15 +99,20 @@ is an explicit error of `LOSAT/src/seqdb`:
 | Rejected | Why |
 | --- | --- |
 | A header with a Seq-id other than `gnl|BL_ORD_ID|n` | parsed Seq-ids (P4); checked on the first sequence of every volume when the database is opened |
-| Alias keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `FIRST_OID`, `LAST_OID`, `MEMB_BIT`, `MASKLIST`, `VDBLIST` | filters (P4) |
-| Alias keys `NSEQ`, `LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`, `MAX_SEQ_LENGTH` | they replace the totals behind the statistics (second step) |
-| A volume listed more than once, a group alias file (`index.alx`), two volumes with one file name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce |
+| Alias keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `OID_MASK_TYPE`, `FIRST_OID`, `LAST_OID`, `MEMB_BIT`, `MASKLIST`, `VDBLIST` | filters (P4) |
+| Alias keys `NSEQ`, `LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH` | they replace the values behind the statistics (second step) |
+| A name that lists several databases | one database per search (P4) |
+| A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce |
 | Column files of a volume (mask data of `makeblastdb -mask_data`) | not read |
 
-Left unread without an error: the LMDB file and the id and taxonomy files of a version 5
-database, which serve lookups by id or taxonomy only. The reader looks for a database at
-the given path; NCBI's search path (`BLASTDB`, `.ncbirc`) belongs to the stage that adds
-`-db`.
+Two errors are NCBI's own and are reproduced: volumes of version 4 and of version 5 in one
+database, and a version 5 volume whose LMDB file is missing.
+
+Left unread without an error: the contents of the LMDB file and the id and taxonomy files of
+a version 5 database, which serve lookups by id or taxonomy only (NCBI also compares the
+LMDB file's volume list with the volumes; the reader does not). The reader looks for a
+database at the given path; NCBI's search path (`BLASTDB`, `.ncbirc`) belongs to the stage
+that adds `-db`.
 
 ## Evidence
 

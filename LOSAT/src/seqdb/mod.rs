@@ -16,7 +16,8 @@
 //! and alias keys that filter sequences or replace the totals. A database
 //! that needs one of these to give NCBI's result is rejected with
 //! [`SeqDbError::Unsupported`]; the version 5 files that only serve lookups
-//! by id or taxonomy are left unread.
+//! by id or taxonomy are left unread. The LMDB file of a version 5 database
+//! must exist, as for NCBI, but its contents are not checked.
 //!
 //! No search program calls this module yet.
 
@@ -278,8 +279,6 @@ impl SeqDb {
         // 		}
         // ```
         // A volume counts as version 5 when its index names an LMDB file.
-        // NCBI then opens that file and checks its volume list; LOSAT does
-        // not read it.
         let names_lmdb = |volume: &Volume| {
             volume
                 .index()
@@ -294,6 +293,36 @@ impl SeqDb {
                     path: other.base().to_path_buf(),
                     message: "DB list contains both Version 4 and Version 5 dbs".to_string(),
                 });
+            }
+        }
+
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb_lmdb.cpp:85-89
+        // ```c++
+        //         CFile tf(fname);
+        // 		Uint8 readMapSize = (tf.GetLength()/10000 + 1) *10000;
+        //         if (!tf.Exists()) {
+        //             NCBI_THROW( CSeqDBException, eFileErr, "File " + fname + " not found. If you renamed any BLAST database files, please use original file names, and makeblastdb to rename the database. If you deleted any BLAST database files, you need to recreate the database.");
+        //         }
+        // ```
+        // NCBI opens the LMDB file of a version 5 database when it opens the
+        // database (seqdblmdbset.cpp:235-262, 35-74) and compares the file's
+        // volume list with the volumes. LOSAT requires the file, in the
+        // volume's directory, and does not read it.
+        for volume in &volumes {
+            if !names_lmdb(volume) {
+                continue;
+            }
+            let lmdb_name = volume.index().lmdb_file.as_deref().unwrap_or_default();
+            let lmdb_path = volume
+                .base()
+                .with_file_name(String::from_utf8_lossy(lmdb_name).as_ref());
+            if !std::fs::metadata(&lmdb_path).is_ok_and(|meta| meta.is_file()) {
+                return Err(SeqDbError::NotFound(format!(
+                    "File {} not found. If you renamed any BLAST database files, please use \
+                     original file names, and makeblastdb to rename the database. If you deleted \
+                     any BLAST database files, you need to recreate the database.",
+                    lmdb_path.display()
+                )));
             }
         }
 

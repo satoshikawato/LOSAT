@@ -72,10 +72,14 @@
 //! bucketed one on a copy of the diagonal table) and aborts when the HSP
 //! lists or the diagonal tables differ.
 //!
-//! The reordering only pays when the table is large (see `min_cells`): with
-//! `LOSAT_X_SEEDBUCKET=1` it is used for tables of at least
-//! `LOSAT_X_SEEDBUCKET_MIN_CELLS` cells (default 2^21, 8 MiB), and in BLASTX
-//! only with `LOSAT_X_BXSEEDBUCKET=1` as well (see `blastx_mode`).
+//! `LOSAT_X_SEEDBUCKET` is a switch of the strict set (`utils/xswitch.rs`): on
+//! unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.  The reordering
+//! only pays when the table is large (see `min_cells`): it is used for tables
+//! of at least `LOSAT_X_SEEDBUCKET_MIN_CELLS` cells (default 2^21, 8 MiB), and
+//! in BLASTX only with `LOSAT_X_BXSEEDBUCKET=1` as well (see `blastx_mode`).
+//! With the set on, TBLASTX reaches the scan loop this module acts in only
+//! where the unit path of `LOSAT_X_PAIRPAR` does not take the batch (its gates
+//! and exactness guards, `x_pair_par.rs` `decide`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -95,8 +99,17 @@ pub(crate) static SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
 /// frame in TBLASTX, a subject in BLASTX) went through.
 pub(crate) static SHADOW_MAX_SCAN_HITS: AtomicU64 = AtomicU64::new(0);
 
-/// Shadow-mode summary (printed by `main` at exit).
-// No NCBI counterpart: prints the shadow-mode counters; it does not change any value NCBI computes.
+// No NCBI counterpart: counters for LOSAT_X_STATS that tell which order ran; they do not change
+// any value NCBI computes.
+/// Scans run in the bucketed order (a subject chunk of one frame in TBLASTX, a subject in
+/// BLASTX; in shadow mode the bucketed half of each comparison), counted where their buckets
+/// are made, and the flushes of those scans.
+static BUCKETED_SCANS: AtomicU64 = AtomicU64::new(0);
+static BUCKET_FLUSHES: AtomicU64 = AtomicU64::new(0);
+
+/// The summary lines (printed by `main` at exit): the shadow summary, and with LOSAT_X_STATS
+/// the number of scans that ran in the bucketed order and of their flushes.
+// No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
     if mode() == 2 {
         eprintln!(
@@ -104,6 +117,13 @@ pub fn print_shadow_stats() {
             SHADOW_CHUNKS.load(Ordering::Relaxed),
             SHADOW_HITS.load(Ordering::Relaxed),
             SHADOW_MAX_SCAN_HITS.load(Ordering::Relaxed)
+        );
+    }
+    if std::env::var_os("LOSAT_X_STATS").is_some() {
+        eprintln!(
+            "[X_STATS] SEEDBUCKET bucketed_scans={} flushes={}",
+            BUCKETED_SCANS.load(Ordering::Relaxed),
+            BUCKET_FLUSHES.load(Ordering::Relaxed)
         );
     }
 }
@@ -126,7 +146,7 @@ pub(crate) fn mode() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_SEEDBUCKETSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_SEEDBUCKET").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_SEEDBUCKET") {
             1
         } else {
             0
@@ -137,7 +157,7 @@ pub(crate) fn mode() -> u8 {
 // No NCBI counterpart: a size threshold for choosing the order. It changes speed only; it does
 // not change any value NCBI computes.
 /// Smallest diagonal table, in cells, for which the bucketed order is used
-/// when `LOSAT_X_SEEDBUCKET=1` (LOSAT_X_SEEDBUCKET_MIN_CELLS, default 2^21:
+/// while `LOSAT_X_SEEDBUCKET` is on (LOSAT_X_SEEDBUCKET_MIN_CELLS, default 2^21:
 /// an 8 MiB table of 4-byte cells).  Below that the table is served well
 /// enough by the cache hierarchy that the extra pass over the hits costs more
 /// than it saves (measured on this VM: a 4 MiB table, tblastx p03, is 50 %
@@ -187,7 +207,8 @@ pub(crate) fn mode_for(cells: usize) -> u8 {
 //         diag_coord = (query_offset - subject_offset) & diag_mask;
 // ```
 // Dispatch point for BLASTX: the same choice between the scan-order loop and the bucketed order.
-/// BLASTX: the bucketed order needs `LOSAT_X_BXSEEDBUCKET=1` as well.  The
+/// BLASTX: the bucketed order needs `LOSAT_X_BXSEEDBUCKET=1` as well (not a
+/// switch of the strict set: off unless set to any value).  The
 /// subjects are single proteins, so a subject's hits are far fewer than the
 /// rows of the (query-sized) table and the grouping buys nothing; measured
 /// slightly slower (blastx_ap 8.4 → 8.7 s).  The shadow mode still compares.
@@ -293,6 +314,7 @@ impl SeedBuckets {
         let shift = cells.trailing_zeros();
         let count = (diag_array_size / cells).max(1) as usize;
         let reserve = ((budget() / count).saturating_mul(5) / 4).max(1024);
+        BUCKETED_SCANS.fetch_add(1, Ordering::Relaxed);
         SeedBuckets {
             diag_mask,
             shift,
@@ -340,6 +362,7 @@ impl SeedBuckets {
     /// `restore_flush_order` when the flush returns.
     #[inline(always)]
     pub(crate) fn flush<F: FnMut(u32, u32, u32)>(&mut self, mut process: F) {
+        BUCKET_FLUSHES.fetch_add(1, Ordering::Relaxed);
         for bucket in self.buckets.iter_mut() {
             for hit in bucket.iter() {
                 process(hit.q_off, hit.s_off, hit.seq);

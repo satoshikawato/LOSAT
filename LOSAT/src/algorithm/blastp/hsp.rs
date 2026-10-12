@@ -2246,11 +2246,12 @@ mod tests {
     //     return TRUE;
     // }
     // ```
-    // The test reads the heaps of all queries: while the heap of one query is as
-    // BlastCompo_HeapInitialize left it, no match of another query is ended, however full that
-    // query's own heap is. The query-parallel redo of blast_engine.rs relies on this.
+    // The test reads every heap it is given (NCBI: those of the queries of one query batch):
+    // while the heap of one query is as BlastCompo_HeapInitialize left it, no match of another
+    // query is ended, however full that query's own heap is. The query-parallel redo of
+    // blast_engine.rs relies on this.
     #[test]
-    fn test_compo_early_termination_reads_the_heaps_of_all_queries() {
+    fn test_compo_early_termination_reads_every_heap_of_the_batch() {
         let ecutoff = 0.002;
         let significant = |oid: u32, evalue: f64| {
             let mut list = BlastpHspList {

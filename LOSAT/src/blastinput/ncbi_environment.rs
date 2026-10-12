@@ -839,6 +839,11 @@ mod tests {
         assert!(!is_harmless_entry("BLAST", "BLAST_USAGE_REPORT", "bogus"));
     }
 
+    // NCBI reference (598d8ae6): c++/src/corelib/metareg.cpp:54-56 (`kConfigPathDelim` is ";" on
+    // Windows and ":;" elsewhere) and :331-396 (`CMetaRegistry::GetDefaultSearchPath`, quoted at
+    // `registry_search_path`); the home directory comes from `CDir::GetHome`, which LOSAT reads
+    // from `HOME` (`USERPROFILE` on Windows). The test uses the delimiter and the variable of
+    // the platform it runs on, so it checks the same rule everywhere.
     #[test]
     fn the_search_path_follows_ncbi_config_path() {
         let env = |pairs: &'static [(&'static str, &'static str)]| {
@@ -849,9 +854,22 @@ mod tests {
                     .map(|(_, value)| OsString::from(value))
             }
         };
-        let only = registry_search_path(&env(&[("NCBI_CONFIG_PATH", "/a:/b")]));
+        let only = registry_search_path(&env(&[("NCBI_CONFIG_PATH", "/a;/b")]));
         assert_eq!(only, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
-        let spliced = registry_search_path(&env(&[("NCBI_CONFIG_PATH", "/a::/z"), ("HOME", "/h")]));
+        // ':' splits the path outside Windows only (metareg.cpp:54-56).
+        let colon = registry_search_path(&env(&[("NCBI_CONFIG_PATH", "/a:/b")]));
+        if cfg!(windows) {
+            assert_eq!(colon, vec![PathBuf::from("/a:/b")]);
+        } else {
+            assert_eq!(colon, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+        }
+        // No NCBI counterpart: test plumbing that picks the platform's empty-entry path and home
+        // variable (the slices must be constants to be 'static).
+        let spliced = registry_search_path(&if cfg!(windows) {
+            env(&[("NCBI_CONFIG_PATH", "/a;;/z"), ("USERPROFILE", "/h")])
+        } else {
+            env(&[("NCBI_CONFIG_PATH", "/a::/z"), ("HOME", "/h")])
+        });
         assert_eq!(
             &spliced[..3],
             &[PathBuf::from("/a"), PathBuf::from("."), PathBuf::from("/h")]

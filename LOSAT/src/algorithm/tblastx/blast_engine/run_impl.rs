@@ -34,6 +34,22 @@ use crate::blastinput::seq_range::{
 mod x_pair_par;
 pub use x_pair_par::print_summary as x_pair_par_print_summary;
 
+// EXPERIMENT (LOSAT_X_SEEDRELEASE): the seed-stage tables of a query batch are held by a
+// per-batch state and reached only through one stage per subject; with the switch on they are
+// freed when the last seed stage of the batch ends, before that subject's HSP list is linked
+// (see tblastx/x_seed_release.rs). A child module of this file, as x_pair_par is.
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1604-1605
+// ```c
+// word_params = BlastInitialWordParametersFree(word_params);
+// s_BlastCoreAuxStructFree(aux_struct);
+// ```
+// NCBI frees its diagonal table after the subject loop and its lookup table with the search's
+// internal data; when LOSAT frees its copies is not a value NCBI computes.
+#[path = "../x_seed_release.rs"]
+mod x_seed_release;
+pub use x_seed_release::print_summary as x_seed_release_print_summary;
+
 /// The queries of a search: the input records, the searched queries (each cut to its
 /// `-query_loc` interval), the query input (where each searched query lies in its record,
 /// its input position, the skipped records), and where each subject's searched letters
@@ -2608,9 +2624,36 @@ fn search_query_batch(
         // LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW: the groups built at dispatch point 0.
         lut: x_pair_lut_batch,
     });
-    let x_pair_par_ref = x_pair_par_batch.as_ref();
+    // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 1 (per batch): the batch's tables move
+    // into one state. From here on they are reached only through the stage that each call of
+    // `process_subject` opens (dispatch point 2), and with the switch on the last stage end of
+    // the batch frees them (dispatch point 4). `x_worker_diag_cells` is the size the workers'
+    // diagonal tables are created with: `diag_array_size`, or 0 with the switch on when the
+    // unit path takes every subject without its shadow, so that the reference frame loop, the
+    // only reader of that table, runs for none.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1004
+    // ```c
+    // if ((status = BlastExtendWordNew(query->length, word_params,
+    //                                 &aux_struct->ewp)) != 0)
+    //   return status;
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1604-1605
+    // ```c
+    // word_params = BlastInitialWordParametersFree(word_params);
+    // s_BlastCoreAuxStructFree(aux_struct);
+    // ```
+    // NCBI keeps its lookup table and diagonal table through the subject loop; when LOSAT
+    // frees its copies is not a value NCBI computes (x_seed_release.rs).
+    let x_seed_state = x_seed_release::XSeedState::new(
+        x_seed_release::XSeedTables {
+            lookup,
+            pair_par: x_pair_par_batch,
+        },
+        subjects_raw.len(),
+    );
+    let x_worker_diag_cells = x_seed_state.worker_table_cells(diag_array_size as usize);
 
-    let lookup_ref = &lookup;
     let contexts_ref = &contexts;
     let _gapped_params_ref = &gapped_params; // Unused - tblastx uses ungapped params
 
@@ -3019,6 +3062,23 @@ fn search_query_batch(
     };
 
     let process_subject = |st: &mut WorkerState, (s_idx, s_rec): (usize, &FastaRecord)| {
+        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 2 (per subject): the seed stage of
+        // this subject holds the batch's tables through `x_seed_stage`, and `lookup_ref` and
+        // `x_pair_par_ref` borrow from it, so neither can be used after `x_seed_stage.end()`
+        // (dispatch point 4). A stage that is dropped (the return just below) ends there. The
+        // run stops here if the tables were already released.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:503-505
+        // ```c
+        //     /* scan the subject sequence for hits */
+        //     hits = scansub(lookup_wrap, subject,
+        //                               offset_pairs, array_size, scan_range);
+        // ```
+        // `lookup_ref` is NCBI's `lookup_wrap`, the one table every subject is scanned with.
+        let x_seed_stage = x_seed_state.enter(s_idx);
+        let lookup_ref: &crate::algorithm::tblastx::lookup::BlastAaLookupTable =
+            &x_seed_stage.tables().lookup;
+        let x_pair_par_ref: Option<&x_pair_par::XPairPar> = x_seed_stage.tables().pair_par.as_ref();
         // NCBI reference: c++/src/algo/blast/core/blast_engine.c:1318-1330,1429-1431
         // return word_length * 3 + 2;
         // if (subject->length < min_subj_seq_length) { ... continue; }
@@ -3180,6 +3240,25 @@ fn search_query_batch(
                 "LOSAT_X_PAIRLUT: the reference frame loop would scan the stub lookup table (subject {s_idx})"
             );
         }
+        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 3 (per subject): the frame loop below
+        // indexes the worker's diagonal table through a raw pointer with `diag_mask`. With the
+        // switch on, a worker of a batch that the unit path takes without its shadow has a
+        // table of zero cells, and the worker that ended the batch's last seed stage has
+        // dropped its table. The loop must then run zero times; anything else stops the run
+        // here, whatever the switch says.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-516
+        // ```c
+        // for (i = 0; i < hits; ++i) {
+        //     Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+        //     Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+        // ...
+        //     diag_coord = (query_offset - subject_offset) & diag_mask;
+        // ```
+        assert!(
+            s_frames_preliminary.is_empty() || diag_array.len() == diag_array_size as usize,
+            "LOSAT_X_SEEDRELEASE: the reference frame loop would run without the worker's diagonal table (subject {s_idx})"
+        );
 
         for (s_f_idx, s_frame) in s_frames_preliminary.iter().enumerate() {
             // NCBI: Diagonal state is NOT reset between subject frames.
@@ -4788,6 +4867,26 @@ fn search_query_batch(
             x_pair_par::shadow_compare(s_idx, x_hits, &combined_ungapped_hits);
         }
 
+        // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 4 (per subject): the seed stage of
+        // this subject ends here; nothing below reads the batch's tables (`end` consumes the
+        // stage that `lookup_ref` and `x_pair_par_ref` borrow from) or the worker's diagonal
+        // table. With the switch on, the last stage end of the batch frees the tables and
+        // returns true, and this worker, which gets no further subject, drops its diagonal
+        // table before the linking call below, where the heap of the search peaks.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:870-873
+        // ```c
+        // if (hit_params->link_hsp_params) {
+        //     status = BLAST_LinkHsps(program_number, hsp_list_out, query_info,
+        //               subject->length, gap_align->sbp, hit_params->link_hsp_params,
+        //               score_options->gapped_calculation);
+        // ```
+        // NCBI links with its lookup table and diagonal table still allocated (freed after the
+        // subject loop, blast_engine.c:1605); `BLAST_LinkHsps` reads neither.
+        if x_seed_stage.end() {
+            x_seed_release::drop_worker_table(&mut st.diag_array);
+        }
+
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:561-584
         // ```c
         // BLAST_GetUngappedHSPList(init_hitlist, query_info, subject,
@@ -5490,7 +5589,7 @@ fn search_query_batch(
                         tx: None,
                         hits: Vec::new(),
                         offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                        diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+                        diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-63
                         // ```c
                         // diag_table->diag_array_length = diag_array_length;
@@ -5526,7 +5625,7 @@ fn search_query_batch(
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
                 offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+                diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
                 diag_offset: window,
@@ -5551,7 +5650,7 @@ fn search_query_batch(
                     tx: tx_opt.clone(),
                     hits: Vec::new(),
                     offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                    diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+                    diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                     // NCBI: diag_table->offset = window_size;
                     // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
                     diag_offset: window,
@@ -5573,7 +5672,7 @@ fn search_query_batch(
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
                 offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+                diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
                 diag_offset: window,
@@ -5600,7 +5699,7 @@ fn search_query_batch(
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
                 offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
-                diag_array: vec![DiagStruct::default(); diag_array_size as usize],
+                diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
                 diag_offset: window,

@@ -290,6 +290,28 @@ Rebuilding less:
   by HSP, every field, E-values by bits; the first difference stops the run and the search continues with the
   reference's result. One line at exit:
   `[X_SHADOW] HSPINPLACE sorts= linkings= hits_compared= replay_fallbacks=`.
+- `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the tables that only the seed stage reads are freed before the HSP list
+  is linked, which is where the heap of a large search peaks (`tblastx/x_seed_release.rs`, exactness argument
+  in its header). The lookup tables of a query batch (the batch's table, and the group tables of
+  `LOSAT_X_PAIRPAR`) are held by a per-batch state and reached only through one stage per subject; the stage
+  ends after the subject's seed stage, and the end of the batch's last stage frees the tables. So the gain is
+  for the last subject of a batch (the only one of a pairwise search); earlier subjects are linked while later
+  ones still need the tables. Measured once on AP027131 x AP027133 (genetic code 4, one thread, bytes requested
+  under massif): the first linking call 167.6 -> 107.3 MiB; the peak of the run is then the end of the seed
+  stage, where the unit path merges its lists with the tables still alive, 147.8 MiB (155.8 without the
+  switch). The worker's diagonal table, which only the reference frame loop reads, is not
+  created when the unit path takes the batch without its shadow, and is otherwise dropped by the worker that
+  ended the last stage. Without the switch the same state holds the tables until the batch has been searched,
+  as before. `LOSAT_X_STATS=1` prints, only with the switch on,
+  `[X_STATS] SEEDRELEASE batches= tables_released= batches_without_worker_table= worker_tables_released=`
+  (batches searched; batches whose tables a stage end released; batches whose workers held no diagonal table;
+  worker tables dropped at the release). There is no shadow switch: the switch changes no value and no order
+  of computation, only when two allocations are freed, so there is no second result to compare. A read after
+  the release is excluded by ownership instead: the stage is the only way to the tables and ending it consumes
+  it (the compiler rejects a later use), an open stage keeps the tables alive, a subject that arrives after
+  the release stops the run, and an assertion that runs with and without the switch stops a frame loop that
+  would run without the worker's table (`LOSAT/tests/tblastx_seed_release.rs` reads the counters).
 
 Scheduling (each value computed by one thread with the original function; order of output kept):
 

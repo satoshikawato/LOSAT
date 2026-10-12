@@ -35,6 +35,13 @@ sys.modules[SPEC.name] = platform_cert
 SPEC.loader.exec_module(platform_cert)
 
 
+SAKAI = ("blastn", "Sakai.MG1655.megablast")
+SAKAI_GATE_A_STEPS = [11, 52, 53]
+# The aggregate fixture's frozen bytes of the case and a known different output.
+SAKAI_FIXTURE_FROZEN = b"matrix:blastn:Sakai.MG1655.megablast\n"
+SAKAI_FIXTURE_ALLOWED = b"allowed:blastn:Sakai.MG1655.megablast\n"
+
+
 class PlatformCertificationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -129,7 +136,39 @@ class PlatformCertificationTests(unittest.TestCase):
             },
         }
 
-    def create_aggregate_fixture(self, root: Path):
+    def fixture_allowlist(self, *extra_entries, **changes):
+        entry = {
+            "program": SAKAI[0],
+            "case_id": SAKAI[1],
+            "frozen_sha256": hashlib.sha256(SAKAI_FIXTURE_FROZEN).hexdigest(),
+            "allowed_actual_sha256": hashlib.sha256(SAKAI_FIXTURE_ALLOWED).hexdigest(),
+            "frozen_gate_a_steps": SAKAI_GATE_A_STEPS,
+            **changes,
+        }
+        document = {
+            "schema": "losat-frozen-mismatch-allowlist-v1",
+            "entries": [entry, *extra_entries],
+        }
+        return platform_cert.Allowlist(
+            Path("frozen_mismatch_allowlist.json"),
+            raw=json.dumps(document).encode(),
+        )
+
+    def fixture_allowed_cases(self) -> list[dict[str, object]]:
+        return [
+            {
+                "program": SAKAI[0],
+                "case_id": SAKAI[1],
+                "frozen_sha256": hashlib.sha256(SAKAI_FIXTURE_FROZEN).hexdigest(),
+                "allowed_actual_sha256": hashlib.sha256(
+                    SAKAI_FIXTURE_ALLOWED
+                ).hexdigest(),
+                "frozen_gate_a_steps": SAKAI_GATE_A_STEPS,
+            }
+        ]
+
+    def create_aggregate_fixture(self, root: Path, allowlist=None):
+        allowed_cases = [] if allowlist is None else self.fixture_allowed_cases()
         canonical_rows = copy.deepcopy(self.catalog.canonical_rows)
         for row in canonical_rows:
             payload = f"matrix:{row['program']}:{row['case_id']}\n".encode()
@@ -175,6 +214,19 @@ class PlatformCertificationTests(unittest.TestCase):
                 }
                 for program in ("blastn", "blastp", "tblastx")
             }
+            allowlist_identity = (
+                {}
+                if allowlist is None
+                else {
+                    "frozen_mismatch_allowlist": {
+                        "git_object": (
+                            f"{'a' * 40}:LOSAT/tests/frozen_mismatch_allowlist.json"
+                        ),
+                        "sha256": allowlist.file_sha256,
+                        "gate_a_cases": allowed_cases,
+                    }
+                }
+            )
             platform_cert.atomic_write_json(
                 artifact / "identity.json",
                 {
@@ -182,6 +234,7 @@ class PlatformCertificationTests(unittest.TestCase):
                     "platform_id": platform_id,
                     "authority_version": authority.authority_version,
                     "authority_file_sha256": authority.file_sha256,
+                    **allowlist_identity,
                     "os": {
                         "system": authority_platform["platform_system"],
                         "machine": authority_platform["normalized_machine"],
@@ -248,7 +301,8 @@ class PlatformCertificationTests(unittest.TestCase):
                     "gate_a_losat_canonical": {
                         "total": 43,
                         "passed": 43,
-                        "all_exact_pr5_raw_bytes": True,
+                        "all_exact_pr5_raw_bytes": not allowed_cases,
+                        "allowed_known_mismatches": allowed_cases,
                     },
                     "gate_b_platform_native_ncbi_reference": {
                         "total": 6,
@@ -332,6 +386,16 @@ class PlatformCertificationTests(unittest.TestCase):
                         "classification": "CANONICAL_PR5_RAW_BYTES",
                         "canonical_sha256": expected["expected_losat_sha256"],
                     }
+                    if (
+                        allowed_cases
+                        and (expected["program"], expected["case_id"]) == SAKAI
+                    ):
+                        payload = SAKAI_FIXTURE_ALLOWED
+                        verification.update(
+                            classification="ALLOWED_KNOWN_MISMATCH",
+                            allowed_actual_sha256=hashlib.sha256(payload).hexdigest(),
+                            allowlist_file_sha256=allowlist.file_sha256,
+                        )
                 output_rel = expected["output_rel"]
                 output_path = artifact / output_rel
                 output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1831,6 +1895,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 "tblastx": {"sha256": "f" * 64},
             },
             "canonical_manifest": {"sha256": "1" * 64},
+            "frozen_mismatch_allowlist": {"sha256": "4" * 64, "gate_a_cases": []},
             "controlled_fixtures": {
                 "lexical_root": platform_cert.HISTORICAL_LEXICAL_ROOT,
                 "staged_input_count": 34,
@@ -1850,6 +1915,15 @@ class PlatformCertificationTests(unittest.TestCase):
         changed = json.loads(json.dumps(identity))
         changed["authority_version"] = "other"
         self.assertNotEqual(key, platform_cert._identity_resume_key(changed))
+        changed = json.loads(json.dumps(identity))
+        changed["frozen_mismatch_allowlist"]["sha256"] = "5" * 64
+        self.assertNotEqual(key, platform_cert._identity_resume_key(changed))
+        changed = json.loads(json.dumps(identity))
+        del changed["frozen_mismatch_allowlist"]
+        with self.assertRaisesRegex(
+            platform_cert.CertificationFailure, "frozen mismatch allowlist identity"
+        ):
+            platform_cert._identity_resume_key(changed)
 
     def test_manual_workflow_has_only_the_three_pr6_platform_jobs(self) -> None:
         workflow = (
@@ -1903,6 +1977,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 "tblastx": {"sha256": "f" * 64},
             },
             "canonical_manifest": {"sha256": "1" * 64},
+            "frozen_mismatch_allowlist": {"sha256": "4" * 64, "gate_a_cases": []},
             "controlled_fixtures": {
                 "lexical_root": platform_cert.HISTORICAL_LEXICAL_ROOT,
                 "staged_input_count": 34,
@@ -2157,6 +2232,667 @@ class PlatformCertificationTests(unittest.TestCase):
                         authority,
                         catalog,
                     )
+
+    # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
+    #   x_PrintField(*iter); m_Ostream << "\n";
+    # The tests below cover frozen_mismatch_allowlist.json in Gate A: raw bytes
+    # are still compared by SHA-256, and a listed case passes only with its
+    # recorded actual output.
+    def plan_rows(self, catalog=None):
+        topology = platform_cert.expected_completion_topology(catalog or self.catalog)
+        return [
+            (
+                step["execution_index"],
+                step["kind"],
+                step["program"],
+                step["case_id"],
+                step["expected_losat_sha256"],
+            )
+            for step in topology.values()
+        ]
+
+    def fixture_catalog(self):
+        canonical_rows = copy.deepcopy(self.catalog.canonical_rows)
+        for row in canonical_rows:
+            payload = f"matrix:{row['program']}:{row['case_id']}\n".encode()
+            row["losat_sha256"] = hashlib.sha256(payload).hexdigest()
+        canonical = {(row["program"], row["case_id"]): row for row in canonical_rows}
+        return replace(self.catalog, canonical_rows=canonical_rows, canonical=canonical)
+
+    def gate_a_step(self, root: Path, kind: str, payload: bytes, expected: bytes):
+        writer = (
+            "from pathlib import Path;import sys;"
+            "Path(sys.argv[1]).parent.mkdir(parents=True,exist_ok=True);"
+            "Path(sys.argv[1]).write_bytes(bytes.fromhex(sys.argv[2]))"
+        )
+        output_rel = f"{kind}/{SAKAI[0]}/{SAKAI[1]}/losat.out.partial"
+        return platform_cert.SearchStep(
+            execution_index=11,
+            step_id=f"{kind}:{SAKAI[0]}:{SAKAI[1]}",
+            kind=kind,
+            program=SAKAI[0],
+            case_id=SAKAI[1],
+            semantic_class="SOURCE_UNDETERMINED_ACCEPTED",
+            run_index=1,
+            command=(
+                sys.executable,
+                "-c",
+                writer,
+                str(root / output_rel),
+                payload.hex(),
+            ),
+            environment=(),
+            output_rel=output_rel,
+            final_output_rel=output_rel.removesuffix(".partial"),
+            expected_losat_sha256=hashlib.sha256(expected).hexdigest(),
+        )
+
+    def test_repository_allowlist_binds_to_gate_a_steps_11_52_53(self) -> None:
+        allowlist = platform_cert.load_frozen_allowlist(
+            self.repo_root, self.candidate_sha
+        )
+        raw = platform_cert.read_git_blob_bytes(
+            self.repo_root,
+            self.candidate_sha,
+            platform_cert.FROZEN_ALLOWLIST_REPO_RELATIVE,
+        )
+        self.assertEqual(allowlist.file_sha256, hashlib.sha256(raw).hexdigest())
+        cases = platform_cert.bind_frozen_allowlist(allowlist, self.plan_rows())
+        self.assertEqual(
+            cases,
+            [
+                {
+                    "program": "blastn",
+                    "case_id": "Sakai.MG1655.megablast",
+                    "frozen_sha256": (
+                        "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262"
+                    ),
+                    "allowed_actual_sha256": (
+                        "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45"
+                    ),
+                    "frozen_gate_a_steps": [11, 52, 53],
+                }
+            ],
+        )
+        topology = platform_cert.expected_completion_topology(self.catalog)
+        self.assertEqual(
+            [
+                step_id
+                for step_id, step in topology.items()
+                if step["execution_index"] in SAKAI_GATE_A_STEPS
+            ],
+            [
+                "matrix:blastn:Sakai.MG1655.megablast",
+                "repeatability:blastn:Sakai.MG1655.megablast:run2",
+                "repeatability:blastn:Sakai.MG1655.megablast:run3",
+            ],
+        )
+        self.assertEqual(
+            platform_cert.allowed_known_mismatch_lines(cases),
+            [
+                "allowed known mismatch: blastn/Sakai.MG1655.megablast "
+                "(Gate A steps 11, 52, 53)"
+            ],
+        )
+        self.assertEqual(
+            platform_cert.frozen_allowlist_identity("a" * 40, allowlist, cases),
+            {
+                "git_object": f"{'a' * 40}:LOSAT/tests/frozen_mismatch_allowlist.json",
+                "sha256": allowlist.file_sha256,
+                "gate_a_cases": cases,
+            },
+        )
+        self.assertEqual(
+            platform_cert.bind_frozen_allowlist(None, self.plan_rows()), []
+        )
+
+    def test_frozen_allowlist_is_read_from_the_candidate_git_blob(self) -> None:
+        relative = platform_cert.FROZEN_ALLOWLIST_REPO_RELATIVE.as_posix()
+        raw = platform_cert.read_git_blob_bytes(
+            self.repo_root, self.candidate_sha, relative
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            candidate_sha = self.commit_files(root, {relative: raw})
+            (root / relative).write_bytes(raw.replace(b"\n", b"\r\n") + b"edited")
+            allowlist = platform_cert.load_frozen_allowlist(root, candidate_sha)
+            self.assertEqual(allowlist.file_sha256, hashlib.sha256(raw).hexdigest())
+            self.assertEqual(set(allowlist.entries), {SAKAI})
+        document = json.loads(raw)
+        rejected = {
+            "duplicate case": json.dumps(
+                {**document, "entries": document["entries"] * 2}
+            ).encode(),
+            "duplicate key": raw.replace(
+                b'"schema":', b'"schema": "other",\n  "schema":', 1
+            ),
+            "schema": json.dumps({**document, "schema": "other"}).encode(),
+            "no entries": json.dumps({"schema": document["schema"]}).encode(),
+            "not an object": b"[]",
+            "not JSON": b"{",
+        }
+        for label, payload in rejected.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                candidate_sha = self.commit_files(root, {relative: payload})
+                with self.assertRaises(platform_cert.CertificationFailure):
+                    platform_cert.load_frozen_allowlist(root, candidate_sha)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            candidate_sha = self.commit_files(root, {"tracked.txt": b"tracked\n"})
+            with self.assertRaisesRegex(
+                platform_cert.CertificationFailure, "candidate Git blob is missing"
+            ):
+                platform_cert.load_frozen_allowlist(root, candidate_sha)
+
+    def test_allowlist_binding_requires_the_exact_gate_a_plan(self) -> None:
+        plan = self.plan_rows(self.fixture_catalog())
+        self.assertEqual(
+            platform_cert.bind_frozen_allowlist(self.fixture_allowlist(), plan),
+            self.fixture_allowed_cases(),
+        )
+        other_suite = {
+            "program": "tblastn",
+            "case_id": "not_in_gate_a",
+            "frozen_sha256": "1" * 64,
+            "allowed_actual_sha256": "2" * 64,
+        }
+        self.assertEqual(
+            platform_cert.bind_frozen_allowlist(
+                self.fixture_allowlist(other_suite), plan
+            ),
+            self.fixture_allowed_cases(),
+        )
+        rejected = {
+            "a step is missing": self.fixture_allowlist(frozen_gate_a_steps=[11, 52]),
+            "another step": self.fixture_allowlist(frozen_gate_a_steps=[11, 52, 54]),
+            "steps not declared": self.fixture_allowlist(frozen_gate_a_steps=None),
+            "allowed equals frozen": self.fixture_allowlist(
+                allowed_actual_sha256=hashlib.sha256(SAKAI_FIXTURE_FROZEN).hexdigest()
+            ),
+            "allowed is not a SHA-256": self.fixture_allowlist(
+                allowed_actual_sha256="AC81"
+            ),
+            "steps for another frozen hash": self.fixture_allowlist(
+                frozen_sha256="1" * 64
+            ),
+            "steps for a case outside the plan": self.fixture_allowlist(
+                {**other_suite, "frozen_gate_a_steps": [1]}
+            ),
+        }
+        for label, allowlist in rejected.items():
+            with (
+                self.subTest(label=label),
+                self.assertRaisesRegex(
+                    platform_cert.CertificationFailure, "frozen mismatch allowlist"
+                ),
+            ):
+                platform_cert.bind_frozen_allowlist(allowlist, plan)
+
+    def test_gate_a_allowlist_passes_only_the_recorded_actual_output(self) -> None:
+        allowlist = self.fixture_allowlist()
+        frozen = hashlib.sha256(SAKAI_FIXTURE_FROZEN).hexdigest()
+        allowed = hashlib.sha256(SAKAI_FIXTURE_ALLOWED).hexdigest()
+        self.assertEqual(
+            platform_cert.gate_a_verification(
+                "matrix", *SAKAI, frozen, allowed, allowlist
+            ),
+            {
+                "gate": "LOSAT_CANONICAL",
+                "classification": "ALLOWED_KNOWN_MISMATCH",
+                "canonical_sha256": frozen,
+                "allowed_actual_sha256": allowed,
+                "allowlist_file_sha256": allowlist.file_sha256,
+            },
+        )
+        self.assertEqual(
+            platform_cert.gate_a_verification(
+                "repeatability", *SAKAI, frozen, allowed, allowlist
+            )["gate"],
+            "LOSAT_REPEATABILITY",
+        )
+        with self.assertRaisesRegex(
+            platform_cert.CertificationFailure, "STALE_FROZEN_MISMATCH_ALLOWLIST"
+        ):
+            platform_cert.gate_a_verification(
+                "matrix", *SAKAI, frozen, frozen, allowlist
+            )
+        with self.assertRaisesRegex(
+            platform_cert.CertificationFailure,
+            f"CROSS_PLATFORM_LOSAT_DIVERGENCE.*allowed known mismatch {allowed}",
+        ):
+            platform_cert.gate_a_verification(
+                "matrix", *SAKAI, frozen, "0" * 64, allowlist
+            )
+        # Without the allowlist, and for every case it does not list, only the
+        # frozen hash passes.
+        with self.assertRaisesRegex(
+            platform_cert.CertificationFailure, "CROSS_PLATFORM_LOSAT_DIVERGENCE"
+        ):
+            platform_cert.gate_a_verification("matrix", *SAKAI, frozen, allowed, None)
+        with self.assertRaisesRegex(
+            platform_cert.CertificationFailure, "CROSS_PLATFORM_LOSAT_DIVERGENCE"
+        ):
+            platform_cert.gate_a_verification(
+                "matrix", "blastn", "other_case", frozen, allowed, allowlist
+            )
+        self.assertEqual(
+            platform_cert.gate_a_verification(
+                "matrix", "blastn", "other_case", frozen, frozen, allowlist
+            ),
+            {
+                "gate": "LOSAT_CANONICAL",
+                "classification": "CANONICAL_PR5_RAW_BYTES",
+                "canonical_sha256": frozen,
+            },
+        )
+
+    def test_execution_reports_an_allowed_known_mismatch_and_fails_a_stale_entry(
+        self,
+    ) -> None:
+        allowlist = self.fixture_allowlist()
+        identity = {
+            "source_sha": "a" * 40,
+            "platform_id": "test",
+            "losat": {"sha256": "b" * 64},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            step = self.gate_a_step(
+                root, "matrix", SAKAI_FIXTURE_ALLOWED, SAKAI_FIXTURE_FROZEN
+            )
+            record = platform_cert._execute_step(
+                root, root, identity, self.catalog, step, None, allowlist
+            )
+            self.assertEqual(
+                (root / step.final_output_rel).read_bytes(), SAKAI_FIXTURE_ALLOWED
+            )
+            self.assertEqual(
+                record["expected_losat_sha256"],
+                hashlib.sha256(SAKAI_FIXTURE_FROZEN).hexdigest(),
+            )
+            self.assertEqual(
+                record["output_sha256"],
+                hashlib.sha256(SAKAI_FIXTURE_ALLOWED).hexdigest(),
+            )
+            self.assertEqual(
+                record["verification"]["classification"], "ALLOWED_KNOWN_MISMATCH"
+            )
+            with self.assertRaisesRegex(
+                platform_cert.CertificationFailure, "CROSS_PLATFORM_LOSAT_DIVERGENCE"
+            ):
+                platform_cert._execute_step(root, root, identity, self.catalog, step)
+            stale = self.gate_a_step(
+                root, "repeatability", SAKAI_FIXTURE_FROZEN, SAKAI_FIXTURE_FROZEN
+            )
+            with self.assertRaisesRegex(
+                platform_cert.CertificationFailure, "STALE_FROZEN_MISMATCH_ALLOWLIST"
+            ):
+                platform_cert._execute_step(
+                    root, root, identity, self.catalog, stale, None, allowlist
+                )
+            other = self.gate_a_step(
+                root, "matrix", b"another output\n", SAKAI_FIXTURE_FROZEN
+            )
+            with self.assertRaisesRegex(
+                platform_cert.CertificationFailure, "CROSS_PLATFORM_LOSAT_DIVERGENCE"
+            ):
+                platform_cert._execute_step(
+                    root, root, identity, self.catalog, other, None, allowlist
+                )
+
+    def test_resume_accepts_an_allowed_output_only_with_the_allowlist(self) -> None:
+        allowlist = self.fixture_allowlist()
+        identity = {
+            "evidence_schema": 1,
+            "authority_version": self.authority.authority_version,
+            "authority_file_sha256": self.authority.file_sha256,
+            "source_sha": "a" * 40,
+            "platform_id": "macos-arm64",
+            "runner_label": "macos-15",
+            "toolchain": {"cargo_V": "cargo 1.92.0"},
+            "losat": {"sha256": "b" * 64},
+            "oracle_archive": {"archive_md5": "c" * 32},
+            "oracles": {
+                "blastn": {"sha256": "d" * 64},
+                "blastp": {"sha256": "e" * 64},
+                "tblastx": {"sha256": "f" * 64},
+            },
+            "canonical_manifest": {"sha256": "1" * 64},
+            "frozen_mismatch_allowlist": platform_cert.frozen_allowlist_identity(
+                "a" * 40, allowlist, self.fixture_allowed_cases()
+            ),
+            "controlled_fixtures": {
+                "lexical_root": platform_cert.HISTORICAL_LEXICAL_ROOT,
+                "staged_input_count": 34,
+                "inputs": [],
+            },
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prior = root / "prior"
+            prior.mkdir()
+            step = self.gate_a_step(
+                prior, "matrix", SAKAI_FIXTURE_ALLOWED, SAKAI_FIXTURE_FROZEN
+            )
+            record = platform_cert._execute_step(
+                prior, prior, identity, self.catalog, step, None, allowlist
+            )
+            (prior / "identity.json").write_text(json.dumps(identity), encoding="utf-8")
+            current = root / "current"
+            current.mkdir()
+            imported = platform_cert.import_resume(
+                prior,
+                current,
+                self.repo_root,
+                identity,
+                [step],
+                self.catalog,
+                self.authority,
+                allowlist,
+            )
+            self.assertEqual(
+                imported[step.step_id]["verification"], record["verification"]
+            )
+            self.assertEqual(
+                (current / step.final_output_rel).read_bytes(), SAKAI_FIXTURE_ALLOWED
+            )
+            second = root / "second"
+            second.mkdir()
+            with self.assertRaisesRegex(
+                platform_cert.CertificationFailure, "resume LOSAT output changed"
+            ):
+                platform_cert.import_resume(
+                    prior,
+                    second,
+                    self.repo_root,
+                    identity,
+                    [step],
+                    self.catalog,
+                    self.authority,
+                )
+
+    def test_final_evidence_names_the_allowed_known_mismatch(self) -> None:
+        platform_id = "macos-arm64"
+        catalog = self.fixture_catalog()
+        allowed_cases = self.fixture_allowed_cases()
+        allowed_sha256 = hashlib.sha256(SAKAI_FIXTURE_ALLOWED).hexdigest()
+        identity = {
+            "source_sha": "a" * 40,
+            "platform_id": platform_id,
+            "authority_version": self.authority.authority_version,
+            "authority_file_sha256": self.authority.file_sha256,
+        }
+
+        def completions(steps, allowed_keys):
+            completed = {}
+            for step in steps:
+                if step.kind == "oracle":
+                    output_sha256 = "9" * 64
+                    verification = {
+                        "native_fingerprint": (
+                            platform_cert.expected_native_fingerprint_evidence(
+                                self.authority, platform_id, step.program, step.case_id
+                            )
+                        ),
+                        "native_vs_losat_diagnostic": {
+                            "classification": "DIAGNOSTIC_ERROR",
+                            "platform_diagnostic": "none",
+                        },
+                    }
+                else:
+                    allowed = (step.program, step.case_id) in allowed_keys
+                    output_sha256 = (
+                        allowed_sha256 if allowed else step.expected_losat_sha256
+                    )
+                    verification = {
+                        "classification": (
+                            "ALLOWED_KNOWN_MISMATCH"
+                            if allowed
+                            else "CANONICAL_PR5_RAW_BYTES"
+                        )
+                    }
+                completed[step.step_id] = {
+                    "kind": step.kind,
+                    "output_sha256": output_sha256,
+                    "verification": verification,
+                }
+            return completed
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            steps = platform_cert.build_steps(
+                self.repo_root,
+                root,
+                catalog,
+                root / "LOSAT",
+                {
+                    "blastn": root / "blastn",
+                    "blastp": root / "blastp",
+                    "tblastx": root / "tblastx",
+                },
+            )
+            output = root / "allowed"
+            platform_cert.finalize_evidence(
+                output, identity, steps, completions(steps, {SAKAI}), 61, allowed_cases
+            )
+            summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["decision"], "PLATFORM_NATIVE_CERTIFIED")
+            self.assertEqual(
+                summary["gate_a_losat_canonical"],
+                {
+                    "total": 43,
+                    "passed": 43,
+                    "all_exact_pr5_raw_bytes": False,
+                    "allowed_known_mismatches": allowed_cases,
+                },
+            )
+            equalities = (output / "cross_platform_equalities.tsv").read_text(
+                encoding="utf-8"
+            )
+            self.assertEqual(equalities.count("\tEXACT_BYTES\n"), 42)
+            self.assertIn(
+                f"blastn\tSakai.MG1655.megablast\t"
+                f"{hashlib.sha256(SAKAI_FIXTURE_FROZEN).hexdigest()}\t"
+                f"{allowed_sha256}\tALLOWED_KNOWN_MISMATCH\n",
+                equalities,
+            )
+            direct = (output / "direct_ncbi_checks.tsv").read_text(encoding="utf-8")
+            sakai_row = next(
+                line for line in direct.splitlines() if "Sakai.MG1655.megablast" in line
+            )
+            self.assertIn(f"\t{allowed_sha256}\t", sakai_row)
+
+            exact = root / "exact"
+            platform_cert.finalize_evidence(
+                exact, identity, steps, completions(steps, set()), 61
+            )
+            self.assertEqual(
+                json.loads((exact / "summary.json").read_text(encoding="utf-8"))[
+                    "gate_a_losat_canonical"
+                ],
+                {
+                    "total": 43,
+                    "passed": 43,
+                    "all_exact_pr5_raw_bytes": True,
+                    "allowed_known_mismatches": [],
+                },
+            )
+            for label, allowed_keys, cases in (
+                ("allowed step outside the allowlist", {SAKAI}, []),
+                ("listed case recorded as exact", set(), allowed_cases),
+            ):
+                with (
+                    self.subTest(label=label),
+                    self.assertRaisesRegex(
+                        platform_cert.CertificationFailure,
+                        "Gate A allowlist coverage changed",
+                    ),
+                ):
+                    platform_cert.finalize_evidence(
+                        root / "rejected",
+                        identity,
+                        steps,
+                        completions(steps, allowed_keys),
+                        61,
+                        cases,
+                    )
+
+    def test_aggregate_accepts_only_the_bound_allowed_known_mismatch(self) -> None:
+        def update_json(path: Path, mutate) -> None:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            mutate(value)
+            platform_cert.atomic_write_json(path, value)
+
+        allowlist = self.fixture_allowlist()
+        frozen_sha256 = hashlib.sha256(SAKAI_FIXTURE_FROZEN).hexdigest()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_root = root / "input"
+            input_root.mkdir()
+            authority, catalog = self.create_aggregate_fixture(input_root, allowlist)
+            result = platform_cert.aggregate_platform_evidence(
+                input_root,
+                root / "aggregate.json",
+                "a" * 40,
+                authority,
+                catalog,
+                allowlist,
+            )
+            self.assertEqual(result["decision"], "CROSS_PLATFORM_NATIVE_CERTIFIED")
+            self.assertEqual(
+                result["frozen_mismatch_allowlist"]["gate_a_cases"],
+                self.fixture_allowed_cases(),
+            )
+            self.assertEqual(
+                [
+                    (item["gate_a_passed"], item["gate_a_allowed_known_mismatches"])
+                    for item in result["platforms"]
+                ],
+                [(43, 1)] * 3,
+            )
+            # The same evidence is not certified when the aggregator's allowlist
+            # does not list the case, or lists another output.
+            for label, other in (
+                ("no allowlist", None),
+                (
+                    "another allowed output",
+                    self.fixture_allowlist(allowed_actual_sha256="7" * 64),
+                ),
+            ):
+                with (
+                    self.subTest(label=label),
+                    self.assertRaises(platform_cert.CertificationFailure),
+                ):
+                    platform_cert.aggregate_platform_evidence(
+                        input_root,
+                        root / "rejected.json",
+                        "a" * 40,
+                        authority,
+                        catalog,
+                        other,
+                    )
+
+        def stale(artifact: Path, name: str) -> None:
+            completion = artifact / "completions" / name
+            value = json.loads(completion.read_text(encoding="utf-8"))
+            (artifact / value["output_rel"]).write_bytes(SAKAI_FIXTURE_FROZEN)
+            value["output_sha256"] = frozen_sha256
+            value["verification"] = {
+                "gate": value["verification"]["gate"],
+                "classification": "CANONICAL_PR5_RAW_BYTES",
+                "canonical_sha256": frozen_sha256,
+            }
+            platform_cert.atomic_write_json(completion, value)
+
+        cases = (
+            (
+                "summary claims exact PR 5 bytes",
+                "aggregate Gate A failed",
+                lambda artifact: update_json(
+                    artifact / "summary.json",
+                    lambda value: value["gate_a_losat_canonical"].update(
+                        all_exact_pr5_raw_bytes=True, allowed_known_mismatches=[]
+                    ),
+                ),
+            ),
+            (
+                "another allowlist file",
+                "aggregate frozen mismatch allowlist identity failed",
+                lambda artifact: update_json(
+                    artifact / "identity.json",
+                    lambda value: value["frozen_mismatch_allowlist"].__setitem__(
+                        "sha256", "0" * 64
+                    ),
+                ),
+            ),
+            (
+                "listed matrix step is the frozen output again",
+                "aggregate Gate A completion failed",
+                lambda artifact: stale(
+                    artifact, "matrix__blastn__Sakai.MG1655.megablast.json"
+                ),
+            ),
+            (
+                "listed repeatability step is the frozen output again",
+                "aggregate repeatability completion failed",
+                lambda artifact: stale(
+                    artifact, "repeatability__blastn__Sakai.MG1655.megablast__run3.json"
+                ),
+            ),
+            (
+                "allowed classification on a case that is not listed",
+                "aggregate Gate A completion failed",
+                lambda artifact: update_json(
+                    artifact
+                    / "completions"
+                    / "matrix__blastn__PesePMNV.MjPMNV.task_blastn.json",
+                    lambda value: value["verification"].update(
+                        classification="ALLOWED_KNOWN_MISMATCH",
+                        allowed_actual_sha256=value["output_sha256"],
+                        allowlist_file_sha256=allowlist.file_sha256,
+                    ),
+                ),
+            ),
+        )
+        for label, message, mutate in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                input_root = root / "input"
+                input_root.mkdir()
+                authority, catalog = self.create_aggregate_fixture(
+                    input_root, allowlist
+                )
+                artifact = input_root / "platform-native-macos-x64"
+                mutate(artifact)
+                self.refresh_evidence_manifest(artifact)
+                with self.assertRaisesRegex(
+                    platform_cert.CertificationFailure, message
+                ):
+                    platform_cert.aggregate_platform_evidence(
+                        input_root,
+                        root / "aggregate.json",
+                        "a" * 40,
+                        authority,
+                        catalog,
+                        allowlist,
+                    )
+        # Evidence in which every case has its frozen bytes is not certified
+        # while the allowlist still lists a case (a stale entry).
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_root = root / "input"
+            input_root.mkdir()
+            authority, catalog = self.create_aggregate_fixture(input_root)
+            with self.assertRaises(platform_cert.CertificationFailure):
+                platform_cert.aggregate_platform_evidence(
+                    input_root,
+                    root / "aggregate.json",
+                    "a" * 40,
+                    authority,
+                    catalog,
+                    allowlist,
+                )
 
 
 if __name__ == "__main__":

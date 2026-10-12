@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use run_local_support::{assert_observer_ranges, reader_records, run_formats, Run, TempFasta};
+use run_local_support::{
+    assert_observer_ranges, reader_records, run_formats, temp_path, Run, TempFasta,
+};
 use LOSAT::algorithm::tblastn::TblastnArgs;
 use LOSAT::api::local_blast::{run_local_tblastn, FormatOutput, OutputSink, ReportOutputs};
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
@@ -153,14 +155,7 @@ struct Inputs {
 impl Inputs {
     fn new() -> Self {
         let concatenate = |name: &str, parts: &[&str]| {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "losat_run_local_tblastn_{}_{nanos}_{name}",
-                std::process::id()
-            ));
+            let path = temp_path(&format!("tblastn_{name}"));
             let mut bytes = Vec::new();
             for part in parts {
                 bytes.extend(std::fs::read(repository(part)).expect("fixture"));

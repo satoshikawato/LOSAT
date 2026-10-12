@@ -2224,6 +2224,70 @@ mod tests {
         assert_eq!(second.oid, 7);
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1580
+    // ```c
+    // BlastCompo_EarlyTermination(double evalue,
+    //                             BlastCompo_Heap significantMatches[],
+    //                             int numQueries)
+    // {
+    //     int i;
+    //     for (i = 0;  i < numQueries;  i++) {
+    //         if (BlastCompo_HeapFilledToCutoff(&significantMatches[i])) {
+    //             double ecutoff = significantMatches[i].ecutoff;
+    //             /* Only matches with evalue <= ethresh will be saved. */
+    //             if (evalue <= EVALUE_STRETCH * ecutoff) {
+    //                 ...
+    //                 return FALSE;
+    //             }
+    //         } else {
+    //             return FALSE;
+    //         }
+    //     }
+    //     return TRUE;
+    // }
+    // ```
+    // The test reads every heap it is given (NCBI: those of the queries of one query batch):
+    // while the heap of one query is as BlastCompo_HeapInitialize left it, no match of another
+    // query is ended, however full that query's own heap is. The query-parallel redo of
+    // blast_engine.rs relies on this.
+    #[test]
+    fn test_compo_early_termination_reads_every_heap_of_the_batch() {
+        let ecutoff = 0.002;
+        let significant = |oid: u32, evalue: f64| {
+            let mut list = BlastpHspList {
+                oid,
+                query_index: 0,
+                hsps: vec![BlastpHsp::from_hit(make_hit(60, 1, 10, 1, 10))],
+                best_evalue: evalue,
+            };
+            list.hsps[0].e_value = evalue;
+            list
+        };
+        let mut heaps = vec![
+            BlastCompoHeap::new(2, ecutoff),
+            BlastCompoHeap::new(2, ecutoff),
+        ];
+        assert!(!heaps[1].filled_to_cutoff());
+        heaps[0].insert(significant(1, 1e-20), 1e-20, 60, 1);
+        heaps[0].insert(significant(2, 1e-10), 1e-10, 60, 2);
+        assert!(heaps[0].filled_to_cutoff());
+
+        let weak = COMPO_HEAP_EVALUE_STRETCH * ecutoff * 2.0;
+        // The first query's heap alone ends a weak match ...
+        assert!(blast_compo_early_termination(weak, &heaps[..1]));
+        // ... but not while the second query's heap is untouched or only partly filled.
+        assert!(!blast_compo_early_termination(weak, &heaps));
+        heaps[1].insert(significant(3, 1e-20), 1e-20, 60, 3);
+        assert!(!blast_compo_early_termination(weak, &heaps));
+        heaps[1].insert(significant(4, 1e-10), 1e-10, 60, 4);
+        assert!(blast_compo_early_termination(weak, &heaps));
+        // A match within EVALUE_STRETCH of the cutoff is redone whatever the heaps hold.
+        assert!(!blast_compo_early_termination(
+            COMPO_HEAP_EVALUE_STRETCH * ecutoff,
+            &heaps
+        ));
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2494-2514
     // ```c
     // while (NULL != (hsp_list = BlastCompo_HeapPop(heap))) {

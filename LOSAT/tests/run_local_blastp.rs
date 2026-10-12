@@ -11,10 +11,10 @@ mod run_local_support;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use run_local_support::{
-    assert_observer_ranges, field, read_records, reader_records, run_formats, Run, TempFasta,
+    assert_observer_ranges, field, read_records, reader_records, run_formats, temp_path, Run,
+    TempFasta,
 };
 use LOSAT::api::local_blast::{run_local_blastp, FormatOutput, OutputSink, ReportOutputs};
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
@@ -41,14 +41,7 @@ fn fixture_prefix(name: &str, count: usize) -> PathBuf {
         }
         kept.push_str(line);
     }
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!(
-        "losat_run_local_{}_{nanos}_{count}_{name}",
-        std::process::id()
-    ));
+    let path = temp_path(&format!("{count}_{name}"));
     std::fs::write(&path, kept).expect("write fixture prefix");
     path
 }

@@ -26,20 +26,30 @@ pub fn fixture_sequence(name: &str) -> Vec<u8> {
         .to_vec()
 }
 
+/// A path in the temporary directory that no other call of this process gets. The tests of
+/// one binary run at the same time and remove their files when they end; the process id and
+/// the clock alone give two of them the same path where the clock ticks in microseconds
+/// (macOS), so a counter of the calls is part of the name.
+pub fn temp_path(name: &str) -> PathBuf {
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "losat_run_local_{}_{nanos}_{}_{name}",
+        std::process::id(),
+        CALLS.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
 /// A temporary FASTA file, removed when dropped.
 pub struct TempFasta(pub PathBuf);
 
 impl TempFasta {
     /// Writes `records` (id, sequence) with 60 residues per line.
     pub fn new(name: &str, records: &[(&str, &[u8])]) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "losat_run_local_{}_{nanos}_{name}",
-            std::process::id()
-        ));
+        let path = temp_path(name);
         let mut text = Vec::new();
         for (id, sequence) in records {
             text.extend_from_slice(format!(">{id}\n").as_bytes());

@@ -588,7 +588,13 @@ mod tests {
                 ))
                 .unwrap();
                 if *actual != expected {
-                    let path = format!("/tmp/tblastn_stagee_mode{mode}_fmt{fmt}.actual");
+                    // No NCBI counterpart: test plumbing; the platform's temporary directory
+                    // replaces the Unix-only "/tmp" that made a mismatch fail on Windows with
+                    // "path not found" instead of reporting the byte difference.
+                    let path = std::env::temp_dir()
+                        .join(format!("tblastn_stagee_mode{mode}_fmt{fmt}.actual"))
+                        .display()
+                        .to_string();
                     std::fs::write(&path, actual).unwrap();
                     let offset = actual
                         .iter()

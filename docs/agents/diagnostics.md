@@ -391,6 +391,16 @@ Rebuilding less:
   result. One line at exit: `[X_SHADOW] LINKSORT sorts= indices_compared=`. Together with
   `LOSAT_X_HSPINPLACESHADOW=1` the reference bodies are compared with the path's result end to end
   (`LOSAT/tests/tblastx_link_sort.rs` runs both).
+- `LOSAT_X_BPQBLOCK=<letters>` (BLASTP, memory and speed; not in the strict set: off unless set to a positive
+  integer, and `LOSAT_X_DEFAULT` does not touch it) the queries are searched in blocks of whole query batches
+  (`blastp/x_query_blocks.rs`, exactness argument in its header): a block closes at the first batch end where
+  its letters reach the value, and each block is a search of its own (its lookup table, its diagonal table,
+  its hit lists) whose rows are written before the next block is searched, as NCBI searches and reports one
+  batch at a time. Taken only where a block's report is its rows: one output in tabular format 6, no
+  `-query_loc`, the default lookup table, every batch read, more than one block, and no subject whose tabular
+  ID the reference path rejects; otherwise the search of all queries. The output file is created when the
+  first block's rows are written; a run that fails in a later block leaves the rows of the blocks before.
+  With `LOSAT_TIMING=1` each block prints its own `[TIMING]` lines.
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks

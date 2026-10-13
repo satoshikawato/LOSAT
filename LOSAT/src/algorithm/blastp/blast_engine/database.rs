@@ -1159,6 +1159,63 @@ mod tests {
         );
     }
 
+    // local_blast.cpp:240-251 and blast_app_util.hpp:185-203: a reader error of NCBI's own
+    // is the search stage's text during the preliminary search (`BLAST engine error`,
+    // exit 3) and the reader's text elsewhere (`BLAST Database error`, exit 2); what the
+    // reader does not read is LOSAT's refusal in both places.
+    #[cfg(unix)]
+    #[test]
+    fn reader_errors_of_the_search_and_of_the_other_reads() {
+        let unreadable = || SeqDbError::Open {
+            path: "/data/db.psq".into(),
+            source: std::io::Error::from_raw_os_error(13),
+        };
+        let read = search_read_error(unreadable())
+            .downcast::<PreliminaryReadError>()
+            .expect("NCBI's error of the search stage");
+        assert_eq!(read.0, "Database memory map file error");
+        assert_eq!(
+            read.to_string(),
+            "BLAST engine error: Database memory map file error"
+        );
+        let native = database_error(unreadable());
+        let native = native.downcast_ref::<NativeError>().expect("NCBI's error");
+        assert_eq!(native.exit, 2);
+        assert_eq!(
+            native.message,
+            "BLAST Database error: Database memory map file error - CMemoryFile: Cannot memory map file '/data/db.psq':Permission denied\n"
+        );
+        let too_many = || SeqDbError::Open {
+            path: "/data/db.psq".into(),
+            source: std::io::Error::from_raw_os_error(24),
+        };
+        let read = search_read_error(too_many())
+            .downcast::<PreliminaryReadError>()
+            .expect("NCBI's error of the search stage");
+        assert_eq!(
+            read.0,
+            "Too many open files, please raise the open file limit"
+        );
+        let missing = SeqDbError::NotFound("Error: File (/data/db.psq) not found.".to_string());
+        let read = search_read_error(missing)
+            .downcast::<PreliminaryReadError>()
+            .expect("NCBI's error of the search stage");
+        assert_eq!(read.0, "Database memory map file error");
+        for refused in [search_read_error, database_error] {
+            let error = refused(SeqDbError::Unsupported {
+                path: "/data/db.pal".into(),
+                message: "the alias file filters sequences".to_string(),
+            });
+            assert!(error.downcast_ref::<NativeError>().is_none());
+            assert!(error.downcast_ref::<PreliminaryReadError>().is_none());
+            assert!(
+                format!("{error:#}")
+                    .ends_with("; this database is not supported by LOSAT's BLASTP"),
+                "{error:#}"
+            );
+        }
+    }
+
     // blast_stat.c:1583-1593: O scores as X. p03 of the fixture holds every NCBIstdaa
     // letter but the gap (`ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT`).
     #[test]

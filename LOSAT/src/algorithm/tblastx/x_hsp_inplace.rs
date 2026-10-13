@@ -152,6 +152,12 @@
 //! reference on a clone of the input), compares the two results record by record, every field,
 //! `e_value` by bits, stops at the first difference and continues with the reference's result;
 //! the summary is printed by `main`.
+//!
+//! EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW, off unless set): the two index sort
+//! sites of this file (`sort_in_place`, `replay_in_place_counted`) then call `x_link_sort.rs`,
+//! which returns the same index order from one final sort instead of two and from a stable
+//! parallel sort for long lists (its header has the argument). With the switch off the
+//! statements described in items 1 and 5 run.
 
 use super::*;
 // Diagnostic (LOSAT_TIMING): the clock of a linking call (tblastx/x_link_timing.rs). It reads
@@ -286,16 +292,41 @@ fn apply_permutation_in_place<T>(items: &mut [T], source: &mut [usize]) {
 // ```
 // The index sort of `sort_ungapped_hits_by_index_replay` (same `sort_by`, same comparator, same
 // records at the same indices), then the records moved instead of copied and cloned back.
+// `site` names the caller for LOSAT_X_LINKSORT and is not read with that switch off.
 /// The result of `sort_ungapped_hits_by_index_replay` without a copy of the list.
-fn sort_in_place(hits: &mut [UngappedHit], compare: fn(&UngappedHit, &UngappedHit) -> Ordering) {
+fn sort_in_place(
+    hits: &mut [UngappedHit],
+    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
+    site: x_link_sort::Site,
+) {
     if hits.len() <= 1 {
         return;
     }
     let mut indices: Vec<usize> = (0..hits.len()).collect();
     {
         let original: &[UngappedHit] = hits;
-        indices
-            .sort_by(|&lhs_index, &rhs_index| compare(&original[lhs_index], &original[rhs_index]));
+        // EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW), dispatch: the same index order
+        // from a stable parallel sort when the list is long and the call may use the pool
+        // (tblastx/x_link_sort.rs, item 2 of its header). With the switch off the statement
+        // below runs.
+        //
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
+        // ```c
+        //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+        //          s_RevCompareHSPsTbx);
+        // ```
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
+        // ```c
+        //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
+        //               ScoreCompareHSPs);
+        // ```
+        if x_link_sort::mode() != 0 {
+            x_link_sort::sort_indices(&mut indices, original, compare, site);
+        } else {
+            indices.sort_by(|&lhs_index, &rhs_index| {
+                compare(&original[lhs_index], &original[rhs_index])
+            });
+        }
     }
     apply_permutation_in_place(hits, &mut indices);
 }
@@ -399,7 +430,7 @@ pub(crate) fn sort_dispatch(
     }
     match m {
         1 => {
-            sort_in_place(hits, compare);
+            sort_in_place(hits, compare, x_link_sort::Site::Dispatch);
             SORTS.fetch_add(1, AtomicOrdering::Relaxed);
             HITS.fetch_add(hits.len() as u64, AtomicOrdering::Relaxed);
             true
@@ -415,7 +446,7 @@ pub(crate) fn sort_dispatch(
                 !SORT_REFERENCE_CALL.with(|flag| flag.get()),
                 "LOSAT_X_HSPINPLACESHADOW: the reference sort did not reach its dispatch"
             );
-            sort_in_place(hits, compare);
+            sort_in_place(hits, compare, x_link_sort::Site::Dispatch);
             shadow_compare("sort", hits, &reference);
             SORTS.fetch_add(1, AtomicOrdering::Relaxed);
             HITS.fetch_add(reference.len() as u64, AtomicOrdering::Relaxed);
@@ -636,8 +667,12 @@ fn assemble(groups: impl Iterator<Item = Vec<UngappedHit>>, total: usize) -> Vec
 // order when it holds every record exactly once (module doc, item 5).
 /// The result of the reference's two final sorts and `replay_ncbi_output_list` for a list of at
 /// least two HSPs, without a second list unless the replay leaves a record out or repeats one.
-fn replay_in_place(results: Vec<UngappedHit>, lap: &mut LinkLap) -> Vec<UngappedHit> {
-    let (replayed, in_place) = replay_in_place_counted(results, lap);
+fn replay_in_place(
+    results: Vec<UngappedHit>,
+    lap: &mut LinkLap,
+    allow_parallel: bool,
+) -> Vec<UngappedHit> {
+    let (replayed, in_place) = replay_in_place_counted(results, lap, allow_parallel);
     if in_place {
         REPLAY_INPLACE.fetch_add(1, AtomicOrdering::Relaxed);
     } else {
@@ -662,20 +697,45 @@ fn replay_in_place(results: Vec<UngappedHit>, lap: &mut LinkLap) -> Vec<Ungapped
 //    hsp_list->hsp_array[index] = H->hsp;
 // ```
 // The body of `replay_in_place`; the flag says which of the two outcomes produced the list.
+// `allow_parallel` is the linking call's, for LOSAT_X_LINKSORT; it is not read with that switch
+// off.
 /// The replayed list and whether it was made in place (`true`) or by the reference's clones.
 fn replay_in_place_counted(
     mut results: Vec<UngappedHit>,
     lap: &mut LinkLap,
+    allow_parallel: bool,
 ) -> (Vec<UngappedHit>, bool) {
     let n = results.len();
     let mut order: Vec<usize> = (0..n).collect();
-    for compare in [
-        rev_compare_hsps_transl as fn(&UngappedHit, &UngappedHit) -> Ordering,
-        fwd_compare_hsps_transl,
-    ] {
-        let records: &[UngappedHit] = &results;
-        // Stable, as `sort_linked_hsp_references`: comparator-equal records keep their order.
-        order.sort_by(|&lhs, &rhs| compare(&records[lhs], &records[rhs]));
+    // EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW), dispatch: the index order of the
+    // two sorts below from one stable sort with `s_FwdCompareHSPsTransl`, ties by
+    // `s_RevCompareHSPsTransl`, on the pool when the list is long and the call may use it
+    // (tblastx/x_link_sort.rs, items 1 and 2 of its header). With the switch off the two sorts
+    // below run.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
+    // ```c
+    // if (kTranslatedQuery) {
+    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //          s_RevCompareHSPsTransl);
+    //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
+    //          s_FwdCompareHSPsTransl);
+    // ```
+    if x_link_sort::mode() != 0 {
+        x_link_sort::final_sort(
+            &mut order,
+            &results,
+            x_link_sort::Site::Final(allow_parallel),
+        );
+    } else {
+        for compare in [
+            rev_compare_hsps_transl as fn(&UngappedHit, &UngappedHit) -> Ordering,
+            fwd_compare_hsps_transl,
+        ] {
+            let records: &[UngappedHit] = &results;
+            // Stable, as `sort_linked_hsp_references`: comparator-equal records keep their order.
+            order.sort_by(|&lhs, &rhs| compare(&records[lhs], &records[rhs]));
+        }
     }
     lap.lap(LinkStage::FinalSorts);
 
@@ -839,8 +899,13 @@ fn link_in_place(
     //          s_RevCompareHSPsTbx);
     // ```
     // The reference's `sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx)`.
+    // `allow_parallel` goes to the sort for LOSAT_X_LINKSORT (tblastx/x_link_sort.rs).
     lap.lap(LinkStage::Reset);
-    sort_in_place(&mut hits, rev_compare_hsps_tbx);
+    sort_in_place(
+        &mut hits,
+        rev_compare_hsps_tbx,
+        x_link_sort::Site::First(allow_parallel),
+    );
     lap.lap(LinkStage::Sort);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
@@ -976,7 +1041,7 @@ fn link_in_place(
     if results.len() <= 1 {
         return results;
     }
-    let replayed = replay_in_place(results, &mut lap);
+    let replayed = replay_in_place(results, &mut lap, allow_parallel);
     lap.lap(LinkStage::Replay);
     replayed
 }
@@ -1335,7 +1400,7 @@ mod tests {
                     let mut expected = hits.clone();
                     reference_sort(&mut expected, compare);
                     let mut actual = hits;
-                    sort_in_place(&mut actual, compare);
+                    sort_in_place(&mut actual, compare, x_link_sort::Site::Dispatch);
                     assert_same_list(&format!("{name} n {n} span {span}"), &actual, &expected);
                     equal_neighbours += actual
                         .windows(2)
@@ -1426,7 +1491,11 @@ mod tests {
         for queries in [1usize, 3] {
             for n in [2usize, 5, 64, 3000] {
                 let mut hits = random_hits(&mut rng, n, 60, queries);
-                sort_in_place(&mut hits, rev_compare_hsps_tbx);
+                sort_in_place(
+                    &mut hits,
+                    rev_compare_hsps_tbx,
+                    x_link_sort::Site::First(false),
+                );
                 let groups = check(hits, &format!("sorted, {queries} queries, n {n}"));
                 assert!(groups <= 4 * queries);
                 if n == 3000 {
@@ -1541,7 +1610,7 @@ mod tests {
             let hits = chained_hits(&mut rng, n, max_chain);
             let expected = reference_replay(hits.clone());
             let allocation = hits.as_ptr();
-            let (actual, in_place) = replay_in_place_counted(hits, &mut LinkLap::off());
+            let (actual, in_place) = replay_in_place_counted(hits, &mut LinkLap::off(), false);
             let label = format!("case {case} n {n} max_chain {max_chain}");
             assert!(in_place, "{label}: every HSP is replayed once");
             assert_eq!(actual.as_ptr(), allocation, "{label}: no second list");
@@ -1596,7 +1665,7 @@ mod tests {
         fn check(hits: Vec<UngappedHit>, expected_len: usize, expect_in_place: bool, label: &str) {
             let expected = reference_replay(hits.clone());
             assert_eq!(expected.len(), expected_len, "{label}: reference length");
-            let (actual, in_place) = replay_in_place_counted(hits, &mut LinkLap::off());
+            let (actual, in_place) = replay_in_place_counted(hits, &mut LinkLap::off(), false);
             assert_eq!(in_place, expect_in_place, "{label}");
             assert_same_list(label, &actual, &expected);
         }
@@ -1748,7 +1817,11 @@ mod tests {
                 }
             }
             let mut sorted = hits;
-            sort_in_place(&mut sorted, rev_compare_hsps_tbx);
+            sort_in_place(
+                &mut sorted,
+                rev_compare_hsps_tbx,
+                x_link_sort::Site::First(false),
+            );
             most_groups = most_groups.max(groups_off_the_end(sorted).len());
         }
         if cases >= 400 {

@@ -58,6 +58,9 @@ pub use x_seed_release::print_summary as x_seed_release_print_summary;
 #[path = "../x_search_timing.rs"]
 mod x_search_timing;
 use x_search_timing::XStage;
+// Diagnostic (LOSAT_TIMING): the stage times of the two linking calls, two more `[TIMING]`
+// lines after those (see tblastx/x_link_timing.rs).
+use crate::algorithm::tblastx::x_link_timing::{LinkCall, XLinkTimer};
 
 /// The queries of a search: the input records, the searched queries (each cut to its
 /// `-query_loc` interval), the query input (where each searched query lies in its record,
@@ -2517,6 +2520,9 @@ fn search_query_batch(
     // No NCBI counterpart: the stage timer of LOSAT_TIMING (x_search_timing.rs). It reads the
     // clock only when `timing_enabled`, and the search reads nothing from it.
     let x_times = x_search_timing::XSearchTimes::new(timing_enabled);
+    // No NCBI counterpart: the linking timer of LOSAT_TIMING (x_link_timing.rs). It arms a
+    // linking call only when `timing_enabled`, and the search reads nothing from it.
+    let x_link_timer = XLinkTimer::new(timing_enabled);
 
     // NCBI verbose CLI flag is only present under _BLAST_DEBUG builds.
     // ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
@@ -4981,6 +4987,7 @@ fn search_query_batch(
         // NCBI links and prelim-evalue-reaps the raw ungapped HSP list inside
         // s_BlastSearchEngineCore before the outer translated-subject path
         // reevaluates ambiguities and calls BLAST_LinkHsps again.
+        x_link_timer.arm(LinkCall::First);
         let mut prelinked_ungapped_hits = if combined_ungapped_hits.is_empty() {
             combined_ungapped_hits
         } else {
@@ -4995,6 +5002,7 @@ fn search_query_batch(
                 use_parallel,
             )
         };
+        x_link_timer.disarm();
         x_lap.lap(XStage::Link1);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1802-1803
         // ```c
@@ -5173,6 +5181,7 @@ fn search_query_batch(
             //    number_of_hsps = hp_frame_number[frame_index];
             // }
             // ```
+            x_link_timer.arm(LinkCall::Second);
             let linked = apply_sum_stats_even_gap_linking_with_parallel(
                 ungapped_hits,
                 &linking_params_for_cutoff,
@@ -5183,6 +5192,7 @@ fn search_query_batch(
                 &eff_searchsp_per_context,
                 use_parallel,
             );
+            x_link_timer.disarm();
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:959-982
             // ```c
             // H->hsp->evalue = (best_evalue == -1) ? H->hsp->evalue :
@@ -5908,6 +5918,12 @@ fn search_query_batch(
         eprintln!("[TIMING] total: {:.3}s", t_total.elapsed().as_secs_f64());
         // No NCBI counterpart: the stage lines of x_search_timing.rs, after the lines above.
         if let Some(lines) = x_times.lines(t_search_start, x_t_subjects, x_t_collect, t_search) {
+            for line in lines {
+                eprintln!("{line}");
+            }
+        }
+        // No NCBI counterpart: the linking lines of x_link_timing.rs, after the stage lines.
+        if let Some(lines) = x_link_timer.lines() {
             for line in lines {
                 eprintln!("{line}");
             }

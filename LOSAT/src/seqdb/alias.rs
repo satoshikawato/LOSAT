@@ -4,9 +4,20 @@
 //! `TITLE` and `DBLIST`. The keys that filter sequences or replace the
 //! statistics are explicit errors (not supported yet); unknown keys are
 //! ignored, as in NCBI.
+//!
+//! Two ways lead from a name to its volumes. `resolve_in` is NCBI's: the
+//! name of a search program's `-db` is looked for in the directories of a
+//! [`SearchPath`] (the current directory, `BLASTDB`, the registry value
+//! `[BLAST] BLASTDB`), names inside alias files are looked for there too when
+//! they are found nowhere else, and volumes are recorded under normalised
+//! directory names. `resolve_one_name` takes the path of one database as it
+//! is and looks nowhere else (`LOSAT makedb`).
 
+use std::collections::VecDeque;
+use std::ffi::OsStr;
 use std::path::{Path, MAIN_SEPARATOR};
 
+use super::file::DbFile;
 use super::volume::with_extension;
 use super::{SeqDbError, SeqType};
 
@@ -59,7 +70,37 @@ const UNSUPPORTED_KEYS: [&str; 16] = [
     "OID_MASK_TYPE",
 ];
 
-fn exists(path: &Path) -> bool {
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbatlas.cpp:160-182
+// ```c++
+// bool CSeqDBAtlas::GetFileSizeL(const string & fname, TIndx &length)
+// {
+//     ...
+//     pair<bool, TIndx> val;
+//     CFile whole(fname);
+//     Int8 file_length = whole.GetLength();
+//
+//     if (file_length >= 0) {
+//         val.first = true;
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3204-3216
+// ```c++
+// Int8 CFile::GetLength(void) const
+// {
+//     TNcbiSys_stat st;
+//     if (NcbiSys_stat(_T_XCSTRING(GetPath()), &st) != 0) {
+//         LOG_ERROR_ERRNO(40, "CFile:GetLength(): stat() failed for: " + GetPath());
+//         return -1L;
+//     }
+//     if ( GetType(st) != eFile ) {
+//         LOG_ERROR_NCBI(40, "CFile:GetLength(): Not a file: " + GetPath(), CNcbiError::eOperationNotPermitted);
+//         return -1L;
+//     }
+//     return st.st_size;
+// }
+// ```
+/// `CSeqDBAtlas::DoesFileExist`: `path` is a regular file, or a symbolic link
+/// to one.
+pub(super) fn exists(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|meta| meta.is_file())
 }
 
@@ -92,17 +133,22 @@ fn base_name(path: &str) -> &str {
 // (seqdbgeneral.hpp:975-979): the file name without a final `.pal`, `.nal`,
 // `.pin`, `.nin`, `.pdb` or `.ndb`. `SeqDB_CompareVolume` compares these.
 fn path_base_name(path: &str) -> &str {
-    let name = base_name(path);
-    let bytes = name.as_bytes();
+    remove_extn(base_name(path))
+}
+
+/// `SeqDB_RemoveExtn` (quoted above): `s` without a final `.pal`, `.nal`,
+/// `.pin`, `.nin`, `.pdb` or `.ndb`, when something precedes it.
+fn remove_extn(s: &str) -> &str {
+    let bytes = s.as_bytes();
     let len = bytes.len();
     if len > 4
         && bytes[len - 4] == b'.'
         && (bytes[len - 3] == b'n' || bytes[len - 3] == b'p')
         && matches!(&bytes[len - 2..], b"al" | b"in" | b"db")
     {
-        &name[..len - 4]
+        &s[..len - 4]
     } else {
-        name
+        s
     }
 }
 
@@ -188,6 +234,535 @@ fn combine_path(one: &str, two: &str) -> String {
     }
     out.push_str(two);
     out
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:465-472
+// ```c++
+// string CDirEntry::DeleteTrailingPathSeparator(const string& path)
+// {
+//     size_t pos = path.find_last_not_of(DIR_SEPARATORS);
+//     if (pos + 1 < path.length()) {
+//         return path.substr(0, pos + 1);
+//     }
+//     return path;
+// }
+// ```
+// `DIR_SEPARATORS` is "/" on Unix and "/\\" on Windows (ncbifile.cpp:110, 114).
+fn delete_trailing_path_separator(path: &str) -> &str {
+    if cfg!(windows) {
+        path.trim_end_matches(['/', '\\'])
+    } else {
+        path.trim_end_matches('/')
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:820-972
+// ```c++
+// string CDirEntry::NormalizePath(const string& path, EFollowLinks follow_links)
+// {
+//     if ( path.empty() ) {
+//         return path;
+//     }
+//     static const char kSep[] = { DIR_SEPARATOR, '\0' };
+//
+//     std::list<string> head;       // already resolved to our satisfaction
+//     std::list<string> tail;       // to resolve afterwards
+//     string  current;              // to resolve next
+//     int     link_depth = 0;
+//
+//     // Delete trailing slash for all paths except similar to 'd:\'
+// #  ifdef DISK_SEPARATOR
+//     if ( path.find(DISK_SEPARATOR) == NPOS ) {
+//         current = DeleteTrailingPathSeparator(path);
+//     } else {
+//         current = path;
+//     }
+// #  else
+//     current = DeleteTrailingPathSeparator(path);
+// #  endif
+//
+//     if ( current.empty() ) {
+//         // root dir
+//         return string(1, DIR_SEPARATOR);
+//     }
+//
+// #ifdef NCBI_OS_MSWIN
+//     NStr::ReplaceInPlace(current, "/", "\\");
+// #endif
+//
+//     while ( !current.empty()  ||  !tail.empty() ) {
+//         std::list<string> pretail;
+//         if ( !current.empty() ) {
+//             NStr::Split(current, kSep, pretail);
+//             current.erase();
+//             if (pretail.front().empty()
+// #ifdef DISK_SEPARATOR
+//                 ||  pretail.front().find(DISK_SEPARATOR) != NPOS
+// #endif
+//                 ) {
+//                 // Absolute path
+//                 head.clear();
+// #ifdef NCBI_OS_MSWIN
+//                 // Remove leading "\\?\". Replace leading "\\?\UNC\" with "\\".
+//                 static const char* const kUNC[] = { "", "", "?", "UNC" };
+//                 std::list<string>::iterator it = pretail.begin();
+//                 unsigned int matched = 0;
+//                 while (matched < 4  &&  it != pretail.end()
+//                        &&  !NStr::CompareNocase(*it, kUNC[matched])) {
+//                     ++it;
+//                     ++matched;
+//                 }
+//                 pretail.erase(pretail.begin(), it);
+//                 switch (matched) {
+//                 case 2: case 4: // got a UNC path (\\... or \\?\UNC\...)
+//                     head.push_back(kEmptyStr);
+//                     // fall through
+//                 case 1:         // normal volume-less absolute path
+//                     head.push_back(kEmptyStr);
+//                     break;
+//                 case 3/*?*/:    // normal path, absolute or relative
+//                     break;
+//                 }
+// #endif
+//             }
+//             tail.splice(tail.begin(), pretail);
+//         }
+//
+//         string next;
+//         if (!tail.empty()) {
+//             next = tail.front();
+//             tail.pop_front();
+//         }
+//         if ( !head.empty() ) { // empty heads should accept anything
+//             string& last = head.back();
+//             if (last == DIR_CURRENT) {
+//                 if (!next.empty()) {
+//                     head.pop_back();
+//                 }
+// #ifdef DISK_SEPARATOR
+//             } else if (!last.empty() && last[last.size()-1] == DISK_SEPARATOR) {
+//                 // Allow almost anything right after a volume specification
+// #endif
+//             } else if (next == DIR_CURRENT) {
+//                 // Leave out, since we already have content
+//                 continue;
+//             } else if (next.empty()) {
+//                 continue; // leave out empty components in most cases
+//             } else if (next == DIR_PARENT) {
+// #ifdef DISK_SEPARATOR
+//                 SIZE_TYPE pos;
+// #endif
+//                 // Back up if possible, assuming existing path to be "physical"
+//                 if (last.empty()) {
+//                     // Already at the root; .. is a no-op
+//                     continue;
+// #ifdef DISK_SEPARATOR
+//                 } else if ((pos = last.find(DISK_SEPARATOR) != NPOS)) {
+//                     last.erase(pos + 1);
+// #endif
+//                 } else if (last != DIR_PARENT) {
+//                     head.pop_back();
+//                     continue;
+//                 }
+//             }
+//         }
+// #ifdef NCBI_OS_UNIX
+//         // Is there a Windows equivalent for readlink?
+//         if ( follow_links ) {
+//             string s(head.empty() ? next : NStr::Join(head, string(1, DIR_SEPARATOR)) + DIR_SEPARATOR + next);
+//             char buf[PATH_MAX];
+//             int  length = (int)readlink(s.c_str(), buf, sizeof(buf));
+//             if (length > 0) {
+//                 current.assign(buf, length);
+//                 if (++link_depth >= 1024) {
+//                     ERR_POST_X(1, Warning << "CDirEntry::NormalizePath(): "
+//                                "Reached symlink depth limit " <<
+//                                link_depth << " when resolving " << path);
+//                     CNcbiError::Set(CNcbiError::eTooManySymbolicLinkLevels);
+//                     follow_links = eIgnoreLinks;
+//                 }
+//                 continue;
+//             }
+//         }
+// #endif
+//         // Normal case: just append the next element to head
+//         head.push_back(next);
+//     }
+//
+//     // Special cases
+//     if ( (head.size() == 0)  ||
+//          (head.size() == 2  &&  head.front() == DIR_CURRENT  &&  head.back().empty()) ) {
+//         // current dir
+//         return DIR_CURRENT;
+//     }
+//     if (head.size() == 1  &&  head.front().empty()) {
+//         // root dir
+//         return string(1, DIR_SEPARATOR);
+//     }
+// #ifdef DISK_SEPARATOR
+//     if (head.front().find(DISK_SEPARATOR) != NPOS) {
+//         if ((head.size() == 2  &&  head.back() == DIR_CURRENT) ||
+//             (head.size() == 3  &&  *(++head.begin()) == DIR_CURRENT  &&  head.back().empty()) ) {
+//             // root dir on drive X:
+//             return head.front() + DIR_SEPARATOR;
+//         }
+//     }
+// #endif
+//     // Compose path
+//     return NStr::Join(head, string(1, DIR_SEPARATOR));
+// }
+// ```
+// `DIR_SEPARATOR` is '/' on Unix and '\\' on Windows, where `DISK_SEPARATOR`
+// is ':' (ncbifile.cpp:102-116). `NStr::Split` without flags keeps empty
+// pieces. NCBI applies the function to a whole value such as `BLASTDB`, the
+// separators of a list included, so `/a/x:/../b` becomes `/a/b`.
+//
+// The symbolic links are read as NCBI reads them, one path component at a
+// time and only outside Windows; a relative path is read relative to the
+// current directory of the process. The warning NCBI posts at the depth
+// limit is not printed. A link whose target is not valid UTF-8 is an
+// explicit error (LOSAT keeps path names as UTF-8 strings).
+/// `CDirEntry::NormalizePath(path, eFollowLinks)`.
+fn normalize_path(path: &str) -> Result<String, SeqDbError> {
+    if path.is_empty() {
+        return Ok(String::new());
+    }
+    let windows = cfg!(windows);
+    let sep = MAIN_SEPARATOR;
+    let disk_separator = ':';
+
+    let mut head: Vec<String> = Vec::new();
+    let mut tail: VecDeque<String> = VecDeque::new();
+    let mut link_depth = 0;
+    let mut follow_links = true;
+
+    let mut current = if windows && path.contains(disk_separator) {
+        path.to_string()
+    } else {
+        delete_trailing_path_separator(path).to_string()
+    };
+    if current.is_empty() {
+        return Ok(sep.to_string());
+    }
+    if windows {
+        current = current.replace('/', "\\");
+    }
+
+    while !current.is_empty() || !tail.is_empty() {
+        if !current.is_empty() {
+            let mut pretail: VecDeque<String> = current.split(sep).map(str::to_string).collect();
+            current.clear();
+            let absolute = pretail.front().is_some_and(|front| {
+                front.is_empty() || (windows && front.contains(disk_separator))
+            });
+            if absolute {
+                head.clear();
+                if windows {
+                    const UNC: [&str; 4] = ["", "", "?", "UNC"];
+                    let mut matched = 0;
+                    while matched < 4
+                        && pretail
+                            .front()
+                            .is_some_and(|front| front.eq_ignore_ascii_case(UNC[matched]))
+                    {
+                        pretail.pop_front();
+                        matched += 1;
+                    }
+                    match matched {
+                        2 | 4 => {
+                            head.push(String::new());
+                            head.push(String::new());
+                        }
+                        1 => head.push(String::new()),
+                        _ => {}
+                    }
+                }
+            }
+            while let Some(piece) = pretail.pop_back() {
+                tail.push_front(piece);
+            }
+        }
+
+        let next = tail.pop_front().unwrap_or_default();
+        if let Some(last) = head.last_mut() {
+            if last == "." {
+                if !next.is_empty() {
+                    head.pop();
+                }
+            } else if windows && last.ends_with(disk_separator) {
+                // Allow almost anything right after a volume specification
+            } else if next == "." || next.is_empty() {
+                continue;
+            } else if next == ".." {
+                if last.is_empty() {
+                    continue;
+                } else if windows && last.contains(disk_separator) {
+                    // `pos` receives the result of the comparison, 1, so
+                    // `last.erase(pos + 1)` keeps the first two characters.
+                    if last.is_char_boundary(2) {
+                        last.truncate(2);
+                    }
+                } else if last != ".." {
+                    head.pop();
+                    continue;
+                }
+            }
+        }
+        if follow_links && !windows {
+            let link = if head.is_empty() {
+                next.clone()
+            } else {
+                format!("{}{sep}{next}", head.join(&sep.to_string()))
+            };
+            if let Ok(target) = std::fs::read_link(&link) {
+                let target =
+                    target
+                        .into_os_string()
+                        .into_string()
+                        .map_err(|_| SeqDbError::Unsupported {
+                            path: Path::new(&link).to_path_buf(),
+                            message: "the target of the symbolic link is not valid UTF-8"
+                                .to_string(),
+                        })?;
+                if !target.is_empty() {
+                    current = target;
+                    link_depth += 1;
+                    if link_depth >= 1024 {
+                        follow_links = false;
+                    }
+                    continue;
+                }
+            }
+        }
+        head.push(next);
+    }
+
+    if head.is_empty() || (head.len() == 2 && head[0] == "." && head[1].is_empty()) {
+        return Ok(".".to_string());
+    }
+    if head.len() == 1 && head[0].is_empty() {
+        return Ok(sep.to_string());
+    }
+    if windows
+        && head[0].contains(disk_separator)
+        && ((head.len() == 2 && head[1] == ".")
+            || (head.len() == 3 && head[1] == "." && head[2].is_empty()))
+    {
+        return Ok(format!("{}{sep}", head[0]));
+    }
+    Ok(head.join(&sep.to_string()))
+}
+
+/// The separator of the directories of a search path: `s_GetPathSplitter`
+/// (seqdbcommon.cpp:270-281), ":" on Unix and ";" elsewhere.
+fn path_splitter() -> char {
+    if cfg!(windows) {
+        ';'
+    } else {
+        ':'
+    }
+}
+
+/// The directories where NCBI BLAST+ looks for a database name: the current
+/// directory, the environment variable `BLASTDB`, and the registry value
+/// `[BLAST] BLASTDB` (`.ncbirc`, the program's `.ini` file, or the variable
+/// `NCBI_CONFIG__BLAST__BLASTDB`), in this order.
+///
+/// A relative directory of `BLASTDB` or of the registry value is used as it
+/// is written, so the operating system resolves it against the current
+/// directory of the process, as for NCBI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchPath {
+    /// `CDir::GetCwd()`: where a volume named in an alias file is looked for
+    /// first ("local copy").
+    cwd: String,
+    /// The string of `CSeqDBAtlas::GenerateSearchPath`.
+    path: String,
+}
+
+impl SearchPath {
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
+    // ```c++
+    //     static const string GenerateSearchPath() {
+    //         string splitter;
+    //         string path;
+    // #if defined(NCBI_OS_UNIX)
+    //         splitter = ":";
+    // #else
+    //         splitter = ";";
+    // #endif
+    //         // Local directory first;
+    //         path  = CDirEntry::NormalizePath(CDir::GetCwd(),eFollowLinks);
+    //         path += splitter;
+    //         // Then, BLASTDB;
+    //         CNcbiEnvironment env;
+    //         path += CDirEntry::NormalizePath(env.Get("BLASTDB"),eFollowLinks);
+    //         path += splitter;
+    //         // Finally, the config file.
+    //         CNcbiApplicationAPI* app = CNcbiApplicationAPI::Instance();
+    //         if (app) {
+    //             const CNcbiRegistry& registry = app->GetConfig();
+    //             if (registry.HasEntry("BLAST", "BLASTDB")) {
+    //                 path += CDirEntry::NormalizePath(registry.Get("BLAST", "BLASTDB"),eFollowLinks);
+    //                 path += splitter;
+    //             }
+    //         }
+    //         return path;
+    //     }
+    // ```
+    // `env.Get` gives the empty string for a variable that is not set
+    // (ncbienv.cpp:109-130), and `NormalizePath` returns an empty string as
+    // it is, so the string is `CWD::` without `BLASTDB` and without a
+    // registry entry.
+    /// The search path of a process whose current directory is `cwd`, whose
+    /// environment variable `BLASTDB` is `blastdb` (`None`: not set) and
+    /// whose registry has the entry `[BLAST] BLASTDB` with the value
+    /// `registry` (`None`: no such entry;
+    /// `blastinput::ncbi_environment::ApplicationSettings::blastdb`).
+    ///
+    /// A value that is not valid UTF-8 is an explicit error: LOSAT keeps the
+    /// names of database files as UTF-8 strings.
+    pub fn new(
+        cwd: &Path,
+        blastdb: Option<&OsStr>,
+        registry: Option<&str>,
+    ) -> Result<Self, SeqDbError> {
+        let utf8 = |value: &OsStr, what: &str| {
+            value
+                .to_str()
+                .map(str::to_string)
+                .ok_or_else(|| SeqDbError::Unsupported {
+                    path: Path::new(value).to_path_buf(),
+                    message: format!("{what} is not valid UTF-8"),
+                })
+        };
+        let cwd = utf8(cwd.as_os_str(), "the current directory")?;
+        let blastdb = match blastdb {
+            Some(value) => utf8(value, "the environment variable BLASTDB")?,
+            None => String::new(),
+        };
+        let splitter = path_splitter();
+        let mut path = normalize_path(&cwd)?;
+        path.push(splitter);
+        path.push_str(&normalize_path(&blastdb)?);
+        path.push(splitter);
+        if let Some(registry) = registry {
+            path.push_str(&normalize_path(registry)?);
+            path.push(splitter);
+        }
+        Ok(Self { cwd, path })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3708-3716
+    // ```c++
+    // string CDir::GetCwd(void)
+    // {
+    //     TXChar buf[4096];
+    //     if ( NcbiSys_getcwd(buf, sizeof(buf)/sizeof(TXChar) - 1) ) {
+    //         return _T_CSTRING(buf);
+    //     }
+    //     LOG_ERROR_ERRNO(90, "CDir::GetCwd(): Cannot get current directory");
+    //     return kEmptyCStr;
+    // }
+    // ```
+    /// The search path of this process: its current directory (the empty
+    /// string when it cannot be read, as `CDir::GetCwd` gives), its
+    /// environment variable `BLASTDB`, and `registry` as in [`Self::new`].
+    pub fn from_environment(registry: Option<&str>) -> Result<Self, SeqDbError> {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let blastdb = std::env::var_os("BLASTDB");
+        Self::new(&cwd, blastdb.as_deref(), registry)
+    }
+
+    /// The string NCBI names in its "No alias or index file found" message:
+    /// the directories, each followed by the separator.
+    pub fn as_str(&self) -> &str {
+        &self.path
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:330-374
+    // ```c++
+    // static string s_SeqDB_TryPaths(const string         & blast_paths,
+    //                                const string         & dbname,
+    //                                char                   dbtype,
+    //                                bool                   exact,
+    //                                CSeqDB_FileExistence & access,
+    //                                bool                   linkoutdb_search = false)
+    // {
+    //     ...
+    //     vector<string> roads;
+    //     NStr::Split(blast_paths, s_GetPathSplitter(), roads, NStr::fSplit_Tokenize);
+    //
+    //     string result;
+    //     string attempt;
+    //
+    //     ITERATE(vector<string>, road, roads) {
+    //         attempt.erase();
+    //
+    //         SeqDB_CombinePath(CSeqDB_Substring(SeqDB_MakeOSPath(*road)),
+    //                           CSeqDB_Substring(dbname),
+    //                           0,
+    //                           attempt);
+    //
+    //         if (exact) {
+    //             if (access.DoesFileExist(attempt)) {
+    //                 result = attempt;
+    //                 break;
+    //             }
+    //         } else {
+    //             if (s_SeqDB_DBExists(attempt, dbtype, access, linkoutdb_search)) {
+    //                 result = attempt;
+    //                 break;
+    //             }
+    //         }
+    //     }
+    //
+    //     return result;
+    // }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:232-262
+    // ```c++
+    // static bool s_SeqDB_DBExists(const string         & dbname,
+    //                              char                   dbtype,
+    //                              CSeqDB_FileExistence & access,
+    //                              bool linkoutdb_search)
+    // {
+    //     ...
+    //         path.append(".-al");
+    //
+    //         path[path.size()-3] = dbtype;
+    //
+    //         if (access.DoesFileExist(path)) {
+    //             return true;
+    //         }
+    //
+    //         path[path.size()-2] = 'i';
+    //         path[path.size()-1] = 'n';
+    //
+    //         if (access.DoesFileExist(path)) {
+    //             return true;
+    // ```
+    // `fSplit_Tokenize` is `fSplit_MergeDelimiters | fSplit_Truncate`
+    // (ncbistr.hpp:2500-2510): empty directories are left out. With
+    // `seqtype` the name is a database name and `s_SeqDB_DBExists` looks for
+    // its alias file, then for its index file, inside one directory before
+    // the next directory is tried; without it the name is a file name
+    // ("exact"). A file exists when it is a regular file (`exists`).
+    /// The first directory of the path that holds `dbname`, joined with it.
+    fn find(&self, dbname: &str, seqtype: Option<SeqType>) -> Option<String> {
+        self.path
+            .split(path_splitter())
+            .filter(|road| !road.is_empty())
+            .map(|road| combine_path(&fix_delimiters(road), dbname))
+            .find(|attempt| match seqtype {
+                Some(seqtype) => {
+                    let base = Path::new(attempt);
+                    exists(&with_extension(base, seqtype, "al"))
+                        || exists(&with_extension(base, seqtype, "in"))
+                }
+                None => exists(Path::new(attempt)),
+            })
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1762-1807
@@ -372,7 +947,7 @@ fn read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
     values
 }
 
-struct Resolver {
+struct Resolver<'a> {
     seqtype: SeqType,
     /// Alias files being expanded, outermost first.
     recurse: Vec<String>,
@@ -380,6 +955,11 @@ struct Resolver {
     /// before the alias file's own directory: NCBI's "local copy", in the
     /// current directory. `None`: the alias file's directory only.
     local_dir: Option<String>,
+    /// NCBI's search path, when the name is resolved as a search program
+    /// resolves it (`resolve_in`). `None`: the name is the path of one
+    /// database (`resolve_one_name`), and names are looked for where they
+    /// point only.
+    search: Option<&'a SearchPath>,
 }
 
 /// Where the volumes that an alias file names are looked for.
@@ -395,13 +975,105 @@ pub(super) enum LocalCopy<'a> {
     No,
 }
 
-impl Resolver {
+impl Resolver<'_> {
     fn alias_path(&self, base: &str) -> std::path::PathBuf {
         with_extension(Path::new(base), self.seqtype, "al")
     }
 
     fn index_path(&self, base: &str) -> std::path::PathBuf {
         with_extension(Path::new(base), self.seqtype, "in")
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:851-862
+    // ```c++
+    //         if (found) {
+    //             string normal_name;
+    //             if (m_ExpandLinks) {
+    //                 // normalize this_name
+    //                 string dir_name, base_name;
+    //                 bp.FindDirName().GetString(dir_name);
+    //                 bp.FindBaseName().GetString(base_name);
+    //                 normal_name = CDirEntry::NormalizePath(dir_name, eFollowLinks) +
+    //                   CDirEntry::GetPathSeparator() + base_name;
+    //             } else {
+    //                 normal_name = bp.GetBasePathS();
+    //             }
+    // ```
+    // `m_ExpandLinks` is true for the alias file of a database that is opened
+    // (seqdbalias.hpp:1005-1008, the default of `CSeqDBAliasFile`;
+    // seqdbimpl.cpp:56 passes no value). The same lines stand at the three
+    // other places where NCBI records a volume (seqdbalias.cpp:777-786,
+    // 894-903) or a resolved name (seqdbalias.cpp:325-335).
+    /// The name under which NCBI records the volume `base`: its directory
+    /// normalised, with symbolic links followed. `resolve_one_name` keeps
+    /// the name as it is.
+    fn normal_name(&self, base: &str) -> Result<String, SeqDbError> {
+        if self.search.is_none() {
+            return Ok(base.to_string());
+        }
+        Ok(format!(
+            "{}{MAIN_SEPARATOR}{}",
+            normalize_path(dir_name(base))?,
+            base_name(base)
+        ))
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:203-222
+    // ```c++
+    // bool
+    // CSeqDBAliasSets::FindAliasPath(const CSeqDB_Path & dbpath,
+    //                                CSeqDB_Path       * resolved,
+    //                                CSeqDBLockHold    & locked)
+    // {
+    //     CSeqDB_Path     aset_path;
+    //     CSeqDB_FileName alias_fname;
+    //
+    //     x_DbToIndexName(dbpath, aset_path, alias_fname);
+    //
+    //     CSeqDB_Path resolved_aset;
+    //
+    //     if (! FindBlastDBPath(aset_path, resolved_aset)) {
+    //         return false;
+    //     }
+    //
+    //     CSeqDB_Path afpath(resolved_aset.FindDirName(),
+    //                        alias_fname.GetFileNameSub());
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:453-460
+    // ```c++
+    // void CSeqDBAliasSets::x_DbToIndexName(const CSeqDB_Path & dbpath,
+    //                                       CSeqDB_Path       & index_path,
+    //                                       CSeqDB_FileName   & alias_fname)
+    // {
+    //     index_path.ReplaceFilename(dbpath,
+    //                                CSeqDB_Substring(kSeqDBGroupAliasFileName));
+    //     alias_fname.Assign(dbpath.FindFileName());
+    // }
+    // ```
+    // `kSeqDBGroupAliasFileName` is "index.alx" (seqdbcommon.cpp:48), and
+    // `FindBlastDBPath` of a `CSeqDB_Path` looks for that file name in the
+    // directories of the search path (seqdbalias.hpp:285-300, "exact").
+    // NCBI looks a name up in the group alias file before the alias file or
+    // the volume of that name, and goes on when the group file has no entry
+    // for it. LOSAT does not read group alias files, so the group file NCBI
+    // would read is an explicit error whatever it holds.
+    /// Rejects the group alias file that NCBI would consult for the alias
+    /// file or volume `base`.
+    fn reject_group_alias(&self, base: &str) -> Result<(), SeqDbError> {
+        let aset_path = combine_path(dir_name(base), "index.alx");
+        let found = match self.search {
+            Some(search) => search.find(&aset_path, None),
+            None => exists(Path::new(&aset_path)).then_some(aset_path),
+        };
+        match found {
+            Some(group) => Err(SeqDbError::Unsupported {
+                path: Path::new(&group).to_path_buf(),
+                message: "the directory has a group alias file; LOSAT does not read group \
+                          alias files"
+                    .to_string(),
+            }),
+            None => Ok(()),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:169-176
@@ -422,10 +1094,10 @@ impl Resolver {
             path: path.clone(),
             message,
         };
-        let bytes = std::fs::read(&path).map_err(|source| SeqDbError::Io {
-            path: path.clone(),
-            source,
-        })?;
+        // NCBI maps the alias file (`CSeqDBFileMemMap lease(m_Atlas,path.GetPathS())`,
+        // seqdbalias.cpp:662-667); a file that cannot be opened gives the
+        // errors of `DbFile::open`.
+        let bytes = DbFile::open(&path)?.read_all()?;
         let values = read_values(&bytes);
         let mut title = None;
         let mut dblist: &[u8] = &[];
@@ -524,12 +1196,45 @@ impl Resolver {
     //
     //         NCBI_THROW(CSeqDBException, eFileErr, oss.str());
     // ```
-    // Not ported: NCBI's last step, which looks the name up again in the
-    // BLASTDB search path (seqdbalias.cpp:881-917); a name found only there
-    // gets the "Could not find" error. NCBI also follows symbolic links in a
-    // volume's directory name (`CDirEntry::NormalizePath`) before it compares
-    // volume names; LOSAT keeps the names as written and `resolve` rejects the
-    // databases where that could change the result.
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:877-917
+    // ```c++
+    //         // If all that failed, "restart" the search using the blast DB
+    //         // path configuration.  This ensures always finding the local
+    //         // copy of a database even if the alias file resides on remote site.
+    //
+    //         CSeqDB_BasePath result;
+    //         CSeqDB_BasePath restart(m_DBList[i]);
+    //
+    //         if (m_AliasSets.FindBlastDBPath(restart, prot_nucl, result)) {
+    //             // either alias or volume file exists for this entry
+    //             CSeqDB_Path new_alias( result, prot_nucl, 'a', 'l' );
+    //             CSeqDB_Path new_volume( result, prot_nucl, 'i', 'n' );
+    //
+    //             if (m_Atlas.DoesFileExist(new_alias)) {
+    //                 x_AppendSubNode( result, prot_nucl, recurse, locked );
+    //             } else if (m_Atlas.DoesFileExist(new_volume)) {
+    //                 string normal_name;
+    //                 if (m_ExpandLinks) {
+    //                     ...
+    //                 }
+    //                 ...
+    //                 if (!found) {
+    //                     m_VolNames.push_back(CSeqDB_BasePath(normal_name));
+    //                 }
+    //             }
+    //             continue;
+    //         }
+    // ```
+    // `resolve_one_name` (no search path) does not take this last step and
+    // keeps the names as they are written; `resolve_in` follows NCBI: the
+    // name as the alias file writes it is looked up in the directories of the
+    // search path, and a volume is recorded under its normalised name
+    // (`normal_name`).
+    //
+    // NCBI does not test an alias file found by this last step against the
+    // files being expanded, so alias files that name each other through the
+    // search path make it recurse without end. LOSAT reports them as the
+    // mutual recursion they are, as an unsupported database.
     fn expand(
         &mut self,
         node: &mut AliasNode,
@@ -546,7 +1251,7 @@ impl Resolver {
         }
         for entry in db_list {
             if dir_name(entry).is_empty() && base_name(entry) == base_name(this_name) {
-                push_unique(&mut node.vol_names, this_name.to_string());
+                push_unique(&mut node.vol_names, self.normal_name(this_name)?);
                 continue;
             }
 
@@ -563,15 +1268,7 @@ impl Resolver {
             // NCBI looks a name up in the group alias file of its directory
             // before the alias file itself (`FindAliasPath` above,
             // seqdbalias.cpp:206-247); LOSAT does not read group alias files.
-            let group = combine_path(dir_name(&base), "index.alx");
-            if exists(Path::new(&group)) {
-                return Err(SeqDbError::Unsupported {
-                    path: Path::new(&group).to_path_buf(),
-                    message: "the directory has a group alias file; LOSAT does not read group \
-                              alias files"
-                        .to_string(),
-                });
-            }
+            self.reject_group_alias(&base)?;
             if exists(&new_db_path) {
                 let subnode = self.alias_node(&base)?;
                 node.subnodes.push(subnode);
@@ -590,15 +1287,37 @@ impl Resolver {
             if found.is_none() && exists(&self.index_path(&base)) {
                 found = Some(base);
             }
-            match found {
-                Some(volume) => push_unique(&mut node.vol_names, volume),
-                None => {
-                    return Err(SeqDbError::NotFound(format!(
-                        "Could not find volume or alias file ({entry}) referenced in alias file \
-                         ({this_name})."
-                    )));
-                }
+            if let Some(volume) = found {
+                push_unique(&mut node.vol_names, self.normal_name(&volume)?);
+                continue;
             }
+
+            if let Some(result) = self.search.and_then(|s| s.find(entry, Some(self.seqtype))) {
+                let new_alias = self.alias_path(&result);
+                if exists(&new_alias) {
+                    if self
+                        .recurse
+                        .contains(&new_alias.to_string_lossy().into_owned())
+                    {
+                        return Err(SeqDbError::Unsupported {
+                            path: new_alias,
+                            message: "the alias files name each other through the database \
+                                      search path (NCBI BLAST+ does not end on them)"
+                                .to_string(),
+                        });
+                    }
+                    let subnode = self.alias_node(&result)?;
+                    node.subnodes.push(subnode);
+                } else if exists(&self.index_path(&result)) {
+                    push_unique(&mut node.vol_names, self.normal_name(&result)?);
+                }
+                continue;
+            }
+
+            return Err(SeqDbError::NotFound(format!(
+                "Could not find volume or alias file ({entry}) referenced in alias file \
+                 ({this_name})."
+            )));
         }
         Ok(())
     }
@@ -617,28 +1336,6 @@ fn collect_volumes(node: &AliasNode, out: &mut Vec<String>) {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:232-262
-// ```c++
-// static bool s_SeqDB_DBExists(const string         & dbname,
-//                              char                   dbtype,
-//                              CSeqDB_FileExistence & access,
-//                              bool linkoutdb_search)
-// {
-//     ...
-//         path.append(".-al");
-//
-//         path[path.size()-3] = dbtype;
-//
-//         if (access.DoesFileExist(path)) {
-//             return true;
-//         }
-//
-//         path[path.size()-2] = 'i';
-//         path[path.size()-1] = 'n';
-//
-//         if (access.DoesFileExist(path)) {
-//             return true;
-// ```
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:190-197
 // ```c++
 // bool SeqDB_CompareVolume(const string & s1, const string & s2)
@@ -670,37 +1367,274 @@ fn collect_volumes(node: &AliasNode, out: &mut Vec<String>) {
 // The volumes are opened, and ordinal ids are given, in the sorted order of
 // the volume names, not in `DBLIST` order.
 //
-// LOSAT looks for the database at the given path only; NCBI's search path
-// (current directory, `BLASTDB`, `.ncbirc`; seqdbcommon.cpp:378-391) is not
-// consulted here. Two cases are rejected because LOSAT does not reproduce
-// what NCBI derives from them: a volume reached more than once (NCBI's alias
-// walk counts it once per mention, seqdbalias.cpp:1588-1592), and two volumes
-// of the same base name in different directories (their order would depend
-// on the normalised directory names).
-/// Resolves the database `db_base` (a path without extension): an alias file
-/// when `db_base.{p|n}al` exists, else the single volume `db_base.{p|n}in`.
-pub(super) fn resolve(db_base: &str, seqtype: SeqType) -> Result<AliasTree, SeqDbError> {
-    // NCBI reads the name as a list (seqdbalias.cpp:114-116, `x_Tokenize`):
-    // spaces separate databases and double quotes keep a name with spaces
-    // together. LOSAT searches one database.
-    let names = split_quoted(db_base.as_bytes());
-    let db_base = match names.as_slice() {
+// Two cases are rejected because LOSAT does not reproduce what NCBI derives
+// from them: a volume reached more than once (NCBI's alias walk counts it
+// once per mention, seqdbalias.cpp:1588-1592), and two volumes of the same
+// base name in different directories.
+/// The volumes of the alias tree `root` in NCBI's order.
+fn volumes_in_order(root: AliasNode) -> Result<AliasTree, SeqDbError> {
+    let mut mentions = Vec::new();
+    collect_volumes(&root, &mut mentions);
+    let mut volumes = mentions.clone();
+    volumes.sort_by(|a, b| {
+        path_base_name(a)
+            .cmp(path_base_name(b))
+            .then_with(|| a.cmp(b))
+    });
+    volumes.dedup();
+    let unsupported = |volume: &str, message: &str| SeqDbError::Unsupported {
+        path: Path::new(volume).to_path_buf(),
+        message: message.to_string(),
+    };
+    if volumes.len() != mentions.len() {
+        let repeated = volumes
+            .iter()
+            .find(|volume| mentions.iter().filter(|m| m == volume).count() > 1)
+            .map_or("", String::as_str);
+        return Err(unsupported(
+            repeated,
+            "the volume is listed more than once by the alias files",
+        ));
+    }
+    if let Some(pair) = volumes.windows(2).find(|pair| {
+        path_base_name(&pair[0]) == path_base_name(&pair[1])
+            && dir_name(&pair[0]) != dir_name(&pair[1])
+    }) {
+        return Err(unsupported(
+            &pair[1],
+            "two volumes of the database have the same name in different directories",
+        ));
+    }
+    Ok(AliasTree { root, volumes })
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:155-165
+// ```c++
+// CSeqDB::CSeqDB(const string & dbname,
+//                ESeqType       seqtype,
+//                CSeqDBGiList * gi_list,
+//                bool           use_atlas_lock)
+//
+// {
+//     if (dbname.size() == 0) {
+//         NCBI_THROW(CSeqDBException,
+//                    eArgErr,
+//                    "Database name is required.");
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:249-337
+// ```c++
+// void CSeqDBAliasNode::x_ResolveNames(char prot_nucl, CSeqDBLockHold & locked)
+// {
+//     m_DBPath = CSeqDB_DirName(".");
+//
+//     size_t i = 0;
+//
+//     for(i = 0; i < m_DBList.size(); i++) {
+//         // skip local DB search only if absolute path is given
+//         if(m_DBList[i].GetBasePathS().find(CDirEntry::GetPathSeparator()) != string::npos) {
+//             m_SkipLocal[i] = true;
+//         }
+//
+//         const CSeqDB_Path db_path( (CSeqDB_BasePath(m_DBList[i])), prot_nucl, 'a', 'l' );
+//
+//         CSeqDB_Path resolved_path;
+//
+//         // search for X/kSeqDBGroupAliasFileName
+//         if (! m_AliasSets.FindAliasPath(db_path, & resolved_path, locked)) {
+//             CSeqDB_BasePath base(db_path.FindBasePath());
+//             CSeqDB_BasePath resolved_bp;
+//
+//             // search for X/base.nal/nin
+//             if (m_AliasSets.FindBlastDBPath(base, prot_nucl, resolved_bp)) {
+//                 resolved_path = CSeqDB_Path(resolved_bp, prot_nucl, 'a', 'l');
+//             }
+//         }
+//
+//         if (! resolved_path.Valid()) {
+//             string p_or_n;
+//
+//             switch(prot_nucl) {
+//             case 'p':
+//                 p_or_n = "protein";
+//                 break;
+//
+//             case 'n':
+//                 p_or_n = "nucleotide";
+//                 break;
+//             ...
+//             }
+//
+//             // Do over (to get the search path).  This doesnt use the
+//             // resolution map, since speed is not of the essence.
+//
+//             string search_path;
+//             string input_path;
+//
+//             db_path.FindBasePath().GetString(input_path);
+//
+//             SeqDB_FindBlastDBPath(input_path,
+//                                   prot_nucl,
+//                                   & search_path,
+//                                   false,
+//                                   m_Atlas);
+//
+//             ostringstream oss;
+//             oss << "No alias or index file found for " << p_or_n
+//                 << " database [" << m_DBList[i].GetBasePathS()
+//                 << "] in search path [" << search_path << "]. "
+//                 << "Please verify the spelling of the BLAST "
+//                 << "database and its molecule type.";
+//
+//             string msg(oss.str());
+//
+//             NCBI_THROW(CSeqDBException,
+//                        eFileErr,
+//                        msg);
+//         } else {
+//             // full dereferenced name but without suffix /X/base
+//             if (m_ExpandLinks) {
+//                 string dir_name, base_name;
+//                 resolved_path.FindDirName().GetString(dir_name);
+//                 resolved_path.FindBaseName().GetString(base_name);
+//                 m_DBList[i].Assign(CSeqDB_Substring(
+//                     CDirEntry::NormalizePath(dir_name, eFollowLinks) +
+//                     CDirEntry::GetPathSeparator() +
+//                     base_name  ));
+//             } else {
+//                 m_DBList[i].Assign(resolved_path.FindBasePath());
+//             }
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:343-383
+// ```c++
+//     size_t common = m_DBList[0].GetBasePathS().size();
+//
+//     // Reduce common length to length of min db path.
+//     for(i = 1; common && (i < m_DBList.size()); i++) {
+//         ...
+//     }
+//
+//     if (common) {
+//         --common;
+//     }
+//     ...
+//     // Adjust back to whole path component.
+//     while(common && (first[common-1] != CFile::GetPathSeparator())) {
+//         --common;
+//     }
+//
+//     if (common > 1) {
+//         // Factor out common path components.
+//         m_DBPath.Assign( CSeqDB_Substring(first.data(), first.data() + common) );
+//
+//         for(i = 0; i < m_DBList.size(); i++) {
+//             CSeqDB_Substring sub(m_DBList[i].GetBasePathS());
+//             sub.EraseFront((int) common);
+//
+//             m_DBList[i].Assign(sub);
+//         }
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:112-127
+// ```c++
+//     m_Values["DBLIST"] = dbname_list;
+//
+//     x_Tokenize(dbname_list);
+//     ...
+//     x_ResolveNames(prot_nucl, locked);
+//
+//     CSeqDBAliasStack recurse;
+//
+//     x_ExpandAliases(CSeqDB_BasePath("-"), prot_nucl, recurse, locked);
+// ```
+// The name is a list (`x_Tokenize`, quoted at `resolve_one_name`): spaces
+// separate databases and double quotes keep a name with spaces together.
+// LOSAT searches one database, so a list of several names is an explicit
+// error. A name carries no extension: `db.pin` is looked for as `db.pin.pal`
+// and `db.pin.pin`. A name with a path separator is joined to every
+// directory of the search path like any other (an absolute name stays as it
+// is, `combine_path`); it only turns off the look for a volume of the same
+// base name in the current directory (`m_SkipLocal`).
+/// Resolves `dbname`, the value of a search program's `-db`, as NCBI BLAST+
+/// resolves it: the name is looked for in the directories of `search`, an
+/// alias file before an index file inside each directory.
+pub(super) fn resolve_in(
+    dbname: &str,
+    seqtype: SeqType,
+    search: &SearchPath,
+) -> Result<AliasTree, SeqDbError> {
+    if dbname.is_empty() {
+        return Err(SeqDbError::NotFound(
+            "Database name is required.".to_string(),
+        ));
+    }
+    let names = split_quoted(dbname.as_bytes());
+    let name = match names.as_slice() {
+        // `x_ExpandAliases` on an empty list (quoted at `Resolver::expand`).
         [] => {
             return Err(SeqDbError::NotFound(
                 "No database names were passed to CSeqDB::CSeqDB().".to_string(),
             ));
         }
-        [name] => String::from_utf8_lossy(name).into_owned(),
+        [name] => fix_delimiters(&String::from_utf8_lossy(name)),
         _ => {
             return Err(SeqDbError::Unsupported {
-                path: Path::new(db_base).to_path_buf(),
+                path: Path::new(dbname).to_path_buf(),
                 message: "the name lists several databases; LOSAT searches one database \
                           (a name with spaces goes between double quotes)"
                     .to_string(),
             });
         }
     };
-    resolve_one_name(&db_base, seqtype, LocalCopy::CurrentDir)
+    let mut resolver = Resolver {
+        seqtype,
+        recurse: Vec::new(),
+        local_dir: Some(search.cwd.clone()),
+        search: Some(search),
+    };
+    let skip_local = name.contains(MAIN_SEPARATOR);
+
+    // `db_path` is the name with the extension of an alias file, and
+    // `db_path.FindBasePath()` takes that extension off again.
+    let db_path = resolver.alias_path(&name);
+    let db_path = db_path.to_string_lossy();
+    resolver.reject_group_alias(&db_path)?;
+    let Some(resolved) = search.find(remove_extn(&db_path), Some(seqtype)) else {
+        return Err(SeqDbError::NotFound(format!(
+            "No alias or index file found for {} database [{name}] in search path [{}]. \
+             Please verify the spelling of the BLAST database and its molecule type.",
+            seqtype.name(),
+            search.as_str()
+        )));
+    };
+    // `resolved_path` is the resolved name with the extension of an alias
+    // file; its directory is normalised and its base name loses the extension.
+    let resolved_path = resolver.alias_path(&resolved);
+    let resolved_path = resolved_path.to_string_lossy();
+    let first = format!(
+        "{}{MAIN_SEPARATOR}{}",
+        normalize_path(dir_name(&resolved_path))?,
+        remove_extn(base_name(&resolved_path))
+    );
+
+    // One name: the common prefix is its directory, separator included.
+    let bytes = first.as_bytes();
+    let mut common = bytes.len().saturating_sub(1);
+    while common > 0 && char::from(bytes[common - 1]) != MAIN_SEPARATOR {
+        common -= 1;
+    }
+    let (db_dir, entry) = if common > 1 {
+        first.split_at(common)
+    } else {
+        (".", first.as_str())
+    };
+
+    let mut root = AliasNode::default();
+    // The top node is named "-" (seqdbalias.cpp:106, 127).
+    resolver.expand(&mut root, db_dir, "-", &[entry.to_string()], skip_local)?;
+    volumes_in_order(root)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:85-97
@@ -743,6 +1677,7 @@ pub(super) fn resolve_one_name(
             LocalCopy::Dir(dir) => Some(dir.to_string()),
             LocalCopy::No => None,
         },
+        search: None,
     };
     let db_base = fix_delimiters(db_base);
     if !exists(&resolver.alias_path(&db_base)) && !exists(&resolver.index_path(&db_base)) {
@@ -754,40 +1689,7 @@ pub(super) fn resolve_one_name(
     let mut root = AliasNode::default();
     // The top node is named "-" (seqdbalias.cpp:106, 127).
     resolver.expand(&mut root, "", "-", std::slice::from_ref(&db_base), true)?;
-
-    let mut mentions = Vec::new();
-    collect_volumes(&root, &mut mentions);
-    let mut volumes = mentions.clone();
-    volumes.sort_by(|a, b| {
-        path_base_name(a)
-            .cmp(path_base_name(b))
-            .then_with(|| a.cmp(b))
-    });
-    volumes.dedup();
-    let unsupported = |volume: &str, message: &str| SeqDbError::Unsupported {
-        path: Path::new(volume).to_path_buf(),
-        message: message.to_string(),
-    };
-    if volumes.len() != mentions.len() {
-        let repeated = volumes
-            .iter()
-            .find(|volume| mentions.iter().filter(|m| m == volume).count() > 1)
-            .map_or("", String::as_str);
-        return Err(unsupported(
-            repeated,
-            "the volume is listed more than once by the alias files",
-        ));
-    }
-    if let Some(pair) = volumes.windows(2).find(|pair| {
-        path_base_name(&pair[0]) == path_base_name(&pair[1])
-            && dir_name(&pair[0]) != dir_name(&pair[1])
-    }) {
-        return Err(unsupported(
-            &pair[1],
-            "two volumes of the database have the same name in different directories",
-        ));
-    }
-    Ok(AliasTree { root, volumes })
+    volumes_in_order(root)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:970-984
@@ -938,6 +1840,65 @@ fn join_delim(a: &mut Vec<u8>, b: &[u8]) {
 #[cfg(test)]
 pub(super) fn test_read_values(bytes: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
     read_values(bytes)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:929-958
+// ```c++
+// void CSeqDBAliasNode::FindVolumePaths(vector<string> & vols, vector<string> * alias, bool recursive) const
+// {
+//
+//     set<string> volset;
+//     set<string> aliset;
+//
+//     if (recursive) {
+//         x_FindVolumePaths(volset, aliset);
+//     } else {
+//         // No alias file list is populated in the non-recursive mode
+//         ITERATE(vector<CSeqDB_BasePath>, path, m_VolNames) {
+//             volset.insert(path->GetBasePathS());
+//         }
+//         ITERATE(TSubNodeList, iter, m_SubNodes) {
+//             ITERATE(vector<CSeqDB_BasePath>, path, (*iter)->m_VolNames) {
+//                 volset.insert(path->GetBasePathS());
+//             }
+//             ITERATE(TSubNodeList, sub, (*iter)->m_SubNodes) {
+//                 volset.insert(((*sub)->m_ThisName).GetPathS());
+//             }
+//         }
+//     }
+//
+//     vols.clear();
+//     ITERATE(set<string>, iter, volset) {
+//         vols.push_back(*iter);
+//     }
+//
+//     // Sort to insure deterministic order.
+//     sort(vols.begin(), vols.end(), SeqDB_CompareVolume);
+// ```
+// blastdbcmd prints this list under "Volumes:" (`FindVolumePaths(volumes,
+// false)`, blastdbcmd.cpp:568): the volumes of the first two levels of the
+// alias tree and the alias files of the third. The tests compare it with what
+// NCBI printed.
+/// What `blastdbcmd -info` lists under "Volumes:" for the database `dbname`.
+#[cfg(test)]
+pub(super) fn test_info_volumes(
+    dbname: &str,
+    seqtype: SeqType,
+    search: &SearchPath,
+) -> Result<Vec<String>, SeqDbError> {
+    let tree = resolve_in(dbname, seqtype, search)?;
+    let mut vols: Vec<String> = tree.root.vol_names.clone();
+    for node in &tree.root.subnodes {
+        vols.extend(node.vol_names.iter().cloned());
+        vols.extend(node.subnodes.iter().filter_map(|sub| sub.this_name.clone()));
+    }
+    vols.sort_by(|a, b| {
+        path_base_name(a)
+            .cmp(path_base_name(b))
+            .then_with(|| a.cmp(b))
+    });
+    vols.dedup();
+    Ok(vols)
 }
 
 #[cfg(test)]

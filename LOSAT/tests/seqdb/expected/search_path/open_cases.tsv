@@ -1,0 +1,26 @@
+id	cwd	blastdb	name	open_file_limit	blastp	blastp_error	blastp_status	blastdbcmd	blastdbcmd_error	blastdbcmd_status	losat
+k01_unreadable_index	cwd	{R}/d	nopin	\e	error	Database memory map file error - CMemoryFile: Cannot memory map file '{R}/d/nopin.pin':Permission denied	2	error	Database memory map file error - CMemoryFile: Cannot memory map file '{R}/d/nopin.pin':Permission denied	2	\e
+k02_unreadable_alias	cwd	{R}/d	nopal	\e	error	Database memory map file error - CMemoryFile: Cannot memory map file '{R}/d/nopal.pal':Permission denied	2	error	Database memory map file error - CMemoryFile: Cannot memory map file '{R}/d/nopal.pal':Permission denied	2	\e
+k03_unreadable_sequence_file	cwd	{R}/d	nopsq	\e	other	BLAST engine error: Database memory map file error	3	ok	\e	0	search:Database memory map file error
+k04_unreadable_header_file	cwd	{R}/d	nophr	\e	error	Database memory map file error - CMemoryFile: Cannot memory map file '{R}/d/nophr.phr':Permission denied	2	ok	\e	0	\e
+k05_alias_of_unreadable_index	cwd	{R}/d	al_nopin	\e	error	Database memory map file error - CMemoryFile: Cannot memory map file '{R}/d/nopin.pin':Permission denied	2	error	Database memory map file error - CMemoryFile: Cannot memory map file '{R}/d/nopin.pin':Permission denied	2	\e
+k06_closed_directory	cwd	{R}/d	closed/db	\e	error	No alias or index file found for protein database [closed/db] in search path [{R}/cwd:{R}/d:]. Please verify the spelling of the BLAST database and its molecule type.	2	error	No alias or index file found for protein database [closed/db] in search path [{R}/cwd:{R}/d:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e
+k07_closed_directory_absolute	cwd	<unset>	{R}/d/closed/db	\e	error	No alias or index file found for protein database [{R}/d/closed/db] in search path [{R}/cwd::]. Please verify the spelling of the BLAST database and its molecule type.	2	error	No alias or index file found for protein database [{R}/d/closed/db] in search path [{R}/cwd::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e
+k08_recursion_through_the_path	rec	{R}/d	rec_a	\e	other	\e	139	other	\e	139	unsupported:name each other through the database search path
+k09_all_volumes	cwd	{R}/d	prot_mv	\e	ok	\e	0	ok	\e	0	\e
+m04_open_file_limit	cwd	{R}/d	prot_mv	4	error	Too many open files, please raise the open file limit	2	error	Too many open files, please raise the open file limit	2	\e
+m06_open_file_limit	cwd	{R}/d	prot_mv	6	error	Too many open files, please raise the open file limit	2	error	Too many open files, please raise the open file limit	2	\e
+m08_open_file_limit	cwd	{R}/d	prot_mv	8	error	Too many open files, please raise the open file limit	2	error	Too many open files, please raise the open file limit	2	\e
+m10_open_file_limit	cwd	{R}/d	prot_mv	10	error	Too many open files, please raise the open file limit	2	ok	\e	0	\e
+m12_open_file_limit	cwd	{R}/d	prot_mv	12	other	BLAST engine error: Too many open files, please raise the open file limit	3	ok	\e	0	\e
+m14_open_file_limit	cwd	{R}/d	prot_mv	14	other	BLAST engine error: Too many open files, please raise the open file limit	3	ok	\e	0	\e
+m16_open_file_limit	cwd	{R}/d	prot_mv	16	other	BLAST engine error: Too many open files, please raise the open file limit	3	ok	\e	0	\e
+m18_open_file_limit	cwd	{R}/d	prot_mv	18	error	Too many open files, please raise the open file limit	2	ok	\e	0	\e
+m20_open_file_limit	cwd	{R}/d	prot_mv	20	ok	\e	0	ok	\e	0	\e
+m22_open_file_limit	cwd	{R}/d	prot_mv	22	ok	\e	0	ok	\e	0	\e
+m24_open_file_limit	cwd	{R}/d	prot_mv	24	ok	\e	0	ok	\e	0	\e
+m26_open_file_limit	cwd	{R}/d	prot_mv	26	ok	\e	0	ok	\e	0	\e
+m28_open_file_limit	cwd	{R}/d	prot_mv	28	ok	\e	0	ok	\e	0	\e
+m32_open_file_limit	cwd	{R}/d	prot_mv	32	ok	\e	0	ok	\e	0	\e
+m40_open_file_limit	cwd	{R}/d	prot_mv	40	ok	\e	0	ok	\e	0	\e
+m64_open_file_limit	cwd	{R}/d	prot_mv	64	ok	\e	0	ok	\e	0	\e

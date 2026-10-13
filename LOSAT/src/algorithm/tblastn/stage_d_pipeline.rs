@@ -1233,15 +1233,15 @@ pub(super) fn x_tbn_parallel() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNPAR"))
 }
 
-// No NCBI counterpart: reads the LOSAT_X_TBNOIDCHUNK variable once; it does not change any value
+// No NCBI counterpart: reads the LOSAT_X_TBNOIDCHUNK switch once; it does not change any value
 // NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): off unless the variable is set (it is not in the strict
-/// set).
+/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
 #[cfg(feature = "parallel")]
 fn x_tbn_oid_chunk() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOIDCHUNK").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOIDCHUNK"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413

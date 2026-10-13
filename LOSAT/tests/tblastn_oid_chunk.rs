@@ -11,10 +11,11 @@
 //! ```
 //! Each NCBI search thread takes a hundredth of the subjects at a time. Without the switch one
 //! entry into LOSAT's pool takes one subject per thread; with it, one such chunk per thread. The
-//! switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
-//! set. It must change the number of entries and nothing in the report, so the tests compare the
-//! report with the one-thread search, which has no pool and searches the subjects in NCBI's
-//! loop order, and read the `pool_entries` field of the `[losat-thread-activity]` line
+//! switch is in the strict set (`src/utils/xswitch.rs`): it is on by default, off with
+//! `LOSAT_X_TBNOIDCHUNK=0`, and off with `LOSAT_X_DEFAULT=0` unless its variable is set. It must
+//! change the number of entries and nothing in the report, so the tests compare the report with
+//! the one-thread search, which has no pool and searches the subjects in NCBI's loop order, and
+//! read the `pool_entries` field of the `[losat-thread-activity]` line
 //! (`LOSAT_WASI_THREADS_DEBUG=1`) to check which entries ran.
 //!
 //! The fixture suites have no search with 200 or more subjects, the least that gives a chunk of
@@ -134,10 +135,11 @@ fn pool_entries(stderr: &str) -> usize {
 //            != BLAST_SEQSRC_EOF) {
 // ```
 // The one-thread search runs this loop over the subjects in order. The pool's entries of one
-// subject per thread and of one chunk per thread must give its report, with the default set and
-// with `LOSAT_X_DEFAULT=0`.
+// chunk per thread (the default, and `LOSAT_X_DEFAULT=0` with `LOSAT_X_TBNOIDCHUNK=1`) and of
+// one subject per thread (`LOSAT_X_TBNOIDCHUNK=0`, and `LOSAT_X_DEFAULT=0`) must give its
+// report.
 #[test]
-fn the_report_is_the_one_thread_report_with_and_without_the_switch() {
+fn the_report_is_the_one_thread_report_by_default_and_with_the_switch_off() {
     let (expected, _) = tblastn(1, &[]);
     let rows = expected
         .split(|&byte| byte == b'\n')
@@ -156,7 +158,7 @@ fn the_report_is_the_one_thread_report_with_and_without_the_switch() {
     );
     for variables in [
         &[][..],
-        &[("LOSAT_X_TBNOIDCHUNK", "1")],
+        &[("LOSAT_X_TBNOIDCHUNK", "0")],
         &[("LOSAT_X_DEFAULT", "0")],
         &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_X_TBNOIDCHUNK", "1")],
     ] {
@@ -172,17 +174,36 @@ fn the_report_is_the_one_thread_report_with_and_without_the_switch() {
 // ```c
 //     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
 // ```
-// 240 subjects give a chunk of two. Without the variable an entry takes `THREADS` subjects (60
-// entries); with it, `THREADS` chunks (30 entries).
+// 240 subjects give a chunk of two. With no variable an entry takes `THREADS` chunks (30
+// entries). With `LOSAT_X_TBNOIDCHUNK=0`, and with `LOSAT_X_DEFAULT=0` and no variable for the
+// switch, it takes `THREADS` subjects (60 entries); `LOSAT_X_DEFAULT=0` with
+// `LOSAT_X_TBNOIDCHUNK=1` gives the chunks again. The report is the same in all four.
 #[test]
-fn the_switch_is_off_unless_set_and_halves_the_entries_here() {
+fn the_switch_is_on_by_default_and_follows_its_variable_and_the_global_one() {
     let debug = ("LOSAT_WASI_THREADS_DEBUG", "1");
-    let (plain, plain_err) = tblastn(THREADS, &[debug]);
-    let (chunked, chunked_err) = tblastn(THREADS, &[debug, ("LOSAT_X_TBNOIDCHUNK", "1")]);
-    assert_eq!(pool_entries(&plain_err), SUBJECTS / THREADS);
-    assert_eq!(
-        pool_entries(&chunked_err),
-        SUBJECTS / (THREADS * (SUBJECTS / 100))
+    let chunks = SUBJECTS / (THREADS * (SUBJECTS / 100));
+    let subjects = SUBJECTS / THREADS;
+    let cases: [(&[(&str, &str)], usize); 4] = [
+        (&[debug], chunks),
+        (&[debug, ("LOSAT_X_TBNOIDCHUNK", "0")], subjects),
+        (&[debug, ("LOSAT_X_DEFAULT", "0")], subjects),
+        (
+            &[
+                debug,
+                ("LOSAT_X_DEFAULT", "0"),
+                ("LOSAT_X_TBNOIDCHUNK", "1"),
+            ],
+            chunks,
+        ),
+    ];
+    let mut reports = Vec::new();
+    for (variables, entries) in cases {
+        let (report, stderr) = tblastn(THREADS, variables);
+        assert_eq!(pool_entries(&stderr), entries, "{variables:?}");
+        reports.push(report);
+    }
+    assert!(
+        reports.iter().all(|report| *report == reports[0]),
+        "the reports differ"
     );
-    assert!(plain == chunked, "the reports differ");
 }

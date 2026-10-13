@@ -60,8 +60,9 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 46 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE` and
-`LOSAT_X_SEEDBUCKET` joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
+strict set are on by default (43 then, 47 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+`LOSAT_X_SEEDBUCKET` and `LOSAT_X_TBNOIDCHUNK` joined), and their variables mean
+(`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -90,7 +91,7 @@ strict set are on by default (43 then, 46 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `LOSAT_X_AHEADSHADOW`, which compares only while `AHEAD` is on). A shadow compares the kernel
   the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128` or base kernel that takes the
   call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 46 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 47 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -114,6 +115,7 @@ export LOSAT_X_BXLUT=1 LOSAT_X_BXSCAN=1 LOSAT_X_BXSEGMEMO=1
 export LOSAT_X_PAIRPAR=1 LOSAT_X_NEWTONLANES=1 LOSAT_X_GREEDYPRELIM=1
 export LOSAT_X_PAIRLUT=1 LOSAT_X_HSPINPLACE=1
 export LOSAT_X_SEEDBUCKET=1
+export LOSAT_X_TBNOIDCHUNK=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -144,6 +146,10 @@ the unit path of `LOSAT_X_PAIRPAR` then builds only the tables it scans with, an
 of a subject is sorted and linked without a second whole copy. `LOSAT_X_PAIRLUT` acts only
 while `LOSAT_X_PAIRPAR` is on.
 
+`LOSAT_X_TBNOIDCHUNK` was added after the default changed, as a switch that was off unless set,
+and joined the set on 2026-10-13. It changes only how many subjects one entry into the tblastn
+search pool takes (2 or more threads, several subjects) and needs no other switch.
+
 What runs per target:
 
 - x86_64: the vector X-drop DP (`DPFAST`: SSE4.1 or AVX 128-bit; `DPAVX2`: 256-bit with AVX2;
@@ -157,8 +163,8 @@ What runs per target:
   nothing (it is compiled for wasm32 only); everything else as on wasm32.
 - One thread (`-num_threads 1`, a build without the `parallel` feature, wasm32 without
   `wasm-threads`): the scheduling switches (`AHEAD`, `GREEDYSPEC`, `PAIRPAR` for
-  blastn/megablast, `SEGSHARE`, `TBNBATCH`, `BXPAR`, `BXPOOL`, `BXBATCH`, `BXCHUNK`) leave the
-  reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
+  blastn/megablast, `SEGSHARE`, `TBNBATCH`, `TBNOIDCHUNK`, `BXPAR`, `BXPOOL`, `BXBATCH`, `BXCHUNK`)
+  leave the reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
   (with `TBNSSIDE` / `TBNQSIDE`; only its parallel redo needs a pool) and the TBLASTX `PAIRPAR`
   units run in order on the calling thread.
 
@@ -344,19 +350,20 @@ Scheduling (each value computed by one thread with the original function; order 
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
 - `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE`) tblastn query batches searched side by side, appended
   in input order.
-- `LOSAT_X_TBNOIDCHUNK=1` tblastn with 2+ threads and several subjects: one entry into the search
-  pool takes one chunk of NCBI's subject iterator per thread (a hundredth of the subjects, at
-  least one; `blast_engine.c:1409`) instead of one subject per thread. The subjects are searched
-  by the same call and their lists reach the collector in subject order, so only the scheduling
-  changes; with fewer than 200 subjects the entries are the same. Not in the set (off unless set
-  to any value). Without it 28,036 subjects at 8 threads are 3,505 entries, each shorter than
-  the wake-up of the workers; with it 13. Timed on those subjects (16S rRNA genes, 40.6 Mb
-  together) at 8 threads with other work on the machine: one query batch of 55 proteins 1.43-1.64 s
-  without it and 0.76-0.85 s with it (NCBI BLAST+ 2.17.0 `-db` 0.68-0.78 s), one protein 0.87-1.11 s
-  and 0.22-0.27 s; the same output and the same peak memory. Nothing changes at one thread, nor
-  where `TBNBATCH` searches the batches side by side (each batch on one thread). With
-  `LOSAT_WASI_THREADS_DEBUG=1` the `[losat-thread-activity]` line of the subject stage ends with
-  `pool_entries=` (the entries of one query batch); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.
+- `LOSAT_X_TBNOIDCHUNK=1` (in the strict set since 2026-10-13) tblastn with 2+ threads and several
+  subjects: one entry into the search pool takes one chunk of NCBI's subject iterator per thread
+  (a hundredth of the subjects, at least one; `blast_engine.c:1409`) instead of one subject per
+  thread. The subjects are searched by the same call and their lists reach the collector in
+  subject order, so only the scheduling changes; with fewer than 200 subjects the entries are the
+  same. It was off unless set (to any value) until it joined the set. Without it 28,036 subjects
+  at 8 threads are 3,505 entries, each shorter than the wake-up of the workers; with it 13. Timed
+  on those subjects (16S rRNA genes, 40.6 Mb together) at 8 threads with other work on the
+  machine: one query batch of 55 proteins 1.43-1.64 s without it and 0.76-0.85 s with it (NCBI
+  BLAST+ 2.17.0 `-db` 0.68-0.78 s), one protein 0.87-1.11 s and 0.22-0.27 s; the same output and
+  the same peak memory. Nothing changes at one thread, nor where `TBNBATCH` searches the batches
+  side by side (each batch on one thread). With `LOSAT_WASI_THREADS_DEBUG=1` the
+  `[losat-thread-activity]` line of the subject stage ends with `pool_entries=` (the entries of
+  one query batch); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.
 - `LOSAT_X_PAIRPAR=1` TBLASTX seed stage (scan, two-hit test, ungapped extension) of each subject
   as units of (subject frame, chunk, query context), 36 per one-query pair, on the search pool (in
   order on the calling thread with one thread); each unit scans with a lookup table holding only its

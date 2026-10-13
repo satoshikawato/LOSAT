@@ -185,6 +185,18 @@ fn tblastn(threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
     tblastn_on(&inputs().1, threads, variables)
 }
 
+/// The subjects whose (frame, chunk) units ran on the pool: the `[losat-thread-stage]` lines of
+/// the unit stage with `parallel_selected=true`, one per subject searched by units.
+fn units_on_the_pool(stderr: &str) -> usize {
+    stderr
+        .lines()
+        .filter(|line| {
+            line.starts_with("[losat-thread-stage] program=tblastn stage=prelim_units ")
+                && line.contains(" parallel_selected=true ")
+        })
+        .count()
+}
+
 /// The `pool_entries` field of the one `[losat-thread-activity]` line of the subject stage.
 fn pool_entries(stderr: &str) -> usize {
     let lines: Vec<_> = stderr
@@ -371,4 +383,48 @@ fn the_chunks_taken_when_a_thread_is_free_give_the_one_thread_report() {
     );
     assert_eq!(pool_entries(&stderr), SUBJECTS / THREADS);
     assert!(!stderr.contains(" flow_chunks="));
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-482
+// ```c
+//     while (TRUE) {
+//         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+//                                        dbseq_chunk_overlap);
+//
+//         if (status == SUBJECT_SPLIT_DONE) break;
+// ```
+// NCBI's thread searches the chunks of its subject one after another. With
+// `LOSAT_X_TBNOIDUNITS` (off unless set) the (frame, chunk) units of a subject longer than a
+// chunk's budget go to the pool, with the entries of `LOSAT_X_TBNOIDCHUNK` and with the flow of
+// `LOSAT_X_TBNOIDNEXT`. The report at 2, 3 and 8 threads must be the one-thread report with the
+// long subject first, in the middle and last. Only the long subject (48,000 bases; a chunk may
+// hold 7,751, 5,167 and 1,938 bases at 2, 3 and 8 threads) runs its units on the pool, and no
+// subject does without the switch.
+#[test]
+fn the_units_of_a_long_subject_on_the_pool_give_the_one_thread_report() {
+    let debug = ("LOSAT_WASI_THREADS_DEBUG", "1");
+    let units = ("LOSAT_X_TBNOIDUNITS", "1");
+    let next = ("LOSAT_X_TBNOIDNEXT", "1");
+    for position in [Long::First, Long::Middle, Long::Last] {
+        let subjects = long_subject_set(position);
+        let (expected, _) = tblastn_on(&subjects, 1, &[]);
+        for threads in [2, 3, 8] {
+            for (variables, on_the_pool) in [
+                (&[debug, units][..], 1),
+                (&[debug, units, next][..], 1),
+                (&[debug][..], 0),
+            ] {
+                let (report, stderr) = tblastn_on(&subjects, threads, variables);
+                assert!(
+                    report == expected,
+                    "{position:?}: {threads} threads with {variables:?} differ from one thread"
+                );
+                assert_eq!(
+                    units_on_the_pool(&stderr),
+                    on_the_pool,
+                    "{position:?} at {threads} threads with {variables:?}"
+                );
+            }
+        }
+    }
 }

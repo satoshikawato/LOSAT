@@ -1257,6 +1257,17 @@ fn x_tbn_oid_next() -> bool {
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOIDNEXT").is_some())
 }
 
+// No NCBI counterpart: reads the LOSAT_X_TBNOIDUNITS switch once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNOIDUNITS): off unless set (to any value); not in the strict set. It
+/// acts only where `LOSAT_X_TBNOIDCHUNK` makes the chunks.
+#[cfg(feature = "parallel")]
+fn x_tbn_oid_units() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOIDUNITS").is_some())
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:153-154
 // ```c++
 //     BlastSeqSrcSetNumberOfThreads(m_InternalData->m_SeqSrc->GetPointer(),
@@ -1873,10 +1884,45 @@ fn run_preliminary_subjects(
     // ```
     // NCBI scans the subjects in this loop. With one job per subject the pool is busy with
     // subjects; otherwise the units of the single subject use it. Scheduling only.
-    let unit_pool = if pool.is_some_and(SearchPool::enabled) && subjects.len() > 1 {
-        None
-    } else {
-        pool
+    // Each subject keeps the NCBI search-to-link-to-reap order. Indexed
+    // collection finishes before the OID-ordered shared collector below.
+    let parallel_selected = pool.is_some_and(SearchPool::enabled) && subjects.len() > 1;
+    let unit_pool = if parallel_selected { None } else { pool };
+    // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the bases one chunk may hold, from the size of the
+    // sequence file of the subjects (x_oid_chunk_bases); none without the switch.
+    #[cfg(feature = "parallel")]
+    let x_chunk_bases = match pool {
+        Some(pool) if parallel_selected && x_tbn_oid_chunk() => Some(x_oid_chunk_bases(
+            pool.threads(),
+            x_subject_file_size(subjects),
+        )),
+        _ => None,
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-482
+    // ```c
+    //     while (TRUE) {
+    //         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+    //                                        dbseq_chunk_overlap);
+    //
+    //         if (status == SUBJECT_SPLIT_DONE) break;
+    // ```
+    // EXPERIMENT (LOSAT_X_TBNOIDUNITS): NCBI's thread searches the chunks of its subject one after
+    // another. A subject longer than a chunk's budget, a chunk of its own, runs its (frame, chunk)
+    // units on the pool as the single subject of a search does, so that threads without a chunk
+    // to search take them; its merge, linking and reaping stay on its thread after its last unit.
+    // The other subjects, and every subject without the switch, keep `unit_pool`. Scheduling only.
+    #[cfg(feature = "parallel")]
+    let x_units_beyond = x_chunk_bases.filter(|_| x_tbn_oid_units());
+    let x_unit_pool = |subject: &[u8]| {
+        #[cfg(feature = "parallel")]
+        if x_units_beyond
+            .is_some_and(|bases| u64::try_from(subject.len()).unwrap_or(u64::MAX) > bases)
+        {
+            return pool;
+        }
+        #[cfg(not(feature = "parallel"))]
+        let _ = subject;
+        unit_pool
     };
     // EXPERIMENT (LOSAT_X_TBNQSIDE): query frames and lookup table of this
     // query set, built by the first subject that needs them.
@@ -1923,7 +1969,7 @@ fn run_preliminary_subjects(
                 subject,
                 inputs.genetic_code,
                 inputs.search,
-                unit_pool,
+                x_unit_pool(subject),
                 x_query_side.as_ref(),
                 x_subject_side.map(|side| (side, x_oid)),
             )?;
@@ -1968,9 +2014,6 @@ fn run_preliminary_subjects(
     //                                  seq_arg.seq, lookup_wrap, gap_align,
     // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
     // (*thread)->Run(); (*thread)->Join(&result);
-    // Each subject keeps the NCBI search-to-link-to-reap order. Indexed
-    // collection finishes before the OID-ordered shared collector below.
-    let parallel_selected = pool.is_some_and(SearchPool::enabled) && subjects.len() > 1;
     crate::utils::threading::report_stage(
         "tblastn",
         "subject_core",
@@ -1991,16 +2034,6 @@ fn run_preliminary_subjects(
     // for the reduction; a subject's translation still lives only while its worker searches it.
     #[cfg(feature = "parallel")]
     let mut parallel_batch = std::collections::VecDeque::new();
-    // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the bases one chunk may hold, from the size of the
-    // sequence file of the subjects (x_oid_chunk_bases); none without the switch.
-    #[cfg(feature = "parallel")]
-    let x_chunk_bases = match pool {
-        Some(pool) if parallel_selected && x_tbn_oid_chunk() => Some(x_oid_chunk_bases(
-            pool.threads(),
-            x_subject_file_size(subjects),
-        )),
-        _ => None,
-    };
     #[cfg(feature = "parallel")]
     let diagnose = crate::utils::threading::diagnostics_enabled();
     #[cfg(feature = "parallel")]
@@ -2032,6 +2065,7 @@ fn run_preliminary_subjects(
         Some(bases) if x_tbn_oid_next() => Some(super::x_oid_flow::XOidFlow::new(
             x_all_chunks(subjects, bases),
             x_flow_window(pool.map_or(1, SearchPool::threads)),
+            pool.map_or(1, SearchPool::threads).saturating_sub(1),
         )),
         _ => None,
     };

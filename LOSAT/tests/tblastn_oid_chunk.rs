@@ -100,8 +100,22 @@ enum Long {
 
 /// The subject file with one long subject (`LONG_SUBJECT` bases, the start of the genome) and
 /// `SHORT_SUBJECTS` pieces of `SUBJECT_LENGTH` bases after it in the genome; the long subject is
-/// first, after half of the pieces, or last. Written once per position.
+/// first, after half of the pieces, or last. The three files are written once for the whole test
+/// binary: the tests run side by side, and a test that wrote a file again while another one's
+/// search read it gave that search an empty subject file.
 fn long_subject_set(position: Long) -> PathBuf {
+    static FILES: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    FILES.get_or_init(|| {
+        [Long::First, Long::Middle, Long::Last]
+            .into_iter()
+            .map(write_long_subject_set)
+            .collect()
+    })[position as usize]
+        .clone()
+}
+
+/// Writes the subject file of `long_subject_set`.
+fn write_long_subject_set(position: Long) -> PathBuf {
     let fasta = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
     let genome = &records(&fasta.join("MelaMJNV.fasta"))[0].1;
     assert!(

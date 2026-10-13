@@ -46,8 +46,17 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
   every stage boundary, so the stages add up to `sum`, and `end` includes the release of the
   subject's translation; with several subjects the times are sums over the subjects and their
   threads). `link1` is the first linking call, on every HSP the seed stage saved; `link2` is the
-  call `sum_stats_linking` times (`tblastx/x_search_timing.rs`). The clock is not read without
-  the variable.
+  call `sum_stats_linking` times (`tblastx/x_search_timing.rs`). Two more lines follow, one per
+  linking call:
+  `[TIMING] x_link1: reset .. sort .. groups .. kernels .. assemble .. final_sorts .. replay .. sum .. (calls=N hsps=N groups=N largest_group=N kernel_sum ..s kernel_max ..s)`
+  and `[TIMING] x_link2:` in the same form (the steps of the default linking call,
+  `x_hsp_inplace::link_in_place`, in the order they run; one clock per call, so the steps add up
+  to `sum`. `kernels` is the wall time of the per-group linking, `kernel_sum` the per-group
+  times added over the threads that ran them, `kernel_max` the longest group, which `kernels`
+  cannot go below; `largest_group` is the number of HSPs in the largest group. A linking call
+  that takes the reference body (`LOSAT_X_HSPINPLACE=0`, `LOSAT_X_DEFAULT=0`,
+  `LOSAT_DIAGNOSTICS`, `LOSAT_DEBUG_CUTOFFS`) is not timed there: `calls=0`;
+  `tblastx/x_link_timing.rs`). The clock is not read without the variable.
 - `LOSAT_DIAGNOSTICS=1` general diagnostics counters.
 - `LOSAT_STARTUP_TRACE=1` startup trace.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.

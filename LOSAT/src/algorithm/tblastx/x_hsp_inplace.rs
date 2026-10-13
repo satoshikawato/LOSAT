@@ -154,6 +154,9 @@
 //! the summary is printed by `main`.
 
 use super::*;
+// Diagnostic (LOSAT_TIMING): the clock of a linking call (tblastx/x_link_timing.rs). It reads
+// the clock only in a call the batch function armed, and the linking reads nothing from it.
+use crate::algorithm::tblastx::x_link_timing::{KernelTimes, LinkLap, LinkStage};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
@@ -633,8 +636,8 @@ fn assemble(groups: impl Iterator<Item = Vec<UngappedHit>>, total: usize) -> Vec
 // order when it holds every record exactly once (module doc, item 5).
 /// The result of the reference's two final sorts and `replay_ncbi_output_list` for a list of at
 /// least two HSPs, without a second list unless the replay leaves a record out or repeats one.
-fn replay_in_place(results: Vec<UngappedHit>) -> Vec<UngappedHit> {
-    let (replayed, in_place) = replay_in_place_counted(results);
+fn replay_in_place(results: Vec<UngappedHit>, lap: &mut LinkLap) -> Vec<UngappedHit> {
+    let (replayed, in_place) = replay_in_place_counted(results, lap);
     if in_place {
         REPLAY_INPLACE.fetch_add(1, AtomicOrdering::Relaxed);
     } else {
@@ -660,7 +663,10 @@ fn replay_in_place(results: Vec<UngappedHit>) -> Vec<UngappedHit> {
 // ```
 // The body of `replay_in_place`; the flag says which of the two outcomes produced the list.
 /// The replayed list and whether it was made in place (`true`) or by the reference's clones.
-fn replay_in_place_counted(mut results: Vec<UngappedHit>) -> (Vec<UngappedHit>, bool) {
+fn replay_in_place_counted(
+    mut results: Vec<UngappedHit>,
+    lap: &mut LinkLap,
+) -> (Vec<UngappedHit>, bool) {
     let n = results.len();
     let mut order: Vec<usize> = (0..n).collect();
     for compare in [
@@ -671,6 +677,7 @@ fn replay_in_place_counted(mut results: Vec<UngappedHit>) -> (Vec<UngappedHit>, 
         // Stable, as `sort_linked_hsp_references`: comparator-equal records keep their order.
         order.sort_by(|&lhs, &rhs| compare(&records[lhs], &records[rhs]));
     }
+    lap.lap(LinkStage::FinalSorts);
 
     let max_link_id = results.iter().map(|h| h.link_id).max().unwrap_or(0);
     let mut id_to_index = vec![SENTINEL_IDX; max_link_id + 1];
@@ -786,6 +793,9 @@ fn link_in_place(
     eff_searchsp_per_context: &[i64],
     allow_parallel: bool,
 ) -> Vec<UngappedHit> {
+    // No NCBI counterpart: the clock of this call for LOSAT_TIMING. The first local, so that it
+    // is dropped last.
+    let mut lap = LinkLap::start();
     if hits.is_empty() {
         return hits;
     }
@@ -829,7 +839,9 @@ fn link_in_place(
     //          s_RevCompareHSPsTbx);
     // ```
     // The reference's `sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx)`.
+    lap.lap(LinkStage::Reset);
     sort_in_place(&mut hits, rev_compare_hsps_tbx);
+    lap.lap(LinkStage::Sort);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
     // ```c
@@ -846,6 +858,9 @@ fn link_in_place(
     // ```
     let total_hits = hits.len(); // NCBI: hsp_list->hspcnt
     let frame_groups = groups_off_the_end(hits);
+    lap.lap(LinkStage::Groups);
+    lap.sizes(total_hits, frame_groups.iter().map(Vec::len));
+    let kernel_times = lap.kernels();
     GROUPS.fetch_add(frame_groups.len() as u64, AtomicOrdering::Relaxed);
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
@@ -904,18 +919,24 @@ fn link_in_place(
                     let pool = pools_opt.get_or_insert_with(|| {
                         buffer_pools(initial_lh_size, total_hits, literal_port)
                     });
-                    (group_idx, link_one_group(group_hits, &args, pool))
+                    (
+                        group_idx,
+                        kernel_times.time(|| link_one_group(group_hits, &args, pool)),
+                    )
                 })
             })
             .collect();
 
         // Sort by group index to preserve NCBI processing order
         indexed_results.sort_by_key(|(idx, _)| *idx);
+        lap.lap(LinkStage::Kernels);
 
-        assemble(
+        let ordered = assemble(
             indexed_results.into_iter().map(|(_, hits)| hits),
             total_hits,
-        )
+        );
+        lap.lap(LinkStage::Assemble);
+        ordered
     } else {
         link_groups_serially(
             frame_groups,
@@ -923,6 +944,8 @@ fn link_in_place(
             initial_lh_size,
             total_hits,
             literal_port,
+            &mut lap,
+            &kernel_times,
         )
     };
 
@@ -936,6 +959,8 @@ fn link_in_place(
         initial_lh_size,
         total_hits,
         literal_port,
+        &mut lap,
+        &kernel_times,
     );
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
@@ -947,10 +972,13 @@ fn link_in_place(
     //          s_FwdCompareHSPsTransl);
     // ```
     // The reference's empty/singleton shortcut, then its final sorts and replay.
+    lap.add_kernels(&kernel_times);
     if results.len() <= 1 {
         return results;
     }
-    replay_in_place(results)
+    let replayed = replay_in_place(results, &mut lap);
+    lap.lap(LinkStage::Replay);
+    replayed
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
@@ -971,14 +999,19 @@ fn link_groups_serially(
     initial_lh_size: usize,
     total_hits: usize,
     literal_port: bool,
+    lap: &mut LinkLap,
+    kernel_times: &KernelTimes,
 ) -> Vec<UngappedHit> {
     let mut pools = buffer_pools(initial_lh_size, total_hits, literal_port);
     for slot in frame_groups.iter_mut() {
         let group_hits = std::mem::take(slot);
-        *slot = link_one_group(group_hits, args, &mut pools);
+        *slot = kernel_times.time(|| link_one_group(group_hits, args, &mut pools));
     }
     drop(pools);
-    assemble(frame_groups.into_iter(), total_hits)
+    lap.lap(LinkStage::Kernels);
+    let ordered = assemble(frame_groups.into_iter(), total_hits);
+    lap.lap(LinkStage::Assemble);
+    ordered
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1773-1776
@@ -1508,7 +1541,7 @@ mod tests {
             let hits = chained_hits(&mut rng, n, max_chain);
             let expected = reference_replay(hits.clone());
             let allocation = hits.as_ptr();
-            let (actual, in_place) = replay_in_place_counted(hits);
+            let (actual, in_place) = replay_in_place_counted(hits, &mut LinkLap::off());
             let label = format!("case {case} n {n} max_chain {max_chain}");
             assert!(in_place, "{label}: every HSP is replayed once");
             assert_eq!(actual.as_ptr(), allocation, "{label}: no second list");
@@ -1563,7 +1596,7 @@ mod tests {
         fn check(hits: Vec<UngappedHit>, expected_len: usize, expect_in_place: bool, label: &str) {
             let expected = reference_replay(hits.clone());
             assert_eq!(expected.len(), expected_len, "{label}: reference length");
-            let (actual, in_place) = replay_in_place_counted(hits);
+            let (actual, in_place) = replay_in_place_counted(hits, &mut LinkLap::off());
             assert_eq!(in_place, expect_in_place, "{label}");
             assert_same_list(label, &actual, &expected);
         }

@@ -1,11 +1,12 @@
-//! The stage lines of `LOSAT_TIMING` for TBLASTX (`src/algorithm/tblastx/x_search_timing.rs`)
-//! on whole searches.
+//! The stage lines of `LOSAT_TIMING` for TBLASTX (`src/algorithm/tblastx/x_search_timing.rs`,
+//! `x_link_timing.rs`) on whole searches.
 //!
 //! No NCBI counterpart: NCBI BLAST+ has no such timer. The timer reads a clock and prints; the
 //! tests check that the report is the same with it and without it, that the lines that were
-//! printed before are still printed in the same form, and that the two new lines account for
-//! their intervals: the three parts of `x_search` add up to `search_total`, and the stages of
-//! `x_subject` add up to its `sum`. The expected output of the fixture pair
+//! printed before are still printed in the same form, and that the new lines account for their
+//! intervals: the three parts of `x_search` add up to `search_total`, the stages of `x_subject`
+//! add up to its `sum`, and the stages of `x_link1` and `x_link2` add up to their `sum`, which
+//! lies inside `link1` and `link2` of `x_subject`. The expected output of the fixture pair
 //! (`tests/fixtures/tblastx_link_fast/short_hsp.ncbi_2.17.0.fmt6.out`) was produced by NCBI
 //! BLAST+ 2.17.0.
 
@@ -53,6 +54,17 @@ const STAGES: [&str; 15] = [
     "convert",
     "emit",
     "end",
+];
+
+/// The stages of the `x_link1` and `x_link2` lines, in their order.
+const LINK_STAGES: [&str; 7] = [
+    "reset",
+    "sort",
+    "groups",
+    "kernels",
+    "assemble",
+    "final_sorts",
+    "replay",
 ];
 
 /// One TBLASTX run of the fixture query against `subject` (`-outfmt 6` on standard output)
@@ -165,9 +177,96 @@ fn check_stage_lines(stderr: &str, subjects: u64, what: &str) {
     );
 }
 
+/// The value of `name=<integer>` in the parenthesis that ends a linking line.
+fn count(line: &str, name: &str) -> u64 {
+    let key = format!("{name}=");
+    let tail = line
+        .split_once('(')
+        .and_then(|(_, tail)| tail.split_once(key.as_str()))
+        .unwrap_or_else(|| panic!("no {name}= in {line}"))
+        .1;
+    tail.split(|c: char| !c.is_ascii_digit())
+        .next()
+        .and_then(|digits| digits.parse().ok())
+        .unwrap_or_else(|| panic!("no number after {name}= in {line}"))
+}
+
+/// Checks the two linking lines of one run against its `x_subject` line. `timed` says whether
+/// the run's linking calls take the path the timer is in (the default path): then the first
+/// call is counted for at least one subject and at most `subjects`, and the second for no more
+/// subjects than the first; otherwise both lines are all zero.
+fn check_link_lines(stderr: &str, subjects: u64, timed: bool, what: &str) {
+    let subject = pairs(timing_line(stderr, "x_subject"));
+    let mut calls = Vec::new();
+    for (name, stage) in [("x_link1", "link1"), ("x_link2", "link2")] {
+        let line = timing_line(stderr, name);
+        let fields = pairs(line);
+        let names: Vec<&str> = fields.iter().map(|(field, _)| *field).collect();
+        let expected: Vec<&str> = LINK_STAGES.iter().copied().chain(["sum"]).collect();
+        assert_eq!(names, expected, "{what}: {name}:\n{stderr}");
+        let (stages, sum) = fields.split_at(LINK_STAGES.len());
+        let stage_sum: i64 = stages.iter().map(|(_, value)| value).sum();
+        // Seven values rounded to a millisecond against their rounded sum.
+        assert!(
+            (stage_sum - sum[0].1).abs() <= 4,
+            "{what}: {name}: the stages add up to {stage_sum} ms, sum is {} ms:\n{stderr}",
+            sum[0].1
+        );
+        // The timed part of a linking call lies inside the call the subject's clock times.
+        let whole = subject
+            .iter()
+            .find(|(field, _)| *field == stage)
+            .unwrap_or_else(|| panic!("{what}: no {stage} in x_subject:\n{stderr}"))
+            .1;
+        assert!(
+            sum[0].1 <= whole + 1,
+            "{what}: {name}: sum {} ms, {stage} {whole} ms:\n{stderr}",
+            sum[0].1
+        );
+        let tail = line.split_once('(').map(|(_, tail)| tail).unwrap_or("");
+        let fields: Vec<&str> = tail.split_whitespace().collect();
+        assert!(
+            fields.len() == 8
+                && fields[0].starts_with("calls=")
+                && fields[1].starts_with("hsps=")
+                && fields[2].starts_with("groups=")
+                && fields[3].starts_with("largest_group=")
+                && fields[4] == "kernel_sum"
+                && fields[6] == "kernel_max"
+                && fields[7].ends_with("s)"),
+            "{what}: {name}:\n{stderr}"
+        );
+        let (kernel_sum, kernel_max) = (millis(fields[5]), millis(fields[7]));
+        assert!(kernel_max <= kernel_sum + 1, "{what}: {name}:\n{stderr}");
+        let (n, hsps, groups, largest) = (
+            count(line, "calls"),
+            count(line, "hsps"),
+            count(line, "groups"),
+            count(line, "largest_group"),
+        );
+        // Every timed call has a list of at least one HSP in at least one group.
+        assert!(
+            n <= groups && groups <= hsps && n <= largest && largest <= hsps,
+            "{what}: {name}:\n{stderr}"
+        );
+        if n == 0 {
+            assert_eq!((sum[0].1, stage_sum, hsps), (0, 0, 0), "{what}: {name}");
+        }
+        calls.push(n);
+    }
+    if timed {
+        assert!(
+            1 <= calls[0] && calls[0] <= subjects && calls[1] <= calls[0],
+            "{what}: calls {calls:?}:\n{stderr}"
+        );
+    } else {
+        assert_eq!(calls, [0, 0], "{what}:\n{stderr}");
+    }
+}
+
 // No NCBI counterpart (a timer). With LOSAT_TIMING the report is NCBI's, the lines that were
-// there before are printed once each in their order and form, and the two stage lines follow
-// them and account for their intervals. The default search runs on the unit path, so the
+// there before are printed once each in their order and form, and the stage lines follow them
+// and account for their intervals. The default search runs on the unit path, so the
 // reference frame loop takes no measurable part of the subject.
 #[test]
 fn the_stage_lines_follow_the_old_lines_and_add_up() {
@@ -185,8 +284,8 @@ fn the_stage_lines_follow_the_old_lines_and_add_up() {
         let old: Vec<&str> = timing.iter().copied().take(OLD_LINES.len()).collect();
         assert_eq!(old, OLD_LINES, "{what}:\n{stderr}");
         assert_eq!(
-            &timing[OLD_LINES.len()..OLD_LINES.len() + 2],
-            ["x_search", "x_subject"],
+            &timing[OLD_LINES.len()..OLD_LINES.len() + 4],
+            ["x_search", "x_subject", "x_link1", "x_link2"],
             "{what}:\n{stderr}"
         );
         for name in OLD_LINES {
@@ -205,13 +304,16 @@ fn the_stage_lines_follow_the_old_lines_and_add_up() {
             );
         }
         check_stage_lines(&stderr, 1, &what);
+        check_link_lines(&stderr, 1, true, &what);
     }
 }
 
 // No NCBI counterpart (a timer). The paths a subject can take all reach the stage lines: the
 // reference frame loop (`LOSAT_X_PAIRPAR=0`), the previous paths (`LOSAT_X_DEFAULT=0`), and
 // several subject records with one too short to search (counted as a subject, all of it in the
-// last stage). The report does not depend on the timer.
+// last stage). The linking lines count the calls of the default linking path, whichever seed
+// stage ran before it, and are all zero on the previous paths, whose linking calls take the
+// reference body. The report does not depend on the timer.
 #[test]
 fn every_path_of_a_subject_is_timed_and_the_report_is_the_same() {
     let single = fixture("short_hsp.subject.fna");
@@ -248,6 +350,8 @@ fn every_path_of_a_subject_is_timed_and_the_report_is_the_same() {
                 let (report, stderr) = tblastx(subject, threads, &variables);
                 assert_eq!(report, expected, "{what}");
                 check_stage_lines(&stderr, subjects, &what);
+                let timed = !path.contains(&("LOSAT_X_DEFAULT", "0"));
+                check_link_lines(&stderr, subjects, timed, &what);
             }
         }
     }

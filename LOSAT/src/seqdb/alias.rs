@@ -1,9 +1,10 @@
 //! Alias files (`.pal` / `.nal`) and the list of volumes behind a database name.
 //!
-//! LOSAT reads the two keys a multi-volume database of makeblastdb uses,
-//! `TITLE` and `DBLIST`. The keys that filter sequences or replace the
-//! statistics are explicit errors (not supported yet); unknown keys are
-//! ignored, as in NCBI.
+//! LOSAT reads the keys a multi-volume database of makeblastdb uses, `TITLE`
+//! and `DBLIST`, and the keys `NSEQ` and `LENGTH` of blastdb_aliastool when
+//! their values equal the sums over the databases they cover (`check_sums`).
+//! The keys that filter sequences or replace the statistics are explicit
+//! errors (not supported yet); unknown keys are ignored, as in NCBI.
 //!
 //! Two ways lead from a name to its volumes. `resolve_in` is NCBI's: the
 //! name of a search program's `-db` is looked for in the directories of a
@@ -27,6 +28,10 @@ use super::{SeqDbError, SeqType};
 pub(super) struct AliasNode {
     /// `TITLE` of the alias file, when it has that key.
     pub title: Option<Vec<u8>>,
+    /// Raw value of the `NSEQ` key of the alias file, when it has that key.
+    pub nseq: Option<Vec<u8>>,
+    /// Raw value of the `LENGTH` key of the alias file, when it has that key.
+    pub length: Option<Vec<u8>>,
     /// Alias files named in `DBLIST`, in order.
     pub subnodes: Vec<AliasNode>,
     /// Volumes named in `DBLIST` (paths without extension), in order.
@@ -46,12 +51,13 @@ pub(super) struct AliasTree {
 
 /// Alias keys that LOSAT recognises and does not support: they select
 /// sequences (alias_files.txt "Type: filter"), replace the values used for
-/// statistics ("meta-data"), or name data LOSAT does not read. They are the
+/// statistics ("meta-data"), or name data LOSAT does not read. `NSEQ` and
+/// `LENGTH` are read (`check_sums`) and are not among them. They are the
 /// keys NCBI's reader looks up (seqdbalias.cpp), except `MAX_SEQ_LENGTH`,
 /// which it never applies (seqdbimpl.cpp:972-976 takes the maximum from the
 /// volumes) and which is ignored here too, plus `VDBLIST` of
 /// blastdb_aliastool.
-const UNSUPPORTED_KEYS: [&str; 16] = [
+const UNSUPPORTED_KEYS: [&str; 14] = [
     "FIRST_OID",
     "LAST_OID",
     "GILIST",
@@ -62,8 +68,6 @@ const UNSUPPORTED_KEYS: [&str; 16] = [
     "MEMB_BIT",
     "MASKLIST",
     "VDBLIST",
-    "NSEQ",
-    "LENGTH",
     "STATS_NSEQ",
     "STATS_TOTLEN",
     "MIN_SEQ_LENGTH",
@@ -1100,15 +1104,20 @@ impl Resolver<'_> {
         let bytes = DbFile::open(&path)?.read_all()?;
         let values = read_values(&bytes);
         let mut title = None;
+        let mut nseq = None;
+        let mut length = None;
         let mut dblist: &[u8] = &[];
         for (key, value) in &values {
             match key.as_slice() {
                 b"TITLE" => title = Some(value.clone()),
+                b"NSEQ" => nseq = Some(value.clone()),
+                b"LENGTH" => length = Some(value.clone()),
                 b"DBLIST" => dblist = value,
                 other => {
                     if let Some(key) = UNSUPPORTED_KEYS.iter().find(|k| k.as_bytes() == other) {
                         return Err(unsupported(format!(
-                            "alias file key {key} is not supported; LOSAT reads TITLE and DBLIST"
+                            "alias file key {key} is not supported; LOSAT reads TITLE, DBLIST, NSEQ and \
+                             LENGTH"
                         )));
                     }
                 }
@@ -1125,6 +1134,8 @@ impl Resolver<'_> {
         let mut node = AliasNode {
             this_name: Some(path.to_string_lossy().into_owned()),
             title,
+            nseq,
+            length,
             ..AliasNode::default()
         };
         let result = self.expand(&mut node, dir_name(base), base, &entries, false);
@@ -1825,6 +1836,139 @@ pub(super) fn walk_title(
             join_delim(title, &value);
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1575-1596
+// ```c++
+// CSeqDBAliasNode::WalkNodes(CSeqDB_AliasWalker * walker,
+//                            const CSeqDBVolSet & volset) const
+// {
+//     TVarList::const_iterator value =
+//         m_Values.find(walker->GetFileKey());
+//
+//     if (value != m_Values.end()) {
+//         walker->AddString( (*value).second );
+//         return;
+//     }
+//
+//     ITERATE(TSubNodeList, node, m_SubNodes) {
+//         (*node)->WalkNodes( walker, volset );
+//     }
+//
+//     ITERATE(TVolNames, volname, m_VolNames) {
+//         if (const CSeqDBVol * vptr = volset.GetVol(volname->GetBasePathS())) {
+//             walker->Accumulate( *vptr );
+//         }
+//     }
+// }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1189-1192
+// ```c++
+//     virtual void Accumulate(const CSeqDBVol & vol)
+//     {
+//         m_Value += vol.GetNumOIDs();
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1201-1204
+// ```c++
+//     virtual void AddString(const string & value)
+//     {
+//         m_Value += NStr::StringToInt8(value);
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1290-1293
+// ```c++
+//     virtual void Accumulate(const CSeqDBVol & vol)
+//     {
+//         m_Value += vol.GetVolumeLength();
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:1302-1305
+// ```c++
+//     virtual void AddString(const string & value)
+//     {
+//         m_Value += NStr::StringToUInt8(value);
+//     }
+// ```
+// The number of sequences (`NSEQ`) and the total length (`LENGTH`) of a
+// database are such walks: a node that has the key contributes its value and
+// is not descended into; any other node contributes the walks of its sub-nodes
+// and its own volumes. A value equal to the sum the walk gives below its node
+// therefore changes nothing, and LOSAT reads the key only in that case.
+/// The number of sequences and the total length of `node`, as the walks of
+/// `NSEQ` and `LENGTH` (quoted above) compute them over the volumes below it
+/// when no node has the keys. `volume_sums` gives both for a volume path.
+/// Every alias node below `node` that has `NSEQ` or `LENGTH` is checked on the
+/// way: the value must be plain decimal digits (1 to 19) and equal the sum of
+/// that node. NCBI's parse of other values is not reproduced.
+pub(super) fn check_sums(
+    node: &AliasNode,
+    volume_sums: &dyn Fn(&str) -> Option<(u64, u64)>,
+) -> Result<(u64, u64), SeqDbError> {
+    let mut nseq: u64 = 0;
+    let mut length: u64 = 0;
+    let overflow = || SeqDbError::Unsupported {
+        path: node
+            .this_name
+            .as_deref()
+            .map_or_else(Default::default, |name| Path::new(name).to_path_buf()),
+        message: "the number of sequences or the total length of the databases of an alias \
+                  file overflows"
+            .to_string(),
+    };
+    for subnode in &node.subnodes {
+        let (sub_nseq, sub_length) = check_sums(subnode, volume_sums)?;
+        nseq = nseq.checked_add(sub_nseq).ok_or_else(overflow)?;
+        length = length.checked_add(sub_length).ok_or_else(overflow)?;
+    }
+    for volume in &node.vol_names {
+        if let Some((vol_nseq, vol_length)) = volume_sums(volume) {
+            nseq = nseq.checked_add(vol_nseq).ok_or_else(overflow)?;
+            length = length.checked_add(vol_length).ok_or_else(overflow)?;
+        }
+    }
+    let path = node
+        .this_name
+        .as_deref()
+        .map_or_else(Default::default, |name| Path::new(name).to_path_buf());
+    for (key, value, sum, what) in [
+        ("NSEQ", &node.nseq, nseq, "the number of sequences"),
+        ("LENGTH", &node.length, length, "the total length"),
+    ] {
+        let Some(value) = value else { continue };
+        let digits = (1..=19).contains(&value.len()) && value.iter().all(u8::is_ascii_digit);
+        let parsed = if digits {
+            std::str::from_utf8(value)
+                .ok()
+                .and_then(|text| text.parse::<u64>().ok())
+        } else {
+            None
+        };
+        let shown = String::from_utf8_lossy(value);
+        match parsed {
+            Some(parsed) if parsed == sum => {}
+            Some(_) => {
+                return Err(SeqDbError::Unsupported {
+                    path,
+                    message: format!(
+                        "alias file key {key} ({shown}) differs from {what} of its databases \
+                         ({sum}); LOSAT reads NSEQ and LENGTH only when they equal those sums"
+                    ),
+                })
+            }
+            None => {
+                return Err(SeqDbError::Unsupported {
+                    path,
+                    message: format!(
+                        "alias file key {key} ({shown}) is not a plain decimal number of 1 to \
+                         19 digits; LOSAT reads NSEQ and LENGTH only when they equal {what} of \
+                         their databases ({sum})"
+                    ),
+                })
+            }
+        }
+    }
+    Ok((nseq, length))
 }
 
 fn join_delim(a: &mut Vec<u8>, b: &[u8]) {

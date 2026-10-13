@@ -462,10 +462,11 @@ impl SeqDb {
     //     return x_FixString( m_Aliases.GetTitle(m_VolSet) );
     // }
     // ```
-    // Without the alias keys NSEQ and LENGTH (rejected in `alias`) and with
-    // every volume listed once, the number of sequences and the total length
-    // that NCBI takes from its alias walk (seqdbalias.cpp:1190-1193,
-    // 1291-1294) are the sums over the volumes.
+    // The number of sequences and the total length that NCBI takes from its
+    // alias walk (seqdbalias.cpp:1189-1192, 1290-1293, 1575-1596) are the sums
+    // over the volumes when no alias file has the keys NSEQ and LENGTH, or
+    // when their values equal the sums below their nodes (`alias::check_sums`,
+    // which rejects every other value).
     /// Opens the volumes of a resolved database (`name` is for messages).
     fn open_tree(tree: alias::AliasTree, name: &str, seqtype: SeqType) -> Result<Self, SeqDbError> {
         let mut volumes = Vec::with_capacity(tree.volumes.len());
@@ -496,6 +497,18 @@ impl SeqDb {
             volumes.push(volume);
         }
         volume_starts.push(num_oids as u32);
+
+        alias::check_sums(&tree.root, &|volume_name| {
+            tree.volumes
+                .iter()
+                .position(|name| name == volume_name)
+                .map(|at| {
+                    (
+                        u64::from(volumes[at].num_oids()),
+                        volumes[at].index().volume_length,
+                    )
+                })
+        })?;
 
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdblmdbset.cpp:217-233
         // ```c++

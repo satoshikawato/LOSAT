@@ -487,7 +487,7 @@ fn databases_that_need_unread_data_are_rejected() {
             "{name}: {error}"
         );
     }
-    for (name, key) in [("alias_nseq", "NSEQ"), ("alias_gilist", "GILIST")] {
+    for (name, key) in [("alias_gilist", "GILIST")] {
         let error = open_error(name, SeqType::Protein);
         assert!(
             matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
@@ -498,6 +498,81 @@ fn databases_that_need_unread_data_are_rejected() {
     let error = open_error("alias_twice", SeqType::Protein);
     assert!(
         matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("more than once")),
+        "{error}"
+    );
+}
+
+#[test]
+fn alias_nseq_and_length_that_equal_the_sums_are_read() {
+    // blastdb_aliastool writes NSEQ 20 and LENGTH 1602, the sums over prot_v4
+    // and prot_old. NCBI's walk takes the values instead of the sums of
+    // that node, so the database is the two volumes.
+    let (db, entries) = check_against_ncbi("alias_nseq", SeqType::Protein);
+    assert_eq!(db.num_seqs(), 20);
+    assert_eq!(db.total_length(), 1602);
+    assert_eq!(db.title(), b"alias with NSEQ and LENGTH");
+    assert_eq!(volume_names(&db), ["prot_old", "prot_v4"]);
+    let mut volume_entries = expected_entries("prot_old");
+    volume_entries.extend(expected_entries("prot_v4"));
+    assert_eq!(entries.len(), volume_entries.len());
+    for (entry, volume_entry) in entries.iter().zip(&volume_entries) {
+        // The id of a record is its ordinal id, which differs.
+        assert_eq!(entry.length, volume_entry.length);
+        assert_eq!(entry.seq, volume_entry.seq);
+        assert_eq!(entry.title, volume_entry.title);
+    }
+
+    // A nested alias file whose inner and outer nodes both have right values
+    // (20 and 1602 inside; 30 and 2403 over the inner node and prot_mv).
+    let (db, entries) = check_against_ncbi("alias_sums_nested", SeqType::Protein);
+    assert_eq!(db.num_seqs(), 30);
+    assert_eq!(db.total_length(), 2403);
+    assert_eq!(entries.len(), 30);
+    assert_eq!(db.volumes().len(), 8);
+}
+
+#[test]
+fn alias_nseq_and_length_that_differ_from_the_sums_are_rejected() {
+    for (name, key, shown) in [
+        ("alias_nseq_high", "NSEQ", "(21)"),
+        ("alias_length_low", "LENGTH", "(1601)"),
+        ("alias_nseq_plus", "NSEQ", "(+20)"),
+        ("alias_nseq_exp", "NSEQ", "(2e1)"),
+        ("alias_length_space", "LENGTH", "(1 602)"),
+        // The inner node is right and the outer one has LENGTH 2402 (sum 2403).
+        ("alias_sums_nested_bad", "LENGTH", "(2402)"),
+        // The inner alias file is wrong, although the outer node's values would
+        // make NCBI skip it.
+        ("alias_sums_inner_bad", "NSEQ", "(21)"),
+    ] {
+        let error = open_error(name, SeqType::Protein);
+        assert!(
+            matches!(&error, SeqDbError::Unsupported { message, .. }
+                if message.contains(&format!("alias file key {key} {shown}"))),
+            "{name}: {error}"
+        );
+        let SeqDbError::Unsupported { path, .. } = &error else {
+            unreachable!()
+        };
+        assert!(
+            path.extension().is_some_and(|ext| ext == "pal"),
+            "{name}: the error names an alias file: {}",
+            path.display()
+        );
+    }
+    // The wrong value is named together with the sum.
+    let error = open_error("alias_nseq_high", SeqType::Protein);
+    assert!(
+        error.to_string().contains(
+            "alias file key NSEQ (21) differs from the number of sequences of its databases (20)"
+        ),
+        "{error}"
+    );
+    let error = open_error("alias_length_low", SeqType::Protein);
+    assert!(
+        error.to_string().contains(
+            "alias file key LENGTH (1601) differs from the total length of its databases (1602)"
+        ),
         "{error}"
     );
 }
@@ -841,6 +916,23 @@ fn every_filtering_or_statistics_alias_key_is_rejected() {
         SeqDb::open(&name, SeqType::Protein).unwrap().max_length(),
         300
     );
+
+    // NSEQ and LENGTH that equal the sums are read; a repeated key takes the
+    // later value (seqdbalias.cpp:446-449), here the right one.
+    std::fs::write(
+        dir.join("keyed.pal"),
+        b"TITLE t\nDBLIST prot_v4\nNSEQ 99\nLENGTH 801\nNSEQ 10\n",
+    )
+    .unwrap();
+    let db = SeqDb::open(&name, SeqType::Protein).unwrap();
+    assert_eq!((db.num_seqs(), db.total_length()), (10, 801));
+    std::fs::write(
+        dir.join("keyed.pal"),
+        b"TITLE t\nDBLIST prot_v4\nNSEQ 10\nNSEQ 99\n",
+    )
+    .unwrap();
+    let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
+    assert!(error.to_string().contains("NSEQ (99)"), "{error}");
 
     // A group alias file in the directory: rejected for an alias file and for
     // a plain volume alike.

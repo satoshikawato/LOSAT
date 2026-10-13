@@ -230,6 +230,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastx::sum_stats_linking::x_hsp_inplace_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_sort_print_summary();
     LOSAT::algorithm::tblastn::x_subject_translate_print_summary();
+    LOSAT::algorithm::blastp::x_bp_seed_print_summary();
     LOSAT::algorithm::blastx::seed::x_seed_scan::print_shadow_stats();
     LOSAT::utils::x_logclone::print_shadow_stats();
     Ok(())

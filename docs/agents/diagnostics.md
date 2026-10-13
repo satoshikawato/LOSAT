@@ -332,6 +332,46 @@ Rebuilding less:
   by HSP, every field, E-values by bits; the first difference stops the run and the search continues with the
   reference's result. One line at exit:
   `[X_SHADOW] HSPINPLACE sorts= linkings= hits_compared= replay_fallbacks=`.
+- `LOSAT_X_LINKSORT=1` (TBLASTX, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the index sorts of the in-place HSP list path
+  (`tblastx/x_link_sort.rs`, exactness argument in its header; it acts only where `LOSAT_X_HSPINPLACE` does).
+  Two changes, both of how an index order is computed, not of the order: (1) the linking call sorts its
+  output order once, stably, with `s_FwdCompareHSPsTransl` and ties by `s_RevCompareHSPsTransl`, where it
+  sorts twice (a stable sort by B followed by a stable sort by A is one stable sort by "A, then B"); this
+  also saves a sort at one thread. (2) An index sort of 32,768 indices or more runs as rayon's stable
+  parallel sort (`par_sort_by`) when its call may use the search pool: the two sorts of a linking call
+  under the call's `allow_parallel`, as its per-group linking; the other HSP sorts (the score sorts after
+  each frame, after the first linking call and after the re-evaluation) when the calling thread is a worker
+  of a rayon pool, which in a search started by the command line or the Web adapter it is exactly when
+  `-num_threads` is 2 or more (the header names the one case this repository's code does not show: a
+  program that calls a one-thread search from a thread of its own rayon pool). A stable sort with a
+  comparator that is a total preorder has one result, so the index order is the same at any number of
+  threads; the comparators are NCBI's four, each a lexicographic comparison of integer fields. With one thread, in a
+  build without the `parallel` feature and on wasm32 without `wasm-threads` every sort is the serial
+  statement. With the switch off the statements of `x_hsp_inplace.rs` run as before. `LOSAT_X_STATS=1`
+  prints, only with the switch or its shadow on,
+  `[X_STATS] LINKSORT sorts= indices= parallel_sorts= parallel_indices= composite_sorts=`
+  (index sorts through the path and their lengths added; those that ran on the pool; final sorts made as
+  one). With several subjects on a pool, a thread that waits for the parts of its sort can run another
+  subject meanwhile, as it can while it waits for its linking groups, so the `sort`, `final_sorts`,
+  `merge` and `reap` times of `LOSAT_TIMING` can then hold time of another subject. Measured once on
+  2026-10-13 (medians of three alternating runs without and with the switch, one binary, a loaded
+  machine; `[TIMING] x_link1` and `x_subject`, seconds, without -> with): AP027131 x AP027133 (genetic
+  code 4, 338,859 HSPs in the first linking call) at 8 threads `sort` 0.085 -> 0.039, `final_sorts`
+  0.067 -> 0.009, `reap` 0.073 -> 0.045, `merge` 0.167 -> 0.156, and at one thread `final_sorts`
+  0.060 -> 0.035 (the other sorts are today's statements there); NZ_CP006932 against itself (516,395
+  HSPs) at 8 threads `sort` 0.139 -> 0.075, `final_sorts` 0.100 -> 0.014, `reap` 0.098 -> 0.068, and at
+  one thread `final_sorts` 0.105 -> 0.047. Max RSS did not change (164 -> 161 and 242 -> 243 MiB at 8
+  threads, one run each). What is left of `sort` and `reap` includes the move of the records into the
+  sorted order, which stays on one thread. In a search of 200 short subjects no list reached 32,768 HSPs
+  and no sort went to the pool.
+- `LOSAT_X_LINKSORTSHADOW=1` shadow of `LOSAT_X_LINKSORT` (turns the path on): every index sort runs both
+  ways, the path's sort on a copy of the index vector and today's statement or statements on the vector
+  itself, and the two vectors must be equal element for element; the first difference stops the run with
+  the sort (first, final or dispatch), the length and the position, and the search continues with today's
+  result. One line at exit: `[X_SHADOW] LINKSORT sorts= indices_compared=`. Together with
+  `LOSAT_X_HSPINPLACESHADOW=1` the reference bodies are compared with the path's result end to end
+  (`LOSAT/tests/tblastx_link_sort.rs` runs both).
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks

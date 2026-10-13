@@ -220,6 +220,51 @@ pub struct BlastpArgs {
     // (`blastinput/app.rs` `missing_subject_error`).
     #[arg(long, value_parser = ncbi_input_path(), value_name = "PATH")]
     pub subject: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199
+    // ```c++
+    //     arg_desc.SetCurrentGroup("General search options");
+    //     // database filename
+    //     if (m_IsIgBlast){
+    //         arg_desc.AddOptionalKey(kArgDb, "database_name", "Optional additional database name",
+    //                                 CArgDescriptions::eString);
+    //     } else {
+    //         arg_desc.AddOptionalKey(kArgDb, "database_name", "BLAST database name",
+    //                                 CArgDescriptions::eString);
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
+    // ```c++
+    //         arg_desc.AddOptionalKey(kArgSubject, "subject_input_file",
+    //                                 "Subject sequence(s) to search",
+    //                                 CArgDescriptions::eInputFile);
+    //         ITERATE(vector<string>, dbarg, database_args) {
+    //             arg_desc.SetDependency(kArgSubject, CArgDescriptions::eExcludes,
+    //                                    *dbarg);
+    //         }
+    // ```
+    // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). The exclusion
+    // is an error of the argument parser: LOSAT's parser reports it with its own text
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1).
+    #[arg(
+        long,
+        value_name = "NAME",
+        conflicts_with_all = ["subject", "subject_loc"],
+        help = "BLAST database name (a protein database without parsed Seq-ids)"
+    )]
+    pub db: Option<String>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
+    // ```c++
+    //     // DB size
+    //     if (!m_IsMapper) {
+    //         arg_desc.SetCurrentGroup("Statistical options");
+    //         arg_desc.AddOptionalKey(kArgDbSize, "num_letters",
+    //                                 "Effective length of the database ",
+    //                                 CArgDescriptions::eInt8);
+    //     }
+    // ```
+    // No constraint and no dependency: read with `-db` and with `-subject`.
+    #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
+    pub dbsize: Option<i64>,
     // NCBI reference: c++/src/algo/blast/api/blast_options_handle.cpp:225-228
     // ```c
     //     if (choice == eProtProt || choice == eAll) {
@@ -445,6 +490,10 @@ impl BlastpTaskOptions {
 pub struct ResolvedBlastpArgs {
     pub query: PathBuf,
     pub subject: PathBuf,
+    /// The `-db` value as NCBI keeps it (`db_name`), when the search is of a database.
+    pub db: Option<String>,
+    /// `-dbsize` (`eff_len_options->db_length`; 0 when it is not given).
+    pub dbsize: i64,
     pub task: String,
     pub evalue: f64,
     pub threshold: f64,
@@ -472,6 +521,43 @@ pub struct ResolvedBlastpArgs {
     /// The `-query_loc` range, as given.
     pub query_range: Option<crate::blastinput::seq_range::SequenceRange>,
     pub outfmt: String,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
+// ```c++
+//     if (args.Exist(kArgDb) && args[kArgDb]) {
+// 	std::string local_dblist = NStr::TruncateSpaces( args[kArgDb].AsString() );
+//
+//         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
+//                                              mol_type));
+// ```
+// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3152-3171
+// ```c++
+//     SIZE_TYPE beg = 0;
+//     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
+//         _ASSERT(beg < length);
+//         while ( isspace((unsigned char) str[beg]) ) {
+//             if (++beg == length) {
+//                 return empty_str;
+//             }
+//         }
+//     }
+//     SIZE_TYPE end = length;
+//     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
+//         _ASSERT(beg < end);
+//         while (isspace((unsigned char) str[--end])) {
+//             if (beg == end) {
+//                 return empty_str;
+//             }
+//         }
+//         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
+//         ++end;
+//     }
+// ```
+/// The `-db` value as NCBI keeps it: without the white space (`isspace` of the C locale)
+/// at its two ends. The reports show this name; the reader resolves it.
+pub fn db_name(value: &str) -> &str {
+    value.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'))
 }
 
 impl BlastpArgs {
@@ -698,6 +784,16 @@ impl BlastpArgs {
         Ok(ResolvedBlastpArgs {
             query: self.query.clone(),
             subject: self.subject.clone().unwrap_or_default(),
+            db: self.db.as_deref().map(db_name).map(str::to_string),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
+            // ```c++
+            //     if (args.Exist(kArgDbSize) && args[kArgDbSize]) {
+            //         opts.SetDbLength(args[kArgDbSize].AsInt8());
+            //     }
+            // ```
+            // The options start with a database length of 0
+            // (blast_prot_options.cpp:150-156, `SetDbLength(0)`).
+            dbsize: self.dbsize.unwrap_or(0),
             task: self.task.clone(),
             evalue: options.evalue,
             threshold: options.threshold,
@@ -748,6 +844,25 @@ impl BlastpArgs {
 mod tests {
     use super::*;
     use clap::Parser;
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3152-3171 (`s_TruncateSpaces`
+    // with `eTrunc_Both`: `isspace` at both ends).
+    #[test]
+    fn the_database_name_loses_the_white_space_at_its_ends() {
+        for (given, kept) in [
+            ("db", "db"),
+            (" db ", "db"),
+            ("\tdir/db\n", "dir/db"),
+            ("\r\x0b\x0c db", "db"),
+            ("a b", "a b"),
+            (" a  b ", "a  b"),
+            ("", ""),
+            ("   ", ""),
+            ("\u{a0}db", "\u{a0}db"),
+        ] {
+            assert_eq!(db_name(given), kept, "{given:?}");
+        }
+    }
 
     // NCBI blast_args.cpp:332-349: parse the same single string as the public CLI.
     fn parse_cli<const N: usize>(args: [&str; N]) -> TestCli {

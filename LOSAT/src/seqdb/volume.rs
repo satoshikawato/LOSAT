@@ -389,6 +389,33 @@ impl SequenceBlock {
         )
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1803
+    // ```c++
+    //     if ('p' == seqtype) {
+    //         // Subtract one, for the inter-sequence null.
+    //
+    //         end_offset --;
+    //
+    //         length = int(end_offset - start_offset);
+    //
+    //         // Although we subtracted one above to get the correct length,
+    //         // we expand the range here by one byte in both directions.
+    //         // The normal consumer of this data relies on them, and can
+    //         // walk off memory if a sequence ends on a slice boundary.
+    //         *buffer = m_Seq->GetFileDataPtr(start_offset-1) + 1;
+    //         if (! (*buffer - 1)) return -1;
+    // ```
+    // NCBI's search reads these bytes in place. A LOSAT block is a private
+    // copy of them, so a search may rewrite it before it scans it (BLASTP reads
+    // O as X); the layout stays the one of the file.
+    /// The bytes of a protein block as read: the sentinel byte before the
+    /// first sequence, then every sequence followed by its sentinel byte
+    /// (`protein_with_sentinels(i)` is a window of them).
+    pub fn protein_bytes_mut(&mut self) -> &mut [u8] {
+        self.expect(SeqType::Protein);
+        &mut self.data
+    }
+
     /// The 2-bit data of nucleotide `i` as stored: four bases per byte from
     /// the high bits down, the last byte holding the remaining bases and,
     /// in its two low bits, their count.

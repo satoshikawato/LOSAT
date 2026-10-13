@@ -29,6 +29,13 @@ mod query_split;
 // static void s_ComputeNumIdentities(...);
 // ```
 mod kappa;
+// EXPERIMENT (LOSAT_X_BPSEED): the subject scan and the two-hit test in one loop.
+mod x_seed_fused;
+
+/// EXPERIMENT (LOSAT_X_BPSEEDSHADOW): the shadow mode's line at exit.
+pub fn x_bp_seed_print_summary() {
+    x_seed_fused::x_bp_seed_print_summary();
+}
 
 pub use args::BlastpArgs;
 pub use blast_engine::run;

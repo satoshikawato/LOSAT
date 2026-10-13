@@ -21,6 +21,9 @@ pub(crate) mod extension;
 pub(crate) mod gapalign;
 mod hsp;
 mod query_split;
+// EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW, off unless set): the ungapped X-drop
+// walks of aa_ungapped.c:804-883 in AVX2 lanes, same results (`pub` for the summary line of `main`).
+pub mod x_ungapped_fast;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
 // ```c
 // static void s_HSPListNormalizeScores(...);

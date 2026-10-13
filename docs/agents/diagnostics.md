@@ -391,6 +391,16 @@ Rebuilding less:
   result. One line at exit: `[X_SHADOW] LINKSORT sorts= indices_compared=`. Together with
   `LOSAT_X_HSPINPLACESHADOW=1` the reference bodies are compared with the path's result end to end
   (`LOSAT/tests/tblastx_link_sort.rs` runs both).
+- `LOSAT_X_BPUNGAP=1` (BLASTP/BLASTX/TBLASTN one-hit and two-hit BLOSUM62 ungapped extension, speed; not in the
+  strict set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the X-drop walks of
+  `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` run 16 positions at a time in AVX2 lanes (residue scores
+  gathered from a 32 x 32 table, 16-bit prefix sums and prefix maxima, the first stopping lane found with a
+  mask), with the scalar statements for the last fewer than 16 steps (`blastp/x_ungapped_fast.rs`, exactness
+  argument in its header). Acts in `extend_one_hit_blosum62` / `extend_two_hit_blosum62`; a dropoff outside
+  1..=8192, a residue code >= 32, no AVX2 or a non-x86_64 target run the reference.
+- `LOSAT_X_BPUNGAPSHADOW=1` shadow of `LOSAT_X_BPUNGAP` (turns the path on): every extension runs both ways and
+  the results (score, offsets, length, `right_extend`, `s_last_off`, and the early return) must be equal; any
+  difference panics with the inputs. One line at exit: `[X_SHADOW] BPUNGAP compared=`.
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks

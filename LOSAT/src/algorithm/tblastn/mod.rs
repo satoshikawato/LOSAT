@@ -5,6 +5,11 @@ mod args;
 //     status = s_BlastSearchEngineOneContext(...);
 // }
 mod search_seed;
+// NCBI c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
+// translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
+// length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);
+// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the subject frames read from tables.
+mod x_subject_translate;
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
 // Blast_InitHitListSortByScore(init_hitlist);
@@ -39,3 +44,6 @@ mod stage_d_pipeline;
 // PrintOneResultSet dispatches the retained search result to its output format.
 mod stage_e_report;
 pub use args::{check_options, run_local, ResolvedTblastnArgs, TblastnArgs};
+// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the summary lines `main` prints at
+// exit. No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub use x_subject_translate::print_summary as x_subject_translate_print_summary;

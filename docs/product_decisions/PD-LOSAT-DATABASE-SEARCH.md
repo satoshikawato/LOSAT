@@ -1,11 +1,12 @@
 # Product Decision: database search (`-db`)
 
 - Decision ID: `PD-LOSAT-DATABASE-SEARCH`
-- Version: 1.0
-- Date: 2026-10-12
+- Version: 1.1
+- Date: 2026-10-13 (version 1.0: 2026-10-12)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
-  database search campaign (decisions P1 to P4 below, each as recommended). One decision
-  is open (section "Open decision"); the maintainer takes it before stage DB-3.
+  database search campaign (decisions P1 to P4 below, each as recommended). The decision
+  that version 1.0 left open, the thread count of the parity target, was taken by the
+  maintainer on 2026-10-13 (P1.1).
 - Implementation status: stage DB-1 added the database reader (`LOSAT/src/seqdb`); no
   search program calls it yet. Stage DB-2 adds the subcommand `LOSAT makedb`
   (`LOSAT/src/writedb`, section "What `LOSAT makedb` of stage DB-2 writes and rejects").
@@ -41,6 +42,23 @@ database files, byte for byte, for outfmt 0, 6 and 7. `-db` and `-subject` of on
 therefore differ exactly as NCBI's do. This replaces the earlier wording "E-values are
 computed with the size of the whole database", which `-subject` already meets.
 
+### P1.1. Thread count of the parity target (2026-10-13)
+
+NCBI's own `-db` output can depend on `-num_threads`. With composition-based statistics,
+blastp ends the redo of a query early by the hit lists of its query batch, and with more
+than one thread NCBI keeps one set of hit lists per thread. Measured: a random
+10,500-residue query followed by PUR4_HUMAN against Swiss-Prot gives 42 different output
+rows at 8 threads and at 1 thread. P1 names "NCBI `-db` on the same database" without a
+thread count.
+
+Decision: LOSAT's `-db` reproduces NCBI `-db` run with `-num_threads 1`, and LOSAT gives
+the same output at every thread count.
+
+- NCBI's threaded redo (one set of hit lists per thread) is not reproduced.
+- Comparison runs of NCBI `-db` use `-num_threads 1` and state the thread count.
+- "LOSAT's output at 1, 2, 4 and 8 threads is the same" is a gate of every stage that adds
+  `-db` to a program.
+
 ### P2. Database format
 
 A LOSAT database is an NCBI BLAST database: the volume layout that makeblastdb writes.
@@ -67,19 +85,6 @@ Databases distributed by NCBI (they store parsed Seq-ids), id and taxonomy filte
 files that filter or replace the statistics, and several databases in one `-db` are a
 second step. Until then LOSAT rejects them explicitly; it never searches such a database
 with part of its data ignored.
-
-## Open decision (the maintainer's, before stage DB-3)
-
-NCBI's own `-db` output can depend on `-num_threads`. With composition-based statistics,
-blastp ends the redo of a query early by the hit lists of its query batch, and with more
-than one thread NCBI keeps one set of hit lists per thread. Measured: a random
-10,500-residue query followed by PUR4_HUMAN against Swiss-Prot gives 42 different output
-rows at 8 threads and at 1 thread. P1 names "NCBI `-db` on the same database" without a
-thread count.
-
-To decide: which NCBI thread count LOSAT's `-db` reproduces. Recommendation of the
-campaign (not a decision): NCBI with one thread, at every LOSAT thread count, as `-subject`
-does today. Comparisons with NCBI state the thread count in the meantime.
 
 ## Not part of this document
 

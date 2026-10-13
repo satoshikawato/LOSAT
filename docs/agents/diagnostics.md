@@ -106,9 +106,10 @@ variables mean (`LOSAT/src/utils/xswitch.rs`):
   and stop with an assertion on the first difference. They, the counters, the timing aids and the
   tuning variables are not part of the set: they are off unless set to any value, and a shadow
   switch turns its switch on whatever the two variables above say (except
-  `LOSAT_X_AHEADSHADOW`, which compares only while `AHEAD` is on). A shadow compares the kernel
-  the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128` or base kernel that takes the
-  call).
+  `LOSAT_X_AHEADSHADOW`, which compares only while `AHEAD` is on, and
+  `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
+  shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
+  or base kernel that takes the call).
 - The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 48 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
@@ -441,6 +442,22 @@ Scheduling (each value computed by one thread with the original function; order 
   side by side (each batch on one thread). With `LOSAT_WASI_THREADS_DEBUG=1` the
   `[losat-thread-activity]` line of the subject stage ends with `pool_entries=` (the entries of
   one query batch); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.
+- `LOSAT_X_TBNXLATE=1` tblastn: the six translated frames of a subject are read from tables, as
+  NCBI makes them from the compressed subject (`blast_util.c:1071-1090`: one table of 64 residues
+  per strand, `s_BlastGetTranslationTable`, and one table read per codon,
+  `BLAST_TranslateCompressedSequence`). The subject's letters become ncbi2na in one pass; a gap or
+  an ambiguous letter draws from the generator seeded with the subject's length, in subject
+  order, as `s_Ncbi4naToNcbi2na` does (`blast_objmgr_tools.cpp:427-475`). The reference path
+  reaches the same residues through letters (the subject as ncbi4na, as ncbi2na, as `ACGT`, its
+  reverse complement, then `GeneticCode::get` per codon). The tables are filled from the
+  reference path's own functions, so every residue is the reference's by construction. Not in the
+  set (off unless set to any value). It acts where the subject plans of the unit path are made
+  (`TBNPAR`, on by default); with `LOSAT_X_DEFAULT=0` the reference loop translates each subject
+  itself and the variable changes nothing. Shadow: `LOSAT_X_TBNXLATESHADOW=1` makes both
+  translations for every plan and stops (panic) if a frame, a unit or an error text differs; one
+  `[X_SHADOW] TBNXLATE` line on stderr at the end gives the plans and residues compared, or says
+  that nothing was compared. With `LOSAT_X_STATS=1` a `[X_STATS] TBNXLATE table_plans=` line
+  counts the plans made from the tables; `LOSAT/tests/tblastn_subject_translate.rs` reads both.
 - `LOSAT_X_PAIRPAR=1` TBLASTX seed stage (scan, two-hit test, ungapped extension) of each subject
   as units of (subject frame, chunk, query context), 36 per one-query pair, on the search pool (in
   order on the calling thread with one thread); each unit scans with a lookup table holding only its

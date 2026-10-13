@@ -78,9 +78,9 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 49 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
-`LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE` and `LOSAT_X_GREEDYFUSE`
-joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
+strict set are on by default (43 then, 50 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+`LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE` and
+`LOSAT_X_LINKSORT` joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -110,7 +110,7 @@ joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 49 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 50 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -137,6 +137,7 @@ export LOSAT_X_SEEDBUCKET=1
 export LOSAT_X_TBNOIDCHUNK=1
 export LOSAT_X_SEEDRELEASE=1
 export LOSAT_X_GREEDYFUSE=1
+export LOSAT_X_LINKSORT=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -185,6 +186,13 @@ as one fused loop over distances. It changes no value and no order of computatio
 the blastn searches whose preliminary stage takes the score-only greedy alignment on an unpacked
 subject (`LOSAT_X_GREEDYPRELIM`, which is in the set), and its shadow
 `LOSAT_X_GREEDYFUSESHADOW` stays outside the set.
+
+`LOSAT_X_LINKSORT` was added after the default changed, as a switch that was off unless set, and
+joined the set on 2026-10-14. It speeds up TBLASTX at two or more threads: the linking call sorts
+its output order once where it sorted twice, and a long index sort runs as a stable parallel sort
+on the search pool. It changes only how an index order is computed, not the order, and acts only
+where `LOSAT_X_HSPINPLACE` does (the reference bodies have their own sorts). The shadow
+`LOSAT_X_LINKSORTSHADOW` stays opt-in.
 
 What runs per target:
 
@@ -432,9 +440,9 @@ Rebuilding less:
 - `LOSAT_X_BPUNGAPSHADOW=1` shadow of `LOSAT_X_BPUNGAP` (turns the path on): every extension runs both ways and
   the results (score, offsets, length, `right_extend`, `s_last_off`, and the early return) must be equal; any
   difference panics with the inputs. One line at exit: `[X_SHADOW] BPUNGAP compared=`.
-- `LOSAT_X_LINKSORT=1` (TBLASTX, speed; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it) the index sorts of the in-place HSP list path
-  (`tblastx/x_link_sort.rs`, exactness argument in its header; it acts only where `LOSAT_X_HSPINPLACE` does).
+- `LOSAT_X_LINKSORT=1` (TBLASTX, speed; in the strict set since 2026-10-14) the index sorts of the
+  in-place HSP list path (`tblastx/x_link_sort.rs`, exactness argument in its header; it acts only where
+  `LOSAT_X_HSPINPLACE` does).
   Two changes, both of how an index order is computed, not of the order: (1) the linking call sorts its
   output order once, stably, with `s_FwdCompareHSPsTransl` and ties by `s_RevCompareHSPsTransl`, where it
   sorts twice (a stable sort by B followed by a stable sort by A is one stable sort by "A, then B"); this
@@ -448,8 +456,8 @@ Rebuilding less:
   comparator that is a total preorder has one result, so the index order is the same at any number of
   threads; the comparators are NCBI's four, each a lexicographic comparison of integer fields. With one thread, in a
   build without the `parallel` feature and on wasm32 without `wasm-threads` every sort is the serial
-  statement. With the switch off the statements of `x_hsp_inplace.rs` run as before. `LOSAT_X_STATS=1`
-  prints, only with the switch or its shadow on,
+  statement. With the switch off the statements of `x_hsp_inplace.rs` run as before it existed.
+  `LOSAT_X_STATS=1` prints, only with the switch or its shadow on,
   `[X_STATS] LINKSORT sorts= indices= parallel_sorts= parallel_indices= composite_sorts=`
   (index sorts through the path and their lengths added; those that ran on the pool; final sorts made as
   one). With several subjects on a pool, a thread that waits for the parts of its sort can run another

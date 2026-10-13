@@ -52,7 +52,7 @@ use super::params::LinkingParams;
 pub(crate) mod x_hsp_inplace;
 pub use x_hsp_inplace::print_summary as x_hsp_inplace_print_summary;
 
-// EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW, off unless set): the index sorts of
+// EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW): the index sorts of
 // `x_hsp_inplace` as one final sort instead of two and, for long lists, as stable parallel sorts;
 // a child module of this file so that it names the comparators below unchanged (see
 // tblastx/x_link_sort.rs).

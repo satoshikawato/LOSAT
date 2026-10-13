@@ -153,11 +153,11 @@
 //! `e_value` by bits, stops at the first difference and continues with the reference's result;
 //! the summary is printed by `main`.
 //!
-//! EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW, off unless set): the two index sort
-//! sites of this file (`sort_in_place`, `replay_in_place_counted`) then call `x_link_sort.rs`,
-//! which returns the same index order from one final sort instead of two and from a stable
-//! parallel sort for long lists (its header has the argument). With the switch off the
-//! statements described in items 1 and 5 run.
+//! EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW, on by default as a strict-set switch):
+//! the two index sort sites of this file (`sort_in_place`, `replay_in_place_counted`) then call
+//! `x_link_sort.rs`, which returns the same index order from one final sort instead of two and
+//! from a stable parallel sort for long lists (its header has the argument). With the switch off
+//! the statements described in items 1 and 5 run.
 
 use super::*;
 // Diagnostic (LOSAT_TIMING): the clock of a linking call (tblastx/x_link_timing.rs). It reads

@@ -111,15 +111,18 @@ fn normalize_absolute_path(path: &str) -> String {
 // directories it was given, the name is used as it is.
 /// `CDirEntry::CreateAbsolutePath(dbname)`.
 fn create_absolute_path(dbname: &str) -> String {
+    // `NormalizePath` leaves no separator at the end of a path that is not a
+    // root, so `-out sub/` names the database `sub` on every platform.
     #[cfg(windows)]
     {
-        std::path::absolute(dbname)
+        let absolute = std::path::absolute(dbname)
             .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| dbname.to_string())
+            .unwrap_or_else(|_| dbname.to_string());
+        dir_entry_path(&absolute).to_string()
     }
     #[cfg(target_os = "wasi")]
     {
-        dbname.to_string()
+        dir_entry_path(dbname).to_string()
     }
     #[cfg(not(any(windows, target_os = "wasi")))]
     {

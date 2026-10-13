@@ -292,7 +292,9 @@ pub fn run(words: &[&str], query: &[FastaRecord], subject: &[FastaRecord]) -> Re
                 ordinals = searched_queries(args.query_loc.as_deref(), "TBLASTX", query);
                 run_local_tblastx(args, query, subject, &mut outputs)
             }
-            Commands::Blastx(_) => unreachable!("rejected by Program::parse"),
+            Commands::Blastx(_) | Commands::Makedb(_) => {
+                unreachable!("rejected by Program::parse")
+            }
         };
         result.map_err(|error| format!("{error:#}"))?;
     }

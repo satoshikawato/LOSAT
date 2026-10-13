@@ -11849,6 +11849,26 @@ fn search_query_batch(
                         ),
                     );
                         }
+                        // EXPERIMENT (perf-mb M2, not for merge): one log line per score-only greedy call.
+                        #[cfg(feature = "xstats")]
+                        if !use_dp
+                            && crate::algorithm::blastn::alignment::greedy::mblog::enabled()
+                        {
+                            match crate::algorithm::blastn::alignment::greedy::mblog::take() {
+                                Some(x_rec) => {
+                                    crate::algorithm::blastn::alignment::greedy::mblog::write_line(
+                                        uh.context_idx as u32,
+                                        s_idx,
+                                        seed_qs,
+                                        seed_ss,
+                                        prelim_score,
+                                        prelim_score >= cutoff_score,
+                                        &x_rec,
+                                    )
+                                }
+                                None => crate::algorithm::blastn::alignment::greedy::mblog::count_no_rec(),
+                            }
+                        }
                         if prelim_score < cutoff_score {
                             continue;
                         }

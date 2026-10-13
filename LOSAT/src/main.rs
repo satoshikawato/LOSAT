@@ -222,6 +222,9 @@ fn main() -> Result<()> {
         }
     }
     LOSAT::utils::xstats::print();
+    // EXPERIMENT (perf-mb M2, not for merge)
+    #[cfg(feature = "xstats")]
+    LOSAT::algorithm::blastn::alignment::greedy::mblog::flush();
     LOSAT::core::composition_adjustment::adjust_scores::x_adjmemo_print_stats();
     LOSAT::core::composition_adjustment::adjust_scores::x_newtonexact_print_stats();
     LOSAT::algorithm::tblastx::x_seed_bucket::print_shadow_stats();

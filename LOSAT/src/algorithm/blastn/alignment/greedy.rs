@@ -26,6 +26,128 @@
 
 use std::cell::RefCell;
 
+// EXPERIMENT (perf-mb M2, not for merge): per-call log of the preliminary score-only greedy
+// alignment of megablast (LOSAT_X_MBLOG=<path>, xstats feature only). Counters live in a
+// thread-local record that `greedy_gapped_alignment_internal` resets and fills; run.rs takes it
+// and writes the line. No computed value depends on it.
+#[cfg(feature = "xstats")]
+pub mod mblog {
+    use std::cell::Cell;
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Mutex, OnceLock};
+
+    #[derive(Clone, Copy, Default)]
+    pub struct Rec {
+        pub valid: bool,
+        pub q_avail_r: i32,
+        pub s_avail_r: i32,
+        pub q_avail_l: i32,
+        pub s_avail_l: i32,
+        pub q_ext_r: i32,
+        pub s_ext_r: i32,
+        pub q_ext_l: i32,
+        pub s_ext_l: i32,
+        pub dist_r: i32,
+        pub dist_l: i32,
+        pub rows: [u64; 2],
+        pub cells: [u64; 2],
+        pub maxband: [u64; 2],
+        pub retries: u32,
+    }
+
+    thread_local! {
+        static REC: Cell<Rec> = const { Cell::new(Rec {
+            valid: false, q_avail_r: 0, s_avail_r: 0, q_avail_l: 0, s_avail_l: 0,
+            q_ext_r: 0, s_ext_r: 0, q_ext_l: 0, s_ext_l: 0, dist_r: 0, dist_l: 0,
+            rows: [0; 2], cells: [0; 2], maxband: [0; 2], retries: 0,
+        }) };
+    }
+    static WRITER: Mutex<Option<std::io::BufWriter<std::fs::File>>> = Mutex::new(None);
+    static NO_REC: AtomicU64 = AtomicU64::new(0);
+    static NONE_CALLS: AtomicU64 = AtomicU64::new(0);
+
+    pub fn enabled() -> bool {
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| {
+            let Some(path) = std::env::var_os("LOSAT_X_MBLOG") else {
+                return false;
+            };
+            let file = std::fs::File::create(&path).expect("LOSAT_X_MBLOG: cannot create file");
+            *WRITER.lock().unwrap() = Some(std::io::BufWriter::new(file));
+            true
+        })
+    }
+    pub fn reset() {
+        if enabled() {
+            REC.with(|c| c.set(Rec::default()));
+        }
+    }
+    pub fn with(f: impl FnOnce(&mut Rec)) {
+        if enabled() {
+            REC.with(|c| {
+                let mut r = c.get();
+                f(&mut r);
+                c.set(r);
+            });
+        }
+    }
+    /// One executed distance iteration; `reverse` = left extension; `width` = diag_upper - diag_lower + 1.
+    pub fn row(reverse: bool, width: i32) {
+        with(|r| {
+            let i = reverse as usize;
+            r.rows[i] += 1;
+            r.cells[i] += width.max(0) as u64;
+            r.maxband[i] = r.maxband[i].max(width.max(0) as u64);
+        });
+    }
+    /// The record of the last finished score-only call on this thread (cleared by the read).
+    pub fn take() -> Option<Rec> {
+        if !enabled() {
+            return None;
+        }
+        REC.with(|c| {
+            let r = c.get();
+            c.set(Rec::default());
+            if r.valid {
+                Some(r)
+            } else {
+                None
+            }
+        })
+    }
+    pub fn count_none() {
+        NONE_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn count_no_rec() {
+        NO_REC.fetch_add(1, Ordering::Relaxed);
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn write_line(ctx: u32, subj: usize, q_seed: usize, s_seed: usize, score: i32, saved: bool, r: &Rec) {
+        let mut guard = WRITER.lock().unwrap();
+        if let Some(w) = guard.as_mut() {
+            let _ = writeln!(
+                w,
+                "{ctx}\t{subj}\t{q_seed}\t{s_seed}\t{}\t{}\t{}\t{}\t{score}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                r.q_avail_r, r.s_avail_r, r.q_avail_l, r.s_avail_l,
+                r.q_ext_r, r.s_ext_r, r.q_ext_l, r.s_ext_l, r.dist_r, r.dist_l,
+                r.rows[0], r.rows[1], r.cells[0], r.cells[1], r.maxband[0], r.maxband[1],
+                r.retries, saved as u8
+            );
+        }
+    }
+    pub fn flush() {
+        if let Some(w) = WRITER.lock().unwrap().as_mut() {
+            let _ = w.flush();
+            eprintln!(
+                "[MBLOG] none_calls={} no_record={}",
+                NONE_CALLS.load(Ordering::Relaxed),
+                NO_REC.load(Ordering::Relaxed)
+            );
+        }
+    }
+}
+
 use super::super::constants::{
     GREEDY_MAX_COST, GREEDY_MAX_COST_FRACTION, INVALID_DIAG, INVALID_OFFSET,
 };
@@ -3304,6 +3426,9 @@ fn blast_greedy_align(
         let mut curr_diag: i32 = 0;
         let tmp_diag_lower = diag_lower;
         let tmp_diag_upper = diag_upper;
+        // EXPERIMENT (perf-mb M2, not for merge)
+        #[cfg(feature = "xstats")]
+        mblog::row(reverse, tmp_diag_upper - tmp_diag_lower + 1);
 
         let prev_row_idx = if store_traceback {
             (d - 1) as usize
@@ -4217,6 +4342,9 @@ pub(super) fn greedy_gapped_alignment_internal(
     scratch: &mut GreedyAlignScratch,
     do_traceback: bool,
 ) -> Option<GreedyGappedCore> {
+    // EXPERIMENT (perf-mb M2, not for merge)
+    #[cfg(feature = "xstats")]
+    mblog::reset();
     let q_avail = query.len().saturating_sub(q_off) as i32;
     let s_avail = subject_len.saturating_sub(s_off) as i32;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
@@ -4246,14 +4374,32 @@ pub(super) fn greedy_gapped_alignment_internal(
         s_off
     };
     if subject_offset >= subject.len() {
+        // EXPERIMENT (perf-mb M2, not for merge)
+        #[cfg(feature = "xstats")]
+        if !do_traceback {
+            mblog::count_none();
+        }
         return None;
     }
     let subject_full = subject;
     let subject_forward = &subject_full[subject_offset..];
 
     if q_avail <= 0 || s_avail <= 0 {
+        // EXPERIMENT (perf-mb M2, not for merge)
+        #[cfg(feature = "xstats")]
+        if !do_traceback {
+            mblog::count_none();
+        }
         return None;
     }
+    // EXPERIMENT (perf-mb M2, not for merge)
+    #[cfg(feature = "xstats")]
+    mblog::with(|r| {
+        r.q_avail_r = q_avail;
+        r.s_avail_r = s_avail;
+        r.q_avail_l = q_off as i32;
+        r.s_avail_l = s_off as i32;
+    });
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:323-330
     // ```c
@@ -4336,6 +4482,11 @@ pub(super) fn greedy_gapped_alignment_internal(
             &mut fwd_start_point,
         );
         if fence_hit {
+            // EXPERIMENT (perf-mb M2, not for merge)
+            #[cfg(feature = "xstats")]
+            if !do_traceback {
+                mblog::count_none();
+            }
             return None;
         }
         if debug_greedy_traceback_enabled(q_off, s_off) {
@@ -4351,9 +4502,19 @@ pub(super) fn greedy_gapped_alignment_internal(
         }
         if score >= 0 {
             scratch.max_dist = max_dist;
+            // EXPERIMENT (perf-mb M2, not for merge)
+            #[cfg(feature = "xstats")]
+            mblog::with(|r| {
+                r.dist_r = score;
+                r.q_ext_r = q_ext_r;
+                r.s_ext_r = s_ext_r;
+            });
             break;
         }
         max_dist *= 2;
+        // EXPERIMENT (perf-mb M2, not for merge)
+        #[cfg(feature = "xstats")]
+        mblog::with(|r| r.retries += 1);
         scratch.max_dist = max_dist;
     }
 
@@ -4389,6 +4550,11 @@ pub(super) fn greedy_gapped_alignment_internal(
             &mut rev_start_point,
         );
         if fence_hit {
+            // EXPERIMENT (perf-mb M2, not for merge)
+            #[cfg(feature = "xstats")]
+            if !do_traceback {
+                mblog::count_none();
+            }
             return None;
         }
         if debug_greedy_traceback_enabled(q_off, s_off) {
@@ -4405,9 +4571,19 @@ pub(super) fn greedy_gapped_alignment_internal(
         if score_left >= 0 {
             score += score_left;
             scratch.max_dist = max_dist;
+            // EXPERIMENT (perf-mb M2, not for merge)
+            #[cfg(feature = "xstats")]
+            mblog::with(|r| {
+                r.dist_l = score_left;
+                r.q_ext_l = q_ext_l;
+                r.s_ext_l = s_ext_l;
+            });
             break;
         }
         max_dist *= 2;
+        // EXPERIMENT (perf-mb M2, not for merge)
+        #[cfg(feature = "xstats")]
+        mblog::with(|r| r.retries += 1);
         scratch.max_dist = max_dist;
     }
 
@@ -4519,6 +4695,11 @@ pub(super) fn greedy_gapped_alignment_internal(
         }
     }
 
+    // EXPERIMENT (perf-mb M2, not for merge)
+    #[cfg(feature = "xstats")]
+    if !do_traceback {
+        mblog::with(|r| r.valid = true);
+    }
     Some(GreedyGappedCore {
         q_start: q_off as i32 - q_ext_l,
         q_end: q_off as i32 + q_ext_r,

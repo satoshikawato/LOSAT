@@ -541,7 +541,10 @@ mod tests {
         let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];
         assert!(validate(&both).unwrap_err().contains("cannot be used with"));
         // `-dbsize` is an option of the search: accepted with the subject records.
-        validate(&["blastp", "-query", "q", "-subject", "s", "-dbsize", "1000000"]).unwrap();
+        validate(&[
+            "blastp", "-query", "q", "-subject", "s", "-dbsize", "1000000",
+        ])
+        .unwrap();
     }
 
     // The HSP records give the registered index of a query where `-query_loc` skips

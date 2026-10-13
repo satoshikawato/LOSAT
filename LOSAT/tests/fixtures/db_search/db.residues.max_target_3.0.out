@@ -1,0 +1,429 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: residues O U * B Z J X
+           17 sequences; 2,287 total letters
+
+
+
+Query= q_plain
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_plain plain copy                                                    286     2e-105
+s_Z three Z                                                           282     1e-103
+s_J three J                                                           280     9e-103
+
+
+>s_plain plain copy
+Length=142
+
+ Score = 286 bits (733),  Expect = 2e-105, Method: Compositional matrix adjust.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+>s_Z three Z
+Length=142
+
+ Score = 282 bits (722),  Expect = 1e-103, Method: Compositional matrix adjust.
+ Identities = 139/142 (98%), Positives = 141/142 (99%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL+RMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALZRMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+            +KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFK LSHCLLVTLAAHLPAEFTP
+Sbjct  61   ZKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKZLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+>s_J three J
+Length=142
+
+ Score = 280 bits (716),  Expect = 9e-103, Method: Compositional matrix adjust.
+ Identities = 139/142 (98%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL RMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALJRMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+             KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFK LSHCLLVTLAAHLPAEFTP
+Sbjct  61   JKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKJLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.130    0.385    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 188134
+
+
+Query= q_U three U
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_U three U                                                           289     2e-106
+s_J three J                                                           280     9e-103
+s_X three X                                                           279     2e-102
+
+
+>s_U three U
+Length=142
+
+ Score = 289 bits (739),  Expect = 2e-106, Method: Compositional matrix adjust.
+ Identities = 142/142 (100%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALURMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALURMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALURMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   UKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKULSHCLLVTLAAHLPAEFTP  120
+            UKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKULSHCLLVTLAAHLPAEFTP
+Sbjct  61   UKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKULSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+>s_J three J
+Length=142
+
+ Score = 280 bits (716),  Expect = 9e-103, Method: Compositional matrix adjust.
+ Identities = 139/142 (98%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALURMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL RMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALJRMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   UKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKULSHCLLVTLAAHLPAEFTP  120
+             KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFK LSHCLLVTLAAHLPAEFTP
+Sbjct  61   JKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKJLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+>s_X three X
+Length=142
+
+ Score = 279 bits (714),  Expect = 2e-102, Method: Compositional matrix adjust.
+ Identities = 139/142 (98%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALURMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL RMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALXRMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   UKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKULSHCLLVTLAAHLPAEFTP  120
+             KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFK LSHCLLVTLAAHLPAEFTP
+Sbjct  61   XKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKXLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.131    0.403    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 188134
+
+
+Query= q_O three O
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_Z three Z                                                           280     1e-102
+s_plain plain copy                                                    280     1e-102
+s_U three U                                                           279     2e-102
+
+
+>s_Z three Z
+Length=142
+
+ Score = 280 bits (715),  Expect = 1e-102, Method: Compositional matrix adjust.
+ Identities = 139/142 (98%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALORMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL RMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALZRMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   OKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKOLSHCLLVTLAAHLPAEFTP  120
+             KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFK LSHCLLVTLAAHLPAEFTP
+Sbjct  61   ZKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKZLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+>s_plain plain copy
+Length=142
+
+ Score = 280 bits (715),  Expect = 1e-102, Method: Compositional matrix adjust.
+ Identities = 139/142 (98%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALORMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL RMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   OKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKOLSHCLLVTLAAHLPAEFTP  120
+             KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFK LSHCLLVTLAAHLPAEFTP
+Sbjct  61   KKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+>s_U three U
+Length=142
+
+ Score = 279 bits (714),  Expect = 2e-102, Method: Compositional matrix adjust.
+ Identities = 139/142 (98%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALORMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL RMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALURMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   OKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKOLSHCLLVTLAAHLPAEFTP  120
+             KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFK LSHCLLVTLAAHLPAEFTP
+Sbjct  61   UKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKULSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+Lambda      K        H        a         alpha
+   0.319    0.130    0.387    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 188134
+
+
+Query= q_C cysteine where the subjects have their letters
+
+Length=142
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_U three U                                                           289     2e-106
+s_J three J                                                           280     9e-103
+s_X three X                                                           279     2e-102
+
+
+>s_U three U
+Length=142
+
+ Score = 289 bits (739),  Expect = 2e-106, Method: Compositional matrix adjust.
+ Identities = 139/142 (98%), Positives = 142/142 (100%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALCRMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL+RMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALURMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   CKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKCLSHCLLVTLAAHLPAEFTP  120
+            +KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFK+LSHCLLVTLAAHLPAEFTP
+Sbjct  61   UKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKULSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+>s_J three J
+Length=142
+
+ Score = 280 bits (716),  Expect = 9e-103, Method: Compositional matrix adjust.
+ Identities = 139/142 (98%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALCRMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL RMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALJRMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   CKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKCLSHCLLVTLAAHLPAEFTP  120
+             KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFK LSHCLLVTLAAHLPAEFTP
+Sbjct  61   JKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKJLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+>s_X three X
+Length=142
+
+ Score = 279 bits (714),  Expect = 2e-102, Method: Compositional matrix adjust.
+ Identities = 139/142 (98%), Positives = 139/142 (98%), Gaps = 0/142 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALCRMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEAL RMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALXRMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   CKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKCLSHCLLVTLAAHLPAEFTP  120
+             KVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFK LSHCLLVTLAAHLPAEFTP
+Sbjct  61   XKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKXLSHCLLVTLAAHLPAEFTP  120
+
+Query  121  AVHASLDKFLASVSTVLTSKYR  142
+            AVHASLDKFLASVSTVLTSKYR
+Sbjct  121  AVHASLDKFLASVSTVLTSKYR  142
+
+
+
+Lambda      K        H        a         alpha
+   0.321    0.131    0.403    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 188134
+
+
+Query= q_beta
+
+Length=147
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_beta beta chain with U and O                                        295     1e-108
+s_plain plain copy                                                    114     3e-37 
+s_J three J                                                           111     7e-36 
+
+
+>s_beta beta chain with U and O
+Length=147
+
+ Score = 295 bits (755),  Expect = 1e-108, Method: Compositional matrix adjust.
+ Identities = 145/147 (99%), Positives = 145/147 (99%), Gaps = 0/147 (0%)
+
+Query  1    MVHLTPEEKSAVTALWGKVNVDEVGGEALGRLLVVYPWTQRFFESFGDLSTPDAVMGNPK  60
+            MVHLTPEEKSAVTALWGKVNVDEVGGEALGRLLVVYPWTQ FFESFGDLSTPDAVMGNPK
+Sbjct  1    MVHLTPEEKSAVTALWGKVNVDEVGGEALGRLLVVYPWTQUFFESFGDLSTPDAVMGNPK  60
+
+Query  61   VKAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHHFG  120
+            VKAHGKKVLGAFSDGLAHLDNLKGTFATLS LHCDKLHVDPENFRLLGNVLVCVLAHHFG
+Sbjct  61   VKAHGKKVLGAFSDGLAHLDNLKGTFATLSOLHCDKLHVDPENFRLLGNVLVCVLAHHFG  120
+
+Query  121  KEFTPPVQAAYQKVVAGVANALAHKYH  147
+            KEFTPPVQAAYQKVVAGVANALAHKYH
+Sbjct  121  KEFTPPVQAAYQKVVAGVANALAHKYH  147
+
+
+>s_plain plain copy
+Length=142
+
+ Score = 114 bits (286),  Expect = 3e-37, Method: Compositional matrix adjust.
+ Identities = 63/145 (43%), Positives = 88/145 (61%), Gaps = 8/145 (6%)
+
+Query  4    LTPEEKSAVTALWGKV--NVDEVGGEALGRLLVVYPWTQRFFESFGDLSTPDAVMGNPKV  61
+            L+P +K+ V A WGKV  +  E G EAL R+ + +P T+ +F  F DLS      G+ +V
+Sbjct  3    LSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHF-DLS-----HGSAQV  56
+
+Query  62   KAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHHFGK  121
+            K HGKKV  A ++ +AH+D++    + LS+LH  KL VDP NF+LL + L+  LA H   
+Sbjct  57   KGHGKKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKLLSHCLLVTLAAHLPA  116
+
+Query  122  EFTPPVQAAYQKVVAGVANALAHKY  146
+            EFTP V A+  K +A V+  L  KY
+Sbjct  117  EFTPAVHASLDKFLASVSTVLTSKY  141
+
+
+>s_J three J
+Length=142
+
+ Score = 111 bits (277),  Expect = 7e-36, Method: Compositional matrix adjust.
+ Identities = 61/145 (42%), Positives = 86/145 (59%), Gaps = 8/145 (6%)
+
+Query  4    LTPEEKSAVTALWGKV--NVDEVGGEALGRLLVVYPWTQRFFESFGDLSTPDAVMGNPKV  61
+            L+P +K+ V A WGKV  +  E G EAL R+ + +P T+ +F  F DLS      G+ +V
+Sbjct  3    LSPADKTNVKAAWGKVGAHAGEYGAEALJRMFLSFPTTKTYFPHF-DLS-----HGSAQV  56
+
+Query  62   KAHGKKVLGAFSDGLAHLDNLKGTFATLSELHCDKLHVDPENFRLLGNVLVCVLAHHFGK  121
+            K HG KV  A ++ +AH+D++    + LS+LH  KL VDP NF+ L + L+  LA H   
+Sbjct  57   KGHGJKVADALTNAVAHVDDMPNALSALSDLHAHKLRVDPVNFKJLSHCLLVTLAAHLPA  116
+
+Query  122  EFTPPVQAAYQKVVAGVANALAHKY  146
+            EFTP V A+  K +A V+  L  KY
+Sbjct  117  EFTPAVHASLDKFLASVSTVLTSKY  141
+
+
+
+Lambda      K        H        a         alpha
+   0.320    0.137    0.422    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 196764
+
+
+  Database: residues O U * B Z J X
+    Posted date:  Oct 13, 2026  1:38 PM
+  Number of letters in database: 2,287
+  Number of sequences in database:  17
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

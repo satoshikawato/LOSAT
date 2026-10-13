@@ -523,43 +523,6 @@ pub struct ResolvedBlastpArgs {
     pub outfmt: String,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
-// ```c++
-//     if (args.Exist(kArgDb) && args[kArgDb]) {
-// 	std::string local_dblist = NStr::TruncateSpaces( args[kArgDb].AsString() );
-//
-//         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
-//                                              mol_type));
-// ```
-// NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3152-3171
-// ```c++
-//     SIZE_TYPE beg = 0;
-//     if (where == NStr::eTrunc_Begin  ||  where == NStr::eTrunc_Both) {
-//         _ASSERT(beg < length);
-//         while ( isspace((unsigned char) str[beg]) ) {
-//             if (++beg == length) {
-//                 return empty_str;
-//             }
-//         }
-//     }
-//     SIZE_TYPE end = length;
-//     if ( where == NStr::eTrunc_End  ||  where == NStr::eTrunc_Both ) {
-//         _ASSERT(beg < end);
-//         while (isspace((unsigned char) str[--end])) {
-//             if (beg == end) {
-//                 return empty_str;
-//             }
-//         }
-//         _ASSERT(beg <= end  &&  !isspace((unsigned char) str[end]));
-//         ++end;
-//     }
-// ```
-/// The `-db` value as NCBI keeps it: without the white space (`isspace` of the C locale)
-/// at its two ends. The reports show this name; the reader resolves it.
-pub fn db_name(value: &str) -> &str {
-    value.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'))
-}
-
 impl BlastpArgs {
     /// The options as `check_options` resolves them, without NCBI's warnings.
     pub fn resolve(&self) -> Result<ResolvedBlastpArgs> {
@@ -784,7 +747,21 @@ impl BlastpArgs {
         Ok(ResolvedBlastpArgs {
             query: self.query.clone(),
             subject: self.subject.clone().unwrap_or_default(),
-            db: self.db.as_deref().map(db_name).map(str::to_string),
+            // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
+            // ```c++
+            //     if (args.Exist(kArgDb) && args[kArgDb]) {
+            // 	std::string local_dblist = NStr::TruncateSpaces( args[kArgDb].AsString() );
+            //
+            //         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
+            //                                              mol_type));
+            // ```
+            // The name without the white space at its ends: what the reader resolves and
+            // what the reports show.
+            db: self
+                .db
+                .as_deref()
+                .map(crate::seqdb::db_argument_name)
+                .map(str::to_string),
             // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
             // ```c++
             //     if (args.Exist(kArgDbSize) && args[kArgDbSize]) {
@@ -846,9 +823,14 @@ mod tests {
     use clap::Parser;
 
     // NCBI reference (598d8ae6): c++/src/corelib/ncbistr.cpp:3152-3171 (`s_TruncateSpaces`
-    // with `eTrunc_Both`: `isspace` at both ends).
+    // with `eTrunc_Both`: `isspace` at both ends; `seqdb::db_argument_name`).
     #[test]
     fn the_database_name_loses_the_white_space_at_its_ends() {
+        let resolved_name = |given: &str| {
+            let cli = parse_cli(["losat", "blastp", "-query", "q.faa", "-db", given]);
+            let TestCommand::Blastp(args) = cli.command;
+            args.resolve().unwrap().db
+        };
         for (given, kept) in [
             ("db", "db"),
             (" db ", "db"),
@@ -860,7 +842,7 @@ mod tests {
             ("   ", ""),
             ("\u{a0}db", "\u{a0}db"),
         ] {
-            assert_eq!(db_name(given), kept, "{given:?}");
+            assert_eq!(resolved_name(given).as_deref(), Some(kept), "{given:?}");
         }
     }
 

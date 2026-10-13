@@ -31,7 +31,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
 use crate::report::pairwise::PairwiseDatabase;
-use crate::seqdb::{BlockRange, SeqDb, SeqDbError, SeqType, SequenceBlock};
+use crate::seqdb::{BlockRange, SearchPath, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{compute_length_adjustment_ncbi, KarlinParams};
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
@@ -84,33 +84,61 @@ pub(super) struct BlastpDatabase {
     name: String,
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdb.cpp:155-165
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
 // ```c++
-// CSeqDB::CSeqDB(const string & dbname,
-//                ESeqType       seqtype,
-//                CSeqDBGiList * gi_list,
-//                bool           use_atlas_lock)
-//
-// {
-//     if (dbname.size() == 0) {
-//         NCBI_THROW(CSeqDBException,
-//                    eArgErr,
-//                    "Database name is required.");
+//     static const string GenerateSearchPath() {
+//         string splitter;
+//         string path;
+// #if defined(NCBI_OS_UNIX)
+//         splitter = ":";
+// #else
+//         splitter = ";";
+// #endif
+//         // Local directory first;
+//         path  = CDirEntry::NormalizePath(CDir::GetCwd(),eFollowLinks);
+//         path += splitter;
+//         // Then, BLASTDB;
+//         CNcbiEnvironment env;
+//         path += CDirEntry::NormalizePath(env.Get("BLASTDB"),eFollowLinks);
+//         path += splitter;
+//         // Finally, the config file.
+//         CNcbiApplicationAPI* app = CNcbiApplicationAPI::Instance();
+//         if (app) {
+//             const CNcbiRegistry& registry = app->GetConfig();
+//             if (registry.HasEntry("BLAST", "BLASTDB")) {
+//                 path += CDirEntry::NormalizePath(registry.Get("BLAST", "BLASTDB"),eFollowLinks);
+//                 path += splitter;
+//             }
+//         }
+//         return path;
 //     }
 // ```
-/// Opens the protein database `name` for a BLASTP search (the one function through which
-/// BLASTP opens a database). `settings` are NCBI's application settings of the run (the
-/// registry value behind NCBI's database search path is read from them).
+/// Opens the protein database `name` (the `-db` value as NCBI keeps it,
+/// `seqdb::db_argument_name`) for a BLASTP search: the one function through which BLASTP
+/// opens a database. The name is looked for as NCBI looks for it: in the current
+/// directory, then in the directories of the `BLASTDB` variable, then in those of the
+/// registry entry `[BLAST] BLASTDB` (`settings.blastdb`, read from
+/// `NCBI_CONFIG__BLAST__BLASTDB`, `blastp.ini` and `.ncbirc`).
 pub(super) fn open_search_database(
     name: &str,
-    _settings: &ApplicationSettings,
-) -> Result<SeqDb, SeqDbError> {
-    if name.is_empty() {
-        return Err(SeqDbError::NotFound(
-            "Database name is required.".to_string(),
-        ));
-    }
-    SeqDb::open(name, SeqType::Protein)
+    settings: &ApplicationSettings,
+) -> Result<SeqDb, DatabaseOpenError> {
+    let registry = match &settings.blastdb {
+        Ok(value) => value.as_deref(),
+        Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
+    };
+    let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
+    SeqDb::open_in(name, SeqType::Protein, &path).map_err(DatabaseOpenError::Reader)
+}
+
+/// Why `open_search_database` could not open a database.
+#[derive(Debug)]
+pub(super) enum DatabaseOpenError {
+    /// The registry entry `[BLAST] BLASTDB` has a value that LOSAT does not read as NCBI
+    /// does (`ApplicationSettings::blastdb`).
+    Registry(String),
+    /// An error of the reader (NCBI's own, or LOSAT's refusal: `database_error`).
+    Reader(SeqDbError),
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
@@ -139,31 +167,81 @@ pub(super) fn open_search_database(
 // ```c++
 // #define BLAST_DATABASE_ERROR                    2
 // ```
-/// The error of a database that cannot be read, as the command line reports it: NCBI's
-/// own errors (a database that is not found, a file that is no database file, a file
-/// that cannot be read) as `BLAST Database error: <text>` with exit status 2; a database
-/// that needs what LOSAT does not read (`SeqDbError::Unsupported`) in LOSAT's wording.
+/// A reader error outside the preliminary search (when the database is opened, and when
+/// the sequences and titles of the hit lists are read) as the command line reports it:
+/// NCBI's own errors (`SeqDbError::ncbi_message`: a database that is not found, a file
+/// that is no database file or cannot be opened) as `BLAST Database error: <text>` with
+/// exit status 2; everything else is LOSAT's refusal, in LOSAT's wording.
 pub(super) fn database_error(error: SeqDbError) -> anyhow::Error {
-    match error {
-        SeqDbError::Unsupported { .. } => {
-            anyhow::anyhow!("{error}; this database is not supported by LOSAT's BLASTP")
+    match error.ncbi_message() {
+        Some(text) => NativeError {
+            exit: 2,
+            message: format!("BLAST Database error: {text}\n"),
         }
-        SeqDbError::Range(_) => anyhow::anyhow!("{error}"),
-        SeqDbError::NotFound(_) | SeqDbError::Io { .. } | SeqDbError::Format { .. } => {
-            NativeError {
-                exit: 2,
-                message: format!("BLAST Database error: {error}\n"),
-            }
-            .into()
-        }
+        .into(),
+        None => refusal(&error.to_string()),
     }
 }
+
+/// LOSAT's refusal of a database that it does not search as NCBI does.
+fn refusal(reason: &str) -> anyhow::Error {
+    anyhow::anyhow!("{reason}; this database is not supported by LOSAT's BLASTP")
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:240-251
+// ```c++
+// 	catch (CSeqDBException & e) {
+// 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {
+//             _TRACE(e.GetMsg());
+// 			string err_msg = BlastErrorCode2String(BLASTERR_DB_TOO_MANY_OPEN_FILES);
+// 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
+// 		}
+// 		else {
+//             _TRACE(e.GetMsg());
+// 			string err_msg = BlastErrorCode2String(BLASTERR_DB_MEMORY_MAP);
+// 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
+// 		}
+// 	}
+// ```
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
+// ```c++
+//         } else {                                                            \
+//             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
+//             exit_code = BLAST_ENGINE_ERROR;                                 \
+// ```
+/// A reader error while the preliminary search reads the sequences: NCBI's search stage
+/// replaces the reader's text (`SeqDbError::ncbi_search_message`), and the application
+/// reports `BLAST engine error: <text>` with exit status 3. The error is kept apart from
+/// the others (`PreliminaryReadError`), because NCBI has written the outfmt 0 prolog and
+/// read the first query batch before it (`blast_engine::run_resolved_in_pool`).
+fn search_read_error(error: SeqDbError) -> anyhow::Error {
+    match error.ncbi_search_message() {
+        Some(text) => PreliminaryReadError(text).into(),
+        None => refusal(&error.to_string()),
+    }
+}
+
+/// NCBI's error of a database file that cannot be read during the preliminary search
+/// (`search_read_error`), with the text after `BLAST engine error: `.
+#[derive(Debug)]
+pub(super) struct PreliminaryReadError(pub(super) &'static str);
+
+impl std::fmt::Display for PreliminaryReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BLAST engine error: {}", self.0)
+    }
+}
+
+impl std::error::Error for PreliminaryReadError {}
 
 impl BlastpDatabase {
     /// Opens the database of `-db name` (`open_search_database`) with the command line's
     /// errors (`database_error`).
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        let db = open_search_database(name, settings).map_err(database_error)?;
+        let db = open_search_database(name, settings).map_err(|error| match error {
+            DatabaseOpenError::Registry(reason) => refusal(&reason),
+            DatabaseOpenError::Reader(error) => database_error(error),
+        })?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -335,9 +413,10 @@ pub(super) fn blastp_database_search_space(
 //     }
 // ```
 // NCBI searches the stored bytes in place: a stored O (26) scores as X in every matrix
-// row and column, so LOSAT reads it as X (21) before the search, as the `-subject`
-// encoder does (`encode_protein_sequence`, after blast_setup_cxx.cpp:894-899); the
-// reports show the stored letter (`ListedSubjects`). A stored gap character (0, which
+// row and column, so the preliminary stage, which reads scores only, reads it as X (21),
+// as the `-subject` encoder does (`encode_protein_sequence`, after
+// blast_setup_cxx.cpp:894-899); the redo and the reports read the stored letter
+// (`ListedSubjects`). A stored gap character (0, which
 // makeblastdb writes for `-` in a protein FASTA) never aligns in NCBI (row and column 0
 // stay `BLAST_SCORE_MIN`) and NCBI's formatter then counts it as a gap of the alignment;
 // LOSAT's kernels read byte 0 as the end of a sequence, so a sequence that holds one is
@@ -396,7 +475,7 @@ fn prepare_search_block(block: &mut SequenceBlock) -> Result<()> {
 
 /// Reads the block `range` and prepares it for the search (`prepare_search_block`).
 fn read_search_block(db: &SeqDb, range: BlockRange) -> Result<SequenceBlock> {
-    let mut block = db.read_block(range).map_err(database_error)?;
+    let mut block = db.read_block(range).map_err(search_read_error)?;
     prepare_search_block(&mut block)?;
     Ok(block)
 }
@@ -662,11 +741,14 @@ where
 pub(super) struct ListedSubjects {
     /// The listed ordinal ids, ascending.
     pub(super) ordinals: Vec<u32>,
-    /// The sequences as the search reads them (O as X), by rank.
+    /// The sequences as stored (O stays O), between two sentinel bytes, by rank: what
+    /// the composition redo reads.
     pub(super) encoded: Vec<EncodedProtein>,
-    /// The stored titles and the stored letters (O as O) as the reports read them, by
-    /// rank.
+    /// The stored titles and the stored letters as the reports read them, by rank.
     pub(super) records: Vec<FastaRecord>,
+    /// Whether the stored title of a subject holds a byte outside ' ' ..= '~' (read as
+    /// '#'), by rank (`check_reported_titles`).
+    replaced_title_bytes: Vec<bool>,
 }
 
 impl ListedSubjects {
@@ -679,7 +761,39 @@ impl ListedSubjects {
     //         }
     // ```
     // NCBI's redo fetches each sequence of the hit lists again from the database, in the
-    // encoding of the search. NCBI reference for the titles:
+    // encoding of the search: the stored bytes.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1620-1636
+    // ```c
+    //     /* Copy the sequence data */
+    //     for (idx = 0;  idx < seqData->length;  idx++) {
+    //         seqData->data[idx] = origData[idx];
+    //     }
+    //
+    //     if ( !(KAPPA_BLASTP_NO_SEG_SEQUENCE) ) {
+    //         if (compo_adjust_mode
+    //             && (!subject_maybe_biased || *subject_maybe_biased)) {
+    //
+    //             if ( (!shouldTestIdentical)
+    //                  || (shouldTestIdentical
+    //                      && (!s_TestNearIdentical(seqData, 0, queryData,
+    //                                               q_range->begin, query_words,
+    //                                               align)))) {
+    //
+    //                 status = s_DoSegSequenceData(seqData, eBlastTypeBlastp,
+    //                                              subject_maybe_biased);
+    // ```
+    // Here the stored letter matters: a stored O (26) is not the X (21) that the query
+    // holds for its own O (blast_setup_cxx.cpp:894-899), so an O aligned to an O counts
+    // against "near identical" and the subject is then SEG-filtered, where the same
+    // records given as `-subject` (O read as X on both sides) are near identical. Shown
+    // with the oracle (campaign dbsearch-20261012, `$BUILD_ROOT/dbsearch/db3/exp_o_near`;
+    // fixture rows `db.o_stored.*`): NCBI `-db` gives 266 bits where `-subject` gives
+    // 307. So the redo reads the stored bytes; its matrices score O as X
+    // (`adjust_scores.rs`, composition_adjustment.c:681-703). The preliminary stage uses
+    // scores only, which are the same for O and X (`prepare_search_block`).
+    //
+    // NCBI reference for the titles:
     // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:970-1017 (`s_GetBioseqTitle`: the
     // title of the first definition line, the others appended as ` >id title`).
     /// Reads the sequences and the definition lines of the ordinal ids in `hit_lists`
@@ -698,18 +812,15 @@ impl ListedSubjects {
         ordinals.dedup();
         let mut encoded = Vec::with_capacity(ordinals.len());
         let mut records = Vec::with_capacity(ordinals.len());
+        let mut replaced_title_bytes = Vec::with_capacity(ordinals.len());
         for &ordinal in &ordinals {
             let stored = db.read_sequence(ordinal).map_err(database_error)?;
             let residues = stored.protein(0);
+            // (A sequence with a gap residue or a foreign byte never reaches a hit
+            // list: `prepare_search_block` rejects its block.)
             let mut aa_seq = Vec::with_capacity(residues.len() + 2);
             aa_seq.push(NCBISTDAA_GAP);
-            aa_seq.extend(residues.iter().map(|&residue| {
-                if residue == NCBISTDAA_O {
-                    ncbistdaa::X
-                } else {
-                    residue
-                }
-            }));
+            aa_seq.extend_from_slice(residues);
             aa_seq.push(NCBISTDAA_GAP);
             encoded.push(EncodedProtein {
                 aa_seq,
@@ -725,6 +836,7 @@ impl ListedSubjects {
                 );
             }
             let defline = deflines.remove(0);
+            replaced_title_bytes.push(defline.replaced_title_bytes > 0);
             let letters: Vec<u8> = residues
                 .iter()
                 .map(|&residue| ncbistdaa_to_ascii(residue) as u8)
@@ -752,7 +864,59 @@ impl ListedSubjects {
             ordinals,
             encoded,
             records,
+            replaced_title_bytes,
         })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
+    // ```c++
+    //         string message;
+    //         if (io != NULL) {
+    //             message += io->GetStackTrace() + "\n";
+    //         }
+    //         message += "Bad char [0x" +
+    //                    NStr::NumericToString((unsigned char)c,0,16)+
+    //                    "] in string";
+    //         if (io != NULL) {
+    //             message += " at " + io->GetPosition();
+    //         }
+    //         if (!str.empty()) {
+    //             message += "\n" + str;
+    //         }
+    //         switch (fix_method) {
+    //         case eFNP_ReplaceAndWarn:
+    // #if 0
+    //             CNcbiDiag(eDiag_Error, eDPF_Default)
+    //                 << ErrCode(NCBI_ERRCODE_X, 7) << message << Endm;
+    // #else
+    //             ERR_POST_X(7, message);
+    // #endif
+    //             break;
+    // ```
+    // NCBI BLAST+ 2.17.0 `blastp -db` on a version 4 database whose header file holds
+    // the bytes 0xE9 and 0x7F in two titles (campaign dbsearch-20261012,
+    // `$BUILD_ROOT/dbsearch/db3/exp_badbyte`): the report shows `#` for the byte, and
+    // standard error gets, for each reported subject and bad byte,
+    //   Error: (803.7) [blastp] Blast-def-line-set.E.title
+    //   Bad char [0xE9] in string at byte 21
+    //   <the stored title>
+    // as often as the formatter reads the definition line: twice per subject for the
+    // default outfmt 6, three times for `6 sseqid stitle`, five times for outfmt 0. The
+    // number of readings is the formatter's, not ported; makeblastdb and `LOSAT makedb`
+    // store `#` for such a byte, so only a header file written otherwise holds one.
+    /// LOSAT's rejection of a reported subject (one with rows in the final `hit_lists`)
+    /// whose stored title holds a byte outside ' ' ..= '~': NCBI writes an error message
+    /// for the byte each time its formatter reads the definition line.
+    pub(super) fn check_reported_titles(&self, hit_lists: &[Option<BlastpHitList>]) -> Result<()> {
+        for rank in Self::reported(hit_lists) {
+            if self.replaced_title_bytes[rank] {
+                bail!(
+                    "database sequence {} has a stored title with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line); this is not supported by LOSAT's BLASTP",
+                    self.ordinals[rank]
+                );
+            }
+        }
+        Ok(())
     }
 
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).
@@ -922,6 +1086,8 @@ mod tests {
     }
 
     // align_format_util.cpp:385-387: an empty title is shown as the name.
+    // (A path in the system's temporary directory or in an error text: Unix spelling.)
+    #[cfg(unix)]
     #[test]
     fn a_database_without_a_title_shows_its_name() {
         let dir = std::env::temp_dir().join(format!(
@@ -950,6 +1116,8 @@ mod tests {
     }
 
     // blast_app_util.hpp:185-203 and seqdb.cpp:155-165.
+    // (A path in the system's temporary directory or in an error text: Unix spelling.)
+    #[cfg(unix)]
     #[test]
     fn open_errors_are_ncbis_database_errors_or_losats_refusals() {
         let native = |error: anyhow::Error| {
@@ -1237,7 +1405,7 @@ mod tests {
     }
 
     // The listed subjects stand for the subject set after the preliminary stage: ranks
-    // in ordinal order, O searched as X and shown as O (p03 and p08 of the fixture).
+    // in ordinal order, with the stored letters (O is O; p03 and p08 of the fixture).
     #[test]
     fn listed_subjects_are_read_by_ordinal_and_renamed_to_ranks() {
         let database = open("prot_mv");
@@ -1270,7 +1438,7 @@ mod tests {
         let mut renamed = oids(&hit_lists[2]);
         renamed.sort();
         assert_eq!(renamed, [(0, vec![0, 0]), (1, vec![1, 1])]);
-        // p03: every letter; the search reads O as X, the report shows O.
+        // p03: every letter; the redo and the report read the stored letters (O is O).
         assert_eq!(
             listed.records[1].title(),
             b"p03 every letter of NCBIstdaa but the gap"
@@ -1279,11 +1447,11 @@ mod tests {
             listed.records[1].seq(),
             b"ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT"
         );
-        let searched: String = listed.encoded[1].aa_seq[1..=listed.encoded[1].aa_len]
+        let redone: String = listed.encoded[1].aa_seq[1..=listed.encoded[1].aa_len]
             .iter()
             .map(|&residue| ncbistdaa_to_ascii(residue))
             .collect();
-        assert_eq!(searched, "ABCDEFGHIKLMNPQRSTVWXYZUXJMHCENQT");
+        assert_eq!(redone, "ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT");
         assert_eq!(listed.encoded[1].aa_seq.len(), 35);
         assert_eq!(
             listed.records[2].seq(),
@@ -1303,5 +1471,62 @@ mod tests {
         listed
             .check_shown_titles(&[0usize, 1, 2, 3].into_iter().collect())
             .unwrap();
+        listed.check_reported_titles(&hit_lists).unwrap();
+    }
+
+    // NCBI BLAST+ 2.17.0 writes `Error: (803.7) [blastp] Blast-def-line-set.E.title`,
+    // `Bad char [0xE9] in string at byte 21` and the stored title to standard error
+    // each time its formatter reads such a definition line (`check_reported_titles`).
+    // (A path in the system's temporary directory or in an error text: Unix spelling.)
+    #[cfg(unix)]
+    #[test]
+    fn a_reported_title_with_a_byte_outside_the_visible_range_is_rejected() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-db-badtitle-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        for ext in ["pin", "psq"] {
+            std::fs::copy(fixture("prot_v4") + "." + ext, dir.join(format!("b.{ext}"))).unwrap();
+        }
+        // The title of p10 (`p10 last protein`) with a byte of Latin-1 in it.
+        let mut header = std::fs::read(fixture("prot_v4") + ".phr").unwrap();
+        let at = header
+            .windows(16)
+            .position(|window| window == b"p10 last protein")
+            .expect("the title of p10");
+        header[at + 5] = 0xE9;
+        std::fs::write(dir.join("b.phr"), header).unwrap();
+        let name = dir.join("b").to_str().unwrap().to_string();
+        let database = BlastpDatabase::open(&name, &ApplicationSettings::default()).unwrap();
+        let list = |oid: u32| BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![test_hsp(oid, 60)],
+            best_evalue: 1e-5,
+        };
+        // A subject whose title is clean: nothing to reject.
+        let mut clean = BlastpHitList::new(10);
+        clean.update(list(0));
+        let mut hit_lists = vec![Some(clean)];
+        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        listed.check_reported_titles(&hit_lists).unwrap();
+        // The subject with the bad byte: read as `#`, and rejected when it is reported.
+        let mut bad = BlastpHitList::new(10);
+        bad.update(list(9));
+        bad.update(list(0));
+        let mut hit_lists = vec![Some(bad)];
+        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        assert_eq!(listed.records[1].title(), b"p10 l#st protein");
+        let error = listed.check_reported_titles(&hit_lists).unwrap_err();
+        assert!(
+            format!("{error:#}").starts_with(
+                "database sequence 9 has a stored title with a byte outside ' ' to '~'"
+            ),
+            "{error:#}"
+        );
+        drop(database);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

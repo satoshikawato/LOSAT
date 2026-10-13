@@ -4716,7 +4716,7 @@ pub fn run(
             records: std::borrow::Cow::Owned(Vec::new()),
             placements: seq_range::Placements::default(),
         },
-        None => read_cli_subjects(&args, settings)?,
+        None => read_cli_subjects(&args, &settings)?,
     };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
@@ -4787,7 +4787,7 @@ pub fn run(
 /// database arguments reads them (`run`).
 fn read_cli_subjects(
     args: &BlastpArgs,
-    settings: crate::blastinput::ncbi_environment::ApplicationSettings,
+    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
 ) -> Result<SubjectSet<'static>> {
     use crate::blastinput::app;
     use crate::blastinput::fasta_reader::{read_subjects, FastaInputSource, ReaderConfig};
@@ -5649,6 +5649,64 @@ fn write_reports_without_queries(
     Ok(())
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:240-251
+// ```c++
+// 	catch (CSeqDBException & e) {
+// 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {
+//             _TRACE(e.GetMsg());
+// 			string err_msg = BlastErrorCode2String(BLASTERR_DB_TOO_MANY_OPEN_FILES);
+// 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
+// 		}
+// 		else {
+//             _TRACE(e.GetMsg());
+// 			string err_msg = BlastErrorCode2String(BLASTERR_DB_MEMORY_MAP);
+// 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
+// 		}
+// 	}
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:227-229
+// ```c
+//     case BLASTERR_DB_MEMORY_MAP :
+//     	new_msg->message = strdup("Database memory map file error");
+//         new_msg->severity = eBlastSevFatal;
+// ```
+/// The error of a database search whose preliminary stage cannot read the database (a
+/// database without sequences, a sequence file that is missing or unreadable): NCBI has
+/// opened the database, written the outfmt 0 prolog and read the first query batch (its
+/// reader's messages) when the batch's search fails with `BLAST engine error: <text>`,
+/// exit status 3. LOSAT searches all batches together, so the failure is the first
+/// batch's. `first_batch_searched` is false when the first batch holds invalid queries
+/// only: NCBI does not search such a batch (local_blast.cpp:177-180), the failure would
+/// come with a later batch, after that batch's report, which is not reproduced.
+#[allow(clippy::too_many_arguments)]
+fn preliminary_search_error(
+    args: &ResolvedBlastpArgs,
+    subject_source: BlastpSubjectSource<'_>,
+    subject_label: &str,
+    outputs: &mut ReportOutputs<'_>,
+    reports: &BlastpReports<'_>,
+    first_batch_searched: bool,
+    database_name: &str,
+    text: &str,
+) -> anyhow::Error {
+    if !first_batch_searched {
+        return anyhow::anyhow!(
+            "the database {database_name} cannot be searched ({text}) and the first query batch is one that NCBI BLAST+ does not search; this is not supported by LOSAT's BLASTP"
+        );
+    }
+    let written = (|| -> Result<()> {
+        write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+        if let Some(first_batch_messages) = reports.reader_warnings.first() {
+            outputs.diagnostics.write_all(first_batch_messages)?;
+        }
+        Ok(())
+    })();
+    match written {
+        Ok(()) => crate::blastinput::app::engine_error(text),
+        Err(error) => error,
+    }
+}
+
 /// What the reports of the searched batches need besides the search: the reader's
 /// messages before each query's report (`read_query_batches`), whether the reports end
 /// with the epilog, and whether ABI v1's rejection of outfmt 0 titles applies
@@ -6123,44 +6181,19 @@ fn run_resolved_in_pool(
         BlastpTiming::record_duration(&timing.lookup_ns, lookup_start);
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:240-251
-    // ```c++
-    // 	catch (CSeqDBException & e) {
-    // 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {
-    //             _TRACE(e.GetMsg());
-    // 			string err_msg = BlastErrorCode2String(BLASTERR_DB_TOO_MANY_OPEN_FILES);
-    // 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
-    // 		}
-    // 		else {
-    //             _TRACE(e.GetMsg());
-    // 			string err_msg = BlastErrorCode2String(BLASTERR_DB_MEMORY_MAP);
-    // 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
-    // 		}
-    // 	}
-    // ```
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_message.c:227-229
-    // ```c
-    //     case BLASTERR_DB_MEMORY_MAP :
-    //     	new_msg->message = strdup("Database memory map file error");
-    //         new_msg->severity = eBlastSevFatal;
-    // ```
     // A database without sequences (makeblastdb builds none; a volume whose index holds
     // no sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query
     // batch and fails in that batch's preliminary search, where its reader cannot map
-    // the sequence file (fixture `LOSAT/tests/seqdb/db/empty`). A batch of invalid
-    // queries only is not searched by NCBI (local_blast.cpp:177-180), so the failure
-    // would come with a later batch, after that batch's report: not reproduced.
+    // the sequence file (fixture `LOSAT/tests/seqdb/db/empty`).
     if let Some(database) = database.filter(|database| database.num_sequences() == 0) {
-        anyhow::ensure!(
-            query_batch_skipped.first() == Some(&false),
-            "a database without sequences ({}) searched with a first query batch that NCBI BLAST+ does not search is not supported by LOSAT's BLASTP",
-            database.name()
-        );
-        write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
-        if let Some(first_batch_messages) = reports.reader_warnings.first() {
-            outputs.diagnostics.write_all(first_batch_messages)?;
-        }
-        return Err(crate::blastinput::app::engine_error(
+        return Err(preliminary_search_error(
+            &args,
+            subject_source,
+            subject_label,
+            outputs,
+            reports,
+            chunk_prelim.is_some() || query_batch_skipped.first() == Some(&false),
+            database.name(),
             "Database memory map file error",
         ));
     }
@@ -7328,7 +7361,24 @@ fn run_resolved_in_pool(
             &process_subject,
             &mut preliminary_hit_lists,
             prelim_hitlist_size,
-        )?;
+        )
+        .map_err(|error| {
+            // A sequence file that cannot be read: NCBI's error of the batch's
+            // preliminary search (`database::PreliminaryReadError`).
+            match error.downcast::<database::PreliminaryReadError>() {
+                Ok(read_error) => preliminary_search_error(
+                    &args,
+                    subject_source,
+                    subject_label,
+                    outputs,
+                    reports,
+                    chunk_prelim.is_some() || query_batch_skipped.first() == Some(&false),
+                    database.name(),
+                    read_error.0,
+                ),
+                Err(other) => other,
+            }
+        })?;
         if let Some(timing) = timing.as_ref() {
             BlastpTiming::record_call(
                 &timing.prelim_merge_sort_ns,
@@ -8701,6 +8751,11 @@ fn run_resolved_in_pool(
             lines
         })
         .collect();
+    // A database title that LOSAT does not report as NCBI does is an error before any
+    // format is written.
+    if let Some(listed) = listed_subjects.as_ref() {
+        listed.check_reported_titles(&hit_lists)?;
+    }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`).
     let subject_ids: Vec<Arc<[u8]>> = if format_plans

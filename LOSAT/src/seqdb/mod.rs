@@ -777,6 +777,7 @@ impl SeqDb {
                 Ok(OrdinalDefline {
                     title: defline.title,
                     bl_ord_id: bl_ord_id as u32,
+                    replaced_title_bytes: defline.replaced_title_bytes,
                 })
             })
             .collect()
@@ -804,4 +805,7 @@ pub struct OrdinalDefline {
     pub title: Vec<u8>,
     /// `n` of `gnl|BL_ORD_ID|n`.
     pub bl_ord_id: u32,
+    /// Number of stored title bytes outside ' ' ..= '~' that were read as '#'
+    /// (`Defline::replaced_title_bytes`).
+    pub replaced_title_bytes: usize,
 }

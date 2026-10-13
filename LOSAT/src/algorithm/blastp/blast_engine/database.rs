@@ -438,8 +438,14 @@ fn prepare_search_block(block: &mut SequenceBlock) -> Result<()> {
         invalid |= usize::from(*residue) >= BLASTAA_SIZE;
     }
     // A well-formed block holds one sentinel byte before its first sequence and one
-    // after every sequence, and no other byte 0.
-    if gaps == sequences + 1 && !invalid {
+    // after every sequence, and no other byte 0: with as many bytes 0 as sentinels, the
+    // sentinels in place leave none inside a sequence.
+    let sentinels_in_place = (0..sequences).all(|i| {
+        let with_sentinels = block.protein_with_sentinels(i);
+        (i > 0 || with_sentinels[0] == NCBISTDAA_GAP)
+            && with_sentinels[with_sentinels.len() - 1] == NCBISTDAA_GAP
+    });
+    if gaps == sequences + 1 && !invalid && sentinels_in_place {
         return Ok(());
     }
     for i in 0..sequences {
@@ -510,6 +516,13 @@ fn block_subject(block: &SequenceBlock, i: usize) -> BlastpSubjectRef<'_> {
 /// `diag_offset` before them: the recurrence of `BlastpSubjectScratch::finish_subject`
 /// over the sequence lengths of the index. A sequence without letters is not searched
 /// (blast_engine.c:1429-1432), so the offset does not move for it.
+///
+/// No search result depends on this value: from a cleared table, every starting offset
+/// from `window` up to INT4_MAX / 4 gives the same decisions (a cleared entry reads as
+/// `diff >= window`, or `diff >= 0` for one hit, and its flag is 0). A block starts at
+/// the one-thread offset so that its table holds the values of the one-thread table and
+/// the INT4_MAX / 4 reset (which keeps the 31-bit `last_hit` in range) falls on the
+/// same sequences.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -567,8 +580,13 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 /// offset of every later subject by at least the window, so it reads as a cleared entry
 /// does (the property the parallel `-subject` path uses per subject). The round's
 /// results are put into the hit lists in ordinal order, and its blocks are dropped
-/// before the next round is read: the memory held is bounded by the threads and the
-/// block size, not by the database.
+/// before the next round is read: during this stage a worker holds one block at a
+/// time, so the sequence memory is bounded by the threads and the block size, not by
+/// the database (the results of a round wait for the merge; after the stage,
+/// `ListedSubjects` holds the sequences of the listed subjects). A block that cannot be
+/// read or searched does not stop the other blocks of its round; the round's first
+/// error in ordinal order is returned, the error of the one-thread order (the blocks
+/// are cut alike).
 pub(super) fn search_blocks<S, K>(
     database: &BlastpDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
@@ -1402,16 +1420,23 @@ mod tests {
             ),
             "{error:#}"
         );
-        // A sentinel that is not NUL (the byte after sequence 0) with a NUL elsewhere,
-        // so that the count of NUL bytes alone would not show it.
-        let mut block = database.db.read_block(range).unwrap();
-        let after_first = offset_of(&block, 1) - 1;
-        block.protein_bytes_mut()[after_first] = 1;
-        let error = prepare_search_block(&mut block).unwrap_err();
-        assert!(
-            format!("{error:#}").contains("is not between two NUL bytes"),
-            "{error:#}"
-        );
+        // A sentinel that is not NUL (the byte after sequence 0), alone and with a NUL
+        // inside sequence 9, so that the count of NUL bytes alone would not show it.
+        for compensated in [false, true] {
+            let mut block = database.db.read_block(range).unwrap();
+            let after_first = offset_of(&block, 1) - 1;
+            block.protein_bytes_mut()[after_first] = 1;
+            if compensated {
+                let inside = offset_of(&block, 9) + 5;
+                block.protein_bytes_mut()[inside] = 0;
+            }
+            let error = prepare_search_block(&mut block).unwrap_err();
+            assert!(
+                format!("{error:#}")
+                    .starts_with("database sequence 0 is not between two NUL bytes"),
+                "{error:#}"
+            );
+        }
     }
 
     /// A kernel that records what it is given and "finds" every third sequence.

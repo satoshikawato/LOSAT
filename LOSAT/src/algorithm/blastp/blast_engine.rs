@@ -72,8 +72,9 @@ use super::gapalign::{
 };
 use super::hsp::{
     blast_compo_early_termination, collect_hits_and_methods_from_hit_lists,
-    collect_hits_from_hit_lists, fill_results_from_compo_heaps, reap_hsplist_by_evalue,
-    trim_by_max_hsps, BlastCompoHeap, BlastpHitList, BlastpHsp, BlastpHspList,
+    collect_hits_from_hit_lists, fill_results_from_compo_heaps, hit_list_to_seqalign_order,
+    reap_hsplist_by_evalue, trim_by_max_hsps, BlastCompoHeap, BlastpHitList, BlastpHsp,
+    BlastpHspList,
 };
 #[cfg(all(
     feature = "parallel",
@@ -8032,37 +8033,22 @@ fn run_resolved_in_pool(
             hit_list.prune_by_size(args.max_target_seqs);
         }
     }
-    // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:672-674
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:267-275
     // ```c++
-    //     if (hsp->score == 0) {
-    //         return CRef<CSeq_align>();
-    //     }
+    //     TSeqAlignVector aligns =
+    //         LocalBlastResults2SeqAlign(hsp_results,
+    //                                    *qdata,
+    //                                    *m_SeqInfoSrc,
+    //                                    m_OptsMemento->m_ProgramType,
+    //                                    m_Options->GetGappedMode(),
+    //                                    m_Options->GetOutOfFrameMode(),
+    //                                    subj_masks,
+    //                                    m_ResultType);
     // ```
-    // NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1485-1490
-    // ```c++
-    //             seqalign =
-    //                 s_BlastHSP2SeqAlign(program, hsp, query_id, subject_id,
-    //                                     query_length, subject_length);
-    //         }
-    //
-    //         if (seqalign.Empty()) continue;
-    // ```
-    // The reports are made from the Seq-aligns of the final hit lists: an HSP of score 0
-    // (kept by a very large -evalue) is in no report, and a subject with only such HSPs has
-    // none (the hit list was already cut to -max_target_seqs).
+    // The reports are made from the Seq-aligns of the final hit lists, in the order and with
+    // the HSPs that BlastHitList2SeqAlign_OMF gives them (`hit_list_to_seqalign_order`).
     for hit_list in hit_lists.iter_mut().flatten() {
-        let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-        let mut kept: Vec<_> = hit_list
-            .hsplist_array
-            .drain(..count)
-            .filter_map(|mut hsp_list| {
-                hsp_list.hsps.retain(|hsp| hsp.raw_score != 0);
-                (!hsp_list.hsps.is_empty()).then_some(hsp_list)
-            })
-            .collect();
-        hit_list.hsplist_count = kept.len();
-        kept.append(&mut hit_list.hsplist_array);
-        hit_list.hsplist_array = kept;
+        hit_list_to_seqalign_order(hit_list);
     }
     recount_pyrrolysine_identities(
         &mut hit_lists,

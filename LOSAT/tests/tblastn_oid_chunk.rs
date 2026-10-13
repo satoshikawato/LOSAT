@@ -308,3 +308,53 @@ fn a_long_subject_first_in_the_middle_or_last_gives_the_one_thread_report() {
         }
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-344
+// ```c++
+//     begin_chunk = * state_obj;
+//
+//     // fill the cache for all sequence in mmaped slice
+//     if (m_NumThreads) {
+//         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
+//         x_FillSeqBuffer(buffer, begin_chunk);
+// ```
+// With `LOSAT_X_TBNOIDNEXT` (off unless set) the threads take the next chunk when they are free,
+// as NCBI's do, and the lists come back in OID order (`src/algorithm/tblastn/x_oid_flow.rs`): the
+// search is one entry into the pool and the line names the chunks. The report must be the
+// one-thread report on the 240 pieces and on the sets with one long subject, at 2, 3 and 8
+// threads; with `LOSAT_X_TBNOIDCHUNK=0` there are no chunks and the switch does nothing.
+#[test]
+fn the_chunks_taken_when_a_thread_is_free_give_the_one_thread_report() {
+    let debug = ("LOSAT_WASI_THREADS_DEBUG", "1");
+    let next = ("LOSAT_X_TBNOIDNEXT", "1");
+    let mut sets = vec![(None, inputs().1.clone())];
+    for position in [Long::First, Long::Middle, Long::Last] {
+        sets.push((Some(position), long_subject_set(position)));
+    }
+    for (position, subjects) in sets {
+        let (expected, _) = tblastn_on(&subjects, 1, &[]);
+        for threads in [2, 3, 8] {
+            let (report, stderr) = tblastn_on(&subjects, threads, &[debug, next]);
+            assert!(
+                report == expected,
+                "{position:?}: {threads} threads with the flow differ from one thread"
+            );
+            assert_eq!(
+                pool_entries(&stderr),
+                1,
+                "{position:?} at {threads} threads"
+            );
+            assert!(
+                stderr.contains(" flow_chunks="),
+                "{position:?} at {threads} threads: no flow fields"
+            );
+        }
+    }
+    let (report, stderr) = tblastn(THREADS, &[debug, next, ("LOSAT_X_TBNOIDCHUNK", "0")]);
+    assert!(
+        report == tblastn(1, &[]).0,
+        "LOSAT_X_TBNOIDCHUNK=0 with the flow"
+    );
+    assert_eq!(pool_entries(&stderr), SUBJECTS / THREADS);
+    assert!(!stderr.contains(" flow_chunks="));
+}

@@ -1246,6 +1246,17 @@ fn x_tbn_oid_chunk() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOIDCHUNK"))
 }
 
+// No NCBI counterpart: reads the LOSAT_X_TBNOIDNEXT switch once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNOIDNEXT): off unless set (to any value); not in the strict set. It
+/// acts only where `LOSAT_X_TBNOIDCHUNK` makes the chunks.
+#[cfg(feature = "parallel")]
+fn x_tbn_oid_next() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOIDNEXT").is_some())
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:153-154
 // ```c++
 //     BlastSeqSrcSetNumberOfThreads(m_InternalData->m_SeqSrc->GetPointer(),
@@ -1371,6 +1382,32 @@ fn x_entry_chunks(
         start = end;
     }
     chunks
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-347
+// ```c++
+//     begin_chunk = * state_obj;
+// ...
+//         x_FillSeqBuffer(buffer, begin_chunk);
+//         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
+// ...
+//     *state_obj = end_chunk;
+// ```
+// The chunks NCBI's threads take one after another, all of them: each starts where the last one
+// ended. Scheduling only.
+/// EXPERIMENT (LOSAT_X_TBNOIDNEXT): every chunk of the subjects, in OID order.
+#[cfg(feature = "parallel")]
+fn x_all_chunks(subjects: &[Vec<u8>], bases: u64) -> Vec<std::ops::Range<usize>> {
+    x_entry_chunks(subjects, 0, usize::MAX, bases)
+}
+
+// No NCBI counterpart: NCBI's threads write their lists into the shared HSP stream at once. The
+// lists of chunks finished ahead of the oldest one LOSAT has not reduced yet wait, at most this
+// many chunks beyond it, so that their memory stays bounded. Scheduling only.
+/// EXPERIMENT (LOSAT_X_TBNOIDNEXT): the chunks taken or waiting beyond the oldest one not reduced.
+#[cfg(feature = "parallel")]
+fn x_flow_window(threads: usize) -> usize {
+    threads.saturating_mul(4).max(1)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3346-3350,3499-3502
@@ -1965,119 +2002,181 @@ fn run_preliminary_subjects(
     // not change any value NCBI computes.
     #[cfg(feature = "parallel")]
     let mut x_pool_entries = 0usize;
-    for (oid, subject) in subjects.iter().enumerate() {
-        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-        // BLAST_LinkHsps(..., subject->length, ...);
-        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
-        #[cfg(feature = "parallel")]
-        let (preliminary, linked) = if parallel_selected {
-            if parallel_batch.is_empty() {
-                let pool = pool.expect("parallel pool selected");
-                let search = |x_oid: usize, subject: &[u8]| {
+    #[cfg(feature = "parallel")]
+    let search = |x_oid: usize, subject: &[u8]| {
+        if diagnose {
+            let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(now, Ordering::SeqCst);
+        }
+        let result = subject_core(x_oid, subject);
+        if diagnose {
+            active.fetch_sub(1, Ordering::SeqCst);
+        }
+        (result, rayon::current_thread_index())
+    };
+    // EXPERIMENT (LOSAT_X_TBNOIDNEXT): every chunk of LOSAT_X_TBNOIDCHUNK handed to the threads
+    // when they are free (`x_oid_flow.rs`); the lists come back below chunk by chunk in OID order.
+    #[cfg(feature = "parallel")]
+    let x_flow = match x_chunk_bases {
+        Some(bases) if x_tbn_oid_next() => Some(super::x_oid_flow::XOidFlow::new(
+            x_all_chunks(subjects, bases),
+            x_flow_window(pool.map_or(1, SearchPool::threads)),
+        )),
+        _ => None,
+    };
+    #[cfg(feature = "parallel")]
+    let x_flow_search = |x_oid: usize| search(x_oid, &subjects[x_oid]);
+    // The OID-ordered reduction below, as one closure so that it can run inside the scope whose
+    // other threads search the chunks of the flow.
+    let mut reduce_subjects = || -> Result<()> {
+        for (oid, subject) in subjects.iter().enumerate() {
+            // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
+            // BLAST_LinkHsps(..., subject->length, ...);
+            // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
+            #[cfg(feature = "parallel")]
+            let (preliminary, linked) = if parallel_selected {
+                if parallel_batch.is_empty() {
+                    let pool = pool.expect("parallel pool selected");
+                    // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): one chunk of subjects per thread.
+                    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:338-341
+                    // ```c++
+                    //     if (m_NumThreads) {
+                    //         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
+                    //         x_FillSeqBuffer(buffer, begin_chunk);
+                    //         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
+                    // ```
+                    // Dispatch point: the chunks this entry into the pool takes (x_entry_chunks), one
+                    // task each, or one subject per thread without the switch. The subjects are
+                    // searched by the same call as before and their lists are taken in OID order
+                    // below.
+                    // EXPERIMENT (LOSAT_X_TBNOIDNEXT): the next chunk in OID order from the flow.
+                    let batch: Vec<_> = if let Some(flow) = x_flow.as_ref() {
+                        flow.next_in_order(&x_flow_search)?
+                            .context("missing ordered TBLASTN subject chunk")?
+                    } else if let Some(bases) = x_chunk_bases {
+                        x_pool_entries += 1;
+                        let chunks = x_entry_chunks(subjects, oid, pool.threads(), bases);
+                        let lists: Vec<Vec<_>> = pool.install(|| {
+                            chunks
+                                .par_iter()
+                                .with_max_len(1)
+                                .map(|chunk| {
+                                    chunk
+                                        .clone()
+                                        .map(|x_oid| search(x_oid, &subjects[x_oid]))
+                                        .collect()
+                                })
+                                .collect()
+                        });
+                        lists.into_iter().flatten().collect()
+                    } else {
+                        x_pool_entries += 1;
+                        let end = oid.saturating_add(pool.threads()).min(subjects.len());
+                        pool.install(|| {
+                            subjects[oid..end]
+                                .par_iter()
+                                .enumerate()
+                                .map(|(x_within, subject)| search(oid + x_within, subject))
+                                .collect()
+                        })
+                    };
                     if diagnose {
-                        let now = active.fetch_add(1, Ordering::SeqCst) + 1;
-                        peak.fetch_max(now, Ordering::SeqCst);
+                        workers.extend(batch.iter().filter_map(|(_, worker)| *worker));
                     }
-                    let result = subject_core(x_oid, subject);
-                    if diagnose {
-                        active.fetch_sub(1, Ordering::SeqCst);
-                    }
-                    (result, rayon::current_thread_index())
-                };
-                x_pool_entries += 1;
-                // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): one chunk of subjects per thread.
-                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:338-341
-                // ```c++
-                //     if (m_NumThreads) {
-                //         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
-                //         x_FillSeqBuffer(buffer, begin_chunk);
-                //         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
-                // ```
-                // Dispatch point: the chunks this entry into the pool takes (x_entry_chunks), one
-                // task each, or one subject per thread without the switch. The subjects are
-                // searched by the same call as before and their lists are taken in OID order
-                // below.
-                let batch: Vec<_> = if let Some(bases) = x_chunk_bases {
-                    let chunks = x_entry_chunks(subjects, oid, pool.threads(), bases);
-                    let lists: Vec<Vec<_>> = pool.install(|| {
-                        chunks
-                            .par_iter()
-                            .with_max_len(1)
-                            .map(|chunk| {
-                                chunk
-                                    .clone()
-                                    .map(|x_oid| search(x_oid, &subjects[x_oid]))
-                                    .collect()
-                            })
-                            .collect()
-                    });
-                    lists.into_iter().flatten().collect()
-                } else {
-                    let end = oid.saturating_add(pool.threads()).min(subjects.len());
-                    pool.install(|| {
-                        subjects[oid..end]
-                            .par_iter()
-                            .enumerate()
-                            .map(|(x_within, subject)| search(oid + x_within, subject))
-                            .collect()
-                    })
-                };
-                if diagnose {
-                    workers.extend(batch.iter().filter_map(|(_, worker)| *worker));
+                    parallel_batch.extend(batch);
                 }
-                parallel_batch.extend(batch);
+                parallel_batch
+                    .pop_front()
+                    .context("missing ordered TBLASTN subject result")?
+                    .0?
+            } else {
+                subject_core(oid, subject)?
+            };
+            #[cfg(not(feature = "parallel"))]
+            let (preliminary, linked) = subject_core(oid, subject)?;
+            // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
+            // BLAST_LinkHsps(..., hsp_list_out, ...);
+            // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
+            // The comparison-only trace retains pre-link HSP bytes by OID.
+            if let Some(ref mut trace) = observer {
+                trace.preliminary.push((oid, preliminary.clone()));
             }
-            parallel_batch
-                .pop_front()
-                .context("missing ordered TBLASTN subject result")?
-                .0?
-        } else {
-            subject_core(oid, subject)?
-        };
-        #[cfg(not(feature = "parallel"))]
-        let (preliminary, linked) = subject_core(oid, subject)?;
-        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-        // BLAST_LinkHsps(..., hsp_list_out, ...);
-        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
-        // The comparison-only trace retains pre-link HSP bytes by OID.
-        if let Some(ref mut trace) = observer {
-            trace.preliminary.push((oid, preliminary.clone()));
-        }
-        // NCBI c++/src/algo/blast/core/blast_engine.c:1553-1555:
-        // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
-        // NCBI c++/src/algo/blast/core/blast_hspstream.c:289-319:
-        // Query-indexed lists are consumed in
-        // reverse-sorted order by BlastHSPStreamRead.
-        for context in 0..inputs.queries.len() {
-            let hsps: Vec<_> = linked
-                .hsps
-                .iter()
-                .copied()
-                .filter(|h| h.context == context)
-                .collect();
-            if !hsps.is_empty() {
-                let best_evalue = hsps.iter().map(|h| h.evalue).reduce(f64::min).unwrap();
-                // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
-                // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
-                // Each context owns an independently capped preliminary list.
-                let collector = preliminary_hitlists[context]
-                    .get_or_insert(KappaResultHitList::new(inputs.prelim_size)?);
-                collector.update(KappaResultList {
-                    oid: i32::try_from(oid)?,
-                    hsps: LinkedHspList { hsps, best_evalue },
-                    payloads: Vec::new(),
-                })?;
+            // NCBI c++/src/algo/blast/core/blast_engine.c:1553-1555:
+            // status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+            // NCBI c++/src/algo/blast/core/blast_hspstream.c:289-319:
+            // Query-indexed lists are consumed in
+            // reverse-sorted order by BlastHSPStreamRead.
+            for context in 0..inputs.queries.len() {
+                let hsps: Vec<_> = linked
+                    .hsps
+                    .iter()
+                    .copied()
+                    .filter(|h| h.context == context)
+                    .collect();
+                if !hsps.is_empty() {
+                    let best_evalue = hsps.iter().map(|h| h.evalue).reduce(f64::min).unwrap();
+                    // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
+                    // Blast_HitListUpdate(results->hitlist_array[index], hsp_list);
+                    // Each context owns an independently capped preliminary list.
+                    let collector = preliminary_hitlists[context]
+                        .get_or_insert(KappaResultHitList::new(inputs.prelim_size)?);
+                    collector.update(KappaResultList {
+                        oid: i32::try_from(oid)?,
+                        hsps: LinkedHspList { hsps, best_evalue },
+                        payloads: Vec::new(),
+                    })?;
+                }
             }
         }
+        Ok(())
+    };
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-180
+    // ```c++
+    //     for (TBlastThreads::iterator thread = the_threads.begin();
+    //          thread != the_threads.end();
+    //          ++thread) {
+    //         (*thread)->Run();
+    //     }
+    // ```
+    // EXPERIMENT (LOSAT_X_TBNOIDNEXT): NCBI runs its search threads side by side until the
+    // subjects run out. With the flow the other threads of the pool take chunks for the whole
+    // search while this thread reduces (and searches when the next chunk is not ready); the flow
+    // is closed when the reduction ends, fails or panics, so the scope always ends.
+    #[cfg(feature = "parallel")]
+    match (x_flow.as_ref(), pool) {
+        (Some(flow), Some(pool)) => pool.install(|| {
+            rayon::scope(|scope| {
+                for _ in 1..pool.threads() {
+                    scope.spawn(|_| flow.work(&x_flow_search));
+                }
+                let _close = super::x_oid_flow::XCloseOnDrop(flow);
+                reduce_subjects()
+            })
+        })?,
+        _ => reduce_subjects()?,
     }
+    #[cfg(not(feature = "parallel"))]
+    reduce_subjects()?;
     // NCBI c++/src/algo/blast/core/blast_engine.c:1659-1668:
     // /* Use a local diagnostics structure, because the one passed in an input
     //    argument can be shared between multiple threads */
     #[cfg(feature = "parallel")]
     if parallel_selected && diagnose {
+        // EXPERIMENT (LOSAT_X_TBNOIDNEXT): with the flow the search is one entry; the line adds
+        // its chunks and the most finished chunks that waited for the reduction at once.
+        let x_flow_fields = x_flow.as_ref().map_or(String::new(), |flow| {
+            format!(
+                " flow_chunks={} flow_peak_waiting={}",
+                flow.chunks(),
+                flow.peak_waiting()
+            )
+        });
+        if x_flow.is_some() {
+            x_pool_entries = 1;
+        }
         eprintln!(
-            "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={} pool_entries={}",
-            subjects.len(), workers, peak.load(Ordering::SeqCst), x_pool_entries
+            "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={} pool_entries={}{}",
+            subjects.len(), workers, peak.load(Ordering::SeqCst), x_pool_entries, x_flow_fields
         );
     }
     Ok(preliminary_hitlists)

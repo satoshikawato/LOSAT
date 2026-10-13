@@ -372,6 +372,36 @@ Rebuilding less:
   result. One line at exit: `[X_SHADOW] LINKSORT sorts= indices_compared=`. Together with
   `LOSAT_X_HSPINPLACESHADOW=1` the reference bodies are compared with the path's result end to end
   (`LOSAT/tests/tblastx_link_sort.rs` runs both).
+- `LOSAT_X_LINKSLICES=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the linking call of the in-place HSP list path links its groups
+  as disjoint sub-slices of the one sorted list (`tblastx/x_link_slices.rs`, exactness argument in its
+  header; it acts only where `LOSAT_X_HSPINPLACE` does). Without it the call cuts the sorted list into
+  one Vec per group, links each and copies the linked groups into a new list of the whole size, so the
+  list exists twice while the new one is filled (AP027131 x AP027133, genetic code 4: 49 MiB twice in
+  the first linking call, where the heap of that search peaks). With it the groups are the same runs
+  (the same start test, `group_starts`), each kernel writes fields of its own records in place and
+  changes no order, and the list after the kernels is today's assembled list, record for record; no
+  second list is made. The kernels, their arguments, the per-thread scratch and the pool condition
+  (`allow_parallel` and more than one group) are today's; `LOSAT_LINKING_LEGACY` and the linking traces
+  link each group's copy with the literal port and write it back, since that port returns its group
+  in the same order and length. With the switch off the statements of `x_hsp_inplace.rs` run as
+  before, after one read of the mode per linking call. `LOSAT_TIMING=1`: `assemble` of the `x_link1`
+  / `x_link2` lines is then about zero. `LOSAT_X_STATS=1` prints, only with the switch or its shadow
+  on, `[X_STATS] LINKSLICES linkings= groups= parallel_linkings= legacy_fallbacks=` (linking calls
+  linked as slices, their groups, those on the pool, and calls handed back to the cut, which never
+  happens: always 0). Measured once on 2026-10-13 (one binary, a loaded machine): massif of AP027131 x
+  AP027133 at one thread, heap requested, 107.3 MiB at the peak in the first linking call without the
+  switch; with it that call reaches 77.3 MiB and the search peaks at 102.4 MiB at the end of the seed
+  stage, as without it. Max RSS (medians of three alternating runs, without -> with): that pair 110 ->
+  111 MiB at one thread and 162 -> 163 at eight (its RSS peak is in the seed stage); NZ_CP006932
+  against itself 142 -> 132 at one thread and 242 -> 222 at eight. `groups` 0.011 -> 0.002 s and
+  `assemble` 0.010 -> 0.000 s in the first linking call of the pair at one thread.
+- `LOSAT_X_LINKSLICESSHADOW=1` shadow of `LOSAT_X_LINKSLICES` (turns the path on): every linking call's
+  group step runs both ways, today's cut and assembly on the list and the slices on a copy of the
+  sorted list, and the two lists are compared record by record, every field, E-values by bits; the
+  first difference stops the run with a message that starts with the variable's name, and the search
+  continues with today's list. One line at exit: `[X_SHADOW] LINKSLICES linkings= hits_compared=`
+  (`LOSAT/tests/tblastx_link_slices.rs` runs it with the other linking variables).
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks

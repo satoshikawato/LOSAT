@@ -811,9 +811,9 @@ pub(super) fn x_scan_plan(
     //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
     //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
     // ```
-    // Translation and chunking of the subject, as above; this closure is what the shared plan
-    // memoises.
-    let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
+    // Translation and chunking of the subject, as above: the reference path of the plan that the
+    // shared plan memoises.
+    let x_reference_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
         let resolved_subject = resolve_local_subject_ncbi2na(subject)?;
         let frames = generate_frames(&resolved_subject, &code);
         let negative_first_length = frames
@@ -836,6 +836,40 @@ pub(super) fn x_scan_plan(
             }
         }
         Ok(std::sync::Arc::new(XSubjectPlan { frames, units }))
+    };
+    // EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the frames read from tables.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1071-1074,1080-1090
+    // ```c
+    //    } else {
+    //       translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
+    //       translation_table_rc = s_BlastGetTranslationTable(genetic_code, TRUE);
+    //    }
+    // ...
+    //    for (context = 0; context < NUM_FRAMES; ++context) {
+    //       frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+    //       if (encoding == eBlastEncodingNcbi2na) {
+    //          if (frame > 0) {
+    //             length =
+    //                BLAST_TranslateCompressedSequence(translation_table,
+    //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
+    //          } else {
+    //             length =
+    //                BLAST_TranslateCompressedSequence(translation_table_rc,
+    //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
+    // ```
+    // Dispatch point: what the shared plan memoises. Without the variables it is the closure above,
+    // as before. With LOSAT_X_TBNXLATE the subject becomes ncbi2na in one pass and each frame is
+    // read from the codon table of its strand, as BLAST_GetAllTranslations does for the compressed
+    // subject (tblastn/x_subject_translate.rs); the frames and units are the same values. With
+    // LOSAT_X_TBNXLATESHADOW both are made for every plan and the search stops if they differ.
+    let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
+        super::x_subject_translate::x_subject_plan(
+            super::x_subject_translate::x_translate(),
+            subject,
+            db_gencode,
+            mask_lowercase,
+            &x_reference_subject,
+        )
     };
     let x_slot = x_subject.and_then(|(side, oid)| {
         side.slot(oid, db_gencode, mask_lowercase)

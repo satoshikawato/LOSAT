@@ -333,6 +333,14 @@ Rebuilding less:
   by HSP, every field, E-values by bits; the first difference stops the run and the search continues with the
   reference's result. One line at exit:
   `[X_SHADOW] HSPINPLACE sorts= linkings= hits_compared= replay_fallbacks=`.
+- `LOSAT_X_BPLUT=1` (BLASTP, memory; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the lookup table of the default (non-compressed) BLASTP lookup is
+  filled in place from per-cell counts by `LOSAT_X_BXLUT`'s builder (same append order as
+  `s_AddNeighboringWords` and `BlastAaLookupFinalize`; `tblastx/lookup/x_lut_direct.rs`, exactness
+  argument in its header), so the per-cell chains of the reference builder, about 1.5 times the
+  finished table, are never held. In diagnostics mode the reference builder runs. Shadow:
+  `LOSAT_X_BPLUTSHADOW=1` (both builders, every table compared field by field, the reference's table
+  used); one line at exit: `[X_SHADOW] BPLUT tables_compared=`.
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the two-hit seed stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one

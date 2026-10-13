@@ -21,6 +21,8 @@ pub(crate) mod extension;
 pub(crate) mod gapalign;
 mod hsp;
 mod query_split;
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the queries searched in blocks of whole query batches.
+mod x_query_blocks;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
 // ```c
 // static void s_HSPListNormalizeScores(...);

@@ -287,9 +287,20 @@ Rebuilding less:
 - `LOSAT_X_SEGSHARE=1` blastp with 2+ threads: the subject SEG masks shared by the whole search,
   as in the one-thread path. Shadow: `LOSAT_X_SEGSHARESHADOW=1`.
 - `LOSAT_X_TBNQSIDE=1` tblastn: query SEG and lookup table once per query set.
-- `LOSAT_X_TBNSSIDE=1` tblastn: subject six-frame translations once per search of two or more
+- `LOSAT_X_TBNSSIDE=1` tblastn: subject six-frame translations once per search of four or more
   query batches (20,000 query residues per batch), up to 256 MiB of translated residues. A
-  search of one batch keeps none: no later batch could read them.
+  search of one to three batches keeps none and translates a subject again for each batch, as
+  NCBI does (`blast_engine.c:627-631`): one batch has no later reader, and two or three give
+  the time the kept translations would save for their memory. Timed with two and three batches
+  at 4 and 8 threads, with other work on the machine: on 28,036 16S subjects (40.6 Mb) the
+  search without them has 115 MiB less (max RSS 218-226 -> 103-113 MiB) and takes a median of
+  1.03-1.11 of the time, on one 606 kb genome the same memory and 1.05-1.08 of the time
+  (0.01-0.06 s). Four batches at 8 threads gave 1.06 on the 16S set, so the saving does not
+  start at four batches: the number is where the memory is preferred to it. `TBNBATCH` needs
+  the kept translations, so two or three batches with at least one batch per thread are now
+  searched one after another instead of side by side: 1.02-1.07 of the time on the 16S set and
+  1.12-1.24 on the genome (0.04-0.09 s) with one batch per thread, 0.75-0.86 with three
+  batches on two threads.
 - `LOSAT_X_LUTSPLIT=1` tblastn: build only the half (contexts or table) a caller uses.
 - `LOSAT_X_IDEALMEMO=1` BLOSUM62 ideal Karlin block once per process.
 - `LOSAT_X_BXSEGMEMO=1` blastx redo stage: the subject SEG once per subject instead of once per window
@@ -364,8 +375,9 @@ Scheduling (each value computed by one thread with the original function; order 
   `[TIMING] x_pairpar_seed` line gives the strips, seeds and the owner's fold, scan and wait time.
 - `LOSAT_X_TBNPAR=1` tblastn: preliminary stage per (frame, chunk) and redo per match in
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
-- `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE`) tblastn query batches searched side by side, appended
-  in input order.
+- `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE` and its kept translations, so four or more query
+  batches, and at least one batch per thread) tblastn query batches searched side by side,
+  appended in input order.
 - `LOSAT_X_TBNOIDCHUNK=1` (in the strict set since 2026-10-13) tblastn with 2+ threads and several
   subjects: one entry into the search pool takes one chunk of NCBI's subject iterator per thread
   (a hundredth of the subjects, at least one; `blast_engine.c:1409`) instead of one subject per

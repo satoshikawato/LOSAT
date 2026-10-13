@@ -1246,33 +1246,131 @@ fn x_tbn_oid_chunk() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOIDCHUNK"))
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413
-// ```c
-//     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-//
-//     /* iterate over all subject sequences */
-//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//            != BLAST_SEQSRC_EOF) {
-// ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:474-476
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:153-154
 // ```c++
-//     CSeqDB::EOidListType chunk_type =
-//         seqdb.GetNextOIDChunk(itr->oid_range[0], itr->oid_range[1],
-//                               itr->chunk_sz, oid_list);
+//     BlastSeqSrcSetNumberOfThreads(m_InternalData->m_SeqSrc->GetPointer(),
+//                                   static_cast<int>(GetNumberOfThreads()));
 // ```
-// Each NCBI search thread takes a hundredth of the subjects (at least one) from the source at a
-// time and searches them before it asks for more. With the switch one entry into the pool takes
-// one such chunk per thread; without it, one subject per thread, which on many short subjects
-// is an entry (and a wake-up of the workers) for work shorter than the entry itself. Scheduling
-// only: the number enters no computation.
-/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the subjects one entry into the search pool takes.
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:338-344
+// ```c++
+//     if (m_NumThreads) {
+//         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
+//         x_FillSeqBuffer(buffer, begin_chunk);
+//         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
+//     } else {
+//         end_chunk = begin_chunk + oid_size;
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:496-501,597
+// ```c++
+//     Uint8 GetSliceSize()
+//     {
+//         Uint8 max_slice = e_MaxSlice64;
+//         Uint8 sliceSize = min(max_slice,m_MaxFileSize);
+//         return sliceSize;
+//     }
+// ...
+//     enum {e_MaxSlice64 = 1 << 30};
+// ```
+// With two or more search threads NCBI's database reader cuts the subjects into chunks by
+// residues (x_FillSeqBuffer, below), not into the hundredth of the subjects of its one-thread
+// iterator (`blast_engine.c:1409`). The budget of a chunk is the slice size (the largest file
+// the reader opened, at most 1 GiB) over four times the threads, plus one. `-subject` has no
+// database file; its F is the size of the sequence file `makeblastdb` writes for the same set,
+// a quarter byte per base. LOSAT's tblastn has no `-db` yet (`args.rs` rejects it); it would
+// pass the largest file of the database. Scheduling only: the number enters no computation.
+/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the bases one chunk of subjects may hold.
 #[cfg(feature = "parallel")]
-fn x_subjects_per_entry(threads: usize, subjects: usize, oid_chunk: bool) -> usize {
-    if oid_chunk {
-        threads.saturating_mul((subjects / 100).max(1))
-    } else {
-        threads
+fn x_oid_chunk_bases(threads: usize, largest_file: u64) -> u64 {
+    // NCBI's Int8 `GetSliceSize() / (4*m_NumThreads) + 1`; usize fits u64 on every target.
+    let divisor = u64::try_from(threads.max(1))
+        .unwrap_or(u64::MAX)
+        .saturating_mul(4);
+    largest_file.min(1 << 30) / divisor + 1
+}
+
+// No NCBI counterpart: the size of the `.nsq` file that `makeblastdb` writes for the subjects,
+// as F of `x_oid_chunk_bases` for `-subject`; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): ceil(bases of all subjects / 4).
+#[cfg(feature = "parallel")]
+fn x_subject_file_size(subjects: &[Vec<u8>]) -> u64 {
+    let bases = subjects.iter().fold(0u64, |sum, subject| {
+        sum.saturating_add(u64::try_from(subject.len()).unwrap_or(u64::MAX))
+    });
+    bases.div_ceil(4)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697-707
+// ```c++
+//         Int8 tot_length = m_Atlas.GetSliceSize() / (4*m_NumThreads) + 1;
+//
+//         res.length = vol->GetSequence(vol_oid++, &seq);
+//         if (res.length < 0) return;
+//         // must return at least one sequence
+//         do {
+//             tot_length -= res.length;
+//             res.address = seq;
+//             buffer->results.push_back(res);
+//             res.length = vol->GetSequence(vol_oid++, &seq);
+//         } while (res.length >= 0 && tot_length >= res.length && vol_oid < m_RestrictEnd);
+// ```
+// A chunk takes the subject at `begin` and then the next ones while the bases taken stay within
+// the budget (`tot_length >= res.length` is `taken + length <= bases`). NCBI's last condition
+// compares the OID after the next one with the end, so the last subject of a database always
+// starts a chunk of its own, and a chunk never crosses a volume; LOSAT does not copy these, as
+// `-subject` has one volume and the rest is scheduling only.
+/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the end of the chunk of subjects that starts at `begin`.
+#[cfg(feature = "parallel")]
+fn x_oid_chunk_end(subjects: &[Vec<u8>], begin: usize, bases: u64) -> usize {
+    let length = |subject: &Vec<u8>| u64::try_from(subject.len()).unwrap_or(u64::MAX);
+    let Some(first) = subjects.get(begin) else {
+        return begin;
+    };
+    let mut taken = length(first);
+    let mut end = begin + 1;
+    while let Some(next) = subjects.get(end) {
+        match taken.checked_add(length(next)) {
+            Some(sum) if sum <= bases => {
+                taken = sum;
+                end += 1;
+            }
+            _ => break,
+        }
     }
+    end
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-347
+// ```c++
+//     begin_chunk = * state_obj;
+//
+//     // fill the cache for all sequence in mmaped slice
+//     if (m_NumThreads) {
+//         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
+//         x_FillSeqBuffer(buffer, begin_chunk);
+//         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
+// ...
+//     *state_obj = end_chunk;
+// ```
+// Each NCBI search thread takes the next chunk when it is free. One entry into LOSAT's pool
+// takes the next chunk for each thread, and each chunk is one task. Scheduling only.
+/// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the chunks of the entry that starts at `begin`, at most
+/// `threads` of them.
+#[cfg(feature = "parallel")]
+fn x_entry_chunks(
+    subjects: &[Vec<u8>],
+    begin: usize,
+    threads: usize,
+    bases: u64,
+) -> Vec<std::ops::Range<usize>> {
+    let mut chunks = Vec::new();
+    let mut start = begin;
+    while chunks.len() < threads.max(1) && start < subjects.len() {
+        let end = x_oid_chunk_end(subjects, start, bases);
+        chunks.push(start..end);
+        start = end;
+    }
+    chunks
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3329-3334,3346-3350,3499-3502
@@ -1839,11 +1937,22 @@ fn run_preliminary_subjects(
     //        != BLAST_SEQSRC_EOF) {
     // Keep at most one pool-sized batch of subject results before OID reduction;
     // memory follows NCBI's bounded number of workers, not total subject count.
-    // With LOSAT_X_TBNOIDCHUNK the batch is one chunk of that iterator per worker
-    // (x_subjects_per_entry), so the lists of at most that many subjects wait for the
-    // reduction; a subject's translation still lives only while its worker searches it.
+    // With LOSAT_X_TBNOIDCHUNK the batch is one chunk of subjects per worker, cut by residues
+    // as NCBI's database reader cuts them for its search threads (x_entry_chunks), so the
+    // lists of the subjects of at most that many chunks wait for the reduction; a subject's
+    // translation still lives only while its worker searches it.
     #[cfg(feature = "parallel")]
     let mut parallel_batch = std::collections::VecDeque::new();
+    // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the bases one chunk may hold, from the size of the
+    // sequence file of the subjects (x_oid_chunk_bases); none without the switch.
+    #[cfg(feature = "parallel")]
+    let x_chunk_bases = match pool {
+        Some(pool) if parallel_selected && x_tbn_oid_chunk() => Some(x_oid_chunk_bases(
+            pool.threads(),
+            x_subject_file_size(subjects),
+        )),
+        _ => None,
+    };
     #[cfg(feature = "parallel")]
     let diagnose = crate::utils::threading::diagnostics_enabled();
     #[cfg(feature = "parallel")]
@@ -1864,39 +1973,55 @@ fn run_preliminary_subjects(
         let (preliminary, linked) = if parallel_selected {
             if parallel_batch.is_empty() {
                 let pool = pool.expect("parallel pool selected");
-                // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): one chunk of subjects per thread.
-                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413
-                // ```c
-                //     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
-                //
-                //     /* iterate over all subject sequences */
-                //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-                //            != BLAST_SEQSRC_EOF) {
-                // ```
-                // Dispatch point: how many subjects this entry into the pool takes
-                // (x_subjects_per_entry). The subjects of an entry are searched by the same call
-                // as before and their lists are taken in OID order below.
-                let x_take =
-                    x_subjects_per_entry(pool.threads(), subjects.len(), x_tbn_oid_chunk());
-                let end = oid.saturating_add(x_take).min(subjects.len());
+                let search = |x_oid: usize, subject: &[u8]| {
+                    if diagnose {
+                        let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(now, Ordering::SeqCst);
+                    }
+                    let result = subject_core(x_oid, subject);
+                    if diagnose {
+                        active.fetch_sub(1, Ordering::SeqCst);
+                    }
+                    (result, rayon::current_thread_index())
+                };
                 x_pool_entries += 1;
-                let batch: Vec<_> = pool.install(|| {
-                    subjects[oid..end]
-                        .par_iter()
-                        .enumerate()
-                        .map(|(x_within, subject)| {
-                            if diagnose {
-                                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
-                                peak.fetch_max(now, Ordering::SeqCst);
-                            }
-                            let result = subject_core(oid + x_within, subject);
-                            if diagnose {
-                                active.fetch_sub(1, Ordering::SeqCst);
-                            }
-                            (result, rayon::current_thread_index())
-                        })
-                        .collect()
-                });
+                // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): one chunk of subjects per thread.
+                // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:338-341
+                // ```c++
+                //     if (m_NumThreads) {
+                //         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
+                //         x_FillSeqBuffer(buffer, begin_chunk);
+                //         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
+                // ```
+                // Dispatch point: the chunks this entry into the pool takes (x_entry_chunks), one
+                // task each, or one subject per thread without the switch. The subjects are
+                // searched by the same call as before and their lists are taken in OID order
+                // below.
+                let batch: Vec<_> = if let Some(bases) = x_chunk_bases {
+                    let chunks = x_entry_chunks(subjects, oid, pool.threads(), bases);
+                    let lists: Vec<Vec<_>> = pool.install(|| {
+                        chunks
+                            .par_iter()
+                            .with_max_len(1)
+                            .map(|chunk| {
+                                chunk
+                                    .clone()
+                                    .map(|x_oid| search(x_oid, &subjects[x_oid]))
+                                    .collect()
+                            })
+                            .collect()
+                    });
+                    lists.into_iter().flatten().collect()
+                } else {
+                    let end = oid.saturating_add(pool.threads()).min(subjects.len());
+                    pool.install(|| {
+                        subjects[oid..end]
+                            .par_iter()
+                            .enumerate()
+                            .map(|(x_within, subject)| search(oid + x_within, subject))
+                            .collect()
+                    })
+                };
                 if diagnose {
                     workers.extend(batch.iter().filter_map(|(_, worker)| *worker));
                 }
@@ -5021,32 +5146,114 @@ mod tests {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409
-    // ```c
-    //     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697
+    // ```c++
+    //         Int8 tot_length = m_Atlas.GetSliceSize() / (4*m_NumThreads) + 1;
     // ```
-    // The chunk of NCBI's iterator is a hundredth of the subjects, at least one. One entry into
-    // the pool takes one chunk per thread with LOSAT_X_TBNOIDCHUNK and one subject per thread
-    // without it; fewer than 200 subjects give the same entries either way.
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:499
+    // ```c++
+    //         Uint8 sliceSize = min(max_slice,m_MaxFileSize);
+    // ```
+    // The budget of a chunk: the largest file, at most 2^30 bytes, over four times the threads,
+    // plus one. For `-subject` the file is ceil(bases / 4), the `.nsq` of `makeblastdb`.
     #[cfg(feature = "parallel")]
     #[test]
-    fn x_pool_entries_take_one_iterator_chunk_per_thread() {
-        for (threads, subjects, with_chunk) in [
-            (8, 1, 8),
-            (8, 99, 8),
-            (8, 199, 8),
-            (8, 200, 16),
-            (8, 28_036, 2_240),
-            (2, 1_000, 20),
-            (usize::MAX, 1_000, usize::MAX),
+    fn x_chunk_budget_is_the_slice_over_four_times_the_threads() {
+        for (threads, largest_file, bases) in [
+            // the fly genome, 143.7 Mb: a .nsq of 35.9 MB
+            (8, 35_925_000, 1_122_657),
+            (2, 35_925_000, 4_490_626),
+            // the human genome, 3,100 Mb: 775 MB, below the slice limit
+            (8, 775_000_000, 24_218_751),
+            // above 2^30 bytes the slice is 2^30
+            (8, 2_000_000_000, 33_554_433),
+            (32, 1 << 30, 8_388_609),
+            (8, 0, 1),
+            (0, 100, 26),
+            (usize::MAX, 1 << 30, 1),
         ] {
             assert_eq!(
-                x_subjects_per_entry(threads, subjects, true),
-                with_chunk,
-                "{threads} threads, {subjects} subjects"
+                x_oid_chunk_bases(threads, largest_file),
+                bases,
+                "{threads} threads, largest file {largest_file}"
             );
-            assert_eq!(x_subjects_per_entry(threads, subjects, false), threads);
         }
+        for (lengths, size) in [
+            (&[][..], 0),
+            (&[0][..], 0),
+            (&[1][..], 1),
+            (&[4][..], 1),
+            (&[5][..], 2),
+            (&[3, 3][..], 2),
+            (&[1_000; 240][..], 60_000),
+        ] {
+            let subjects: Vec<Vec<u8>> = lengths.iter().map(|&n| vec![b'A'; n]).collect();
+            assert_eq!(x_subject_file_size(&subjects), size, "{lengths:?}");
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:699-707
+    // ```c++
+    //         res.length = vol->GetSequence(vol_oid++, &seq);
+    //         if (res.length < 0) return;
+    //         // must return at least one sequence
+    //         do {
+    //             tot_length -= res.length;
+    //             res.address = seq;
+    //             buffer->results.push_back(res);
+    //             res.length = vol->GetSequence(vol_oid++, &seq);
+    //         } while (res.length >= 0 && tot_length >= res.length && vol_oid < m_RestrictEnd);
+    // ```
+    // A chunk is at least one subject, then the next ones while the bases stay within the budget
+    // (a sum equal to the budget is in); a subject longer than the budget is a chunk of its own,
+    // and empty subjects join a chunk that is not over its budget.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn x_chunks_hold_consecutive_subjects_within_the_budget() {
+        let set = |lengths: &[usize]| -> Vec<Vec<u8>> {
+            lengths.iter().map(|&n| vec![b'A'; n]).collect()
+        };
+        for (lengths, begin, bases, end) in [
+            // the budget's edge
+            (&[10, 10, 10][..], 0, 20, 2),
+            (&[10, 10, 10][..], 0, 19, 1),
+            (&[10, 10, 10][..], 0, 30, 3),
+            (&[10, 10, 10][..], 1, 20, 3),
+            // one subject over the budget, first or after shorter ones
+            (&[50, 1, 1][..], 0, 20, 1),
+            (&[5, 50, 5][..], 0, 20, 1),
+            (&[5, 50, 5][..], 1, 20, 2),
+            (&[5, 50, 5][..], 2, 20, 3),
+            // empty subjects
+            (&[0, 0, 0][..], 0, 1, 3),
+            (&[30, 0, 0][..], 0, 20, 1),
+            (&[10, 0, 10, 0, 1][..], 0, 20, 4),
+            (&[0, 30][..], 0, 20, 1),
+            // no subject at `begin`
+            (&[10][..], 1, 20, 1),
+        ] {
+            assert_eq!(
+                x_oid_chunk_end(&set(lengths), begin, bases),
+                end,
+                "{lengths:?} from {begin}, {bases} bases"
+            );
+        }
+        // An entry takes one chunk per thread from `begin`, fewer at the end of the subjects, and
+        // at least one chunk.
+        let subjects = set(&[50, 5, 5, 5, 5, 50, 5]);
+        assert_eq!(x_entry_chunks(&subjects, 0, 3, 12), [0..1, 1..3, 3..5]);
+        assert_eq!(x_entry_chunks(&subjects, 5, 3, 12), [5..6, 6..7]);
+        assert_eq!(x_entry_chunks(&subjects, 0, 0, 12), [0..1]);
+        assert!(x_entry_chunks(&subjects, 7, 3, 12).is_empty());
+        // 240 subjects of 1,000 bases at 4 threads (tests/tblastn_oid_chunk.rs): 3,751 bases, three
+        // subjects per chunk and twelve per entry.
+        let subjects = set(&[1_000; 240]);
+        let bases = x_oid_chunk_bases(4, x_subject_file_size(&subjects));
+        assert_eq!(bases, 3_751);
+        assert_eq!(
+            x_entry_chunks(&subjects, 0, 4, bases),
+            [0..3, 3..6, 6..9, 9..12]
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289

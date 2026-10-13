@@ -449,13 +449,18 @@ mod tests {
         assert_eq!(load(&first.call_ns), 0);
         let lines = timer.lines().expect("timer on");
         assert!(lines[0].starts_with("[TIMING] x_link1: reset 0.000s sort 0.000s groups 0.000s kernels 0.000s assemble 0.000s final_sorts 0.000s replay 0.000s sum 0.000s (calls=0 hsps=0 groups=0 largest_group=0 kernel_sum 0.000s kernel_max 0.000s)"), "{}", lines[0]);
+        // The sleeps above have no upper bound (several milliseconds each on a loaded machine),
+        // so the times of this line are not compared with text.
         assert!(
-            lines[1].starts_with("[TIMING] x_link2: reset 0.00"),
+            lines[1].starts_with("[TIMING] x_link2: reset "),
             "{}",
             lines[1]
         );
         assert!(
-            lines[1].contains(" (calls=1 hsps=10 groups=2 largest_group=6 kernel_sum 0.00"),
+            lines[1].contains("s sum ")
+                && lines[1].contains("s (calls=1 hsps=10 groups=2 largest_group=6 kernel_sum ")
+                && lines[1].contains("s kernel_max ")
+                && lines[1].ends_with("s)"),
             "{}",
             lines[1]
         );

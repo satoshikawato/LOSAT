@@ -1,0 +1,187 @@
+dir	cwd1
+dir	cwd1/sub
+dir	cwd1/my dir
+dir	empty
+dir	b1
+dir	b1/sub
+dir	b1/deep
+dir	b2
+dir	b2/far
+dir	b2/dupdir
+dir	reg
+dir	nuc
+dir	g1
+dir	bad
+dir	bad/dir.pin
+dir	v5ok
+dir	v5no
+copy	prot_v4.pin	cwd1/db.pin
+copy	prot_v4.phr	cwd1/db.phr
+copy	prot_v4.psq	cwd1/db.psq
+copy	prot_v4.pin	cwd1/both.pin
+copy	prot_v4.phr	cwd1/both.phr
+copy	prot_v4.psq	cwd1/both.psq
+text	cwd1/palpin.pal	TITLE alias beside a volume of its name\nDBLIST ord\n
+copy	prot_old.pin	cwd1/palpin.pin
+copy	prot_old.phr	cwd1/palpin.phr
+copy	prot_old.psq	cwd1/palpin.psq
+copy	ord.pdb.pin	cwd1/ord.pin
+copy	ord.pdb.phr	cwd1/ord.phr
+copy	ord.pdb.psq	cwd1/ord.psq
+copy	prot_v4.pin	cwd1/sub/dbs.pin
+copy	prot_v4.phr	cwd1/sub/dbs.phr
+copy	prot_v4.psq	cwd1/sub/dbs.psq
+copy	prot_v4.pin	cwd1/dv.pin
+copy	prot_v4.phr	cwd1/dv.phr
+copy	prot_v4.psq	cwd1/dv.psq
+copy	prot_v4.pin	cwd1/vol_a.pin
+copy	prot_v4.phr	cwd1/vol_a.phr
+copy	prot_v4.psq	cwd1/vol_a.psq
+copy	prot_v4.pin	cwd1/vol_c.pin
+copy	prot_v4.phr	cwd1/vol_c.phr
+copy	prot_v4.psq	cwd1/vol_c.psq
+text	cwd1/selfal.pal	TITLE an alias that names itself\nDBLIST selfal\n
+copy	ord.pdb.pin	cwd1/selfal.pin
+copy	ord.pdb.phr	cwd1/selfal.phr
+copy	ord.pdb.psq	cwd1/selfal.psq
+copy	sub/ord-extra.pin	cwd1/dotted.pin.pin
+copy	sub/ord-extra.phr	cwd1/dotted.pin.phr
+copy	sub/ord-extra.psq	cwd1/dotted.pin.psq
+copy	sub/ord-extra.pin	cwd1/my dir/spdb.pin
+copy	sub/ord-extra.phr	cwd1/my dir/spdb.phr
+copy	sub/ord-extra.psq	cwd1/my dir/spdb.psq
+copy	ord.pdb.pin	b1/only.pin
+copy	ord.pdb.phr	b1/only.phr
+copy	ord.pdb.psq	b1/only.psq
+copy	ord.pdb.pin	b1/both.pin
+copy	ord.pdb.phr	b1/both.phr
+copy	ord.pdb.psq	b1/both.psq
+copy	ord.pdb.pin	b1/sub/dbs.pin
+copy	ord.pdb.phr	b1/sub/dbs.phr
+copy	ord.pdb.psq	b1/sub/dbs.psq
+copy	ord.pdb.pin	b1/deep/dv.pin
+copy	ord.pdb.phr	b1/deep/dv.phr
+copy	ord.pdb.psq	b1/deep/dv.psq
+copy	ord.pdb.pin	b1/split.pin
+copy	ord.pdb.phr	b1/split.phr
+copy	ord.pdb.psq	b1/split.psq
+text	b1/al_beside.pal	TITLE volumes beside the alias\nDBLIST vol_a vol_b\n
+copy	ord.pdb.pin	b1/vol_a.pin
+copy	ord.pdb.phr	b1/vol_a.phr
+copy	ord.pdb.psq	b1/vol_a.psq
+copy	sub/ord-extra.pin	b1/vol_b.pin
+copy	sub/ord-extra.phr	b1/vol_b.phr
+copy	sub/ord-extra.psq	b1/vol_b.psq
+text	b1/al_far.pal	TITLE a volume found through the search path\nDBLIST far_vol\n
+text	b1/al_farsub.pal	TITLE a volume with a directory found through the search path\nDBLIST far/vol_c\n
+text	b1/al_faralias.pal	DBLIST split2\n
+text	b1/al_missing.pal	TITLE missing volume\nDBLIST vol_a no_such_volume\n
+text	b1/al_abs.pal	TITLE absolute name\nDBLIST {R}/b2/only2\n
+text	b1/al_empty.pal	TITLE no DBLIST\n
+text	b1/loop_a.pal	DBLIST loop_b\n
+text	b1/loop_b.pal	DBLIST loop_a\n
+text	b1/al_nseq.pal	TITLE alias with NSEQ\nDBLIST vol_a\nNSEQ 2\nLENGTH 100\n
+text	b1/al_gilist.pal	TITLE filtered\nDBLIST vol_a\nGILIST some.gil\n
+text	b1/al_twice.pal	DBLIST vol_a al_beside\n
+text	b1/al_samename.pal	DBLIST vol_b {R}/b2/dupdir/vol_b\n
+copy	prot_ids_v4.pin	b1/ids.pin
+copy	prot_ids_v4.phr	b1/ids.phr
+copy	prot_ids_v4.psq	b1/ids.psq
+copy	prot_v4.pin	b1/col.pin
+copy	prot_v4.phr	b1/col.phr
+copy	prot_v4.psq	b1/col.psq
+text	b1/col.paa	column
+text	b1/al_mixed.pal	TITLE versions 4 and 5\nDBLIST vol_a {R}/v5ok/prot_v5\n
+copy	sub/ord-extra.pin	b2/only2.pin
+copy	sub/ord-extra.phr	b2/only2.phr
+copy	sub/ord-extra.psq	b2/only2.psq
+copy	sub/ord-extra.pin	b2/both.pin
+copy	sub/ord-extra.phr	b2/both.phr
+copy	sub/ord-extra.psq	b2/both.psq
+text	b2/split.pal	TITLE alias in the second directory\nDBLIST only2\n
+copy	sub/ord-extra.pin	b2/far_vol.pin
+copy	sub/ord-extra.phr	b2/far_vol.phr
+copy	sub/ord-extra.psq	b2/far_vol.psq
+copy	sub/ord-extra.pin	b2/far/vol_c.pin
+copy	sub/ord-extra.phr	b2/far/vol_c.phr
+copy	sub/ord-extra.psq	b2/far/vol_c.psq
+text	b2/split2.pal	TITLE second-level alias\nDBLIST only2\n
+copy	sub/ord-extra.pin	b2/dupdir/vol_b.pin
+copy	sub/ord-extra.phr	b2/dupdir/vol_b.phr
+copy	sub/ord-extra.psq	b2/dupdir/vol_b.psq
+copy	prot_old.pin	reg/regonly.pin
+copy	prot_old.phr	reg/regonly.phr
+copy	prot_old.psq	reg/regonly.psq
+copy	prot_old.pin	reg/both.pin
+copy	prot_old.phr	reg/both.phr
+copy	prot_old.psq	reg/both.psq
+copy	prot_old.pin	reg/only.pin
+copy	prot_old.phr	reg/only.phr
+copy	prot_old.psq	reg/only.psq
+copy	prot_v5.pin	v5ok/prot_v5.pin
+copy	prot_v5.phr	v5ok/prot_v5.phr
+copy	prot_v5.psq	v5ok/prot_v5.psq
+copy	prot_v5.pdb	v5ok/prot_v5.pdb
+copy	prot_v5.pin	v5no/prot_v5.pin
+copy	prot_v5.phr	v5no/prot_v5.phr
+copy	prot_v5.psq	v5no/prot_v5.psq
+copy	nucl_v4.nin	nuc/nt.nin
+copy	nucl_v4.nhr	nuc/nt.nhr
+copy	nucl_v4.nsq	nuc/nt.nsq
+copy	nucl_v4.nin	nuc/fake.pin
+copy	nucl_v4.nhr	nuc/fake.phr
+copy	nucl_v4.nsq	nuc/fake.psq
+patch	prot_v4.pin	nuc/v3.pin	3	03
+copy	prot_v4.phr	nuc/v3.phr
+copy	prot_v4.psq	nuc/v3.psq
+text	g1/index.alx	ALIAS_FILE grp.pal\nTITLE through the group alias file\nDBLIST gvol\n
+copy	ord.pdb.pin	g1/gvol.pin
+copy	ord.pdb.phr	g1/gvol.phr
+copy	ord.pdb.psq	g1/gvol.psq
+copy	prot_v4.pin	g1/plain.pin
+copy	prot_v4.phr	g1/plain.phr
+copy	prot_v4.psq	g1/plain.psq
+trunc	prot_v4.pin	bad/trunc0.pin	0
+copy	prot_v4.phr	bad/trunc0.phr
+copy	prot_v4.psq	bad/trunc0.psq
+trunc	prot_v4.pin	bad/trunc3.pin	3
+copy	prot_v4.phr	bad/trunc3.phr
+copy	prot_v4.psq	bad/trunc3.psq
+trunc	prot_v4.pin	bad/trunc20.pin	20
+copy	prot_v4.phr	bad/trunc20.phr
+copy	prot_v4.psq	bad/trunc20.psq
+trunc	prot_v4.pin	bad/truncm1.pin	-1
+copy	prot_v4.phr	bad/truncm1.phr
+copy	prot_v4.psq	bad/truncm1.psq
+copy	prot_v4.pin	bad/nopsq.pin
+copy	prot_v4.phr	bad/nopsq.phr
+copy	prot_v4.pin	bad/nophr.pin
+copy	prot_v4.psq	bad/nophr.psq
+text	bad/al_trunc.pal	DBLIST trunc20\n
+symlink	b1	link_b1
+symlink	{R}/b2	link_abs
+symlink	../b1/only.pin	empty/lnk.pin
+symlink	../b1/only.phr	empty/lnk.phr
+symlink	../b1/only.psq	empty/lnk.psq
+dir	xd
+dir	xz
+dir	xr
+dir	xr/sub
+dir	xs
+copy	prot_v4.pin	xd/-.pin
+copy	prot_v4.phr	xd/-.phr
+copy	prot_v4.psq	xd/-.psq
+text	xz/zero.pal	\e
+copy	ord.pdb.pin	xz/zero.pin
+copy	ord.pdb.phr	xz/zero.phr
+copy	ord.pdb.psq	xz/zero.psq
+text	xr/sub/up.pal	TITLE a volume one directory up\nDBLIST ../upvol\n
+copy	sub/ord-extra.pin	xr/upvol.pin
+copy	sub/ord-extra.phr	xr/upvol.phr
+copy	sub/ord-extra.psq	xr/upvol.psq
+text	xs/two.pal	TITLE one volume under two spellings\nDBLIST svol ./svol ../xs/svol\n
+copy	ord.pdb.pin	xs/svol.pin
+copy	ord.pdb.phr	xs/svol.phr
+copy	ord.pdb.psq	xs/svol.psq
+text	xs/outer.pal	DBLIST svol inner\n
+text	xs/inner.pal	DBLIST ./svol\n

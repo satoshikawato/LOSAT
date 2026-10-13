@@ -191,8 +191,8 @@ What runs per target:
   nothing (it is compiled for wasm32 only); everything else as on wasm32.
 - One thread (`-num_threads 1`, a build without the `parallel` feature, wasm32 without
   `wasm-threads`): the scheduling switches (`AHEAD`, `GREEDYSPEC`, `PAIRPAR` for
-  blastn/megablast, `SEGSHARE`, `TBNBATCH`, `TBNOIDCHUNK`, `BXPAR`, `BXPOOL`, `BXBATCH`, `BXCHUNK`)
-  leave the reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
+  blastn/megablast, `SEGSHARE`, `TBNBATCH`, `TBNOIDCHUNK`, `TBNOIDNEXT`, `BXPAR`, `BXPOOL`, `BXBATCH`,
+  `BXCHUNK`) leave the reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
   (with `TBNSSIDE` / `TBNQSIDE`; only its parallel redo needs a pool) and the TBLASTX `PAIRPAR`
   units run in order on the calling thread.
 
@@ -457,6 +457,20 @@ Scheduling (each value computed by one thread with the original function; order 
   side by side (each batch on one thread). With `LOSAT_WASI_THREADS_DEBUG=1` the
   `[losat-thread-activity]` line of the subject stage ends with `pool_entries=` (the entries of
   one query batch); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.
+- `LOSAT_X_TBNOIDNEXT=1` tblastn with 2+ threads and several subjects, where `TBNOIDCHUNK` makes
+  the chunks: no wait between entries. The threads of the pool take the next chunk when they are
+  free, as NCBI's search threads ask the database for the next chunk (`seqdbimpl.cpp:333-344`),
+  instead of waiting at the end of each entry for its longest chunk. The thread that owns the
+  search takes the lists back chunk by chunk in OID order and enters them into the collector as
+  before, and searches a chunk itself while the next one in order is not finished
+  (`tblastn/x_oid_flow.rs`). At most `4 * threads` chunks are taken or finished beyond the oldest
+  one not taken back; a thread waits before a new chunk when that window is full, so the memory of
+  the waiting lists stays bounded. The chunks and the search of each subject are those of
+  `TBNOIDCHUNK`, so the report is the same. Not in the set (off unless set to any value); with
+  `LOSAT_X_TBNOIDCHUNK=0` (or `LOSAT_X_DEFAULT=0` alone) there are no chunks and it changes
+  nothing. With `LOSAT_WASI_THREADS_DEBUG=1` the search is one entry (`pool_entries=1`) and the
+  line adds `flow_chunks=` and `flow_peak_waiting=` (the most finished chunks that waited at
+  once); `LOSAT/tests/tblastn_oid_chunk.rs` reads them.
 - `LOSAT_X_TBNXLATE=1` tblastn: the six translated frames of a subject are read from tables, as
   NCBI makes them from the compressed subject (`blast_util.c:1071-1090`: one table of 64 residues
   per strand, `s_BlastGetTranslationTable`, and one table read per codon,

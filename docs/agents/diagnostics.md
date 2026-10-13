@@ -458,6 +458,20 @@ Scheduling (each value computed by one thread with the original function; order 
   `[X_SHADOW] TBNXLATE` line on stderr at the end gives the plans and residues compared, or says
   that nothing was compared. With `LOSAT_X_STATS=1` a `[X_STATS] TBNXLATE table_plans=` line
   counts the plans made from the tables; `LOSAT/tests/tblastn_subject_translate.rs` reads both.
+- `LOSAT_X_BPGAP=1` blastp preliminary stage: the restricted gapped alignment (NCBI
+  `s_RestrictedGappedAlign`, `blast_gapalign.c:991-1300`, which `s_BlastProtGappedAlignment` runs
+  for a query whose best ungapped score is below 0.68 of the cutoff) keeps the two score rows and
+  the column gaps of the columns that are multiples of 10 in separate arrays, and on x86_64 with
+  AVX2 computes eight cells of a row at a time (`blastp/x_restricted_gap.rs`, exactness argument in
+  its header): in the rows where no gap opens in A the cells depend on each other only through the
+  X-drop test, whose `best_score` is a prefix maximum; in the other rows the row gap is a decayed
+  prefix maximum. 32-bit values as in the reference, the matrix rows read from 16-bit tables built
+  from the reference's score function. Without AVX2 the same arrays run the scalar loops. A letter
+  code of 28 or more, a negative gap cost, a gap cost above 65,536 or an X-drop above 2^28 leaves
+  the call to the reference function. Not in the set (off unless set to any value). Shadow:
+  `LOSAT_X_BPGAPSHADOW=1` runs both for every restricted alignment and stops (panic) if
+  `(a_offset, b_offset, best_score)` differ; one `[X_SHADOW] BPGAP compared= not_taken=` line on
+  stderr at the end. With `LOSAT_X_STATS=1` a `[X_STATS] BPGAP fast= not_taken=` line.
 - `LOSAT_X_PAIRPAR=1` TBLASTX seed stage (scan, two-hit test, ungapped extension) of each subject
   as units of (subject frame, chunk, query context), 36 per one-query pair, on the search pool (in
   order on the calling thread with one thread); each unit scans with a lookup table holding only its

@@ -51,6 +51,14 @@ pub use x_pair_par::print_summary as x_pair_par_print_summary;
 mod x_seed_release;
 pub use x_seed_release::print_summary as x_seed_release_print_summary;
 
+// Diagnostic (LOSAT_TIMING): the stage times of a batch search and of its subjects, two
+// `[TIMING]` lines after the ones this file prints (see tblastx/x_search_timing.rs). A child
+// module of this file, as x_seed_release is.
+// No NCBI counterpart: a timer; it computes no value NCBI computes and none the search reads.
+#[path = "../x_search_timing.rs"]
+mod x_search_timing;
+use x_search_timing::XStage;
+
 /// The queries of a search: the input records, the searched queries (each cut to its
 /// `-query_loc` interval), the query input (where each searched query lies in its record,
 /// its input position, the skipped records), and where each subject's searched letters
@@ -2506,6 +2514,9 @@ fn search_query_batch(
     let linking_calls = AtomicU64::new(0);
     let identity_ns = AtomicU64::new(0);
     let identity_calls = AtomicU64::new(0);
+    // No NCBI counterpart: the stage timer of LOSAT_TIMING (x_search_timing.rs). It reads the
+    // clock only when `timing_enabled`, and the search reads nothing from it.
+    let x_times = x_search_timing::XSearchTimes::new(timing_enabled);
 
     // NCBI verbose CLI flag is only present under _BLAST_DEBUG builds.
     // ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3265-3273
@@ -3060,6 +3071,9 @@ fn search_query_batch(
     };
 
     let process_subject = |st: &mut WorkerState, (s_idx, s_rec): (usize, &FastaRecord)| {
+        // No NCBI counterpart: the clock of this subject for LOSAT_TIMING. The first local of
+        // the closure, so it is dropped last and its last stage includes the drops of the rest.
+        let mut x_lap = x_times.subject();
         // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 2 (per subject): the seed stage of
         // this subject holds the batch's lookup table through `x_seed_stage` and the unit path
         // through `x_units_stage`. `lookup_ref` borrows from the first and `x_pair_par_ref`
@@ -3097,6 +3111,7 @@ fn search_query_batch(
             *d = DiagStruct::default();
         }
         st.diag_offset = window;
+        x_lap.lap(XStage::Enter);
 
         // NCBI reference (translate all frames for subject sequences):
         // ncbi-blast/c++/src/algo/blast/core/blast_util.c:1296-1308
@@ -3134,6 +3149,7 @@ fn search_query_batch(
             preliminary_subject_bases(s_rec.seq()).map(|bases| generate_frames(&bases, &db_code));
         let s_frames_preliminary: &[QueryFrame] =
             s_frames_preliminary_owned.as_deref().unwrap_or(&s_frames);
+        x_lap.lap(XStage::Translate);
 
         let s_len = s_rec.seq().len();
 
@@ -3229,10 +3245,14 @@ fn search_query_batch(
                     s_idx,
                     s_len,
                 };
+                x_lap.lap(XStage::Prepare);
                 let x_units = x.run_subject_units(&x_subject, parallel_pool);
+                x_lap.lap(XStage::Units);
                 let x_shadow = x.shadow();
                 x_units_stage.end();
+                x_lap.lap(XStage::UnitsRelease);
                 let x_hits = x_pair_par::XPairPar::merge_subject(x_units, &x_subject);
+                x_lap.lap(XStage::Merge);
                 if x_shadow {
                     x_pair_par_shadow = Some(x_hits);
                     s_frames_preliminary
@@ -3242,7 +3262,9 @@ fn search_query_batch(
                 }
             }
             None => {
+                x_lap.lap(XStage::Prepare);
                 x_units_stage.end();
+                x_lap.lap(XStage::UnitsRelease);
                 s_frames_preliminary
             }
         };
@@ -4877,6 +4899,7 @@ fn search_query_batch(
                 }
             }
         } // End of subject frame loop
+        x_lap.lap(XStage::FrameLoop);
 
         // EXPERIMENT (LOSAT_X_PAIRPARSHADOW), dispatch point 3 (per subject): the unit path's
         // list against the reference loop's, every field; the first difference stops the run.
@@ -4910,6 +4933,7 @@ fn search_query_batch(
         if x_seed_stage.end() {
             x_seed_release::drop_worker_table(&mut st.diag_array);
         }
+        x_lap.lap(XStage::SeedRelease);
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:561-584
         // ```c
@@ -4971,6 +4995,7 @@ fn search_query_batch(
                 use_parallel,
             )
         };
+        x_lap.lap(XStage::Link1);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1802-1803
         // ```c
         //     /* Sort the HSP array by score */
@@ -5005,6 +5030,7 @@ fn search_query_batch(
         // An HSP is removed when its e-value is greater than the cutoff, so a NaN cutoff
         // (`-evalue -nan`) keeps every HSP.
         prelinked_ungapped_hits.retain(|h| !(h.e_value > evalue_threshold));
+        x_lap.lap(XStage::Reap);
         if diag_enabled && prelim_linked_count != prelinked_ungapped_hits.len() {
             eprintln!(
                 "[DEBUG PRELIM_REAP] linked_before={} kept={} filtered_by_prelim_evalue={} threshold={}",
@@ -5054,6 +5080,7 @@ fn search_query_batch(
         if !ungapped_hits_is_sorted_by_score_ncbi(&ungapped_hits) {
             sort_ungapped_hits_by_score_ncbi(&mut ungapped_hits);
         }
+        x_lap.lap(XStage::Reevaluate);
         // Record the post-reevaluation list and the exact input to link_hsps.
         if stage_dump::enabled() {
             stage_dump::dump_ungapped_hits("after_reevaluate", &ungapped_hits);
@@ -5177,6 +5204,7 @@ fn search_query_batch(
                 linking_ns.fetch_add(elapsed.as_nanos() as u64, AtomicOrdering::Relaxed);
                 linking_calls.fetch_add(1, AtomicOrdering::Relaxed);
             }
+            x_lap.lap(XStage::Link2);
             if diag_enabled {
                 diagnostics
                     .base
@@ -5466,6 +5494,7 @@ fn search_query_batch(
                     num: h.num,
                 });
             }
+            x_lap.lap(XStage::Convert);
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:1018-1059
             // ```c
             // if (H->linked_set == TRUE && H->start_of_chain == FALSE)
@@ -5542,6 +5571,7 @@ fn search_query_batch(
                     st.hits.extend(final_hits);
                 }
             }
+            x_lap.lap(XStage::Emit);
         }
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
         // ```c
@@ -5554,6 +5584,8 @@ fn search_query_batch(
         bar.inc(1);
         st.diag_offset = diag_offset;
     };
+    // No NCBI counterpart: LOSAT_TIMING, the clock before the subject loop (x_search_timing.rs).
+    let x_t_subjects = x_times.now();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/prelim_stage.cpp:82-88
     // ```c
@@ -5732,6 +5764,8 @@ fn search_query_batch(
         ));
     }
 
+    // No NCBI counterpart: LOSAT_TIMING, the clock after the subject loop (x_search_timing.rs).
+    let x_t_collect = x_times.now();
     // Close channel so the writer can exit.
     if let Some(tx) = tx_opt {
         drop(tx);
@@ -5872,6 +5906,12 @@ fn search_query_batch(
         );
         eprintln!("[TIMING] search_total: {:.3}s", t_search.as_secs_f64());
         eprintln!("[TIMING] total: {:.3}s", t_total.elapsed().as_secs_f64());
+        // No NCBI counterpart: the stage lines of x_search_timing.rs, after the lines above.
+        if let Some(lines) = x_times.lines(t_search_start, x_t_subjects, x_t_collect, t_search) {
+            for line in lines {
+                eprintln!("{line}");
+            }
+        }
     }
     Ok(TblastxBatch {
         hits,

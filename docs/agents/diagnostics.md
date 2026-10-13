@@ -38,7 +38,16 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
 - `LOSAT_DEBUG_COORDS_START=<int>` narrow selected BLASTN coordinate diagnostics.
 - `LOSAT_DEBUG_SCAN_SOFF=<int>` tblastx scan debug center subject offset.
 - `LOSAT_DEBUG_SCAN_WINDOW=<int>` tblastx scan debug window size.
-- `LOSAT_TIMING=1` timing breakdown.
+- `LOSAT_TIMING=1` timing breakdown. TBLASTX prints, per query batch, after its other lines:
+  `[TIMING] x_search: setup .. subjects .. collect ..` (three wall times that add up to
+  `search_total`: before the first subject, the subject loop, after it) and
+  `[TIMING] x_subject: enter .. translate .. prepare .. units .. units_release .. merge .. frame_loop .. seed_release .. link1 .. reap .. reevaluate .. link2 .. convert .. emit .. end .. sum .. (subjects=N)`
+  (the stages of the per-subject work in the order they run; one clock per subject is read at
+  every stage boundary, so the stages add up to `sum`, and `end` includes the release of the
+  subject's translation; with several subjects the times are sums over the subjects and their
+  threads). `link1` is the first linking call, on every HSP the seed stage saved; `link2` is the
+  call `sum_stats_linking` times (`tblastx/x_search_timing.rs`). The clock is not read without
+  the variable.
 - `LOSAT_DIAGNOSTICS=1` general diagnostics counters.
 - `LOSAT_STARTUP_TRACE=1` startup trace.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.

@@ -333,6 +333,24 @@ Rebuilding less:
   by HSP, every field, E-values by bits; the first difference stops the run and the search continues with the
   reference's result. One line at exit:
   `[X_SHADOW] HSPINPLACE sorts= linkings= hits_compared= replay_fallbacks=`.
+- `LOSAT_X_BPSEED=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the two-hit seed stage with an amino-acid lookup table
+  (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one
+  loop that reads each lookup cell's list in place, in the reference's order, and hands only the hits that need
+  the context check and the ungapped extension to the reference's code; the context of a candidate comes from a
+  two-level table (a coarse table of at most 16,384 entries and a walk over the frame bases) instead of the
+  binary search; the diagonal entry of a later hit of the cell is prefetched `LOSAT_X_BPSEED_PREFETCH` hits
+  ahead (default 16, 0 = none; tuning only). Measured 2026-10-13 on the workstation (OrthoFinder-style job,
+  fly x human, every 10th protein, one thread, medians of 6 rotating rounds under load): 51.4 s -> 34.2 s,
+  output unchanged.
+- `LOSAT_X_BPSEEDSHADOW=1` shadow of `LOSAT_X_BPSEED` (turns the fused loop on): for every subject the fused
+  loop and the reference loop run from the same diagonal table, and the initial HSPs (every field) and the
+  whole table must be equal; the first difference stops the run (panic). For a subject shorter than a word less
+  one letter (one residue with word size 3) only the initial HSPs are compared: the reference's only word there
+  ends one byte past the subject's buffer (NCBI reads the same byte), whose value can name a cell with hits; such a
+  hit is never extended and leaves an entry that later subjects read as no previous hit (`x_shadow_compare`).
+  One line at exit: `[X_SHADOW] BPSEED subjects= initial_hsps= identical`, with
+  `(tables not compared for N subjects shorter than a word)` when there were such subjects.
 - `LOSAT_X_LINKSORT=1` (TBLASTX, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the index sorts of the in-place HSP list path
   (`tblastx/x_link_sort.rs`, exactness argument in its header; it acts only where `LOSAT_X_HSPINPLACE` does).

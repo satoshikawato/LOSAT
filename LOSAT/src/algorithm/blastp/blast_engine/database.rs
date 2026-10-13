@@ -9,11 +9,12 @@
 //!   cutoff (`BLAST_SEQSRC_MINLENGTH`);
 //! - the preliminary stage reads the sequences in blocks and searches them in the order
 //!   of their ordinal ids (`search_blocks`); nothing but the hit lists is kept;
-//! - the sequences and definition lines of the hit lists are read again by ordinal id
-//!   after the preliminary stage (`ListedSubjects`) for the redo and the reports;
+//! - the sequences of the hit lists are read again by ordinal id after the preliminary
+//!   stage (`ListedSubjects`) for the redo, and the definition lines of the final hit
+//!   lists after the redo (`ListedSubjects::read_titles`) for the reports;
 //! - the reports show the database (`BlastpDatabase::pairwise_database`, `name`) and
 //!   the subject ids and titles of sequences without parsed Seq-ids
-//!   (`ListedSubjects::tabular_subject_ids`, `stitles`).
+//!   (`ListedTitles::tabular_subject_ids`, `stitles`).
 //!
 //! The per-subject kernel, the composition redo and the report writers are those of the
 //! `-subject` path.
@@ -730,8 +731,9 @@ where
 }
 
 /// The database sequences that the preliminary hit lists name, read by ordinal id after
-/// the preliminary stage: they stand for the subject set in the rest of the search (the
-/// composition redo and the reports).
+/// the preliminary stage: they stand for the subject set in the composition redo. Their
+/// definition lines are read after the redo, for the final hit lists only
+/// (`read_titles`).
 ///
 /// From here on a hit list names a sequence by its rank among the listed ordinal ids
 /// (`ordinals[rank]`), so that the code of the `-subject` path indexes these vectors as
@@ -744,11 +746,6 @@ pub(super) struct ListedSubjects {
     /// The sequences as stored (O stays O), between two sentinel bytes, by rank: what
     /// the composition redo reads.
     pub(super) encoded: Vec<EncodedProtein>,
-    /// The stored titles and the stored letters as the reports read them, by rank.
-    pub(super) records: Vec<FastaRecord>,
-    /// Whether the stored title of a subject holds a byte outside ' ' ..= '~' (read as
-    /// '#'), by rank (`check_reported_titles`).
-    replaced_title_bytes: Vec<bool>,
 }
 
 impl ListedSubjects {
@@ -792,12 +789,8 @@ impl ListedSubjects {
     // 307. So the redo reads the stored bytes; its matrices score O as X
     // (`adjust_scores.rs`, composition_adjustment.c:681-703). The preliminary stage uses
     // scores only, which are the same for O and X (`prepare_search_block`).
-    //
-    // NCBI reference for the titles:
-    // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:970-1017 (`s_GetBioseqTitle`: the
-    // title of the first definition line, the others appended as ` >id title`).
-    /// Reads the sequences and the definition lines of the ordinal ids in `hit_lists`
-    /// and renames the subjects of the hit lists to their ranks.
+    /// Reads the sequences of the ordinal ids in `hit_lists` and renames the subjects of
+    /// the hit lists to their ranks.
     pub(super) fn read(
         database: &BlastpDatabase,
         hit_lists: &mut [Option<BlastpHitList>],
@@ -811,8 +804,6 @@ impl ListedSubjects {
         ordinals.sort_unstable();
         ordinals.dedup();
         let mut encoded = Vec::with_capacity(ordinals.len());
-        let mut records = Vec::with_capacity(ordinals.len());
-        let mut replaced_title_bytes = Vec::with_capacity(ordinals.len());
         for &ordinal in &ordinals {
             let stored = db.read_sequence(ordinal).map_err(database_error)?;
             let residues = stored.protein(0);
@@ -826,26 +817,6 @@ impl ListedSubjects {
                 aa_seq,
                 aa_len: residues.len(),
             });
-            let mut deflines = db.deflines(ordinal).map_err(database_error)?;
-            // makeblastdb without -parse_seqids writes one definition line per sequence;
-            // NCBI shows the others of a sequence as ` >id title` after the first.
-            if deflines.len() != 1 {
-                bail!(
-                    "database sequence {ordinal} has {} definition lines; a sequence with more or fewer than one is not supported by LOSAT's BLASTP",
-                    deflines.len()
-                );
-            }
-            let defline = deflines.remove(0);
-            replaced_title_bytes.push(defline.replaced_title_bytes > 0);
-            let letters: Vec<u8> = residues
-                .iter()
-                .map(|&residue| ncbistdaa_to_ascii(residue) as u8)
-                .collect();
-            records.push(FastaRecord::new(
-                format!("gnl|BL_ORD_ID|{}", defline.bl_ord_id),
-                &defline.title,
-                &letters,
-            ));
         }
         let rank = |ordinal: u32| -> u32 {
             ordinals
@@ -860,14 +831,165 @@ impl ListedSubjects {
                 }
             }
         }
-        Ok(Self {
-            ordinals,
-            encoded,
+        Ok(Self { ordinals, encoded })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
+    // ```c++
+    //     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);
+    //
+    //     vector<TSeqLocInfoVector> subj_masks;
+    //     TSeqAlignVector aligns =
+    //         LocalBlastResults2SeqAlign(hsp_results,
+    //                                    *qdata,
+    //                                    *m_SeqInfoSrc,
+    //                                    m_OptsMemento->m_ProgramType,
+    //                                    m_Options->GetGappedMode(),
+    //                                    m_Options->GetOutOfFrameMode(),
+    //                                    subj_masks,
+    //                                    m_ResultType);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1582
+    // ```c++
+    //     for (int index = 0; index < hit_list->hsplist_count; index++) {
+    //         BlastHSPList* hsp_list = hit_list->hsplist_array[index];
+    //         if (!hsp_list)
+    //             continue;
+    //
+    //         // Sort HSPs with e-values as first priority and scores as
+    //         // tie-breakers, since that is the order we want to see them in
+    //         // in Seq-aligns.
+    //         Blast_HSPListSortByEvalue(hsp_list);
+    //
+    //         const Uint4 kOid = hsp_list->oid;
+    //         TSeqPos subj_length = 0;
+    //         CRef<CSeq_id> subject_id;
+    //         GetSequenceLengthAndId(seqinfo_src, kOid, subject_id, &subj_length);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2310
+    // ```c++
+    // CTempString
+    // CSeqDBVol::x_GetHdrAsn1Binary(int oid) const
+    // {
+    //     TIndx hdr_start = 0;
+    //     TIndx hdr_end   = 0;
+    //
+    //     //m_Atlas.Lock(locked);
+    //
+    //     if (!m_HdrFileOpened) x_OpenHdrFile();
+    // ```
+    // NCBI first reads a header file (and opens it, seqdbvol.cpp:127-133) when the
+    // traceback's results become Seq-aligns: after the batch's traceback, for the final
+    // hit lists only, query by query and in the order of each hit list. A header file
+    // that is missing or cannot be read fails the batch there (`BLAST Database error`,
+    // exit status 2, blast_app_util.hpp:185-203, outside the search stage's handler of
+    // local_blast.cpp:240-251), after the outfmt 0 prolog and the reports of the batches
+    // before; a batch without hits reads no header. Shown with the oracle (campaign
+    // dbsearch-20261012, `scripts/db3_nophr_probe.py`; comparison cases `cli.path.no_phr*`).
+    //
+    // NCBI reference for the titles:
+    // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:970-1017 (`s_GetBioseqTitle`: the
+    // title of the first definition line, the others appended as ` >id title`).
+    /// Reads the definition lines of the subjects of the final hit lists (`hit_lists`,
+    /// after the redo and before anything is dropped from them), in NCBI's order. A reader
+    /// error of NCBI's own is a `HeaderReadError` that names the query whose hit list
+    /// reached it; LOSAT's refusals are errors of their own.
+    pub(super) fn read_titles(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> Result<ListedTitles<'_>> {
+        let mut titles: Vec<Option<(Vec<u8>, bool)>> = vec![None; self.ordinals.len()];
+        for (query, hit_list) in hit_lists.iter().enumerate() {
+            let Some(hit_list) = hit_list else {
+                continue;
+            };
+            let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+            for hsp_list in &hit_list.hsplist_array[..count] {
+                let rank = hsp_list.oid as usize;
+                if titles[rank].is_some() {
+                    continue;
+                }
+                let ordinal = self.ordinals[rank];
+                let mut deflines = database.db.deflines(ordinal).map_err(|error| {
+                    if error.ncbi_message().is_some() {
+                        anyhow::Error::new(HeaderReadError {
+                            query,
+                            error: database_error(error),
+                        })
+                    } else {
+                        database_error(error)
+                    }
+                })?;
+                // makeblastdb without -parse_seqids writes one definition line per
+                // sequence; NCBI shows the others of a sequence as ` >id title` after the
+                // first.
+                if deflines.len() != 1 {
+                    bail!(
+                        "database sequence {ordinal} has {} definition lines; a sequence with more or fewer than one is not supported by LOSAT's BLASTP",
+                        deflines.len()
+                    );
+                }
+                let defline = deflines.remove(0);
+                titles[rank] = Some((defline.title, defline.replaced_title_bytes > 0));
+            }
+        }
+        let mut records = Vec::with_capacity(self.ordinals.len());
+        let mut replaced_title_bytes = Vec::with_capacity(self.ordinals.len());
+        for ((&ordinal, encoded), title) in self.ordinals.iter().zip(&self.encoded).zip(titles) {
+            let letters: Vec<u8> = encoded.aa_seq[1..=encoded.aa_len]
+                .iter()
+                .map(|&residue| ncbistdaa_to_ascii(residue) as u8)
+                .collect();
+            // A subject that is in no final hit list keeps an empty title: no report
+            // shows it.
+            let (title, replaced) = title.unwrap_or_default();
+            replaced_title_bytes.push(replaced);
+            records.push(FastaRecord::new(
+                format!("gnl|BL_ORD_ID|{ordinal}"),
+                &title,
+                &letters,
+            ));
+        }
+        Ok(ListedTitles {
+            listed: self,
             records,
             replaced_title_bytes,
         })
     }
+}
 
+/// A reader error of NCBI's own while the definition lines of the final hit lists are
+/// read (`ListedSubjects::read_titles`): `query` is the query whose hit list reached it.
+/// NCBI fails that query's batch, after the reports of the batches before
+/// (`blast_engine::search`).
+#[derive(Debug)]
+pub(super) struct HeaderReadError {
+    pub(super) query: usize,
+    pub(super) error: anyhow::Error,
+}
+
+impl std::fmt::Display for HeaderReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.error)
+    }
+}
+
+impl std::error::Error for HeaderReadError {}
+
+/// The stored titles and letters of the listed subjects as the reports read them, by rank
+/// (`ListedSubjects::read_titles`).
+pub(super) struct ListedTitles<'a> {
+    listed: &'a ListedSubjects,
+    /// The stored titles (empty for a subject in no final hit list) and the stored
+    /// letters, by rank.
+    pub(super) records: Vec<FastaRecord>,
+    /// Whether the stored title of a subject holds a byte outside ' ' ..= '~' (read as
+    /// '#'), by rank (`check_reported_titles`).
+    replaced_title_bytes: Vec<bool>,
+}
+
+impl ListedTitles<'_> {
     // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
     // ```c++
     //         string message;
@@ -912,7 +1034,7 @@ impl ListedSubjects {
             if self.replaced_title_bytes[rank] {
                 bail!(
                     "database sequence {} has a stored title with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line); this is not supported by LOSAT's BLASTP",
-                    self.ordinals[rank]
+                    self.listed.ordinals[rank]
                 );
             }
         }
@@ -948,7 +1070,7 @@ impl ListedSubjects {
                 ids.push(Arc::from(&b""[..]));
                 continue;
             }
-            let ordinal = self.ordinals[rank];
+            let ordinal = self.listed.ordinals[rank];
             let id = crate::report::defline::database_subject_id(&record.title, true)
                 .map_err(|problem| {
                     anyhow::anyhow!(
@@ -985,7 +1107,7 @@ impl ListedSubjects {
             if reads_past_end {
                 bail!(
                     "database sequence {} has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0); this is not supported by LOSAT's BLASTP",
-                    self.ordinals[rank]
+                    self.listed.ordinals[rank]
                 );
             }
         }
@@ -1482,6 +1604,7 @@ mod tests {
         let mut hit_lists = vec![Some(first), None, Some(second)];
         let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
         assert_eq!(listed.ordinals, [0, 2, 7, 9]);
+        let titles = listed.read_titles(&database, &hit_lists).unwrap();
         let oids = |hit_list: &Option<BlastpHitList>| -> Vec<(u32, Vec<u32>)> {
             let hit_list = hit_list.as_ref().unwrap();
             hit_list.hsplist_array[..hit_list.hsplist_count]
@@ -1497,11 +1620,11 @@ mod tests {
         assert_eq!(renamed, [(0, vec![0, 0]), (1, vec![1, 1])]);
         // p03: every letter; the redo and the report read the stored letters (O is O).
         assert_eq!(
-            listed.records[1].title(),
+            titles.records[1].title(),
             b"p03 every letter of NCBIstdaa but the gap"
         );
         assert_eq!(
-            listed.records[1].seq(),
+            titles.records[1].seq(),
             b"ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT"
         );
         let redone: String = listed.encoded[1].aa_seq[1..=listed.encoded[1].aa_len]
@@ -1511,24 +1634,106 @@ mod tests {
         assert_eq!(redone, "ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT");
         assert_eq!(listed.encoded[1].aa_seq.len(), 35);
         assert_eq!(
-            listed.records[2].seq(),
+            titles.records[2].seq(),
             b"MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ"
         );
         assert_eq!(listed.encoded[3].aa_len, 300);
         // The tabular ids of the subjects with rows, the stored titles for `stitle`.
-        let ids = listed.tabular_subject_ids(&hit_lists).unwrap();
+        let ids = titles.tabular_subject_ids(&hit_lists).unwrap();
         assert_eq!(
             ids.iter().map(|id| id.as_ref()).collect::<Vec<_>>(),
             [&b"p01"[..], b"p03", b"p08", b"p10"]
         );
         assert_eq!(
-            listed.stitles()[0].as_ref(),
+            titles.stitles()[0].as_ref(),
             b"p01 first protein [Test organism]"
         );
-        listed
+        titles
             .check_shown_titles(&[0usize, 1, 2, 3].into_iter().collect())
             .unwrap();
-        listed.check_reported_titles(&hit_lists).unwrap();
+        titles.check_reported_titles(&hit_lists).unwrap();
+    }
+
+    // blast_seqalign.cpp:1569-1582 and seqdbvol.cpp:2302-2310: NCBI opens a volume's
+    // header file when the Seq-aligns of the final hit lists are made, query by query and
+    // in the order of each hit list; a subject that is in no final hit list is never read.
+    // prot_mv: volume 00 holds the ordinal ids 0-2, 01 holds 3, 05 holds 9.
+    // (A path in the system's temporary directory: Unix spelling.)
+    #[cfg(unix)]
+    #[test]
+    fn titles_are_read_for_the_final_hit_lists_in_ncbis_order() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-db-nohdr-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        for entry in
+            std::fs::read_dir(fixture("prot_mv.pal").trim_end_matches("prot_mv.pal")).unwrap()
+        {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            if name.starts_with("prot_mv.") && name != "prot_mv.00.phr" && name != "prot_mv.05.phr"
+            {
+                std::fs::copy(&path, dir.join(&name)).unwrap();
+            }
+        }
+        let name = dir.join("prot_mv").to_str().unwrap().to_string();
+        let database = BlastpDatabase::open(&name, &ApplicationSettings::default()).unwrap();
+        let list = |oid: u32, best_evalue: f64| BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![test_hsp(oid, 60)],
+            best_evalue,
+        };
+        let hit_list = |lists: Vec<BlastpHspList>, count: usize| {
+            let mut hit_list = BlastpHitList::new(10);
+            hit_list.hsplist_array = lists;
+            hit_list.hsplist_count = count;
+            Some(hit_list)
+        };
+        // Query 1 reports ordinal id 3 (volume 01); ordinal id 1 (volume 00, no header
+        // file) is in its list past the count, and is not read.
+        let mut hit_lists = vec![None, hit_list(vec![list(3, 1e-9), list(1, 1e-3)], 1)];
+        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        assert_eq!(listed.ordinals, [1, 3]);
+        let titles = listed.read_titles(&database, &hit_lists).unwrap();
+        assert_eq!(
+            titles.records[1].title(),
+            b"p04 lower case and ambiguity codes"
+        );
+        assert_eq!(titles.records[0].title(), b"");
+        assert_eq!(titles.records[0].seq(), b"I");
+        // Query 2 reports ordinal id 9 (volume 05) before ordinal id 0 (volume 00): the
+        // first header file read is that of volume 05, in query 2's batch.
+        let mut hit_lists = vec![
+            None,
+            hit_list(vec![list(3, 1e-9), list(1, 1e-3)], 1),
+            hit_list(vec![list(9, 1e-9), list(0, 1e-5)], 2),
+        ];
+        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        assert_eq!(listed.ordinals, [0, 1, 3, 9]);
+        let error = listed
+            .read_titles(&database, &hit_lists)
+            .err()
+            .expect("a missing header file")
+            .downcast::<HeaderReadError>()
+            .expect("NCBI's error, with the query that reached it");
+        assert_eq!(error.query, 2);
+        let native = error
+            .error
+            .downcast_ref::<NativeError>()
+            .expect("NCBI's error");
+        assert_eq!(native.exit, 2);
+        assert_eq!(
+            native.message,
+            format!(
+                "BLAST Database error: Error: File ({}) not found.\n",
+                dir.join("prot_mv.05.phr").display()
+            )
+        );
+        drop(database);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     // NCBI BLAST+ 2.17.0 writes `Error: (803.7) [blastp] Blast-def-line-set.E.title`,
@@ -1568,15 +1773,17 @@ mod tests {
         clean.update(list(0));
         let mut hit_lists = vec![Some(clean)];
         let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
-        listed.check_reported_titles(&hit_lists).unwrap();
+        let titles = listed.read_titles(&database, &hit_lists).unwrap();
+        titles.check_reported_titles(&hit_lists).unwrap();
         // The subject with the bad byte: read as `#`, and rejected when it is reported.
         let mut bad = BlastpHitList::new(10);
         bad.update(list(9));
         bad.update(list(0));
         let mut hit_lists = vec![Some(bad)];
         let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
-        assert_eq!(listed.records[1].title(), b"p10 l#st protein");
-        let error = listed.check_reported_titles(&hit_lists).unwrap_err();
+        let titles = listed.read_titles(&database, &hit_lists).unwrap();
+        assert_eq!(titles.records[1].title(), b"p10 l#st protein");
+        let error = titles.check_reported_titles(&hit_lists).unwrap_err();
         assert!(
             format!("{error:#}").starts_with(
                 "database sequence 9 has a stored title with a byte outside ' ' to '~'"

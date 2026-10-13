@@ -385,7 +385,9 @@ impl SeqDb {
     /// accepts one name; it carries no file extension.
     ///
     /// A database that stores parsed Seq-ids is rejected here: the first
-    /// header of every volume is decoded once.
+    /// header of every volume is decoded once. A volume whose header file
+    /// cannot be opened (missing, or an `open` that fails) is not checked:
+    /// NCBI opens a header file at its first read, and the error comes there.
     pub fn open_in(name: &str, seqtype: SeqType, path: &SearchPath) -> Result<Self, SeqDbError> {
         Self::open_tree(alias::resolve_in(name, seqtype, path)?, name, seqtype)
     }
@@ -595,9 +597,27 @@ impl SeqDb {
             total_length,
             max_length,
         };
+        // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:126-133
+        // ```c++
+        // void
+        // CSeqDBVol::x_OpenHdrFile(void) const {
+        //     CFastMutexGuard mtx_gurad(m_MtxHdr);
+        //     if (!m_HdrFileOpened && m_Idx->GetNumOIDs() != 0) {
+        //         m_Hdr.Reset(new CSeqDBHdrFile(m_Atlas, m_VolName, (m_IsAA?'p':'n')));
+        //     }
+        //     m_HdrFileOpened = true;
+        // }
+        // ```
+        // NCBI opens a header file at the first read of a header of its volume
+        // (`x_GetHdrAsn1Binary`, seqdbvol.cpp:2302-2310): a search program reads
+        // the first one after its search, so a header file that is missing or
+        // cannot be opened fails there, not here (`Volume::lazy_file`).
         for (at, volume) in db.volumes.iter().enumerate() {
             if volume.num_oids() > 0 {
-                db.deflines(db.volume_starts[at])?;
+                match db.deflines(db.volume_starts[at]) {
+                    Ok(_) | Err(SeqDbError::NotFound(_) | SeqDbError::Open { .. }) => {}
+                    Err(error) => return Err(error),
+                }
             }
         }
         Ok(db)

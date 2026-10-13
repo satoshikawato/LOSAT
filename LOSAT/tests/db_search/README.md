@@ -22,6 +22,10 @@ FASTA files:
   `blastp -subject tests/fasta/PajaWSV.faa -outfmt 6` prints 1), then `nohit`, a 72-residue low-complexity
   glycine/serine sequence for which NCBI `-db paja` reports no hit. For the whole file: 4 rows with `-db`, 2
   rows with `-subject` (outfmt 6).
+- `nohit.faa`: `GGGGG`, a query without hits in `nophr` (the database of `LOSAT/tests/seqdb/prot.faa`).
+- `empty.faa`: an empty query file.
+- `vol2.faa`: `A` (record p10 of `LOSAT/tests/seqdb/prot.faa`) and `B`, the same with every fifth letter
+  replaced by `W` (`A` where it is `W`); `vol2_q.faa`: `A` as the query.
 
 Databases (all `-blastdb_version 4`, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file
 makeblastdb also writes was deleted). Run from `LOSAT/`:
@@ -34,6 +38,14 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
         -title "PajaWSV proteins" -blastdb_version 4
     makeblastdb -in tests/db_search/o_stored.faa -dbtype prot -out tests/db_search/o_stored \
         -title "stored O against the query's X" -blastdb_version 4
+    makeblastdb -in tests/db_search/vol2.faa -dbtype prot -out tests/db_search/vol2_nophr \
+        -title "two volumes, the second without its header file" -blastdb_version 4 -max_file_sz 128B
+    rm tests/db_search/vol2_nophr.01.phr
+
+`nophr.pin` and `nophr.psq` are copies of `LOSAT/tests/seqdb/db/prot_v4.pin` and `.psq`: the database without
+its header file. `vol2_nophr` (one sequence per volume, `vol2_nophr.pal`) lacks the header file of its second
+volume. NCBI opens a volume's header file when it first reads a header of it, after the search and for the
+final hit lists only, so these searches succeed when no reported subject is in such a volume.
 
 `residues_gap` is the database LOSAT rejects (a stored `-`). The other databases of the rows are the ones of
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index

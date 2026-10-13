@@ -128,7 +128,7 @@ j02_index_3_bytes	empty	{R}/bad	<none>	trunc3	error	\e	\e	\e	Error: Not a valid 
 j03_index_20_bytes	empty	{R}/bad	<none>	trunc20	other	\e	\e	\e	BLAST engine error: Database memory map file error	3	\e	format:index file ends inside a field
 j04_index_last_byte_missing	empty	{R}/bad	<none>	truncm1	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/bad/truncm1	\e	0	\e	format:index file ends inside a field
 j05_no_sequence_file	empty	{R}/bad	<none>	nopsq	other	\e	\e	\e	BLAST engine error: Database memory map file error	3	\e	search:Database memory map file error
-j06_no_header_file	empty	{R}/bad	<none>	nophr	error	\e	\e	\e	Error: File ({R}/bad/nophr.phr) not found.	2	\e	\e
+j06_no_header_file	empty	{R}/bad	<none>	nophr	error	\e	\e	\e	Error: File ({R}/bad/nophr.phr) not found.	2	\e	header
 j07_alias_of_cut_index	empty	{R}/bad	<none>	al_trunc	other	\e	\e	\e	BLAST engine error: Database memory map file error	3	\e	format:index file ends inside a field
 x01_database_named_dash	xd	<unset>	<none>	-	error	\e	\e	\e	Error: File (/-.pin) not found.	2	\e	\e
 x02_database_named_dash_blastdb	empty	{R}/xd	<none>	-	error	\e	\e	\e	Error: File (/-.pin) not found.	2	\e	\e

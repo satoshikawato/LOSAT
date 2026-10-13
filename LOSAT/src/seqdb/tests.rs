@@ -1321,6 +1321,18 @@ fn check_search_path_row(
         assert_eq!(status, "3", "{id}: exit status of an engine error");
         return;
     }
+    // A volume without its header file: NCBI opens the file at the first read of
+    // a header, which a search makes after its search (`SeqDb::open_in`); the
+    // error is the reader's.
+    if losat == "header" {
+        let db = opened.unwrap_or_else(|e| panic!("{id}: LOSAT does not open it: {e:?}"));
+        db.read_sequence(0)
+            .unwrap_or_else(|e| panic!("{id}: the sequence file: {e:?}"));
+        let read = db.deflines(0).expect_err("the first header read fails");
+        assert_eq!(read.ncbi_message(), Some(place(error)), "{id}: {read:?}");
+        assert_eq!(status, "2", "{id}: exit status of a database error");
+        return;
+    }
     // Databases LOSAT refuses on purpose, whatever NCBI does with them.
     if let Some((kind, text)) = losat.split_once(':') {
         let error = match opened {

@@ -5459,33 +5459,40 @@ fn search(
     // without the epilog.
     let epilog = batches.stop.is_none();
     if batches.searched_done > 0 {
-        let searched_done = batches.searched_done;
-        let done_input = seq_range::QueryInput {
-            placements: seq_range::Placements(
-                query_input
-                    .placements
-                    .0
-                    .iter()
-                    .take(searched_done)
-                    .copied()
-                    .collect(),
-            ),
-            ordinals: query_input.ordinals[..searched_done].to_vec(),
-            input_lengths: query_input.input_lengths[..batches.input_done].to_vec(),
-            skipped: query_input.skipped[..batches.input_done].to_vec(),
-            range_length: query_input.range_length,
-        };
-        let ranges = BlastpRanges {
-            input_records: &query_records[..batches.input_done],
-            query_input: &done_input,
-            subject_placements: &subjects.placements,
-        };
-        let reports = BlastpReports {
-            reader_warnings: &batches.warnings[..searched_done],
-            epilog,
-            v1_titles: v1.is_some(),
-        };
-        crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
+        // The searches and reports of the batches up to the input record `input_done` and
+        // the searched query `searched_done`.
+        let search_batches = |args: ResolvedBlastpArgs,
+                              outputs: &mut ReportOutputs<'_>,
+                              pool: &crate::utils::threading::SearchPool<'_>,
+                              input_done: usize,
+                              searched_done: usize,
+                              epilog: bool|
+         -> Result<()> {
+            let done_input = seq_range::QueryInput {
+                placements: seq_range::Placements(
+                    query_input
+                        .placements
+                        .0
+                        .iter()
+                        .take(searched_done)
+                        .copied()
+                        .collect(),
+                ),
+                ordinals: query_input.ordinals[..searched_done].to_vec(),
+                input_lengths: query_input.input_lengths[..input_done].to_vec(),
+                skipped: query_input.skipped[..input_done].to_vec(),
+                range_length: query_input.range_length,
+            };
+            let ranges = BlastpRanges {
+                input_records: &query_records[..input_done],
+                query_input: &done_input,
+                subject_placements: &subjects.placements,
+            };
+            let reports = BlastpReports {
+                reader_warnings: &batches.warnings[..searched_done],
+                epilog,
+                v1_titles: v1.is_some(),
+            };
             run_resolved_in_pool(
                 args,
                 &searched_queries[..searched_done],
@@ -5498,6 +5505,55 @@ fn search(
                 &ranges,
                 &reports,
             )
+        };
+        crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
+            let result = search_batches(
+                args.clone(),
+                outputs,
+                pool,
+                batches.input_done,
+                batches.searched_done,
+                epilog,
+            );
+            // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
+            // ```c++
+            //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+            // 	    BLAST_PROF_START( APP.LOOP.PRE );
+            //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+            //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+            //             ...
+            //                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+            //                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+            //                 results = lcl_blast.Run();
+            // ```
+            // A header file that NCBI cannot read fails the search of the batch whose
+            // hit lists reach it first (`database::HeaderReadError`), after the outfmt 0
+            // prolog, the reports of the batches before (without the epilog) and the
+            // reader's messages of that batch. LOSAT searches all batches together, so
+            // the batches before are searched again and reported alone.
+            let failure = match result {
+                Err(error) if error.is::<database::HeaderReadError>() => error
+                    .downcast::<database::HeaderReadError>()
+                    .expect("the error was checked to be a HeaderReadError"),
+                other => return other,
+            };
+            let (input_start, searched_start) = batches.start_of(failure.query);
+            if searched_start > 0 {
+                search_batches(
+                    args.clone(),
+                    outputs,
+                    pool,
+                    input_start,
+                    searched_start,
+                    false,
+                )?;
+            } else {
+                write_pairwise_prologs(&args, subject_source, subject_label, outputs)?;
+            }
+            outputs
+                .diagnostics
+                .write_all(&batches.warnings[searched_start])?;
+            Err(failure.error)
         })?;
     } else if batches.stop.is_some() {
         // NCBI reference: ncbi-blast/c++/src/app/blast/blastp_app.cpp:253
@@ -7510,10 +7566,10 @@ fn run_resolved_in_pool(
         &mut preliminary_hit_lists,
     )?;
 
-    // A database: the sequences and the definition lines of the preliminary hit lists
-    // are read now, by ordinal id, and stand for the subject set in the rest of the
-    // search (the redo and the reports); the hit lists name them by their rank among the
-    // listed ordinal ids from here on (`database::ListedSubjects`).
+    // A database: the sequences of the preliminary hit lists are read now, by ordinal id,
+    // and stand for the subject set in the redo; the hit lists name them by their rank
+    // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
+    // definition lines are read after the redo (`ListedSubjects::read_titles`).
     let listed_subjects = match database {
         Some(database) => Some(database::ListedSubjects::read(
             database,
@@ -7521,27 +7577,9 @@ fn run_resolved_in_pool(
         )?),
         None => None,
     };
-    let (subjects, subject_records, subject_titles): (
-        &[EncodedProtein],
-        &[FastaRecord],
-        std::borrow::Cow<'_, [Arc<[u8]>]>,
-    ) = match listed_subjects.as_ref() {
-        Some(listed) => (
-            &listed.encoded,
-            &listed.records,
-            std::borrow::Cow::Owned(
-                listed
-                    .records
-                    .iter()
-                    .map(|record| Arc::from(record.title()))
-                    .collect(),
-            ),
-        ),
-        None => (
-            &subjects,
-            subject_records,
-            std::borrow::Cow::Borrowed(&subject_titles[..]),
-        ),
+    let subjects: &[EncodedProtein] = match listed_subjects.as_ref() {
+        Some(listed) => &listed.encoded,
+        None => &subjects,
     };
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
@@ -8513,6 +8551,30 @@ fn run_resolved_in_pool(
     // The reports are made from the Seq-aligns of the final hit lists: an HSP of score 0
     // (kept by a very large -evalue) is in no report, and a subject with only such HSPs has
     // none (the hit list was already cut to -max_target_seqs).
+    //
+    // A database: the definition lines of the final hit lists are read first, where NCBI
+    // reads the Seq-ids of its Seq-aligns (`database::ListedSubjects::read_titles`).
+    let listed_titles = match (listed_subjects.as_ref(), database) {
+        (Some(listed), Some(database)) => Some(listed.read_titles(database, &hit_lists)?),
+        _ => None,
+    };
+    let (subject_records, subject_titles): (&[FastaRecord], std::borrow::Cow<'_, [Arc<[u8]>]>) =
+        match listed_titles.as_ref() {
+            Some(titles) => (
+                &titles.records,
+                std::borrow::Cow::Owned(
+                    titles
+                        .records
+                        .iter()
+                        .map(|record| Arc::from(record.title()))
+                        .collect(),
+                ),
+            ),
+            None => (
+                subject_records,
+                std::borrow::Cow::Borrowed(&subject_titles[..]),
+            ),
+        };
     for hit_list in hit_lists.iter_mut().flatten() {
         let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
         let mut kept: Vec<_> = hit_list
@@ -8753,8 +8815,8 @@ fn run_resolved_in_pool(
         .collect();
     // A database title that LOSAT does not report as NCBI does is an error before any
     // format is written.
-    if let Some(listed) = listed_subjects.as_ref() {
-        listed.check_reported_titles(&hit_lists)?;
+    if let Some(titles) = listed_titles.as_ref() {
+        titles.check_reported_titles(&hit_lists)?;
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
     // format is written (`tabular_subject_ids`).
@@ -8762,8 +8824,8 @@ fn run_resolved_in_pool(
         .iter()
         .any(|(outfmt, _, _)| *outfmt != OutputFormat::Pairwise)
     {
-        match listed_subjects.as_ref() {
-            Some(listed) => listed.tabular_subject_ids(&hit_lists)?,
+        match listed_titles.as_ref() {
+            Some(titles) => titles.tabular_subject_ids(&hit_lists)?,
             None => tabular_subject_ids(&hit_lists, subject_records)?,
         }
     } else {
@@ -8772,9 +8834,9 @@ fn run_resolved_in_pool(
     // The `stitle` text of the tabular formats by subject: the stored titles of a
     // database; none for the records of a subject set, which have no BLAST definition
     // line (`N/A`, `blastp_subject_stitle`).
-    let subject_stitles: Vec<Arc<[u8]>> = listed_subjects
+    let subject_stitles: Vec<Arc<[u8]>> = listed_titles
         .as_ref()
-        .map(database::ListedSubjects::stitles)
+        .map(database::ListedTitles::stitles)
         .unwrap_or_default();
     let pairwise_database = database.map(database::BlastpDatabase::pairwise_database);
     let mut format_warnings = Some(crate::report::query_warnings::QueryWarnings {
@@ -8873,8 +8935,8 @@ fn run_resolved_in_pool(
                 if reports.v1_titles {
                     check_v1_shown_subject_titles(&shown, subject_records)?;
                 }
-                match listed_subjects.as_ref() {
-                    Some(listed) => listed.check_shown_titles(&shown)?,
+                match listed_titles.as_ref() {
+                    Some(titles) => titles.check_shown_titles(&shown)?,
                     None => check_shown_subject_titles(&shown, subject_records)?,
                 }
                 let masked_hits =

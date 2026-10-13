@@ -60,9 +60,9 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 47 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
-`LOSAT_X_SEEDBUCKET` and `LOSAT_X_TBNOIDCHUNK` joined), and their variables mean
-(`LOSAT/src/utils/xswitch.rs`):
+strict set are on by default (43 then, 48 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+`LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK` and `LOSAT_X_SEEDRELEASE` joined), and their
+variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -91,7 +91,7 @@ strict set are on by default (43 then, 47 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `LOSAT_X_AHEADSHADOW`, which compares only while `AHEAD` is on). A shadow compares the kernel
   the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128` or base kernel that takes the
   call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 47 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 48 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -116,6 +116,7 @@ export LOSAT_X_PAIRPAR=1 LOSAT_X_NEWTONLANES=1 LOSAT_X_GREEDYPRELIM=1
 export LOSAT_X_PAIRLUT=1 LOSAT_X_HSPINPLACE=1
 export LOSAT_X_SEEDBUCKET=1
 export LOSAT_X_TBNOIDCHUNK=1
+export LOSAT_X_SEEDRELEASE=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -149,6 +150,12 @@ while `LOSAT_X_PAIRPAR` is on.
 `LOSAT_X_TBNOIDCHUNK` was added after the default changed, as a switch that was off unless set,
 and joined the set on 2026-10-13. It changes only how many subjects one entry into the tblastn
 search pool takes (2 or more threads, several subjects) and needs no other switch.
+
+`LOSAT_X_SEEDRELEASE` was added after the default changed, as a switch that was off unless set,
+and joined the set on 2026-10-13. It lowers the peak memory of TBLASTX further: the tables that
+only the seed stage reads are freed before the HSP list of a query batch's last subject is
+merged and linked. It changes no value and no order of computation, acts on every TBLASTX path
+(the unit path of `LOSAT_X_PAIRPAR` and the scan loop) and needs no other switch.
 
 What runs per target:
 
@@ -296,9 +303,9 @@ Rebuilding less:
   by HSP, every field, E-values by bits; the first difference stops the run and the search continues with the
   reference's result. One line at exit:
   `[X_SHADOW] HSPINPLACE sorts= linkings= hits_compared= replay_fallbacks=`.
-- `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it) the tables that only the scan reads are freed before the HSP list of
-  the batch's last subject is merged and linked, which is where the heap of a large search peaks
+- `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
+  scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
+  the heap of a large search peaks
   (`tblastx/x_seed_release.rs`, exactness argument in its header). A query batch keeps its tables in two
   holders, each reached only through one stage per subject: the unit path of `LOSAT_X_PAIRPAR` with its group
   tables, whose stage ends when the subject's units have run, before their lists are merged (the unit path
@@ -306,8 +313,8 @@ Rebuilding less:
   in the same order); and the batch's lookup table, whose stage ends after the seed stage. The end of the
   batch's last stage of a holder frees it. The worker's diagonal table, which only the reference frame loop
   reads, is not created when the unit path takes the batch without its shadow, and is otherwise dropped by
-  the worker that ended the last lookup stage. Without the switch the same holders keep the tables until the
-  batch has been searched, as before. Measured once on AP027131 x AP027133 (genetic code 4, one thread, bytes
+  the worker that ended the last lookup stage. With the switch off the same holders keep the tables until the
+  batch has been searched, as before it existed. Measured once on AP027131 x AP027133 (genetic code 4, one thread, bytes
   requested under massif), without -> with the switch: the end of the units 110.4 -> 102.4 MiB, the merge of
   their lists 155.8 -> 81.0 MiB, the first linking call 167.6 -> 107.3 MiB, which is the peak of the run in
   both; max RSS in one run each 167 -> 110 MiB at one thread and 221 -> 163 MiB at eight. Known limits: the

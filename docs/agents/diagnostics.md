@@ -466,7 +466,8 @@ Scheduling (each value computed by one thread with the original function; order 
   its header): in the rows where no gap opens in A the cells depend on each other only through the
   X-drop test, whose `best_score` is a prefix maximum; in the other rows the row gap is a decayed
   prefix maximum. 32-bit values as in the reference, the matrix rows read from 16-bit tables built
-  from the reference's score function. Without AVX2 the same arrays run the scalar loops. A letter
+  from the reference's score function. Without AVX2 (other CPUs, aarch64, Wasm) the reference
+  function runs (the scalar loops on the same arrays were slower than it). A letter
   code of 28 or more, a negative gap cost, a gap cost above 65,536 or an X-drop above 2^28 leaves
   the call to the reference function. Not in the set (off unless set to any value). Shadow:
   `LOSAT_X_BPGAPSHADOW=1` runs both for every restricted alignment and stops (panic) if

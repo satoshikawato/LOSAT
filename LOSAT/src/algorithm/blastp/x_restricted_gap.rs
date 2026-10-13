@@ -1,6 +1,6 @@
 //! EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): the restricted gapped alignment of the blastp
-//! preliminary stage (NCBI `s_RestrictedGappedAlign`) with its score rows in separate arrays and,
-//! on x86_64 with AVX2, eight cells of a row at a time.
+//! preliminary stage (NCBI `s_RestrictedGappedAlign`) with its score rows in separate arrays,
+//! eight cells of a row at a time (x86_64 with AVX2; elsewhere the reference function runs).
 //!
 //! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1107-1122,1143-1147,1171
 //! ```c
@@ -48,7 +48,8 @@
 //!   of the row and the scores of the cells left of `b` in this row: a dropped cell has
 //!   `score < best_score - x_dropoff <= best_score` (`x_dropoff >= gap_open + gap_extend >= 0`),
 //!   so it could not have raised `best_score` either. That is a prefix maximum, computed for eight
-//!   cells at a time. `best_score` changes at the first cell of the row that holds the row's
+//!   cells at a time; when no cell of the eight exceeds `best_score`, it is `best_score` for all
+//!   of them and is not computed. `best_score` changes at the first cell of the row that holds the row's
 //!   largest score, if that score exceeds `best_score` (`score > best_score` is strict), which
 //!   gives `a_offset` and `b_offset`. `first_b_index` passes the dropped cells at the start of the
 //!   row, `last_b_index` is the last cell kept, and the score after the loop
@@ -72,6 +73,10 @@
 //!   (BLOSUM62's `BLAST_SCORE_MIN` = -32768 for the gap letter fits). A matrix with an entry
 //!   outside 16 bits, a letter code of 28 or more, a negative gap cost, a gap cost above 65,536 or
 //!   an X-drop above 2^28 are not handled here; the reference function runs instead.
+//! - The scalar rows (`row_nogap_scalar`, `row_gap_scalar`) are the reference's loops on these
+//!   arrays, cell by cell. They were slower than the reference function, so a CPU without AVX2
+//!   runs the reference function; the tests run them to check the arrays apart from the vector
+//!   code.
 //!
 //! The variables are read once. `LOSAT_X_BPGAP` (off unless set to any value; not in the strict
 //! set, `utils/xswitch.rs`) runs this module; `LOSAT_X_BPGAPSHADOW` runs both for every
@@ -294,21 +299,27 @@ pub(super) fn restricted_gapped_align_protein_x(
 ) -> (usize, usize, i32) {
     let mode = x_bpgap();
     if mode != XBpGap::Reference {
-        let fast = restricted_fast(
-            query,
-            query_base,
-            subject,
-            subject_base,
-            len1,
-            len2,
-            score_matrix,
-            gap_open,
-            gap_extend,
-            x_drop,
-            reverse,
-            &mut scratch.x_restricted,
-            cpu_has_avx2(),
-        );
+        // Without AVX2 the reference function runs: the scalar rows on the same arrays were
+        // slower than it (they serve the tests as the cell-by-cell version of the arrays).
+        let fast = if cpu_has_avx2() {
+            restricted_fast(
+                query,
+                query_base,
+                subject,
+                subject_base,
+                len1,
+                len2,
+                score_matrix,
+                gap_open,
+                gap_extend,
+                x_drop,
+                reverse,
+                &mut scratch.x_restricted,
+                true,
+            )
+        } else {
+            None
+        };
         if let Some(fast) = fast {
             FAST_CALLS.fetch_add(1, Ordering::Relaxed);
             if mode == XBpGap::Fast {
@@ -469,6 +480,121 @@ fn restricted_fast(
     if sc.col.len() < len2 + 2 + TAIL {
         sc.col.resize(len2 + 2 + TAIL, 0);
     }
+    let p = XParams {
+        x_dropoff,
+        gap_open_extend,
+        gap_extend,
+    };
+    #[cfg(target_arch = "x86_64")]
+    if use_avx2 {
+        // SAFETY: `use_avx2` is true only when the CPU has AVX2, BMI1 and LZCNT (`cpu_has_avx2`,
+        // which the tests also call). The arrays of `sc` were sized for `len2` above.
+        return unsafe {
+            restricted_rows_avx2(
+                query,
+                query_base,
+                subject,
+                subject_base,
+                len1,
+                len2,
+                reverse,
+                tables,
+                &p,
+                sc,
+            )
+        };
+    }
+    let _ = use_avx2;
+    restricted_rows::<false>(
+        query,
+        query_base,
+        subject,
+        subject_base,
+        len1,
+        len2,
+        reverse,
+        tables,
+        &p,
+        sc,
+    )
+}
+
+// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1076
+// ```c
+//     for (a_index = 1; a_index <= M; a_index++) {
+// ```
+/// The rows with the vector kernel, compiled for AVX2 as a whole (no call per row).
+///
+/// # Safety
+/// AVX2, BMI1 and LZCNT; `sc` sized for `len2` by `restricted_fast`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,bmi1,lzcnt")]
+unsafe fn restricted_rows_avx2(
+    query: &[u8],
+    query_base: usize,
+    subject: &[u8],
+    subject_base: usize,
+    len1: usize,
+    len2: usize,
+    reverse: bool,
+    tables: &XScoreTables,
+    p: &XParams,
+    sc: &mut XRestrictedScratch,
+) -> Option<(usize, usize, i32)> {
+    restricted_rows::<true>(
+        query,
+        query_base,
+        subject,
+        subject_base,
+        len1,
+        len2,
+        reverse,
+        tables,
+        p,
+        sc,
+    )
+}
+
+// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1053-1067,1076-1098
+// ```c
+//     score = -gap_open_extend;
+//     score_array[0].best = 0;
+//     score_array[0].best_gap = -gap_open_extend;
+//
+//     for (i = 1; i <= N; i++) {
+//         if (score < -x_dropoff)
+//             break;
+//
+//         score_array[i].best = score;
+//         score_array[i].best_gap = score - gap_open_extend;
+//         score -= gap_extend;
+//     }
+//
+//     b_size = i;
+//     best_score = 0;
+//     first_b_index = 0;
+//     b_gap = 0;
+// ...
+//     for (a_index = 1; a_index <= M; a_index++) {
+// ```
+/// Row 0 and the row loop of `s_RestrictedGappedAlign` (`AVX2`: the vector rows; the caller
+/// guarantees the CPU features and has sized the arrays of `sc` for `len2`).
+#[inline(always)]
+fn restricted_rows<const AVX2: bool>(
+    query: &[u8],
+    query_base: usize,
+    subject: &[u8],
+    subject_base: usize,
+    len1: usize,
+    len2: usize,
+    reverse: bool,
+    tables: &XScoreTables,
+    p: &XParams,
+    sc: &mut XRestrictedScratch,
+) -> Option<(usize, usize, i32)> {
+    let x_dropoff = p.x_dropoff;
+    let gap_open_extend = p.gap_open_extend;
+    let gap_extend = p.gap_extend;
     let col_cap = len2 + 2 + TAIL;
     let mut col_ready = 0usize;
 
@@ -500,11 +626,6 @@ fn restricted_fast(
         a_offset: 0,
         b_offset: 0,
     };
-    let p = XParams {
-        x_dropoff,
-        gap_open_extend,
-        gap_extend,
-    };
 
     for a_index in 1..=len1 {
         let qc = if reverse {
@@ -515,7 +636,8 @@ fn restricted_fast(
         if qc >= 28 {
             return None;
         }
-        // Letters for the cells up to `b_size` and the block that may run past it.
+        // Letters for the cells up to `b_size` and the block that may run past it. A letter is
+        // below 28 (checked when it is copied), so `& 31` in the scalar rows changes no index.
         let need = (band.b_size + 9).min(col_cap);
         if col_ready < need {
             let upto = (need + 56).min(col_cap);
@@ -530,11 +652,10 @@ fn restricted_fast(
             (&row1[..], &mut row0[..])
         };
         let gap_row = a_index % RESTRICT_SIZE == 0;
-        let mut score_gap_row = run_row(
-            use_avx2,
+        let mut score_gap_row = run_row::<AVX2>(
             gap_row,
             &mut band,
-            &p,
+            p,
             a_index,
             &tables.rows[qc as usize],
             &tables.lut[qc as usize],
@@ -615,8 +736,11 @@ struct XParams {
 //                 next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
 // ```
 /// `col[c]` for `c` in `from..to`: the letter the reference reads for `next_score` at
-/// `b_index = c - 1` (its own function, sentinels included); 0 past cell `len2 + 1`, which no
-/// cell of the reference reads. False: a letter code of 28 or more (not taken).
+/// `b_index = c - 1` (`blastp_subject_residue`, sentinels included); 0 for cell 0 and past cell
+/// `len2 + 1`, which no cell of the reference reads. The cells whose letter lies inside `subject`
+/// are one slice copy (forward: `subject[subject_base + c]`; reverse: `subject[subject_base + len2
+/// - c]`, the indices that function computes); the others go through that function. False: a
+/// letter code of 28 or more (not taken).
 fn fill_col(
     col: &mut [u8],
     from: usize,
@@ -626,19 +750,49 @@ fn fill_col(
     len2: usize,
     reverse: bool,
 ) -> bool {
-    let mut any_bad = 0u8;
-    for (c, slot) in col.iter_mut().enumerate().take(to).skip(from) {
-        let v = if c == 0 || c > len2 + 1 {
+    let reference = |c: usize| -> u8 {
+        if c == 0 || c > len2 + 1 {
             0
         } else if reverse {
             blastp_subject_residue::<true>(subject, subject_base, len2, c - 1)
         } else {
             blastp_subject_residue::<false>(subject, subject_base, len2, c - 1)
-        };
-        any_bad |= (v >= 28) as u8;
-        *slot = v;
+        }
+    };
+    // Cells `fa..fb` read inside `subject`.
+    let (fa, fb) = if reverse {
+        (
+            (subject_base + len2 + 1)
+                .saturating_sub(subject.len())
+                .max(1),
+            len2 + 1,
+        )
+    } else {
+        (
+            1,
+            (len2 + 2).min(subject.len().saturating_sub(subject_base)),
+        )
+    };
+    let a = fa.max(from);
+    let b = fb.min(to);
+    if a < b {
+        if reverse {
+            let src = &subject[subject_base + len2 + 1 - b..=subject_base + len2 - a];
+            for (slot, &v) in col[a..b].iter_mut().zip(src.iter().rev()) {
+                *slot = v;
+            }
+        } else {
+            col[a..b].copy_from_slice(&subject[subject_base + a..subject_base + b]);
+        }
+        for c in (from..a).chain(b..to) {
+            col[c] = reference(c);
+        }
+    } else {
+        for c in from..to {
+            col[c] = reference(c);
+        }
     }
-    any_bad == 0
+    col[from..to].iter().all(|&v| v < 28)
 }
 
 // NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:1107,1173
@@ -647,11 +801,10 @@ fn fill_col(
 // ...
 //         else {
 // ```
-/// One row: the vector kernel when `use_avx2`, else the scalar loops. Returns `score_gap_row`
-/// after the row.
-#[inline]
-fn run_row(
-    use_avx2: bool,
+/// One row: the vector kernel when `AVX2`, else the scalar loops. Returns `score_gap_row` after
+/// the row.
+#[inline(always)]
+fn run_row<const AVX2: bool>(
     gap_row: bool,
     band: &mut XBand,
     p: &XParams,
@@ -664,11 +817,11 @@ fn run_row(
     e10: &mut [i32],
 ) -> i32 {
     #[cfg(target_arch = "x86_64")]
-    if use_avx2 {
-        // SAFETY: `use_avx2` is true only when the CPU has AVX2, BMI1 and LZCNT (`cpu_has_avx2`,
-        // which the tests also call). `prev` and `cur` hold `PAD` cells before cell 0 and `TAIL`
-        // cells after cell `len2 + 1`, `col` and `e10` cover every index the row reads (sizes set
-        // in `restricted_fast`; `b_size <= len2 + 1`).
+    if AVX2 {
+        // SAFETY: `AVX2` is true only inside `restricted_rows_avx2`, whose caller checked AVX2,
+        // BMI1 and LZCNT. `prev` and `cur` hold `PAD` cells before cell 0 and `TAIL` cells after
+        // cell `len2 + 1`, `col` and `e10` cover every index the row reads (sizes set in
+        // `restricted_fast`; `b_size <= len2 + 1`).
         unsafe {
             return if gap_row {
                 x_avx2::row::<true>(band, p, a_index, row, lut, prev, cur, col, e10)
@@ -677,7 +830,7 @@ fn run_row(
             };
         }
     }
-    let _ = (use_avx2, lut);
+    let _ = lut;
     if gap_row {
         row_gap_scalar(band, p, a_index, row, prev, cur, col, e10)
     } else {
@@ -728,7 +881,8 @@ fn run_row(
 //
 //             score_gap_row = score;
 // ```
-/// A row where no gap opens in A, cell by cell (`b_index == b_gap` is `b_index % 10 == 0`).
+/// A row where no gap opens in A, cell by cell (`b_gap` steps over the multiples of 10 from the
+/// first one at or after `first_b_index`, as in the reference; `e10[gk]` is its column gap).
 fn row_nogap_scalar(
     band: &mut XBand,
     p: &XParams,
@@ -739,49 +893,64 @@ fn row_nogap_scalar(
     col: &[u8],
     e10: &mut [i32],
 ) -> i32 {
+    // The band in locals while the row runs.
+    let b_size = band.b_size;
+    let mut first = band.first;
+    let mut last = first;
+    let mut best = band.best;
+    let mut a_offset = band.a_offset;
+    let mut b_offset = band.b_offset;
     let mut score = MININT;
-    band.last = band.first;
-    for b_index in band.first..band.b_size {
-        let next_score = prev[PAD + b_index] + row[col[b_index + 1] as usize];
-        if b_index % RESTRICT_SIZE != 0 {
-            if band.best - score > p.x_dropoff {
+    let mut gk = first.div_ceil(RESTRICT_SIZE);
+    let mut b_gap = gk * RESTRICT_SIZE;
+    for b_index in first..b_size {
+        let next_score = prev[PAD + b_index] + row[(col[b_index + 1] & 31) as usize];
+        if b_index != b_gap {
+            if best - score > p.x_dropoff {
                 cur[PAD + b_index] = MININT;
-                if b_index == band.first {
-                    band.first += 1;
+                if b_index == first {
+                    first += 1;
                 }
             } else {
-                band.last = b_index;
-                if score > band.best {
-                    band.best = score;
-                    band.a_offset = a_index;
-                    band.b_offset = b_index;
+                last = b_index;
+                if score > best {
+                    best = score;
+                    a_offset = a_index;
+                    b_offset = b_index;
                 }
                 cur[PAD + b_index] = score;
             }
         } else {
-            let mut score_gap_col = e10[b_index / RESTRICT_SIZE];
+            b_gap += RESTRICT_SIZE;
+            let mut score_gap_col = e10[gk];
             if score < score_gap_col {
                 score = score_gap_col;
             }
-            if band.best - score > p.x_dropoff {
+            if best - score > p.x_dropoff {
                 cur[PAD + b_index] = MININT;
-                if b_index == band.first {
-                    band.first += 1;
+                if b_index == first {
+                    first += 1;
                 }
             } else {
-                band.last = b_index;
-                if score > band.best {
-                    band.best = score;
-                    band.a_offset = a_index;
-                    band.b_offset = b_index;
+                last = b_index;
+                if score > best {
+                    best = score;
+                    a_offset = a_index;
+                    b_offset = b_index;
                 }
                 score_gap_col -= p.gap_extend;
-                e10[b_index / RESTRICT_SIZE] = (score - p.gap_open_extend).max(score_gap_col);
+                e10[gk] = (score - p.gap_open_extend).max(score_gap_col);
                 cur[PAD + b_index] = score;
             }
+            gk += 1;
         }
         score = next_score;
     }
+    band.first = first;
+    band.last = last;
+    band.best = best;
+    band.a_offset = a_offset;
+    band.b_offset = b_offset;
     score
 }
 
@@ -832,60 +1001,75 @@ fn row_gap_scalar(
     col: &[u8],
     e10: &mut [i32],
 ) -> i32 {
+    // The band in locals while the row runs.
+    let b_size = band.b_size;
+    let mut first = band.first;
+    let mut last = first;
+    let mut best = band.best;
+    let mut a_offset = band.a_offset;
+    let mut b_offset = band.b_offset;
     let mut score = MININT;
     let mut score_gap_row = MININT;
-    band.last = band.first;
-    for b_index in band.first..band.b_size {
-        let next_score = prev[PAD + b_index] + row[col[b_index + 1] as usize];
-        if b_index % RESTRICT_SIZE != 0 {
+    let mut gk = first.div_ceil(RESTRICT_SIZE);
+    let mut b_gap = gk * RESTRICT_SIZE;
+    for b_index in first..b_size {
+        let next_score = prev[PAD + b_index] + row[(col[b_index + 1] & 31) as usize];
+        if b_index != b_gap {
             if score < score_gap_row {
                 score = score_gap_row;
             }
-            if band.best - score > p.x_dropoff {
+            if best - score > p.x_dropoff {
                 cur[PAD + b_index] = MININT;
-                if b_index == band.first {
-                    band.first += 1;
+                if b_index == first {
+                    first += 1;
                 }
             } else {
-                band.last = b_index;
-                if score > band.best {
-                    band.best = score;
-                    band.a_offset = a_index;
-                    band.b_offset = b_index;
+                last = b_index;
+                if score > best {
+                    best = score;
+                    a_offset = a_index;
+                    b_offset = b_index;
                 }
                 score_gap_row -= p.gap_extend;
                 score_gap_row = (score - p.gap_open_extend).max(score_gap_row);
                 cur[PAD + b_index] = score;
             }
         } else {
-            let mut score_gap_col = e10[b_index / RESTRICT_SIZE];
+            b_gap += RESTRICT_SIZE;
+            let mut score_gap_col = e10[gk];
             if score < score_gap_col {
                 score = score_gap_col;
             }
             if score < score_gap_row {
                 score = score_gap_row;
             }
-            if band.best - score > p.x_dropoff {
+            if best - score > p.x_dropoff {
                 cur[PAD + b_index] = MININT;
-                if b_index == band.first {
-                    band.first += 1;
+                if b_index == first {
+                    first += 1;
                 }
             } else {
-                band.last = b_index;
-                if score > band.best {
-                    band.best = score;
-                    band.a_offset = a_index;
-                    band.b_offset = b_index;
+                last = b_index;
+                if score > best {
+                    best = score;
+                    a_offset = a_index;
+                    b_offset = b_index;
                 }
                 score_gap_row -= p.gap_extend;
                 score_gap_col -= p.gap_extend;
-                e10[b_index / RESTRICT_SIZE] = (score - p.gap_open_extend).max(score_gap_col);
+                e10[gk] = (score - p.gap_open_extend).max(score_gap_col);
                 score_gap_row = (score - p.gap_open_extend).max(score_gap_row);
                 cur[PAD + b_index] = score;
             }
+            gk += 1;
         }
         score = next_score;
     }
+    band.first = first;
+    band.last = last;
+    band.best = best;
+    band.a_offset = a_offset;
+    band.b_offset = b_offset;
     score_gap_row
 }
 
@@ -956,9 +1140,10 @@ mod x_avx2 {
     /// `score_gap_row` after the row (the diagonal into cell `b_size`, or the row gap).
     ///
     /// # Safety
-    /// AVX2, BMI1 and LZCNT; `prev` and `cur` at least `PAD + b_size + 8` long, `col` at least
+    /// Inlined into code compiled for AVX2, BMI1 and LZCNT (`restricted_rows_avx2`); `prev` and
+    /// `cur` at least `PAD + b_size + 8` long, `col` at least
     /// `b_size + 8`, `e10` at least `b_size / 10 + 1`.
-    #[target_feature(enable = "avx2,bmi1,lzcnt")]
+    #[inline(always)]
     pub(super) unsafe fn row<const GAP: bool>(
         band: &mut XBand,
         p: &XParams,
@@ -975,7 +1160,7 @@ mod x_avx2 {
         debug_assert!(first0 < end);
         debug_assert!(prev.len() >= PAD + end + 8 && cur.len() >= PAD + end + 8);
         debug_assert!(col.len() >= end + 8);
-        // Cell `b` is at `PAD + b`; the block of cell 0 reads `PAD - 1`.
+        // Cell `b` is at `PAD + b`; the step of cell 0 reads `PAD - 1`.
         let prev_p = prev.as_ptr().add(PAD);
         let cur_p = cur.as_mut_ptr().add(PAD);
         let col_p = col.as_ptr();
@@ -994,6 +1179,8 @@ mod x_avx2 {
 
         let mut best = band.best;
         let mut rv = _mm256_set1_epi32(best);
+        // best_score - x_dropoff, the drop threshold while `best` holds.
+        let mut thr = _mm256_sub_epi32(rv, xv);
         let mut leading = true;
         let mut first = first0;
         let mut last = first0;
@@ -1028,12 +1215,21 @@ mod x_avx2 {
                 let ev = _mm256_set1_epi32(*e10.get_unchecked(gk));
                 h0 = _mm256_max_epi32(h0, _mm256_blendv_epi8(minv, ev, one));
             }
-            let valid = _mm256_loadu_si256(VALID.as_ptr().add(8 - n) as *const __m256i);
+            // Lanes past `b_size` (the last step of the row only) hold no cell.
+            let valid = if n < 8 {
+                Some(_mm256_loadu_si256(
+                    VALID.as_ptr().add(8 - n) as *const __m256i
+                ))
+            } else {
+                None
+            };
             let mut s = h0;
             if GAP {
                 // Row gap: F(i) = max(f_in, max_{j<i} (h0[j] - goe + (j+1) ge)) - i ge.
-                let w = _mm256_add_epi32(_mm256_sub_epi32(h0, goev), ramp1);
-                let w = _mm256_blendv_epi8(minv, w, valid);
+                let mut w = _mm256_add_epi32(_mm256_sub_epi32(h0, goev), ramp1);
+                if let Some(valid) = valid {
+                    w = _mm256_blendv_epi8(minv, w, valid);
+                }
                 let pw = prefix_max(w, minv);
                 let fv = _mm256_set1_epi32(f_in);
                 let f = _mm256_sub_epi32(exclusive(pw, fv), ramp0);
@@ -1047,11 +1243,29 @@ mod x_avx2 {
                 f_in = f_out.max(MININT);
                 score_gap_row = f_in;
             }
-            s = _mm256_blendv_epi8(minv, s, valid);
+            if let Some(valid) = valid {
+                s = _mm256_blendv_epi8(minv, s, valid);
+            }
             // X-drop: best_score when a cell is tested = max(best at the block, cells left of it).
-            let ps = prefix_max(s, minv);
-            let ex = exclusive(ps, rv);
-            let dropped = _mm256_cmpgt_epi32(_mm256_sub_epi32(ex, xv), s);
+            // When no cell of the block exceeds `best`, that is `best` for every cell.
+            let above = _mm256_movemask_ps(_mm256_castsi256_ps(_mm256_cmpgt_epi32(s, rv)));
+            let dropped = if above == 0 {
+                _mm256_cmpgt_epi32(thr, s)
+            } else {
+                let ps = prefix_max(s, minv);
+                let ex = exclusive(ps, rv);
+                // The block's largest score exceeds `best`: `score > best_score` holds last at the
+                // first cell that holds it.
+                let block_max = _mm256_extract_epi32::<7>(ps);
+                let eq = _mm256_cmpeq_epi32(s, _mm256_set1_epi32(block_max));
+                let lane = (_mm256_movemask_ps(_mm256_castsi256_ps(eq)) as u32).trailing_zeros();
+                best = block_max;
+                band.a_offset = a_index;
+                band.b_offset = b0 + lane as usize;
+                rv = _mm256_set1_epi32(best);
+                thr = _mm256_sub_epi32(rv, xv);
+                _mm256_cmpgt_epi32(_mm256_sub_epi32(ex, xv), s)
+            };
             _mm256_storeu_si256(
                 cur_p.add(b0) as *mut __m256i,
                 _mm256_blendv_epi8(s, minv, dropped),
@@ -1066,15 +1280,6 @@ mod x_avx2 {
                 }
             } else if leading {
                 first = b0 + n;
-            }
-            let block_max = _mm256_extract_epi32::<7>(ps);
-            if block_max > best {
-                let eq = _mm256_cmpeq_epi32(s, _mm256_set1_epi32(block_max));
-                let lane = (_mm256_movemask_ps(_mm256_castsi256_ps(eq)) as u32).trailing_zeros();
-                best = block_max;
-                band.a_offset = a_index;
-                band.b_offset = b0 + lane as usize;
-                rv = _mm256_set1_epi32(best);
             }
             if has_gap_col {
                 // A kept cell is >= best - x_dropoff >= -x_dropoff > MININT.
@@ -1460,6 +1665,38 @@ mod tests {
     }
 
     #[test]
+    fn x_bpgap_column_letters_are_the_reference_reads() {
+        // Every window position, including bases and lengths that reach past the subject.
+        let mut rng = Rng(0x7777_1111_2222_9999);
+        let mut col = vec![0u8; 200];
+        for _ in 0..4000 {
+            let sl = rng.below(40) as usize;
+            let subject = random_seq(&mut rng, sl, 27, false);
+            let subject_base = rng.below(50) as usize;
+            let len2 = rng.below(60) as usize;
+            let from = rng.below(len2 as u64 + 30) as usize;
+            let to = from + rng.below(100) as usize;
+            for reverse in [false, true] {
+                let ok = fill_col(&mut col, from, to, &subject, subject_base, len2, reverse);
+                for (c, &v) in col.iter().enumerate().take(to).skip(from) {
+                    let want = if c == 0 || c > len2 + 1 {
+                        0
+                    } else if reverse {
+                        blastp_subject_residue::<true>(&subject, subject_base, len2, c - 1)
+                    } else {
+                        blastp_subject_residue::<false>(&subject, subject_base, len2, c - 1)
+                    };
+                    assert_eq!(
+                        v, want,
+                        "c={c} base={subject_base} len2={len2} rev={reverse}"
+                    );
+                }
+                assert!(ok);
+            }
+        }
+    }
+
+    #[test]
     fn x_bpgap_leaves_unusual_problems_to_the_reference() {
         let mut scratch = GapAlignScratch::new();
         let q = [1u8, 2, 3, 4];
@@ -1504,6 +1741,75 @@ mod tests {
                 false
             )
             .is_none());
+        }
+    }
+
+    /// Timing aid (ignored; run with `cargo test --release -- --ignored x_bpgap_time_kernels
+    /// --nocapture`): the reference, the scalar rows and the AVX2 rows on the same unrelated
+    /// sequence pairs (the restricted alignments of the preliminary stage are low-scoring ones),
+    /// one after the other, three times. Prints ns per call and per row.
+    #[test]
+    #[ignore]
+    fn x_bpgap_time_kernels() {
+        let mut rng = Rng(0x5151_7272_9393_B4B4);
+        let mut problems = Vec::new();
+        for _ in 0..4000 {
+            let (ql, sl) = (100 + rng.below(500) as usize, 100 + rng.below(500) as usize);
+            let q = random_seq(&mut rng, ql, 20, false);
+            let s = random_seq(&mut rng, sl, 20, false);
+            let qs = rng.below(q.len() as u64) as usize;
+            let ss = rng.below(s.len() as u64) as usize;
+            problems.push((q, s, qs, ss));
+        }
+        let mut scratch = GapAlignScratch::new();
+        let m = MATRICES[0];
+        let calls = |scratch: &mut GapAlignScratch, kernel: u8| -> (u64, i64) {
+            let mut sum = 0i64;
+            let mut n = 0u64;
+            for (q, s, qs, ss) in &problems {
+                let (qs, ss) = (*qs, *ss);
+                for (qb, sb, len1, len2, rev) in [
+                    (0, 0, qs + 1, ss + 1, true),
+                    (qs, ss, q.len() - qs - 1, s.len() - ss - 1, false),
+                ] {
+                    let r = if kernel == 0 {
+                        reference(q, qb, s, sb, len1, len2, m, 11, 1, 38, rev, scratch)
+                    } else {
+                        restricted_fast(
+                            q,
+                            qb,
+                            s,
+                            sb,
+                            len1,
+                            len2,
+                            m,
+                            11,
+                            1,
+                            38,
+                            rev,
+                            &mut scratch.x_restricted,
+                            kernel == 2,
+                        )
+                        .unwrap()
+                    };
+                    sum += r.2 as i64 + r.0 as i64;
+                    n += 1;
+                }
+            }
+            (n, sum)
+        };
+        let kernels: &[u8] = if cpu_has_avx2() { &[0, 1, 2] } else { &[0, 1] };
+        for round in 0..3 {
+            for &k in kernels {
+                let t = std::time::Instant::now();
+                let (n, sum) = calls(&mut scratch, k);
+                let ns = t.elapsed().as_nanos() as f64;
+                eprintln!(
+                    "round {round} kernel {} calls {n} {:.1} ns/call checksum {sum}",
+                    ["reference", "scalar", "avx2"][k as usize],
+                    ns / n as f64
+                );
+            }
         }
     }
 }

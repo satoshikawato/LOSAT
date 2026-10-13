@@ -50,6 +50,14 @@ pub enum Commands {
     // static const string kProgram("tblastn"); SetTask("tblastn");
     /// Protein query vs translated nucleotide subject (local tblastn)
     Tblastn(tblastn::TblastnArgs),
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:217-219
+    // ```c++
+    //     arg_desc->SetUsageContext(GetArguments().GetProgramBasename(),
+    //                   "Application to create BLAST databases, version "
+    //                   + CBlastVersion().Print());
+    // ```
+    /// Create a BLAST database from a FASTA file (makeblastdb, format version 4)
+    Makedb(crate::writedb::makeblastdb::MakedbArgs),
 }
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:166-170,203-207,332-349
@@ -127,11 +135,12 @@ where
         // `--` starts NCBI's positional arguments, which the BLAST programs do not have:
         // a last `--` changes nothing, and a word after it is an extra positional
         // argument (NCBI's USAGE error; LOSAT's parser error, exception 1).
+        // makeblastdb reads its arguments with the same parser.
         if text == "--"
             && input.len() == 0
             && matches!(
                 scope.get_name(),
-                "blastn" | "blastp" | "tblastn" | "tblastx"
+                "blastn" | "blastp" | "tblastn" | "tblastx" | "makedb"
             )
         {
             continue;
@@ -421,6 +430,23 @@ fn unknown_option_error(scope: &clap::Command, name: &str, text: &str) -> clap::
         return clap::Error::raw(
             ErrorKind::InvalidValue,
             format!("unsupported BLASTX option '-{name}': outside the declared local FASTA scope"),
+        );
+    }
+    // NCBI reference (598d8ae6): c++/src/app/blastdb/makeblastdb.cpp:246-250
+    // ```c++
+    //     arg_desc->AddFlag("parse_seqids",
+    //                       "Option to parse seqid for FASTA input if set, for all other input types seqids are parsed automatically", true);
+    //     arg_desc->AddFlag("hash_index",
+    //                       "Create index of sequence hash values.",
+    // ```
+    // makeblastdb's options that LOSAT's makedb does not serve are named in
+    // its refusal (AGENTS.md rule 2: explicit unsupported errors).
+    if scope.get_name() == "makedb"
+        && crate::writedb::makeblastdb::UNSUPPORTED_OPTIONS.contains(&name)
+    {
+        return clap::Error::raw(
+            ErrorKind::InvalidValue,
+            format!("the NCBI BLAST+ option -{name} is not supported by LOSAT's makedb"),
         );
     }
     if scope.get_name() == "blastn" && is_unported_blastn_arg(name) {

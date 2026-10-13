@@ -880,6 +880,92 @@ fn a_name_is_a_list_as_for_ncbi() {
     );
 }
 
+/// One database name is a path taken as it is: a space or a double quote in
+/// it does not split it (the entry point of `LOSAT makedb`, whose output name
+/// is one name).
+#[test]
+fn one_name_is_not_a_list() {
+    let mut names = vec!["my data"];
+    if cfg!(unix) {
+        names.push("q\"d");
+    }
+    for name in names {
+        let dir = temp_dir("one-name").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        copy_database("prot_v4", &["pin", "phr", "psq"], &dir);
+        let path = dir.join("prot_v4").to_str().unwrap().to_string();
+        assert!(SeqDb::open(&path, SeqType::Protein).is_err(), "{name}");
+        let db = SeqDb::open_one_name(&path, SeqType::Protein).unwrap();
+        assert_eq!(db.num_seqs(), 10, "{name}");
+        let (volumes, alias_files) =
+            super::alias::find_volume_paths(&path, SeqType::Protein).unwrap();
+        assert_eq!((volumes, alias_files), (vec![path], Vec::new()), "{name}");
+        std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbalias.cpp:831-841
+// ```c++
+//         // Always check local copy first unless full path is given
+//         if (!m_SkipLocal[i]) {
+//             // GCC 3.0.4 requires the extra parentheses below.
+//             CSeqDB_BasePath local_base((CSeqDB_DirName(CDir::GetCwd())),
+//                                    CSeqDB_BaseName(m_DBList[i].FindBaseName()));
+//             CSeqDB_Path new_local_vol_path(local_base, prot_nucl, 'i', 'n' );
+//             if (m_Atlas.DoesFileExist(new_local_vol_path)) {
+//                 bp = CSeqDB_BasePath(new_local_vol_path.FindBasePath());
+//                 found = true;
+//             }
+//         }
+// ```
+/// A volume that an alias file names is taken from the current directory
+/// when a volume of that name is there (NCBI's rule, for reading). The
+/// removal of a database before a build must not follow it: it lists the
+/// volumes beside the alias file. The current directory of the test process
+/// is not changed; the resolver takes the directory as an argument.
+#[test]
+fn volumes_to_remove_are_those_beside_the_alias_file() {
+    let root = temp_dir("local-copy");
+    let (sub, here) = (root.join("sub"), root.join("here"));
+    for dir in [&sub, &here] {
+        std::fs::create_dir(dir).unwrap();
+    }
+    std::fs::write(sub.join("db.pal"), b"TITLE t\nDBLIST db.00 db.01\n").unwrap();
+    // The resolver looks for the index files only.
+    for file in [
+        sub.join("db.00.pin"),
+        sub.join("db.01.pin"),
+        here.join("db.00.pin"),
+    ] {
+        std::fs::write(file, b"").unwrap();
+    }
+    let path = |dir: &Path, name: &str| dir.join(name).to_str().unwrap().to_string();
+    let name = path(&sub, "db");
+
+    let read = super::alias::resolve_one_name(
+        &name,
+        SeqType::Protein,
+        super::alias::LocalCopy::Dir(here.to_str().unwrap()),
+    )
+    .unwrap();
+    assert_eq!(read.volumes, [path(&here, "db.00"), path(&sub, "db.01")]);
+
+    let (volumes, alias_files) = super::alias::find_volume_paths(&name, SeqType::Protein).unwrap();
+    assert_eq!(volumes, [path(&sub, "db.00"), path(&sub, "db.01")]);
+    assert_eq!(alias_files, [path(&sub, "db.pal")]);
+
+    // A volume that is missing beside the alias file is not looked for
+    // elsewhere: the database cannot be listed, and nothing is removed.
+    std::fs::remove_file(sub.join("db.00.pin")).unwrap();
+    let error = super::alias::find_volume_paths(&name, SeqType::Protein).unwrap_err();
+    assert!(
+        matches!(&error, SeqDbError::NotFound(message) if message
+            == &format!("Could not find volume or alias file (db.00) referenced in alias file ({name}).")),
+        "{error}"
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 #[test]
 fn a_version_5_database_needs_its_lmdb_file() {
     let dir = temp_dir("lmdb");

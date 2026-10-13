@@ -56,9 +56,9 @@
 //! `-parse_deflines` (`fParseRawID`) is rejected by LOSAT's programs; `fSkipCheck` is not
 //! set by the BLAST programs.
 
-mod reader;
+pub(crate) mod reader;
 mod seq_id;
-mod stream;
+pub(crate) mod stream;
 #[cfg(test)]
 mod tests;
 

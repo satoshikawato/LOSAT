@@ -166,6 +166,35 @@ fn fix_string(s: &[u8]) -> &[u8] {
 }
 
 impl SeqDb {
+    /// Opens the database `name`: a path without extension, absolute or
+    /// relative to the current directory. `name.{p|n}al` is read when it
+    /// exists, else the single volume `name.{p|n}in`.
+    ///
+    /// A database that stores parsed Seq-ids is rejected here: the first
+    /// header of every volume is decoded once.
+    pub fn open(name: &str, seqtype: SeqType) -> Result<Self, SeqDbError> {
+        Self::open_tree(alias::resolve(name, seqtype)?, name, seqtype)
+    }
+
+    /// Opens the one database at the path `name` (without extension), taken
+    /// as it is: a space or a double quote in it is a character of the path
+    /// (`alias::resolve_one_name`). Everything else is as in [`SeqDb::open`],
+    /// including NCBI's rule that a volume named in an alias file is looked
+    /// for in the current directory first.
+    #[cfg(test)]
+    pub(crate) fn open_one_name(name: &str, seqtype: SeqType) -> Result<Self, SeqDbError> {
+        let tree = alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir)?;
+        Self::open_tree(tree, name, seqtype)
+    }
+
+    /// Resolves the one database at the path `name` as [`SeqDb::open_one_name`]
+    /// does, without opening its volumes: the alias files are read and the
+    /// index file of every volume they name is located. No volume file is
+    /// read, so the cost does not grow with the number of sequences.
+    pub(crate) fn locate_one_name(name: &str, seqtype: SeqType) -> Result<(), SeqDbError> {
+        alias::resolve_one_name(name, seqtype, alias::LocalCopy::CurrentDir).map(|_| ())
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvolset.cpp:101-116
     // ```c++
     // void CSeqDBVolSet::x_AddVolume(CSeqDBAtlas        & atlas,
@@ -221,14 +250,8 @@ impl SeqDb {
     // every volume listed once, the number of sequences and the total length
     // that NCBI takes from its alias walk (seqdbalias.cpp:1190-1193,
     // 1291-1294) are the sums over the volumes.
-    /// Opens the database `name`: a path without extension, absolute or
-    /// relative to the current directory. `name.{p|n}al` is read when it
-    /// exists, else the single volume `name.{p|n}in`.
-    ///
-    /// A database that stores parsed Seq-ids is rejected here: the first
-    /// header of every volume is decoded once.
-    pub fn open(name: &str, seqtype: SeqType) -> Result<Self, SeqDbError> {
-        let tree = alias::resolve(name, seqtype)?;
+    /// Opens the volumes of a resolved database (`name` is for messages).
+    fn open_tree(tree: alias::AliasTree, name: &str, seqtype: SeqType) -> Result<Self, SeqDbError> {
         let mut volumes = Vec::with_capacity(tree.volumes.len());
         let mut volume_starts = Vec::with_capacity(tree.volumes.len() + 1);
         let mut num_oids: u64 = 0;

@@ -138,6 +138,17 @@ LOSAT tblastn \
 
 The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its certified output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). Database searches, `tblastn-fast`, PSI-TBLASTN, and composition modes 1/3 are unsupported.
 
+### 5. Writing a BLAST Database (makedb)
+```bash
+LOSAT makedb \
+  -in proteins.faa \
+  -dbtype prot \
+  -out proteins_db \
+  -title "my proteins"
+```
+
+`LOSAT makedb` writes the sequence, header and index files of `makeblastdb -blastdb_version 4` (without `-parse_seqids`), and the alias file of a database in several volumes: the sequence and header files are the same bytes, and the index file differs only in its creation date. The JSON metadata file (`.pjs`, `.njs`) is not written. `-max_file_sz` splits the database into volumes as makeblastdb does. NCBI BLAST+ programs search such a database with `-db`. LOSAT's own `-db` search is not available yet; the makeblastdb options LOSAT does not implement (`-parse_seqids`, masks, taxonomy, `-blastdb_version 5`) are rejected by name.
+
 ---
 
 ## Common Command-Line Options

@@ -450,7 +450,10 @@ Scheduling (each value computed by one thread with the original function; order 
   chunks of a hundredth on those subjects (16S rRNA genes, 40.6 Mb together) at 8 threads with other work on the
   machine: one query batch of 55 proteins 1.43-1.64 s without it and 0.76-0.85 s with it (NCBI
   BLAST+ 2.17.0 `-db` 0.68-0.78 s), one protein 0.87-1.11 s and 0.22-0.27 s; the same output and
-  the same peak memory. Nothing changes at one thread, nor where `TBNBATCH` searches the batches
+  the same peak memory. With the chunks bounded by residues, four rounds on a loaded machine (load
+  4-25): medians 1.35 s (55 proteins) and 0.61 s (one protein) against 1.25 s and 0.60 s with the
+  hundredth and 2.81 s and 1.50 s without the switch; on the fly genome 7.0 s against 26.2 s with
+  the hundredth and 6.8 s without the switch (NCBI `-db` 6.6-7.4 s). Nothing changes at one thread, nor where `TBNBATCH` searches the batches
   side by side (each batch on one thread). With `LOSAT_WASI_THREADS_DEBUG=1` the
   `[losat-thread-activity]` line of the subject stage ends with `pool_entries=` (the entries of
   one query batch); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.

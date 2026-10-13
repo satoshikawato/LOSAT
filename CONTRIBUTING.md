@@ -132,3 +132,12 @@ Before opening a PR, please verify:
 - [ ] No runtime, build, or fallback code invokes external NCBI binaries or libraries.
 - [ ] Code builds without warnings under `cargo fmt` and `cargo clippy`.
 - [ ] Parity comparison tests confirm bit-identical output with NCBI BLAST+ on affected profiles.
+
+---
+
+## Auto-merge
+
+- Pull requests of this repository get auto-merge (merge commit) when they are opened as ready or marked ready for review.
+- They merge when the required checks of `main` pass: `rust`, `fast output regressions`, `platform checks result`, and `web result` (the ruleset is set by the repository owner).
+- Draft pull requests are not merged; mark one ready to turn auto-merge on.
+- Turn it off for one pull request with "Disable auto-merge" on its page.

@@ -25,6 +25,9 @@ pub mod sum_stats_linking;
 pub mod tracing;
 pub mod translation;
 mod ungapped_hit_sort;
+// Diagnostic (LOSAT_TIMING): the stage times of the two linking calls of a subject. No NCBI
+// counterpart; it computes no value the search reads.
+mod x_link_timing;
 pub mod x_seed_bucket;
 
 pub use args::TblastxArgs;

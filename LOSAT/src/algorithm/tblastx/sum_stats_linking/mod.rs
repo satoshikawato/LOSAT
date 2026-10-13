@@ -55,3 +55,14 @@ pub use linking::{
 // ```
 pub(crate) use linking::x_hsp_inplace;
 pub use linking::x_hsp_inplace_print_summary;
+
+// EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW): the summary of the index sorts of the
+// in-place path (tblastx/x_link_sort.rs, a child module of `linking`), for `main`.
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:993-994
+// ```c
+//    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
+//          s_FwdCompareHSPsTransl);
+// ```
+// No NCBI counterpart for the summary: it prints counters.
+pub use linking::x_link_sort_print_summary;

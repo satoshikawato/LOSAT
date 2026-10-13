@@ -586,7 +586,9 @@ pub(super) struct XSubjectPlan {
 /// for its fixed list of subjects and options; the first batch that reaches a
 /// subject computes its plan, as before, and the later ones read it. Plans are
 /// kept only up to a total size, beyond which they are made per use as before.
-/// A search of one batch has no later reader and gets no value (`for_batches`).
+/// A search of fewer than `KEEP_FROM_BATCHES` batches gets no value
+/// (`for_batches`): one batch has no later reader, and two or three give the
+/// time their later readers would save for the memory of the plans.
 ///
 /// Batches can reach a subject at the same time. The cell of a subject is
 /// initialised by one of them while the others wait, so a plan is made once
@@ -608,6 +610,25 @@ impl XSubjectSide {
     /// Translated residues kept at most (two bytes per subject base).
     pub(super) const KEEP_LIMIT: usize = 256 << 20;
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631
+    // ```c
+    //     if (program_number != eBlastTypeRpsTblastn) {
+    //         if (translation_buffer) {
+    //             sfree(translation_buffer);
+    //         }
+    //     }
+    // ```
+    // NCBI frees a subject's translation when the subject has been searched, in every query
+    // batch. Below this number of batches the search does the same.
+    /// Query batches (20,000 query residues each) from which a search keeps its
+    /// subject plans. A kept plan saves the later batches the translation of
+    /// its subject and holds the translated residues until the search ends.
+    /// Timed on 28,036 subjects (40.6 Mb) at 4 and 8 threads: the plans hold
+    /// 115 MiB, and a search of two, three or four batches without them took a
+    /// median of 1.03 to 1.11 of the time with them. The saving does not start
+    /// at this number; below it the search gives that time for the memory.
+    pub(super) const KEEP_FROM_BATCHES: usize = 4;
+
     /// `LOSAT_X_TBNSSIDE` set.
     pub(super) fn enabled() -> bool {
         use std::sync::OnceLock;
@@ -626,10 +647,10 @@ impl XSubjectSide {
 
     /// The subject plans of a search of `batches` query batches, or `None`
     /// when the search keeps none: the switch is off (`on` is `enabled()`), or
-    /// there are fewer than two batches. A kept plan is read by the batches
-    /// after the first one that reaches its subject. A search of one batch has
-    /// no such reader, so its plans are made per use and dropped after the
-    /// subject, like those above `KEEP_LIMIT`.
+    /// there are fewer than `KEEP_FROM_BATCHES` batches. A kept plan is read by
+    /// the batches after the first one that reaches its subject. A search of
+    /// fewer batches makes its plans per use and drops them after the subject,
+    /// like those above `KEEP_LIMIT`.
     pub(super) fn for_batches(
         on: bool,
         batches: usize,
@@ -637,7 +658,8 @@ impl XSubjectSide {
         gencode: u8,
         mask_lowercase: bool,
     ) -> Option<Self> {
-        (on && batches > 1).then(|| Self::new(subjects, gencode, mask_lowercase))
+        (on && batches >= Self::KEEP_FROM_BATCHES)
+            .then(|| Self::new(subjects, gencode, mask_lowercase))
     }
 
     fn slot(
@@ -789,9 +811,9 @@ pub(super) fn x_scan_plan(
     //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
     //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
     // ```
-    // Translation and chunking of the subject, as above; this closure is what the shared plan
-    // memoises.
-    let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
+    // Translation and chunking of the subject, as above: the reference path of the plan that the
+    // shared plan memoises.
+    let x_reference_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
         let resolved_subject = resolve_local_subject_ncbi2na(subject)?;
         let frames = generate_frames(&resolved_subject, &code);
         let negative_first_length = frames
@@ -814,6 +836,40 @@ pub(super) fn x_scan_plan(
             }
         }
         Ok(std::sync::Arc::new(XSubjectPlan { frames, units }))
+    };
+    // EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the frames read from tables.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1071-1074,1080-1090
+    // ```c
+    //    } else {
+    //       translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
+    //       translation_table_rc = s_BlastGetTranslationTable(genetic_code, TRUE);
+    //    }
+    // ...
+    //    for (context = 0; context < NUM_FRAMES; ++context) {
+    //       frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+    //       if (encoding == eBlastEncodingNcbi2na) {
+    //          if (frame > 0) {
+    //             length =
+    //                BLAST_TranslateCompressedSequence(translation_table,
+    //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
+    //          } else {
+    //             length =
+    //                BLAST_TranslateCompressedSequence(translation_table_rc,
+    //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
+    // ```
+    // Dispatch point: what the shared plan memoises. Without the variables it is the closure above,
+    // as before. With LOSAT_X_TBNXLATE the subject becomes ncbi2na in one pass and each frame is
+    // read from the codon table of its strand, as BLAST_GetAllTranslations does for the compressed
+    // subject (tblastn/x_subject_translate.rs); the frames and units are the same values. With
+    // LOSAT_X_TBNXLATESHADOW both are made for every plan and the search stops if they differ.
+    let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
+        super::x_subject_translate::x_subject_plan(
+            super::x_subject_translate::x_translate(),
+            subject,
+            db_gencode,
+            mask_lowercase,
+            &x_reference_subject,
+        )
     };
     let x_slot = x_subject.and_then(|(side, oid)| {
         side.slot(oid, db_gencode, mask_lowercase)
@@ -2023,15 +2079,20 @@ mod tests {
 
     // No NCBI counterpart: test of when the plan cache exists (XSubjectSide::for_batches); it does
     // not change any value NCBI computes.
-    // LOSAT_X_TBNSSIDE: a search of one query batch has no later batch to read
-    // a kept plan, so it keeps none and every use makes its own; two or more
-    // batches keep the plans. The plan is the same either way.
+    // LOSAT_X_TBNSSIDE: a search of fewer than four query batches keeps no
+    // plan and every use makes its own (one batch has no later batch to read a
+    // kept plan; two and three give the time it would save for its memory);
+    // four or more batches keep the plans. The plan is the same either way.
     #[test]
-    fn x_subject_plans_are_kept_only_for_two_or_more_batches() {
-        for batches in [0, 1] {
+    fn x_subject_plans_are_kept_only_from_four_batches() {
+        assert_eq!(XSubjectSide::KEEP_FROM_BATCHES, 4);
+        for batches in [0, 1, 2, 3] {
             assert!(XSubjectSide::for_batches(true, batches, 1, 1, false).is_none());
         }
-        for batches in [0, 1, 2, 9] {
+        for batches in [4, 5, 9] {
+            assert!(XSubjectSide::for_batches(true, batches, 1, 1, false).is_some());
+        }
+        for batches in [0, 1, 2, 3, 4, 9] {
             assert!(XSubjectSide::for_batches(false, batches, 1, 1, false).is_none());
         }
         let subject = x_test_subject(9_000);
@@ -2053,16 +2114,16 @@ mod tests {
             .unwrap()
             .subject
         };
-        // One batch: two uses make two plans, and nothing else holds them.
-        let one = XSubjectSide::for_batches(true, 1, 1, 1, false);
-        let (first, second) = (scan(one.as_ref()), scan(one.as_ref()));
+        // Three batches: two uses make two plans, and nothing else holds them.
+        let three = XSubjectSide::for_batches(true, 3, 1, 1, false);
+        let (first, second) = (scan(three.as_ref()), scan(three.as_ref()));
         assert!(!std::sync::Arc::ptr_eq(&first, &second));
         assert_eq!(std::sync::Arc::strong_count(&first), 1);
-        // Two batches: the second use reads the plan the first one made.
-        let two = XSubjectSide::for_batches(true, 2, 1, 1, false).unwrap();
-        let (kept, read) = (scan(Some(&two)), scan(Some(&two)));
+        // Four batches: the second use reads the plan the first one made.
+        let four = XSubjectSide::for_batches(true, 4, 1, 1, false).unwrap();
+        let (kept, read) = (scan(Some(&four)), scan(Some(&four)));
         assert!(std::sync::Arc::ptr_eq(&kept, &read));
-        assert_eq!(two.kept_bytes(), XSubjectSide::plan_bytes(&kept));
+        assert_eq!(four.kept_bytes(), XSubjectSide::plan_bytes(&kept));
         assert!(first
             .frames
             .iter()

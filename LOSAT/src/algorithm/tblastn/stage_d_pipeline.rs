@@ -269,9 +269,9 @@ pub(super) type XBatchReport = (
 /// NCBI searches each batch on its own (`CLocalBlast` per batch); a batch reads nothing
 /// another batch writes, so only the order of the reports matters, and the caller appends
 /// them in the order of `ranges`. With `LOSAT_X_TBNPAR` one search pool serves every
-/// batch instead of one pool per batch; with `LOSAT_X_TBNSSIDE` and two or more batches the
+/// batch instead of one pool per batch; with `LOSAT_X_TBNSSIDE` and four or more batches the
 /// subject plans (translations, masks) are made once for the search and shared through the
-/// pool (a search of one batch has no later reader and keeps none); with
+/// pool (a search of fewer batches keeps none, `XSubjectSide::KEEP_FROM_BATCHES`); with
 /// `LOSAT_X_TBNBATCH` (and the plans shared and fitting, and at least one batch per
 /// thread) the batches are searched side by side, each as the one-thread search. The
 /// first failing batch in the order of `ranges` gives the error, as in the reference loop.
@@ -304,7 +304,8 @@ pub(super) fn x_search_batches<'p>(
     //                                    translation_buffer, frame_offsets_a);
     // ```
     // NCBI frees the translation of a subject when the subject has been searched. The plans are
-    // kept only for a later query batch to read, so a search of one batch gets no XSubjectSide
+    // kept only for a later query batch to read, and only from four batches on
+    // (XSubjectSide::KEEP_FROM_BATCHES): a search of fewer batches gets no XSubjectSide
     // (XSubjectSide::for_batches) and each plan is dropped after its subject, as in NCBI. The gate
     // below reads the switch and not the object, so the number of batches does not decide which
     // loop searches them.
@@ -343,9 +344,10 @@ pub(super) fn x_search_batches<'p>(
         // EXPERIMENT (LOSAT_X_TBNBATCH): search the batches side by side, each as the
         // one-thread search. The serial parts of a batch (query masking, lookup table,
         // linking, the hand-over between stages) then no longer leave the other threads
-        // idle. It needs the subject plans to be shared (LOSAT_X_TBNSSIDE) and to fit, or
-        // every batch in flight would hold its own translation of the subjects; and at
-        // least one batch per thread (with fewer, each batch uses the pool inside).
+        // idle. It needs the subject plans to be shared (LOSAT_X_TBNSSIDE, four or more
+        // batches) and to fit, or every batch in flight would hold its own translation of
+        // the subjects; and at least one batch per thread (with fewer, each batch uses the
+        // pool inside).
         #[cfg(feature = "parallel")]
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:380-393
         // ```c
@@ -5056,13 +5058,14 @@ mod tests {
     //                 ...
     //                     CLocalBlast lcl_blast(query_factory, m_OptsHndl, db_adapter);
     // ```
-    // NCBI searches every batch with the same code, whatever their number. A search of one batch
-    // keeps no subject plans (LOSAT_X_TBNSSIDE), and that does not move it to the other loop:
-    // x_search_batches takes the batches by the switches alone, at one thread too, and gives the
-    // report of run_local_for_report_threads.
+    // NCBI searches every batch with the same code, whatever their number. A search of fewer than
+    // four batches keeps no subject plans (LOSAT_X_TBNSSIDE), and that does not move it to the
+    // other loop: x_search_batches takes the batches by the switches alone, at one thread too, and
+    // gives the report of run_local_for_report_threads, with the plans kept (four batches) and
+    // without (one, two, three).
     #[test]
     fn x_search_batches_takes_one_batch_by_the_switches_alone() {
-        let queries = vec![b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ".to_vec(); 2];
+        let queries = vec![b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ".to_vec(); 4];
         let subjects: Vec<Vec<u8>> = (0..2usize)
             .map(|n| {
                 (0..3_000usize)
@@ -5081,7 +5084,12 @@ mod tests {
             query_offsets: &[],
         };
         let taken = x_tbn_parallel() && super::super::search_seed::XSubjectSide::enabled();
-        for ranges in [vec![0..1], vec![0..1, 1..2]] {
+        for ranges in [
+            vec![0..1],
+            vec![0..1, 1..2],
+            vec![0..1, 1..2, 2..3],
+            vec![0..1, 1..2, 2..3, 3..4],
+        ] {
             let searched = x_search_batches(
                 &queries,
                 &subjects,

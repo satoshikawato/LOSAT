@@ -575,6 +575,58 @@ fn sort_hsplist_by_evalue(list: &mut BlastpHspList) {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1578
+// ```c++
+//     for (int index = 0; index < hit_list->hsplist_count; index++) {
+//         BlastHSPList* hsp_list = hit_list->hsplist_array[index];
+//         if (!hsp_list)
+//             continue;
+//
+//         // Sort HSPs with e-values as first priority and scores as
+//         // tie-breakers, since that is the order we want to see them in
+//         // in Seq-aligns.
+//         Blast_HSPListSortByEvalue(hsp_list);
+// ```
+// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:672-674
+// ```c++
+//     if (hsp->score == 0) {
+//         return CRef<CSeq_align>();
+//     }
+// ```
+// NCBI reference: c++/src/algo/blast/api/blast_seqalign.cpp:1485-1490
+// ```c++
+//             seqalign =
+//                 s_BlastHSP2SeqAlign(program, hsp, query_id, subject_id,
+//                                     query_length, subject_length);
+//         }
+//
+//         if (seqalign.Empty()) continue;
+// ```
+// BlastHitList2SeqAlign_OMF, which makes the Seq-aligns that the reports print (`-subject` is
+// a db-scan CLocalDbAdapter, blast_app_util.cpp:207-210, so local_blast.cpp:287-290 keeps the
+// database-search conversion). Each HSP list is sorted by E-value first. The redo sorted it by
+// the scaled scores (blast_kappa.c:355-357) and s_HSPListNormalizeScores rounded them only
+// afterwards (blast_kappa.c:108-114), so two HSPs whose scaled scores round to the same score
+// and whose E-values are both below 1.0e-180 (s_EvalueComp, blast_hits.c:1390-1395) are put in
+// ScoreCompareHSPs order here, the smaller subject offset first. An HSP of score 0 (kept by a
+// very large -evalue) is in no report, and a subject with only such HSPs has none (the hit
+// list was already cut to -max_target_seqs).
+pub(crate) fn hit_list_to_seqalign_order(hit_list: &mut BlastpHitList) {
+    let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
+    let mut kept: Vec<_> = hit_list
+        .hsplist_array
+        .drain(..count)
+        .filter_map(|mut hsp_list| {
+            sort_hsplist_by_evalue(&mut hsp_list);
+            hsp_list.hsps.retain(|hsp| hsp.raw_score != 0);
+            (!hsp_list.hsps.is_empty()).then_some(hsp_list)
+        })
+        .collect();
+    hit_list.hsplist_count = kept.len();
+    kept.append(&mut hit_list.hsplist_array);
+    hit_list.hsplist_array = kept;
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1739-1748
 // ```c
 // static double s_BlastGetBestEvalue(const BlastHSPList* hsp_list)
@@ -1937,6 +1989,121 @@ mod tests {
                 (1e-20, 90, 30, 20),
             ]
         );
+    }
+
+    /// One HSP list of the final hit list with the given (score, q_start, q_end, s_start,
+    /// s_end, E-value) HSPs in the given order.
+    fn hsp_list_of(oid: u32, hsps: &[(i32, usize, usize, usize, usize, f64)]) -> BlastpHspList {
+        BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: hsps
+                .iter()
+                .map(|&(score, q_start, q_end, s_start, s_end, e_value)| {
+                    let mut hsp = make_blastp_hsp(score, q_start, q_end, s_start, s_end);
+                    hsp.e_value = e_value;
+                    hsp
+                })
+                .collect(),
+            best_evalue: 0.0,
+        }
+    }
+
+    fn hsp_order(list: &BlastpHspList) -> Vec<(i32, usize, usize)> {
+        list.hsps
+            .iter()
+            .map(|hsp| (hsp.raw_score, hsp.q_start, hsp.s_start))
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1574-1577
+    // ```c++
+    //         // Sort HSPs with e-values as first priority and scores as
+    //         // tie-breakers, since that is the order we want to see them in
+    //         // in Seq-aligns.
+    //         Blast_HSPListSortByEvalue(hsp_list);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1392-1395
+    // ```c
+    //     const double epsilon = 1.0e-180;
+    //     if (evalue1 < epsilon && evalue2 < epsilon) {
+    //         return 0;
+    //     }
+    // ```
+    // The two lists of the OrthoFinder-style benchmark (2026-10-13) as the redo leaves them,
+    // after s_HSPListNormalizeScores: sorted by the scaled scores (43971 before 43959, 48512
+    // before 48503), which both round to the same score, with E-values below 1.0e-180. NCBI
+    // prints them in ScoreCompareHSPs order, the smaller subject offset first.
+    #[test]
+    fn test_hit_list_to_seqalign_order_sorts_rounded_score_ties_below_evalue_epsilon() {
+        let mut hit_list = BlastpHitList::new(10);
+        hit_list.update(hsp_list_of(
+            784,
+            &[
+                (1378, 173, 783, 65, 657, 5.0e-182),
+                (1374, 92, 674, 96, 657, 9.825702395207e-182),
+                (1374, 229, 797, 65, 643, 1.118498368325e-181),
+                (1269, 81, 618, 113, 657, 6.24e-166),
+            ],
+        ));
+        hit_list.update(hsp_list_of(
+            1211,
+            &[
+                (1516, 604, 1120, 700, 1233, 6.002427993935e-191),
+                (1516, 1, 514, 1, 534, 6.600259301753e-191),
+            ],
+        ));
+
+        hit_list_to_seqalign_order(&mut hit_list);
+
+        assert_eq!(hit_list.hsplist_count, 2);
+        assert_eq!(
+            hsp_order(&hit_list.hsplist_array[0]),
+            vec![
+                (1378, 173, 65),
+                (1374, 229, 65),
+                (1374, 92, 96),
+                (1269, 81, 113)
+            ]
+        );
+        assert_eq!(
+            hsp_order(&hit_list.hsplist_array[1]),
+            vec![(1516, 1, 1), (1516, 604, 700)]
+        );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1431-1434
+    // ```c
+    //    if ((retval = s_EvalueComp(h1->evalue, h2->evalue)) != 0)
+    //       return retval;
+    //
+    //    return ScoreCompareHSPs(v1, v2);
+    // ```
+    // E-values of 1.0e-180 or more are compared as they are: the HSP with the higher scaled
+    // score has the smaller E-value and stays first although its subject offset is larger. An
+    // HSP of score 0 is in no Seq-align, and a list with only such HSPs is left out.
+    #[test]
+    fn test_hit_list_to_seqalign_order_keeps_evalue_order_and_drops_score_zero() {
+        let mut hit_list = BlastpHitList::new(10);
+        hit_list.update(hsp_list_of(
+            0,
+            &[
+                (100, 10, 60, 40, 90, 1.0e-20),
+                (100, 1, 50, 1, 50, 2.0e-20),
+                (0, 1, 5, 1, 5, 9.0),
+            ],
+        ));
+        hit_list.update(hsp_list_of(1, &[(0, 1, 5, 1, 5, 9.0)]));
+        hit_list.update(hsp_list_of(2, &[(80, 1, 40, 1, 40, 1.0e-10)]));
+
+        hit_list_to_seqalign_order(&mut hit_list);
+
+        assert_eq!(hit_list.hsplist_count, 2);
+        assert_eq!(
+            hsp_order(&hit_list.hsplist_array[0]),
+            vec![(100, 10, 40), (100, 1, 1)]
+        );
+        assert_eq!(hit_list.hsplist_array[1].oid, 2);
     }
 
     #[test]

@@ -239,8 +239,9 @@ fn legacy_and_unsupported_syntax_is_unknown() {
         ] {
             let err = parse(program, &["-outfmt", "6", old]).unwrap_err();
             // The programs name the NCBI options that they do not implement (AGENTS.md
-            // rule 2). BLASTP has `-db` (it takes a value, which is missing here).
-            if program == "blastp" && old == "-db" {
+            // rule 2). BLASTP and BLASTN have `-db` (it takes a value, which is missing
+            // here).
+            if matches!(program, "blastp" | "blastn") && old == "-db" {
                 assert!(err.to_string().contains("-db requires one value"), "{err}");
                 continue;
             } else if matches!(old, "-db" | "-remote") {
@@ -916,7 +917,9 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("blastn", &["-db", "nt"][..]),
+        ("blastn", &["-searchsp", "1000"][..]),
+        ("blastn", &["-db_soft_mask", "11"]),
+        ("blastn", &["-db_hard_mask", "11"]),
         ("tblastn", &["-dbsize", "1000"]),
         ("tblastx", &["-db", "nt"]),
         ("blastp", &["-searchsp", "1000"]),
@@ -1049,6 +1052,69 @@ fn blastp_takes_a_database_and_its_size() {
     let error =
         LOSAT::algorithm::blastp::blast_engine::check_options(&blastp(&["-db", "d"]).unwrap())
             .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("-db (a database search) is not supported by LOSAT Web yet"),
+        "{error:#}"
+    );
+}
+
+// BLASTN's `-db NAME` and `-dbsize N` (blast_args.cpp:2191-2199 and 2231-2237, quoted
+// above): as BLASTP's, read by the handler of the database arguments of every program
+// (blast_args.cpp:2472-2476 and 2570-2572).
+#[test]
+fn blastn_takes_a_database_and_its_size() {
+    let blastn = |words: &[&str]| {
+        let mut argv = vec!["losat", "blastn", "-query", "q.fa"];
+        argv.extend(words);
+        try_parse_from::<Cli, _, _>(argv).map(|cli| match cli.command {
+            Commands::Blastn(args) => args,
+            _ => unreachable!("blastn"),
+        })
+    };
+    let args = blastn(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
+    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(args.subject, None);
+    assert_eq!(args.dbsize, Some(3_000_000_000));
+    // NCBI keeps the name without the white space at its ends (blast_args.cpp:2473).
+    assert_eq!(args.database_name(), Some("dir/name"));
+    assert_eq!(args.db_length(), 3_000_000_000);
+    assert_eq!(blastn(&["-db", "  "]).unwrap().database_name(), Some(""));
+    // `-dbsize` is read with `-subject` too, and takes NCBI's Int8 forms.
+    for (word, value) in [
+        ("0", 0),
+        ("-5", -5),
+        ("0x10", 16),
+        ("9223372036854775807", i64::MAX),
+    ] {
+        let args = blastn(&["-subject", "s.fa", "-dbsize", word]).unwrap();
+        assert_eq!(args.db_length(), value, "{word}");
+    }
+    // Without `-dbsize` the options keep a database length of 0.
+    let args = blastn(&["-subject", "s.fa"]).unwrap();
+    assert_eq!((args.database_name(), args.db_length()), (None, 0));
+    for word in ["abc", "1.5", "", "9223372036854775808"] {
+        let error = blastn(&["-db", "d", "-dbsize", word]).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::ValueValidation,
+            "{word}"
+        );
+    }
+    for words in [
+        &["-db", "d", "-subject", "s.fa"][..],
+        &["-subject", "s.fa", "-db", "d"],
+        &["-db", "d", "-subject_loc", "1-10"],
+    ] {
+        let error = blastn(words).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::ArgumentConflict,
+            "{words:?}: {error}"
+        );
+    }
+    // LOSAT Web has no database files: its validation (`check_scoring`) rejects `-db`.
+    let error = LOSAT::algorithm::blastn::scoring::check_scoring(&blastn(&["-db", "d"]).unwrap())
+        .unwrap_err();
     assert!(
         format!("{error:#}").contains("-db (a database search) is not supported by LOSAT Web yet"),
         "{error:#}"

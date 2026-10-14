@@ -401,6 +401,29 @@ Rebuilding less:
   `[TIMING] x_bpredofit: lists=<n> hsps=<m>`. Measured once (human proteome block 1, 566 proteins, 50,404
   letters, x human proteome, one thread, with `LOSAT_X_BPQBLOCK=50000` and the other memory switches; max RSS):
   121,304 -> 82,180 kB (NCBI -db 151,476 kB in the same run).
+- `LOSAT_X_BPREDOPAR=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the composition-based redo of a search with more than one thread and
+  at least two matches runs one job per match on the pool, as NCBI's `omp for` over its array of matches,
+  instead of one job per query (or the matches of the only query with matches); the early termination
+  test, the heap insertions and the error that ends the redo are then replayed on the calling thread in the
+  order of the one-thread loop, on the same heaps (`blastp/x_redo_par.rs`, exactness argument in its
+  header). Each job uses its own parameters and per-worker scratch, with the search's `LOSAT_X_SEGSHARE`
+  store; the `LOSAT_X_NEWTONLANES` prefetch is not used on this path. Windows of whole queries (at least 64
+  jobs per thread) bound the results held before their replay, and the preliminary lists are released
+  after each window as the one-thread loop releases them (`LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`). With
+  `LOSAT_TIMING=1` each search the path runs prints
+  `[TIMING] x_bpredopar: jobs=<n> windows=<w> ended=<e> par_s=<s> replay_s=<s>` (`ended`: computed results
+  the early termination test dropped). Reason: the query-level redo waits for the largest query of a
+  search (in the blocks of the human x yeast blastp-fast job with `LOSAT_X_BPQBLOCK=20000`, 33 % of a
+  block's redo work at the median, 54 % at p90).
+- `LOSAT_X_BPREDOPARSHADOW=1` shadow of `LOSAT_X_BPREDOPAR` (implies it): the new path runs first into
+  separate heaps without releasing the preliminary lists, and every match that its replay redoes is
+  computed again on the calling thread with one set of scratch, as the one-thread loop holds it, and the
+  two results are compared (error or not, best score, E-value bits, every HSP field); then the one-thread
+  loop runs for the output and the hit lists of both sets of heaps (`fill_results_from_compo_heaps`) are
+  compared field by field, floating-point values by their bits. The first difference stops the run
+  (panic). One line at exit:
+  `[X_SHADOW] BPREDOPAR searches= queries= matches_compared= lists_compared= diffs=`.
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the two-hit seed stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one

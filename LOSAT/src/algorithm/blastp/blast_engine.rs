@@ -6175,6 +6175,9 @@ fn run_resolved_in_pool(
     // params->prelim_evalue = cbs_stretch*evalue;
     // ```
     let prelim_evalue = blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode);
+    // EXPERIMENT (LOSAT_X_BPPFREE): `x_prelim_free.rs`.
+    let x_prelim_free = super::x_prelim_free::x_bp_prelim_free();
+    let mut x_prelim_freed = 0usize;
     let mut redone_matches = build_redone_match_heaps(query_ids.len(), args.max_target_seqs);
     let mut preliminary_hit_lists: Vec<Option<BlastpHitList>> = std::iter::repeat_with(|| None)
         .take(query_ids.len())
@@ -7200,6 +7203,11 @@ fn run_resolved_in_pool(
             if provisional_hsp_list.hsps.is_empty() {
                 preliminary_hits.clear();
                 continue;
+            }
+            // EXPERIMENT (LOSAT_X_BPPFREE): the reaped list gives back the room of the HSPs it no
+            // longer holds; the same HSPs in the same order (`x_prelim_free.rs`).
+            if x_prelim_free {
+                provisional_hsp_list.hsps.shrink_to_fit();
             }
             subject_result
                 .query_hsp_lists
@@ -8277,9 +8285,18 @@ fn run_resolved_in_pool(
                     redone_match.insert(hsp_list, best_evalue, best_score, s_idx);
                 }
             }
+            // EXPERIMENT (LOSAT_X_BPPFREE): nothing reads this query's preliminary list after its
+            // redo; it is freed here as NCBI frees each list it has redone (`x_prelim_free.rs`).
+            if x_prelim_free {
+                preliminary_hit_lists[q_idx] = None;
+                x_prelim_freed += 1;
+            }
         }
     }
 
+    if x_prelim_free && timing_enabled {
+        eprintln!("[TIMING] x_bppfree: freed_lists={x_prelim_freed}");
+    }
     let mut hit_lists = fill_results_from_compo_heaps(args.max_target_seqs, &mut redone_matches);
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(

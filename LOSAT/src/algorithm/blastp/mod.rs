@@ -37,6 +37,9 @@ mod x_query_blocks;
 mod kappa;
 // EXPERIMENT (LOSAT_X_BPSEED): the subject scan and the two-hit test in one loop.
 mod x_seed_fused;
+// EXPERIMENT (LOSAT_X_BPPFREE): preliminary hit lists without spare room, each freed after its
+// query's redo.
+mod x_prelim_free;
 
 /// EXPERIMENT (LOSAT_X_BPSEEDSHADOW): the shadow mode's line at exit.
 pub fn x_bp_seed_print_summary() {

@@ -81,17 +81,42 @@ impl<'a> SubjectLetters<'a> {
         match self {
             Self::Records(subjects) => f(subjects[oid]),
             Self::Packed(subjects) => {
-                let mut buffer = X_LETTERS.with(Cell::take);
                 LETTERS_MADE.fetch_add(1, Ordering::Relaxed);
-                subjects[oid].ascii_into(&mut buffer);
-                let result = f(&buffer);
-                if buffer.capacity() <= X_KEPT_BUFFER {
-                    X_LETTERS.with(|cell| cell.set(buffer));
-                }
-                result
+                with_buffer(|buffer| subjects[oid].ascii_into(buffer), f)
             }
         }
     }
+
+    /// `f` of the letters that the preliminary stage of subject `oid` reads. With `case` (the
+    /// stage reads the lower-case letters, `-lcase_masking`) they are the record's letters
+    /// (`with_letters`). Without it a packed subject gives its bases as resolved, `A`, `C`, `G`
+    /// or `T` for every base: the stage resolves the letters into these same bases, which
+    /// resolve to themselves, so a worker holds these alone and not the letters too.
+    pub(super) fn with_search_letters<R>(
+        &self,
+        oid: usize,
+        case: bool,
+        f: impl FnOnce(&[u8]) -> R,
+    ) -> R {
+        match self {
+            Self::Packed(subjects) if !case => {
+                RESOLVED_MADE.fetch_add(1, Ordering::Relaxed);
+                with_buffer(|buffer| subjects[oid].resolved_letters_into(buffer), f)
+            }
+            _ => self.with_letters(oid, f),
+        }
+    }
+}
+
+/// `f` of the bytes `make` writes in this thread's buffer (see `with_letters`).
+fn with_buffer<R>(make: impl FnOnce(&mut Vec<u8>), f: impl FnOnce(&[u8]) -> R) -> R {
+    let mut buffer = X_LETTERS.with(Cell::take);
+    make(&mut buffer);
+    let result = f(&buffer);
+    if buffer.capacity() <= X_KEPT_BUFFER {
+        X_LETTERS.with(|cell| cell.set(buffer));
+    }
+    result
 }
 
 /// The largest letter buffer a thread keeps between subjects.
@@ -154,17 +179,20 @@ static STORED_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static STORED_BYTES: AtomicU64 = AtomicU64::new(0);
 /// The times the letters of a packed subject were made.
 static LETTERS_MADE: AtomicU64 = AtomicU64::new(0);
+/// The times the resolved bases of a packed subject were made for its preliminary stage.
+static RESOLVED_MADE: AtomicU64 = AtomicU64::new(0);
 
 /// The summary line (printed by `main` at exit) with LOSAT_X_STATS: the subjects held packed,
-/// the bytes of their stores, and the times their letters were made.
+/// the bytes of their stores, and the times their letters and resolved bases were made.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
     if std::env::var_os("LOSAT_X_STATS").is_some() {
         eprintln!(
-            "[X_STATS] TBNSTORE subjects={} stored_bytes={} letters_made={}",
+            "[X_STATS] TBNSTORE subjects={} stored_bytes={} letters_made={} resolved_made={}",
             STORED_SUBJECTS.load(Ordering::Relaxed),
             STORED_BYTES.load(Ordering::Relaxed),
-            LETTERS_MADE.load(Ordering::Relaxed)
+            LETTERS_MADE.load(Ordering::Relaxed),
+            RESOLVED_MADE.load(Ordering::Relaxed)
         );
     }
 }

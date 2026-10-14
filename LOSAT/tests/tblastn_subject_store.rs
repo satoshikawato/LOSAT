@@ -289,7 +289,18 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
         assert_eq!(store_messages, messages, "{options:?}");
         assert_eq!(counter(&stats, "subjects"), 8, "{options:?}");
         assert!(counter(&stats, "stored_bytes") > 0, "{options:?}");
-        assert!(counter(&stats, "letters_made") >= 7, "{options:?}: {stats}");
+        // the preliminary stage reads the resolved bases unless it reads the case; the later
+        // stages of the subjects with hits read the letters
+        if options.contains(&"-lcase_masking") {
+            assert!(counter(&stats, "letters_made") >= 7, "{options:?}: {stats}");
+            assert_eq!(counter(&stats, "resolved_made"), 0, "{options:?}");
+        } else {
+            assert!(
+                counter(&stats, "resolved_made") >= 7,
+                "{options:?}: {stats}"
+            );
+            assert!(counter(&stats, "letters_made") >= 4, "{options:?}: {stats}");
+        }
     }
 }
 
@@ -308,6 +319,7 @@ fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_sub
     assert_eq!(store_messages, messages);
     assert_eq!(counter(&stats, "subjects"), 0);
     assert_eq!(counter(&stats, "letters_made"), 0);
+    assert_eq!(counter(&stats, "resolved_made"), 0);
 
     let options = ["-outfmt", "6", "-num_threads", "1"];
     let (expected, messages, _) = tblastn(ten, subjects, &options, &[]);
@@ -316,5 +328,5 @@ fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_sub
     assert!(report == expected);
     assert_eq!(store_messages, messages);
     assert_eq!(counter(&stats, "subjects"), 8);
-    assert!(counter(&stats, "letters_made") >= 7);
+    assert!(counter(&stats, "letters_made") + counter(&stats, "resolved_made") >= 7);
 }

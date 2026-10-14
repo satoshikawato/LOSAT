@@ -554,25 +554,34 @@ pub fn resolve_ncbi4na_to_ncbi2na(ncbi4na: &[u8]) -> Vec<u8> {
     let mut random = NcbiRandom::new(ncbi4na.len() as u32);
     ncbi4na
         .iter()
-        .map(|&mask| match mask {
-            1 => 0,
-            2 => 1,
-            4 => 2,
-            8 => 3,
-            0 | 15 => (random.get_rand() & 0x3) as u8,
-            _ => {
-                let mut pick = random.get_rand() % mask.count_ones();
-                (0..4u8)
-                    .filter(|bit| mask & (1 << bit) != 0)
-                    .find(|_| {
-                        let found = pick == 0;
-                        pick = pick.wrapping_sub(1);
-                        found
-                    })
-                    .unwrap_or(0)
-            }
-        })
+        .map(|&mask| resolve_ncbi4na_base(mask, &mut random))
         .collect()
+}
+
+/// The ncbi2na code of one ncbi4na code, an ambiguous one drawn from `random` (the next base
+/// of `resolve_ncbi4na_to_ncbi2na`).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474 (above)
+#[inline]
+pub(crate) fn resolve_ncbi4na_base(mask: u8, random: &mut NcbiRandom) -> u8 {
+    match mask {
+        1 => 0,
+        2 => 1,
+        4 => 2,
+        8 => 3,
+        0 | 15 => (random.get_rand() & 0x3) as u8,
+        _ => {
+            let mut pick = random.get_rand() % mask.count_ones();
+            (0..4u8)
+                .filter(|bit| mask & (1 << bit) != 0)
+                .find(|_| {
+                    let found = pick == 0;
+                    pick = pick.wrapping_sub(1);
+                    found
+                })
+                .unwrap_or(0)
+        }
+    }
 }
 
 /// A subject in packed ncbi2na (4 bases per byte, the remainder count in the last byte),

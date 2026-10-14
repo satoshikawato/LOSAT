@@ -2031,9 +2031,12 @@ fn run_preliminary_subjects(
         };
     // The letters of subject `x_oid` for its preliminary stage: the record's own, or (EXPERIMENT,
     // LOSAT_X_TBNSTORE) made from its packed form for the time of the call, as NCBI makes a
-    // subject's search forms from its scope.
-    let subject_core_oid =
-        |x_oid: usize| subjects.with_letters(x_oid, |subject| subject_core(x_oid, subject));
+    // subject's search forms from its scope (its resolved bases unless the stage reads the case).
+    let subject_core_oid = |x_oid: usize| {
+        subjects.with_search_letters(x_oid, inputs.search.mask_lowercase, |subject| {
+            subject_core(x_oid, subject)
+        })
+    };
     // NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
     // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
     //        != BLAST_SEQSRC_EOF) {

@@ -7,12 +7,64 @@
 //! read is made again from it exactly: the record's letters, their ncbi4na and blastna codes, and
 //! the packed bytes the seed stages read.
 
-use crate::core::blast_encoding::{encode_iupac_to_blastna, iupacna_to_ncbi4na};
+use std::sync::OnceLock;
+
+use crate::core::blast_encoding::{
+    encode_iupac_to_blastna, iupacna_to_ncbi4na, resolve_ncbi4na_base, NcbiRandom,
+};
 use crate::seqdb::volume::AmbiguityRun;
 use crate::utils::dust::MaskedInterval;
 
 /// ncbi4na code -> IUPAC letter (NCBI's `NCBI4NA_TO_IUPACNA`, upper case).
 const NCBI4NA_TO_IUPACNA: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
+
+/// `letter_codes()` of a byte without an ncbi4na code.
+const NO_CODE: u8 = 0xFF;
+/// The bit of `letter_codes()` set for a lower-case letter.
+const LOWER: u8 = 0x10;
+
+/// Byte -> its ncbi4na code (`iupacna_to_ncbi4na`), with `LOWER` for a lower-case letter, or
+/// `NO_CODE`.
+fn letter_codes() -> &'static [u8; 256] {
+    static CODES: OnceLock<[u8; 256]> = OnceLock::new();
+    CODES.get_or_init(|| {
+        std::array::from_fn(|byte| {
+            let letter = byte as u8;
+            match iupacna_to_ncbi4na(letter) {
+                Some(code) if letter.is_ascii_lowercase() => code | LOWER,
+                Some(code) => code,
+                None => NO_CODE,
+            }
+        })
+    })
+}
+
+/// Letter -> ncbi2na base for `A`, `C`, `G`, `T` (`UPPER_BASES`) or `a`, `c`, `g`, `t`
+/// (`LOWER_BASES`); `AMBIGUOUS` for every other byte.
+const UPPER_BASES: [u8; 256] = bases_of(*b"ACGT");
+const LOWER_BASES: [u8; 256] = bases_of(*b"acgt");
+
+const fn bases_of(letters: [u8; 4]) -> [u8; 256] {
+    let mut bases = [AMBIGUOUS; 256];
+    let mut base = 0;
+    while base < 4 {
+        bases[letters[base] as usize] = base as u8;
+        base += 1;
+    }
+    bases
+}
+
+/// `NCBI4NA_TO_BASE` of an ambiguous code.
+const AMBIGUOUS: u8 = 0xFF;
+/// ncbi4na code -> ncbi2na base for `A`, `C`, `G`, `T`; `AMBIGUOUS` for the others.
+const NCBI4NA_TO_BASE: [u8; 16] = {
+    let mut bases = [AMBIGUOUS; 16];
+    bases[1] = 0;
+    bases[2] = 1;
+    bases[4] = 2;
+    bases[8] = 3;
+    bases
+};
 
 /// One nucleotide subject: ncbi2na packed as NCBI packs a subject (`length / 4 + 1` bytes, 4
 /// bases per byte from the high bits, the remainder count in the low 2 bits of the last byte),
@@ -43,43 +95,82 @@ impl PackedNucleotide {
     /// The store of a record's letters (IUPAC nucleotide letters and `-`, in either case), or
     /// `None` when a byte has no ncbi4na code (only records built by an API caller can hold one;
     /// such a search keeps the letters) or the record is longer than a run offset can hold.
+    ///
+    /// One pass over the letters: the packed bytes are those of `encode_subject_ncbi2na_packed`
+    /// (the random draws of the ambiguous bases in the same order), made without its two
+    /// intermediate arrays of one byte per base.
     pub fn from_subject_letters(seq: &[u8]) -> Option<Self> {
-        u32::try_from(seq.len()).ok()?;
+        let length = seq.len();
+        u32::try_from(length).ok()?;
+        let letter_codes = letter_codes();
+        let mut packed = vec![0u8; if length == 0 { 0 } else { length / 4 + 1 }];
         let mut ambiguity: Vec<AmbiguityRun> = Vec::new();
         let mut lowercase: Vec<MaskedInterval> = Vec::new();
         let mut lower_start: Option<usize> = None;
-        for (index, &letter) in seq.iter().enumerate() {
-            let code = iupacna_to_ncbi4na(letter)?;
-            if !matches!(code, 1 | 2 | 4 | 8) {
-                match ambiguity.last_mut() {
-                    Some(run)
-                        if run.ncbi4na == code && (run.offset + run.length) as usize == index =>
-                    {
-                        run.length += 1
+        // drawn from only by ambiguous bases, so made at the first one
+        let mut random: Option<NcbiRandom> = None;
+        for (group, letters) in seq.chunks(4).enumerate() {
+            // four bases A, C, G, T in the case of the letters before them: no run, no interval
+            if let [first, second, third, fourth] = *letters {
+                let bases = if lower_start.is_none() {
+                    &UPPER_BASES
+                } else {
+                    &LOWER_BASES
+                };
+                let [first, second, third, fourth] =
+                    [first, second, third, fourth].map(|letter| bases[usize::from(letter)]);
+                if first | second | third | fourth < 4 {
+                    packed[group] = first << 6 | second << 4 | third << 2 | fourth;
+                    continue;
+                }
+            }
+            let mut byte = 0u8;
+            for (slot, &letter) in letters.iter().enumerate() {
+                let entry = letter_codes[usize::from(letter)];
+                if entry == NO_CODE {
+                    return None;
+                }
+                let index = group * 4 + slot;
+                let code = entry & 0x0F;
+                let mut base = NCBI4NA_TO_BASE[usize::from(code)];
+                if base == AMBIGUOUS {
+                    base = resolve_ncbi4na_base(
+                        code,
+                        random.get_or_insert_with(|| NcbiRandom::new(length as u32)),
+                    );
+                    match ambiguity.last_mut() {
+                        Some(run)
+                            if run.ncbi4na == code
+                                && (run.offset + run.length) as usize == index =>
+                        {
+                            run.length += 1
+                        }
+                        _ => ambiguity.push(AmbiguityRun {
+                            offset: index as u32,
+                            length: 1,
+                            ncbi4na: code,
+                        }),
                     }
-                    _ => ambiguity.push(AmbiguityRun {
-                        offset: index as u32,
-                        length: 1,
-                        ncbi4na: code,
-                    }),
+                }
+                byte |= base << (6 - 2 * slot);
+                if (entry & LOWER != 0) != lower_start.is_some() {
+                    match lower_start.take() {
+                        Some(start) => lowercase.push(MaskedInterval::new(start, index)),
+                        None => lower_start = Some(index),
+                    }
                 }
             }
-            match (lower_start, letter.is_ascii_lowercase()) {
-                (None, true) => lower_start = Some(index),
-                (Some(start), false) => {
-                    lowercase.push(MaskedInterval::new(start, index));
-                    lower_start = None;
-                }
-                _ => {}
-            }
+            packed[group] = byte;
+        }
+        if let Some(last) = packed.last_mut() {
+            *last |= (length % 4) as u8;
         }
         if let Some(start) = lower_start {
-            lowercase.push(MaskedInterval::new(start, seq.len()));
+            lowercase.push(MaskedInterval::new(start, length));
         }
         Some(Self {
-            packed: crate::core::blast_encoding::encode_subject_ncbi2na_packed(seq)
-                .into_boxed_slice(),
-            length: seq.len(),
+            packed: packed.into_boxed_slice(),
+            length,
             ambiguity: ambiguity.into_boxed_slice(),
             lowercase: lowercase.into_boxed_slice(),
         })

@@ -14,6 +14,10 @@ pub(crate) mod encoding;
 // status = s_BlastAaWordFinder_TwoHit(subject, query, ..., matrix, ...);
 // The same protein two-hit extension primitive is used by BLASTP and TBLASTN.
 pub(crate) mod extension;
+// EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW, off unless set): the ungapped X-drop
+// walks of aa_ungapped.c:804-883 with a byte score table, same results (`pub` for the summary line
+// of `main`).
+pub mod x_ungapped_fast;
 // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
 // max_offset = BlastGetStartForGappedAlignment(...);
 // status = s_BlastProtGappedAlignment(...);

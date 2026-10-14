@@ -353,6 +353,17 @@ Rebuilding less:
   hit is never extended and leaves an entry that later subjects read as no previous hit (`x_shadow_compare`).
   One line at exit: `[X_SHADOW] BPSEED subjects= initial_hsps= identical`, with
   `(tables not compared for N subjects shorter than a word)` when there were such subjects.
+- `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; not in the
+  strict set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the word loop and the
+  X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte
+  table (`q << 5 | s`; the sentinel's `BLAST_SCORE_MIN` stored as -128) with raw-pointer walks over the
+  positions the reference indexes, NCBI's statements and exit tests unchanged (`blastp/x_ungapped_fast.rs`,
+  exactness argument in its header). Acts in `extend_one_hit_blosum62` / `extend_two_hit_blosum62` (TBLASTN
+  calls the matrix-generic functions and is not affected); a dropoff outside 1..=127, a word size outside
+  1..=11 or a residue code >= 32 run the reference.
+- `LOSAT_X_BPUNGAPSHADOW=1` shadow of `LOSAT_X_BPUNGAP` (turns the path on): every extension runs both ways and
+  the results (score, offsets, length, `right_extend`, `s_last_off`, and the early return) must be equal; any
+  difference panics with the inputs. One line at exit: `[X_SHADOW] BPUNGAP compared=`.
 - `LOSAT_X_LINKSORT=1` (TBLASTX, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the index sorts of the in-place HSP list path
   (`tblastx/x_link_sort.rs`, exactness argument in its header; it acts only where `LOSAT_X_HSPINPLACE` does).

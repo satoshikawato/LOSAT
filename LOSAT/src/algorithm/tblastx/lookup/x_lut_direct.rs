@@ -519,6 +519,96 @@ pub(crate) fn x_shadow_tables() -> Option<u64> {
     (x_bxlut_mode() == 2).then(|| X_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
 }
 
+/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): 0 = off (`build_ncbi_lookup`),
+/// 1 = BLASTP's table built in place by [`x_build_direct`], 2 = shadow (both builders, compared).
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result. Not in
+// `xswitch::STRICT_SET`, so not read with `xswitch::on`.
+pub(super) fn x_bplut_mode() -> u8 {
+    use std::sync::OnceLock;
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if std::env::var_os("LOSAT_X_BPLUTSHADOW").is_some() {
+            2
+        } else if std::env::var_os("LOSAT_X_BPLUT").is_some() {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+/// EXPERIMENT (LOSAT_X_BPLUTSHADOW): BLASTP tables compared so far.
+static X_BPLUT_SHADOW_TABLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// EXPERIMENT (LOSAT_X_BPLUTSHADOW): `Some(tables compared)` in shadow mode, for the exit summary.
+// No NCBI counterpart: reads a counter.
+pub(crate) fn x_bplut_shadow_tables() -> Option<u64> {
+    (x_bplut_mode() == 2).then(|| X_BPLUT_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see `x_dispatch`)
+// ```c
+//     for (i = 0; i < lookup->backbone_size; i++) {
+//         if (exact_backbone[i] != NULL) {
+//             s_AddWordHits(lookup, matrix, query->sequence,
+//                           exact_backbone[i], query_bias, row_max);
+//             sfree(exact_backbone[i]);
+//         }
+//     }
+// ```
+/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): `build_ncbi_lookup` for BLASTP. Mode 0 calls
+/// it; mode 1 prepares the query as `build_ncbi_lookup_for_profile(.., Blosum62,
+/// LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`] (the same table without
+/// the chains, so without the chains' memory while it is built), falling back to the reference
+/// builder where that declines; mode 2 builds both, compares them field by field (panics on a
+/// difference) and returns the reference's.
+pub(super) fn x_bp_build_lookup(
+    mode: u8,
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    karlin_params: &KarlinParams,
+    check_ideal: bool,
+) -> (BlastAaLookupTable, Vec<QueryContext>) {
+    if mode == 0 {
+        return build_ncbi_lookup(queries, threshold, karlin_params, check_ideal);
+    }
+    let matrix = ScoringMatrix::Blosum62;
+    // The arguments of build_ncbi_lookup_for_profile for BLOSUM62.
+    let bounds = (-4, 11);
+    let prepared = prepare_lookup_query(
+        queries,
+        ideal_karlin_params_for_matrix(matrix, bounds),
+        &compute_std_aa_composition(),
+        LOOKUP_WORD_LENGTH,
+        check_ideal,
+        matrix,
+        bounds,
+    );
+    if mode == 1 {
+        // build_lookup_from_prepared returns the prepared contexts unchanged.
+        let contexts = prepared.contexts.clone();
+        return match x_build_direct(prepared, threshold, matrix, LOOKUP_WORD_LENGTH) {
+            Ok(table) => (table, contexts),
+            Err(prepared) => {
+                build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH)
+            }
+        };
+    }
+    let copy = PreparedLookupQuery {
+        concat_query: prepared.concat_query.clone(),
+        lookup_locations: prepared.lookup_locations.clone(),
+        frame_bases: prepared.frame_bases.clone(),
+        contexts: prepared.contexts.clone(),
+        skipped_seg_mask: prepared.skipped_seg_mask,
+    };
+    let reference = build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH);
+    if let Ok(direct) = x_build_direct(copy, threshold, matrix, LOOKUP_WORD_LENGTH) {
+        x_assert_same_table(&direct, &reference.0);
+        X_BPLUT_SHADOW_TABLES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    reference
+}
+
 /// EXPERIMENT (LOSAT_X_BXLUTSHADOW): assert that two tables are equal field by field.
 pub(super) fn x_assert_same_table(direct: &BlastAaLookupTable, reference: &BlastAaLookupTable) {
     assert_eq!(
@@ -688,5 +778,84 @@ mod tests {
         };
         assert!(table.pv.iter().all(|&w| w == 0));
         assert_eq!(table.longest_chain, 0);
+    }
+
+    /// BLASTP's builder in `mode` against `build_ncbi_lookup`: every table field and every
+    /// context field. Returns the overflow length.
+    fn same_bp(mode: u8, queries: &[Vec<QueryFrame>], threshold: i32, check_ideal: bool) -> usize {
+        let params = blosum62_ideal_karlin_params();
+        let (reference, ref_contexts) = build_ncbi_lookup(queries, threshold, &params, check_ideal);
+        let (got, contexts) = x_bp_build_lookup(mode, queries, threshold, &params, check_ideal);
+        x_assert_same_table(&got, &reference);
+        assert_eq!(contexts.len(), ref_contexts.len());
+        for (a, b) in contexts.iter().zip(&ref_contexts) {
+            assert!(
+                a.q_idx == b.q_idx
+                    && a.f_idx == b.f_idx
+                    && a.frame == b.frame
+                    && a.aa_seq == b.aa_seq
+                    && a.aa_seq_nomask == b.aa_seq_nomask
+                    && a.aa_len == b.aa_len
+                    && a.orig_len == b.orig_len
+                    && a.frame_base == b.frame_base
+                    && a.is_valid == b.is_valid
+                    && format!("{:?}", a.karlin_params) == format!("{:?}", b.karlin_params),
+                "context {} differs",
+                a.q_idx
+            );
+        }
+        reference.overflow.len()
+    }
+
+    /// One BLASTP query: a single frame (as blastp builds them), optionally masked.
+    fn bp_query(seq: Vec<u8>, seg_masks: Vec<(usize, usize)>, nomask: bool) -> Vec<QueryFrame> {
+        let mut f = frame(seq, seg_masks, 1);
+        if nomask {
+            f.aa_seq_nomask = Some(f.aa_seq.clone());
+        }
+        vec![f]
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:461-467
+    // ```c
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         if (exact_backbone[i] != NULL) {
+    //             s_AddWordHits(lookup, matrix, query->sequence,
+    //                           exact_backbone[i], query_bias, row_max);
+    //             sfree(exact_backbone[i]);
+    //         }
+    //     }
+    // ```
+    #[test]
+    fn bplut_table_and_contexts_equal_build_ncbi_lookup() {
+        let mut seed = 23u64;
+        let mut low_complexity = vec![1u8; 200];
+        low_complexity.extend(residues(&mut seed, 30));
+        let queries = vec![
+            bp_query(residues(&mut seed, 900), vec![(40, 90)], true),
+            bp_query(residues(&mut seed, 2), vec![], false),
+            bp_query(low_complexity, vec![(150, 199)], true),
+            bp_query(residues(&mut seed, 1), vec![], false),
+            bp_query(Vec::new(), vec![], false),
+            bp_query(residues(&mut seed, 1500), vec![], false),
+            bp_query(residues(&mut seed, 60), vec![(0, 59)], true),
+        ];
+        let mut overflow_seen = false;
+        for mode in [1, 2] {
+            for check_ideal in [false, true] {
+                for threshold in [0, 11, 12, 13, 21] {
+                    overflow_seen |= same_bp(mode, &queries, threshold, check_ideal) > 0;
+                }
+            }
+        }
+        assert!(overflow_seen, "the fixture must reach the overflow array");
+        // A threshold beyond Int4 (`INT_MIN`, every word a neighbour) on short queries.
+        let short: Vec<Vec<QueryFrame>> = (0..3)
+            .map(|_| bp_query(residues(&mut seed, 15), vec![], false))
+            .collect();
+        same_bp(1, &short, i32::MIN, false);
+        same_bp(2, &short, i32::MIN, false);
+        // Mode 0 is the reference itself.
+        same_bp(0, &queries, 11, false);
     }
 }

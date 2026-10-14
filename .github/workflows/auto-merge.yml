@@ -1,0 +1,34 @@
+name: Auto-merge
+
+# Turns on GitHub auto-merge (merge commit, as for the repository's other merges) for every pull
+# request of this repository that is opened as ready, reopened, or marked ready for review. The
+# pull request then merges by itself as soon as the required checks of main pass (`rust`,
+# `fast output regressions`, `platform checks result`, `web result`; the ruleset is set by the
+# repository owner). Draft pull requests are skipped until they are marked ready; pull requests
+# from forks are never touched. "Disable auto-merge" on a pull request's page turns it off again.
+#
+# The job runs on pull_request_target and does not check out pull-request code.
+#
+# With the default github.token the merge is made by github-actions[bot], and GitHub starts no
+# workflow for a push made with that token, so the `push` runs of ci.yml and web.yml on main would
+# not happen. A secret AUTO_MERGE_TOKEN (a token of the repository owner with contents and
+# pull-requests write access to this repository) avoids that: it is used when it exists.
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: enable auto-merge
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge (merge commit)
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN || github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr merge --auto --merge --repo "$GITHUB_REPOSITORY" "$PR_NUMBER"

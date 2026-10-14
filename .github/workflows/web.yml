@@ -13,19 +13,56 @@ on:
       - 'LOSAT/tests/outfmt0_manifest.tsv'
       - '.github/workflows/web.yml'
   pull_request:
-    paths:
-      - 'web/**'
-      - 'LOSAT/src/**'
-      - 'LOSAT/build.rs'
-      - 'LOSAT/Cargo.toml'
-      - 'LOSAT/Cargo.lock'
-      - 'LOSAT/.cargo/**'
-      - 'LOSAT/tests/wasi_*.js'
-      - 'LOSAT/tests/outfmt0_manifest.tsv'
-      - '.github/workflows/web.yml'
 
 jobs:
+  # One always-present gate for the required check: the `on.pull_request` trigger has no `paths:`
+  # filter (a required check of a workflow that did not run would block the pull request forever),
+  # so this job decides whether the pull request touches relevant files.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != pull_request ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Pattern = the former `pull_request: paths:` list, as anchored extended regular
+          # expressions (`**` = .*, `*` = [^/]*):
+          #   web/**
+          #   LOSAT/src/**
+          #   LOSAT/build.rs
+          #   LOSAT/Cargo.toml
+          #   LOSAT/Cargo.lock
+          #   LOSAT/.cargo/**
+          #   LOSAT/tests/wasi_*.js
+          #   LOSAT/tests/outfmt0_manifest.tsv
+          #   .github/workflows/web.yml
+          pattern='^(web/.*|LOSAT/src/.*|LOSAT/build\.rs|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/\.cargo/.*|LOSAT/tests/wasi_[^/]*\.js|LOSAT/tests/outfmt0_manifest\.tsv|\.github/workflows/web\.yml)$'
+          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" -q '.[].filename')
+          echo "Changed files:"
+          printf '%s\n' "$files"
+          if grep -Eq "$pattern" <<< "$files"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   app:
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -51,6 +88,8 @@ jobs:
   # The web API tests compile only for wasm32, so the native `cargo test` in ci.yml
   # never runs them. Run them on wasm32-wasip1 under Node's WASI.
   engine-web-api:
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -72,6 +111,8 @@ jobs:
   # every supported format of every program through ABI v2, compared with the native
   # CLI of the same commit (plan §6.2).
   adapter:
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -121,7 +162,8 @@ jobs:
   # the application built with the engine; and the reactor tests in Node (the RecordScanner
   # contract on the serial reactor, responses of more than 1 MiB).
   browser-engine:
-    needs: adapter
+    needs: [changes, adapter]
+    if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -159,3 +201,24 @@ jobs:
           name: playwright-engine-results
           path: web/app/test-results/
           retention-days: 7
+
+  # The check to require in the ruleset: it always runs and fails only if a job failed or was
+  # cancelled (jobs skipped because no relevant file changed count as passed).
+  result:
+    name: web result
+    if: always()
+    needs: [changes, app, engine-web-api, adapter, browser-engine]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any job failed or was cancelled
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" = failure ] || [ "$r" = cancelled ]; then
+              echo "A job did not succeed." >&2
+              exit 1
+            fi
+          done

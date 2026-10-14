@@ -8,18 +8,11 @@ name: Platform checks
 #    the frozen hashes are checked on Linux by ci.yml);
 #  - tests: cargo test --all-features in both modes on the three non-Linux platforms (ci.yml runs
 #    both modes on Linux).
-# Pull requests run it when the engine, the Cargo files or this workflow's own files change; the
-# schedule and workflow_dispatch run it always.
+# Pull requests always start it (so that `platform checks result` exists and can be required), but
+# its jobs run only when the engine, the Cargo files or this workflow's own files change (job
+# `changes`); the schedule and workflow_dispatch run them always.
 on:
   pull_request:
-    paths:
-      - 'LOSAT/src/**'
-      - 'LOSAT/Cargo.toml'
-      - 'LOSAT/Cargo.lock'
-      - 'LOSAT/build.rs'
-      - '.github/workflows/platform-checks.yml'
-      - 'LOSAT/tests/platform_checks.py'
-      - 'LOSAT/tests/platform_check_cases.json'
   schedule:
     - cron: '23 19 * * 0'
   workflow_dispatch:
@@ -36,8 +29,53 @@ defaults:
     shell: bash
 
 jobs:
+  # One always-present gate for the required check: the `on.pull_request` trigger has no `paths:`
+  # filter (a required check of a workflow that did not run would block the pull request forever),
+  # so this job decides whether the pull request touches relevant files.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != pull_request ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Pattern = the former `pull_request: paths:` list, as anchored extended regular
+          # expressions (`**` = .*, `*` = [^/]*):
+          #   LOSAT/src/**
+          #   LOSAT/Cargo.toml
+          #   LOSAT/Cargo.lock
+          #   LOSAT/build.rs
+          #   .github/workflows/platform-checks.yml
+          #   LOSAT/tests/platform_checks.py
+          #   LOSAT/tests/platform_check_cases.json
+          pattern='^(LOSAT/src/.*|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/build\.rs|\.github/workflows/platform-checks\.yml|LOSAT/tests/platform_checks\.py|LOSAT/tests/platform_check_cases\.json)$'
+          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" -q '.[].filename')
+          echo "Changed files:"
+          printf '%s\n' "$files"
+          if grep -Eq "$pattern" <<< "$files"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   outputs:
     name: default = LOSAT_X_DEFAULT=0 (${{ matrix.id }})
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -77,8 +115,8 @@ jobs:
 
   compare:
     name: same hashes on all platforms
-    needs: outputs
-    if: ${{ !cancelled() }}
+    needs: [changes, outputs]
+    if: ${{ !cancelled() && needs.changes.outputs.relevant == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -97,6 +135,8 @@ jobs:
 
   tests:
     name: cargo test, ${{ matrix.mode }} (${{ matrix.id }})
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -131,3 +171,24 @@ jobs:
           # Optimized test code; the test profile keeps the dev profile's debug assertions
           # and overflow checks (as in ci.yml).
           CARGO_PROFILE_TEST_OPT_LEVEL: '1'
+
+  # The check to require in the ruleset: it always runs and fails only if a job failed or was
+  # cancelled (jobs skipped because no relevant file changed count as passed).
+  result:
+    name: platform checks result
+    if: always()
+    needs: [changes, outputs, compare, tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail if any job failed or was cancelled
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" = failure ] || [ "$r" = cancelled ]; then
+              echo "A job did not succeed." >&2
+              exit 1
+            fi
+          done

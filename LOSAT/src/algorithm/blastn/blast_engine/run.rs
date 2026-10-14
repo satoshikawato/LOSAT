@@ -3615,13 +3615,52 @@ fn collect_prelim_hit_lists(
     num_queries: usize,
     prelim_hitlist_size: usize,
 ) -> PrelimHitLists {
-    let mut hit_lists: PrelimHitLists = Vec::with_capacity(num_queries);
-    hit_lists.resize_with(num_queries, || None);
+    let mut collector = PrelimHitCollector::new(num_queries, prelim_hitlist_size);
     for (oid, hits) in subject_hits.into_iter().enumerate() {
-        if hits.is_empty() {
-            continue;
+        collector.add(oid, hits);
+    }
+    collector.hit_lists
+}
+
+/// EXPERIMENT (LOSAT_X_BNSTREAM, off unless set): with two or more threads, the subjects of a
+/// query batch are searched in blocks of `X_BNSTREAM_SUBJECTS_PER_THREAD` subjects per thread,
+/// and the results of a block go to the hit lists, in OID order, before the next block starts
+/// (`search_query_batch`), so that the HSPs of one block are held at a time instead of those of
+/// every subject. The hit lists are the same; only the threads wait for each other at the end of
+/// a block. Not in the strict set.
+// No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
+fn x_bnstream() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BNSTREAM").is_some())
+}
+
+/// No NCBI counterpart: the subjects per thread of one block of `LOSAT_X_BNSTREAM`.
+const X_BNSTREAM_SUBJECTS_PER_THREAD: usize = 64;
+
+/// The preliminary hit lists of a batch filled one subject at a time, in OID order
+/// (`collect_prelim_hit_lists`), so that only the HSP lists the hit lists keep stay in memory
+/// instead of those of every subject.
+struct PrelimHitCollector {
+    hit_lists: PrelimHitLists,
+    prelim_hitlist_size: usize,
+}
+
+impl PrelimHitCollector {
+    fn new(num_queries: usize, prelim_hitlist_size: usize) -> Self {
+        let mut hit_lists: PrelimHitLists = Vec::with_capacity(num_queries);
+        hit_lists.resize_with(num_queries, || None);
+        Self {
+            hit_lists,
+            prelim_hitlist_size,
         }
-        let mut per_query: Vec<Vec<PrelimHit>> = vec![Vec::new(); num_queries];
+    }
+
+    /// The HSPs of subject `oid`; the subjects must come in OID order.
+    fn add(&mut self, oid: usize, hits: Vec<PrelimHit>) {
+        if hits.is_empty() {
+            return;
+        }
+        let mut per_query: Vec<Vec<PrelimHit>> = vec![Vec::new(); self.hit_lists.len()];
         for hit in hits {
             per_query[hit.query_idx as usize].push(hit);
         }
@@ -3629,7 +3668,8 @@ fn collect_prelim_hit_lists(
             if hsps.is_empty() {
                 continue;
             }
-            hit_lists[query]
+            let prelim_hitlist_size = self.prelim_hitlist_size;
+            self.hit_lists[query]
                 .get_or_insert_with(|| HitList::new(prelim_hitlist_size))
                 .update(PrelimHspList {
                     oid: oid as u32,
@@ -3638,7 +3678,6 @@ fn collect_prelim_hit_lists(
                 });
         }
     }
-    hit_lists
 }
 
 /// The preliminary HSPs that the traceback reads, for each subject: the kept lists of the
@@ -14097,76 +14136,96 @@ fn search_query_batch(
     //                                   hit_params->options->hitlist_size);
     //                 }
     // ```
-    let search_subjects = |kept: Option<&[Vec<PrelimHit>]>| {
-        let results: Vec<(Option<Vec<BlastnHsp>>, Vec<PrelimHit>)> = if use_parallel {
-            #[cfg(all(
-                feature = "parallel",
-                any(not(target_arch = "wasm32"), feature = "wasm-threads")
-            ))]
-            {
-                parallel_pool.install(|| {
-                    subject_records_ref
-                        .par_iter()
-                        .enumerate()
-                        .map_init(
-                            || {
-                                (
-                                    GapAlignScratch::new(),
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                                    // ```c
-                                    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                                    // ...
-                                    // aux_struct->offset_pairs =
-                                    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                                    // ```
-                                    SubjectScratch::new(
-                                        queries_ref.len(),
-                                        offset_array_size,
-                                        window_size,
-                                    ),
-                                )
-                            },
-                            |state, (s_idx, s_record)| {
-                                let (gap_scratch, subject_scratch) = state;
-                                let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-                                let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                                process_subject(
-                                    s_idx,
-                                    s_record,
-                                    gap_scratch,
-                                    subject_scratch,
-                                    kept.map(|kept| &kept[s_idx]),
-                                    &mut subject_hits,
-                                    &mut prelim_hits,
-                                );
-                                (subject_hits, prelim_hits)
-                            },
-                        )
-                        .collect()
-                })
-            }
-            #[cfg(any(
-                not(feature = "parallel"),
-                all(target_arch = "wasm32", not(feature = "wasm-threads"))
-            ))]
-            {
-                unreachable!("use_parallel is false when parallel threads are disabled");
-            }
-        } else {
-            let mut gap_scratch = GapAlignScratch::new();
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-            // ```c
-            // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-            // ...
-            // aux_struct->offset_pairs =
-            //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-            // ```
-            let mut subject_scratch =
-                SubjectScratch::new(queries_ref.len(), offset_array_size, window_size);
-            subject_records_ref
-                .iter()
-                .enumerate()
-                .map(|(s_idx, s_record)| {
+    // Each subject's results go to `sink` in OID order, which fills the hit lists as NCBI's
+    // `Blast_HitListUpdate` does, one HSP list at a time. One thread hands each subject over as
+    // soon as it is searched, so only the HSPs the hit lists keep stay in memory. Two or more
+    // threads search all subjects of the batch and then hand them over, or, with
+    // `LOSAT_X_BNSTREAM`, search them in blocks and hand each block over before the next.
+    let search_subjects =
+        |kept: Option<&[Vec<PrelimHit>]>,
+         sink: &mut dyn FnMut(usize, Option<Vec<BlastnHsp>>, Vec<PrelimHit>)| {
+            if use_parallel {
+                #[cfg(all(
+                    feature = "parallel",
+                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+                ))]
+                {
+                    let num_subjects = subject_records_ref.len();
+                    let block = if x_bnstream() {
+                        (parallel_pool.threads() * X_BNSTREAM_SUBJECTS_PER_THREAD).max(1)
+                    } else {
+                        num_subjects
+                    };
+                    let mut start = 0;
+                    while start < num_subjects {
+                        let end = (start + block).min(num_subjects);
+                        let results: Vec<(Option<Vec<BlastnHsp>>, Vec<PrelimHit>)> = parallel_pool
+                            .install(|| {
+                                subject_records_ref[start..end]
+                                    .par_iter()
+                                    .enumerate()
+                                    .map(|(index, s_record)| (start + index, s_record))
+                                    .map_init(
+                                        || {
+                                            (
+                                                GapAlignScratch::new(),
+                                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                                                // ```c
+                                                // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                                                // ...
+                                                // aux_struct->offset_pairs =
+                                                //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                                                // ```
+                                                SubjectScratch::new(
+                                                    queries_ref.len(),
+                                                    offset_array_size,
+                                                    window_size,
+                                                ),
+                                            )
+                                        },
+                                        |state, (s_idx, s_record)| {
+                                            let (gap_scratch, subject_scratch) = state;
+                                            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                                            let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                                            process_subject(
+                                                s_idx,
+                                                s_record,
+                                                gap_scratch,
+                                                subject_scratch,
+                                                kept.map(|kept| &kept[s_idx]),
+                                                &mut subject_hits,
+                                                &mut prelim_hits,
+                                            );
+                                            (subject_hits, prelim_hits)
+                                        },
+                                    )
+                                    .collect()
+                            });
+                        for (index, (hits, prelim)) in results.into_iter().enumerate() {
+                            sink(start + index, hits, prelim);
+                        }
+                        start = end;
+                    }
+                }
+                #[cfg(any(
+                    not(feature = "parallel"),
+                    all(target_arch = "wasm32", not(feature = "wasm-threads"))
+                ))]
+                {
+                    unreachable!("use_parallel is false when parallel threads are disabled");
+                }
+            } else {
+                let mut gap_scratch = GapAlignScratch::new();
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+                // ```c
+                // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+                // ...
+                // aux_struct->offset_pairs =
+                //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+                // ```
+                let mut subject_scratch =
+                    SubjectScratch::new(queries_ref.len(), offset_array_size, window_size);
+                for (s_idx, s_record) in subject_records_ref.iter().enumerate() {
                     let mut subject_hits: Option<Vec<BlastnHsp>> = None;
                     let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                     process_subject(
@@ -14178,21 +14237,10 @@ fn search_query_batch(
                         &mut subject_hits,
                         &mut prelim_hits,
                     );
-                    (subject_hits, prelim_hits)
-                })
-                .collect()
-        };
-        let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
-        hit_lists.resize_with(queries_ref.len(), || None);
-        let mut prelim_hits = Vec::with_capacity(results.len());
-        for (hits, prelim) in results {
-            if let Some(hits) = hits {
-                update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
+                    sink(s_idx, subject_hits, prelim_hits);
+                }
             }
-            prelim_hits.push(prelim);
-        }
-        (hit_lists, prelim_hits)
-    };
+        };
 
     // NCBI's preliminary stage keeps, for each query, the preliminary HSPs of at most
     // `prelim_hitlist_size` subjects (a split batch merges those of its query chunks), and
@@ -14213,15 +14261,22 @@ fn search_query_batch(
     let prelim_lists = match split_prelim_lists {
         Some(lists) => lists,
         None => {
-            let (_, prelim_hits) = search_subjects(None);
-            collect_prelim_hit_lists(prelim_hits, queries_ref.len(), prelim_hitlist_size)
+            let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
+            search_subjects(None, &mut |oid, _, prelim| collector.add(oid, prelim));
+            collector.hit_lists
         }
     };
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
     let kept = prelim_hits_by_subject(prelim_lists, subject_records_ref.len());
-    let (hit_lists, _) = search_subjects(Some(&kept));
+    let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
+    hit_lists.resize_with(queries_ref.len(), || None);
+    search_subjects(Some(&kept), &mut |_, hits, _| {
+        if let Some(hits) = hits {
+            update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
+        }
+    });
 
     if let Some(bar) = progress_bar.as_ref() {
         bar.finish();

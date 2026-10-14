@@ -141,8 +141,24 @@ pub fn write_empty_subject_warnings(
     program: &str,
     diagnostics: &mut dyn std::io::Write,
 ) -> std::io::Result<()> {
+    write_empty_subject_warnings_by_length(
+        records,
+        |index| records[index].seq().len(),
+        program,
+        diagnostics,
+    )
+}
+
+/// `write_empty_subject_warnings` for records whose letters are held elsewhere
+/// (`sequence::packed_subject`): `length(index)` is the number of letters of record `index`.
+pub fn write_empty_subject_warnings_by_length(
+    records: &[crate::blastinput::fasta_reader::FastaRecord],
+    length: impl Fn(usize) -> usize,
+    program: &str,
+    diagnostics: &mut dyn std::io::Write,
+) -> std::io::Result<()> {
     for (index, record) in records.iter().enumerate() {
-        if record.seq().is_empty() {
+        if length(index) == 0 {
             let mut warning = format!("Warning: [{program}] Subject_{} ", index + 1).into_bytes();
             warning.extend_from_slice(&record.title);
             warning.extend_from_slice(b": Subject sequence contains no data\n");

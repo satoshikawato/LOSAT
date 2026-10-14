@@ -638,6 +638,19 @@ pub fn read_subjects<R: Read>(
     range: Option<&crate::blastinput::seq_range::SequenceRange>,
     warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
 ) -> anyhow::Result<Vec<FastaRecord>> {
+    read_subjects_map(source, range, warn, Ok)
+}
+
+/// `read_subjects`, with each record given to `convert` as soon as it has been read and its
+/// range checked; the results are kept in record order. A caller that keeps a smaller form of a
+/// record (`sequence::packed_subject`) never holds the letters of the whole set at once. An
+/// error of `convert` ends the reading with that error.
+pub fn read_subjects_map<R: Read, T>(
+    source: &mut FastaInputSource<R>,
+    range: Option<&crate::blastinput::seq_range::SequenceRange>,
+    warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+    mut convert: impl FnMut(FastaRecord) -> anyhow::Result<T>,
+) -> anyhow::Result<Vec<T>> {
     use crate::blastinput::seq_range::{record_interval, RecordInterval};
     let mut records = Vec::new();
     while !source.end() {
@@ -650,7 +663,7 @@ pub fn read_subjects<R: Read>(
                         ));
                     }
                 }
-                records.push(record);
+                records.push(convert(record)?);
             }
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,

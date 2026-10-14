@@ -11,6 +11,7 @@ use super::search_seed::encode_tblastn_lookup_query;
 use super::stage_d_pipeline::LocalStageDScoring;
 use super::stage_d_results::KappaResultHitList;
 use super::stage_d_stats::LocalSubjectParameters;
+use super::x_subject_store::SubjectLetters;
 use crate::api::local_blast::{FormatProbe, HspIndex, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::common::{GapEditOp, Hit};
@@ -61,6 +62,7 @@ pub(super) fn render(
     outputs: &mut ReportOutputs<'_>,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
+    subject_letters: SubjectLetters<'_>,
     subject_path: &Path,
     hitlists: &mut [KappaResultHitList],
     parameters: &LocalSubjectParameters,
@@ -112,6 +114,7 @@ pub(super) fn render(
         Some(pairwise_hits(
             query_records,
             subject_records,
+            subject_letters,
             hitlists,
             scoring,
             genetic_code,
@@ -145,6 +148,7 @@ pub(super) fn render(
                 format_number(format.outfmt) == 7,
                 query_records,
                 subject_records,
+                subject_letters,
                 &subject_ids,
                 subject_path,
                 hitlists,
@@ -160,6 +164,7 @@ pub(super) fn render(
                     .expect("pairwise hits prepared for TBLASTN outfmt 0"),
                 query_records,
                 subject_records,
+                subject_letters,
                 subject_path,
                 parameters,
                 ungapped_karlin,
@@ -190,6 +195,7 @@ fn write_tabular(
     comments: bool,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
+    subject_letters: SubjectLetters<'_>,
     subject_ids: &[Arc<[u8]>],
     subject_path: &Path,
     hitlists: &[KappaResultHitList],
@@ -272,7 +278,7 @@ fn write_tabular(
                 //     *end = 3*segment->end + segment->frame - 2;
                 // }
                 // Stage D's local subject coordinate conversion is 1-offset.
-                let subject_len = i32::try_from(subject.seq().len())?;
+                let subject_len = i32::try_from(subject_letters.length(oid))?;
                 let (s_start, s_end) = if frame > 0 {
                     (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
                 } else {
@@ -517,10 +523,7 @@ mod tests {
         let queries = read(query_path, "Query_", true);
         let subjects = read(full_subject_path, "Subject_", false);
         let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
-        let subject_seqs: Vec<_> = subjects
-            .iter()
-            .map(|record| record.seq().to_vec())
-            .collect();
+        let subject_seqs: Vec<&[u8]> = subjects.iter().map(|record| record.seq()).collect();
         let seg = SegParams::default();
         for mode in [0, 2] {
             let (mut results, parameters, ungapped_karlin, query_validity) = run_local_for_report(
@@ -560,6 +563,7 @@ mod tests {
                 &mut outputs,
                 &queries,
                 &subjects,
+                crate::algorithm::tblastn::x_subject_store::SubjectLetters::Records(&subject_seqs),
                 subject_path,
                 &mut results,
                 &parameters,
@@ -618,6 +622,7 @@ mod tests {
 fn pairwise_hits(
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
+    subject_letters: SubjectLetters<'_>,
     hitlists: &[KappaResultHitList],
     scoring: LocalStageDScoring,
     genetic_code: u8,
@@ -627,6 +632,7 @@ fn pairwise_hits(
 ) -> Result<Vec<PairwiseHit>> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut hits = Vec::new();
+    let mut x_letters = Vec::new();
     for (q_idx, hitlist) in hitlists.iter().enumerate() {
         let query = query_records[q_idx].seq();
         // NCBI c++/src/algo/blast/format/blast_format.cpp:1541-1557:
@@ -643,14 +649,16 @@ fn pairwise_hits(
                 list.payloads.len() == list.hsps.hsps.len(),
                 "TBLASTN report payload count mismatch"
             );
-            let mut translation = TargetTranslation::new(subject.seq(), &code);
+            // The subject's letters (made from its packed form with LOSAT_X_TBNSTORE).
+            let subject_seq = subject_letters.letters(oid, &mut x_letters);
+            let mut translation = TargetTranslation::new(subject_seq, &code);
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
                 let hsp = &linked.hsp;
                 let frame = i32::from(hsp.frame);
                 // NCBI c++/src/algo/blast/core/blast_hits.c:1087-1105:
                 // translated coordinates use three nucleotide letters per
                 // residue and reverse strand endpoints run in descending order.
-                let subject_len = i32::try_from(subject.seq().len())?;
+                let subject_len = i32::try_from(subject_seq.len())?;
                 let (s_start, s_end) = if frame > 0 {
                     (3 * hsp.s_start + frame, 3 * hsp.s_end + frame - 1)
                 } else {
@@ -661,7 +669,7 @@ fn pairwise_hits(
                 };
                 let (qseq, sseq) = aligned_sequences(
                     query,
-                    subject.seq(),
+                    subject_seq,
                     &code,
                     &mut translation,
                     hsp.frame,
@@ -738,7 +746,7 @@ fn pairwise_hits(
                 // The report's frame comes from the record coordinate of the subject row's
                 // start and the record's length (the search's frame without
                 // `-subject_loc`).
-                let subject_length = ranges.subjects.length(oid, subject.seq().len());
+                let subject_length = ranges.subjects.length(oid, subject_seq.len());
                 let subject_frame = crate::blastinput::seq_range::record_frame(
                     frame > 0,
                     usize::try_from(s_start - 1)?,
@@ -815,6 +823,7 @@ fn write_pairwise(
     hits: &[PairwiseHit],
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
+    subject_letters: SubjectLetters<'_>,
     subject_path: &Path,
     parameters: &LocalSubjectParameters,
     ungapped_karlin: &[crate::stats::tables::KarlinParams],
@@ -836,10 +845,7 @@ fn write_pairwise(
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
     };
-    let total_nt: usize = subject_records
-        .iter()
-        .map(|record| record.seq().len())
-        .sum();
+    let total_nt: usize = subject_letters.lengths().sum();
     let gumbel = lookup_protein_gumbel_params(&spec, i64::try_from(total_nt / 3)?)
         .context("TBLASTN pairwise Spouge parameters are unavailable")?;
     let report = BlastpPairwiseReport {

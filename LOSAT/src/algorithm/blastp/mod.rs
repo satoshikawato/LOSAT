@@ -14,6 +14,10 @@ pub(crate) mod encoding;
 // status = s_BlastAaWordFinder_TwoHit(subject, query, ..., matrix, ...);
 // The same protein two-hit extension primitive is used by BLASTP and TBLASTN.
 pub(crate) mod extension;
+// EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW, off unless set): the ungapped X-drop
+// walks of aa_ungapped.c:804-883 with a byte score table, same results (`pub` for the summary line
+// of `main`).
+pub mod x_ungapped_fast;
 // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
 // max_offset = BlastGetStartForGappedAlignment(...);
 // status = s_BlastProtGappedAlignment(...);
@@ -21,6 +25,8 @@ pub(crate) mod extension;
 pub(crate) mod gapalign;
 mod hsp;
 mod query_split;
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the queries searched in blocks of whole query batches.
+mod x_query_blocks;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
 // ```c
 // static void s_HSPListNormalizeScores(...);
@@ -39,3 +45,6 @@ pub fn x_bp_seed_print_summary() {
 
 pub use args::BlastpArgs;
 pub use blast_engine::run;
+// EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): the summary lines `main` prints at exit.
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub use gapalign::x_restricted_gap_print_summary;

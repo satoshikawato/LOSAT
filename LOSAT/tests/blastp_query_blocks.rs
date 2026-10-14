@@ -109,6 +109,38 @@ fn blocks_write_the_rows_of_the_search_of_all_queries() {
     }
 }
 
+// blastp-fast's compressed lookup table: each block builds its own (exactness argument for the
+// compressed scan in `x_query_blocks.rs`).
+#[test]
+fn blastp_fast_blocks_write_the_rows_of_the_search_of_all_queries() {
+    let fast = ["-task", "blastp-fast", "-outfmt", "6"];
+    for batch_size in [None, Some("3000")] {
+        let batch: Vec<(&str, &str)> = batch_size
+            .map(|size| ("BATCH_SIZE", size))
+            .into_iter()
+            .collect();
+        for threads in THREADS {
+            let (reference, reference_searches) = blastp(threads, &batch, &fast);
+            assert!(!reference.is_empty(), "the fixture pair has rows");
+            for letters in ["1", "20000"] {
+                let mut vars = batch.clone();
+                vars.push(("LOSAT_X_BPQBLOCK", letters));
+                let (rows, searches) = blastp(threads, &vars, &fast);
+                assert!(
+                    rows == reference,
+                    "blastp-fast BATCH_SIZE {batch_size:?} threads {threads} blocks of {letters}: \
+                     rows differ"
+                );
+                assert!(
+                    searches > reference_searches,
+                    "blastp-fast BATCH_SIZE {batch_size:?} threads {threads} blocks of {letters}: \
+                     {searches} searches, the reference {reference_searches}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn blocks_write_the_rows_to_one_output_file() {
     let dir = std::env::temp_dir().join(format!("losat-bpqblock-{}", std::process::id()));

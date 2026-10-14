@@ -481,6 +481,8 @@ fn print_blastp_timing(timing: &BlastpTiming, total_start: Option<Instant>) {
         BlastpTiming::seconds(&timing.output_format_ns),
         BlastpTiming::calls(&timing.output_format_calls)
     );
+    // EXPERIMENT (LOSAT_X_BPDIAG): the cells the fused loop tested in batches (`x_seed_fused.rs`).
+    super::x_seed_fused::x_bp_diag_print_timing();
     if let Some(total_start) = total_start {
         eprintln!(
             "[TIMING] blastp_total: {:.3}s",
@@ -6283,6 +6285,7 @@ fn run_resolved_in_pool(
         // Dispatch point: with the switch, the two-hit test reads the lookup cells in place
         // (`x_seed_fused::x_scan_two_hit`) and this closure takes the hits that need the context
         // check and the extension, with the same body as the reference closure below.
+        // EXPERIMENT (LOSAT_X_BPDIAG): inside it the hits of a cell are tested in batches.
         // EXPERIMENT (LOSAT_X_BPSEEDSHADOW): both loops from the same diagonal table, compared.
         let x_shadow = args.window_size != 0
             && super::x_seed_fused::x_bp_seed_shadow()

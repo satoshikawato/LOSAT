@@ -581,6 +581,23 @@ Scheduling (each value computed by one thread with the original function; order 
   chunk, the hit list and the whole diagonal hash compared with the original code; one
   `[X_PAIRPARSHADOW]` summary line on stderr at the end). With `LOSAT_TIMING` a
   `[TIMING] x_pairpar_seed` line gives the strips, seeds and the owner's fold, scan and wait time.
+- `LOSAT_X_PAIRPARDISC=1` (not in the strict set: off unless set to any value, whatever
+  `LOSAT_X_DEFAULT` and `LOSAT_X_PAIRPAR` say) blastn `-task dc-megablast`, one query-subject pair
+  on a pool of 2+ threads: the two-hit seed stage of a subject chunk with a discontiguous megablast
+  table (one or two templates) and the diagonal hash (query block over 8000 letters, `scan_range`
+  0, unmasked subject, one subject, no debug or trace). The pool threads scan strips of the subject
+  with the discontiguous scan kernel (both templates' chains in NCBI's order, the query context of
+  each pair), and the owner thread folds the pairs in scan order through a copy of the two-hit
+  diagonal-hash code (window test, `s_TypeOfWord`, ungapped extension, every insert;
+  `blastn/blast_engine/x_pair_seed_disc.rs`). The helpers scan at most two strips per thread
+  ahead of the owner and reuse the owner's consumed buffers. The owner's fold is the slower side
+  for dc-megablast (most pairs reach the diagonal hash), so the stage stops gaining at about 4
+  threads. Anything else (contiguous tables, which `LOSAT_X_PAIRPAR` takes in one-hit mode) runs
+  the original code. Shadow: `LOSAT_X_PAIRPARDISCSHADOW=1` (per chunk the hit list and the whole
+  diagonal hash compared with the original code; one `[X_PAIRPARDISCSHADOW]` summary line on
+  stderr at the end, with the number of chunks compared). With `LOSAT_TIMING` a
+  `[TIMING] x_pairpardisc_seed` line gives the strips, seeds and the owner's fold, scan and wait
+  time. Test: `LOSAT/tests/blastn_pairpar_disc.rs`.
 - `LOSAT_X_TBNPAR=1` tblastn: preliminary stage per (frame, chunk) and redo per match in
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
 - `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE` and its kept translations, so four or more query

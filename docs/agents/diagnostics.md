@@ -392,6 +392,27 @@ Rebuilding less:
   both loops, so its tables are always compared.
   One line at exit: `[X_SHADOW] BPSEED subjects= initial_hsps= identical`, with
   `(tables not compared for N subjects shorter than a word)` when there were such subjects.
+- `LOSAT_X_BPCLUT=1` (BLASTP `-task blastp-fast`, speed and memory; not in the strict set: off unless set, to
+  any value, and `LOSAT_X_DEFAULT` does not touch it) the compressed lookup table (`CompressedAaLookupTable`) is
+  built flat in three passes (`tblastx/lookup/x_clut_direct.rs`, exactness argument in its header): a count pass
+  makes the reference builder's appends in its order (the words of `add_word_hits`, the neighbors' last letter
+  taken as a prefix of the sorted row) and records the cell of each append; a layout pass places each cell's hits
+  in one slice of one array (an array of starts, and the reference's PV array and longest chain from the counts);
+  a fill pass writes the hits in the order of their appends and then moves the hits of each cell of more than 5
+  to NCBI's scan order (`x_emission_position`: the first three, the overflow cell filled last, then the older
+  cells newest first). The test for NCBI's overflow banks (the per-batch refusal) is the reference's, with the
+  same message. Each block of `LOSAT_X_BPQBLOCK` builds its own flat table. The scans read a cell as its slice:
+  the offset-pair scan (`scan_subject`'s statements) when `LOSAT_X_BPSEED` is off, the fused loop
+  (`blastp/x_seed_fused_clut.rs`) when it is on. The table holds 4 bytes per hit plus 4 per backbone cell (the
+  reference: 32 bytes per backbone cell plus 8 per overflowed hit), and its build holds another 4 bytes per hit.
+  Measured 2026-10-14 on the WSL machine (blastp-fast, 2M query letters x 1M subject letters,
+  `LOSAT_X_BPQBLOCK=20000` and `LOSAT_X_BPSEED=1` on both sides, one thread, 8 alternating pairs, load 5.9-8.2):
+  `blastp_build_lookup` summed over the blocks 4.55 -> 2.27 s (median ratio 0.54), `blastp_scan_ungapped`
+  1.41 -> 1.08 s (0.84), wall 8.21 -> 5.43 s (0.73), max RSS 77 -> 40 MB, output unchanged.
+- `LOSAT_X_BPCLUTSHADOW=1` shadow of `LOSAT_X_BPCLUT` (for blastp-fast): both builders run, the refusal and the
+  tables are compared (every cell's hits in the reference's scan order, the PV array, `longest_chain` and the
+  scan's parameters) and the first difference stops the run (panic); the search uses the reference's table. One
+  line at exit: `[X_SHADOW] BPCLUT tables_compared= refusals_compared= hits= identical`.
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; not in the
   strict set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the word loop and the
   X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte

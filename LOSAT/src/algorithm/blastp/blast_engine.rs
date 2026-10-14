@@ -30,7 +30,7 @@ use crate::algorithm::tblastx::lookup::compressed::{
     try_build_blosum62_compressed_lookup, BlastCompressedAaLookupTable,
 };
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
-use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, BlastAaLookupTable, QueryContext};
+use crate::algorithm::tblastx::lookup::{x_bp_build_ncbi_lookup, BlastAaLookupTable, QueryContext};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
@@ -5948,7 +5948,9 @@ fn run_resolved_in_pool(
             //     lookup->threshold = (Int4)opt->threshold;
             // ```
             // The x86-64 conversion: `INT_MIN` for a threshold beyond `Int4` (every word).
-            let (lookup, contexts) = build_ncbi_lookup(
+            // EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): the same table
+            // filled in place, without the reference builder's chains (lookup/x_lut_direct.rs).
+            let (lookup, contexts) = x_bp_build_ncbi_lookup(
                 &query_frames,
                 crate::core::blast_util::ncbi_int4_from_double(args.threshold),
                 &lookup_ideal_params,
@@ -8782,6 +8784,7 @@ fn run_resolved_in_pool(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
 
     #[test]
     fn frames_are_set_only_with_the_alignment_fields() {

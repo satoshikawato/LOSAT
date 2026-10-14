@@ -1202,10 +1202,9 @@ fn search(
             .map(|index| query_input.placements.offset(index))
             .collect();
         let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
-        let subject_seqs: Vec<_> = subjects
-            .iter()
-            .map(|record| record.seq().to_vec())
-            .collect();
+        // The search reads the residues of the subject records in place (NCBI's subjects stay
+        // in the reader's records, `CBlastQueryVector`); they are not copied for it.
+        let subject_seqs: Vec<&[u8]> = subjects.iter().map(FastaRecord::seq).collect();
         let seg = resolved.seg.params();
         // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
         // (*thread)->Run(); (*thread)->Join(&result);

@@ -144,7 +144,7 @@ struct LocalBatchSetup {
 // Formatting consumes the same initial context lengths computed before search.
 pub(super) fn run_local_for_report(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
     composition_mode2: bool,
     do_sum_stats: bool,
@@ -177,7 +177,7 @@ pub(super) fn run_local_for_report(
 // The pool owns one search; ordered subject results enter the same Stage D stream.
 pub(super) fn run_local_for_report_threads(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
     composition_mode2: bool,
     do_sum_stats: bool,
@@ -227,7 +227,7 @@ pub(super) fn run_local_for_report_threads(
 /// the caller keeps for all its query batches.
 pub(super) fn x_run_local_for_report_in_pool(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
     composition_mode2: bool,
     do_sum_stats: bool,
@@ -290,7 +290,7 @@ pub(super) type XBatchReport = (
 #[allow(clippy::too_many_arguments)]
 pub(super) fn x_search_batches<'p>(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     ranges: Vec<std::ops::Range<usize>>,
     profile: impl Fn(std::ops::Range<usize>) -> LocalStageDProfile<'p> + Sync,
     composition_mode2: bool,
@@ -376,7 +376,9 @@ pub(super) fn x_search_batches<'p>(
         // batch per thread, the batches are searched side by side, each as the one-thread search,
         // and the reports are returned in batch order.
         if crate::utils::xswitch::on("LOSAT_X_TBNBATCH") && pool.enabled() {
-            let fits = super::search_seed::XSubjectSide::all_fit(subjects.iter().map(Vec::len));
+            let fits = super::search_seed::XSubjectSide::all_fit(
+                subjects.iter().map(|subject| subject.len()),
+            );
             if let Some(side) = x_subject_side
                 .as_ref()
                 .filter(|_| fits && ranges.len() >= pool.threads())
@@ -418,7 +420,7 @@ pub(super) fn x_search_batches<'p>(
 #[allow(dead_code)] // This internal path is compared before the public CLI is enabled.
 pub(super) fn run_local_mode2_sum_stats(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
 ) -> Result<Vec<KappaResultHitList>> {
     run_local_search(
@@ -438,7 +440,7 @@ pub(super) fn run_local_mode2_sum_stats(
 #[allow(dead_code)]
 pub(super) fn run_local_mode0_no_sum_stats(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
 ) -> Result<Vec<KappaResultHitList>> {
     run_local_search(
@@ -458,7 +460,7 @@ pub(super) fn run_local_mode0_no_sum_stats(
 #[allow(dead_code)]
 pub(super) fn run_local_mode0_sum_stats(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
 ) -> Result<Vec<KappaResultHitList>> {
     run_local_search(
@@ -478,7 +480,7 @@ pub(super) fn run_local_mode0_sum_stats(
 #[allow(dead_code)]
 pub(super) fn run_local_mode2_no_sum_stats(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
 ) -> Result<Vec<KappaResultHitList>> {
     run_local_search(
@@ -498,7 +500,7 @@ pub(super) fn run_local_mode2_no_sum_stats(
 #[allow(dead_code)]
 pub(super) fn run_local_mode2_sum_stats_with_scoring(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
     scoring: LocalStageDScoring,
 ) -> Result<Vec<KappaResultHitList>> {
@@ -511,7 +513,7 @@ pub(super) fn run_local_mode2_sum_stats_with_scoring(
 #[allow(dead_code)]
 pub(super) fn run_local_mode0_no_sum_stats_with_scoring(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
     scoring: LocalStageDScoring,
 ) -> Result<Vec<KappaResultHitList>> {
@@ -523,7 +525,7 @@ pub(super) fn run_local_mode0_no_sum_stats_with_scoring(
 // else Blast_TracebackFromHSPList(...);
 fn run_local_search(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
     composition_mode2: bool,
     do_sum_stats: bool,
@@ -554,7 +556,7 @@ fn run_local_search(
 // Preliminary work uses one immutable subject; linking and stream writes follow OID order.
 fn run_local_search_with_pool(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
     composition_mode2: bool,
     do_sum_stats: bool,
@@ -576,7 +578,7 @@ fn run_local_search_with_pool(
         "TBLASTN hitlist size must be positive"
     );
     let code = GeneticCode::try_from_id(profile.genetic_code).map_err(anyhow::Error::msg)?;
-    let total_nt: usize = subjects.iter().map(Vec::len).sum();
+    let total_nt: usize = subjects.iter().map(|subject| subject.len()).sum();
     // NCBI reference: c++/src/algo/blast/api/local_db_adapter.cpp:133-135
     // ```c
     //             if ( !m_Subjects.empty() ) {
@@ -618,7 +620,7 @@ fn run_local_search_with_pool(
     const BLAST_SEQSRC_MINLENGTH: usize = 10;
     let min_subject_length = subjects
         .iter()
-        .map(Vec::len)
+        .map(|subject| subject.len())
         .min()
         .unwrap_or(i32::MAX as usize)
         .max(BLAST_SEQSRC_MINLENGTH)
@@ -687,7 +689,7 @@ fn run_local_search_with_pool(
         trace.parameters = Some(batch_setup.parameters.clone());
         trace.ungapped_karlin = batch_setup.ungapped_karlin.clone();
         trace.query_validity = batch_setup.query_validity.clone();
-        trace.subject_nt_lengths = subjects.iter().map(Vec::len).collect();
+        trace.subject_nt_lengths = subjects.iter().map(|subject| subject.len()).collect();
     }
     *setup = Some(batch_setup);
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
@@ -940,7 +942,7 @@ fn run_local_search_with_pool(
                      scratch: &mut GapAlignScratch,
                      workspace: &mut BlastCompositionWorkspace|
      -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
-        let subject = &subjects[oid];
+        let subject = subjects[oid];
         let incoming: Vec<_> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
         let mut redo = redo_preliminary_match(
             &incoming,
@@ -1335,7 +1337,7 @@ fn x_oid_chunk_bases(threads: usize, largest_file: u64) -> u64 {
 // as F of `x_oid_chunk_bases` for `-subject`; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): ceil(bases of all subjects / 4).
 #[cfg(feature = "parallel")]
-fn x_subject_file_size(subjects: &[Vec<u8>]) -> u64 {
+fn x_subject_file_size(subjects: &[&[u8]]) -> u64 {
     let bases = subjects.iter().fold(0u64, |sum, subject| {
         sum.saturating_add(u64::try_from(subject.len()).unwrap_or(u64::MAX))
     });
@@ -1363,8 +1365,8 @@ fn x_subject_file_size(subjects: &[Vec<u8>]) -> u64 {
 // `-subject` has one volume and the rest is scheduling only.
 /// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the end of the chunk of subjects that starts at `begin`.
 #[cfg(feature = "parallel")]
-fn x_oid_chunk_end(subjects: &[Vec<u8>], begin: usize, bases: u64) -> usize {
-    let length = |subject: &Vec<u8>| u64::try_from(subject.len()).unwrap_or(u64::MAX);
+fn x_oid_chunk_end(subjects: &[&[u8]], begin: usize, bases: u64) -> usize {
+    let length = |subject: &[u8]| u64::try_from(subject.len()).unwrap_or(u64::MAX);
     let Some(first) = subjects.get(begin) else {
         return begin;
     };
@@ -1400,7 +1402,7 @@ fn x_oid_chunk_end(subjects: &[Vec<u8>], begin: usize, bases: u64) -> usize {
 /// `count` of them.
 #[cfg(feature = "parallel")]
 fn x_entry_chunks(
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     begin: usize,
     count: usize,
     bases: u64,
@@ -1440,7 +1442,7 @@ fn x_chunks_per_entry(threads: usize) -> usize {
 // ended. Scheduling only.
 /// EXPERIMENT (LOSAT_X_TBNOIDNEXT): every chunk of the subjects, in OID order.
 #[cfg(feature = "parallel")]
-fn x_all_chunks(subjects: &[Vec<u8>], bases: u64) -> Vec<std::ops::Range<usize>> {
+fn x_all_chunks(subjects: &[&[u8]], bases: u64) -> Vec<std::ops::Range<usize>> {
     x_entry_chunks(subjects, 0, usize::MAX, bases)
 }
 
@@ -1588,7 +1590,7 @@ fn split_preliminary_hitlists(
     sizes: SplitSizes,
     batch_parameters: &LocalSubjectParameters,
     inputs: QuerySetInputs<'_>,
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     prelim_size: usize,
     pool: Option<&SearchPool<'_>>,
 ) -> Result<Vec<Option<KappaResultHitList>>> {
@@ -1877,7 +1879,7 @@ struct PreliminaryInputs<'a> {
 // The preliminary hit list of each query context of the query set.
 fn run_preliminary_subjects(
     inputs: &PreliminaryInputs<'_>,
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     pool: Option<&SearchPool<'_>>,
     mut observer: Option<&mut StageDBoundaryTrace>,
 ) -> Result<Vec<Option<KappaResultHitList>>> {
@@ -2091,7 +2093,7 @@ fn run_preliminary_subjects(
         _ => None,
     };
     #[cfg(feature = "parallel")]
-    let x_flow_search = |x_oid: usize| search(x_oid, &subjects[x_oid]);
+    let x_flow_search = |x_oid: usize| search(x_oid, subjects[x_oid]);
     // The OID-ordered reduction below, as one closure so that it can run inside the scope whose
     // other threads search the chunks of the flow.
     let mut reduce_subjects = || -> Result<()> {
@@ -2140,7 +2142,7 @@ fn run_preliminary_subjects(
                                     chunk
                                         .clone()
                                         .into_par_iter()
-                                        .map(|x_oid| search(x_oid, &subjects[x_oid]))
+                                        .map(|x_oid| search(x_oid, subjects[x_oid]))
                                         .collect()
                                 })
                                 .collect()
@@ -2329,7 +2331,7 @@ fn direct_local_evalues(
 // Blast_HSPResultsInsertHSPList(...); Blast_HSPResultsSortByEvalue(...);
 fn finish_local_mode0_no_sum_stats(
     queries: &[Vec<u8>],
-    subjects: &[Vec<u8>],
+    subjects: &[&[u8]],
     profile: LocalStageDProfile<'_>,
     preliminary_lists: Vec<(usize, usize, LinkedHspList)>,
     query_lengths: &[i32],
@@ -2359,7 +2361,7 @@ fn finish_local_mode0_no_sum_stats(
         })
         .collect();
     for (context, oid, preliminary) in preliminary_lists {
-        let subject = &subjects[oid];
+        let subject = subjects[oid];
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:
         // traceback uses the selected scoring matrix and gap costs.
@@ -2498,6 +2500,11 @@ fn finish_local_mode0_no_sum_stats(
 mod tests {
     use super::*;
 
+    // The search reads the subjects as slices of the records' residues (`args.rs`).
+    fn subject_slices(subjects: &[Vec<u8>]) -> Vec<&[u8]> {
+        subjects.iter().map(Vec::as_slice).collect()
+    }
+
     // NCBI c++/src/algo/blast/core/blast_stat.c:2777-2827;
     // c++/src/algo/blast/core/blast_parameters.c:208-223,335-347:
     // sbp->kbp = sbp->kbp_std; x_dropoff_init uses kbp[context]->Lambda.
@@ -2531,7 +2538,7 @@ mod tests {
         let mut trace = StageDBoundaryTrace::default();
         let results = run_local_search(
             &queries[33..34],
-            &subjects,
+            &subject_slices(&subjects),
             LocalStageDProfile {
                 seg: Some(&seg),
                 soft_masking: false,
@@ -2578,7 +2585,7 @@ mod tests {
         let mut trace = StageDBoundaryTrace::default();
         let results = run_local_search(
             &queries,
-            &subjects,
+            &subject_slices(&subjects),
             LocalStageDProfile {
                 seg: Some(&seg),
                 soft_masking: false,
@@ -2865,7 +2872,7 @@ mod tests {
         let mut boundary = StageDBoundaryTrace::default();
         let results = run_local_search(
             &queries,
-            &subjects,
+            &subject_slices(&subjects),
             LocalStageDProfile {
                 seg: Some(&seg),
                 soft_masking: false,
@@ -2950,7 +2957,7 @@ mod tests {
         let mut boundary = StageDBoundaryTrace::default();
         let results = run_local_search(
             &queries,
-            &subjects,
+            &subject_slices(&subjects),
             LocalStageDProfile {
                 seg: Some(&seg),
                 soft_masking: false,
@@ -3104,7 +3111,7 @@ mod tests {
         let seg = SegParams::default();
         let results = run_local_mode2_sum_stats(
             &queries,
-            &subjects,
+            &subject_slices(&subjects),
             LocalStageDProfile {
                 seg: Some(&seg),
                 soft_masking: false,
@@ -3194,7 +3201,7 @@ mod tests {
             let seg = SegParams::default();
             let results = run_local_mode0_no_sum_stats(
                 &query_sequences,
-                &subject_sequences,
+                &subject_slices(&subject_sequences),
                 LocalStageDProfile {
                     seg: Some(&seg),
                     soft_masking: false,
@@ -3388,7 +3395,7 @@ mod tests {
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
                     &query_sequences,
-                    &subject_sequences,
+                    &subject_slices(&subject_sequences),
                     profile,
                     mode == 2,
                     mode == 2,
@@ -3612,7 +3619,7 @@ mod tests {
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
                     &[query.clone()],
-                    &[subject.clone()],
+                    &[subject.as_slice()],
                     profile,
                     mode == 2,
                     mode == 2,
@@ -3806,7 +3813,7 @@ mod tests {
         let mut boundary = StageDBoundaryTrace::default();
         let results = run_local_search(
             &queries,
-            &[subject.clone()],
+            &[subject.as_slice()],
             LocalStageDProfile {
                 seg: None,
                 soft_masking: false,
@@ -3951,7 +3958,7 @@ mod tests {
         let mut boundary = StageDBoundaryTrace::default();
         let results = run_local_search(
             &query_sequences,
-            &subject_sequences,
+            &subject_slices(&subject_sequences),
             LocalStageDProfile {
                 seg: None,
                 soft_masking: false,
@@ -4130,7 +4137,7 @@ mod tests {
             let mut boundary = StageDBoundaryTrace::default();
             let result = run_local_search(
                 &query_sequences,
-                &subject_sequences,
+                &subject_slices(&subject_sequences),
                 profile,
                 mode == 2,
                 mode == 0,
@@ -4324,7 +4331,7 @@ mod tests {
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
                     &queries,
-                    &subjects,
+                    &subject_slices(&subjects),
                     profile,
                     mode == 2,
                     mode == 2,
@@ -4468,7 +4475,7 @@ mod tests {
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
                     &queries,
-                    &subjects,
+                    &subject_slices(&subjects),
                     LocalStageDProfile {
                         seg: Some(&seg),
                         soft_masking: false,
@@ -4776,7 +4783,7 @@ mod tests {
         let seg = SegParams::default();
         let results = run_local_mode2_sum_stats(
             &queries,
-            &subjects,
+            &subject_slices(&subjects),
             LocalStageDProfile {
                 seg: Some(&seg),
                 soft_masking: false,
@@ -4963,7 +4970,7 @@ mod tests {
             let seg = SegParams::default();
             let results = run_local_mode2_sum_stats(
                 &query_sequences,
-                &subject_sequences,
+                &subject_slices(&subject_sequences),
                 LocalStageDProfile {
                     seg: Some(&seg),
                     soft_masking: false,
@@ -5075,7 +5082,7 @@ mod tests {
         let subjects = read_fasta("evalue_subjects.fna");
         let results = run_local_mode2_sum_stats(
             &queries,
-            &subjects,
+            &subject_slices(&subjects),
             LocalStageDProfile {
                 seg: None,
                 soft_masking: false,
@@ -5169,7 +5176,7 @@ mod tests {
         let subjects = vec![read("containment_subject.fna")];
         let results = run_local_mode2_sum_stats(
             &queries,
-            &subjects,
+            &subject_slices(&subjects),
             LocalStageDProfile {
                 seg: None,
                 soft_masking: false,
@@ -5280,7 +5287,7 @@ mod tests {
         let subjects = read_fasta("heap_subjects.fna");
         let results = run_local_mode2_sum_stats(
             &queries,
-            &subjects,
+            &subject_slices(&subjects),
             LocalStageDProfile {
                 seg: None,
                 soft_masking: false,
@@ -5364,7 +5371,11 @@ mod tests {
             (&[1_000; 240][..], 60_000),
         ] {
             let subjects: Vec<Vec<u8>> = lengths.iter().map(|&n| vec![b'A'; n]).collect();
-            assert_eq!(x_subject_file_size(&subjects), size, "{lengths:?}");
+            assert_eq!(
+                x_subject_file_size(&subject_slices(&subjects)),
+                size,
+                "{lengths:?}"
+            );
         }
     }
 
@@ -5409,7 +5420,7 @@ mod tests {
             (&[10][..], 1, 20, 1),
         ] {
             assert_eq!(
-                x_oid_chunk_end(&set(lengths), begin, bases),
+                x_oid_chunk_end(&subject_slices(&set(lengths)), begin, bases),
                 end,
                 "{lengths:?} from {begin}, {bases} bases"
             );
@@ -5417,10 +5428,16 @@ mod tests {
         // An entry takes the given number of chunks from `begin`, fewer at the end of the
         // subjects, and at least one chunk; four per thread.
         let subjects = set(&[50, 5, 5, 5, 5, 50, 5]);
-        assert_eq!(x_entry_chunks(&subjects, 0, 3, 12), [0..1, 1..3, 3..5]);
-        assert_eq!(x_entry_chunks(&subjects, 5, 3, 12), [5..6, 6..7]);
-        assert_eq!(x_entry_chunks(&subjects, 0, 0, 12), [0..1]);
-        assert!(x_entry_chunks(&subjects, 7, 3, 12).is_empty());
+        assert_eq!(
+            x_entry_chunks(&subject_slices(&subjects), 0, 3, 12),
+            [0..1, 1..3, 3..5]
+        );
+        assert_eq!(
+            x_entry_chunks(&subject_slices(&subjects), 5, 3, 12),
+            [5..6, 6..7]
+        );
+        assert_eq!(x_entry_chunks(&subject_slices(&subjects), 0, 0, 12), [0..1]);
+        assert!(x_entry_chunks(&subject_slices(&subjects), 7, 3, 12).is_empty());
         assert_eq!(x_chunks_per_entry(8), 32);
         assert_eq!(x_chunks_per_entry(1), 4);
         assert_eq!(x_chunks_per_entry(0), 1);
@@ -5428,9 +5445,9 @@ mod tests {
         // 240 subjects of 1,000 bases at 4 threads (tests/tblastn_oid_chunk.rs): 3,751 bases, three
         // subjects per chunk, sixteen chunks and 48 subjects per entry.
         let subjects = set(&[1_000; 240]);
-        let bases = x_oid_chunk_bases(4, x_subject_file_size(&subjects));
+        let bases = x_oid_chunk_bases(4, x_subject_file_size(&subject_slices(&subjects)));
         assert_eq!(bases, 3_751);
-        let entry = x_entry_chunks(&subjects, 0, x_chunks_per_entry(4), bases);
+        let entry = x_entry_chunks(&subject_slices(&subjects), 0, x_chunks_per_entry(4), bases);
         assert_eq!(entry.len(), 16);
         assert_eq!(entry[..2], [0..3, 3..6]);
         assert_eq!(entry[15], 45..48);
@@ -5479,7 +5496,7 @@ mod tests {
         ] {
             let searched = x_search_batches(
                 &queries,
-                &subjects,
+                &subject_slices(&subjects),
                 ranges.clone(),
                 profile,
                 true,
@@ -5496,7 +5513,7 @@ mod tests {
                 let (reference, reference_parameters, _, reference_validity) =
                     run_local_for_report_threads(
                         &queries[range.clone()],
-                        &subjects,
+                        &subject_slices(&subjects),
                         profile(range.clone()),
                         true,
                         true,

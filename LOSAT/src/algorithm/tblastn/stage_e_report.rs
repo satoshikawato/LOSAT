@@ -517,10 +517,7 @@ mod tests {
         let queries = read(query_path, "Query_", true);
         let subjects = read(full_subject_path, "Subject_", false);
         let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
-        let subject_seqs: Vec<_> = subjects
-            .iter()
-            .map(|record| record.seq().to_vec())
-            .collect();
+        let subject_seqs: Vec<&[u8]> = subjects.iter().map(|record| record.seq()).collect();
         let seg = SegParams::default();
         for mode in [0, 2] {
             let (mut results, parameters, ungapped_karlin, query_validity) = run_local_for_report(

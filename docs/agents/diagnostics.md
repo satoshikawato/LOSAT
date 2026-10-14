@@ -581,6 +581,23 @@ Scheduling (each value computed by one thread with the original function; order 
   chunk, the hit list and the whole diagonal hash compared with the original code; one
   `[X_PAIRPARSHADOW]` summary line on stderr at the end). With `LOSAT_TIMING` a
   `[TIMING] x_pairpar_seed` line gives the strips, seeds and the owner's fold, scan and wait time.
+- `LOSAT_X_PAIRPARDISC=1` (not in the strict set: off unless set to any value, whatever
+  `LOSAT_X_DEFAULT` and `LOSAT_X_PAIRPAR` say) blastn `-task dc-megablast`, one query-subject pair
+  on a pool of 2+ threads: the two-hit seed stage of a subject chunk with a discontiguous megablast
+  table (one or two templates) and the diagonal hash (query block over 8000 letters, `scan_range`
+  0, unmasked subject, one subject, no debug or trace). The pool threads scan strips of the subject
+  with the discontiguous scan kernel (both templates' chains in NCBI's order, the query context of
+  each pair), and the owner thread folds the pairs in scan order through a copy of the two-hit
+  diagonal-hash code (window test, `s_TypeOfWord`, ungapped extension, every insert;
+  `blastn/blast_engine/x_pair_seed_disc.rs`). The helpers scan at most two strips per thread
+  ahead of the owner and reuse the owner's consumed buffers. The owner's fold is the slower side
+  for dc-megablast (most pairs reach the diagonal hash), so the stage stops gaining at about 4
+  threads. Anything else (contiguous tables, which `LOSAT_X_PAIRPAR` takes in one-hit mode) runs
+  the original code. Shadow: `LOSAT_X_PAIRPARDISCSHADOW=1` (per chunk the hit list and the whole
+  diagonal hash compared with the original code; one `[X_PAIRPARDISCSHADOW]` summary line on
+  stderr at the end, with the number of chunks compared). With `LOSAT_TIMING` a
+  `[TIMING] x_pairpardisc_seed` line gives the strips, seeds and the owner's fold, scan and wait
+  time. Test: `LOSAT/tests/blastn_pairpar_disc.rs`.
 - `LOSAT_X_TBNPAR=1` tblastn: preliminary stage per (frame, chunk) and redo per match in
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
 - `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE` and its kept translations, so four or more query
@@ -647,6 +664,33 @@ Scheduling (each value computed by one thread with the original function; order 
   flow. Not in the set (off unless set to any value). With `LOSAT_WASI_THREADS_DEBUG=1` each subject
   whose units ran on the pool prints a `prelim_units` stage line with `parallel_selected=true`;
   `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
+- `LOSAT_X_TBNSTATE=1` tblastn, the unit path (`TBNPAR`): the scan state of a subject's (frame,
+  chunk) units (the diagonal table of the two-hit word finder, the offset pairs, the initial hits,
+  the gapped alignment memory) is kept by the thread from one subject to the next, as NCBI's search
+  thread keeps its word-finder and gapped alignment structures for every subject of its loop
+  (`blast_engine.c:1002-1003,1412-1413`), and each unit ends with NCBI's step of the diagonal offset
+  (`Blast_ExtendWordExit`, `blast_extend.c:166-171`: the offset moves on by the unit's length plus
+  the window; the table is cleared only when the offset reaches INT4_MAX / 4) instead of the next
+  unit clearing the whole table. After the step every entry lies more than a window behind any hit
+  of the next unit, so its first hit on a diagonal only records it, as on a cleared table: the same
+  initial hits by construction. Without the switch each subject makes its own state and each unit
+  clears a table of next_pow2(query residues + window) entries of 8 bytes (1 MB for 84,000 query
+  residues); on the human transcriptome (465,769 subjects, 118 fly proteins, 8 threads) glibc's
+  per-thread heaps were created and deleted about 250,000 times for these states (munmap 461,484,
+  mmap 249,858 against 36 and 71 before #161). On the workstation (8 threads on 8 cores of one NUMA
+  node, other work on the machine, alternating rounds against a placebo variable, the same reports):
+  that search 161.9 -> 133.2 s (CPU 1,261 -> 1,031 s, minor faults 3.8-22 M -> 0.87 M, munmap
+  415,942 -> 55), the zebrafish transcriptome 15.2 -> 12.0 s, the 16S rRNA genes (28,036 subjects,
+  55 proteins) 1.18 -> 1.01 s, and at one thread 8.15 -> 6.82 s. The units of a long subject that
+  run on the pool (`TBNOIDUNITS`, the single subject of a search) take the offset step too, on a
+  state per task.
+  The thread that runs the search keeps one set (the table and the largest offset-pair and hit
+  buffers) until it ends or its next tblastn search takes it over. Not in the set (off unless set
+  to any value); it acts at every thread count. With `LOSAT_X_DEFAULT=0` the reference loop runs
+  instead of the unit path and the variable changes nothing. `LOSAT_X_TBNPARSHADOW=1` compares the
+  unit path of every subject with the serial reference. Tests: `tblastn/search_init.rs` (the table
+  kept across units, across the clear and taken over by another query set), the last test of
+  `LOSAT/tests/tblastn_oid_chunk.rs`.
 - `LOSAT_X_TBNXLATE=1` tblastn: the six translated frames of a subject are read from tables, as
   NCBI makes them from the compressed subject (`blast_util.c:1071-1090`: one table of 64 residues
   per strand, `s_BlastGetTranslationTable`, and one table read per codon,
@@ -663,6 +707,27 @@ Scheduling (each value computed by one thread with the original function; order 
   `[X_SHADOW] TBNXLATE` line on stderr at the end gives the plans and residues compared, or says
   that nothing was compared. With `LOSAT_X_STATS=1` a `[X_STATS] TBNXLATE table_plans=` line
   counts the plans made from the tables; `LOSAT/tests/tblastn_subject_translate.rs` reads both.
+- `LOSAT_X_TBNSTORE=1` tblastn `-subject` without `-subject_loc`: each subject record's letters are
+  packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
+  database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of
+  letters other than `ACGT` as ncbi4na codes, the lower-case intervals), so the letters of the
+  whole set are never held; the records keep their deflines. The preliminary stage of a subject
+  reads its packed bases as letters (`ACGT`, each ambiguous base as resolved): the bases it would
+  make from the letters, which resolve to themselves (`x_reference_subject` reads letters that are
+  all `ACGT` in place); with `-lcase_masking` it reads the letters. A subject's letters are made
+  again into a buffer when it is redone (composition mode 2), traced back (mode 0) or reported
+  (outfmt 0), exactly as the reader gave them (the comparison tests in `packed_subject.rs`). The
+  packed bases are those NCBI's subject set-up makes (`encode_subject_ncbi2na_packed`,
+  `s_Ncbi4naToNcbi2na` in `blast_objmgr_tools.cpp:427-475`; one pass over the letters). Memory:
+  about a quarter of a byte per base held instead of one; per thread the subject in hand as
+  without the switch (a thread keeps a buffer of at most 8 MiB between subjects). A subject
+  range keeps the letters (the records are cut before
+  the search), and so does a set with a byte that has no ncbi4na code (only an API caller can
+  make one); the library entry `run_local` reads the caller's records. Not in the set (off unless
+  set to any value). With `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE subjects= stored_bytes=
+  letters_made= resolved_made=` line gives the subjects held packed, the bytes of their stores and
+  the times their letters and their resolved bases were made; `LOSAT/tests/tblastn_subject_store.rs`
+  reads it.
 - `LOSAT_X_BPGAP=1` blastp preliminary stage: the restricted gapped alignment (NCBI
   `s_RestrictedGappedAlign`, `blast_gapalign.c:991-1300`, which `s_BlastProtGappedAlignment` runs
   for a query whose best ungapped score is below 0.68 of the cutoff) keeps the two score rows and

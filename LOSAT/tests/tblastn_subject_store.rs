@@ -89,6 +89,7 @@ fn inputs() -> &'static (PathBuf, PathBuf, PathBuf) {
         runs[5_000..5_007].fill(b'n');
         lowercase(&mut runs, 900, 1_200);
         let mut subjects = String::new();
+        let mut long = String::new();
         for (title, letters) in [
             ("plain", plain.as_slice()),
             ("lower", lower.as_slice()),
@@ -99,10 +100,14 @@ fn inputs() -> &'static (PathBuf, PathBuf, PathBuf) {
             ("one_word", b"ATGNCGTRAAC".as_slice()),
             ("few_codons", b"ATGAAACGTYTGGCNnnAAATAG".as_slice()),
         ] {
-            subjects.push_str(&format!(
+            let record = format!(
                 ">{title}\n{}\n",
                 String::from_utf8(letters.to_vec()).expect("ASCII letters")
-            ));
+            );
+            if letters.len() == PIECE {
+                long.push_str(&record);
+            }
+            subjects.push_str(&record);
         }
         let files = (
             dir.join("ten.faa"),
@@ -112,8 +117,14 @@ fn inputs() -> &'static (PathBuf, PathBuf, PathBuf) {
         std::fs::write(&files.0, ten).expect("query file");
         std::fs::write(&files.1, all).expect("query file");
         std::fs::write(&files.2, subjects).expect("subject file");
+        std::fs::write(long_subjects(&files.2), long).expect("subject file");
         files
     })
+}
+
+/// The subject file of the four pieces alone (a subject range must lie in every subject).
+fn long_subjects(subjects: &Path) -> PathBuf {
+    subjects.with_file_name("long.fna")
 }
 
 /// One TBLASTN run (report on standard output) with `options` and with `variables` and
@@ -123,6 +134,7 @@ fn inputs() -> &'static (PathBuf, PathBuf, PathBuf) {
 /// error without the `[X_STATS]` lines, and the `[X_STATS] TBNSTORE` line.
 fn tblastn(
     query: &Path,
+    subjects: &Path,
     options: &[&str],
     variables: &[(&str, &str)],
 ) -> (Vec<u8>, String, String) {
@@ -142,7 +154,7 @@ fn tblastn(
         .arg("-query")
         .arg(query)
         .arg("-subject")
-        .arg(&inputs().2)
+        .arg(subjects)
         .args(options)
         .env("LOSAT_X_STATS", "1")
         .envs(variables.iter().copied())
@@ -202,7 +214,7 @@ const STORE: (&str, &str) = ("LOSAT_X_TBNSTORE", "1");
 // packed and their letters are made again (at least once per searched subject); without it none.
 #[test]
 fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
-    let (ten, all, _) = inputs();
+    let (ten, all, subjects) = inputs();
     let searches: [(&Path, &[&str]); 8] = [
         (ten, &["-outfmt", "6", "-num_threads", "1"]),
         (ten, &["-outfmt", "6", "-num_threads", "3"]),
@@ -254,7 +266,7 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
         ),
     ];
     for (query, options) in searches {
-        let (expected, messages, stats) = tblastn(query, options, &[]);
+        let (expected, messages, stats) = tblastn(query, subjects, options, &[]);
         assert_eq!(counter(&stats, "subjects"), 0, "{options:?}");
         assert_eq!(counter(&stats, "letters_made"), 0, "{options:?}");
         assert!(
@@ -269,7 +281,7 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
             }
         }
 
-        let (report, store_messages, stats) = tblastn(query, options, &[STORE]);
+        let (report, store_messages, stats) = tblastn(query, subjects, options, &[STORE]);
         assert!(
             report == expected,
             "{options:?}: the packed subjects change the report"
@@ -287,19 +299,20 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
 // held packed and the report is the same.
 #[test]
 fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_subjects() {
-    let (ten, _, _) = inputs();
+    let (ten, _, subjects) = inputs();
+    let long = long_subjects(subjects);
     let ranged = ["-outfmt", "6", "-subject_loc", "100-5000"];
-    let (expected, messages, _) = tblastn(ten, &ranged, &[]);
-    let (report, store_messages, stats) = tblastn(ten, &ranged, &[STORE]);
+    let (expected, messages, _) = tblastn(ten, &long, &ranged, &[]);
+    let (report, store_messages, stats) = tblastn(ten, &long, &ranged, &[STORE]);
     assert!(report == expected);
     assert_eq!(store_messages, messages);
     assert_eq!(counter(&stats, "subjects"), 0);
     assert_eq!(counter(&stats, "letters_made"), 0);
 
     let options = ["-outfmt", "6", "-num_threads", "1"];
-    let (expected, messages, _) = tblastn(ten, &options, &[]);
+    let (expected, messages, _) = tblastn(ten, subjects, &options, &[]);
     let previous = ("LOSAT_X_DEFAULT", "0");
-    let (report, store_messages, stats) = tblastn(ten, &options, &[previous, STORE]);
+    let (report, store_messages, stats) = tblastn(ten, subjects, &options, &[previous, STORE]);
     assert!(report == expected);
     assert_eq!(store_messages, messages);
     assert_eq!(counter(&stats, "subjects"), 8);

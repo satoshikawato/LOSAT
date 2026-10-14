@@ -40,6 +40,17 @@ SAKAI_GATE_A_STEPS = [11, 52, 53]
 # The aggregate fixture's frozen bytes of the case and a known different output.
 SAKAI_FIXTURE_FROZEN = b"matrix:blastn:Sakai.MG1655.megablast\n"
 SAKAI_FIXTURE_ALLOWED = b"allowed:blastn:Sakai.MG1655.megablast\n"
+SAKAI_FROZEN_PR5 = "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262"
+SAKAI_APPROVED = "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45"
+# The allowlist entry that PD-NCBI-PLATFORM-VARIANCE 1.1 to 1.2 carried; 1.3 moved
+# its output into the v0.1.1 manifest and emptied the list.
+HISTORICAL_SAKAI_ENTRY = {
+    "program": SAKAI[0],
+    "case_id": SAKAI[1],
+    "frozen_sha256": SAKAI_FROZEN_PR5,
+    "allowed_actual_sha256": SAKAI_APPROVED,
+    "frozen_gate_a_steps": SAKAI_GATE_A_STEPS,
+}
 
 
 class PlatformCertificationTests(unittest.TestCase):
@@ -303,7 +314,7 @@ class PlatformCertificationTests(unittest.TestCase):
                     "gate_a_losat_canonical": {
                         "total": 43,
                         "passed": 43,
-                        "all_exact_pr5_raw_bytes": not allowed_cases,
+                        "all_exact_canonical_raw_bytes": not allowed_cases,
                         "allowed_known_mismatches": allowed_cases,
                     },
                     "gate_b_platform_native_ncbi_reference": {
@@ -385,7 +396,7 @@ class PlatformCertificationTests(unittest.TestCase):
                             if expected["kind"] == "matrix"
                             else "LOSAT_REPEATABILITY"
                         ),
-                        "classification": "CANONICAL_PR5_RAW_BYTES",
+                        "classification": "CANONICAL_RAW_BYTES",
                         "canonical_sha256": expected["expected_losat_sha256"],
                     }
                     if (
@@ -689,11 +700,11 @@ class PlatformCertificationTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(raw).hexdigest(),
-            "7e65cfb4de0dc575c47d059f1e29ddc9999fc50887ac769fb8f299a9ec97760c",
+            "9bfac81fff33cd770729540494e9c8df1e76b798374d120c26dd1945e5bd1611",
         )
         self.assertEqual(
             hashlib.sha256(raw.replace(b"\n", b"\r\n")).hexdigest(),
-            "199e123e7980b01a68c6ad9605b7c7dec7310e06e7d339b476def52b52c06e4e",
+            "d3cec365ca3ee9ef5aceeda3bedc3341c6e5b92ed9a2210712f1f4945349fd56",
         )
         with mock.patch.object(
             platform_cert,
@@ -706,7 +717,100 @@ class PlatformCertificationTests(unittest.TestCase):
             self.candidate_sha,
             platform_cert.CANONICAL_MANIFEST_REPO_RELATIVE,
         )
+        read_blob.assert_any_call(
+            self.repo_root,
+            self.candidate_sha,
+            platform_cert.CANONICAL_V010_REPO_RELATIVE,
+        )
         self.assertEqual(catalog.canonical_rows, self.catalog.canonical_rows)
+
+    def test_canonical_v011_is_v010_with_only_the_approved_sakai_output(self) -> None:
+        v010 = platform_cert.read_git_blob_bytes(
+            self.repo_root,
+            self.candidate_sha,
+            platform_cert.CANONICAL_V010_REPO_RELATIVE,
+        )
+        self.assertEqual(
+            hashlib.sha256(v010).hexdigest(), platform_cert.CANONICAL_V010_SHA256
+        )
+        _, v010_lines = platform_cert._canonical_lines(v010)
+        v010_rows = list(platform_cert.csv.DictReader(v010_lines, delimiter="\t"))
+        changed = [
+            (old, new)
+            for old, new in zip(v010_rows, self.catalog.canonical_rows)
+            if old != new
+        ]
+        self.assertEqual(len(v010_rows), 43)
+        self.assertEqual(len(self.catalog.canonical_rows), 43)
+        self.assertEqual(len(changed), 1)
+        old, new = changed[0]
+        self.assertEqual((old["program"], old["case_id"]), SAKAI)
+        self.assertEqual(old["losat_sha256"], SAKAI_FROZEN_PR5)
+        self.assertEqual(new, {**old, "losat_sha256": SAKAI_APPROVED})
+        # The contract and class stay those of the authority's representative.
+        sakai = self.catalog.canonical[SAKAI]
+        self.assertEqual(sakai["contract"], "SOURCE_UNDETERMINED_ACCEPTED")
+        self.assertEqual(sakai["classification"], "SOURCE_UNDETERMINED_ACCEPTED")
+        # The approved output is the retained Linux NCBI BLAST+ 2.17.0 output.
+        retained = {
+            entry["retained_linux_raw_sha256"]
+            for entry in self.authority.document["diagnostic_metadata"]
+            if (entry["program"], entry["case_id"]) == SAKAI
+        }
+        self.assertEqual(retained, {SAKAI_APPROVED})
+
+    def test_canonical_manifest_must_derive_from_the_v010_file(self) -> None:
+        real = platform_cert.read_git_blob_bytes
+        canonical = platform_cert.CANONICAL_MANIFEST_REPO_RELATIVE
+        v010 = platform_cert.CANONICAL_V010_REPO_RELATIVE
+        v011_raw = real(self.repo_root, self.candidate_sha, canonical)
+        v010_raw = real(self.repo_root, self.candidate_sha, v010)
+        other_row = b"PesePMNV.MjPMNV.task_blastn\tEXACT_TEXT\tEXACT_TEXT\tfcd9236c"
+        self.assertEqual(v011_raw.count(other_row), 1)
+        cases = {
+            "v0.1.0 canonical manifest changed": {
+                v010: v010_raw.replace(b"PR 5", b"PR5", 1)
+            },
+            "canonical manifest is not v0.1.0 with the approved outputs": {
+                canonical: v011_raw.replace(other_row, other_row[:-1] + b"d"),
+            },
+            "canonical manifest provenance comments changed": {
+                canonical: v011_raw.replace(b"# DERIVED_FROM_SHA256", b"# DERIVED_SHA256"),
+            },
+        }
+        for message, replaced in cases.items():
+            def fake(root, sha, relative, replaced=replaced):
+                key = platform_cert.PurePosixPath(str(relative))
+                if key in replaced:
+                    return replaced[key]
+                return real(root, sha, relative)
+
+            with self.subTest(message=message), mock.patch.object(
+                platform_cert, "read_git_blob_bytes", side_effect=fake
+            ):
+                with self.assertRaisesRegex(platform_cert.CertificationFailure, message):
+                    platform_cert.load_catalog(self.repo_root, self.candidate_sha)
+        # Behind the v0.1.0 file hash: the approved output must replace exactly
+        # the frozen PR 5 hash of a case that v0.1.0 lists.
+        sakai_row = next(
+            line
+            for line in v010_raw.splitlines(keepends=True)
+            if line.startswith(b"blastn\tSakai.MG1655.megablast\t")
+        )
+        for message, altered in (
+            (
+                "approved output replaces another hash",
+                v010_raw.replace(SAKAI_FROZEN_PR5.encode(), b"0" * 64),
+            ),
+            ("approved output case missing", v010_raw.replace(sakai_row, b"")),
+        ):
+            with self.subTest(message=message), mock.patch.object(
+                platform_cert,
+                "CANONICAL_V010_SHA256",
+                hashlib.sha256(altered).hexdigest(),
+            ):
+                with self.assertRaisesRegex(platform_cert.CertificationFailure, message):
+                    platform_cert.derive_canonical_v011_rows(altered)
 
     def test_strict_authority_rejects_unknown_fields_versions_and_platforms(
         self,
@@ -1699,7 +1803,7 @@ class PlatformCertificationTests(unittest.TestCase):
             self.assertEqual(record["output_sha256"], raw_hash)
             self.assertEqual(
                 record["verification"]["classification"],
-                "CANONICAL_PR5_RAW_BYTES",
+                "CANONICAL_RAW_BYTES",
             )
 
     def test_gate_b_fingerprint_cannot_compensate_for_gate_a_failure(self) -> None:
@@ -2160,7 +2264,7 @@ class PlatformCertificationTests(unittest.TestCase):
             "output_sha256": output_hash,
             "verification": {
                 "gate": "LOSAT_CANONICAL",
-                "classification": "CANONICAL_PR5_RAW_BYTES",
+                "classification": "CANONICAL_RAW_BYTES",
                 "canonical_sha256": output_hash,
             },
         }
@@ -2436,7 +2540,7 @@ class PlatformCertificationTests(unittest.TestCase):
             expected_losat_sha256=hashlib.sha256(expected).hexdigest(),
         )
 
-    def test_repository_allowlist_binds_to_gate_a_steps_11_52_53(self) -> None:
+    def test_repository_allowlist_is_empty_and_sakai_is_exact_in_v011(self) -> None:
         allowlist = platform_cert.load_frozen_allowlist(
             self.repo_root, self.candidate_sha
         )
@@ -2446,54 +2550,58 @@ class PlatformCertificationTests(unittest.TestCase):
             platform_cert.FROZEN_ALLOWLIST_REPO_RELATIVE,
         )
         self.assertEqual(allowlist.file_sha256, hashlib.sha256(raw).hexdigest())
+        self.assertEqual(allowlist.entries, {})
         cases = platform_cert.bind_frozen_allowlist(allowlist, self.plan_rows())
-        self.assertEqual(
-            cases,
-            [
-                {
-                    "program": "blastn",
-                    "case_id": "Sakai.MG1655.megablast",
-                    "frozen_sha256": (
-                        "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262"
-                    ),
-                    "allowed_actual_sha256": (
-                        "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45"
-                    ),
-                    "frozen_gate_a_steps": [11, 52, 53],
-                }
-            ],
-        )
-        topology = platform_cert.expected_completion_topology(self.catalog)
-        self.assertEqual(
-            [
-                step_id
-                for step_id, step in topology.items()
-                if step["execution_index"] in SAKAI_GATE_A_STEPS
-            ],
-            [
-                "matrix:blastn:Sakai.MG1655.megablast",
-                "repeatability:blastn:Sakai.MG1655.megablast:run2",
-                "repeatability:blastn:Sakai.MG1655.megablast:run3",
-            ],
-        )
-        self.assertEqual(
-            platform_cert.allowed_known_mismatch_lines(cases),
-            [
-                "allowed known mismatch: blastn/Sakai.MG1655.megablast "
-                "(Gate A steps 11, 52, 53)"
-            ],
-        )
+        self.assertEqual(cases, [])
+        self.assertEqual(platform_cert.allowed_known_mismatch_lines(cases), [])
         self.assertEqual(
             platform_cert.frozen_allowlist_identity("a" * 40, allowlist, cases),
             {
                 "git_object": f"{'a' * 40}:LOSAT/tests/frozen_mismatch_allowlist.json",
                 "sha256": allowlist.file_sha256,
-                "gate_a_cases": cases,
+                "gate_a_cases": [],
             },
         )
+        topology = platform_cert.expected_completion_topology(self.catalog)
         self.assertEqual(
-            platform_cert.bind_frozen_allowlist(None, self.plan_rows()), []
+            [
+                (step_id, step["expected_losat_sha256"])
+                for step_id, step in topology.items()
+                if step["execution_index"] in SAKAI_GATE_A_STEPS
+            ],
+            [
+                ("matrix:blastn:Sakai.MG1655.megablast", SAKAI_APPROVED),
+                ("repeatability:blastn:Sakai.MG1655.megablast:run2", SAKAI_APPROVED),
+                ("repeatability:blastn:Sakai.MG1655.megablast:run3", SAKAI_APPROVED),
+            ],
         )
+        self.assertEqual(
+            platform_cert.gate_a_verification(
+                "matrix", *SAKAI, SAKAI_APPROVED, SAKAI_APPROVED, allowlist
+            )["classification"],
+            "CANONICAL_RAW_BYTES",
+        )
+        # The old frozen PR 5 bytes now fail Gate A, and the entry that allowed
+        # the approved output against them no longer binds to the plan.
+        with self.assertRaisesRegex(
+            platform_cert.CertificationFailure, "CROSS_PLATFORM_LOSAT_DIVERGENCE"
+        ):
+            platform_cert.gate_a_verification(
+                "matrix", *SAKAI, SAKAI_APPROVED, SAKAI_FROZEN_PR5, allowlist
+            )
+        historical = platform_cert.Allowlist(
+            Path("frozen_mismatch_allowlist.json"),
+            raw=json.dumps(
+                {
+                    "schema": "losat-frozen-mismatch-allowlist-v1",
+                    "entries": [HISTORICAL_SAKAI_ENTRY],
+                }
+            ).encode(),
+        )
+        with self.assertRaisesRegex(
+            platform_cert.CertificationFailure, "frozen hash outside the plan"
+        ):
+            platform_cert.bind_frozen_allowlist(historical, self.plan_rows())
 
     def test_frozen_allowlist_is_read_from_the_candidate_git_blob(self) -> None:
         relative = platform_cert.FROZEN_ALLOWLIST_REPO_RELATIVE.as_posix()
@@ -2506,21 +2614,27 @@ class PlatformCertificationTests(unittest.TestCase):
             (root / relative).write_bytes(raw.replace(b"\n", b"\r\n") + b"edited")
             allowlist = platform_cert.load_frozen_allowlist(root, candidate_sha)
             self.assertEqual(allowlist.file_sha256, hashlib.sha256(raw).hexdigest())
+            self.assertEqual(allowlist.entries, {})
+        entry = dict(HISTORICAL_SAKAI_ENTRY)
+        document = {**json.loads(raw), "entries": [entry]}
+        listed = json.dumps(document).encode()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            candidate_sha = self.commit_files(root, {relative: listed})
+            allowlist = platform_cert.load_frozen_allowlist(root, candidate_sha)
             self.assertEqual(set(allowlist.entries), {SAKAI})
-        document = json.loads(raw)
         rejected = {
             "duplicate case": json.dumps(
-                {**document, "entries": document["entries"] * 2}
+                {**document, "entries": [entry, entry]}
             ).encode(),
-            "duplicate key": raw.replace(
-                b'"schema":', b'"schema": "other",\n  "schema":', 1
+            "duplicate key": listed.replace(
+                b'"schema":', b'"schema": "other", "schema":', 1
             ),
             "schema": json.dumps({**document, "schema": "other"}).encode(),
             "no entries": json.dumps({"schema": document["schema"]}).encode(),
             "not an object": b"[]",
             "not JSON": b"{",
         }
-        entry = document["entries"][0]
         other = {**entry, "case_id": "another_case"}
         other.pop("frozen_gate_a_steps")
         for label, entries in (
@@ -2673,7 +2787,7 @@ class PlatformCertificationTests(unittest.TestCase):
             ),
             {
                 "gate": "LOSAT_CANONICAL",
-                "classification": "CANONICAL_PR5_RAW_BYTES",
+                "classification": "CANONICAL_RAW_BYTES",
                 "canonical_sha256": frozen,
             },
         )
@@ -2849,7 +2963,7 @@ class PlatformCertificationTests(unittest.TestCase):
             stale["output_sha256"] = hashlib.sha256(SAKAI_FIXTURE_FROZEN).hexdigest()
             stale["verification"] = {
                 "gate": "LOSAT_CANONICAL",
-                "classification": "CANONICAL_PR5_RAW_BYTES",
+                "classification": "CANONICAL_RAW_BYTES",
                 "canonical_sha256": stale["output_sha256"],
             }
             completion.write_text(json.dumps(stale), encoding="utf-8")
@@ -2906,7 +3020,7 @@ class PlatformCertificationTests(unittest.TestCase):
                         "classification": (
                             "ALLOWED_KNOWN_MISMATCH"
                             if allowed
-                            else "CANONICAL_PR5_RAW_BYTES"
+                            else "CANONICAL_RAW_BYTES"
                         )
                     }
                 completed[step.step_id] = {
@@ -2940,7 +3054,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 {
                     "total": 43,
                     "passed": 43,
-                    "all_exact_pr5_raw_bytes": False,
+                    "all_exact_canonical_raw_bytes": False,
                     "allowed_known_mismatches": allowed_cases,
                 },
             )
@@ -2976,7 +3090,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 {
                     "total": 43,
                     "passed": 43,
-                    "all_exact_pr5_raw_bytes": True,
+                    "all_exact_canonical_raw_bytes": True,
                     "allowed_known_mismatches": [],
                 },
             )
@@ -3070,7 +3184,7 @@ class PlatformCertificationTests(unittest.TestCase):
             value["output_sha256"] = frozen_sha256
             value["verification"] = {
                 "gate": value["verification"]["gate"],
-                "classification": "CANONICAL_PR5_RAW_BYTES",
+                "classification": "CANONICAL_RAW_BYTES",
                 "canonical_sha256": frozen_sha256,
             }
             platform_cert.atomic_write_json(completion, value)
@@ -3098,7 +3212,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 lambda artifact: update_json(
                     artifact / "summary.json",
                     lambda value: value["gate_a_losat_canonical"].update(
-                        all_exact_pr5_raw_bytes=True, allowed_known_mismatches=[]
+                        all_exact_canonical_raw_bytes=True, allowed_known_mismatches=[]
                     ),
                 ),
             ),

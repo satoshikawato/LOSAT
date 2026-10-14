@@ -44,12 +44,31 @@ NATIVE_AUTHORITY_REPO_RELATIVE = PurePosixPath(
     "LOSAT/tests/ncbi_platform_variance_v011.json"
 )
 CANONICAL_MANIFEST_REPO_RELATIVE = PurePosixPath(
+    "LOSAT/tests/platform_native_v011_canonical.tsv"
+)
+# Gate A manifest v0.1.1 is v0.1.0's 43 rows with the approved outputs below in
+# place of their frozen PR 5 hashes (PD-NCBI-PLATFORM-VARIANCE 1.3). The v0.1.0
+# file is never edited; the driver rebuilds v0.1.1 from it on every run.
+CANONICAL_V010_REPO_RELATIVE = PurePosixPath(
     "LOSAT/tests/platform_native_v010_canonical.tsv"
 )
+CANONICAL_V010_SHA256 = (
+    "7e65cfb4de0dc575c47d059f1e29ddc9999fc50887ac769fb8f299a9ec97760c"
+)
+APPROVED_CANONICAL_RECORD = (
+    "docs/evidence/losatx_stage_g_authority_v3/run-20260928T121516Z/"
+)
+# (program, case_id) -> (frozen PR 5 SHA-256, approved SHA-256), approved 2026-09-28
+APPROVED_CANONICAL_OUTPUTS = {
+    ("blastn", "Sakai.MG1655.megablast"): (
+        "3f27c1f1396b59ecb7e78827b5da390e9c97a276c05cbc7a6c82f56bd0a03262",
+        "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+    ),
+}
 FROZEN_ALLOWLIST_REPO_RELATIVE = PurePosixPath(
     "LOSAT/tests/frozen_mismatch_allowlist.json"
 )
-GATE_A_EXACT = "CANONICAL_PR5_RAW_BYTES"
+GATE_A_EXACT = "CANONICAL_RAW_BYTES"
 GATE_A_ALLOWED = "ALLOWED_KNOWN_MISMATCH"
 SAFE_CASE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
@@ -1511,6 +1530,26 @@ def _canonical_lines(raw: bytes) -> tuple[list[str], list[str]]:
     return comments, data
 
 
+def derive_canonical_v011_rows(v010_bytes: bytes) -> list[dict[str, str]]:
+    """v0.1.0's rows with each approved output in place of its frozen PR 5 hash."""
+    if hashlib.sha256(v010_bytes).hexdigest() != CANONICAL_V010_SHA256:
+        raise CertificationFailure("v0.1.0 canonical manifest changed")
+    _, data_lines = _canonical_lines(v010_bytes)
+    rows = list(csv.DictReader(data_lines, delimiter="\t"))
+    replaced = set()
+    for row in rows:
+        key = (row["program"], row["case_id"])
+        if key in APPROVED_CANONICAL_OUTPUTS:
+            frozen, approved = APPROVED_CANONICAL_OUTPUTS[key]
+            if row["losat_sha256"] != frozen:
+                raise CertificationFailure(f"approved output replaces another hash: {key}")
+            row["losat_sha256"] = approved
+            replaced.add(key)
+    if replaced != set(APPROVED_CANONICAL_OUTPUTS):
+        raise CertificationFailure("approved output case missing from v0.1.0")
+    return rows
+
+
 def load_catalog(repo_root: Path, candidate_sha: str) -> Catalog:
     tests_dir = repo_root / "LOSAT" / "tests"
     blastn_compare = load_authority(
@@ -1531,11 +1570,19 @@ def load_catalog(repo_root: Path, candidate_sha: str) -> Catalog:
     )
     comments, data_lines = _canonical_lines(canonical_bytes)
     required_comments = {
-        "# Canonical LOSAT native output hashes from PR 5 integrated certification.",
+        "# Canonical LOSAT native output hashes v0.1.1: the PR 5 integrated "
+        "certification hashes with the approved BLASTN Sakai.MG1655.megablast output.",
+        f"# DERIVED_FROM={CANONICAL_V010_REPO_RELATIVE}",
+        f"# DERIVED_FROM_SHA256={CANONICAL_V010_SHA256}",
         f"# RUNTIME_CERT_SHA={RUNTIME_CERT_SHA}",
         f"# PR5_EVIDENCE_MANIFEST_SHA256={PR5_EVIDENCE_MANIFEST_SHA256}",
+        *(
+            f"# APPROVED_OUTPUT={program} {case_id} {approved} "
+            f"approved 2026-09-28: {APPROVED_CANONICAL_RECORD}"
+            for (program, case_id), (_, approved) in APPROVED_CANONICAL_OUTPUTS.items()
+        ),
     }
-    if set(comments) != required_comments:
+    if set(comments) != required_comments or len(comments) != len(required_comments):
         raise CertificationFailure("canonical manifest provenance comments changed")
     canonical_rows = list(csv.DictReader(data_lines, delimiter="\t"))
     expected_fields = (
@@ -1561,6 +1608,12 @@ def load_catalog(repo_root: Path, candidate_sha: str) -> Catalog:
         canonical[key] = row
     if dict(Counter(row["program"] for row in canonical_rows)) != EXPECTED_COUNTS:
         raise CertificationFailure("canonical program counts changed")
+    if canonical_rows != derive_canonical_v011_rows(
+        read_git_blob_bytes(repo_root, candidate_sha, CANONICAL_V010_REPO_RELATIVE)
+    ):
+        raise CertificationFailure(
+            "canonical manifest is not v0.1.0 with the approved outputs"
+        )
 
     blastn_manifest = tests_dir / "blastn_parity_manifest.tsv"
     blastn_rows_list = blastn_compare.read_manifest(blastn_manifest)
@@ -1902,7 +1955,7 @@ def fixture_staging_identity(records: Sequence[StagedFixture]) -> dict[str, obje
 # ```
 # Existing program authorities own command construction and output classification.
 # This platform layer records and invokes those commands without sorting or rewriting
-# LOSAT output; the PR 5 raw SHA-256 is the cross-platform gate.
+# LOSAT output; the Gate A manifest's raw SHA-256 is the cross-platform gate.
 def build_steps(
     repo_root: Path,
     output_dir: Path,
@@ -2026,7 +2079,8 @@ def build_steps(
 #   x_PrintField(*iter); m_Ostream << "\n";
 # Gate A compares these raw bytes by SHA-256 without normalization. The known
 # frozen mismatches are read from the candidate commit's Git blob, like the
-# other control files; the frozen PR 5 hashes themselves are never rewritten.
+# other control files; a frozen manifest is never rewritten (a new output
+# needs a new manifest version, as v0.1.1).
 def load_frozen_allowlist(repo_root: Path, candidate_sha: str) -> Allowlist:
     raw = read_git_blob_bytes(repo_root, candidate_sha, FROZEN_ALLOWLIST_REPO_RELATIVE)
     path = repo_root.joinpath(*FROZEN_ALLOWLIST_REPO_RELATIVE.parts)
@@ -2148,7 +2202,7 @@ def allowed_known_mismatch_lines(
 # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
 #   x_PrintField(*iter); m_Ostream << "\n";
 # One rule for a Gate A output hash in execution, resume and aggregation: the
-# frozen PR 5 hash, or, for a case in frozen_mismatch_allowlist.json, only its
+# Gate A manifest hash, or, for a case in frozen_mismatch_allowlist.json, only its
 # recorded actual output. A listed case that matches its frozen hash again is
 # a stale entry and fails.
 def gate_a_verification(
@@ -3279,7 +3333,7 @@ def finalize_evidence(
         "gate_a_losat_canonical": {
             "total": 43,
             "passed": 43,
-            "all_exact_pr5_raw_bytes": not allowed_cases,
+            "all_exact_canonical_raw_bytes": not allowed_cases,
             "allowed_known_mismatches": list(allowed_cases),
         },
         "gate_b_platform_native_ncbi_reference": {
@@ -3718,7 +3772,7 @@ def aggregate_platform_evidence(
         if summary.get("gate_a_losat_canonical") != {
             "total": 43,
             "passed": 43,
-            "all_exact_pr5_raw_bytes": not allowed_cases,
+            "all_exact_canonical_raw_bytes": not allowed_cases,
             "allowed_known_mismatches": allowed_cases,
         }:
             raise CertificationFailure(f"aggregate Gate A failed: {platform_id}")
@@ -3956,9 +4010,7 @@ def certify(args: argparse.Namespace) -> None:
         "blastp": args.blastp_oracle.resolve(),
         "tblastx": args.tblastx_oracle.resolve(),
     }
-    canonical_manifest = (
-        repo_root / "LOSAT" / "tests" / "platform_native_v010_canonical.tsv"
-    )
+    canonical_manifest = repo_root.joinpath(*CANONICAL_MANIFEST_REPO_RELATIVE.parts)
     catalog = load_catalog(repo_root, certified_sha)
     validate_native_authority_catalog(authority, catalog)
     steps = build_steps(

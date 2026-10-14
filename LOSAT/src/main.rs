@@ -233,6 +233,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastn::x_subject_translate_print_summary();
     LOSAT::algorithm::blastp::x_bp_seed_print_summary();
     LOSAT::algorithm::blastp::x_restricted_gap_print_summary();
+    LOSAT::algorithm::blastn::alignment::greedy::x_greedy_fuse_print_summary();
     LOSAT::algorithm::blastx::seed::x_seed_scan::print_shadow_stats();
     LOSAT::algorithm::blastp::x_ungapped_fast::print_shadow_stats();
     LOSAT::utils::x_logclone::print_shadow_stats();

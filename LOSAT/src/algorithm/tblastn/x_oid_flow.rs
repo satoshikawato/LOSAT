@@ -39,6 +39,14 @@
 //! is full (no NCBI counterpart: NCBI's threads write their lists into the shared HSP stream at
 //! once; this bound only keeps the memory of the waiting lists bounded). The chunks and the
 //! search of each subject are those of `LOSAT_X_TBNOIDCHUNK`, so the reports are the same.
+//!
+//! The threads start together: each thread's loop and the owner wait until every thread of the
+//! pool has entered its loop before the first chunk is searched (no NCBI counterpart). A search
+//! may run the units of its subject on the pool (`LOSAT_X_TBNOIDUNITS`), and a thread that waits
+//! for a unit taken by another thread runs other jobs of the pool meanwhile; were a thread's
+//! loop still queued then, it would start there, on top of the chunk being searched, and could
+//! wait for the window while that chunk is the one the owner waits for. Once every loop runs,
+//! only units are left for a waiting thread to take.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -50,6 +58,8 @@ use anyhow::{bail, Result};
 pub(super) struct XOidFlow<T> {
     chunks: Vec<Range<usize>>,
     window: usize,
+    /// The threads that run `work`, besides the owner.
+    workers: usize,
     state: Mutex<XFlowState<T>>,
     changed: Condvar,
 }
@@ -67,15 +77,19 @@ struct XFlowState<T> {
     failed: bool,
     /// The most finished lists that waited at once (for the tests and the diagnostic line).
     peak_waiting: usize,
+    /// The threads that have entered `work`.
+    started: usize,
 }
 
 impl<T: Send> XOidFlow<T> {
     /// A flow over `chunks` (consecutive ranges of subject indices, in OID order) with at most
-    /// `window` chunks (at least one) taken or waiting beyond the oldest one not taken back.
-    pub(super) fn new(chunks: Vec<Range<usize>>, window: usize) -> Self {
+    /// `window` chunks (at least one) taken or waiting beyond the oldest one not taken back, for
+    /// the owner and `workers` threads that run `work`.
+    pub(super) fn new(chunks: Vec<Range<usize>>, window: usize, workers: usize) -> Self {
         XOidFlow {
             chunks,
             window: window.max(1),
+            workers,
             state: Mutex::new(XFlowState {
                 next: 0,
                 taken_back: 0,
@@ -83,6 +97,7 @@ impl<T: Send> XOidFlow<T> {
                 closed: false,
                 failed: false,
                 peak_waiting: 0,
+                started: 0,
             }),
             changed: Condvar::new(),
         }
@@ -90,6 +105,21 @@ impl<T: Send> XOidFlow<T> {
 
     fn lock(&self) -> MutexGuard<'_, XFlowState<T>> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Waits until every worker has entered `work` (or the flow is closed or failed), so that no
+    /// loop of the flow is still queued in the pool when a search starts (see the module text).
+    fn start_together<'s>(
+        &self,
+        mut state: MutexGuard<'s, XFlowState<T>>,
+    ) -> MutexGuard<'s, XFlowState<T>> {
+        while state.started < self.workers && !state.closed && !state.failed {
+            state = self
+                .changed
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        state
     }
 
     /// The next chunk, if one is left and it lies within the window; marks it taken.
@@ -130,6 +160,9 @@ impl<T: Send> XOidFlow<T> {
     /// search it, and wait while the window is full, until no chunk is left or the owner closes.
     pub(super) fn work(&self, search: &(impl Fn(usize) -> T + Sync)) {
         let mut state = self.lock();
+        state.started += 1;
+        self.changed.notify_all();
+        state = self.start_together(state);
         loop {
             if state.closed || state.failed || state.next >= self.chunks.len() {
                 return;
@@ -154,7 +187,7 @@ impl<T: Send> XOidFlow<T> {
         &self,
         search: &(impl Fn(usize) -> T + Sync),
     ) -> Result<Option<Vec<T>>> {
-        let mut state = self.lock();
+        let mut state = self.start_together(self.lock());
         loop {
             let wanted = state.taken_back;
             if wanted >= self.chunks.len() {
@@ -229,7 +262,7 @@ mod tests {
             .num_threads(threads)
             .build()
             .unwrap();
-        let flow = XOidFlow::new(chunks, window);
+        let flow = XOidFlow::new(chunks, window, threads - 1);
         let received = pool.install(|| {
             rayon::scope(|scope| {
                 for _ in 1..threads {
@@ -278,6 +311,42 @@ mod tests {
         }
     }
 
+    // No NCBI counterpart: searches that run parts of their work on the pool (as the units of a
+    // long subject with LOSAT_X_TBNOIDUNITS) still give every subject once and in OID order, with
+    // the smallest windows too: a thread waiting for a part runs other jobs of the pool, and the
+    // threads start together, so that no loop of the flow is left in the pool to start there.
+    #[test]
+    fn searches_with_parts_on_the_pool_keep_the_order() {
+        use rayon::prelude::*;
+        let chunks: Vec<Range<usize>> = (0..24).map(|i| i..i + 1).collect();
+        let search = |subject: usize| {
+            let parts: usize = (0..6)
+                .into_par_iter()
+                .with_max_len(1)
+                .map(|part| {
+                    std::thread::sleep(std::time::Duration::from_micros(
+                        100 * ((subject + part) % 5) as u64,
+                    ));
+                    part
+                })
+                .sum();
+            assert_eq!(parts, 15);
+            subject
+        };
+        for (threads, window) in [(2, 1), (3, 1), (4, 1), (4, 2), (8, 1), (8, 4)] {
+            let (received, peak) = run_flow(threads, chunks.clone(), window, &search);
+            assert_eq!(
+                received,
+                (0..24).collect::<Vec<_>>(),
+                "{threads} threads, window {window}"
+            );
+            assert!(
+                peak <= window,
+                "{threads} threads, window {window}: peak {peak}"
+            );
+        }
+    }
+
     // No NCBI counterpart: when the owner stops early (an error in the reduction) the other
     // threads stop taking chunks and the scope ends.
     #[test]
@@ -292,7 +361,7 @@ mod tests {
             .num_threads(4)
             .build()
             .unwrap();
-        let flow = XOidFlow::new((0..1000).map(|i| i..i + 1).collect(), 8);
+        let flow = XOidFlow::new((0..1000).map(|i| i..i + 1).collect(), 8, 3);
         pool.install(|| {
             rayon::scope(|scope| {
                 for _ in 1..4 {
@@ -325,7 +394,7 @@ mod tests {
                 .num_threads(threads)
                 .build()
                 .unwrap();
-            let flow = XOidFlow::new((0..20).map(|i| i..i + 1).collect(), 4);
+            let flow = XOidFlow::new((0..20).map(|i| i..i + 1).collect(), 4, threads - 1);
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 pool.install(|| {
                     rayon::scope(|scope| {

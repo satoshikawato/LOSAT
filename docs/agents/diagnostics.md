@@ -384,7 +384,9 @@ Rebuilding less:
   `every_cell_lists_a_query_offset_once`, and per batch by a `debug_assert`), so a batch's hits fall on distinct
   entries, and a candidate's entry is stored back unchanged before its call. The 31-bit truncation and the i32
   wrapping are those of the per-hit test. `LOSAT_X_BPDIAG_SIMD=0` keeps the scalar batch on an AVX2 CPU (tuning
-  and tests); the batches prefetch nothing (`LOSAT_X_BPSEED_PREFETCH` is the per-hit loop's). Shadow:
+  and tests). `LOSAT_X_BPDIAG_GATHER=0` reads the eight entries with scalar loads into the register instead of
+  the AVX2 gather, the same values (tuning: the workstation's Xeon 6338 reports the Gather Data Sampling
+  microcode mitigation, under which `vpgatherdd` can be slow). The batches prefetch nothing (`LOSAT_X_BPSEED_PREFETCH` is the per-hit loop's). Shadow:
   `LOSAT_X_BPSEEDSHADOW=1` with `LOSAT_X_BPDIAG=1` compares the batched loop with the reference for every
   subject. With `LOSAT_TIMING=1` each search of a query set prints
   `[TIMING] x_bpdiag: cells=<n> batched_hits=<m> candidates=<k>` (cells tested in batches, their hits, the

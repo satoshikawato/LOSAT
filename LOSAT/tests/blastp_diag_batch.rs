@@ -4,9 +4,10 @@
 //! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
 //! set, and it acts in the fused seed loop of `LOSAT_X_BPSEED`. With it on, the hits of one lookup
 //! cell are tested in batches of eight (AVX2 where the CPU has it; `LOSAT_X_BPDIAG_SIMD=0` keeps
-//! the scalar batch). These tests compare the reports with the reference loop and the per-hit
-//! fused loop at one and four threads, on a generated pair (long lookup cells from repeats,
-//! related proteins for two-hit extensions) and on the fixture pair, run the shadow of
+//! the scalar batch, `LOSAT_X_BPDIAG_GATHER=0` reads the entries without the AVX2 gather). These
+//! tests compare the reports with the reference loop and the per-hit fused loop at one and four
+//! threads, on a generated pair (long lookup cells from repeats, related proteins for two-hit
+//! extensions) and on the fixture pair, run the shadow of
 //! `LOSAT_X_BPSEEDSHADOW` (the batched loop against the reference for every subject), and check
 //! from the `[TIMING] x_bpdiag: cells=<n> batched_hits=<m> candidates=<k>` lines that cells were
 //! tested in batches, not only that the report is equal.
@@ -186,7 +187,8 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
                 "threads {threads}: the fused loop differs"
             );
             assert!(fused_counts.is_empty(), "no line without LOSAT_X_BPDIAG");
-            for simd in ["1", "0"] {
+            // The AVX2 batch with the gather, with scalar loads, and the scalar batch.
+            for (simd, gather) in [("1", "1"), ("1", "0"), ("0", "1")] {
                 let (rows, counts, _) = blastp(
                     query,
                     subject,
@@ -195,19 +197,24 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
                         ("LOSAT_X_BPSEED", "1"),
                         ("LOSAT_X_BPDIAG", "1"),
                         ("LOSAT_X_BPDIAG_SIMD", simd),
+                        ("LOSAT_X_BPDIAG_GATHER", gather),
                     ],
                     &["-outfmt", "6"],
                 );
                 assert!(
                     rows == reference,
-                    "{} threads {threads} simd {simd}: rows differ",
+                    "{} threads {threads} simd {simd} gather {gather}: rows differ",
                     query.display()
                 );
-                assert_eq!(counts.len(), 1, "threads {threads} simd {simd}: {counts:?}");
+                assert_eq!(
+                    counts.len(),
+                    1,
+                    "threads {threads} simd {simd} gather {gather}: {counts:?}"
+                );
                 let c = counts[0];
                 assert!(
                     c.cells > 0 && c.hits >= c.cells && c.candidates > 0 && c.candidates <= c.hits,
-                    "threads {threads} simd {simd}: {c:?}"
+                    "threads {threads} simd {simd} gather {gather}: {c:?}"
                 );
             }
         }

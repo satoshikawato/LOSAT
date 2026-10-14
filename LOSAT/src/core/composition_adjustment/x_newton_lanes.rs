@@ -44,13 +44,15 @@
 //! and never re-associates sums; SIMD add / sub / mul / div / sqrt are
 //! IEEE-754 per element, so a lane gives the scalar result.
 //!
-//! EXPERIMENT (LOSAT_X_NEWTONLANES8): eight problems per round, value `k` of
-//! eight problems in one `[f64; 8]` (`F8`), so each operation is two 256-bit
-//! or four 128-bit vector operations on independent values.  The lane body is
-//! the same generic code; each lane still runs the operation sequence above.
-//! When the queue is empty and at most four lanes hold a problem, those
-//! problems move to a four-lane state (bit copies of the values that persist
-//! between rounds) and finish there.
+//! EXPERIMENT (LOSAT_X_NEWTONLANES8, aarch64): eight problems per round, value
+//! `k` of eight problems in one `[f64; 8]` (`F8`), so each operation is four
+//! 128-bit NEON operations on independent values.  The lane body is the same
+//! generic code; each lane still runs the operation sequence above.  When the
+//! queue is empty and at most four lanes hold a problem, those problems move to
+//! a four-lane state (bit copies of the values that persist between rounds) and
+//! finish there.  Other targets keep four lanes (on x86-64 the two 256-bit
+//! operations per value gave no gain); the unit tests run the eight-lane body
+//! on every target.
 //!
 //! No NCBI counterpart: batching of independent problems, the result store
 //! and its lookup by bitwise-equal input. NCBI solves one problem per call;
@@ -122,28 +124,14 @@ pub(crate) fn mode() -> u8 {
 }
 
 // No NCBI counterpart: reads LOSAT_X_NEWTONLANES8 once (off unless set to any value; not in the
-// strict set). It chooses how many problems share a round when the lanes run; it does not turn
-// them on and does not change any value NCBI computes.
+// strict set). On aarch64 it chooses how many problems share a round when the lanes run; it does
+// not turn them on. Other targets keep four lanes (x86-64 AVX2 measured no gain). It does not
+// change any value NCBI computes.
 /// Whether batches of `MIN_LANE8_BATCH` or more problems use eight lanes.
 fn eight_lanes() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_NEWTONLANES8").is_some())
-}
-
-// No NCBI counterpart: development aid of LOSAT_X_NEWTONLANES8; `LOSAT_X_NEWTONLANES8_TAIL=0`
-// keeps an eight-lane batch on eight lanes to its end (no move to four lanes). It does not change
-// any value NCBI computes.
-fn hand_over_lanes() -> usize {
-    static AT: OnceLock<usize> = OnceLock::new();
-    *AT.get_or_init(|| {
-        match std::env::var_os("LOSAT_X_NEWTONLANES8_TAIL")
-            .as_deref()
-            .and_then(|v| v.to_str())
-            .map(str::trim)
-        {
-            Some("0") => 0,
-            _ => HAND_OVER_LANES,
-        }
+    *ON.get_or_init(|| {
+        cfg!(target_arch = "aarch64") && std::env::var_os("LOSAT_X_NEWTONLANES8").is_some()
     })
 }
 
@@ -1372,7 +1360,8 @@ fn solve_lanes_plain(
 //     while (its <= maxits) {
 // ```
 // No NCBI counterpart: the eight-lane loop compiled with AVX2 enabled (each `F8` operation is two
-// 256-bit operations on independent values); it does not change any value NCBI computes.
+// 256-bit operations on independent values); x86-64 runs it only in the unit tests
+// (LOSAT_X_NEWTONLANES8 acts on aarch64). It does not change any value NCBI computes.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn solve_lanes8_avx2(
@@ -1390,7 +1379,7 @@ unsafe fn solve_lanes8_avx2(
 //     while (its <= maxits) {
 // ```
 // No NCBI counterpart: the eight-lane loop without target features (aarch64 NEON through the
-// baseline target, Wasm, LOSAT_X_NEWTONEXACT_LEVEL=0); it does not change any value NCBI computes.
+// baseline target; other targets in the unit tests); it does not change any value NCBI computes.
 fn solve_lanes8_plain(
     inputs: &[NewtonInput],
     outputs: &mut [NewtonOutput],
@@ -1413,11 +1402,11 @@ fn solve_lanes8_plain(
 // ```
 // Solves every problem of the batch, each with the result of this function (`x` and the status).
 // Batches of fewer than `MIN_LANE_BATCH` problems use `x_newton_exact` (same results); with
-// LOSAT_X_NEWTONLANES8, batches of `MIN_LANE8_BATCH` or more use eight lanes.
+// LOSAT_X_NEWTONLANES8 on aarch64, batches of `MIN_LANE8_BATCH` or more use eight lanes.
 /// Solves `inputs[i]` into `outputs[i]`.
 pub(crate) fn solve_batch(inputs: &[NewtonInput], outputs: &mut [NewtonOutput]) {
     let lanes8 = if eight_lanes() {
-        Some(hand_over_lanes())
+        Some(HAND_OVER_LANES)
     } else {
         None
     };
@@ -1975,8 +1964,8 @@ mod tests {
     //                                 int maxits)
     // ```
     // The ignored test times `optimize_target_frequencies_exact` (one problem per call) against
-    // `solve_batch` with four lanes and with eight (with and without the move to four lanes) on the
-    // realistic test problems and checks the results by bits.
+    // four lanes and eight lanes (with and without the move to four lanes, at every batch size) on
+    // the realistic test problems and checks the results by bits.
     /// Timing (run with --release --ignored --nocapture).
     #[test]
     #[ignore]
@@ -1985,7 +1974,7 @@ mod tests {
         let reps = 10;
         // rounds of the four forms in turn; the fastest round of each form is printed
         let rounds = 9;
-        for batch in [5usize, 8, 12, 16, 21, 32, 36] {
+        for batch in [5usize, 6, 7, 8, 9, 10, 11, 12, 16, 21, 32, 36] {
             let inputs: Vec<NewtonInput> = problems[..batch].to_vec();
             let mut exact = vec![NewtonOutput::new(); batch];
             let mut lanes = vec![NewtonOutput::new(); batch];
@@ -2004,13 +1993,14 @@ mod tests {
                     }
                 }
                 best[0] = best[0].min(t0.elapsed().as_secs_f64() / (reps * batch) as f64 * 1e6);
-                for (t, width) in best[1..]
-                    .iter_mut()
-                    .zip([None, Some(HAND_OVER_LANES), Some(0)])
-                {
+                for (form, t) in best[1..].iter_mut().enumerate() {
                     let t0 = std::time::Instant::now();
                     for _ in 0..reps {
-                        solve_batch_with(&inputs, &mut lanes, width);
+                        match form {
+                            0 => solve_batch_with(&inputs, &mut lanes, None),
+                            1 => solve_batch8(&inputs, &mut lanes, HAND_OVER_LANES),
+                            _ => solve_batch8(&inputs, &mut lanes, 0),
+                        }
                     }
                     *t = t.min(t0.elapsed().as_secs_f64() / (reps * batch) as f64 * 1e6);
                     for (a, b) in exact.iter().zip(&lanes) {

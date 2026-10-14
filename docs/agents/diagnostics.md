@@ -191,8 +191,8 @@ What runs per target:
   nothing (it is compiled for wasm32 only); everything else as on wasm32.
 - One thread (`-num_threads 1`, a build without the `parallel` feature, wasm32 without
   `wasm-threads`): the scheduling switches (`AHEAD`, `GREEDYSPEC`, `PAIRPAR` for
-  blastn/megablast, `SEGSHARE`, `TBNBATCH`, `TBNOIDCHUNK`, `BXPAR`, `BXPOOL`, `BXBATCH`, `BXCHUNK`)
-  leave the reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
+  blastn/megablast, `SEGSHARE`, `TBNBATCH`, `TBNOIDCHUNK`, `TBNOIDNEXT`, `BXPAR`, `BXPOOL`, `BXBATCH`,
+  `BXCHUNK`) leave the reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
   (with `TBNSSIDE` / `TBNQSIDE`; only its parallel redo needs a pool) and the TBLASTX `PAIRPAR`
   units run in order on the calling thread.
 
@@ -364,6 +364,17 @@ Rebuilding less:
   hit is never extended and leaves an entry that later subjects read as no previous hit (`x_shadow_compare`).
   One line at exit: `[X_SHADOW] BPSEED subjects= initial_hsps= identical`, with
   `(tables not compared for N subjects shorter than a word)` when there were such subjects.
+- `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; not in the
+  strict set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the word loop and the
+  X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte
+  table (`q << 5 | s`; the sentinel's `BLAST_SCORE_MIN` stored as -128) with raw-pointer walks over the
+  positions the reference indexes, NCBI's statements and exit tests unchanged (`blastp/x_ungapped_fast.rs`,
+  exactness argument in its header). Acts in `extend_one_hit_blosum62` / `extend_two_hit_blosum62` (TBLASTN
+  calls the matrix-generic functions and is not affected); a dropoff outside 1..=127, a word size outside
+  1..=11 or a residue code >= 32 run the reference.
+- `LOSAT_X_BPUNGAPSHADOW=1` shadow of `LOSAT_X_BPUNGAP` (turns the path on): every extension runs both ways and
+  the results (score, offsets, length, `right_extend`, `s_last_off`, and the early return) must be equal; any
+  difference panics with the inputs. One line at exit: `[X_SHADOW] BPUNGAP compared=`.
 - `LOSAT_X_LINKSORT=1` (TBLASTX, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the index sorts of the in-place HSP list path
   (`tblastx/x_link_sort.rs`, exactness argument in its header; it acts only where `LOSAT_X_HSPINPLACE` does).
@@ -496,6 +507,20 @@ Scheduling (each value computed by one thread with the original function; order 
   side by side (each batch on one thread). With `LOSAT_WASI_THREADS_DEBUG=1` the
   `[losat-thread-activity]` line of the subject stage ends with `pool_entries=` (the entries of
   one query batch); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.
+- `LOSAT_X_TBNOIDNEXT=1` tblastn with 2+ threads and several subjects, where `TBNOIDCHUNK` makes
+  the chunks: no wait between entries. The threads of the pool take the next chunk when they are
+  free, as NCBI's search threads ask the database for the next chunk (`seqdbimpl.cpp:333-344`),
+  instead of waiting at the end of each entry for its longest chunk. The thread that owns the
+  search takes the lists back chunk by chunk in OID order and enters them into the collector as
+  before, and searches a chunk itself while the next one in order is not finished
+  (`tblastn/x_oid_flow.rs`). At most `4 * threads` chunks are taken or finished beyond the oldest
+  one not taken back; a thread waits before a new chunk when that window is full, so the memory of
+  the waiting lists stays bounded. The chunks and the search of each subject are those of
+  `TBNOIDCHUNK`, so the report is the same. Not in the set (off unless set to any value); with
+  `LOSAT_X_TBNOIDCHUNK=0` (or `LOSAT_X_DEFAULT=0` alone) there are no chunks and it changes
+  nothing. With `LOSAT_WASI_THREADS_DEBUG=1` the search is one entry (`pool_entries=1`) and the
+  line adds `flow_chunks=` and `flow_peak_waiting=` (the most finished chunks that waited at
+  once); `LOSAT/tests/tblastn_oid_chunk.rs` reads them.
 - `LOSAT_X_TBNXLATE=1` tblastn: the six translated frames of a subject are read from tables, as
   NCBI makes them from the compressed subject (`blast_util.c:1071-1090`: one table of 64 residues
   per strand, `s_BlastGetTranslationTable`, and one table read per codon,

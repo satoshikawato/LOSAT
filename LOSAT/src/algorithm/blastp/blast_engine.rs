@@ -87,6 +87,10 @@ use super::kappa::{
     reset_blastp_kappa_range_counters, x_newton_lanes_prefetch_matches, BlastRedoAlignParams,
     BlastpKappaSubjectRangeCache, BlastpTraceHspTarget,
 };
+use super::x_prelim_compact::{
+    x_bp_prelim_compact, x_expand_hit_list, x_expanded_lists, x_finish_compact_lists,
+    x_shadow_compare, XPrelimCompact, XPrelimHsp,
+};
 // No NCBI counterpart: matches per LOSAT_X_NEWTONLANES prefetch in the BLASTP redo loops; it does
 // not change any value NCBI computes.
 const X_NEWTON_LANES_MATCHES: usize = 16;
@@ -150,6 +154,9 @@ impl InitHSP {
 struct BlastpSubjectResult {
     subject_index: usize,
     query_hsp_lists: Vec<(usize, BlastpHspList)>,
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the same lists with the compact element
+    // (`x_prelim_compact.rs`).
+    x_compact_hsp_lists: Vec<(usize, BlastpHspList<XPrelimHsp>)>,
 }
 
 impl BlastpSubjectResult {
@@ -162,6 +169,7 @@ impl BlastpSubjectResult {
         Self {
             subject_index,
             query_hsp_lists: Vec::new(),
+            x_compact_hsp_lists: Vec::new(),
         }
     }
 
@@ -175,6 +183,7 @@ impl BlastpSubjectResult {
     fn reset(&mut self, subject_index: usize) {
         self.subject_index = subject_index;
         self.query_hsp_lists.clear();
+        self.x_compact_hsp_lists.clear();
     }
 }
 
@@ -1025,6 +1034,30 @@ fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<
     offsets
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
+// ```c
+// #pragma omp parallel ... num_threads(actual_num_threads)
+// #pragma omp for schedule(static)
+// for (b = 0; b < numMatches; ++b) {
+// ```
+// The matches of query `q_idx` (`hsplist_count` of its preliminary hit list), from the compact
+// list while it is not expanded yet (EXPERIMENT LOSAT_X_BPPCOMPACT, `x_prelim_compact.rs`).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_prelim_hsplist_count(
+    preliminary_hit_lists: &[Option<BlastpHitList>],
+    x_compact_hit_lists: &[Option<BlastpHitList<XPrelimHsp>>],
+    q_idx: usize,
+) -> usize {
+    match (&preliminary_hit_lists[q_idx], &x_compact_hit_lists[q_idx]) {
+        (Some(hit_list), _) => hit_list.hsplist_count,
+        (None, Some(hit_list)) => hit_list.hsplist_count,
+        (None, None) => 0,
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:139-159
 // ```c
 // if (!results->hitlist_array[0]) {
@@ -1035,6 +1068,7 @@ fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<
 // ```
 fn update_blastp_preliminary_hit_lists(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     subject_result: &mut BlastpSubjectResult,
     prelim_hitlist_size: usize,
 ) {
@@ -1047,6 +1081,12 @@ fn update_blastp_preliminary_hit_lists(
         let provisional_hit_list = preliminary_hit_lists[q_idx]
             .get_or_insert_with(|| BlastpHitList::new(prelim_hitlist_size));
         provisional_hit_list.update(provisional_hsp_list);
+    }
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the same update of the compact lists.
+    for (q_idx, provisional_hsp_list) in subject_result.x_compact_hsp_lists.drain(..) {
+        x_compact_hit_lists[q_idx]
+            .get_or_insert_with(|| BlastpHitList::new(prelim_hitlist_size))
+            .update(provisional_hsp_list);
     }
 }
 
@@ -1068,6 +1108,7 @@ fn update_blastp_preliminary_hit_lists(
 ))]
 fn merge_blastp_subject_results_in_order(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     subject_results: Vec<Option<BlastpSubjectResult>>,
     prelim_hitlist_size: usize,
 ) {
@@ -1078,6 +1119,7 @@ fn merge_blastp_subject_results_in_order(
         debug_assert_eq!(subject_result.subject_index, subject_index);
         update_blastp_preliminary_hit_lists(
             preliminary_hit_lists,
+            x_compact_hit_lists,
             &mut subject_result,
             prelim_hitlist_size,
         );
@@ -1307,60 +1349,17 @@ fn build_preliminary_hsp_list_for_hitlist(
 ) -> BlastpHspList {
     let hsps: Vec<BlastpHsp> = preliminary_hits
         .iter()
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-178
-        // ```c
-        // Blast_HSPInit(Int4 query_start, Int4 query_end, Int4 subject_start,
-        //               Int4 subject_end, Int4 query_gapped_start,
-        //               Int4 subject_gapped_start, Int4 query_context,
-        //               Int2 query_frame, Int2 subject_frame, Int4 score, ...)
-        // {
-        //    new_hsp->query.offset = query_start;
-        //    new_hsp->subject.offset = subject_start;
-        //    new_hsp->query.end = query_end;
-        //    new_hsp->subject.end = subject_end;
-        //    new_hsp->query.gapped_start = query_gapped_start;
-        //    new_hsp->subject.gapped_start = subject_gapped_start;
-        //    new_hsp->context = query_context;
-        //    new_hsp->query.frame = query_frame;
-        //    new_hsp->subject.frame = subject_frame;
-        // }
-        // ```
-        .map(|hit| BlastpHsp {
-            identity: 0.0,
-            length: usize::try_from(hit.query_end - hit.query_start)
-                .expect("preliminary blastp HSP query span must be non-negative"),
-            mismatch: 0,
-            gapopen: 0,
-            q_start: usize::try_from(hit.query_start + 1)
-                .expect("preliminary blastp query start must be non-negative"),
-            q_end: usize::try_from(hit.query_end)
-                .expect("preliminary blastp query end must be non-negative"),
-            s_start: usize::try_from(hit.subject_start + 1)
-                .expect("preliminary blastp subject start must be non-negative"),
-            s_end: usize::try_from(hit.subject_end)
-                .expect("preliminary blastp subject end must be non-negative"),
-            gapped_q_start: hit.gapped_query_start,
-            gapped_s_start: hit.gapped_subject_start,
-            e_value: blast_spouge_stoe(
-                hit.raw_score,
-                karlin_params,
-                gumbel_params,
-                query_length as i32,
-                subject_length as i32,
-            ),
-            bit_score: 0.0,
-            num_ident: 0,
-            query_context: hit.query_context,
-            query_frame: hit.query_frame,
-            subject_frame: hit.subject_frame,
-            query_length: hit.query_length,
-            q_idx: hit.q_idx,
-            s_idx: hit.s_idx,
-            raw_score: hit.raw_score,
-            gap_info: None,
-            num_positives: 0,
-            // Blast_HSPInit callocs the HSP: no composition adjustment yet.
-            comp_adjustment_method: 0,
+        .map(|hit| {
+            blastp_hsp_from_preliminary(
+                hit,
+                blast_spouge_stoe(
+                    hit.raw_score,
+                    karlin_params,
+                    gumbel_params,
+                    query_length as i32,
+                    subject_length as i32,
+                ),
+            )
         })
         .collect();
     let mut hsp_list = BlastpHspList {
@@ -1371,6 +1370,98 @@ fn build_preliminary_hsp_list_for_hitlist(
     };
     super::hsp::update_best_evalue(&mut hsp_list);
     hsp_list
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-242
+// ```c
+// Blast_HSPListGetEvalues(program_number, query_info, subject_length,
+//                         hsp_list, TRUE, FALSE, sbp, 0.0, 1.0);
+// ```
+// EXPERIMENT (LOSAT_X_BPPCOMPACT): `build_preliminary_hsp_list_for_hitlist` with the compact
+// element: the same E-values (`x_prelim_compact.rs`).
+#[allow(clippy::too_many_arguments)]
+fn x_build_compact_preliminary_hsp_list(
+    preliminary_hits: &[BlastpPreliminaryHsp],
+    oid: u32,
+    query_index: u32,
+    query_length: usize,
+    subject_length: usize,
+    karlin_params: &KarlinParams,
+    gumbel_params: &BlastGumbelBlk,
+) -> BlastpHspList<XPrelimHsp> {
+    let hsps: Vec<XPrelimHsp> = preliminary_hits
+        .iter()
+        .map(|hit| XPrelimHsp {
+            hsp: *hit,
+            e_value: blast_spouge_stoe(
+                hit.raw_score,
+                karlin_params,
+                gumbel_params,
+                query_length as i32,
+                subject_length as i32,
+            ),
+        })
+        .collect();
+    let mut hsp_list = BlastpHspList {
+        oid,
+        query_index,
+        hsps,
+        best_evalue: f64::MAX,
+    };
+    super::hsp::update_best_evalue(&mut hsp_list);
+    hsp_list
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-178
+// ```c
+// Blast_HSPInit(Int4 query_start, Int4 query_end, Int4 subject_start,
+//               Int4 subject_end, Int4 query_gapped_start,
+//               Int4 subject_gapped_start, Int4 query_context,
+//               Int2 query_frame, Int2 subject_frame, Int4 score, ...)
+// {
+//    new_hsp->query.offset = query_start;
+//    new_hsp->subject.offset = subject_start;
+//    new_hsp->query.end = query_end;
+//    new_hsp->subject.end = subject_end;
+//    new_hsp->query.gapped_start = query_gapped_start;
+//    new_hsp->subject.gapped_start = subject_gapped_start;
+//    new_hsp->context = query_context;
+//    new_hsp->query.frame = query_frame;
+//    new_hsp->subject.frame = subject_frame;
+// }
+// ```
+pub(super) fn blastp_hsp_from_preliminary(hit: &BlastpPreliminaryHsp, e_value: f64) -> BlastpHsp {
+    BlastpHsp {
+        identity: 0.0,
+        length: usize::try_from(hit.query_end - hit.query_start)
+            .expect("preliminary blastp HSP query span must be non-negative"),
+        mismatch: 0,
+        gapopen: 0,
+        q_start: usize::try_from(hit.query_start + 1)
+            .expect("preliminary blastp query start must be non-negative"),
+        q_end: usize::try_from(hit.query_end)
+            .expect("preliminary blastp query end must be non-negative"),
+        s_start: usize::try_from(hit.subject_start + 1)
+            .expect("preliminary blastp subject start must be non-negative"),
+        s_end: usize::try_from(hit.subject_end)
+            .expect("preliminary blastp subject end must be non-negative"),
+        gapped_q_start: hit.gapped_query_start,
+        gapped_s_start: hit.gapped_subject_start,
+        e_value,
+        bit_score: 0.0,
+        num_ident: 0,
+        query_context: hit.query_context,
+        query_frame: hit.query_frame,
+        subject_frame: hit.subject_frame,
+        query_length: hit.query_length,
+        q_idx: hit.q_idx,
+        s_idx: hit.s_idx,
+        raw_score: hit.raw_score,
+        gap_info: None,
+        num_positives: 0,
+        // Blast_HSPInit callocs the HSP: no composition adjustment yet.
+        comp_adjustment_method: 0,
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:516-518
@@ -5653,6 +5744,8 @@ fn search_split_query_batches(
     query_lengths: &[usize],
     query_input: &seq_range::QueryInput,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    x_split_queries: &mut [bool],
 ) -> Result<()> {
     use crate::algorithm::common::protein_query_split::{
         protein_chunk_would_be_split, split_protein_batch,
@@ -5743,7 +5836,19 @@ fn search_split_query_batches(
             );
         }
         for (local, list) in merged.into_iter().enumerate() {
-            preliminary_hit_lists[range.start + local] = list;
+            // EXPERIMENT (LOSAT_X_BPPCOMPACT): the chunks' list replaces the compact one too; the
+            // shadow mode compares the two lists it replaces.
+            let q_idx = range.start + local;
+            if x_bp_prelim_compact() == XPrelimCompact::Shadow {
+                x_shadow_compare(
+                    q_idx,
+                    preliminary_hit_lists[q_idx].as_ref(),
+                    x_compact_hit_lists[q_idx].take(),
+                );
+            }
+            x_compact_hit_lists[q_idx] = None;
+            x_split_queries[q_idx] = true;
+            preliminary_hit_lists[q_idx] = list;
         }
     }
     Ok(())
@@ -6180,6 +6285,17 @@ fn run_resolved_in_pool(
     let mut preliminary_hit_lists: Vec<Option<BlastpHitList>> = std::iter::repeat_with(|| None)
         .take(query_ids.len())
         .collect();
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the preliminary hit lists with the compact element
+    // (`x_prelim_compact.rs`); all None with the switch off.
+    let x_prelim_compact = x_bp_prelim_compact();
+    let x_expanded_at_start = x_expanded_lists();
+    let mut x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> =
+        std::iter::repeat_with(|| None)
+            .take(query_ids.len())
+            .collect();
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT=shadow): queries whose lists the query chunks replaced
+    // (compared before the replacement, in `search_split_query_batches`).
+    let mut x_split_queries = vec![false; query_ids.len()];
 
     let window = args.window_size as i32;
     let word_size = lookup.word_length();
@@ -7171,6 +7287,32 @@ fn run_resolved_in_pool(
                 continue;
             }
             let ctx = &contexts[q_idx as usize];
+            // EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact list, with the same E-values and the
+            // same reap (`x_prelim_compact.rs`); the shadow mode builds both lists.
+            if x_prelim_compact.compact() {
+                let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
+                    preliminary_hits.as_slice(),
+                    s_idx as u32,
+                    q_idx as u32,
+                    ctx.aa_len,
+                    subject.aa_len,
+                    &gapped_params,
+                    &gapped_gumbel,
+                );
+                reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
+                if !compact_hsp_list.hsps.is_empty() {
+                    if x_prelim_free {
+                        compact_hsp_list.hsps.shrink_to_fit();
+                    }
+                    subject_result
+                        .x_compact_hsp_lists
+                        .push((q_idx, compact_hsp_list));
+                }
+                if !x_prelim_compact.full() {
+                    preliminary_hits.clear();
+                    continue;
+                }
+            }
             let mut provisional_hsp_list = build_preliminary_hsp_list_for_hitlist(
                 preliminary_hits.as_slice(),
                 s_idx as u32,
@@ -7311,6 +7453,7 @@ fn run_resolved_in_pool(
             let merge_sort_start = blastp_timing_start(timing_enabled);
             merge_blastp_subject_results_in_order(
                 &mut preliminary_hit_lists,
+                &mut x_compact_hit_lists,
                 subject_results,
                 prelim_hitlist_size,
             );
@@ -7331,6 +7474,7 @@ fn run_resolved_in_pool(
             let merge_sort_start = blastp_timing_start(timing_enabled);
             update_blastp_preliminary_hit_lists(
                 &mut preliminary_hit_lists,
+                &mut x_compact_hit_lists,
                 &mut subject_result,
                 prelim_hitlist_size,
             );
@@ -7354,6 +7498,14 @@ fn run_resolved_in_pool(
     // A query chunk's preliminary stage ends here, before its stream is closed: its hit
     // lists merge into the batch's (`search_split_query_batches`).
     if let Some(chunk_lists) = chunk_prelim {
+        // EXPERIMENT (LOSAT_X_BPPCOMPACT): a chunk's lists leave as the off path's lists, so the
+        // chunk merge (`query_split.rs`) is unchanged; the shadow mode compares them here.
+        x_finish_compact_lists(
+            x_prelim_compact,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            &[],
+        );
         *chunk_lists = preliminary_hit_lists;
         return Ok(());
     }
@@ -7367,6 +7519,8 @@ fn run_resolved_in_pool(
         &query_lengths,
         ranges.query_input,
         &mut preliminary_hit_lists,
+        &mut x_compact_hit_lists,
+        &mut x_split_queries,
     )?;
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
@@ -7375,11 +7529,27 @@ fn run_resolved_in_pool(
             hit_list.sort_by_evalue();
         }
     }
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the same sort of the compact lists.
+    for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+        hit_list.sort_by_evalue();
+    }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
             &timing.prelim_merge_sort_ns,
             &timing.prelim_merge_sort_calls,
             merge_sort_start,
+        );
+    }
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the redo reads the off path's lists. With more than one
+    // thread its parallel paths read the lists of all queries, so all are expanded here; the
+    // one-thread loop below expands each query's list when it reaches it. The shadow mode
+    // compares every list here and redoes the off path's lists.
+    if x_prelim_compact == XPrelimCompact::Shadow || blastp_num_threads > 1 {
+        x_finish_compact_lists(
+            x_prelim_compact,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            &x_split_queries,
         );
     }
 
@@ -7555,14 +7725,9 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let kappa_parallel_query_indices: Vec<usize> = preliminary_hit_lists
-        .iter()
-        .enumerate()
-        .filter_map(|(q_idx, hit_list)| {
-            hit_list
-                .as_ref()
-                .filter(|hit_list| hit_list.hsplist_count > 0)
-                .map(|_| q_idx)
+    let kappa_parallel_query_indices: Vec<usize> = (0..preliminary_hit_lists.len())
+        .filter(|&q_idx| {
+            x_prelim_hsplist_count(&preliminary_hit_lists, &x_compact_hit_lists, q_idx) > 0
         })
         .collect();
     #[cfg(all(
@@ -7620,10 +7785,8 @@ fn run_resolved_in_pool(
             None
         } else {
             let q_idx = kappa_parallel_query_indices[0];
-            let match_jobs = preliminary_hit_lists[q_idx]
-                .as_ref()
-                .map(|hit_list| hit_list.hsplist_count)
-                .unwrap_or(0);
+            let match_jobs =
+                x_prelim_hsplist_count(&preliminary_hit_lists, &x_compact_hit_lists, q_idx);
             if blastp_should_parallelize_stage(
                 "kappa-match-redo",
                 args.num_threads,
@@ -8146,6 +8309,11 @@ fn run_resolved_in_pool(
             let ctx = &contexts[q_idx];
             let query_raw = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
             let query_nomask = query_nomask_sequence(ctx);
+            // EXPERIMENT (LOSAT_X_BPPCOMPACT): this query's list as the off path holds it
+            // (`x_prelim_compact.rs`).
+            if let Some(compact) = x_compact_hit_lists[q_idx].take() {
+                preliminary_hit_lists[q_idx] = Some(x_expand_hit_list(compact));
+            }
             let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
                 continue;
             };
@@ -8288,12 +8456,22 @@ fn run_resolved_in_pool(
             if x_prelim_free {
                 preliminary_hit_lists[q_idx] = None;
                 x_prelim_freed += 1;
+            } else if x_prelim_compact == XPrelimCompact::On {
+                // EXPERIMENT (LOSAT_X_BPPCOMPACT): the expanded list is a copy made for this
+                // query's redo; nothing reads it afterwards.
+                preliminary_hit_lists[q_idx] = None;
             }
         }
     }
 
     if x_prelim_free && timing_enabled {
         eprintln!("[TIMING] x_bppfree: freed_lists={x_prelim_freed}");
+    }
+    if x_prelim_compact == XPrelimCompact::On && timing_enabled {
+        eprintln!(
+            "[TIMING] x_bppcompact: expanded_lists={}",
+            x_expanded_lists() - x_expanded_at_start
+        );
     }
     let mut hit_lists = fill_results_from_compo_heaps(args.max_target_seqs, &mut redone_matches);
     if let Some(timing) = timing.as_ref() {
@@ -8911,7 +9089,12 @@ mod tests {
             Some(make_test_subject_result(2, 70)),
         ];
 
-        merge_blastp_subject_results_in_order(&mut preliminary_hit_lists, subject_results, 10);
+        merge_blastp_subject_results_in_order(
+            &mut preliminary_hit_lists,
+            &mut [None],
+            subject_results,
+            10,
+        );
 
         let hit_list = preliminary_hit_lists[0]
             .as_ref()

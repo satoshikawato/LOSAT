@@ -1,0 +1,116 @@
+# BLASTP 2.17.0+
+# Query: p01 first protein [Test organism]
+# Database: tests/seqdb/db/alias_nested
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+p01	p01	100.000	61	0	0	1	61	1	61	1.33e-44	127
+p01	p01	100.000	61	0	0	1	61	1	61	1.33e-44	127
+p01	p01	100.000	61	0	0	1	61	1	61	1.33e-44	127
+p01	p06	33.333	12	8	0	24	35	48	59	3.2	14.6
+p01	p06	33.333	12	8	0	24	35	48	59	3.2	14.6
+p01	p06	33.333	12	8	0	24	35	48	59	3.2	14.6
+# BLASTP 2.17.0+
+# Query: p02
+# Database: tests/seqdb/db/alias_nested
+# 0 hits found
+# BLASTP 2.17.0+
+# Query: p03 every letter of NCBIstdaa but the gap
+# Database: tests/seqdb/db/alias_nested
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+p03	p03	100.000	33	0	0	1	33	1	33	4.16e-22	68.6
+p03	p03	100.000	33	0	0	1	33	1	33	4.16e-22	68.6
+p03	p03	100.000	33	0	0	1	33	1	33	4.16e-22	68.6
+p03	p05	33.333	12	8	0	22	33	66	77	1.8	14.2
+p03	p05	33.333	12	8	0	22	33	66	77	1.8	14.2
+p03	p05	33.333	12	8	0	22	33	66	77	1.8	14.2
+# BLASTP 2.17.0+
+# Query: p04 lower case and ambiguity codes
+# Database: tests/seqdb/db/alias_nested
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+p04	p04	100.000	46	0	0	1	46	1	46	1.15e-31	93.6
+p04	p04	100.000	46	0	0	1	46	1	46	1.15e-31	93.6
+p04	p04	100.000	46	0	0	1	46	1	46	1.15e-31	93.6
+p04	p05	83.333	6	1	0	5	10	1	6	0.84	15.8
+p04	p05	83.333	6	1	0	5	10	1	6	0.84	15.8
+p04	p05	83.333	6	1	0	5	10	1	6	0.84	15.8
+# BLASTP 2.17.0+
+# Query: p05 a title longer than 127 bytes word00 word01 word02 word03 word04 word05 word06 word07 word08 word09 word10 word11 word12 word13 word14 word15 word16 word17 word18 word19
+# Database: tests/seqdb/db/alias_nested
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 15 hits found
+p05	p05	100.000	130	0	0	1	130	1	130	4.01e-102	277
+p05	p05	100.000	130	0	0	1	130	1	130	4.01e-102	277
+p05	p05	100.000	130	0	0	1	130	1	130	4.01e-102	277
+p05	p04	83.333	6	1	0	1	6	5	10	2.4	15.8
+p05	p04	83.333	6	1	0	1	6	5	10	2.4	15.8
+p05	p04	83.333	6	1	0	1	6	5	10	2.4	15.8
+p05	p03	33.333	12	8	0	66	77	22	33	7.0	14.2
+p05	p03	33.333	12	8	0	66	77	22	33	7.0	14.2
+p05	p03	33.333	12	8	0	66	77	22	33	7.0	14.2
+p05	p07	40.000	20	9	1	72	91	7	23	7.9	14.2
+p05	p07	40.000	20	9	1	72	91	7	23	7.9	14.2
+p05	p07	40.000	20	9	1	72	91	7	23	7.9	14.2
+p05	p10	36.842	19	12	0	54	72	184	202	8.1	15.0
+p05	p10	36.842	19	12	0	54	72	184	202	8.1	15.0
+p05	p10	36.842	19	12	0	54	72	184	202	8.1	15.0
+# BLASTP 2.17.0+
+# Query: p06 a title longer than 255 bytes token000 token001 token002 token003 token004 token005 token006 token007 token008 token009 token010 token011 token012 token013 token014 token015 token016 token017 token018 token019 token020 token021 token022 token023 token024 token025 token026 token027 token028 token029 token030 token031 token032 token033 token034 token035 token036 token037 token038 token039
+# Database: tests/seqdb/db/alias_nested
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 15 hits found
+p06	p06	100.000	88	0	0	1	88	1	88	8.08e-68	187
+p06	p06	100.000	88	0	0	1	88	1	88	8.08e-68	187
+p06	p06	100.000	88	0	0	1	88	1	88	8.08e-68	187
+p06	p10	22.951	61	42	2	19	77	212	269	3.0	15.4
+p06	p10	62.500	8	3	0	15	22	230	237	3.2	15.4
+p06	p10	28.000	25	18	0	38	62	77	101	4.7	15.0
+p06	p10	22.951	61	42	2	19	77	212	269	3.0	15.4
+p06	p10	62.500	8	3	0	15	22	230	237	3.2	15.4
+p06	p10	28.000	25	18	0	38	62	77	101	4.7	15.0
+p06	p10	22.951	61	42	2	19	77	212	269	3.0	15.4
+p06	p10	62.500	8	3	0	15	22	230	237	3.2	15.4
+p06	p10	28.000	25	18	0	38	62	77	101	4.7	15.0
+p06	p01	33.333	12	8	0	48	59	24	35	4.6	14.6
+p06	p01	33.333	12	8	0	48	59	24	35	4.6	14.6
+p06	p01	33.333	12	8	0	48	59	24	35	4.6	14.6
+# BLASTP 2.17.0+
+# Query: p07  two  spaces  and  punctuation: (a) [b] {c} 100% a=b;c|d
+# Database: tests/seqdb/db/alias_nested
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 9 hits found
+p07	p07	100.000	45	0	0	1	45	1	45	6.32e-33	96.7
+p07	p07	100.000	45	0	0	1	45	1	45	6.32e-33	96.7
+p07	p07	100.000	45	0	0	1	45	1	45	6.32e-33	96.7
+p07	p05	40.000	20	9	1	7	23	72	91	2.7	14.2
+p07	p05	40.000	20	9	1	7	23	72	91	2.7	14.2
+p07	p05	40.000	20	9	1	7	23	72	91	2.7	14.2
+p07	p10	30.435	23	16	0	3	25	144	166	8.5	13.1
+p07	p10	30.435	23	16	0	3	25	144	166	8.5	13.1
+p07	p10	30.435	23	16	0	3	25	144	166	8.5	13.1
+# BLASTP 2.17.0+
+# Query: p08 selenocysteine pyrrolysine
+# Database: tests/seqdb/db/alias_nested
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+p08	p08	100.000	46	0	0	1	46	1	46	4.80e-33	97.1
+p08	p08	100.000	46	0	0	1	46	1	46	4.80e-33	97.1
+p08	p08	100.000	46	0	0	1	46	1	46	4.80e-33	97.1
+# BLASTP 2.17.0+
+# Query: p09 stop inside
+# Database: tests/seqdb/db/alias_nested
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+p09	p09	100.000	51	0	0	1	51	1	51	1.57e-37	108
+p09	p09	100.000	51	0	0	1	51	1	51	1.57e-37	108
+p09	p09	100.000	51	0	0	1	51	1	51	1.57e-37	108
+# BLASTP 2.17.0+
+# Query: p10 last protein
+# Database: tests/seqdb/db/alias_nested
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 3 hits found
+p10	p10	100.000	300	0	0	1	300	1	300	0.0	636
+p10	p10	100.000	300	0	0	1	300	1	300	0.0	636
+p10	p10	100.000	300	0	0	1	300	1	300	0.0	636
+# BLAST processed 10 queries

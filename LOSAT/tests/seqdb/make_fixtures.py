@@ -203,6 +203,22 @@ def main():
     (work / "alias_titled.pal").write_bytes(
         b"# comment\r\n  TITLE\ta title\twith tabs  \r\n\r\nFUTURE_KEY ignored\r\n"
         b"DBLIST   prot_old\tprot_v4\r\nTITLE\tthe second TITLE line wins \r\n")
+    # NSEQ and LENGTH written by hand: the sums over prot_v4 and prot_old are 20 and 1602
+    # (alias_nseq, above). One too many, one too few, values that are not plain digits.
+    for name, nseq, length in [("alias_nseq_high", b"21", b"1602"), ("alias_length_low", b"20", b"1601"),
+                               ("alias_nseq_plus", b"+20", b"1602"), ("alias_nseq_exp", b"2e1", b"1602"),
+                               ("alias_length_space", b"20", b"1 602")]:
+        (work / f"{name}.pal").write_bytes(
+            b"TITLE hand-written sums\nDBLIST prot_v4 prot_old\nNSEQ " + nseq + b"\nLENGTH " + length + b"\n")
+    # Nested: alias_nseq (right values, 20 and 1602) and prot_mv (10 and 801) under an outer
+    # node with right values (30, 2403), then with wrong ones.
+    (work / "alias_sums_nested.pal").write_bytes(
+        b"TITLE nested sums\nDBLIST alias_nseq prot_mv\nNSEQ 30\nLENGTH 2403\n")
+    (work / "alias_sums_nested_bad.pal").write_bytes(
+        b"TITLE nested sums, outer wrong\nDBLIST alias_nseq prot_mv\nNSEQ 30\nLENGTH 2402\n")
+    # The inner node is wrong, the outer one has the key too (NCBI never reads the inner value).
+    (work / "alias_sums_inner_bad.pal").write_bytes(
+        b"TITLE nested sums, inner wrong\nDBLIST alias_nseq_high prot_mv\nNSEQ 31\nLENGTH 2403\n")
     (work / "alias_gilist.pal").write_bytes(b"TITLE filtered\nDBLIST prot_v4\nGILIST some.gil\n")
     (work / "alias_missing.pal").write_bytes(b"TITLE missing volume\nDBLIST prot_v4 no_such_volume\n")
     (work / "alias_loop_a.pal").write_bytes(b"DBLIST alias_loop_b\n")
@@ -221,7 +237,8 @@ def main():
     readable = [("prot_v4", "prot"), ("prot_v5", "prot"), ("nucl_v4", "nucl"), ("nucl_v5", "nucl"),
                 ("prot_mv", "prot"), ("nucl_mv", "nucl"), ("alias_nested", "prot"),
                 ("alias_titled", "prot"), ("prot_old", "prot"), ("alias_order", "prot"),
-                ("alias_emptyvol", "prot")]
+                ("alias_emptyvol", "prot"), ("alias_nseq", "prot"),
+                ("alias_sums_nested", "prot")]
     for name, dbtype in readable:
         info = run([bin_dir / "blastdbcmd", "-db", name, "-dbtype", dbtype, "-info"], work).decode("ascii")
         m = re.search(r"Database: (.*?)\n\t([\d,]+) sequences; ([\d,]+) total (?:residues|bases)\n\n"

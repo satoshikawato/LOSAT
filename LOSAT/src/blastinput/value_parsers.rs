@@ -210,6 +210,60 @@ pub fn ncbi_integer(value: &str) -> Result<i32, String> {
     i32::try_from(int8).map_err(|_| "Integer value is out of range".to_string())
 }
 
+/// A 64-bit integer argument as NCBI reads it (`CArg_Int8`, such as `-dbsize`): what
+/// `ncbi_integer` reads, without the range of `int`.
+///
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:351-360
+/// ```c++
+/// inline CArg_Int8::CArg_Int8(const string& name, const string& value)
+///     : CArg_String(name, value)
+/// {
+///     try {
+///         m_Integer = s_StringToInt8(value);
+///     } catch (const CException& e) {
+///         NCBI_RETHROW(e, CArgException, eConvert, s_ArgExptMsg(GetName(),
+///             "Argument cannot be converted", value));
+///     }
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:118-129
+/// ```c++
+/// Int8 s_StringToInt8(const string& value)
+/// {
+///     try {
+///         return NStr::StringToInt8(value);
+///     } catch (const CStringException&) {
+///         if (NStr::StartsWith(value, "0x", NStr::eNocase)) {
+///             return NStr::StringToInt8(value, 0, 16);
+///         } else {
+///             throw;
+///         }
+///     }
+/// }
+/// ```
+pub fn ncbi_int8(value: &str) -> Result<i64, String> {
+    match value.parse::<i64>() {
+        Ok(n) => Ok(n),
+        Err(_)
+            if value
+                .get(..2)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("0x")) =>
+        {
+            let digits = &value[2..];
+            if !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err("expected an integer".into());
+            }
+            if digits.is_empty() {
+                Ok(0)
+            } else {
+                i64::from_str_radix(digits, 16)
+                    .map_err(|_| "Integer value is out of range".to_string())
+            }
+        }
+        Err(_) => Err("expected an integer".into()),
+    }
+}
+
 /// A real argument as NCBI reads it (`CArg_Double`): the first character is a digit, a
 /// point or a sign, and the rest is what `strtod` reads. LOSAT reads the decimal forms,
 /// the signed infinities and NaN (`f64::from_str`) and glibc's `nan(n-char-sequence)`
@@ -1037,6 +1091,45 @@ mod tests {
             "7.0",
         ] {
             assert!(ncbi_integer(value).is_err(), "{value:?}");
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbiargs.cpp:118-129 (`s_StringToInt8`)
+    // An Int8 argument (`-dbsize`) reads what an integer argument reads, in 64 bits.
+    #[test]
+    fn int8_arguments_are_read_as_ncbi_reads_them() {
+        for (value, expected) in [
+            ("7", 7),
+            ("+7", 7),
+            ("-07", -7),
+            ("0", 0),
+            ("0x1F", 31),
+            ("0XaB", 171),
+            ("0x", 0),
+            ("3000000000", 3_000_000_000),
+            ("-3000000000", -3_000_000_000),
+            ("9223372036854775807", i64::MAX),
+            ("-9223372036854775808", i64::MIN),
+            ("0x7FFFFFFFFFFFFFFF", i64::MAX),
+        ] {
+            assert_eq!(ncbi_int8(value), Ok(expected), "{value}");
+        }
+        for value in [
+            "",
+            " 7",
+            "7 ",
+            "+",
+            "-0x5",
+            "0x5g",
+            "1_000",
+            "9223372036854775808",
+            "-9223372036854775809",
+            "0x8000000000000000",
+            "7.0",
+            "1e3",
+            "abc",
+        ] {
+            assert!(ncbi_int8(value).is_err(), "{value:?}");
         }
     }
 

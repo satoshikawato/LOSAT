@@ -259,6 +259,79 @@ pub fn tabular_subject_id(
     Ok(replaced.to_vec())
 }
 
+/// The subject ID of the tabular formats (`sseqid`, `sacc`, `saccver`) of a database
+/// sequence without parsed Seq-ids (its only id is `gnl|BL_ORD_ID|n`) with the stored
+/// title `title`: the first word of the title that `GenerateDefline` makes of it
+/// (flags 0), which `GetSeqIdList` puts in the place of the id.
+///
+/// `Err` names what LOSAT does not write as NCBI: a title whose encoding NCBI cannot
+/// guess (`GenerateDefline` throws), a title of punctuation that NCBI's
+/// `x_CleanAndCompress` reads past the end of (NCBI crashes), and a title whose generated
+/// first word is empty (NCBI keeps the general id and writes it in two forms,
+/// `gnl|BL_ORD_ID|n` for `sseqid` and `BL_ORD_ID:n` for `sacc` and `saccver`).
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-242
+/// ```c++
+///     ITERATE(vector< CConstRef<CSeq_id> >, itr, original_seqids) {
+///         CRef<CSeq_id> next_seqid(new CSeq_id());
+///         string id_token = NcbiEmptyString;
+///
+///         if (((*itr)->IsGeneral() &&
+///             (*itr)->AsFastaString().find("gnl|BL_ORD_ID")
+///             != string::npos) ||
+/// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
+///             vector<string> title_tokens;
+///             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
+///             if (defline != NcbiEmptyString) {
+///                 id_token =
+///                     NStr::Split(defline, " ", title_tokens)[0];
+///             }
+///         }
+///         if (id_token != NcbiEmptyString) {
+///             // Create a new local id with a label containing the extracted
+///             // token and save it in the next_seqid instead of the original
+///             // id.
+///             CObject_id* obj_id = new CObject_id();
+///             obj_id->SetStr(id_token);
+///             next_seqid->SetLocal(*obj_id);
+///         } else {
+///             next_seqid->Assign(**itr);
+///         }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:522-532
+/// ```c++
+/// void CBlastTabularInfo::SetSubjectId(const CBioseq_Handle& bh)
+/// {
+///     m_SubjectId.clear();
+///
+///     vector<CConstRef<objects::CSeq_id> > subject_id_list;
+///     ITERATE(CBioseq_Handle::TId, itr, bh.GetId()) {
+///     	CRef<CSeq_id> next_id = s_ReplaceLocalId(bh, itr->GetSeqId(), !m_ParseSubjectDefline );
+///     	subject_id_list.push_back(next_id);
+///     }
+///     CShowBlastDefline::GetSeqIdList(bh, subject_id_list, m_SubjectId);
+/// }
+/// ```
+/// The Bioseq of a database sequence carries its stored title as its title descriptor
+/// (seqdbvol.cpp:1445-1463) and no source, so `GenerateDefline` reads the title as it
+/// reads the one of a FASTA record (`generate_defline`).
+pub fn database_subject_id(title: &[u8], protein: bool) -> Result<Vec<u8>, &'static str> {
+    let defline = generate_defline(title, protein, false)
+        .map_err(|UnknownEncoding| "in no encoding that NCBI BLAST+ recognises")?;
+    if defline.reads_past_end {
+        return Err(
+            "of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes)",
+        );
+    }
+    let token = first_word(&defline.text);
+    if token.is_empty() {
+        return Err(
+            "from which NCBI BLAST+ makes no subject id (it writes gnl|BL_ORD_ID|n and BL_ORD_ID:n)",
+        );
+    }
+    Ok(token.to_vec())
+}
+
 /// `NStr::Split(text, " ", tokens)[0]`: the bytes before the first space.
 fn first_word(text: &[u8]) -> &[u8] {
     let end = text
@@ -1155,6 +1228,81 @@ fn replace_in_place(src: &[u8], search: &[u8], replace: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::blastinput::fasta_reader::{read_all, FastaInputSource, ReaderConfig};
+
+    // NCBI BLAST+ 2.17.0 `blastp -db DB -outfmt "6 sseqid sacc saccver stitle"
+    // -num_threads 1` on databases that makeblastdb made (without -parse_seqids) from
+    // protein records with these titles (campaign dbsearch-20261012,
+    // scripts/db3_compare.py: cases shapes.titles.ids and shapes.punct*.ids): the three
+    // id columns are the first word of the title that `GenerateDefline` makes.
+    #[test]
+    fn database_subject_id_is_the_first_word_of_the_generated_title() {
+        for (title, id) in [
+            (
+                "sp|P69905|HBA_HUMAN Hemoglobin subunit alpha OS=Homo sapiens OX=9606 GN=HBA1 PE=1 SV=2",
+                "sp|P69905|HBA_HUMAN",
+            ),
+            (
+                "gi|12345|ref|NP_000549.1| hemoglobin subunit alpha [Homo sapiens]",
+                "gi|12345|ref|NP_000549.1|",
+            ),
+            ("lcl|local_id a local id as first word", "lcl|local_id"),
+            ("Subject_1 a word like a local subject id", "Subject_1"),
+            ("Query_1 a word like a local query id", "Query_1"),
+            ("gnl|BL_ORD_ID|7 a word like an ordinal id", "gnl|BL_ORD_ID|7"),
+            // The alignment title (flags 0) loses the TPA and TSA prefixes.
+            ("TPA: a third party annotation prefix", "a"),
+            ("TPA_exp: experimental prefix", "experimental"),
+            ("TSA: transcriptome shotgun prefix", "transcriptome"),
+            ("MAG: metagenome prefix", "metagenome"),
+            ("UNVERIFIED: unverified prefix", "unverified"),
+            ("tpa: lower case prefix", "lower"),
+            (">leading greater-than sign", ">leading"),
+            (". a period as first word", "."),
+            ("- a hyphen as first word", "-"),
+            ("(parenthesis first word)", "(parenthesis"),
+            ("ampersand &amp; entity", "ampersand"),
+            ("a,b comma inside", "a,b"),
+            ("two  spaces  inside", "two"),
+            ("word", "word"),
+            // An empty title is `unnamed protein product`.
+            ("", "unnamed"),
+            (".", "."),
+            (",", ","),
+            ("~", "~"),
+            (". .", "."),
+            ("~ ~", "~"),
+            (", x", ","),
+            ("x ,", "x"),
+            (",;,x y", ",;,x"),
+        ] {
+            assert_eq!(
+                database_subject_id(title.as_bytes(), true).as_deref(),
+                Ok(id.as_bytes()),
+                "{title:?}"
+            );
+        }
+    }
+
+    // The same oracle: a title of one space keeps the general id (NCBI writes
+    // `gnl|BL_ORD_ID|0` for sseqid and `BL_ORD_ID:0` for sacc and saccver), and NCBI
+    // dies of SIGSEGV on the titles `, ,` and `; ;` (exit status 139): LOSAT names them.
+    #[test]
+    fn database_subject_id_names_the_titles_that_it_does_not_write() {
+        assert!(database_subject_id(b" ", true)
+            .unwrap_err()
+            .contains("makes no subject id"));
+        for title in [", ,", "; ;"] {
+            assert!(
+                database_subject_id(title.as_bytes(), true)
+                    .unwrap_err()
+                    .contains("x_CleanAndCompress reads past the end"),
+                "{title:?}"
+            );
+        }
+        assert!(database_subject_id(b"caf\x81", true)
+            .unwrap_err()
+            .contains("in no encoding"));
+    }
 
     /// The title that the FASTA reader gives a record with the defline `defline`.
     fn reader_title(defline: &[u8]) -> Vec<u8> {

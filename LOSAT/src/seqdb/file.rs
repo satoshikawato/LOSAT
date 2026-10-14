@@ -32,11 +32,73 @@ impl DbFile {
     //         NCBI_THROW(CSeqDBException, eFileErr, msg);
     //     }
     // ```
-    /// Opens `path` for reading. A file that cannot be opened is NCBI's
-    /// "Error: File (...) not found.".
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbfile.hpp:93-105
+    // ```c++
+    //     bool Open(const CSeqDB_Path & name)
+    //     {
+    //         _ASSERT(name.Valid());
+    //
+    //         // FIXME: should use path even in atlas code
+    //         bool success = m_Atlas.GetFileSizeL(name.GetPathS(), m_Length);
+    //
+    //         if (success) {
+    //             m_FileName = name.GetPathS();
+    //         }
+    //
+    //         return success;
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5932-5946
+    // ```c++
+    //         // Open file
+    //         errno = 0;
+    //         m_Handle->hMap = NcbiSys_open(_T_XCSTRING(m_FileName), m_Attrs->file_access);
+    //         if ( m_Handle->hMap < 0 ) {
+    //             errmsg = NcbiSys_strerror(errno);
+    //             break;
+    //         }
+    // #endif
+    //         // Success
+    //         return;
+    //     }
+    //     // Error: close and cleanup
+    //     x_Close();
+    //     NCBI_THROW(CFileException, eMemoryMap,
+    //                "CMemoryFile: Cannot memory map file '" + m_FileName + "':" + errmsg);
+    // ```
+    // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:709-720
+    // ```c++
+    //             try {
+    //                 m_MappedFile = m_Atlas.GetMemoryFile(m_Filename);
+    //             }
+    //             catch (const CFileException& e) {
+    //                 if (e.GetErrCode() == CFileException::eMemoryMap &&
+    //                     NStr::Find(e.GetMsg(), "Too many open files") != NPOS) {
+    //                     NCBI_THROW(CSeqDBException, eTooManyOpenFiles, e.GetMsg());
+    //                 }
+    //                 else {
+    //                     NCBI_THROW(CSeqDBException, eMemoryMappingFailure, e.GetMsg());
+    //                 }
+    //             }
+    // ```
+    // NCBI first asks whether the file exists (`GetFileSizeL`: `stat`
+    // succeeds and names a regular file, quoted at `alias::exists`) and gives
+    // "not found" otherwise; it then opens the file to map it, and an `open`
+    // that fails is its memory-mapping error. LOSAT takes the same two steps
+    // with a plain `open` in place of the mapping.
+    /// Opens `path` for reading. A path that is no regular file is NCBI's
+    /// "Error: File (...) not found."; a regular file that cannot be opened is
+    /// [`SeqDbError::Open`].
     pub fn open(path: &Path) -> Result<Self, SeqDbError> {
-        let file = File::open(path).map_err(|_| {
-            SeqDbError::NotFound(format!("Error: File ({}) not found.", path.display()))
+        if !super::alias::exists(path) {
+            return Err(SeqDbError::NotFound(format!(
+                "Error: File ({}) not found.",
+                path.display()
+            )));
+        }
+        let file = File::open(path).map_err(|source| SeqDbError::Open {
+            path: path.to_path_buf(),
+            source,
         })?;
         let len = file
             .metadata()

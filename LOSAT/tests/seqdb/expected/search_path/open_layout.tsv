@@ -1,0 +1,48 @@
+dir	cwd
+dir	d
+dir	d/closed
+dir	rec
+dir	rec/q
+copy	prot_v4.pin	d/nopin.pin
+copy	prot_v4.phr	d/nopin.phr
+copy	prot_v4.psq	d/nopin.psq
+copy	prot_v4.pin	d/vol.pin
+copy	prot_v4.phr	d/vol.phr
+copy	prot_v4.psq	d/vol.psq
+text	d/nopal.pal	TITLE unreadable alias file\nDBLIST vol\n
+copy	prot_v4.pin	d/nopsq.pin
+copy	prot_v4.phr	d/nopsq.phr
+copy	prot_v4.psq	d/nopsq.psq
+copy	prot_v4.pin	d/nophr.pin
+copy	prot_v4.phr	d/nophr.phr
+copy	prot_v4.psq	d/nophr.psq
+text	d/al_nopin.pal	TITLE alias of an unreadable index\nDBLIST nopin\n
+copy	prot_v4.pin	d/closed/db.pin
+copy	prot_v4.phr	d/closed/db.phr
+copy	prot_v4.psq	d/closed/db.psq
+text	d/rec_a.pal	DBLIST q/rec_b\n
+text	rec/q/rec_b.pal	DBLIST rec_a\n
+copy	prot_mv.pal	d/prot_mv.pal
+copy	prot_mv.00.pin	d/prot_mv.00.pin
+copy	prot_mv.00.phr	d/prot_mv.00.phr
+copy	prot_mv.00.psq	d/prot_mv.00.psq
+copy	prot_mv.01.pin	d/prot_mv.01.pin
+copy	prot_mv.01.phr	d/prot_mv.01.phr
+copy	prot_mv.01.psq	d/prot_mv.01.psq
+copy	prot_mv.02.pin	d/prot_mv.02.pin
+copy	prot_mv.02.phr	d/prot_mv.02.phr
+copy	prot_mv.02.psq	d/prot_mv.02.psq
+copy	prot_mv.03.pin	d/prot_mv.03.pin
+copy	prot_mv.03.phr	d/prot_mv.03.phr
+copy	prot_mv.03.psq	d/prot_mv.03.psq
+copy	prot_mv.04.pin	d/prot_mv.04.pin
+copy	prot_mv.04.phr	d/prot_mv.04.phr
+copy	prot_mv.04.psq	d/prot_mv.04.psq
+copy	prot_mv.05.pin	d/prot_mv.05.pin
+copy	prot_mv.05.phr	d/prot_mv.05.phr
+copy	prot_mv.05.psq	d/prot_mv.05.psq
+mode	d/nopin.pin	000
+mode	d/nopal.pal	000
+mode	d/nopsq.psq	000
+mode	d/nophr.phr	000
+mode	d/closed	000

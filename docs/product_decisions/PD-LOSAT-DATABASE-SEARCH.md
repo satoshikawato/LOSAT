@@ -1,15 +1,18 @@
 # Product Decision: database search (`-db`)
 
 - Decision ID: `PD-LOSAT-DATABASE-SEARCH`
-- Version: 1.0
-- Date: 2026-10-12
+- Version: 1.1
+- Date: 2026-10-13 (version 1.0: 2026-10-12)
 - Status: Accepted by the maintainer on 2026-10-12, after the probe and design of the
-  database search campaign (decisions P1 to P4 below, each as recommended). One decision
-  is open (section "Open decision"); the maintainer takes it before stage DB-3.
-- Implementation status: stage DB-1 added the database reader (`LOSAT/src/seqdb`); no
-  search program calls it yet. Stage DB-2 adds the subcommand `LOSAT makedb`
-  (`LOSAT/src/writedb`, section "What `LOSAT makedb` of stage DB-2 writes and rejects").
-  Until a stage adds them, `-db`, `-dbsize` and `-searchsp` stay explicit rejections.
+  database search campaign (decisions P1 to P4 below, each as recommended). The decision
+  that version 1.0 left open, the thread count of the parity target, was taken by the
+  maintainer on 2026-10-13 (P1.1).
+- Implementation status: stage DB-1 added the database reader (`LOSAT/src/seqdb`). Stage
+  DB-2 added the subcommand `LOSAT makedb` (`LOSAT/src/writedb`, section "What `LOSAT makedb`
+  of stage DB-2 writes and rejects"). Stage DB-3 adds `-db` and `-dbsize` to BLASTP (section
+  "What BLASTP `-db` of stage DB-3 does and rejects"). `-searchsp` stays an explicit
+  rejection until a stage of its own, and the other programs keep `-db` and `-dbsize` as
+  rejections until their stages (DB-4, DB-5).
 
 ## Scope
 
@@ -41,6 +44,23 @@ database files, byte for byte, for outfmt 0, 6 and 7. `-db` and `-subject` of on
 therefore differ exactly as NCBI's do. This replaces the earlier wording "E-values are
 computed with the size of the whole database", which `-subject` already meets.
 
+### P1.1. Thread count of the parity target (2026-10-13)
+
+NCBI's own `-db` output can depend on `-num_threads`. With composition-based statistics,
+blastp ends the redo of a query early by the hit lists of its query batch, and with more
+than one thread NCBI keeps one set of hit lists per thread. Measured: a random
+10,500-residue query followed by PUR4_HUMAN against Swiss-Prot gives 42 different output
+rows at 8 threads and at 1 thread. P1 names "NCBI `-db` on the same database" without a
+thread count.
+
+Decision: LOSAT's `-db` reproduces NCBI `-db` run with `-num_threads 1`, and LOSAT gives
+the same output at every thread count.
+
+- NCBI's threaded redo (one set of hit lists per thread) is not reproduced.
+- Comparison runs of NCBI `-db` use `-num_threads 1` and state the thread count.
+- "LOSAT's output at 1, 2, 4 and 8 threads is the same" is a gate of every stage that adds
+  `-db` to a program.
+
 ### P2. Database format
 
 A LOSAT database is an NCBI BLAST database: the volume layout that makeblastdb writes.
@@ -68,19 +88,6 @@ files that filter or replace the statistics, and several databases in one `-db` 
 second step. Until then LOSAT rejects them explicitly; it never searches such a database
 with part of its data ignored.
 
-## Open decision (the maintainer's, before stage DB-3)
-
-NCBI's own `-db` output can depend on `-num_threads`. With composition-based statistics,
-blastp ends the redo of a query early by the hit lists of its query batch, and with more
-than one thread NCBI keeps one set of hit lists per thread. Measured: a random
-10,500-residue query followed by PUR4_HUMAN against Swiss-Prot gives 42 different output
-rows at 8 threads and at 1 thread. P1 names "NCBI `-db` on the same database" without a
-thread count.
-
-To decide: which NCBI thread count LOSAT's `-db` reproduces. Recommendation of the
-campaign (not a decision): NCBI with one thread, at every LOSAT thread count, as `-subject`
-does today. Comparisons with NCBI state the thread count in the meantime.
-
 ## Not part of this document
 
 - LOSAT Web taking a database as engine input (accepted on the same day) is written into
@@ -99,9 +106,9 @@ is an explicit error of `LOSAT/src/seqdb`:
 
 | Rejected | Why |
 | --- | --- |
-| A header with a Seq-id other than `gnl|BL_ORD_ID|n` | parsed Seq-ids (P4); checked on the first sequence of every volume when the database is opened |
+| A header with a Seq-id other than `gnl|BL_ORD_ID|n` | parsed Seq-ids (P4); checked on the first sequence of every volume when the database is opened, and at every header read after that |
 | Alias keys `GILIST`, `TILIST`, `SEQIDLIST`, `TAXIDLIST`, `OIDLIST`, `OID_MASK_TYPE`, `FIRST_OID`, `LAST_OID`, `MEMB_BIT`, `MASKLIST`, `VDBLIST` | filters (P4) |
-| Alias keys `NSEQ`, `LENGTH`, `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH` | they replace the values behind the statistics (second step) |
+| Alias keys `STATS_NSEQ`, `STATS_TOTLEN`, `MIN_SEQ_LENGTH`; `NSEQ` or `LENGTH` whose value is not the number of sequences or the total length of the alias file's databases | they replace the values behind the statistics (second step). `NSEQ` and `LENGTH` equal to those sums, as `blastdb_aliastool -dblist` writes them, change nothing in NCBI and are read (since stage DB-3) |
 | A name that lists several databases | one database per search (P4) |
 | A volume listed more than once, a group alias file (`index.alx`) in a directory, two volumes of one name in different directories | NCBI derives counts or the volume order from them in ways the reader does not reproduce |
 | Column files of a volume (mask data of `makeblastdb -mask_data`) | not read |
@@ -111,9 +118,12 @@ database, and a version 5 volume whose LMDB file is missing.
 
 Left unread without an error: the contents of the LMDB file and the id and taxonomy files of
 a version 5 database, which serve lookups by id or taxonomy only (NCBI also compares the
-LMDB file's volume list with the volumes; the reader does not). The reader looks for a
-database at the given path; NCBI's search path (`BLASTDB`, `.ncbirc`) belongs to the stage
-that adds `-db`.
+LMDB file's volume list with the volumes; the reader does not). Since stage DB-3 a `-db`
+name is looked up along NCBI's search path (the current directory, then `BLASTDB`, then
+`[BLAST] BLASTDB` of `.ncbirc`), with NCBI's texts when it is not found. Not ported, each an
+error or a difference that a test records: group alias files (`index.alx`), several names
+in one `-db`, index files cut short, NCBI's threshold of open files and its warning at
+1,024 links, escapes in registry values.
 
 ## What `LOSAT makedb` of stage DB-2 writes and rejects
 
@@ -152,7 +162,7 @@ Removal of an existing database and the paths of the output:
   file. Other behaviour of makeblastdb is kept: the existing database is removed before the
   input is read, so a failing build also removes it.
 - A volume that an existing alias file names and that is found only through `BLASTDB` or
-  `.ncbirc` is not removed (the search path belongs to the stage that adds `-db`).
+  `.ncbirc` is not removed (`LOSAT makedb` does not use the search path of `-db`).
 - Directories that makeblastdb creates get mode 0755; LOSAT does the same on Unix only.
 
 Errors that makeblastdb does not detect, or detects elsewhere:
@@ -196,6 +206,55 @@ and with `LOSAT makedb` alike: NCBI opens volumes in the sorted order of their n
 the names makeblastdb gives then (`db.0010`, `db.00100`, `db.00101`, ...) do not sort by
 number. `LOSAT makedb` writes the same names and LOSAT's reader opens them in NCBI's order.
 
+## What BLASTP `-db` of stage DB-3 does and rejects
+
+`LOSAT blastp -db NAME` searches a protein database of the reader above and gives the output
+of NCBI BLAST+ 2.17.0 `blastp -db NAME -num_threads 1` for outfmt 0, 6 and 7, the same bytes
+at every `-num_threads` (P1, P1.1). The `-subject` path is unchanged; both paths run the same
+search code with a different subject source.
+
+- Statistics: the number of sequences and the total length of the database, and 10 as the
+  shortest subject length behind the hit-saving cutoff (a database always answers 10;
+  `-subject` answers the shortest subject of the set, at least 10). This is why `-db` and
+  `-subject` of the same sequences can differ near the cutoff, in NCBI and in LOSAT alike.
+- `-dbsize N` (NCBI's `Int8`) for `-db` and `-subject`, with NCBI's meaning: any value but 0
+  replaces the database length in the Gumbel parameters, a value above 0 also in the
+  effective lengths.
+- The database is read in blocks of about 1 MiB. With one thread the blocks are searched in
+  order; with more, each worker starts a block from the state the one-thread order has
+  there, and the results are merged in database order. During the search the memory taken
+  by the database is its index (12 bytes per sequence) and the blocks in work; afterwards
+  only the sequences of the subjects in the hit lists and the titles of the reported ones
+  are read.
+- Residues: a stored `O` is read as `X` for the search and as `O` for the composition-based
+  redo (NCBI compares the stored bytes there); `U`, `B`, `Z`, `J`, `*` as stored.
+- Reports: the `Database:` lines of outfmt 0 (title, counts, `Posted date`), `>` and the
+  stored title, subject ids made from the title as NCBI makes them (`gnl|BL_ORD_ID|n` is
+  never shown), `# Database:` of outfmt 7 with the `-db` value as given.
+- Errors: NCBI's texts and exit statuses for a database that is not found or cannot be
+  read, at the point where NCBI reports them (a header file is first read when the reports
+  of a query batch are made).
+- `-db` with `-subject` or `-subject_loc` is a usage error (LOSAT's parser text and exit
+  status 2; NCBI prints its usage and exits 1). LOSAT Web rejects `-db` until stage DB-7.
+
+Rejected explicitly (NCBI runs these, or crashes, or LOSAT cannot reproduce what it does):
+
+| Rejected | Why |
+| --- | --- |
+| `-searchsp` | NCBI then uses a different statistics path (`OLD_FSC`, no Gumbel block); a stage of its own |
+| A database sequence with a gap residue (`-`, stored by makeblastdb), a byte above the protein alphabet, or a sequence not between two NUL bytes | NCBI's `-db` never aligns a stored gap and its formatter counts it as a gap; not reproduced |
+| A database sequence with more or fewer than one definition line | makeblastdb without `-parse_seqids` writes one; several need the parsed-Seq-id rules (P4) |
+| A reported subject whose title gives no subject id (a title of spaces: NCBI shows `gnl|BL_ORD_ID|n`), or whose title NCBI's cleaner reads past (titles like `, ,`: NCBI crashes) | tabular formats, and outfmt 0 for the second |
+| A reported title with a raw byte outside ' '..'~' in the header file | NCBI prints `#` and a warning a number of times that depends on the format and the field |
+| `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
+| A database of more letters than the target's `usize` (32-bit targets) | |
+| A database that cannot be searched, when the first query batch holds invalid queries only | NCBI would report that batch first; not reproduced |
+| A registry value `[BLAST] BLASTDB` that LOSAT does not read as NCBI does | |
+
+Known differences that remain: the reader's (section above), and a version 5 database
+copied under another name, which NCBI refuses (`Input db vol does not match lmdb vol`) and
+LOSAT searches.
+
 ## Evidence
 
 Design and measurements of 2026-10-12 are kept outside the repository by the campaign
@@ -203,4 +262,9 @@ Design and measurements of 2026-10-12 are kept outside the repository by the cam
 `LOSAT/src/seqdb/tests.rs` with fixtures written by NCBI BLAST+ 2.17.0 under
 `LOSAT/tests/seqdb`. The writer's tests are in `LOSAT/src/writedb` (`tests.rs`,
 `fasta_source/tests.rs`) with runs of makeblastdb 2.17.0 recorded in the generated tables
-beside them.
+beside them. The tests of `-db` are frozen NCBI outputs replayed by
+`LOSAT/tests/db_search_fixtures.py` (rows in `LOSAT/tests/db_search_manifest.tsv`, inputs in
+`LOSAT/tests/db_search`, outputs in `LOSAT/tests/fixtures/db_search`; run by
+`ci_fast_regressions.py` at 1 and 4 threads), the search-path cases recorded from NCBI in
+`LOSAT/tests/seqdb/expected/search_path`, and the unit tests of
+`LOSAT/src/algorithm/blastp/blast_engine/database.rs`.

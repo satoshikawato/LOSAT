@@ -1,0 +1,19 @@
+# BLASTP 2.17.0+
+# Query: YP_009220551.1 ICP11/P9 [White spot syndrome virus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+YP_009220551.1	BDT63579.1	35.484	31	14	1	19	49	2753	2777	3.2	19.6
+YP_009220551.1	BDT63568.1	85.714	7	1	0	3	9	137	143	7.7	18.5
+# BLASTP 2.17.0+
+# Query: YP_009220614.1 envelope protein [White spot syndrome virus]
+# Database: tests/db_search/paja
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+YP_009220614.1	BDT63571.1	33.333	30	20	0	43	72	30	59	0.84	23.1
+YP_009220614.1	BDT63503.1	26.531	49	30	2	101	143	1173	1221	5.3	20.8
+# BLASTP 2.17.0+
+# Query: nohit a query without hits
+# Database: tests/db_search/paja
+# 0 hits found
+# BLAST processed 3 queries

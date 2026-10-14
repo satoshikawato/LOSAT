@@ -519,6 +519,34 @@ mod tests {
         }
     }
 
+    // LOSAT Web gives the engine subject records: BLASTP's `-db` (a database read from
+    // files, CLI only until LOSAT Web takes a database) is rejected by `validate` and by
+    // `run`, before any search.
+    #[test]
+    fn a_database_search_is_rejected() {
+        let words = ["blastp", "-query", "q", "-db", "swissprot"];
+        let error = validate(&words).unwrap_err();
+        assert_eq!(
+            error,
+            "-db (a database search) is not supported by LOSAT Web yet"
+        );
+        let protein = b"MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQ";
+        let query = [FastaRecord::new("Query_1", b"q", protein)];
+        let subject = [FastaRecord::new("Subject_1", b"s", protein)];
+        assert_eq!(
+            run(&words, &query, &subject).unwrap_err(),
+            "-db (a database search) is not supported by LOSAT Web yet"
+        );
+        // `-db` with `-subject` is the parser's conflict, as on the command line.
+        let both = ["blastp", "-query", "q", "-subject", "s", "-db", "swissprot"];
+        assert!(validate(&both).unwrap_err().contains("cannot be used with"));
+        // `-dbsize` is an option of the search: accepted with the subject records.
+        validate(&[
+            "blastp", "-query", "q", "-subject", "s", "-dbsize", "1000000",
+        ])
+        .unwrap();
+    }
+
     // The HSP records give the registered index of a query where `-query_loc` skips
     // an earlier record (its interval starts past its end), and records without residues
     // are registered records too.

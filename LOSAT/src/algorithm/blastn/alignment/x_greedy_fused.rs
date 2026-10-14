@@ -73,8 +73,9 @@
 //!   of that diagonal and the seed are not written, as in C). The outputs `seq1_align_len`,
 //!   `seq2_align_len` and the seed keep the values of their last update in every case.
 //!
-//! The variables are read once. `LOSAT_X_GREEDYFUSE` (off unless set to any value; not in the
-//! strict set, `utils/xswitch.rs`) runs this module. `LOSAT_X_GREEDYFUSESHADOW` (implies it) runs
+//! The variables are read once. `LOSAT_X_GREEDYFUSE` (a switch of the strict set,
+//! `utils/xswitch.rs`: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) runs this
+//! module. `LOSAT_X_GREEDYFUSESHADOW` (set to any value; not in the strict set; implies it) runs
 //! this module on copies of the rows, of `max_score` and of the outputs, then the reference
 //! (`blast_greedy_align` again, from its start, with this module off for that call), and panics
 //! unless the return value, both align lengths, the seed, `fence_hit`, both rows and `max_score`
@@ -108,9 +109,10 @@ thread_local! {
 // No NCBI counterpart: the number of calls the shadow compared (relaxed; it orders nothing).
 static X_SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
 
-/// No NCBI counterpart: reads LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW once (off unless set
-/// to any value; not in the strict set). 0 = the ported loop, 1 = this module, 2 = both and
-/// compare; SHADOW wins. It chooses a LOSAT code path and changes no value NCBI computes.
+/// No NCBI counterpart: reads LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW once.
+/// `LOSAT_X_GREEDYFUSE` is a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and
+/// it is not set. `LOSAT_X_GREEDYFUSESHADOW` is not: it counts when set to any value. 0 = the
+/// ported loop, 1 = this module, 2 = both and compare; SHADOW wins. It chooses a LOSAT code path and changes no value NCBI computes.
 fn x_greedy_fuse_mode() -> u8 {
     #[cfg(test)]
     if let Some(mode) = X_GREEDY_FUSE_TEST_MODE.with(Cell::get) {
@@ -120,7 +122,7 @@ fn x_greedy_fuse_mode() -> u8 {
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_GREEDYFUSESHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_GREEDYFUSE").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_GREEDYFUSE") {
             1
         } else {
             0

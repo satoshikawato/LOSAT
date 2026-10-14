@@ -78,9 +78,9 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 48 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
-`LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK` and `LOSAT_X_SEEDRELEASE` joined), and their
-variables mean (`LOSAT/src/utils/xswitch.rs`):
+strict set are on by default (43 then, 49 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+`LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE` and `LOSAT_X_GREEDYFUSE`
+joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -110,7 +110,7 @@ variables mean (`LOSAT/src/utils/xswitch.rs`):
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 48 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 49 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -136,6 +136,7 @@ export LOSAT_X_PAIRLUT=1 LOSAT_X_HSPINPLACE=1
 export LOSAT_X_SEEDBUCKET=1
 export LOSAT_X_TBNOIDCHUNK=1
 export LOSAT_X_SEEDRELEASE=1
+export LOSAT_X_GREEDYFUSE=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -177,6 +178,13 @@ and joined the set on 2026-10-13. It lowers the peak memory of TBLASTX further: 
 only the seed stage reads are freed before the HSP list of a query batch's last subject is
 merged and linked. It changes no value and no order of computation, acts on every TBLASTX path
 (the unit path of `LOSAT_X_PAIRPAR` and the scan loop) and needs no other switch.
+
+`LOSAT_X_GREEDYFUSE` was added after the default changed, as a switch that was off unless set,
+and joined the set on 2026-10-14. It runs the preliminary score-only greedy alignment of megablast
+as one fused loop over distances. It changes no value and no order of computation, acts on
+the blastn searches whose preliminary stage takes the score-only greedy alignment on an unpacked
+subject (`LOSAT_X_GREEDYPRELIM`, which is in the set), and its shadow
+`LOSAT_X_GREEDYFUSESHADOW` stays outside the set.
 
 What runs per target:
 
@@ -231,7 +239,7 @@ Same values, faster computation:
   `LOSAT_X_GREEDYPRELIMSHADOW=1` (implies the switch) also runs the packed call and stops on the
   first difference; at exit `[X_SHADOW] GREEDYPRELIM calls_compared=N`. With `LOSAT_X_STATS=1`:
   `[X_STATS] GREEDYPRELIM calls= subjects_unpacked= bytes_unpacked=`.
-- `LOSAT_X_GREEDYFUSE=1` (not in the strict set; off unless set) the score-only megablast greedy
+- `LOSAT_X_GREEDYFUSE=1` (in the strict set since 2026-10-14; `=0` turns it off) the score-only megablast greedy
   alignment on an unpacked subject (the preliminary stage with `LOSAT_X_GREEDYPRELIM`): the whole
   loop over distances of `BLAST_GreedyAlign` in one function, one pass over the diagonals of a
   distance, eight bases per slide step, the same cells of the two rolling rows and of `max_score`
@@ -392,6 +400,27 @@ Rebuilding less:
   both loops, so its tables are always compared.
   One line at exit: `[X_SHADOW] BPSEED subjects= initial_hsps= identical`, with
   `(tables not compared for N subjects shorter than a word)` when there were such subjects.
+- `LOSAT_X_BPCLUT=1` (BLASTP `-task blastp-fast`, speed and memory; not in the strict set: off unless set, to
+  any value, and `LOSAT_X_DEFAULT` does not touch it) the compressed lookup table (`CompressedAaLookupTable`) is
+  built flat in three passes (`tblastx/lookup/x_clut_direct.rs`, exactness argument in its header): a count pass
+  makes the reference builder's appends in its order (the words of `add_word_hits`, the neighbors' last letter
+  taken as a prefix of the sorted row) and records the cell of each append; a layout pass places each cell's hits
+  in one slice of one array (an array of starts, and the reference's PV array and longest chain from the counts);
+  a fill pass writes the hits in the order of their appends and then moves the hits of each cell of more than 5
+  to NCBI's scan order (`x_emission_position`: the first three, the overflow cell filled last, then the older
+  cells newest first). The test for NCBI's overflow banks (the per-batch refusal) is the reference's, with the
+  same message. Each block of `LOSAT_X_BPQBLOCK` builds its own flat table. The scans read a cell as its slice:
+  the offset-pair scan (`scan_subject`'s statements) when `LOSAT_X_BPSEED` is off, the fused loop
+  (`blastp/x_seed_fused_clut.rs`) when it is on. The table holds 4 bytes per hit plus 4 per backbone cell (the
+  reference: 32 bytes per backbone cell plus 8 per overflowed hit), and its build holds another 4 bytes per hit.
+  Measured 2026-10-14 on the WSL machine (blastp-fast, 2M query letters x 1M subject letters,
+  `LOSAT_X_BPQBLOCK=20000` and `LOSAT_X_BPSEED=1` on both sides, one thread, 8 alternating pairs, load 5.9-8.2):
+  `blastp_build_lookup` summed over the blocks 4.55 -> 2.27 s (median ratio 0.54), `blastp_scan_ungapped`
+  1.41 -> 1.08 s (0.84), wall 8.21 -> 5.43 s (0.73), max RSS 77 -> 40 MB, output unchanged.
+- `LOSAT_X_BPCLUTSHADOW=1` shadow of `LOSAT_X_BPCLUT` (for blastp-fast): both builders run, the refusal and the
+  tables are compared (every cell's hits in the reference's scan order, the PV array, `longest_chain` and the
+  scan's parameters) and the first difference stops the run (panic); the search uses the reference's table. One
+  line at exit: `[X_SHADOW] BPCLUT tables_compared= refusals_compared= hits= identical`.
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; not in the
   strict set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the word loop and the
   X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte

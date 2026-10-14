@@ -32,7 +32,7 @@ use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: the switches of the strict set, the variables that are on by default.
-/// The last five joined after the set became the default. `LOSAT_X_PAIRLUT` and
+/// The last six joined after the set became the default. `LOSAT_X_PAIRLUT` and
 /// `LOSAT_X_HSPINPLACE` were added after the change as switches that are off unless set and
 /// joined the set once they were verified with it on. `LOSAT_X_SEEDBUCKET` was left out at the
 /// change: it numbered the lookup hits of a chunk scan in a `u32`, exact only up to 2^32 hits
@@ -43,8 +43,11 @@ use std::sync::OnceLock;
 /// reader cuts them for its search threads, `tblastn/stage_d_pipeline.rs`) and
 /// `LOSAT_X_SEEDRELEASE` (when TBLASTX frees the tables of its seed stage,
 /// `tblastx/x_seed_release.rs`) were added after the change as switches that are off unless set
-/// and joined the set once they were verified with it on.
-pub(crate) const STRICT_SET: [&str; 48] = [
+/// and joined the set once they were verified with it on. `LOSAT_X_GREEDYFUSE` (the fused loop
+/// of megablast's score-only greedy alignment, `blastn/alignment/x_greedy_fused.rs`) was added
+/// after the change as a switch that is off unless set and joined the set once it was verified
+/// with it on.
+pub(crate) const STRICT_SET: [&str; 49] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_PURGEFAST",
@@ -93,6 +96,7 @@ pub(crate) const STRICT_SET: [&str; 48] = [
     "LOSAT_X_SEEDBUCKET",
     "LOSAT_X_TBNOIDCHUNK",
     "LOSAT_X_SEEDRELEASE",
+    "LOSAT_X_GREEDYFUSE",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that

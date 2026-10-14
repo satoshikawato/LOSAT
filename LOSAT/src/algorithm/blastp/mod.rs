@@ -16,7 +16,7 @@ pub(crate) mod encoding;
 pub(crate) mod extension;
 // EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW, off unless set): the ungapped X-drop
 // walks of aa_ungapped.c:804-883 with a byte score table, same results (`pub` for the summary line
-// of `main`).
+// of `main`); with LOSAT_X_BPWALK the walks keep the drop below the best score.
 pub mod x_ungapped_fast;
 // NCBI c++/src/algo/blast/core/blast_gapalign.c:3936-3953:
 // max_offset = BlastGetStartForGappedAlignment(...);

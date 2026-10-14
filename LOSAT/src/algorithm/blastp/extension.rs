@@ -96,7 +96,7 @@ pub(crate) struct BlastpTwoHitUngappedResult {
 //     return maxscore;
 // }
 // ```
-fn extend_right<const BLOSUM62: bool>(
+pub(super) fn extend_right<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query: &[u8],
     subject: &[u8],
@@ -152,7 +152,7 @@ fn extend_right<const BLOSUM62: bool>(
 //     return maxscore;
 // }
 // ```
-fn extend_left<const BLOSUM62: bool>(
+pub(super) fn extend_left<const BLOSUM62: bool>(
     matrix: ScoringMatrix,
     query: &[u8],
     subject: &[u8],

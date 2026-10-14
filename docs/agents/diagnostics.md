@@ -403,6 +403,17 @@ Rebuilding less:
 - `LOSAT_X_BPUNGAPSHADOW=1` shadow of `LOSAT_X_BPUNGAP` (turns the path on): every extension runs both ways and
   the results (score, offsets, length, `right_extend`, `s_last_off`, and the early return) must be equal; any
   difference panics with the inputs. One line at exit: `[X_SHADOW] BPUNGAP compared=`.
+- `LOSAT_X_BPWALK=1` (BLASTP and BLASTX ungapped X-drop walks, speed; not in the strict set: off unless set, to
+  any value, and `LOSAT_X_DEFAULT` does not touch it; it acts only where `LOSAT_X_BPUNGAP` or its shadow runs)
+  the walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` in `blastp/x_ungapped_fast.rs` keep the drop below
+  the best score instead of the best score (as `slack = dropoff - (maxscore - score)`: a step adds its score to
+  it, stops the walk when it is <= 0, and moves the best when it is above `dropoff`; `maxscore` is
+  `score + dropoff - slack` at the end), OR the residue codes they read once after the walk (8-byte words)
+  instead of at every step, count with one variable, and run in functions of their own (exactness argument in
+  the module header): 14 instructions a step for the left walk and 16 for the right walk where `walk` takes 23
+  and 26 (x86-64 release build). Read once per process; with `LOSAT_X_BPUNGAPSHADOW` the fast side of every
+  compared extension is the drop walk, and the line at exit reads
+  `[X_SHADOW] BPUNGAP compared=N walk=drop (ungapped extensions identical)`.
 - `LOSAT_X_LINKSORT=1` (TBLASTX, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the index sorts of the in-place HSP list path
   (`tblastx/x_link_sort.rs`, exactness argument in its header; it acts only where `LOSAT_X_HSPINPLACE` does).

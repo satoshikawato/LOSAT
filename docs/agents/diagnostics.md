@@ -78,9 +78,9 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 48 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
-`LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK` and `LOSAT_X_SEEDRELEASE` joined), and their
-variables mean (`LOSAT/src/utils/xswitch.rs`):
+strict set are on by default (43 then, 49 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+`LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE` and `LOSAT_X_GREEDYFUSE`
+joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -110,7 +110,7 @@ variables mean (`LOSAT/src/utils/xswitch.rs`):
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 48 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 49 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -136,6 +136,7 @@ export LOSAT_X_PAIRLUT=1 LOSAT_X_HSPINPLACE=1
 export LOSAT_X_SEEDBUCKET=1
 export LOSAT_X_TBNOIDCHUNK=1
 export LOSAT_X_SEEDRELEASE=1
+export LOSAT_X_GREEDYFUSE=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -177,6 +178,13 @@ and joined the set on 2026-10-13. It lowers the peak memory of TBLASTX further: 
 only the seed stage reads are freed before the HSP list of a query batch's last subject is
 merged and linked. It changes no value and no order of computation, acts on every TBLASTX path
 (the unit path of `LOSAT_X_PAIRPAR` and the scan loop) and needs no other switch.
+
+`LOSAT_X_GREEDYFUSE` was added after the default changed, as a switch that was off unless set,
+and joined the set on 2026-10-14. It runs the preliminary score-only greedy alignment of megablast
+as one fused loop over distances. It changes no value and no order of computation, acts on
+the blastn searches whose preliminary stage takes the score-only greedy alignment on an unpacked
+subject (`LOSAT_X_GREEDYPRELIM`, which is in the set), and its shadow
+`LOSAT_X_GREEDYFUSESHADOW` stays outside the set.
 
 What runs per target:
 
@@ -231,7 +239,7 @@ Same values, faster computation:
   `LOSAT_X_GREEDYPRELIMSHADOW=1` (implies the switch) also runs the packed call and stops on the
   first difference; at exit `[X_SHADOW] GREEDYPRELIM calls_compared=N`. With `LOSAT_X_STATS=1`:
   `[X_STATS] GREEDYPRELIM calls= subjects_unpacked= bytes_unpacked=`.
-- `LOSAT_X_GREEDYFUSE=1` (not in the strict set; off unless set) the score-only megablast greedy
+- `LOSAT_X_GREEDYFUSE=1` (in the strict set since 2026-10-14; `=0` turns it off) the score-only megablast greedy
   alignment on an unpacked subject (the preliminary stage with `LOSAT_X_GREEDYPRELIM`): the whole
   loop over distances of `BLAST_GreedyAlign` in one function, one pass over the diagonals of a
   distance, eight bases per slide step, the same cells of the two rolling rows and of `max_score`

@@ -57,6 +57,16 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
   that takes the reference body (`LOSAT_X_HSPINPLACE=0`, `LOSAT_X_DEFAULT=0`,
   `LOSAT_DIAGNOSTICS`, `LOSAT_DEBUG_CUTOFFS`) is not timed there: `calls=0`;
   `tblastx/x_link_timing.rs`). The clock is not read without the variable.
+  TBLASTN (command line) prints, per query set, `[TIMING] tbn_subjects: subjects= threads= entries=
+  pool= pool_busy= work= work_busy= own= work_per_subject= entry_ms=` (the subject loop: entries into the
+  pool, the calling thread's wait for them and the threads busy meanwhile, the sum of the per-subject
+  search times and how many threads were inside a subject on average, the first 40 entries' wall
+  times), and at the end of the run `[TIMING] tbn_run: threads= total= <part> ..s busy .. ...` (the steps
+  of the thread that runs the search, in the order they first run: read_subjects, read_queries, copy,
+  pool, setup, prelim_search (waits for the pool, or the search itself at one thread), prelim_reduce,
+  lists, redo_pool, redo_serial, results or traceback, collect, render, flush, drop; parts of the same
+  name are added over query batches; busy = CPU time of the process / wall, from `/proc/self/stat`,
+  `-` off Linux; `tblastn/x_run_timing.rs`).
 - `LOSAT_DIAGNOSTICS=1` general diagnostics counters.
 - `LOSAT_STARTUP_TRACE=1` startup trace.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.

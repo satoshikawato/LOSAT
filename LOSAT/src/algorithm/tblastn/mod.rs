@@ -48,6 +48,9 @@ mod x_oid_flow;
 // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
 // PrintOneResultSet dispatches the retained search result to its output format.
 mod stage_e_report;
+// No NCBI counterpart (LOSAT_TIMING): the wall and CPU time of the parts of one run; it reads
+// clocks only and changes no value NCBI computes.
+mod x_run_timing;
 pub use args::{check_options, run_local, ResolvedTblastnArgs, TblastnArgs};
 // EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the summary lines `main` prints at
 // exit. No NCBI counterpart: it prints counters and changes no value NCBI computes.

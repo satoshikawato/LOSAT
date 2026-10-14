@@ -332,6 +332,7 @@ pub(super) fn x_search_batches<'p>(
         )
     };
     with_search_pool(threads, "tblastn", |pool| {
+        super::x_run_timing::lap("pool");
         let x_pool_with_plans;
         let pool = match x_subject_side.as_ref() {
             Some(side) => {
@@ -725,6 +726,7 @@ fn run_local_search_with_pool(
     let query_refs: Vec<_> = queries.iter().map(Vec::as_slice).collect();
     let protein_split = crate::blastinput::app::protein_query_split_sizes("TBLASTN", 20000)?;
     let batch_lengths: Vec<usize> = queries.iter().map(Vec::len).collect();
+    super::x_run_timing::lap("setup");
     let preliminary_hitlists = match split_protein_batch(&batch_lengths, protein_split) {
         None => run_preliminary_subjects(
             &PreliminaryInputs {
@@ -792,12 +794,13 @@ fn run_local_search_with_pool(
     } else {
         preliminary_lists.sort_by(|(qa, oa, _), (qb, ob, _)| oa.cmp(ob).then_with(|| qb.cmp(qa)));
     }
+    super::x_run_timing::lap("lists");
 
     if !composition_mode2 {
         // NCBI c++/src/algo/blast/core/blast_traceback.c:1481-1501,
         // 1644-1707,1763-1776: the control path performs ordinary
         // traceback and posttraceback statistics, then result post-pipes.
-        return finish_local_mode0_no_sum_stats(
+        let results = finish_local_mode0_no_sum_stats(
             queries,
             subjects,
             profile,
@@ -811,6 +814,8 @@ fn run_local_search_with_pool(
             scoring,
             observer.as_deref_mut(),
         );
+        super::x_run_timing::lap("traceback");
+        return results;
     }
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2352-2384,2418-2479,
@@ -1074,6 +1079,8 @@ fn run_local_search_with_pool(
         x_tbn_parallel() && pool.is_some_and(SearchPool::enabled) && preliminary_lists.len() > 1;
     #[cfg(not(feature = "parallel"))]
     let parallel_redo = false;
+    // LOSAT_TIMING: the redo's waits for the pool (x_run_timing.rs).
+    let x_redo_waits = super::x_run_timing::XPoolWaits::new();
     // No NCBI counterpart: stage report for the thread-use statistics; it does not change any value
     // NCBI computes.
     if x_tbn_parallel() {
@@ -1127,27 +1134,31 @@ fn run_local_search_with_pool(
                     .iter()
                     .map(|(_, _, list)| !compo_early_termination(list.best_evalue, &heaps))
                     .collect();
-                let computed: Vec<_> = pool.install(|| {
-                    batch
-                        .par_iter()
-                        .zip(wanted.par_iter())
-                        .map(|((context, oid, list), &wanted)| {
-                            if !wanted {
-                                return None;
-                            }
-                            let slot = rayon::current_thread_index().unwrap_or(0) % states.len();
-                            let mut guard = states[slot].lock().expect("TBLASTN redo worker state");
-                            let worker = &mut *guard;
-                            Some(redo_item(
-                                *context,
-                                *oid,
-                                list,
-                                &worker.params,
-                                &mut worker.scratch,
-                                &mut worker.workspace,
-                            ))
-                        })
-                        .collect()
+                let computed: Vec<_> = x_redo_waits.entry(|| {
+                    pool.install(|| {
+                        batch
+                            .par_iter()
+                            .zip(wanted.par_iter())
+                            .map(|((context, oid, list), &wanted)| {
+                                if !wanted {
+                                    return None;
+                                }
+                                let slot =
+                                    rayon::current_thread_index().unwrap_or(0) % states.len();
+                                let mut guard =
+                                    states[slot].lock().expect("TBLASTN redo worker state");
+                                let worker = &mut *guard;
+                                Some(redo_item(
+                                    *context,
+                                    *oid,
+                                    list,
+                                    &worker.params,
+                                    &mut worker.scratch,
+                                    &mut worker.workspace,
+                                ))
+                            })
+                            .collect()
+                    })
                 });
                 for ((context, oid, list), result) in batch.iter().zip(computed) {
                     if compo_early_termination(list.best_evalue, &heaps) {
@@ -1201,6 +1212,7 @@ fn run_local_search_with_pool(
         }
     }
     drop(keep_item);
+    x_redo_waits.finish("redo_serial", "redo_pool");
 
     // NCBI c++/src/algo/blast/core/blast_kappa.c:2494-2515;
     // c++/src/algo/blast/core/blast_hits.c:3243-3297,3383-3400,3420-3437:
@@ -1223,6 +1235,7 @@ fn run_local_search_with_pool(
         }
         results.push(hitlist);
     }
+    super::x_run_timing::lap("results");
     Ok(results)
 }
 
@@ -1889,6 +1902,8 @@ fn run_preliminary_subjects(
     // collection finishes before the OID-ordered shared collector below.
     let parallel_selected = pool.is_some_and(SearchPool::enabled) && subjects.len() > 1;
     let unit_pool = if parallel_selected { None } else { pool };
+    // LOSAT_TIMING: the loop's waits for the pool and the subjects' search time (x_run_timing.rs).
+    let x_loop = super::x_run_timing::XSubjectLoop::new();
     // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the bases one chunk may hold, from the size of the
     // sequence file of the subjects (x_oid_chunk_bases); none without the switch.
     #[cfg(feature = "parallel")]
@@ -2053,7 +2068,7 @@ fn run_preliminary_subjects(
             let now = active.fetch_add(1, Ordering::SeqCst) + 1;
             peak.fetch_max(now, Ordering::SeqCst);
         }
-        let result = subject_core(x_oid, subject);
+        let result = x_loop.subject(|| subject_core(x_oid, subject));
         if diagnose {
             active.fetch_sub(1, Ordering::SeqCst);
         }
@@ -2112,29 +2127,33 @@ fn run_preliminary_subjects(
                             x_chunks_per_entry(pool.threads()),
                             bases,
                         );
-                        let lists: Vec<Vec<_>> = pool.install(|| {
-                            chunks
-                                .par_iter()
-                                .with_max_len(1)
-                                .map(|chunk| {
-                                    chunk
-                                        .clone()
-                                        .into_par_iter()
-                                        .map(|x_oid| search(x_oid, &subjects[x_oid]))
-                                        .collect()
-                                })
-                                .collect()
+                        let lists: Vec<Vec<_>> = x_loop.entry(|| {
+                            pool.install(|| {
+                                chunks
+                                    .par_iter()
+                                    .with_max_len(1)
+                                    .map(|chunk| {
+                                        chunk
+                                            .clone()
+                                            .into_par_iter()
+                                            .map(|x_oid| search(x_oid, &subjects[x_oid]))
+                                            .collect()
+                                    })
+                                    .collect()
+                            })
                         });
                         lists.into_iter().flatten().collect()
                     } else {
                         x_pool_entries += 1;
                         let end = oid.saturating_add(pool.threads()).min(subjects.len());
-                        pool.install(|| {
-                            subjects[oid..end]
-                                .par_iter()
-                                .enumerate()
-                                .map(|(x_within, subject)| search(oid + x_within, subject))
-                                .collect()
+                        x_loop.entry(|| {
+                            pool.install(|| {
+                                subjects[oid..end]
+                                    .par_iter()
+                                    .enumerate()
+                                    .map(|(x_within, subject)| search(oid + x_within, subject))
+                                    .collect()
+                            })
                         })
                     };
                     if diagnose {
@@ -2147,10 +2166,10 @@ fn run_preliminary_subjects(
                     .context("missing ordered TBLASTN subject result")?
                     .0?
             } else {
-                subject_core(oid, subject)?
+                x_loop.subject(|| subject_core(oid, subject))?
             };
             #[cfg(not(feature = "parallel"))]
-            let (preliminary, linked) = subject_core(oid, subject)?;
+            let (preliminary, linked) = x_loop.subject(|| subject_core(oid, subject))?;
             // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
             // BLAST_LinkHsps(..., hsp_list_out, ...);
             // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
@@ -2236,6 +2255,7 @@ fn run_preliminary_subjects(
             subjects.len(), workers, peak.load(Ordering::SeqCst), x_pool_entries, x_flow_fields
         );
     }
+    x_loop.finish(subjects.len(), pool.map_or(1, SearchPool::threads));
     Ok(preliminary_hitlists)
 }
 

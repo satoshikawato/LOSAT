@@ -651,6 +651,8 @@ impl TblastnArgs {
         use crate::blastinput::input_files;
         use crate::blastinput::seq_range;
         let args = self;
+        // LOSAT_TIMING: the run's timer, dropped after the subjects (x_run_timing.rs).
+        let _x_timer = super::x_run_timing::start(args.num_threads);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
         // ```c
         //     if (GetExportSearchStrategyStream(args) ||
@@ -756,6 +758,7 @@ impl TblastnArgs {
                 Some((cut, placements)) => (cut, placements),
                 None => (read_subject_records, seq_range::Placements::default()),
             };
+        super::x_run_timing::lap("read_subjects");
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
         // ```c
         // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
@@ -821,6 +824,7 @@ impl TblastnArgs {
             )
         };
         let flushed = std::io::Write::flush(&mut stream);
+        super::x_run_timing::lap("flush");
         // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
         // ```c
         //     catch (const std::ios::failure&) {                                      \
@@ -940,6 +944,7 @@ fn search_cli(
     // it in, after the reports of the batches before.
     let QueryRecords { records, end } = read_queries(&mut query_source);
     drop(query_source);
+    super::x_run_timing::lap("read_queries");
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
         QueryEnd::EofError => QueryReading::BlankLines,
@@ -1206,6 +1211,7 @@ fn search(
             .iter()
             .map(|record| record.seq().to_vec())
             .collect();
+        super::x_run_timing::lap("copy");
         let seg = resolved.seg.params();
         // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
         // (*thread)->Run(); (*thread)->Join(&result);
@@ -1377,6 +1383,7 @@ fn search(
                 lines
             })
             .collect();
+        super::x_run_timing::lap("collect");
         render(
             outputs,
             queries,
@@ -1405,6 +1412,7 @@ fn search(
                 epilog: batches.stop.is_none(),
             },
         )?;
+        super::x_run_timing::lap("render");
     }
     if let Some((warnings, error)) = batches.stop {
         outputs.diagnostics.write_all(&warnings)?;

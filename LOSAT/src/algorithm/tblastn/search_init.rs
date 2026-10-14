@@ -40,7 +40,7 @@ pub(super) struct InitHsp {
 // diag_table->offset = window_size;
 // if (ewp->diag_table->offset >= INT4_MAX / 4) { ... clear ... }
 // else ewp->diag_table->offset += subject_length + ewp->diag_table->window;
-struct Diagonals {
+pub(super) struct Diagonals {
     entries: Vec<(i32, bool)>,
     mask: i32,
     offset: i32,
@@ -467,8 +467,52 @@ impl<'a> XTwoHit<'a> {
         window: i32,
         word_size: usize,
     ) -> Self {
+        Self::with_table(
+            None,
+            query_sequence,
+            context_offsets,
+            x_dropoffs,
+            cutoff_scores,
+            matrix,
+            window,
+            word_size,
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1003,1377-1379,1412-1413
+    // ```c
+    //     if ((status = BlastExtendWordNew(query->length, word_params,
+    //                                     &aux_struct->ewp)) != 0)
+    // ...
+    //        s_BlastSetUpAuxStructures(seq_src, lookup_wrap, word_params,
+    //           ext_options, hit_options, query, query_info, &aux_struct)) != 0)
+    // ...
+    //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+    //            != BLAST_SEQSRC_EOF) {
+    // ```
+    // NCBI's search thread makes its diagonal table once, before its loop over the subjects, and
+    // keeps it for every subject. A table of the same length and window is taken over as it is:
+    // `exit` after each unit leaves every entry older than a full window (see `exit`).
+    /// `new` on `table` (a table an earlier unit left) when it has the length and window this
+    /// query needs, otherwise on a new table.
+    pub(super) fn with_table(
+        table: Option<Diagonals>,
+        query_sequence: &'a [u8],
+        context_offsets: &'a [i32],
+        x_dropoffs: &'a [i32],
+        cutoff_scores: &'a [i32],
+        matrix: ScoringMatrix,
+        window: i32,
+        word_size: usize,
+    ) -> Self {
+        let query_length = query_sequence.len().saturating_sub(1);
+        let size = (query_length + window as usize).next_power_of_two();
+        let diagonals = match table {
+            Some(table) if table.entries.len() == size && table.window == window => table,
+            _ => Diagonals::new(query_length, window),
+        };
         Self {
-            diagonals: Diagonals::new(query_sequence.len().saturating_sub(1), window),
+            diagonals,
             query_sequence,
             context_offsets,
             x_dropoffs,
@@ -493,6 +537,36 @@ impl<'a> XTwoHit<'a> {
     pub(super) fn reset(&mut self) {
         self.diagonals.offset = self.window;
         self.diagonals.entries.fill((0, false));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:608-609
+    // ```c
+    //     /* increment the offset in the diagonal array */
+    //     Blast_ExtendWordExit(ewp, subject->length);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-171
+    // ```c
+    //         if (ewp->diag_table->offset >= INT4_MAX / 4) {
+    //             ewp->diag_table->offset = ewp->diag_table->window;
+    //             s_BlastDiagClear(ewp->diag_table);
+    //         } else {
+    //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+    //         }
+    // ```
+    // The end of NCBI's WordFinder call for one (frame, chunk). Every entry the unit wrote holds
+    // at most `offset + subject_length - 1`, so after the step each one lies more than a window
+    // behind any hit of the next unit: its first hit on a diagonal only records `last_hit` and
+    // clears `flag` (the tests of `pairs`), as on the table `reset` gives. Instead of `reset`
+    // before the next unit, this is what the next unit sees.
+    /// End a unit of `subject_length` residues as NCBI does (the table is kept).
+    pub(super) fn exit(&mut self, subject_length: usize) {
+        self.diagonals.finish_frame(subject_length);
+    }
+
+    /// No NCBI counterpart: hands the diagonal table back for `with_table`; it does not change
+    /// any value NCBI computes.
+    pub(super) fn into_table(self) -> Diagonals {
+        self.diagonals
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
@@ -1312,5 +1386,203 @@ mod tests {
         let actual =
             find_blosum62_word3_init_hsps(query, &subject, 1, None, 13, 40, 16, 30, true).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    /// The concatenated queries and their context offsets, as the unit path builds them.
+    fn x_concatenated(queries: &[&[u8]]) -> (Vec<u8>, Vec<i32>) {
+        let mut sequence = Vec::new();
+        let mut offsets = Vec::new();
+        for query in queries {
+            offsets.push(sequence.len() as i32);
+            sequence
+                .extend_from_slice(&encode_tblastn_lookup_query(query, None, false).aa_seq[1..]);
+        }
+        (sequence, offsets)
+    }
+
+    /// Every exact word of three residues the subject shares with the queries, in subject order
+    /// (the order of the subject scan).
+    fn x_word_pairs(
+        query: &[u8],
+        subject: &[u8],
+    ) -> Vec<crate::algorithm::tblastx::blast_aascan::BlastOffsetPair> {
+        let mut pairs = Vec::new();
+        for s in 0..subject.len().saturating_sub(2) {
+            for q in 0..query.len().saturating_sub(2) {
+                if query[q..q + 3] == subject[s..s + 3] && query[q..q + 3].iter().all(|&r| r != 0) {
+                    pairs.push(crate::algorithm::tblastx::blast_aascan::BlastOffsetPair {
+                        q_off: q as u32,
+                        s_off: s as u32,
+                    });
+                }
+            }
+        }
+        pairs
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-171
+    // ```c
+    //         if (ewp->diag_table->offset >= INT4_MAX / 4) {
+    //             ewp->diag_table->offset = ewp->diag_table->window;
+    //             s_BlastDiagClear(ewp->diag_table);
+    //         } else {
+    //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+    //         }
+    // ```
+    // LOSAT_X_TBNSTATE: one table carried through many units with `exit` after each, as NCBI's
+    // thread carries it through its subjects, gives every unit the hits of a cleared table
+    // (`reset`): from a new table, across the clear near INT4_MAX / 4, and when `with_table`
+    // takes it over for another query set of the same table length. The units are fragments of
+    // the queries with substitutions, so that two-hit extensions (and the `flag` path after a
+    // right extension) happen on many diagonals.
+    #[test]
+    fn x_two_hit_table_kept_across_units_gives_the_hits_of_a_cleared_table() {
+        let mut seed = 0x2545_f491_u64;
+        let mut next = move |bound: usize| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((seed >> 33) as usize) % bound
+        };
+        const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+        fn random(length: usize, next: &mut dyn FnMut(usize) -> usize) -> Vec<u8> {
+            (0..length).map(|_| RESIDUES[next(20)]).collect()
+        }
+        let queries: Vec<Vec<u8>> = [150, 90, 210]
+            .into_iter()
+            .map(|length| random(length, &mut next))
+            .collect();
+        let mut units = Vec::new();
+        for _ in 0..60 {
+            let mut unit = random(next(40), &mut next);
+            for _ in 0..1 + next(3) {
+                let query = &queries[next(queries.len())];
+                let start = next(query.len() - 30);
+                let end = (start + 30 + next(80)).min(query.len());
+                for &residue in &query[start..end] {
+                    unit.push(if next(100) < 15 {
+                        RESIDUES[next(20)]
+                    } else {
+                        residue
+                    });
+                }
+                unit.extend(random(next(30), &mut next));
+            }
+            units.push(
+                encode_tblastn_lookup_query(&unit, None, false).aa_seq[1..=unit.len()].to_vec(),
+            );
+        }
+        let x_dropoffs = [16, 16, 16];
+        let cutoffs = [24, 24, 24];
+        let window = 40;
+        /// The hits of every unit in turn: on a cleared table (`reset` first) or on the kept one
+        /// (`exit` after).
+        fn hits_of(
+            two_hit: &mut XTwoHit<'_>,
+            query: &[u8],
+            units: &[Vec<u8>],
+            keep: bool,
+        ) -> Vec<Vec<InitHsp>> {
+            units
+                .iter()
+                .map(|unit| {
+                    if !keep {
+                        two_hit.reset();
+                    }
+                    let mut hits = Vec::new();
+                    two_hit.pairs(1, 0, unit, &x_word_pairs(query, unit), &mut hits);
+                    if keep {
+                        two_hit.exit(unit.len());
+                    }
+                    hits
+                })
+                .collect()
+        }
+        let set_a: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        let (query_a, offsets_a) = x_concatenated(&set_a);
+        let new_a = |table| {
+            XTwoHit::with_table(
+                table,
+                &query_a,
+                &offsets_a,
+                &x_dropoffs,
+                &cutoffs,
+                ScoringMatrix::Blosum62,
+                window,
+                3,
+            )
+        };
+        let cleared = hits_of(&mut new_a(None), &query_a, &units, false);
+        let found: usize = cleared.iter().map(Vec::len).sum();
+        assert!(found >= 60, "the units must give hits ({found})");
+
+        let mut kept = new_a(None);
+        assert_eq!(
+            hits_of(&mut kept, &query_a, &units, true),
+            cleared,
+            "kept table"
+        );
+
+        let mut near_limit = new_a(Some(kept.into_table()));
+        let start = i32::MAX / 4 - 5_000;
+        near_limit.diagonals.offset = start;
+        assert_eq!(
+            hits_of(&mut near_limit, &query_a, &units, true),
+            cleared,
+            "across the clear"
+        );
+        assert!(
+            near_limit.diagonals.offset < start,
+            "the offset must have passed INT4_MAX / 4 and been cleared"
+        );
+
+        // Another query set of the same table length (the same queries in another order) takes
+        // the table over.
+        let set_b: Vec<&[u8]> = queries.iter().rev().map(Vec::as_slice).collect();
+        let (query_b, offsets_b) = x_concatenated(&set_b);
+        let new_b = |table| {
+            XTwoHit::with_table(
+                table,
+                &query_b,
+                &offsets_b,
+                &x_dropoffs,
+                &cutoffs,
+                ScoringMatrix::Blosum62,
+                window,
+                3,
+            )
+        };
+        let cleared_b = hits_of(&mut new_b(None), &query_b, &units, false);
+        let table = near_limit.into_table();
+        let entries = table.entries.as_ptr();
+        let mut taken_over = new_b(Some(table));
+        assert_eq!(
+            taken_over.diagonals.entries.as_ptr(),
+            entries,
+            "the table must be taken over"
+        );
+        assert_eq!(
+            hits_of(&mut taken_over, &query_b, &units, true),
+            cleared_b,
+            "taken over"
+        );
+
+        // A table of another length is not taken over.
+        let (short_query, short_offsets) = x_concatenated(&set_a[..1]);
+        let other = XTwoHit::with_table(
+            Some(taken_over.into_table()),
+            &short_query,
+            &short_offsets,
+            &x_dropoffs[..1],
+            &cutoffs[..1],
+            ScoringMatrix::Blosum62,
+            window,
+            3,
+        );
+        assert_eq!(other.diagonals.offset, window);
+        assert_eq!(
+            other.diagonals.entries.len(),
+            (short_query.len() - 1 + window as usize).next_power_of_two()
+        );
     }
 }

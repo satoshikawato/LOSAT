@@ -276,7 +276,15 @@ impl BlastCompressedAaLookupTable {
             return max_cells - 1;
         }
         if cell_index == self.overflow_cells.capacity() {
-            let additional = COMPRESSED_OVERFLOW_CELLS_IN_BANK.min(max_cells - cell_index);
+            // No NCBI counterpart: a table with NCBI's capacity grows by one bank, as NCBI
+            // allocates its banks; BLASTP's table of all query batches, which has no limit,
+            // grows geometrically, so that its cells are not copied once per bank on platforms
+            // whose `realloc` copies. Only the capacity differs; the cells are the same.
+            let additional = if max_cells > NCBI_OVERFLOW_CELL_CAPACITY {
+                cell_index.max(COMPRESSED_OVERFLOW_CELLS_IN_BANK)
+            } else {
+                COMPRESSED_OVERFLOW_CELLS_IN_BANK.min(max_cells - cell_index)
+            };
             self.overflow_cells.reserve_exact(additional);
         }
         self.overflow_cells.push(CompressedOverflowCell::default());

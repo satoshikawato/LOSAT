@@ -354,6 +354,15 @@ Rebuilding less:
   finished table, are never held. In diagnostics mode the reference builder runs. Shadow:
   `LOSAT_X_BPLUTSHADOW=1` (both builders, every table compared field by field, the reference's table
   used); one line at exit: `[X_SHADOW] BPLUT tables_compared=`.
+- `LOSAT_X_BPREDOFIT=1` (BLASTP, memory; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the composition-based redo builds each redone HSP list with room for
+  exactly its alignments, and a list from which HSPs were removed afterwards gives back their room
+  (`blastp/x_redo_fit.rs`): without it the list's vector grows by `push`, whose first allocation has room for
+  four HSPs of 168 bytes, while most lists hold one. The lists hold the same HSPs in the same order, so there
+  is no shadow. With `LOSAT_TIMING=1` each search of a query set prints
+  `[TIMING] x_bpredofit: lists=<n> hsps=<m>`. Measured once (human proteome block 1, 566 proteins, 50,404
+  letters, x human proteome, one thread, with `LOSAT_X_BPQBLOCK=50000` and the other memory switches; max RSS):
+  121,304 -> 82,180 kB (NCBI -db 151,476 kB in the same run).
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the two-hit seed stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one

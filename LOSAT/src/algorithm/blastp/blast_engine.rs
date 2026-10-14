@@ -5452,10 +5452,12 @@ fn search(
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the blocks of the block search, or `None` for the search of all
 // queries. The block search is taken only where a block's report is its rows and nothing else:
-// one output, tabular format 6, no `-query_loc` (every record is searched whole), the default
-// lookup table, every batch read, more than one block, and no subject whose tabular ID the
-// reference path rejects before it writes any row (`tabular_subject_ids`; a block search would
-// have written the rows of the blocks before).
+// one output, tabular format 6, no `-query_loc` (every record is searched whole), every batch
+// read, more than one block, no subject whose tabular ID the reference path rejects before it
+// writes any row (`tabular_subject_ids`), and none of the other refusals of the search of all
+// queries that come before its rows (`x_block_search_refuses_nothing`): a block search would have
+// written the rows of the blocks before. Both lookup tables (`AaLookupTable`, and
+// `CompressedAaLookupTable` of blastp-fast) take it.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 #[allow(clippy::too_many_arguments)]
 fn x_query_block_plan(
@@ -5469,7 +5471,6 @@ fn x_query_block_plan(
 ) -> Option<Vec<std::ops::Range<usize>>> {
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
     if args.query_range.is_some()
-        || args.lookup_table_type != BlastpLookupTableType::AaLookupTable
         || outputs.formats.len() != 1
         || outputs.hits.is_some()
         || outputs.observer.is_some()
@@ -5494,12 +5495,95 @@ fn x_query_block_plan(
         return None;
     }
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
-    let blocks = super::x_query_blocks::x_query_blocks(
-        &query_input.batches(batch_size),
-        &lengths,
-        block_letters,
-    )?;
-    (blocks.len() > 1).then_some(blocks)
+    let query_batches = query_input.batches(batch_size);
+    let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters)?;
+    (blocks.len() > 1 && x_block_search_refuses_nothing(args, queries, &query_batches, &lengths))
+        .then_some(blocks)
+}
+
+// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse
+// it before any row is written and that a block search would make only in the block that holds
+// the cause, after the rows of the blocks before:
+// - the diagonal table of all queries (`check_diag_table_window` in `run_resolved_in_pool`, with
+//   the concatenated length of all queries; a block's is shorter);
+// - the split of a long query batch (the `ensure!`s of `search_split_query_batches`);
+// - with the compressed lookup table, a table of one of NCBI's query batches (or of a query
+//   chunk of a split batch) that fills NCBI's overflow banks
+//   (`try_build_blosum62_compressed_lookup`). A table takes at most a quarter of its words as
+//   overflow cells, and a batch's tables have no more words than the batch's offsets add
+//   (`CompressedWordCount`): a batch whose words are at most four times the banks' cells cannot
+//   fill them; a batch with more leaves the search to the reference path, which tests the batch
+//   exactly.
+// A search that passes them is refused by none of them in any block either: a block's batches are
+// those of the whole input (`x_query_blocks.rs`).
+// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
+fn x_block_search_refuses_nothing(
+    args: &ResolvedBlastpArgs,
+    queries: &[FastaRecord],
+    query_batches: &[seq_range::RangedBatch],
+    lengths: &[usize],
+) -> bool {
+    use crate::algorithm::common::protein_query_split::{
+        protein_chunk_would_be_split, split_protein_batch,
+    };
+    // `blastp_concatenated_query_length`: each query and the sentinel after it, but the last.
+    let query_length = lengths
+        .iter()
+        .map(|&length| length as u64 + 1)
+        .sum::<u64>()
+        .saturating_sub(1);
+    let Ok(query_length) = i32::try_from(query_length) else {
+        return false;
+    };
+    let window = args.window_size as i32;
+    if crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP").is_err() {
+        return false;
+    }
+    let Ok(sizes) = crate::blastinput::app::protein_query_split_sizes("BLASTP", 10000) else {
+        return false;
+    };
+    let searched_batches = || {
+        query_batches
+            .iter()
+            .map(|batch| batch.searched.clone())
+            .filter(|searched| !searched.is_empty())
+    };
+    for searched in searched_batches() {
+        if let Some(chunks) = split_protein_batch(&lengths[searched], sizes) {
+            if sizes.negative_chunk_size()
+                || protein_chunk_would_be_split(&chunks, sizes)
+                || chunks.iter().any(|chunk| chunk.queries.is_empty())
+            {
+                return false;
+            }
+        }
+    }
+    if args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable {
+        // The threshold as the table is built (`run_resolved_in_pool`).
+        let Some(mut words) =
+            crate::algorithm::tblastx::lookup::compressed::CompressedWordCount::new(
+                args.word_size,
+                crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
+            )
+        else {
+            return false;
+        };
+        // The letters of the lookup query (`encode_protein_query_frame_with_seg`) where SEG does
+        // not mask them; a lookup segment holds only those (`build_lookup_segments_for_context`).
+        for searched in searched_batches() {
+            let encoded: Vec<EncodedProtein> = queries[searched]
+                .iter()
+                .map(|record| encode_protein_sequence(record.seq()))
+                .collect();
+            let mut letters = encoded
+                .iter()
+                .map(|query| &query.aa_seq[1..query.aa_seq.len() - 1]);
+            if !words.fits_banks(&mut letters) {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// The `Database:` text of the reports of a local `-subject` search (`subject_label`, or
@@ -6033,7 +6117,9 @@ fn run_resolved_in_pool(
             //     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
             // ```
             // One table for all query batches; NCBI's tables (`ncbi_compressed_lookup_tables`)
-            // only bound the overflow cells.
+            // only bound the overflow cells. With LOSAT_X_BPQBLOCK the queries are a block of
+            // whole batches, and `query_batches` are the block's batches of the whole input, as
+            // ranges of the block's lookup segments.
             let ncbi_tables = ncbi_compressed_lookup_tables(
                 &query_batches,
                 &query_lengths,
@@ -10886,5 +10972,156 @@ mod tests {
             ncbi_compressed_lookup_tables(&batches, &lengths, &contexts, &locations, true).unwrap(),
             vec![0..4]
         );
+    }
+
+    // Protein records of `lengths` letters (a deterministic generator), some with runs that SEG
+    // masks, so that a query can have more than one lookup segment.
+    fn x_block_test_records(lengths: &[usize]) -> Vec<FastaRecord> {
+        const LETTERS: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        lengths
+            .iter()
+            .enumerate()
+            .map(|(index, &length)| {
+                let mut sequence = Vec::with_capacity(length);
+                while sequence.len() < length {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    if index % 2 == 1 && state % 97 == 0 {
+                        let run = (length - sequence.len()).min(30);
+                        sequence.extend(std::iter::repeat_n(b'Q', run));
+                    } else {
+                        sequence.push(LETTERS[(state % LETTERS.len() as u64) as usize]);
+                    }
+                }
+                FastaRecord::new("", format!("q{index}").as_bytes(), &sequence)
+            })
+            .collect()
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): a block's compressed table is tested with the tables of the
+    // block's own query batches, as ranges of the block's lookup segments.
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-259
+    // ```c++
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    // ```
+    // The block search gives `run_resolved_in_pool` a block's records as the whole input, whose
+    // batches are those of the whole input; the blocks' tables, each shifted by the block's first
+    // lookup segment, are the tables of the search of all queries, and the blocks' lookup segments
+    // are those of the search of all queries.
+    #[test]
+    fn test_x_query_block_compressed_tables_are_the_blocks_batches() {
+        let lengths = [
+            3000usize, 4000, 2500, 6000, 25000, 0, 7000, 1500, 9000, 200, 12000, 800,
+        ];
+        let records = x_block_test_records(&lengths);
+        let seg = crate::utils::seg::SegParams::default();
+        let lookup_query = |records: &[FastaRecord]| {
+            let frames: Vec<Vec<QueryFrame>> = records
+                .iter()
+                .map(|record| {
+                    vec![encode_protein_query_frame_with_seg(
+                        record.seq(),
+                        Some(&seg),
+                    )]
+                })
+                .collect();
+            let (_, locations, contexts) =
+                prepare_blosum62_lookup_query_for_word_size(&frames, 5, false);
+            (locations, contexts)
+        };
+        let tables = |records: &[FastaRecord]| {
+            let (locations, contexts) = lookup_query(records);
+            let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
+            let batches = seq_range::QueryInput::whole(records).batches(10000);
+            ncbi_compressed_lookup_tables(&batches, &lengths, &contexts, &locations, false).unwrap()
+        };
+        let (whole_locations, whole_contexts) = lookup_query(&records);
+        let whole_tables = tables(&records);
+        assert!(
+            whole_locations.len() > lengths.len(),
+            "SEG splits some queries"
+        );
+        assert!(whole_tables.len() >= 4);
+        let whole_batches = seq_range::QueryInput::whole(&records).batches(10000);
+        for block_letters in [1, 20000] {
+            let blocks = super::super::x_query_blocks::x_query_blocks(
+                &whole_batches,
+                &lengths,
+                block_letters,
+            )
+            .unwrap();
+            assert!(blocks.len() > 2, "blocks of {block_letters}: {blocks:?}");
+            let mut shifted = Vec::new();
+            for block in &blocks {
+                let base = whole_contexts[block.start].frame_base;
+                let first = whole_locations.partition_point(|&(left, _)| left < base);
+                let (block_locations, _) = lookup_query(&records[block.clone()]);
+                let expected: Vec<(i32, i32)> = whole_locations
+                    [first..first + block_locations.len()]
+                    .iter()
+                    .map(|&(left, right)| (left - base, right - base))
+                    .collect();
+                assert_eq!(block_locations, expected, "block {block:?}");
+                shifted.extend(
+                    tables(&records[block.clone()])
+                        .into_iter()
+                        .map(|table| table.start + first..table.end + first),
+                );
+            }
+            assert_eq!(shifted, whole_tables, "blocks of {block_letters}");
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): the refusals of the search of all queries that the block
+    // search would make only in a later block keep the reference path.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
+    // ```c
+    //     if (lookup->curr_overflow_cell ==
+    //                         COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
+    //         /* need a new bank */
+    //         Int4 bank_idx = lookup->curr_overflow_bank + 1;
+    // ```
+    #[test]
+    fn test_x_block_search_refusals_of_the_search_of_all_queries() {
+        let lengths = [1500usize, 2000, 1000];
+        let records = x_block_test_records(&lengths);
+        let batches = seq_range::QueryInput::whole(&records).batches(10000);
+        let mut args = make_blastp_args();
+        args.task = "blastp-fast".to_string();
+        let resolved = args.resolve().expect("resolved blastp-fast args");
+        assert_eq!(
+            resolved.lookup_table_type,
+            BlastpLookupTableType::CompressedAaLookupTable
+        );
+        assert!(x_block_search_refuses_nothing(
+            &resolved, &records, &batches, &lengths
+        ));
+        // A threshold below every score: each offset can add all 15^5 compressed words, more
+        // than the banks take for a batch of 4,500 letters, so the bound does not clear it.
+        let mut low = resolved.clone();
+        low.threshold = -1000.0;
+        assert!(!x_block_search_refuses_nothing(
+            &low, &records, &batches, &lengths
+        ));
+        // The default lookup table has no overflow banks.
+        low.lookup_table_type = BlastpLookupTableType::AaLookupTable;
+        assert!(x_block_search_refuses_nothing(
+            &low, &records, &batches, &lengths
+        ));
+        // NCBI blast_extend.c:52-57 with the concatenated length of all queries.
+        let mut wide = resolved.clone();
+        let query_length = lengths.iter().sum::<usize>() + lengths.len() - 1;
+        wide.window_size = (1 << 30) - query_length;
+        assert!(x_block_search_refuses_nothing(
+            &wide, &records, &batches, &lengths
+        ));
+        wide.window_size += 1;
+        assert!(!x_block_search_refuses_nothing(
+            &wide, &records, &batches, &lengths
+        ));
     }
 }

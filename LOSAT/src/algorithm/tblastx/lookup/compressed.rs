@@ -1463,6 +1463,179 @@ fn compressed_table_fills_banks(
     table.overflow_banks_exhausted
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1071-1110
+// ```c
+//     lookup->exact_matches++;
+//     score = 0;
+//     for (i = 0; i < lookup->word_length; i++) {
+//         int c = lookup->compress_table[w[i]];
+//         if (c >= lookup->compressed_alphabet_size)
+//             return;
+//         score += info->matrix[w[i]][c];
+//     }
+//     ...
+//     if (lookup->threshold == 0 || score < lookup->threshold) {
+//         s_CompressedLookupAddUnencoded(lookup, w, query_offset);
+//     }
+//     ...
+//     if (lookup->threshold == 0)
+//         return;
+//     ...
+//     score = info->row_max[w[0]];
+//     for (i = 1; i < lookup->word_length; i++)
+//         score += info->row_max[w[i]];
+//     s_CompressedAddWordHitsCore(info, score, 0);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1019-1053
+// ```c
+//     score -= info->row_max[currQueryChar];
+//     rowSorted = info->matrixSorted[currQueryChar];
+//     ...
+//     if (current_pos == info->wordsize - 1) {
+//         ...
+//         for (i = 0; i < info->compressed_alphabet_size &&
+//                (score + rowSorted[i] >= info->threshold); i++) {
+//             subject_word[current_pos] = charSorted[i];
+//             s_CompressedLookupAddEncoded(lookup, subject_word,
+//                                          query_offset);
+//         ...
+//         return;
+//     }
+//     ...
+//     for (i = 0; i < info->compressed_alphabet_size &&
+//            (score + rowSorted[i] >= info->threshold); i++) {
+//         subject_word[current_pos] = charSorted[i];
+//         s_CompressedAddWordHitsCore(info, score + rowSorted[i],
+//                                     current_pos + 1);
+// ```
+// No NCBI counterpart: counts the words of `add_word_hits` (above) without a table, for LOSAT's
+// choice of a path (EXPERIMENT LOSAT_X_BPQBLOCK, `blastp/blast_engine.rs`
+// `x_block_search_refuses_nothing`); it changes no value NCBI computes.
+/// The number of words that `add_word_hits` adds to a table for one query offset: none when a
+/// letter of the word has no compressed letter; otherwise the word itself (`add_unencoded`) when
+/// there is no threshold or its own score is below it, and with a threshold the neighbors that
+/// `add_word_hits_core` enumerates (the same loops, counted). The enumeration bounds the
+/// positions after the current one by their row maxima, which a word reaches, so its neighbors
+/// are exactly the compressed words whose score reaches the threshold. Neither their number nor
+/// the word's own score depends on the order of its letters, so a count is kept per set of
+/// letters (`counts`, keyed by the number of each letter) and the letters of a proteome take a
+/// few tens of thousands of enumerations.
+pub(crate) struct CompressedWordCount {
+    threshold: i32,
+    word_length: usize,
+    compressed_alphabet_size: usize,
+    compress_table: [u8; BLASTAA_SIZE],
+    matrix: CompressedScoreMatrix,
+    info: CompressedNeighborInfo,
+    counts: rustc_hash::FxHashMap<u128, u64>,
+}
+
+impl CompressedWordCount {
+    /// The counts of the table of `build_blosum62_compressed_lookup` with a threshold in NCBI's
+    /// matrix units (as `try_build_blosum62_compressed_lookup` takes it).
+    pub(crate) fn new(word_size: usize, scaled_threshold: i32) -> Option<Self> {
+        let (compressed_alphabet_size, _) = compressed_lookup_parameters(word_size)?;
+        let matrix = build_blosum62_compressed_score_matrix(compressed_alphabet_size)?;
+        Some(Self {
+            threshold: scaled_threshold,
+            word_length: word_size,
+            compressed_alphabet_size,
+            compress_table: build_compressed_translation(compressed_alphabet_size)?,
+            info: CompressedNeighborInfo::new(&matrix, compressed_alphabet_size),
+            matrix,
+            counts: rustc_hash::FxHashMap::default(),
+        })
+    }
+
+    /// The words that `add_word_hits` adds for `word` (NCBISTDAA letters, `word_length` of them).
+    fn words(&mut self, word: &[u8]) -> u64 {
+        let mut letters = 0u128;
+        for &residue in word {
+            let compressed = self.compress_table.get(usize::from(residue));
+            if compressed.is_none_or(|&c| usize::from(c) >= self.compressed_alphabet_size) {
+                return 0;
+            }
+            // 3 bits per letter (BLASTAA_SIZE of them) take the up to 7 letters of a word.
+            letters += 1u128 << (3 * u32::from(residue));
+        }
+        if let Some(&words) = self.counts.get(&letters) {
+            return words;
+        }
+        let words = self.count(word);
+        self.counts.insert(letters, words);
+        words
+    }
+
+    /// `words` without the kept counts.
+    fn count(&self, word: &[u8]) -> u64 {
+        let mut own_score = 0i32;
+        for &residue in word {
+            let compressed = self.compress_table[usize::from(residue)];
+            own_score += self.matrix[usize::from(residue)][usize::from(compressed)];
+        }
+        let own = u64::from(self.threshold == 0 || own_score < self.threshold);
+        if self.threshold == 0 {
+            return own;
+        }
+        let mut score = self.info.row_max[usize::from(word[0])];
+        for &residue in &word[1..] {
+            score += self.info.row_max[usize::from(residue)];
+        }
+        own + self.count_neighbors(word, score, 0)
+    }
+
+    /// The words that `add_word_hits_core` adds from `current_pos` on.
+    fn count_neighbors(&self, word: &[u8], mut score: i32, current_pos: usize) -> u64 {
+        let curr_query_char = usize::from(word[current_pos]);
+        score -= self.info.row_max[curr_query_char];
+        let row_sorted = &self.info.matrix_sorted[curr_query_char];
+        let mut neighbors = 0u64;
+        for &letter_score in &row_sorted[..self.compressed_alphabet_size] {
+            if score + letter_score < self.threshold {
+                break;
+            }
+            neighbors += if current_pos == self.word_length - 1 {
+                1
+            } else {
+                self.count_neighbors(word, score + letter_score, current_pos + 1)
+            };
+        }
+        neighbors
+    }
+
+    /// Whether a table whose words are some of the words of `queries`' offsets (each query's
+    /// NCBISTDAA letters) takes at most `overflow_cell_capacity` overflow cells: a backbone cell
+    /// with n offsets takes cells(n) <= n / 4 of them
+    /// (`try_build_blosum62_compressed_lookup_with_capacity`), so such a table takes at most a
+    /// quarter of the queries' words. Stops counting once they are more than that.
+    fn fits(
+        &mut self,
+        queries: &mut dyn Iterator<Item = &[u8]>,
+        overflow_cell_capacity: usize,
+    ) -> bool {
+        let limit = (COMPRESSED_HITS_PER_OVERFLOW_CELL as u64)
+            .saturating_mul(overflow_cell_capacity as u64);
+        let mut words = 0u64;
+        for query in queries {
+            for word in query.windows(self.word_length) {
+                words = words.saturating_add(self.words(word));
+                if words > limit {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Whether no table whose words are some of the words of `queries`' offsets can fill NCBI's
+    /// overflow banks: a query batch's table, or the table of one of its query chunks (whose
+    /// parts are pieces of the batch's queries). `false` when their words are more than four
+    /// times the banks' cells, though the table might still fit.
+    pub(crate) fn fits_banks(&mut self, queries: &mut dyn Iterator<Item = &[u8]>) -> bool {
+        self.fits(queries, NCBI_OVERFLOW_CELL_CAPACITY)
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1339-1347
 // ```c
 // table_scale = iexp(lookup->compressed_alphabet_size, word_size - 1);
@@ -1947,6 +2120,177 @@ mod tests {
         }
         // Batches that the shortcut leaves to the exact test, and that pass it, were seen.
         assert!(shortcut_undecided > 0);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1071-1110
+    // ```c
+    //     lookup->exact_matches++;
+    //     score = 0;
+    //     for (i = 0; i < lookup->word_length; i++) {
+    //         int c = lookup->compress_table[w[i]];
+    //         if (c >= lookup->compressed_alphabet_size)
+    //             return;
+    // ```
+    // (d) `CompressedWordCount` gives the number of words that `add_word_hits` adds for each
+    // offset, on random words of all NCBISTDAA letters (some without a compressed letter), with
+    // and without a threshold, and the count of a word does not depend on the order of its
+    // letters (the counts are kept per set of letters).
+    #[test]
+    fn compressed_word_count_is_the_words_of_each_offset() {
+        let mut rng = XorShift(0x0bad_cafe_1234_5678);
+        let standard = (*b"ACDEFGHIKLMNPQRSTVWY").map(aa_char_to_ncbistdaa);
+        let mut letters: Vec<u8> = (1..BLASTAA_SIZE as u8).collect();
+        for _ in 0..3 {
+            letters.extend_from_slice(&standard);
+        }
+        let matrix = build_blosum62_compressed_score_matrix(15).expect("compressed matrix");
+        let info = CompressedNeighborInfo::new(&matrix, 15);
+        for threshold in [0, 1100, 1600, 1930, 2000, 2400] {
+            let mut counter = CompressedWordCount::new(5, threshold).expect("word size 5");
+            let mut table = BlastCompressedAaLookupTable::new(5, 0.0).expect("compressed lookup");
+            table.threshold = threshold;
+            table.overflow_cell_capacity = usize::MAX;
+            let query: Vec<u8> = (0..40).map(|_| letters[rng.below(letters.len())]).collect();
+            let mut words_before = 0u64;
+            for offset in 0..=query.len() - 5 {
+                table.add_word_hits(&info, &matrix, &query, offset as i32);
+                let words_after: u64 = table.backbone.iter().map(|cell| cell.num_used as u64).sum();
+                let added = words_after - words_before;
+                words_before = words_after;
+                let word = &query[offset..offset + 5];
+                assert_eq!(
+                    counter.words(word),
+                    added,
+                    "threshold {threshold}, offset {offset}"
+                );
+                if word
+                    .iter()
+                    .all(|&residue| usize::from(table.compress_table[usize::from(residue)]) < 15)
+                {
+                    let mut reversed = word.to_vec();
+                    reversed.reverse();
+                    assert_eq!(counter.count(&reversed), added, "reversed, offset {offset}");
+                }
+            }
+        }
+    }
+
+    // (e) The count clears a table exactly when a quarter of its words fits the capacity, and a
+    // table it clears is not refused (`try_build_blosum62_compressed_lookup_with_capacity`).
+    #[test]
+    fn compressed_word_count_clears_only_tables_within_the_capacity() {
+        let mut rng = XorShift(0x5851_f42d_4c95_7f2d);
+        let (query, locations) = concatenated_queries(&mut rng, &[120, 300, 80, 200], &FEW_LETTERS);
+        let queries: Vec<&[u8]> = locations
+            .iter()
+            .map(|&(left, right)| &query[left as usize..=right as usize])
+            .collect();
+        let mut counter = CompressedWordCount::new(5, LOW_THRESHOLD).expect("word size 5");
+        let words: u64 = queries
+            .iter()
+            .flat_map(|query| query.windows(5))
+            .map(|word| counter.words(word))
+            .sum();
+        let table = unlimited_table(LOW_THRESHOLD, &query, &locations);
+        let table_words: u64 = table.backbone.iter().map(|cell| cell.num_used as u64).sum();
+        assert_eq!(words, table_words);
+        let cells = table.overflow_cells.len();
+        let cleared = words.div_ceil(4) as usize;
+        assert!(cells > 0 && cells <= cleared);
+        assert!(counter.fits(&mut queries.iter().copied(), cleared));
+        assert!(!counter.fits(&mut queries.iter().copied(), cleared - 1));
+        let table = try_build_blosum62_compressed_lookup_with_capacity(
+            5,
+            LOW_THRESHOLD,
+            &query,
+            &locations,
+            &[0..locations.len()],
+            cleared,
+        )
+        .expect("word size 5");
+        assert!(table.is_ok());
+        // The public test uses NCBI's capacity.
+        assert!(counter.fits_banks(&mut queries.iter().copied()));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:400-405
+    // ```c
+    //           else
+    //               /* not enough space in the destination array */
+    //           {
+    //               s_range[1] = (Int4)(s - subject->sequence);
+    //               return totalhits;
+    //           }
+    // ```
+    // (f) BLASTP's block search (EXPERIMENT LOSAT_X_BPQBLOCK, `blastp/x_query_blocks.rs`): the
+    // table of some queries (a block) gives, at each subject offset, the hits of those queries
+    // that the table of all queries gives, not always in the same order (cells of more than 5
+    // offsets); and a scan gives the same hits in the same order with any offset-pair array
+    // that takes its longest cell, wherever it stops and resumes.
+    #[test]
+    fn compressed_block_table_scans_the_whole_tables_hits_per_subject_offset() {
+        let mut rng = XorShift(0x6a09_e667_f3bc_c908);
+        let (query, locations) =
+            concatenated_queries(&mut rng, &[150, 90, 200, 60, 120], &FEW_LETTERS);
+        let mut whole = unlimited_table(LOW_THRESHOLD, &query, &locations);
+        whole.finalize();
+        let block = 1..3;
+        let mut part = unlimited_table(LOW_THRESHOLD, &query, &locations[block.clone()]);
+        part.finalize();
+        let block_offsets = locations[block.start].0..=locations[block.end - 1].1;
+        let mut subject: Vec<u8> = (0..400)
+            .map(|_| FEW_LETTERS[rng.below(FEW_LETTERS.len())])
+            .collect();
+        subject.push(0);
+        let scan = |table: &BlastCompressedAaLookupTable, array_size: i32| {
+            let seq_ranges = [(0, subject.len() as i32 - 1)];
+            let mut s_range = [0, 0, seq_ranges[0].1 - 5];
+            let mut offset_pairs = vec![OffsetPair::default(); array_size as usize];
+            let mut hits = Vec::new();
+            let mut stops = 0;
+            while s_range[1] <= s_range[2] {
+                let count = table.scan_subject(
+                    &subject,
+                    &seq_ranges,
+                    &mut offset_pairs,
+                    array_size,
+                    &mut s_range,
+                );
+                hits.extend(
+                    offset_pairs[..count as usize]
+                        .iter()
+                        .map(|pair| (pair.s_off, pair.q_off as i32)),
+                );
+                stops += 1;
+            }
+            (hits, stops)
+        };
+        let (whole_hits, _) = scan(&whole, 4096 + whole.longest_chain);
+        let (part_hits, _) = scan(&part, 4096 + part.longest_chain);
+        let whole_in_block: Vec<(u32, i32)> = whole_hits
+            .iter()
+            .copied()
+            .filter(|(_, q_off)| block_offsets.contains(q_off))
+            .collect();
+        assert_ne!(
+            part_hits, whole_in_block,
+            "some subject offset's order differs"
+        );
+        let mut sorted_part = part_hits.clone();
+        sorted_part.sort_unstable();
+        let mut sorted_whole = whole_in_block.clone();
+        sorted_whole.sort_unstable();
+        assert_eq!(sorted_part, sorted_whole);
+        assert!(part_hits.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+        for array_size in [
+            part.longest_chain,
+            part.longest_chain + 7,
+            3 * part.longest_chain,
+        ] {
+            let (hits, stops) = scan(&part, array_size);
+            assert!(stops > 1, "array {array_size}: the scan stops and resumes");
+            assert_eq!(hits, part_hits, "array {array_size}");
+        }
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:782-849

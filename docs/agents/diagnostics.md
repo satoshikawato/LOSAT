@@ -417,10 +417,15 @@ Rebuilding less:
   (`blastp/x_query_blocks.rs`, exactness argument in its header): a block closes at the first batch end where
   its letters reach the value, and each block is a search of its own (its lookup table, its diagonal table,
   its hit lists) whose rows are written before the next block is searched, as NCBI searches and reports one
-  batch at a time. Taken only where a block's report is its rows: one output in tabular format 6, no
-  `-query_loc`, the default lookup table, every batch read, more than one block, and no subject whose tabular
-  ID the reference path rejects; otherwise the search of all queries. The output file is created when the
-  first block's rows are written; a run that fails in a later block leaves the rows of the blocks before.
+  batch at a time. Both lookup tables take it: the default one, and the compressed one of `-task blastp-fast`
+  (word size 5), whose table each block builds for its own batches and tests for NCBI's overflow banks with
+  them. Taken only where a block's report is its rows: one output in tabular format 6, no `-query_loc`, every
+  batch read, more than one block, no subject whose tabular ID the reference path rejects, and none of the
+  reference path's other refusals that come before its rows (a `-window_size` whose diagonal table with all
+  queries passes 2^30, a query split that LOSAT rejects, or with the compressed table a query batch whose
+  offsets add more than four times NCBI's overflow cells, about 859 million words, counted before the search);
+  otherwise the search of all queries. The output file is created when the first block's rows are written; a
+  run that fails in a later block leaves the rows of the blocks before.
   With `LOSAT_TIMING=1` each block prints its own `[TIMING]` lines.
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where

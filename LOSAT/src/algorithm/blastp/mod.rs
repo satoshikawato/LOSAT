@@ -14,7 +14,7 @@ pub(crate) mod encoding;
 // status = s_BlastAaWordFinder_TwoHit(subject, query, ..., matrix, ...);
 // The same protein two-hit extension primitive is used by BLASTP and TBLASTN.
 pub(crate) mod extension;
-// EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW, off unless set): the ungapped X-drop
+// EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW): the ungapped X-drop
 // walks of aa_ungapped.c:804-883 with a byte score table, same results (`pub` for the summary line
 // of `main`).
 pub mod x_ungapped_fast;

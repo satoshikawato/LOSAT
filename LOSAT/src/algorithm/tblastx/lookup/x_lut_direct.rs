@@ -519,17 +519,17 @@ pub(crate) fn x_shadow_tables() -> Option<u64> {
     (x_bxlut_mode() == 2).then(|| X_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
 }
 
-/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): 0 = off (`build_ncbi_lookup`),
+/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): 0 = off (`build_ncbi_lookup`),
 /// 1 = BLASTP's table built in place by [`x_build_direct`], 2 = shadow (both builders, compared).
-// No NCBI counterpart: chooses between two LOSAT code paths with the same result. Not in
-// `xswitch::STRICT_SET`, so not read with `xswitch::on`.
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+// `LOSAT_X_BPLUT` is a strict-set switch; the shadow variable is read first, as "set to any value".
 pub(super) fn x_bplut_mode() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BPLUTSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_BPLUT").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BPLUT") {
             1
         } else {
             0

@@ -46,8 +46,8 @@
 //!   `next_char`), so the hits and their order are those of a scan without rounds.
 //!
 //! The closure, the switches (`LOSAT_X_BPSEED`, `LOSAT_X_BPSEEDSHADOW`, `LOSAT_X_BPSEED_PREFETCH`) and
-//! the shadow are those of `x_seed_fused.rs`. Off unless `LOSAT_X_BPSEED` is set (any value). Not in
-//! the strict set.
+//! the shadow are those of `x_seed_fused.rs`. `LOSAT_X_BPSEED` is a switch of the
+//! strict set (`utils/xswitch.rs`): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
 
 use std::cell::Cell;
 

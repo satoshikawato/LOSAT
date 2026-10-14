@@ -414,6 +414,15 @@ Rebuilding less:
   ID the reference path rejects; otherwise the search of all queries. The output file is created when the
   first block's rows are written; a run that fails in a later block leaves the rows of the blocks before.
   With `LOSAT_TIMING=1` each block prints its own `[TIMING]` lines.
+- `LOSAT_X_BPPFREE=1` (BLASTP, memory; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the preliminary hit lists hold no more than their HSPs need
+  (`blastp/x_prelim_free.rs`, exactness argument in its header): a subject's HSP list for a query gives back
+  the room of the HSPs that the preliminary E-value reaped, and the serial composition-based redo (one thread)
+  frees each query's preliminary list after its redo, as NCBI's redo frees each list it has redone. The
+  parallel redo paths keep the lists, as before. No value changes, so there is no shadow. With
+  `LOSAT_TIMING=1` each search of a query set prints `[TIMING] x_bppfree: freed_lists=<n>`. Measured once
+  (C. elegans block of 150 proteins, 50,869 letters, x human proteome, one thread, max RSS): 153,744 ->
+  117,968 kB (NCBI -db 109,080 in the same run).
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks

@@ -67,7 +67,7 @@ pub(crate) fn x_bp_seed() -> bool {
 
 // No NCBI counterpart: how many hits ahead the fused loop reads the diagonal entries
 // (LOSAT_X_BPSEED_PREFETCH, default 16; 0 = no prefetch). Tuning only.
-fn x_prefetch_distance() -> usize {
+pub(super) fn x_prefetch_distance() -> usize {
     use std::sync::OnceLock;
     static D: OnceLock<usize> = OnceLock::new();
     *D.get_or_init(|| {
@@ -80,7 +80,7 @@ fn x_prefetch_distance() -> usize {
 
 // No NCBI counterpart: a cache hint for one diagonal entry; it reads nothing and changes no value.
 #[inline(always)]
-fn x_prefetch(diag_array: &[DiagStruct], index: usize) {
+pub(super) fn x_prefetch(diag_array: &[DiagStruct], index: usize) {
     #[cfg(target_arch = "x86_64")]
     if let Some(entry) = diag_array.get(index) {
         // SAFETY: a prefetch of a valid address has no effect on program state.
@@ -384,7 +384,7 @@ pub fn x_bp_seed_print_summary() {
 // LOSAT_X_BPDIAG's batches compute the same wrapping values per lane, and their tests compare
 // with this function on offsets whose sum passes 2^31 - 1.
 #[inline(always)]
-fn x_test_hit(
+pub(super) fn x_test_hit(
     entry: &mut DiagStruct,
     subject_offset: i32,
     diag_offset: i32,

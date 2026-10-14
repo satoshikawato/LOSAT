@@ -169,6 +169,34 @@ impl BlastpHsp {
     }
 }
 
+// No NCBI counterpart: NCBI keeps one BlastHSP type in every HSP list. LOSAT's preliminary
+// hit lists may hold a smaller element (EXPERIMENT LOSAT_X_BPPCOMPACT, `x_prelim_compact.rs`);
+// this trait gives the hit-list helpers the fields they read, in `BlastpHsp`'s convention.
+/// The fields of an HSP that the HSP-list and hit-list helpers read: the E-value, the raw score
+/// and the offsets of `ScoreCompareHSPs`.
+pub(crate) trait HitListHsp {
+    fn e_value(&self) -> f64;
+    fn raw_score(&self) -> i32;
+    /// `(q_start, q_end, s_start, s_end)` as `BlastpHsp` stores them: 1-based starts, ends
+    /// inclusive (NCBI's 0-based offset + 1, and its exclusive end).
+    fn offsets(&self) -> (usize, usize, usize, usize);
+}
+
+impl HitListHsp for BlastpHsp {
+    #[inline]
+    fn e_value(&self) -> f64 {
+        self.e_value
+    }
+    #[inline]
+    fn raw_score(&self) -> i32 {
+        self.raw_score
+    }
+    #[inline]
+    fn offsets(&self) -> (usize, usize, usize, usize) {
+        (self.q_start, self.q_end, self.s_start, self.s_end)
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
 // ```c
 // typedef struct BlastHSPList {
@@ -181,10 +209,10 @@ impl BlastpHsp {
 // ```
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub(crate) struct BlastpHspList {
+pub(crate) struct BlastpHspList<H = BlastpHsp> {
     pub oid: u32,
     pub query_index: u32,
-    pub hsps: Vec<BlastpHsp>,
+    pub hsps: Vec<H>,
     pub best_evalue: f64,
 }
 
@@ -203,13 +231,13 @@ pub(crate) struct BlastpHspList {
 // ```
 #[derive(Debug)]
 #[allow(dead_code)]
-pub(crate) struct BlastpHitList {
+pub(crate) struct BlastpHitList<H = BlastpHsp> {
     pub hsplist_count: usize,
     pub hsplist_max: usize,
     pub worst_evalue: f64,
     pub low_score: i32,
     pub heapified: bool,
-    pub hsplist_array: Vec<BlastpHspList>,
+    pub hsplist_array: Vec<BlastpHspList<H>>,
     pub hsplist_current: usize,
     pub num_hits: usize,
 }
@@ -449,19 +477,21 @@ pub(crate) fn score_compare_hits(a: &Hit, b: &Hit) -> Ordering {
 //    ...
 // }
 // ```
-pub(crate) fn score_compare_hsps(a: &BlastpHsp, b: &BlastpHsp) -> Ordering {
-    let (a_q_offset, a_q_end) = (a.q_start.saturating_sub(1), a.q_end);
-    let (b_q_offset, b_q_end) = (b.q_start.saturating_sub(1), b.q_end);
+pub(crate) fn score_compare_hsps<H: HitListHsp>(a: &H, b: &H) -> Ordering {
+    let (a_q_start, a_q_end, a_s_start, a_s_end) = a.offsets();
+    let (b_q_start, b_q_end, b_s_start, b_s_end) = b.offsets();
+    let a_q_offset = a_q_start.saturating_sub(1);
+    let b_q_offset = b_q_start.saturating_sub(1);
     let (a_s_offset, a_s_end) = (
-        a.s_start.min(a.s_end).saturating_sub(1),
-        a.s_start.max(a.s_end),
+        a_s_start.min(a_s_end).saturating_sub(1),
+        a_s_start.max(a_s_end),
     );
     let (b_s_offset, b_s_end) = (
-        b.s_start.min(b.s_end).saturating_sub(1),
-        b.s_start.max(b.s_end),
+        b_s_start.min(b_s_end).saturating_sub(1),
+        b_s_start.max(b_s_end),
     );
 
-    match b.raw_score.cmp(&a.raw_score) {
+    match b.raw_score().cmp(&a.raw_score()) {
         Ordering::Equal => {}
         ord => return ord,
     }
@@ -491,8 +521,8 @@ pub(crate) fn score_compare_hsps(a: &BlastpHsp, b: &BlastpHsp) -> Ordering {
 //    return ScoreCompareHSPs(v1, v2);
 // }
 // ```
-pub(crate) fn evalue_compare_hsps(a: &BlastpHsp, b: &BlastpHsp) -> Ordering {
-    let cmp = evalue_comp(a.e_value, b.e_value);
+pub(crate) fn evalue_compare_hsps<H: HitListHsp>(a: &H, b: &H) -> Ordering {
+    let cmp = evalue_comp(a.e_value(), b.e_value());
     if cmp == Ordering::Equal {
         score_compare_hsps(a, b)
     } else {
@@ -553,7 +583,7 @@ pub(crate) fn sort_hsplist_by_score(list: &mut BlastpHspList) {
 //     ...
 // }
 // ```
-fn sort_hsplist_by_evalue(list: &mut BlastpHspList) {
+fn sort_hsplist_by_evalue<H: HitListHsp>(list: &mut BlastpHspList<H>) {
     if list.hsps.len() > 1 {
         let mut index = 0usize;
         while index < list.hsps.len() - 1 {
@@ -634,11 +664,11 @@ pub(crate) fn hit_list_to_seqalign_order(hit_list: &mut BlastpHitList) {
 //     ...
 // }
 // ```
-pub(crate) fn update_best_evalue(list: &mut BlastpHspList) {
+pub(crate) fn update_best_evalue<H: HitListHsp>(list: &mut BlastpHspList<H>) {
     let mut best = i32::MAX as f64;
     for hsp in &list.hsps {
-        if hsp.e_value < best {
-            best = hsp.e_value;
+        if hsp.e_value() < best {
+            best = hsp.e_value();
         }
     }
     list.best_evalue = best;
@@ -652,10 +682,13 @@ pub(crate) fn update_best_evalue(list: &mut BlastpHspList) {
 //    ...
 // }
 // ```
-pub(crate) fn reap_hsplist_by_evalue(list: &mut BlastpHspList, expect_value: f64) {
+pub(crate) fn reap_hsplist_by_evalue<H: HitListHsp>(
+    list: &mut BlastpHspList<H>,
+    expect_value: f64,
+) {
     let mut write_index = 0usize;
     for read_index in 0..list.hsps.len() {
-        if list.hsps[read_index].e_value > expect_value {
+        if list.hsps[read_index].e_value() > expect_value {
             continue;
         }
         if read_index > write_index {
@@ -697,7 +730,7 @@ pub(crate) fn trim_by_max_hsps(list: &mut BlastpHspList, max_hsps_per_subject: u
 //    ...
 // }
 // ```
-fn compare_hsp_lists(a: &BlastpHspList, b: &BlastpHspList) -> Ordering {
+fn compare_hsp_lists<H: HitListHsp>(a: &BlastpHspList<H>, b: &BlastpHspList<H>) -> Ordering {
     if a.hsps.is_empty() && b.hsps.is_empty() {
         return Ordering::Equal;
     } else if a.hsps.is_empty() {
@@ -710,8 +743,8 @@ fn compare_hsp_lists(a: &BlastpHspList, b: &BlastpHspList) -> Ordering {
     if cmp != Ordering::Equal {
         return cmp;
     }
-    let a_score = a.hsps.first().map(|h| h.raw_score).unwrap_or(0);
-    let b_score = b.hsps.first().map(|h| h.raw_score).unwrap_or(0);
+    let a_score = a.hsps.first().map(|h| h.raw_score()).unwrap_or(0);
+    let b_score = b.hsps.first().map(|h| h.raw_score()).unwrap_or(0);
     match b_score.cmp(&a_score) {
         Ordering::Equal => {}
         ord => return ord,
@@ -724,7 +757,7 @@ fn compare_hsp_lists(a: &BlastpHspList, b: &BlastpHspList) -> Ordering {
 // static void s_Heapify(...);
 // static void s_CreateHeap(...);
 // ```
-fn heapify_hsplist_array(lists: &mut [BlastpHspList], start: usize, end: usize) {
+fn heapify_hsplist_array<H: HitListHsp>(lists: &mut [BlastpHspList<H>], start: usize, end: usize) {
     let mut root = start;
     loop {
         let left = root.saturating_mul(2).saturating_add(1);
@@ -749,7 +782,7 @@ fn heapify_hsplist_array(lists: &mut [BlastpHspList], start: usize, end: usize) 
 // ```c
 // static void s_CreateHeap(...);
 // ```
-fn create_hsplist_heap(lists: &mut [BlastpHspList]) {
+fn create_hsplist_heap<H: HitListHsp>(lists: &mut [BlastpHspList<H>]) {
     let nel = lists.len();
     if nel < 2 {
         return;
@@ -1045,7 +1078,7 @@ fn reverse_hit_list_order(hit_lists: &mut [Option<BlastpHitList>]) {
     }
 }
 
-impl BlastpHitList {
+impl<H: HitListHsp> BlastpHitList<H> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3125-3133
     // ```c
     // BlastHitList* Blast_HitListNew(Int4 hitlist_size)
@@ -1099,7 +1132,7 @@ impl BlastpHitList {
     //    ...
     // }
     // ```
-    fn insert_hsplist_in_heap(&mut self, hsp_list: BlastpHspList) {
+    fn insert_hsplist_in_heap(&mut self, hsp_list: BlastpHspList<H>) {
         if self.hsplist_array.is_empty() {
             self.hsplist_array.push(hsp_list);
             self.hsplist_count = 1;
@@ -1111,7 +1144,7 @@ impl BlastpHitList {
         }
         if let Some(root) = self.hsplist_array.first() {
             self.worst_evalue = root.best_evalue;
-            if let Some(score) = root.hsps.first().map(|h| h.raw_score) {
+            if let Some(score) = root.hsps.first().map(|h| h.raw_score()) {
                 self.low_score = score;
             }
         }
@@ -1124,7 +1157,7 @@ impl BlastpHitList {
     //    ...
     // }
     // ```
-    pub(crate) fn update(&mut self, mut hsp_list: BlastpHspList) {
+    pub(crate) fn update(&mut self, mut hsp_list: BlastpHspList<H>) {
         update_best_evalue(&mut hsp_list);
 
         if self.hsplist_count < self.hsplist_max {
@@ -1142,7 +1175,7 @@ impl BlastpHitList {
                 .unwrap()
                 .hsps
                 .first()
-                .map(|h| h.raw_score)
+                .map(|h| h.raw_score())
             {
                 self.low_score = self.low_score.min(score);
             }

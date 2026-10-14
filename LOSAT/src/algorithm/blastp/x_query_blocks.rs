@@ -37,6 +37,39 @@
 //! search is used only where nothing else is written around the rows (see
 //! `blast_engine.rs` `search`); everything else takes the reference path.
 //!
+//! With the compressed lookup table of blastp-fast (`CompressedAaLookupTable`), the hits of a
+//! block's scan reach the two-hit test in another order within a subject offset, and that order
+//! changes nothing:
+//! - a cell of the block's table holds the offsets of the block's queries, added in the order of
+//!   the whole table (the order of the queries' offsets, shifted by the block's start), but the
+//!   scan reads a cell of more than 5 offsets as NCBI does: the first three, then the others in
+//!   groups of four, the group added last first (`query_offsets_in_scan_order`; blast_aalookup.c
+//!   and blast_aascan.c below). Where the groups fall depends on the cell's count, so a block's
+//!   hits at one subject offset do not always come in the whole search's order.
+//! - the scan stops where the offset-pair array cannot take the next cell's hits and resumes at
+//!   that subject offset. The array's size (`OFFSET_ARRAY_SIZE` plus the table's longest chain)
+//!   and the offsets where the scan stops depend on the other queries' hits, but a cell is never
+//!   split (the array takes the longest cell), and the resumed scan reads the same word there (a
+//!   word that hit has no letter outside the compressed alphabet, so the priming stops at once,
+//!   and its index is the one the rolling index gives). So both searches give the block's
+//!   queries the same hits per subject offset, the offsets in increasing order.
+//! - the hits of one subject offset lie on different diagonal entries: their query offsets differ
+//!   by less than the concatenated query's length, and the diagonal table has at least that many
+//!   entries (blast_extend.c below). The test of a hit reads and writes only its entry and reads
+//!   no other state that a hit changes, so their order changes no test and no extension, only the
+//!   order in which their ungapped alignments are saved.
+//! - those alignments are sorted before anything reads them (`ncbi_qsort_init_hsps_by_score`,
+//!   stable as glibc's qsort, by score, subject start, length and query start). Two alignments
+//!   that tie have the same subject start and query start, so the same diagonal, and come from
+//!   hits at different subject offsets, saved in the same order in both searches; the sorted list
+//!   is the reference's (its query starts shifted by the block's start).
+//! The same argument covers the reference path's one table of all queries against NCBI's table
+//! per query batch. A block's table is tested for NCBI's overflow banks with the block's own
+//! batches (`blast_engine.rs` `ncbi_compressed_lookup_tables`), and the block search is taken only
+//! where the words of each batch's offsets show that no batch's table fills them
+//! (`x_block_search_refuses_nothing`), so that the reference path's refusal, which comes before
+//! any row, is never made in a later block.
+//!
 //! Off unless `LOSAT_X_BPQBLOCK` is set to a positive number of query letters (the block closes
 //! at the first batch end at or past it). Not in the strict set.
 //!
@@ -69,6 +102,62 @@
 //! ```c
 //!         if (score <= 0 || (maxscore - score) >= dropoff)
 //!             break;
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:831-840
+//! ```c
+//!         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
+//!
+//!         if (cell_index == 0 ) { /* can't be empty => it's full  */
+//!
+//!             /* fetch next vacant cell */
+//!         	CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
+//!
+//!             /* shuffle the pointers */
+//!             new_cell->next = backbone_cell->payload.overflow_list.head;
+//!             backbone_cell->payload.overflow_list.head = new_cell;
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:274-284
+//! ```c
+//!     /* prime the index */
+//!     for(s = s_first; s <= s_last; s++){
+//!         index = s_ComputeCompressedIndex(word_length - 1, s,
+//!                                          compressed_alphabet_size,
+//!                                          &skip, lookup);
+//!         if(!skip)
+//!           break;
+//!     }
+//!
+//!     next_char = ((s <= s_last)? s[word_length-1] : 0);
+//!     preshift = (Int4)((((Int8)index) * recip) >> 32);
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:384-405
+//! ```c
+//!                 /* handle the rest of the list */
+//!                 if (first_cell_entries) {
+//!                    curr_cell = curr_cell->next;
+//!                 }
+//!                    while (curr_cell != NULL) {
+//!     ...
+//!              totalhits += numhits;
+//!           }
+//!           else
+//!               /* not enough space in the destination array */
+//!           {
+//!               s_range[1] = (Int4)(s - subject->sequence);
+//!               return totalhits;
+//!           }
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-56
+//! ```c
+//!                 diag_array_length = 1;
+//!                 /* What power of 2 is just longer than the query? */
+//!                 while (diag_array_length < (qlen+window_size))
+//!                 {
+//!                         diag_array_length = diag_array_length << 1;
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:234
+//! ```c
+//!     Blast_InitHitListSortByScore(init_hitlist);
 //! ```
 
 use std::fs::File;

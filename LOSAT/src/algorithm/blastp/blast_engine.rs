@@ -5615,70 +5615,74 @@ fn search(
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries in blocks of whole batches, each block a search
     // of its own whose rows are written before the next block is searched
     // (`x_query_blocks.rs`, exactness argument in its header), where only the rows of tabular
-    // format 6 are written; otherwise the search of all queries below. Not with `-db`: the
-    // experiment's exactness argument covers the subject records of `-subject` only.
-    if let Some(blocks) = database
-        .is_none()
-        .then(|| {
-            x_query_block_plan(
-                &args,
-                &searched_queries,
-                &query_input,
-                &batches,
-                &subjects.records,
-                outputs,
-                batch_size,
-            )
-        })
-        .flatten()
-    {
+    // format 6 are written; otherwise the search of all queries below. With `-db` the blocks
+    // are searched only when no definition line of the database can fail a batch where its
+    // titles are read (`database::x_titles_allow_blocks`, read in the block search's pool before
+    // the first block); otherwise the search of all queries below.
+    if let Some(blocks) = x_query_block_plan(
+        &args,
+        &searched_queries,
+        &query_input,
+        &batches,
+        subject_source,
+        outputs,
+        batch_size,
+    ) {
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
             formats,
             diagnostics,
             ..
-        } = outputs;
+        } = &mut *outputs;
         let outfmt = formats[0].outfmt;
-        crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
-            let mut sink = super::x_query_blocks::XBlockSink::new(&mut formats[0].sink);
-            for (index, block) in blocks.iter().enumerate() {
-                let block_queries = &searched_queries[block.clone()];
-                let block_input = seq_range::QueryInput::whole(block_queries);
-                let mut block_outputs = ReportOutputs {
-                    formats: vec![crate::api::local_blast::FormatOutput {
-                        outfmt,
-                        sink: OutputSink::Writer(&mut sink),
-                    }],
-                    diagnostics: &mut **diagnostics,
-                    hits: None,
-                    observer: None,
-                };
-                run_resolved_in_pool(
-                    args.clone(),
-                    block_queries,
-                    subject_source,
-                    "",
-                    subject_label,
-                    &mut block_outputs,
-                    pool,
-                    None,
-                    &BlastpRanges {
-                        input_records: &query_records[block.clone()],
-                        query_input: &block_input,
-                        subject_placements: &subjects.placements,
-                        x_ordinal_base: block.start,
-                    },
-                    &BlastpReports {
-                        reader_warnings: &reader_warnings[block.clone()],
-                        epilog: epilog && index + 1 == blocks.len(),
-                        v1_titles: v1.is_some(),
-                    },
-                )?;
-            }
-            sink.flush()?;
-            Ok(())
-        })?;
-        return Ok(());
+        let searched_in_blocks =
+            crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
+                if let Some(database) = database {
+                    if !database::x_titles_allow_blocks(database, pool) {
+                        return Ok(false);
+                    }
+                }
+                let mut sink = super::x_query_blocks::XBlockSink::new(&mut formats[0].sink);
+                for (index, block) in blocks.iter().enumerate() {
+                    let block_queries = &searched_queries[block.clone()];
+                    let block_input = seq_range::QueryInput::whole(block_queries);
+                    let mut block_outputs = ReportOutputs {
+                        formats: vec![crate::api::local_blast::FormatOutput {
+                            outfmt,
+                            sink: OutputSink::Writer(&mut sink),
+                        }],
+                        diagnostics: &mut **diagnostics,
+                        hits: None,
+                        observer: None,
+                    };
+                    run_resolved_in_pool(
+                        args.clone(),
+                        block_queries,
+                        subject_source,
+                        "",
+                        subject_label,
+                        &mut block_outputs,
+                        pool,
+                        None,
+                        &BlastpRanges {
+                            input_records: &query_records[block.clone()],
+                            query_input: &block_input,
+                            subject_placements: &subjects.placements,
+                            x_ordinal_base: block.start,
+                        },
+                        &BlastpReports {
+                            reader_warnings: &reader_warnings[block.clone()],
+                            epilog: epilog && index + 1 == blocks.len(),
+                            v1_titles: v1.is_some(),
+                        },
+                    )?;
+                }
+                sink.flush()?;
+                Ok(true)
+            })?;
+        if searched_in_blocks {
+            return Ok(());
+        }
     }
     if batches.searched_done > 0 {
         // The searches and reports of the batches up to the input record `input_done` and
@@ -5801,10 +5805,13 @@ fn search(
 // queries. The block search is taken only where a block's report is its rows and nothing else:
 // one output, tabular format 6, no `-query_loc` (every record is searched whole), every batch
 // read, more than one block, no subject whose tabular ID the reference path rejects before it
-// writes any row (`tabular_subject_ids`), and none of the other refusals of the search of all
-// queries that come before its rows (`x_block_search_refuses_nothing`): a block search would have
-// written the rows of the blocks before. Both lookup tables (`AaLookupTable`, and
-// `CompressedAaLookupTable` of blastp-fast) take it.
+// writes any row (`tabular_subject_ids`; with `-db`, the definition lines are checked where the
+// blocks are searched, `database::x_titles_allow_blocks`), no query whose effective search space
+// in NCBI's `Int8` the reference path rejects (`blastp_database_search_space`, with `-db` or
+// `-dbsize`), and none of the other refusals of the search of all queries that come before its
+// rows (`x_block_search_refuses_nothing`): a block search would have written the rows of the
+// blocks before. Both lookup tables (`AaLookupTable`, and `CompressedAaLookupTable` of
+// blastp-fast) take it.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 #[allow(clippy::too_many_arguments)]
 fn x_query_block_plan(
@@ -5812,7 +5819,7 @@ fn x_query_block_plan(
     queries: &[FastaRecord],
     query_input: &seq_range::QueryInput,
     batches: &crate::blastinput::query_batch::QueryBatches,
-    subjects: &[FastaRecord],
+    subject_source: BlastpSubjectSource<'_>,
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
 ) -> Option<Vec<std::ops::Range<usize>>> {
@@ -5831,17 +5838,40 @@ fn x_query_block_plan(
     {
         return None;
     }
-    if subjects.iter().any(|subject| {
-        crate::report::defline::tabular_subject_id(
-            subject.local_id.as_bytes(),
-            &subject.title,
-            true,
-        )
-        .is_err()
-    }) {
-        return None;
+    match subject_source {
+        BlastpSubjectSource::Fasta(subjects) => {
+            if subjects.iter().any(|subject| {
+                crate::report::defline::tabular_subject_id(
+                    subject.local_id.as_bytes(),
+                    &subject.title,
+                    true,
+                )
+                .is_err()
+            }) {
+                return None;
+            }
+        }
+        // A database without sequences fails in the first batch (`run_resolved_in_pool`).
+        BlastpSubjectSource::Database(database) => {
+            if database.num_sequences() == 0 {
+                return None;
+            }
+        }
     }
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
+    // The effective search space is at most the database length times the query length (the
+    // length adjustment is not negative), so no query's product can pass `Int8` when the
+    // longest one's does not.
+    if subject_source.database().is_some() || args.dbsize > 0 {
+        let db_length = match subject_source.database() {
+            Some(database) if args.dbsize <= 0 => u128::from(database.total_letters()),
+            _ => args.dbsize.max(0) as u128,
+        };
+        let longest = lengths.iter().copied().max().unwrap_or(0) as u128;
+        if db_length * longest > i64::MAX as u128 {
+            return None;
+        }
+    }
     let query_batches = query_input.batches(batch_size);
     let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters)?;
     (blocks.len() > 1 && x_block_search_refuses_nothing(args, queries, &query_batches, &lengths))
@@ -6297,9 +6327,7 @@ fn search_split_query_batches(
             // EXPERIMENT (LOSAT_X_BPPCOMPACT): the chunks' list replaces the compact one too; the
             // shadow mode compares the two lists it replaces.
             let q_idx = range.start + local;
-            if x_bp_prelim_compact() == XPrelimCompact::Shadow
-                && subject_source.database().is_none()
-            {
+            if x_bp_prelim_compact() == XPrelimCompact::Shadow {
                 x_shadow_compare(
                     q_idx,
                     preliminary_hit_lists[q_idx].as_ref(),
@@ -6878,14 +6906,8 @@ fn run_resolved_in_pool(
         .take(query_ids.len())
         .collect();
     // EXPERIMENT (LOSAT_X_BPPCOMPACT): the preliminary hit lists with the compact element
-    // (`x_prelim_compact.rs`); all None with the switch off. Not with `-db`: the sequences of a
-    // database's hit lists are listed from the off path's lists (`database::ListedSubjects`), so
-    // the experiment is skipped there and the search runs as without the variable.
-    let x_prelim_compact = if database.is_some() {
-        XPrelimCompact::Off
-    } else {
-        x_bp_prelim_compact()
-    };
+    // (`x_prelim_compact.rs`); all None with the switch off.
+    let x_prelim_compact = x_bp_prelim_compact();
     let x_expanded_at_start = x_expanded_lists();
     let mut x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> =
         std::iter::repeat_with(|| None)
@@ -8045,6 +8067,7 @@ fn run_resolved_in_pool(
             },
             &process_subject,
             &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
             prelim_hitlist_size,
         )
         .map_err(|error| {
@@ -8215,6 +8238,7 @@ fn run_resolved_in_pool(
         Some(database) => Some(database::ListedSubjects::read(
             database,
             &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
         )?),
         None => None,
     };

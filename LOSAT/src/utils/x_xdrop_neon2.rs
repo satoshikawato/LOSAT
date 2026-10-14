@@ -1389,7 +1389,8 @@ mod tests {
                 // prefix maxima
                 let pu = u16s(wb(pmax_u16w(wv(x))));
                 let ps = u16s(wb(pmax_s16w(wv(x))));
-                let (mut mu, mut ms) = (0u16, i16::MIN);
+                // zeros are shifted in, so each lane's signed maximum includes 0 (`H` is never negative)
+                let (mut mu, mut ms) = (0u16, 0i16);
                 for i in 0..16 {
                     mu = mu.max(x16[i]);
                     ms = ms.max(x16[i] as i16);
@@ -1398,7 +1399,7 @@ mod tests {
                 }
                 let pu = wb(pmax_u8w(wv(x)));
                 let ps = wb(pmax_s8w(wv(x)));
-                let (mut mu, mut ms) = (0u8, i8::MIN);
+                let (mut mu, mut ms) = (0u8, 0i8);
                 for i in 0..32 {
                     mu = mu.max(x[i]);
                     ms = ms.max(x[i] as i8);

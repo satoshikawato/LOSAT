@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Certify LOSAT v0.1.0 native output on Windows and macOS."""
+"""Certify LOSAT v0.1.0 native output on Windows, macOS and Linux arm64."""
 
 from __future__ import annotations
 
@@ -38,9 +38,10 @@ PR5_EVIDENCE_MANIFEST_SHA256 = (
 )
 CERT_TOOLCHAIN = "1.92.0"
 EVIDENCE_SCHEMA = 1
-NATIVE_AUTHORITY_VERSION = "ncbi-platform-variance-v0.1.0"
+NATIVE_AUTHORITY_VERSION = "ncbi-platform-variance-v0.1.1"
+NATIVE_AUTHORITY_SCHEMA = 2
 NATIVE_AUTHORITY_REPO_RELATIVE = PurePosixPath(
-    "LOSAT/tests/ncbi_platform_variance_v010.json"
+    "LOSAT/tests/ncbi_platform_variance_v011.json"
 )
 CANONICAL_MANIFEST_REPO_RELATIVE = PurePosixPath(
     "LOSAT/tests/platform_native_v010_canonical.tsv"
@@ -125,6 +126,16 @@ PLATFORMS = {
         archive_name="ncbi-blast-2.17.0+-x64-macosx.tar.gz",
         archive_md5="cde7979c0edca21da0567ab172b68b0e",
     ),
+    "linux-aarch64": PlatformSpec(
+        platform_id="linux-aarch64",
+        os_name="Linux",
+        machine="arm64",
+        target_triple="aarch64-unknown-linux-gnu",
+        binary_arch="arm64",
+        runner_label="ubuntu-24.04-arm",
+        archive_name="ncbi-blast-2.17.0+-aarch64-linux.tar.gz",
+        archive_md5="5f9d49b999346e0ddb6637b71af4b22a",
+    ),
 }
 
 REPRESENTATIVES = (
@@ -135,6 +146,19 @@ REPRESENTATIVES = (
     ("tblastx", "p14_ap027131_ap027133_query4", "query_gencode_exact"),
     ("tblastx", "d06_ap027131_ap027133_db4", "db_gencode_deviation"),
 )
+
+# Each certified platform has exactly one characterization source in the
+# authority. Run 33582928402 (authority v0.1.0, whose provenance and rich groups
+# v0.1.1 carries unchanged) characterized these three platforms.
+V010_CHARACTERIZED_PLATFORMS = frozenset({"windows-x64", "macos-arm64", "macos-x64"})
+# Platforms added after v0.1.0: platform -> (characterization run, candidate).
+ADDED_PLATFORM_CHARACTERIZATIONS = {
+    "linux-aarch64": (
+        38563517687,
+        "d81f0209a5d91af9a820832d8ef56e7a1cbe621e",
+    ),
+}
+NATIVE_OUTPUTS_PER_PLATFORM = len(REPRESENTATIVES)
 
 
 @dataclass(frozen=True)
@@ -339,6 +363,36 @@ def _validate_authority_input(value: object, context: str, role: str) -> None:
         raise CertificationFailure(f"{context} must retain exact LF Git-blob bytes")
 
 
+def _validate_platform_run(
+    value: object, runner_fields: set[str], context: str
+) -> str:
+    record = _exact_fields(
+        value,
+        {
+            "platform_id",
+            "runner_label",
+            "runner",
+            "fixture_manifest_sha256",
+            "identity_sha256",
+        },
+        context,
+    )
+    platform_id = _no_wildcard(record["platform_id"], f"{context}.platform_id")
+    if platform_id not in PLATFORMS:
+        raise CertificationFailure(f"unknown provenance platform: {platform_id}")
+    if (
+        _no_wildcard(record["runner_label"], f"{context}.runner_label")
+        != PLATFORMS[platform_id].runner_label
+    ):
+        raise CertificationFailure(f"{context} runner label changed")
+    runner = _exact_fields(record["runner"], runner_fields, f"{context}.runner")
+    for key, item in runner.items():
+        _string(item, f"{context}.runner.{key}")
+    _sha256(record["fixture_manifest_sha256"], f"{context}.fixture_manifest_sha256")
+    _sha256(record["identity_sha256"], f"{context}.identity_sha256")
+    return platform_id
+
+
 def _validate_native_authority_document(document: dict[str, object]) -> NativeAuthority:
     top = _exact_fields(
         document,
@@ -348,6 +402,7 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
             "normative_acceptance",
             "diagnostic_metadata",
             "characterization_provenance",
+            "added_platform_characterizations",
         },
         "authority",
     )
@@ -355,7 +410,7 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
         raise CertificationFailure(
             f"unknown native authority version: {top['authority_version']}"
         )
-    if top["schema_version"] != 1:
+    if top["schema_version"] != NATIVE_AUTHORITY_SCHEMA:
         raise CertificationFailure("unknown native authority schema version")
     normative = _exact_fields(
         top["normative_acceptance"],
@@ -590,9 +645,11 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
                 f"{context} must contain all six exact output tuples"
             )
         platforms[platform_id] = record
-    if set(platforms) != expected_platforms or len(outputs) != 18:
+    expected_output_count = NATIVE_OUTPUTS_PER_PLATFORM * len(expected_platforms)
+    if set(platforms) != expected_platforms or len(outputs) != expected_output_count:
         raise CertificationFailure(
-            "native authority must contain exactly 3 platforms/18 outputs"
+            f"native authority must contain exactly {len(expected_platforms)} "
+            f"platforms/{expected_output_count} outputs"
         )
 
     diagnostics: dict[tuple[str, str, str], dict[str, object]] = {}
@@ -660,9 +717,9 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
                 f"{context} diagnostic metadata became normative"
             )
         diagnostics[key] = record
-    if set(diagnostics) != set(outputs) or len(diagnostics) != 18:
+    if set(diagnostics) != set(outputs) or len(diagnostics) != expected_output_count:
         raise CertificationFailure(
-            "native authority must contain exactly 18 diagnostics"
+            f"native authority must contain exactly {expected_output_count} diagnostics"
         )
 
     provenance = _exact_fields(
@@ -772,6 +829,7 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
         "linux_ncbi_reruns": 0,
     }:
         raise CertificationFailure("characterization execution accounting changed")
+    v010_platforms = set(V010_CHARACTERIZED_PLATFORMS)
     platform_run_ids = set()
     runner_fields = {
         "ImageOS",
@@ -799,19 +857,13 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
             },
             context,
         )
-        platform_id = _no_wildcard(record["platform_id"], f"{context}.platform_id")
-        if platform_id in platform_run_ids or platform_id not in expected_platforms:
+        platform_id = _validate_platform_run(record, runner_fields, context)
+        if platform_id in platform_run_ids or platform_id not in v010_platforms:
             raise CertificationFailure(
                 f"duplicate or unknown provenance platform: {platform_id}"
             )
-        _no_wildcard(record["runner_label"], f"{context}.runner_label")
-        runner = _exact_fields(record["runner"], runner_fields, f"{context}.runner")
-        for key, item in runner.items():
-            _string(item, f"{context}.runner.{key}")
-        _sha256(record["fixture_manifest_sha256"], f"{context}.fixture_manifest_sha256")
-        _sha256(record["identity_sha256"], f"{context}.identity_sha256")
         platform_run_ids.add(platform_id)
-    if platform_run_ids != expected_platforms:
+    if platform_run_ids != v010_platforms:
         raise CertificationFailure("characterization platform provenance changed")
     rich_counts = _exact_fields(
         provenance["rich_group_counts"],
@@ -897,7 +949,7 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
             )
             if (
                 platform_id in multiset_platforms
-                or platform_id not in expected_platforms
+                or platform_id not in v010_platforms
             ):
                 raise CertificationFailure(f"{multiset_context} platform set changed")
             _sha256(
@@ -938,7 +990,7 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
             if multiplicity != row_count:
                 raise CertificationFailure(f"{multiset_context} multiplicity changed")
             multiset_platforms.add(platform_id)
-        if multiset_platforms != expected_platforms:
+        if multiset_platforms != v010_platforms:
             raise CertificationFailure(f"{context} must bind all three platforms")
     if (
         len(
@@ -959,6 +1011,70 @@ def _validate_native_authority_document(document: dict[str, object]) -> NativeAu
         }
     ):
         raise CertificationFailure("rich diagnostic representative counts changed")
+
+    added_platforms: set[str] = set()
+    for index, value in enumerate(
+        _array(
+            top["added_platform_characterizations"],
+            "added_platform_characterizations",
+        )
+    ):
+        context = f"added_platform_characterizations[{index}]"
+        added = _exact_fields(
+            value,
+            {
+                "runtime_enforced",
+                "characterization_run_id",
+                "candidate_sha",
+                "execution_counts",
+                "platform_runs",
+                "derived_record_sha256",
+            },
+            context,
+        )
+        if _boolean(added["runtime_enforced"], f"{context}.runtime_enforced"):
+            raise CertificationFailure(f"{context} became normative")
+        run_id = _integer(
+            added["characterization_run_id"],
+            f"{context}.characterization_run_id",
+            minimum=1,
+        )
+        candidate = _sha40(added["candidate_sha"], f"{context}.candidate_sha")
+        _sha256(added["derived_record_sha256"], f"{context}.derived_record_sha256")
+        runs = _array(added["platform_runs"], f"{context}.platform_runs")
+        if not runs:
+            raise CertificationFailure(f"{context} has no platform run")
+        run_platforms = set()
+        for run_index, run_value in enumerate(runs):
+            run_context = f"{context}.platform_runs[{run_index}]"
+            platform_id = _validate_platform_run(run_value, runner_fields, run_context)
+            if (
+                platform_id in run_platforms
+                or platform_id in added_platforms
+                or platform_id in v010_platforms
+                or ADDED_PLATFORM_CHARACTERIZATIONS.get(platform_id)
+                != (run_id, candidate)
+            ):
+                raise CertificationFailure(
+                    f"{run_context} characterization source changed: {platform_id}"
+                )
+            run_platforms.add(platform_id)
+        executions = NATIVE_OUTPUTS_PER_PLATFORM * len(run_platforms)
+        if added["execution_counts"] != {
+            "authoritative_ncbi": executions,
+            "diagnostic_ncbi": executions,
+            "total_ncbi": 2 * executions,
+            "losat": 0,
+            "linux_ncbi_reruns": 0,
+        }:
+            raise CertificationFailure(f"{context} execution accounting changed")
+        added_platforms |= run_platforms
+    if added_platforms != set(ADDED_PLATFORM_CHARACTERIZATIONS) or (
+        v010_platforms | added_platforms != expected_platforms
+    ):
+        raise CertificationFailure(
+            "each certified platform needs exactly one characterization source"
+        )
 
     return NativeAuthority(
         path=Path(),
@@ -1151,6 +1267,11 @@ def binary_architecture(path: Path) -> str:
     if len(data) >= 8 and data[:4] in {b"\xfe\xed\xfa\xcf", b"\xfe\xed\xfa\xce"}:
         cpu_type = int.from_bytes(data[4:8], "big")
         return {0x01000007: "x86_64", 0x0100000C: "arm64"}.get(cpu_type, "unknown")
+    # ELF: e_ident[EI_DATA] (offset 5) gives the byte order of e_machine (offset 18).
+    if len(data) >= 20 and data[:4] == b"\x7fELF" and data[5] in {1, 2}:
+        byteorder = "little" if data[5] == 1 else "big"
+        machine = int.from_bytes(data[18:20], byteorder)
+        return {0x3E: "x86_64", 0xB7: "arm64"}.get(machine, "unknown")
     raise CertificationFailure(f"unsupported native executable format: {path}")
 
 
@@ -3432,7 +3553,8 @@ def aggregate_platform_evidence(
     observed_directories = {path.name for path in input_root.iterdir() if path.is_dir()}
     if observed_directories != expected_directories:
         raise CertificationFailure(
-            "aggregate must consume exactly the three expected platform artifacts"
+            f"aggregate must consume exactly the {len(expected_platforms)} "
+            "expected platform artifacts"
         )
     platform_summaries = []
     for platform_id in sorted(expected_platforms):
@@ -3782,9 +3904,9 @@ def aggregate_platform_evidence(
         "authority_file_sha256": authority.file_sha256,
         "frozen_mismatch_allowlist": expected_allowlist_identity,
         "expected_platform_ids": sorted(expected_platforms),
-        "platform_count": 3,
+        "platform_count": len(expected_platforms),
         "search_executions_per_platform": 61,
-        "total_search_executions": 183,
+        "total_search_executions": 61 * len(expected_platforms),
         "platforms": platform_summaries,
     }
     atomic_write_json(output, aggregate)
@@ -3937,7 +4059,7 @@ def certify(args: argparse.Namespace) -> None:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     script_path = Path(__file__).resolve()
     repo_root = script_path.parents[2]
-    default_authority = script_path.with_name("ncbi_platform_variance_v010.json")
+    default_authority = script_path.with_name(NATIVE_AUTHORITY_REPO_RELATIVE.name)
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="mode", required=True)
     archive_parser = subparsers.add_parser(
@@ -3985,7 +4107,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     certify_parser.add_argument("--blastp-oracle", type=Path, required=True)
     certify_parser.add_argument("--tblastx-oracle", type=Path, required=True)
     aggregate_parser = subparsers.add_parser(
-        "aggregate", help="aggregate exactly three completed platform artifacts"
+        "aggregate", help="aggregate exactly the completed artifacts of every platform"
     )
     aggregate_parser.add_argument("--input-root", type=Path, required=True)
     aggregate_parser.add_argument("--output", type=Path, required=True)

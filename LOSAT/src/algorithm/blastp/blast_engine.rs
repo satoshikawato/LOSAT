@@ -26,9 +26,10 @@ use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::constants::{
     GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
-use crate::algorithm::tblastx::lookup::compressed::{
-    try_build_blosum62_compressed_lookup, BlastCompressedAaLookupTable,
+use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
+    x_bp_build_compressed_lookup, XCompressedLookup, XFlatCompressedLookup,
 };
+use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
 use crate::algorithm::tblastx::lookup::{x_bp_build_ncbi_lookup, BlastAaLookupTable, QueryContext};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
@@ -1756,6 +1757,16 @@ fn blastp_offset_array_size(longest_chain: i32) -> i32 {
 enum BlastpRuntimeLookup {
     Aa(BlastAaLookupTable),
     Compressed(BlastCompressedAaLookupTable),
+    // EXPERIMENT (LOSAT_X_BPCLUT): the compressed table built flat (lookup/x_clut_direct.rs); the
+    // same cells, PV array and parameters.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:104-107
+    // ```c
+    //    case eCompressedAaLookupTable:
+    //       BlastCompressedAaLookupTableNew(query, lookup_segments,
+    //                          (BlastCompressedAaLookupTable* *) &(lookup_wrap->lut),
+    //                          lookup_options, sbp);
+    // ```
+    CompressedFlat(XFlatCompressedLookup),
 }
 
 impl BlastpRuntimeLookup {
@@ -1775,6 +1786,7 @@ impl BlastpRuntimeLookup {
         match self {
             Self::Aa(lookup) => lookup.word_length,
             Self::Compressed(lookup) => lookup.word_length,
+            Self::CompressedFlat(lookup) => lookup.word_length,
         }
     }
 
@@ -1793,6 +1805,7 @@ impl BlastpRuntimeLookup {
         match self {
             Self::Aa(lookup) => lookup.longest_chain,
             Self::Compressed(lookup) => lookup.longest_chain,
+            Self::CompressedFlat(lookup) => lookup.longest_chain,
         }
     }
 }
@@ -1899,6 +1912,20 @@ fn blastp_for_each_offset_pair<F>(
             }
         }
         BlastpRuntimeLookup::Compressed(lookup) => {
+            while scan_range[1] <= scan_range[2] {
+                let hits = lookup.scan_subject(
+                    subject_sequence,
+                    &seq_ranges,
+                    offset_pairs,
+                    array_size,
+                    &mut scan_range,
+                );
+                blastp_visit_scanned_offset_pairs(offset_pairs, hits, &mut visit);
+            }
+        }
+        // EXPERIMENT (LOSAT_X_BPCLUT): the same scan on the flat table (`scan_subject`'s statements, a
+        // cell's hits copied from its slice; lookup/x_clut_direct.rs).
+        BlastpRuntimeLookup::CompressedFlat(lookup) => {
             while scan_range[1] <= scan_range[2] {
                 let hits = lookup.scan_subject(
                     subject_sequence,
@@ -6127,7 +6154,10 @@ fn run_resolved_in_pool(
                 &locations,
                 chunk_prelim.is_some(),
             )?;
-            let lookup = try_build_blosum62_compressed_lookup(
+            // EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW, off unless set): the same table built
+            // flat, each cell's hits in one slice in NCBI's scan order, with the same refusal
+            // (lookup/x_clut_direct.rs); without the switches `try_build_blosum62_compressed_lookup`.
+            let lookup = x_bp_build_compressed_lookup(
                 args.word_size,
                 crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
                 &query,
@@ -6142,7 +6172,11 @@ fn run_resolved_in_pool(
                     args.word_size
                 )
             })?;
-            (BlastpRuntimeLookup::Compressed(lookup), contexts)
+            let lookup = match lookup {
+                XCompressedLookup::Reference(lookup) => BlastpRuntimeLookup::Compressed(lookup),
+                XCompressedLookup::Flat(lookup) => BlastpRuntimeLookup::CompressedFlat(lookup),
+            };
+            (lookup, contexts)
         }
     };
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
@@ -6569,6 +6603,21 @@ fn run_resolved_in_pool(
                         x_candidate,
                     )
                 }
+                // EXPERIMENT (LOSAT_X_BPCLUT): the same loop on the flat table, each cell read as one
+                // slice (`x_seed_fused_clut.rs`).
+                BlastpRuntimeLookup::CompressedFlat(flat_lookup) => {
+                    super::x_seed_fused_clut::x_scan_two_hit_compressed_flat(
+                        flat_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate,
+                    )
+                }
             }
         }
         // EXPERIMENT (LOSAT_X_BPSEEDSHADOW): put the table back as it was before the fused loop and keep
@@ -6852,8 +6901,10 @@ fn run_resolved_in_pool(
                 &reference_hsps,
                 &fused_diag,
                 &scratch.diag_array,
-                matches!(&lookup, BlastpRuntimeLookup::Compressed(_))
-                    || subject.aa_len + 1 >= word_size as usize,
+                matches!(
+                    &lookup,
+                    BlastpRuntimeLookup::Compressed(_) | BlastpRuntimeLookup::CompressedFlat(_)
+                ) || subject.aa_len + 1 >= word_size as usize,
             );
         }
 

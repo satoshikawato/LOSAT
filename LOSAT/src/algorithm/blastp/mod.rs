@@ -39,6 +39,8 @@ mod kappa;
 mod x_seed_fused;
 // EXPERIMENT (LOSAT_X_BPSEED): the same loop for the compressed lookup table of blastp-fast.
 mod x_seed_fused_compressed;
+// EXPERIMENT (LOSAT_X_BPSEED with LOSAT_X_BPCLUT): the same loop on the flat compressed table.
+mod x_seed_fused_clut;
 // EXPERIMENT (LOSAT_X_BPPFREE): preliminary hit lists without spare room, each freed after its
 // query's redo.
 mod x_prelim_free;

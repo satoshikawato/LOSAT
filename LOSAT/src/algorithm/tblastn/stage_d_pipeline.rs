@@ -125,6 +125,18 @@ struct StageDBoundaryTrace {
     posttraceback_lengths: Vec<(usize, usize, i32)>,
 }
 
+// NCBI c++/src/algo/blast/api/blast_results.cpp:72-115;
+// c++/src/algo/blast/format/blast_format.cpp:445-477:
+// s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
+// x_PrintOneQueryFooter(*results.GetAncillaryData());
+// The report of a batch reads these set-up values only; the search returns them
+// with or without the comparison-only trace above.
+struct LocalBatchSetup {
+    parameters: LocalSubjectParameters,
+    ungapped_karlin: Vec<KarlinParams>,
+    query_validity: Vec<bool>,
+}
+
 // NCBI c++/src/algo/blast/core/blast_setup.c:1011-1024;
 // c++/src/algo/blast/format/blast_format.cpp:445-477:
 // BLAST_CalcEffLengths(...); BlastHitSavingParametersUpdate(...);
@@ -178,7 +190,7 @@ pub(super) fn run_local_for_report_threads(
     Vec<bool>,
 )> {
     with_search_pool(threads, "tblastn", |pool| {
-        let mut trace = StageDBoundaryTrace::default();
+        let mut setup = None;
         let results = run_local_search_with_pool(
             queries,
             subjects,
@@ -186,16 +198,16 @@ pub(super) fn run_local_for_report_threads(
             composition_mode2,
             do_sum_stats,
             scoring,
-            Some(&mut trace),
+            &mut setup,
+            None,
             Some(pool),
         )?;
+        let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
         Ok((
             results,
-            trace
-                .parameters
-                .context("missing TBLASTN initial parameters")?,
-            trace.ungapped_karlin,
-            trace.query_validity,
+            setup.parameters,
+            setup.ungapped_karlin,
+            setup.query_validity,
         ))
     })
 }
@@ -222,7 +234,7 @@ pub(super) fn x_run_local_for_report_in_pool(
     scoring: LocalStageDScoring,
     pool: &SearchPool<'_>,
 ) -> Result<XBatchReport> {
-    let mut trace = StageDBoundaryTrace::default();
+    let mut setup = None;
     let results = run_local_search_with_pool(
         queries,
         subjects,
@@ -230,16 +242,16 @@ pub(super) fn x_run_local_for_report_in_pool(
         composition_mode2,
         do_sum_stats,
         scoring,
-        Some(&mut trace),
+        &mut setup,
+        None,
         Some(pool),
     )?;
+    let setup: LocalBatchSetup = setup.context("missing TBLASTN initial parameters")?;
     Ok((
         results,
-        trace
-            .parameters
-            .context("missing TBLASTN initial parameters")?,
-        trace.ungapped_karlin,
-        trace.query_validity,
+        setup.parameters,
+        setup.ungapped_karlin,
+        setup.query_validity,
     ))
 }
 
@@ -525,6 +537,7 @@ fn run_local_search(
         composition_mode2,
         do_sum_stats,
         scoring,
+        &mut None,
         observer,
         None,
     )
@@ -546,6 +559,7 @@ fn run_local_search_with_pool(
     composition_mode2: bool,
     do_sum_stats: bool,
     scoring: LocalStageDScoring,
+    setup: &mut Option<LocalBatchSetup>,
     mut observer: Option<&mut StageDBoundaryTrace>,
     pool: Option<&SearchPool<'_>>,
 ) -> Result<Vec<KappaResultHitList>> {
@@ -657,19 +671,25 @@ fn run_local_search_with_pool(
         },
         None,
     )?;
-    if let Some(ref mut trace) = observer {
-        trace.parameters = Some(parameters.clone());
+    let batch_setup = LocalBatchSetup {
+        parameters: parameters.clone(),
         // NCBI c++/src/algo/blast/api/blast_results.cpp:72-115:
         // s_InitializeKarlinBlk(sbp->kbp_std[ctx_index], &m_UngappedKarlinBlk);
-        trace.ungapped_karlin = contexts
+        ungapped_karlin: contexts
             .iter()
             .map(|context| context.karlin_params)
-            .collect();
+            .collect(),
         // NCBI blast_results.cpp:82-97: no valid context returns before
         // Karlin block initialization and leaves search space at zero.
-        trace.query_validity = contexts.iter().map(|context| context.is_valid).collect();
+        query_validity: contexts.iter().map(|context| context.is_valid).collect(),
+    };
+    if let Some(ref mut trace) = observer {
+        trace.parameters = Some(batch_setup.parameters.clone());
+        trace.ungapped_karlin = batch_setup.ungapped_karlin.clone();
+        trace.query_validity = batch_setup.query_validity.clone();
         trace.subject_nt_lengths = subjects.iter().map(Vec::len).collect();
     }
+    *setup = Some(batch_setup);
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
     // int status = m_PrelimSearch->CheckInternalData();
     // if (status != 0) {

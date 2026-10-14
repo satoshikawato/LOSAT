@@ -1471,6 +1471,63 @@ fn blastp_context_lookup_bounds(contexts: &[QueryContext]) -> BlastpContextLooku
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-213
+// ```c++
+//     // 5. Create the lookup table
+//     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+//         LookupTableWrap* lut =
+//             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
+//                                              sbp, lookup_segments_wrap,
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:192-201
+// ```c++
+//     CRef<SBlastSetupData> setup_data =
+//         BlastSetupPreliminarySearchEx(
+//                 qf, options,
+//                 CRef<objects::CPssmWithParameters>(),
+//                 seqsrc, num_threads);
+//     ...
+//     _ASSERT(setup_data->m_QuerySplitter->IsQuerySplit() == false);
+// ```
+// The compressed lookup tables that NCBI builds for the queries of this search, as ranges of
+// `locations` (the lookup segments of all queries, in query order): one for each query batch
+// (`query_batch_size`: GetQueryBatchSize's 10000 letters, or the environment variable
+// BATCH_SIZE) that NCBI does not split, none for a split batch, and one for each query chunk
+// of a split batch, which is a search of its own here (`search_split_query_batches`,
+// `query_chunk`) whose queries make that one table.
+fn ncbi_compressed_lookup_tables(
+    query_batches: &[seq_range::RangedBatch],
+    query_lengths: &[usize],
+    contexts: &[QueryContext],
+    locations: &[(i32, i32)],
+    query_chunk: bool,
+) -> Result<Vec<std::ops::Range<usize>>> {
+    if query_chunk {
+        return Ok(vec![0..locations.len()]);
+    }
+    let sizes = crate::blastinput::app::protein_query_split_sizes("BLASTP", 10000)?;
+    // The first lookup segment of query `q_idx` or of a query after it.
+    let first_segment = |q_idx: usize| {
+        let context = contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
+        contexts.get(context).map_or(locations.len(), |context| {
+            locations.partition_point(|&(left, _)| left < context.frame_base)
+        })
+    };
+    Ok(query_batches
+        .iter()
+        .map(|batch| batch.searched.clone())
+        .filter(|searched| !searched.is_empty())
+        .filter(|searched| {
+            crate::algorithm::common::protein_query_split::split_protein_batch(
+                &query_lengths[searched.clone()],
+                sizes,
+            )
+            .is_none()
+        })
+        .map(|searched| first_segment(searched.start)..first_segment(searched.end))
+        .collect())
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-235
 // ```c
 // Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
@@ -5935,6 +5992,10 @@ fn run_resolved_in_pool(
     let x_drop_gapped_final =
         blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, gapped_params.lambda)
             .max(x_drop_gapped);
+    let batch_size = crate::blastinput::app::query_batch_size("BLASTP", 10000)?;
+    // The batches count whole records (`seq_range::QueryInput::batches`); the batches
+    // here are those that NCBI searches (`read_query_batches`).
+    let query_batches = ranges.query_input.batches(batch_size);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2746-2748
     // ```c
     // Boolean check_ideal =
@@ -5971,16 +6032,26 @@ fn run_resolved_in_pool(
             // ```c
             //     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
             // ```
+            // One table for all query batches; NCBI's tables (`ncbi_compressed_lookup_tables`)
+            // only bound the overflow cells.
+            let ncbi_tables = ncbi_compressed_lookup_tables(
+                &query_batches,
+                &query_lengths,
+                &contexts,
+                &locations,
+                chunk_prelim.is_some(),
+            )?;
             let lookup = try_build_blosum62_compressed_lookup(
                 args.word_size,
                 crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
                 &query,
                 &locations,
+                &ncbi_tables,
             )
             .context("failed to build NCBI compressed amino-acid lookup table")?
             .map_err(|()| {
                 anyhow::anyhow!(
-                    "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's BLASTP: its neighboring words fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
+                    "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's BLASTP: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
                     args.threshold,
                     args.word_size
                 )
@@ -6039,10 +6110,6 @@ fn run_resolved_in_pool(
         }
     }
     let mut query_batch_skipped = vec![false; query_records.len()];
-    let batch_size = crate::blastinput::app::query_batch_size("BLASTP", 10000)?;
-    // The batches count whole records (`seq_range::QueryInput::batches`); the batches
-    // here are those that NCBI searches (`read_query_batches`).
-    let query_batches = ranges.query_input.batches(batch_size);
     for batch in &query_batches {
         let range = batch.searched.clone();
         let skipped = query_valid[range.clone()].iter().all(|valid| !valid);
@@ -10786,5 +10853,55 @@ mod tests {
         let restricted = build_restricted_align_array(&init_hsps, &contexts, &[100, 100], 2);
 
         assert_eq!(restricted, vec![false, true]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-209
+    // ```c++
+    //     // 5. Create the lookup table
+    //     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+    //         LookupTableWrap* lut =
+    //             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
+    // ```
+    // The compressed tables of NCBI's query batches as ranges of lookup segments: a batch that
+    // NCBI splits (19,800 letters or more with the default CHUNK_SIZE) has none, and a query
+    // chunk's search is one table.
+    #[test]
+    fn test_ncbi_compressed_lookup_tables_are_unsplit_batches() {
+        let lengths = [5000usize, 6000, 3000, 25000];
+        let contexts = vec![
+            make_query_context(0, 0),
+            make_query_context(1, 5001),
+            make_query_context(2, 11002),
+            make_query_context(3, 14003),
+        ];
+        // Query 0 has two segments, query 2 none (all masked).
+        let locations = [(0, 99), (200, 4999), (5001, 11000), (14003, 39002)];
+        let batches = [
+            seq_range::RangedBatch {
+                input: 0..2,
+                searched: 0..2,
+            },
+            seq_range::RangedBatch {
+                input: 2..3,
+                searched: 2..3,
+            },
+            seq_range::RangedBatch {
+                input: 3..4,
+                searched: 3..4,
+            },
+            seq_range::RangedBatch {
+                input: 4..5,
+                searched: 4..4,
+            },
+        ];
+        assert_eq!(
+            ncbi_compressed_lookup_tables(&batches, &lengths, &contexts, &locations, false)
+                .unwrap(),
+            vec![0..3, 3..3]
+        );
+        assert_eq!(
+            ncbi_compressed_lookup_tables(&batches, &lengths, &contexts, &locations, true).unwrap(),
+            vec![0..4]
+        );
     }
 }

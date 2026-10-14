@@ -156,7 +156,24 @@ pub struct BlastCompressedAaLookupTable {
     /// Whether the words filled NCBI's overflow banks: NCBI then writes past
     /// `overflow_banks` and corrupts its heap, so the table is not used.
     pub overflow_banks_exhausted: bool,
+    /// The overflow cells the table can take: NCBI's banks (`NCBI_OVERFLOW_CELL_CAPACITY`),
+    /// or no limit for BLASTP's one table of all query batches
+    /// (`try_build_blosum62_compressed_lookup`), which tests each batch's own table instead.
+    overflow_cell_capacity: usize,
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1321-1330
+// ```c
+//     lookup->overflow_banks = (CompressedOverflowCell **) calloc(
+//                                          COMPRESSED_OVERFLOW_MAX_BANKS,
+//                                          sizeof(CompressedOverflowCell *));
+//     ...
+//     lookup->curr_overflow_cell = COMPRESSED_OVERFLOW_CELLS_IN_BANK;
+//     lookup->curr_overflow_bank = -1;
+// ```
+// The cells a table can take before `s_CompressedListGetNewCell` writes past `overflow_banks`.
+const NCBI_OVERFLOW_CELL_CAPACITY: usize =
+    COMPRESSED_OVERFLOW_CELLS_IN_BANK * COMPRESSED_OVERFLOW_MAX_BANKS;
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:935-952
 // ```c
@@ -219,6 +236,7 @@ impl BlastCompressedAaLookupTable {
             neighbor_matches: 0,
             exact_matches: 0,
             overflow_banks_exhausted: false,
+            overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
         })
     }
 
@@ -247,16 +265,26 @@ impl BlastCompressedAaLookupTable {
     // ```
     // The release build has no ASSERT, so after the last bank NCBI writes past
     // `overflow_banks`; the table is marked and the last cell is reused, and the words that
-    // are left are not added.
+    // are left are not added. The capacity is that of NCBI's banks, except for BLASTP's
+    // table of all query batches, which has none (`overflow_cell_capacity`); the cells are
+    // taken in the same order either way.
     fn compressed_list_get_new_cell(&mut self) -> usize {
         let cell_index = self.overflow_cells.len();
-        let max_cells = COMPRESSED_OVERFLOW_CELLS_IN_BANK * COMPRESSED_OVERFLOW_MAX_BANKS;
+        let max_cells = self.overflow_cell_capacity;
         if cell_index >= max_cells {
             self.overflow_banks_exhausted = true;
             return max_cells - 1;
         }
         if cell_index == self.overflow_cells.capacity() {
-            let additional = COMPRESSED_OVERFLOW_CELLS_IN_BANK.min(max_cells - cell_index);
+            // No NCBI counterpart: a table with NCBI's capacity grows by one bank, as NCBI
+            // allocates its banks; BLASTP's table of all query batches, which has no limit,
+            // grows geometrically, so that its cells are not copied once per bank on platforms
+            // whose `realloc` copies. Only the capacity differs; the cells are the same.
+            let additional = if max_cells > NCBI_OVERFLOW_CELL_CAPACITY {
+                cell_index.max(COMPRESSED_OVERFLOW_CELLS_IN_BANK)
+            } else {
+                COMPRESSED_OVERFLOW_CELLS_IN_BANK.min(max_cells - cell_index)
+            };
             self.overflow_cells.reserve_exact(additional);
         }
         self.overflow_cells.push(CompressedOverflowCell::default());
@@ -555,6 +583,31 @@ impl BlastCompressedAaLookupTable {
         locations: &[(i32, i32)],
     ) {
         let info = CompressedNeighborInfo::new(matrix, self.compressed_alphabet_size as usize);
+        self.add_location_words(&info, matrix, query, locations, |_| true);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175
+    // ```c
+    //     for (loc = location; loc; loc = loc->next){
+    //         Int4 from = loc->ssr->left;
+    //         Int4 to = loc->ssr->right - lookup->word_length + 1;
+    //
+    //         for (offset = from; offset <= to; offset++){
+    //             s_CompressedAddWordHits(&info, query->sequence, offset);
+    //         }
+    //     }
+    // ```
+    // The loop of `add_neighboring_words`. No NCBI counterpart: `after_word` sees the table
+    // after the words of each query offset (BLASTP's test of its query batches' own tables)
+    // and stops the loop when it returns `false`; it changes no word that is added.
+    fn add_location_words(
+        &mut self,
+        info: &CompressedNeighborInfo,
+        matrix: &CompressedScoreMatrix,
+        query: &[u8],
+        locations: &[(i32, i32)],
+        mut after_word: impl FnMut(&Self) -> bool,
+    ) -> bool {
         let word_size = self.word_length;
         for &(left, right) in locations {
             let to = right - word_size + 1;
@@ -563,10 +616,14 @@ impl BlastCompressedAaLookupTable {
                     .expect("NCBI BLAST compressed query offset must be non-negative");
                 let end = start + word_size as usize;
                 if end <= query.len() {
-                    self.add_word_hits(&info, matrix, query, offset);
+                    self.add_word_hits(info, matrix, query, offset);
+                    if !after_word(self) {
+                        return false;
+                    }
                 }
             }
         }
+        true
     }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aascan.c:343-384
@@ -1266,22 +1323,144 @@ pub fn build_blosum62_compressed_lookup(
 
 /// The table of `build_blosum62_compressed_lookup` for a threshold already in NCBI's
 /// matrix units (`(Int4)(kMatrixScale * opt->threshold)`, converted by the caller as the
-/// x86-64 build does). `Some(Err(()))` is a table whose words filled NCBI's overflow banks.
+/// x86-64 build does), built once for the queries of several of NCBI's tables: `locations`
+/// are the lookup segments of all queries in query order, and `tables` the ranges of
+/// `locations` (in order) of each table that NCBI builds (BLASTP's query batches). The
+/// table has no limit on its overflow cells, and its cells hold their offsets in NCBI's
+/// order. `Some(Err(()))` when the words of one of NCBI's tables fill its overflow banks.
 pub fn try_build_blosum62_compressed_lookup(
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
     locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
+    try_build_blosum62_compressed_lookup_with_capacity(
+        word_size,
+        scaled_threshold,
+        query,
+        locations,
+        tables,
+        NCBI_OVERFLOW_CELL_CAPACITY,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-213
+// ```c++
+//     // 5. Create the lookup table
+//     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+//         LookupTableWrap* lut =
+//             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
+//                                              sbp, lookup_segments_wrap,
+//                                              retval->m_InternalData->m_RpsData,
+//                                              seqsrc,
+//                                              num_threads);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:798-834
+// ```c
+//     case 5:
+//     {
+//         ...
+//         CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
+//         ...
+//     default:
+//     {
+//         ...
+//         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
+//
+//         if (cell_index == 0 ) { /* can't be empty => it's full  */
+//
+//             /* fetch next vacant cell */
+//         	CompressedOverflowCell * new_cell = s_CompressedListGetNewCell(lookup);
+// ```
+// NCBI builds a table for each query batch; this is one table for all of them, whose
+// cells hold the offsets of each batch in the batch's order, one batch after another.
+// `overflow_cell_capacity` is that of NCBI's banks (a parameter for the tests).
+//
+// The test of each of NCBI's tables: a backbone cell with n offsets takes cells(n) overflow
+// cells, 0 for n <= 5 and floor(n / 4) from n = 6 on (one cell for the 6th offset, then one
+// whenever (num_entries - 3) & 3 == 0). With c offsets of the batches before it, a batch's
+// n offsets take cells(c + n) - cells(c) >= cells(n) cells of this table (floor is
+// superadditive), so a batch whose words take no more cells of this table than NCBI's
+// banks hold cannot fill them in its own table either; this is checked after each query
+// offset. A batch past that is tested exactly once: when no words come before it, this
+// table so far is the batch's own; otherwise the batch's own table is built with NCBI's
+// capacity (`compressed_table_fills_banks`). Either stops as soon as the banks are full.
+fn try_build_blosum62_compressed_lookup_with_capacity(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    overflow_cell_capacity: usize,
 ) -> Option<Result<BlastCompressedAaLookupTable, ()>> {
     let mut lookup = BlastCompressedAaLookupTable::new(word_size, 0.0)?;
     lookup.threshold = scaled_threshold;
+    lookup.overflow_cell_capacity = usize::MAX;
     let matrix = build_blosum62_compressed_score_matrix(lookup.compressed_alphabet_size as usize)?;
-    lookup.add_neighboring_words(&matrix, query, locations);
-    if lookup.overflow_banks_exhausted {
-        return Some(Err(()));
+    let info = CompressedNeighborInfo::new(&matrix, lookup.compressed_alphabet_size as usize);
+    let mut next = 0usize;
+    for table in tables {
+        // The words between NCBI's tables (a split query batch, whose chunks have tables
+        // of their own) are added without a test.
+        lookup.add_location_words(&info, &matrix, query, &locations[next..table.start], |_| {
+            true
+        });
+        let table_locations = &locations[table.clone()];
+        let cells_before = lookup.overflow_cells.len();
+        let words_before = table.start > 0;
+        let mut tested = false;
+        let fits = lookup.add_location_words(&info, &matrix, query, table_locations, |lookup| {
+            if tested || lookup.overflow_cells.len() - cells_before <= overflow_cell_capacity {
+                return true;
+            }
+            tested = true;
+            words_before
+                && !compressed_table_fills_banks(
+                    word_size,
+                    scaled_threshold,
+                    &matrix,
+                    query,
+                    table_locations,
+                    overflow_cell_capacity,
+                )
+        });
+        if !fits {
+            return Some(Err(()));
+        }
+        next = table.end;
     }
+    lookup.add_location_words(&info, &matrix, query, &locations[next..], |_| true);
     lookup.finalize();
     Some(Ok(lookup))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+// One of NCBI's tables (a query batch's lookup segments), built with NCBI's capacity only to
+// see whether its words fill the banks; it stops there. Its offsets are those of the whole
+// query, which changes no count of a cell.
+fn compressed_table_fills_banks(
+    word_size: usize,
+    scaled_threshold: i32,
+    matrix: &CompressedScoreMatrix,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    overflow_cell_capacity: usize,
+) -> bool {
+    let mut table = BlastCompressedAaLookupTable::new(word_size, 0.0)
+        .expect("the word size of a table already built");
+    table.threshold = scaled_threshold;
+    table.overflow_cell_capacity = overflow_cell_capacity;
+    let info = CompressedNeighborInfo::new(matrix, table.compressed_alphabet_size as usize);
+    table.add_location_words(&info, matrix, query, locations, |table| {
+        !table.overflow_banks_exhausted
+    });
+    table.overflow_banks_exhausted
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1339-1347
@@ -1481,6 +1660,294 @@ pub fn compressed_pv_set(pv: &mut [u32], index: usize, pv_array_bts: usize) {
 mod tests {
     use super::*;
     use crate::utils::matrix::ncbistdaa;
+
+    // A small deterministic generator (xorshift64) for the tests of the query batches' tables.
+    struct XorShift(u64);
+
+    impl XorShift {
+        fn below(&mut self, n: usize) -> usize {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            (x % n as u64) as usize
+        }
+    }
+
+    // Queries of `lengths` letters drawn from `letters`, concatenated as BLASTP's lookup query
+    // (each query followed by a sentinel), with one lookup segment per query.
+    fn concatenated_queries(
+        rng: &mut XorShift,
+        lengths: &[usize],
+        letters: &[u8],
+    ) -> (Vec<u8>, Vec<(i32, i32)>) {
+        let mut query = Vec::new();
+        let mut locations = Vec::new();
+        for &length in lengths {
+            let left = query.len() as i32;
+            for _ in 0..length {
+                query.push(letters[rng.below(letters.len())]);
+            }
+            locations.push((left, left + length as i32 - 1));
+            query.push(0);
+        }
+        (query, locations)
+    }
+
+    // A table of `locations` with no limit on its overflow cells (not finalized).
+    fn unlimited_table(
+        threshold: i32,
+        query: &[u8],
+        locations: &[(i32, i32)],
+    ) -> BlastCompressedAaLookupTable {
+        let mut table = BlastCompressedAaLookupTable::new(5, 0.0).expect("compressed lookup");
+        table.threshold = threshold;
+        table.overflow_cell_capacity = usize::MAX;
+        let matrix = build_blosum62_compressed_score_matrix(15).expect("compressed matrix");
+        table.add_neighboring_words(&matrix, query, locations);
+        table
+    }
+
+    fn assert_same_table(lhs: &BlastCompressedAaLookupTable, rhs: &BlastCompressedAaLookupTable) {
+        assert!(lhs.backbone == rhs.backbone, "backbone cells differ");
+        assert!(
+            lhs.overflow_cells == rhs.overflow_cells,
+            "overflow cells differ"
+        );
+        assert_eq!(lhs.pv, rhs.pv);
+        assert_eq!(lhs.pv_array_bts, rhs.pv_array_bts);
+        assert_eq!(lhs.longest_chain, rhs.longest_chain);
+        assert_eq!(lhs.neighbor_matches, rhs.neighbor_matches);
+        assert_eq!(lhs.exact_matches, rhs.exact_matches);
+        for index in 0..lhs.backbone.len() {
+            if lhs.backbone[index].num_used > 5 {
+                assert_eq!(
+                    lhs.query_offsets_in_scan_order(index),
+                    rhs.query_offsets_in_scan_order(index)
+                );
+            }
+        }
+    }
+
+    // The queries of the tests below: few letters and a low threshold (11, in NCBI's matrix
+    // units), so that words repeat and cells overflow.
+    const FEW_LETTERS: [u8; 4] = [ncbistdaa::A, ncbistdaa::L, ncbistdaa::S, ncbistdaa::K];
+    const LOW_THRESHOLD: i32 = 1100;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-213
+    // ```c++
+    //     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+    //         LookupTableWrap* lut =
+    //             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
+    // ```
+    // (a) The table of all batches takes more cells than the capacity, no batch's own table
+    // does: the table is built, and it is the table without a limit.
+    #[test]
+    fn compressed_batches_within_capacity_give_the_unlimited_table() {
+        let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
+        let (query, locations) =
+            concatenated_queries(&mut rng, &[300, 250, 400, 150, 350, 300], &FEW_LETTERS);
+        let tables = [0..2, 2..3, 3..6];
+        let batch_cells: Vec<usize> = tables
+            .iter()
+            .map(|table| {
+                unlimited_table(LOW_THRESHOLD, &query, &locations[table.clone()])
+                    .overflow_cells
+                    .len()
+            })
+            .collect();
+        let capacity = *batch_cells.iter().max().unwrap();
+        let mut unlimited = unlimited_table(LOW_THRESHOLD, &query, &locations);
+        assert!(capacity > 0);
+        assert!(unlimited.overflow_cells.len() > capacity);
+        unlimited.finalize();
+
+        let table = try_build_blosum62_compressed_lookup_with_capacity(
+            5,
+            LOW_THRESHOLD,
+            &query,
+            &locations,
+            &tables,
+            capacity,
+        )
+        .expect("word size 5")
+        .expect("no batch fills the capacity");
+        assert_same_table(&table, &unlimited);
+
+        // Locations outside NCBI's tables (a split batch) are in the table, untested.
+        let table = try_build_blosum62_compressed_lookup_with_capacity(
+            5,
+            LOW_THRESHOLD,
+            &query,
+            &locations,
+            &[0..2, 3..6],
+            capacity,
+        )
+        .expect("word size 5")
+        .expect("no batch fills the capacity");
+        assert_same_table(&table, &unlimited);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
+    // ```c
+    //     if (lookup->curr_overflow_cell ==
+    //                         COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
+    //         /* need a new bank */
+    //         Int4 bank_idx = lookup->curr_overflow_bank + 1;
+    //         lookup->overflow_banks[bank_idx] = (CompressedOverflowCell*) malloc(
+    // ```
+    // (b) One batch's own table needs more cells than the capacity: refused, whether the
+    // batch is the first (its table so far is the whole table) or a later one.
+    #[test]
+    fn compressed_batch_past_capacity_is_refused() {
+        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
+        let (query, locations) = concatenated_queries(&mut rng, &[100, 400, 60, 80], &FEW_LETTERS);
+        let small = [0..1, 2..3, 3..4]
+            .iter()
+            .map(|table| {
+                unlimited_table(LOW_THRESHOLD, &query, &locations[table.clone()])
+                    .overflow_cells
+                    .len()
+            })
+            .max()
+            .unwrap();
+        let large = unlimited_table(LOW_THRESHOLD, &query, &locations[1..2])
+            .overflow_cells
+            .len();
+        assert!(small > 0 && large > small + 1);
+        let build = |tables: &[std::ops::Range<usize>], capacity: usize| {
+            try_build_blosum62_compressed_lookup_with_capacity(
+                5,
+                LOW_THRESHOLD,
+                &query,
+                &locations,
+                tables,
+                capacity,
+            )
+            .expect("word size 5")
+        };
+        // A later batch: its own table is built for the test.
+        assert!(build(&[0..1, 1..2, 2..3, 3..4], large - 1).is_err());
+        assert!(build(&[0..1, 1..2, 2..3, 3..4], large).is_ok());
+        assert!(build(&[1..2, 2..4], large - 1).is_err());
+        // The first batch: the table so far is its own.
+        let first = unlimited_table(LOW_THRESHOLD, &query, &locations[0..2])
+            .overflow_cells
+            .len();
+        let rest = unlimited_table(LOW_THRESHOLD, &query, &locations[2..4])
+            .overflow_cells
+            .len();
+        assert!(first >= large && rest < first - 1);
+        assert!(build(&[0..2, 2..4], first - 1).is_err());
+        assert!(build(&[0..2, 2..4], first).is_ok());
+        // The large query in a split batch (no table of its own) is not tested.
+        assert!(build(&[0..1, 2..3, 3..4], small).is_ok());
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:825-841
+    // ```c
+    //     default:
+    //     {
+    //     	/* continue with existing overflow list */
+    //         ...
+    //         Int4 cell_index = (num_entries -3) & COMPRESSED_HITS_CELL_MASK ;
+    //
+    //         if (cell_index == 0 ) { /* can't be empty => it's full  */
+    // ```
+    // (c) On random queries: a batch's own table takes cells(n) = 0 (n <= 5) or floor(n / 4)
+    // cells per backbone cell, the batch takes at least as many cells of the table of all
+    // batches (the shortcut is sound), and the build refuses exactly when some batch's own
+    // table needs more cells than the capacity.
+    #[test]
+    fn compressed_batch_shortcut_agrees_with_exact_test() {
+        let mut rng = XorShift(0x1234_5678_9abc_def1);
+        let mut shortcut_undecided = 0usize;
+        for round in 0..12 {
+            let letters: &[u8] = if round % 3 == 2 {
+                &[
+                    ncbistdaa::A,
+                    ncbistdaa::L,
+                    ncbistdaa::S,
+                    ncbistdaa::K,
+                    ncbistdaa::E,
+                    ncbistdaa::G,
+                    ncbistdaa::X,
+                ]
+            } else {
+                &FEW_LETTERS
+            };
+            let threshold = [1100, 1600, 2000, 2400][rng.below(4)];
+            let lengths: Vec<usize> = (0..2 + rng.below(6)).map(|_| 5 + rng.below(400)).collect();
+            let (query, locations) = concatenated_queries(&mut rng, &lengths, letters);
+            // Batches of consecutive queries; some are left out (split batches).
+            let mut tables = Vec::new();
+            let mut start = 0;
+            while start < locations.len() {
+                let end = (start + 1 + rng.below(3)).min(locations.len());
+                if rng.below(4) != 0 {
+                    tables.push(start..end);
+                }
+                start = end;
+            }
+            let mut whole = BlastCompressedAaLookupTable::new(5, 0.0).expect("compressed lookup");
+            whole.threshold = threshold;
+            whole.overflow_cell_capacity = usize::MAX;
+            let matrix = build_blosum62_compressed_score_matrix(15).expect("compressed matrix");
+            let mut next = 0;
+            let mut exact = Vec::new();
+            for table in &tables {
+                whole.add_neighboring_words(&matrix, &query, &locations[next..table.start]);
+                let before = whole.overflow_cells.len();
+                whole.add_neighboring_words(&matrix, &query, &locations[table.clone()]);
+                let shortcut = whole.overflow_cells.len() - before;
+                let own = unlimited_table(threshold, &query, &locations[table.clone()]);
+                let cells: usize = own
+                    .backbone
+                    .iter()
+                    .map(|cell| match cell.num_used {
+                        n if n <= 5 => 0,
+                        n => n as usize / 4,
+                    })
+                    .sum();
+                assert_eq!(own.overflow_cells.len(), cells);
+                assert!(shortcut >= cells, "round {round}: {shortcut} < {cells}");
+                exact.push((cells, shortcut));
+                next = table.end;
+            }
+            whole.add_neighboring_words(&matrix, &query, &locations[next..]);
+            whole.finalize();
+
+            let mut capacities = vec![1usize, whole.overflow_cells.len() + 1];
+            for &(cells, shortcut) in &exact {
+                capacities.extend([cells, cells + 1, shortcut, shortcut + 1]);
+                if cells > 1 {
+                    capacities.push(cells - 1);
+                }
+            }
+            capacities.retain(|&capacity| capacity > 0);
+            for capacity in capacities {
+                let refused = exact.iter().any(|&(cells, _)| cells > capacity);
+                shortcut_undecided += exact
+                    .iter()
+                    .filter(|&&(cells, shortcut)| cells <= capacity && shortcut > capacity)
+                    .count();
+                let built = try_build_blosum62_compressed_lookup_with_capacity(
+                    5, threshold, &query, &locations, &tables, capacity,
+                )
+                .expect("word size 5");
+                match built {
+                    Err(()) => assert!(refused, "round {round}, capacity {capacity}"),
+                    Ok(table) => {
+                        assert!(!refused, "round {round}, capacity {capacity}");
+                        assert_same_table(&table, &whole);
+                    }
+                }
+            }
+        }
+        // Batches that the shortcut leaves to the exact test, and that pass it, were seen.
+        assert!(shortcut_undecided > 0);
+    }
 
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:782-849
     // ```c

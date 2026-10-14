@@ -814,7 +814,16 @@ pub(super) fn x_scan_plan(
     // Translation and chunking of the subject, as above: the reference path of the plan that the
     // shared plan memoises.
     let x_reference_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
-        let resolved_subject = resolve_local_subject_ncbi2na(subject)?;
+        // Letters that are all `A`, `C`, `G`, `T` resolve to themselves (no base is ambiguous,
+        // so nothing is drawn): read them in place.
+        let resolved_subject = if subject
+            .iter()
+            .all(|&letter| matches!(letter, b'A' | b'C' | b'G' | b'T'))
+        {
+            std::borrow::Cow::Borrowed(subject)
+        } else {
+            std::borrow::Cow::Owned(resolve_local_subject_ncbi2na(subject)?)
+        };
         let frames = generate_frames(&resolved_subject, &code);
         let negative_first_length = frames
             .iter()
@@ -1021,6 +1030,24 @@ mod tests {
     use crate::algorithm::blastp::encoding::ncbistdaa_to_ascii;
     use std::collections::HashMap;
     use std::fs;
+
+    // No NCBI counterpart: the premise of `x_reference_subject`'s in-place read. Letters that
+    // are all `A`, `C`, `G`, `T` are their own resolution (`s_Ncbi4naToNcbi2na` draws only for an
+    // ambiguous base); one other letter anywhere makes a resolution that is not the letters.
+    #[test]
+    fn upper_case_acgt_letters_resolve_to_themselves() {
+        let letters: Vec<u8> = (0..4099u32)
+            .map(|index| b"ACGT"[(index.wrapping_mul(2_654_435_761) >> 30) as usize])
+            .collect();
+        assert_eq!(resolve_local_subject_ncbi2na(&letters).unwrap(), letters);
+        for other in [b'a', b'N', b'n', b'R', b'-'] {
+            let mut changed = letters.clone();
+            changed[2048] = other;
+            let resolved = resolve_local_subject_ncbi2na(&changed).unwrap();
+            assert!(resolved.iter().all(|&base| b"ACGT".contains(&base)));
+            assert_ne!(resolved, changed);
+        }
+    }
 
     fn read_fasta(path: &str) -> Vec<(String, Vec<u8>)> {
         let text = fs::read_to_string(path).unwrap();

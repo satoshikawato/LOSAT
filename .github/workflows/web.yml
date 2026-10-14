@@ -2,6 +2,8 @@ name: Web
 
 on:
   push:
+    # bench branch only (not for merge): no Web run for the measurement pushes
+    branches-ignore: ['bench/**']
     paths:
       - 'web/**'
       - 'LOSAT/src/**'

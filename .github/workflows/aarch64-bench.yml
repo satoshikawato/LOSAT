@@ -1,0 +1,143 @@
+name: aarch64 bench
+
+# Measurement only (A1-X, followups-20261014): the two-register NEON X-drop kernels
+# (LOSAT_X_DPNEON2) against the 128-bit NEON kernels (LOSAT_X_DPNEON) on the arm runners, NCBI
+# BLAST+ 2.17.0 as the reference, bench5's seven small cases, configurations alternating within each
+# round (LOSAT/tests/aarch64_bench.py); and the verification of the new kernels (random problems,
+# platform-check cases with the shadow comparison, ci_fast). Runs on a push to a bench/aarch64*
+# branch; not for merge.
+on:
+  push:
+    branches: ['bench/aarch64**']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bench:
+    name: bench (${{ matrix.id }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04-arm, id: linux-arm64, ncbi: ncbi-blast-2.17.0+-aarch64-linux.tar.gz }
+          - { runner: macos-15, id: macos-arm64, ncbi: ncbi-blast-2.17.0+-aarch64-macosx.tar.gz }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+      - name: Machine
+        run: |
+          uname -a
+          if command -v lscpu >/dev/null; then lscpu; else sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize; fi
+      - name: Build LOSAT
+        run: |
+          cd LOSAT && cargo build --release --locked --bin LOSAT
+          sha256sum target/release/LOSAT 2>/dev/null || shasum -a 256 target/release/LOSAT
+      - name: NCBI BLAST+ 2.17.0 (official archive, md5 checked)
+        env:
+          ARCHIVE: ${{ matrix.ncbi }}
+        run: |
+          set -euo pipefail
+          base=https://ftp.ncbi.nlm.nih.gov/blast/executables/blast%2B/2.17.0
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$ARCHIVE" "$base/${ARCHIVE/+/%2B}"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$ARCHIVE.md5" "$base/${ARCHIVE/+/%2B}.md5"
+          python3 - "$RUNNER_TEMP/$ARCHIVE" <<'PY'
+          import hashlib, sys
+          path = sys.argv[1]
+          want = open(path + ".md5").read().split()[0]
+          got = hashlib.md5(open(path, "rb").read()).hexdigest()
+          print("md5", got, "published", want)
+          sys.exit(0 if got == want else 1)
+          PY
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/ncbi-blast-2.17.0+/bin/blastn" -version
+      - name: NCBI, LOSAT_X_DPNEON=1 (128-bit) and LOSAT_X_DPNEON2=1 (two registers), 7 rounds
+        run: |
+          python3 LOSAT/tests/aarch64_bench.py --out bench-out \
+            --bin ncbi="$RUNNER_TEMP/ncbi-blast-2.17.0+/bin" --bin main=LOSAT/target/release/LOSAT \
+            --config ncbi=ncbi --config neon=main:LOSAT_X_DPNEON=1 --config neon2=main:LOSAT_X_DPNEON2=1 \
+            --threads 1,max --rounds 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aarch64-bench-${{ matrix.id }}
+          path: |
+            bench-out/rows.tsv
+            bench-out/summary.tsv
+            bench-out/work/*.err
+          if-no-files-found: warn
+          retention-days: 30
+
+  verify:
+    name: verify NEON2 (${{ matrix.id }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04-arm, id: linux-arm64 }
+          - { runner: macos-15, id: macos-arm64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.92.0
+      - name: Random-problem tests, 30000 cases, release with debug assertions
+        env:
+          LOSAT_FUZZ_CASES: '30000'
+          CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: 'true'
+          CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS: 'true'
+        run: cd LOSAT && cargo test --release --locked --lib xdrop -- --nocapture 2>&1 | tee ../fuzz.log; test "${PIPESTATUS[0]}" = 0
+      - name: Release binary
+        run: cd LOSAT && cargo build --release --locked --bin LOSAT
+      - name: Platform-check cases with DPNEON, DPNEON2 and LOSAT_X_DPSHADOW=1 (128-bit NEON compared)
+        run: |
+          python3 LOSAT/tests/platform_checks.py run --losat LOSAT/target/release/LOSAT --out verify-out \
+            --extra-mode dpneon=LOSAT_X_DPNEON=1 --extra-mode dpneon2=LOSAT_X_DPNEON2=1 \
+            --extra-mode shadow=LOSAT_X_DPSHADOW=1
+      - name: Platform-check cases with LOSAT_X_DPNEON2=1 and LOSAT_X_DPSHADOW=1 (two-register kernels compared)
+        run: |
+          printf '#!/bin/sh\nLOSAT_X_DPNEON2=1 exec "%s" "$@"\n' "$PWD/LOSAT/target/release/LOSAT" > "$RUNNER_TEMP/losat-neon2"
+          chmod +x "$RUNNER_TEMP/losat-neon2"
+          python3 LOSAT/tests/platform_checks.py run --losat "$RUNNER_TEMP/losat-neon2" --out verify-out2 \
+            --extra-mode shadow2=LOSAT_X_DPSHADOW=1
+      # Frozen outfmt 0/7 bytes print the input paths of the runs that froze them (ci.yml).
+      - name: Link the frozen input paths (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo mkdir -p /mnt/c/Users/genom/GitHub
+          sudo ln -sfn "$GITHUB_WORKSPACE" /mnt/c/Users/genom/GitHub/LOSAT
+      - name: ci_fast, all programs, default (Linux)
+        if: runner.os == 'Linux'
+        run: python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/LOSAT --out fr-default --programs all
+      - name: ci_fast, all programs, LOSAT_X_DEFAULT=0 (Linux)
+        if: runner.os == 'Linux'
+        env:
+          LOSAT_X_DEFAULT: '0'
+        run: python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/LOSAT --out fr-reference --programs all
+      - name: ci_fast, all programs, LOSAT_X_DPNEON2=1 (Linux)
+        if: runner.os == 'Linux'
+        env:
+          LOSAT_X_DPNEON2: '1'
+        run: python3 LOSAT/tests/ci_fast_regressions.py --losat LOSAT/target/release/LOSAT --out fr-neon2 --programs all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aarch64-verify-${{ matrix.id }}
+          path: |
+            fuzz.log
+            verify-out/rows.tsv
+            verify-out2/rows.tsv
+            fr-*/summary.json
+            fr-*/hashes.tsv
+          if-no-files-found: warn
+          retention-days: 30

@@ -67,8 +67,8 @@
 //! per query batch. A block's table is tested for NCBI's overflow banks with the block's own
 //! batches (`blast_engine.rs` `ncbi_compressed_lookup_tables`), and the block search is taken only
 //! where the words of each batch's offsets show that no batch's table fills them
-//! (`x_block_search_refuses_nothing`), so that the reference path's refusal, which comes before
-//! any row, is never made in a later block.
+//! (`x_block_words_fit`, tested before the first block), so that the reference path's refusal,
+//! which comes before any row, is never made in a later block.
 //!
 //! Off unless `LOSAT_X_BPQBLOCK` is set to a positive number of query letters (the block closes
 //! at the first batch end at or past it). Not in the strict set.
@@ -165,8 +165,13 @@ use std::io::{self, BufWriter, Write};
 use std::ops::Range;
 use std::path::Path;
 
+use super::encoding::EncodedProtein;
+use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::OutputSink;
+use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::RangedBatch;
+use crate::utils::threading::SearchPool;
 
 // No NCBI counterpart: reads the LOSAT_X_BPQBLOCK switch once; it does not change any value NCBI
 // computes.
@@ -278,9 +283,154 @@ impl Write for XBlockSink<'_> {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
+// ```c
+//     /* iterate over all subject sequences */
+//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//            != BLAST_SEQSRC_EOF) {
+//        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+//            continue;
+//        }
+// ```
+// NCBI reads each subject again for each query batch; the encoded subject is a function of the
+// subject's record only, so one encoding serves every block. Reuse only.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks (attached to the search's
+/// pool, `SearchPool::x_with_ext`), with the records they encode.
+pub(crate) struct XBlockSubjects {
+    /// The address and count of the records encoded.
+    records: (usize, usize),
+    encoded: Vec<EncodedProtein>,
+}
+
+impl XBlockSubjects {
+    // No NCBI counterpart: keeps the encoding of `records` (module comment above).
+    pub(crate) fn new(records: &[FastaRecord], encoded: Vec<EncodedProtein>) -> Self {
+        assert_eq!(records.len(), encoded.len());
+        Self {
+            records: (records.as_ptr() as usize, records.len()),
+            encoded,
+        }
+    }
+}
+
+// No NCBI counterpart: reads back the encoding attached by the block search (reuse only).
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the encoded subjects attached to `pool`, when they encode
+/// `records` (the same slice).
+pub(crate) fn x_block_subjects<'p>(
+    pool: &SearchPool<'p>,
+    records: &[FastaRecord],
+) -> Option<&'p [EncodedProtein]> {
+    pool.x_ext::<XBlockSubjects>()
+        .filter(|subjects| subjects.records == (records.as_ptr() as usize, records.len()))
+        .map(|subjects| &subjects.encoded[..])
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (the contexts' Karlin
+// blocks, `x_prepare_blosum62_lookup_query_in_pool`)
+// ```c
+//       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+// ```
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): `prepare_blosum62_lookup_query_for_word_size(query_frames,
+/// word_size, false)`, with the contexts' Karlin blocks computed on `pool`'s threads when the switch
+/// is set and the pool has more than one thread (the same values).
+pub(crate) fn x_bp_lookup_query(
+    query_frames: &[Vec<QueryFrame>],
+    word_size: usize,
+    pool: &SearchPool<'_>,
+) -> (Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if x_bp_qblock().is_some() && pool.enabled() && pool.threads() > 1 {
+        return crate::algorithm::tblastx::lookup::x_prepare_blosum62_lookup_query_in_pool(
+            query_frames,
+            word_size,
+            false,
+            pool,
+        );
+    }
+    let _ = pool;
+    crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size(
+        query_frames,
+        word_size,
+        false,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803
+    // ```c
+    //       if ( !contexts[context].is_valid )
+    //           continue;
+    //       ...
+    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+    // ```
+    // The lookup query with the contexts' Karlin blocks computed on a pool of 1, 3 and 7 threads is
+    // the reference's (`prepare_blosum62_lookup_query_for_word_size`): the query, the segments and
+    // every context (Karlin blocks bit for bit, validity). Random queries with low-complexity runs
+    // (SEG-masked, several segments), a query of X only (no Karlin block: invalid), a short one.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn lookup_query_with_karlin_blocks_on_a_pool_is_the_references() {
+        use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
+        use crate::algorithm::tblastx::lookup::x_pair_lut::x_assert_same_contexts;
+        use crate::algorithm::tblastx::lookup::{
+            prepare_blosum62_lookup_query_for_word_size, x_prepare_blosum62_lookup_query_in_pool,
+        };
+        let letters = b"ACDEFGHIKLMNPQRSTVWYBZXUO*";
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut below = |n: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % n as u64) as usize
+        };
+        let mut sequences: Vec<Vec<u8>> = Vec::new();
+        for _ in 0..40 {
+            let length = 1 + below(400);
+            let mut sequence: Vec<u8> = (0..length).map(|_| letters[below(20)]).collect();
+            if length > 60 && below(2) == 0 {
+                let at = below(length - 40);
+                let run = letters[below(letters.len())];
+                sequence[at..at + 30].fill(run);
+            }
+            if below(10) == 0 {
+                sequence[below(length)] = letters[20 + below(6)];
+            }
+            sequences.push(sequence);
+        }
+        sequences.push(b"XXXXXXXXXXXX".to_vec());
+        sequences.push(b"MK".to_vec());
+        let seg = crate::utils::seg::SegParams::default();
+        for seg in [None, Some(&seg)] {
+            let frames: Vec<Vec<QueryFrame>> = sequences
+                .iter()
+                .map(|sequence| vec![encode_protein_query_frame_with_seg(sequence, seg)])
+                .collect();
+            let (query, locations, contexts) =
+                prepare_blosum62_lookup_query_for_word_size(&frames, 5, false);
+            assert!(contexts.iter().any(|context| !context.is_valid));
+            for threads in [1, 3, 7] {
+                let (pool_query, pool_locations, pool_contexts) =
+                    crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                        Ok(x_prepare_blosum62_lookup_query_in_pool(
+                            &frames, 5, false, pool,
+                        ))
+                    })
+                    .expect("pool");
+                assert_eq!(pool_query, query);
+                assert_eq!(pool_locations, locations);
+                x_assert_same_contexts(&pool_contexts, &contexts);
+            }
+        }
+    }
 
     fn batch(input: Range<usize>, searched: Range<usize>) -> RangedBatch {
         RangedBatch { input, searched }

@@ -425,10 +425,28 @@ Rebuilding less:
   `LOSAT_X_BPQBLOCK=20000` and `LOSAT_X_BPSEED=1` on both sides, one thread, 8 alternating pairs, load 5.9-8.2):
   `blastp_build_lookup` summed over the blocks 4.55 -> 2.27 s (median ratio 0.54), `blastp_scan_ungapped`
   1.41 -> 1.08 s (0.84), wall 8.21 -> 5.43 s (0.73), max RSS 77 -> 40 MB, output unchanged.
+  With more than one thread (`-num_threads`) the search's thread pool builds the same table
+  (`tblastx/lookup/x_clut_par.rs`, exactness argument in its header): the query offsets of each count range
+  are cut into chunks in order, each chunk makes its appends (the serial count pass's statements) and sorts
+  them stably by stripe (2^shift backbone cells, at least the largest PV shift); each stripe then reads its
+  part of every chunk in chunk order, which gives each cell its offsets in the serial order, counts them,
+  lays out its cells' starts from its first hit (the hits of the stripes before) and sets its PV words, and
+  runs the serial fill and the move to NCBI's scan order on its cells. The overflow cells that each of
+  NCBI's tables takes are counted per stripe and summed, and each table is tested at its end by the serial
+  builder's rule (same refusal, same message). At one thread the serial builder runs, unchanged. The build
+  holds 4 bytes per hit for the sorted appends, as the serial build's record of the appends.
+  Measured 2026-10-14 on the WSL machine (i9-14900HX, 8 performance and 16 efficiency cores, shared with
+  other sessions; same input, `LOSAT_X_BPQBLOCK=20000 LOSAT_X_BPSEED=1 LOSAT_X_BPCLUT=1` on both sides,
+  with this change and the per-block set-up on the pool of `LOSAT_X_BPQBLOCK` below; alternating pairs,
+  medians; load 15-32): wall at 1 / 4 / 8 / 16 threads 7.36 / 5.00 / 4.55 / 7.92 -> 7.19 / 2.74 / 2.33 /
+  3.97 s (median pair ratios 0.98 / 0.55 / 0.51 / 0.49), `blastp_build_lookup` 3.04 / 3.07 / 3.00 / 4.91
+  -> 3.03 / 1.03 / 0.86 / 1.41 s, max RSS 39 / 45 / 46 / 53 -> 42 / 42 / 45 / 63 MB, output unchanged.
 - `LOSAT_X_BPCLUTSHADOW=1` shadow of `LOSAT_X_BPCLUT` (for blastp-fast): both builders run, the refusal and the
   tables are compared (every cell's hits in the reference's scan order, the PV array, `longest_chain` and the
-  scan's parameters) and the first difference stops the run (panic); the search uses the reference's table. One
-  line at exit: `[X_SHADOW] BPCLUT tables_compared= refusals_compared= hits= identical`.
+  scan's parameters) and the first difference stops the run (panic); the search uses the reference's table.
+  With more than one thread the pool's build runs too and its outcome and table (every field, slot for slot)
+  are compared with the serial flat build's. One line at exit: `[X_SHADOW] BPCLUT tables_compared=
+  refusals_compared= hits= parallel_tables_compared= parallel_refusals_compared= identical`.
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; not in the
   strict set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the word loop and the
   X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte
@@ -495,6 +513,13 @@ Rebuilding less:
   otherwise the search of all queries. The output file is created when the first block's rows are written; a
   run that fails in a later block leaves the rows of the blocks before.
   With `LOSAT_TIMING=1` each block prints its own `[TIMING]` lines.
+  The block search's set-up uses its thread pool (no value changes): the count of the query batches' words
+  for the overflow banks runs on the pool before the first block (groups of consecutive batches, one counter
+  per group; when it fails nothing has been written and the search of all queries runs); the subjects are
+  encoded once for all blocks (attached to the pool, `x_query_blocks::XBlockSubjects`); and with the
+  compressed table and more than one thread, the contexts' Karlin blocks of each block are computed on the
+  pool's threads (`tblastx/lookup/backbone.rs` `x_prepare_blosum62_lookup_query_in_pool`: each context's
+  block reads only its own letters, `x_context_karlin`).
 - `LOSAT_X_BPPFREE=1` (BLASTP, memory; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the preliminary hit lists hold no more than their HSPs need
   (`blastp/x_prelim_free.rs`, exactness argument in its header): a subject's HSP list for a query gives back
@@ -630,6 +655,33 @@ Scheduling (each value computed by one thread with the original function; order 
   flow. Not in the set (off unless set to any value). With `LOSAT_WASI_THREADS_DEBUG=1` each subject
   whose units ran on the pool prints a `prelim_units` stage line with `parallel_selected=true`;
   `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
+- `LOSAT_X_TBNSTATE=1` tblastn, the unit path (`TBNPAR`): the scan state of a subject's (frame,
+  chunk) units (the diagonal table of the two-hit word finder, the offset pairs, the initial hits,
+  the gapped alignment memory) is kept by the thread from one subject to the next, as NCBI's search
+  thread keeps its word-finder and gapped alignment structures for every subject of its loop
+  (`blast_engine.c:1002-1003,1412-1413`), and each unit ends with NCBI's step of the diagonal offset
+  (`Blast_ExtendWordExit`, `blast_extend.c:166-171`: the offset moves on by the unit's length plus
+  the window; the table is cleared only when the offset reaches INT4_MAX / 4) instead of the next
+  unit clearing the whole table. After the step every entry lies more than a window behind any hit
+  of the next unit, so its first hit on a diagonal only records it, as on a cleared table: the same
+  initial hits by construction. Without the switch each subject makes its own state and each unit
+  clears a table of next_pow2(query residues + window) entries of 8 bytes (1 MB for 84,000 query
+  residues); on the human transcriptome (465,769 subjects, 118 fly proteins, 8 threads) glibc's
+  per-thread heaps were created and deleted about 250,000 times for these states (munmap 461,484,
+  mmap 249,858 against 36 and 71 before #161). On the workstation (8 threads on 8 cores of one NUMA
+  node, other work on the machine, alternating rounds against a placebo variable, the same reports):
+  that search 161.9 -> 133.2 s (CPU 1,261 -> 1,031 s, minor faults 3.8-22 M -> 0.87 M, munmap
+  415,942 -> 55), the zebrafish transcriptome 15.2 -> 12.0 s, the 16S rRNA genes (28,036 subjects,
+  55 proteins) 1.18 -> 1.01 s, and at one thread 8.15 -> 6.82 s. The units of a long subject that
+  run on the pool (`TBNOIDUNITS`, the single subject of a search) take the offset step too, on a
+  state per task.
+  The thread that runs the search keeps one set (the table and the largest offset-pair and hit
+  buffers) until it ends or its next tblastn search takes it over. Not in the set (off unless set
+  to any value); it acts at every thread count. With `LOSAT_X_DEFAULT=0` the reference loop runs
+  instead of the unit path and the variable changes nothing. `LOSAT_X_TBNPARSHADOW=1` compares the
+  unit path of every subject with the serial reference. Tests: `tblastn/search_init.rs` (the table
+  kept across units, across the clear and taken over by another query set), the last test of
+  `LOSAT/tests/tblastn_oid_chunk.rs`.
 - `LOSAT_X_TBNXLATE=1` tblastn: the six translated frames of a subject are read from tables, as
   NCBI makes them from the compressed subject (`blast_util.c:1071-1090`: one table of 64 residues
   per strand, `s_BlastGetTranslationTable`, and one table read per codon,

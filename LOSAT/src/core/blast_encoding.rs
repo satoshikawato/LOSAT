@@ -554,26 +554,52 @@ pub fn resolve_ncbi4na_to_ncbi2na(ncbi4na: &[u8]) -> Vec<u8> {
     let mut random = NcbiRandom::new(ncbi4na.len() as u32);
     ncbi4na
         .iter()
-        .map(|&mask| match mask {
-            1 => 0,
-            2 => 1,
-            4 => 2,
-            8 => 3,
-            0 | 15 => (random.get_rand() & 0x3) as u8,
-            _ => {
-                let mut pick = random.get_rand() % mask.count_ones();
-                (0..4u8)
-                    .filter(|bit| mask & (1 << bit) != 0)
-                    .find(|_| {
-                        let found = pick == 0;
-                        pick = pick.wrapping_sub(1);
-                        found
-                    })
-                    .unwrap_or(0)
-            }
-        })
+        .map(|&mask| resolve_ncbi4na_letter(mask, &mut random))
         .collect()
 }
+
+/// The ncbi2na code of one ncbi4na letter (`resolve_ncbi4na_to_ncbi2na`): an ambiguous
+/// letter draws from `random`, an unambiguous one does not.
+#[inline]
+fn resolve_ncbi4na_letter(mask: u8, random: &mut NcbiRandom) -> u8 {
+    match mask {
+        1 => 0,
+        2 => 1,
+        4 => 2,
+        8 => 3,
+        0 | 15 => (random.get_rand() & 0x3) as u8,
+        _ => {
+            let mut pick = random.get_rand() % mask.count_ones();
+            (0..4u8)
+                .filter(|bit| mask & (1 << bit) != 0)
+                .find(|_| {
+                    let found = pick == 0;
+                    pick = pick.wrapping_sub(1);
+                    found
+                })
+                .unwrap_or(0)
+        }
+    }
+}
+
+/// The value of `UNAMBIGUOUS_NCBI2NA` for a byte that is not an unambiguous letter (the
+/// one bit that no ncbi2na code has).
+const AMBIGUOUS_LETTER: u8 = 4;
+
+/// The ncbi2na code of each byte that is `A`, `C`, `G` or `T` in either case, and
+/// `AMBIGUOUS_LETTER` for every other byte (`encode_subject_ncbi2na_packed`).
+const UNAMBIGUOUS_NCBI2NA: [u8; 256] = {
+    let mut table = [AMBIGUOUS_LETTER; 256];
+    table[b'A' as usize] = 0;
+    table[b'a' as usize] = 0;
+    table[b'C' as usize] = 1;
+    table[b'c' as usize] = 1;
+    table[b'G' as usize] = 2;
+    table[b'g' as usize] = 2;
+    table[b'T' as usize] = 3;
+    table[b't' as usize] = 3;
+    table
+};
 
 /// A subject in packed ncbi2na (4 bases per byte, the remainder count in the last byte),
 /// with its ambiguous letters resolved as NCBI resolves them (`resolve_ncbi4na_to_ncbi2na`).
@@ -600,21 +626,49 @@ pub fn resolve_ncbi4na_to_ncbi2na(ncbi4na: &[u8]) -> Vec<u8> {
 ///     // compressed sequence
 ///     retval.data.get()[ci] |= source.length%COMPRESSION_RATIO;
 /// ```
+///
+/// The letters are read once: `A`, `C`, `G` and `T` through a table, the others as
+/// `resolve_ncbi4na_to_ncbi2na` resolves their ncbi4na values, in order, from a `CRandom`
+/// seeded with the length and made at the first of them (the generator is not drawn from
+/// for unambiguous letters, so a subject without one needs none).
 pub fn encode_subject_ncbi2na_packed(seq: &[u8]) -> Vec<u8> {
     if seq.is_empty() {
         return Vec::new();
     }
-    let ncbi4na: Vec<u8> = seq
-        .iter()
-        .map(|&letter| iupacna_to_ncbi4na(letter).unwrap_or(15))
-        .collect();
-    let codes = resolve_ncbi4na_to_ncbi2na(&ncbi4na);
-    let mut packed = vec![0u8; codes.len() / COMPRESSION_RATIO + 1];
-    for (index, &code) in codes.iter().enumerate() {
-        let shift = 6 - 2 * (index % COMPRESSION_RATIO);
-        packed[index / COMPRESSION_RATIO] |= code << shift;
+    let length = seq.len();
+    let mut random: Option<NcbiRandom> = None;
+    let mut code = |letter: u8| -> u8 {
+        let code = UNAMBIGUOUS_NCBI2NA[letter as usize];
+        if code != AMBIGUOUS_LETTER {
+            return code;
+        }
+        let mask = iupacna_to_ncbi4na(letter).unwrap_or(15);
+        let random = random.get_or_insert_with(|| NcbiRandom::new(length as u32));
+        resolve_ncbi4na_letter(mask, random)
+    };
+    let mut packed = Vec::with_capacity(length / COMPRESSION_RATIO + 1);
+    let mut groups = seq.chunks_exact(COMPRESSION_RATIO);
+    for group in &mut groups {
+        let first = UNAMBIGUOUS_NCBI2NA[group[0] as usize];
+        let second = UNAMBIGUOUS_NCBI2NA[group[1] as usize];
+        let third = UNAMBIGUOUS_NCBI2NA[group[2] as usize];
+        let fourth = UNAMBIGUOUS_NCBI2NA[group[3] as usize];
+        if (first | second | third | fourth) & AMBIGUOUS_LETTER == 0 {
+            packed.push((first << 6) | (second << 4) | (third << 2) | fourth);
+            continue;
+        }
+        // At least one ambiguous letter: the four letters in order.
+        let first = code(group[0]);
+        let second = code(group[1]);
+        let third = code(group[2]);
+        let fourth = code(group[3]);
+        packed.push((first << 6) | (second << 4) | (third << 2) | fourth);
     }
-    *packed.last_mut().expect("at least one byte") |= (codes.len() % COMPRESSION_RATIO) as u8;
+    let mut last = (length % COMPRESSION_RATIO) as u8;
+    for (index, &letter) in groups.remainder().iter().enumerate() {
+        last |= code(letter) << (6 - 2 * index);
+    }
+    packed.push(last);
     packed
 }
 
@@ -666,6 +720,68 @@ pub fn decode_kmer(kmer: u64, k: usize) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `encode_subject_ncbi2na_packed` as it was written before its one-pass form: every
+    /// letter to ncbi4na, all of them resolved, then packed.
+    fn encode_subject_ncbi2na_packed_two_pass(seq: &[u8]) -> Vec<u8> {
+        if seq.is_empty() {
+            return Vec::new();
+        }
+        let ncbi4na: Vec<u8> = seq
+            .iter()
+            .map(|&letter| iupacna_to_ncbi4na(letter).unwrap_or(15))
+            .collect();
+        let codes = resolve_ncbi4na_to_ncbi2na(&ncbi4na);
+        let mut packed = vec![0u8; codes.len() / COMPRESSION_RATIO + 1];
+        for (index, &code) in codes.iter().enumerate() {
+            let shift = 6 - 2 * (index % COMPRESSION_RATIO);
+            packed[index / COMPRESSION_RATIO] |= code << shift;
+        }
+        *packed.last_mut().expect("at least one byte") |= (codes.len() % COMPRESSION_RATIO) as u8;
+        packed
+    }
+
+    #[test]
+    fn subject_packing_equals_the_two_pass_form() {
+        // Every byte value alone and between unambiguous letters.
+        for byte in 0..=255u8 {
+            for seq in [vec![byte], vec![b'A', byte, b'c', b'G', b't', byte, byte]] {
+                assert_eq!(
+                    encode_subject_ncbi2na_packed(&seq),
+                    encode_subject_ncbi2na_packed_two_pass(&seq),
+                    "{seq:?}"
+                );
+            }
+        }
+        // Mixed letters of every length up to 64 and a few long ones (a linear congruential
+        // generator picks them; one letter in eight is ambiguous or not a letter).
+        let alphabet = b"ACGTacgtACGTacgtACGTacgtACGTacgtMRSVWYHKDBNmrsvwyhkdbn-UuX*";
+        let mut state = 0x2545_f491_u32;
+        let mut next = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            state >> 8
+        };
+        let lengths = (0..=64).chain([1_000, 4_097, 100_003]);
+        for length in lengths {
+            for _ in 0..4 {
+                let seq: Vec<u8> = (0..length)
+                    .map(|_| {
+                        let pick = next() as usize;
+                        if pick % 8 == 0 {
+                            alphabet[32 + pick / 8 % (alphabet.len() - 32)]
+                        } else {
+                            alphabet[pick / 8 % 32]
+                        }
+                    })
+                    .collect();
+                assert_eq!(
+                    encode_subject_ncbi2na_packed(&seq),
+                    encode_subject_ncbi2na_packed_two_pass(&seq),
+                    "length {length}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn test_encode_base() {

@@ -58,6 +58,23 @@ const MAX_TOTAL_GAPS: usize = 3_000;
 // ```
 const RESTRICT_SIZE: usize = 10;
 
+// NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:4273-4278
+// ```c
+//          if (restricted_alignment) {
+//             score_left = s_RestrictedGappedAlign(query, subject+subject_shift,
+//                                    q_length, s_length,
+//                                    &private_q_start, &private_s_start,
+//                                    gap_align, score_params,
+//                                    init_hsp->offsets.qs_offsets.q_off, TRUE);
+// ```
+// EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): `s_RestrictedGappedAlign` on separate row
+// arrays, eight cells at a time with AVX2. A child module, so that it calls the reference
+// function and its helpers without changing them.
+#[path = "x_restricted_gap.rs"]
+mod x_restricted_gap;
+// No NCBI counterpart: the summary lines `main` prints at exit; they change no value NCBI computes.
+pub use x_restricted_gap::print_summary as x_restricted_gap_print_summary;
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:399-414
 // ```c
 // matrix = gap_align->sbp->matrix->data;
@@ -360,6 +377,9 @@ pub(crate) struct GapAlignScratch {
     // }
     // ```
     trace_ops_reversed: Vec<(u8, u32)>,
+    // No NCBI counterpart: the row arrays of LOSAT_X_BPGAP (NCBI keeps its rows in
+    // gap_align->dp_mem); empty unless the switch runs.
+    x_restricted: x_restricted_gap::XRestrictedScratch,
 }
 
 impl GapAlignScratch {
@@ -389,6 +409,7 @@ impl GapAlignScratch {
             // GapPrelimEditBlockAdd(edit_block, (EGapAlignOpType)script, 1);
             // ```
             trace_ops_reversed: Vec::new(),
+            x_restricted: x_restricted_gap::XRestrictedScratch::new(),
         }
     }
 }
@@ -3047,21 +3068,24 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
             true,
             scratch,
         ),
-        BlastpGappedAlignmentMode::Restricted => restricted_gapped_align_protein(
-            query,
-            0,
-            subject,
-            subject_shift,
-            q_length,
-            subject_offset,
-            score_matrix,
-            gap_open,
-            gap_extend,
-            x_drop,
-            true,
-            &mut scratch.dp_mem,
-            &mut scratch.dp_mem_alloc,
-        ),
+        // EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): the reference function unless a
+        // variable is set (x_restricted_gap.rs).
+        BlastpGappedAlignmentMode::Restricted => {
+            x_restricted_gap::restricted_gapped_align_protein_x(
+                query,
+                0,
+                subject,
+                subject_shift,
+                q_length,
+                subject_offset,
+                score_matrix,
+                gap_open,
+                gap_extend,
+                x_drop,
+                true,
+                scratch,
+            )
+        }
     };
     let query_hit_start = i32::try_from(q_length - private_q_start)
         .expect("NCBI BLAST preliminary query start must fit in Int4");
@@ -3098,21 +3122,23 @@ pub(crate) fn blastp_score_only_gapped_alignment_with_scratch(
                     false,
                     scratch,
                 ),
-                BlastpGappedAlignmentMode::Restricted => restricted_gapped_align_protein(
-                    query,
-                    q_start,
-                    subject,
-                    s_start,
-                    query.len() - q_length,
-                    subject_length - subject_offset,
-                    score_matrix,
-                    gap_open,
-                    gap_extend,
-                    x_drop,
-                    false,
-                    &mut scratch.dp_mem,
-                    &mut scratch.dp_mem_alloc,
-                ),
+                // EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): as for the left extension.
+                BlastpGappedAlignmentMode::Restricted => {
+                    x_restricted_gap::restricted_gapped_align_protein_x(
+                        query,
+                        q_start,
+                        subject,
+                        s_start,
+                        query.len() - q_length,
+                        subject_length - subject_offset,
+                        score_matrix,
+                        gap_open,
+                        gap_extend,
+                        x_drop,
+                        false,
+                        scratch,
+                    )
+                }
             };
             (
                 i32::try_from(q_start + private_q_stop + 1)

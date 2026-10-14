@@ -21,6 +21,8 @@ pub(crate) mod extension;
 pub(crate) mod gapalign;
 mod hsp;
 mod query_split;
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the queries searched in blocks of whole query batches.
+mod x_query_blocks;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
 // ```c
 // static void s_HSPListNormalizeScores(...);
@@ -39,3 +41,6 @@ pub fn x_bp_seed_print_summary() {
 
 pub use args::BlastpArgs;
 pub use blast_engine::run;
+// EXPERIMENT (LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW): the summary lines `main` prints at exit.
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub use gapalign::x_restricted_gap_print_summary;

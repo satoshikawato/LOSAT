@@ -1,26 +1,35 @@
-//! How many subjects one entry into the search pool takes in TBLASTN (`LOSAT_X_TBNOIDCHUNK`,
-//! `src/algorithm/tblastn/stage_d_pipeline.rs`), on a whole search of many short subjects.
+//! How TBLASTN hands its subjects to the search pool (`LOSAT_X_TBNOIDCHUNK`,
+//! `src/algorithm/tblastn/stage_d_pipeline.rs`), on whole searches of many subjects.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413
-//! ```c
-//!     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+//! NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697-707
+//! ```c++
+//!         Int8 tot_length = m_Atlas.GetSliceSize() / (4*m_NumThreads) + 1;
 //!
-//!     /* iterate over all subject sequences */
-//!     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-//!            != BLAST_SEQSRC_EOF) {
+//!         res.length = vol->GetSequence(vol_oid++, &seq);
+//!         if (res.length < 0) return;
+//!         // must return at least one sequence
+//!         do {
+//!             tot_length -= res.length;
+//!             res.address = seq;
+//!             buffer->results.push_back(res);
+//!             res.length = vol->GetSequence(vol_oid++, &seq);
+//!         } while (res.length >= 0 && tot_length >= res.length && vol_oid < m_RestrictEnd);
 //! ```
-//! Each NCBI search thread takes a hundredth of the subjects at a time. Without the switch one
-//! entry into LOSAT's pool takes one subject per thread; with it, one such chunk per thread. The
-//! switch is in the strict set (`src/utils/xswitch.rs`): it is on by default, off with
-//! `LOSAT_X_TBNOIDCHUNK=0`, and off with `LOSAT_X_DEFAULT=0` unless its variable is set. It must
-//! change the number of entries and nothing in the report, so the tests compare the report with
-//! the one-thread search, which has no pool and searches the subjects in NCBI's loop order, and
-//! read the `pool_entries` field of the `[losat-thread-activity]` line
-//! (`LOSAT_WASI_THREADS_DEBUG=1`) to check which entries ran.
+//! With two or more threads each NCBI search thread takes a chunk of consecutive subjects whose
+//! bases stay within `min(2^30, F) / (4 * threads) + 1`, at least one subject; F is the largest
+//! file of the database, and for `-subject` LOSAT takes ceil(bases / 4), the `.nsq` that
+//! `makeblastdb` writes for the same subjects. Without the switch one entry into LOSAT's pool
+//! takes one subject per thread; with it, one such chunk per thread. The switch is in the strict
+//! set (`src/utils/xswitch.rs`): it is on by default, off with `LOSAT_X_TBNOIDCHUNK=0`, and off
+//! with `LOSAT_X_DEFAULT=0` unless its variable is set. It must change the entries and nothing in
+//! the report, so the tests compare the report with the one-thread search, which has no pool and
+//! searches the subjects in NCBI's loop order, and read the `pool_entries` field of the
+//! `[losat-thread-activity]` line (`LOSAT_WASI_THREADS_DEBUG=1`) to check which entries ran.
 //!
-//! The fixture suites have no search with 200 or more subjects, the least that gives a chunk of
-//! two, so the tests cut `tests/fasta/MelaMJNV.fasta` into 240 subjects of 1,000 bases and search
-//! them with the first ten proteins of `tests/fasta/PemoMJNVA.faa`.
+//! The fixture suites have no search of many subjects, so the tests cut
+//! `tests/fasta/MelaMJNV.fasta` into subjects of 1,000 bases (240 of them, or 200 with one subject
+//! of 48,000 bases first, in the middle or last) and search them with the first ten proteins of
+//! `tests/fasta/PemoMJNVA.faa`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,6 +39,10 @@ const SUBJECTS: usize = 240;
 const SUBJECT_LENGTH: usize = 1_000;
 const QUERIES: usize = 10;
 const THREADS: usize = 4;
+/// The sets with one long subject: `SHORT_SUBJECTS` pieces of `SUBJECT_LENGTH` bases and one of
+/// `LONG_SUBJECT` bases, which is longer than a chunk's budget at every thread count tested.
+const SHORT_SUBJECTS: usize = 200;
+const LONG_SUBJECT: usize = 48_000;
 
 /// The records of a FASTA file as (title line, letters).
 fn records(path: &Path) -> Vec<(String, String)> {
@@ -77,13 +90,57 @@ fn inputs() -> &'static (PathBuf, PathBuf) {
     })
 }
 
-/// One TBLASTN run of the inputs (`-outfmt 6` on standard output) with the given variables as
-/// its only `LOSAT_*` variables, except `LOSAT_BLASTX_WORKER_LOG`: a build with the worker probe
-/// (`--all-features`) writes to that file as soon as a pool starts, so the caller's value is
-/// kept, or a file of the tests is named. Returns the report and the standard error.
-fn tblastn(threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
+/// Where the long subject stands in its set.
+#[derive(Clone, Copy, Debug)]
+enum Long {
+    First,
+    Middle,
+    Last,
+}
+
+/// The subject file with one long subject (`LONG_SUBJECT` bases, the start of the genome) and
+/// `SHORT_SUBJECTS` pieces of `SUBJECT_LENGTH` bases after it in the genome; the long subject is
+/// first, after half of the pieces, or last. Written once per position.
+fn long_subject_set(position: Long) -> PathBuf {
+    let fasta = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
+    let genome = &records(&fasta.join("MelaMJNV.fasta"))[0].1;
+    assert!(
+        genome.len() >= LONG_SUBJECT + SHORT_SUBJECTS * SUBJECT_LENGTH,
+        "genome too short"
+    );
+    let long = format!(">long\n{}\n", &genome[..LONG_SUBJECT]);
+    let at = match position {
+        Long::First => 0,
+        Long::Middle => SHORT_SUBJECTS / 2,
+        Long::Last => SHORT_SUBJECTS,
+    };
+    let mut subjects = String::new();
+    for index in 0..SHORT_SUBJECTS {
+        if index == at {
+            subjects.push_str(&long);
+        }
+        let start = LONG_SUBJECT + index * SUBJECT_LENGTH;
+        let piece = &genome[start..start + SUBJECT_LENGTH];
+        subjects.push_str(&format!(">piece{index}\n{piece}\n"));
+    }
+    if at == SHORT_SUBJECTS {
+        subjects.push_str(&long);
+    }
+    let path = inputs()
+        .1
+        .with_file_name(format!("long_{position:?}.fna").to_lowercase());
+    std::fs::write(&path, subjects).expect("subject file");
+    path
+}
+
+/// One TBLASTN run of the queries against `subjects` (`-outfmt 6` on standard output) with the
+/// given variables as its only `LOSAT_*` variables, except `LOSAT_BLASTX_WORKER_LOG`: a build
+/// with the worker probe (`--all-features`) writes to that file as soon as a pool starts, so the
+/// caller's value is kept, or a file of the tests is named. Returns the report and the standard
+/// error.
+fn tblastn_on(subjects: &Path, threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
     const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
-    let (query, subjects) = inputs();
+    let query = &inputs().0;
     let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
     for (name, _) in std::env::vars_os() {
         let name_text = name.to_string_lossy();
@@ -107,6 +164,11 @@ fn tblastn(threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(output.status.success(), "{variables:?}: {stderr}");
     (output.stdout, stderr)
+}
+
+/// `tblastn_on` with the `SUBJECTS` pieces.
+fn tblastn(threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
+    tblastn_on(&inputs().1, threads, variables)
 }
 
 /// The `pool_entries` field of the one `[losat-thread-activity]` line of the subject stage.
@@ -170,18 +232,19 @@ fn the_report_is_the_one_thread_report_by_default_and_with_the_switch_off() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409
-// ```c
-//     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697
+// ```c++
+//         Int8 tot_length = m_Atlas.GetSliceSize() / (4*m_NumThreads) + 1;
 // ```
-// 240 subjects give a chunk of two. With no variable an entry takes `THREADS` chunks (30
-// entries). With `LOSAT_X_TBNOIDCHUNK=0`, and with `LOSAT_X_DEFAULT=0` and no variable for the
-// switch, it takes `THREADS` subjects (60 entries); `LOSAT_X_DEFAULT=0` with
-// `LOSAT_X_TBNOIDCHUNK=1` gives the chunks again. The report is the same in all four.
+// 240 subjects of 1,000 bases: F = 60,000, and at `THREADS` = 4 a chunk may hold 3,751 bases,
+// three subjects. With no variable an entry takes `THREADS` chunks (20 entries). With
+// `LOSAT_X_TBNOIDCHUNK=0`, and with `LOSAT_X_DEFAULT=0` and no variable for the switch, it takes
+// `THREADS` subjects (60 entries); `LOSAT_X_DEFAULT=0` with `LOSAT_X_TBNOIDCHUNK=1` gives the
+// chunks again. The report is the same in all four.
 #[test]
 fn the_switch_is_on_by_default_and_follows_its_variable_and_the_global_one() {
     let debug = ("LOSAT_WASI_THREADS_DEBUG", "1");
-    let chunks = SUBJECTS / (THREADS * (SUBJECTS / 100));
+    let chunks = SUBJECTS / (THREADS * 3);
     let subjects = SUBJECTS / THREADS;
     let cases: [(&[(&str, &str)], usize); 4] = [
         (&[debug], chunks),
@@ -206,4 +269,42 @@ fn the_switch_is_on_by_default_and_follows_its_variable_and_the_global_one() {
         reports.iter().all(|report| *report == reports[0]),
         "the reports differ"
     );
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:697-707
+// ```c++
+//         Int8 tot_length = m_Atlas.GetSliceSize() / (4*m_NumThreads) + 1;
+// ...
+//         } while (res.length >= 0 && tot_length >= res.length && vol_oid < m_RestrictEnd);
+// ```
+// A subject longer than a chunk's budget is a chunk of its own, wherever it stands; the chunks
+// before and after it are cut short or start anew. With the long subject first, in the middle
+// and last the report at 2, 3 and 8 threads must be the one-thread report. The 248,000 bases
+// give F = 62,000; at 2 threads a chunk may hold 7,751 bases (seven short subjects), so the
+// entries are, by hand: first, {long} {7} then 13 entries of 14 and one of 11 (15); in the
+// middle, 7 entries of 14, {2} {long}, 7 of 14 and one of 2 (16); last, 14 entries of 14 and
+// {4} {long} (15).
+#[test]
+fn a_long_subject_first_in_the_middle_or_last_gives_the_one_thread_report() {
+    let debug = ("LOSAT_WASI_THREADS_DEBUG", "1");
+    for (position, entries_at_two) in [(Long::First, 15), (Long::Middle, 16), (Long::Last, 15)] {
+        let subjects = long_subject_set(position);
+        let (expected, _) = tblastn_on(&subjects, 1, &[]);
+        assert!(
+            expected
+                .split(|&byte| byte == b'\n')
+                .any(|row| row.split(|&byte| byte == b'\t').nth(1) == Some(&b"long"[..])),
+            "{position:?}: the search must hit the long subject"
+        );
+        for threads in [2, 3, 8] {
+            let (report, stderr) = tblastn_on(&subjects, threads, &[debug]);
+            assert!(
+                report == expected,
+                "{position:?}: {threads} threads differ from one thread"
+            );
+            if threads == 2 {
+                assert_eq!(pool_entries(&stderr), entries_at_two, "{position:?}");
+            }
+        }
+    }
 }

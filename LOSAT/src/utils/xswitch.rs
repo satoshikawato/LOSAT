@@ -38,8 +38,9 @@ use std::sync::OnceLock;
 /// change: it numbered the lookup hits of a chunk scan in a `u32`, exact only up to 2^32 hits
 /// per scan. It now numbers them per flush (`tblastx/x_seed_bucket.rs`) and joined the set once
 /// it was timed on the searches it acts on with the set on (the TBLASTX searches that
-/// `LOSAT_X_PAIRPAR` leaves to the scan loop). `LOSAT_X_TBNOIDCHUNK` (the subjects one entry
-/// into the TBLASTN search pool takes, `tblastn/stage_d_pipeline.rs`) and `LOSAT_X_SEEDRELEASE`
+/// `LOSAT_X_PAIRPAR` leaves to the scan loop). `LOSAT_X_TBNOIDCHUNK` (one entry into the TBLASTN
+/// search pool takes a chunk of subjects per thread, cut by residues as NCBI's database reader
+/// cuts them for its search threads, `tblastn/stage_d_pipeline.rs`) and `LOSAT_X_SEEDRELEASE`
 /// (when TBLASTX frees the tables of its seed stage, `tblastx/x_seed_release.rs`) were added
 /// after the change as switches that are off unless set and joined the set once they were
 /// verified with it on.

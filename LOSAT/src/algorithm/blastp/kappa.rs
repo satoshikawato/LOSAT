@@ -1073,11 +1073,19 @@ fn hsplist_from_distinct_alignments(
     template_hit: &BlastpPreliminaryHsp,
     oid: u32,
     query_index: u32,
+    x_redo_fit: bool,
 ) -> BlastpHspList {
+    // EXPERIMENT (LOSAT_X_BPREDOFIT): room for exactly the alignments of the list
+    // (`x_redo_fit.rs`); without the switch the vector grows by `push`, as before.
+    let capacity = if x_redo_fit {
+        super::x_redo_fit::x_alignment_count(alignments.as_deref())
+    } else {
+        0
+    };
     let mut hsp_list = BlastpHspList {
         oid,
         query_index,
-        hsps: Vec::new(),
+        hsps: Vec::with_capacity(capacity),
         best_evalue: i32::MAX as f64,
     };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:321-356
@@ -1954,6 +1962,7 @@ pub(crate) fn postprocess_preliminary_hits(
                 &preliminary_hits[0],
                 matching_seq.index as u32,
                 preliminary_hits[0].q_idx,
+                super::x_redo_fit::x_bp_redo_fit(),
             )
         })
         .unwrap_or_else(|| BlastpHspList {
@@ -2054,6 +2063,11 @@ pub(crate) fn postprocess_preliminary_hits(
         }
     }
 
+    // EXPERIMENT (LOSAT_X_BPREDOFIT): the kept list gives back the room of the HSPs removed
+    // above; the same HSPs in the same order (`x_redo_fit.rs`).
+    if super::x_redo_fit::x_bp_redo_fit() {
+        super::x_redo_fit::x_fit_redone_hsps(&mut hsp_list.hsps);
+    }
     Ok(BlastpPostprocessResult {
         hsp_list: Some(hsp_list),
         best_score,
@@ -2388,6 +2402,61 @@ mod tests {
         assert_eq!(hits[0].hit.q_start, 1);
         assert_eq!(hits[0].hit.s_start, 5);
         assert_eq!(hits[0].hit.s_idx, 9);
+    }
+
+    // EXPERIMENT (LOSAT_X_BPREDOFIT): the list built with fitted room is the list built by `push`.
+    #[test]
+    fn x_redo_fit_builds_the_same_list_with_room_for_its_alignments_only() {
+        let template_hit = BlastpPreliminaryHsp {
+            query_start: 0,
+            query_end: 20,
+            subject_start: 4,
+            subject_end: 24,
+            gapped_query_start: 0,
+            gapped_subject_start: 4,
+            raw_score: 80,
+            query_context: 0,
+            query_frame: 0,
+            subject_frame: 0,
+            query_length: 100,
+            q_idx: 0,
+            s_idx: 9,
+        };
+        let alignments = |count: usize| {
+            let mut head: Option<Box<BlastCompoAlignment>> = None;
+            for index in 0..count {
+                let mut align = blast_compo_alignment_new(
+                    60 + 10 * ((index as i32 * 7) % 5),
+                    EMatrixAdjustRule::DontAdjustMatrix,
+                    index as i32,
+                    20 + index as i32,
+                    0,
+                    4 + index as i32,
+                    24 + index as i32,
+                    0,
+                    Some(BlastCompoAlignmentContext::EditScript(vec![
+                        crate::common::GapEditOp::Sub(20),
+                    ])),
+                );
+                align.next = head;
+                head = Some(align);
+            }
+            head
+        };
+        for count in [1, 2, 3, 5] {
+            assert_eq!(
+                super::super::x_redo_fit::x_alignment_count(alignments(count).as_deref()),
+                count
+            );
+            let pushed =
+                hsplist_from_distinct_alignments(alignments(count), &template_hit, 9, 0, false);
+            let fitted =
+                hsplist_from_distinct_alignments(alignments(count), &template_hit, 9, 0, true);
+            assert_eq!(format!("{:?}", fitted.hsps), format!("{:?}", pushed.hsps));
+            assert_eq!(fitted.hsps.len(), count);
+            assert_eq!(fitted.hsps.capacity(), count);
+            assert!(pushed.hsps.capacity() >= 4);
+        }
     }
 
     #[test]

@@ -27,6 +27,8 @@ mod hsp;
 mod query_split;
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries searched in blocks of whole query batches.
 mod x_query_blocks;
+// EXPERIMENT (LOSAT_X_BPREDOFIT): redone HSP lists without spare room.
+mod x_redo_fit;
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-3691
 // ```c
 // static void s_HSPListNormalizeScores(...);
@@ -39,6 +41,8 @@ mod kappa;
 mod x_seed_fused;
 // EXPERIMENT (LOSAT_X_BPSEED): the same loop for the compressed lookup table of blastp-fast.
 mod x_seed_fused_compressed;
+// EXPERIMENT (LOSAT_X_BPSEED with LOSAT_X_BPCLUT): the same loop on the flat compressed table.
+mod x_seed_fused_clut;
 // EXPERIMENT (LOSAT_X_BPPFREE): preliminary hit lists without spare room, each freed after its
 // query's redo.
 mod x_prelim_free;

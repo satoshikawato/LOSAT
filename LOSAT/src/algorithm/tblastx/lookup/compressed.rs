@@ -10,6 +10,19 @@ use crate::core::composition_adjustment::adjust_scores::build_matrix_info;
 use crate::stats::{compute_std_aa_composition, lookup_protein_params_ungapped};
 use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE, BLAST_SCORE_MIN};
 
+// EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW, off unless set): this file's table built flat
+// (count, layout, fill), each cell's hits in one slice in NCBI's scan order; a child module, so that
+// it uses this file's private builder pieces (x_clut_direct.rs, exactness argument in its header).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+#[path = "x_clut_direct.rs"]
+pub mod x_clut_direct;
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_aalookup.h:186-201
 // ```c
 // #define COMPRESSED_HITS_PER_BACKBONE_CELL 4

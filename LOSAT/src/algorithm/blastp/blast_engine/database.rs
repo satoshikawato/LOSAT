@@ -1750,11 +1750,15 @@ mod tests {
             .downcast_ref::<NativeError>()
             .expect("NCBI's error");
         assert_eq!(native.exit, 2);
+        // The volume is recorded under its directory normalised with symbolic links
+        // followed (seqdbalias.cpp:851-862, `NormalizePath(dir_name, eFollowLinks)`), so
+        // the message names that directory: on macOS the temporary directory under `/var`
+        // is shown under `/private/var`.
         assert_eq!(
             native.message,
             format!(
                 "BLAST Database error: Error: File ({}) not found.\n",
-                dir.join("prot_mv.05.phr").display()
+                dir.canonicalize().unwrap().join("prot_mv.05.phr").display()
             )
         );
         drop(database);

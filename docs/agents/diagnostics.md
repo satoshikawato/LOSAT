@@ -479,8 +479,9 @@ Scheduling (each value computed by one thread with the original function; order 
   appended in input order.
 - `LOSAT_X_TBNOIDCHUNK=1` (in the strict set since 2026-10-13) tblastn with 2+ threads and several
   subjects: one entry into the search pool takes four chunks of subjects per thread instead of one
-  subject per thread, and each chunk is one task that the pool gives to whichever thread is free.
-  A chunk is cut as NCBI's database reader cuts
+  subject per thread, and each chunk is one task that the pool gives to whichever thread is free;
+  inside it the subjects of the chunk are a parallel range, so a thread that finds no chunk left
+  takes part of one still being searched. A chunk is cut as NCBI's database reader cuts
   them for its search threads (`seqdbimpl.cpp:684-708` `x_FillSeqBuffer`, `seqdbatlas.hpp:496-501`
   `GetSliceSize`): consecutive subjects while their bases stay within
   `min(2^30, F) / (4 * threads) + 1`, at least one subject. NCBI's F is the largest file of the

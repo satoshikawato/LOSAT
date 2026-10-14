@@ -1399,7 +1399,8 @@ fn x_entry_chunks(
 // times the threads gives each thread about four chunks of a slice. An entry of four chunks per
 // thread does the same inside LOSAT's entries: the pool hands each chunk to whichever thread is
 // free, so at the end of an entry a thread waits for about one chunk, not for the slowest of one
-// chunk per thread. Scheduling only.
+// chunk per thread, and less than that when it takes part of the subjects of a chunk another
+// thread is still searching. Scheduling only.
 /// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the chunks one entry into the pool takes.
 #[cfg(feature = "parallel")]
 fn x_chunks_per_entry(threads: usize) -> usize {
@@ -2093,7 +2094,12 @@ fn run_preliminary_subjects(
                     // Dispatch point: the chunks this entry into the pool takes (x_entry_chunks), one
                     // task each, or one subject per thread without the switch. The subjects are
                     // searched by the same call as before and their lists are taken in OID order
-                    // below.
+                    // below. NCBI's thread searches the subjects of its chunk one after another;
+                    // here they are a parallel range inside the chunk's task, so a thread that runs
+                    // out of chunks at the end of an entry takes part of a chunk another thread is
+                    // still searching instead of waiting for all of it (a subject longer than a
+                    // chunk's budget is a chunk of its own). The ordered collect keeps the subject
+                    // order. Scheduling only.
                     // EXPERIMENT (LOSAT_X_TBNOIDNEXT): the next chunk in OID order from the flow.
                     let batch: Vec<_> = if let Some(flow) = x_flow.as_ref() {
                         flow.next_in_order(&x_flow_search)?
@@ -2113,6 +2119,7 @@ fn run_preliminary_subjects(
                                 .map(|chunk| {
                                     chunk
                                         .clone()
+                                        .into_par_iter()
                                         .map(|x_oid| search(x_oid, &subjects[x_oid]))
                                         .collect()
                                 })

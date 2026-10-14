@@ -191,8 +191,8 @@ What runs per target:
   nothing (it is compiled for wasm32 only); everything else as on wasm32.
 - One thread (`-num_threads 1`, a build without the `parallel` feature, wasm32 without
   `wasm-threads`): the scheduling switches (`AHEAD`, `GREEDYSPEC`, `PAIRPAR` for
-  blastn/megablast, `SEGSHARE`, `TBNBATCH`, `TBNOIDCHUNK`, `TBNOIDNEXT`, `BXPAR`, `BXPOOL`, `BXBATCH`,
-  `BXCHUNK`) leave the reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
+  blastn/megablast, `SEGSHARE`, `TBNBATCH`, `TBNOIDCHUNK`, `TBNOIDNEXT`, `TBNOIDUNITS`, `BXPAR`,
+  `BXPOOL`, `BXBATCH`, `BXCHUNK`) leave the reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
   (with `TBNSSIDE` / `TBNQSIDE`; only its parallel redo needs a pool) and the TBLASTX `PAIRPAR`
   units run in order on the calling thread.
 
@@ -478,8 +478,9 @@ Scheduling (each value computed by one thread with the original function; order 
   batches, and at least one batch per thread) tblastn query batches searched side by side,
   appended in input order.
 - `LOSAT_X_TBNOIDCHUNK=1` (in the strict set since 2026-10-13) tblastn with 2+ threads and several
-  subjects: one entry into the search pool takes one chunk of subjects per thread instead of one
-  subject per thread, and each chunk is one task. A chunk is cut as NCBI's database reader cuts
+  subjects: one entry into the search pool takes four chunks of subjects per thread instead of one
+  subject per thread, and each chunk is one task that the pool gives to whichever thread is free.
+  A chunk is cut as NCBI's database reader cuts
   them for its search threads (`seqdbimpl.cpp:684-708` `x_FillSeqBuffer`, `seqdbatlas.hpp:496-501`
   `GetSliceSize`): consecutive subjects while their bases stay within
   `min(2^30, F) / (4 * threads) + 1`, at least one subject. NCBI's F is the largest file of the
@@ -492,22 +493,27 @@ Scheduling (each value computed by one thread with the original function; order 
   6.10 s without the switch). The subjects are searched by the same call and their lists reach
   the collector in subject order, so only the scheduling changes. It was off unless set (to any
   value) until it joined the set. Without it 28,036 subjects at 8 threads are 3,505 entries, each
-  shorter than the wake-up of the workers; with it 13 (a hundredth of the subjects per chunk)
-  or 17 (chunks bounded by residues: about 217 subjects of 317 kb at most each). Timed with
+  shorter than the wake-up of the workers; with it 13 (a hundredth of the subjects per chunk),
+  17 (chunks bounded by residues, one per thread: about 217 subjects of 317 kb at most each) or 5
+  (four such chunks per thread). An entry of one chunk per thread, the first form of the residue
+  rule, lasted as long as its slowest chunk with nothing left for a thread that finished early:
+  on the workstation (NUMA node 1) the zebrafish genome took 102.6 s at 8 threads against 77.8 s
+  with the hundredth, and the transcriptomes and 16S 5-22 % longer, with the same CPU time. Timed with
   chunks of a hundredth on those subjects (16S rRNA genes, 40.6 Mb together) at 8 threads with other work on the
   machine: one query batch of 55 proteins 1.43-1.64 s without it and 0.76-0.85 s with it (NCBI
   BLAST+ 2.17.0 `-db` 0.68-0.78 s), one protein 0.87-1.11 s and 0.22-0.27 s; the same output and
   the same peak memory. With the chunks bounded by residues, four rounds on a loaded machine (load
-  4-25): medians 1.35 s (55 proteins) and 0.61 s (one protein) against 1.25 s and 0.60 s with the
-  hundredth and 2.81 s and 1.50 s without the switch; on the fly genome 7.0 s against 26.2 s with
-  the hundredth and 6.8 s without the switch (NCBI `-db` 6.6-7.4 s). Nothing changes at one thread, nor where `TBNBATCH` searches the batches
+  4-25; the first form, one chunk per thread): medians 1.35 s (55 proteins) and 0.61 s (one
+  protein) against 1.25 s and 0.60 s with the hundredth and 2.81 s and 1.50 s without the switch;
+  on the fly genome 7.0 s against 26.2 s with the hundredth and 6.8 s without the switch (NCBI
+  `-db` 6.6-7.4 s; on the workstation 16.4 s against 62.1 s, NCBI 16.1 s). Nothing changes at one thread, nor where `TBNBATCH` searches the batches
   side by side (each batch on one thread). With `LOSAT_WASI_THREADS_DEBUG=1` the
   `[losat-thread-activity]` line of the subject stage ends with `pool_entries=` (the entries of
   one query batch); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.
 - `LOSAT_X_TBNOIDNEXT=1` tblastn with 2+ threads and several subjects, where `TBNOIDCHUNK` makes
   the chunks: no wait between entries. The threads of the pool take the next chunk when they are
   free, as NCBI's search threads ask the database for the next chunk (`seqdbimpl.cpp:333-344`),
-  instead of waiting at the end of each entry for its longest chunk. The thread that owns the
+  instead of waiting at the end of each entry for its last chunk. The thread that owns the
   search takes the lists back chunk by chunk in OID order and enters them into the collector as
   before, and searches a chunk itself while the next one in order is not finished
   (`tblastn/x_oid_flow.rs`). At most `4 * threads` chunks are taken or finished beyond the oldest
@@ -518,6 +524,19 @@ Scheduling (each value computed by one thread with the original function; order 
   nothing. With `LOSAT_WASI_THREADS_DEBUG=1` the search is one entry (`pool_entries=1`) and the
   line adds `flow_chunks=` and `flow_peak_waiting=` (the most finished chunks that waited at
   once); `LOSAT/tests/tblastn_oid_chunk.rs` reads them.
+- `LOSAT_X_TBNOIDUNITS=1` tblastn with 2+ threads and several subjects, where `TBNOIDCHUNK` makes
+  the chunks (with or without `TBNOIDNEXT`): a subject longer than a chunk's budget (a chunk of its
+  own, such as a chromosome) runs its (frame, chunk) units on the pool, as the single subject of a
+  search does with `TBNPAR`, instead of one after another on the thread that took it. Threads that
+  have no chunk to search (at the end of an entry, or when no chunk is left) take its units; its
+  merge in NCBI order, linking, E-values and reaping run on its thread after its last unit, so the
+  report is the same. NCBI's thread searches a subject whole, so at 16 and 32 threads the longest
+  chromosome bounds both programs; this goes beyond NCBI. Other subjects keep their units on their
+  thread. With `TBNOIDNEXT` the threads of the flow start together (each waits until all have
+  entered the flow) so that a thread waiting for a unit can only take units, never a loop of the
+  flow. Not in the set (off unless set to any value). With `LOSAT_WASI_THREADS_DEBUG=1` each subject
+  whose units ran on the pool prints a `prelim_units` stage line with `parallel_selected=true`;
+  `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
 - `LOSAT_X_TBNXLATE=1` tblastn: the six translated frames of a subject are read from tables, as
   NCBI makes them from the compressed subject (`blast_util.c:1071-1090`: one table of 64 residues
   per strand, `s_BlastGetTranslationTable`, and one table read per codon,

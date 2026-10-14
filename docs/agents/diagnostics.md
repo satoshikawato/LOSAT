@@ -372,6 +372,26 @@ Rebuilding less:
   hit is never extended and leaves an entry that later subjects read as no previous hit (`x_shadow_compare`).
   One line at exit: `[X_SHADOW] BPSEED subjects= initial_hsps= identical`, with
   `(tables not compared for N subjects shorter than a word)` when there were such subjects.
+- `LOSAT_X_BPDIAG=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and `LOSAT_X_DEFAULT`
+  does not touch it; acts only in the fused loop of `LOSAT_X_BPSEED` or `LOSAT_X_BPSEEDSHADOW`) the two-hit
+  diagonal test of the hits of one lookup cell in batches of eight instead of one after the other
+  (`blastp/x_seed_fused.rs`, exactness argument in its header): for each hit the entry's new value and whether
+  the hit is a candidate are computed without branches on the entry (AVX2 where the CPU has it: the eight
+  entries read with one gather, compared in i32 lanes, blended; a cell's last batch of fewer than eight hits
+  and CPUs without AVX2 take a scalar batch), all eight entries are stored, then the candidates go to the
+  context check and the extension in the cell's order. Exact because a cell lists a query offset at most once
+  (`s_AddWordHits`; checked for both BLASTP builders by `x_lut_direct` test
+  `every_cell_lists_a_query_offset_once`, and per batch by a `debug_assert`), so a batch's hits fall on distinct
+  entries, and a candidate's entry is stored back unchanged before its call. The 31-bit truncation and the i32
+  wrapping are those of the per-hit test. `LOSAT_X_BPDIAG_SIMD=0` keeps the scalar batch on an AVX2 CPU (tuning
+  and tests); the batches prefetch nothing (`LOSAT_X_BPSEED_PREFETCH` is the per-hit loop's). Shadow:
+  `LOSAT_X_BPSEEDSHADOW=1` with `LOSAT_X_BPDIAG=1` compares the batched loop with the reference for every
+  subject. With `LOSAT_TIMING=1` each search of a query set prints
+  `[TIMING] x_bpdiag: cells=<n> batched_hits=<m> candidates=<k>` (cells tested in batches, their hits, the
+  hits passed on). Measured once, locally (2026-10-14, load 7-9, pinned to one CPU; human proteome block 1,
+  566 proteins, x Species4 by `-subject`, one thread, the other exact switches on main and
+  `LOSAT_X_BPQBLOCK=50000`; 3 alternating pairs, means): `blastp_scan_ungapped` 7.77 -> 6.38 s, wall 13.4 ->
+  12.9 s, rows unchanged; indicative only (this machine is load-sensitive).
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; not in the
   strict set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the word loop and the
   X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte

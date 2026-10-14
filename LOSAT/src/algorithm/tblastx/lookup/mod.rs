@@ -213,6 +213,17 @@ pub(crate) use backbone::build_ncbi_lookup_from_prepared;
 // EXPERIMENT (LOSAT_X_BXLUTSHADOW): shadow counter for the exit summary; no NCBI counterpart, it
 // does not change any value NCBI computes.
 pub(crate) use backbone::x_bxlut_shadow_tables;
+// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): BLASTP's table built in place
+// (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export itself.
+pub(crate) use backbone::x_bp_build_ncbi_lookup;
+
+/// EXPERIMENT (LOSAT_X_BPLUTSHADOW): the shadow mode's line (printed by `main` at exit).
+// No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
+pub fn x_bplut_print_summary() {
+    if let Some(tables) = backbone::x_bplut_shadow_tables() {
+        eprintln!("[X_SHADOW] BPLUT tables_compared={tables} (lookup tables identical)");
+    }
+}
 // EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the direct builder of the TBLASTX unit
 // path's group tables (lookup/x_pair_lut.rs); no NCBI counterpart for the re-export itself.
 //

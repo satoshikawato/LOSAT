@@ -30,7 +30,7 @@ use crate::algorithm::tblastx::lookup::compressed::{
     try_build_blosum62_compressed_lookup, BlastCompressedAaLookupTable,
 };
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
-use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, BlastAaLookupTable, QueryContext};
+use crate::algorithm::tblastx::lookup::{x_bp_build_ncbi_lookup, BlastAaLookupTable, QueryContext};
 use crate::algorithm::tblastx::ncbi_cutoffs::{gap_trigger_raw_score, x_drop_raw_score};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
@@ -88,6 +88,10 @@ use super::kappa::{
     build_query_workspace, postprocess_preliminary_hits, print_blastp_kappa_range_counters,
     reset_blastp_kappa_range_counters, x_newton_lanes_prefetch_matches, BlastRedoAlignParams,
     BlastpKappaSubjectRangeCache, BlastpTraceHspTarget,
+};
+use super::x_prelim_compact::{
+    x_bp_prelim_compact, x_expand_hit_list, x_expanded_lists, x_finish_compact_lists,
+    x_shadow_compare, XPrelimCompact, XPrelimHsp,
 };
 // No NCBI counterpart: matches per LOSAT_X_NEWTONLANES prefetch in the BLASTP redo loops; it does
 // not change any value NCBI computes.
@@ -152,6 +156,9 @@ impl InitHSP {
 struct BlastpSubjectResult {
     subject_index: usize,
     query_hsp_lists: Vec<(usize, BlastpHspList)>,
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the same lists with the compact element
+    // (`x_prelim_compact.rs`).
+    x_compact_hsp_lists: Vec<(usize, BlastpHspList<XPrelimHsp>)>,
 }
 
 impl BlastpSubjectResult {
@@ -164,6 +171,7 @@ impl BlastpSubjectResult {
         Self {
             subject_index,
             query_hsp_lists: Vec::new(),
+            x_compact_hsp_lists: Vec::new(),
         }
     }
 
@@ -177,6 +185,7 @@ impl BlastpSubjectResult {
     fn reset(&mut self, subject_index: usize) {
         self.subject_index = subject_index;
         self.query_hsp_lists.clear();
+        self.x_compact_hsp_lists.clear();
     }
 }
 
@@ -489,6 +498,8 @@ fn print_blastp_timing(timing: &BlastpTiming, total_start: Option<Instant>) {
             total_start.elapsed().as_secs_f64()
         );
     }
+    // EXPERIMENT (LOSAT_X_BPREDOFIT): the redone lists kept with fitted room (`x_redo_fit.rs`).
+    super::x_redo_fit::x_bp_redo_fit_print_timing();
 }
 
 impl BlastpSubjectScratch {
@@ -1027,6 +1038,30 @@ fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<
     offsets
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
+// ```c
+// #pragma omp parallel ... num_threads(actual_num_threads)
+// #pragma omp for schedule(static)
+// for (b = 0; b < numMatches; ++b) {
+// ```
+// The matches of query `q_idx` (`hsplist_count` of its preliminary hit list), from the compact
+// list while it is not expanded yet (EXPERIMENT LOSAT_X_BPPCOMPACT, `x_prelim_compact.rs`).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn x_prelim_hsplist_count(
+    preliminary_hit_lists: &[Option<BlastpHitList>],
+    x_compact_hit_lists: &[Option<BlastpHitList<XPrelimHsp>>],
+    q_idx: usize,
+) -> usize {
+    match (&preliminary_hit_lists[q_idx], &x_compact_hit_lists[q_idx]) {
+        (Some(hit_list), _) => hit_list.hsplist_count,
+        (None, Some(hit_list)) => hit_list.hsplist_count,
+        (None, None) => 0,
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/hspfilter_collector.c:139-159
 // ```c
 // if (!results->hitlist_array[0]) {
@@ -1037,6 +1072,7 @@ fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<
 // ```
 fn update_blastp_preliminary_hit_lists(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     subject_result: &mut BlastpSubjectResult,
     prelim_hitlist_size: usize,
 ) {
@@ -1049,6 +1085,12 @@ fn update_blastp_preliminary_hit_lists(
         let provisional_hit_list = preliminary_hit_lists[q_idx]
             .get_or_insert_with(|| BlastpHitList::new(prelim_hitlist_size));
         provisional_hit_list.update(provisional_hsp_list);
+    }
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the same update of the compact lists.
+    for (q_idx, provisional_hsp_list) in subject_result.x_compact_hsp_lists.drain(..) {
+        x_compact_hit_lists[q_idx]
+            .get_or_insert_with(|| BlastpHitList::new(prelim_hitlist_size))
+            .update(provisional_hsp_list);
     }
 }
 
@@ -1070,6 +1112,7 @@ fn update_blastp_preliminary_hit_lists(
 ))]
 fn merge_blastp_subject_results_in_order(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     subject_results: Vec<Option<BlastpSubjectResult>>,
     prelim_hitlist_size: usize,
 ) {
@@ -1080,6 +1123,7 @@ fn merge_blastp_subject_results_in_order(
         debug_assert_eq!(subject_result.subject_index, subject_index);
         update_blastp_preliminary_hit_lists(
             preliminary_hit_lists,
+            x_compact_hit_lists,
             &mut subject_result,
             prelim_hitlist_size,
         );
@@ -1309,60 +1353,17 @@ fn build_preliminary_hsp_list_for_hitlist(
 ) -> BlastpHspList {
     let hsps: Vec<BlastpHsp> = preliminary_hits
         .iter()
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-178
-        // ```c
-        // Blast_HSPInit(Int4 query_start, Int4 query_end, Int4 subject_start,
-        //               Int4 subject_end, Int4 query_gapped_start,
-        //               Int4 subject_gapped_start, Int4 query_context,
-        //               Int2 query_frame, Int2 subject_frame, Int4 score, ...)
-        // {
-        //    new_hsp->query.offset = query_start;
-        //    new_hsp->subject.offset = subject_start;
-        //    new_hsp->query.end = query_end;
-        //    new_hsp->subject.end = subject_end;
-        //    new_hsp->query.gapped_start = query_gapped_start;
-        //    new_hsp->subject.gapped_start = subject_gapped_start;
-        //    new_hsp->context = query_context;
-        //    new_hsp->query.frame = query_frame;
-        //    new_hsp->subject.frame = subject_frame;
-        // }
-        // ```
-        .map(|hit| BlastpHsp {
-            identity: 0.0,
-            length: usize::try_from(hit.query_end - hit.query_start)
-                .expect("preliminary blastp HSP query span must be non-negative"),
-            mismatch: 0,
-            gapopen: 0,
-            q_start: usize::try_from(hit.query_start + 1)
-                .expect("preliminary blastp query start must be non-negative"),
-            q_end: usize::try_from(hit.query_end)
-                .expect("preliminary blastp query end must be non-negative"),
-            s_start: usize::try_from(hit.subject_start + 1)
-                .expect("preliminary blastp subject start must be non-negative"),
-            s_end: usize::try_from(hit.subject_end)
-                .expect("preliminary blastp subject end must be non-negative"),
-            gapped_q_start: hit.gapped_query_start,
-            gapped_s_start: hit.gapped_subject_start,
-            e_value: blast_spouge_stoe(
-                hit.raw_score,
-                karlin_params,
-                gumbel_params,
-                query_length as i32,
-                subject_length as i32,
-            ),
-            bit_score: 0.0,
-            num_ident: 0,
-            query_context: hit.query_context,
-            query_frame: hit.query_frame,
-            subject_frame: hit.subject_frame,
-            query_length: hit.query_length,
-            q_idx: hit.q_idx,
-            s_idx: hit.s_idx,
-            raw_score: hit.raw_score,
-            gap_info: None,
-            num_positives: 0,
-            // Blast_HSPInit callocs the HSP: no composition adjustment yet.
-            comp_adjustment_method: 0,
+        .map(|hit| {
+            blastp_hsp_from_preliminary(
+                hit,
+                blast_spouge_stoe(
+                    hit.raw_score,
+                    karlin_params,
+                    gumbel_params,
+                    query_length as i32,
+                    subject_length as i32,
+                ),
+            )
         })
         .collect();
     let mut hsp_list = BlastpHspList {
@@ -1373,6 +1374,98 @@ fn build_preliminary_hsp_list_for_hitlist(
     };
     super::hsp::update_best_evalue(&mut hsp_list);
     hsp_list
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-242
+// ```c
+// Blast_HSPListGetEvalues(program_number, query_info, subject_length,
+//                         hsp_list, TRUE, FALSE, sbp, 0.0, 1.0);
+// ```
+// EXPERIMENT (LOSAT_X_BPPCOMPACT): `build_preliminary_hsp_list_for_hitlist` with the compact
+// element: the same E-values (`x_prelim_compact.rs`).
+#[allow(clippy::too_many_arguments)]
+fn x_build_compact_preliminary_hsp_list(
+    preliminary_hits: &[BlastpPreliminaryHsp],
+    oid: u32,
+    query_index: u32,
+    query_length: usize,
+    subject_length: usize,
+    karlin_params: &KarlinParams,
+    gumbel_params: &BlastGumbelBlk,
+) -> BlastpHspList<XPrelimHsp> {
+    let hsps: Vec<XPrelimHsp> = preliminary_hits
+        .iter()
+        .map(|hit| XPrelimHsp {
+            hsp: *hit,
+            e_value: blast_spouge_stoe(
+                hit.raw_score,
+                karlin_params,
+                gumbel_params,
+                query_length as i32,
+                subject_length as i32,
+            ),
+        })
+        .collect();
+    let mut hsp_list = BlastpHspList {
+        oid,
+        query_index,
+        hsps,
+        best_evalue: f64::MAX,
+    };
+    super::hsp::update_best_evalue(&mut hsp_list);
+    hsp_list
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-178
+// ```c
+// Blast_HSPInit(Int4 query_start, Int4 query_end, Int4 subject_start,
+//               Int4 subject_end, Int4 query_gapped_start,
+//               Int4 subject_gapped_start, Int4 query_context,
+//               Int2 query_frame, Int2 subject_frame, Int4 score, ...)
+// {
+//    new_hsp->query.offset = query_start;
+//    new_hsp->subject.offset = subject_start;
+//    new_hsp->query.end = query_end;
+//    new_hsp->subject.end = subject_end;
+//    new_hsp->query.gapped_start = query_gapped_start;
+//    new_hsp->subject.gapped_start = subject_gapped_start;
+//    new_hsp->context = query_context;
+//    new_hsp->query.frame = query_frame;
+//    new_hsp->subject.frame = subject_frame;
+// }
+// ```
+pub(super) fn blastp_hsp_from_preliminary(hit: &BlastpPreliminaryHsp, e_value: f64) -> BlastpHsp {
+    BlastpHsp {
+        identity: 0.0,
+        length: usize::try_from(hit.query_end - hit.query_start)
+            .expect("preliminary blastp HSP query span must be non-negative"),
+        mismatch: 0,
+        gapopen: 0,
+        q_start: usize::try_from(hit.query_start + 1)
+            .expect("preliminary blastp query start must be non-negative"),
+        q_end: usize::try_from(hit.query_end)
+            .expect("preliminary blastp query end must be non-negative"),
+        s_start: usize::try_from(hit.subject_start + 1)
+            .expect("preliminary blastp subject start must be non-negative"),
+        s_end: usize::try_from(hit.subject_end)
+            .expect("preliminary blastp subject end must be non-negative"),
+        gapped_q_start: hit.gapped_query_start,
+        gapped_s_start: hit.gapped_subject_start,
+        e_value,
+        bit_score: 0.0,
+        num_ident: 0,
+        query_context: hit.query_context,
+        query_frame: hit.query_frame,
+        subject_frame: hit.subject_frame,
+        query_length: hit.query_length,
+        q_idx: hit.q_idx,
+        s_idx: hit.s_idx,
+        raw_score: hit.raw_score,
+        gap_info: None,
+        num_positives: 0,
+        // Blast_HSPInit callocs the HSP: no composition adjustment yet.
+        comp_adjustment_method: 0,
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:516-518
@@ -1471,6 +1564,63 @@ fn blastp_context_lookup_bounds(contexts: &[QueryContext]) -> BlastpContextLooku
         min_length,
         max_length,
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-213
+// ```c++
+//     // 5. Create the lookup table
+//     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+//         LookupTableWrap* lut =
+//             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
+//                                              sbp, lookup_segments_wrap,
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/split_query_aux_priv.cpp:192-201
+// ```c++
+//     CRef<SBlastSetupData> setup_data =
+//         BlastSetupPreliminarySearchEx(
+//                 qf, options,
+//                 CRef<objects::CPssmWithParameters>(),
+//                 seqsrc, num_threads);
+//     ...
+//     _ASSERT(setup_data->m_QuerySplitter->IsQuerySplit() == false);
+// ```
+// The compressed lookup tables that NCBI builds for the queries of this search, as ranges of
+// `locations` (the lookup segments of all queries, in query order): one for each query batch
+// (`query_batch_size`: GetQueryBatchSize's 10000 letters, or the environment variable
+// BATCH_SIZE) that NCBI does not split, none for a split batch, and one for each query chunk
+// of a split batch, which is a search of its own here (`search_split_query_batches`,
+// `query_chunk`) whose queries make that one table.
+fn ncbi_compressed_lookup_tables(
+    query_batches: &[seq_range::RangedBatch],
+    query_lengths: &[usize],
+    contexts: &[QueryContext],
+    locations: &[(i32, i32)],
+    query_chunk: bool,
+) -> Result<Vec<std::ops::Range<usize>>> {
+    if query_chunk {
+        return Ok(vec![0..locations.len()]);
+    }
+    let sizes = crate::blastinput::app::protein_query_split_sizes("BLASTP", 10000)?;
+    // The first lookup segment of query `q_idx` or of a query after it.
+    let first_segment = |q_idx: usize| {
+        let context = contexts.partition_point(|context| (context.q_idx as usize) < q_idx);
+        contexts.get(context).map_or(locations.len(), |context| {
+            locations.partition_point(|&(left, _)| left < context.frame_base)
+        })
+    };
+    Ok(query_batches
+        .iter()
+        .map(|batch| batch.searched.clone())
+        .filter(|searched| !searched.is_empty())
+        .filter(|searched| {
+            crate::algorithm::common::protein_query_split::split_protein_batch(
+                &query_lengths[searched.clone()],
+                sizes,
+            )
+            .is_none()
+        })
+        .map(|searched| first_segment(searched.start)..first_segment(searched.end))
+        .collect())
 }
 
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-235
@@ -5649,10 +5799,12 @@ fn search(
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the blocks of the block search, or `None` for the search of all
 // queries. The block search is taken only where a block's report is its rows and nothing else:
-// one output, tabular format 6, no `-query_loc` (every record is searched whole), the default
-// lookup table, every batch read, more than one block, and no subject whose tabular ID the
-// reference path rejects before it writes any row (`tabular_subject_ids`; a block search would
-// have written the rows of the blocks before).
+// one output, tabular format 6, no `-query_loc` (every record is searched whole), every batch
+// read, more than one block, no subject whose tabular ID the reference path rejects before it
+// writes any row (`tabular_subject_ids`), and none of the other refusals of the search of all
+// queries that come before its rows (`x_block_search_refuses_nothing`): a block search would have
+// written the rows of the blocks before. Both lookup tables (`AaLookupTable`, and
+// `CompressedAaLookupTable` of blastp-fast) take it.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 #[allow(clippy::too_many_arguments)]
 fn x_query_block_plan(
@@ -5666,7 +5818,6 @@ fn x_query_block_plan(
 ) -> Option<Vec<std::ops::Range<usize>>> {
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
     if args.query_range.is_some()
-        || args.lookup_table_type != BlastpLookupTableType::AaLookupTable
         || outputs.formats.len() != 1
         || outputs.hits.is_some()
         || outputs.observer.is_some()
@@ -5691,12 +5842,95 @@ fn x_query_block_plan(
         return None;
     }
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
-    let blocks = super::x_query_blocks::x_query_blocks(
-        &query_input.batches(batch_size),
-        &lengths,
-        block_letters,
-    )?;
-    (blocks.len() > 1).then_some(blocks)
+    let query_batches = query_input.batches(batch_size);
+    let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters)?;
+    (blocks.len() > 1 && x_block_search_refuses_nothing(args, queries, &query_batches, &lengths))
+        .then_some(blocks)
+}
+
+// EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse
+// it before any row is written and that a block search would make only in the block that holds
+// the cause, after the rows of the blocks before:
+// - the diagonal table of all queries (`check_diag_table_window` in `run_resolved_in_pool`, with
+//   the concatenated length of all queries; a block's is shorter);
+// - the split of a long query batch (the `ensure!`s of `search_split_query_batches`);
+// - with the compressed lookup table, a table of one of NCBI's query batches (or of a query
+//   chunk of a split batch) that fills NCBI's overflow banks
+//   (`try_build_blosum62_compressed_lookup`). A table takes at most a quarter of its words as
+//   overflow cells, and a batch's tables have no more words than the batch's offsets add
+//   (`CompressedWordCount`): a batch whose words are at most four times the banks' cells cannot
+//   fill them; a batch with more leaves the search to the reference path, which tests the batch
+//   exactly.
+// A search that passes them is refused by none of them in any block either: a block's batches are
+// those of the whole input (`x_query_blocks.rs`).
+// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
+fn x_block_search_refuses_nothing(
+    args: &ResolvedBlastpArgs,
+    queries: &[FastaRecord],
+    query_batches: &[seq_range::RangedBatch],
+    lengths: &[usize],
+) -> bool {
+    use crate::algorithm::common::protein_query_split::{
+        protein_chunk_would_be_split, split_protein_batch,
+    };
+    // `blastp_concatenated_query_length`: each query and the sentinel after it, but the last.
+    let query_length = lengths
+        .iter()
+        .map(|&length| length as u64 + 1)
+        .sum::<u64>()
+        .saturating_sub(1);
+    let Ok(query_length) = i32::try_from(query_length) else {
+        return false;
+    };
+    let window = args.window_size as i32;
+    if crate::blastinput::app::check_diag_table_window(query_length, window, "BLASTP").is_err() {
+        return false;
+    }
+    let Ok(sizes) = crate::blastinput::app::protein_query_split_sizes("BLASTP", 10000) else {
+        return false;
+    };
+    let searched_batches = || {
+        query_batches
+            .iter()
+            .map(|batch| batch.searched.clone())
+            .filter(|searched| !searched.is_empty())
+    };
+    for searched in searched_batches() {
+        if let Some(chunks) = split_protein_batch(&lengths[searched], sizes) {
+            if sizes.negative_chunk_size()
+                || protein_chunk_would_be_split(&chunks, sizes)
+                || chunks.iter().any(|chunk| chunk.queries.is_empty())
+            {
+                return false;
+            }
+        }
+    }
+    if args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable {
+        // The threshold as the table is built (`run_resolved_in_pool`).
+        let Some(mut words) =
+            crate::algorithm::tblastx::lookup::compressed::CompressedWordCount::new(
+                args.word_size,
+                crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
+            )
+        else {
+            return false;
+        };
+        // The letters of the lookup query (`encode_protein_query_frame_with_seg`) where SEG does
+        // not mask them; a lookup segment holds only those (`build_lookup_segments_for_context`).
+        for searched in searched_batches() {
+            let encoded: Vec<EncodedProtein> = queries[searched]
+                .iter()
+                .map(|record| encode_protein_sequence(record.seq()))
+                .collect();
+            let mut letters = encoded
+                .iter()
+                .map(|query| &query.aa_seq[1..query.aa_seq.len() - 1]);
+            if !words.fits_banks(&mut letters) {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// The `Database:` text of the reports of a local `-subject` search (`subject_label`, or
@@ -5968,6 +6202,8 @@ fn search_split_query_batches(
     query_lengths: &[usize],
     query_input: &seq_range::QueryInput,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    x_split_queries: &mut [bool],
 ) -> Result<()> {
     use crate::algorithm::common::protein_query_split::{
         protein_chunk_would_be_split, split_protein_batch,
@@ -6058,7 +6294,21 @@ fn search_split_query_batches(
             );
         }
         for (local, list) in merged.into_iter().enumerate() {
-            preliminary_hit_lists[range.start + local] = list;
+            // EXPERIMENT (LOSAT_X_BPPCOMPACT): the chunks' list replaces the compact one too; the
+            // shadow mode compares the two lists it replaces.
+            let q_idx = range.start + local;
+            if x_bp_prelim_compact() == XPrelimCompact::Shadow
+                && subject_source.database().is_none()
+            {
+                x_shadow_compare(
+                    q_idx,
+                    preliminary_hit_lists[q_idx].as_ref(),
+                    x_compact_hit_lists[q_idx].take(),
+                );
+            }
+            x_compact_hit_lists[q_idx] = None;
+            x_split_queries[q_idx] = true;
+            preliminary_hit_lists[q_idx] = list;
         }
     }
     Ok(())
@@ -6254,6 +6504,10 @@ fn run_resolved_in_pool(
     let x_drop_gapped_final =
         blastp_gapped_x_dropoff_raw(X_DROP_GAPPED_FINAL as f64, gapped_params.lambda)
             .max(x_drop_gapped);
+    let batch_size = crate::blastinput::app::query_batch_size("BLASTP", 10000)?;
+    // The batches count whole records (`seq_range::QueryInput::batches`); the batches
+    // here are those that NCBI searches (`read_query_batches`).
+    let query_batches = ranges.query_input.batches(batch_size);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2746-2748
     // ```c
     // Boolean check_ideal =
@@ -6267,7 +6521,9 @@ fn run_resolved_in_pool(
             //     lookup->threshold = (Int4)opt->threshold;
             // ```
             // The x86-64 conversion: `INT_MIN` for a threshold beyond `Int4` (every word).
-            let (lookup, contexts) = build_ncbi_lookup(
+            // EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): the same table
+            // filled in place, without the reference builder's chains (lookup/x_lut_direct.rs).
+            let (lookup, contexts) = x_bp_build_ncbi_lookup(
                 &query_frames,
                 crate::core::blast_util::ncbi_int4_from_double(args.threshold),
                 &lookup_ideal_params,
@@ -6288,16 +6544,28 @@ fn run_resolved_in_pool(
             // ```c
             //     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
             // ```
+            // One table for all query batches; NCBI's tables (`ncbi_compressed_lookup_tables`)
+            // only bound the overflow cells. With LOSAT_X_BPQBLOCK the queries are a block of
+            // whole batches, and `query_batches` are the block's batches of the whole input, as
+            // ranges of the block's lookup segments.
+            let ncbi_tables = ncbi_compressed_lookup_tables(
+                &query_batches,
+                &query_lengths,
+                &contexts,
+                &locations,
+                chunk_prelim.is_some(),
+            )?;
             let lookup = try_build_blosum62_compressed_lookup(
                 args.word_size,
                 crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
                 &query,
                 &locations,
+                &ncbi_tables,
             )
             .context("failed to build NCBI compressed amino-acid lookup table")?
             .map_err(|()| {
                 anyhow::anyhow!(
-                    "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's BLASTP: its neighboring words fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
+                    "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's BLASTP: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
                     args.threshold,
                     args.word_size
                 )
@@ -6356,10 +6624,6 @@ fn run_resolved_in_pool(
         }
     }
     let mut query_batch_skipped = vec![false; query_records.len()];
-    let batch_size = crate::blastinput::app::query_batch_size("BLASTP", 10000)?;
-    // The batches count whole records (`seq_range::QueryInput::batches`); the batches
-    // here are those that NCBI searches (`read_query_batches`).
-    let query_batches = ranges.query_input.batches(batch_size);
     for batch in &query_batches {
         let range = batch.searched.clone();
         let skipped = query_valid[range.clone()].iter().all(|valid| !valid);
@@ -6606,10 +6870,30 @@ fn run_resolved_in_pool(
     // params->prelim_evalue = cbs_stretch*evalue;
     // ```
     let prelim_evalue = blastp_prelim_evalue(args.evalue, args.comp_based_stats.mode);
+    // EXPERIMENT (LOSAT_X_BPPFREE): `x_prelim_free.rs`.
+    let x_prelim_free = super::x_prelim_free::x_bp_prelim_free();
+    let mut x_prelim_freed = 0usize;
     let mut redone_matches = build_redone_match_heaps(query_ids.len(), args.max_target_seqs);
     let mut preliminary_hit_lists: Vec<Option<BlastpHitList>> = std::iter::repeat_with(|| None)
         .take(query_ids.len())
         .collect();
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the preliminary hit lists with the compact element
+    // (`x_prelim_compact.rs`); all None with the switch off. Not with `-db`: the sequences of a
+    // database's hit lists are listed from the off path's lists (`database::ListedSubjects`), so
+    // the experiment is skipped there and the search runs as without the variable.
+    let x_prelim_compact = if database.is_some() {
+        XPrelimCompact::Off
+    } else {
+        x_bp_prelim_compact()
+    };
+    let x_expanded_at_start = x_expanded_lists();
+    let mut x_compact_hit_lists: Vec<Option<BlastpHitList<XPrelimHsp>>> =
+        std::iter::repeat_with(|| None)
+            .take(query_ids.len())
+            .collect();
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT=shadow): queries whose lists the query chunks replaced
+    // (compared before the replacement, in `search_split_query_batches`).
+    let mut x_split_queries = vec![false; query_ids.len()];
 
     let window = args.window_size as i32;
     let word_size = lookup.word_length();
@@ -6712,118 +6996,142 @@ fn run_resolved_in_pool(
         //     for (i = 0; i < hits; ++i) {
         // ```
         // Dispatch point: with the switch, the two-hit test reads the lookup cells in place
-        // (`x_seed_fused::x_scan_two_hit`) and this closure takes the hits that need the context
-        // check and the extension, with the same body as the reference closure below.
+        // (`x_seed_fused::x_scan_two_hit`, and `x_seed_fused_compressed::x_scan_two_hit_compressed`
+        // for the compressed table of blastp-fast) and this closure takes the hits that need the
+        // context check and the extension, with the same body as the reference closure below.
         // EXPERIMENT (LOSAT_X_BPSEEDSHADOW): both loops from the same diagonal table, compared.
-        let x_shadow = args.window_size != 0
-            && super::x_seed_fused::x_bp_seed_shadow()
-            && matches!(&lookup, BlastpRuntimeLookup::Aa(_));
-        let x_fused_lookup = match &lookup {
-            BlastpRuntimeLookup::Aa(aa_lookup)
-                if args.window_size != 0 && (super::x_seed_fused::x_bp_seed() || x_shadow) =>
-            {
-                Some(aa_lookup)
-            }
-            _ => None,
-        };
+        let x_shadow = args.window_size != 0 && super::x_seed_fused::x_bp_seed_shadow();
+        let x_fused = args.window_size != 0 && (super::x_seed_fused::x_bp_seed() || x_shadow);
         let x_snapshot = x_shadow.then(|| (scratch.diag_array.clone(), init_hsps.len()));
-        if let Some(aa_lookup) = x_fused_lookup {
-            super::x_seed_fused::x_scan_two_hit(
-                aa_lookup,
-                subject_sequence,
-                subject.aa_len,
-                &mut scratch.diag_array,
-                diag_mask,
-                subject_diag_offset,
-                window,
-                word_size,
-                |query_offset, subject_offset, last_hit, diff, diag_entry| {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:551-570
-                    // ```c
-                    // curr_context = BSearchContextInfo(query_offset, query_info);
-                    // ...
-                    // if (query_offset - diff <
-                    //     query_info->contexts[curr_context].query_offset) {
-                    //     diag_array[diag_coord].last_hit =
-                    //         subject_offset + diag_offset;
-                    //     continue;
-                    // }
-                    // ```
-                    let ctx_idx = x_context_table
-                        .as_ref()
-                        .and_then(|table| table.get(query_offset))
-                        .unwrap_or_else(|| {
-                            blastp_context_idx_for_query_offset_with_bounds(
-                                &contexts,
-                                context_lookup_bounds,
-                                query_offset,
-                            )
-                        });
-                    let ctx = &contexts[ctx_idx];
-                    if query_offset - diff < ctx.frame_base {
-                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
-                        return;
-                    }
-                    let x_drop = x_dropoff_per_context[ctx_idx];
-                    let cutoff = word_cutoff_scores[ctx_idx];
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
-                    // ```c
-                    // if (use_pssm)
-                    //     score += matrix[q_right_off + i][s[s_right_off + i]];
-                    // else
-                    //     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
-                    // ```
-                    let Some(ungapped_hit) = extend_two_hit_blosum62(
-                        &concatenated_query,
-                        subject_raw,
-                        usize::try_from(last_hit + word_size)
-                            .expect("NCBI BLAST two-hit seed boundary must be non-negative"),
-                        usize::try_from(subject_offset)
-                            .expect("NCBI BLAST two-hit subject offset must be non-negative"),
-                        usize::try_from(query_offset)
-                            .expect("NCBI BLAST two-hit query offset must be non-negative"),
-                        x_drop,
-                        args.word_size,
-                    ) else {
-                        return;
-                    };
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-588
-                    // ```c
-                    // if (score >= cutoffs->cutoff_score)
-                    //     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-                    //                      query_offset, subject_offset, hsp_len,
-                    //                      score);
-                    // if (right_extend) {
-                    //     diag_array[diag_coord].flag = 1;
-                    //     diag_array[diag_coord].last_hit =
-                    //         s_last_off - (wordsize - 1) + diag_offset;
-                    // }
-                    // else {
-                    //     diag_array[diag_coord].last_hit =
-                    //         subject_offset + diag_offset;
-                    // }
-                    // ```
-                    if ungapped_hit.ungapped_data.score >= cutoff {
-                        blastp_save_init_hsp(
-                            &mut init_hsps,
-                            ungapped_hit.ungapped_data.q_start,
-                            ungapped_hit.ungapped_data.s_start,
+        if x_fused {
+            let x_candidate = |query_offset: i32,
+                               subject_offset: i32,
+                               last_hit: i32,
+                               diff: i32,
+                               diag_entry: &mut DiagStruct| {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:551-570
+                // ```c
+                // curr_context = BSearchContextInfo(query_offset, query_info);
+                // ...
+                // if (query_offset - diff <
+                //     query_info->contexts[curr_context].query_offset) {
+                //     diag_array[diag_coord].last_hit =
+                //         subject_offset + diag_offset;
+                //     continue;
+                // }
+                // ```
+                let ctx_idx = x_context_table
+                    .as_ref()
+                    .and_then(|table| table.get(query_offset))
+                    .unwrap_or_else(|| {
+                        blastp_context_idx_for_query_offset_with_bounds(
+                            &contexts,
+                            context_lookup_bounds,
                             query_offset,
-                            subject_offset,
-                            ungapped_hit.ungapped_data.length,
-                            ungapped_hit.ungapped_data.score,
-                        );
-                    }
-                    if ungapped_hit.right_extend {
-                        diag_entry.set_flag(1);
-                        diag_entry.set_last_hit(
-                            ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
-                        );
-                    } else {
-                        diag_entry.set_last_hit(subject_offset + subject_diag_offset);
-                    }
-                },
-            );
+                        )
+                    });
+                let ctx = &contexts[ctx_idx];
+                if query_offset - diff < ctx.frame_base {
+                    diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                    return;
+                }
+                let x_drop = x_dropoff_per_context[ctx_idx];
+                let cutoff = word_cutoff_scores[ctx_idx];
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1112-1116
+                // ```c
+                // if (use_pssm)
+                //     score += matrix[q_right_off + i][s[s_right_off + i]];
+                // else
+                //     score += matrix[q[q_right_off + i]][s[s_right_off + i]];
+                // ```
+                let Some(ungapped_hit) = extend_two_hit_blosum62(
+                    &concatenated_query,
+                    subject_raw,
+                    usize::try_from(last_hit + word_size)
+                        .expect("NCBI BLAST two-hit seed boundary must be non-negative"),
+                    usize::try_from(subject_offset)
+                        .expect("NCBI BLAST two-hit subject offset must be non-negative"),
+                    usize::try_from(query_offset)
+                        .expect("NCBI BLAST two-hit query offset must be non-negative"),
+                    x_drop,
+                    args.word_size,
+                ) else {
+                    return;
+                };
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-588
+                // ```c
+                // if (score >= cutoffs->cutoff_score)
+                //     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                //                      query_offset, subject_offset, hsp_len,
+                //                      score);
+                // if (right_extend) {
+                //     diag_array[diag_coord].flag = 1;
+                //     diag_array[diag_coord].last_hit =
+                //         s_last_off - (wordsize - 1) + diag_offset;
+                // }
+                // else {
+                //     diag_array[diag_coord].last_hit =
+                //         subject_offset + diag_offset;
+                // }
+                // ```
+                if ungapped_hit.ungapped_data.score >= cutoff {
+                    blastp_save_init_hsp(
+                        &mut init_hsps,
+                        ungapped_hit.ungapped_data.q_start,
+                        ungapped_hit.ungapped_data.s_start,
+                        query_offset,
+                        subject_offset,
+                        ungapped_hit.ungapped_data.length,
+                        ungapped_hit.ungapped_data.score,
+                    );
+                }
+                if ungapped_hit.right_extend {
+                    diag_entry.set_flag(1);
+                    diag_entry.set_last_hit(
+                        ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
+                    );
+                } else {
+                    diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                }
+            };
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aascan.c:555-568
+            // ```c
+            //     if (lookup_wrap->lut_type == eAaLookupTable) {
+            //         ...
+            //            lut->scansub_callback = (void *)s_BlastAaScanSubject;
+            //         ...
+            //     }
+            //     else if (lookup_wrap->lut_type == eCompressedAaLookupTable) {
+            //         ...
+            //         lut->scansub_callback = (void *)s_BlastCompressedAaScanSubject;
+            //     }
+            // ```
+            match &lookup {
+                BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
+                    aa_lookup,
+                    subject_sequence,
+                    subject.aa_len,
+                    &mut scratch.diag_array,
+                    diag_mask,
+                    subject_diag_offset,
+                    window,
+                    word_size,
+                    x_candidate,
+                ),
+                BlastpRuntimeLookup::Compressed(compressed_lookup) => {
+                    super::x_seed_fused_compressed::x_scan_two_hit_compressed(
+                        compressed_lookup,
+                        subject_sequence,
+                        subject.aa_len,
+                        &mut scratch.diag_array,
+                        diag_mask,
+                        subject_diag_offset,
+                        window,
+                        word_size,
+                        x_candidate,
+                    )
+                }
+            }
         }
         // EXPERIMENT (LOSAT_X_BPSEEDSHADOW): put the table back as it was before the fused loop and keep
         // the fused loop's results for the comparison below.
@@ -6836,7 +7144,7 @@ fn run_resolved_in_pool(
             init_hsps.truncate(hsps_before);
             (fused_diag, fused_hsps, hsps_before)
         });
-        if x_fused_lookup.is_none() || x_fused_results.is_some() {
+        if !x_fused || x_fused_results.is_some() {
             blastp_for_each_offset_pair(
                 &lookup,
                 subject_sequence,
@@ -7099,12 +7407,15 @@ fn run_resolved_in_pool(
                 .collect();
             // The reference's words stay in the subject's buffer (its residues and the
             // sentinel after them) unless the subject is shorter than a word less one letter.
+            // The compressed scan reads a letter past the buffer as NULLB in both loops
+            // (`scan_subject`), so its tables are always compared.
             super::x_seed_fused::x_shadow_compare(
                 &fused_hsps,
                 &reference_hsps,
                 &fused_diag,
                 &scratch.diag_array,
-                subject.aa_len + 1 >= word_size as usize,
+                matches!(&lookup, BlastpRuntimeLookup::Compressed(_))
+                    || subject.aa_len + 1 >= word_size as usize,
             );
         }
 
@@ -7604,6 +7915,32 @@ fn run_resolved_in_pool(
                 continue;
             }
             let ctx = &contexts[q_idx as usize];
+            // EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact list, with the same E-values and the
+            // same reap (`x_prelim_compact.rs`); the shadow mode builds both lists.
+            if x_prelim_compact.compact() {
+                let mut compact_hsp_list = x_build_compact_preliminary_hsp_list(
+                    preliminary_hits.as_slice(),
+                    s_idx as u32,
+                    q_idx as u32,
+                    ctx.aa_len,
+                    subject.aa_len,
+                    &gapped_params,
+                    &gapped_gumbel,
+                );
+                reap_hsplist_by_evalue(&mut compact_hsp_list, prelim_evalue);
+                if !compact_hsp_list.hsps.is_empty() {
+                    if x_prelim_free {
+                        compact_hsp_list.hsps.shrink_to_fit();
+                    }
+                    subject_result
+                        .x_compact_hsp_lists
+                        .push((q_idx, compact_hsp_list));
+                }
+                if !x_prelim_compact.full() {
+                    preliminary_hits.clear();
+                    continue;
+                }
+            }
             let mut provisional_hsp_list = build_preliminary_hsp_list_for_hitlist(
                 preliminary_hits.as_slice(),
                 s_idx as u32,
@@ -7634,6 +7971,11 @@ fn run_resolved_in_pool(
             if provisional_hsp_list.hsps.is_empty() {
                 preliminary_hits.clear();
                 continue;
+            }
+            // EXPERIMENT (LOSAT_X_BPPFREE): the reaped list gives back the room of the HSPs it no
+            // longer holds; the same HSPs in the same order (`x_prelim_free.rs`).
+            if x_prelim_free {
+                provisional_hsp_list.hsps.shrink_to_fit();
             }
             subject_result
                 .query_hsp_lists
@@ -7790,6 +8132,7 @@ fn run_resolved_in_pool(
             let merge_sort_start = blastp_timing_start(timing_enabled);
             merge_blastp_subject_results_in_order(
                 &mut preliminary_hit_lists,
+                &mut x_compact_hit_lists,
                 subject_results,
                 prelim_hitlist_size,
             );
@@ -7815,6 +8158,7 @@ fn run_resolved_in_pool(
             let merge_sort_start = blastp_timing_start(timing_enabled);
             update_blastp_preliminary_hit_lists(
                 &mut preliminary_hit_lists,
+                &mut x_compact_hit_lists,
                 &mut subject_result,
                 prelim_hitlist_size,
             );
@@ -7838,6 +8182,14 @@ fn run_resolved_in_pool(
     // A query chunk's preliminary stage ends here, before its stream is closed: its hit
     // lists merge into the batch's (`search_split_query_batches`).
     if let Some(chunk_lists) = chunk_prelim {
+        // EXPERIMENT (LOSAT_X_BPPCOMPACT): a chunk's lists leave as the off path's lists, so the
+        // chunk merge (`query_split.rs`) is unchanged; the shadow mode compares them here.
+        x_finish_compact_lists(
+            x_prelim_compact,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            &[],
+        );
         *chunk_lists = preliminary_hit_lists;
         return Ok(());
     }
@@ -7851,6 +8203,8 @@ fn run_resolved_in_pool(
         &query_lengths,
         ranges.query_input,
         &mut preliminary_hit_lists,
+        &mut x_compact_hit_lists,
+        &mut x_split_queries,
     )?;
 
     // A database: the sequences of the preliminary hit lists are read now, by ordinal id,
@@ -7875,11 +8229,37 @@ fn run_resolved_in_pool(
             hit_list.sort_by_evalue();
         }
     }
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the same sort of the compact lists.
+    for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+        hit_list.sort_by_evalue();
+    }
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
             &timing.prelim_merge_sort_ns,
             &timing.prelim_merge_sort_calls,
             merge_sort_start,
+        );
+    }
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the redo reads the off path's lists. With more than one
+    // thread its parallel paths read the lists of all queries, so all are expanded here; the
+    // one-thread loop below expands each query's list when it reaches it. The shadow mode
+    // compares every list here and redoes the off path's lists.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let x_compact_expand_all = blastp_num_threads > 1;
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    let x_compact_expand_all = false;
+    if x_prelim_compact == XPrelimCompact::Shadow || x_compact_expand_all {
+        x_finish_compact_lists(
+            x_prelim_compact,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            &x_split_queries,
         );
     }
 
@@ -8055,14 +8435,9 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    let kappa_parallel_query_indices: Vec<usize> = preliminary_hit_lists
-        .iter()
-        .enumerate()
-        .filter_map(|(q_idx, hit_list)| {
-            hit_list
-                .as_ref()
-                .filter(|hit_list| hit_list.hsplist_count > 0)
-                .map(|_| q_idx)
+    let kappa_parallel_query_indices: Vec<usize> = (0..preliminary_hit_lists.len())
+        .filter(|&q_idx| {
+            x_prelim_hsplist_count(&preliminary_hit_lists, &x_compact_hit_lists, q_idx) > 0
         })
         .collect();
     #[cfg(all(
@@ -8120,10 +8495,8 @@ fn run_resolved_in_pool(
             None
         } else {
             let q_idx = kappa_parallel_query_indices[0];
-            let match_jobs = preliminary_hit_lists[q_idx]
-                .as_ref()
-                .map(|hit_list| hit_list.hsplist_count)
-                .unwrap_or(0);
+            let match_jobs =
+                x_prelim_hsplist_count(&preliminary_hit_lists, &x_compact_hit_lists, q_idx);
             if blastp_should_parallelize_stage(
                 "kappa-match-redo",
                 args.num_threads,
@@ -8646,6 +9019,11 @@ fn run_resolved_in_pool(
             let ctx = &contexts[q_idx];
             let query_raw = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
             let query_nomask = query_nomask_sequence(ctx);
+            // EXPERIMENT (LOSAT_X_BPPCOMPACT): this query's list as the off path holds it
+            // (`x_prelim_compact.rs`).
+            if let Some(compact) = x_compact_hit_lists[q_idx].take() {
+                preliminary_hit_lists[q_idx] = Some(x_expand_hit_list(compact));
+            }
             let Some(preliminary_hit_list) = preliminary_hit_lists[q_idx].as_ref() else {
                 continue;
             };
@@ -8783,9 +9161,28 @@ fn run_resolved_in_pool(
                     redone_match.insert(hsp_list, best_evalue, best_score, s_idx);
                 }
             }
+            // EXPERIMENT (LOSAT_X_BPPFREE): nothing reads this query's preliminary list after its
+            // redo; it is freed here as NCBI frees each list it has redone (`x_prelim_free.rs`).
+            if x_prelim_free {
+                preliminary_hit_lists[q_idx] = None;
+                x_prelim_freed += 1;
+            } else if x_prelim_compact == XPrelimCompact::On {
+                // EXPERIMENT (LOSAT_X_BPPCOMPACT): the expanded list is a copy made for this
+                // query's redo; nothing reads it afterwards.
+                preliminary_hit_lists[q_idx] = None;
+            }
         }
     }
 
+    if x_prelim_free && timing_enabled {
+        eprintln!("[TIMING] x_bppfree: freed_lists={x_prelim_freed}");
+    }
+    if x_prelim_compact == XPrelimCompact::On && timing_enabled {
+        eprintln!(
+            "[TIMING] x_bppcompact: expanded_lists={}",
+            x_expanded_lists() - x_expanded_at_start
+        );
+    }
     let mut hit_lists = fill_results_from_compo_heaps(args.max_target_seqs, &mut redone_matches);
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
@@ -9354,6 +9751,7 @@ fn run_resolved_in_pool(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::tblastx::lookup::build_ncbi_lookup;
 
     #[test]
     fn frames_are_set_only_with_the_alignment_fields() {
@@ -9466,7 +9864,12 @@ mod tests {
             Some(make_test_subject_result(2, 70)),
         ];
 
-        merge_blastp_subject_results_in_order(&mut preliminary_hit_lists, subject_results, 10);
+        merge_blastp_subject_results_in_order(
+            &mut preliminary_hit_lists,
+            &mut [None],
+            subject_results,
+            10,
+        );
 
         let hit_list = preliminary_hit_lists[0]
             .as_ref()
@@ -11391,5 +11794,206 @@ mod tests {
         let restricted = build_restricted_align_array(&init_hsps, &contexts, &[100, 100], 2);
 
         assert_eq!(restricted, vec![false, true]);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-209
+    // ```c++
+    //     // 5. Create the lookup table
+    //     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
+    //         LookupTableWrap* lut =
+    //             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
+    // ```
+    // The compressed tables of NCBI's query batches as ranges of lookup segments: a batch that
+    // NCBI splits (19,800 letters or more with the default CHUNK_SIZE) has none, and a query
+    // chunk's search is one table.
+    #[test]
+    fn test_ncbi_compressed_lookup_tables_are_unsplit_batches() {
+        let lengths = [5000usize, 6000, 3000, 25000];
+        let contexts = vec![
+            make_query_context(0, 0),
+            make_query_context(1, 5001),
+            make_query_context(2, 11002),
+            make_query_context(3, 14003),
+        ];
+        // Query 0 has two segments, query 2 none (all masked).
+        let locations = [(0, 99), (200, 4999), (5001, 11000), (14003, 39002)];
+        let batches = [
+            seq_range::RangedBatch {
+                input: 0..2,
+                searched: 0..2,
+            },
+            seq_range::RangedBatch {
+                input: 2..3,
+                searched: 2..3,
+            },
+            seq_range::RangedBatch {
+                input: 3..4,
+                searched: 3..4,
+            },
+            seq_range::RangedBatch {
+                input: 4..5,
+                searched: 4..4,
+            },
+        ];
+        assert_eq!(
+            ncbi_compressed_lookup_tables(&batches, &lengths, &contexts, &locations, false)
+                .unwrap(),
+            vec![0..3, 3..3]
+        );
+        assert_eq!(
+            ncbi_compressed_lookup_tables(&batches, &lengths, &contexts, &locations, true).unwrap(),
+            vec![0..4]
+        );
+    }
+
+    // Protein records of `lengths` letters (a deterministic generator), some with runs that SEG
+    // masks, so that a query can have more than one lookup segment.
+    fn x_block_test_records(lengths: &[usize]) -> Vec<FastaRecord> {
+        const LETTERS: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        lengths
+            .iter()
+            .enumerate()
+            .map(|(index, &length)| {
+                let mut sequence = Vec::with_capacity(length);
+                while sequence.len() < length {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    if index % 2 == 1 && state % 97 == 0 {
+                        let run = (length - sequence.len()).min(30);
+                        sequence.extend(std::iter::repeat_n(b'Q', run));
+                    } else {
+                        sequence.push(LETTERS[(state % LETTERS.len() as u64) as usize]);
+                    }
+                }
+                FastaRecord::new("", format!("q{index}").as_bytes(), &sequence)
+            })
+            .collect()
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): a block's compressed table is tested with the tables of the
+    // block's own query batches, as ranges of the block's lookup segments.
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-259
+    // ```c++
+    //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
+    //             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+    //             CRef<IQueryFactory> queries(new CObjMgr_QueryFactory(*query_batch));
+    // ```
+    // The block search gives `run_resolved_in_pool` a block's records as the whole input, whose
+    // batches are those of the whole input; the blocks' tables, each shifted by the block's first
+    // lookup segment, are the tables of the search of all queries, and the blocks' lookup segments
+    // are those of the search of all queries.
+    #[test]
+    fn test_x_query_block_compressed_tables_are_the_blocks_batches() {
+        let lengths = [
+            3000usize, 4000, 2500, 6000, 25000, 0, 7000, 1500, 9000, 200, 12000, 800,
+        ];
+        let records = x_block_test_records(&lengths);
+        let seg = crate::utils::seg::SegParams::default();
+        let lookup_query = |records: &[FastaRecord]| {
+            let frames: Vec<Vec<QueryFrame>> = records
+                .iter()
+                .map(|record| {
+                    vec![encode_protein_query_frame_with_seg(
+                        record.seq(),
+                        Some(&seg),
+                    )]
+                })
+                .collect();
+            let (_, locations, contexts) =
+                prepare_blosum62_lookup_query_for_word_size(&frames, 5, false);
+            (locations, contexts)
+        };
+        let tables = |records: &[FastaRecord]| {
+            let (locations, contexts) = lookup_query(records);
+            let lengths: Vec<usize> = records.iter().map(|record| record.seq().len()).collect();
+            let batches = seq_range::QueryInput::whole(records).batches(10000);
+            ncbi_compressed_lookup_tables(&batches, &lengths, &contexts, &locations, false).unwrap()
+        };
+        let (whole_locations, whole_contexts) = lookup_query(&records);
+        let whole_tables = tables(&records);
+        assert!(
+            whole_locations.len() > lengths.len(),
+            "SEG splits some queries"
+        );
+        assert!(whole_tables.len() >= 4);
+        let whole_batches = seq_range::QueryInput::whole(&records).batches(10000);
+        for block_letters in [1, 20000] {
+            let blocks = super::super::x_query_blocks::x_query_blocks(
+                &whole_batches,
+                &lengths,
+                block_letters,
+            )
+            .unwrap();
+            assert!(blocks.len() > 2, "blocks of {block_letters}: {blocks:?}");
+            let mut shifted = Vec::new();
+            for block in &blocks {
+                let base = whole_contexts[block.start].frame_base;
+                let first = whole_locations.partition_point(|&(left, _)| left < base);
+                let (block_locations, _) = lookup_query(&records[block.clone()]);
+                let expected: Vec<(i32, i32)> = whole_locations
+                    [first..first + block_locations.len()]
+                    .iter()
+                    .map(|&(left, right)| (left - base, right - base))
+                    .collect();
+                assert_eq!(block_locations, expected, "block {block:?}");
+                shifted.extend(
+                    tables(&records[block.clone()])
+                        .into_iter()
+                        .map(|table| table.start + first..table.end + first),
+                );
+            }
+            assert_eq!(shifted, whole_tables, "blocks of {block_letters}");
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): the refusals of the search of all queries that the block
+    // search would make only in a later block keep the reference path.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:759-768
+    // ```c
+    //     if (lookup->curr_overflow_cell ==
+    //                         COMPRESSED_OVERFLOW_CELLS_IN_BANK) {
+    //         /* need a new bank */
+    //         Int4 bank_idx = lookup->curr_overflow_bank + 1;
+    // ```
+    #[test]
+    fn test_x_block_search_refusals_of_the_search_of_all_queries() {
+        let lengths = [1500usize, 2000, 1000];
+        let records = x_block_test_records(&lengths);
+        let batches = seq_range::QueryInput::whole(&records).batches(10000);
+        let mut args = make_blastp_args();
+        args.task = "blastp-fast".to_string();
+        let resolved = args.resolve().expect("resolved blastp-fast args");
+        assert_eq!(
+            resolved.lookup_table_type,
+            BlastpLookupTableType::CompressedAaLookupTable
+        );
+        assert!(x_block_search_refuses_nothing(
+            &resolved, &records, &batches, &lengths
+        ));
+        // A threshold below every score: each offset can add all 15^5 compressed words, more
+        // than the banks take for a batch of 4,500 letters, so the bound does not clear it.
+        let mut low = resolved.clone();
+        low.threshold = -1000.0;
+        assert!(!x_block_search_refuses_nothing(
+            &low, &records, &batches, &lengths
+        ));
+        // The default lookup table has no overflow banks.
+        low.lookup_table_type = BlastpLookupTableType::AaLookupTable;
+        assert!(x_block_search_refuses_nothing(
+            &low, &records, &batches, &lengths
+        ));
+        // NCBI blast_extend.c:52-57 with the concatenated length of all queries.
+        let mut wide = resolved.clone();
+        let query_length = lengths.iter().sum::<usize>() + lengths.len() - 1;
+        wide.window_size = (1 << 30) - query_length;
+        assert!(x_block_search_refuses_nothing(
+            &wide, &records, &batches, &lengths
+        ));
+        wide.window_size += 1;
+        assert!(!x_block_search_refuses_nothing(
+            &wide, &records, &batches, &lengths
+        ));
     }
 }

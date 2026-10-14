@@ -2,6 +2,7 @@
 //!
 //! Reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c
 
+use super::x_ungapped_fast;
 use crate::config::ScoringMatrix;
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score};
 
@@ -256,15 +257,37 @@ pub(crate) fn extend_one_hit_blosum62(
     dropoff: i32,
     word_size: usize,
 ) -> Option<BlastpOneHitUngappedResult> {
-    extend_one_hit_impl::<true>(
-        ScoringMatrix::Blosum62,
-        query,
-        subject,
-        q_off,
-        s_off,
-        dropoff,
-        word_size,
-    )
+    let reference = || {
+        extend_one_hit_impl::<true>(
+            ScoringMatrix::Blosum62,
+            query,
+            subject,
+            q_off,
+            s_off,
+            dropoff,
+            word_size,
+        )
+    };
+    // LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW (x_ungapped_fast.rs): the same result, the
+    // X-drop walks with a byte score table and no bounds checks; off unless set.
+    match x_ungapped_fast::mode() {
+        0 => reference(),
+        1 => x_ungapped_fast::one_hit(query, subject, q_off, s_off, dropoff, word_size)
+            .unwrap_or_else(reference),
+        _ => {
+            let expected = reference();
+            if let Some(got) =
+                x_ungapped_fast::one_hit(query, subject, q_off, s_off, dropoff, word_size)
+            {
+                assert_eq!(
+                    got, expected,
+                    "[X_SHADOW] BPUNGAP one-hit mismatch: q_off={q_off} s_off={s_off} dropoff={dropoff} word_size={word_size}"
+                );
+                x_ungapped_fast::count_shadow();
+            }
+            expected
+        }
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1020-1083
@@ -436,16 +459,52 @@ pub(crate) fn extend_two_hit_blosum62(
     dropoff: i32,
     word_size: usize,
 ) -> Option<BlastpTwoHitUngappedResult> {
-    extend_two_hit_impl::<true>(
-        ScoringMatrix::Blosum62,
-        query,
-        subject,
-        s_left_off,
-        s_right_off,
-        q_right_off,
-        dropoff,
-        word_size,
-    )
+    let reference = || {
+        extend_two_hit_impl::<true>(
+            ScoringMatrix::Blosum62,
+            query,
+            subject,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        )
+    };
+    // LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW (x_ungapped_fast.rs): the same result, the
+    // X-drop walks with a byte score table and no bounds checks; off unless set.
+    match x_ungapped_fast::mode() {
+        0 => reference(),
+        1 => x_ungapped_fast::two_hit(
+            query,
+            subject,
+            s_left_off,
+            s_right_off,
+            q_right_off,
+            dropoff,
+            word_size,
+        )
+        .unwrap_or_else(reference),
+        _ => {
+            let expected = reference();
+            if let Some(got) = x_ungapped_fast::two_hit(
+                query,
+                subject,
+                s_left_off,
+                s_right_off,
+                q_right_off,
+                dropoff,
+                word_size,
+            ) {
+                assert_eq!(
+                    got, expected,
+                    "[X_SHADOW] BPUNGAP two-hit mismatch: s_left_off={s_left_off} s_right_off={s_right_off} q_right_off={q_right_off} dropoff={dropoff} word_size={word_size}"
+                );
+                x_ungapped_fast::count_shadow();
+            }
+            expected
+        }
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:1089-1155

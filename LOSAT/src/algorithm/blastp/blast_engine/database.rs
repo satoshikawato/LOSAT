@@ -586,7 +586,9 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 /// `ListedSubjects` holds the sequences of the listed subjects). A block that cannot be
 /// read or searched does not stop the other blocks of its round; the round's first
 /// error in ordinal order is returned, the error of the one-thread order (the blocks
-/// are cut alike).
+/// are cut alike). The subject scan of a database keeps no compact list (EXPERIMENT
+/// LOSAT_X_BPPCOMPACT is skipped with `-db`, `run_resolved_in_pool`), so the hit-list
+/// updates are given none.
 pub(super) fn search_blocks<S, K>(
     database: &BlastpDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
@@ -711,6 +713,7 @@ where
                 for mut subject_result in block_results? {
                     update_blastp_preliminary_hit_lists(
                         preliminary_hit_lists,
+                        &mut [],
                         &mut subject_result,
                         prelim_hitlist_size,
                     );
@@ -739,6 +742,7 @@ where
             );
             update_blastp_preliminary_hit_lists(
                 preliminary_hit_lists,
+                &mut [],
                 &mut subject_result,
                 prelim_hitlist_size,
             );

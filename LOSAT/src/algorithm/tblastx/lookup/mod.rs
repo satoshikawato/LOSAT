@@ -17,6 +17,11 @@ mod backbone;
 pub mod compressed;
 
 // Re-export public types and functions
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) use backbone::x_prepare_blosum62_lookup_query_in_pool;
 pub use backbone::{
     build_direct_lookup, build_ncbi_lookup, BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL,
 };

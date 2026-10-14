@@ -417,10 +417,28 @@ Rebuilding less:
   `LOSAT_X_BPQBLOCK=20000` and `LOSAT_X_BPSEED=1` on both sides, one thread, 8 alternating pairs, load 5.9-8.2):
   `blastp_build_lookup` summed over the blocks 4.55 -> 2.27 s (median ratio 0.54), `blastp_scan_ungapped`
   1.41 -> 1.08 s (0.84), wall 8.21 -> 5.43 s (0.73), max RSS 77 -> 40 MB, output unchanged.
+  With more than one thread (`-num_threads`) the search's thread pool builds the same table
+  (`tblastx/lookup/x_clut_par.rs`, exactness argument in its header): the query offsets of each count range
+  are cut into chunks in order, each chunk makes its appends (the serial count pass's statements) and sorts
+  them stably by stripe (2^shift backbone cells, at least the largest PV shift); each stripe then reads its
+  part of every chunk in chunk order, which gives each cell its offsets in the serial order, counts them,
+  lays out its cells' starts from its first hit (the hits of the stripes before) and sets its PV words, and
+  runs the serial fill and the move to NCBI's scan order on its cells. The overflow cells that each of
+  NCBI's tables takes are counted per stripe and summed, and each table is tested at its end by the serial
+  builder's rule (same refusal, same message). At one thread the serial builder runs, unchanged. The build
+  holds 4 bytes per hit for the sorted appends, as the serial build's record of the appends.
+  Measured 2026-10-14 on the WSL machine (i9-14900HX, 8 performance and 16 efficiency cores, shared with
+  other sessions; same input, `LOSAT_X_BPQBLOCK=20000 LOSAT_X_BPSEED=1 LOSAT_X_BPCLUT=1` on both sides,
+  with this change and the per-block set-up on the pool of `LOSAT_X_BPQBLOCK` below; alternating pairs,
+  medians; load 15-32): wall at 1 / 4 / 8 / 16 threads 7.36 / 5.00 / 4.55 / 7.92 -> 7.19 / 2.74 / 2.33 /
+  3.97 s (median pair ratios 0.98 / 0.55 / 0.51 / 0.49), `blastp_build_lookup` 3.04 / 3.07 / 3.00 / 4.91
+  -> 3.03 / 1.03 / 0.86 / 1.41 s, max RSS 39 / 45 / 46 / 53 -> 42 / 42 / 45 / 63 MB, output unchanged.
 - `LOSAT_X_BPCLUTSHADOW=1` shadow of `LOSAT_X_BPCLUT` (for blastp-fast): both builders run, the refusal and the
   tables are compared (every cell's hits in the reference's scan order, the PV array, `longest_chain` and the
-  scan's parameters) and the first difference stops the run (panic); the search uses the reference's table. One
-  line at exit: `[X_SHADOW] BPCLUT tables_compared= refusals_compared= hits= identical`.
+  scan's parameters) and the first difference stops the run (panic); the search uses the reference's table.
+  With more than one thread the pool's build runs too and its outcome and table (every field, slot for slot)
+  are compared with the serial flat build's. One line at exit: `[X_SHADOW] BPCLUT tables_compared=
+  refusals_compared= hits= parallel_tables_compared= parallel_refusals_compared= identical`.
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; not in the
   strict set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the word loop and the
   X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte
@@ -487,6 +505,13 @@ Rebuilding less:
   otherwise the search of all queries. The output file is created when the first block's rows are written; a
   run that fails in a later block leaves the rows of the blocks before.
   With `LOSAT_TIMING=1` each block prints its own `[TIMING]` lines.
+  The block search's set-up uses its thread pool (no value changes): the count of the query batches' words
+  for the overflow banks runs on the pool before the first block (groups of consecutive batches, one counter
+  per group; when it fails nothing has been written and the search of all queries runs); the subjects are
+  encoded once for all blocks (attached to the pool, `x_query_blocks::XBlockSubjects`); and with the
+  compressed table and more than one thread, the contexts' Karlin blocks of each block are computed on the
+  pool's threads (`tblastx/lookup/backbone.rs` `x_prepare_blosum62_lookup_query_in_pool`: each context's
+  block reads only its own letters, `x_context_karlin`).
 - `LOSAT_X_BPPFREE=1` (BLASTP, memory; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the preliminary hit lists hold no more than their HSPs need
   (`blastp/x_prelim_free.rs`, exactness argument in its header): a subject's HSP list for a query gives back

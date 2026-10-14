@@ -2,8 +2,8 @@
 //! on whole searches.
 //!
 //! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
-//! set. With it on, more than one thread and at least two matches, each match of the redo is one
-//! job on the pool, and the early termination test and the heap insertions are replayed in the
+//! set. With it on, more than one thread and at least two matches, the matches of the redo run on
+//! the pool in jobs of up to four consecutive matches of one query, and the early termination test and the heap insertions are replayed in the
 //! order of the one-thread loop. These tests compare the reports with the switch off at one thread
 //! (the one-thread loop) and with the switch off and on at one, two and four threads, for blastp
 //! and blastp-fast, alone and with the block search of `LOSAT_X_BPQBLOCK`; a search with
@@ -48,7 +48,7 @@ fn one_query() -> &'static PathBuf {
     })
 }
 
-/// What one run printed: the report, and the (jobs, windows, ended) of each
+/// What one run printed: the report, and the (matches, windows, ended) of each
 /// `[TIMING] x_bpredopar` line (one per search the path ran), and standard error.
 struct Run {
     stdout: Vec<u8>,
@@ -108,7 +108,7 @@ fn blastp(query: &Path, threads: u32, vars: &[(&str, &str)], args: &[&str]) -> R
                     .and_then(|value| value.parse().ok())
                     .unwrap_or_else(|| panic!("{name} in {line}"))
             };
-            (count("jobs="), count("windows="), count("ended="))
+            (count("matches="), count("windows="), count("ended="))
         })
         .collect();
     Run {
@@ -121,7 +121,7 @@ fn blastp(query: &Path, threads: u32, vars: &[(&str, &str)], args: &[&str]) -> R
 const SWITCH: (&str, &str) = ("LOSAT_X_BPREDOPAR", "1");
 
 /// The reports with the switch off and on at 1, 2 and 4 threads equal the one-thread report; the
-/// path runs (one line per search, every match a job) at 2 and 4 threads only.
+/// path runs (one line per search, at least two matches) at 2 and 4 threads only.
 fn same_rows_at_every_thread_count(query: &Path, vars: &[(&str, &str)], args: &[&str]) {
     let reference = blastp(query, 1, vars, args);
     assert!(!reference.stdout.is_empty(), "{vars:?} {args:?}: a report");
@@ -147,7 +147,12 @@ fn same_rows_at_every_thread_count(query: &Path, vars: &[(&str, &str)], args: &[
         } else {
             assert!(
                 !on.redo_par.is_empty()
-                    && on.redo_par.iter().map(|(jobs, ..)| jobs).sum::<usize>() > 1,
+                    && on
+                        .redo_par
+                        .iter()
+                        .map(|(matches, ..)| matches)
+                        .sum::<usize>()
+                        > 1,
                 "{vars:?} {args:?} threads {threads}: the path did not run: {}",
                 on.stderr
             );

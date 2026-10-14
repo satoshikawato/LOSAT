@@ -8766,7 +8766,7 @@ fn run_resolved_in_pool(
             args.num_threads,
             blastp_num_threads,
             subjects.len(),
-            super::x_redo_par::x_match_jobs(&preliminary_hit_lists),
+            super::x_redo_par::x_matches(&preliminary_hit_lists),
             total_db_len,
         );
     #[cfg(all(

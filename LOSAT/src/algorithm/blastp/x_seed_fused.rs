@@ -20,9 +20,9 @@
 //!
 //! EXPERIMENT (LOSAT_X_BPDIAG): with the fused loop on, the hits of one subject offset (one lookup
 //! cell) are tested in batches of eight instead of one after the other: for every hit of a batch
-//! the entry's new value and whether the hit is a candidate are computed without branches (in
-//! AVX2 registers where the CPU has AVX2, eight lanes, the entries read with one gather), every
-//! entry of the batch is stored, and then the candidates go to the closure in the cell's order.
+//! the entry's new value and whether the hit is a candidate are computed without branches in
+//! AVX2 registers (eight lanes), every entry of the batch is stored, and then the candidates go to
+//! the closure in the cell's order.
 //! Why the outcome is the per-hit loop's:
 //! - The query offsets of one cell are distinct: NCBI's `s_AddWordHits` adds a query offset to a
 //!   cell once, as a neighbour of the offset's word or (when the word's self score is below the
@@ -39,13 +39,17 @@
 //!   write) and the i32 arithmetic of `x_test_hit`, which wraps (see there).
 //!
 //! Off unless `LOSAT_X_BPDIAG` is set (any value); it needs `LOSAT_X_BPSEED` (or
-//! `LOSAT_X_BPSEEDSHADOW`, which then compares the batched loop with the reference).
-//! `LOSAT_X_BPDIAG_SIMD=0` keeps the scalar batch where the CPU has AVX2, and
-//! `LOSAT_X_BPDIAG_GATHER=0` reads a batch's entries with eight scalar loads instead of the AVX2
-//! gather (tuning and tests; the gather can be slow under the Gather Data Sampling microcode
-//! mitigation). Not in the strict set. With `LOSAT_TIMING=1` each search of a query set prints
-//! `[TIMING] x_bpdiag: cells=<n> batched_hits=<m> candidates=<k>` (the cells tested in batches,
-//! their hits, and the hits passed to the closure).
+//! `LOSAT_X_BPSEEDSHADOW`, which then compares the batched loop with the reference). Without AVX2
+//! (another architecture, or an x86-64 CPU without it) the switch keeps the per-hit loop: the
+//! scalar batch was slower than the per-hit loop on both machines it was timed on (2026-10-14,
+//! human block 1 x Species4, one thread, scan_ungapped: workstation 12.56 s against 11.59 s,
+//! local 7.53 / 7.08 s against 6.78 / 6.88 s). The scalar batch remains as the AVX2 path's handler
+//! of a cell's last batch of fewer than eight hits and as the cell-by-cell version the tests
+//! compare with; `LOSAT_X_BPDIAG_SIMD=0` forces it (diagnostic, used by the tests). Not in the
+//! strict set. With `LOSAT_TIMING=1` each search of a query set prints
+//! `[TIMING] x_bpdiag: mode=<avx2|scalar|per-hit> cells=<n> batched_hits=<m> candidates=<k>` (the
+//! path that ran, the cells tested in batches, their hits, and the hits passed to the closure;
+//! zeros with `per-hit`).
 
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::{
@@ -105,14 +109,25 @@ pub(crate) fn x_bp_diag() -> bool {
 enum XDiagMode {
     /// One hit after the other ([`x_test_hit`]): the fused loop without LOSAT_X_BPDIAG.
     PerHit,
-    /// LOSAT_X_BPDIAG: batches of [`X_DIAG_LANES`] hits in scalar code ([`x_test_batch_scalar`]).
+    /// LOSAT_X_BPDIAG with LOSAT_X_BPDIAG_SIMD=0 (diagnostic): batches of [`X_DIAG_LANES`] hits in
+    /// scalar code ([`x_test_batch_scalar`]).
     Scalar,
     /// LOSAT_X_BPDIAG with AVX2: batches of eight hits in AVX2 registers
     /// ([`x_test_batch_avx2`]); a cell's last batch of fewer than eight hits is a scalar batch.
-    /// `gather`: the eight entries are read with one AVX2 gather; without it
-    /// (LOSAT_X_BPDIAG_GATHER=0) with eight scalar loads into the register.
     #[cfg(target_arch = "x86_64")]
-    Avx2 { gather: bool },
+    Avx2,
+}
+
+impl XDiagMode {
+    /// The name in the `[TIMING] x_bpdiag` line.
+    fn name(self) -> &'static str {
+        match self {
+            XDiagMode::PerHit => "per-hit",
+            XDiagMode::Scalar => "scalar",
+            #[cfg(target_arch = "x86_64")]
+            XDiagMode::Avx2 => "avx2",
+        }
+    }
 }
 
 // No NCBI counterpart: whether the CPU has AVX2; it does not change any value NCBI computes.
@@ -121,9 +136,9 @@ fn x_avx2_available() -> bool {
     std::arch::is_x86_feature_detected!("avx2")
 }
 
-// No NCBI counterpart: chooses LOSAT's code path once (LOSAT_X_BPDIAG, LOSAT_X_BPDIAG_SIMD=0 for
-// the scalar batch on a CPU with AVX2, LOSAT_X_BPDIAG_GATHER=0 for scalar loads instead of the AVX2
-// gather); it does not change any value NCBI computes.
+// No NCBI counterpart: chooses LOSAT's code path once (LOSAT_X_BPDIAG; the AVX2 batch where the
+// CPU has AVX2, otherwise the per-hit loop; LOSAT_X_BPDIAG_SIMD=0 forces the scalar batch); it does
+// not change any value NCBI computes.
 fn x_diag_mode() -> XDiagMode {
     use std::sync::OnceLock;
     static MODE: OnceLock<XDiagMode> = OnceLock::new();
@@ -131,17 +146,15 @@ fn x_diag_mode() -> XDiagMode {
         if !x_bp_diag() {
             return XDiagMode::PerHit;
         }
-        let simd = std::env::var_os("LOSAT_X_BPDIAG_SIMD").is_none_or(|v| v.as_os_str() != "0");
-        #[cfg(target_arch = "x86_64")]
-        if simd && x_avx2_available() {
-            // Tuning only: a CPU with the Gather Data Sampling microcode mitigation (Xeon 6338 on
-            // the workstation) may run vpgatherdd slowly.
-            let gather =
-                std::env::var_os("LOSAT_X_BPDIAG_GATHER").is_none_or(|v| v.as_os_str() != "0");
-            return XDiagMode::Avx2 { gather };
+        if std::env::var_os("LOSAT_X_BPDIAG_SIMD").is_some_and(|v| v.as_os_str() == "0") {
+            return XDiagMode::Scalar;
         }
-        let _ = simd;
-        XDiagMode::Scalar
+        #[cfg(target_arch = "x86_64")]
+        if x_avx2_available() {
+            return XDiagMode::Avx2;
+        }
+        // Without AVX2 the scalar batch would be slower than the per-hit loop (module header).
+        XDiagMode::PerHit
     })
 }
 
@@ -184,7 +197,8 @@ pub(crate) fn x_bp_diag_print_timing() {
     if x_bp_diag() {
         use std::sync::atomic::Ordering::Relaxed;
         eprintln!(
-            "[TIMING] x_bpdiag: cells={} batched_hits={} candidates={}",
+            "[TIMING] x_bpdiag: mode={} cells={} batched_hits={} candidates={}",
+            x_diag_mode().name(),
             X_DIAG_CELLS.swap(0, Relaxed),
             X_DIAG_HITS.swap(0, Relaxed),
             X_DIAG_CANDIDATES.swap(0, Relaxed)
@@ -479,31 +493,19 @@ where
             counts.add_cell(hits.len(), candidates);
         }),
         #[cfg(target_arch = "x86_64")]
-        XDiagMode::Avx2 { gather } => {
+        XDiagMode::Avx2 => {
             assert!(x_avx2_available(), "the AVX2 batch needs AVX2");
             // SAFETY: the CPU has AVX2 (asserted above).
             unsafe {
-                if gather {
-                    x_scan_cells_avx2::<true, F>(
-                        lookup,
-                        subject,
-                        subject_length,
-                        table,
-                        test,
-                        candidate,
-                        &mut counts,
-                    )
-                } else {
-                    x_scan_cells_avx2::<false, F>(
-                        lookup,
-                        subject,
-                        subject_length,
-                        table,
-                        test,
-                        candidate,
-                        &mut counts,
-                    )
-                }
+                x_scan_cells_avx2(
+                    lookup,
+                    subject,
+                    subject_length,
+                    table,
+                    test,
+                    candidate,
+                    &mut counts,
+                )
             }
         }
     }
@@ -517,7 +519,7 @@ where
 /// The CPU must have AVX2.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn x_scan_cells_avx2<const GATHER: bool, F>(
+unsafe fn x_scan_cells_avx2<F>(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     subject_length: usize,
@@ -530,7 +532,7 @@ unsafe fn x_scan_cells_avx2<const GATHER: bool, F>(
 {
     x_scan_cells(lookup, subject, subject_length, |s, hits| {
         // SAFETY: the CPU has AVX2 (this function's contract).
-        let candidates = unsafe { x_cell_avx2::<GATHER, F>(hits, s, table, test, candidate) };
+        let candidates = unsafe { x_cell_avx2(hits, s, table, test, candidate) };
         counts.add_cell(hits.len(), candidates);
     });
 }
@@ -758,16 +760,14 @@ where
 /// The lane arithmetic is the scalar code's: `_mm256_sub_epi32` wraps like `wrapping_sub`, and
 /// `_mm256_cmpgt_epi32` is the signed i32 comparison. All eight entries are stored (the old value
 /// where the test writes nothing): storing only the written lanes, from the movemask, was slower
-/// on 2026-10-14 (local, human block 1 x Species4, one thread). `GATHER`: the entries are read
-/// with one gather; otherwise with eight scalar loads from the lanes' indices
-/// (LOSAT_X_BPDIAG_GATHER=0, for CPUs where the gather is slow), the same values.
+/// on 2026-10-14 (local, human block 1 x Species4, one thread).
 ///
 /// # Safety
 /// The CPU must have AVX2.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn x_test_batch_avx2<const GATHER: bool, F>(
+unsafe fn x_test_batch_avx2<F>(
     hits: &[i32],
     s: i32,
     table: &mut XDiagTable<'_>,
@@ -789,17 +789,16 @@ where
     );
     let mut lane_coords = [0u32; X_DIAG_LANES];
     _mm256_storeu_si256(lane_coords.as_mut_ptr().cast(), coords);
-    // Every lane is <= mask < entries.len() (XDiagTable::new), and an entry is a
-    // repr(transparent) u32.
-    let old = if GATHER {
-        _mm256_i32gather_epi32::<4>(table.entries.as_ptr().cast::<i32>(), coords)
-    } else {
-        let mut lane_old = [0u32; X_DIAG_LANES];
-        for (old, &coord) in lane_old.iter_mut().zip(&lane_coords) {
-            *old = table.entries.get_unchecked(coord as usize).raw_bits();
-        }
-        _mm256_loadu_si256(lane_old.as_ptr().cast())
-    };
+    // The eight entries with scalar loads, not `_mm256_i32gather_epi32`: on the workstation (Xeon
+    // 6338, Gather Data Sampling microcode mitigation on) the gather was slower, 2026-10-14, one
+    // pinned core, scan_ungapped: human block 1 per-hit 11.59 s, gather 10.17 s, scalar loads
+    // 9.13 s; C. elegans block 5 32.68, 28.55, 26.45 s. Locally (no mitigation) both were equal.
+    let mut lane_old = [0u32; X_DIAG_LANES];
+    for (old, &coord) in lane_old.iter_mut().zip(&lane_coords) {
+        // coord <= mask < entries.len() (XDiagTable::new)
+        *old = table.entries.get_unchecked(coord as usize).raw_bits();
+    }
+    let old = _mm256_loadu_si256(lane_old.as_ptr().cast());
     // flag: all ones where bit 31 is set; last: the 31-bit field sign-extended (last_hit()).
     let flag = _mm256_srai_epi32::<31>(old);
     let last = _mm256_srai_epi32::<1>(_mm256_slli_epi32::<1>(old));
@@ -839,7 +838,7 @@ where
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn x_cell_avx2<const GATHER: bool, F>(
+unsafe fn x_cell_avx2<F>(
     hits: &[i32],
     s: i32,
     table: &mut XDiagTable<'_>,
@@ -852,7 +851,7 @@ where
     let mut candidates = 0;
     let mut batches = hits.chunks_exact(X_DIAG_LANES);
     for batch in &mut batches {
-        candidates += x_test_batch_avx2::<GATHER, F>(batch, s, table, test, candidate);
+        candidates += x_test_batch_avx2(batch, s, table, test, candidate);
     }
     let rest = batches.remainder();
     if !rest.is_empty() {
@@ -1010,8 +1009,7 @@ mod tests {
         let mut modes = vec![XDiagMode::PerHit, XDiagMode::Scalar];
         #[cfg(target_arch = "x86_64")]
         if x_avx2_available() {
-            modes.push(XDiagMode::Avx2 { gather: true });
-            modes.push(XDiagMode::Avx2 { gather: false });
+            modes.push(XDiagMode::Avx2);
         } else {
             eprintln!("no AVX2 on this CPU: the AVX2 batch is not compared");
         }
@@ -1053,16 +1051,10 @@ mod tests {
                     counted += x_cell_scalar(hits, *s, &mut table, test, &mut candidate);
                 }
                 #[cfg(target_arch = "x86_64")]
-                XDiagMode::Avx2 { gather } => {
+                XDiagMode::Avx2 => {
                     assert!(x_avx2_available());
                     // SAFETY: the CPU has AVX2 (asserted above).
-                    counted += unsafe {
-                        if gather {
-                            x_cell_avx2::<true, _>(hits, *s, &mut table, test, &mut candidate)
-                        } else {
-                            x_cell_avx2::<false, _>(hits, *s, &mut table, test, &mut candidate)
-                        }
-                    };
+                    counted += unsafe { x_cell_avx2(hits, *s, &mut table, test, &mut candidate) };
                 }
             }
         }

@@ -3,14 +3,14 @@
 //!
 //! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
 //! set, and it acts in the fused seed loop of `LOSAT_X_BPSEED`. With it on, the hits of one lookup
-//! cell are tested in batches of eight (AVX2 where the CPU has it; `LOSAT_X_BPDIAG_SIMD=0` keeps
-//! the scalar batch, `LOSAT_X_BPDIAG_GATHER=0` reads the entries without the AVX2 gather). These
-//! tests compare the reports with the reference loop and the per-hit fused loop at one and four
-//! threads, on a generated pair (long lookup cells from repeats, related proteins for two-hit
-//! extensions) and on the fixture pair, run the shadow of
-//! `LOSAT_X_BPSEEDSHADOW` (the batched loop against the reference for every subject), and check
-//! from the `[TIMING] x_bpdiag: cells=<n> batched_hits=<m> candidates=<k>` lines that cells were
-//! tested in batches, not only that the report is equal.
+//! cell are tested in batches of eight in AVX2 registers where the CPU has AVX2; without it the
+//! per-hit loop runs, and `LOSAT_X_BPDIAG_SIMD=0` forces the scalar batch. These tests compare the
+//! reports with the reference loop and the per-hit fused loop at one and four threads, on a
+//! generated pair (long lookup cells from repeats, related proteins for two-hit extensions) and on
+//! the fixture pair, run the shadow of `LOSAT_X_BPSEEDSHADOW` (the batched loop against the
+//! reference for every subject), and check from the
+//! `[TIMING] x_bpdiag: mode=<m> cells=<n> batched_hits=<h> candidates=<k>` lines which path ran and
+//! that cells were tested in batches, not only that the report is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
 //! ```c
@@ -33,9 +33,10 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// The counts of one `[TIMING] x_bpdiag` line.
-#[derive(Clone, Copy, Debug)]
+/// The mode and counts of one `[TIMING] x_bpdiag` line.
+#[derive(Clone, Debug)]
 struct DiagCounts {
+    mode: String,
     cells: u64,
     hits: u64,
     candidates: u64,
@@ -92,11 +93,13 @@ fn blastp(
     );
     let counts = stderr
         .lines()
-        .filter_map(|line| line.strip_prefix("[TIMING] x_bpdiag: cells="))
+        .filter_map(|line| line.strip_prefix("[TIMING] x_bpdiag: mode="))
         .map(|rest| {
+            let (mode, rest) = rest.split_once(" cells=").expect("cells");
             let (cells, rest) = rest.split_once(" batched_hits=").expect("hits");
             let (hits, candidates) = rest.split_once(" candidates=").expect("candidates");
             DiagCounts {
+                mode: mode.to_string(),
                 cells: cells.parse().expect("a count of cells"),
                 hits: hits.parse().expect("a count of hits"),
                 candidates: candidates.parse().expect("a count of candidates"),
@@ -104,6 +107,37 @@ fn blastp(
         })
         .collect();
     (output.stdout, counts, stderr)
+}
+
+/// Checks one search's `[TIMING] x_bpdiag` line: `LOSAT_X_BPDIAG_SIMD=0` runs the scalar batch,
+/// otherwise the AVX2 batch where this CPU has AVX2 and the per-hit loop (nothing counted) where
+/// it has not. A batched run has tested cells and passed candidates on.
+fn check_counts(counts: &[DiagCounts], simd: &str, what: &str) {
+    assert_eq!(counts.len(), 1, "{what}: {counts:?}");
+    let c = &counts[0];
+    #[cfg(target_arch = "x86_64")]
+    let avx2 = std::arch::is_x86_feature_detected!("avx2");
+    #[cfg(not(target_arch = "x86_64"))]
+    let avx2 = false;
+    let expected = if simd == "0" {
+        "scalar"
+    } else if avx2 {
+        "avx2"
+    } else {
+        "per-hit"
+    };
+    assert_eq!(c.mode, expected, "{what}: {c:?}");
+    if expected == "per-hit" {
+        assert!(
+            c.cells == 0 && c.hits == 0 && c.candidates == 0,
+            "{what}: {c:?}"
+        );
+    } else {
+        assert!(
+            c.cells > 0 && c.hits >= c.cells && c.candidates > 0 && c.candidates <= c.hits,
+            "{what}: {c:?}"
+        );
+    }
 }
 
 fn next(seed: &mut u64) -> u32 {
@@ -187,8 +221,9 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
                 "threads {threads}: the fused loop differs"
             );
             assert!(fused_counts.is_empty(), "no line without LOSAT_X_BPDIAG");
-            // The AVX2 batch with the gather, with scalar loads, and the scalar batch.
-            for (simd, gather) in [("1", "1"), ("1", "0"), ("0", "1")] {
+            // The CPU's path (the AVX2 batch, or the per-hit loop without AVX2) and the scalar
+            // batch.
+            for simd in ["1", "0"] {
                 let (rows, counts, _) = blastp(
                     query,
                     subject,
@@ -197,25 +232,12 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
                         ("LOSAT_X_BPSEED", "1"),
                         ("LOSAT_X_BPDIAG", "1"),
                         ("LOSAT_X_BPDIAG_SIMD", simd),
-                        ("LOSAT_X_BPDIAG_GATHER", gather),
                     ],
                     &["-outfmt", "6"],
                 );
-                assert!(
-                    rows == reference,
-                    "{} threads {threads} simd {simd} gather {gather}: rows differ",
-                    query.display()
-                );
-                assert_eq!(
-                    counts.len(),
-                    1,
-                    "threads {threads} simd {simd} gather {gather}: {counts:?}"
-                );
-                let c = counts[0];
-                assert!(
-                    c.cells > 0 && c.hits >= c.cells && c.candidates > 0 && c.candidates <= c.hits,
-                    "threads {threads} simd {simd} gather {gather}: {c:?}"
-                );
+                let what = format!("{} threads {threads} simd {simd}", query.display());
+                assert!(rows == reference, "{what}: rows differ");
+                check_counts(&counts, simd, &what);
             }
         }
     }
@@ -256,9 +278,6 @@ fn the_shadow_compares_the_batched_loop_with_the_reference() {
                     && line.contains(" identical")),
             "simd {simd}: no shadow line: {stderr}"
         );
-        assert!(
-            counts.len() == 1 && counts[0].cells > 0,
-            "simd {simd}: the shadow ran the batched loop: {counts:?}"
-        );
+        check_counts(&counts, simd, &format!("shadow simd {simd}"));
     }
 }

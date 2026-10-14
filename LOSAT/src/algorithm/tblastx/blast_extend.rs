@@ -9,11 +9,7 @@
 ///
 /// NCBI uses a bitfield: signed last_hit:31 + unsigned flag:1.
 /// Reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:57-61
-///
-/// `repr(transparent)`: one entry is laid out as its `u32`, so a table can be read as an array of
-/// 32-bit words (`LOSAT_X_BPDIAG`'s AVX2 gather, `blastp/x_seed_fused.rs`).
 #[derive(Clone, Copy)]
-#[repr(transparent)]
 pub struct DiagStruct {
     /// Packed bitfield storage mirroring NCBI layout.
     /// Reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:57-61

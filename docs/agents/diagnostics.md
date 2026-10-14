@@ -352,13 +352,24 @@ Rebuilding less:
   binary search; the diagonal entry of a later hit of the cell is prefetched `LOSAT_X_BPSEED_PREFETCH` hits
   ahead (default 16, 0 = none; tuning only). Measured 2026-10-13 on the workstation (OrthoFinder-style job,
   fly x human, every 10th protein, one thread, medians of 6 rotating rounds under load): 51.4 s -> 34.2 s,
-  output unchanged.
-- `LOSAT_X_BPSEEDSHADOW=1` shadow of `LOSAT_X_BPSEED` (turns the fused loop on): for every subject the fused
-  loop and the reference loop run from the same diagonal table, and the initial HSPs (every field) and the
-  whole table must be equal; the first difference stops the run (panic). For a subject shorter than a word less
-  one letter (one residue with word size 3) only the initial HSPs are compared: the reference's only word there
-  ends one byte past the subject's buffer (NCBI reads the same byte), whose value can name a cell with hits; such a
-  hit is never extended and leaves an entry that later subjects read as no previous hit (`x_shadow_compare`).
+  output unchanged. The switch also covers the compressed lookup table of blastp-fast
+  (`blastp/x_seed_fused_compressed.rs`, exactness argument in its header): the scan (NCBI's
+  `s_BlastCompressedAaScanSubject` statements) lists the subject offsets whose word passes the PV test, then
+  reads those cells in scan order, the backbone cell 8 cells ahead prefetched, and hands each cell's hits in
+  NCBI's order (the backbone's offsets, then the overflow list from the cell filled last) to the same test and
+  closure; the offset-pair array's rounds are not repeated (a resumed round reads the index the rolling scan has,
+  as NCBI's reciprocal division is exact below the table size). Measured 2026-10-14 on the WSL machine (blastp-fast,
+  2M query letters x 1M subject letters, `LOSAT_X_BPQBLOCK=20000` on both sides, one thread, 8 alternating pairs,
+  load 7.5-10.9): `blastp_scan_ungapped` summed over the blocks 2.05 -> 1.40 s (median ratio 0.67), wall
+  8.94 -> 8.22 s (0.89), output unchanged.
+- `LOSAT_X_BPSEEDSHADOW=1` shadow of `LOSAT_X_BPSEED` (turns the fused loop on), for both lookup tables: for
+  every subject the fused loop and the reference loop run from the same diagonal table, and the initial HSPs
+  (every field) and the whole table must be equal; the first difference stops the run (panic). For a subject
+  shorter than a word less one letter (amino-acid table, one residue with word size 3) only the initial HSPs are
+  compared: the reference's only word there ends one byte past the subject's buffer (NCBI reads the same byte),
+  whose value can name a cell with hits; such a hit is never extended and leaves an entry that later subjects read
+  as no previous hit (`x_shadow_compare`). The compressed scan reads letters past the buffer as the sentinel in
+  both loops, so its tables are always compared.
   One line at exit: `[X_SHADOW] BPSEED subjects= initial_hsps= identical`, with
   `(tables not compared for N subjects shorter than a word)` when there were such subjects.
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; not in the

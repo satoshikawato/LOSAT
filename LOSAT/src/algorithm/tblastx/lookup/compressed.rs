@@ -150,7 +150,7 @@ pub struct BlastCompressedAaLookupTable {
     // Rust keeps a byte-wide scan mirror so the hot compressed BLASTP scan can
     // index by `Uint1`-equivalent subject bytes without an Option/bounds branch;
     // entries outside NCBISTDAA remain `-1`, preserving the bad-character flush.
-    scaled_compress_table_u8: [i32; 256],
+    pub(crate) scaled_compress_table_u8: [i32; 256],
     pub neighbor_matches: i32,
     pub exact_matches: i32,
     /// Whether the words filled NCBI's overflow banks: NCBI then writes past
@@ -1048,7 +1048,7 @@ fn determine_compressed_scanning_offsets(
 // ```
 #[inline(always)]
 #[allow(dead_code)]
-fn compressed_reciprocal_divide(index: i32, reciprocal_alphabet_size: i64) -> i32 {
+pub(crate) fn compressed_reciprocal_divide(index: i32, reciprocal_alphabet_size: i64) -> i32 {
     ((i64::from(index) * reciprocal_alphabet_size) >> 32) as i32
 }
 
@@ -1788,7 +1788,7 @@ pub fn compute_compressed_index(
 // return index;
 // ```
 #[inline(always)]
-fn compute_compressed_index_u8(
+pub(crate) fn compute_compressed_index_u8(
     word_size: usize,
     word: &[u8],
     compressed_alphabet_size: usize,

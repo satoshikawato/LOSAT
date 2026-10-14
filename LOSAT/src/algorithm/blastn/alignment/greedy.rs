@@ -3178,6 +3178,21 @@ unsafe fn x_greedy_row(
     )
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:509,537
+// ```c
+//     for (d = 1; d <= max_dist; d++) {
+// ...
+//         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+// ```
+// EXPERIMENT (LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW): the distance loop of the score-only
+// `BLAST_GreedyAlign` on an unpacked subject in one function, one pass per distance. A child
+// module, so that it uses the types and helpers of this file and calls `blast_greedy_align` (its
+// shadow) without changing them.
+#[path = "x_greedy_fused.rs"]
+mod x_greedy_fused;
+// No NCBI counterpart: the summary line `main` prints at exit; it changes no value NCBI computes.
+pub use x_greedy_fused::print_summary as x_greedy_fuse_print_summary;
+
 /// Non-affine greedy alignment with optional traceback.
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/greedy_align.c:379-751 (BLAST_GreedyAlign)
 fn blast_greedy_align(
@@ -3294,6 +3309,45 @@ fn blast_greedy_align(
     non_affine_mem.max_score[max_score_offset] = seq1_index * match_cost;
     diag_lower = diag_origin - 1;
     diag_upper = diag_origin + 1;
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:508-509,682-686
+    // ```c
+    //     /* for each distance */
+    //     for (d = 1; d <= max_dist; d++) {
+    // ...
+    //     if (!converged)
+    //         return -1;
+    //
+    //     if (edit_block == NULL)
+    //         return best_dist;
+    // ```
+    // Dispatch point of LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW: without an edit block on an
+    // unpacked subject, `x_greedy_fused` runs the loop below and returns what it returns, with
+    // the same outputs, rows and `max_score`. `None` (switch off, or another case): the loop below.
+    // EXPERIMENT (LOSAT_X_GREEDYFUSE / LOSAT_X_GREEDYFUSESHADOW)
+    if let Some(result) = x_greedy_fused::x_greedy_fused_dispatch(
+        seq1,
+        len1,
+        seq2,
+        len2,
+        reverse,
+        xdrop_threshold,
+        match_cost,
+        mismatch_cost,
+        seq1_align_len,
+        seq2_align_len,
+        max_dist,
+        non_affine_mem,
+        edit_block.is_none(),
+        rem,
+        fence_hit,
+        seed,
+        diag_lower,
+        diag_upper,
+        max_score_offset,
+    ) {
+        return result;
+    }
 
     let mut converged = false;
     for d_val in 1..=max_dist {

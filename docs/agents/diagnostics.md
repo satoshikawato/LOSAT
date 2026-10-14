@@ -231,6 +231,17 @@ Same values, faster computation:
   `LOSAT_X_GREEDYPRELIMSHADOW=1` (implies the switch) also runs the packed call and stops on the
   first difference; at exit `[X_SHADOW] GREEDYPRELIM calls_compared=N`. With `LOSAT_X_STATS=1`:
   `[X_STATS] GREEDYPRELIM calls= subjects_unpacked= bytes_unpacked=`.
+- `LOSAT_X_GREEDYFUSE=1` (not in the strict set; off unless set) the score-only megablast greedy
+  alignment on an unpacked subject (the preliminary stage with `LOSAT_X_GREEDYPRELIM`): the whole
+  loop over distances of `BLAST_GreedyAlign` in one function, one pass over the diagonals of a
+  distance, eight bases per slide step, the same cells of the two rolling rows and of `max_score`
+  written in the C order (`algorithm/blastn/alignment/x_greedy_fused.rs`, exactness argument in
+  its module doc). It replaces the per-distance `LOSAT_X_GREEDYFAST` row there; traceback, packed
+  subjects and the affine alignment keep their paths. x86_64 with AVX2/BMI runs a build with
+  `tzcnt`/`lzcnt`, other CPUs and targets the plain build of the same code. Shadow:
+  `LOSAT_X_GREEDYFUSESHADOW=1` (implies the switch) runs it on copies, runs the reference call as
+  well and stops on the first difference in the return value, align lengths, seed, fence flag,
+  rows or `max_score`; at exit `[X_SHADOW] GREEDYFUSE compared=N`.
 - `LOSAT_X_COMPFAST=1` composition adjustment (Newton) loops reordered with the same element
   operations in the same order. Shadow: `LOSAT_X_COMPSHADOW=1`.
 - `LOSAT_X_NEWTONEXACT=1` the Newton iteration of the composition adjustment with fixed-size

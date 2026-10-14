@@ -442,6 +442,16 @@ Rebuilding less:
   `LOSAT_TIMING=1` each search of a query set prints `[TIMING] x_bppfree: freed_lists=<n>`. Measured once
   (C. elegans block of 150 proteins, 50,869 letters, x human proteome, one thread, max RSS): 153,744 ->
   117,968 kB (NCBI -db 109,080 in the same run).
+- `LOSAT_X_BPPCOMPACT=1` (BLASTP, memory; not in the strict set: off unless set, and `LOSAT_X_DEFAULT` does
+  not touch it) the subject scan keeps each preliminary HSP as a 64-byte element (the
+  `BlastpPreliminaryHsp` and its E-value) instead of a 168-byte `BlastpHsp`, in the same hit-list helpers
+  made generic over the element (`blastp/x_prelim_compact.rs`, exactness argument in its header); the redo
+  reads lists rebuilt as the off path holds them: the one-thread redo rebuilds each query's list when it
+  reaches it and drops it after its redo, a search with more than one thread rebuilds all lists before the
+  redo, query chunks hand on rebuilt lists. `LOSAT_X_BPPCOMPACT=shadow` builds both lists, compares every
+  rebuilt list field by field with the off path's (it panics on a difference) and prints
+  `[X_SHADOW] BPPCOMPACT compared=<lists> hsps=<n>` at exit. With `LOSAT_TIMING=1` each search of a query
+  set prints `[TIMING] x_bppcompact: expanded_lists=<n>`.
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks

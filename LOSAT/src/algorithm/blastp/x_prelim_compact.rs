@@ -1,0 +1,411 @@
+//! EXPERIMENT (LOSAT_X_BPPCOMPACT): blastp's preliminary hit lists hold a 64-byte element instead
+//! of a `BlastpHsp` (168 bytes) until the redo reads them.
+//!
+//! The preliminary stage keeps, for every query of a search, the HSP lists of up to the
+//! preliminary hit list size of subjects. Each preliminary HSP is a `BlastpHsp`, most of whose
+//! fields (identities, bit score, edit script, ...) the preliminary stage never sets and the redo
+//! never reads: the redo turns every HSP of a list back into the `BlastpPreliminaryHsp` it was
+//! made from (`preliminary_hit_from_local_match_hsp`). With many matches in a block of queries
+//! these lists are the largest part of the peak at the end of the subject scan.
+//!
+//! With the switch on, the subject scan keeps an `XPrelimHsp` (the `BlastpPreliminaryHsp` and its
+//! E-value) in the same `BlastpHspList` / `BlastpHitList` helpers, made generic over the element
+//! (`HitListHsp`): the same E-values, scores and offsets in the same comparisons, and every sort of
+//! HSPs is stable (`sort_by`), so the lists end in the same order. Before the redo a list is made
+//! into the `BlastpHitList` the off path holds (`x_expand_hit_list`, with the HSPs built by the
+//! same `blastp_hsp_from_preliminary` as the off path): the one-thread redo does it query by
+//! query and drops the expanded list after the query's redo (nothing reads it afterwards, as with
+//! LOSAT_X_BPPFREE); a search with more than one thread expands every list before the redo (its
+//! parallel paths read the lists of all queries). The lists of query chunks (`-query` longer than
+//! the split size) are expanded where a chunk's search ends, so the chunk merge is unchanged.
+//!
+//! `LOSAT_X_BPPCOMPACT=shadow` builds both kinds of list for every subject, expands every compact
+//! list before the redo and compares it field by field with the off path's list (the bits of the
+//! floating-point values), panics on the first difference, then runs the redo on the off path's
+//! lists. `main` prints `[X_SHADOW] BPPCOMPACT compared=<lists> hsps=<n>`.
+//!
+//! Off unless `LOSAT_X_BPPCOMPACT` is set (any value other than `shadow` turns it on). Not in the
+//! strict set. With `LOSAT_TIMING=1` a search with the switch prints
+//! `[TIMING] x_bppcompact: expanded_lists=<n>` (the hit lists expanded during the search, those of
+//! its query chunks included).
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
+
+use super::gapalign::BlastpPreliminaryHsp;
+use super::hsp::{BlastpHitList, BlastpHsp, BlastpHspList, HitListHsp};
+
+/// EXPERIMENT (LOSAT_X_BPPCOMPACT): how the preliminary hit lists are kept.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum XPrelimCompact {
+    Off,
+    On,
+    Shadow,
+}
+
+impl XPrelimCompact {
+    /// The subject scan builds compact lists.
+    pub(crate) fn compact(self) -> bool {
+        self != XPrelimCompact::Off
+    }
+    /// The subject scan also builds the off path's lists (shadow mode).
+    pub(crate) fn full(self) -> bool {
+        self != XPrelimCompact::On
+    }
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPPCOMPACT switch once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPPCOMPACT): off unless set; `shadow` builds and compares both lists.
+pub(crate) fn x_bp_prelim_compact() -> XPrelimCompact {
+    static MODE: OnceLock<XPrelimCompact> = OnceLock::new();
+    *MODE.get_or_init(|| match std::env::var_os("LOSAT_X_BPPCOMPACT") {
+        None => XPrelimCompact::Off,
+        Some(value) if value == "shadow" => XPrelimCompact::Shadow,
+        Some(_) => XPrelimCompact::On,
+    })
+}
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:151-178
+// ```c
+// Blast_HSPInit(Int4 query_start, Int4 query_end, Int4 subject_start,
+//               Int4 subject_end, Int4 query_gapped_start,
+//               Int4 subject_gapped_start, Int4 query_context,
+//               Int2 query_frame, Int2 subject_frame, Int4 score, ...)
+// ```
+// NCBI keeps one BlastHSP; this is the part of it the preliminary stage sets, with the E-value of
+// Blast_HSPListGetEvalues (blast_engine.c:1523-1530).
+/// EXPERIMENT (LOSAT_X_BPPCOMPACT): a preliminary HSP as the subject scan keeps it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct XPrelimHsp {
+    pub hsp: BlastpPreliminaryHsp,
+    pub e_value: f64,
+}
+
+// No NCBI counterpart: the values `BlastpHsp` holds for the same HSP
+// (`blastp_hsp_from_preliminary`: starts + 1).
+impl HitListHsp for XPrelimHsp {
+    #[inline]
+    fn e_value(&self) -> f64 {
+        self.e_value
+    }
+    #[inline]
+    fn raw_score(&self) -> i32 {
+        self.hsp.raw_score
+    }
+    #[inline]
+    fn offsets(&self) -> (usize, usize, usize, usize) {
+        (
+            (self.hsp.query_start + 1) as usize,
+            self.hsp.query_end as usize,
+            (self.hsp.subject_start + 1) as usize,
+            self.hsp.subject_end as usize,
+        )
+    }
+}
+
+// No NCBI counterpart: rebuilds the off path's hit list from the compact one (same counts, same
+// list order, the HSPs that `build_preliminary_hsp_list_for_hitlist` would have made).
+/// EXPERIMENT (LOSAT_X_BPPCOMPACT): the `BlastpHitList` the off path holds for this list.
+pub(crate) fn x_expand_hit_list(list: BlastpHitList<XPrelimHsp>) -> BlastpHitList {
+    X_EXPANDED_LISTS.fetch_add(1, Ordering::Relaxed);
+    let BlastpHitList {
+        hsplist_count,
+        hsplist_max,
+        worst_evalue,
+        low_score,
+        heapified,
+        hsplist_array,
+        hsplist_current,
+        num_hits,
+    } = list;
+    let mut expanded = Vec::with_capacity(hsplist_array.capacity());
+    expanded.extend(hsplist_array.into_iter().map(|hsp_list| {
+        BlastpHspList {
+            oid: hsp_list.oid,
+            query_index: hsp_list.query_index,
+            hsps: hsp_list
+                .hsps
+                .iter()
+                .map(|hsp| super::blast_engine::blastp_hsp_from_preliminary(&hsp.hsp, hsp.e_value))
+                .collect(),
+            best_evalue: hsp_list.best_evalue,
+        }
+    }));
+    BlastpHitList {
+        hsplist_count,
+        hsplist_max,
+        worst_evalue,
+        low_score,
+        heapified,
+        hsplist_array: expanded,
+        hsplist_current,
+        num_hits,
+    }
+}
+
+// No NCBI counterpart: hands the preliminary hit lists on as the off path's lists.
+/// EXPERIMENT (LOSAT_X_BPPCOMPACT): with the switch on, every compact list becomes the off path's
+/// list (`full` holds the lists of the queries whose chunks replaced them); in the shadow mode
+/// every compact list is compared with the off path's list of its query (but for the queries
+/// marked in `split`, compared before their chunks' list replaced them) and dropped.
+pub(crate) fn x_finish_compact_lists(
+    mode: XPrelimCompact,
+    full: &mut [Option<BlastpHitList>],
+    compact: &mut [Option<BlastpHitList<XPrelimHsp>>],
+    split: &[bool],
+) {
+    match mode {
+        XPrelimCompact::Off => {}
+        XPrelimCompact::On => {
+            for (full, compact) in full.iter_mut().zip(compact.iter_mut()) {
+                if let Some(list) = compact.take() {
+                    *full = Some(x_expand_hit_list(list));
+                }
+            }
+        }
+        XPrelimCompact::Shadow => {
+            for (q_idx, (full, compact)) in full.iter().zip(compact.iter_mut()).enumerate() {
+                let compact = compact.take();
+                if split.get(q_idx).copied().unwrap_or(false) {
+                    assert!(compact.is_none());
+                    continue;
+                }
+                x_shadow_compare(q_idx, full.as_ref(), compact);
+            }
+        }
+    }
+}
+
+static X_EXPANDED_LISTS: AtomicU64 = AtomicU64::new(0);
+static X_SHADOW_LISTS: AtomicU64 = AtomicU64::new(0);
+static X_SHADOW_HSPS: AtomicU64 = AtomicU64::new(0);
+
+/// EXPERIMENT (LOSAT_X_BPPCOMPACT): the hit lists expanded so far (for the timing line).
+pub(crate) fn x_expanded_lists() -> u64 {
+    X_EXPANDED_LISTS.load(Ordering::Relaxed)
+}
+
+fn same_hsp(a: &BlastpHsp, b: &BlastpHsp) -> bool {
+    a.identity.to_bits() == b.identity.to_bits()
+        && a.length == b.length
+        && a.mismatch == b.mismatch
+        && a.gapopen == b.gapopen
+        && a.q_start == b.q_start
+        && a.q_end == b.q_end
+        && a.s_start == b.s_start
+        && a.s_end == b.s_end
+        && a.gapped_q_start == b.gapped_q_start
+        && a.gapped_s_start == b.gapped_s_start
+        && a.e_value.to_bits() == b.e_value.to_bits()
+        && a.bit_score.to_bits() == b.bit_score.to_bits()
+        && a.num_ident == b.num_ident
+        && a.query_context == b.query_context
+        && a.query_frame == b.query_frame
+        && a.subject_frame == b.subject_frame
+        && a.query_length == b.query_length
+        && a.q_idx == b.q_idx
+        && a.s_idx == b.s_idx
+        && a.raw_score == b.raw_score
+        && a.gap_info == b.gap_info
+        && a.num_positives == b.num_positives
+        && a.comp_adjustment_method == b.comp_adjustment_method
+}
+
+// No NCBI counterpart: the shadow mode's check.
+/// EXPERIMENT (LOSAT_X_BPPCOMPACT=shadow): panics unless the expanded compact list of query
+/// `q_idx` equals the off path's list (all fields; floating-point values by their bits).
+pub(crate) fn x_shadow_compare(
+    q_idx: usize,
+    full: Option<&BlastpHitList>,
+    compact: Option<BlastpHitList<XPrelimHsp>>,
+) {
+    let compact = compact.map(x_expand_hit_list);
+    let (full, compact) = match (full, compact.as_ref()) {
+        (None, None) => return,
+        (Some(full), Some(compact)) => (full, compact),
+        (full, compact) => panic!(
+            "[X_SHADOW] BPPCOMPACT query {q_idx}: off path list {}, compact list {}",
+            if full.is_some() { "present" } else { "absent" },
+            if compact.is_some() {
+                "present"
+            } else {
+                "absent"
+            },
+        ),
+    };
+    let header = (
+        full.hsplist_count,
+        full.hsplist_max,
+        full.worst_evalue.to_bits(),
+        full.low_score,
+        full.heapified,
+        full.hsplist_array.len(),
+        full.hsplist_current,
+        full.num_hits,
+    );
+    let compact_header = (
+        compact.hsplist_count,
+        compact.hsplist_max,
+        compact.worst_evalue.to_bits(),
+        compact.low_score,
+        compact.heapified,
+        compact.hsplist_array.len(),
+        compact.hsplist_current,
+        compact.num_hits,
+    );
+    assert_eq!(
+        header, compact_header,
+        "[X_SHADOW] BPPCOMPACT query {q_idx}: hit list fields differ"
+    );
+    for (position, (a, b)) in full
+        .hsplist_array
+        .iter()
+        .zip(&compact.hsplist_array)
+        .enumerate()
+    {
+        assert!(
+            a.oid == b.oid
+                && a.query_index == b.query_index
+                && a.best_evalue.to_bits() == b.best_evalue.to_bits()
+                && a.hsps.len() == b.hsps.len(),
+            "[X_SHADOW] BPPCOMPACT query {q_idx} list {position}: oid {} / {}, query {} / {}, best E {:e} / {:e}, HSPs {} / {}",
+            a.oid,
+            b.oid,
+            a.query_index,
+            b.query_index,
+            a.best_evalue,
+            b.best_evalue,
+            a.hsps.len(),
+            b.hsps.len(),
+        );
+        for (index, (x, y)) in a.hsps.iter().zip(&b.hsps).enumerate() {
+            assert!(
+                same_hsp(x, y),
+                "[X_SHADOW] BPPCOMPACT query {q_idx} list {position} HSP {index}: {x:?} / {y:?}"
+            );
+        }
+        X_SHADOW_HSPS.fetch_add(a.hsps.len() as u64, Ordering::Relaxed);
+    }
+    X_SHADOW_LISTS.fetch_add(1, Ordering::Relaxed);
+}
+
+// No NCBI counterpart: prints counters and changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPPCOMPACT=shadow): the line `main` prints at exit.
+pub fn x_bp_prelim_compact_print_summary() {
+    if x_bp_prelim_compact() == XPrelimCompact::Shadow {
+        eprintln!(
+            "[X_SHADOW] BPPCOMPACT compared={} hsps={}",
+            X_SHADOW_LISTS.load(Ordering::Relaxed),
+            X_SHADOW_HSPS.load(Ordering::Relaxed)
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prelim(score: i32, q: (i32, i32), s: (i32, i32), e_value: f64) -> XPrelimHsp {
+        XPrelimHsp {
+            hsp: BlastpPreliminaryHsp {
+                query_start: q.0,
+                query_end: q.1,
+                subject_start: s.0,
+                subject_end: s.1,
+                gapped_query_start: q.0 + 1,
+                gapped_subject_start: s.0 + 1,
+                raw_score: score,
+                query_context: 0,
+                query_frame: 0,
+                subject_frame: 0,
+                query_length: 300,
+                q_idx: 0,
+                s_idx: 0,
+            },
+            e_value,
+        }
+    }
+
+    fn lists_of(oid: u32, hsps: &[XPrelimHsp]) -> (BlastpHspList, BlastpHspList<XPrelimHsp>) {
+        let compact = BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: hsps
+                .iter()
+                .map(|h| {
+                    let mut h = *h;
+                    h.hsp.s_idx = oid;
+                    h
+                })
+                .collect::<Vec<_>>(),
+            best_evalue: f64::MAX,
+        };
+        let full = BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: compact
+                .hsps
+                .iter()
+                .map(|h| super::super::blast_engine::blastp_hsp_from_preliminary(&h.hsp, h.e_value))
+                .collect(),
+            best_evalue: f64::MAX,
+        };
+        (full, compact)
+    }
+
+    #[test]
+    fn offsets_match_the_expanded_hsp() {
+        let h = prelim(57, (4, 90), (10, 97), 1e-12);
+        let full = super::super::blast_engine::blastp_hsp_from_preliminary(&h.hsp, h.e_value);
+        assert_eq!(h.offsets(), full.offsets());
+        assert_eq!(h.raw_score(), full.raw_score());
+        assert_eq!(h.e_value().to_bits(), full.e_value().to_bits());
+    }
+
+    // The hit list helpers on both element types: a list size small enough that the heap,
+    // its replacement rule and the in-list E-value sort all run, with ties in E-value and score.
+    #[test]
+    fn hit_list_helpers_keep_the_same_lists_on_both_types() {
+        let mut full_hits: BlastpHitList = BlastpHitList::new(3);
+        let mut compact_hits: BlastpHitList<XPrelimHsp> = BlastpHitList::new(3);
+        let subjects: Vec<Vec<XPrelimHsp>> = vec![
+            vec![
+                prelim(40, (0, 50), (0, 50), 1e-5),
+                prelim(40, (60, 90), (60, 90), 1e-5),
+            ],
+            vec![
+                prelim(40, (60, 90), (60, 90), 1e-5),
+                prelim(40, (0, 50), (0, 50), 1e-5),
+            ],
+            vec![prelim(55, (1, 80), (3, 82), 1e-9)],
+            vec![prelim(40, (0, 50), (0, 50), 1e-5)],
+            vec![
+                prelim(30, (5, 25), (7, 27), 2e-3),
+                prelim(61, (30, 99), (31, 100), 1e-11),
+            ],
+            vec![
+                prelim(55, (2, 81), (3, 82), 1e-9),
+                prelim(55, (1, 80), (3, 82), 1e-9),
+            ],
+            vec![prelim(20, (0, 10), (0, 10), 9.0)],
+        ];
+        for (oid, hsps) in subjects.iter().enumerate() {
+            let (mut full, mut compact) = lists_of(oid as u32, hsps);
+            super::super::hsp::reap_hsplist_by_evalue(&mut full, 5.0);
+            super::super::hsp::reap_hsplist_by_evalue(&mut compact, 5.0);
+            if full.hsps.is_empty() {
+                assert!(compact.hsps.is_empty());
+                continue;
+            }
+            full_hits.update(full);
+            compact_hits.update(compact);
+        }
+        full_hits.sort_by_evalue();
+        compact_hits.sort_by_evalue();
+        assert_eq!(full_hits.hsplist_count, 3);
+        X_SHADOW_LISTS.store(0, Ordering::Relaxed);
+        x_shadow_compare(0, Some(&full_hits), Some(compact_hits));
+        assert_eq!(X_SHADOW_LISTS.load(Ordering::Relaxed), 1);
+    }
+}

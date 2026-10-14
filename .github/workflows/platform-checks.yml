@@ -1,13 +1,14 @@
 name: Platform checks
 
-# LOSAT on Linux, Windows x64, macOS arm64 and macOS x64, with the performance switches on (the
-# default, LOSAT/src/utils/xswitch.rs) and off (LOSAT_X_DEFAULT=0, the reference paths):
+# LOSAT on Linux x64, Linux arm64, Windows x64, macOS arm64 and macOS x64, with the performance
+# switches on (the default, LOSAT/src/utils/xswitch.rs) and off (LOSAT_X_DEFAULT=0, the reference
+# paths):
 #  - outputs: release binary, 49 cases (all five programs) at 1 and 4 threads in both modes; the
 #    outputs of the two modes must be byte-identical and the exit codes 0 (LOSAT/tests/platform_checks.py);
-#  - compare: the hashes of the four platforms must equal each other (no expected hash is stored;
-#    the frozen hashes are checked on Linux by ci.yml);
-#  - tests: cargo test --all-features in both modes on the three non-Linux platforms (ci.yml runs
-#    both modes on Linux).
+#  - compare: the hashes of the five platforms must equal each other (no expected hash is stored;
+#    the frozen hashes are checked on Linux x64 by ci.yml);
+#  - tests: cargo test --all-features in both modes on the four platforms other than Linux x64
+#    (ci.yml runs both modes on Linux x64).
 # Pull requests always start it (so that `platform checks result` exists and can be required), but
 # its jobs run only when the engine, the Cargo files or this workflow's own files change (job
 # `changes`); the schedule and workflow_dispatch run them always.
@@ -81,6 +82,7 @@ jobs:
       matrix:
         include:
           - { runner: ubuntu-24.04, id: linux-x64, python: python3 }
+          - { runner: ubuntu-24.04-arm, id: linux-arm64, python: python3 }
           - { runner: windows-2025, id: windows-x64, python: python }
           - { runner: macos-15, id: macos-arm64, python: python3 }
           - { runner: macos-15-intel, id: macos-x64, python: python3 }
@@ -125,10 +127,11 @@ jobs:
         with:
           pattern: platform-checks-*
           path: tables
-      - name: Compare the tables of the four platforms
+      - name: Compare the tables of the five platforms
         run: |
           python3 LOSAT/tests/platform_checks.py compare \
             --table linux-x64=tables/platform-checks-linux-x64/rows.tsv \
+            --table linux-arm64=tables/platform-checks-linux-arm64/rows.tsv \
             --table windows-x64=tables/platform-checks-windows-x64/rows.tsv \
             --table macos-arm64=tables/platform-checks-macos-arm64/rows.tsv \
             --table macos-x64=tables/platform-checks-macos-x64/rows.tsv
@@ -140,9 +143,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [windows-2025, macos-15, macos-15-intel]
+        runner: [ubuntu-24.04-arm, windows-2025, macos-15, macos-15-intel]
         mode: [default, reference]
         include:
+          - { runner: ubuntu-24.04-arm, id: linux-arm64 }
           - { runner: windows-2025, id: windows-x64 }
           - { runner: macos-15, id: macos-arm64 }
           - { runner: macos-15-intel, id: macos-x64 }

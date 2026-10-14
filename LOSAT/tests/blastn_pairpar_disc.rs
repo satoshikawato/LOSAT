@@ -94,6 +94,60 @@ fn check_template(template: &[&str]) {
     assert_eq!(stderr.lines().count(), 1, "{template:?}: {stderr}");
 }
 
+/// The `chunks=` count of the stage's `LOSAT_TIMING` line (`[TIMING] x_pairpardisc_seed:
+/// chunks=N strips=M ...`) and the strip count `M` in `stderr`.
+fn stage_counts(stderr: &str) -> (u64, u64) {
+    let line = stderr
+        .lines()
+        .find(|line| line.starts_with("[TIMING] x_pairpardisc_seed: chunks="))
+        .unwrap_or_else(|| panic!("no x_pairpardisc_seed line:\n{stderr}"));
+    let field = |name: &str| -> u64 {
+        line.split_whitespace()
+            .find_map(|word| word.strip_prefix(name))
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(|| panic!("no {name} in: {line}"))
+    };
+    (field("chunks="), field("strips="))
+}
+
+// The switch-on runs of `check_template` compare bytes only, which a stage that silently
+// stopped running would pass too: with LOSAT_TIMING the stage prints how many chunks it took.
+#[test]
+fn the_stage_runs_when_the_switch_is_set() {
+    let task_args = ["-task", "dc-megablast"];
+    let (expected, _) = blastn(&task_args, 1, &[]);
+    assert!(!expected.is_empty());
+    let (report, stderr) = blastn(&task_args, 4, &[SWITCH, ("LOSAT_TIMING", "1")]);
+    assert!(report == expected, "the report differs with {SWITCH:?}");
+    let (chunks, strips) = stage_counts(&stderr);
+    assert!(chunks > 0, "the stage took no chunk:\n{stderr}");
+    assert!(strips >= chunks, "{stderr}");
+}
+
+// Strips that start at a subject offset that is not a multiple of 4 (the scan kernels read
+// packed bytes, four bases each). `plan_strips` (`x_pair_seed.rs`) cuts the grid of the scan
+// range into strips of `per = max(ceil(grid points / target strips), 512)` points, with
+// target strips = 64 * max(4, threads) (`seed_stage`) and step 1. The subject LC738868 has
+// 306008 bases, no ambiguity, and template length 18 (the default), so 305991 grid points;
+// at 5 threads the target is 320 strips and per = ceil(305991 / 320) = 957 = 4 * 239 + 1,
+// so the second strip starts at offset 957 (957 % 4 = 1), the third at 1914 (% 4 = 2), the
+// fourth at 2871 (% 4 = 3). (At 2 to 4 threads per = 1196, a multiple of 4.) The strip count
+// asserted below is ceil(305991 / 957) = 320 when the chunk is the whole subject.
+#[test]
+fn strips_that_start_off_a_multiple_of_four_give_the_same_report() {
+    let task_args = ["-task", "dc-megablast"];
+    let (expected, _) = blastn(&task_args, 1, &[]);
+    assert!(!expected.is_empty());
+    let (report, stderr) = blastn(&task_args, 5, &[SWITCH, ("LOSAT_TIMING", "1")]);
+    assert!(
+        report == expected,
+        "the report differs with {SWITCH:?} at 5 threads"
+    );
+    let (chunks, strips) = stage_counts(&stderr);
+    assert!(chunks > 0, "{stderr}");
+    assert_eq!(strips, 320 * chunks, "{stderr}");
+}
+
 // The default template of dc-megablast (word size 11, coding, length 18) and the other one-
 // template coding cases: each length picks its own scan kernel (11-of-18 and 11-of-21 coding
 // have their own, the rest the general one).

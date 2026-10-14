@@ -912,12 +912,17 @@ impl<T> Strips<T> {
             strips: self,
             done: false,
         };
-        let mut out = self
-            .spare
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .pop()
-            .unwrap_or_default();
+        // The spare buffers exist only while strips run ahead (`recycle` fills them then); the
+        // one-hit path (`ahead == 0`) takes no lock here.
+        let mut out = if self.ahead > 0 {
+            self.spare
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .pop()
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         produce(i, &mut out);
         *self.slots[i].lock().unwrap_or_else(|e| e.into_inner()) = Some(out);
         self.ready[i].store(true, Ordering::Release);
@@ -981,7 +986,7 @@ impl<T> Strips<T> {
             }
             assert!(
                 !self.failed.load(Ordering::Acquire),
-                "LOSAT_X_PAIRPAR: a strip scan failed"
+                "LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARDISC: a strip scan failed"
             );
             match self.claim() {
                 Some(j) => {

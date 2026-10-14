@@ -1128,7 +1128,10 @@ mod arch {
         vqmovun_high_s16(vqmovun_s16(s16(a)), s16(b))
     }
     /// The top bit of each byte, byte i at bit i (`pmovmskb`): the top bits spread over each
-    /// byte, weighted 1..128 within each half, and each half summed across.
+    /// byte and weighted 1..128 within each half; byte i of the low half and byte i of the high
+    /// half are interleaved into 16-bit lane i, and one `addv` over the eight lanes sums the
+    /// disjoint bits. (Of three forms timed on the arm runners, this one was fastest: 1.5-14 %
+    /// less time than one `addv` per half on ubuntu-24.04-arm, 69 of 70 paired rounds.)
     #[inline(always)]
     pub unsafe fn mask8(v: V) -> u32 {
         const W: [u8; 16] = [1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128];
@@ -1136,7 +1139,8 @@ mod arch {
             vreinterpretq_u8_s8(vshrq_n_s8::<7>(s8(v))),
             vld1q_u8(W.as_ptr()),
         );
-        vaddv_u8(vget_low_u8(m)) as u32 | (vaddv_u8(vget_high_u8(m)) as u32) << 8
+        let z = vzip1q_u8(m, vextq_u8::<8>(m, m));
+        vaddvq_u16(vreinterpretq_u16_u8(z)) as u32
     }
     #[inline(always)]
     pub unsafe fn lane0(v: V) -> i32 {

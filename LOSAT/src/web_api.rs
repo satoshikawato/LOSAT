@@ -506,6 +506,9 @@ fn parse_blastp_args(
     let mut args = blastp::BlastpArgs {
         query,
         subject: Some(subject),
+        // The frozen web ABI v1 (plan TD-1) searches subject records, not a database.
+        db: None,
+        dbsize: None,
         task: "blastp".to_string(),
         evalue: None,
         threshold: None,

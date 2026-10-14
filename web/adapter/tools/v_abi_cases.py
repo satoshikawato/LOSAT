@@ -187,6 +187,11 @@ def quick() -> list[dict]:
             "tblastn", "-query", f"docs/evidence/tlosan_stage_g/batch_boundary/{stem}.faa",
             "-subject", "docs/evidence/tlosan_stage_d/all_codes_20260925/fixtures/code1.fna"], REPO))
     searches = group(cases, frozen=False)
+    # BLASTP -dbsize (DB-3): an option of the search that LOSAT Web takes with subject records; the
+    # effective database length replaces the total length in the statistics.
+    first_blastp = next(search for search in searches if search["program"] == "blastp")
+    searches.append({**first_blastp, "argv": first_blastp["argv"] + ["-dbsize", "1000000"],
+                     "cases": [case + ".dbsize" for case in first_blastp["cases"]], "frozen": {}})
     # BLASTN dc-megablast and blastn-short (Session SD): their default fixtures, with the
     # NCBI-frozen hashes of outfmt 0 and 7.
     searches += [search for search in outfmt0_fixtures()

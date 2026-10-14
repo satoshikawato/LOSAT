@@ -244,9 +244,22 @@ pub(crate) struct QueryBatches {
     /// The input records and the searched queries of the batches that NCBI searches.
     pub(crate) input_done: usize,
     pub(crate) searched_done: usize,
+    /// Where each of those batches starts: (first input record, first searched query).
+    pub(crate) starts: Vec<(usize, usize)>,
     /// What stops the run at the batch after them: the messages that NCBI writes as it
     /// reads that batch, and its error.
     pub(crate) stop: Option<(Vec<u8>, anyhow::Error)>,
+}
+
+impl QueryBatches {
+    /// Where the batch of the searched query `query` starts: (first input record, first
+    /// searched query). Every batch in `starts` holds at least one searched query.
+    pub(crate) fn start_of(&self, query: usize) -> (usize, usize) {
+        let after = self
+            .starts
+            .partition_point(|&(_, searched)| searched <= query);
+        self.starts[after.saturating_sub(1)]
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_input.cpp:134-171
@@ -333,6 +346,7 @@ pub(crate) fn read_query_batches(
     batch_size: u32,
 ) -> QueryBatches {
     let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); searched.len()];
+    let mut starts = Vec::new();
     // Whether what ended the reading after the records (`reading`) has come.
     let mut reading_ended = false;
     let mut input_start = 0;
@@ -397,16 +411,19 @@ pub(crate) fn read_query_batches(
                 warnings,
                 input_done: input_start,
                 searched_done: start,
+                starts,
                 stop: Some((batch_warnings, error)),
             };
         }
         warnings[start].extend_from_slice(&batch_warnings);
+        starts.push((input_start, start));
         input_start = input_end;
     }
     QueryBatches {
         warnings,
         input_done: input_start,
         searched_done: searched.len(),
+        starts,
         stop: None,
     }
 }
@@ -417,6 +434,27 @@ mod tests {
         get_query_batch_size, ncbi_string_to_int, next_query_batch_end, query_batches,
         BatchSizeMixer,
     };
+
+    // blast_input.cpp:134-171: a batch takes records until their letters reach the batch
+    // size; each searched query belongs to the batch that read it.
+    #[test]
+    fn every_searched_query_knows_where_its_batch_starts() {
+        use crate::algorithm::blastn::blast_engine::QueryReading;
+        use crate::blastinput::fasta_reader::FastaRecord;
+        use crate::blastinput::seq_range::QueryInput;
+        let records: Vec<FastaRecord> = [4usize, 7, 3, 12, 1]
+            .iter()
+            .enumerate()
+            .map(|(i, &len)| FastaRecord::new(format!("q{i}"), b"", &vec![b'A'; len]))
+            .collect();
+        let input = QueryInput::whole(&records);
+        let batches =
+            super::read_query_batches(&records, &records, &input, QueryReading::Records, 10);
+        assert!(batches.stop.is_none());
+        assert_eq!(batches.starts, vec![(0, 0), (2, 2), (4, 4)]);
+        let starts: Vec<(usize, usize)> = (0..5).map(|q| batches.start_of(q)).collect();
+        assert_eq!(starts, vec![(0, 0), (0, 0), (2, 2), (2, 2), (4, 4)]);
+    }
 
     #[test]
     fn the_query_that_reaches_the_batch_size_stays_in_the_batch() {

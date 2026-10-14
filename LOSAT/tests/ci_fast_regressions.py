@@ -14,7 +14,9 @@ lowercase masking) and for TBLASTX those of tblastx_regression_fixtures.py (quer
 batches, warnings, hit lists, ambiguity, empty inputs, failed writes); for each
 selected program the FASTA-input fixtures of fasta_input_fixtures.py (`check --rows
 <program>`: stdout, stderr, exit code and combined stream against the frozen NCBI
-hashes, and LOSAT's explicit rejections where it rejects an input or option).
+hashes, and LOSAT's explicit rejections where it rejects an input or option); for BLASTP
+the `-db` fixtures of db_search_fixtures.py (stdout, stderr and exit status against the
+frozen NCBI `blastp -db -num_threads 1` bytes, at 1 and 4 threads).
 
 Programs are selected from the changed paths (--changed-from): a program's own
 directory selects it and every program that imports it; any other engine or
@@ -213,6 +215,15 @@ def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
         log.write_text(result.stdout + result.stderr)
         if result.returncode != 0:
             failures.append(f"outfmt 0 fixtures differ at {threads} thread(s): see {log.name}")
+    if "blastp" in programs:
+        for threads in (1, 4):
+            log = out / f"db-search-fixtures-n{threads}.tsv"
+            result = subprocess.run([sys.executable, str(TESTS / "db_search_fixtures.py"), "check", "--losat", str(losat),
+                                     "--threads", str(threads), "--out", str(log)], capture_output=True, text=True)
+            if result.returncode != 0:
+                failures += [f"BLASTP -db fixture at {threads} thread(s) {line}" for line in result.stdout.splitlines()
+                             if "\t" in line and line.split("\t")[1] not in ("same", "rejection")][:20]
+                failures.append(f"BLASTP -db fixtures differ at {threads} thread(s): see {log.name}")
     for program, name in REGRESSION_FIXTURES.items():
         if program not in programs:
             continue

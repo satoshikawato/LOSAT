@@ -1,0 +1,20 @@
+id	variable	value	blastp.ini	.ncbirc	registry	status	note
+n01_nothing	NCBI_CONFIG__BLAST__BLASTDB	<unset>	<unset>	<unset>	<none>	2	\e
+n02_ncbirc	NCBI_CONFIG__BLAST__BLASTDB	<unset>	<unset>	[BLAST]\nBLASTDB = {R}/reg\n	{R}/reg	2	\e
+n03_ini	NCBI_CONFIG__BLAST__BLASTDB	<unset>	[BLAST]\nBLASTDB = {R}/b1\n	<unset>	{R}/b1	2	\e
+n04_ini_before_ncbirc	NCBI_CONFIG__BLAST__BLASTDB	<unset>	[BLAST]\nBLASTDB = {R}/b1\n	[BLAST]\nBLASTDB = {R}/reg\n	{R}/b1	2	\e
+n05_env_before_files	NCBI_CONFIG__BLAST__BLASTDB	{R}/b2	[BLAST]\nBLASTDB = {R}/b1\n	[BLAST]\nBLASTDB = {R}/reg\n	{R}/b2	2	\e
+n06_env_only	NCBI_CONFIG__BLAST__BLASTDB	{R}/b2	<unset>	<unset>	{R}/b2	2	\e
+n07_env_empty	NCBI_CONFIG__BLAST__BLASTDB	\e	<unset>	[BLAST]\nBLASTDB = {R}/reg\n	\e	2	\e
+n08_env_empty_alone	NCBI_CONFIG__BLAST__BLASTDB	\e	<unset>	<unset>	\e	2	\e
+n09_ncbirc_empty_value	NCBI_CONFIG__BLAST__BLASTDB	<unset>	<unset>	[BLAST]\nBLASTDB =\n	\e	2	\e
+n10_ini_empty_then_ncbirc	NCBI_CONFIG__BLAST__BLASTDB	<unset>	[BLAST]\nBLASTDB =\n	[BLAST]\nBLASTDB = {R}/reg\n	\e	2	\e
+n11_quoted	NCBI_CONFIG__BLAST__BLASTDB	<unset>	<unset>	[BLAST]\nBLASTDB = "{R}/reg"\n	{R}/reg	2	\e
+n12_lower_case_names	NCBI_CONFIG__BLAST__BLASTDB	<unset>	<unset>	[blast]\nblastdb = {R}/reg\n	{R}/reg	2	\e
+n13_last_entry_of_a_file	NCBI_CONFIG__BLAST__BLASTDB	<unset>	<unset>	[BLAST]\nBLASTDB = {R}/b1\nBLASTDB = {R}/reg\n	{R}/reg	2	\e
+n14_list_value	NCBI_CONFIG__BLAST__BLASTDB	<unset>	<unset>	[BLAST]\nBLASTDB = {R}/reg:{R}/b2\n	{R}/reg:{R}/b2	2	\e
+n15_spaces_around	NCBI_CONFIG__BLAST__BLASTDB	<unset>	<unset>	[BLAST]\n  BLASTDB   =    {R}/reg   \n	{R}/reg	2	\e
+n16_quoted_empty	NCBI_CONFIG__BLAST__BLASTDB	<unset>	<unset>	[BLAST]\nBLASTDB = ""\n	\e	2	\e
+n17_env_lower_case	NCBI_CONFIG__blast__blastdb	{R}/b2	<unset>	<unset>	<none>	2	\e
+n18_dont_use_ncbirc	NCBI_CONFIG__BLAST__BLASTDB	<unset>	[NCBI]\nDONT_USE_NCBIRC = 1\n	[BLAST]\nBLASTDB = {R}/reg\n	<none>	2	\e
+n19_other_section_last	NCBI_CONFIG__BLAST__BLASTDB	<unset>	<unset>	[BLAST]\nBLASTDB = {R}/reg\n[NCBI]\nDATA = /nowhere\n	{R}/reg	2	\e

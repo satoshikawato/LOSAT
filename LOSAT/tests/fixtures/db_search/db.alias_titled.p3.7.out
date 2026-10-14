@@ -1,0 +1,28 @@
+# BLASTP 2.17.0+
+# Query: p01 first protein [Test organism]
+# Database: tests/seqdb/db/alias_titled
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+p01	p01	100.000	61	0	0	1	61	1	61	8.84e-45	127
+p01	p01	100.000	61	0	0	1	61	1	61	8.84e-45	127
+p01	p06	33.333	12	8	0	24	35	48	59	2.1	14.6
+p01	p06	71.429	7	2	0	27	33	44	50	8.2	13.1
+p01	p06	33.333	12	8	0	24	35	48	59	2.1	14.6
+p01	p06	71.429	7	2	0	27	33	44	50	8.2	13.1
+# BLASTP 2.17.0+
+# Query: p03 every letter of NCBIstdaa but the gap
+# Database: tests/seqdb/db/alias_titled
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 4 hits found
+p03	p03	100.000	33	0	0	1	33	1	33	2.77e-22	68.6
+p03	p03	100.000	33	0	0	1	33	1	33	2.77e-22	68.6
+p03	p05	33.333	12	8	0	22	33	66	77	1.2	14.2
+p03	p05	33.333	12	8	0	22	33	66	77	1.2	14.2
+# BLASTP 2.17.0+
+# Query: p08 selenocysteine pyrrolysine
+# Database: tests/seqdb/db/alias_titled
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+p08	p08	100.000	46	0	0	1	46	1	46	3.20e-33	97.1
+p08	p08	100.000	46	0	0	1	46	1	46	3.20e-33	97.1
+# BLAST processed 3 queries

@@ -1,0 +1,19 @@
+id	blastdb	registry	name	ncbi	title	sequences	volumes	error	status	note
+r01_relative_dir	tests/seqdb/db	<none>	prot_v4	ok	LOSAT seqdb fixture, protein, version 4	10	tests/seqdb/db/prot_v4	\e	0	\e
+r02_relative_dir_alias	tests/seqdb/db	<none>	alias_nested	ok	protein in volumes; LOSAT seqdb fixture, protein, version 4; LOSAT seqdb fixture, protein, version 4	30	tests/seqdb/db/prot_mv.pal | tests/seqdb/db/prot_old | tests/seqdb/db/prot_v4	\e	0	\e
+r03_relative_dir_not_found	tests/seqdb/db	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{P}:tests/seqdb/db:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e
+r04_relative_dir_missing_volume	tests/seqdb/db	<none>	alias_missing	error	\e	\e	\e	Could not find volume or alias file (no_such_volume) referenced in alias file (tests/seqdb/db/alias_missing).	2	\e
+r05_dot_slash_dir	./tests/seqdb/db/	<none>	prot_v4	ok	LOSAT seqdb fixture, protein, version 4	10	tests/seqdb/db/prot_v4	\e	0	\e
+r06_dot_slash_dir_not_found	./tests/seqdb/db/	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{P}:tests/seqdb/db:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e
+r07_dotdot_inside	tests/seqdb/../seqdb/db	<none>	sub/ord-extra	ok	next three proteins	3	tests/seqdb/db/sub/ord-extra	\e	0	\e
+r08_dotdot_inside_not_found	tests/seqdb/../seqdb/db	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{P}:tests/seqdb/db:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e
+r09_relative_registry	<unset>	tests/seqdb/db/sub	ord-extra	ok	next three proteins	3	tests/seqdb/db/sub/ord-extra	\e	0	\e
+r10_relative_name_from_cwd	<unset>	<none>	tests/seqdb/db/alias_order	ok	next three proteins; first four proteins	7	{P}/tests/seqdb/db/ord.pdb | {P}/tests/seqdb/db/sub/ord-extra	\e	0	\e
+r11_dot	.	<none>	tests/seqdb/db/prot_v4	ok	LOSAT seqdb fixture, protein, version 4	10	{P}/tests/seqdb/db/prot_v4	\e	0	\e
+r12_dotdot_leading	../LOSAT/tests/seqdb/db	<none>	prot_old	ok	LOSAT seqdb fixture, protein, version 4	10	../LOSAT/tests/seqdb/db/prot_old	\e	0	\e
+r13_dotdot_leading_not_found	../LOSAT/tests/seqdb/db	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{P}:../LOSAT/tests/seqdb/db:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e
+r14_relative_mixed_versions	tests/seqdb/db	<none>	alias_mixed	error	\e	\e	\e	DB list contains both Version 4 and Version 5 dbs	2	\e
+r15_relative_loop	tests/seqdb/db	<none>	alias_loop_a	error	\e	\e	\e	Illegal configuration: DB alias files are mutually recursive.	2	\e
+r16_relative_empty_dblist	tests/seqdb/db	<none>	alias_empty	error	\e	\e	\e	No database names were found in alias file [tests/seqdb/db/alias_empty].	2	\e
+r17_relative_list	tests/seqdb:tests/seqdb/db	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{P}:tests/seqdb:tests/seqdb/db:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e
+r18_relative_version_5	tests/seqdb/db	<none>	prot_v5	ok	prot.faa	10	tests/seqdb/db/prot_v5	\e	0	\e

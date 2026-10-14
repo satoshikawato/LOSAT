@@ -1,0 +1,192 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: stored O against the query's X
+           4 sequences; 508 total letters
+
+
+
+Query= q_o twelve O and a Q tract
+
+Length=166
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_x the same with X                                                   307     2e-113
+s_plain without                                                       268     8e-98 
+s_o the same with O                                                   266     6e-97 
+
+
+>s_x the same with X
+Length=166
+
+ Score = 307 bits (787),  Expect = 2e-113, Method: Compositional matrix adjust.
+ Identities = 154/166 (93%), Positives = 154/166 (93%), Gaps = 0/166 (0%)
+
+Query  1    MVLSPODKTNVKAAWGKOGAHAGEYGAEAOERMFLSFPTTKOYFPHFDLSHGSOQVKGHG  60
+            MVLSP DKTNVKAAWGK GAHAGEYGAEA ERMFLSFPTTK YFPHFDLSHGS QVKGHG
+Sbjct  1    MVLSPXDKTNVKAAWGKXGAHAGEYGAEAXERMFLSFPTTKXYFPHFDLSHGSXQVKGHG  60
+
+Query  61   KKVADOLTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDOPNALSALSDLHOHKLRVDP  120
+            KKVAD LTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDD PNALSALSDLH HKLRVDP
+Sbjct  61   KKVADXLTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDXPNALSALSDLHXHKLRVDP  120
+
+Query  121  VNFKOLSHCLLVTLAAOLPAEFTPAVHAOLDKFLASVSTVOTSKYR  166
+            VNFK LSHCLLVTLAA LPAEFTPAVHA LDKFLASVSTV TSKYR
+Sbjct  121  VNFKXLSHCLLVTLAAXLPAEFTPAVHAXLDKFLASVSTVXTSKYR  166
+
+
+>s_plain without
+Length=166
+
+ Score = 268 bits (685),  Expect = 8e-98, Method: Compositional matrix adjust.
+ Identities = 154/166 (93%), Positives = 154/166 (93%), Gaps = 0/166 (0%)
+
+Query  1    MVLSPODKTNVKAAWGKOGAHAGEYGAEAOERMFLSFPTTKOYFPHFDLSHGSOQVKGHG  60
+            MVLSP DKTNVKAAWGK GAHAGEYGAEA ERMFLSFPTTK YFPHFDLSHGS QVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADOLTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDOPNALSALSDLHOHKLRVDP  120
+            KKVAD LTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDD PNALSALSDLH HKLRVDP
+Sbjct  61   KKVADALTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDMPNALSALSDLHAHKLRVDP  120
+
+Query  121  VNFKOLSHCLLVTLAAOLPAEFTPAVHAOLDKFLASVSTVOTSKYR  166
+            VNFK LSHCLLVTLAA LPAEFTPAVHA LDKFLASVSTV TSKYR
+Sbjct  121  VNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR  166
+
+
+>s_o the same with O
+Length=166
+
+ Score = 266 bits (679),  Expect = 6e-97, Method: Compositional matrix adjust.
+ Identities = 166/166 (100%), Positives = 166/166 (100%), Gaps = 0/166 (0%)
+
+Query  1    MVLSPODKTNVKAAWGKOGAHAGEYGAEAOERMFLSFPTTKOYFPHFDLSHGSOQVKGHG  60
+            MVLSPODKTNVKAAWGKOGAHAGEYGAEAOERMFLSFPTTKOYFPHFDLSHGSOQVKGHG
+Sbjct  1    MVLSPODKTNVKAAWGKOGAHAGEYGAEAOERMFLSFPTTKOYFPHFDLSHGSOQVKGHG  60
+
+Query  61   KKVADOLTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDOPNALSALSDLHOHKLRVDP  120
+            KKVADOLTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDOPNALSALSDLHOHKLRVDP
+Sbjct  61   KKVADOLTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDOPNALSALSDLHOHKLRVDP  120
+
+Query  121  VNFKOLSHCLLVTLAAOLPAEFTPAVHAOLDKFLASVSTVOTSKYR  166
+            VNFKOLSHCLLVTLAAOLPAEFTPAVHAOLDKFLASVSTVOTSKYR
+Sbjct  121  VNFKOLSHCLLVTLAAOLPAEFTPAVHAOLDKFLASVSTVOTSKYR  166
+
+
+
+Lambda      K        H        a         alpha
+   0.315    0.126    0.362    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 57528
+
+
+Query= q_plain no O
+
+Length=166
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+s_plain without                                                       335     2e-124
+s_x the same with X                                                   266     5e-97 
+s_o the same with O                                                   266     5e-97 
+
+
+>s_plain without
+Length=166
+
+ Score = 335 bits (859),  Expect = 2e-124, Method: Compositional matrix adjust.
+ Identities = 166/166 (100%), Positives = 166/166 (100%), Gaps = 0/166 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG
+Sbjct  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+
+Query  61   KKVADALTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDMPNALSALSDLHAHKLRVDP  120
+            KKVADALTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDMPNALSALSDLHAHKLRVDP
+Sbjct  61   KKVADALTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDMPNALSALSDLHAHKLRVDP  120
+
+Query  121  VNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR  166
+            VNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR
+Sbjct  121  VNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR  166
+
+
+>s_x the same with X
+Length=166
+
+ Score = 266 bits (679),  Expect = 5e-97, Method: Compositional matrix adjust.
+ Identities = 154/166 (93%), Positives = 154/166 (93%), Gaps = 0/166 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSP DKTNVKAAWGK GAHAGEYGAEA ERMFLSFPTTK YFPHFDLSHGS QVKGHG
+Sbjct  1    MVLSPXDKTNVKAAWGKXGAHAGEYGAEAXERMFLSFPTTKXYFPHFDLSHGSXQVKGHG  60
+
+Query  61   KKVADALTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDMPNALSALSDLHAHKLRVDP  120
+            KKVAD LTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDD PNALSALSDLH HKLRVDP
+Sbjct  61   KKVADXLTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDXPNALSALSDLHXHKLRVDP  120
+
+Query  121  VNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR  166
+            VNFK LSHCLLVTLAA LPAEFTPAVHA LDKFLASVSTV TSKYR
+Sbjct  121  VNFKXLSHCLLVTLAAXLPAEFTPAVHAXLDKFLASVSTVXTSKYR  166
+
+
+>s_o the same with O
+Length=166
+
+ Score = 266 bits (679),  Expect = 5e-97, Method: Compositional matrix adjust.
+ Identities = 154/166 (93%), Positives = 154/166 (93%), Gaps = 0/166 (0%)
+
+Query  1    MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSHGSAQVKGHG  60
+            MVLSP DKTNVKAAWGK GAHAGEYGAEA ERMFLSFPTTK YFPHFDLSHGS QVKGHG
+Sbjct  1    MVLSPODKTNVKAAWGKOGAHAGEYGAEAOERMFLSFPTTKOYFPHFDLSHGSOQVKGHG  60
+
+Query  61   KKVADALTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDMPNALSALSDLHAHKLRVDP  120
+            KKVAD LTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDD PNALSALSDLH HKLRVDP
+Sbjct  61   KKVADOLTNAQQQQQQQQQQQQQQQQQQQQQQQQVAHVDDOPNALSALSDLHOHKLRVDP  120
+
+Query  121  VNFKLLSHCLLVTLAAHLPAEFTPAVHASLDKFLASVSTVLTSKYR  166
+            VNFK LSHCLLVTLAA LPAEFTPAVHA LDKFLASVSTV TSKYR
+Sbjct  121  VNFKOLSHCLLVTLAAOLPAEFTPAVHAOLDKFLASVSTVOTSKYR  166
+
+
+
+Lambda      K        H        a         alpha
+   0.316    0.125    0.358    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 57528
+
+
+  Database: stored O against the query's X
+    Posted date:  Oct 13, 2026  2:13 PM
+  Number of letters in database: 508
+  Number of sequences in database:  4
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

@@ -487,6 +487,8 @@ fn print_blastp_timing(timing: &BlastpTiming, total_start: Option<Instant>) {
             total_start.elapsed().as_secs_f64()
         );
     }
+    // EXPERIMENT (LOSAT_X_BPREDOFIT): the redone lists kept with fitted room (`x_redo_fit.rs`).
+    super::x_redo_fit::x_bp_redo_fit_print_timing();
 }
 
 impl BlastpSubjectScratch {

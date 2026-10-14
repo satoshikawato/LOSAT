@@ -60,6 +60,9 @@
 //! (query longer than 8000), `window_size == 0` (one hit), `scan_range == 0`, a contiguous
 //! megablast table, an unmasked subject, no small-query word extension, no debug, trace or
 //! window diagnostics, one subject searched by the owner of a pool of two threads or more.
+//! A chunk with a discontiguous megablast table goes to the child module `disc`
+//! (`x_pair_seed_disc.rs`, LOSAT_X_PAIRPARDISC: the two-hit stage of dc-megablast on the same
+//! strips, with its own switches).
 
 use super::{
     determine_scanning_offsets, extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi,
@@ -76,6 +79,9 @@ use crate::algorithm::blastn::lookup::TwoStageLookup;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+#[path = "x_pair_seed_disc.rs"]
+mod disc;
 
 /// No NCBI counterpart: reads the switches once (LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARSHADOW); they
 /// do not change any value NCBI computes.
@@ -833,9 +839,15 @@ fn fold(
 
 /// No NCBI counterpart: the strips of one scan and their results (scheduling only). Strip
 /// `i` is scanned once, by whichever thread claims it; the owner takes the results in
-/// strip order.
+/// strip order. `taken` counts the strips the owner has taken; with `ahead > 0` a helper
+/// claims a strip only while fewer than `ahead` strips past `taken` are claimed (a bound on
+/// the results waiting for the owner, up to one strip per helper over it), and the buffers
+/// the owner has consumed go back to `spare` for the next strips.
 struct Strips<T> {
     cursor: AtomicUsize,
+    taken: AtomicUsize,
+    ahead: usize,
+    spare: Mutex<Vec<Vec<T>>>,
     slots: Vec<Mutex<Option<Vec<T>>>>,
     ready: Vec<AtomicBool>,
     failed: AtomicBool,
@@ -856,13 +868,37 @@ impl<T> Drop for Producing<'_, T> {
     }
 }
 
+// No NCBI counterpart: when the owner leaves its loop (at the end, or unwinding), the helpers
+// that wait for it to take a strip (`ahead > 0`) stop waiting.
+struct Closing<'a, T>(&'a Strips<T>);
+
+impl<T> Drop for Closing<'_, T> {
+    fn drop(&mut self) {
+        self.0.failed.store(true, Ordering::Release);
+    }
+}
+
 impl<T> Strips<T> {
-    fn new(n: usize) -> Self {
+    fn new(n: usize, ahead: usize) -> Self {
         Self {
             cursor: AtomicUsize::new(0),
+            taken: AtomicUsize::new(0),
+            ahead,
+            spare: Mutex::new(Vec::new()),
             slots: (0..n).map(|_| Mutex::new(None)).collect(),
             ready: (0..n).map(|_| AtomicBool::new(false)).collect(),
             failed: AtomicBool::new(false),
+        }
+    }
+
+    /// A consumed buffer, kept for a later strip when the look-ahead is bounded.
+    fn recycle(&self, mut out: Vec<T>) {
+        if self.ahead > 0 {
+            out.clear();
+            self.spare
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(out);
         }
     }
 
@@ -876,7 +912,12 @@ impl<T> Strips<T> {
             strips: self,
             done: false,
         };
-        let mut out = Vec::new();
+        let mut out = self
+            .spare
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pop()
+            .unwrap_or_default();
         produce(i, &mut out);
         *self.slots[i].lock().unwrap_or_else(|e| e.into_inner()) = Some(out);
         self.ready[i].store(true, Ordering::Release);
@@ -884,7 +925,32 @@ impl<T> Strips<T> {
     }
 
     fn helper(&self, produce: &impl Fn(usize, &mut Vec<T>)) {
-        while let Some(i) = self.claim() {
+        loop {
+            if self.ahead > 0 {
+                // spin a little, then sleep 20 us, doubling up to 1 ms (a helper that the
+                // owner does not need costs a few wake-ups per millisecond)
+                let mut idle = 0u32;
+                let mut nap = 20u64;
+                loop {
+                    let cursor = self.cursor.load(Ordering::Relaxed);
+                    if cursor >= self.slots.len() || self.failed.load(Ordering::Acquire) {
+                        return;
+                    }
+                    if cursor < self.taken.load(Ordering::Acquire) + self.ahead {
+                        break;
+                    }
+                    idle = idle.saturating_add(1);
+                    if idle < 128 {
+                        std::hint::spin_loop();
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_micros(nap));
+                        nap = (nap * 2).min(1000);
+                    }
+                }
+            }
+            let Some(i) = self.claim() else {
+                return;
+            };
             self.produce(i, produce);
         }
     }
@@ -905,11 +971,13 @@ impl<T> Strips<T> {
                 if let Some(t0) = wait_start {
                     *wait_ns += t0.elapsed().as_nanos() as u64;
                 }
-                return self.slots[i]
+                let out = self.slots[i]
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .take()
                     .unwrap_or_default();
+                self.taken.store(i + 1, Ordering::Release);
+                return out;
             }
             assert!(
                 !self.failed.load(Ordering::Acquire),
@@ -945,17 +1013,20 @@ impl<T> Strips<T> {
 
 /// No NCBI counterpart (scheduling only): runs `produce` for strips `0..n` on this thread
 /// and `helpers` other threads of its pool, and `consume` on this thread for strips
-/// `0, 1, ..., n - 1` in that order, each as soon as its result is there.
+/// `0, 1, ..., n - 1` in that order, each as soon as its result is there. `ahead` (0: no
+/// bound) bounds how far the helpers scan past the strip being consumed.
+#[allow(clippy::too_many_arguments)]
 fn run_strips<T: Send>(
     n: usize,
     helpers: usize,
+    ahead: usize,
     produce: &(impl Fn(usize, &mut Vec<T>) + Sync),
-    mut consume: impl FnMut(usize, Vec<T>),
+    mut consume: impl FnMut(usize, &[T]),
     scan_ns: &mut u64,
     wait_ns: &mut u64,
     timed: bool,
 ) {
-    let strips = Strips::new(n);
+    let strips = Strips::new(n, ahead);
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -966,9 +1037,11 @@ fn run_strips<T: Send>(
             for _ in 0..helpers.min(n) {
                 scope.spawn(move |_| strips.helper(produce));
             }
+            let _closing = Closing(strips);
             for i in 0..n {
                 let out = strips.take(i, produce, scan_ns, wait_ns, timed);
-                consume(i, out);
+                consume(i, &out);
+                strips.recycle(out);
             }
         });
         return;
@@ -976,7 +1049,8 @@ fn run_strips<T: Send>(
     let _ = helpers;
     for i in 0..n {
         let out = strips.take(i, produce, scan_ns, wait_ns, timed);
-        consume(i, out);
+        consume(i, &out);
+        strips.recycle(out);
     }
 }
 
@@ -1034,10 +1108,11 @@ fn seed_stage(
     run_strips(
         jobs.len(),
         threads.saturating_sub(1),
+        0,
         &produce,
         |_, seeds| {
             let t0 = timed.then(std::time::Instant::now);
-            fold(x, &seeds, hash, hits, timing, scan_pause_ns, counts);
+            fold(x, seeds, hash, hits, timing, scan_pause_ns, counts);
             if let Some(t0) = t0 {
                 *fold_ns += t0.elapsed().as_nanos() as u64;
             }
@@ -1049,10 +1124,12 @@ fn seed_stage(
     stats
 }
 
-/// The result of the shadow computation of one chunk, compared after the reference ran.
+/// The result of the shadow computation of one chunk, compared after the reference ran
+/// (`disc`: made by the child module `disc`, LOSAT_X_PAIRPARDISCSHADOW).
 struct Stash {
     hits: Vec<UngappedHit>,
     hash: DiagHashTable,
+    disc: bool,
 }
 
 thread_local! {
@@ -1093,6 +1170,10 @@ pub(super) fn run(
     diag_hash: &mut DiagHashTable,
     ungapped_hits: &mut Vec<UngappedHit>,
 ) -> bool {
+    // A discontiguous megablast table: LOSAT_X_PAIRPARDISC and its shadow decide.
+    if x.two_stage.disc().is_some() {
+        return disc::run(x, diag_hash, ungapped_hits);
+    }
     let (on, shadow) = switches();
     if !on && !shadow {
         return false;
@@ -1103,7 +1184,6 @@ pub(super) fn run(
     if x.use_array_indexing
         || x.window_size != 0
         || x.scan_range != 0
-        || x.two_stage.disc().is_some()
         || x.subject_masked
         || x.small_na_word
         || x.diagnostics
@@ -1149,6 +1229,7 @@ pub(super) fn run(
             *s.borrow_mut() = Some(Stash {
                 hits: shadow_hits,
                 hash,
+                disc: false,
             })
         });
         return false;
@@ -1161,12 +1242,17 @@ pub(super) fn run(
 ///     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
 ///           sizeof(BlastInitHSP), score_compare_match);
 /// ```
-/// LOSAT_X_PAIRPARSHADOW, before the sort above: the hit list and the diagonal hash the
-/// reference built for this chunk against the ones of `run`, element by element; panics on
-/// the first difference.
+/// LOSAT_X_PAIRPARSHADOW (and LOSAT_X_PAIRPARDISCSHADOW), before the sort above: the hit
+/// list and the diagonal hash the reference built for this chunk against the ones of `run`,
+/// element by element; panics on the first difference.
 pub(super) fn shadow_check(ungapped_hits: &[UngappedHit], diag_hash: &DiagHashTable) {
     let Some(stash) = STASH.with(|s| s.borrow_mut().take()) else {
         return;
+    };
+    let name = if stash.disc {
+        "LOSAT_X_PAIRPARDISCSHADOW"
+    } else {
+        "LOSAT_X_PAIRPARSHADOW"
     };
     let key = |h: &UngappedHit| {
         (
@@ -1186,7 +1272,7 @@ pub(super) fn shadow_check(ungapped_hits: &[UngappedHit], diag_hash: &DiagHashTa
     for (i, (r, p)) in ungapped_hits.iter().zip(&stash.hits).enumerate() {
         assert!(
             key(r) == key(p),
-            "LOSAT_X_PAIRPARSHADOW: ungapped hit {i} differs: reference {:?} strips {:?}",
+            "{name}: ungapped hit {i} differs: reference {:?} strips {:?}",
             key(r),
             key(p)
         );
@@ -1194,7 +1280,7 @@ pub(super) fn shadow_check(ungapped_hits: &[UngappedHit], diag_hash: &DiagHashTa
     assert_eq!(
         ungapped_hits.len(),
         stash.hits.len(),
-        "LOSAT_X_PAIRPARSHADOW: number of ungapped hits differs"
+        "{name}: number of ungapped hits differs"
     );
     let h = &stash.hash;
     assert!(
@@ -1206,7 +1292,7 @@ pub(super) fn shadow_check(ungapped_hits: &[UngappedHit], diag_hash: &DiagHashTa
                 diag_hash.offset,
                 diag_hash.window
             ),
-        "LOSAT_X_PAIRPARSHADOW: diagonal hash header differs: reference occupancy {} capacity {} strips occupancy {} capacity {}",
+        "{name}: diagonal hash header differs: reference occupancy {} capacity {} strips occupancy {} capacity {}",
         diag_hash.occupancy,
         diag_hash.capacity,
         h.occupancy,
@@ -1215,7 +1301,7 @@ pub(super) fn shadow_check(ungapped_hits: &[UngappedHit], diag_hash: &DiagHashTa
     if let Some(b) = (0..diag_hash.backbone.len()).find(|&b| diag_hash.backbone[b] != h.backbone[b])
     {
         panic!(
-            "LOSAT_X_PAIRPARSHADOW: diagonal hash bucket {b} differs: reference head {} strips head {}",
+            "{name}: diagonal hash bucket {b} differs: reference head {} strips head {}",
             diag_hash.backbone[b], h.backbone[b]
         );
     }
@@ -1229,8 +1315,12 @@ pub(super) fn shadow_check(ungapped_hits: &[UngappedHit], diag_hash: &DiagHashTa
         let (r, p) = (cell(r), cell(p));
         assert!(
             r == p,
-            "LOSAT_X_PAIRPARSHADOW: diagonal hash cell {i} differs: reference {r:?} strips {p:?}"
+            "{name}: diagonal hash cell {i} differs: reference {r:?} strips {p:?}"
         );
+    }
+    if stash.disc {
+        disc::count_shadow(ungapped_hits.len(), diag_hash.occupancy);
+        return;
     }
     SHADOW_CHUNKS.fetch_add(1, Ordering::Relaxed);
     SHADOW_HITS.fetch_add(ungapped_hits.len() as u64, Ordering::Relaxed);
@@ -1238,7 +1328,8 @@ pub(super) fn shadow_check(ungapped_hits: &[UngappedHit], diag_hash: &DiagHashTa
 }
 
 /// No NCBI counterpart: the one summary line of LOSAT_X_PAIRPARSHADOW, and with LOSAT_TIMING
-/// the counters of LOSAT_X_PAIRPAR, on stderr at the end of the search.
+/// the counters of LOSAT_X_PAIRPAR, on stderr at the end of the search; then those of
+/// LOSAT_X_PAIRPARDISC (child module `disc`).
 pub(super) fn summary() {
     let (on, shadow) = switches();
     if shadow {
@@ -1268,6 +1359,7 @@ pub(super) fn summary() {
             s(&X_WAIT_NS)
         );
     }
+    disc::summary();
 }
 
 #[cfg(test)]
@@ -1423,9 +1515,10 @@ mod tests {
                     run_strips(
                         cuts.len() - 1,
                         threads - 1,
+                        (case % 3) * threads,
                         &produce,
                         |_, strip| {
-                            for op in &strip {
+                            for op in strip {
                                 apply(&mut hash, op, window, &mut decisions);
                             }
                         },

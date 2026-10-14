@@ -630,6 +630,23 @@ Scheduling (each value computed by one thread with the original function; order 
   `[X_SHADOW] TBNXLATE` line on stderr at the end gives the plans and residues compared, or says
   that nothing was compared. With `LOSAT_X_STATS=1` a `[X_STATS] TBNXLATE table_plans=` line
   counts the plans made from the tables; `LOSAT/tests/tblastn_subject_translate.rs` reads both.
+- `LOSAT_X_TBNSTORE=1` tblastn `-subject` without `-subject_loc`: each subject record's letters are
+  packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
+  database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of
+  letters other than `ACGT` as ncbi4na codes, the lower-case intervals), so the letters of the
+  whole set are never held; the records keep their deflines. A subject's letters are made again
+  into a buffer when it is searched (the preliminary stage), redone (composition mode 2),
+  traced back (mode 0) or reported (outfmt 0), exactly as the reader gave them (the comparison
+  tests in `packed_subject.rs`). The packed bases are those NCBI's subject set-up makes
+  (`encode_subject_ncbi2na_packed`, `s_Ncbi4naToNcbi2na` in `blast_objmgr_tools.cpp:427-475`), the
+  form a later step can scan without the letters. Memory: about a quarter of a byte per base held
+  instead of one, plus per thread the letters of the subject in hand (a thread keeps a buffer of
+  at most 8 MiB between subjects). A subject range keeps the letters (the records are cut before
+  the search), and so does a set with a byte that has no ncbi4na code (only an API caller can
+  make one); the library entry `run_local` reads the caller's records. Not in the set (off unless
+  set to any value). With `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE subjects= stored_bytes=
+  letters_made=` line gives the subjects held packed, the bytes of their stores and the times
+  their letters were made; `LOSAT/tests/tblastn_subject_store.rs` reads it.
 - `LOSAT_X_BPGAP=1` blastp preliminary stage: the restricted gapped alignment (NCBI
   `s_RestrictedGappedAlign`, `blast_gapalign.c:991-1300`, which `s_BlastProtGappedAlignment` runs
   for a query whose best ungapped score is below 0.68 of the cutoff) keeps the two score rows and

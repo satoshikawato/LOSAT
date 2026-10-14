@@ -13,6 +13,7 @@ use super::stage_d_pipeline::{
 };
 use super::stage_d_stats::LocalSubjectParameters;
 use super::stage_e_report::render;
+use super::x_subject_store::SubjectLetters;
 use crate::algorithm::blastn::blast_engine::{QueryReading, NO_DATA_MESSAGE};
 use crate::api::local_blast::{OutputSink, ReportOutputs};
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -742,13 +743,30 @@ impl TblastnArgs {
             subject_file,
             ReaderConfig::subject("TBLASTN", false, settings.data_loaders),
         );
-        let read_subject_records = {
+        // EXPERIMENT (LOSAT_X_TBNSTORE): each record's letters packed as it is read
+        // (`x_read_subject_stores`); a subject range keeps the letters.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
+        // ```c
+        //     virtual SBlastSequence GetCompressedPlusStrand() {
+        //         SBlastSequence retval(size());
+        //         string ncbi4na = kEmptyStr;
+        //         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
+        //         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
+        // ```
+        // Dispatch point: NCBI keeps the subjects in its scope and makes each one's search forms
+        // from it. With the switch the records keep their deflines and the letters are held packed,
+        // made again when a subject is searched or reported; without it the records keep them.
+        let (read_subject_records, x_subject_stores) = {
             let mut stderr = std::io::stderr();
-            read_subjects(
-                &mut subject_source,
-                subject_range.as_ref(),
-                &mut |message: &[u8]| std::io::Write::write_all(&mut stderr, message),
-            )?
+            let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
+            if super::x_subject_store::x_tbn_store() && subject_range.is_none() {
+                super::x_subject_store::x_read_subject_stores(&mut subject_source, &mut warn)?
+            } else {
+                (
+                    read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?,
+                    None,
+                )
+            }
         };
         drop(subject_source);
         let (subjects, subject_placements) =
@@ -815,6 +833,7 @@ impl TblastnArgs {
                 query_file,
                 &subjects,
                 &subject_placements,
+                x_subject_stores.as_deref(),
                 &mut outputs,
                 &choice,
                 settings,
@@ -845,11 +864,14 @@ impl TblastnArgs {
 /// The part of `run` after the files are opened: NCBI's processing of the options,
 /// `Query is Empty!`, the query batch size and the subjects without letters, the reading of
 /// the queries and the search.
+#[allow(clippy::too_many_arguments)]
 fn search_cli(
     args: TblastnArgs,
     query_file: std::fs::File,
     subjects: &[FastaRecord],
     subject_placements: &crate::blastinput::seq_range::Placements,
+    // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects' letters, packed (the records keep none).
+    x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
     outputs: &mut ReportOutputs<'_>,
     choice: &crate::blastinput::app::FormatChoice,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
@@ -918,7 +940,7 @@ fn search_cli(
             .write_all(b"Warning: [tblastn] Query is Empty!\n")?;
         return Ok(());
     }
-    let batch_size = before_prolog(subjects, outputs.diagnostics)?;
+    let batch_size = before_prolog(subjects, x_subject_stores, outputs.diagnostics)?;
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastn_app.cpp:267-270
     // ```c
     // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
@@ -953,6 +975,7 @@ fn search_cli(
         reading,
         subjects,
         subject_placements,
+        x_subject_stores,
         outputs,
     )
 }
@@ -999,9 +1022,19 @@ fn search_cli(
 /// before the division by 3 (`run_local_search_with_pool` ports blast_setup.c:969-973 and
 /// seqsrc_multiseq.cpp:226-240; LOSAT rejects `-ungapped` and `OLD_FSC`, the two ways to a
 /// search without `sbp->gbp`).
-fn before_prolog(subjects: &[FastaRecord], diagnostics: &mut dyn Write) -> Result<u32> {
+fn before_prolog(
+    subjects: &[FastaRecord],
+    x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
+    diagnostics: &mut dyn Write,
+) -> Result<u32> {
     let batch_size = crate::blastinput::app::query_batch_size("TBLASTN", 20000)?;
-    crate::blastinput::input_files::write_empty_subject_warnings(subjects, "tblastn", diagnostics)?;
+    // EXPERIMENT (LOSAT_X_TBNSTORE): a packed subject's length is its store's.
+    crate::blastinput::input_files::write_empty_subject_warnings_by_length(
+        subjects,
+        |index| x_subject_stores.map_or(subjects[index].seq().len(), |stores| stores[index].len()),
+        "tblastn",
+        diagnostics,
+    )?;
     Ok(batch_size)
 }
 
@@ -1088,7 +1121,8 @@ pub fn run_local(
         Some((cut, placements)) => (cut.as_slice(), placements),
         None => (subject_records, &whole_subjects),
     };
-    let batch_size = before_prolog(searched_subjects, outputs.diagnostics)?;
+    // The caller owns the records: their letters are read in place.
+    let batch_size = before_prolog(searched_subjects, None, outputs.diagnostics)?;
     search(
         &args,
         resolved,
@@ -1097,6 +1131,7 @@ pub fn run_local(
         QueryReading::Records,
         searched_subjects,
         subject_placements,
+        None,
         outputs,
     )
 }
@@ -1114,6 +1149,8 @@ fn search(
     reading: QueryReading,
     subject_records: &[FastaRecord],
     subject_placements: &crate::blastinput::seq_range::Placements,
+    // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects' letters, packed (the records keep none).
+    x_subject_stores: Option<&[crate::sequence::packed_subject::PackedNucleotide]>,
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
     use crate::blastinput::app;
@@ -1143,6 +1180,17 @@ fn search(
     app::check_old_fsc("TBLASTN")?;
     app::check_query_split_environment("TBLASTN", false)??;
     let subjects = subject_records;
+    // The search reads the residues of the subject records in place (NCBI's subjects stay in the
+    // reader's records, `CBlastQueryVector`); they are not copied for it. EXPERIMENT
+    // (LOSAT_X_TBNSTORE): or from their packed form.
+    let subject_seqs: Vec<&[u8]> = match x_subject_stores {
+        Some(_) => Vec::new(),
+        None => subjects.iter().map(FastaRecord::seq).collect(),
+    };
+    let subject_letters = match x_subject_stores {
+        Some(stores) => SubjectLetters::Packed(stores),
+        None => SubjectLetters::Records(&subject_seqs),
+    };
     let subject_path = args
         .subject
         .as_ref()
@@ -1187,7 +1235,7 @@ fn search(
                         subject_path.display()
                     ),
                     subjects.len(),
-                    subjects.iter().map(|record| record.seq().len()).sum(),
+                    subject_letters.lengths().sum(),
                 )?;
                 writer.flush()?;
             }
@@ -1202,9 +1250,6 @@ fn search(
             .map(|index| query_input.placements.offset(index))
             .collect();
         let query_seqs: Vec<_> = queries.iter().map(|record| record.seq().to_vec()).collect();
-        // The search reads the residues of the subject records in place (NCBI's subjects stay
-        // in the reader's records, `CBlastQueryVector`); they are not copied for it.
-        let subject_seqs: Vec<&[u8]> = subjects.iter().map(FastaRecord::seq).collect();
         let seg = resolved.seg.params();
         // NCBI c++/src/algo/blast/api/prelim_stage.cpp:172-188:
         // (*thread)->Run(); (*thread)->Join(&result);
@@ -1247,7 +1292,7 @@ fn search(
         // and the loop below runs as before.
         let mut x_searched = super::stage_d_pipeline::x_search_batches(
             &query_seqs,
-            &subject_seqs,
+            subject_letters,
             query_input
                 .batches(batch_size)
                 .into_iter()
@@ -1292,7 +1337,7 @@ fn search(
                     Some((x_range, report)) if x_range == range => report,
                     _ => run_local_for_report_threads(
                         &query_seqs[range.clone()],
-                        &subject_seqs,
+                        subject_letters,
                         LocalStageDProfile {
                             seg: seg.as_ref(),
                             soft_masking: resolved.soft_masking,
@@ -1380,6 +1425,7 @@ fn search(
             outputs,
             queries,
             subjects,
+            subject_letters,
             subject_path,
             &mut results,
             &lengths,

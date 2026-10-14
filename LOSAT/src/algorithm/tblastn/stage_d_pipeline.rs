@@ -31,6 +31,7 @@ use super::stage_d_results::{
 use super::stage_d_stats::{
     local_parameters_for_call, LocalParameterCall, LocalParameterOptions, LocalSubjectParameters,
 };
+use super::x_subject_store::SubjectLetters;
 use crate::algorithm::blastn::query_split::SplitSizes;
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::gapalign::GapAlignScratch;
@@ -157,7 +158,7 @@ pub(super) fn run_local_for_report(
 )> {
     run_local_for_report_threads(
         queries,
-        subjects,
+        SubjectLetters::Records(subjects),
         profile,
         composition_mode2,
         do_sum_stats,
@@ -177,7 +178,7 @@ pub(super) fn run_local_for_report(
 // The pool owns one search; ordered subject results enter the same Stage D stream.
 pub(super) fn run_local_for_report_threads(
     queries: &[Vec<u8>],
-    subjects: &[&[u8]],
+    subjects: SubjectLetters<'_>,
     profile: LocalStageDProfile<'_>,
     composition_mode2: bool,
     do_sum_stats: bool,
@@ -227,7 +228,7 @@ pub(super) fn run_local_for_report_threads(
 /// the caller keeps for all its query batches.
 pub(super) fn x_run_local_for_report_in_pool(
     queries: &[Vec<u8>],
-    subjects: &[&[u8]],
+    subjects: SubjectLetters<'_>,
     profile: LocalStageDProfile<'_>,
     composition_mode2: bool,
     do_sum_stats: bool,
@@ -290,7 +291,7 @@ pub(super) type XBatchReport = (
 #[allow(clippy::too_many_arguments)]
 pub(super) fn x_search_batches<'p>(
     queries: &[Vec<u8>],
-    subjects: &[&[u8]],
+    subjects: SubjectLetters<'_>,
     ranges: Vec<std::ops::Range<usize>>,
     profile: impl Fn(std::ops::Range<usize>) -> LocalStageDProfile<'p> + Sync,
     composition_mode2: bool,
@@ -325,7 +326,7 @@ pub(super) fn x_search_batches<'p>(
     let x_subject_side = super::search_seed::XSubjectSide::for_batches(
         x_subject_side_on,
         ranges.len(),
-        subjects.len(),
+        subjects.count(),
         first.genetic_code,
         first.mask_lowercase,
     );
@@ -376,9 +377,7 @@ pub(super) fn x_search_batches<'p>(
         // batch per thread, the batches are searched side by side, each as the one-thread search,
         // and the reports are returned in batch order.
         if crate::utils::xswitch::on("LOSAT_X_TBNBATCH") && pool.enabled() {
-            let fits = super::search_seed::XSubjectSide::all_fit(
-                subjects.iter().map(|subject| subject.len()),
-            );
+            let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
             if let Some(side) = x_subject_side
                 .as_ref()
                 .filter(|_| fits && ranges.len() >= pool.threads())
@@ -534,7 +533,7 @@ fn run_local_search(
 ) -> Result<Vec<KappaResultHitList>> {
     run_local_search_with_pool(
         queries,
-        subjects,
+        SubjectLetters::Records(subjects),
         profile,
         composition_mode2,
         do_sum_stats,
@@ -556,7 +555,7 @@ fn run_local_search(
 // Preliminary work uses one immutable subject; linking and stream writes follow OID order.
 fn run_local_search_with_pool(
     queries: &[Vec<u8>],
-    subjects: &[&[u8]],
+    subjects: SubjectLetters<'_>,
     profile: LocalStageDProfile<'_>,
     composition_mode2: bool,
     do_sum_stats: bool,
@@ -570,7 +569,7 @@ fn run_local_search_with_pool(
         "TBLASTN Stage D requires a protein query"
     );
     ensure!(
-        !subjects.is_empty(),
+        subjects.count() > 0,
         "TBLASTN Stage D requires a local subject"
     );
     ensure!(
@@ -578,7 +577,7 @@ fn run_local_search_with_pool(
         "TBLASTN hitlist size must be positive"
     );
     let code = GeneticCode::try_from_id(profile.genetic_code).map_err(anyhow::Error::msg)?;
-    let total_nt: usize = subjects.iter().map(|subject| subject.len()).sum();
+    let total_nt: usize = subjects.lengths().sum();
     // NCBI reference: c++/src/algo/blast/api/local_db_adapter.cpp:133-135
     // ```c
     //             if ( !m_Subjects.empty() ) {
@@ -619,8 +618,7 @@ fn run_local_search_with_pool(
     // empty one counts as 0, in nucleotides) is raised to 10 before the division.
     const BLAST_SEQSRC_MINLENGTH: usize = 10;
     let min_subject_length = subjects
-        .iter()
-        .map(|subject| subject.len())
+        .lengths()
         .min()
         .unwrap_or(i32::MAX as usize)
         .max(BLAST_SEQSRC_MINLENGTH)
@@ -666,7 +664,7 @@ fn run_local_search_with_pool(
             ungapped: &ungapped,
             gumbel: gumbel.as_ref(),
             total_nt,
-            num_subjects: subjects.len(),
+            num_subjects: subjects.count(),
             min_subject_length,
             composition_mode2,
             do_sum_stats,
@@ -689,7 +687,7 @@ fn run_local_search_with_pool(
         trace.parameters = Some(batch_setup.parameters.clone());
         trace.ungapped_karlin = batch_setup.ungapped_karlin.clone();
         trace.query_validity = batch_setup.query_validity.clone();
-        trace.subject_nt_lengths = subjects.iter().map(|subject| subject.len()).collect();
+        trace.subject_nt_lengths = subjects.lengths().collect();
     }
     *setup = Some(batch_setup);
     // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,197-224:
@@ -777,7 +775,7 @@ fn run_local_search_with_pool(
                 ungapped: &ungapped,
                 gumbel: gumbel.as_ref(),
                 total_nt,
-                num_subjects: subjects.len(),
+                num_subjects: subjects.count(),
                 min_subject_length,
                 composition_mode2,
                 do_sum_stats,
@@ -942,7 +940,9 @@ fn run_local_search_with_pool(
                      scratch: &mut GapAlignScratch,
                      workspace: &mut BlastCompositionWorkspace|
      -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
-        let subject = subjects[oid];
+        // The letters of the subject (made from its packed form with LOSAT_X_TBNSTORE).
+        let mut x_letters = Vec::new();
+        let subject = subjects.letters(oid, &mut x_letters);
         let incoming: Vec<_> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
         let mut redo = redo_preliminary_match(
             &incoming,
@@ -1337,9 +1337,9 @@ fn x_oid_chunk_bases(threads: usize, largest_file: u64) -> u64 {
 // as F of `x_oid_chunk_bases` for `-subject`; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): ceil(bases of all subjects / 4).
 #[cfg(feature = "parallel")]
-fn x_subject_file_size(subjects: &[&[u8]]) -> u64 {
-    let bases = subjects.iter().fold(0u64, |sum, subject| {
-        sum.saturating_add(u64::try_from(subject.len()).unwrap_or(u64::MAX))
+fn x_subject_file_size(subjects: SubjectLetters<'_>) -> u64 {
+    let bases = subjects.lengths().fold(0u64, |sum, length| {
+        sum.saturating_add(u64::try_from(length).unwrap_or(u64::MAX))
     });
     bases.div_ceil(4)
 }
@@ -1365,15 +1365,15 @@ fn x_subject_file_size(subjects: &[&[u8]]) -> u64 {
 // `-subject` has one volume and the rest is scheduling only.
 /// EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the end of the chunk of subjects that starts at `begin`.
 #[cfg(feature = "parallel")]
-fn x_oid_chunk_end(subjects: &[&[u8]], begin: usize, bases: u64) -> usize {
-    let length = |subject: &[u8]| u64::try_from(subject.len()).unwrap_or(u64::MAX);
-    let Some(first) = subjects.get(begin) else {
+fn x_oid_chunk_end(subjects: SubjectLetters<'_>, begin: usize, bases: u64) -> usize {
+    let length = |oid: usize| u64::try_from(subjects.length(oid)).unwrap_or(u64::MAX);
+    if begin >= subjects.count() {
         return begin;
-    };
-    let mut taken = length(first);
+    }
+    let mut taken = length(begin);
     let mut end = begin + 1;
-    while let Some(next) = subjects.get(end) {
-        match taken.checked_add(length(next)) {
+    while end < subjects.count() {
+        match taken.checked_add(length(end)) {
             Some(sum) if sum <= bases => {
                 taken = sum;
                 end += 1;
@@ -1402,14 +1402,14 @@ fn x_oid_chunk_end(subjects: &[&[u8]], begin: usize, bases: u64) -> usize {
 /// `count` of them.
 #[cfg(feature = "parallel")]
 fn x_entry_chunks(
-    subjects: &[&[u8]],
+    subjects: SubjectLetters<'_>,
     begin: usize,
     count: usize,
     bases: u64,
 ) -> Vec<std::ops::Range<usize>> {
     let mut chunks = Vec::new();
     let mut start = begin;
-    while chunks.len() < count.max(1) && start < subjects.len() {
+    while chunks.len() < count.max(1) && start < subjects.count() {
         let end = x_oid_chunk_end(subjects, start, bases);
         chunks.push(start..end);
         start = end;
@@ -1442,7 +1442,7 @@ fn x_chunks_per_entry(threads: usize) -> usize {
 // ended. Scheduling only.
 /// EXPERIMENT (LOSAT_X_TBNOIDNEXT): every chunk of the subjects, in OID order.
 #[cfg(feature = "parallel")]
-fn x_all_chunks(subjects: &[&[u8]], bases: u64) -> Vec<std::ops::Range<usize>> {
+fn x_all_chunks(subjects: SubjectLetters<'_>, bases: u64) -> Vec<std::ops::Range<usize>> {
     x_entry_chunks(subjects, 0, usize::MAX, bases)
 }
 
@@ -1590,7 +1590,7 @@ fn split_preliminary_hitlists(
     sizes: SplitSizes,
     batch_parameters: &LocalSubjectParameters,
     inputs: QuerySetInputs<'_>,
-    subjects: &[&[u8]],
+    subjects: SubjectLetters<'_>,
     prelim_size: usize,
     pool: Option<&SearchPool<'_>>,
 ) -> Result<Vec<Option<KappaResultHitList>>> {
@@ -1879,7 +1879,7 @@ struct PreliminaryInputs<'a> {
 // The preliminary hit list of each query context of the query set.
 fn run_preliminary_subjects(
     inputs: &PreliminaryInputs<'_>,
-    subjects: &[&[u8]],
+    subjects: SubjectLetters<'_>,
     pool: Option<&SearchPool<'_>>,
     mut observer: Option<&mut StageDBoundaryTrace>,
 ) -> Result<Vec<Option<KappaResultHitList>>> {
@@ -1909,7 +1909,7 @@ fn run_preliminary_subjects(
     // subjects; otherwise the units of the single subject use it. Scheduling only.
     // Each subject keeps the NCBI search-to-link-to-reap order. Indexed
     // collection finishes before the OID-ordered shared collector below.
-    let parallel_selected = pool.is_some_and(SearchPool::enabled) && subjects.len() > 1;
+    let parallel_selected = pool.is_some_and(SearchPool::enabled) && subjects.count() > 1;
     let unit_pool = if parallel_selected { None } else { pool };
     // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the bases one chunk may hold, from the size of the
     // sequence file of the subjects (x_oid_chunk_bases); none without the switch.
@@ -2029,6 +2029,11 @@ fn run_preliminary_subjects(
             reap_by_evalue(&mut linked, inputs.prelim_evalue);
             Ok((preliminary, linked))
         };
+    // The letters of subject `x_oid` for its preliminary stage: the record's own, or (EXPERIMENT,
+    // LOSAT_X_TBNSTORE) made from its packed form for the time of the call, as NCBI makes a
+    // subject's search forms from its scope.
+    let subject_core_oid =
+        |x_oid: usize| subjects.with_letters(x_oid, |subject| subject_core(x_oid, subject));
     // NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
     // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
     //        != BLAST_SEQSRC_EOF) {
@@ -2040,7 +2045,7 @@ fn run_preliminary_subjects(
     crate::utils::threading::report_stage(
         "tblastn",
         "subject_core",
-        subjects.len(),
+        subjects.count(),
         parallel_selected,
     );
     // NCBI c++/src/algo/blast/api/prelim_stage.cpp:145-145:
@@ -2070,12 +2075,12 @@ fn run_preliminary_subjects(
     #[cfg(feature = "parallel")]
     let mut x_pool_entries = 0usize;
     #[cfg(feature = "parallel")]
-    let search = |x_oid: usize, subject: &[u8]| {
+    let search = |x_oid: usize| {
         if diagnose {
             let now = active.fetch_add(1, Ordering::SeqCst) + 1;
             peak.fetch_max(now, Ordering::SeqCst);
         }
-        let result = subject_core(x_oid, subject);
+        let result = subject_core_oid(x_oid);
         if diagnose {
             active.fetch_sub(1, Ordering::SeqCst);
         }
@@ -2093,11 +2098,11 @@ fn run_preliminary_subjects(
         _ => None,
     };
     #[cfg(feature = "parallel")]
-    let x_flow_search = |x_oid: usize| search(x_oid, subjects[x_oid]);
+    let x_flow_search = |x_oid: usize| search(x_oid);
     // The OID-ordered reduction below, as one closure so that it can run inside the scope whose
     // other threads search the chunks of the flow.
     let mut reduce_subjects = || -> Result<()> {
-        for (oid, subject) in subjects.iter().enumerate() {
+        for oid in 0..subjects.count() {
             // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
             // BLAST_LinkHsps(..., subject->length, ...);
             // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, hit_params);
@@ -2138,26 +2143,14 @@ fn run_preliminary_subjects(
                             chunks
                                 .par_iter()
                                 .with_max_len(1)
-                                .map(|chunk| {
-                                    chunk
-                                        .clone()
-                                        .into_par_iter()
-                                        .map(|x_oid| search(x_oid, subjects[x_oid]))
-                                        .collect()
-                                })
+                                .map(|chunk| chunk.clone().into_par_iter().map(&search).collect())
                                 .collect()
                         });
                         lists.into_iter().flatten().collect()
                     } else {
                         x_pool_entries += 1;
-                        let end = oid.saturating_add(pool.threads()).min(subjects.len());
-                        pool.install(|| {
-                            subjects[oid..end]
-                                .par_iter()
-                                .enumerate()
-                                .map(|(x_within, subject)| search(oid + x_within, subject))
-                                .collect()
-                        })
+                        let end = oid.saturating_add(pool.threads()).min(subjects.count());
+                        pool.install(|| (oid..end).into_par_iter().map(&search).collect())
                     };
                     if diagnose {
                         workers.extend(batch.iter().filter_map(|(_, worker)| *worker));
@@ -2169,10 +2162,10 @@ fn run_preliminary_subjects(
                     .context("missing ordered TBLASTN subject result")?
                     .0?
             } else {
-                subject_core(oid, subject)?
+                subject_core_oid(oid)?
             };
             #[cfg(not(feature = "parallel"))]
-            let (preliminary, linked) = subject_core(oid, subject)?;
+            let (preliminary, linked) = subject_core_oid(oid)?;
             // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
             // BLAST_LinkHsps(..., hsp_list_out, ...);
             // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
@@ -2255,7 +2248,7 @@ fn run_preliminary_subjects(
         }
         eprintln!(
             "[losat-thread-activity] program=tblastn stage=subject_core work_items={} worker_slots={:?} peak_active={} pool_entries={}{}",
-            subjects.len(), workers, peak.load(Ordering::SeqCst), x_pool_entries, x_flow_fields
+            subjects.count(), workers, peak.load(Ordering::SeqCst), x_pool_entries, x_flow_fields
         );
     }
     Ok(preliminary_hitlists)
@@ -2331,7 +2324,7 @@ fn direct_local_evalues(
 // Blast_HSPResultsInsertHSPList(...); Blast_HSPResultsSortByEvalue(...);
 fn finish_local_mode0_no_sum_stats(
     queries: &[Vec<u8>],
-    subjects: &[&[u8]],
+    subjects: SubjectLetters<'_>,
     profile: LocalStageDProfile<'_>,
     preliminary_lists: Vec<(usize, usize, LinkedHspList)>,
     query_lengths: &[i32],
@@ -2360,8 +2353,10 @@ fn finish_local_mode0_no_sum_stats(
                 .collect::<Vec<_>>()
         })
         .collect();
+    // The letters of the subject in hand (made from its packed form with LOSAT_X_TBNSTORE).
+    let mut x_letters = Vec::new();
     for (context, oid, preliminary) in preliminary_lists {
-        let subject = subjects[oid];
+        let subject = subjects.letters(oid, &mut x_letters);
         let input: Vec<_> = preliminary.hsps.iter().map(|linked| linked.hsp).collect();
         // NCBI c++/src/algo/blast/core/blast_traceback.c:503-536:
         // traceback uses the selected scoring matrix and gap costs.
@@ -5372,7 +5367,7 @@ mod tests {
         ] {
             let subjects: Vec<Vec<u8>> = lengths.iter().map(|&n| vec![b'A'; n]).collect();
             assert_eq!(
-                x_subject_file_size(&subject_slices(&subjects)),
+                x_subject_file_size(SubjectLetters::Records(&subject_slices(&subjects))),
                 size,
                 "{lengths:?}"
             );
@@ -5420,7 +5415,11 @@ mod tests {
             (&[10][..], 1, 20, 1),
         ] {
             assert_eq!(
-                x_oid_chunk_end(&subject_slices(&set(lengths)), begin, bases),
+                x_oid_chunk_end(
+                    SubjectLetters::Records(&subject_slices(&set(lengths))),
+                    begin,
+                    bases
+                ),
                 end,
                 "{lengths:?} from {begin}, {bases} bases"
             );
@@ -5429,15 +5428,39 @@ mod tests {
         // subjects, and at least one chunk; four per thread.
         let subjects = set(&[50, 5, 5, 5, 5, 50, 5]);
         assert_eq!(
-            x_entry_chunks(&subject_slices(&subjects), 0, 3, 12),
+            x_entry_chunks(
+                SubjectLetters::Records(&subject_slices(&subjects)),
+                0,
+                3,
+                12
+            ),
             [0..1, 1..3, 3..5]
         );
         assert_eq!(
-            x_entry_chunks(&subject_slices(&subjects), 5, 3, 12),
+            x_entry_chunks(
+                SubjectLetters::Records(&subject_slices(&subjects)),
+                5,
+                3,
+                12
+            ),
             [5..6, 6..7]
         );
-        assert_eq!(x_entry_chunks(&subject_slices(&subjects), 0, 0, 12), [0..1]);
-        assert!(x_entry_chunks(&subject_slices(&subjects), 7, 3, 12).is_empty());
+        assert_eq!(
+            x_entry_chunks(
+                SubjectLetters::Records(&subject_slices(&subjects)),
+                0,
+                0,
+                12
+            ),
+            [0..1]
+        );
+        assert!(x_entry_chunks(
+            SubjectLetters::Records(&subject_slices(&subjects)),
+            7,
+            3,
+            12
+        )
+        .is_empty());
         assert_eq!(x_chunks_per_entry(8), 32);
         assert_eq!(x_chunks_per_entry(1), 4);
         assert_eq!(x_chunks_per_entry(0), 1);
@@ -5445,9 +5468,17 @@ mod tests {
         // 240 subjects of 1,000 bases at 4 threads (tests/tblastn_oid_chunk.rs): 3,751 bases, three
         // subjects per chunk, sixteen chunks and 48 subjects per entry.
         let subjects = set(&[1_000; 240]);
-        let bases = x_oid_chunk_bases(4, x_subject_file_size(&subject_slices(&subjects)));
+        let bases = x_oid_chunk_bases(
+            4,
+            x_subject_file_size(SubjectLetters::Records(&subject_slices(&subjects))),
+        );
         assert_eq!(bases, 3_751);
-        let entry = x_entry_chunks(&subject_slices(&subjects), 0, x_chunks_per_entry(4), bases);
+        let entry = x_entry_chunks(
+            SubjectLetters::Records(&subject_slices(&subjects)),
+            0,
+            x_chunks_per_entry(4),
+            bases,
+        );
         assert_eq!(entry.len(), 16);
         assert_eq!(entry[..2], [0..3, 3..6]);
         assert_eq!(entry[15], 45..48);
@@ -5496,7 +5527,7 @@ mod tests {
         ] {
             let searched = x_search_batches(
                 &queries,
-                &subject_slices(&subjects),
+                SubjectLetters::Records(&subject_slices(&subjects)),
                 ranges.clone(),
                 profile,
                 true,
@@ -5513,7 +5544,7 @@ mod tests {
                 let (reference, reference_parameters, _, reference_validity) =
                     run_local_for_report_threads(
                         &queries[range.clone()],
-                        &subject_slices(&subjects),
+                        SubjectLetters::Records(&subject_slices(&subjects)),
                         profile(range.clone()),
                         true,
                         true,

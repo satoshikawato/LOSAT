@@ -2,6 +2,10 @@ name: NCBI-only Platform Characterization
 
 run-name: NCBI-only platform characterization ${{ inputs.candidate_sha }}
 
+# Added-platform form (A1, 2026-10-14): characterizes linux-aarch64 only, with the
+# fixtures, retained Linux reference, commands and pair capture of the v0.1.0
+# characterization (run 33582928402). No LOSAT execution, no Linux x64 rerun.
+
 on:
   workflow_dispatch:
     inputs:
@@ -26,15 +30,10 @@ jobs:
     name: Stage immutable fixtures (${{ matrix.platform_id }})
     strategy:
       fail-fast: false
-      max-parallel: 3
       matrix:
         include:
-          - platform_id: windows-x64
-            runner: windows-2025
-          - platform_id: macos-arm64
-            runner: macos-15
-          - platform_id: macos-x64
-            runner: macos-15-intel
+          - platform_id: linux-aarch64
+            runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     env:
       CANDIDATE_SHA: ${{ inputs.candidate_sha }}
@@ -60,10 +59,18 @@ jobs:
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           git merge-base --is-ancestor "$PR6_CERT_SHA_V3" "$CANDIDATE_SHA"
 
+      - name: Record runner tools
+        run: |
+          uname -a
+          command -v python python3 || true
+          python3 --version
+          printf 'ImageOS=%s ImageVersion=%s RUNNER_OS=%s RUNNER_ARCH=%s\n' \
+            "${ImageOS:-}" "${ImageVersion:-}" "${RUNNER_OS:-}" "${RUNNER_ARCH:-}"
+
       - name: Stage fixture bytes from immutable Git objects
         run: |
           set -euo pipefail
-          python LOSAT/tests/characterize_ncbi_platform_variance_v010.py stage-fixtures \
+          python3 LOSAT/tests/characterize_ncbi_platform_variance_v010.py stage-fixtures \
             --candidate-sha "$CANDIDATE_SHA" \
             --platform-id "${{ matrix.platform_id }}" \
             --output-dir "$FIXTURE_ARTIFACT_DIR"
@@ -74,10 +81,10 @@ jobs:
           name: ncbi-characterization-fixtures-${{ matrix.platform_id }}
           path: ${{ env.FIXTURE_ARTIFACT_DIR }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
   verify-fixture-invariance:
-    name: Verify three-platform fixture invariance
+    name: Verify fixtures against the authority v0.1.0 inputs
     needs: stage-fixtures
     runs-on: ubuntu-24.04
     env:
@@ -93,28 +100,16 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: ncbi-characterization-fixtures-windows-x64
-          path: ${{ env.FIXTURE_ROOT }}/windows-x64
+          name: ncbi-characterization-fixtures-linux-aarch64
+          path: ${{ env.FIXTURE_ROOT }}/linux-aarch64
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: ncbi-characterization-fixtures-macos-arm64
-          path: ${{ env.FIXTURE_ROOT }}/macos-arm64
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: ncbi-characterization-fixtures-macos-x64
-          path: ${{ env.FIXTURE_ROOT }}/macos-x64
-
-      - name: Compare all staged fixture identities before NCBI
+      - name: Compare staged fixture identities before NCBI
         run: |
           set -euo pipefail
           mkdir -p "$GATE_ROOT"
-          python LOSAT/tests/characterize_ncbi_platform_variance_v010.py \
+          python3 LOSAT/tests/characterize_ncbi_platform_variance_v010.py \
             verify-fixture-invariance \
-            --manifest "$FIXTURE_ROOT/windows-x64/fixture_manifest.json" \
-            --manifest "$FIXTURE_ROOT/macos-arm64/fixture_manifest.json" \
-            --manifest "$FIXTURE_ROOT/macos-x64/fixture_manifest.json" \
+            --manifest "$FIXTURE_ROOT/linux-aarch64/fixture_manifest.json" \
             --output "$GATE_ROOT/fixture_invariance.json"
 
       - name: Upload fixture-invariance gate
@@ -123,7 +118,7 @@ jobs:
           name: ncbi-characterization-fixture-invariance
           path: ${{ env.GATE_ROOT }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
   retained-linux-evidence:
     name: Export retained PR 5 Linux evidence without rerun
@@ -147,7 +142,7 @@ jobs:
       - name: Verify and export retained Linux Git-blob evidence
         run: |
           set -euo pipefail
-          python LOSAT/tests/characterize_ncbi_platform_variance_v010.py \
+          python3 LOSAT/tests/characterize_ncbi_platform_variance_v010.py \
             export-linux-reference \
             --candidate-sha "$CANDIDATE_SHA" \
             --output-dir "$LINUX_ARTIFACT_DIR"
@@ -158,7 +153,7 @@ jobs:
           name: ncbi-characterization-retained-linux
           path: ${{ env.LINUX_ARTIFACT_DIR }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
   characterize:
     name: Official NCBI only (${{ matrix.platform_id }})
@@ -166,21 +161,12 @@ jobs:
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      max-parallel: 3
       matrix:
         include:
-          - platform_id: windows-x64
-            runner: windows-2025
-            executable_suffix: .exe
-            oracle_archive: ncbi-blast-2.17.0+-x64-win64.tar.gz
-          - platform_id: macos-arm64
-            runner: macos-15
+          - platform_id: linux-aarch64
+            runner: ubuntu-24.04-arm
             executable_suffix: ""
-            oracle_archive: ncbi-blast-2.17.0+-aarch64-macosx.tar.gz
-          - platform_id: macos-x64
-            runner: macos-15-intel
-            executable_suffix: ""
-            oracle_archive: ncbi-blast-2.17.0+-x64-macosx.tar.gz
+            oracle_archive: ncbi-blast-2.17.0+-aarch64-linux.tar.gz
     runs-on: ${{ matrix.runner }}
     env:
       CANDIDATE_SHA: ${{ inputs.candidate_sha }}
@@ -246,11 +232,11 @@ jobs:
           ARCHIVE_NAME: ${{ matrix.oracle_archive }}
         run: |
           set -euo pipefail
-          python LOSAT/tests/certify_platform_native_v010.py verify-archive \
+          python3 LOSAT/tests/certify_platform_native_v010.py verify-archive \
             --platform-id "$PLATFORM_ID" \
             --archive "$DOWNLOAD_DIR/$ARCHIVE_NAME" \
             --checksum "$DOWNLOAD_DIR/$ARCHIVE_NAME.md5"
-          python LOSAT/tests/certify_platform_native_v010.py extract-verified-archive \
+          python3 LOSAT/tests/certify_platform_native_v010.py extract-verified-archive \
             --platform-id "$PLATFORM_ID" \
             --archive "$DOWNLOAD_DIR/$ARCHIVE_NAME" \
             --checksum "$DOWNLOAD_DIR/$ARCHIVE_NAME.md5" \
@@ -269,7 +255,7 @@ jobs:
           # The existing authorities build each authoritative command. The
           # driver runs it first, then runs its paired rich-output command with
           # no argv change except -outfmt. It never invokes LOSAT.
-          python LOSAT/tests/characterize_ncbi_platform_variance_v010.py characterize \
+          python3 LOSAT/tests/characterize_ncbi_platform_variance_v010.py characterize \
             --candidate-sha "$CANDIDATE_SHA" \
             --platform-id "$PLATFORM_ID" \
             --output-dir "$EVIDENCE_DIR" \
@@ -289,16 +275,16 @@ jobs:
           name: ncbi-characterization-${{ matrix.platform_id }}
           path: ${{ env.EVIDENCE_DIR }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
-  analyze-rich-diagnostics:
-    name: Compare retained Linux and three-platform rich diagnostics
+  classify-added-platform:
+    name: Derive the added platform's authority record (not accepted)
     needs: [characterize, retained-linux-evidence]
     runs-on: ubuntu-24.04
     env:
       PLATFORM_ROOT: ${{ github.workspace }}/platform-evidence
       LINUX_BUNDLE: ${{ github.workspace }}/retained-linux
-      ANALYSIS_ROOT: ${{ github.workspace }}/rich-diagnostic-analysis
+      RECORD_ROOT: ${{ github.workspace }}/added-platform-record
     steps:
       - uses: actions/checkout@v4
         with:
@@ -308,40 +294,29 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: ncbi-characterization-windows-x64
-          path: ${{ env.PLATFORM_ROOT }}/windows-x64
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: ncbi-characterization-macos-arm64
-          path: ${{ env.PLATFORM_ROOT }}/macos-arm64
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: ncbi-characterization-macos-x64
-          path: ${{ env.PLATFORM_ROOT }}/macos-x64
+          name: ncbi-characterization-linux-aarch64
+          path: ${{ env.PLATFORM_ROOT }}/linux-aarch64
 
       - uses: actions/download-artifact@v4
         with:
           name: ncbi-characterization-retained-linux
           path: ${{ env.LINUX_BUNDLE }}
 
-      - name: Enforce 18 authoritative plus 18 diagnostic searches
+      - name: Classify against the retained Linux reference
         run: |
           set -euo pipefail
-          mkdir -p "$ANALYSIS_ROOT"
-          python LOSAT/tests/characterize_ncbi_platform_variance_v010.py \
-            analyze-platforms \
-            --platform-evidence "$PLATFORM_ROOT/windows-x64" \
-            --platform-evidence "$PLATFORM_ROOT/macos-arm64" \
-            --platform-evidence "$PLATFORM_ROOT/macos-x64" \
+          mkdir -p "$RECORD_ROOT"
+          python3 LOSAT/tests/characterize_ncbi_platform_variance_v010.py \
+            classify-added-platform \
+            --platform-evidence "$PLATFORM_ROOT/linux-aarch64" \
             --linux-bundle "$LINUX_BUNDLE" \
-            --output "$ANALYSIS_ROOT/rich_diagnostic_analysis.json"
+            --output "$RECORD_ROOT/linux-aarch64-authority-record.json"
+          cat "$RECORD_ROOT/linux-aarch64-authority-record.json"
 
-      - name: Upload separated rich diagnostic analysis
+      - name: Upload the derived record
         uses: actions/upload-artifact@v4
         with:
-          name: ncbi-characterization-rich-diagnostic-analysis
-          path: ${{ env.ANALYSIS_ROOT }}
+          name: ncbi-characterization-added-platform-record
+          path: ${{ env.RECORD_ROOT }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90

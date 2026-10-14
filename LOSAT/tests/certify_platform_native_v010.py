@@ -108,6 +108,16 @@ PLATFORMS = {
         archive_name="ncbi-blast-2.17.0+-x64-macosx.tar.gz",
         archive_md5="cde7979c0edca21da0567ab172b68b0e",
     ),
+    "linux-aarch64": PlatformSpec(
+        platform_id="linux-aarch64",
+        os_name="Linux",
+        machine="arm64",
+        target_triple="aarch64-unknown-linux-gnu",
+        binary_arch="arm64",
+        runner_label="ubuntu-24.04-arm",
+        archive_name="ncbi-blast-2.17.0+-aarch64-linux.tar.gz",
+        archive_md5="5f9d49b999346e0ddb6637b71af4b22a",
+    ),
 }
 
 REPRESENTATIVES = (
@@ -243,6 +253,11 @@ def binary_architecture(path: Path) -> str:
         return {0x01000007: "x86_64", 0x0100000C: "arm64"}.get(
             cpu_type, "unknown"
         )
+    # ELF: e_ident[EI_DATA] (offset 5) gives the byte order of e_machine (offset 18).
+    if len(data) >= 20 and data[:4] == b"\x7fELF" and data[5] in {1, 2}:
+        byteorder = "little" if data[5] == 1 else "big"
+        machine = int.from_bytes(data[18:20], byteorder)
+        return {0x3E: "x86_64", 0xB7: "arm64"}.get(machine, "unknown")
     raise CertificationFailure(f"unsupported native executable format: {path}")
 
 

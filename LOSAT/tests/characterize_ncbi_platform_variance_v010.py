@@ -1,9 +1,22 @@
 #!/usr/bin/env python3
-"""Characterize official NCBI BLAST+ 2.17.0 output on three native platforms.
+"""Characterize official NCBI BLAST+ 2.17.0 output on an added native platform.
 
 This driver is diagnostic-only.  On each platform it executes the six retained
 direct-oracle representatives as six authoritative/diagnostic pairs, never
 executes LOSAT, and never changes an authority classification.
+
+Added-platform form (A1, 2026-10-14): the v0.1.0 characterization (run
+33582928402 at be67253156ce10b852166709e9519ab54709fd80, analyzer
+cfd213f57691607429c4e21edbf314899310d805) covered windows-x64, macos-arm64 and
+macos-x64.  This candidate characterizes exactly the platforms in
+``CHARACTERIZED_PLATFORMS`` (linux-aarch64) with the same fixtures, retained
+Linux reference, commands and pair capture.  With one platform there is no
+cross-platform fixture comparison; the staged fixture bytes are instead checked
+against the input identities that authority v0.1.0 binds
+(``AUTHORITY_V010_FIXTURES``).  ``classify-added-platform`` derives the
+platform's normative fingerprints and its diagnostic classification against the
+retained Linux reference, in the field layout of ncbi_platform_variance_v010.json,
+for review in a new authority version.  It decides nothing.
 
 NCBI references:
 - ncbi-blast/c++/src/objtools/align_format/format_flags.cpp:38-45
@@ -51,15 +64,72 @@ EXPECTED_REPRESENTATIVE_COUNT = 6
 EXPECTED_PLATFORM_AUTHORITATIVE_EXECUTIONS = 6
 EXPECTED_PLATFORM_DIAGNOSTIC_EXECUTIONS = 6
 EXPECTED_PLATFORM_EXECUTIONS = 12
-EXPECTED_TOTAL_AUTHORITATIVE_EXECUTIONS = 18
-EXPECTED_TOTAL_DIAGNOSTIC_EXECUTIONS = 18
-EXPECTED_TOTAL_EXECUTIONS = 36
+CHARACTERIZED_PLATFORMS = frozenset({"linux-aarch64"})
+EXPECTED_TOTAL_AUTHORITATIVE_EXECUTIONS = 6
+EXPECTED_TOTAL_DIAGNOSTIC_EXECUTIONS = 6
+EXPECTED_TOTAL_EXECUTIONS = 12
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 ALLOWED_DIAGNOSTIC_CHANGES = {
     ".github/workflows/ncbi-only-platform-characterization.yml",
     "LOSAT/tests/characterize_ncbi_platform_variance_v010.py",
     "LOSAT/tests/test_characterize_ncbi_platform_variance_v010.py",
+    # The added platform's PlatformSpec and the ELF reader of
+    # binary_architecture; no other driver line changes.
+    "LOSAT/tests/certify_platform_native_v010.py",
 }
+# Input identities bound by ncbi_platform_variance_v010.json
+# (normative_acceptance.representatives[*].query / .subject).
+AUTHORITY_V010_FIXTURES = {
+    "LOSAT/tests/fasta/AP027131.fasta": (
+        "184a9e3264cf522a1187716754cf9bca6dab8e882d76f9a267862751570bde80",
+        671644,
+    ),
+    "LOSAT/tests/fasta/AP027133.fasta": (
+        "3942c9759d39d8d209b26b63e822b60c43de4c16d1477158dce8ab07966dd07d",
+        614931,
+    ),
+    "LOSAT/tests/fasta/AP027152.fasta": (
+        "d78996c7897146934aee27db0df03c5655b67e75d4216e2a0b2dcf1c94f27093",
+        281379,
+    ),
+    "LOSAT/tests/fasta/AP027202.fasta": (
+        "0b9f7dfc0bc4720aea9c196d9d6b5fc6addc4058cb9c64ebba2ea6657f6e8fb6",
+        328657,
+    ),
+    "LOSAT/tests/fasta/MG1655.fna": (
+        "6b195feda4c66140f6762742eb8b30c2652f02b45878b174f5b00ef85ecc95d7",
+        4708035,
+    ),
+    "LOSAT/tests/fasta/MelaMJNV.fasta": (
+        "099fcec7fbd5e8c77d583e59be0eaa7e525b7023bd6fc8eaeab9b9f3a0ac42f7",
+        291249,
+    ),
+    "LOSAT/tests/fasta/PajaWSV.faa": (
+        "d6ea8b8258357feb1f2c78d8948ffbeaa5d9afa11ba6e7278351bad130e7ae61",
+        73498,
+    ),
+    "LOSAT/tests/fasta/PemoMJNVA.fasta": (
+        "f289aa47634597eb5c84fc0e6ead64065f4a30d4124a6501ef17a90501c3c680",
+        298427,
+    ),
+    "LOSAT/tests/fasta/Sakai.fna": (
+        "d2144b241e49c16d5e09d3218f1d2f65bf424a4c813f2633874f983ac15d1999",
+        5577201,
+    ),
+    "LOSAT/tests/fasta/SicyWSV.faa": (
+        "5018a0a34281a0fed92ac7e902104a3dfe2412ba054ae6966dbfe248549fd56c",
+        70128,
+    ),
+}
+FIXTURE_GATE_STATUS = "ADDED_PLATFORM_FIXTURES_MATCH_AUTHORITY_V010"
+# Classes of ncbi_platform_variance_v010.json diagnostic_metadata, in the order
+# the classifier tests them.
+NATIVE_REFERENCE_CLASSES = (
+    "EXACT_TO_RETAINED_LINUX_REFERENCE",
+    "OUTPUT_NEWLINE_ONLY",
+    "ROW_ORDER_VARIANCE",
+    "HSP_STATISTIC_VARIANCE",
+)
 ALLOWED_DIAGNOSTIC_PREFIXES = (f"{RETAINED_LINUX_REFERENCE_ROOT.as_posix()}/",)
 
 
@@ -583,7 +653,10 @@ def stage_fixtures(
 ) -> None:
     verify_candidate(repo_root, candidate_sha)
     authority, catalog = load_platform_authority(repo_root)
-    if platform_id not in authority.PLATFORMS:
+    if (
+        platform_id not in authority.PLATFORMS
+        or platform_id not in CHARACTERIZED_PLATFORMS
+    ):
         raise CharacterizationFailure(f"unsupported platform: {platform_id}")
     placeholders = {
         program: Path(f"${{NCBI_BIN}}/{program}")
@@ -669,13 +742,13 @@ def _invariant_input(record: dict[str, object]) -> dict[str, object]:
 
 
 def verify_fixture_invariance(manifests: Sequence[Path], output: Path) -> None:
-    if len(manifests) != 3:
+    if len(manifests) != len(CHARACTERIZED_PLATFORMS):
         raise CharacterizationFailure(
-            "fixture invariance requires exactly three manifests"
+            "fixture gate requires one manifest per characterized platform"
         )
     loaded = [json.loads(path.read_text(encoding="utf-8")) for path in manifests]
     platform_ids = {manifest["platform_id"] for manifest in loaded}
-    if platform_ids != {"windows-x64", "macos-arm64", "macos-x64"}:
+    if platform_ids != CHARACTERIZED_PLATFORMS:
         raise CharacterizationFailure(
             f"fixture platform topology changed: {platform_ids}"
         )
@@ -693,9 +766,23 @@ def verify_fixture_invariance(manifests: Sequence[Path], output: Path) -> None:
             raise CharacterizationFailure(
                 f"cross-platform fixture bytes differ for {manifest['platform_id']}"
             )
+    observed_identities = {
+        item["repository_relative"]: (
+            item["expected_git_blob_raw_sha256"],
+            item["byte_length"],
+        )
+        for item in baseline
+    }
+    if any(
+        item["staged_sha256"] != item["expected_git_blob_raw_sha256"]
+        for item in baseline
+    ) or observed_identities != AUTHORITY_V010_FIXTURES:
+        raise CharacterizationFailure(
+            "staged fixtures differ from the inputs bound by authority v0.1.0"
+        )
     record = {
         "evidence_schema": EVIDENCE_SCHEMA,
-        "status": "CROSS_PLATFORM_FIXTURES_BYTE_IDENTICAL",
+        "status": FIXTURE_GATE_STATUS,
         "verified_at": utc_now(),
         "platform_ids": sorted(platform_ids),
         "candidate_sha": next(iter(candidate_shas)),
@@ -1021,10 +1108,10 @@ def _validate_fixture_bundle(
         or manifest["platform_id"] != platform_id
     ):
         raise CharacterizationFailure("fixture artifact identity mismatch")
-    if invariance["status"] != "CROSS_PLATFORM_FIXTURES_BYTE_IDENTICAL":
-        raise CharacterizationFailure("cross-platform fixture gate is not verified")
-    if set(invariance["platform_ids"]) != {"windows-x64", "macos-arm64", "macos-x64"}:
-        raise CharacterizationFailure("cross-platform fixture gate topology changed")
+    if invariance["status"] != FIXTURE_GATE_STATUS:
+        raise CharacterizationFailure("fixture gate is not verified")
+    if set(invariance["platform_ids"]) != CHARACTERIZED_PLATFORMS:
+        raise CharacterizationFailure("fixture gate topology changed")
     common = {item["repository_relative"]: item for item in invariance["inputs"]}
     identities: dict[str, dict[str, object]] = {}
     staged_records = []
@@ -1194,7 +1281,7 @@ def _record_identity(
                 EXPECTED_PLATFORM_DIAGNOSTIC_EXECUTIONS
             ),
             "ncbi_executions_per_platform": EXPECTED_PLATFORM_EXECUTIONS,
-            "platform_count": 3,
+            "platform_count": len(CHARACTERIZED_PLATFORMS),
             "total_authoritative_ncbi_searches": (
                 EXPECTED_TOTAL_AUTHORITATIVE_EXECUTIONS
             ),
@@ -1788,7 +1875,10 @@ def _prepare_characterization(
     output_dir.mkdir(parents=True, exist_ok=True)
     verify_candidate(repo_root, args.candidate_sha)
     authority, catalog = load_platform_authority(repo_root)
-    if args.platform_id not in authority.PLATFORMS:
+    if (
+        args.platform_id not in authority.PLATFORMS
+        or args.platform_id not in CHARACTERIZED_PLATFORMS
+    ):
         raise CharacterizationFailure(f"unsupported platform: {args.platform_id}")
     fixture_identities = _validate_fixture_bundle(
         authority,
@@ -2265,6 +2355,180 @@ def characterize(args: argparse.Namespace) -> None:
     )
 
 
+def native_reference_class(comparison: dict[str, object]) -> str:
+    """Name the v0.1.0 diagnostic class of one platform output.
+
+    The rule reproduces every diagnostic_metadata entry of
+    ncbi_platform_variance_v010.json: identical raw bytes, then identical bytes
+    after CRLF/CR -> LF, then the same row keys in another order, then the same
+    row keys in the same order with differing fields.  Anything else (a row key
+    added or lost) has no class and fails closed.
+    """
+
+    if comparison["raw_bytes_equal"]:
+        return "EXACT_TO_RETAINED_LINUX_REFERENCE"
+    if comparison["lf_diagnostic_bytes_equal"]:
+        return "OUTPUT_NEWLINE_ONLY"
+    if not comparison["row_key_multiset_equal"]:
+        raise CharacterizationFailure(
+            "row keys differ from the retained Linux reference: no native class"
+        )
+    if not comparison["row_key_order_equal"]:
+        return "ROW_ORDER_VARIANCE"
+    return "HSP_STATISTIC_VARIANCE"
+
+
+def output_data_row_count(data: bytes) -> int:
+    # The certifier's count (certify_platform_native_v010.output_data_row_count).
+    return sum(
+        bool(line.strip()) and not line.lstrip().startswith(b"#")
+        for line in data.splitlines()
+    )
+
+
+def classify_added_platform(
+    evidence_root: Path, linux_bundle: Path, output: Path
+) -> dict[str, object]:
+    repo_root = Path(__file__).resolve().parents[2]
+    authority, _catalog = load_platform_authority(repo_root)
+    linux_paths, _linux_manifest = _validate_linux_bundle(linux_bundle)
+    identity = json.loads((evidence_root / "identity.json").read_text("utf-8"))
+    summary = json.loads((evidence_root / "summary.json").read_text("utf-8"))
+    platform_id = identity["platform_id"]
+    if (
+        platform_id not in CHARACTERIZED_PLATFORMS
+        or identity["status"] != "CHARACTERIZATION_COMPLETE"
+        or summary["decision"] != "DIAGNOSTIC_CHARACTERIZATION_COMPLETE"
+        or summary["platform_id"] != platform_id
+        or summary["candidate_sha"] != identity["candidate_sha"]
+        or summary["losat_executions"] != 0
+        or summary["authoritative_search_executions"]
+        != EXPECTED_PLATFORM_AUTHORITATIVE_EXECUTIONS
+        or summary["diagnostic_search_executions"]
+        != EXPECTED_PLATFORM_DIAGNOSTIC_EXECUTIONS
+    ):
+        raise CharacterizationFailure("characterization evidence is incomplete")
+    spec = authority.PLATFORMS[platform_id]
+    archive = identity["oracle_archive"]
+    if (
+        archive["published_md5"] != spec.archive_md5
+        or archive["observed_archive_md5"] != spec.archive_md5
+    ):
+        raise CharacterizationFailure("oracle archive identity changed")
+    executables = []
+    for program in ("blastn", "blastp", "tblastx"):
+        oracle = identity["oracles"][program]
+        if oracle["architecture"] != spec.binary_arch:
+            raise CharacterizationFailure(f"{program} architecture changed")
+        executables.append(
+            {
+                "architecture": oracle["architecture"],
+                "program": program,
+                "sha256": oracle["sha256"],
+            }
+        )
+    expected_outputs = []
+    diagnostics = []
+    for representative in REPRESENTATIVES:
+        case_dir = evidence_root / representative.program / representative.case_id
+        raw = load_platform_authoritative_raw(
+            case_dir / "authoritative" / "ncbi.raw.out"
+        )
+        linux_raw = linux_paths[
+            (representative.program, representative.case_id)
+        ].read_bytes()
+        comparison = structured_comparison(
+            parse_structured_rows(raw),
+            parse_structured_rows(linux_raw),
+            raw,
+            linux_raw,
+        )
+        recorded = json.loads(
+            (case_dir / "authoritative" / "linux_comparison.json").read_text("utf-8")
+        )
+        if any(
+            recorded[key] != comparison[key]
+            for key in comparison
+            if key != "differing_rows"
+        ):
+            raise CharacterizationFailure(
+                f"recorded comparison changed: {representative.case_id}"
+            )
+        profile = newline_profile(raw)
+        expected_outputs.append(
+            {
+                "byte_length": len(raw),
+                "case_id": representative.case_id,
+                "data_row_count": output_data_row_count(raw),
+                "newline_profile": {
+                    key: profile[key]
+                    for key in (
+                        "bare_cr_count",
+                        "bare_lf_count",
+                        "crlf_count",
+                        "lf_count",
+                    )
+                },
+                "program": representative.program,
+                "raw_sha256": sha256_bytes(raw),
+            }
+        )
+        diagnostics.append(
+            {
+                "case_id": representative.case_id,
+                "complete_row_order_equal": comparison["row_order_equal"],
+                "differing_row_count": comparison["differing_row_count"],
+                "lf_diagnostic_sha256": comparison["platform_lf_diagnostic_sha256"],
+                "native_ncbi_reference_class": native_reference_class(comparison),
+                "platform_id": platform_id,
+                "program": representative.program,
+                "retained_linux_raw_sha256": comparison["linux_raw_sha256"],
+                "retained_linux_row_count": comparison["linux_row_count"],
+                "row_key_multiset_equal": comparison["row_key_multiset_equal"],
+                "row_key_order_equal": comparison["row_key_order_equal"],
+                "runtime_enforced": False,
+            }
+        )
+    record = {
+        "evidence_schema": EVIDENCE_SCHEMA,
+        "status": "ADDED_PLATFORM_RECORD_DERIVED_NOT_ACCEPTED",
+        "candidate_sha": identity["candidate_sha"],
+        "platform_id": platform_id,
+        "normative_platform_record": {
+            "architecture": spec.binary_arch,
+            "archive": {
+                "checksum": {"algorithm": "md5", "value": spec.archive_md5},
+                "filename": spec.archive_name,
+                "release": "2.17.0",
+                "retrieval_url": spec.archive_url,
+            },
+            "executables": executables,
+            "expected_outputs": expected_outputs,
+            "normalized_machine": spec.machine,
+            "platform_id": platform_id,
+            "platform_system": spec.os_name,
+        },
+        "diagnostic_metadata": diagnostics,
+        "platform_run": {
+            "fixture_manifest_sha256": identity["fixture_manifest_sha256"],
+            "identity_sha256": summary["identity_sha256"],
+            "platform_id": platform_id,
+            "runner": identity["runner"],
+            "runner_label": identity["runner_label"],
+        },
+        "execution_counts": {
+            "authoritative_ncbi": EXPECTED_TOTAL_AUTHORITATIVE_EXECUTIONS,
+            "diagnostic_ncbi": EXPECTED_TOTAL_DIAGNOSTIC_EXECUTIONS,
+            "linux_ncbi_reruns": 0,
+            "losat": 0,
+            "total_ncbi": EXPECTED_TOTAL_EXECUTIONS,
+        },
+        "summary_sha256": sha256_path(evidence_root / "summary.json"),
+    }
+    atomic_write_json(output, record)
+    return record
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     script_path = Path(__file__).resolve()
     default_root = script_path.parents[2]
@@ -2300,6 +2564,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     run.add_argument("--blastp-oracle", type=Path, required=True)
     run.add_argument("--tblastx-oracle", type=Path, required=True)
 
+    classify = subparsers.add_parser("classify-added-platform")
+    classify.add_argument("--platform-evidence", type=Path, required=True)
+    classify.add_argument("--linux-bundle", type=Path, required=True)
+    classify.add_argument("--output", type=Path, required=True)
+
     analyze = subparsers.add_parser("analyze-platforms")
     analyze.add_argument(
         "--platform-evidence", type=Path, action="append", required=True
@@ -2329,6 +2598,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.repo_root.resolve(),
                 args.candidate_sha,
                 args.output_dir.resolve(),
+            )
+        elif args.mode == "classify-added-platform":
+            classify_added_platform(
+                args.platform_evidence.resolve(),
+                args.linux_bundle.resolve(),
+                args.output.resolve(),
             )
         elif args.mode == "analyze-platforms":
             analyze_platforms(

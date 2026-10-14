@@ -63,7 +63,6 @@ jobs:
         run: |
           uname -a
           command -v python python3 || true
-          python3 --version
           printf 'ImageOS=%s ImageVersion=%s RUNNER_OS=%s RUNNER_ARCH=%s\n' \
             "${ImageOS:-}" "${ImageVersion:-}" "${RUNNER_OS:-}" "${RUNNER_ARCH:-}"
 

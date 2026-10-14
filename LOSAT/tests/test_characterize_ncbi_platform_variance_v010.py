@@ -75,10 +75,14 @@ class InventoryTests(unittest.TestCase):
         )
         self.assertEqual(len(self.plan), driver.EXPECTED_REPRESENTATIVE_COUNT)
         self.assertEqual(len(self.plan) * 2, driver.EXPECTED_PLATFORM_EXECUTIONS)
-        self.assertEqual(len(self.plan) * 2 * 3, driver.EXPECTED_TOTAL_EXECUTIONS)
-        self.assertEqual(driver.EXPECTED_TOTAL_AUTHORITATIVE_EXECUTIONS, 18)
-        self.assertEqual(driver.EXPECTED_TOTAL_DIAGNOSTIC_EXECUTIONS, 18)
-        self.assertEqual(driver.EXPECTED_TOTAL_EXECUTIONS, 36)
+        self.assertEqual(
+            len(self.plan) * 2 * len(driver.CHARACTERIZED_PLATFORMS),
+            driver.EXPECTED_TOTAL_EXECUTIONS,
+        )
+        self.assertEqual(driver.CHARACTERIZED_PLATFORMS, {"linux-aarch64"})
+        self.assertEqual(driver.EXPECTED_TOTAL_AUTHORITATIVE_EXECUTIONS, 6)
+        self.assertEqual(driver.EXPECTED_TOTAL_DIAGNOSTIC_EXECUTIONS, 6)
+        self.assertEqual(driver.EXPECTED_TOTAL_EXECUTIONS, 12)
 
     def test_commands_come_from_existing_authorities(self) -> None:
         by_case = {step["case_id"]: step for step in self.plan}
@@ -225,51 +229,85 @@ class FixtureByteTests(unittest.TestCase):
         with self.assertRaises(driver.CharacterizationFailure):
             driver.require_lf_fixture(b">q\r\nACGT\r\n", "fixture.fa")
 
-    def test_three_manifest_gate_detects_a_platform_difference(self) -> None:
-        common = {
-            "repository_relative": "LOSAT/tests/fasta/q.fa",
-            "git_blob_oid": "a" * 40,
-            "expected_git_blob_raw_sha256": "b" * 64,
-            "staged_relative": "fixtures/LOSAT/tests/fasta/q.fa",
-            "staged_sha256": "b" * 64,
-            "byte_length": 4,
-            "newline_profile": {
-                "lf_count": 1,
-                "bare_lf_count": 1,
-                "crlf_count": 0,
-                "bare_cr_count": 0,
-            },
-            "lf_only": True,
-        }
+    def test_added_platform_fixture_gate_checks_authority_v010_inputs(self) -> None:
+        inputs = [
+            {
+                "repository_relative": relative,
+                "git_blob_oid": "a" * 40,
+                "expected_git_blob_raw_sha256": sha256,
+                "staged_relative": f"fixtures/{relative}",
+                "staged_sha256": sha256,
+                "byte_length": byte_length,
+                "newline_profile": {
+                    "lf_count": 1,
+                    "bare_lf_count": 1,
+                    "crlf_count": 0,
+                    "bare_cr_count": 0,
+                },
+                "lf_only": True,
+            }
+            for relative, (sha256, byte_length) in sorted(
+                driver.AUTHORITY_V010_FIXTURES.items()
+            )
+        ]
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            paths = []
-            for platform_id in ("windows-x64", "macos-arm64", "macos-x64"):
-                path = root / f"{platform_id}.json"
-                path.write_text(
-                    json.dumps(
-                        {
-                            "platform_id": platform_id,
-                            "candidate_sha": "d" * 40,
-                            "fixture_source_sha": driver.PR6_CERT_SHA_V3,
-                            "inputs": [dict(common)],
-                        }
-                    ),
-                    encoding="utf-8",
-                )
-                paths.append(path)
+            path = root / "linux-aarch64.json"
+            manifest = {
+                "platform_id": "linux-aarch64",
+                "candidate_sha": "d" * 40,
+                "fixture_source_sha": driver.PR6_CERT_SHA_V3,
+                "inputs": inputs,
+            }
+            path.write_text(json.dumps(manifest), encoding="utf-8")
             output = root / "gate.json"
-            driver.verify_fixture_invariance(paths, output)
+            driver.verify_fixture_invariance([path], output)
             self.assertEqual(
                 json.loads(output.read_text(encoding="utf-8"))["status"],
-                "CROSS_PLATFORM_FIXTURES_BYTE_IDENTICAL",
+                driver.FIXTURE_GATE_STATUS,
             )
-            changed = json.loads(paths[-1].read_text(encoding="utf-8"))
-            changed["inputs"][0]["staged_sha256"] = "c" * 64
-            paths[-1].write_text(json.dumps(changed), encoding="utf-8")
+            for field, value in (
+                ("staged_sha256", "c" * 64),
+                ("expected_git_blob_raw_sha256", "c" * 64),
+                ("byte_length", 5),
+            ):
+                changed = json.loads(json.dumps(manifest))
+                changed["inputs"][0][field] = value
+                path.write_text(json.dumps(changed), encoding="utf-8")
+                with self.assertRaises(driver.CharacterizationFailure):
+                    driver.verify_fixture_invariance([path], output)
+            other = dict(manifest, platform_id="macos-arm64")
+            path.write_text(json.dumps(other), encoding="utf-8")
             with self.assertRaises(driver.CharacterizationFailure):
-                driver.verify_fixture_invariance(paths, output)
+                driver.verify_fixture_invariance([path], output)
 
+    def test_native_reference_class_rule_order(self) -> None:
+        def comparison(raw, lf, multiset, order):
+            return {
+                "raw_bytes_equal": raw,
+                "lf_diagnostic_bytes_equal": lf,
+                "row_key_multiset_equal": multiset,
+                "row_key_order_equal": order,
+            }
+
+        self.assertEqual(
+            driver.native_reference_class(comparison(True, True, True, True)),
+            "EXACT_TO_RETAINED_LINUX_REFERENCE",
+        )
+        self.assertEqual(
+            driver.native_reference_class(comparison(False, True, True, True)),
+            "OUTPUT_NEWLINE_ONLY",
+        )
+        self.assertEqual(
+            driver.native_reference_class(comparison(False, False, True, False)),
+            "ROW_ORDER_VARIANCE",
+        )
+        self.assertEqual(
+            driver.native_reference_class(comparison(False, False, True, True)),
+            "HSP_STATISTIC_VARIANCE",
+        )
+        with self.assertRaises(driver.CharacterizationFailure):
+            driver.native_reference_class(comparison(False, False, False, False))
 
 class RetainedLinuxReferenceTests(unittest.TestCase):
     @classmethod
@@ -799,6 +837,154 @@ class ExhaustiveRichComparisonTests(unittest.TestCase):
         self.assertFalse(evidence["rerun_performed"])
 
 
+
+class AddedPlatformRecordTests(unittest.TestCase):
+    def test_record_layout_and_classes_from_platform_bytes(self) -> None:
+        head = (
+            subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT)
+            .decode("ascii")
+            .strip()
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            driver.export_linux_reference(REPO_ROOT, head, root / "linux")
+            linux_paths, _ = driver._validate_linux_bundle(root / "linux")
+            evidence = root / "evidence"
+            expected = {}
+            for representative in driver.REPRESENTATIVES:
+                key = (representative.program, representative.case_id)
+                raw = linux_paths[key].read_bytes()
+                lines = raw.split(b"\n")
+                rows = [
+                    index
+                    for index, line in enumerate(lines)
+                    if line and not line.startswith(b"#")
+                ]
+                if representative.case_id == "pairwise_default_serial":
+                    raw = raw.replace(b"\n", b"\r\n")
+                    expected[key] = "OUTPUT_NEWLINE_ONLY"
+                elif representative.case_id == "p03_mela_pemojnva":
+                    lines[rows[0]], lines[rows[1]] = lines[rows[1]], lines[rows[0]]
+                    raw = b"\n".join(lines)
+                    expected[key] = "ROW_ORDER_VARIANCE"
+                elif representative.case_id == "PesePMNV.MjPMNV.task_blastn":
+                    fields = lines[rows[0]].split(b"\t")
+                    fields[-1] = b"999"
+                    lines[rows[0]] = b"\t".join(fields)
+                    raw = b"\n".join(lines)
+                    expected[key] = "HSP_STATISTIC_VARIANCE"
+                else:
+                    expected[key] = "EXACT_TO_RETAINED_LINUX_REFERENCE"
+                case_dir = (
+                    evidence
+                    / representative.program
+                    / representative.case_id
+                    / "authoritative"
+                )
+                case_dir.mkdir(parents=True)
+                (case_dir / "ncbi.raw.out").write_bytes(raw)
+                linux_raw = linux_paths[key].read_bytes()
+                comparison = driver.structured_comparison(
+                    driver.parse_structured_rows(raw),
+                    driver.parse_structured_rows(linux_raw),
+                    raw,
+                    linux_raw,
+                )
+                (case_dir / "linux_comparison.json").write_text(
+                    json.dumps(comparison), encoding="utf-8"
+                )
+            md5 = "5f9d49b999346e0ddb6637b71af4b22a"
+            identity = {
+                "platform_id": "linux-aarch64",
+                "status": "CHARACTERIZATION_COMPLETE",
+                "candidate_sha": head,
+                "oracle_archive": {
+                    "published_md5": md5,
+                    "observed_archive_md5": md5,
+                },
+                "oracles": {
+                    program: {"architecture": "arm64", "sha256": "a" * 64}
+                    for program in ("blastn", "blastp", "tblastx")
+                },
+                "fixture_manifest_sha256": "b" * 64,
+                "runner": {"system": "Linux"},
+                "runner_label": "ubuntu-24.04-arm",
+            }
+            (evidence / "identity.json").write_text(json.dumps(identity))
+            (evidence / "summary.json").write_text(
+                json.dumps(
+                    {
+                        "decision": "DIAGNOSTIC_CHARACTERIZATION_COMPLETE",
+                        "platform_id": "linux-aarch64",
+                        "candidate_sha": head,
+                        "losat_executions": 0,
+                        "authoritative_search_executions": 6,
+                        "diagnostic_search_executions": 6,
+                        "identity_sha256": "c" * 64,
+                    }
+                )
+            )
+            record = driver.classify_added_platform(
+                evidence, root / "linux", root / "record.json"
+            )
+            self.assertEqual(
+                {
+                    (item["program"], item["case_id"]): item[
+                        "native_ncbi_reference_class"
+                    ]
+                    for item in record["diagnostic_metadata"]
+                },
+                expected,
+            )
+            platform_record = record["normative_platform_record"]
+            self.assertEqual(
+                set(platform_record),
+                {
+                    "platform_id",
+                    "platform_system",
+                    "normalized_machine",
+                    "architecture",
+                    "archive",
+                    "executables",
+                    "expected_outputs",
+                },
+            )
+            self.assertEqual(platform_record["platform_system"], "Linux")
+            self.assertEqual(platform_record["normalized_machine"], "arm64")
+            self.assertEqual(len(platform_record["expected_outputs"]), 6)
+            self.assertTrue(
+                all(
+                    item["runtime_enforced"] is False
+                    for item in record["diagnostic_metadata"]
+                )
+            )
+            self.assertEqual(
+                record["execution_counts"],
+                {
+                    "authoritative_ncbi": 6,
+                    "diagnostic_ncbi": 6,
+                    "linux_ncbi_reruns": 0,
+                    "losat": 0,
+                    "total_ncbi": 12,
+                },
+            )
+            # A recorded comparison that disagrees with the bytes fails closed.
+            first = driver.REPRESENTATIVES[0]
+            recorded = (
+                evidence
+                / first.program
+                / first.case_id
+                / "authoritative"
+                / "linux_comparison.json"
+            )
+            changed = json.loads(recorded.read_text(encoding="utf-8"))
+            changed["differing_row_count"] += 1
+            recorded.write_text(json.dumps(changed), encoding="utf-8")
+            with self.assertRaises(driver.CharacterizationFailure):
+                driver.classify_added_platform(
+                    evidence, root / "linux", root / "record.json"
+                )
+
 class WorkflowContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -836,11 +1022,7 @@ class WorkflowContractTests(unittest.TestCase):
             matrix = jobs[job_name]["strategy"]["matrix"]["include"]
             self.assertEqual(
                 [(item["platform_id"], item["runner"]) for item in matrix],
-                [
-                    ("windows-x64", "windows-2025"),
-                    ("macos-arm64", "macos-15"),
-                    ("macos-x64", "macos-15-intel"),
-                ],
+                [("linux-aarch64", "ubuntu-24.04-arm")],
             )
 
     def test_workflow_has_exact_thirty_six_searches_and_no_losat_run(self) -> None:
@@ -854,25 +1036,27 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(driver.EXPECTED_PLATFORM_AUTHORITATIVE_EXECUTIONS, 6)
         self.assertEqual(driver.EXPECTED_PLATFORM_DIAGNOSTIC_EXECUTIONS, 6)
         self.assertEqual(driver.EXPECTED_PLATFORM_EXECUTIONS, 12)
-        self.assertEqual(driver.EXPECTED_TOTAL_AUTHORITATIVE_EXECUTIONS, 18)
-        self.assertEqual(driver.EXPECTED_TOTAL_DIAGNOSTIC_EXECUTIONS, 18)
-        self.assertEqual(driver.EXPECTED_TOTAL_EXECUTIONS, 36)
+        self.assertEqual(driver.EXPECTED_TOTAL_AUTHORITATIVE_EXECUTIONS, 6)
+        self.assertEqual(driver.EXPECTED_TOTAL_DIAGNOSTIC_EXECUTIONS, 6)
+        self.assertEqual(driver.EXPECTED_TOTAL_EXECUTIONS, 12)
         self.assertNotIn("cargo build", text)
         self.assertNotIn("target/release/LOSAT", text)
         self.assertNotIn("--native-bin", text)
         self.assertNotIn("certify --", text)
         self.assertNotIn("-version", text)
 
-    def test_workflow_aggregates_three_platforms_without_linux_rerun(self) -> None:
+    def test_workflow_classifies_one_platform_without_linux_rerun(self) -> None:
         document = yaml.load(
             WORKFLOW_PATH.read_text(encoding="utf-8"), Loader=yaml.BaseLoader
         )
-        analysis = document["jobs"]["analyze-rich-diagnostics"]
-        self.assertEqual(analysis["needs"], ["characterize", "retained-linux-evidence"])
+        classification = document["jobs"]["classify-added-platform"]
+        self.assertEqual(
+            classification["needs"], ["characterize", "retained-linux-evidence"]
+        )
         text = WORKFLOW_PATH.read_text(encoding="utf-8")
-        self.assertIn("analyze-platforms", text)
-        self.assertEqual(text.count("--platform-evidence"), 3)
-        self.assertIn("18 authoritative plus 18 diagnostic", text)
+        self.assertIn("classify-added-platform", text)
+        self.assertNotIn("analyze-platforms", text)
+        self.assertEqual(text.count("--platform-evidence"), 1)
         self.assertNotIn("linux-rerun", text.lower())
 
     def test_retained_linux_export_is_hosted_git_blob_transport_only(self) -> None:
@@ -896,7 +1080,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assert_no_blast_or_losat_invocation(run_text)
 
     def test_analysis_job_cannot_execute_blast_or_losat(self) -> None:
-        run_text = self._job_run_text("analyze-rich-diagnostics")
+        run_text = self._job_run_text("classify-added-platform")
         self.assertNotIn("cargo ", run_text)
         self.assertNotIn("run_losat", run_text)
         self.assertNotIn("--native-bin", run_text)
@@ -915,10 +1099,34 @@ class WorkflowContractTests(unittest.TestCase):
             "LOSAT/src/main.rs",
             "LOSAT/tests/platform_native_v010_canonical.tsv",
             ".github/workflows/platform-native-certification-v010.yml",
-            "LOSAT/tests/certify_platform_native_v010.py",
             "LOSAT/tests/test_certify_platform_native_v010.py",
         }
         self.assertTrue(changed.isdisjoint(protected))
+        # The driver only gains the added PlatformSpec and the ELF reader.
+        driver_diff = subprocess.check_output(
+            [
+                "git",
+                "diff",
+                "--unified=0",
+                driver.PR6_CERT_SHA_V3,
+                "--",
+                "LOSAT/tests/certify_platform_native_v010.py",
+            ],
+            cwd=REPO_ROOT,
+        ).decode("utf-8")
+        removed = [
+            line
+            for line in driver_diff.splitlines()
+            if line.startswith("-") and not line.startswith("---")
+        ]
+        added = [
+            line
+            for line in driver_diff.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        ]
+        self.assertEqual(removed, [])
+        self.assertEqual(len(added), 15)
+        self.assertIn('+    "linux-aarch64": PlatformSpec(', added)
         self.assertFalse(
             any(path.startswith("docs/product_decisions/") for path in changed)
         )
@@ -946,9 +1154,14 @@ class WorkflowContractTests(unittest.TestCase):
                     "ncbi-blast-2.17.0+-x64-macosx.tar.gz",
                     "cde7979c0edca21da0567ab172b68b0e",
                 ),
+                "linux-aarch64": (
+                    "ncbi-blast-2.17.0+-aarch64-linux.tar.gz",
+                    "5f9d49b999346e0ddb6637b71af4b22a",
+                ),
             },
         )
-        for spec in self.authority.PLATFORMS.values():
+        for platform_id in driver.CHARACTERIZED_PLATFORMS:
+            spec = self.authority.PLATFORMS[platform_id]
             self.assertIn(spec.archive_name, text)
             self.assertIn(spec.runner_label, text)
         self.assertNotIn("brew install", text)

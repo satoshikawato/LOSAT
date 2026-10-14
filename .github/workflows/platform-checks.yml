@@ -5,6 +5,8 @@ name: Platform checks
 # paths):
 #  - outputs: release binary, 49 cases (all five programs) at 1 and 4 threads in both modes; the
 #    outputs of the two modes must be byte-identical and the exit codes 0 (LOSAT/tests/platform_checks.py);
+#    on the two arm64 platforms a third mode, LOSAT_X_DPNEON=1 (the NEON X-drop kernels, off unless
+#    set), must give the same outputs as well;
 #  - compare: the hashes of the five platforms must equal each other (no expected hash is stored;
 #    the frozen hashes are checked on Linux x64 by ci.yml);
 #  - tests: cargo test --all-features in both modes on the four platforms other than Linux x64
@@ -82,9 +84,9 @@ jobs:
       matrix:
         include:
           - { runner: ubuntu-24.04, id: linux-x64, python: python3 }
-          - { runner: ubuntu-24.04-arm, id: linux-arm64, python: python3 }
+          - { runner: ubuntu-24.04-arm, id: linux-arm64, python: python3, extra: '--extra-mode dpneon=LOSAT_X_DPNEON=1' }
           - { runner: windows-2025, id: windows-x64, python: python }
-          - { runner: macos-15, id: macos-arm64, python: python3 }
+          - { runner: macos-15, id: macos-arm64, python: python3, extra: '--extra-mode dpneon=LOSAT_X_DPNEON=1' }
           - { runner: macos-15-intel, id: macos-x64, python: python3 }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -106,7 +108,7 @@ jobs:
       - name: Build release binary
         run: cd LOSAT && cargo build --release --locked --bin LOSAT
       - name: Default against LOSAT_X_DEFAULT=0, 49 cases, 1 and 4 threads
-        run: ${{ matrix.python }} LOSAT/tests/platform_checks.py run --losat LOSAT/target/release/LOSAT --out platform-check
+        run: ${{ matrix.python }} LOSAT/tests/platform_checks.py run --losat LOSAT/target/release/LOSAT --out platform-check ${{ matrix.extra }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:

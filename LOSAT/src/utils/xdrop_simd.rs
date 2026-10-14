@@ -979,6 +979,211 @@ mod arch {
     }
 }
 
+// No NCBI counterpart: the same vector instruction wrappers for aarch64 NEON (Advanced SIMD, part
+// of every aarch64 target Rust builds for, so no run-time check). One 128-bit register type for
+// all lane widths; the reinterpretations between them emit no instruction. Where NEON has no
+// single instruction for an x86 one, the comment gives the sequence; the result is the wasm result
+// for every input (`pick` and `lut32` included) and the x86 result where x86 and wasm agree.
+#[cfg(target_arch = "aarch64")]
+mod arch {
+    use core::arch::aarch64::*;
+    pub type V = uint8x16_t;
+    #[inline(always)]
+    unsafe fn s16(v: V) -> int16x8_t {
+        vreinterpretq_s16_u8(v)
+    }
+    #[inline(always)]
+    unsafe fn u16(v: V) -> uint16x8_t {
+        vreinterpretq_u16_u8(v)
+    }
+    #[inline(always)]
+    unsafe fn s8(v: V) -> int8x16_t {
+        vreinterpretq_s8_u8(v)
+    }
+    #[inline(always)]
+    unsafe fn u64(v: V) -> uint64x2_t {
+        vreinterpretq_u64_u8(v)
+    }
+    #[inline(always)]
+    pub unsafe fn zero() -> V {
+        vdupq_n_u8(0)
+    }
+    #[inline(always)]
+    pub unsafe fn splat16(x: i16) -> V {
+        vreinterpretq_u8_s16(vdupq_n_s16(x))
+    }
+    #[inline(always)]
+    pub unsafe fn splat8(x: i8) -> V {
+        vreinterpretq_u8_s8(vdupq_n_s8(x))
+    }
+    #[inline(always)]
+    pub unsafe fn load<T>(p: *const T) -> V {
+        vld1q_u8(p as *const u8)
+    }
+    #[inline(always)]
+    pub unsafe fn store<T>(p: *mut T, v: V) {
+        vst1q_u8(p as *mut u8, v)
+    }
+    #[inline(always)]
+    pub unsafe fn adds16(a: V, b: V) -> V {
+        vreinterpretq_u8_s16(vqaddq_s16(s16(a), s16(b)))
+    }
+    #[inline(always)]
+    pub unsafe fn add16(a: V, b: V) -> V {
+        vreinterpretq_u8_s16(vaddq_s16(s16(a), s16(b)))
+    }
+    #[inline(always)]
+    pub unsafe fn subsu16(a: V, b: V) -> V {
+        vreinterpretq_u8_u16(vqsubq_u16(u16(a), u16(b)))
+    }
+    #[inline(always)]
+    pub unsafe fn max16(a: V, b: V) -> V {
+        vreinterpretq_u8_s16(vmaxq_s16(s16(a), s16(b)))
+    }
+    #[inline(always)]
+    pub unsafe fn gt16(a: V, b: V) -> V {
+        vreinterpretq_u8_u16(vcgtq_s16(s16(a), s16(b)))
+    }
+    #[inline(always)]
+    pub unsafe fn and(a: V, b: V) -> V {
+        vandq_u8(a, b)
+    }
+    #[inline(always)]
+    pub unsafe fn or(a: V, b: V) -> V {
+        vorrq_u8(a, b)
+    }
+    /// `!mask & v` (`bic` takes the operands the other way round).
+    #[inline(always)]
+    pub unsafe fn andnot(mask: V, v: V) -> V {
+        vbicq_u8(v, mask)
+    }
+    #[inline(always)]
+    pub unsafe fn shlq16(v: V) -> V {
+        vreinterpretq_u8_u64(vshlq_n_u64::<16>(u64(v)))
+    }
+    #[inline(always)]
+    pub unsafe fn shlq32(v: V) -> V {
+        vreinterpretq_u8_u64(vshlq_n_u64::<32>(u64(v)))
+    }
+    /// Bytes up by 2 / 4 / 8 lanes, zeros shifted in (x86 `pslldq`): the window of `0 ++ v` that
+    /// starts 16 - n bytes in.
+    #[inline(always)]
+    pub unsafe fn bsl2(v: V) -> V {
+        vextq_u8::<14>(vdupq_n_u8(0), v)
+    }
+    #[inline(always)]
+    pub unsafe fn bsl4(v: V) -> V {
+        vextq_u8::<12>(vdupq_n_u8(0), v)
+    }
+    #[inline(always)]
+    pub unsafe fn bsl8(v: V) -> V {
+        vextq_u8::<8>(vdupq_n_u8(0), v)
+    }
+    /// Byte shuffle; an index byte >= 16 gives 0. `tbl` with one table register is wasm
+    /// `swizzle` for every index byte. x86 `pshufb` differs for 16..128 only.
+    #[inline(always)]
+    pub unsafe fn pick(v: V, idx: V) -> V {
+        vqtbl1q_u8(v, idx)
+    }
+    /// 32-entry byte table lookup; an index byte >= 32 gives 0. `tbl` with two table registers is
+    /// the two `swizzle`s of wasm for every index byte. x86 can differ from both for 32 and up:
+    /// those bytes (the fence sentinel 201, a letter the kernel declines, columns past the band)
+    /// reach only lanes the kernels mask or do not read, so all three give the same results.
+    #[inline(always)]
+    pub unsafe fn lut32(t0: V, t1: V, idx: V) -> V {
+        vqtbl2q_u8(uint8x16x2_t(t0, t1), idx)
+    }
+    /// Lane 7 (16-bit) to every lane (`mask` unused).
+    #[inline(always)]
+    pub unsafe fn bcast_last16(v: V, _mask: V) -> V {
+        vreinterpretq_u8_u16(vdupq_laneq_u16::<7>(u16(v)))
+    }
+    /// Lane 3 (16-bit) to lanes 4..8, zero elsewhere: the x86 shuffle mask (bytes 128 or 6, 7)
+    /// through `tbl`, which gives 0 for the out-of-range bytes as `pshufb` does for 128.
+    #[inline(always)]
+    pub unsafe fn cross16(v: V, mask: V) -> V {
+        vqtbl1q_u8(v, mask)
+    }
+    /// Lane 15 (8-bit) to every lane (`mask` unused).
+    #[inline(always)]
+    pub unsafe fn bcast_last8(v: V, _mask: V) -> V {
+        vdupq_laneq_u8::<15>(v)
+    }
+    /// Lane 7 (8-bit) to lanes 8..16, zero elsewhere (the x86 mask through `tbl`, as `cross16`).
+    #[inline(always)]
+    pub unsafe fn cross8(v: V, mask: V) -> V {
+        vqtbl1q_u8(v, mask)
+    }
+    #[inline(always)]
+    pub unsafe fn unpacklo8(a: V, b: V) -> V {
+        vzip1q_u8(a, b)
+    }
+    #[inline(always)]
+    pub unsafe fn unpackhi8(a: V, b: V) -> V {
+        vzip2q_u8(a, b)
+    }
+    /// i16 to u8 with unsigned saturation: the lanes of `a`, then those of `b` (`packuswb`).
+    #[inline(always)]
+    pub unsafe fn packus16(a: V, b: V) -> V {
+        vqmovun_high_s16(vqmovun_s16(s16(a)), s16(b))
+    }
+    /// The top bit of each byte, byte i at bit i (`pmovmskb`): the top bits spread over each
+    /// byte, weighted 1..128 within each half, and each half summed across.
+    #[inline(always)]
+    pub unsafe fn mask8(v: V) -> u32 {
+        const W: [u8; 16] = [1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128];
+        let m = vandq_u8(
+            vreinterpretq_u8_s8(vshrq_n_s8::<7>(s8(v))),
+            vld1q_u8(W.as_ptr()),
+        );
+        vaddv_u8(vget_low_u8(m)) as u32 | (vaddv_u8(vget_high_u8(m)) as u32) << 8
+    }
+    #[inline(always)]
+    pub unsafe fn lane0(v: V) -> i32 {
+        vgetq_lane_s16::<0>(s16(v)) as i32
+    }
+    #[inline(always)]
+    pub unsafe fn adds8(a: V, b: V) -> V {
+        vreinterpretq_u8_s8(vqaddq_s8(s8(a), s8(b)))
+    }
+    #[inline(always)]
+    pub unsafe fn add8(a: V, b: V) -> V {
+        vaddq_u8(a, b)
+    }
+    #[inline(always)]
+    pub unsafe fn subsu8(a: V, b: V) -> V {
+        vqsubq_u8(a, b)
+    }
+    #[inline(always)]
+    pub unsafe fn max8(a: V, b: V) -> V {
+        vreinterpretq_u8_s8(vmaxq_s8(s8(a), s8(b)))
+    }
+    #[inline(always)]
+    pub unsafe fn gt8(a: V, b: V) -> V {
+        vcgtq_s8(s8(a), s8(b))
+    }
+    #[inline(always)]
+    pub unsafe fn shlq8(v: V) -> V {
+        vreinterpretq_u8_u64(vshlq_n_u64::<8>(u64(v)))
+    }
+    #[inline(always)]
+    pub unsafe fn bsl1(v: V) -> V {
+        vextq_u8::<15>(vdupq_n_u8(0), v)
+    }
+    #[inline(always)]
+    pub unsafe fn lane0_u8(v: V) -> i32 {
+        vgetq_lane_u8::<0>(v) as i32
+    }
+    #[inline(always)]
+    pub unsafe fn lane15_u8(v: V) -> i32 {
+        vgetq_lane_u8::<15>(v) as i32
+    }
+    #[inline(always)]
+    pub unsafe fn lane7(v: V) -> i32 {
+        vgetq_lane_s16::<7>(s16(v)) as i32
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:578-601,616-619,631
 // ```c
 //             next_score = score_array[b_index].best + matrix_row[ *b_ptr ];
@@ -1005,7 +1210,8 @@ mod arch {
 // (`align_body`) and with (`TB`) or without a traceback.
 #[cfg(any(
     target_arch = "x86_64",
-    all(target_arch = "wasm32", target_feature = "simd128")
+    all(target_arch = "wasm32", target_feature = "simd128"),
+    target_arch = "aarch64"
 ))]
 mod kernel {
     use super::arch::*;
@@ -2108,10 +2314,11 @@ mod kernel {
 }
 
 /// No NCBI counterpart: whether the vector kernels of this file (`mod kernel`) are compiled for
-/// the target: x86_64, and wasm32 built with simd128.
+/// the target: x86_64, wasm32 built with simd128, and aarch64 (NEON).
 const KERNEL_COMPILED: bool = cfg!(any(
     target_arch = "x86_64",
-    all(target_arch = "wasm32", target_feature = "simd128")
+    all(target_arch = "wasm32", target_feature = "simd128"),
+    target_arch = "aarch64"
 ));
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:766-770
@@ -2126,18 +2333,35 @@ const KERNEL_COMPILED: bool = cfg!(any(
 /// LOSAT_X_DPFAST is on by default (`utils/xswitch.rs`); on a target without a vector kernel
 /// (`KERNEL_COMPILED` false) the mode stays 0, because `xdrop_align` returns `None` for every
 /// call there and mode 1 would only build the kernel's tables before the scalar port runs.
+/// On aarch64 mode 1 also needs LOSAT_X_DPNEON (`neon_on`).
 pub(crate) fn mode() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_DPSHADOW").is_some() {
             2
-        } else if KERNEL_COMPILED && crate::utils::xswitch::on("LOSAT_X_DPFAST") {
+        } else if KERNEL_COMPILED && crate::utils::xswitch::on("LOSAT_X_DPFAST") && neon_on() {
             1
         } else {
             0
         }
     })
+}
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_DPNEON, off unless set): on aarch64 the NEON build of
+/// the vector kernels runs only when this variable is set (any value), so that the kernels enter
+/// as an opt-in path; without it aarch64 keeps the scalar port, as before the NEON layer
+/// existed. LOSAT_X_DEFAULT does not touch it. Always true on the other targets.
+/// LOSAT_X_DPSHADOW (mode 2) runs and compares the kernels without it.
+fn neon_on() -> bool {
+    #[cfg(target_arch = "aarch64")]
+    {
+        std::env::var_os("LOSAT_X_DPNEON").is_some()
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        true
+    }
 }
 
 /// No NCBI counterpart: checks the CPU features at run time (LOSAT_X_DPNOAVX turns the AVX
@@ -2203,11 +2427,12 @@ fn fits_8bit(scores: &Scores<'_>, gap_open: i32, gap_extend: i32, x_drop: i32) -
 #[path = "x_xdrop_avx2.rs"]
 mod x_avx2;
 // EXPERIMENT (LOSAT_X_DPW128): the 128-bit kernels with the per-row savings of the 256-bit ones,
-// over the same `arch` layer (x86_64 SSE4.1 / AVX-128 builds and wasm32 simd128). A child module
-// like `x_avx2`.
+// over the same `arch` layer (x86_64 SSE4.1 / AVX-128 builds, wasm32 simd128 and aarch64 NEON). A
+// child module like `x_avx2`.
 #[cfg(any(
     target_arch = "x86_64",
-    all(target_arch = "wasm32", target_feature = "simd128")
+    all(target_arch = "wasm32", target_feature = "simd128"),
+    target_arch = "aarch64"
 ))]
 #[path = "x_xdrop_w128.rs"]
 mod x_w128;
@@ -2219,7 +2444,8 @@ mod x_capture;
 /// change any value NCBI computes. Bit 0: try the 256-bit kernels first (set only when the CPU
 /// has AVX2); bit 1: record a sample of the calls. 0 (both off) leaves `xdrop_align` as it was.
 /// Bit 2 (EXPERIMENT, LOSAT_X_DPW128): try the 128-bit kernels of `x_xdrop_w128.rs` after the
-/// 256-bit ones (set only when the CPU runs the 128-bit kernels; always on wasm32 simd128).
+/// 256-bit ones (set only when the CPU runs the 128-bit kernels; always on wasm32 simd128 and
+/// aarch64).
 fn x_extra_switches() -> u8 {
     use std::sync::OnceLock;
     static ON: OnceLock<u8> = OnceLock::new();
@@ -2233,7 +2459,8 @@ fn x_extra_switches() -> u8 {
         }
         #[cfg(any(
             target_arch = "x86_64",
-            all(target_arch = "wasm32", target_feature = "simd128")
+            all(target_arch = "wasm32", target_feature = "simd128"),
+            target_arch = "aarch64"
         ))]
         {
             if x_w128::switch_on() {
@@ -2358,12 +2585,13 @@ fn x_extra_dispatch(
     // whatever `xdrop_align` returns, so it covers these kernels as well.
     #[cfg(any(
         target_arch = "x86_64",
-        all(target_arch = "wasm32", target_feature = "simd128")
+        all(target_arch = "wasm32", target_feature = "simd128"),
+        target_arch = "aarch64"
     ))]
     {
         if on & 4 != 0 {
             // SAFETY: bit 2 is set only when `x_w128::available()` held (the 128-bit kernels' CPU
-            // features on x86_64; simd128 is a compile-time feature on wasm32).
+            // features on x86_64; simd128 on wasm32 and NEON on aarch64 are compile-time features).
             let r = unsafe {
                 x_w128::align(
                     q,
@@ -2553,10 +2781,13 @@ pub(crate) fn xdrop_align(
             }
         }
     }
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[cfg(any(
+        all(target_arch = "wasm32", target_feature = "simd128"),
+        target_arch = "aarch64"
+    ))]
     {
         let m8 = fits_8bit(scores, gap_open, gap_extend, x_drop);
-        // SAFETY: simd128 is a compile-time feature of this build.
+        // SAFETY: simd128 (wasm32) and NEON (aarch64) are compile-time features of this build.
         unsafe {
             match (tb, m8) {
                 (true, Some(m)) => kernel::align_body8::<true>(
@@ -2614,7 +2845,8 @@ pub(crate) fn xdrop_align(
     }
     #[cfg(not(any(
         target_arch = "x86_64",
-        all(target_arch = "wasm32", target_feature = "simd128")
+        all(target_arch = "wasm32", target_feature = "simd128"),
+        target_arch = "aarch64"
     )))]
     {
         let _ = (
@@ -3011,7 +3243,8 @@ mod tests {
         // On targets without the SIMD kernel nothing is handled.
         if cfg!(any(
             target_arch = "x86_64",
-            all(target_arch = "wasm32", target_feature = "simd128")
+            all(target_arch = "wasm32", target_feature = "simd128"),
+            target_arch = "aarch64"
         )) {
             assert!(
                 handled > cases,

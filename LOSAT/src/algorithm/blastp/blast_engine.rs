@@ -7544,7 +7544,17 @@ fn run_resolved_in_pool(
     // thread its parallel paths read the lists of all queries, so all are expanded here; the
     // one-thread loop below expands each query's list when it reaches it. The shadow mode
     // compares every list here and redoes the off path's lists.
-    if x_prelim_compact == XPrelimCompact::Shadow || blastp_num_threads > 1 {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let x_compact_expand_all = blastp_num_threads > 1;
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    let x_compact_expand_all = false;
+    if x_prelim_compact == XPrelimCompact::Shadow || x_compact_expand_all {
         x_finish_compact_lists(
             x_prelim_compact,
             &mut preliminary_hit_lists,

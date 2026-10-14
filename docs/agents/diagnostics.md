@@ -627,8 +627,13 @@ Scheduling (each value computed by one thread with the original function; order 
   clears a table of next_pow2(query residues + window) entries of 8 bytes (1 MB for 84,000 query
   residues); on the human transcriptome (465,769 subjects, 118 fly proteins, 8 threads) glibc's
   per-thread heaps were created and deleted about 250,000 times for these states (munmap 461,484,
-  mmap 249,858 against 36 and 71 before #161). The units of a long subject that run on the pool
-  (`TBNOIDUNITS`, the single subject of a search) take the offset step too, on a state per task.
+  mmap 249,858 against 36 and 71 before #161). On the workstation (8 threads on 8 cores of one NUMA
+  node, other work on the machine, alternating rounds against a placebo variable, the same reports):
+  that search 161.9 -> 133.2 s (CPU 1,261 -> 1,031 s, minor faults 3.8-22 M -> 0.87 M, munmap
+  415,942 -> 55), the zebrafish transcriptome 15.2 -> 12.0 s, the 16S rRNA genes (28,036 subjects,
+  55 proteins) 1.18 -> 1.01 s, and at one thread 8.15 -> 6.82 s. The units of a long subject that
+  run on the pool (`TBNOIDUNITS`, the single subject of a search) take the offset step too, on a
+  state per task.
   The thread that runs the search keeps one set (the table and the largest offset-pair and hit
   buffers) until it ends or its next tblastn search takes it over. Not in the set (off unless set
   to any value); it acts at every thread count. With `LOSAT_X_DEFAULT=0` the reference loop runs

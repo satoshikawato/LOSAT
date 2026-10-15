@@ -45,9 +45,21 @@ class AllowlistTests(unittest.TestCase):
         self.assertEqual(listed.unexecuted({("blastn", "other")}, {"blastn"}), [("blastn", "known")])
         self.assertEqual(listed.unexecuted(set(), {"blastp"}), [])
 
-    def test_repository_allowlist_loads(self):
-        entries = Allowlist().entries
-        self.assertIn(("blastn", "Sakai.MG1655.megablast"), entries)
+    def test_repository_allowlist_is_empty_and_gate_a_reads_the_v011_manifest(self):
+        self.assertEqual(Allowlist().entries, {})
+        # PD-NCBI-PLATFORM-VARIANCE 1.3: the approved Sakai output is the Gate A
+        # expectation itself, read from the certification driver's manifest.
+        expected = fast.capture_outputs.gate_a()
+        self.assertEqual(len(expected), 43)
+        self.assertEqual(
+            expected[("blastn", "Sakai.MG1655.megablast")],
+            "ac8177764f35b2fb92777f8b1d01ea646cc55ae21b05f1f486ee231348a34a45",
+        )
+        # The S02 baseline's outputs are the v0.1.1 expectations in all 43 cases.
+        baseline = fast.read_tsv(fast.BASELINE)
+        gate_a_rows = {key: row for key, row in baseline.items() if row["expected_source"] == "gate_a"}
+        self.assertEqual(set(gate_a_rows), set(expected))
+        self.assertEqual({key: row["output_sha256"] for key, row in gate_a_rows.items()}, expected)
 
 
 class CheckRowsTests(unittest.TestCase):

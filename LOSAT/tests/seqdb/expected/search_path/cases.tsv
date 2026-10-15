@@ -1,0 +1,141 @@
+id	cwd	blastdb	registry	name	ncbi	title	sequences	volumes	error	status	note	losat
+a01_cwd	cwd1	<unset>	<none>	db	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/cwd1/db	\e	0	\e	\e
+a02_blastdb_only	empty	{R}/b1	<none>	only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+a03_cwd_before_blastdb	cwd1	{R}/b1	<none>	both	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/cwd1/both	\e	0	\e	\e
+a04_first_dir_wins	empty	{R}/b1:{R}/b2	<none>	both	ok	first four proteins	4	{R}/b1/both	\e	0	\e	\e
+a05_first_dir_wins_rev	empty	{R}/b2:{R}/b1	<none>	both	ok	next three proteins	3	{R}/b2/both	\e	0	\e	\e
+a06_second_dir	empty	{R}/b1:{R}/b2	<none>	only2	ok	next three proteins	3	{R}/b2/only2	\e	0	\e	\e
+a07_empty_element	empty	{R}/b1::{R}/b2	<none>	only2	ok	next three proteins	3	{R}/b2/only2	\e	0	\e	\e
+a08_leading_separator	empty	:{R}/b1	<none>	only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+a09_trailing_separator	empty	{R}/b1:	<none>	only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+a10_trailing_slash	empty	{R}/b1/	<none>	only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+a11_double_slash	empty	{R}//b1//	<none>	only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+a12_missing_dir_first	empty	{R}/nonexistent:{R}/b1	<none>	only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+a13_dotdot_in_dir	empty	{R}/b1/../b2	<none>	only2	ok	next three proteins	3	{R}/b2/only2	\e	0	\e	\e
+a14_list_normalised_as_one_path	empty	{R}/b2/:/../b1	<none>	only	error	\e	\e	\e	No alias or index file found for protein database [only] in search path [{R}/empty:{R}/b2/b1:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+a15_symlink_dir	empty	{R}/link_b1	<none>	only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+a16_symlink_dir_in_list	empty	{R}/link_b1:{R}/b2	<none>	both	ok	first four proteins	4	{R}/b1/both	\e	0	\e	\e
+a17_symlink_abs_target	empty	{R}/link_abs	<none>	only2	ok	next three proteins	3	{R}/b2/only2	\e	0	\e	\e
+a18_backslash_in_dir	empty	{R}/b1\\sub	<none>	dbs	ok	first four proteins	4	{R}/b1/sub/dbs	\e	0	\e	\e
+a19_blastdb_empty_value	cwd1	\e	<none>	db	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/cwd1/db	\e	0	\e	\e
+a20_file_symlinks	empty	<unset>	<none>	lnk	ok	first four proteins	4	{R}/empty/lnk	\e	0	\e	\e
+a21_dot_slash_dir	empty	{R}/./b1/.	<none>	only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+a22_second_dir_trailing_slash	empty	{R}/b1/:{R}/b2/	<none>	only2	ok	next three proteins	3	{R}/b2/only2	\e	0	\e	\e
+b01_registry_only	empty	<unset>	{R}/reg	regonly	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/reg/regonly	\e	0	\e	\e
+b02_blastdb_before_registry	empty	{R}/b1	{R}/reg	only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+b03_registry_after_blastdb	empty	{R}/b2	{R}/reg	only	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/reg/only	\e	0	\e	\e
+b04_cwd_first_of_three	cwd1	{R}/b1	{R}/reg	both	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/cwd1/both	\e	0	\e	\e
+b05_registry_list	empty	<unset>	{R}/reg:{R}/b2	only2	ok	next three proteins	3	{R}/b2/only2	\e	0	\e	\e
+b06_registry_trailing_slash	empty	<unset>	{R}/reg/	regonly	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/reg/regonly	\e	0	\e	\e
+b07_registry_symlink	empty	<unset>	{R}/link_b1	only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+c01_subdir_cwd	cwd1	<unset>	<none>	sub/dbs	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/cwd1/sub/dbs	\e	0	\e	\e
+c02_subdir_blastdb	empty	{R}/b1	<none>	sub/dbs	ok	first four proteins	4	{R}/b1/sub/dbs	\e	0	\e	\e
+c03_subdir_cwd_first	cwd1	{R}/b1	<none>	sub/dbs	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/cwd1/sub/dbs	\e	0	\e	\e
+c04_subdir_skips_local_copy	cwd1	{R}/b1	<none>	deep/dv	ok	first four proteins	4	{R}/b1/deep/dv	\e	0	\e	\e
+c05_dot_slash	cwd1	<unset>	<none>	./db	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/cwd1/db	\e	0	\e	\e
+c06_dot_slash_blastdb	empty	{R}/b1	<none>	./only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+c07_dotdot	empty	<unset>	<none>	../cwd1/db	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/cwd1/db	\e	0	\e	\e
+c08_double_slash_name	cwd1	<unset>	<none>	sub//dbs	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/cwd1/sub/dbs	\e	0	\e	\e
+c09_absolute	empty	<unset>	<none>	{R}/b1/only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+c10_absolute_with_blastdb	cwd1	{R}/b2	<none>	{R}/b1/both	ok	first four proteins	4	{R}/b1/both	\e	0	\e	\e
+c11_backslash_name	empty	{R}/b1	<none>	sub\\dbs	ok	first four proteins	4	{R}/b1/sub/dbs	\e	0	\e	\e
+c12_absolute_through_symlink	empty	<unset>	<none>	{R}/link_b1/only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+c13_subdir_registry	empty	<unset>	{R}/b1	deep/dv	ok	first four proteins	4	{R}/b1/deep/dv	\e	0	\e	\e
+c14_dotdot_blastdb	empty	{R}/b2	<none>	../b1/only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	\e
+d01_pin	cwd1	<unset>	<none>	db.pin	error	\e	\e	\e	No alias or index file found for protein database [db.pin] in search path [{R}/cwd1::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+d02_pal	cwd1	<unset>	<none>	palpin.pal	error	\e	\e	\e	No alias or index file found for protein database [palpin.pal] in search path [{R}/cwd1::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+d03_psq	cwd1	<unset>	<none>	db.psq	error	\e	\e	\e	No alias or index file found for protein database [db.psq] in search path [{R}/cwd1::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+d04_name_that_ends_in_pin	cwd1	<unset>	<none>	dotted.pin	ok	next three proteins	3	{R}/cwd1/dotted.pin	\e	0	\e	\e
+d05_pin_blastdb	empty	{R}/b1	<none>	only.pin	error	\e	\e	\e	No alias or index file found for protein database [only.pin] in search path [{R}/empty:{R}/b1:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+e01_pal_and_pin_same_dir	cwd1	<unset>	<none>	palpin	ok	alias beside a volume of its name	4	{R}/cwd1/ord	\e	0	\e	\e
+e02_pin_first_dir_pal_second	empty	{R}/b1:{R}/b2	<none>	split	ok	first four proteins	4	{R}/b1/split	\e	0	\e	\e
+e03_pal_first_dir_pin_second	empty	{R}/b2:{R}/b1	<none>	split	ok	alias in the second directory	3	{R}/b2/only2	\e	0	\e	\e
+f01_alias_volumes_beside	empty	{R}/b1	<none>	al_beside	ok	volumes beside the alias	7	{R}/b1/vol_a | {R}/b1/vol_b	\e	0	\e	\e
+f02_alias_local_copy	cwd1	{R}/b1	<none>	al_beside	ok	volumes beside the alias	13	{R}/cwd1/vol_a | {R}/b1/vol_b	\e	0	\e	\e
+f03_dblist_not_found	empty	{R}/b1	<none>	al_far	error	\e	\e	\e	Could not find volume or alias file (far_vol) referenced in alias file ({R}/b1/al_far).	2	\e	\e
+f04_dblist_through_blastdb	empty	{R}/b1:{R}/b2	<none>	al_far	ok	a volume found through the search path	3	{R}/b2/far_vol	\e	0	\e	\e
+f05_dblist_through_registry	empty	{R}/b1	{R}/b2	al_far	ok	a volume found through the search path	3	{R}/b2/far_vol	\e	0	\e	\e
+f06_dblist_subdir_through_blastdb	empty	{R}/b1:{R}/b2	<none>	al_farsub	ok	a volume with a directory found through the search path	3	{R}/b2/far/vol_c	\e	0	\e	\e
+f07_dblist_alias_through_blastdb	empty	{R}/b1:{R}/b2	<none>	al_faralias	ok	second-level alias	3	{R}/b2/split2.pal	\e	0	\e	\e
+f08_alias_missing_volume	empty	{R}/b1	<none>	al_missing	error	\e	\e	\e	Could not find volume or alias file (no_such_volume) referenced in alias file ({R}/b1/al_missing).	2	\e	\e
+f09_dblist_absolute	empty	{R}/b1	<none>	al_abs	ok	absolute name	3	{R}/b2/only2	\e	0	\e	\e
+f10_alias_names_itself	cwd1	<unset>	<none>	selfal	ok	an alias that names itself	4	{R}/cwd1/selfal	\e	0	\e	\e
+f11_absolute_alias_local_copy	cwd1	<unset>	<none>	{R}/b1/al_beside	ok	volumes beside the alias	13	{R}/cwd1/vol_a | {R}/b1/vol_b	\e	0	\e	\e
+f12_alias_through_symlink_dir	empty	{R}/link_b1	<none>	al_beside	ok	volumes beside the alias	7	{R}/b1/vol_a | {R}/b1/vol_b	\e	0	\e	\e
+f13_alias_empty_dblist	empty	{R}/b1	<none>	al_empty	error	\e	\e	\e	No database names were found in alias file [{R}/b1/al_empty].	2	\e	\e
+f14_alias_loop	empty	{R}/b1	<none>	loop_a	error	\e	\e	\e	Illegal configuration: DB alias files are mutually recursive.	2	\e	\e
+f15_dblist_subdir_local_copy	cwd1	{R}/b1:{R}/b2	<none>	al_farsub	ok	a volume with a directory found through the search path	10	{R}/cwd1/vol_c	\e	0	\e	\e
+f16_alias_names_itself_blastdb	empty	{R}/cwd1	<none>	selfal	ok	an alias that names itself	4	{R}/cwd1/selfal	\e	0	\e	\e
+f17_absolute_alias_missing_volume	empty	<unset>	<none>	{R}/b1/al_missing	error	\e	\e	\e	Could not find volume or alias file (no_such_volume) referenced in alias file ({R}/b1/al_missing).	2	\e	\e
+g01_unset	empty	<unset>	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g02_one_dir	empty	{R}/b1	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b1:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g03_two_dirs	empty	{R}/b1:{R}/b2	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b1:{R}/b2:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g04_trailing_slash	empty	{R}/b1/	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b1:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g05_empty_element	empty	{R}/b1::{R}/b2	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b1::{R}/b2:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g06_leading_separator	empty	:{R}/b1	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty::{R}/b1:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g07_trailing_separator	empty	{R}/b1:	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b1::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g08_dotdot	empty	{R}/b1/../b2	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b2:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g09_list_as_one_path	empty	{R}/b2/:/../b1	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b2/b1:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g10_only_separator	empty	:	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g11_two_separators	empty	::	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty::::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g12_space	empty	\s	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty: :]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g13_symlink	empty	{R}/link_b1	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b1:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g14_symlink_in_list	empty	{R}/link_b1:{R}/b2	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/link_b1:{R}/b2:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g15_missing_dir	empty	{R}/nonexistent	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/nonexistent:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g16_registry	empty	<unset>	{R}/reg	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty::{R}/reg:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g17_blastdb_and_registry	empty	{R}/b1	{R}/reg	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b1:{R}/reg:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g18_registry_list	empty	<unset>	{R}/reg/:{R}/b2/	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty::{R}/reg/:{R}/b2:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g19_blastdb_empty_value	empty	\e	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g20_absolute_name	cwd1	{R}/b1	<none>	{R}/b1/nothere	error	\e	\e	\e	No alias or index file found for protein database [{R}/b1/nothere] in search path [{R}/cwd1:{R}/b1:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g21_subdir_name	cwd1	{R}/b1	<none>	sub/nothere	error	\e	\e	\e	No alias or index file found for protein database [sub/nothere] in search path [{R}/cwd1:{R}/b1:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g22_slash	empty	/	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:/:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g23_double_slash_root	empty	//	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:/:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g24_backslash	empty	{R}/b1\\sub	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b1\\sub:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g25_symlink_abs	empty	{R}/link_abs/	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b2:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g26_symlink_then_dotdot	empty	{R}/link_abs/../b1	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:{R}/b1:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g27_trailing_slash_name	cwd1	<unset>	<none>	sub/	error	\e	\e	\e	No alias or index file found for protein database [sub/] in search path [{R}/cwd1::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g28_dot	empty	.	<none>	nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/empty:.:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+g29_dir_named_pin	empty	{R}/bad	<none>	dir	error	\e	\e	\e	No alias or index file found for protein database [dir] in search path [{R}/empty:{R}/bad:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+h01_empty_name	cwd1	<unset>	<none>	\e	error	\e	\e	\e	Database name is required.	2	\e	\e
+h02_spaces	cwd1	<unset>	<none>	\s\s	error	\e	\e	\e	Database name is required.	2	\e	\e
+h03_quoted	cwd1	<unset>	<none>	"db"	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/cwd1/db	\e	0	\e	\e
+h04_quoted_with_space	cwd1	<unset>	<none>	"my dir/spdb"	ok	next three proteins	3	{R}/cwd1/my dir/spdb	\e	0	\e	\e
+h05_space_unquoted	cwd1	<unset>	<none>	my dir/spdb	error	\e	\e	\e	No alias or index file found for protein database [my] in search path [{R}/cwd1::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	unsupported:several databases
+h06_two_names	cwd1	{R}/b1	<none>	db only	ok	LOSAT seqdb fixture, protein, version 4; first four proteins	14	{R}/cwd1/db | {R}/b1/only	\e	0	\e	unsupported:several databases
+h07_two_names_second_missing	cwd1	{R}/b1	<none>	db nothere	error	\e	\e	\e	No alias or index file found for protein database [nothere] in search path [{R}/cwd1:{R}/b1:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	unsupported:several databases
+h08_nucleotide_as_protein	empty	{R}/nuc	<none>	nt	error	\e	\e	\e	No alias or index file found for protein database [nt] in search path [{R}/empty:{R}/nuc:]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+h09_pin_with_nucleotide_content	empty	{R}/nuc	<none>	fake	error	\e	\e	\e	Error: requested sequence type does not match DB.	2	\e	\e
+h10_version_3	empty	{R}/nuc	<none>	v3	error	\e	\e	\e	Error: Not a valid version 4 or 5 database.	2	\e	\e
+h11_leading_and_trailing_space	cwd1	<unset>	<none>	\sdb\s	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/cwd1/db	\e	0	\e	\e
+h12_only_quotes	cwd1	<unset>	<none>	""	error	\e	\e	\e	No database names were passed to CSeqDB::CSeqDB().	2	\e	\e
+h13_dash	cwd1	<unset>	<none>	-	error	\e	\e	\e	No alias or index file found for protein database [-] in search path [{R}/cwd1::]. Please verify the spelling of the BLAST database and its molecule type.	2	\e	\e
+h14_tab_name	cwd1	<unset>	<none>	\t	error	\e	\e	\e	Database name is required.	2	\e	\e
+i01_group_alias	empty	{R}/g1	<none>	grp	error	\e	\e	\e	Database memory map file error - To be memory mapped the file must exist: '{R}/g1/grp.pal'	2	\e	unsupported:group alias file
+i02_volume_beside_group_alias	empty	{R}/g1	<none>	plain	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/g1/plain	\e	0	\e	unsupported:group alias file
+i03_group_alias_in_cwd	g1	{R}/b1	<none>	only	ok	first four proteins	4	{R}/b1/only	\e	0	\e	unsupported:group alias file
+i04_alias_nseq	empty	{R}/b1	<none>	al_nseq	ok	alias with NSEQ	2	{R}/b1/vol_a	\e	0	\e	unsupported:NSEQ
+i05_alias_gilist	empty	{R}/b1	<none>	al_gilist	error	\e	\e	\e	Database memory map file error - To be memory mapped the file must exist: '{R}/b1/some.gil'	2	\e	unsupported:GILIST
+i06_volume_twice	empty	{R}/b1	<none>	al_twice	ok	volumes beside the alias; first four proteins	11	{R}/b1/al_beside.pal | {R}/b1/vol_a	\e	0	\e	unsupported:more than once
+i07_same_name_two_dirs	empty	{R}/b1	<none>	al_samename	ok	next three proteins; next three proteins	6	{R}/b1/vol_b | {R}/b2/dupdir/vol_b	\e	0	\e	unsupported:same name in different directories
+i08_parsed_seqids	empty	{R}/b1	<none>	ids	other	\e	\e	\e	Error: NCBI C++ Exception: |     T0 "/opt/conda/conda-bld/blast_1754905306566/work/c++/src/corelib/ncbiobj.cpp", line 1010: Critical: (CCoreException::eNullPtr) ncbi::CObject::ThrowNullPointerException() - Attempt to access NULL pointer. |      Stack trace: |       /home/kawato/micromamba/bin/../lib/ncbi-blast+/libxncbi.so ???:0 ncbi::CObject::ThrowNullPointerException() offset=0xC0 addr=0x7f94c7df3480 |       /home/kawato/micromamba/bin/../lib/ncbi-blast+/libalign_format.so ???:0  offset=0xBF6E2 addr=0x7f94ca21c6e2 |       /home/kawato/micromamba/bin/../lib/ncbi-blast+/libalign_format.so ???:0 ncbi::align_format::CBlastTabularInfo::x_PrintSubjectAccessionVersion() offset=0x31 addr=0x7f94ca21ccf1 |       /home/kawato/micromamba/bin/../lib/ncbi-blast+/libalign_format.so ???:0 ncbi::align_format::CBlastTabularInfo::Print() offset=0x2C addr=0x7f94ca21e15c |       /home/kawato/micromamba/bin/../lib/ncbi-blast+/libxblastformat.so ???:0 ncbi::CBlastFormat::x_PrintTabularReport(ncbi::blast::CSearchResults const&, unsigned int) offset=0x891 addr=0x7f94ca2dca11 |       /home/kawato/micromamba/bin/blastp ???:0 CBlastpApp::x_RunMTBySplitDB() offset=0x1534 addr=0x560c700ddd94 |       /home/kawato/micromamba/bin/blastp ???:0 CBlastpApp::Run() offset=0x669 addr=0x560c700e00b9 |       /home/kawato/micromamba/bin/../lib/ncbi-blast+/libxncbi.so ???:0 ncbi::CNcbiApplicationAPI::x_TryMain(ncbi::EAppDiagStream, char const*, int*, bool*) offset=0x293 addr=0x7f94c7d33993 |       /home/kawato/micromamba/bin/../lib/ncbi-blast+/libxncbi.so ???:0 ncbi::CNcbiApplicationAPI::AppMain(int, char const* const*, char const* const*, ncbi::EAppDiagStream, char const*, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) offset=0x507 addr=0x7f94c7d362b7 |       /home/kawato/micromamba/bin/blastp ???:0 main offset=0x76 addr=0x560c700d4cf6 |       /lib/x86_64-linux-gnu/libc.so.6 ???:0  offset=0x2A1CA addr=0x7f94c79781ca |       /lib/x86_64-linux-gnu/libc.so.6 ???:0 __libc_start_main offset=0x8B addr=0x7f94c797828b |       /home/kawato/micromamba/bin/blastp ???:0  offset=0x18E95 addr=0x560c700d4e95	255	\e	unsupported:parsed Seq-ids
+i09_column_file	empty	{R}/b1	<none>	col	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/b1/col	\e	0	\e	unsupported:column data
+i10_versions_4_and_5	empty	{R}/b1	<none>	al_mixed	error	\e	\e	\e	DB list contains both Version 4 and Version 5 dbs	2	\e	\e
+i11_version_5	empty	{R}/v5ok	<none>	prot_v5	ok	prot.faa	10	{R}/v5ok/prot_v5	\e	0	\e	\e
+i12_version_5_without_lmdb	empty	{R}/v5no	<none>	prot_v5	error	\e	\e	\e	File {R}/v5no/prot_v5.pdb not found. If you renamed any BLAST database files, please use original file names, and makeblastdb to rename the database. If you deleted any BLAST database files, you need to recreate the database.	2	\e	\e
+i13_group_alias_dblist_dir	empty	{R}/b1	<none>	{R}/g1/plain	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/g1/plain	\e	0	\e	unsupported:group alias file
+j01_index_0_bytes	empty	{R}/bad	<none>	trunc0	other	\e	\e	\e	\e	139	\e	format:index file ends inside a field
+j02_index_3_bytes	empty	{R}/bad	<none>	trunc3	error	\e	\e	\e	Error: Not a valid version 4 or 5 database.	2	\e	format:index file ends inside a field
+j03_index_20_bytes	empty	{R}/bad	<none>	trunc20	other	\e	\e	\e	BLAST engine error: Database memory map file error	3	\e	format:index file ends inside a field
+j04_index_last_byte_missing	empty	{R}/bad	<none>	truncm1	ok	LOSAT seqdb fixture, protein, version 4	10	{R}/bad/truncm1	\e	0	\e	format:index file ends inside a field
+j05_no_sequence_file	empty	{R}/bad	<none>	nopsq	other	\e	\e	\e	BLAST engine error: Database memory map file error	3	\e	search:Database memory map file error
+j06_no_header_file	empty	{R}/bad	<none>	nophr	error	\e	\e	\e	Error: File ({R}/bad/nophr.phr) not found.	2	\e	header
+j07_alias_of_cut_index	empty	{R}/bad	<none>	al_trunc	other	\e	\e	\e	BLAST engine error: Database memory map file error	3	\e	format:index file ends inside a field
+x01_database_named_dash	xd	<unset>	<none>	-	error	\e	\e	\e	Error: File (/-.pin) not found.	2	\e	\e
+x02_database_named_dash_blastdb	empty	{R}/xd	<none>	-	error	\e	\e	\e	Error: File (/-.pin) not found.	2	\e	\e
+x03_alias_without_bytes	empty	{R}/xz	<none>	zero	error	\e	\e	\e	No database names were found in alias file [{R}/xz/zero].	2	\e	\e
+x04_dblist_dotdot	empty	{R}/xr/sub	<none>	up	ok	a volume one directory up	3	{R}/xr/upvol	\e	0	\e	\e
+x05_one_volume_two_spellings	empty	{R}/xs	<none>	two	ok	one volume under two spellings	4	{R}/xs/svol	\e	0	\e	\e
+x06_one_volume_in_two_alias_files	empty	{R}/xs	<none>	outer	ok	first four proteins; first four proteins	8	{R}/xs/inner.pal | {R}/xs/svol	\e	0	\e	unsupported:more than once
+x07_dash_with_directory	empty	<unset>	<none>	{R}/xd/-	error	\e	\e	\e	Error: File (/-.pin) not found.	2	\e	\e
+x08_name_with_dot_components	empty	<unset>	<none>	{R}/xr/sub/../upvol	ok	next three proteins	3	{R}/xr/upvol	\e	0	\e	\e
+x09_blastdb_dot_components	empty	{R}/xr/./sub/..	<none>	upvol	ok	next three proteins	3	{R}/xr/upvol	\e	0	\e	\e

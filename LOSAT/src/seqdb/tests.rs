@@ -487,7 +487,7 @@ fn databases_that_need_unread_data_are_rejected() {
             "{name}: {error}"
         );
     }
-    for (name, key) in [("alias_nseq", "NSEQ"), ("alias_gilist", "GILIST")] {
+    for (name, key) in [("alias_gilist", "GILIST")] {
         let error = open_error(name, SeqType::Protein);
         assert!(
             matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains(key)),
@@ -498,6 +498,81 @@ fn databases_that_need_unread_data_are_rejected() {
     let error = open_error("alias_twice", SeqType::Protein);
     assert!(
         matches!(&error, SeqDbError::Unsupported { message, .. } if message.contains("more than once")),
+        "{error}"
+    );
+}
+
+#[test]
+fn alias_nseq_and_length_that_equal_the_sums_are_read() {
+    // blastdb_aliastool writes NSEQ 20 and LENGTH 1602, the sums over prot_v4
+    // and prot_old. NCBI's walk takes the values instead of the sums of
+    // that node, so the database is the two volumes.
+    let (db, entries) = check_against_ncbi("alias_nseq", SeqType::Protein);
+    assert_eq!(db.num_seqs(), 20);
+    assert_eq!(db.total_length(), 1602);
+    assert_eq!(db.title(), b"alias with NSEQ and LENGTH");
+    assert_eq!(volume_names(&db), ["prot_old", "prot_v4"]);
+    let mut volume_entries = expected_entries("prot_old");
+    volume_entries.extend(expected_entries("prot_v4"));
+    assert_eq!(entries.len(), volume_entries.len());
+    for (entry, volume_entry) in entries.iter().zip(&volume_entries) {
+        // The id of a record is its ordinal id, which differs.
+        assert_eq!(entry.length, volume_entry.length);
+        assert_eq!(entry.seq, volume_entry.seq);
+        assert_eq!(entry.title, volume_entry.title);
+    }
+
+    // A nested alias file whose inner and outer nodes both have right values
+    // (20 and 1602 inside; 30 and 2403 over the inner node and prot_mv).
+    let (db, entries) = check_against_ncbi("alias_sums_nested", SeqType::Protein);
+    assert_eq!(db.num_seqs(), 30);
+    assert_eq!(db.total_length(), 2403);
+    assert_eq!(entries.len(), 30);
+    assert_eq!(db.volumes().len(), 8);
+}
+
+#[test]
+fn alias_nseq_and_length_that_differ_from_the_sums_are_rejected() {
+    for (name, key, shown) in [
+        ("alias_nseq_high", "NSEQ", "(21)"),
+        ("alias_length_low", "LENGTH", "(1601)"),
+        ("alias_nseq_plus", "NSEQ", "(+20)"),
+        ("alias_nseq_exp", "NSEQ", "(2e1)"),
+        ("alias_length_space", "LENGTH", "(1 602)"),
+        // The inner node is right and the outer one has LENGTH 2402 (sum 2403).
+        ("alias_sums_nested_bad", "LENGTH", "(2402)"),
+        // The inner alias file is wrong, although the outer node's values would
+        // make NCBI skip it.
+        ("alias_sums_inner_bad", "NSEQ", "(21)"),
+    ] {
+        let error = open_error(name, SeqType::Protein);
+        assert!(
+            matches!(&error, SeqDbError::Unsupported { message, .. }
+                if message.contains(&format!("alias file key {key} {shown}"))),
+            "{name}: {error}"
+        );
+        let SeqDbError::Unsupported { path, .. } = &error else {
+            unreachable!()
+        };
+        assert!(
+            path.extension().is_some_and(|ext| ext == "pal"),
+            "{name}: the error names an alias file: {}",
+            path.display()
+        );
+    }
+    // The wrong value is named together with the sum.
+    let error = open_error("alias_nseq_high", SeqType::Protein);
+    assert!(
+        error.to_string().contains(
+            "alias file key NSEQ (21) differs from the number of sequences of its databases (20)"
+        ),
+        "{error}"
+    );
+    let error = open_error("alias_length_low", SeqType::Protein);
+    assert!(
+        error.to_string().contains(
+            "alias file key LENGTH (1601) differs from the total length of its databases (1602)"
+        ),
         "{error}"
     );
 }
@@ -842,6 +917,23 @@ fn every_filtering_or_statistics_alias_key_is_rejected() {
         300
     );
 
+    // NSEQ and LENGTH that equal the sums are read; a repeated key takes the
+    // later value (seqdbalias.cpp:446-449), here the right one.
+    std::fs::write(
+        dir.join("keyed.pal"),
+        b"TITLE t\nDBLIST prot_v4\nNSEQ 99\nLENGTH 801\nNSEQ 10\n",
+    )
+    .unwrap();
+    let db = SeqDb::open(&name, SeqType::Protein).unwrap();
+    assert_eq!((db.num_seqs(), db.total_length()), (10, 801));
+    std::fs::write(
+        dir.join("keyed.pal"),
+        b"TITLE t\nDBLIST prot_v4\nNSEQ 10\nNSEQ 99\n",
+    )
+    .unwrap();
+    let error = SeqDb::open(&name, SeqType::Protein).unwrap_err();
+    assert!(error.to_string().contains("NSEQ (99)"), "{error}");
+
     // A group alias file in the directory: rejected for an alias file and for
     // a plain volume alike.
     std::fs::write(dir.join("index.alx"), b"ALIAS_FILE keyed.pal\n").unwrap();
@@ -1185,5 +1277,490 @@ fn full_databases_match_their_fasta() {
             db.date(),
             parts[2]
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The database search path: what NCBI BLAST+ 2.17.0 does with the name given
+// to `-db`. `expected/search_path/*.tsv` were written from runs of NCBI's
+// blastp and blastdbcmd (script `db3_path_cases.py` of the campaign's task
+// folder; see `tests/seqdb/README.md`). The tests build the same directory
+// tree and never change the current directory or the environment of the test
+// process: the search path is a value. They run on Unix: the directory
+// names, the symbolic links and the file modes of the tables are Unix's.
+
+/// A field of the tables: backslash escapes, `\s` for a space at either end
+/// and `\e` for an empty field.
+#[cfg(unix)]
+fn unescape(field: &str) -> String {
+    let mut out = String::with_capacity(field.len());
+    let mut chars = field.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('t') => out.push('\t'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('s') => out.push(' '),
+            Some('e') => {}
+            Some(other) => out.push(other),
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// The rows of `expected/search_path/NAME` (`header`: the first line names the
+/// columns and is left out).
+#[cfg(unix)]
+fn search_path_table(name: &str, header: bool) -> Vec<Vec<String>> {
+    let path = fixture_dir().join("expected/search_path").join(name);
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+    text.split('\n')
+        .skip(usize::from(header))
+        .filter(|line| !line.is_empty())
+        .map(|line| line.split('\t').map(unescape).collect())
+        .collect()
+}
+
+/// Builds the directory tree of `expected/search_path/layout.tsv` under a new
+/// temporary directory and returns its path without symbolic links, as the
+/// operating system reports a current directory.
+#[cfg(unix)]
+fn search_path_sandbox(tag: &str, layout: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temp_dir(tag).canonicalize().unwrap();
+    let root_str = root.to_str().expect("temporary directory is UTF-8");
+    let source = fixture_dir().join("db");
+    for op in search_path_table(layout, false) {
+        let op: Vec<&str> = op.iter().map(String::as_str).collect();
+        match op.as_slice() {
+            ["dir", path] => std::fs::create_dir_all(root.join(path)).unwrap(),
+            ["copy", from, to] => {
+                std::fs::copy(source.join(from), root.join(to)).unwrap();
+            }
+            ["text", to, content] => {
+                std::fs::write(root.join(to), content.replace("{R}", root_str)).unwrap();
+            }
+            ["symlink", target, to] => {
+                std::os::unix::fs::symlink(target.replace("{R}", root_str), root.join(to)).unwrap();
+            }
+            ["mode", path, bits] => {
+                let mode = u32::from_str_radix(bits, 8).unwrap();
+                std::fs::set_permissions(root.join(path), std::fs::Permissions::from_mode(mode))
+                    .unwrap();
+            }
+            ["patch", from, to, offset, byte] => {
+                let mut bytes = std::fs::read(source.join(from)).unwrap();
+                bytes[offset.parse::<usize>().unwrap()] = u8::from_str_radix(byte, 16).unwrap();
+                std::fs::write(root.join(to), bytes).unwrap();
+            }
+            ["trunc", from, to, length] => {
+                let bytes = std::fs::read(source.join(from)).unwrap();
+                let length: i64 = length.parse().unwrap();
+                let keep = if length >= 0 {
+                    length as usize
+                } else {
+                    bytes.len() - length.unsigned_abs() as usize
+                };
+                std::fs::write(root.join(to), &bytes[..keep]).unwrap();
+            }
+            other => panic!("unknown layout line {other:?}"),
+        }
+    }
+    root
+}
+
+/// The search path of a table row: `<unset>` and `<none>` stand for a
+/// variable that is not set and a registry without the entry.
+#[cfg(unix)]
+fn row_search_path(cwd: &Path, blastdb: &str, registry: &str) -> SearchPath {
+    SearchPath::new(
+        cwd,
+        (blastdb != "<unset>").then(|| std::ffi::OsStr::new(blastdb)),
+        (registry != "<none>").then_some(registry),
+    )
+    .unwrap()
+}
+
+/// Compares what LOSAT does with one row with what NCBI did.
+/// `row`: NCBI's outcome, title, sequences, volumes, error, exit status.
+#[cfg(unix)]
+fn check_search_path_row(
+    id: &str,
+    name: &str,
+    search: &SearchPath,
+    row: &[String],
+    losat: &str,
+    place: &dyn Fn(&str) -> String,
+) {
+    let (ncbi, title, sequences, volumes, error, status) =
+        (&row[0], &row[1], &row[2], &row[3], &row[4], &row[5]);
+    // The tables hold the value of blastp's `-db`, which the program trims.
+    let name = db_argument_name(name);
+    let opened = SeqDb::open_in(name, SeqType::Protein, search);
+
+    // A volume without its sequence file: NCBI's search fails when it reads
+    // the first sequence, with the search stage's own text and exit status.
+    if let Some(text) = losat.strip_prefix("search:") {
+        let db = opened.unwrap_or_else(|e| panic!("{id}: LOSAT does not open it: {e:?}"));
+        let read = db.read_sequence(0).expect_err("the first read fails");
+        assert_eq!(read.ncbi_search_message(), Some(text), "{id}: {read:?}");
+        assert_eq!(*error, format!("BLAST engine error: {text}"), "{id}");
+        assert_eq!(status, "3", "{id}: exit status of an engine error");
+        return;
+    }
+    // A volume without its header file: NCBI opens the file at the first read of
+    // a header, which a search makes after its search (`SeqDb::open_in`); the
+    // error is the reader's.
+    if losat == "header" {
+        let db = opened.unwrap_or_else(|e| panic!("{id}: LOSAT does not open it: {e:?}"));
+        db.read_sequence(0)
+            .unwrap_or_else(|e| panic!("{id}: the sequence file: {e:?}"));
+        let read = db.deflines(0).expect_err("the first header read fails");
+        assert_eq!(read.ncbi_message(), Some(place(error)), "{id}: {read:?}");
+        assert_eq!(status, "2", "{id}: exit status of a database error");
+        return;
+    }
+    // Databases LOSAT refuses on purpose, whatever NCBI does with them.
+    if let Some((kind, text)) = losat.split_once(':') {
+        let error = match opened {
+            Ok(_) => panic!("{id}: opened, expected {losat}"),
+            Err(error) => error,
+        };
+        let matches = match (kind, &error) {
+            ("unsupported", SeqDbError::Unsupported { message, .. })
+            | ("format", SeqDbError::Format { message, .. }) => message.contains(text),
+            _ => false,
+        };
+        assert!(matches, "{id}: expected {losat}, got {error:?}");
+        assert_eq!(error.ncbi_message(), None, "{id}: a refusal of LOSAT");
+        return;
+    }
+
+    match ncbi.as_str() {
+        "ok" => {
+            let db = opened.unwrap_or_else(|e| panic!("{id}: NCBI opens it, LOSAT: {e:?}"));
+            assert_eq!(String::from_utf8_lossy(db.title()), *title, "{id}: title");
+            assert_eq!(db.num_seqs().to_string(), *sequences, "{id}: sequences");
+            let listed = super::alias::test_info_volumes(name, SeqType::Protein, search).unwrap();
+            let expected: Vec<String> = volumes.split(" | ").map(place).collect();
+            assert_eq!(listed, expected, "{id}: volumes");
+        }
+        "error" => {
+            assert_eq!(status, "2", "{id}: exit status of a database error");
+            let error_text = match opened {
+                Ok(_) => panic!("{id}: LOSAT opens it, NCBI: {error}"),
+                Err(e) => e
+                    .ncbi_message()
+                    .unwrap_or_else(|| panic!("{id}: not an NCBI error: {e:?}")),
+            };
+            assert_eq!(error_text, place(error), "{id}: error text");
+        }
+        other => panic!("{id}: outcome {other} needs a `losat` column"),
+    }
+}
+
+/// `expected/search_path/cases.tsv`: one row per `-db` name with a current
+/// directory, `BLASTDB` and the registry value.
+#[cfg(unix)]
+#[test]
+fn a_name_is_found_where_ncbi_finds_it() {
+    let root = search_path_sandbox("search-path", "layout.tsv");
+    let root_str = root.to_str().unwrap().to_string();
+    let place = |value: &str| value.replace("{R}", &root_str);
+    let rows = search_path_table("cases.tsv", true);
+    for row in &rows {
+        assert_eq!(row.len(), 13, "{row:?}");
+        let (id, cwd, blastdb, registry, name) = (&row[0], &row[1], &row[2], &row[3], &row[4]);
+        let search = row_search_path(&root.join(cwd), &place(blastdb), &place(registry));
+        check_search_path_row(id, &place(name), &search, &row[5..11], &row[12], &place);
+    }
+    assert!(rows.len() > 100, "{} cases", rows.len());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// `expected/search_path/relative.tsv`: relative directories in `BLASTDB` and
+/// in the registry value, run from the crate root, where Cargo runs the tests
+/// of the crate. The fixtures of `tests/seqdb/db` are read in place.
+#[cfg(unix)]
+#[test]
+fn relative_directories_are_used_as_they_are_written() {
+    let cwd = std::env::current_dir().unwrap();
+    let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    if cwd.canonicalize().ok() != crate_root.canonicalize().ok() {
+        eprintln!("skipped: the tests do not run in the crate root");
+        return;
+    }
+    let cwd_str = cwd.to_str().unwrap().to_string();
+    let place = |value: &str| value.replace("{P}", &cwd_str);
+    let rows = search_path_table("relative.tsv", true);
+    for row in &rows {
+        assert_eq!(row.len(), 11, "{row:?}");
+        let (id, blastdb, registry, name) = (&row[0], &row[1], &row[2], &row[3]);
+        let search = row_search_path(&cwd, blastdb, registry);
+        check_search_path_row(id, name, &search, &row[4..10], "", &place);
+    }
+    assert!(rows.len() >= 15, "{} cases", rows.len());
+}
+
+// NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:5932-5946 and
+// c++/src/app/blast/blast_app_util.hpp:185-203 (quoted at `DbFile::open` and
+// at `SeqDbError::ncbi_message`).
+/// `expected/search_path/open_cases.tsv`: files without read permission and a
+/// directory that cannot be searched. LOSAT opens a volume's files at other
+/// moments than NCBI (NCBI maps the sequence and header files when the
+/// search reads them), so the text compared is that of the first error LOSAT
+/// meets when it opens the database and reads its first sequence and title.
+/// The rows with a limit of open files are not run here (the limit belongs
+/// to the process); `ncbis_errors_are_told_from_losats` covers their text.
+#[cfg(unix)]
+#[test]
+fn files_that_cannot_be_opened_give_ncbis_errors() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = search_path_sandbox("search-path-open", "open_layout.tsv");
+    let root_str = root.to_str().unwrap().to_string();
+    let place = |value: &str| value.replace("{R}", &root_str);
+    // The administrator reads files of any mode: nothing to compare then.
+    let readable_anyway = std::fs::File::open(root.join("d/nopin.pin")).is_ok();
+    let rows = search_path_table("open_cases.tsv", true);
+    let mut compared = 0;
+    for row in &rows {
+        assert_eq!(row.len(), 12, "{row:?}");
+        let (id, cwd, blastdb, name, limit) = (&row[0], &row[1], &row[2], &row[3], &row[4]);
+        let (blastp, blastp_error, losat) = (&row[5], &row[6], &row[11]);
+        if !limit.is_empty() || readable_anyway {
+            continue;
+        }
+        let search = row_search_path(&root.join(cwd), &place(blastdb), "<none>");
+        let first_error = SeqDb::open_in(&place(name), SeqType::Protein, &search).and_then(|db| {
+            db.read_sequence(0)?;
+            db.deflines(0).map(|_| db.num_seqs())
+        });
+        if let Some(text) = losat.strip_prefix("search:") {
+            // The sequence file: NCBI's search stage reports the failure in
+            // its own words and with exit status 3.
+            let error = first_error.expect_err("the first read fails");
+            assert_eq!(error.ncbi_search_message(), Some(text), "{id}: {error:?}");
+            assert_eq!(*blastp_error, format!("BLAST engine error: {text}"), "{id}");
+            assert_eq!(row[7], "3", "{id}: exit status of an engine error");
+        } else if let Some((_, text)) = losat.split_once(':') {
+            assert!(
+                matches!(&first_error, Err(SeqDbError::Unsupported { message, .. }) if message.contains(text)),
+                "{id}: expected {losat}, got {first_error:?}"
+            );
+        } else if blastp == "ok" {
+            assert!(first_error.is_ok(), "{id}: {first_error:?}");
+        } else {
+            assert_eq!(
+                blastp, "error",
+                "{id}: an outcome that needs a `losat` column"
+            );
+            let message = first_error
+                .err()
+                .and_then(|error| error.ncbi_message())
+                .unwrap_or_else(|| panic!("{id}: no NCBI error"));
+            assert_eq!(message, place(blastp_error), "{id}");
+            assert_eq!(row[7], "2", "{id}: exit status of a database error");
+        }
+        compared += 1;
+    }
+    assert!(readable_anyway || compared >= 8, "{compared} cases");
+    // Directories are opened again before the tree is removed.
+    let closed = root.join("d/closed");
+    std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The string of the search path, and the errors of a search path that
+/// cannot be used.
+#[test]
+fn the_search_path_string_and_its_errors() {
+    let cwd = std::env::current_dir().unwrap();
+    let cwd_str = cwd.to_str().unwrap();
+    let search = SearchPath::new(&cwd, None, None).unwrap();
+    // The directory is the one the operating system reports; its spelling
+    // is compared on Unix only (the Windows rules of NCBI's path
+    // normalisation are ported from the source and have no oracle run).
+    if cfg!(unix) {
+        assert_eq!(search.as_str(), format!("{cwd_str}::"));
+    }
+    // The path of the process starts with the same directory, whatever
+    // `BLASTDB` holds.
+    assert!(SearchPath::from_environment(None)
+        .unwrap()
+        .as_str()
+        .starts_with(cwd_str));
+    // A registry entry adds its value and a separator, also when it is empty.
+    let with_entry = SearchPath::new(&cwd, None, Some("")).unwrap();
+    let separator = if cfg!(windows) { ';' } else { ':' };
+    assert_eq!(
+        with_entry.as_str(),
+        format!("{}{separator}", search.as_str())
+    );
+
+    // `CSeqDB::CSeqDB` (seqdb.cpp:155-165) and `x_ExpandAliases` on an empty
+    // list (seqdbalias.cpp:740-754).
+    let message = |name: &str| {
+        SeqDb::open_in(name, SeqType::Protein, &search)
+            .unwrap_err()
+            .ncbi_message()
+    };
+    assert_eq!(message("").as_deref(), Some("Database name is required."));
+    assert_eq!(
+        message("  ").as_deref(),
+        Some("No database names were passed to CSeqDB::CSeqDB().")
+    );
+    // A program trims the value of `-db` before it opens the database
+    // (blast_args.cpp:2472-2476).
+    assert_eq!(db_argument_name(" \t db one\r\n\x0b\x0c "), "db one");
+    assert_eq!(db_argument_name(" \t "), "");
+    assert_eq!(db_argument_name("\u{a0}db"), "\u{a0}db");
+    let error = SeqDb::open_in("no_such_database", SeqType::Nucleotide, &search).unwrap_err();
+    assert_eq!(
+        error.ncbi_message(),
+        Some(format!(
+            "No alias or index file found for nucleotide database [no_such_database] in search \
+             path [{}]. Please verify the spelling of the BLAST database and its molecule type.",
+            search.as_str()
+        ))
+    );
+}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
+// (the texts of `eTooManyOpenFiles` and `eMemoryMappingFailure`, quoted at
+// `SeqDbError::ncbi_message`).
+/// Which errors are NCBI's own, and their texts.
+#[test]
+fn ncbis_errors_are_told_from_losats() {
+    let path = PathBuf::from("/data/db.pin");
+    let format = |message: &str| SeqDbError::Format {
+        path: path.clone(),
+        message: message.to_string(),
+    };
+    for message in [
+        "Error: Not a valid version 4 or 5 database.",
+        "Error: requested sequence type does not match DB.",
+        "DB list contains both Version 4 and Version 5 dbs",
+        "Illegal configuration: DB alias files are mutually recursive.",
+        "No database names were found in alias file [/data/alias].",
+    ] {
+        assert_eq!(format(message).ncbi_message().as_deref(), Some(message));
+    }
+    assert_eq!(
+        format("index file ends inside a field").ncbi_message(),
+        None
+    );
+    assert_eq!(
+        SeqDbError::NotFound("Error: File (/data/db.psq) not found.".to_string()).ncbi_message(),
+        Some("Error: File (/data/db.psq) not found.".to_string())
+    );
+    let unsupported = SeqDbError::Unsupported {
+        path: path.clone(),
+        message: "x".to_string(),
+    };
+    assert_eq!(unsupported.ncbi_message(), None);
+    assert_eq!(unsupported.ncbi_search_message(), None);
+    assert_eq!(SeqDbError::Range("x".to_string()).ncbi_message(), None);
+    // Inside the search NCBI replaces the reader's text (local_blast.cpp:240-252).
+    assert_eq!(
+        SeqDbError::NotFound("Error: File (/data/db.psq) not found.".to_string())
+            .ncbi_search_message(),
+        Some("Database memory map file error")
+    );
+    let io = |code: i32| std::io::Error::from_raw_os_error(code);
+    assert_eq!(
+        SeqDbError::Io {
+            path: path.clone(),
+            source: io(5)
+        }
+        .ncbi_message(),
+        None
+    );
+    // An error without an operating system code is LOSAT's.
+    assert_eq!(
+        SeqDbError::Open {
+            path: path.clone(),
+            source: std::io::Error::other("x")
+        }
+        .ncbi_message(),
+        None
+    );
+    #[cfg(unix)]
+    {
+        // EACCES (13), EMFILE (24) and ENFILE (23) on Linux and macOS.
+        assert_eq!(
+            SeqDbError::Open {
+                path: path.clone(),
+                source: io(13)
+            }
+            .ncbi_message()
+            .as_deref(),
+            Some(
+                "Database memory map file error - CMemoryFile: Cannot memory map file \
+                 '/data/db.pin':Permission denied"
+            )
+        );
+        assert_eq!(
+            SeqDbError::Open {
+                path: path.clone(),
+                source: io(13)
+            }
+            .ncbi_search_message(),
+            Some("Database memory map file error")
+        );
+        for code in [23, 24] {
+            let error = SeqDbError::Open {
+                path: path.clone(),
+                source: io(code),
+            };
+            let text = "Too many open files, please raise the open file limit";
+            assert_eq!(error.ncbi_message().as_deref(), Some(text));
+            assert_eq!(error.ncbi_search_message(), Some(text));
+        }
+    }
+}
+
+/// Opens a database as a search program would and prints what a program
+/// would report, for checks by hand against NCBI that need a property of the
+/// process (its current directory, `BLASTDB`, its limit of open files).
+///
+/// `LOSAT_SEQDB_OPEN_PROBE` is `prot|nucl,NAME`; the registry value comes
+/// from `LOSAT_SEQDB_OPEN_PROBE_REGISTRY` when it is set. Every sequence and
+/// title is read, so that all the files of all the volumes are opened.
+#[test]
+#[ignore = "needs LOSAT_SEQDB_OPEN_PROBE (a check by hand)"]
+fn open_probe() {
+    let spec = std::env::var("LOSAT_SEQDB_OPEN_PROBE").expect("LOSAT_SEQDB_OPEN_PROBE");
+    let (kind, name) = spec.split_once(',').expect("prot|nucl,NAME");
+    let seqtype = match kind {
+        "prot" => SeqType::Protein,
+        "nucl" => SeqType::Nucleotide,
+        other => panic!("unknown sequence type {other}"),
+    };
+    let registry = std::env::var("LOSAT_SEQDB_OPEN_PROBE_REGISTRY").ok();
+    let outcome = SearchPath::from_environment(registry.as_deref())
+        .and_then(|search| SeqDb::open_in(db_argument_name(name), seqtype, &search))
+        .and_then(|db| {
+            for ordinal in 0..db.num_seqs() {
+                db.read_sequence(ordinal)?;
+                db.deflines(ordinal)?;
+            }
+            Ok(db)
+        });
+    match outcome {
+        Ok(db) => println!(
+            "probe: ok: {} sequences in {} volume(s), title {:?}",
+            db.num_seqs(),
+            db.volumes().len(),
+            String::from_utf8_lossy(db.title())
+        ),
+        Err(error) => match error.ncbi_message() {
+            Some(text) => println!("probe: BLAST Database error: {text}"),
+            None => println!("probe: LOSAT: {error}"),
+        },
     }
 }

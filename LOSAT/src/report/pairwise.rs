@@ -186,6 +186,32 @@ pub struct BlastpPairwiseReport {
     pub num_alignments: usize,
 }
 
+/// The database of a `-db` search as the pairwise report shows it (NCBI's `SDbInfo` of a
+/// BLAST database). A search of a FASTA subject set has none: its `Database:` lines are
+/// `BlastpPairwiseReport::database_name` with a period, and its date is `Unknown`.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:385-391
+/// ```c++
+///     info.name = seqdb->GetDBNameList();
+///     info.definition = seqdb->GetTitle();
+///     if (info.definition.empty())
+///         info.definition = info.name;
+///     info.date = seqdb->GetDate();
+///     info.total_length = seqdb->GetTotalLength();
+///     info.number_seqs = seqdb->GetNumSeqs();
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairwiseDatabase {
+    /// `definition`: the title of the database, or the name as given for an empty title.
+    pub definition: Vec<u8>,
+    /// `date`.
+    pub date: String,
+    /// `number_seqs`.
+    pub num_sequences: u64,
+    /// `total_length`.
+    pub total_letters: u64,
+}
+
 // =============================================================================
 // Pairwise Output Writers
 // =============================================================================
@@ -319,6 +345,136 @@ fn write_subject_alignments<W: Write>(
                 u64::from(s_idx) + 1
             )?,
         }
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.end(hsp_index);
+        }
+    }
+    Ok(())
+}
+
+/// The alignments of one database subject (an `-db` search) in outfmt 0: each HSP by
+/// `write_hsp`, the first one after the subject's heading. The heading of a sequence that
+/// has a BLAST definition line with the id `gnl|BL_ORD_ID|n` is `>` and the stored title
+/// (no id and no space), or the title that `GenerateDefline` makes when the stored one is
+/// empty, wrapped as every heading, then `Length=`. `probe` marks the heading and each
+/// HSP without changing the written bytes.
+///
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2249-2254
+/// ```c++
+/// 		if(bdl->IsSetTitle()){
+/// 			alnDispParams->title = bdl->GetTitle();
+/// 		}
+///         if(alnDispParams->title.empty()) {
+///             alnDispParams->title = CDeflineGenerator().GenerateDefline(bsp_handle);
+///         }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2383-2386
+/// ```c++
+///                 if(alnDispParams) {
+///                     numBdl++;
+///                     if(isFirst){
+///                         out << ">";
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2421-2422
+/// ```c++
+///                     if(!(alnDispParams->seqID->AsFastaString().find("gnl|BL_ORD_ID") != string::npos) ||
+/// 			alnDispParams->seqID->AsFastaString().find("lcl|Subject_") != string::npos){
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:2461-2479
+/// ```c++
+///                     if (out.tellp() > 1L) {
+///                         out << " ";
+///                     }
+/// 					if(!alnDispParams->title.empty()) {
+///                         s_WrapOutputLine(out, (m_AlignOption&eHtml) ?
+///                                          CHTMLHelper::
+///                                          HTMLEncode(alnDispParams->title) :
+///                                          alnDispParams->title);
+///                     }
+///                     out<<"\n";
+///                     isFirst = false;
+///                 }
+///             }
+///             ...
+///     out<<kLengthString<<bsp_handle.GetBioseqLength()<<"\n";
+/// ```
+/// Nothing was written after `>` for a `BL_ORD_ID` id, so `tellp()` is 1 and no space
+/// follows it. A stored title is a VisibleString (bytes from ' ' to '~'), so the title
+/// that `GenerateDefline` makes of an empty one is `unnamed protein product` and its
+/// encoding is never unknown.
+fn write_database_subject_alignments<W: Write>(
+    writer: &mut W,
+    mut probe: Option<&mut FormatProbe<'_>>,
+    title: &[u8],
+    hits: &[&PairwiseHit],
+    hsp_indices: &[HspIndex],
+    mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+) -> io::Result<()> {
+    let first_index = hsp_indices[0];
+    if let Some(probe) = probe.as_mut() {
+        writer.flush()?;
+        probe.subject_begin(first_index);
+    }
+    let generated;
+    let heading: &[u8] = if title.is_empty() {
+        generated = super::defline::generate_defline(title, true, false)
+            .map(|defline| defline.text)
+            .unwrap_or_default();
+        &generated
+    } else {
+        title
+    };
+    writer.write_all(b">")?;
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:340-359
+    // ```c++
+    // static void s_WrapOutputLine(CNcbiOstream& out, const string& str)
+    // {
+    //     const int line_len = 60;
+    //     bool do_wrap = false;
+    //     int length = (int) str.size();
+    //     if (length > line_len) {
+    //         for (int i = 0; i < length; i ++){
+    //             if(i > 0 && i % line_len == 0){
+    //                 do_wrap = true;
+    //             }
+    //             out << str[i];
+    //             if(do_wrap && isspace((unsigned char) str[i])){
+    //                 out << "\n";
+    //                 do_wrap = false;
+    //             }
+    //         }
+    //     } else {
+    //         out << str;
+    //     }
+    // }
+    // ```
+    let mut do_wrap = false;
+    for (i, &c) in heading.iter().enumerate() {
+        if i > 0 && i % 60 == 0 {
+            do_wrap = true;
+        }
+        writer.write_all(&[c])?;
+        if do_wrap && (c.is_ascii_whitespace() || c == 11) {
+            writer.write_all(b"\n")?;
+            do_wrap = false;
+        }
+    }
+    writeln!(writer)?;
+    if let Some(length) = hits[0].subject_length {
+        writeln!(writer, "Length={length}")?;
+    }
+    writeln!(writer)?;
+    if let Some(probe) = probe.as_mut() {
+        writer.flush()?;
+        probe.subject_end(first_index);
+    }
+    for (hit, &hsp_index) in hits.iter().zip(hsp_indices) {
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.begin(hsp_index);
+        }
+        write_hsp(writer, hit)?;
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
             probe.end(hsp_index);
@@ -1292,8 +1448,12 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
     database_name: &str,
     database_num_sequences: usize,
     database_total_letters: usize,
+    database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     write_blastp_pairwise_intro(writer, version)?;
+    if let Some(database) = database {
+        return write_blast_database_header(writer, database);
+    }
     // The blank lines before the first query are the query's (as TBLASTX's prolog).
     write_blastp_database_header_spacing(
         writer,
@@ -1302,6 +1462,90 @@ pub fn write_blastp_pairwise_prolog<W: Write>(
         database_total_letters,
         1,
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:511-538
+// ```c++
+//     if (top) {
+//         const CAlignFormatUtil::SDbInfo* dbinfo = &(dbinfo_list.front());
+//         out << "Database: ";
+//
+//         string db_titles = dbinfo->definition;
+//         Int8 tot_num_seqs = static_cast<Int8>(dbinfo->number_seqs);
+//         Int8 tot_length = dbinfo->total_length;
+//
+//         for (size_t i = 1; i < dbinfo_list.size(); i++) {
+//             db_titles += "; " + dbinfo_list[i].definition;
+//             tot_num_seqs += static_cast<Int8>(dbinfo_list[i].number_seqs);
+//             tot_length += dbinfo_list[i].total_length;
+//         }
+//
+//         x_WrapOutputLine(db_titles, line_length, out);
+//         ...
+//         CAlignFormatUtil::AddSpace(out, 11);
+//         out << NStr::Int8ToString(tot_num_seqs, NStr::fWithCommas) <<
+//             " sequences; " <<
+//             NStr::Int8ToString(tot_length, NStr::fWithCommas) <<
+//             " total letters\n\n";
+//         return;
+//     }
+// ```
+/// The `Database:` lines of the prolog for a database (one database per search): its
+/// title as stored, wrapped at 68, then the counts and one blank line.
+fn write_blast_database_header<W: Write>(
+    writer: &mut W,
+    database: &PairwiseDatabase,
+) -> io::Result<()> {
+    write!(writer, "Database: ")?;
+    write_flatfile_wrapped(writer, &database.definition, 68)?;
+    writeln!(
+        writer,
+        "           {} sequences; {} total letters",
+        format_count_with_commas(i64::try_from(database.num_sequences).unwrap_or(i64::MAX)),
+        format_count_with_commas(i64::try_from(database.total_letters).unwrap_or(i64::MAX))
+    )?;
+    writeln!(writer)
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:541-574
+// ```c++
+//     ITERATE(vector<SDbInfo>, dbinfo, dbinfo_list) {
+//         if (dbinfo->subset == false) {
+//             out << "  Database: ";
+//             x_WrapOutputLine(dbinfo->definition, line_length, out);
+//             ...
+//             out << "    Posted date:  ";
+//             out << dbinfo->date << "\n";
+//
+//             out << "  Number of letters in database: ";
+//             out << NStr::Int8ToString(dbinfo->total_length,
+//                                       NStr::fWithCommas) << "\n";
+//             out << "  Number of sequences in database:  ";
+//             out << NStr::IntToString(dbinfo->number_seqs,
+//                                      NStr::fWithCommas) << "\n";
+// ```
+/// The database block of the epilog for a database, and the blank lines before the
+/// matrix line (as `write_final_database_report`).
+fn write_final_database_block<W: Write>(
+    writer: &mut W,
+    database: &PairwiseDatabase,
+) -> io::Result<()> {
+    write!(writer, "  Database: ")?;
+    write_flatfile_wrapped(writer, &database.definition, 68)?;
+    writeln!(writer, "    Posted date:  {}", database.date)?;
+    writeln!(
+        writer,
+        "  Number of letters in database: {}",
+        format_count_with_commas(i64::try_from(database.total_letters).unwrap_or(i64::MAX))
+    )?;
+    writeln!(
+        writer,
+        "  Number of sequences in database:  {}",
+        format_count_with_commas(i64::try_from(database.num_sequences).unwrap_or(i64::MAX))
+    )?;
+    writeln!(writer)?;
+    writeln!(writer)?;
+    writeln!(writer)
 }
 
 fn write_blastp_database_header<W: Write>(
@@ -1569,13 +1813,17 @@ fn write_blastp_query_footer_spacing<W: Write>(
 fn write_blastp_final_footer<W: Write>(
     writer: &mut W,
     report: &BlastpPairwiseReport,
+    database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
-    write_final_database_report(
-        writer,
-        &report.database_name,
-        report.database_num_sequences,
-        report.database_total_letters,
-    )?;
+    match database {
+        Some(database) => write_final_database_block(writer, database)?,
+        None => write_final_database_report(
+            writer,
+            &report.database_name,
+            report.database_num_sequences,
+            report.database_total_letters,
+        )?,
+    }
     writeln!(writer, "Matrix: {}", report.matrix_name)?;
     writeln!(
         writer,
@@ -1651,6 +1899,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
     query_titles: &[Arc<[u8]>],
     subject_titles: &[Arc<[u8]>],
     report: &BlastpPairwiseReport,
+    database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     epilog: bool,
@@ -1661,13 +1910,16 @@ pub fn write_blastp_pairwise_report<W: Write>(
     write_blastp_pairwise_intro(writer, &report.version)?;
     // The prolog ends with one blank line; each query's preamble starts with two
     // (blast_format.cpp:1491), after the query's warnings.
-    write_blastp_database_header_spacing(
-        writer,
-        &report.database_name,
-        report.database_num_sequences,
-        report.database_total_letters,
-        1,
-    )?;
+    match database {
+        Some(database) => write_blast_database_header(writer, database)?,
+        None => write_blastp_database_header_spacing(
+            writer,
+            &report.database_name,
+            report.database_num_sequences,
+            report.database_total_letters,
+            1,
+        )?,
+    }
 
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
     // ```c++
@@ -1777,6 +2029,20 @@ pub fn write_blastp_pairwise_report<W: Write>(
         // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
         let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
         for &s_idx in aligned {
+            if database.is_some() {
+                write_database_subject_alignments(
+                    writer,
+                    probe.as_deref_mut(),
+                    &subject_titles[&s_idx],
+                    &subject_hits[&s_idx],
+                    &subject_hit_indices[&s_idx],
+                    |writer, hit| {
+                        write_hsp_info(writer, hit, config)?;
+                        write_alignment(writer, hit, config)
+                    },
+                )?;
+                continue;
+            }
             write_subject_alignments(
                 writer,
                 probe.as_deref_mut(),
@@ -1819,7 +2085,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
 
     writeln!(writer)?;
 
-    write_blastp_final_footer(writer, report)?;
+    write_blastp_final_footer(writer, report, database)?;
     writer.flush()
 }
 
@@ -3245,6 +3511,167 @@ pub fn write_pairwise_simple<W: Write>(
 mod tests {
     use super::*;
 
+    fn long_titled_database() -> PairwiseDatabase {
+        PairwiseDatabase {
+            definition: [
+                &b"a database title that is much longer than sixty-eight letters, with commas, "[..],
+                b"hyphen-ated words and a-very-long-unbroken-token-",
+                &[b'z'; 80],
+                b" at its end",
+            ]
+            .concat(),
+            date: "Oct 13, 2026  1:18 PM".to_string(),
+            num_sequences: 17,
+            total_letters: 2287,
+        }
+    }
+
+    // NCBI BLAST+ 2.17.0 `blastp -db longtitle -query hba.faa -num_threads 1` (campaign
+    // dbsearch-20261012, scripts/db3_compare.py case shapes.longtitle.0): the prolog's
+    // `Database:` lines. The title is wrapped at 68 without the period that the text of
+    // a FASTA subject set gets.
+    #[test]
+    fn database_header_is_the_stored_title_wrapped_and_the_real_counts() {
+        let mut written = Vec::new();
+        write_blast_database_header(&mut written, &long_titled_database()).unwrap();
+        assert_eq!(
+            String::from_utf8(written).unwrap(),
+            "Database: a database title that is much longer than sixty-eight letters, with\n\
+             commas, hyphen-ated words and\n\
+             a-very-long-unbroken-token-\n\
+             zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n\
+             zzzzzzzzzzzz at its end\n           17 sequences; 2,287 total letters\n\n"
+        );
+        let mut written = Vec::new();
+        write_blast_database_header(
+            &mut written,
+            &PairwiseDatabase {
+                definition: b"Swiss-Prot".to_vec(),
+                date: "Oct 12, 2026  1:01 AM".to_string(),
+                num_sequences: 575_748,
+                total_letters: 209_017_843,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            String::from_utf8(written).unwrap(),
+            "Database: Swiss-Prot\n           575,748 sequences; 209,017,843 total letters\n\n"
+        );
+    }
+
+    // The same report's epilog: the posted date of the database after its title.
+    #[test]
+    fn database_footer_has_the_posted_date() {
+        let mut written = Vec::new();
+        write_final_database_block(&mut written, &long_titled_database()).unwrap();
+        assert_eq!(
+            String::from_utf8(written).unwrap(),
+            "  Database: a database title that is much longer than sixty-eight letters, with\n\
+             commas, hyphen-ated words and\n\
+             a-very-long-unbroken-token-\n\
+             zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n\
+             zzzzzzzzzzzz at its end\n    Posted date:  Oct 13, 2026  1:18 PM\n  \
+             Number of letters in database: 2,287\n  \
+             Number of sequences in database:  17\n\n\n\n"
+        );
+    }
+
+    fn heading_of(title: &[u8]) -> String {
+        let mut hit = PairwiseHit::from(Hit {
+            identity: 100.0,
+            length: 10,
+            mismatch: 0,
+            gapopen: 0,
+            q_start: 1,
+            q_end: 10,
+            s_start: 1,
+            s_end: 10,
+            e_value: 1e-5,
+            bit_score: 30.0,
+            num_ident: 10,
+            query_frame: 0,
+            query_length: 10,
+            q_idx: 0,
+            s_idx: 0,
+            raw_score: 60,
+            sort_query_offset: 0,
+            sort_query_end: 10,
+            sort_subject_offset: 0,
+            sort_subject_end: 10,
+            has_sort_offsets: false,
+            gap_info: None,
+            num_positives: 10,
+        });
+        hit.subject_length = Some(142);
+        let mut written = Vec::new();
+        write_database_subject_alignments(
+            &mut written,
+            None,
+            title,
+            &[&hit],
+            &[0],
+            |writer: &mut Vec<u8>, _| writer.write_all(b"<hsp>\n"),
+        )
+        .unwrap();
+        String::from_utf8(written).unwrap()
+    }
+
+    // NCBI BLAST+ 2.17.0 `blastp -db titles -query hba.faa -num_threads 1` (case
+    // shapes.titles.0 of the same script): the heading of a database subject is `>` and
+    // the stored title with no space between them, wrapped after the first white space
+    // from every sixtieth letter; an empty title is the generated one.
+    #[test]
+    fn database_subject_heading_is_the_stored_title_after_the_mark() {
+        assert_eq!(
+            heading_of(b"s_plain plain copy"),
+            ">s_plain plain copy\nLength=142\n\n<hsp>\n"
+        );
+        assert_eq!(
+            heading_of(
+                b"a title that is longer than sixty letters and has spaces so that the heading wraps at a space after the sixtieth"
+            ),
+            ">a title that is longer than sixty letters and has spaces so that \n\
+             the heading wraps at a space after the sixtieth\nLength=142\n\n<hsp>\n"
+        );
+        assert_eq!(
+            heading_of(
+                b"a title of exactly sixty letters long 123456789 123456789 1234"
+            ),
+            ">a title of exactly sixty letters long 123456789 123456789 1234\nLength=142\n\n<hsp>\n"
+        );
+        let unbroken = b"a_title_without_any_space_that_is_longer_than_sixty_letters_so_that_the_heading_cannot_wrap_at_a_space_anywhere";
+        assert_eq!(
+            heading_of(unbroken),
+            format!(
+                ">{}\nLength=142\n\n<hsp>\n",
+                String::from_utf8_lossy(unbroken)
+            )
+        );
+        let seventy = [
+            &[b'x'; 70][..],
+            b" then words after seventy letters without a space before them at all in the title",
+        ]
+        .concat();
+        assert_eq!(
+            heading_of(&seventy),
+            format!(
+                ">{} \nthen words after seventy letters without a space before \n\
+                 them at all in the title\nLength=142\n\n<hsp>\n",
+                "x".repeat(70)
+            )
+        );
+        // The prefixes that the generated title loses stay in the stored one.
+        assert_eq!(
+            heading_of(b"TPA: a third party annotation prefix"),
+            ">TPA: a third party annotation prefix\nLength=142\n\n<hsp>\n"
+        );
+        // case shapes.punct00.0: an empty stored title.
+        assert_eq!(
+            heading_of(b""),
+            ">unnamed protein product\nLength=142\n\n<hsp>\n"
+        );
+    }
+
     #[test]
     fn k_bits_follows_ctoolkit_compatible() {
         assert_eq!(ncbi_k_bits_for(true), "(bits)");
@@ -3673,7 +4100,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     // The blank lines before the epilog (blast_format.cpp:2249).
     writeln!(&mut writer)?;
     writeln!(&mut writer)?;
-    write_blastp_final_footer(&mut writer, report)?;
+    write_blastp_final_footer(&mut writer, report, None)?;
     writer.flush()
 }
 

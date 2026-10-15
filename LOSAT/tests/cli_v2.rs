@@ -239,8 +239,11 @@ fn legacy_and_unsupported_syntax_is_unknown() {
         ] {
             let err = parse(program, &["-outfmt", "6", old]).unwrap_err();
             // The programs name the NCBI options that they do not implement (AGENTS.md
-            // rule 2).
-            if matches!(old, "-db" | "-remote") {
+            // rule 2). BLASTP has `-db` (it takes a value, which is missing here).
+            if program == "blastp" && old == "-db" {
+                assert!(err.to_string().contains("-db requires one value"), "{err}");
+                continue;
+            } else if matches!(old, "-db" | "-remote") {
                 assert!(
                     err.to_string().contains(&format!(
                         "not supported by LOSAT's {}",
@@ -913,7 +916,16 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
 #[test]
 fn unported_ncbi_options_are_rejected_explicitly() {
     for (program, words) in [
-        ("blastp", &["-db", "nr"][..]),
+        ("blastn", &["-db", "nt"][..]),
+        ("tblastn", &["-dbsize", "1000"]),
+        ("tblastx", &["-db", "nt"]),
+        ("blastp", &["-searchsp", "1000"]),
+        ("blastp", &["-gilist", "ids.gil"]),
+        ("blastp", &["-seqidlist", "ids.txt"]),
+        ("blastp", &["-taxids", "9606"]),
+        ("blastp", &["-db_soft_mask", "21"]),
+        ("blastp", &["-db_hard_mask", "21"]),
+        ("blastp", &["-mt_mode", "1"]),
         ("blastp", &["-culling_limit", "2"]),
         ("blastp", &["-lcase_masking"]),
         ("blastp", &["-h"]),
@@ -938,6 +950,109 @@ fn unported_ncbi_options_are_rejected_explicitly() {
             "{program} {words:?}: {error}"
         );
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199
+// ```c++
+//     arg_desc.SetCurrentGroup("General search options");
+//     // database filename
+//     if (m_IsIgBlast){
+//         arg_desc.AddOptionalKey(kArgDb, "database_name", "Optional additional database name",
+//                                 CArgDescriptions::eString);
+//     } else {
+//         arg_desc.AddOptionalKey(kArgDb, "database_name", "BLAST database name",
+//                                 CArgDescriptions::eString);
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
+// ```c++
+//     // DB size
+//     if (!m_IsMapper) {
+//         arg_desc.SetCurrentGroup("Statistical options");
+//         arg_desc.AddOptionalKey(kArgDbSize, "num_letters",
+//                                 "Effective length of the database ",
+//                                 CArgDescriptions::eInt8);
+//     }
+// ```
+// BLASTP's `-db NAME` and `-dbsize N`: `-db` excludes `-subject` and `-subject_loc` (a
+// conflict of LOSAT's parser, where NCBI prints its usage), `-dbsize` is an Int8 read with
+// either of them.
+#[test]
+fn blastp_takes_a_database_and_its_size() {
+    let blastp = |words: &[&str]| {
+        let mut argv = vec!["losat", "blastp", "-query", "q.fa"];
+        argv.extend(words);
+        try_parse_from::<Cli, _, _>(argv).map(|cli| match cli.command {
+            Commands::Blastp(args) => args,
+            _ => unreachable!("blastp"),
+        })
+    };
+    let args = blastp(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
+    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(args.subject, None);
+    assert_eq!(args.dbsize, Some(3_000_000_000));
+    // NCBI keeps the name without the white space at its ends (blast_args.cpp:2473).
+    let resolved = args.resolve().unwrap();
+    assert_eq!(resolved.db.as_deref(), Some("dir/name"));
+    assert_eq!(resolved.dbsize, 3_000_000_000);
+    // An empty name is a name (NCBI's "Database name is required." comes from the open).
+    assert_eq!(blastp(&["-db", ""]).unwrap().db.as_deref(), Some(""));
+    assert_eq!(
+        blastp(&["-db", "  "])
+            .unwrap()
+            .resolve()
+            .unwrap()
+            .db
+            .as_deref(),
+        Some("")
+    );
+    assert_eq!(blastp(&["-db=a b"]).unwrap().db.as_deref(), Some("a b"));
+    // `-dbsize` is read with `-subject` too, and takes NCBI's Int8 forms.
+    for (word, value) in [
+        ("0", 0),
+        ("-5", -5),
+        ("+7", 7),
+        ("0x10", 16),
+        ("9223372036854775807", i64::MAX),
+        ("-9223372036854775808", i64::MIN),
+    ] {
+        let args = blastp(&["-subject", "s.fa", "-dbsize", word]).unwrap();
+        assert_eq!(args.dbsize, Some(value), "{word}");
+        assert_eq!(args.resolve().unwrap().dbsize, value, "{word}");
+    }
+    // Without `-dbsize` the options keep a database length of 0.
+    let resolved = blastp(&["-subject", "s.fa"]).unwrap().resolve().unwrap();
+    assert_eq!((resolved.db, resolved.dbsize), (None, 0));
+    for word in ["abc", "1.5", "", "9223372036854775808", "1e3"] {
+        let error = blastp(&["-db", "d", "-dbsize", word]).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::ValueValidation,
+            "{word}"
+        );
+    }
+    for words in [
+        &["-db", "d", "-subject", "s.fa"][..],
+        &["-subject", "s.fa", "-db", "d"],
+        &["-db", "d", "-subject_loc", "1-10"],
+    ] {
+        let error = blastp(words).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::ArgumentConflict,
+            "{words:?}: {error}"
+        );
+        let text = LOSAT::cli::render_message(&error);
+        assert!(text.contains("'-db <NAME>'"), "{text}");
+    }
+    // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
+    let error =
+        LOSAT::algorithm::blastp::blast_engine::check_options(&blastp(&["-db", "d"]).unwrap())
+            .unwrap_err();
+    assert!(
+        format!("{error:#}").contains("-db (a database search) is not supported by LOSAT Web yet"),
+        "{error:#}"
+    );
 }
 
 #[test]

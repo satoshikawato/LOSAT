@@ -314,17 +314,21 @@ The frozen runner uses a 3600-second per-search deadline, configurable with a
 positive `--timeout-seconds`; long genome cases can exceed a 900-second limit.
 A deadline failure remains a failed attempt, even if a later retry succeeds.
 These runs are correctness checks and must not be used for speed comparisons.
-Native Gate A's frozen LOSAT hashes are not rewritten; the separate
-registered-platform Gate B is unchanged. The local Linux oracle check is
+Native Gate A's frozen LOSAT hashes are not rewritten: an approved new output
+goes into a new manifest version (`platform_native_v011_canonical.tsv` = v0.1.0's
+43 hashes with the approved Sakai.MG1655.megablast output, PD 1.3; the driver
+checks that derivation, and `capture_outputs.py` reads the driver's manifest).
+The allowlist is empty since then. The separate registered-platform Gate B is
+unchanged. The local Linux oracle check is
 explicitly diagnostic.
-The hosted Windows and macOS certification (`certify_platform_native_v010.py`)
-applies the same allowlist to Gate A. It reads the file from the candidate
+The hosted Windows, macOS and Linux arm64 certification
+(`certify_platform_native_v010.py`) applies the same allowlist to Gate A. It reads the file from the candidate
 commit. An entry that names a case of the 61-step plan and that case's frozen
 hash must declare exactly the case's matrix and repeatability steps in
 `frozen_gate_a_steps`; any other entry must not have that field and is left to
 the suite it belongs to. A listed case passes only with its listed output on
 every platform and is recorded as `ALLOWED_KNOWN_MISMATCH`
-(`all_exact_pr5_raw_bytes` is then false in the platform summary).
+(`all_exact_canonical_raw_bytes` is then false in the platform summary).
 
 `benchmark_wasm_threading.py --candidate-dir <build-root> --artifacts <wasi-dir>
 --baseline-dir <baseline-build-root> --baseline-runners <saved-test-dir>

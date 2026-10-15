@@ -21,6 +21,10 @@ pub struct Defline {
     pub title: Vec<u8>,
     /// `n` of `gnl|BL_ORD_ID|n` as stored, that is, relative to the volume.
     pub volume_ordinal: u32,
+    /// Number of stored title bytes outside ' ' ..= '~' that were read as '#'
+    /// (`fix_visible_chars`). NCBI posts an error message for each of them every
+    /// time it reads the definition line; makeblastdb stores none.
+    pub replaced_title_bytes: usize,
 }
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:71-130
@@ -383,6 +387,7 @@ fn decode_defline(ber: &mut Ber<'_>) -> Result<Defline, SeqDbError> {
     ber.expect_tag(TAG_SEQUENCE, "Blast-def-line")?;
     let defline_end = ber.open()?;
     let mut title = Vec::new();
+    let mut replaced_title_bytes = 0;
     let mut volume_ordinal = None;
     let mut next_member = DEFLINE_TITLE;
     while !ber.at_end(defline_end)? {
@@ -398,7 +403,9 @@ fn decode_defline(ber: &mut Ber<'_>) -> Result<Defline, SeqDbError> {
         let member_end = ber.open()?;
         match member {
             DEFLINE_TITLE => {
-                title = fix_visible_chars(ber.visible_string()?);
+                let stored = ber.visible_string()?;
+                replaced_title_bytes = stored.iter().filter(|c| !(b' '..=b'~').contains(c)).count();
+                title = fix_visible_chars(stored);
                 ber.close(member_end, "the title")?;
             }
             DEFLINE_SEQID => {
@@ -426,6 +433,7 @@ fn decode_defline(ber: &mut Ber<'_>) -> Result<Defline, SeqDbError> {
     Ok(Defline {
         title,
         volume_ordinal,
+        replaced_title_bytes,
     })
 }
 

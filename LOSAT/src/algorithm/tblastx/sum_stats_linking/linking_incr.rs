@@ -624,13 +624,13 @@ impl Children {
 // ...
 //       while (number_of_hsps > 0)
 // ```
-// link_hsp_group_incr only wraps link_hsp_group_incr_with: it adds the LOSAT_LINK_STATS line and
-// changes no value of the result.
+// link_hsp_group_incr only wraps link_hsp_group_incr_slice on its Vec and returns the Vec: the
+// kernel writes fields of the group's records in place and keeps their order and number.
 /// The kernel `linking.rs` runs for every group, unless `LOSAT_LINKING_LEGACY`
 /// or a linking trace selects the literal port.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn link_hsp_group_incr(
-    group_hits: Vec<UngappedHit>,
+    mut group_hits: Vec<UngappedHit>,
     cutoffs: &LinkHspCutoffs,
     gap_decay_rate: f64,
     subject_len_nucl: i64,
@@ -639,15 +639,53 @@ pub(super) fn link_hsp_group_incr(
     eff_searchsp_per_context: &[i64],
     log_k_by_ctx: &[f64],
 ) -> Vec<UngappedHit> {
+    link_hsp_group_incr_slice(
+        &mut group_hits,
+        cutoffs,
+        gap_decay_rate,
+        subject_len_nucl,
+        query_contexts,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        log_k_by_ctx,
+    );
+    group_hits
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
+// ```c
+// for (frame_index=0; frame_index<num_query_frames; frame_index++)
+// {
+//    hp_start = s_LinkHSPStructReset(hp_start);
+//    hp_start->next = hp_frame_start[frame_index];
+//    hp_frame_start[frame_index]->prev = hp_start;
+//    number_of_hsps = hp_frame_number[frame_index];
+// ```
+// NCBI links each group as a sublist of the one sorted array. The kernel on the group's records
+// wherever they lie (a Vec of its own, or a sub-slice of the linking call's list for
+// LOSAT_X_LINKSLICES, tblastx/x_link_slices.rs): it wraps link_hsp_group_incr_with_slice, adds
+// the LOSAT_LINK_STATS line and changes no value of the result.
+/// `link_hsp_group_incr` on the group's records in place.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn link_hsp_group_incr_slice(
+    group_hits: &mut [UngappedHit],
+    cutoffs: &LinkHspCutoffs,
+    gap_decay_rate: f64,
+    subject_len_nucl: i64,
+    query_contexts: &[QueryContext],
+    length_adj_per_context: &[i64],
+    eff_searchsp_per_context: &[i64],
+    log_k_by_ctx: &[f64],
+) {
     let n = group_hits.len();
     let stats_on = stats_enabled() && n > 0;
     let bound = if stats_on {
-        pass_bound(&group_hits, cutoffs)
+        pass_bound(group_hits, cutoffs)
     } else {
         0
     };
     let started = stats_on.then(std::time::Instant::now);
-    let (group_hits, stats) = link_hsp_group_incr_with(
+    let stats = link_hsp_group_incr_with_slice(
         group_hits,
         cutoffs,
         gap_decay_rate,
@@ -684,7 +722,6 @@ pub(super) fn link_hsp_group_incr(
             stats.clamped
         );
     }
-    group_hits
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:702-745
@@ -802,7 +839,7 @@ fn verify_pass(
 /// Links one group with the u64 key when it fits, else with the u128 key.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn link_hsp_group_incr_with(
-    group_hits: Vec<UngappedHit>,
+    mut group_hits: Vec<UngappedHit>,
     cutoffs: &LinkHspCutoffs,
     gap_decay_rate: f64,
     subject_len_nucl: i64,
@@ -812,6 +849,48 @@ pub(super) fn link_hsp_group_incr_with(
     log_k_by_ctx: &[f64],
     options: IncrOptions,
 ) -> (Vec<UngappedHit>, IncrStats) {
+    let stats = link_hsp_group_incr_with_slice(
+        &mut group_hits,
+        cutoffs,
+        gap_decay_rate,
+        subject_len_nucl,
+        query_contexts,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        log_k_by_ctx,
+        options,
+    );
+    (group_hits, stats)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,584-589
+// ```c
+// s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+// ...
+//       first_pass=1;    /* do full search */
+//       path_changed=1;
+// ...
+//       while (number_of_hsps > 0)
+// ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_hits.h:158
+// ```c
+//    Int4 hspcnt; /**< Number of HSPs saved */
+// ```
+// `link_hsp_group_incr_with` on the group's records in place (the Vec version wraps this one): the
+// same assertion, the same choice of the key and the same kernel on the same records.
+/// Links one group, in place, with the u64 key when it fits, else with the u128 key.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn link_hsp_group_incr_with_slice(
+    group_hits: &mut [UngappedHit],
+    cutoffs: &LinkHspCutoffs,
+    gap_decay_rate: f64,
+    subject_len_nucl: i64,
+    query_contexts: &[QueryContext],
+    length_adj_per_context: &[i64],
+    eff_searchsp_per_context: &[i64],
+    log_k_by_ctx: &[f64],
+    options: IncrOptions,
+) -> IncrStats {
     let n = group_hits.len();
     assert!(
         n < 1 << 31,
@@ -819,9 +898,9 @@ pub(super) fn link_hsp_group_incr_with(
     );
     let wide = options.wide_keys
         || n >= (1 << 24) - 1
-        || pass_bound(&group_hits, cutoffs) >= <u64 as LinkKey>::MAX_VALUE;
+        || pass_bound(group_hits, cutoffs) >= <u64 as LinkKey>::MAX_VALUE;
     if wide {
-        let (group_hits, mut stats) = link_group::<u128>(
+        let (_, mut stats) = link_group::<u128>(
             group_hits,
             cutoffs,
             gap_decay_rate,
@@ -833,9 +912,9 @@ pub(super) fn link_hsp_group_incr_with(
             options,
         );
         stats.wide_groups = 1;
-        (group_hits, stats)
+        stats
     } else {
-        link_group::<u64>(
+        let (_, stats) = link_group::<u64>(
             group_hits,
             cutoffs,
             gap_decay_rate,
@@ -845,7 +924,8 @@ pub(super) fn link_hsp_group_incr_with(
             eff_searchsp_per_context,
             log_k_by_ctx,
             options,
-        )
+        );
+        stats
     }
 }
 
@@ -860,10 +940,12 @@ pub(super) fn link_hsp_group_incr_with(
 // ```
 // The replacement for the per-group body of s_BlastEvenGapLinkHSPs: same rounds, same selection
 // rule, same removal; a pass after the first computes again only the HSPs described in the
-// module documentation.
+// module documentation. It takes the group's records as a slice (its own Vec, or a sub-slice of
+// the linking call's list for LOSAT_X_LINKSLICES) and hands the same slice back: the body indexes,
+// reads and writes fields of the records and never adds, removes or moves one.
 #[allow(clippy::too_many_arguments)]
-fn link_group<K: LinkKey>(
-    mut group_hits: Vec<UngappedHit>,
+fn link_group<'g, K: LinkKey>(
+    group_hits: &'g mut [UngappedHit],
     cutoffs: &LinkHspCutoffs,
     gap_decay_rate: f64,
     subject_len_nucl: i64,
@@ -872,7 +954,7 @@ fn link_group<K: LinkKey>(
     eff_searchsp_per_context: &[i64],
     log_k_by_ctx: &[f64],
     options: IncrOptions,
-) -> (Vec<UngappedHit>, IncrStats) {
+) -> (&'g mut [UngappedHit], IncrStats) {
     let mut stats = IncrStats::default();
     let n = group_hits.len();
     if n == 0 {

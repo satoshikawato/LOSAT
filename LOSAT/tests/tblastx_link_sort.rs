@@ -1,13 +1,14 @@
 //! The index sorts of the TBLASTX HSP list with `LOSAT_X_LINKSORT`
 //! (`src/algorithm/tblastx/x_link_sort.rs`) on whole searches.
 //!
-//! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable
-//! is set. With it on, the linking call of the in-place path (`x_hsp_inplace.rs`) sorts its
-//! output order once where it sorts twice, and an index sort of 32,768 indices or more runs as
-//! a stable parallel sort when its call may use the search pool. `LOSAT_X_LINKSORTSHADOW` runs
+//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is
+//! `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. With it on, the linking call of the
+//! in-place path (`x_hsp_inplace.rs`) sorts its output order once where it sorts twice, and an
+//! index sort of 32,768 indices or more runs as a stable parallel sort when its call may use the
+//! search pool. `LOSAT_X_LINKSORTSHADOW` runs
 //! every index sort both ways and stops at the first difference. Every test reads the
 //! `[X_STATS] LINKSORT` or `[X_SHADOW] LINKSORT` line to check that the path ran, not only that
-//! the report is equal.
+//! the report is equal. Both lines are printed only while the switch (or its shadow) is on.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
 //! ```c
@@ -44,6 +45,9 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 const SWITCH: (&str, &str) = ("LOSAT_X_LINKSORT", "1");
+const SWITCH_OFF: (&str, &str) = ("LOSAT_X_LINKSORT", "0");
+const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
+const IN_PLACE: (&str, &str) = ("LOSAT_X_HSPINPLACE", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_LINKSORTSHADOW", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const THREADS: [u32; 2] = [1, 4];
@@ -152,14 +156,15 @@ fn check_stats(stderr: &str, what: &str) -> (u64, u64) {
 //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_FwdCompareHSPsTransl);
 // ```
-// The default search with the switch: the report is NCBI's, the subject's two linking calls
-// each sort their output order once, and the sorts are the same with one thread and four.
+// The default search (no variable for the switch): the report is NCBI's, the subject's two
+// linking calls each sort their output order once, and the sorts are the same with one thread
+// and four.
 #[test]
 fn the_switch_gives_ncbis_report_with_one_final_sort_per_linking_call() {
     let expected = ncbi_report();
     let mut seen = Vec::new();
     for threads in THREADS {
-        let (report, stderr) = tblastx(threads, &[SWITCH, STATS]);
+        let (report, stderr) = tblastx(threads, &[STATS]);
         assert_eq!(report, expected, "threads {threads}");
         assert_eq!(shadow(&stderr), None, "threads {threads}:\n{stderr}");
         seen.push(check_stats(&stderr, &format!("threads {threads}")));
@@ -174,9 +179,10 @@ fn the_switch_gives_ncbis_report_with_one_final_sort_per_linking_call() {
 //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_RevCompareHSPsTbx);
 // ```
-// The shadow turns the path on and compares every index sort with today's statements: the run
-// ends without a difference, the report is NCBI's, and the shadow line counts every sort the
-// path made (the stats line of the same run).
+// The shadow stays opt-in (set to any value) and wins over the switch's variable, whatever it
+// says. It compares every index sort with today's statements: the run ends without a
+// difference, the report is NCBI's, and the shadow line counts every sort the path made (the
+// stats line of the same run).
 #[test]
 fn the_shadow_compares_every_index_sort() {
     let expected = ncbi_report();
@@ -198,6 +204,17 @@ fn the_shadow_compares_every_index_sort() {
         let (report, stderr) = tblastx(threads, &[SWITCH, SHADOW, STATS]);
         assert_eq!(report, expected, "threads {threads}");
         assert_eq!(shadow(&stderr), Some([sorts, indices]), "{what}:\n{stderr}");
+
+        // The shadow wins over `LOSAT_X_LINKSORT=0` and runs under `LOSAT_X_DEFAULT=0` with the
+        // in-place path set, where the switch alone would be off.
+        let (report, stderr) = tblastx(threads, &[SWITCH_OFF, SHADOW, STATS]);
+        assert_eq!(report, expected, "threads {threads}");
+        assert_eq!(shadow(&stderr), Some([sorts, indices]), "{what}:\n{stderr}");
+        let what = format!("shadow, LOSAT_X_DEFAULT=0 with the in-place path, threads {threads}");
+        let (report, stderr) = tblastx(threads, &[DEFAULT_OFF, IN_PLACE, SHADOW, STATS]);
+        assert_eq!(report, expected, "{what}");
+        check_stats(&stderr, &what);
+        assert!(shadow(&stderr).is_some(), "{what}:\n{stderr}");
     }
 }
 
@@ -216,11 +233,12 @@ fn the_shadow_of_the_in_place_path_accepts_the_sorts() {
     let expected = ncbi_report();
     const IN_PLACE_SHADOW: (&str, &str) = ("LOSAT_X_HSPINPLACESHADOW", "1");
     for threads in THREADS {
-        let (_, alone) = tblastx(threads, &[SWITCH, STATS]);
+        let (_, alone) = tblastx(threads, &[STATS]);
         let (sorts_alone, _) = check_stats(&alone, &format!("alone, threads {threads}"));
-        for path in [SWITCH, SHADOW] {
+        for path in [&[][..], &[SHADOW][..]] {
             let what = format!("{path:?} with the in-place shadow, threads {threads}");
-            let (report, stderr) = tblastx(threads, &[path, STATS, IN_PLACE_SHADOW]);
+            let switches = [&[STATS, IN_PLACE_SHADOW][..], path].concat();
+            let (report, stderr) = tblastx(threads, &switches);
             assert_eq!(report, expected, "{what}");
             let (sorts, indices) = check_stats(&stderr, &what);
             assert!(sorts > sorts_alone, "{what}:\n{stderr}");
@@ -228,7 +246,7 @@ fn the_shadow_of_the_in_place_path_accepts_the_sorts() {
                 .unwrap_or_else(|| panic!("{what}: no [X_SHADOW] HSPINPLACE line:\n{stderr}"));
             assert!(compared_sorts > 0, "{what}:\n{stderr}");
             assert_eq!(compared_linkings, 2, "{what}:\n{stderr}");
-            if path == SHADOW {
+            if !path.is_empty() {
                 assert_eq!(shadow(&stderr), Some([sorts, indices]), "{what}:\n{stderr}");
             }
         }
@@ -241,18 +259,20 @@ fn the_shadow_of_the_in_place_path_accepts_the_sorts() {
 // ```
 // `LOSAT_X_PAIRPAR=0` leaves the seed stage to the reference frame loop, which appends and
 // sorts the list of each subject frame through the same dispatch; the linking calls are the
-// in-place path's as before. The report is NCBI's with the switch and with its shadow.
+// in-place path's as before. The report is NCBI's with the switch (on by default, no variable)
+// and with its shadow.
 #[test]
 fn the_frame_loop_sorts_through_the_same_dispatch() {
     let expected = ncbi_report();
     const FRAME_LOOP: (&str, &str) = ("LOSAT_X_PAIRPAR", "0");
     for threads in THREADS {
-        for path in [SWITCH, SHADOW] {
+        for path in [&[][..], &[SHADOW][..]] {
             let what = format!("{path:?} {FRAME_LOOP:?} threads {threads}");
-            let (report, stderr) = tblastx(threads, &[path, STATS, FRAME_LOOP]);
+            let switches = [&[STATS, FRAME_LOOP][..], path].concat();
+            let (report, stderr) = tblastx(threads, &switches);
             assert_eq!(report, expected, "{what}");
             let (sorts, indices) = check_stats(&stderr, &what);
-            if path == SHADOW {
+            if !path.is_empty() {
                 assert_eq!(shadow(&stderr), Some([sorts, indices]), "{what}:\n{stderr}");
             }
         }
@@ -266,21 +286,26 @@ fn the_frame_loop_sorts_through_the_same_dispatch() {
 //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_FwdCompareHSPsTransl);
 // ```
-// `LOSAT_X_DEFAULT=0` and `LOSAT_X_HSPINPLACE=0` leave every sort and every linking call to the
-// reference bodies, which this switch does not touch: it changes nothing there, and its lines
-// show that no index sort went through it (every counter 0). The report is NCBI's.
+// `LOSAT_X_DEFAULT=0` (with the switch set: the run that the variable gave before the switch
+// joined the set) and `LOSAT_X_HSPINPLACE=0` (the switch on by default) leave every sort and
+// every linking call to the reference bodies, which this switch does not touch: it changes
+// nothing there, and its lines show that no index sort went through it (every counter 0). The
+// report is NCBI's.
 #[test]
 fn the_reference_bodies_do_not_reach_the_switch() {
     let expected = ncbi_report();
-    for reference in [("LOSAT_X_DEFAULT", "0"), ("LOSAT_X_HSPINPLACE", "0")] {
+    let references: [&[(&str, &str)]; 2] = [&[DEFAULT_OFF, SWITCH], &[("LOSAT_X_HSPINPLACE", "0")]];
+    for reference in references {
         for threads in THREADS {
             let what = format!("{reference:?} threads {threads}");
-            let (report, stderr) = tblastx(threads, &[SWITCH, STATS, reference]);
+            let switches = [&[STATS][..], reference].concat();
+            let (report, stderr) = tblastx(threads, &switches);
             assert_eq!(report, expected, "{what}");
             assert_eq!(stats(&stderr), Some([0; 5]), "{what}:\n{stderr}");
             assert_eq!(shadow(&stderr), None, "{what}:\n{stderr}");
 
-            let (report, stderr) = tblastx(threads, &[SHADOW, STATS, reference]);
+            let switches = [&[SHADOW, STATS][..], reference].concat();
+            let (report, stderr) = tblastx(threads, &switches);
             assert_eq!(report, expected, "{what}");
             assert_eq!(stats(&stderr), Some([0; 5]), "{what}:\n{stderr}");
             assert_eq!(shadow(&stderr), Some([0; 2]), "{what}:\n{stderr}");
@@ -295,15 +320,36 @@ fn the_reference_bodies_do_not_reach_the_switch() {
 //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_RevCompareHSPsTbx);
 // ```
-// Without the variables the statements of the in-place path run as before: no LINKSORT line is
-// printed, and the report is NCBI's.
+// With `LOSAT_X_LINKSORT=0`, or with `LOSAT_X_DEFAULT=0` and no variable for the switch (the
+// in-place path set, so that its sort sites are reached), the statements of the in-place path
+// run as before the switch existed: no LINKSORT line is printed, and the report is NCBI's.
+// `LOSAT_X_LINKSORT=0` wins over the default, and `LOSAT_X_LINKSORT=1` over `LOSAT_X_DEFAULT=0`
+// (the run with the in-place path set that follows).
 #[test]
-fn the_switch_is_off_unless_its_variable_is_set() {
+fn the_switch_follows_its_variable_and_the_global_one() {
     let expected = ncbi_report();
+    let offs: [&[(&str, &str)]; 4] = [
+        &[SWITCH_OFF],
+        &[DEFAULT_OFF],
+        &[DEFAULT_OFF, IN_PLACE],
+        &[DEFAULT_OFF, IN_PLACE, SWITCH_OFF],
+    ];
+    for off in offs {
+        for threads in THREADS {
+            let what = format!("{off:?} threads {threads}");
+            let switches = [&[STATS][..], off].concat();
+            let (report, stderr) = tblastx(threads, &switches);
+            assert_eq!(report, expected, "{what}");
+            assert_eq!(stats(&stderr), None, "{what}:\n{stderr}");
+            assert_eq!(shadow(&stderr), None, "{what}:\n{stderr}");
+        }
+    }
+    // The run that the variable gave before the switch joined the set: the path runs.
     for threads in THREADS {
-        let (report, stderr) = tblastx(threads, &[STATS]);
-        assert_eq!(report, expected, "threads {threads}");
-        assert_eq!(stats(&stderr), None, "threads {threads}:\n{stderr}");
-        assert_eq!(shadow(&stderr), None, "threads {threads}:\n{stderr}");
+        let what = format!("LOSAT_X_DEFAULT=0 with the variable, threads {threads}");
+        let (report, stderr) = tblastx(threads, &[DEFAULT_OFF, IN_PLACE, SWITCH, STATS]);
+        assert_eq!(report, expected, "{what}");
+        check_stats(&stderr, &what);
+        assert_eq!(shadow(&stderr), None, "{what}:\n{stderr}");
     }
 }

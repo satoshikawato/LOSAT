@@ -1,0 +1,251 @@
+BLASTP 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+Reference for composition-based statistics: Alejandro A. Schaffer,
+L. Aravind, Thomas L. Madden, Sergei Shavirin, John L. Spouge, Yuri
+I. Wolf, Eugene V. Koonin, and Stephen F. Altschul (2001),
+"Improving the accuracy of PSI-BLAST protein database searches with
+composition-based statistics and other refinements", Nucleic Acids
+Res. 29:2994-3005.
+
+
+
+Database: the second TITLE line wins
+           20 sequences; 1,602 total letters
+
+
+
+Query= p01 first protein [Test organism]
+
+Length=61
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p01 first protein [Test organism]                                     127     9e-45
+p01 first protein [Test organism]                                     127     9e-45
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    2.1  
+p06 a title longer than 255 bytes token000 token001 token002 toke...  14.6    2.1  
+
+
+>p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 9e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+>p01 first protein [Test organism]
+Length=61
+
+ Score = 127 bits (318),  Expect = 9e-45, Method: Compositional matrix adjust.
+ Identities = 61/61 (100%), Positives = 61/61 (100%), Gaps = 0/61 (0%)
+
+Query  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+           QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK
+Sbjct  1   QACACVTDIPCGIVVIDYVMQEVFDMKYWRYDLEDPRVMDLYCALFPMWTFQRDLTCPTK  60
+
+Query  61  D  61
+           D
+Sbjct  61  D  61
+
+
+>p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 2.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 8.2, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+>p06 a title longer than 255 bytes token000 token001 token002 
+token003 token004 token005 token006 token007 token008 token009 
+token010 token011 token012 token013 token014 token015 token016 
+token017 token018 token019 token020 token021 token022 
+token023 token024 token025 token026 token027 token028 token029 
+token030 token031 token032 token033 token034 token035 token036 
+token037 token038 token039
+Length=88
+
+ Score = 14.6 bits (26),  Expect = 2.1, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 9/12 (75%), Gaps = 0/12 (0%)
+
+Query  24  FDMKYWRYDLED  35
+           +D+ Y+RY ++ 
+Sbjct  48  YDLVYYRYTVDG  59
+
+
+ Score = 13.1 bits (22),  Expect = 8.2, Method: Compositional matrix adjust.
+ Identities = 5/7 (71%), Positives = 5/7 (71%), Gaps = 0/7 (0%)
+
+Query  27  KYWRYDL  33
+           KY  YDL
+Sbjct  44  KYSHYDL  50
+
+
+
+Lambda      K        H        a         alpha
+   0.332    0.145    0.521    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 43396
+
+
+Query= p03 every letter of NCBIstdaa but the gap
+
+Length=33
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p03 every letter of NCBIstdaa but the gap                             68.6    3e-22
+p03 every letter of NCBIstdaa but the gap                             68.6    3e-22
+p05 a title longer than 127 bytes word00 word01 word02 word03 wor...  14.2    1.2  
+p05 a title longer than 127 bytes word00 word01 word02 word03 wor...  14.2    1.2  
+
+
+>p03 every letter of NCBIstdaa but the gap
+Length=33
+
+ Score = 68.6 bits (166),  Expect = 3e-22, Method: Compositional matrix adjust.
+ Identities = 33/33 (100%), Positives = 33/33 (100%), Gaps = 0/33 (0%)
+
+Query  1   ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT  33
+           ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT
+Sbjct  1   ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT  33
+
+
+>p03 every letter of NCBIstdaa but the gap
+Length=33
+
+ Score = 68.6 bits (166),  Expect = 3e-22, Method: Compositional matrix adjust.
+ Identities = 33/33 (100%), Positives = 33/33 (100%), Gaps = 0/33 (0%)
+
+Query  1   ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT  33
+           ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT
+Sbjct  1   ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT  33
+
+
+>p05 a title longer than 127 bytes word00 word01 word02 word03 
+word04 word05 word06 word07 word08 word09 word10 word11 word12 
+word13 word14 word15 word16 word17 word18 word19
+Length=130
+
+ Score = 14.2 bits (25),  Expect = 1.2, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 5/12 (42%), Gaps = 0/12 (0%)
+
+Query  22  YZUOJMHCENQT  33
+           Y +   H  NQ 
+Sbjct  66  YSCTWNHWANQV  77
+
+
+>p05 a title longer than 127 bytes word00 word01 word02 word03 
+word04 word05 word06 word07 word08 word09 word10 word11 word12 
+word13 word14 word15 word16 word17 word18 word19
+Length=130
+
+ Score = 14.2 bits (25),  Expect = 1.2, Method: Compositional matrix adjust.
+ Identities = 4/12 (33%), Positives = 5/12 (42%), Gaps = 0/12 (0%)
+
+Query  22  YZUOJMHCENQT  33
+           Y +   H  NQ 
+Sbjct  66  YSCTWNHWANQV  77
+
+
+
+Lambda      K        H        a         alpha
+   0.327    0.135    0.487    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 40014
+
+
+Query= p08 selenocysteine pyrrolysine
+
+Length=46
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+p08 selenocysteine pyrrolysine                                        97.1    3e-33
+p08 selenocysteine pyrrolysine                                        97.1    3e-33
+
+
+>p08 selenocysteine pyrrolysine
+Length=46
+
+ Score = 97.1 bits (240),  Expect = 3e-33, Method: Compositional matrix adjust.
+ Identities = 46/46 (100%), Positives = 46/46 (100%), Gaps = 0/46 (0%)
+
+Query  1   MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ  46
+           MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ
+Sbjct  1   MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ  46
+
+
+>p08 selenocysteine pyrrolysine
+Length=46
+
+ Score = 97.1 bits (240),  Expect = 3e-33, Method: Compositional matrix adjust.
+ Identities = 46/46 (100%), Positives = 46/46 (100%), Gaps = 0/46 (0%)
+
+Query  1   MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ  46
+           MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ
+Sbjct  1   MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ  46
+
+
+
+Lambda      K        H        a         alpha
+   0.330    0.142    0.564    0.792     4.96 
+
+Gapped
+Lambda      K        H        a         alpha    sigma
+   0.267   0.0410    0.140     1.90     42.6     43.6 
+
+Effective search space used: 40362
+
+
+  Database: the second TITLE line wins
+    Posted date:  Oct 12, 2026  4:12 PM
+  Number of letters in database: 1,602
+  Number of sequences in database:  20
+
+
+
+Matrix: BLOSUM62
+Gap Penalties: Existence: 11, Extension: 1
+Neighboring words threshold: 11
+Window for multiple hits: 40

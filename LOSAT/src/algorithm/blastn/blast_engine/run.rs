@@ -65,9 +65,9 @@ use super::super::alignment::x_greedy_prelim;
 use super::super::args::BlastnArgs;
 use super::super::blast_extend::DiagStruct;
 use super::super::coordination::{
-    build_lookup_tables, chunk_query_masks, collect_lowercase_masks, configure_task,
-    finalize_task_config, prepare_sequence_data, query_masks, subject_metadata_from_records,
-    LookupTables, SubjectMetadata,
+    build_lookup_tables, chunk_query_masks, configure_task, finalize_task_config,
+    prepare_sequence_data, query_masks, subject_metadata_from_records, LookupTables,
+    SubjectMetadata,
 };
 use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use super::super::extension::{
@@ -94,12 +94,14 @@ use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
+// EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
+use super::super::x_subject_store::{x_bnstore, x_read_subject_stores, SubjectLetters};
 use crate::blastinput::fasta_reader::{
     read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords, ReadError,
     ReaderConfig,
 };
 use crate::blastinput::input_files::{
-    check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings,
+    check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings_by_length,
 };
 use crate::blastinput::query_batch::{next_query_batch_end, BatchSizeMixer};
 use crate::blastinput::seq_range::{
@@ -4835,6 +4837,8 @@ fn update_hitlists_with_subject_hits(
 struct BlastnReportInputs<'a> {
     queries: &'a [FastaRecord],
     subjects: &'a [FastaRecord],
+    /// The subjects' letters (the records', or with LOSAT_X_BNSTORE their packed subjects').
+    subject_letters: SubjectLetters<'a>,
     /// Where the searched letters lie in the records (`-query_loc`, `-subject_loc`).
     ranges: &'a ReportRanges<'a>,
     /// Per query, plus strand: DUST and, with `-lcase_masking`, the input lowercase.
@@ -5285,17 +5289,21 @@ fn post_process_hits_and_write(
     shift_to_records(&mut hit_lists, report.ranges);
     let pairwise_hits =
         if outputs.hits.is_some() || output_formats.contains(&BlastnOutputFormat::Pairwise) {
-            let subject_records = report.ranges.subjects.records.unwrap_or(report.subjects);
+            // The records as read with `-subject_loc` (never packed), else the searched ones.
+            let subject_letters = match report.ranges.subjects.records {
+                Some(records) => SubjectLetters::records(records),
+                None => report.subject_letters,
+            };
             let subject_masks = report.lcase_masking.then(|| {
-                subject_records
-                    .iter()
-                    .map(|subject| collect_lowercase_masks(subject.seq()))
+                (0..subject_letters.count())
+                    .map(|index| subject_letters.lowercase_masks(index))
                     .collect::<Vec<_>>()
             });
             let mut hits = pairwise_hits(
                 &hit_lists,
                 report.queries,
                 report.subjects,
+                report.subject_letters,
                 &DisplayMasks {
                     query: report.query_masks,
                     query_offsets: &report.ranges.queries.placements,
@@ -5588,13 +5596,19 @@ pub fn run(
         subject_file,
         ReaderConfig::subject("BLASTN", false, settings.data_loaders),
     );
-    let read_subjects = {
+    // EXPERIMENT (LOSAT_X_BNSTORE): without a subject range, each record's letters are packed as
+    // soon as it has been read, and the records keep none (`x_read_subject_stores`).
+    let (read_subjects, subject_stores) = {
         let mut stderr = std::io::stderr();
-        read_subjects(
-            &mut subject_source,
-            subject_range.as_ref(),
-            &mut |message: &[u8]| std::io::Write::write_all(&mut stderr, message),
-        )?
+        let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
+        if x_bnstore() && subject_range.is_none() {
+            x_read_subject_stores(&mut subject_source, &mut warn)?
+        } else {
+            (
+                read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?,
+                None,
+            )
+        }
     };
     drop(subject_source);
     // NCBI reads records without residues (and intervals without letters) without a message
@@ -5605,6 +5619,10 @@ pub fn run(
         None => (read_subjects, Placements::default(), None),
     };
     check_subjects_not_empty(&subjects)?;
+    let subject_letters = match subject_stores.as_deref() {
+        Some(stores) => SubjectLetters::packed(&subjects, stores),
+        None => SubjectLetters::records(&subjects),
+    };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
     // ```c
     //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
@@ -5659,6 +5677,7 @@ pub fn run(
             args,
             query_file,
             &subjects,
+            subject_letters,
             SubjectRanges {
                 placements: &subject_placements,
                 records: full_subjects.as_deref(),
@@ -5703,6 +5722,7 @@ fn search_cli(
     mut args: BlastnArgs,
     query_file: std::fs::File,
     subjects: &[FastaRecord],
+    subject_letters: SubjectLetters<'_>,
     subject_ranges: SubjectRanges<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
@@ -5780,6 +5800,7 @@ fn search_cli(
             subjects: subject_ranges,
         },
         subjects,
+        subject_letters,
         outputs,
         output_formats,
     )
@@ -5974,6 +5995,7 @@ pub fn run_local(
             },
         },
         searched_subjects,
+        SubjectLetters::records(searched_subjects),
         outputs,
         output_formats,
     )
@@ -5985,6 +6007,7 @@ fn search(
     reading: QueryReading,
     ranges: Ranges<'_>,
     subject_records: &[FastaRecord],
+    subject_letters: SubjectLetters<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
 ) -> Result<()> {
@@ -6024,7 +6047,12 @@ fn search(
     // the subjects: a subject without letters (a record without residues, or an interval
     // that starts just past its record's end) gets its warning, stays in the database
     // statistics with no letters, and never hits.
-    write_empty_subject_warnings(subject_records, "blastn", outputs.diagnostics)?;
+    write_empty_subject_warnings_by_length(
+        subject_records,
+        |index| subject_letters.len(index),
+        "blastn",
+        outputs.diagnostics,
+    )?;
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
     // NCBI's x_CleanAndCompress reads past the end of some titles of punctuation (NCBI
@@ -6065,13 +6093,10 @@ fn search(
     // ```
     // The report and the query batches (`GetDbTotalLength`) take the total through an
     // `int`, which LOSAT does not reproduce beyond its range.
-    let subject_letters: usize = subject_records
-        .iter()
-        .map(|record| record.seq().len())
-        .sum();
-    if subject_letters > i32::MAX as usize {
+    let total_letters = subject_letters.total();
+    if total_letters > i32::MAX as usize {
         anyhow::bail!(
-            "the subjects have {subject_letters} letters; NCBI BLAST+ reports a total of 2^31 letters or more through a 32-bit int, which is not supported by LOSAT's BLASTN"
+            "the subjects have {total_letters} letters; NCBI BLAST+ reports a total of 2^31 letters or more through a 32-bit int, which is not supported by LOSAT's BLASTN"
         );
     }
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -6085,6 +6110,7 @@ fn search(
             &query_records,
             &query_input,
             subject_records,
+            subject_letters,
             ranges.subjects,
             outputs,
             output_formats,
@@ -6259,8 +6285,22 @@ fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
 /// ```
 struct PreparedSubjects<'a> {
     records: &'a [FastaRecord],
+    /// The subjects' letters: the records', or (EXPERIMENT, LOSAT_X_BNSTORE) their packed
+    /// subjects', which hold the packed letters too.
+    letters: SubjectLetters<'a>,
     metadata: SubjectMetadata,
+    /// The packed letters of each record; empty when `letters` holds them.
     packed: Vec<Vec<u8>>,
+}
+
+impl PreparedSubjects<'_> {
+    /// The packed (ncbi2na) letters of subject `index`.
+    fn packed(&self, index: usize) -> &[u8] {
+        match self.letters.stores() {
+            Some(stores) => stores[index].packed(),
+            None => &self.packed[index],
+        }
+    }
 }
 
 /// The results of one query batch, with the values of its query contexts that the reports
@@ -6330,13 +6370,15 @@ fn run_in_pool(
     query_records: &[FastaRecord],
     query_input: &QueryInput,
     subject_records: &[FastaRecord],
+    subject_letters: SubjectLetters<'_>,
     subject_ranges: SubjectRanges<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     mut batching: QueryBatching,
 ) -> Result<()> {
-    let metadata = subject_metadata_from_records(subject_records);
+    let metadata =
+        subject_metadata_from_records(subject_records, |index| subject_letters.len(index));
     if metadata.db_num_seqs == 0 {
         for record in input_records {
             outputs.diagnostics.write_all(&record.warnings)?;
@@ -6345,10 +6387,15 @@ fn run_in_pool(
     }
     let subjects = PreparedSubjects {
         records: subject_records,
-        packed: subject_records
-            .iter()
-            .map(|record| encode_subject_ncbi2na_packed(record.seq()))
-            .collect(),
+        letters: subject_letters,
+        packed: if subject_letters.stores().is_some() {
+            Vec::new()
+        } else {
+            subject_records
+                .iter()
+                .map(|record| encode_subject_ncbi2na_packed(record.seq()))
+                .collect()
+        },
         metadata,
     };
     let megablast = args.task == "megablast";
@@ -6906,6 +6953,7 @@ fn write_batch_reports(
     let report_inputs = BlastnReportInputs {
         queries: query_records,
         subjects: subjects.records,
+        subject_letters: subjects.letters,
         ranges,
         query_masks: results.query_masks,
         lcase_masking: args.lcase_masking,
@@ -7247,7 +7295,13 @@ fn search_query_batch(
     //                               compressed_seq.data.release());
     // }
     // ```
-    let subject_packed_cache_ref = Some(subjects.packed.as_slice());
+    // The packed letters of each record for the lookup build, which reads them only for
+    // `limit_lookup` (not a BLASTN option, always off); `None` with LOSAT_X_BNSTORE.
+    let subject_packed_cache_ref = subjects
+        .letters
+        .stores()
+        .is_none()
+        .then_some(subjects.packed.as_slice());
 
     // Prepare sequence data (including DUST masking)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1401-1405
@@ -7752,10 +7806,11 @@ fn search_query_batch(
             (total_length, seq_data.db_num_seqs as i64)
         } else {
             (
-                subjects
-                    .records
-                    .first()
-                    .map_or(0, |record| record.seq().len()) as i64,
+                if subjects.records.is_empty() {
+                    0
+                } else {
+                    subjects.letters.len(0) as i64
+                },
                 1,
             )
         };
@@ -8270,7 +8325,6 @@ fn search_query_batch(
     // size the next batch.
     let good_init_extends = std::sync::atomic::AtomicU64::new(0);
     let process_subject = |s_idx: usize,
-                           s_record: &FastaRecord,
                            gap_scratch: &mut GapAlignScratch,
                            subject_scratch: &mut SubjectScratch,
                            prelim_source: Option<&Vec<PrelimHit>>,
@@ -8316,8 +8370,7 @@ fn search_query_batch(
         // hsp_list = Blast_HSPListFree(hsp_list);
         // BlastInitHitListReset(init_hitlist);
         // ```
-        let s_seq_full = s_record.seq();
-        let s_len_full = s_seq_full.len();
+        let s_len_full = subjects.letters.len(s_idx);
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
         // ```c
         // typedef struct BlastHSPList {
@@ -8370,7 +8423,7 @@ fn search_query_batch(
         // }
         // ```
         let subject_masks = if lcase_masking {
-            collect_lowercase_masks(s_seq_full)
+            subjects.letters.lowercase_masks(s_idx)
         } else {
             Vec::new()
         };
@@ -8399,18 +8452,7 @@ fn search_query_batch(
         //                               compressed_seq.data.release());
         // }
         // ```
-        let mut s_seq_packed_full_vec: Option<Vec<u8>> = None;
-        let s_seq_packed_full = if let Some(packed_cache) = subject_packed_cache_ref {
-            if let Some(packed) = packed_cache.get(s_idx) {
-                packed.as_slice()
-            } else {
-                s_seq_packed_full_vec = Some(encode_subject_ncbi2na_packed(s_seq_full));
-                s_seq_packed_full_vec.as_ref().unwrap().as_slice()
-            }
-        } else {
-            s_seq_packed_full_vec = Some(encode_subject_ncbi2na_packed(s_seq_full));
-            s_seq_packed_full_vec.as_ref().unwrap().as_slice()
-        };
+        let s_seq_packed_full = subjects.packed(s_idx);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4019-4025
         // ```c
         //             status = BLAST_GreedyGappedAlignment(
@@ -12342,7 +12384,7 @@ fn search_query_batch(
         // preliminary HSPs; the preliminary stage reads only the packed one. The blastna letters
         // are made here, for this subject only, instead of being kept for every subject of the
         // search.
-        let s_seq_blastna_vec = encode_iupac_to_blastna(s_seq_full);
+        let s_seq_blastna_vec = subjects.letters.blastna(s_idx);
         let s_seq_blastna = s_seq_blastna_vec.as_slice();
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:371-373
@@ -14153,7 +14195,7 @@ fn search_query_batch(
                                 subject_records_ref[start..end]
                                     .par_iter()
                                     .enumerate()
-                                    .map(|(index, s_record)| (start + index, s_record))
+                                    .map(|(index, _)| start + index)
                                     .map_init(
                                         || {
                                             (
@@ -14172,13 +14214,12 @@ fn search_query_batch(
                                                 ),
                                             )
                                         },
-                                        |state, (s_idx, s_record)| {
+                                        |state, s_idx| {
                                             let (gap_scratch, subject_scratch) = state;
                                             let mut subject_hits: Option<Vec<BlastnHsp>> = None;
                                             let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                                             process_subject(
                                                 s_idx,
-                                                s_record,
                                                 gap_scratch,
                                                 subject_scratch,
                                                 kept.map(|kept| &kept[s_idx]),
@@ -14214,12 +14255,11 @@ fn search_query_batch(
                 // ```
                 let mut subject_scratch =
                     SubjectScratch::new(queries_ref.len(), offset_array_size, window_size);
-                for (s_idx, s_record) in subject_records_ref.iter().enumerate() {
+                for s_idx in 0..subject_records_ref.len() {
                     let mut subject_hits: Option<Vec<BlastnHsp>> = None;
                     let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                     process_subject(
                         s_idx,
-                        s_record,
                         &mut gap_scratch,
                         &mut subject_scratch,
                         kept.map(|kept| &kept[s_idx]),

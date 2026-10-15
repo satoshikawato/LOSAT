@@ -17,6 +17,7 @@ use crate::utils::dust::MaskedInterval;
 use super::alignment::build_blastna_matrix;
 use super::hsp::{BlastnHitList, BlastnHsp};
 use super::lookup::reverse_complement;
+use super::x_subject_store::SubjectLetters;
 
 /// The regions that the report prints in lowercase.
 pub(crate) struct DisplayMasks<'a> {
@@ -38,6 +39,7 @@ pub(crate) fn pairwise_hits(
     hit_lists: &[Option<BlastnHitList>],
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
+    subject_letters: SubjectLetters<'_>,
     masks: &DisplayMasks<'_>,
 ) -> Result<Vec<PairwiseHit>> {
     let mut hits = Vec::new();
@@ -67,11 +69,15 @@ pub(crate) fn pairwise_hits(
                 let query = queries
                     .get(hsp.q_idx as usize)
                     .context("BLASTN HSP of an unknown query")?;
+                let s_idx = hsp.s_idx as usize;
                 let subject = subjects
-                    .get(hsp.s_idx as usize)
+                    .get(s_idx)
                     .context("BLASTN HSP of an unknown subject")?;
+                let subject_length = subject_letters.len(s_idx);
                 let (mut query_row, mut subject_row) =
-                    displayed_rows(hsp, query.seq(), subject.seq())?;
+                    displayed_rows(hsp, query.seq(), subject_length, |from, to| {
+                        subject_letters.upper_letters(s_idx, from, to)
+                    })?;
                 lowercase_masked(
                     &mut query_row,
                     hsp.q_start,
@@ -97,7 +103,7 @@ pub(crate) fn pairwise_hits(
                     subject_frame: None,
                     positives: None,
                     gaps: Some(gaps),
-                    subject_length: Some(subject.seq().len()),
+                    subject_length: Some(subject_length),
                     // The title after its first word (the `bio` description of the
                     // inputs that `bio` read alike); the reports take the subject's title
                     // bytes by subject index.
@@ -137,12 +143,19 @@ pub(crate) fn pairwise_hits(
 // Reversing the alignment of a minus-strand HSP reverse-complements both rows. The
 // residues are the input letters in uppercase (NCBI's IUPAC sequence data); masking is
 // applied afterwards. Only the aligned segments are read: the segment of the minus-strand
-// context `[qs, qe)` is the reverse complement of query `[len - qe, len - qs)`.
-fn displayed_rows(hsp: &BlastnHsp, query: &[u8], subject: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+// context `[qs, qe)` is the reverse complement of query `[len - qe, len - qs)`. The subject
+// has `subject_length` letters, and `subject_letters(from, to)` gives its letters
+// `[from, to)` in uppercase.
+fn displayed_rows(
+    hsp: &BlastnHsp,
+    query: &[u8],
+    subject_length: usize,
+    subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
+) -> Result<(Vec<u8>, Vec<u8>)> {
     let (qs, qe) = (hsp.internal_q_offset_0, hsp.internal_q_end_0);
     let (ss, se) = (hsp.internal_s_offset_0, hsp.internal_s_end_0);
     ensure!(
-        qs <= qe && qe <= query.len() && ss <= se && se <= subject.len(),
+        qs <= qe && qe <= query.len() && ss <= se && se <= subject_length,
         "BLASTN HSP outside its sequences"
     );
     let context = if hsp.query_frame < 0 {
@@ -150,7 +163,7 @@ fn displayed_rows(hsp: &BlastnHsp, query: &[u8], subject: &[u8]) -> Result<(Vec<
     } else {
         query[qs..qe].to_ascii_uppercase()
     };
-    let subject = subject[ss..se].to_ascii_uppercase();
+    let subject = subject_letters(ss, se);
     let ungapped = [GapEditOp::Sub((qe - qs) as u32)];
     let ops = hsp.gap_info.as_deref().unwrap_or(&ungapped);
     // Offsets into the two segments.
@@ -478,7 +491,8 @@ mod tests {
         let (q, s) = displayed_rows(
             &hsp(1, (0, 8), (0, 7), Some(ops)),
             query.seq(),
-            subject.seq(),
+            subject.seq().len(),
+            |from, to| subject.seq()[from..to].to_ascii_uppercase(),
         )
         .unwrap();
         assert_eq!(
@@ -498,7 +512,8 @@ mod tests {
         let (q, s) = displayed_rows(
             &hsp(-1, (1, 6), (0, 4), Some(ops)),
             query.seq(),
-            subject.seq(),
+            subject.seq().len(),
+            |from, to| subject.seq()[from..to].to_ascii_uppercase(),
         )
         .unwrap();
         assert_eq!((q.as_slice(), s.as_slice()), (&b"CCGGT"[..], &b"CCGG-"[..]));

@@ -32,7 +32,7 @@ use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: the switches of the strict set, the variables that are on by default.
-/// The last fourteen joined after the set became the default. `LOSAT_X_PAIRLUT` and
+/// The last fifteen joined after the set became the default. `LOSAT_X_PAIRLUT` and
 /// `LOSAT_X_HSPINPLACE` were added after the change as switches that are off unless set and
 /// joined the set once they were verified with it on. `LOSAT_X_SEEDBUCKET` was left out at the
 /// change: it numbered the lookup hits of a chunk scan in a `u32`, exact only up to 2^32 hits
@@ -40,17 +40,18 @@ use std::sync::OnceLock;
 /// it was timed on the searches it acts on with the set on (the TBLASTX searches that
 /// `LOSAT_X_PAIRPAR` leaves to the scan loop). `LOSAT_X_TBNOIDCHUNK` (one entry into the TBLASTN
 /// search pool takes four chunks of subjects per thread, cut by residues as NCBI's database
-/// reader cuts them for its search threads, `tblastn/stage_d_pipeline.rs`) and
+/// reader cuts them for its search threads, `tblastn/stage_d_pipeline.rs`),
 /// `LOSAT_X_SEEDRELEASE` (when TBLASTX frees the tables of its seed stage,
 /// `tblastx/x_seed_release.rs`) were added after the change as switches that are off unless set
 /// and joined the set once they were verified with it on. `LOSAT_X_GREEDYFUSE` (the fused loop
-/// of megablast's score-only greedy alignment, `blastn/alignment/x_greedy_fused.rs`) was added
-/// after the change as a switch that is off unless set and joined the set once it was verified
-/// with it on. The eight blastp switches of the OrthoFinder work (`LOSAT_X_BPSEED`,
+/// of megablast's score-only greedy alignment, `blastn/alignment/x_greedy_fused.rs`) and
+/// `LOSAT_X_LINKSORT` (the index sorts of the TBLASTX linking call, `tblastx/x_link_sort.rs`) were
+/// added after the change as switches that are off unless set and joined the set once they were
+/// verified with it on. The eight blastp switches of the OrthoFinder work (`LOSAT_X_BPSEED`,
 /// `LOSAT_X_BPUNGAP`, `LOSAT_X_BPGAP`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`,
 /// `LOSAT_X_BPREDOFIT` and `LOSAT_X_BPQBLOCK`) joined after a 49-job full-scale run with all of
 /// them on: the outputs equal NCBI's and the max RSS is below NCBI's on every job.
-pub(crate) const STRICT_SET: [&str; 57] = [
+pub(crate) const STRICT_SET: [&str; 58] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_PURGEFAST",
@@ -100,6 +101,7 @@ pub(crate) const STRICT_SET: [&str; 57] = [
     "LOSAT_X_TBNOIDCHUNK",
     "LOSAT_X_SEEDRELEASE",
     "LOSAT_X_GREEDYFUSE",
+    "LOSAT_X_LINKSORT",
     "LOSAT_X_BPSEED",
     "LOSAT_X_BPUNGAP",
     "LOSAT_X_BPGAP",

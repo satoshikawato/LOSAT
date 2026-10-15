@@ -241,9 +241,10 @@ impl LinkLap {
         Self { running }
     }
 
-    // No NCBI counterpart: a clock that is never read, for callers that are not a timed call.
+    // No NCBI counterpart: a clock that is never read, for callers that are not a timed call (the
+    // tests, and the second run of a linking call's groups under LOSAT_X_LINKSLICESSHADOW,
+    // tblastx/x_link_slices.rs).
     /// A clock that measures nothing.
-    #[cfg(test)]
     pub(super) fn off() -> Self {
         Self { running: None }
     }

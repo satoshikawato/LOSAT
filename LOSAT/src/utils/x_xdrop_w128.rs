@@ -2,8 +2,8 @@
 //! `xdrop_simd.rs` with the per-row savings of the 256-bit kernels (`x_xdrop_avx2.rs`): 8 lanes
 //! of 16 bits and 16 lanes of 8 bits, with (`TB`) and without the traceback. Written once over
 //! the 128-bit `arch` layer of `xdrop_simd.rs`, so the same code is built for x86_64 (SSE4.1 and
-//! AVX-128 entry points, chosen at run time like the 128-bit kernels) and for wasm32 simd128,
-//! where no 256-bit kernel exists. They run the recurrence of NCBI `ALIGN_EX` /
+//! AVX-128 entry points, chosen at run time like the 128-bit kernels), for wasm32 simd128 and for
+//! aarch64 NEON, where no 256-bit kernel exists. They run the recurrence of NCBI `ALIGN_EX` /
 //! `Blast_SemiGappedAlign` row by row, with the value representation of the 128-bit kernels, and
 //! return exactly the `XdropResult` and edit operations of those kernels.
 //!
@@ -327,10 +327,101 @@ mod ext {
     }
 }
 
+// No NCBI counterpart: the same lane operations for aarch64 NEON, on the register type of the
+// `arch` layer (`uint8x16_t`).
+#[cfg(target_arch = "aarch64")]
+mod ext {
+    use core::arch::aarch64::*;
+    type V = uint8x16_t;
+    #[inline(always)]
+    pub unsafe fn max_u16(a: V, b: V) -> V {
+        vreinterpretq_u8_u16(vmaxq_u16(vreinterpretq_u16_u8(a), vreinterpretq_u16_u8(b)))
+    }
+    #[inline(always)]
+    pub unsafe fn adds_u16(a: V, b: V) -> V {
+        vreinterpretq_u8_u16(vqaddq_u16(vreinterpretq_u16_u8(a), vreinterpretq_u16_u8(b)))
+    }
+    #[inline(always)]
+    pub unsafe fn max_u8(a: V, b: V) -> V {
+        vmaxq_u8(a, b)
+    }
+    #[inline(always)]
+    pub unsafe fn adds_u8(a: V, b: V) -> V {
+        vqaddq_u8(a, b)
+    }
+    /// Any bit set.
+    #[inline(always)]
+    pub unsafe fn any(v: V) -> bool {
+        vmaxvq_u32(vreinterpretq_u32_u8(v)) != 0
+    }
+    /// The 16 bytes in reverse order: the bytes of each 64-bit half reversed, then the halves
+    /// swapped.
+    #[inline(always)]
+    pub unsafe fn rev8(v: V) -> V {
+        let r = vrev64q_u8(v);
+        vextq_u8::<8>(r, r)
+    }
+    #[inline(always)]
+    pub unsafe fn splat32(x: i32) -> V {
+        vreinterpretq_u8_s32(vdupq_n_s32(x))
+    }
+    #[inline(always)]
+    pub unsafe fn gt32(a: V, b: V) -> V {
+        vreinterpretq_u8_u32(vcgtq_s32(vreinterpretq_s32_u8(a), vreinterpretq_s32_u8(b)))
+    }
+    /// i32 to i16 with signed saturation: the lanes of `a`, then those of `b`.
+    #[inline(always)]
+    pub unsafe fn narrow32(a: V, b: V) -> V {
+        let lo = vqmovn_s32(vreinterpretq_s32_u8(a));
+        vreinterpretq_u8_s16(vqmovn_high_s32(lo, vreinterpretq_s32_u8(b)))
+    }
+    /// i16 to i8 with signed saturation: the lanes of `a`, then those of `b`.
+    #[inline(always)]
+    pub unsafe fn narrow16(a: V, b: V) -> V {
+        let lo = vqmovn_s16(vreinterpretq_s16_u8(a));
+        vreinterpretq_u8_s8(vqmovn_high_s16(lo, vreinterpretq_s16_u8(b)))
+    }
+    /// The low bytes of the eight 16-bit lanes, then their high bytes: a truncating narrow, then
+    /// a narrow of the lanes shifted right by 8 into the high half.
+    #[inline(always)]
+    pub unsafe fn split16(v: V) -> V {
+        let w = vreinterpretq_u16_u8(v);
+        vshrn_high_n_u16::<8>(vmovn_u16(w), w)
+    }
+    /// The low 64 bits of `a`, then the low 64 bits of `b`.
+    #[inline(always)]
+    pub unsafe fn lo64(a: V, b: V) -> V {
+        vreinterpretq_u8_u64(vzip1q_u64(vreinterpretq_u64_u8(a), vreinterpretq_u64_u8(b)))
+    }
+    /// The high 64 bits of `a`, then the high 64 bits of `b`.
+    #[inline(always)]
+    pub unsafe fn hi64(a: V, b: V) -> V {
+        vreinterpretq_u8_u64(vzip2q_u64(vreinterpretq_u64_u8(a), vreinterpretq_u64_u8(b)))
+    }
+    /// Bytes moved up by 1 / 2 / 4 / 8 lanes across the vector, zeros shifted in: the window of
+    /// `0 ++ v` that starts 16 - n bytes in.
+    #[inline(always)]
+    pub unsafe fn up1b(v: V) -> V {
+        vextq_u8::<15>(vdupq_n_u8(0), v)
+    }
+    #[inline(always)]
+    pub unsafe fn up2b(v: V) -> V {
+        vextq_u8::<14>(vdupq_n_u8(0), v)
+    }
+    #[inline(always)]
+    pub unsafe fn up4b(v: V) -> V {
+        vextq_u8::<12>(vdupq_n_u8(0), v)
+    }
+    #[inline(always)]
+    pub unsafe fn up8b(v: V) -> V {
+        vextq_u8::<8>(vdupq_n_u8(0), v)
+    }
+}
+
 use ext::*;
 
 // No NCBI counterpart: shuffle and lane masks; they do not change any value NCBI computes.
-/// Byte shuffle: 16-bit lane 7 to every lane (x86 `bcast_last16`; wasm ignores it).
+/// Byte shuffle: 16-bit lane 7 to every lane (x86 `bcast_last16`; wasm and aarch64 ignore it).
 static KB7: [u8; 16] = [
     14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15, 14, 15,
 ];
@@ -349,7 +440,7 @@ static LANE_MASK8: [u8; 32] = [
 ];
 
 /// No NCBI counterpart: LOSAT_X_DPW128 on (`utils/xswitch.rs`) and a CPU that runs these kernels
-/// (SSE4.1 on x86_64, as the 128-bit kernels; always on wasm32 simd128).
+/// (SSE4.1 on x86_64, as the 128-bit kernels; always on wasm32 simd128 and aarch64).
 pub(super) fn switch_on() -> bool {
     crate::utils::xswitch::on("LOSAT_X_DPW128") && available()
 }
@@ -447,7 +538,7 @@ pub(super) unsafe fn align(
 }
 
 /// No NCBI counterpart: the 16-bit kernel in the build the CPU runs (the AVX-128 or the SSE4.1
-/// build on x86_64, as the 128-bit dispatch picks; the simd128 build on wasm32).
+/// build on x86_64, as the 128-bit dispatch picks; the simd128 build on wasm32, NEON on aarch64).
 ///
 /// # Safety
 /// `available()` must be true.
@@ -2171,7 +2262,7 @@ mod tests {
     /// problems back to back in capture order (median of `LOSAT_X_DPREPLAY_REPS` repetitions,
     /// default 7), "warm-min" = each call timed alone after its residues and matrix were read,
     /// fastest of the repetitions, summed. It runs on every target with the 128-bit kernels, the
-    /// wasm32 simd128 build included (the replay in `x_xdrop_avx2.rs` needs AVX2).
+    /// wasm32 simd128 and aarch64 builds included (the replay in `x_xdrop_avx2.rs` needs AVX2).
     /// `LOSAT_X_DPREPLAY_OUT=<file>` appends the table to a file.
     #[test]
     #[ignore = "needs LOSAT_X_DPREPLAY=<capture directory>"]
@@ -2376,6 +2467,102 @@ mod tests {
                 .open(out)
                 .expect("open LOSAT_X_DPREPLAY_OUT");
             f.write_all(report.as_bytes()).expect("write report");
+        }
+    }
+}
+
+// No NCBI counterpart: the aarch64 `ext` layer against a scalar model of each operation (the x86
+// and wasm definition), on random vectors.
+#[cfg(all(test, target_arch = "aarch64"))]
+mod neon_ext_tests {
+    use super::ext::*;
+    use super::{load, store, V};
+
+    unsafe fn v(b: [u8; 16]) -> V {
+        load(b.as_ptr())
+    }
+    unsafe fn b(x: V) -> [u8; 16] {
+        let mut o = [0u8; 16];
+        store(o.as_mut_ptr(), x);
+        o
+    }
+    fn lanes<const N: usize, const W: usize>(b: [u8; 16]) -> [[u8; W]; N] {
+        core::array::from_fn(|i| core::array::from_fn(|j| b[W * i + j]))
+    }
+
+    #[test]
+    fn neon_ext_layer_matches_the_scalar_definitions() {
+        let mut s = 0x9E37_79B9_7F4A_7C15u64;
+        let mut bytes = move || -> [u8; 16] {
+            core::array::from_fn(|_| {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                match s >> 61 {
+                    0 => 0,
+                    1 => 0xFF,
+                    2 => 0x7F,
+                    3 => 0x80,
+                    _ => (s >> 8) as u8,
+                }
+            })
+        };
+        for _ in 0..20_000 {
+            let (x, y) = (bytes(), bytes());
+            let xw = lanes::<8, 2>(x).map(u16::from_le_bytes);
+            let yw = lanes::<8, 2>(y).map(u16::from_le_bytes);
+            let xd = lanes::<4, 4>(x).map(i32::from_le_bytes);
+            let yd = lanes::<4, 4>(y).map(i32::from_le_bytes);
+            let w16 = |l: [u16; 8]| -> [u8; 16] {
+                core::array::from_fn(|i| l[i / 2].to_le_bytes()[i % 2])
+            };
+            let w32 = |l: [i32; 4]| -> [u8; 16] {
+                core::array::from_fn(|i| l[i / 4].to_le_bytes()[i % 4])
+            };
+            unsafe {
+                let (vx, vy) = (v(x), v(y));
+                assert_eq!(
+                    b(max_u16(vx, vy)),
+                    w16(core::array::from_fn(|i| xw[i].max(yw[i]))),
+                    "max_u16"
+                );
+                assert_eq!(
+                    b(adds_u16(vx, vy)),
+                    w16(core::array::from_fn(|i| xw[i].saturating_add(yw[i]))),
+                    "adds_u16"
+                );
+                let e: [u8; 16] = core::array::from_fn(|i| x[i].max(y[i]));
+                assert_eq!(b(max_u8(vx, vy)), e, "max_u8");
+                let e: [u8; 16] = core::array::from_fn(|i| x[i].saturating_add(y[i]));
+                assert_eq!(b(adds_u8(vx, vy)), e, "adds_u8");
+                assert_eq!(any(vx), x.iter().any(|&c| c != 0), "any");
+                let e: [u8; 16] = core::array::from_fn(|i| x[15 - i]);
+                assert_eq!(b(rev8(vx)), e, "rev8");
+                assert_eq!(b(splat32(xd[1])), w32([xd[1]; 4]), "splat32");
+                let e: [i32; 4] = core::array::from_fn(|i| if xd[i] > yd[i] { -1 } else { 0 });
+                assert_eq!(b(gt32(vx, vy)), w32(e), "gt32");
+                let e: [u16; 8] = core::array::from_fn(|i| {
+                    let l = if i < 4 { xd[i] } else { yd[i - 4] };
+                    l.clamp(i16::MIN as i32, i16::MAX as i32) as i16 as u16
+                });
+                assert_eq!(b(narrow32(vx, vy)), w16(e), "narrow32");
+                let e: [u8; 16] = core::array::from_fn(|i| {
+                    let l = if i < 8 { xw[i] } else { yw[i - 8] } as i16;
+                    l.clamp(i8::MIN as i16, i8::MAX as i16) as i8 as u8
+                });
+                assert_eq!(b(narrow16(vx, vy)), e, "narrow16");
+                let e: [u8; 16] =
+                    core::array::from_fn(|i| if i < 8 { x[2 * i] } else { x[2 * (i - 8) + 1] });
+                assert_eq!(b(split16(vx)), e, "split16");
+                let e: [u8; 16] = core::array::from_fn(|i| if i < 8 { x[i] } else { y[i - 8] });
+                assert_eq!(b(lo64(vx, vy)), e, "lo64");
+                let e: [u8; 16] = core::array::from_fn(|i| if i < 8 { x[8 + i] } else { y[i] });
+                assert_eq!(b(hi64(vx, vy)), e, "hi64");
+                for (n, got) in [(1, up1b(vx)), (2, up2b(vx)), (4, up4b(vx)), (8, up8b(vx))] {
+                    let e: [u8; 16] = core::array::from_fn(|i| if i >= n { x[i - n] } else { 0 });
+                    assert_eq!(b(got), e, "up{n}b");
+                }
+            }
         }
     }
 }

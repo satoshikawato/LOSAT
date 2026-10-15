@@ -15,7 +15,7 @@ Case sources (reused, not copied):
 - BLASTX: a small set built from LOSAT/tests/fasta (outfmt 0/6/7, threads 1 and 4).
 
 Where frozen expected hashes exist they are checked too: Gate A
-(LOSAT/tests/platform_native_v010_canonical.tsv) for the BLASTN, BLASTP and TBLASTX
+(the certification driver's manifest, LOSAT/tests/platform_native_v011_canonical.tsv) for the BLASTN, BLASTP and TBLASTX
 manifest cases, and the Stage G expected hashes for TBLASTN. Output formats 0 and 7
 print the input paths, so inputs are passed with the path strings used when those
 hashes were frozen: the Gate A lexical fixture root of certify_platform_native_v010
@@ -79,7 +79,7 @@ def sha256_bytes(data: bytes) -> str:
 
 def gate_a() -> dict[tuple[str, str], str]:
     rows = {}
-    with open(TESTS / "platform_native_v010_canonical.tsv", newline="") as handle:
+    with open(REPO.joinpath(*certify.CANONICAL_MANIFEST_REPO_RELATIVE.parts), newline="") as handle:
         lines = [line for line in handle if not line.startswith("#")]
     for row in csv.DictReader(lines, delimiter="\t"):
         rows[(row["program"], row["case_id"])] = row["losat_sha256"]

@@ -66,3 +66,17 @@ pub use linking::x_hsp_inplace_print_summary;
 // ```
 // No NCBI counterpart for the summary: it prints counters.
 pub use linking::x_link_sort_print_summary;
+
+// EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW): the summary of the groups linked as
+// sub-slices of the sorted list (tblastx/x_link_slices.rs, a child module of `linking`), for
+// `main`.
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
+// ```c
+// for (frame_index=0; frame_index<num_query_frames; frame_index++)
+// {
+//    hp_start = s_LinkHSPStructReset(hp_start);
+//    hp_start->next = hp_frame_start[frame_index];
+// ```
+// No NCBI counterpart for the summary: it prints counters.
+pub use linking::x_link_slices_print_summary;

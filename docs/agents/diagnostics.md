@@ -570,6 +570,33 @@ Rebuilding less:
   With more than one thread the pool's build runs too and its outcome and table (every field, slot for slot)
   are compared with the serial flat build's. One line at exit: `[X_SHADOW] BPCLUT tables_compared=
   refusals_compared= hits= parallel_tables_compared= parallel_refusals_compared= identical`.
+- `LOSAT_X_BPLKPFLAT=1` (BLASTP `-task blastp-fast`, speed; not in the strict set: off unless set, to any value,
+  and `LOSAT_X_DEFAULT` does not touch it; acts only where the search's pool builds the flat table of
+  `LOSAT_X_BPCLUT` or `LOSAT_X_BPCLUTSHADOW`, with more than one thread) changes how that build is scheduled
+  and where its vectors come from, not the table (`tblastx/lookup/x_clut_par.rs`, exactness argument in its
+  header): (1) the appends pass and the stripes pass each run in one `rayon::scope` with one task per thread,
+  each task taking the next chunk or stripe from one counter and storing its result at its index, instead of
+  `par_iter`'s tree of joins (on the workstation at 16 threads its last wake-ups took 0.6-0.8 ms per pass); (2) in the block
+  search of `LOSAT_X_BPQBLOCK` a block's table takes the `starts` and `hits` vectors of the previous block's
+  table (kept by the block search, `blastp/x_query_blocks.rs` `XBlockSubjects`), cut or grown to their
+  lengths and not zeroed (the build writes every entry it keeps before any is read), instead of a zeroed
+  allocation per block; (3) with `LOSAT_X_BPQBLOCK` the contexts' Karlin blocks (the values of
+  `prepare_blosum62_lookup_query_for_word_size`, one `x_context_karlin` per context) are extra tasks of the
+  appends pass, after its chunks, instead of a pass of their own on the pool; the contexts whose tasks did not
+  run (where the build does not take these passes) are computed after the build by the thread that called
+  it. The table's vectors are allocated by the thread that runs the build or recycled, never by the passes'
+  tasks. Memory: one table's `starts` and `hits` are kept between blocks (at most the largest block's). At one
+  thread nothing changes.
+- `LOSAT_X_BPLKPFLATSHADOW=1` shadow of `LOSAT_X_BPLKPFLAT` (implies it): after each build of the switch (the
+  table the search uses, on the recycled vectors) the table is built again with the `par_iter` passes on fresh
+  zeroed vectors, and the outcomes (table, refusal, `TooLarge`) and the tables (every field, slot for slot) are
+  compared; the contexts set after a build with Karlin tasks are compared with those of
+  `x_query_blocks::x_bp_lookup_query` (the query, the segments, every context field, the Karlin blocks bit for
+  bit). The first difference stops the run (panic). One line at exit: `[X_SHADOW] BPLKPFLAT tables_compared=
+  outcomes_compared= recycled= context_sets_compared= contexts_compared= contexts_from_tasks= identical`
+  (`recycled`: builds that took the vectors of an earlier table; `contexts_from_tasks`: contexts computed by
+  the builds' tasks). With `LOSAT_X_BPCLUTSHADOW` the pool's build is the switch's (on the vectors that the
+  previous block's pool build gave back) and is compared with the serial flat build as well.
 - `LOSAT_X_BPDIAG=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and `LOSAT_X_DEFAULT`
   does not touch it; acts only in the fused loop of `LOSAT_X_BPSEED` or `LOSAT_X_BPSEEDSHADOW`) the two-hit
   diagonal test of the hits of one lookup cell in batches of eight instead of one after the other

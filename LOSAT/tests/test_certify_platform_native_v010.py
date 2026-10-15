@@ -48,7 +48,9 @@ class PlatformCertificationTests(unittest.TestCase):
         cls.repo_root = Path(__file__).resolve().parents[2]
         cls.candidate_sha = platform_cert.resolve_git_head_sha(cls.repo_root)
         cls.catalog = platform_cert.load_catalog(cls.repo_root, cls.candidate_sha)
-        cls.authority_path = SCRIPT.with_name("ncbi_platform_variance_v010.json")
+        cls.authority_path = SCRIPT.with_name(
+            platform_cert.NATIVE_AUTHORITY_REPO_RELATIVE.name
+        )
         cls.authority = platform_cert.load_native_authority(
             cls.repo_root, cls.candidate_sha, cls.authority_path
         )
@@ -472,14 +474,36 @@ class PlatformCertificationTests(unittest.TestCase):
             self.authority.authority_version, platform_cert.NATIVE_AUTHORITY_VERSION
         )
         self.assertEqual(len(self.authority.representatives), 6)
-        self.assertEqual(len(self.authority.platforms), 3)
-        self.assertEqual(len(self.authority.outputs), 18)
-        self.assertEqual(len(self.authority.diagnostics), 18)
+        self.assertEqual(
+            set(self.authority.platforms),
+            {"windows-x64", "macos-arm64", "macos-x64", "linux-aarch64"},
+        )
+        self.assertEqual(set(self.authority.platforms), set(platform_cert.PLATFORMS))
+        self.assertEqual(len(self.authority.outputs), 24)
+        self.assertEqual(len(self.authority.diagnostics), 24)
         provenance = self.authority.document["characterization_provenance"]
+        self.assertEqual(provenance["characterization_run_id"], 33582928402)
         self.assertEqual(len(provenance["rich_groups"]), 11)
         self.assertEqual(
             provenance["rich_group_counts"],
             {"exhaustive": 11, "authoritative_seeded": 7, "rich_only": 4},
+        )
+        added = self.authority.document["added_platform_characterizations"]
+        self.assertEqual(
+            [
+                (
+                    item["characterization_run_id"],
+                    item["candidate_sha"],
+                    [run["platform_id"] for run in item["platform_runs"]],
+                )
+                for item in added
+            ],
+            [
+                (
+                    *platform_cert.ADDED_PLATFORM_CHARACTERIZATIONS["linux-aarch64"],
+                    ["linux-aarch64"],
+                )
+            ],
         )
         self.assertEqual(
             self.authority.file_sha256,
@@ -492,11 +516,100 @@ class PlatformCertificationTests(unittest.TestCase):
             ).hexdigest(),
         )
 
+    def test_authority_v011_carries_v010_and_the_characterized_record(self) -> None:
+        def git_bytes(relative: str) -> bytes:
+            return platform_cert.read_git_blob_bytes(
+                self.repo_root, self.candidate_sha, relative
+            )
+
+        v010_raw = git_bytes("LOSAT/tests/ncbi_platform_variance_v010.json")
+        # The v0.1.0 file is historical and is never edited.
+        self.assertEqual(
+            hashlib.sha256(v010_raw).hexdigest(),
+            "fb156568b854e64196cb0bcc369cd32fd1b1d298f654c5d230ce64ed62f10c2f",
+        )
+        v010 = json.loads(v010_raw)
+        v011 = self.authority.document
+        self.assertEqual(
+            v011["normative_acceptance"]["representatives"],
+            v010["normative_acceptance"]["representatives"],
+        )
+        self.assertEqual(
+            v011["normative_acceptance"]["platforms"][:3],
+            v010["normative_acceptance"]["platforms"],
+        )
+        self.assertEqual(v011["diagnostic_metadata"][:18], v010["diagnostic_metadata"])
+        self.assertEqual(
+            v011["characterization_provenance"], v010["characterization_provenance"]
+        )
+        record_raw = git_bytes(
+            "docs/evidence/ncbi_platform_variance_v011/"
+            "linux-aarch64-authority-record.json"
+        )
+        record = json.loads(record_raw)
+        self.assertEqual(
+            v011["normative_acceptance"]["platforms"][3],
+            record["normative_platform_record"],
+        )
+        self.assertEqual(v011["diagnostic_metadata"][18:], record["diagnostic_metadata"])
+        (added,) = v011["added_platform_characterizations"]
+        self.assertEqual(
+            added["derived_record_sha256"], hashlib.sha256(record_raw).hexdigest()
+        )
+        self.assertEqual(added["candidate_sha"], record["candidate_sha"])
+        self.assertEqual(added["platform_runs"], [record["platform_run"]])
+        self.assertEqual(added["execution_counts"], record["execution_counts"])
+
+    def test_strict_authority_binds_one_characterization_source_per_platform(
+        self,
+    ) -> None:
+        def added(document):
+            return document["added_platform_characterizations"][0]
+
+        def v010_platform_in_added(document) -> None:
+            run = copy.deepcopy(
+                document["characterization_provenance"]["platform_runs"][0]
+            )
+            added(document)["platform_runs"].append(run)
+
+        def added_platform_in_rich_group(document) -> None:
+            group = document["characterization_provenance"]["rich_groups"][0]
+            multiset = copy.deepcopy(group["platform_representation_multisets"][0])
+            multiset["platform_id"] = "linux-aarch64"
+            group["platform_representation_multisets"].append(multiset)
+
+        def added_platform_in_v010_runs(document) -> None:
+            document["characterization_provenance"]["platform_runs"].append(
+                copy.deepcopy(added(document)["platform_runs"][0])
+            )
+
+        mutations = {
+            "run id": lambda d: added(d).update(
+                {"characterization_run_id": 33582928402}
+            ),
+            "candidate": lambda d: added(d).update({"candidate_sha": "0" * 40}),
+            "normative": lambda d: added(d).update({"runtime_enforced": True}),
+            "counts": lambda d: added(d)["execution_counts"].update({"losat": 1}),
+            "runner label": lambda d: added(d)["platform_runs"][0].update(
+                {"runner_label": "ubuntu-24.04"}
+            ),
+            "unknown field": lambda d: added(d).update({"unexpected": True}),
+            "v0.1.0 platform claimed twice": v010_platform_in_added,
+            "added platform in rich groups": added_platform_in_rich_group,
+            "added platform in v0.1.0 runs": added_platform_in_v010_runs,
+            "two added entries": lambda d: d["added_platform_characterizations"].append(
+                copy.deepcopy(added(d))
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                self.assert_authority_rejected(mutate)
+
     def test_strict_json_rejects_duplicate_keys(self) -> None:
         raw = self.authority_path.read_text(encoding="utf-8")
         duplicate = raw.replace(
-            '  "schema_version": 1',
-            '  "schema_version": 1,\n  "schema_version": 1',
+            '  "schema_version": 2',
+            '  "schema_version": 2,\n  "schema_version": 2',
             1,
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -524,7 +637,7 @@ class PlatformCertificationTests(unittest.TestCase):
             )
         self.assertEqual(
             authority.file_sha256,
-            "fb156568b854e64196cb0bcc369cd32fd1b1d298f654c5d230ce64ed62f10c2f",
+            "4f01d4adfa59fd912574098a17a4783fd25ffc6705c5045cf8e99685d004184a",
         )
         self.assertEqual(authority.document, self.authority.document)
 
@@ -535,8 +648,8 @@ class PlatformCertificationTests(unittest.TestCase):
             platform_cert.NATIVE_AUTHORITY_REPO_RELATIVE,
         )
         duplicate = raw.replace(
-            b'  "schema_version": 1',
-            b'  "schema_version": 1,\n  "schema_version": 1',
+            b'  "schema_version": 2',
+            b'  "schema_version": 2,\n  "schema_version": 2',
             1,
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -601,7 +714,10 @@ class PlatformCertificationTests(unittest.TestCase):
         mutations = {
             "unknown field": lambda d: d.update({"unexpected": True}),
             "authority version": lambda d: d.update({"authority_version": "v-next"}),
-            "schema version": lambda d: d.update({"schema_version": 2}),
+            "schema version": lambda d: d.update({"schema_version": 1}),
+            "v0.1.0 version": lambda d: d.update(
+                {"authority_version": "ncbi-platform-variance-v0.1.0"}
+            ),
             "unknown platform": lambda d: d["normative_acceptance"]["platforms"][
                 0
             ].update({"platform_id": "linux-nearest"}),
@@ -632,6 +748,9 @@ class PlatformCertificationTests(unittest.TestCase):
             "ten rich groups": lambda d: d["characterization_provenance"][
                 "rich_groups"
             ].pop(),
+            "no added characterization": lambda d: d[
+                "added_platform_characterizations"
+            ].clear(),
         }
         for label, mutate in mutations.items():
             with self.subTest(label=label):
@@ -1860,7 +1979,7 @@ class PlatformCertificationTests(unittest.TestCase):
                 verification["native_vs_losat_diagnostic"]["runtime_enforced"]
             )
 
-    def test_binary_architecture_reads_pe_and_macho_headers(self) -> None:
+    def test_binary_architecture_reads_pe_macho_and_elf_headers(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             pe = bytearray(128)
@@ -1877,6 +1996,28 @@ class PlatformCertificationTests(unittest.TestCase):
                 b"\xcf\xfa\xed\xfe" + (0x0100000C).to_bytes(4, "little") + b"\0" * 64
             )
             self.assertEqual(platform_cert.binary_architecture(macho_path), "arm64")
+
+            # ELF64: e_ident[EI_DATA] at 5, e_machine at 18 (EM_AARCH64 0xB7,
+            # EM_X86_64 0x3E), in the byte order EI_DATA names.
+            for byte_order, ei_data in (("little", 1), ("big", 2)):
+                for machine, expected in ((0xB7, "arm64"), (0x3E, "x86_64")):
+                    elf = bytearray(64)
+                    elf[:4] = b"\x7fELF"
+                    elf[4] = 2
+                    elf[5] = ei_data
+                    elf[18:20] = machine.to_bytes(2, byte_order)
+                    elf_path = root / f"LOSAT-elf-{byte_order}-{machine:x}"
+                    elf_path.write_bytes(bytes(elf))
+                    self.assertEqual(
+                        platform_cert.binary_architecture(elf_path), expected
+                    )
+            elf = bytearray(64)
+            elf[:4] = b"\x7fELF"
+            elf[5] = 1
+            elf[18:20] = (0xF3).to_bytes(2, "little")
+            other_path = root / "LOSAT-riscv"
+            other_path.write_bytes(bytes(elf))
+            self.assertEqual(platform_cert.binary_architecture(other_path), "unknown")
 
     def test_resume_identity_binds_source_binary_oracles_and_manifest(self) -> None:
         identity = {
@@ -1925,7 +2066,7 @@ class PlatformCertificationTests(unittest.TestCase):
         ):
             platform_cert._identity_resume_key(changed)
 
-    def test_manual_workflow_has_only_the_three_pr6_platform_jobs(self) -> None:
+    def test_manual_workflow_has_only_the_authority_platform_jobs(self) -> None:
         workflow = (
             self.repo_root
             / ".github"
@@ -1935,10 +2076,13 @@ class PlatformCertificationTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", workflow)
         self.assertNotIn("pull_request:", workflow)
         self.assertNotIn("schedule:", workflow)
-        self.assertIn("max-parallel: 3", workflow)
-        self.assertEqual(workflow.count("platform_id:"), 3)
-        for runner in ("windows-2025", "macos-15", "macos-15-intel"):
-            self.assertIn(f"runner: {runner}", workflow)
+        self.assertIn("max-parallel: 4", workflow)
+        self.assertEqual(workflow.count("platform_id:"), 4)
+        for spec in platform_cert.PLATFORMS.values():
+            self.assertIn(f"runner: {spec.runner_label}", workflow)
+            self.assertIn(f"target_triple: {spec.target_triple}", workflow)
+            self.assertIn(f"oracle_archive: {spec.archive_name}", workflow)
+            self.assertIn(f"name: platform-native-{spec.platform_id}", workflow)
         for excluded in ("ubuntu-latest", "wasm32", "benchmark", "soak"):
             self.assertNotIn(excluded, workflow.lower())
         self.assertIn('--expected-sha "$CANDIDATE_SHA"', workflow)
@@ -1956,7 +2100,7 @@ class PlatformCertificationTests(unittest.TestCase):
             .count('print("CROSS_PLATFORM_NATIVE_CERTIFIED")'),
             1,
         )
-        self.assertEqual(workflow.count("actions/download-artifact@v4"), 5)
+        self.assertEqual(workflow.count("actions/download-artifact@v4"), 6)
 
     def test_resume_import_revalidates_verified_output_hash(self) -> None:
         payload = b"canonical output\n"
@@ -2087,7 +2231,7 @@ class PlatformCertificationTests(unittest.TestCase):
             )
             self.assertIn("PLATFORM_CERTIFICATION_FAILED", captured_stderr.getvalue())
 
-    def test_aggregate_requires_three_complete_authority_bound_artifacts(self) -> None:
+    def test_aggregate_requires_every_complete_authority_bound_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             input_root = root / "input"
@@ -2098,11 +2242,11 @@ class PlatformCertificationTests(unittest.TestCase):
                 input_root, output, "a" * 40, authority, catalog
             )
             self.assertEqual(result["decision"], "CROSS_PLATFORM_NATIVE_CERTIFIED")
-            self.assertEqual(result["platform_count"], 3)
-            self.assertEqual(result["total_search_executions"], 183)
+            self.assertEqual(result["platform_count"], 4)
+            self.assertEqual(result["total_search_executions"], 244)
             self.assertEqual(
                 {item["platform_id"] for item in result["platforms"]},
-                {"windows-x64", "macos-arm64", "macos-x64"},
+                {"windows-x64", "macos-arm64", "macos-x64", "linux-aarch64"},
             )
             diagnostic_completion = (
                 input_root
@@ -2891,7 +3035,7 @@ class PlatformCertificationTests(unittest.TestCase):
                     (item["gate_a_passed"], item["gate_a_allowed_known_mismatches"])
                     for item in result["platforms"]
                 ],
-                [(43, 1)] * 3,
+                [(43, 1)] * 4,
             )
             # The same evidence is not certified when the aggregator's allowlist
             # does not list the case, or lists another output: the platforms'

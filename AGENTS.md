@@ -126,7 +126,9 @@ authoritative, current guidance for agent behavior in LOSAT.
   output instead (the same bytes on every platform, reported as an allowed
   known mismatch; the frozen bytes then fail as a stale entry); Gate B requires
   each of six official NCBI searches to match its exact registered platform
-  fingerprint. Never restore the old
+  fingerprint in `LOSAT/tests/ncbi_platform_variance_v011.json` (Windows x64,
+  macOS arm64, macOS x64 and Linux arm64; v0.1.0's file stays unedited). Never
+  restore the old
   requirement that LOSAT equal platform-local NCBI bytes when those registered
   fingerprints differ. Native fingerprints never become LOSAT expected output,
   never authorize platform-specific LOSAT behavior, and never create a new

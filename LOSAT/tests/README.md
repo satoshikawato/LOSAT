@@ -317,8 +317,8 @@ These runs are correctness checks and must not be used for speed comparisons.
 Native Gate A's frozen LOSAT hashes are not rewritten; the separate
 registered-platform Gate B is unchanged. The local Linux oracle check is
 explicitly diagnostic.
-The hosted Windows and macOS certification (`certify_platform_native_v010.py`)
-applies the same allowlist to Gate A. It reads the file from the candidate
+The hosted Windows, macOS and Linux arm64 certification
+(`certify_platform_native_v010.py`) applies the same allowlist to Gate A. It reads the file from the candidate
 commit. An entry that names a case of the 61-step plan and that case's frozen
 hash must declare exactly the case's matrix and repeatability steps in
 `frozen_gate_a_steps`; any other entry must not have that field and is left to

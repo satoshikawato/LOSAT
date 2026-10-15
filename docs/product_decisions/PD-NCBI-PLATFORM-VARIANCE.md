@@ -1,14 +1,15 @@
 # Product Decision: Bounded native-NCBI platform variance
 
 - Decision ID: `PD-NCBI-PLATFORM-VARIANCE`
-- Version: 1.1
-- Date: 2026-09-02 (1.1: 2026-10-12, see Amendments)
+- Version: 1.2
+- Date: 2026-09-02 (1.1: 2026-10-12, 1.2: 2026-10-14, see Amendments)
 - Status: Accepted
 
 ## Scope
 
 This decision governs the six native-NCBI representative checks in the
-Windows x64, macOS arm64, and macOS x64 release-certification jobs. It replaces
+Windows x64, macOS arm64, macOS x64 and (since 1.2) Linux arm64
+release-certification jobs. It replaces
 the former requirement that one LOSAT output simultaneously equal the frozen
 Linux canonical bytes and every platform-local official NCBI binary output.
 
@@ -26,9 +27,10 @@ they are never LOSAT runtime, build, feature, fallback, FFI, or subprocess
 implementation dependencies.
 
 Characterization run `33582928402` established that official NCBI 2.17.0
-binaries can emit different raw output on the three supported native
-platforms. That is an NCBI-side reference property. LOSAT is not authorized to
-be platform-variable.
+binaries can emit different raw output on the three native platforms it
+covered, and characterization run `38563517687` (1.2) found the same for
+Linux arm64. That is an NCBI-side reference property. LOSAT is not authorized
+to be platform-variable.
 
 ## Dual release contract
 
@@ -121,14 +123,22 @@ deviation and no new LOSAT parity exception.
 ## Evidence authority
 
 The immutable authority is
-`LOSAT/tests/ncbi_platform_variance_v010.json`. Its normative layer alone can
-decide Gate B. Diagnostic metadata and characterization provenance never grant
-acceptance.
+`LOSAT/tests/ncbi_platform_variance_v011.json` (`ncbi-platform-variance-v0.1.1`,
+since 1.2). It carries the representatives, the three platform records, the
+18 diagnostics and the characterization provenance of
+`LOSAT/tests/ncbi_platform_variance_v010.json` unchanged, and that historical
+file is not edited. Its normative layer alone can decide Gate B. Diagnostic
+metadata and characterization provenance never grant acceptance.
 
-The authority binds:
+Each certified platform has exactly one characterization source. The
+authority binds:
 
 - characterization run `33582928402` at
-  `be67253156ce10b852166709e9519ab54709fd80`;
+  `be67253156ce10b852166709e9519ab54709fd80` (Windows x64, macOS arm64,
+  macOS x64);
+- characterization run `38563517687` at
+  `d81f0209a5d91af9a820832d8ef56e7a1cbe621e` (Linux arm64; the same fixtures,
+  retained Linux reference and paired searches, no LOSAT execution);
 - corrected analyzer commit
   `cfd213f57691607429c4e21edbf314899310d805`;
 - corrected replay SHA-256
@@ -138,8 +148,9 @@ The authority binds:
 - the retained PR 5/Linux evidence lineage.
 
 The R1 rich diagnostic evidence contains 11 exhaustive representation groups
-(7 authoritative-seeded and 4 rich-only). Those hashes are frozen supporting
-provenance with `runtime_enforced=false`. Rich fields are not searched during
+(7 authoritative-seeded and 4 rich-only) of the three platforms of run
+`33582928402`. Those hashes are frozen supporting provenance with
+`runtime_enforced=false`; Linux arm64 adds none. Rich fields are not searched during
 normal V4 certification and are never an alternate acceptance path.
 
 At runtime the certifier hashes the exact authority-file bytes. Authority
@@ -151,15 +162,17 @@ or file hash cannot resume or aggregate.
 
 Each platform keeps the exact `43 + 6 + 12 = 61` execution plan. A matrix cell
 may certify only its platform. The dependent hosted aggregator consumes exactly
-the three expected artifacts, verifies their complete evidence manifests and
-subgates, and alone may emit `CROSS_PLATFORM_NATIVE_CERTIFIED`.
+one expected artifact per platform of the authority (four since 1.2), verifies
+their complete evidence manifests and subgates, and alone may emit
+`CROSS_PLATFORM_NATIVE_CERTIFIED`.
 
 ## Change policy
 
-An NCBI upgrade or newly observed official fingerprint requires a fresh
-three-platform characterization, a new immutable authority version, review,
-and explicit governance acceptance. Historical authority files are not edited
-or auto-learned in place.
+An NCBI upgrade requires a fresh characterization of every certified platform;
+a newly observed official fingerprint or an added platform requires a
+characterization of that platform. Each needs a new immutable authority
+version, review, and explicit governance acceptance. Historical authority files
+are not edited or auto-learned in place.
 
 ## Amendments
 
@@ -170,6 +183,18 @@ or auto-learned in place.
   the approved Sakai output (run `38170565780` on `main`), so steps 12 to 61
   did not run. The Sakai and TBLASTX d06 ratchets, Gate B and the authority
   file are unchanged.
+- 1.2 (2026-10-14, Owner): Linux arm64 (`linux-aarch64`, GitHub
+  `ubuntu-24.04-arm`, target `aarch64-unknown-linux-gnu`, oracle
+  `ncbi-blast-2.17.0+-aarch64-linux.tar.gz`) becomes a fourth certified
+  platform. Authority `ncbi-platform-variance-v0.1.1`
+  (`LOSAT/tests/ncbi_platform_variance_v011.json`) carries the three v0.1.0
+  platform records unchanged and adds the Linux arm64 record from
+  characterization run `38563517687`; v0.1.0's file is not edited. Gate A is
+  unchanged (the same 43 frozen hashes and allowlist on every platform). The
+  workflow claim becomes `43 + 6 + 12 = 61` executions on each of four
+  platforms and an aggregate of exactly the four expected artifacts. The
+  Non-goal "No expansion beyond the three platforms" reads "beyond the
+  platforms recorded in the authority".
 
 ## Non-goals
 
@@ -178,5 +203,5 @@ or auto-learned in place.
 - No platform-specific LOSAT output path.
 - No broad semantic tolerance or inferred NCBI equivalence class.
 - No paired rich search in release certification.
-- No expansion beyond the three platforms and six representatives recorded in
-  the authority.
+- No expansion beyond the platforms and six representatives recorded in the
+  authority.

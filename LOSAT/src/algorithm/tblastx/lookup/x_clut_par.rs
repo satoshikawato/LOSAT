@@ -84,7 +84,9 @@
 //!   its first slot over its count, the next cell's first slot), and the move to the scan order reads
 //!   only slots the fill wrote. `pv` is zeroed as before (the stripes OR their bits into it). The
 //!   build takes and sizes the vectors itself, before the stripes pass, never in a pass's tasks; a
-//!   build that ends `TooLarge` takes none.
+//!   build that ends `TooLarge` drops the spare's vectors (the reference builder makes that table,
+//!   and they are not kept beside it). In the shadow mode the vectors are filled with `u32::MAX` /
+//!   `i32::MIN` first, so that an entry no stripe writes always differs from the fresh build's.
 //! - extra tasks (`XExtraTasks`: the contexts' Karlin blocks of a blastp block,
 //!   `blastp/x_query_blocks.rs`): the one-latch appends pass runs them after its chunks (the indices
 //!   past the chunks), each once, also when the build then ends `TooLarge` or refused. They read
@@ -156,7 +158,7 @@ pub(super) fn x_try_build_flat_in_pool(
     x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
-    let build = |passes, spare| {
+    let build = |passes, spare, poison| {
         pool.install(|| {
             x_try_build_flat_parallel_with(
                 word_size,
@@ -172,16 +174,22 @@ pub(super) fn x_try_build_flat_in_pool(
                     stripe_shift: None,
                     passes,
                     spare,
+                    poison,
                 },
             )
         })
     };
     if x_flat_args.mode == XLkpFlat::Off {
-        return build(XPasses::Rayon, None);
+        return build(XPasses::Rayon, None, false);
     }
-    let built = build(XPasses::OneLatch(x_flat_args.extra), x_flat_args.spare);
-    if x_flat_args.mode == XLkpFlat::Shadow {
-        x_lkpflat_shadow(built.as_ref(), build(XPasses::Rayon, None).as_ref());
+    let shadow = x_flat_args.mode == XLkpFlat::Shadow;
+    let built = build(
+        XPasses::OneLatch(x_flat_args.extra),
+        x_flat_args.spare,
+        shadow,
+    );
+    if shadow {
+        x_lkpflat_shadow(built.as_ref(), build(XPasses::Rayon, None, false).as_ref());
     }
     built
 }
@@ -235,15 +243,15 @@ impl XFlatSpare {
 // No NCBI counterpart: buffer reuse (LOSAT_X_BPLKPFLAT; module header: no entry is read before the
 // stripes write it). It changes no value NCBI computes.
 /// `len` entries in `spare`'s buffer when it has room for them (its values kept, new entries 0),
-/// else in a fresh zeroed vector.
-fn x_reuse<T: Copy + Default>(spare: Vec<T>, len: usize) -> Vec<T> {
-    if spare.capacity() < len {
+/// else in a fresh zeroed vector; and whether `spare`'s buffer was used.
+fn x_reuse<T: Copy + Default>(spare: Vec<T>, len: usize) -> (Vec<T>, bool) {
+    if spare.capacity() == 0 || spare.capacity() < len {
         drop(spare);
-        return vec![T::default(); len];
+        return (vec![T::default(); len], false);
     }
     let mut reused = spare;
     reused.resize(len, T::default());
-    reused
+    (reused, true)
 }
 
 // No NCBI counterpart: how a pass's items reach the pool's threads (LOSAT_X_BPLKPFLAT). Scheduling
@@ -308,6 +316,9 @@ struct XParallelCuts<'a> {
     passes: XPasses<'a>,
     /// LOSAT_X_BPLKPFLAT: the vectors of an earlier table for `starts` and `hits` (else fresh ones).
     spare: Option<&'a XFlatSpare>,
+    /// LOSAT_X_BPLKPFLATSHADOW: `starts` and `hits` filled with `u32::MAX` / `i32::MIN` before the
+    /// stripes write them.
+    poison: bool,
 }
 
 // No NCBI counterpart: the largest PV shift that `finalize` (blast_aalookup.c:1219-1222, below)
@@ -725,6 +736,11 @@ fn x_try_build_flat_parallel_with(
         ),
     };
     if too_large.load(Ordering::Relaxed) {
+        // LOSAT_X_BPLKPFLAT: the reference builder makes this table; the spare's vectors are not
+        // kept beside it (module header).
+        if let Some(spare) = cuts.spare {
+            drop(spare.take());
+        }
         return Some(XFlatBuild::TooLarge);
     }
 
@@ -749,12 +765,16 @@ fn x_try_build_flat_parallel_with(
     };
     // LOSAT_X_BPLKPFLAT: an earlier table's vectors when the spare holds them (module header).
     let (spare_starts, spare_hits) = cuts.spare.map(XFlatSpare::take).unwrap_or_default();
-    if spare_starts.capacity() > backbone_size {
-        X_LKPFLAT_RECYCLED.fetch_add(1, Ordering::Relaxed);
+    let (mut starts, starts_reused) = x_reuse(spare_starts, backbone_size + 1);
+    let (mut hits, hits_reused) = x_reuse(spare_hits, total);
+    X_LKPFLAT_RECYCLED.fetch_add(u64::from(starts_reused), Ordering::Relaxed);
+    X_LKPFLAT_RECYCLED_HITS.fetch_add(u64::from(hits_reused), Ordering::Relaxed);
+    if cuts.poison {
+        // LOSAT_X_BPLKPFLATSHADOW: an entry that no stripe writes keeps a value no build makes.
+        starts.fill(u32::MAX);
+        hits.fill(i32::MIN);
     }
-    let mut starts = x_reuse(spare_starts, backbone_size + 1);
     starts[backbone_size] = total as u32;
-    let mut hits = x_reuse(spare_hits, total);
 
     // The stripes: count, layout and fill.
     let mut parts = Vec::with_capacity(stripes);
@@ -924,7 +944,7 @@ mod tests {
         chunk_sizes: &[usize],
         stripe_shift: Option<usize>,
         passes: XPasses<'_>,
-        spare: Option<&XFlatSpare>,
+        spare: Option<(&XFlatSpare, bool)>,
     ) -> XFlatBuild {
         in_pool(threads, || {
             x_try_build_flat_parallel_with(
@@ -940,7 +960,8 @@ mod tests {
                     chunk_sizes,
                     stripe_shift,
                     passes,
-                    spare,
+                    spare: spare.map(|(spare, _)| spare),
+                    poison: spare.is_some_and(|(_, poison)| poison),
                 },
             )
         })
@@ -977,6 +998,23 @@ mod tests {
         fn run(&self, index: usize) {
             self.0[index].fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// A spare of garbage: `starts` with room for a word-size-5 table (759,376 cells and one), `hits`
+    /// of random length.
+    fn garbage_spare(rng: &mut XorShift) -> XFlatSpare {
+        let spare = XFlatSpare::default();
+        *spare.0.lock().unwrap() = (
+            vec![u32::MAX - 1; 759_377 + rng.below(9)],
+            vec![i32::MIN + 1; rng.below(4000)],
+        );
+        spare
+    }
+
+    /// The capacities of the spare's vectors.
+    fn spare_capacities(spare: &XFlatSpare) -> (usize, usize) {
+        let kept = spare.0.lock().unwrap();
+        (kept.0.capacity(), kept.1.capacity())
     }
 
     // The cuts of the tests: thread counts, chunk sizes (even and uneven), stripe widths (the
@@ -1108,7 +1146,9 @@ mod tests {
     // parallel builder refuses exactly when the reference does, and otherwise builds its table.
     // The bound on the appends: `TooLarge` exactly when the appends pass it. Both pass
     // implementations; the one-latch passes with extra tasks, each of which runs exactly once, also
-    // when the build is refused or `TooLarge`.
+    // when the build is refused or `TooLarge`, and on a spare of garbage (filled with the shadow's
+    // pattern or not), which a refused build consumes and a `TooLarge` build drops; the next build on
+    // a spare of garbage is still exact.
     #[test]
     fn parallel_refusal_and_bound_are_the_serial_ones() {
         let mut rng = XorShift(0x1f83_d9ab_fb41_bd6b);
@@ -1151,6 +1191,8 @@ mod tests {
                         } else {
                             XPasses::Rayon
                         };
+                        let spare = garbage_spare(&mut rng);
+                        let poison = rng.below(2) == 0;
                         match (
                             &reference,
                             parallel(
@@ -1164,7 +1206,7 @@ mod tests {
                                 chunk_sizes,
                                 None,
                                 passes,
-                                None,
+                                one_latch.then_some((&spare, poison)),
                             ),
                         ) {
                             (Err(()), XFlatBuild::Refused) => refused_seen += 1,
@@ -1181,6 +1223,7 @@ mod tests {
                             usize::from(one_latch),
                             &format!("round {round}, capacity {capacity}, threads {threads}"),
                         );
+                        assert_eq!(spare_capacities(&spare) == (0, 0), one_latch);
                     }
                 }
             }
@@ -1201,6 +1244,8 @@ mod tests {
                     } else {
                         XPasses::Rayon
                     };
+                    let spare = garbage_spare(&mut rng);
+                    let poison = rng.below(2) == 0;
                     let built = parallel(
                         3,
                         threshold,
@@ -1212,17 +1257,22 @@ mod tests {
                         &[5],
                         None,
                         passes,
-                        None,
+                        one_latch.then_some((&spare, poison)),
                     );
                     assert_eq!(
                         matches!(built, XFlatBuild::TooLarge),
                         too_large,
                         "round {round}, bound {max_appends}, appends {appends}"
                     );
+                    if let XFlatBuild::Table(built) = built {
+                        x_assert_same_flat_tables(&built, &serial);
+                    }
                     extra.assert_each_ran(
                         usize::from(one_latch),
                         &format!("round {round}, bound {max_appends}"),
                     );
+                    // A `TooLarge` build drops the spare's vectors, a table takes them.
+                    assert_eq!(spare_capacities(&spare) == (0, 0), one_latch);
                 }
             }
         }
@@ -1293,7 +1343,7 @@ mod tests {
                                 &[],
                                 None,
                                 passes,
-                                Some(&spare),
+                                Some((&spare, build == 1)),
                             )));
                             x_assert_same_flat_tables(&built, &serial);
                             if room && total > 0 {

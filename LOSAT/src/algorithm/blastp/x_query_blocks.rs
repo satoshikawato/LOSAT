@@ -190,7 +190,7 @@ use std::path::Path;
 
 use super::encoding::EncodedProtein;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bpclut_mode, x_bplkpflat_mode, XFlatArgs, XFlatSpare, XLkpFlat,
+    x_bpclut_mode, x_bplkpflat_mode, x_pool_builds, XFlatArgs, XFlatSpare, XLkpFlat,
 };
 use crate::algorithm::tblastx::lookup::QueryContext;
 use crate::algorithm::tblastx::translation::QueryFrame;
@@ -402,17 +402,11 @@ pub(crate) fn x_bp_lookup_query(
 
 // No NCBI counterpart: where LOSAT_X_BPLKPFLAT acts; it reads switches and changes no value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPLKPFLAT): the switch's mode where `pool` builds blastp-fast's flat table
-/// (`LOSAT_X_BPCLUT` or `LOSAT_X_BPCLUTSHADOW`, a pool of more than one thread,
-/// `lookup/x_clut_par.rs`), else `Off`.
-fn x_lkpflat_mode(pool: &SearchPool<'_>) -> XLkpFlat {
-    let pool_builds = cfg!(all(
-        feature = "parallel",
-        any(not(target_arch = "wasm32"), feature = "wasm-threads")
-    )) && pool.enabled()
-        && pool.threads() > 1
-        && x_bpclut_mode() != 0;
-    if pool_builds {
+/// EXPERIMENT (LOSAT_X_BPLKPFLAT): the switch's mode (`x_bplkpflat_mode`) where `pool` builds
+/// blastp-fast's flat table (`LOSAT_X_BPCLUT` or `LOSAT_X_BPCLUTSHADOW`, and `x_pool_builds`: a pool
+/// of more than one thread, `lookup/x_clut_par.rs`), else `Off`.
+fn x_lkpflat_mode_for_pool(pool: &SearchPool<'_>) -> XLkpFlat {
+    if x_bpclut_mode() != 0 && x_pool_builds(pool) {
         x_bplkpflat_mode()
     } else {
         XLkpFlat::Off
@@ -424,7 +418,7 @@ fn x_lkpflat_mode(pool: &SearchPool<'_>) -> XLkpFlat {
 /// (`XBlockSubjects`), where the switch acts: the search of a block gives its table's vectors back
 /// here, and the next block's build takes them.
 pub(crate) fn x_bp_lookup_spare<'p>(pool: &SearchPool<'p>) -> Option<&'p XFlatSpare> {
-    if x_lkpflat_mode(pool) == XLkpFlat::Off {
+    if x_lkpflat_mode_for_pool(pool) == XLkpFlat::Off {
         return None;
     }
     pool.x_ext::<XBlockSubjects>()
@@ -453,14 +447,21 @@ impl<'a> XLookupFlat<'a> {
     // ```
     /// The values of `x_bp_lookup_query(query_frames, word_size, pool)`; where the switch acts with
     /// `LOSAT_X_BPQBLOCK`, the contexts come without their Karlin blocks, which `finish` sets after
-    /// the build (`XKarlinTasks`).
+    /// the build (`XKarlinTasks`). A query chunk of a split batch (`x_query_chunk`, a search that
+    /// ends after its preliminary stage, inside its block's search, and drops its table there)
+    /// takes no spare vectors: the block's table keeps them.
     pub(crate) fn lookup_query<'p: 'a>(
         query_frames: &'a [Vec<QueryFrame>],
         word_size: usize,
         pool: &SearchPool<'p>,
+        x_query_chunk: bool,
     ) -> (Self, Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
-        let mode = x_lkpflat_mode(pool);
-        let spare = x_bp_lookup_spare(pool);
+        let mode = x_lkpflat_mode_for_pool(pool);
+        let spare = if x_query_chunk {
+            None
+        } else {
+            x_bp_lookup_spare(pool)
+        };
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -481,7 +482,22 @@ impl<'a> XLookupFlat<'a> {
         (flat, query, locations, contexts)
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (`lookup_query`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2781
+    // ```c
+    //       if ( !contexts[context].is_valid )
+    //           continue;
+    //
+    //       query_length = contexts[context].query_length;
+    //       context_offset = contexts[context].query_offset;
+    //       buffer = &query[context_offset];
+    //
+    //       Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
+    //       sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+    //       BlastScoreFreqCalc(sbp, sbp->sfp[context], rfp, stdrfp);
+    //       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
+    // ```
+    // NCBI makes the lookup segments (c++/src/algo/blast/core/blast_setup.c:635) before these
+    // blocks (BlastSetup_ScoreBlkInit, blast_setup.c:652); the blocks are left to the build's tasks.
     /// The lookup query without the contexts' Karlin blocks, which become the build's extra tasks.
     #[cfg(all(
         feature = "parallel",
@@ -534,18 +550,21 @@ impl<'a> XLookupFlat<'a> {
         }
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (`lookup_query`)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803
     // ```c
     //       if ( !contexts[context].is_valid )
     //           continue;
     //       ...
     //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
     // ```
-    /// After the build: sets the contexts' validity and Karlin blocks that the build's extra tasks
-    /// computed and computes the others here (all of them when the pool did not run the tasks: the
-    /// serial builder, a refusal before the pass, the switch off). With the shadow mode, compares
-    /// the query, the segments and the contexts with `x_bp_lookup_query`'s, the Karlin blocks bit for
-    /// bit (panics on a difference). Returns the number of contexts the tasks computed.
+    /// After the build: with Karlin tasks (`lookup_query`), sets the contexts' validity and Karlin
+    /// blocks that the build's tasks computed and computes the others here; the tasks do not run
+    /// where the pool's build falls back to the serial builder (a backbone too large for its
+    /// stripes, `x_try_build_flat_parallel_with`); a build that fails before its passes ends the search before
+    /// this call. Without Karlin tasks it does nothing. With the shadow mode, compares the query,
+    /// the segments and the contexts with `x_bp_lookup_query`'s, the Karlin blocks bit for bit
+    /// (panics on a difference). Returns the number of contexts the tasks computed (for the tests;
+    /// the shadow counts them as well).
     pub(crate) fn finish(
         self,
         contexts: &mut [QueryContext],
@@ -618,7 +637,14 @@ impl XExtraTasks for XKarlinTasks<'_> {
         self.frames.len()
     }
 
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803 (above)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2782
+    // ```c
+    //       Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
+    //       sbp->sfp[context] = Blast_ScoreFreqNew(sbp->loscore, sbp->hiscore);
+    //       BlastScoreFreqCalc(sbp, sbp->sfp[context], rfp, stdrfp);
+    //       sbp->kbp_std[context] = kbp = Blast_KarlinBlkNew();
+    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+    // ```
     fn run(&self, index: usize) {
         let karlin = self.lookup_query.context_karlin(self.frames[index]);
         let stored = self.done[index].set(karlin).is_ok();
@@ -631,7 +657,12 @@ impl XExtraTasks for XKarlinTasks<'_> {
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 impl XKarlinTasks<'_> {
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803 (above)
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2782-2784
+    // ```c
+    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+    //       if (loop_status) {
+    //           contexts[context].is_valid = FALSE;
+    // ```
     /// Sets each context's validity and Karlin block from its task, or computes it here when its
     /// task has not run. Returns the number of contexts set from the tasks.
     fn fill(&self, contexts: &mut [QueryContext]) -> usize {

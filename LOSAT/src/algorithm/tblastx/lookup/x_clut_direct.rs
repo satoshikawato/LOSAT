@@ -248,6 +248,7 @@ pub(crate) fn x_bplkpflat_mode() -> XLkpFlat {
 static X_LKPFLAT_TABLES: AtomicU64 = AtomicU64::new(0);
 static X_LKPFLAT_OUTCOMES: AtomicU64 = AtomicU64::new(0);
 static X_LKPFLAT_RECYCLED: AtomicU64 = AtomicU64::new(0);
+static X_LKPFLAT_RECYCLED_HITS: AtomicU64 = AtomicU64::new(0);
 static X_LKPFLAT_CONTEXT_SETS: AtomicU64 = AtomicU64::new(0);
 static X_LKPFLAT_CONTEXTS: AtomicU64 = AtomicU64::new(0);
 static X_LKPFLAT_CONTEXTS_FROM_TASKS: AtomicU64 = AtomicU64::new(0);
@@ -267,16 +268,18 @@ pub(crate) fn x_lkpflat_count_contexts(contexts: usize, from_tasks: usize) {
 
 /// EXPERIMENT (LOSAT_X_BPLKPFLATSHADOW): the shadow mode's line at exit (printed by `main`):
 /// `tables_compared` and `outcomes_compared` (refusals, `TooLarge`) count the pool's builds, which
-/// are all compared; `recycled` the builds that took the vectors of an earlier table.
+/// are all compared; `recycled` and `recycled_hits` the builds whose `starts`, and whose `hits`,
+/// are the buffer of an earlier table (`hits` only where it had the room).
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn x_bplkpflat_print_summary() {
     if x_bplkpflat_mode() == XLkpFlat::Shadow {
         let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
         eprintln!(
-            "[X_SHADOW] BPLKPFLAT tables_compared={} outcomes_compared={} recycled={} context_sets_compared={} contexts_compared={} contexts_from_tasks={} identical",
+            "[X_SHADOW] BPLKPFLAT tables_compared={} outcomes_compared={} recycled={} recycled_hits={} context_sets_compared={} contexts_compared={} contexts_from_tasks={} identical",
             load(&X_LKPFLAT_TABLES),
             load(&X_LKPFLAT_OUTCOMES),
             load(&X_LKPFLAT_RECYCLED),
+            load(&X_LKPFLAT_RECYCLED_HITS),
             load(&X_LKPFLAT_CONTEXT_SETS),
             load(&X_LKPFLAT_CONTEXTS),
             load(&X_LKPFLAT_CONTEXTS_FROM_TASKS),
@@ -1559,7 +1562,7 @@ pub(crate) fn x_bp_build_compressed_lookup(
 // ```
 /// Whether the flat table is built by `pool`'s threads: a pool of more than one thread, in a build
 /// with threads.
-fn x_pool_builds(pool: &SearchPool<'_>) -> bool {
+pub(crate) fn x_pool_builds(pool: &SearchPool<'_>) -> bool {
     cfg!(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")

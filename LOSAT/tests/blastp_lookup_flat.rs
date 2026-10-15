@@ -52,6 +52,25 @@ impl Run {
             .map(|(key, value)| (key.to_string(), value.parse().expect("a count")))
             .collect()
     }
+
+    /// The searches of query sets that ran to their reports (`[TIMING] blastp_total` lines, with
+    /// `LOSAT_TIMING`): the blocks of a block search; a query chunk of a split batch ends after its
+    /// preliminary stage and prints none.
+    fn searches(&self) -> u64 {
+        self.stderr
+            .lines()
+            .filter(|line| line.starts_with("[TIMING] blastp_total:"))
+            .count() as u64
+    }
+}
+
+/// The `recycled_hits` counter: builds whose `hits` are an earlier table's buffer, which happens only
+/// where that buffer has the room; at least one, and at most `recycled`.
+fn assert_hits_recycled(counts: &HashMap<String, u64>, what: &str) {
+    assert!(
+        (1..=counts["recycled"]).contains(&counts["recycled_hits"]),
+        "{what}: {counts:?}"
+    );
 }
 
 /// One blastp-fast run of the fixture pair (two related nimavirus proteomes) against `subject`
@@ -174,6 +193,7 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
             assert!(counts["tables_compared"] > 1, "{what}");
             assert_eq!(counts["outcomes_compared"], 0, "{what}");
             assert_eq!(counts["recycled"], counts["tables_compared"] - 1, "{what}");
+            assert_hits_recycled(&counts, &what);
             assert_eq!(
                 counts["context_sets_compared"], counts["tables_compared"],
                 "{what}"
@@ -200,6 +220,7 @@ fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
         let what = format!("blocks {letters}: {counts:?}");
         assert_eq!(counts["tables_compared"], 1, "{what}");
         assert_eq!(counts["recycled"], 0, "{what}");
+        assert_eq!(counts["recycled_hits"], 0, "{what}");
         assert_eq!(counts["context_sets_compared"], u64::from(tasks), "{what}");
         assert_eq!(
             counts["contexts_from_tasks"], counts["contexts_compared"],
@@ -259,6 +280,67 @@ fn the_clut_shadow_compares_the_switchs_builds() {
                 counts["tables_compared"] - 1,
                 "{counts:?}"
             );
+            assert_hits_recycled(&counts, "BPCLUTSHADOW");
+        }
+    }
+}
+
+// Split query batches inside the blocks (`CHUNK_SIZE` 1000, `OVERLAP_CHUNK_SIZE` 100): each query
+// chunk of a split batch is a search of its own inside its block's search (its preliminary stage
+// only), whose table the pool builds and which drops that table when it ends. A chunk takes no
+// spare vectors, so the block's table keeps them and the next block reuses them, with the switch,
+// its shadow and `LOSAT_X_BPCLUTSHADOW` (whose pool tables give their vectors back at once): the
+// shadow compares more tables than there are blocks (the chunks' too), and `recycled` is the
+// blocks after the first.
+#[test]
+fn query_chunks_of_split_batches_take_no_spare() {
+    let subject = subject_file();
+    let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    let base = [
+        ("LOSAT_X_BPCLUT", "1"),
+        ("LOSAT_X_BPQBLOCK", "1"),
+        ("CHUNK_SIZE", "1000"),
+        ("OVERLAP_CHUNK_SIZE", "100"),
+        ("LOSAT_TIMING", "1"),
+    ];
+    let off = blastp_fast(&subject, 4, &base, "6");
+    assert!(!off.stdout.is_empty(), "the fixture pair has rows");
+    let blocks = off.searches();
+    assert!(blocks > 1, "{blocks} blocks");
+    let clut_shadow = ("LOSAT_X_BPCLUTSHADOW", "1");
+    for extra in [
+        &[ON][..],
+        &[SHADOW][..],
+        &[clut_shadow, ON][..],
+        &[clut_shadow, SHADOW][..],
+    ] {
+        let run = blastp_fast(&subject, 4, &with(&base, extra), "6");
+        assert!(run.stdout == off.stdout, "{extra:?}: the report differs");
+        assert_eq!(run.searches(), blocks, "{extra:?}");
+        let mut tables = None;
+        if extra.contains(&clut_shadow) {
+            let clut = run.shadow("BPCLUT");
+            assert!(
+                clut["parallel_tables_compared"] > blocks,
+                "{extra:?}: {blocks} blocks, {clut:?}"
+            );
+            tables = Some(clut["parallel_tables_compared"]);
+        }
+        if extra.contains(&SHADOW) {
+            let counts = run.shadow("BPLKPFLAT");
+            let what = format!("{extra:?}: {blocks} blocks, {counts:?}");
+            assert!(counts["tables_compared"] > blocks, "{what}");
+            assert_eq!(
+                tables.unwrap_or(counts["tables_compared"]),
+                counts["tables_compared"],
+                "{what}"
+            );
+            assert_eq!(counts["recycled"], blocks - 1, "{what}");
+            assert_hits_recycled(&counts, &what);
+            assert_eq!(
+                counts["contexts_from_tasks"], counts["contexts_compared"],
+                "{what}"
+            );
         }
     }
 }
@@ -276,6 +358,7 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
         counts["tables_compared"] - 1,
         "{counts:?}"
     );
+    assert_hits_recycled(&counts, "-db");
     assert_eq!(
         counts["contexts_from_tasks"], counts["contexts_compared"],
         "{counts:?}"

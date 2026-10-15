@@ -6715,12 +6715,14 @@ fn run_resolved_in_pool(
             // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts' Karlin blocks on the search's pool
             // (`x_query_blocks::x_bp_lookup_query`); without the switch
             // `prepare_blosum62_lookup_query_for_word_size`. EXPERIMENT (LOSAT_X_BPLKPFLAT): they
-            // can be left to the build below and set after it (`x_query_blocks::XLookupFlat`).
+            // can be left to the build below and set after it (`x_query_blocks::XLookupFlat`); a
+            // query chunk takes no spare table vectors.
             let (x_flat, query, locations, mut contexts) =
                 super::x_query_blocks::XLookupFlat::lookup_query(
                     &query_frames,
                     args.word_size,
                     blastp_parallel_pool,
+                    chunk_prelim.is_some(),
                 );
             // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:1292
             // ```c

@@ -1026,13 +1026,13 @@ impl XBlosum62LookupQuery {
         }
     }
 
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:621-636 (the lookup segments,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:634-637 (the lookup segments,
     // `prepare_blosum62_lookup_query_for_word_size`)
     // ```c
-    // if (lookup_segments) {
-    //     BLAST_ComplementMaskLocations(program_number, query_info,
-    //                                   filter_maskloc, lookup_segments);
-    // }
+    //     if (lookup_segments) {
+    //         BLAST_ComplementMaskLocations(program_number, query_info,
+    //                                       filter_maskloc, lookup_segments);
+    //     }
     // ```
     /// The query, the lookup segments and the contexts of
     /// `prepare_blosum62_lookup_query_for_word_size`, each context valid with the default Karlin

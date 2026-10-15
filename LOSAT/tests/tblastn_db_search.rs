@@ -161,6 +161,62 @@ fn a_database_keeps_the_weak_hits_of_its_shortest_length() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+// local_blast.cpp:177-224 (`CheckInternalData`): NCBI does not search a query batch without a
+// valid context, so the sequence file is read by the first batch with one. A database without
+// its `.nsq` answers a query of X letters (no valid context) as NCBI BLAST+ 2.17.0 does: a
+// report without hits and the query's warning, exit status 0; with a second query in a batch
+// of its own (`BATCH_SIZE=1`), that batch fails after the report of the first one.
+#[test]
+fn the_sequence_file_is_read_by_the_first_batch_with_a_valid_context() {
+    let dir = temp_dir("nsq");
+    let db = makedb(&dir, &fasta("MelaMJNV.fasta"), "mela");
+    std::fs::remove_file(format!("{db}.nsq")).unwrap();
+    let proteins = std::fs::read_to_string(fasta("PemoMJNVA.faa")).unwrap();
+    let first = proteins.split_inclusive('>').nth(1).unwrap();
+    let all_x = format!(">xx all X\n{}\n", "X".repeat(32));
+    let query = dir.join("xx.faa");
+    std::fs::write(&query, &all_x).unwrap();
+    let output = losat()
+        .arg("tblastn")
+        .arg("-query")
+        .arg(&query)
+        .args(["-db", &db])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let report = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        report.contains("Query= xx all X") && report.contains("***** No hits found *****"),
+        "{report}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Could not calculate ungapped Karlin-Altschul parameters"),
+        "{stderr}"
+    );
+    std::fs::write(&query, format!("{all_x}>{}", first.trim_end_matches('>'))).unwrap();
+    let output = losat()
+        .arg("tblastn")
+        .arg("-query")
+        .arg(&query)
+        .args(["-db", &db])
+        .env("BATCH_SIZE", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    let report = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        report.contains("Query= xx all X") && report.matches("Query= ").count() == 1,
+        "{report}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.ends_with("BLAST engine error: Database memory map file error\n"),
+        "{stderr}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // blast_args.cpp:2364-2381: `-db` excludes `-subject` and `-subject_loc` (LOSAT's parser
 // reports it); blast_app_util.hpp:185-203: a database that is not found is NCBI's
 // `BLAST Database error`, exit status 2.

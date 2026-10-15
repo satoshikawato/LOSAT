@@ -1376,11 +1376,13 @@ fn search(
         //        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
         // ```
         // `-db`: the database's sequences, read once for every batch (`database::read_stores`)
-        // where NCBI reads them first, in the first batch's preliminary search: a sequence
-        // file that cannot be read fails that batch after the outfmt 0 prolog. A database
-        // without sequences fails there as well (BLASTN's `Database memory map file error`,
-        // blastn/blast_engine/run.rs).
-        let database_stores = match database {
+        // where NCBI reads them first, in the preliminary search of the first batch with a
+        // valid context (a batch without one is not searched, `CheckInternalData`). A database
+        // without sequences (BLASTN's `Database memory map file error`,
+        // blastn/blast_engine/run.rs) or a sequence file that cannot be read fails that batch,
+        // after the reports of the batches before, which are searched without sequences; a run
+        // without such a batch never reads the file.
+        let (database_stores, mut stores_error) = match database {
             Some(database) => {
                 let read = if database.numbers().num_seqs == 0 {
                     Err(PreliminaryReadError("Database memory map file error").into())
@@ -1388,24 +1390,11 @@ fn search(
                     database.read_stores()
                 };
                 match read {
-                    Ok(stores) => stores,
-                    Err(error) => {
-                        let error = match error.downcast::<PreliminaryReadError>() {
-                            Ok(read_error) => app::engine_error(read_error.0),
-                            Err(error) => return Err(error),
-                        };
-                        write_first_batch_prologs(
-                            outputs,
-                            None,
-                            0,
-                            subject_letters,
-                            pairwise_database.as_ref(),
-                        )?;
-                        return Err(error);
-                    }
+                    Ok(stores) => (stores, None),
+                    Err(error) => (Vec::new(), Some(error)),
                 }
             }
-            None => Vec::new(),
+            None => (Vec::new(), None),
         };
         let search_letters = match database {
             Some(_) => SubjectLetters::Packed(&database_stores),
@@ -1442,8 +1431,8 @@ fn search(
         let mut ungapped_karlin = Vec::with_capacity(queries.len());
         let mut query_validity = Vec::with_capacity(queries.len());
         let mut query_batch_skipped = Vec::with_capacity(queries.len());
-        // `-db`: the stored titles read so far, and the batch that a header file failed with
-        // its error.
+        // `-db`: the stored titles read so far, and the batch that a header file or the
+        // sequence file failed with its error.
         let mut titles = super::database::DatabaseTitles::new();
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
         // EXPERIMENT (LOSAT_X_TBNPAR, LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
@@ -1464,15 +1453,20 @@ fn search(
         // batch). With the switches on, x_search_batches searches them ahead (on one shared pool,
         // or side by side) and returns the reports in batch order; with them off it returns None
         // and the loop below runs as before.
-        let mut x_searched = super::stage_d_pipeline::x_search_batches(
-            &query_seqs,
-            search_letters,
-            query_input
+        // A database whose sequences could not be read searches its batches one by one below.
+        let x_batches = match stores_error {
+            Some(_) => Vec::new(),
+            None => query_input
                 .batches(batch_size)
                 .into_iter()
                 .map(|batch| batch.searched)
                 .filter(|searched| !searched.is_empty() && searched.end <= searched_done)
                 .collect(),
+        };
+        let mut x_searched = super::stage_d_pipeline::x_search_batches(
+            &query_seqs,
+            search_letters,
+            x_batches,
             |range| LocalStageDProfile {
                 seg: seg.as_ref(),
                 soft_masking: resolved.soft_masking,
@@ -1529,6 +1523,19 @@ fn search(
                         resolved.num_threads,
                     )?,
                 };
+            // `-db`: the first batch with a valid context reads the sequences (above); a
+            // reader error of NCBI's own fails it, LOSAT's refusal stops the run.
+            if batch_validity.iter().any(|&valid| valid) {
+                if let Some(error) = stores_error.take() {
+                    match error.downcast::<PreliminaryReadError>() {
+                        Ok(read_error) => {
+                            failed = Some((range, app::engine_error(read_error.0)));
+                            break;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:283-293
             // ```c++
             //     m_TbackSearch.Reset(new CBlastTracebackSearch(m_QueryFactory,
@@ -1579,7 +1586,7 @@ fn search(
             word_cutoff_min: 0,
             prelim_evalue: 0.0,
         });
-        // A batch that a header file failed is not reported, nor are the batches after it.
+        // A batch that a database file failed is not reported, nor are the batches after it.
         let queries = match &failed {
             Some((range, _)) => {
                 results.truncate(range.start);

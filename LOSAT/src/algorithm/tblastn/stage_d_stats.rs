@@ -166,7 +166,8 @@ pub(super) fn local_subject_effective_lengths_with_search_spaces(
     search_spaces: Option<&[i64]>,
 ) -> Vec<LocalContextLength> {
     assert_eq!(query_contexts.len(), gapped_params.len());
-    assert!(db_num_seqs > 0);
+    // `db_num_seqs` is 0 only for a database without sequences: its batches without a valid
+    // context are reported, and the first with one fails (`args::search`).
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-732
     // ```c
     //    if (eff_len_options->db_length > 0)

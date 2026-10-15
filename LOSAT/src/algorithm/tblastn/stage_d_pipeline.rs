@@ -680,8 +680,10 @@ fn run_local_search_with_pool(
         !queries.is_empty(),
         "TBLASTN Stage D requires a protein query"
     );
+    // A database search has no subjects in hand when its sequences could not be read: its
+    // batches are set up and reported, and `args::search` fails the first with a valid context.
     ensure!(
-        subjects.count() > 0,
+        subjects.count() > 0 || profile.subject_set.database.is_some(),
         "TBLASTN Stage D requires a local subject"
     );
     ensure!(
@@ -814,7 +816,7 @@ fn run_local_search_with_pool(
     // if (valid_context == FALSE) status = 1;
     // Preserve the parameter/validity state for reporting, then skip subject
     // search when every query context has failed Karlin setup.
-    if !valid_contexts.iter().any(|&valid| valid) {
+    if !valid_contexts.iter().any(|&valid| valid) || subjects.count() == 0 {
         return (0..queries.len())
             .map(|_| KappaResultHitList::new(profile.max_target_seqs))
             .collect();

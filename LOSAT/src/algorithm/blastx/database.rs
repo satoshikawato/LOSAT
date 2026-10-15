@@ -1,0 +1,238 @@
+//! The database path of BLASTX (`-db NAME`): the search of an NCBI BLAST protein database,
+//! as NCBI BLAST+ 2.17.0 `blastx -db NAME -num_threads 1` searches it
+//! (PD-LOSAT-DATABASE-SEARCH, P1 and P1.1).
+//!
+//! What differs from the search of a FASTA subject set (`-subject`):
+//!
+//! - the subjects are the stored bytes of the whole database, read once before the query
+//!   batches (`BlastxDatabase::read_stores`, `common::database::read_protein_stores`) and
+//!   searched by ordinal id through `subjects::Subjects::Database`; the set-level numbers
+//!   are the index's (total, count) and 10 for the shortest sequence (D1);
+//! - a database that cannot be read fails the first query batch with a valid context, after
+//!   the reports of the batches before it (NCBI does not search a batch without one);
+//! - after each batch's search, the titles of its reported sequences are read in NCBI's
+//!   order and the batch's hit lists are renamed to ranks over records of those sequences
+//!   (`ReportedSubjects::for_batch`), so the report writers keep indexing by subject;
+//! - the reports show the database (`BlastxDatabase::pairwise_database`, `name`), the subject
+//!   ids made from the stored titles, and `stitle`.
+//!
+//! The search, the composition redo and the report writers are those of the `-subject`
+//! path. The opening of the database, the reader's errors and the rules for the stored
+//! titles are shared with BLASTP, BLASTN and TBLASTN (`algorithm::common::database`).
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use anyhow::Result;
+
+use super::input::FastaRecord;
+use super::runtime::BatchResults;
+use crate::algorithm::common::database::{self as shared, PreliminaryReadError, StoredProteins};
+use crate::blastinput::ncbi_environment::ApplicationSettings;
+use crate::report::pairwise::PairwiseDatabase;
+use crate::seqdb::{SeqDb, SeqType};
+
+/// The program that LOSAT's refusals name.
+const PROGRAM: &str = "BLASTX";
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-119
+// ```c
+// const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
+// '-','A','B','C','D','E','F','G','H','I','K','L','M',
+// 'N','P','Q','R','S','T','V','W','X','Y','Z','U','*',
+// 'O', 'J'};
+// ```
+/// The letter of each NCBIstdaa byte.
+const NCBISTDAA_TO_AMINOACID: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+
+/// The database of a `-db` search: the opened database and its name as NCBI keeps it
+/// (`BlastxArgs::database_name`: the `-db` value without white space at its ends).
+pub(crate) struct BlastxDatabase {
+    db: SeqDb,
+    name: String,
+}
+
+impl BlastxDatabase {
+    /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
+    /// with the command line's errors.
+    pub(crate) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
+        let db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
+        Ok(Self {
+            db,
+            name: name.to_string(),
+        })
+    }
+
+    /// The `-db` value as NCBI keeps it.
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// What the `Database:` lines of outfmt 0 show (title, date, real totals).
+    pub(crate) fn pairwise_database(&self) -> PairwiseDatabase {
+        shared::pairwise_database(&self.db, &self.name)
+    }
+
+    // A database without sequences (makeblastdb builds none; a volume whose index holds no
+    // sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query batch and
+    // fails in that batch's preliminary search, where its reader cannot map the sequence
+    // file (BLASTP's `-db`, fixture `LOSAT/tests/seqdb/db/empty`).
+    /// Reads every sequence of the database (`read_protein_stores`). The error (a reader
+    /// error of NCBI's preliminary search, LOSAT's refusal of a sequence, or the empty
+    /// database's) belongs to the first query batch with a valid context, which the caller
+    /// fails with it.
+    pub(crate) fn read_stores(&self) -> Result<StoredProteins> {
+        if self.db.num_seqs() == 0 {
+            return Err(PreliminaryReadError("Database memory map file error").into());
+        }
+        shared::read_protein_stores(&self.db, PROGRAM)
+    }
+}
+
+/// The reported sequences of one query batch, by rank (their order of ordinal ids): the
+/// records the report writers index (`gnl|BL_ORD_ID|n`, the stored title, the letters of
+/// the stored bytes), the stored titles, and the tabular ids when a tabular format is
+/// written.
+#[derive(Default)]
+pub(crate) struct ReportedSubjects {
+    records: Vec<FastaRecord>,
+    titles: Vec<Arc<[u8]>>,
+    tabular_ids: Vec<String>,
+}
+
+impl ReportedSubjects {
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:286-291
+    // ```c++
+    //                 BlastFormatter_PreFetchSequenceData(*results, scope,
+    //                 		                            fmt_args->GetFormattedOutputChoice());
+    //             	ITERATE(CSearchResultSet, result, *results) {
+    //                	    formatter.PrintOneResultSet(**result, query_batch);
+    //             	}
+    // ```
+    /// The reported sequences of the batches `batches` (one query batch: the results of
+    /// one search), with their hit lists renamed from ordinal ids to ranks. The titles are
+    /// read before any report of the batch (NCBI fetches the batch's sequences first),
+    /// query by query in hit-list order; NCBI's reader error stops the run at this batch
+    /// (`HeaderReadError`), and a title LOSAT does not show as NCBI is its refusal
+    /// (`check_reported_title`; with `tabular`, `tabular_subject_id`; with `pairwise`,
+    /// `check_shown_protein_title`).
+    pub(crate) fn for_batch(
+        database: &BlastxDatabase,
+        stores: &StoredProteins,
+        batches: &mut [BatchResults],
+        gapped: bool,
+        tabular: bool,
+        pairwise: bool,
+    ) -> Result<Self> {
+        // Every listed subject gets a record (the tabular writer looks its list's subject
+        // up before it filters the HSPs); only the reported ones have their titles read.
+        let mut listed: BTreeMap<usize, Option<Arc<[u8]>>> = BTreeMap::new();
+        for batch in batches.iter() {
+            for (qidx, lists) in batch.queries.iter().enumerate() {
+                for list in lists {
+                    let reported = super::report::reported(list, gapped);
+                    if matches!(listed.get(&list.oid), Some(Some(_)))
+                        || (!reported && listed.contains_key(&list.oid))
+                    {
+                        continue;
+                    }
+                    if !reported {
+                        listed.insert(list.oid, None);
+                        continue;
+                    }
+                    let ordinal = u32::try_from(list.oid)?;
+                    let stored = shared::read_title(
+                        &database.db,
+                        ordinal,
+                        batch.query_ordinal + qidx,
+                        PROGRAM,
+                    )?;
+                    shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
+                    listed.insert(list.oid, Some(Arc::from(stored.title)));
+                }
+            }
+        }
+        let mut reported = ReportedSubjects::default();
+        for (&oid, title) in &listed {
+            let ordinal = u32::try_from(oid)?;
+            let shown = title.is_some();
+            let title = title.clone().unwrap_or_else(|| Arc::from(&b""[..]));
+            if pairwise && shown {
+                shared::check_shown_protein_title(&title, ordinal, PROGRAM)?;
+            }
+            if tabular {
+                let id = if title.is_empty() {
+                    Vec::new()
+                } else {
+                    shared::tabular_subject_id(&title, ordinal, true, PROGRAM)?
+                };
+                // A stored title is a VisibleString (checked above), so its id is ASCII.
+                reported
+                    .tabular_ids
+                    .push(String::from_utf8_lossy(&id).into_owned());
+            }
+            let encoded = stores.residues_with_sentinel(oid);
+            reported.records.push(FastaRecord {
+                internal_id: format!("gnl|BL_ORD_ID|{ordinal}"),
+                title: String::from_utf8_lossy(&title).into_owned(),
+                sequence: encoded[..encoded.len() - 1]
+                    .iter()
+                    .map(|&residue| NCBISTDAA_TO_AMINOACID[usize::from(residue)])
+                    .collect(),
+                lowercase_masks: Vec::new(),
+                warnings: Vec::new(),
+            });
+            reported.titles.push(title);
+        }
+        // Ranks keep the order of the ordinal ids, so every tie broken by subject index
+        // is broken as before.
+        let rank: BTreeMap<usize, usize> = listed
+            .keys()
+            .enumerate()
+            .map(|(rank, &oid)| (oid, rank))
+            .collect();
+        for batch in batches.iter_mut() {
+            for lists in &mut batch.queries {
+                for list in lists.iter_mut() {
+                    list.oid = rank[&list.oid];
+                }
+            }
+        }
+        Ok(reported)
+    }
+
+    /// The records by rank.
+    pub(crate) fn records(&self) -> &[FastaRecord] {
+        &self.records
+    }
+
+    /// The tabular subject id of rank `rank` (only with `tabular` in `for_batch`).
+    pub(crate) fn tabular_id(&self, rank: usize) -> &str {
+        &self.tabular_ids[rank]
+    }
+
+    /// The stored title of rank `rank` (`stitle`).
+    pub(crate) fn title(&self, rank: usize) -> &str {
+        &self.records[rank].title
+    }
+
+    /// The stored titles by rank (the outfmt 0 alignment headings).
+    pub(crate) fn stored_titles(&self) -> &[Arc<[u8]>] {
+        &self.titles
+    }
+
+    /// The description-table labels by rank: the title as NCBI's defline generator makes it
+    /// for the description table (as BLASTP's, BLASTN's and TBLASTN's `-db` reports).
+    pub(crate) fn descriptions(&self) -> Vec<Arc<str>> {
+        self.titles
+            .iter()
+            .map(|title| {
+                let label = match crate::report::defline::generate_defline(title, true, true) {
+                    Ok(defline) => defline.text,
+                    Err(crate::report::defline::UnknownEncoding) => b"Unknown".to_vec(),
+                };
+                Arc::from(String::from_utf8_lossy(&label).as_ref())
+            })
+            .collect()
+    }
+}

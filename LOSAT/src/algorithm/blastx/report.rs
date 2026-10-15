@@ -1,5 +1,8 @@
 //! BLASTX formatting from real final native runtime results.
-use super::{args::ResolvedOptions, input::FastaRecord, results::Hsp, runtime::BatchResults};
+use super::{
+    args::ResolvedOptions, database::ReportedSubjects, input::FastaRecord, results::Hsp,
+    runtime::BatchResults,
+};
 use crate::{
     common::GapEditOp,
     report::outfmt6::{
@@ -149,6 +152,12 @@ pub(crate) fn query_endpoints(length: usize, frame: i8, start: i32, end: i32) ->
 // This is Seq-align construction, after runtime search/pruning and e-value
 fn has_seqalign(hsp: &Hsp, gapped: bool) -> bool {
     !gapped || hsp.hsp.score != 0
+}
+
+/// Whether the hit list `list` has an HSP that the reports show (`has_seqalign`), so that
+/// they read its subject's title.
+pub(super) fn reported(list: &super::results::HspList, gapped: bool) -> bool {
+    list.hsps.iter().any(|hsp| has_seqalign(hsp, gapped))
 }
 
 // NCBI reference (598d8ae6): c++/src/objects/seqfeat/Genetic_code_table.cpp:94-112
@@ -1018,18 +1027,26 @@ fn field_name(field: &str) -> &str {
 // 		}
 // 	}
 // ```
+/// A subject as the tabular fields show it: its record (letters), its id and `stitle`
+/// (`ShownSubjects`).
+struct ShownSubject<'a> {
+    record: &'a FastaRecord,
+    id: &'a str,
+    title: &'a str,
+}
+
 fn field_value(
     field: &str,
     query: &FastaRecord,
-    subject: &FastaRecord,
+    subject: &ShownSubject<'_>,
     hsp: &Hsp,
     a: &DisplayAlignment,
 ) -> String {
     match field {
         "qseqid" | "qacc" | "qaccver" => id_field(query, field),
-        "sseqid" | "sacc" | "saccver" => id_field(subject, field),
+        "sseqid" | "sacc" | "saccver" => subject.id.to_owned(),
         "qlen" => query.sequence.len().to_string(),
-        "slen" => subject.sequence.len().to_string(),
+        "slen" => subject.record.sequence.len().to_string(),
         "qstart" => a.qstart.to_string(),
         "qend" => a.qend.to_string(),
         "sstart" => a.sstart.to_string(),
@@ -1052,7 +1069,7 @@ fn field_value(
         "frames" => format!("{}/0", a.frame),
         "btop" => a.btop.clone(),
         // Local-subject FASTA has no Blast-def-line-set; the source title field is NA.
-        "stitle" => "N/A".into(),
+        "stitle" => subject.title.to_owned(),
         _ => unreachable!("validated BLASTX field"),
     }
 }
@@ -1091,6 +1108,48 @@ fn field_value(
 //        m_Ostream << "# " << num_hits << " hits found" << "\n";
 //     }
 // ```
+/// What the reports show of the subjects: `-subject`'s path (`User specified sequence
+/// set`), or `-db`'s name, its `Database:` lines and the reported sequences of the query
+/// batch, by rank (`database::ReportedSubjects`: ids, stored titles).
+pub(crate) enum ShownSubjects<'a> {
+    Fasta {
+        path: &'a Path,
+    },
+    Database {
+        name: &'a str,
+        pairwise: &'a crate::report::pairwise::PairwiseDatabase,
+        reported: &'a ReportedSubjects,
+    },
+}
+
+impl ShownSubjects<'_> {
+    /// The tabular subject id of subject `oid` (`sseqid`, `sacc`, `saccver`): the first
+    /// word of a record's title, or a database sequence's id made from its stored title.
+    fn subject_id<'s>(&'s self, subject: &'s FastaRecord, oid: usize) -> &'s str {
+        match self {
+            ShownSubjects::Fasta { .. } => local_id(subject),
+            ShownSubjects::Database { reported, .. } => reported.tabular_id(oid),
+        }
+    }
+
+    /// `stitle` of subject `oid`: `N/A` for a record (NCBI's subject set has no title in
+    /// its Seq-align), the stored title of a database sequence.
+    fn stitle(&self, oid: usize) -> &str {
+        match self {
+            ShownSubjects::Fasta { .. } => "N/A",
+            ShownSubjects::Database { reported, .. } => reported.title(oid),
+        }
+    }
+
+    /// The `-db` database's `Database:` lines.
+    fn pairwise_database(&self) -> Option<&crate::report::pairwise::PairwiseDatabase> {
+        match self {
+            ShownSubjects::Fasta { .. } => None,
+            ShownSubjects::Database { pairwise, .. } => Some(pairwise),
+        }
+    }
+}
+
 pub fn render(
     writer: &mut impl Write,
     options: &ResolvedOptions,
@@ -1099,17 +1158,18 @@ pub fn render(
     subject_path: &Path,
     batches: &mut [BatchResults],
 ) -> Result<()> {
-    write_prolog(writer, options, subjects, subject_path)?;
+    let shown = ShownSubjects::Fasta { path: subject_path };
+    write_prolog(writer, options, subjects, &shown)?;
     render_queries(
         writer,
         &mut std::io::stderr().lock(),
         options,
         queries,
         subjects,
-        subject_path,
+        &shown,
         batches,
     )?;
-    write_epilog(writer, options, subjects, subject_path, queries.len())
+    write_epilog(writer, options, subjects, &shown, queries.len())
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:289-290
 // ```c++
@@ -1126,7 +1186,7 @@ pub fn render_queries(
     options: &ResolvedOptions,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
-    subject_path: &Path,
+    shown: &ShownSubjects<'_>,
     batches: &mut [BatchResults],
 ) -> Result<()> {
     for batch in batches.iter_mut() {
@@ -1137,15 +1197,7 @@ pub fn render_queries(
         }
     }
     if options.outfmt == 0 {
-        return write_pairwise(
-            writer,
-            stderr,
-            options,
-            queries,
-            subjects,
-            subject_path,
-            batches,
-        );
+        return write_pairwise(writer, stderr, options, queries, subjects, shown, batches);
     }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     // ```c++
@@ -1263,11 +1315,16 @@ pub fn render_queries(
                         // ```
                         &query.title
                     )?;
-                    writeln!(
-                        writer,
-                        "# Database: User specified sequence set (Input: {})",
-                        subject_path.display()
-                    )?;
+                    match shown {
+                        ShownSubjects::Fasta { path } => writeln!(
+                            writer,
+                            "# Database: User specified sequence set (Input: {})",
+                            path.display()
+                        )?,
+                        ShownSubjects::Database { name, .. } => {
+                            writeln!(writer, "# Database: {name}")?
+                        }
+                    }
                     if count > 0 {
                         writeln!(
                             writer,
@@ -1286,6 +1343,11 @@ pub fn render_queries(
                 }
                 for list in lists {
                     let subject = &subjects[list.oid];
+                    let shown_subject = ShownSubject {
+                        record: subject,
+                        id: shown.subject_id(subject, list.oid),
+                        title: shown.stitle(list.oid),
+                    };
                     for hsp in &list.hsps {
                         if !has_seqalign(hsp, options.gapped) {
                             continue;
@@ -1294,7 +1356,7 @@ pub fn render_queries(
                         let values: Vec<_> = options
                             .fields
                             .iter()
-                            .map(|f| field_value(f, query, subject, hsp, &a))
+                            .map(|f| field_value(f, query, &shown_subject, hsp, &a))
                             .collect();
                         writeln!(writer, "{}", values.join("	"))?;
                     }
@@ -1346,7 +1408,7 @@ fn write_pairwise(
     options: &ResolvedOptions,
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
-    subject_path: &Path,
+    shown: &ShownSubjects<'_>,
     batches: &[BatchResults],
 ) -> Result<()> {
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
@@ -1460,7 +1522,14 @@ fn write_pairwise(
                         positives: Some(a.positive),
                         gaps: Some(a.gaps),
                         subject_length: Some(subject.sequence.len()),
-                        subject_title: subject.title.split_once(' ').map(|(_, t)| t.to_owned()),
+                        // A database sequence's description line is made from its stored
+                        // title alone (`ReportedSubjects::descriptions`).
+                        subject_title: match shown {
+                            ShownSubjects::Fasta { .. } => {
+                                subject.title.split_once(' ').map(|(_, t)| t.to_owned())
+                            }
+                            ShownSubjects::Database { .. } => None,
+                        },
                         comp_adjust_method: Some(u8::try_from(hsp.composition_method)?),
                         sum_n: Some(hsp.num),
                     });
@@ -1468,11 +1537,20 @@ fn write_pairwise(
             }
         }
     }
-    let report = pairwise_metadata(options, subjects, subject_path);
-    let ids: Vec<std::sync::Arc<str>> = subjects
-        .iter()
-        .map(|s| std::sync::Arc::from(local_id(s)))
-        .collect();
+    let report = pairwise_metadata(options, subjects, shown);
+    let ids: Vec<std::sync::Arc<str>> = match shown {
+        ShownSubjects::Fasta { .. } => subjects
+            .iter()
+            .map(|s| std::sync::Arc::from(local_id(s)))
+            .collect(),
+        ShownSubjects::Database { reported, .. } => reported.descriptions(),
+    };
+    let database = match shown {
+        ShownSubjects::Fasta { .. } => None,
+        ShownSubjects::Database {
+            pairwise, reported, ..
+        } => Some((*pairwise, reported.stored_titles())),
+    };
     let config = PairwiseConfig {
         program: "blastx".into(),
         protein_matrix: ScoringMatrix::Blosum62,
@@ -1496,6 +1574,7 @@ fn write_pairwise(
             num_descriptions: options.num_descriptions as usize,
             num_alignments: options.num_alignments as usize,
         },
+        database,
     )?;
     Ok(())
 }
@@ -1525,7 +1604,7 @@ fn write_pairwise(
 fn pairwise_metadata(
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
-    subject_path: &Path,
+    shown: &ShownSubjects<'_>,
 ) -> crate::report::pairwise::BlastpPairwiseReport {
     use crate::{
         config::{ProteinScoringSpec, ScoringMatrix},
@@ -1537,14 +1616,24 @@ fn pairwise_metadata(
         gap_open: options.gap_open,
         gap_extend: options.gap_extend,
     };
-    let total: usize = subjects.iter().map(|s| s.sequence.len()).sum();
+    // A database's lines come from `ShownSubjects::pairwise_database`; these fields serve
+    // `-subject` (the Gumbel block's printed numbers do not depend on the length).
+    let (database_name, num_sequences, total) = match shown {
+        ShownSubjects::Fasta { path } => (
+            format!("User specified sequence set (Input: {})", path.display()),
+            subjects.len(),
+            subjects.iter().map(|s| s.sequence.len()).sum(),
+        ),
+        ShownSubjects::Database { name, pairwise, .. } => (
+            name.to_string(),
+            usize::try_from(pairwise.num_sequences).unwrap_or(usize::MAX),
+            usize::try_from(pairwise.total_letters).unwrap_or(usize::MAX),
+        ),
+    };
     BlastpPairwiseReport {
         version: "2.17.0+".into(),
-        database_name: format!(
-            "User specified sequence set (Input: {})",
-            subject_path.display()
-        ),
-        database_num_sequences: subjects.len(),
+        database_name,
+        database_num_sequences: num_sequences,
         database_total_letters: total,
         matrix_name: options.matrix.clone(),
         gap_open: options.gap_open,
@@ -1563,16 +1652,17 @@ fn pairwise_metadata(
 // ```c++
 //         formatter.PrintProlog();
 // ```
-pub fn write_prolog(
+pub(crate) fn write_prolog(
     writer: &mut impl Write,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
-    subject_path: &Path,
+    shown: &ShownSubjects<'_>,
 ) -> Result<()> {
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_prolog(
             writer,
-            &pairwise_metadata(options, subjects, subject_path),
+            &pairwise_metadata(options, subjects, shown),
+            shown.pairwise_database(),
         )?;
     }
     Ok(())
@@ -1631,17 +1721,17 @@ pub fn write_prolog(
 //                         options.GetWindowSize() << "\n";
 //     }
 // ```
-pub fn write_epilog(
+pub(crate) fn write_epilog(
     writer: &mut impl Write,
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
-    subject_path: &Path,
+    shown: &ShownSubjects<'_>,
     queries: usize,
 ) -> Result<()> {
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_epilog(
             writer,
-            &pairwise_metadata(options, subjects, subject_path),
+            &pairwise_metadata(options, subjects, shown),
             &crate::report::pairwise::BlastxPairwiseOptions {
                 word_threshold: options.threshold,
                 gapped: options.gapped,
@@ -1649,6 +1739,7 @@ pub fn write_epilog(
                 num_descriptions: options.num_descriptions as usize,
                 num_alignments: options.num_alignments as usize,
             },
+            shown.pairwise_database(),
         )?;
     } else if options.outfmt == 7 {
         writeln!(writer, "# BLAST processed {queries} queries")?;

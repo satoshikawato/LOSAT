@@ -103,6 +103,28 @@ pub fn score_block(batch: &PreparedQueryBatch) -> Vec<ContextParameters> {
         .collect()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:913-920
+// ```c
+//       /* Set the database length for new FSC */
+//       if (sbp->gbp) {
+//           Int8 dbl = total_length;
+//           /* Override the database length or set one (e.g., blast2seq). */
+//           if (eff_len_options->db_length) {
+//               dbl = eff_len_options->db_length;
+//           }
+//           sbp->gbp->db_length =
+// ```
+/// The database length of the Gumbel block: `-dbsize` when it is not 0 (also below 0, as
+/// NCBI), else the real total `db_length`; not divided by 3, since BLASTX's subject is not
+/// translated (blast_setup.c:921-922).
+pub fn gumbel_db_length(options: &ResolvedOptions, db_length: i64) -> i64 {
+    if options.db_length != 0 {
+        options.db_length
+    } else {
+        db_length
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:784-824
 // ```c++
 //       if (query_info->contexts[index].is_valid &&
@@ -174,6 +196,21 @@ pub fn effective_lengths(
         parameters.len() == batch.contexts.len(),
         "one statistical block per BLASTX context"
     );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-720
+    // ```c
+    //    /* use overriding value from effective lengths options or the real value
+    //       from effective lengths parameters. */
+    //    if (eff_len_options->db_length > 0)
+    //       db_length = eff_len_options->db_length;
+    //    else
+    // ```
+    // `db_length` is the real total; `-dbsize` above 0 replaces it here (never divided by
+    // 3: BLASTX's subject is not translated).
+    let db_length = if options.db_length > 0 {
+        options.db_length
+    } else {
+        db_length
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:729-732
     // ```c
     //    if (db_length == 0 &&
@@ -413,7 +450,7 @@ pub fn subject_parameters(
     };
     let gapped = lookup_protein_params(&spec);
     let gumbel = if options.gapped {
-        lookup_protein_gumbel_params(&spec, db_length)
+        lookup_protein_gumbel_params(&spec, gumbel_db_length(options, db_length))
     } else {
         None
     };

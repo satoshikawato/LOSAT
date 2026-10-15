@@ -12,6 +12,7 @@ use std::ptr::NonNull;
 
 use crate::common::GapEditOp;
 use crate::core::blast_stat::composition::compute_lambda_from_score_probs;
+use crate::sequence::packed_subject::SubjectNt;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::{aa_char_to_ncbistdaa, BLASTAA_SIZE};
 use crate::utils::seg::{SegMasker, SegParams};
@@ -339,6 +340,16 @@ pub struct BlastCompoMatchingSequence<'a> {
     // Blast_GetPartialTranslation(..., local_data->seq_arg.seq->gen_code_string, ...);
     // ```
     pub genetic_code_id: Option<u8>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1518-1520
+    // ```c
+    //     status = Blast_GetPartialTranslation(na_sequence + translation_start,
+    //                                          num_nucleotides,
+    //                                          (Int2) translation_frame,
+    // ```
+    /// The nucleotides a translated subject's windows are read from (`na_sequence`): its
+    /// letters (then also `data`), or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed store, whose
+    /// windows are made when read. `data` for a protein.
+    pub nucleotides: SubjectNt<'a>,
 }
 
 impl<'a> BlastCompoMatchingSequence<'a> {
@@ -353,6 +364,7 @@ impl<'a> BlastCompoMatchingSequence<'a> {
             index,
             data,
             genetic_code_id: None,
+            nucleotides: SubjectNt::Letters(data),
         }
     }
 
@@ -362,13 +374,23 @@ impl<'a> BlastCompoMatchingSequence<'a> {
     // Blast_GetPartialTranslation(...,
     //     local_data->seq_arg.seq->gen_code_string, ...);
     // ```
-    pub fn new_translated(index: i32, data: &'a [u8], genetic_code_id: u8) -> Result<Self> {
+    pub fn new_translated(
+        index: i32,
+        nucleotides: SubjectNt<'a>,
+        genetic_code_id: u8,
+    ) -> Result<Self> {
         GeneticCode::try_from_id(genetic_code_id).map_err(anyhow::Error::msg)?;
         Ok(Self {
-            length: i32::try_from(data.len())?,
+            length: i32::try_from(nucleotides.len())?,
             index,
-            data,
+            // the letters, when the subject has them (a store's windows are read through
+            // `nucleotides` only)
+            data: match nucleotides {
+                SubjectNt::Letters(letters) => letters,
+                SubjectNt::Packed(_) => &[],
+            },
             genetic_code_id: Some(genetic_code_id),
+            nucleotides,
         })
     }
 }
@@ -1579,7 +1601,7 @@ fn translated_query_composition(
 // BLAST_GetTranslation selects the strand and starts at ABS(frame)-1;
 // prot_seq[0] = NULLB; prot_seq[index_prot] = NULLB;
 fn translated_subject_window_sequence(
-    subject_nt: &[u8],
+    subject_nt: SubjectNt<'_>,
     range: &BlastCompoSequenceRange,
     genetic_code: &GeneticCode,
 ) -> Result<Vec<u8>> {
@@ -1597,7 +1619,14 @@ fn translated_subject_window_sequence(
     if start < 0 || nucleotide_length < 0 || start + nucleotide_length > full_length {
         bail!("NCBI translated subject window exceeds nucleotide sequence");
     }
-    let segment = &subject_nt[start as usize..(start + nucleotide_length) as usize];
+    // EXPERIMENT (LOSAT_X_TBNSTORE): a packed subject gives the window's letters in upper case;
+    // the strand and codon reads below do not depend on the case.
+    let mut window = Vec::new();
+    let segment = subject_nt.fetch(
+        start as usize,
+        (start + nucleotide_length) as usize,
+        &mut window,
+    );
     let strand = if frame > 0 {
         segment.to_vec()
     } else {
@@ -1692,7 +1721,7 @@ pub fn translated_subject_get_range<'seq>(
     let query =
         BlastCompoSequenceData::copy_query_range_with_selenocysteine_fix(orig_query, query_range);
     let translated =
-        translated_subject_window_sequence(matching_seq.data, subject_range, &genetic_code)?;
+        translated_subject_window_sequence(matching_seq.nucleotides, subject_range, &genetic_code)?;
     let mut subject = BlastCompoSequenceData {
         length: i32::try_from(translated.len() - 2)?,
         buffer: translated,
@@ -3326,13 +3355,29 @@ mod tests {
                 .collect();
             assert_eq!(subject_nt.len(), subject_nt_length as usize, "{case}");
             let genetic_code = GeneticCode::from_id(1);
+            // EXPERIMENT (LOSAT_X_TBNSTORE): the windows of the packed subject are the same
+            let store = crate::sequence::packed_subject::PackedNucleotide::from_subject_letters(
+                &subject_nt,
+            )
+            .expect("subject letters");
             for (window, expected_hex) in actual.iter().zip(expected_translation) {
                 let translated = translated_subject_window_sequence(
-                    &subject_nt,
+                    SubjectNt::Letters(&subject_nt),
                     &window.subject_range,
                     &genetic_code,
                 )
                 .unwrap();
+                assert_eq!(
+                    translated_subject_window_sequence(
+                        SubjectNt::Packed(&store),
+                        &window.subject_range,
+                        &genetic_code,
+                    )
+                    .unwrap(),
+                    translated,
+                    "{case}: packed {:?}",
+                    window.subject_range
+                );
                 let observed_hex = translated[1..translated.len() - 1]
                     .iter()
                     .map(|value| format!("{value:02x}"))
@@ -3349,7 +3394,7 @@ mod tests {
             let first_window = &actual[0];
             let first_align = first_window.align.as_deref().unwrap();
             let translated = translated_subject_window_sequence(
-                &subject_nt,
+                SubjectNt::Letters(&subject_nt),
                 &first_window.subject_range,
                 &genetic_code,
             )
@@ -3484,7 +3529,8 @@ mod tests {
                 .flat_map(|line| line.bytes())
                 .collect();
             let matching_seq =
-                BlastCompoMatchingSequence::new_translated(0, &subject_nt, 1).unwrap();
+                BlastCompoMatchingSequence::new_translated(0, SubjectNt::Letters(&subject_nt), 1)
+                    .unwrap();
             let mut raw_events = Vec::new();
             let mut masked_events = std::collections::HashMap::new();
             for line in seg_trace.lines() {
@@ -3605,7 +3651,7 @@ mod tests {
                             let event = &raw_events[observed_calls];
                             assert_eq!(event.0, observed_calls, "{case}: event index");
                             let raw = translated_subject_window_sequence(
-                                &subject_nt,
+                                SubjectNt::Letters(&subject_nt),
                                 &window.subject_range,
                                 &GeneticCode::from_id(1),
                             )
@@ -3758,7 +3804,9 @@ mod tests {
             .filter(|line| !line.starts_with('>'))
             .flat_map(|line| line.bytes())
             .collect();
-        let matching_seq = BlastCompoMatchingSequence::new_translated(0, &subject_nt, 1).unwrap();
+        let matching_seq =
+            BlastCompoMatchingSequence::new_translated(0, SubjectNt::Letters(&subject_nt), 1)
+                .unwrap();
         let query_fasta = std::fs::read_to_string(format!(
             "{root}/tlosan_stage_c/seg_hard_query_20260924/query.faa"
         ))

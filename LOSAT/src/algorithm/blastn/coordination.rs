@@ -793,10 +793,15 @@ pub fn finalize_task_config(
 // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //        != BLAST_SEQSRC_EOF) {
 // ```
-pub fn subject_metadata_from_records<R: InputRecord>(records: &[R]) -> SubjectMetadata {
+/// `length(index)` is the number of letters of record `index` (its letters, or with
+/// `LOSAT_X_BNSTORE` its packed subject's).
+pub fn subject_metadata_from_records<R: InputRecord>(
+    records: &[R],
+    length: impl Fn(usize) -> usize,
+) -> SubjectMetadata {
     let mut subject_ids = Vec::with_capacity(records.len());
     let mut db_len_total: usize = 0;
-    for record in records {
+    for (index, record) in records.iter().enumerate() {
         // The title up to its first space: the ID of a `bio` record (whose ID has no white
         // space), "unknown" when it is empty.
         let title = record.title_bytes();
@@ -809,7 +814,7 @@ pub fn subject_metadata_from_records<R: InputRecord>(records: &[R]) -> SubjectMe
         } else {
             String::from_utf8_lossy(&title[..end]).into_owned()
         });
-        db_len_total += record.seq().len();
+        db_len_total += length(index);
     }
     SubjectMetadata {
         db_len_total,

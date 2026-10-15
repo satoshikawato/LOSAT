@@ -22,6 +22,10 @@ pub mod sequence_compare;
 // Blast_IntervalTreeReset(tree);
 // ```
 pub mod tracing;
+// NCBI c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520: the subjects' search forms made
+// from the scope. EXPERIMENT (LOSAT_X_BNSTORE): the subjects held packed, their letters made when
+// read.
+pub(crate) mod x_subject_store;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-166
 // ```c
 // typedef struct BlastHSP {
@@ -41,3 +45,6 @@ pub mod hsp;
 
 pub use args::BlastnArgs;
 pub use blast_engine::run;
+// EXPERIMENT (LOSAT_X_BNSTORE): the summary line `main` prints at exit. No NCBI counterpart: it
+// prints counters and changes no value NCBI computes.
+pub use x_subject_store::print_summary as x_subject_store_print_summary;

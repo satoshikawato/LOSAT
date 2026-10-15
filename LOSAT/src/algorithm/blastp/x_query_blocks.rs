@@ -37,6 +37,19 @@
 //! search is used only where nothing else is written around the rows (see
 //! `blast_engine.rs` `search`); everything else takes the reference path.
 //!
+//! With `-db` the kernel runs over the database's subjects one after the other on one diagonal
+//! table (`blast_engine/database.rs` `search_blocks`, whose blocks start at the one-thread
+//! offset). From one subject to the next NCBI's offset grows by the subject's length plus
+//! `window`, and the table is cleared where the offset reaches INT4_MAX / 4
+//! (`Blast_ExtendWordExit` below), so an entry left by an earlier subject lies at least `window`
+//! letters behind every hit of a later one: without its flag it gives `diff >= window`, with its
+//! flag the hit is not behind it; in both cases the entry becomes (this hit, no flag), whatever
+//! query wrote it, as a cleared entry would. A subject's hits therefore depend on that subject
+//! only, and the argument above holds subject by subject. The batches of `-db` are those of
+//! `-subject`. A database search can also fail after the rows of some batches where it reads the
+//! definition lines of the reported subjects; the block search runs only when no definition line
+//! of the database can fail that way (`database::x_titles_allow_blocks`).
+//!
 //! With the compressed lookup table of blastp-fast (`CompressedAaLookupTable`), the hits of a
 //! block's scan reach the two-hit test in another order within a subject offset, and that order
 //! changes nothing:
@@ -104,6 +117,16 @@
 //! ```c
 //!         if (score <= 0 || (maxscore - score) >= dropoff)
 //!             break;
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:167-173
+//! ```c
+//!     if (ewp->diag_table) {
+//!         if (ewp->diag_table->offset >= INT4_MAX / 4) {
+//!             ewp->diag_table->offset = ewp->diag_table->window;
+//!             s_BlastDiagClear(ewp->diag_table);
+//!         } else {
+//!             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+//!         }
 //! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:831-840
 //! ```c

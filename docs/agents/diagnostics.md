@@ -229,7 +229,7 @@ What runs per target:
 - One thread (`-num_threads 1`, a build without the `parallel` feature, wasm32 without
   `wasm-threads`): the scheduling switches (`AHEAD`, `GREEDYSPEC`, `PAIRPAR` for
   blastn/megablast, `SEGSHARE`, `TBNBATCH`, `TBNOIDCHUNK`, `TBNOIDNEXT`, `TBNOIDUNITS`, `BXPAR`,
-  `BXPOOL`, `BXBATCH`, `BXCHUNK`) leave the reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
+  `BXPOOL`, `BXBATCH`, `BXCHUNK`, `BNSTREAM`) leave the reference code running. The unit paths have no thread-count gate: the tblastn `TBNPAR` units
   (with `TBNSSIDE` / `TBNQSIDE`; only its parallel redo needs a pool) and the TBLASTX `PAIRPAR`
   units run in order on the calling thread.
 
@@ -306,6 +306,20 @@ Same values, faster computation:
   tblastn range with a fresh `get_range`). With `LOSAT_X_STATS=1` it prints
   `[X_STATS] NEWTONLANES prefetched= hits= misses= unused= ...` (no `xstats` feature needed).
   Strict-set candidate (S-F, round 5).
+- `LOSAT_X_NEWTONLANES8=1` (aarch64 only; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the Newton lanes of `LOSAT_X_NEWTONLANES` solve eight problems
+  per round instead of four (`F8`, four 128-bit NEON operations per value) in batches of five or more
+  problems; once the queue is empty and at most four lanes hold a problem, those problems move to
+  four lanes (bit copies of the values kept between rounds) and finish there. Each problem keeps its
+  operation sequence, so the results are the same bits (`x_newton_lanes.rs`, module header). It
+  only widens the lanes: with `LOSAT_X_NEWTONLANES` off it does nothing. On other targets it is
+  ignored: on x86-64 the two 256-bit operations per value gained nothing (0 to 3 % slower on
+  blastp / tblastn), and Wasm is not measured. Measured 2026-10-15 on the GitHub runners, bench5's
+  blastp_wssv / tblastn_small at one thread, wall relative to four lanes: Linux arm64 (Neoverse-N2)
+  0.981 / 0.959, macOS arm64 0.974 / 0.893 (macOS rounds are noisy); on Neoverse-N2
+  `LOSAT_X_NEWTONLANES=0` gave 0.967 / 0.941. Shadow: `LOSAT_X_NEWTONLANESSHADOW=1` compares the
+  eight-lane results too. With `LOSAT_X_STATS=1` it adds
+  `[X_STATS] NEWTONLANES8 batches8= rounds8= tail_rounds=` (rounds on eight lanes and after the move).
 - `LOSAT_X_SEGFAST=1`, `LOSAT_X_SEGMEMO=1` SEG window as a residue histogram updated in O(1),
   entropy memoised per state vector. Shadow (`SEGFAST` path): `LOSAT_X_SEGSHADOW=1`.
 - `LOSAT_X_DUSTFAST=1`, `LOSAT_X_DUSTRING=1` DUST perfect-interval list built in one merge,
@@ -569,8 +583,12 @@ Rebuilding less:
   reference path's other refusals that come before its rows (a `-window_size` whose diagonal table with all
   queries passes 2^30, a query split that LOSAT rejects, or with the compressed table a query batch whose
   offsets add more than four times NCBI's overflow cells, about 859 million words, counted before the search);
-  otherwise the search of all queries. The output file is created when the first block's rows are written; a
-  run that fails in a later block leaves the rows of the blocks before.
+  otherwise the search of all queries. With `-db` the same, and the blocks run only when every definition line
+  of the database reads and none of LOSAT's refusals of a reported title applies (`x_titles_allow_blocks`, one
+  pass over the header files in the search pool before the first block); a query whose effective search space
+  could pass NCBI's `Int8` (with `-db` or `-dbsize`) or an empty database also takes the search of all queries.
+  The output file is created when the first block's rows are written; a run that fails in a later block leaves
+  the rows of the blocks before.
   With `LOSAT_TIMING=1` each block prints its own `[TIMING]` lines.
   The block search's set-up uses its thread pool (no value changes): the count of the query batches' words
   for the overflow banks runs on the pool before the first block (groups of consecutive batches, one counter
@@ -594,10 +612,31 @@ Rebuilding less:
   made generic over the element (`blastp/x_prelim_compact.rs`, exactness argument in its header); the redo
   reads lists rebuilt as the off path holds them: the one-thread redo rebuilds each query's list when it
   reaches it and drops it after its redo, a search with more than one thread rebuilds all lists before the
-  redo, query chunks hand on rebuilt lists. `LOSAT_X_BPPCOMPACT=shadow` builds both lists, compares every
+  redo, query chunks hand on rebuilt lists; with `-db` the compact lists are listed and renamed to ranks with the
+  others (`ListedSubjects::read`). `LOSAT_X_BPPCOMPACT=shadow` builds both lists, compares every
   rebuilt list field by field with the off path's (it panics on a difference) and prints
   `[X_SHADOW] BPPCOMPACT compared=<lists> hsps=<n>` at exit. With `LOSAT_TIMING=1` each search of a query
   set prints `[TIMING] x_bppcompact: expanded_lists=<n>`.
+- `LOSAT_X_BNSTREAM=1` (BLASTN, all tasks, `-subject` with two or more threads, memory; not in the strict
+  set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the subjects of a query batch
+  are searched in blocks of 64 subjects per thread (`threads x 64` subjects), and the results of a block go to
+  the hit lists in OID order before the next block starts (`search_query_batch` in
+  `blastn/blast_engine/run.rs`), in both passes: the preliminary HSPs to the preliminary hit lists
+  (`PrelimHitCollector`, which keeps those of at most `prelim_hitlist_size` subjects per query) and the
+  traceback's HSPs to the final hit lists (`update_hitlists_with_subject_hits`). Without it two or more threads
+  search every subject of the batch and then hand all results over, so the HSPs of every subject are held at
+  once. The hit lists take the subjects one at a time in OID order either way, as NCBI's
+  `Blast_HitListUpdate` takes one HSP list at a time, so the report is the same; the threads wait for each
+  other at the end of each block. One thread always hands each subject over as soon as it is searched (no
+  switch). No value changes, so there is no shadow; `LOSAT/tests/blastn_subject_stream.rs` compares the
+  reports of one thread and of two and four threads with and without the switch.
+  Measured 2026-10-14 on the WSL machine (megablast, 100 16S queries against 28,036 16S subjects, 8 threads,
+  output unchanged): max RSS with the blastna and packing changes of #187 and #188 applied, one run each in one
+  series, 207.6 MiB without the switch and 145.3 MiB with it (NCBI BLAST+ 2.17.0 `-db` 115.6 MiB); time on this
+  branch, 8 alternating pairs (load 5-19), a median of 8.09 s without and 8.91 s with it (pair ratio median 1.13,
+  1.04-1.25), and 0.39 / 0.47 s with one query. Blocks of 256 or 1,024 subjects per thread were not faster within
+  the noise (6 rounds each: ratios 1.23 and 1.14 against 1.19 for 64), and 1,024 kept 160 MiB, so where the time
+  goes is still open.
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks

@@ -47,7 +47,7 @@ pub(super) struct TblastnDatabase {
 }
 
 impl TblastnDatabase {
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:183-189
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:188-194
     // ```c++
     //         /*** Initialize the database/subject ***/
     //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());

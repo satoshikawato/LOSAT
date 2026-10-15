@@ -97,11 +97,12 @@ pub(super) struct SubjectSetNumbers {
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:131-136
 // ```c++
-// int CSeqDBImpl::GetMinLength() const
-// {
-//     // Do not bother scanning the db, use default.
-//     ...
-//     return BLAST_SEQSRC_MINLENGTH;
+//             m_MinLength   = x_GetMinLength();
+//
+//             // Do not bother scanning the db... it would be slow
+//             // FIXME: future implementation should probably have the
+//             // shortest length encoded in index file...
+//             if ( m_MinLength <= 0)  m_MinLength = BLAST_SEQSRC_MINLENGTH;
 // ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-922
 // ```c

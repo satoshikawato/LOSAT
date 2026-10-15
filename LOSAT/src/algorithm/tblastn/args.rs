@@ -943,7 +943,7 @@ fn search_cli(
         read_queries, FastaInputSource, QueryEnd, QueryRecords, ReaderConfig,
     };
     let resolved = args.check_options(outputs.diagnostics)?;
-    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:183-189
+    // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:189-193
     // ```c++
     //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
     //         CRef<CLocalDbAdapter> db_adapter;

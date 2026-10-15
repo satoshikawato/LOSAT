@@ -184,7 +184,7 @@ const STORE_BLOCK_BYTES: u64 = 1 << 20;
 //        sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
 //     seq_arg.encoding = eBlastEncodingProtein;
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:770-774
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:771-775
 // ```c
 //         } else {
 //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,

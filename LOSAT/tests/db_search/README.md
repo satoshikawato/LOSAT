@@ -1,8 +1,8 @@
 # Inputs of the `-db` fixtures
 
 Used by `LOSAT/tests/db_search_fixtures.py` and `LOSAT/tests/db_search_manifest.tsv` (rows that run
-`LOSAT blastp -db ...` or `LOSAT blastn -db ...` against frozen NCBI BLAST+ 2.17.0 `blastp -db ...` or
-`blastn -db ... -num_threads 1` bytes; the manifest's `program` column says which). NCBI is the
+`LOSAT blastp -db ...`, `LOSAT blastn -db ...` or `LOSAT blastx -db ...` against frozen NCBI BLAST+ 2.17.0
+`blastp -db ...`, `blastn -db ...` or `blastx -db ... -num_threads 1` bytes; the manifest's `program` column says which). NCBI is the
 comparison oracle only; the tests read the committed files and run no NCBI program.
 
 FASTA files:
@@ -75,6 +75,35 @@ writes was deleted). Run from `LOSAT/`:
 
 The nucleotide rows also use `tests/seqdb/db/nucl_v4`, `nucl_v5` and `nucl_mv` with queries cut from
 `tests/seqdb/nucl.fna`.
+
+Translated-query inputs (BLASTX rows, `db.blastx.*`), written by `make_blastx_inputs.py` (run from `LOSAT/`;
+slices of `tests/fasta/MelaMJNV.fasta`, proteins of `tests/fasta/PemoMJNVA.faa`; the decoy proteins and the query
+without hits come from seeded generators):
+
+- `bslice.faa`: 35 proteins for the database `bslice` (14,391 residues, shortest 75): the 11 PemoMJNVA proteins that
+  NCBI `blastx -subject` finds in the two query slices (BDT61857.1, BDT61858.1, BDT61861.1, BDT61866.1, BDT61876.1,
+  BDT61959.1 to BDT61964.1) and 24 more proteins of at most 1,000 residues.
+- `bslice_q.fna`: two queries: `m_fam` (MelaMJNV 26001-31000: minus-strand genes, a family of five related proteins
+  with several HSPs each) and `m_mix` (MelaMJNV 56001-61600: a plus-strand and a minus-strand gene). With the
+  default options NCBI `blastx -db bslice -outfmt 6` prints 36 rows and `blastx -subject bslice.faa` prints 35
+  (D1: a database answers 3 as the shortest subject length, a FASTA set its real shortest; the extra row is
+  `m_fam` against BDT61959.1, E value 0.21). Query codes 1 and 11 give the same output (they differ in start codons
+  only); code 4 changes the scores.
+- `bslice_q_lc.fna`: `m_fam` bases 1-3000 with 301-700 and 1501-1800 in lower case (`-lcase_masking`).
+- `bslice_nohit.fna`: 300 random bases with no hit in `bslice` (candidate 25 of 40 from `random.Random(20261019)`;
+  the others all have weak hits at the default E value). `bslice_alln.fna`: 300 N (NCBI warns that it cannot
+  calculate Karlin-Altschul parameters).
+- `bnophr.pin` and `bnophr.psq` are copies of `bslice.pin` and `.psq`: the database without its header file, used
+  with the query without hits (with a hit NCBI fails with exit 2).
+
+The database (version 4, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file was deleted).
+Run from `LOSAT/`:
+
+    python3 tests/db_search/make_blastx_inputs.py
+    makeblastdb -in tests/db_search/bslice.faa -dbtype prot -out tests/db_search/bslice \
+        -title "protein slice of a shrimp virus proteome" -blastdb_version 4
+    rm tests/db_search/bslice.pjs
+    cp tests/db_search/bslice.pin tests/db_search/bnophr.pin; cp tests/db_search/bslice.psq tests/db_search/bnophr.psq
 
 `residues_gap` is the database LOSAT rejects (a stored `-`). The other databases of the rows are the ones of
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index

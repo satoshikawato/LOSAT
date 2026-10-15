@@ -233,14 +233,14 @@ with it the CPU time is the same.
 joined the set on 2026-10-16. tblastn `-subject` holds each subject packed (about a quarter of a
 byte per base) instead of its letters, translates a subject's frames from the packed bases and
 makes only the windows of a subject that the redo and the report read; it changes where the bases
-are held, not a value. Timed on the workstation (main 4441c2d5 with the switch's PRs, rounds
-alternating with `LOSAT_X_TBNSTORE=0`, the same reports): at 8 threads 0.95-1.01 of the time
-without it (one protein against the zebrafish transcriptome 0.95 and genome 0.96, 55 proteins
-against 16S 1.00, searches of 2 to 4 batches against the fly and zebrafish genomes and the
-transcriptomes 0.98-1.01), at one thread 0.98 (zebrafish genome) and 0.995 (zebrafish
-transcriptome, 12 rounds on one CPU, 3.4 % fewer instructions); peak memory fell in every case,
-for example 2,455-2,575 to 1,154-1,278 MiB (one protein against the zebrafish genome, 8 threads)
-and 1,952 to 1,065 MiB (the human transcriptome).
+are held, not a value. Timed on the workstation (main 20cfc555 with the switch's commits, rounds
+alternating with `LOSAT_X_TBNSTORE=0`, the same reports): at 8 threads 0.94-1.00 of the time
+without it (one protein against the zebrafish transcriptome 0.94 and genome 0.95, 55 proteins
+against 16S 1.00, searches of 2 to 4 batches against the fly, zebrafish and human genomes and the
+transcriptomes 0.97-1.00), at one thread 0.98 (zebrafish genome) and 0.99 (zebrafish
+transcriptome); peak memory fell in every case, for example 2,556-2,627 to 1,261-1,263 MiB (one
+protein against the zebrafish genome, 8 threads) and 1,863 to 975-979 MiB (the human
+transcriptome).
 
 What runs per target:
 

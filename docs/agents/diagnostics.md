@@ -611,6 +611,28 @@ Rebuilding less:
   1.04-1.25), and 0.39 / 0.47 s with one query. Blocks of 256 or 1,024 subjects per thread were not faster within
   the noise (6 rounds each: ratios 1.23 and 1.14 against 1.19 for 64), and 1,024 kept 160 MiB, so where the time
   goes is still open.
+- `LOSAT_X_BNSTORE=1` (BLASTN, all tasks, `-subject` without `-subject_loc`, memory; not in the strict set: off
+  unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) each subject record's letters are packed as
+  soon as the reader has read it (`sequence/packed_subject.rs`, the module of `LOSAT_X_TBNSTORE`: ncbi2na 4 bases
+  per byte with the remainder count in the last byte, the runs of letters other than `ACGT` as ncbi4na codes, the
+  lower-case intervals), so the letters of the whole set are never held; the records keep their deflines. The
+  search reads each form from `SubjectLetters` (`blastn/x_subject_store.rs`): the length, the lower-case intervals
+  (`-lcase_masking`), the packed bases of the preliminary stage (those of the packed subject, not a second copy;
+  the bytes of `encode_subject_ncbi2na_packed`), the blastna letters of a subject in the traceback
+  (`blastna_into`) and the upper-case letters of each outfmt 0 row (`letters_into`), each the bytes the record's
+  letters give (the comparison tests of `packed_subject.rs`). A subject range keeps the letters (the records
+  are cut before the search), and so does a set with a byte that has no ncbi4na code (the CLI reader admits
+  none); the library entry `run_local` (and LOSAT Web) reads the caller's records. With `LOSAT_X_STATS=1` a
+  `[X_STATS] BNSTORE subjects= stored_bytes= blastna_made= rows_made=` line gives the subjects held packed, the
+  bytes of their packed forms, the times the traceback made blastna letters and the report rows made from them;
+  `LOSAT/tests/blastn_subject_store.rs` compares reports and messages with and without the switch and reads it.
+  Measured 2026-10-15 on the WSL machine (megablast against 28,036 16S subjects, 40.6 Mb; max RSS, one run each
+  in one series, the same output in every run): one thread, one query 68.0 -> 30.5 MiB (NCBI BLAST+ 2.17.0 `-db`
+  42.0), a query without hits 67.2 -> 29.4 (34.6), 100 queries 135.3 -> 97.7 (95.8); 8 threads, one query 81.1 ->
+  44.7, 34.8 with `LOSAT_X_BNSTREAM` (43.8), 100 queries 206.7 -> 170.8, 108.9 with `LOSAT_X_BNSTREAM` (145.0 with it
+  alone; NCBI 115.0). One 5.5 Mb subject (Sakai x MG1655, 8 threads) keeps its peak (196.2 -> 194.3; NCBI 152.8):
+  there the query's copies dominate, not the subject.
+  Time: 100 queries at one thread, 4 alternating pairs (load 6-12), pair ratio median 1.06 (0.87-1.11).
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks

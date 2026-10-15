@@ -2356,11 +2356,13 @@ pub(crate) fn mode() -> u8 {
 /// `utils/xswitch.rs`: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set): on
 /// aarch64 the NEON build of the vector kernels runs only while this switch is on; off, aarch64
 /// keeps the scalar port, as before the NEON layer existed. Always true on the other targets.
-/// LOSAT_X_DPSHADOW (mode 2) runs and compares the kernels whatever it says.
+/// LOSAT_X_DPSHADOW (mode 2) runs and compares the kernels whatever it says. EXPERIMENT
+/// (LOSAT_X_DPNEON2, off unless set): that variable turns the NEON kernels on as well, with the
+/// two-register kernels of `x_xdrop_neon2.rs` first (`x_extra_switches`).
 fn neon_on() -> bool {
     #[cfg(target_arch = "aarch64")]
     {
-        crate::utils::xswitch::on("LOSAT_X_DPNEON")
+        crate::utils::xswitch::on("LOSAT_X_DPNEON") || x_neon2::switch_on()
     }
     #[cfg(not(target_arch = "aarch64"))]
     {
@@ -2440,6 +2442,11 @@ mod x_avx2;
 ))]
 #[path = "x_xdrop_w128.rs"]
 mod x_w128;
+// EXPERIMENT (LOSAT_X_DPNEON2): the 256-bit kernels of `x_xdrop_avx2.rs` on aarch64 NEON, each
+// vector in two registers. A child module like `x_avx2`.
+#[cfg(target_arch = "aarch64")]
+#[path = "x_xdrop_neon2.rs"]
+mod x_neon2;
 // EXPERIMENT (LOSAT_X_DPCAPTURE, LOSAT_X_DPCAPTURE_EVERY): diagnostic capture of DP problems.
 #[path = "x_xdrop_capture.rs"]
 mod x_capture;
@@ -2449,7 +2456,8 @@ mod x_capture;
 /// has AVX2); bit 1: record a sample of the calls. 0 (both off) leaves `xdrop_align` as it was.
 /// Bit 2 (EXPERIMENT, LOSAT_X_DPW128): try the 128-bit kernels of `x_xdrop_w128.rs` after the
 /// 256-bit ones (set only when the CPU runs the 128-bit kernels; always on wasm32 simd128 and
-/// aarch64).
+/// aarch64). Bit 3 (EXPERIMENT, LOSAT_X_DPNEON2, aarch64 only): try the two-register NEON kernels
+/// of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64.
 fn x_extra_switches() -> u8 {
     use std::sync::OnceLock;
     static ON: OnceLock<u8> = OnceLock::new();
@@ -2459,6 +2467,12 @@ fn x_extra_switches() -> u8 {
         {
             if x_avx2::switch_on() {
                 on |= 1;
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            if x_neon2::switch_on() {
+                on |= 8;
             }
         }
         #[cfg(any(
@@ -2556,6 +2570,36 @@ fn x_extra_dispatch(
             // SAFETY: bit 0 is set only when `x_avx2::available()` held (AVX2 detected).
             let r = unsafe {
                 x_avx2::align(
+                    q,
+                    s,
+                    scores,
+                    len1,
+                    len2,
+                    gap_open,
+                    gap_extend,
+                    x_drop,
+                    tb,
+                    check_fence,
+                    sc,
+                )
+            };
+            if r.is_some() {
+                return Some(r);
+            }
+        }
+    }
+    // EXPERIMENT (LOSAT_X_DPNEON2): on aarch64 the two-register NEON kernels of `x_xdrop_neon2.rs`
+    // take the place of the 256-bit kernels: the same recurrence, the same lanes per block and
+    // band steps as `x_xdrop_avx2.rs`, so exactly what the 128-bit kernel returns (the argument is
+    // at the head of that file). When they return None (a row-gap precondition, or a problem the
+    // 128-bit kernel declines too) the next dispatch runs. The call sites' LOSAT_X_DPSHADOW
+    // comparison covers them as well.
+    #[cfg(target_arch = "aarch64")]
+    {
+        if on & 8 != 0 {
+            // SAFETY: NEON is a baseline feature of the aarch64 targets.
+            let r = unsafe {
+                x_neon2::align(
                     q,
                     s,
                     scores,

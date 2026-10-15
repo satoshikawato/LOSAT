@@ -5,8 +5,9 @@ name: Platform checks
 # paths):
 #  - outputs: release binary, 49 cases (all five programs) at 1 and 4 threads in both modes; the
 #    outputs of the two modes must be byte-identical and the exit codes 0 (LOSAT/tests/platform_checks.py);
-#    on the two arm64 platforms a third mode, LOSAT_X_DPNEON=0 (the other switches on, the scalar
-#    X-drop instead of the NEON kernels the default runs), must give the same outputs as well;
+#    on the two arm64 platforms two more modes, LOSAT_X_DPNEON=0 (the other switches on, the scalar
+#    X-drop instead of the NEON kernels the default runs) and LOSAT_X_DPNEON2=1 (the NEON kernels in
+#    register pairs, off unless set), must give the same outputs as well;
 #  - compare: the hashes of the five platforms must equal each other (no expected hash is stored;
 #    the frozen hashes are checked on Linux x64 by ci.yml);
 #  - tests: cargo test --all-features in both modes on the four platforms other than Linux x64
@@ -84,9 +85,9 @@ jobs:
       matrix:
         include:
           - { runner: ubuntu-24.04, id: linux-x64, python: python3 }
-          - { runner: ubuntu-24.04-arm, id: linux-arm64, python: python3, extra: '--extra-mode noneon=LOSAT_X_DPNEON=0' }
+          - { runner: ubuntu-24.04-arm, id: linux-arm64, python: python3, extra: '--extra-mode noneon=LOSAT_X_DPNEON=0 --extra-mode dpneon2=LOSAT_X_DPNEON2=1' }
           - { runner: windows-2025, id: windows-x64, python: python }
-          - { runner: macos-15, id: macos-arm64, python: python3, extra: '--extra-mode noneon=LOSAT_X_DPNEON=0' }
+          - { runner: macos-15, id: macos-arm64, python: python3, extra: '--extra-mode noneon=LOSAT_X_DPNEON=0 --extra-mode dpneon2=LOSAT_X_DPNEON2=1' }
           - { runner: macos-15-intel, id: macos-x64, python: python3 }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90

@@ -151,22 +151,31 @@ thread_local! {
 /// one's letters packed as soon as it has been read, so the letters of the whole set are never
 /// held at once. The records keep their deflines and no letters. If a record holds a byte without
 /// an ncbi4na code (only an API caller can make one), every record keeps its letters and no store
-/// is returned: the search then reads the letters as without the switch.
+/// is returned: the search then reads the letters as without the switch. With `threads` above one
+/// a second thread packs each record while the reader reads the next one (`x_packed_while_read`).
 pub(super) fn x_read_subject_stores<R: std::io::Read>(
     source: &mut crate::blastinput::fasta_reader::FastaInputSource<R>,
     warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+    threads: usize,
 ) -> anyhow::Result<(
     Vec<crate::blastinput::fasta_reader::FastaRecord>,
     Option<Vec<PackedNucleotide>>,
 )> {
-    let read =
-        crate::blastinput::fasta_reader::read_subjects_map(source, None, warn, |mut record| {
-            let store = PackedNucleotide::from_subject_letters(&record.sequence);
-            if store.is_some() {
-                record.sequence = Vec::new();
-            }
-            Ok((record, store))
-        })?;
+    #[cfg(feature = "parallel")]
+    let read = if threads > 1 {
+        x_packed_while_read(source, warn)?
+    } else {
+        crate::blastinput::fasta_reader::read_subjects_map(source, None, warn, |record| {
+            Ok(x_packed(record))
+        })?
+    };
+    #[cfg(not(feature = "parallel"))]
+    let read = {
+        let _ = threads;
+        crate::blastinput::fasta_reader::read_subjects_map(source, None, warn, |record| {
+            Ok(x_packed(record))
+        })?
+    };
     if read.iter().all(|(_, store)| store.is_some()) {
         let (records, stores): (_, Vec<PackedNucleotide>) = read
             .into_iter()
@@ -191,6 +200,97 @@ pub(super) fn x_read_subject_stores<R: std::io::Read>(
         None,
     ))
 }
+
+/// A record and its store (`None` when a byte has no ncbi4na code; the record keeps its letters
+/// then, and drops them otherwise).
+fn x_packed(
+    mut record: crate::blastinput::fasta_reader::FastaRecord,
+) -> (
+    crate::blastinput::fasta_reader::FastaRecord,
+    Option<PackedNucleotide>,
+) {
+    let store = PackedNucleotide::from_subject_letters(&record.sequence);
+    if store.is_some() {
+        record.sequence = Vec::new();
+    }
+    (record, store)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
+// ```c
+//     virtual SBlastSequence GetCompressedPlusStrand() {
+//         SBlastSequence retval(size());
+//         string ncbi4na = kEmptyStr;
+//         m_SeqVector.GetSeqData(m_SeqVector.begin(), m_SeqVector.end(), ncbi4na);
+//         s_Ncbi4naToNcbi2na(ncbi4na, size(), retval.data.get());
+// ```
+// No NCBI counterpart for the thread: NCBI packs a subject when its search needs it. Here the
+// reader packs the records of the whole set before the search, on the thread that reads them, so
+// the packing adds to the time the search waits for its subjects (about 0.5 s for the 1.37 Gb
+// zebrafish genome). With two or more search threads a second thread packs the records while the
+// reader reads the next ones. The reader hands them over in batches (up to `X_PACK_BATCH`
+// records or `X_PACK_BATCH_LETTERS` letters, so that a set of many short records costs few
+// hand-overs) and only when that thread takes a batch (a channel without a buffer), so at most
+// two batches' letters are held; the records come back in reading order. Packing is a function
+// of a record alone, so the records and stores are those of the reader packing them itself.
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the records read and packed on two threads.
+#[cfg(feature = "parallel")]
+fn x_packed_while_read<R: std::io::Read>(
+    source: &mut crate::blastinput::fasta_reader::FastaInputSource<R>,
+    warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
+) -> anyhow::Result<
+    Vec<(
+        crate::blastinput::fasta_reader::FastaRecord,
+        Option<PackedNucleotide>,
+    )>,
+> {
+    std::thread::scope(|scope| {
+        let (batches, received) =
+            std::sync::mpsc::sync_channel::<Vec<crate::blastinput::fasta_reader::FastaRecord>>(0);
+        let packer = scope.spawn(move || {
+            received
+                .into_iter()
+                .flatten()
+                .map(x_packed)
+                .collect::<Vec<_>>()
+        });
+        let ended = || anyhow::anyhow!("TBLASTN: the subject packing thread ended");
+        let mut batch = Vec::new();
+        let mut letters = 0usize;
+        let read =
+            crate::blastinput::fasta_reader::read_subjects_map(source, None, warn, |record| {
+                letters += record.sequence.len();
+                batch.push(record);
+                if batch.len() >= X_PACK_BATCH || letters >= X_PACK_BATCH_LETTERS {
+                    letters = 0;
+                    batches
+                        .send(std::mem::take(&mut batch))
+                        .map_err(|_| ended())?;
+                }
+                Ok(())
+            });
+        let last = if read.is_ok() && !batch.is_empty() {
+            batches.send(batch).map_err(|_| ended())
+        } else {
+            Ok(())
+        };
+        // the packer ends when the sender is dropped, also after an error of the reader
+        drop(batches);
+        let packed = packer
+            .join()
+            .map_err(|_| anyhow::anyhow!("TBLASTN: the subject packing thread panicked"))?;
+        read?;
+        last?;
+        Ok(packed)
+    })
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the records and the letters of one hand-over of
+/// `x_packed_while_read`.
+#[cfg(feature = "parallel")]
+const X_PACK_BATCH: usize = 1024;
+#[cfg(feature = "parallel")]
+const X_PACK_BATCH_LETTERS: usize = 4 << 20;
 
 // No NCBI counterpart: counters for LOSAT_X_STATS that tell whether the packed subjects were
 // used; they do not change any value NCBI computes.

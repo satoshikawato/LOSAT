@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import blastn_regression_fixtures as fixtures  # noqa: E402
 import ci_fast_regressions as fast  # noqa: E402
+import db_search_fixtures as db_fixtures  # noqa: E402
 import tblastx_regression_fixtures as tblastx_fixtures  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
@@ -87,6 +88,21 @@ class BlastnFixtureTests(unittest.TestCase):
                 self.assertEqual(module.sha256(data), r["stdout_sha256"], r["case_id"])
                 err = module.FIXTURES / f"{r['case_id']}.err"
                 self.assertEqual(module.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["case_id"])
+
+
+class DbSearchFixtureTests(unittest.TestCase):
+    def test_manifest_rows_match_frozen_files(self):
+        rows = db_fixtures.read_manifest()[1]
+        self.assertEqual({r["program"] for r in rows}, set(db_fixtures.PROGRAMS))
+        self.assertEqual(len({r["row_id"] for r in rows}), len(rows))
+        for r in rows:
+            if r["kind"] != "ncbi":
+                continue
+            data = (db_fixtures.FROZEN / f"{r['row_id']}.out").read_bytes()
+            self.assertEqual(db_fixtures.sha256(data), r["stdout_sha256"], r["row_id"])
+            self.assertEqual(str(len(data)), r["stdout_bytes"], r["row_id"])
+            err = db_fixtures.FROZEN / f"{r['row_id']}.err"
+            self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])
 
 
 class SelectionTests(unittest.TestCase):

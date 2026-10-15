@@ -843,22 +843,31 @@ Scheduling (each value computed by one thread with the original function; order 
   packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
   database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of
   letters other than `ACGT` as ncbi4na codes, the lower-case intervals), so the letters of the
-  whole set are never held; the records keep their deflines. The preliminary stage of a subject
-  reads its packed bases as letters (`ACGT`, each ambiguous base as resolved): the bases it would
-  make from the letters, which resolve to themselves (`x_reference_subject` reads letters that are
-  all `ACGT` in place); with `-lcase_masking` it reads the letters. A subject's letters are made
-  again into a buffer when it is redone (composition mode 2), traced back (mode 0) or reported
-  (outfmt 0), exactly as the reader gave them (the comparison tests in `packed_subject.rs`). The
-  packed bases are those NCBI's subject set-up makes (`encode_subject_ncbi2na_packed`,
-  `s_Ncbi4naToNcbi2na` in `blast_objmgr_tools.cpp:427-475`; one pass over the letters). Memory:
-  about a quarter of a byte per base held instead of one; per thread the subject in hand as
-  without the switch (a thread keeps a buffer of at most 8 MiB between subjects). A subject
-  range keeps the letters (the records are cut before
-  the search), and so does a set with a byte that has no ncbi4na code (only an API caller can
-  make one); the library entry `run_local` reads the caller's records. Not in the set (off unless
-  set to any value). With `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE subjects= stored_bytes=
-  letters_made= resolved_made=` line gives the subjects held packed, the bytes of their stores and
-  the times their letters and their resolved bases were made; `LOSAT/tests/tblastn_subject_store.rs`
+  whole set are never held; the records keep their deflines. The unit path of the preliminary
+  stage (`TBNPAR`, on by default) translates a subject's six frames straight from its packed bases
+  (`x_packed_plan` in `tblastn/x_subject_translate.rs`: the codon tables of `TBNXLATE`, the 2-bit
+  codes unpacked 49,152 bases at a time, each frame filled at its residues' places), as NCBI's
+  `BLAST_GetAllTranslations` translates the compressed subject, so a thread holds the frames of
+  the subject in hand and no letters, resolved bases or reverse complement; this is the
+  translation whatever `TBNXLATE` says, and `LOSAT_X_TBNXLATESHADOW=1` also makes the reference
+  plan from the resolved bases and stops if they differ. The reference loops (`LOSAT_X_DEFAULT=0`)
+  read the packed bases as letters (`ACGT`, each ambiguous base as resolved), which resolve to
+  themselves; with `-lcase_masking` the stage reads the letters. The redo (composition mode 2),
+  its translations and the pairwise rows (outfmt 0) read windows of the subject (`SubjectNt` in
+  `packed_subject.rs`: the HSP's codons, or the window around an HSP that NCBI translates), made
+  in upper case from the store when read (every reader ignores the case); only the traceback of
+  composition mode 0 makes a subject's whole letters again, exactly as the reader gave them (the
+  comparison tests in `packed_subject.rs`). The packed bases are those NCBI's subject set-up makes
+  (`encode_subject_ncbi2na_packed`, `s_Ncbi4naToNcbi2na` in `blast_objmgr_tools.cpp:427-475`; one
+  pass over the letters). Memory: about a quarter of a byte per base held instead of one; per
+  thread the frames of the subject in hand (two bytes per base) instead of four bytes per base
+  (letters or resolved bases, reverse complement, frames). A subject range keeps the letters (the
+  records are cut before the search), and so does a set with a byte that has no ncbi4na code
+  (only an API caller can make one); the library entry `run_local` reads the caller's records.
+  Not in the set (off unless set to any value). With `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE
+  subjects= stored_bytes= letters_made= resolved_made= packed_plans=` line gives the subjects held
+  packed, the bytes of their stores, the times their whole letters and their resolved bases were
+  made, and the plans translated from the packed bases; `LOSAT/tests/tblastn_subject_store.rs`
   reads it.
 - `LOSAT_X_BPGAP=1` blastp preliminary stage: the restricted gapped alignment (NCBI
   `s_RestrictedGappedAlign`, `blast_gapalign.c:991-1300`, which `s_BlastProtGappedAlignment` runs

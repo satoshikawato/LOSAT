@@ -89,9 +89,11 @@ impl<'a> SubjectLetters<'a> {
 
     /// `f` of the letters that the preliminary stage of subject `oid` reads. With `case` (the
     /// stage reads the lower-case letters, `-lcase_masking`) they are the record's letters
-    /// (`with_letters`). Without it a packed subject gives its bases as resolved, `A`, `C`, `G`
-    /// or `T` for every base: the stage resolves the letters into these same bases, which
-    /// resolve to themselves, so a worker holds these alone and not the letters too.
+    /// (`with_letters`) where it has lower-case letters. Otherwise a packed subject gives its
+    /// bases as resolved, `A`, `C`, `G` or `T` for every base: the stage resolves the letters
+    /// into these same bases, which resolve to themselves, so a worker holds these alone and
+    /// not the letters too. A database sequence (`-db`) has no lower-case letters, so its
+    /// stage always reads its stored bases, as NCBI's (no subject mask without `-db_soft_mask`).
     pub(super) fn with_search_letters<R>(
         &self,
         oid: usize,
@@ -99,7 +101,7 @@ impl<'a> SubjectLetters<'a> {
         f: impl FnOnce(&[u8]) -> R,
     ) -> R {
         match self {
-            Self::Packed(subjects) if !case => {
+            Self::Packed(subjects) if !case || subjects[oid].lowercase().is_empty() => {
                 RESOLVED_MADE.fetch_add(1, Ordering::Relaxed);
                 with_buffer(|buffer| subjects[oid].resolved_letters_into(buffer), f)
             }

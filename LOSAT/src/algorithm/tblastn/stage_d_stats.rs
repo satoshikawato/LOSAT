@@ -208,10 +208,11 @@ pub(super) fn local_subject_effective_lengths_with_search_spaces(
     //     retval->contexts = (BlastContextInfo*) calloc(retval->last_context + 1,
     //                                                   sizeof(BlastContextInfo));
     // ```
-    // LOSAT's TBLASTN has no `-dbsize`, so the database length is the subjects' total in
-    // nucleotides (before the division by 3). Without letters in any subject (every
-    // `-subject` record without residues) the contexts keep the search space and length
-    // adjustment of `BlastQueryInfoNew` (zero), unless a search space is set.
+    // The database length is a positive `-dbsize`, else the subjects' or the database's total,
+    // in nucleotides before the division by 3 (`SubjectSetNumbers::eff_length_nt`). Without
+    // letters in any subject (every `-subject` record without residues) the contexts keep the
+    // search space and length adjustment of `BlastQueryInfoNew` (zero), unless a search space
+    // is set.
     let search_space_set =
         search_spaces.is_some_and(|spaces| spaces.iter().any(|&space| space != 0));
     if subject_nt_length == 0 && !search_space_set {

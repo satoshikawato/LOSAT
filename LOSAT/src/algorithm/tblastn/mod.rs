@@ -50,6 +50,9 @@ mod x_oid_flow;
 // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
 // PrintOneResultSet dispatches the retained search result to its output format.
 mod stage_e_report;
+// NCBI c++/src/app/blast/tblastn_app.cpp:183-189 and seqsrc_seqdb.cpp: the search of a BLAST
+// nucleotide database (`-db`): its sequences, numbers and titles.
+mod database;
 pub use args::{check_options, run_local, ResolvedTblastnArgs, TblastnArgs};
 // EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the summary lines `main` prints at
 // exit. No NCBI counterpart: it prints counters and changes no value NCBI computes.

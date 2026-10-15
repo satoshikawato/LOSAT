@@ -147,9 +147,9 @@ LOSAT makedb \
   -title "my proteins"
 ```
 
-`LOSAT makedb` writes the sequence, header and index files of `makeblastdb -blastdb_version 4` (without `-parse_seqids`), and the alias file of a database in several volumes: the sequence and header files are the same bytes, and the index file differs only in its creation date. The JSON metadata file (`.pjs`, `.njs`) is not written. `-max_file_sz` splits the database into volumes as makeblastdb does. NCBI BLAST+ programs and LOSAT's BLASTP and BLASTN search such a database with `-db` (section 6); the makeblastdb options LOSAT does not implement (`-parse_seqids`, masks, taxonomy, `-blastdb_version 5`) are rejected by name.
+`LOSAT makedb` writes the sequence, header and index files of `makeblastdb -blastdb_version 4` (without `-parse_seqids`), and the alias file of a database in several volumes: the sequence and header files are the same bytes, and the index file differs only in its creation date. The JSON metadata file (`.pjs`, `.njs`) is not written. `-max_file_sz` splits the database into volumes as makeblastdb does. NCBI BLAST+ programs and LOSAT's BLASTP, BLASTN and TBLASTN search such a database with `-db` (section 6); the makeblastdb options LOSAT does not implement (`-parse_seqids`, masks, taxonomy, `-blastdb_version 5`) are rejected by name.
 
-### 6. Searching a BLAST Database (BLASTP, BLASTN)
+### 6. Searching a BLAST Database (BLASTP, BLASTN, TBLASTN)
 ```bash
 LOSAT blastp \
   -query proteins.faa \
@@ -166,7 +166,7 @@ LOSAT blastn \
   -num_threads 8
 ```
 
-`blastp -db` and `blastn -db` (megablast, blastn, dc-megablast) search a protein or nucleotide database written by `LOSAT makedb` or by `makeblastdb` without `-parse_seqids` (format versions 4 and 5, several volumes, alias files), found as NCBI finds it (the current directory, `BLASTDB`, `.ncbirc`). The output is that of NCBI BLAST+ 2.17.0 `blastp -db` or `blastn -db` run with `-num_threads 1`, for outfmt 0, 6 and 7, and it is the same at every `-num_threads`. A database search differs from `-subject` on the same sequences as it does in NCBI BLAST+ (the statistics see the database, a nucleotide database stores random bases in place of ambiguous letters, and the `Database:` lines differ). `-dbsize` is accepted with `-db` and `-subject`; `-searchsp`, databases with parsed Seq-ids (NCBI's distributed databases), id and taxonomy filters and several databases in one `-db` are rejected. BLASTX, TBLASTN and TBLASTX do not search a database yet. See [PD-LOSAT-DATABASE-SEARCH](docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md) for what is rejected.
+`blastp -db`, `blastn -db` (megablast, blastn, dc-megablast) and `tblastn -db` search a protein or nucleotide database written by `LOSAT makedb` or by `makeblastdb` without `-parse_seqids` (format versions 4 and 5, several volumes, alias files), found as NCBI finds it (the current directory, `BLASTDB`, `.ncbirc`). The output is that of NCBI BLAST+ 2.17.0 `blastp -db`, `blastn -db` or `tblastn -db` run with `-num_threads 1`, for outfmt 0, 6 and 7, and it is the same at every `-num_threads`. A database search differs from `-subject` on the same sequences as it does in NCBI BLAST+ (the statistics see the database, a nucleotide database stores random bases in place of ambiguous letters, and the `Database:` lines differ). `-dbsize` is accepted with `-db` and `-subject`; `-searchsp`, databases with parsed Seq-ids (NCBI's distributed databases), id and taxonomy filters and several databases in one `-db` are rejected. BLASTX and TBLASTX do not search a database yet. See [PD-LOSAT-DATABASE-SEARCH](docs/product_decisions/PD-LOSAT-DATABASE-SEARCH.md) for what is rejected.
 
 ---
 

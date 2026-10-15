@@ -748,7 +748,7 @@ x86_entry!(w16_sse, w8_sse, "ssse3,sse4.1");
 /// 16-bit path's range), built with vector instructions for `Rows28` and `Flat` matrices; other
 /// sources use `build_row_table` (item 5 of the file header).
 #[inline(always)]
-unsafe fn build_row(scores: &Scores<'_>, q: usize, out: &mut [u8]) -> bool {
+pub(super) unsafe fn build_row(scores: &Scores<'_>, q: usize, out: &mut [u8]) -> bool {
     let row: &[i32] = match *scores {
         Scores::Rows28(m) => {
             if q >= 28 {
@@ -816,7 +816,7 @@ unsafe fn build_row(scores: &Scores<'_>, q: usize, out: &mut [u8]) -> bool {
 /// `>= ncols`; the rest, and any block with such a residue, by the scalar loop of the 128-bit
 /// kernels (item 4 of the file header).
 #[inline(always)]
-unsafe fn fill_cols(
+pub(super) unsafe fn fill_cols(
     s: &ColSeq<'_>,
     sc: &mut XdropScratch,
     to: usize,

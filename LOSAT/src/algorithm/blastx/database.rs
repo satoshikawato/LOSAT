@@ -35,6 +35,9 @@ use crate::seqdb::{SeqDb, SeqType};
 /// The program that LOSAT's refusals name.
 const PROGRAM: &str = "BLASTX";
 
+/// The longest subject BLASTX searches in one piece (NCBI's `MAX_DBSEQ_LEN`).
+const MAX_DBSEQ_LEN: usize = 5_000_000;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:115-119
 // ```c
 // const char NCBISTDAA_TO_AMINOACID[BLASTAA_SIZE] = {
@@ -85,7 +88,22 @@ impl BlastxDatabase {
         if self.db.num_seqs() == 0 {
             return Err(PreliminaryReadError("Database memory map file error").into());
         }
-        shared::read_protein_stores(&self.db, PROGRAM)
+        let stores = shared::read_protein_stores(&self.db, PROGRAM)?;
+        // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_gapalign.h:53-54
+        // ```c
+        // /** Split subject sequences if longer than this */
+        // #define MAX_DBSEQ_LEN 5000000
+        // ```
+        // NCBI searches a longer subject in overlapping parts, which BLASTX does not port (the
+        // same limit stops `-subject` in `search::search_core`); the refusal belongs to the
+        // first batch with a valid context, as the reader's errors.
+        if let Some(ordinal) = (0..stores.len()).find(|&i| stores.length(i) > MAX_DBSEQ_LEN) {
+            anyhow::bail!(
+                "database sequence {ordinal} has {} residues; a subject longer than {MAX_DBSEQ_LEN} residues, which NCBI BLAST+ searches in overlapping parts, is not supported by LOSAT's BLASTX",
+                stores.length(ordinal)
+            );
+        }
+        Ok(stores)
     }
 }
 

@@ -78,10 +78,10 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 53 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 54 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
-`LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` joined),
-and their variables mean (`LOSAT/src/utils/xswitch.rs`):
+`LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE` and
+`LOSAT_X_LINKSLICES` joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -113,7 +113,7 @@ and their variables mean (`LOSAT/src/utils/xswitch.rs`):
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 53 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 54 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -143,6 +143,7 @@ export LOSAT_X_GREEDYFUSE=1
 export LOSAT_X_LINKSORT=1
 export LOSAT_X_NEWTONLANES8=1
 export LOSAT_X_TBNSTATE=1 LOSAT_X_TBNXLATE=1
+export LOSAT_X_LINKSLICES=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -215,6 +216,13 @@ of a subject are read from codon tables instead of through letters. Neither chan
 are timed together because `TBNSTATE` alone was 3 % slower on the fly genome at 8 threads. The
 shadow `LOSAT_X_TBNXLATESHADOW` stays opt-in; `LOSAT_X_TBNPARSHADOW` compares the unit path, with
 both switches, with the serial reference.
+
+`LOSAT_X_LINKSLICES` was added after the default changed, as a switch that was off unless set, and
+joined the set on 2026-10-15. It lowers the memory of TBLASTX and, at two or more threads, its time:
+the linking call links the groups of a subject's HSP list where they lie in the one sorted list,
+where it cut the list into one Vec per group and copied the linked groups into a new list, so the
+list no longer exists twice. It changes where the groups are linked, not a value or an order, and
+acts only where `LOSAT_X_HSPINPLACE` does. The shadow `LOSAT_X_LINKSLICESSHADOW` stays opt-in.
 
 What runs per target:
 
@@ -568,10 +576,10 @@ Rebuilding less:
   result. One line at exit: `[X_SHADOW] LINKSORT sorts= indices_compared=`. Together with
   `LOSAT_X_HSPINPLACESHADOW=1` the reference bodies are compared with the path's result end to end
   (`LOSAT/tests/tblastx_link_sort.rs` runs both).
-- `LOSAT_X_LINKSLICES=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it) the linking call of the in-place HSP list path links its groups
-  as disjoint sub-slices of the one sorted list (`tblastx/x_link_slices.rs`, exactness argument in its
-  header; it acts only where `LOSAT_X_HSPINPLACE` does). Without it the call cuts the sorted list into
+- `LOSAT_X_LINKSLICES=1` (TBLASTX, memory; in the strict set since 2026-10-15) the linking call of
+  the in-place HSP list path links its groups as disjoint sub-slices of the one sorted list
+  (`tblastx/x_link_slices.rs`, exactness argument in its header; it acts only where
+  `LOSAT_X_HSPINPLACE` does). Without it the call cuts the sorted list into
   one Vec per group, links each and copies the linked groups into a new list of the whole size, so the
   list exists twice while the new one is filled (AP027131 x AP027133, genetic code 4: 49 MiB twice in
   the first linking call, where the heap of that search peaks). With it the groups are the same runs
@@ -581,9 +589,10 @@ Rebuilding less:
   (`allow_parallel` and more than one group) are today's; `LOSAT_LINKING_LEGACY` and the linking traces
   link each group's copy with the literal port and write it back, since that port returns its group
   in the same order and length. With the switch off the statements of `x_hsp_inplace.rs` run as
-  before, after one read of the mode per linking call. `LOSAT_TIMING=1`: `assemble` of the `x_link1`
-  / `x_link2` lines is then about zero. `LOSAT_X_STATS=1` prints, only with the switch or its shadow
-  on, `[X_STATS] LINKSLICES linkings= groups= parallel_linkings= legacy_fallbacks=` (linking calls
+  before it existed, after one read of the mode per linking call. `LOSAT_TIMING=1`: `assemble` of
+  the `x_link1` / `x_link2` lines is then about zero. `LOSAT_X_STATS=1` prints, only with the
+  switch or its shadow on,
+  `[X_STATS] LINKSLICES linkings= groups= parallel_linkings= legacy_fallbacks=` (linking calls
   linked as slices, their groups, those on the pool, and calls handed back to the cut, which never
   happens: always 0). Measured once on 2026-10-13 (one binary, a loaded machine): massif of AP027131 x
   AP027133 at one thread, heap requested, 107.3 MiB at the peak in the first linking call without the

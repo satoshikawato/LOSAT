@@ -216,6 +216,18 @@ fn same_as_without(args: &[&str], env: &[(&str, &str)], switches: &[(&str, &str)
         reference.stderr,
         "{what}: standard error"
     );
+    // No batch a slot searched panicked (kept or dropped), and the shadow found no difference.
+    if run.stderr.contains("[X_STATS] QBATCHPAR") {
+        assert_eq!(run.stat("panicked"), 0, "{what}: {}", run.stderr);
+    }
+    if run.stderr.contains("[X_SHADOW] QBATCHPAR") {
+        let shadow = run.summary("[X_SHADOW] QBATCHPAR");
+        assert_eq!(
+            (shadow["diffs"].as_str(), shadow["panicked"].as_str()),
+            ("0", "0"),
+            "{what}"
+        );
+    }
     run
 }
 
@@ -450,8 +462,8 @@ fn an_error_inside_a_batch_with_slots_past_it_comes_as_without_the_switch() {
 }
 
 // Two slots with corrupted predictions: the slots' batches under keys the loop never computes
-// are discarded, the speculation stops after two misses within eight batches, and the reports
-// do not change.
+// are discarded, the speculation stops (two misses within eight batches, or the waste bound),
+// and the reports do not change.
 #[test]
 fn mispredicted_batches_are_discarded() {
     let query = TempFasta::new("q", &queries());
@@ -479,12 +491,9 @@ fn mispredicted_batches_are_discarded() {
             ],
         );
         assert!(run.stat("mispredicted") > 0, "{every}: {}", run.stderr);
-        assert_eq!(
-            run.summary("[X_STATS] QBATCHPAR")["off"],
-            "guard",
-            "{}",
-            run.stderr
-        );
+        // Two misses within eight batches, or the waste bound if the discards reach it first.
+        let off = run.summary("[X_STATS] QBATCHPAR")["off"].clone();
+        assert!(off == "guard" || off == "waste", "{}", run.stderr);
         let run = same_as_without(
             &args,
             &[("BATCH_SIZE", "1")],

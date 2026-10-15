@@ -867,19 +867,24 @@ Scheduling (each value computed by one thread with the original function; order 
   `k = min(1 + budget / estimate, n, units of work left)` lowered to the fewest slots that need as many
   rounds, and `m = n / k`; `LOSAT_X_QBATCHPARSLOTS=k` sets `k` (tuning). Without `LOSAT_X_STATS` the switch
   writes nothing of its own; with it, one line on stderr at the end of the search: `[X_STATS] QBATCHPAR
-  batches= precomputed= loop= mispredicted= discarded= cancelled= waste_bound= k= m= idle= budget_mib=
-  estimate_mib= peak_mib= off=` (`precomputed`: batches taken from a slot; `discarded`: finished or
-  cancelled batches dropped; `waste_bound`: the discards that stop the speculation, at the end; `idle`:
+  batches= precomputed= loop= mispredicted= discarded= cancelled= panicked= waste_bound= k= m= idle=
+  budget_mib= estimate_mib= peak_mib= off=` (`precomputed`: batches taken from a slot; `discarded`:
+  finished or cancelled batches dropped (a search whose flag was set when it returned counts as cancelled,
+  whatever it returned); `panicked`: slot batches that panicked, kept or dropped; `waste_bound`: the
+  discards that stop the speculation, at the end; `idle`:
   threads no slot uses; `peak_mib`: the most memory admitted at once; `off`: why it did not, or stopped
   to, speculate). Shadow: `LOSAT_X_QBATCHPARSHADOW=1` (implies the switch) searches every batch the loop
   takes from a slot on the loop as well (on the whole pool while the slots run, so more than `n` threads
   are active) and compares every field (each query's hit list with every HSP field and edit script
   through its `Debug` text, the extensions, the masks, the Karlin-Altschul blocks, the search spaces, or
-  the two errors); the first difference prints the summary line and panics; at the end
-  `[X_SHADOW] QBATCHPAR batches= compared= diffs= mispredicted= wasted=`. `LOSAT_X_QBATCHPARMISS=N` (test
+  the two errors); any slot panic, taken or not, is a difference too; the first difference prints the
+  summary line and panics; at the end `[X_SHADOW] QBATCHPAR batches= compared= diffs= panicked=
+  mispredicted= wasted=`. `LOSAT_X_QBATCHPARMISS=N` (test
   only) corrupts every N-th prediction. A slot's panic is kept and resumed only if the loop takes its
   batch; the release profile aborts on a panic, so there a panic in a batch a slot searches ends the
-  process (no slot runs while output is written). With debug assertions, a check after the slots are
+  process (no slot runs while output is written, which the writers check with debug assertions). Past an
+  error at batch j, the slots may have searched up to the plan's window (2k - 1 batches) before it is
+  known; once it is known, at most k - 1 still run and are cancelled when the loop meets j. With debug assertions, a check after the slots are
   joined fails if a slot started rayon's global pool. The counters and `LOSAT_TIMING` end-of-run lines of
   other switches (PAIRPAR, PAIRPARDISC, GREEDYPRELIM, the megablast lookup fill) and
   `LOSAT_X_DPCAPTURE` files count the work of the slots' threads too, discarded batches included, so

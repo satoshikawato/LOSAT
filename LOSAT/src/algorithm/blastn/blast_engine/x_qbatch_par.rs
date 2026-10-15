@@ -37,7 +37,11 @@
 //! so there a panic in a batch a slot searches ends the process with its message. To bound that,
 //! no slot runs while the loop writes output: `Driver::finish` cancels and joins every slot before
 //! the reports and before each error path writes anything, and once a slot's batch returns an
-//! error the batches planned after it are no longer started. `LOSAT_TIMING` blocks are text in
+//! error the batches planned after it are no longer started. The batches still exposed past an
+//! error at batch j: before the error is known, the slots may have searched up to the plan's
+//! window (2k - 1 batches) past j; once it is known, at most k - 1 still run, and they are
+//! cancelled when the loop meets j. Slot panics are counted (`panicked=`), and in the shadow
+//! mode any slot panic, taken or not, is a difference. `LOSAT_TIMING` blocks are text in
 //! the batch's result, printed when the loop takes it.
 //!
 //! Cancellation: a slot's search gets a flag through its pool (`SearchPool::x_with_ext`,
@@ -83,13 +87,13 @@
 //!
 //! Diagnostics: with the switch and `LOSAT_X_STATS` set, one line on standard error at the end of
 //! the search, `[X_STATS] QBATCHPAR batches= precomputed= loop= mispredicted= discarded=
-//! cancelled= waste_bound= k= m= idle= budget_mib= estimate_mib= peak_mib= off=` (precomputed:
+//! cancelled= panicked= waste_bound= k= m= idle= budget_mib= estimate_mib= peak_mib= off=` (precomputed:
 //! batches taken from a slot; loop: batches the loop searched itself; discarded: finished or
 //! cancelled batches dropped, `cancelled` of them cancelled; waste_bound: the discards that stop
 //! the speculation, at the end; idle: threads no slot uses; peak_mib: the most memory admitted
 //! at once; off: why the search did not, or stopped to, speculate, `none` if it never stopped).
 //! Without `LOSAT_X_STATS` the switch writes nothing of its own. With the shadow,
-//! `[X_SHADOW] QBATCHPAR batches= compared= diffs= mispredicted= wasted=`; the first difference
+//! `[X_SHADOW] QBATCHPAR batches= compared= diffs= panicked= mispredicted= wasted=`; the first difference
 //! prints it and panics. `LOSAT_X_QBATCHPARMISS=N` (test only) corrupts every N-th prediction so
 //! that the discard, replan and guard paths run.
 //!
@@ -537,6 +541,9 @@ struct State<T> {
     /// Finished or cancelled batches dropped unused, and how many of them were cancelled.
     discarded: u64,
     cancelled: u64,
+    /// Slot batches that panicked (kept for the loop or dropped), and the first one's messages.
+    panicked: u64,
+    first_panic: Option<String>,
     /// The most slots searching at once, and the most memory admitted at once.
     peak_busy: usize,
     peak_bytes: u64,
@@ -545,6 +552,25 @@ struct State<T> {
 }
 
 impl<T> State<T> {
+    fn new() -> Self {
+        State {
+            queue: VecDeque::new(),
+            running: Vec::new(),
+            done: HashMap::new(),
+            wanted: HashSet::new(),
+            next: None,
+            budget: 0,
+            shutdown: false,
+            discarded: 0,
+            cancelled: 0,
+            panicked: 0,
+            first_panic: None,
+            peak_busy: 0,
+            peak_bytes: 0,
+            alive: 0,
+        }
+    }
+
     /// The memory of the batches running and of the results not taken yet.
     fn in_use(&self) -> u64 {
         let running: u64 = self.running.iter().flatten().map(|(_, bytes)| bytes).sum();
@@ -592,6 +618,7 @@ pub(super) struct Summary {
     pub stats: Stats,
     pub discarded: u64,
     pub cancelled: u64,
+    pub panicked: u64,
     pub peak_busy: usize,
     pub peak_bytes: u64,
 }
@@ -614,20 +641,7 @@ impl<T> Shared<T> {
     pub(super) fn new(switches: Switches) -> Self {
         Shared {
             switches,
-            state: Mutex::new(State {
-                queue: VecDeque::new(),
-                running: Vec::new(),
-                done: HashMap::new(),
-                wanted: HashSet::new(),
-                next: None,
-                budget: 0,
-                shutdown: false,
-                discarded: 0,
-                cancelled: 0,
-                peak_busy: 0,
-                peak_bytes: 0,
-                alive: 0,
-            }),
+            state: Mutex::new(State::new()),
             wake: Condvar::new(),
             sinks: OnceLock::new(),
             cancels: OnceLock::new(),
@@ -675,6 +689,7 @@ impl<T> Shared<T> {
             stats,
             discarded: state.discarded,
             cancelled: state.cancelled,
+            panicked: state.panicked,
             peak_busy: state.peak_busy,
             peak_bytes: state.peak_bytes,
         }
@@ -685,13 +700,14 @@ impl<T> Shared<T> {
         let summary = self.summary();
         let stats = summary.stats;
         format!(
-            "[X_STATS] QBATCHPAR batches={} precomputed={} loop={} mispredicted={} discarded={} cancelled={} waste_bound={} k={} m={} idle={} budget_mib={} estimate_mib={} peak_mib={} off={}",
+            "[X_STATS] QBATCHPAR batches={} precomputed={} loop={} mispredicted={} discarded={} cancelled={} panicked={} waste_bound={} k={} m={} idle={} budget_mib={} estimate_mib={} peak_mib={} off={}",
             stats.batches,
             stats.precomputed,
             stats.loop_searched,
             stats.mispredicted,
             summary.discarded,
             summary.cancelled,
+            summary.panicked,
             stats.waste_bound,
             stats.k,
             stats.m,
@@ -708,8 +724,13 @@ impl<T> Shared<T> {
         let summary = self.summary();
         let stats = summary.stats;
         format!(
-            "[X_SHADOW] QBATCHPAR batches={} compared={} diffs={} mispredicted={} wasted={}",
-            stats.batches, stats.compared, stats.diffs, stats.mispredicted, summary.discarded
+            "[X_SHADOW] QBATCHPAR batches={} compared={} diffs={} panicked={} mispredicted={} wasted={}",
+            stats.batches,
+            stats.compared,
+            stats.diffs,
+            summary.panicked,
+            stats.mispredicted,
+            summary.discarded
         )
     }
 }
@@ -874,6 +895,25 @@ where
         self.flush();
     }
 
+    /// The shadow: a slot's batch that panicked, kept for the loop or dropped, is a difference;
+    /// the first one prints the shadow line and panics with the batch's message (in the release
+    /// profile, which aborts on a panic, the slot's panic has already ended the process).
+    fn shadow_panics(&mut self) {
+        if !self.shared.switches.shadow || self.stats.diffs > 0 {
+            return;
+        }
+        let first = {
+            let state = self.shared.lock();
+            (state.panicked > 0).then(|| state.first_panic.clone().unwrap_or_default())
+        };
+        if let Some(message) = first {
+            self.stats.diffs += 1;
+            self.flush();
+            eprintln!("{}", self.shared.shadow_line());
+            panic!("[X_SHADOW] QBATCHPAR a batch searched by a slot panicked: {message}");
+        }
+    }
+
     /// Batch `key` is done in the loop with `gie` successful initial extensions; `mixer` is the
     /// loop's mixer after it (`None` with `BATCH_SIZE`) and `next_size` the next batch's size.
     pub(super) fn commit(
@@ -885,6 +925,7 @@ where
     ) {
         self.stats.batches += 1;
         self.commits += 1;
+        self.shadow_panics();
         let searched = self
             .input
             .query_input
@@ -965,9 +1006,12 @@ where
             // A slot's thread catches the panics of its batches; a panic outside them (not
             // expected) has ended the thread, and the batches were dropped above.
             let _ = slot.join();
+            UNJOINED.with(|unjoined| unjoined.set(unjoined.get().saturating_sub(1)));
         }
         if started && !std::thread::panicking() {
             check_no_global_pool();
+            // The shadow: every panic of a slot's batch, taken or not, is a difference.
+            self.shadow_panics();
         }
         self.flush();
     }
@@ -1078,7 +1122,10 @@ where
                 .stack_size(SLOT_STACK_BYTES)
                 .spawn_scoped(self.scope, move || slot_main(shared, search, slot, m));
             match spawned {
-                Ok(handle) => self.slots.push(handle),
+                Ok(handle) => {
+                    self.slots.push(handle);
+                    UNJOINED.with(|unjoined| unjoined.set(unjoined.get() + 1));
+                }
                 Err(_) => {
                     self.shared.lock().alive -= 1;
                     return Err(Off::Spawn);
@@ -1196,6 +1243,7 @@ impl<T, F> Drop for Driver<'_, '_, T, F> {
         drop(unused);
         for slot in self.slots.drain(..) {
             let _ = slot.join();
+            UNJOINED.with(|unjoined| unjoined.set(unjoined.get().saturating_sub(1)));
         }
         *self
             .shared
@@ -1313,48 +1361,17 @@ fn slot_loop<T, F>(
                 std::mem::take(&mut *sink.lock().unwrap_or_else(PoisonError::into_inner)),
             ),
         };
+        // The result's size, before the lock (it walks every HSP).
+        let held = match &outcome {
+            Outcome::Value(value) => value.held_bytes(),
+            Outcome::Panic(..) => 0,
+        };
         let unused = {
             let mut state = shared.lock();
-            state.running[slot] = None;
-            let wanted = !state.shutdown
-                && state.wanted.contains(&job.key)
-                && !state.done.contains_key(&job.key);
-            match outcome {
-                Outcome::Value(value) if value.cancelled() => {
-                    state.discarded += 1;
-                    state.cancelled += 1;
-                    // A key that a later plan wants again is searched again.
-                    if wanted {
-                        let at = state
-                            .queue
-                            .iter()
-                            .position(|queued| queued.key.input_start > job.key.input_start)
-                            .unwrap_or(state.queue.len());
-                        state.queue.insert(at, job);
-                    }
-                    Some(Outcome::Value(value))
-                }
-                outcome if wanted => {
-                    if outcome.failed() {
-                        // The loop stops at this batch if it reaches it: nothing after it
-                        // starts.
-                        state
-                            .queue
-                            .retain(|queued| queued.key.input_start < job.key.input_start);
-                    }
-                    let held = match &outcome {
-                        Outcome::Value(value) => value.held_bytes(),
-                        Outcome::Panic(..) => 0,
-                    };
-                    state.done.insert(job.key, (outcome, held));
-                    state.note_peak();
-                    None
-                }
-                outcome => {
-                    state.discarded += 1;
-                    Some(outcome)
-                }
-            }
+            // The flag as it stands when the search has returned (it is set and cleared only
+            // under this lock).
+            let flagged = cancel.is_set();
+            settle(&mut state, slot, job, outcome, held, flagged)
         };
         shared.wake.notify_all();
         drop(unused);
@@ -1362,6 +1379,75 @@ fn slot_loop<T, F>(
             return;
         }
     }
+}
+
+/// What becomes of a slot's finished batch, under the state lock; returns what to drop outside
+/// it. `held` is the result's size and `flagged` whether the slot's cancellation flag was set
+/// when the search returned. A flagged search counts as cancelled whatever it returned (a search
+/// may stop part-way at any of its checks, and a later edit could return a partial value
+/// there), so it is never taken: it is counted, and searched again if the plan wants its key.
+/// A panic is counted whether it is kept or dropped.
+fn settle<T: SlotResult>(
+    state: &mut State<T>,
+    slot: usize,
+    job: Job,
+    outcome: Outcome<T>,
+    held: u64,
+    flagged: bool,
+) -> Option<Outcome<T>> {
+    state.running[slot] = None;
+    if let Outcome::Panic(_, messages) = &outcome {
+        state.panicked += 1;
+        if state.first_panic.is_none() {
+            state.first_panic = Some(messages.concat());
+        }
+    }
+    let wanted =
+        !state.shutdown && state.wanted.contains(&job.key) && !state.done.contains_key(&job.key);
+    let cancelled = flagged || matches!(&outcome, Outcome::Value(value) if value.cancelled());
+    if cancelled {
+        state.discarded += 1;
+        state.cancelled += 1;
+        if wanted {
+            let at = state
+                .queue
+                .iter()
+                .position(|queued| queued.key.input_start > job.key.input_start)
+                .unwrap_or(state.queue.len());
+            state.queue.insert(at, job);
+        }
+        return Some(outcome);
+    }
+    if !wanted {
+        state.discarded += 1;
+        return Some(outcome);
+    }
+    if outcome.failed() {
+        // The loop stops at this batch if it reaches it: nothing after it starts.
+        state
+            .queue
+            .retain(|queued| queued.key.input_start < job.key.input_start);
+    }
+    state.done.insert(job.key, (outcome, held));
+    state.note_peak();
+    None
+}
+
+thread_local! {
+    // No NCBI counterpart: the slot threads of the search on this thread (the loop's) that have
+    // not been joined; the writers of `run_in_pool` check that there are none.
+    static UNJOINED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The writers of `run_in_pool` (the reports, and what a failed batch writes) run only after
+/// `Driver::finish` has joined every slot of the search, so that no speculative batch runs
+/// while output is written. With debug assertions this checks it, on the loop's thread.
+pub(super) fn debug_assert_slots_joined() {
+    debug_assert_eq!(
+        UNJOINED.with(std::cell::Cell::get),
+        0,
+        "a writer of run_in_pool runs while LOSAT_X_QBATCHPAR slots may still run (Driver::finish was not called before it)"
+    );
 }
 
 thread_local! {
@@ -1432,6 +1518,10 @@ fn install_panic_hook() {
 /// tests, whose other tests may use the global pool), after the slots are joined: the global
 /// pool must not exist yet, unless this check made it (a one-thread pool, so a later search's
 /// slots are checked as well as the first one's are only if nothing else started it).
+/// Caveats, all in debug builds only: `build_global` can also fail for another reason (a thread
+/// that cannot be spawned), and a host that embeds LOSAT and has built the global pool itself
+/// trips the check; the check leaves a one-thread global pool in the process. Fine for the
+/// command line, whose blastn path never builds the global pool.
 fn check_no_global_pool() {
     #[cfg(all(
         debug_assertions,
@@ -1743,6 +1833,99 @@ mod tests {
         assert_eq!(waste_bound(15, 100), 55);
     }
 
+    /// A result for `settle`: `Err("cancelled")` is a cancelled search, another `Err` a failed
+    /// one.
+    type Settled = Result<u32, &'static str>;
+
+    impl SlotResult for Settled {
+        fn failed(&self) -> bool {
+            matches!(self, Err(error) if *error != "cancelled")
+        }
+
+        fn cancelled(&self) -> bool {
+            matches!(self, Err(error) if *error == "cancelled")
+        }
+
+        fn held_bytes(&self) -> u64 {
+            7
+        }
+    }
+
+    fn key_at(input_start: usize) -> BatchKey {
+        BatchKey {
+            input_start,
+            input_end: input_start + 1,
+            batch_size: 100,
+        }
+    }
+
+    fn job_at(input_start: usize) -> Job {
+        Job {
+            key: key_at(input_start),
+            searched: input_start..input_start + 1,
+            bytes: 10,
+        }
+    }
+
+    /// A state with one slot running batch 1, batches 1-4 wanted and 2-4 queued.
+    fn settling_state() -> State<Settled> {
+        let mut state = State::new();
+        state.running = vec![Some((key_at(1), 10))];
+        state.wanted = (1..5).map(key_at).collect();
+        state.queue = (2..5).map(job_at).collect();
+        state
+    }
+
+    // Review R2: the slot decides "cancelled" from its flag after the search, not from what the
+    // search returned: a search that stopped part-way and returned a value that looks complete
+    // is never taken, and its key, still wanted, is searched again.
+    #[test]
+    fn a_flagged_search_is_never_taken_whatever_it_returned() {
+        let mut state = settling_state();
+        let unused = settle(&mut state, 0, job_at(1), Outcome::Value(Ok(1)), 7, true);
+        assert!(matches!(unused, Some(Outcome::Value(Ok(1)))));
+        assert!(state.done.is_empty());
+        assert_eq!((state.cancelled, state.discarded), (1, 1));
+        let queued: Vec<usize> = state.queue.iter().map(|job| job.key.input_start).collect();
+        assert_eq!(queued, [1, 2, 3, 4]);
+        assert_eq!(state.running, [None]);
+        // Not flagged: the same value is kept for the loop.
+        let mut state = settling_state();
+        assert!(settle(&mut state, 0, job_at(1), Outcome::Value(Ok(1)), 7, false).is_none());
+        assert_eq!(state.done.get(&key_at(1)).map(|(_, held)| *held), Some(7));
+        assert_eq!(state.cancelled, 0);
+        // A key no plan wants is dropped, not queued again.
+        let mut state = settling_state();
+        state.wanted.remove(&key_at(1));
+        assert!(settle(&mut state, 0, job_at(1), Outcome::Value(Ok(1)), 7, true).is_some());
+        assert_eq!(state.queue.len(), 3);
+    }
+
+    // Review R3: a slot's panic is counted, kept for the loop when its key is wanted (it then
+    // ends the batches after it, as a failure does), dropped otherwise.
+    #[test]
+    fn slot_panics_are_counted_kept_or_not() {
+        let mut state = settling_state();
+        let panic = Outcome::Panic(Box::new("boom"), vec!["message\n".to_string()]);
+        assert!(settle(&mut state, 0, job_at(1), panic, 0, false).is_none());
+        assert_eq!(state.panicked, 1);
+        assert_eq!(state.first_panic.as_deref(), Some("message\n"));
+        assert!(state.done.contains_key(&key_at(1)));
+        assert!(
+            state.queue.is_empty(),
+            "nothing after a failed batch starts"
+        );
+        let mut state = settling_state();
+        state.wanted.clear();
+        let panic = Outcome::Panic(Box::new("boom"), Vec::new());
+        assert!(settle(&mut state, 0, job_at(1), panic, 0, false).is_some());
+        assert_eq!((state.panicked, state.discarded), (1, 1));
+        // A failed (not cancelled) result ends the queue after it too.
+        let mut state = settling_state();
+        assert!(settle(&mut state, 0, job_at(1), Outcome::Value(Err("e")), 7, false).is_none());
+        assert!(state.queue.is_empty());
+    }
+
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     mod executor {
         use super::*;
@@ -1781,13 +1964,21 @@ mod tests {
             stale: Stale,
             /// The loop waits this long after each batch it takes, so the slots run ahead.
             loop_delay: Option<Duration>,
+            /// The lookup width the estimates assume (8 if 0).
+            lut: usize,
         }
+
+        /// The thread count a search reports when it saw its cancellation and returned anyway
+        /// (`Stale::PartialOnCancel`): such a result must never be taken.
+        const PARTIAL: usize = 9_999;
 
         #[derive(Clone, Copy, Default, PartialEq, Eq)]
         enum Stale {
             #[default]
             Normal,
             WaitsForCancel,
+            /// Waits for its cancellation, then returns a value as if it were complete.
+            PartialOnCancel,
             Quick,
         }
 
@@ -1828,7 +2019,7 @@ mod tests {
                 active.fetch_add(pool.threads(), Ordering::SeqCst);
                 let stale = batch_size.is_some_and(|size| job.key.batch_size != size);
                 match fakes.stale {
-                    Stale::WaitsForCancel if stale => {
+                    Stale::WaitsForCancel | Stale::PartialOnCancel if stale => {
                         let since = Instant::now();
                         while !cancelled(pool) && since.elapsed() < Duration::from_secs(10) {
                             std::thread::yield_now();
@@ -1839,6 +2030,9 @@ mod tests {
                 }
                 active.fetch_sub(pool.threads(), Ordering::SeqCst);
                 if cancelled(pool) {
+                    if fakes.stale == Stale::PartialOnCancel {
+                        return Ok((job.key, PARTIAL));
+                    }
                     return Err("cancelled".to_string());
                 }
                 if fakes.panic == Some(job.key.input_start) {
@@ -1867,7 +2061,7 @@ mod tests {
                     input,
                     threads,
                     1024,
-                    Box::new(|_, _| 8),
+                    Box::new(move |_, _| if fakes.lut == 0 { 8 } else { fakes.lut }),
                     None,
                 );
                 let mut mixer =
@@ -1960,6 +2154,7 @@ mod tests {
             assert_eq!((stats.k, stats.m, stats.idle), (4, 1, 0), "{}", run4.line);
             assert!(run4.summary.peak_busy <= 4);
             assert_eq!(run4.active_after_finish, 0);
+            assert_eq!(run4.summary.panicked, 0);
             assert_eq!(off.summary.stats.precomputed, 0);
             assert_eq!(off.summary.stats.off, Some(Off::NotSet));
         }
@@ -1993,7 +2188,8 @@ mod tests {
         }
 
         // Corrupted predictions: the slots' batches under other keys are discarded, the loop's
-        // batches do not change, and two misses within eight batches stop the speculation.
+        // batches do not change, and two misses within eight batches (or the waste bound) stop
+        // the speculation.
         #[test]
         fn mispredicted_batches_are_discarded() {
             let lengths = vec![100; 60];
@@ -2011,12 +2207,24 @@ mod tests {
                     "every {every}: {}",
                     missed.line
                 );
-                assert_eq!(
-                    missed.summary.stats.off,
-                    Some(Off::Guard),
+                // Every prediction corrupted: the second batch's and third's next keys are
+                // both wrong, before the waste bound can be reached. With fewer corrupted, the
+                // discards may reach the waste bound first.
+                let stops: &[Off] = if every == 1 {
+                    &[Off::Guard]
+                } else {
+                    &[Off::Guard, Off::Waste]
+                };
+                assert!(
+                    missed
+                        .summary
+                        .stats
+                        .off
+                        .is_some_and(|off| stops.contains(&off)),
                     "every {every}: {}",
                     missed.line
                 );
+                assert_eq!(missed.summary.panicked, 0);
             }
         }
 
@@ -2107,6 +2315,8 @@ mod tests {
             assert_eq!(failed.results[10], Err("error at 10".to_string()));
             assert!(failed.summary.discarded >= 1, "{}", failed.line);
             assert_eq!(failed.active_after_finish, 0);
+            // The panic of batch 12, past the error, is counted though never resumed.
+            assert_eq!(failed.summary.panicked, 1, "{}", failed.line);
         }
 
         // Once a slot's batch returns an error, the batches planned after it are not started:
@@ -2150,6 +2360,87 @@ mod tests {
                 .cloned()
                 .unwrap_or_default();
             assert_eq!(message, "fake batch panic at 5");
+        }
+
+        // Review R2 on whole runs: stale searches that see their cancellation and return a value
+        // as if complete are counted as cancelled and never taken.
+        #[test]
+        fn a_value_returned_after_a_cancel_is_never_taken() {
+            let lengths = vec![100; 40];
+            let off = off_run(&lengths, Some(200));
+            let switches = Switches {
+                slots: Some(2),
+                miss_every: Some(1),
+                ..on()
+            };
+            let fakes = Fakes {
+                stale: Stale::PartialOnCancel,
+                ..Fakes::default()
+            };
+            let partial = run(&lengths, Some(200), 4, switches, fakes);
+            assert_eq!(keys(&partial.results), keys(&off.results));
+            assert!(partial
+                .results
+                .iter()
+                .all(|result| !matches!(result, Ok((_, PARTIAL)))));
+            assert!(partial.summary.cancelled > 0, "{}", partial.line);
+            assert_eq!(partial.summary.panicked, 0);
+        }
+
+        // A budget between none and ample: the estimates (lookup width 10, 4 MiB each) and a
+        // budget of 5 MiB admit the loop's next batch and one more, so two of the four slots
+        // search at a time while the queued batches wait.
+        #[test]
+        fn a_budget_admits_some_batches_and_holds_the_rest() {
+            let lengths = vec![100; 40];
+            let off = off_run(&lengths, Some(200));
+            let switches = Switches {
+                slots: Some(4),
+                mem_mib: Some(5),
+                ..on()
+            };
+            let fakes = Fakes {
+                lut: 10,
+                ..Fakes::default()
+            };
+            let bounded = run(&lengths, Some(200), 4, switches, fakes);
+            assert_eq!(keys(&bounded.results), keys(&off.results));
+            assert_eq!(bounded.summary.peak_busy, 2, "{}", bounded.line);
+            let one = batch_estimate_bytes(10, 200, 20);
+            assert!(
+                bounded.summary.peak_bytes <= 5 * MIB + 2 * one,
+                "{}",
+                bounded.line
+            );
+            assert!(bounded.summary.stats.precomputed > 0, "{}", bounded.line);
+        }
+
+        // Review R3: in the shadow mode a slot's panic is a difference even when its batch is
+        // dropped (here past an error at batch 10): the loop stops with the shadow's panic.
+        #[test]
+        fn the_shadow_fails_on_a_dropped_slot_panic() {
+            let lengths = vec![100; 40];
+            let switches = Switches {
+                shadow: true,
+                ..on()
+            };
+            let fakes = Fakes {
+                fail: Some(10),
+                panic: Some(12),
+                fail_waits_for_panic: true,
+                ..Fakes::default()
+            };
+            let caught = std::panic::catch_unwind(|| run(&lengths, Some(100), 4, switches, fakes));
+            let payload = caught.expect_err("the shadow fails on the slot's panic");
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .unwrap_or_default();
+            assert!(
+                message.starts_with("[X_SHADOW] QBATCHPAR a batch searched by a slot panicked"),
+                "{message}"
+            );
+            assert!(message.contains("fake batch panic at 12"), "{message}");
         }
 
         #[test]

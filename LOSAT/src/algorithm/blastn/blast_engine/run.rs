@@ -7751,6 +7751,7 @@ fn write_before_failed_batch(
     output_formats: &[BlastnOutputFormat],
     results: BatchResults<'_>,
 ) -> Result<()> {
+    x_qbatch_par::debug_assert_slots_joined();
     if before.is_empty() {
         write_pairwise_prologs(
             outputs,
@@ -7796,6 +7797,7 @@ fn write_batch_reports(
     results: BatchResults<'_>,
     epilog: bool,
 ) -> Result<()> {
+    x_qbatch_par::debug_assert_slots_joined();
     let megablast = args.task == "megablast";
     let config = configure_task(args);
     let mut hit_lists = results.hit_lists;

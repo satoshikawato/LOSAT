@@ -4843,7 +4843,15 @@ fn update_hitlists_with_subject_hits(
         return;
     }
 
-    let mut per_query: Vec<Vec<BlastnHsp>> = vec![Vec::new(); hit_lists.len()];
+    // Each query's HSPs get a vector of their exact count (LOSAT's memory: a vector grown by
+    // `push` holds four HSPs from the first one, and most subjects give a query one HSP).
+    let mut counts = vec![0usize; hit_lists.len()];
+    for hit in &hits {
+        if let Some(count) = counts.get_mut(hit.q_idx as usize) {
+            *count += 1;
+        }
+    }
+    let mut per_query: Vec<Vec<BlastnHsp>> = counts.into_iter().map(Vec::with_capacity).collect();
     for hit in hits {
         let q_idx = hit.q_idx as usize;
         if q_idx < per_query.len() {

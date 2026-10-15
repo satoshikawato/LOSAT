@@ -214,7 +214,8 @@ threads take the next chunk when they are free instead of waiting at the end of 
 the units of a subject longer than a chunk's budget (a chromosome) run on the pool instead of on
 the thread that took it. Neither changes a value or the order in which the results are entered;
 they are timed together because `TBNOIDUNITS` alone was slower on the human genome at 8 and 16
-threads. The CPU time on genomes was 5-11 % higher in those timings.
+threads. On main's path before `TBNSTATE` joined the set they cost 5-11 % more CPU time on genomes;
+with it the CPU time is the same.
 
 What runs per target:
 

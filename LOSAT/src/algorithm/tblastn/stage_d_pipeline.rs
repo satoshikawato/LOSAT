@@ -1271,24 +1271,26 @@ fn x_tbn_oid_chunk() -> bool {
 
 // No NCBI counterpart: reads the LOSAT_X_TBNOIDNEXT switch once; it does not change any value
 // NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNOIDNEXT): off unless set (to any value); not in the strict set. It
-/// acts only where `LOSAT_X_TBNOIDCHUNK` makes the chunks.
+/// EXPERIMENT (LOSAT_X_TBNOIDNEXT): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only where `LOSAT_X_TBNOIDCHUNK`
+/// makes the chunks.
 #[cfg(feature = "parallel")]
 fn x_tbn_oid_next() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOIDNEXT").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOIDNEXT"))
 }
 
 // No NCBI counterpart: reads the LOSAT_X_TBNOIDUNITS switch once; it does not change any value
 // NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNOIDUNITS): off unless set (to any value); not in the strict set. It
-/// acts only where `LOSAT_X_TBNOIDCHUNK` makes the chunks.
+/// EXPERIMENT (LOSAT_X_TBNOIDUNITS): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only where `LOSAT_X_TBNOIDCHUNK`
+/// makes the chunks.
 #[cfg(feature = "parallel")]
 fn x_tbn_oid_units() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOIDUNITS").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOIDUNITS"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:153-154

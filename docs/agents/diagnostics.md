@@ -78,10 +78,11 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 54 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 56 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
-`LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE` and
-`LOSAT_X_TBNSTORE` joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
+`LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE`,
+`LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS` and `LOSAT_X_TBNSTORE` joined), and their
+variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -99,7 +100,7 @@ strict set are on by default (43 then, 54 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
   `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
-  act only with `TBNPAR`.
+  act only with `TBNPAR`; `TBNOIDNEXT` and `TBNOIDUNITS` act only with `TBNOIDCHUNK`.
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
   Only `0` means off; `00`, `false` or `off` are "any other value".
 - The variables are read once per process (once per Wasm instance), except `GREEDYSPEC`,
@@ -113,7 +114,7 @@ strict set are on by default (43 then, 54 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 54 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 56 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -143,6 +144,7 @@ export LOSAT_X_GREEDYFUSE=1
 export LOSAT_X_LINKSORT=1
 export LOSAT_X_NEWTONLANES8=1
 export LOSAT_X_TBNSTATE=1 LOSAT_X_TBNXLATE=1
+export LOSAT_X_TBNOIDNEXT=1 LOSAT_X_TBNOIDUNITS=1
 export LOSAT_X_TBNSTORE=1
 ```
 
@@ -217,6 +219,16 @@ are timed together because `TBNSTATE` alone was 3 % slower on the fly genome at 
 shadow `LOSAT_X_TBNXLATESHADOW` stays opt-in; `LOSAT_X_TBNPARSHADOW` compares the unit path, with
 both switches, with the serial reference.
 
+`LOSAT_X_TBNOIDNEXT` and `LOSAT_X_TBNOIDUNITS` were added after the default changed, as switches
+that were off unless set, and joined the set together on 2026-10-15. They change how tblastn hands
+the chunks of `LOSAT_X_TBNOIDCHUNK` to its threads (2 or more threads, several subjects): the
+threads take the next chunk when they are free instead of waiting at the end of each entry, and
+the units of a subject longer than a chunk's budget (a chromosome) run on the pool instead of on
+the thread that took it. Neither changes a value or the order in which the results are entered;
+they are timed together because `TBNOIDUNITS` alone was slower on the human genome at 8 and 16
+threads. On main's path before `TBNSTATE` joined the set they cost 5-11 % more CPU time on genomes;
+with it the CPU time is the same.
+
 `LOSAT_X_TBNSTORE` was added after the default changed, as a switch that was off unless set, and
 joined the set on 2026-10-16. tblastn `-subject` holds each subject packed (about a quarter of a
 byte per base) instead of its letters, translates a subject's frames from the packed bases and
@@ -280,6 +292,16 @@ Same values, faster computation:
   x86_64 and wasm32 run). Without it aarch64 runs the scalar port, as before the NEON layer.
   `LOSAT_X_DPSHADOW=1` runs and compares the NEON kernels on aarch64 whether it is set or not.
   Platform checks hash it on the Linux and macOS arm64 runners (mode `dpneon`).
+- `LOSAT_X_DPNEON2=1` (aarch64 only, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the X-drop DP kernels of `LOSAT_X_DPAVX2` on NEON, each
+  256-bit vector in two registers (32 x i8 or 16 x i16 lanes per block, the same band steps, the
+  row gap in the form of `LOSAT_X_DPW128`): the same values and result as the 128-bit kernels; a
+  call they do not take (8-bit lanes with `32 * gap_extend - (gap_open + gap_extend) > 128`, 16-bit
+  lanes with `16 * gap_extend - (gap_open + gap_extend) > 32768`) runs on the `LOSAT_X_DPW128` /
+  128-bit kernels (`utils/x_xdrop_neon2.rs`). It turns the NEON kernels on as `LOSAT_X_DPNEON`
+  does and takes the place `LOSAT_X_DPAVX2` has on x86_64 (first in the dispatch). Covered by
+  `LOSAT_X_DPSHADOW=1` when set. Platform checks hash it on the Linux and macOS arm64 runners
+  (mode `dpneon2`).
 - `LOSAT_X_GREEDYFAST=1` megablast greedy alignment, one distance in three passes of 256 cells,
   match extension 8 bases at a time. Shadow: `LOSAT_X_GREEDYSHADOW=1`.
 - `LOSAT_X_GREEDYPRELIM=1` (strict-set candidate, S-G, round 5) the preliminary (score-only)
@@ -438,6 +460,62 @@ Rebuilding less:
   `[TIMING] x_bpredofit: lists=<n> hsps=<m>`. Measured once (human proteome block 1, 566 proteins, 50,404
   letters, x human proteome, one thread, with `LOSAT_X_BPQBLOCK=50000` and the other memory switches; max RSS):
   121,304 -> 82,180 kB (NCBI -db 151,476 kB in the same run).
+- `LOSAT_X_BPREDOPAR=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the composition-based redo of a search with more than one thread and
+  at least two matches splits its matches between the threads, as NCBI's `omp for` over its array of
+  matches, in jobs of up to four consecutive matches of one query, instead of one job per query (or the
+  matches of the only query with matches); the early termination test, the heap insertions and the error
+  that ends the redo are then replayed on the calling thread in the order of the one-thread loop, on the
+  same heaps (`blastp/x_redo_par.rs`, exactness argument in its header). The jobs run in windows of
+  consecutive jobs, one `pool.install` each, that may end inside a query: at most 64 jobs per thread
+  (`LOSAT_X_BPREDOPARWINDOW` below), so at most 4 x 64 x threads redone results are held before their
+  replay. A job builds its query's workspace once per window (`OnceLock`; a query that spans windows has it
+  built again from the same inputs, a small cost that grows with the query's length) and its own
+  parameters, prefetches the first Newton problems of its own matches with `LOSAT_X_NEWTONLANES` (one vector
+  of four, against the heaps as the window's start left them), and redoes its matches with per-worker
+  scratch and the search's `LOSAT_X_SEGSHARE` store. A
+  query's preliminary list is released after the replay of the window that holds its last match, as the
+  one-thread loop releases it (`LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`). The early termination test is
+  monotone over the replay (once true for a match's E-value, true afterwards), so a match whose test is
+  already true at its window's start is not computed. A match can be ended at all only for a query whose
+  batch's heaps can all be filled (with fresh heaps, the last query of a batch whose queries all have at
+  least `max_target_seqs` matches) and with a best E-value above 5 x the cutoff; at a window's start, not
+  when a query of its batch whose matches are all replayed has a heap that is not filled, nor among its
+  query's next `max_target_seqs - n` matches (`n`: the lists its heap holds). A job with a match left open
+  is at risk. A window holds at most cap(q) jobs at risk of a query q (it may hold jobs at risk of several
+  queries): `threads` at first and after a window that dropped a computed match of q; otherwise cap(q)
+  grows by q's jobs at risk that the window computed (doubling when it closed the window), up to the job
+  budget. A computed match is dropped only in the window during which its batch's heaps fill, so at most
+  one window drops matches of q, and it drops at most 4 x cap(q) of them, cap(q) <= threads + q's jobs at
+  risk computed, and all used, before (the one-thread loop computes none); where q's batch's heaps never
+  fill, q's windows are back to their budget after a number of windows logarithmic in q's work at risk.
+  With
+  `LOSAT_TIMING=1` each search the path runs prints
+  `[TIMING] x_bpredopar: matches=<n> jobs=<j> windows=<w> split=<s> ended=<e> skipped=<k> wasted=<x>
+  par_s=<s> replay_s=<s>` (on one line; `split`: windows that end inside a query; `ended`: the matches the
+  early termination test ended, as many as in the one-thread loop; `skipped`: those not computed;
+  `wasted`: those computed and dropped). Diagnostics only, the output bytes do not change: the counters
+  and traces of the redo count the `wasted` matches as well (`[TIMING] x_bpredofit: lists= hsps=`, the
+  kappa range counters, `LOSAT_DEBUG_BLASTP_TRACE_HSP` lines), and `[X_STATS] NEWTONLANES` counts the
+  prefetches of the jobs (four matches each, the one-thread loop prefetches 16 ahead). With
+  `LOSAT_X_NEWTONLANES8` (aarch64) a job's prefetch of at most four problems never fills eight lanes.
+  Reason: the query-level redo waits for the largest query of a search (in the blocks of the human x yeast
+  blastp-fast job with `LOSAT_X_BPQBLOCK=20000`, 33 % of a block's redo work at the median, 54 % at p90).
+- `LOSAT_X_BPREDOPARWINDOW=<jobs per thread>` (tuning variable of `LOSAT_X_BPREDOPAR`; not in the strict set,
+  read once when the path first runs) the job budget of a window per thread, a positive integer. Unset or
+  any other value (0, a negative number, not a number) gives 64, without a message, as the value switches of
+  `utils/xswitch.rs` give their built-in value. The tests set 1 to make windows that end inside queries. The
+  output does not depend on it.
+- `LOSAT_X_BPREDOPARSHADOW=1` shadow of `LOSAT_X_BPREDOPAR` (implies it): the new path runs first into
+  separate heaps without releasing the preliminary lists, and every match that its replay redoes is
+  computed again on the calling thread with one set of scratch, as the one-thread loop holds it, and the
+  two results are compared (error or not, best score, E-value bits, every HSP field); then the one-thread
+  loop runs for the output and the hit lists of both sets of heaps (`fill_results_from_compo_heaps`) are
+  compared field by field, floating-point values by their bits. When the one-thread loop ends with an error
+  instead, its error is compared with the new path's (both must end, with the same message). The first
+  difference stops the run (panic) after printing the line that is otherwise printed at exit:
+  `[X_SHADOW] BPREDOPAR searches= queries= matches_compared= lists_compared= diffs=`. With `LOSAT_TIMING=1`
+  the new path's `[TIMING] x_bpredopar:` line is printed as well.
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the two-hit seed stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one
@@ -678,6 +756,28 @@ Rebuilding less:
   1.04-1.25), and 0.39 / 0.47 s with one query. Blocks of 256 or 1,024 subjects per thread were not faster within
   the noise (6 rounds each: ratios 1.23 and 1.14 against 1.19 for 64), and 1,024 kept 160 MiB, so where the time
   goes is still open.
+- `LOSAT_X_BNSTORE=1` (BLASTN, all tasks, `-subject` without `-subject_loc`, memory; not in the strict set: off
+  unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) each subject record's letters are packed as
+  soon as the reader has read it (`sequence/packed_subject.rs`, the module of `LOSAT_X_TBNSTORE`: ncbi2na 4 bases
+  per byte with the remainder count in the last byte, the runs of letters other than `ACGT` as ncbi4na codes, the
+  lower-case intervals), so the letters of the whole set are never held; the records keep their deflines. The
+  search reads each form from `SubjectLetters` (`blastn/x_subject_store.rs`): the length, the lower-case intervals
+  (`-lcase_masking`), the packed bases of the preliminary stage (those of the packed subject, not a second copy;
+  the bytes of `encode_subject_ncbi2na_packed`), the blastna letters of a subject in the traceback
+  (`blastna_into`) and the upper-case letters of each outfmt 0 row (`letters_into`), each the bytes the record's
+  letters give (the comparison tests of `packed_subject.rs`). A subject range keeps the letters (the records
+  are cut before the search), and so does a set with a byte that has no ncbi4na code (the CLI reader admits
+  none); the library entry `run_local` (and LOSAT Web) reads the caller's records. With `LOSAT_X_STATS=1` a
+  `[X_STATS] BNSTORE subjects= stored_bytes= blastna_made= rows_made=` line gives the subjects held packed, the
+  bytes of their packed forms, the times the traceback made blastna letters and the report rows made from them;
+  `LOSAT/tests/blastn_subject_store.rs` compares reports and messages with and without the switch and reads it.
+  Measured 2026-10-15 on the WSL machine (megablast against 28,036 16S subjects, 40.6 Mb; max RSS, one run each
+  in one series, the same output in every run): one thread, one query 68.0 -> 30.5 MiB (NCBI BLAST+ 2.17.0 `-db`
+  42.0), a query without hits 67.2 -> 29.4 (34.6), 100 queries 135.3 -> 97.7 (95.8); 8 threads, one query 81.1 ->
+  44.7, 34.8 with `LOSAT_X_BNSTREAM` (43.8), 100 queries 206.7 -> 170.8, 108.9 with `LOSAT_X_BNSTREAM` (145.0 with it
+  alone; NCBI 115.0). One 5.5 Mb subject (Sakai x MG1655, 8 threads) keeps its peak (196.2 -> 194.3; NCBI 152.8):
+  there the query's copies dominate, not the subject.
+  Time: 100 queries at one thread, 4 alternating pairs (load 6-12), pair ratio median 1.06 (0.87-1.11).
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks
@@ -784,33 +884,33 @@ Scheduling (each value computed by one thread with the original function; order 
   side by side (each batch on one thread). With `LOSAT_WASI_THREADS_DEBUG=1` the
   `[losat-thread-activity]` line of the subject stage ends with `pool_entries=` (the entries of
   one query batch); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.
-- `LOSAT_X_TBNOIDNEXT=1` tblastn with 2+ threads and several subjects, where `TBNOIDCHUNK` makes
-  the chunks: no wait between entries. The threads of the pool take the next chunk when they are
-  free, as NCBI's search threads ask the database for the next chunk (`seqdbimpl.cpp:333-344`),
-  instead of waiting at the end of each entry for its last chunk. The thread that owns the
-  search takes the lists back chunk by chunk in OID order and enters them into the collector as
-  before, and searches a chunk itself while the next one in order is not finished
-  (`tblastn/x_oid_flow.rs`). At most `4 * threads` chunks are taken or finished beyond the oldest
-  one not taken back; a thread waits before a new chunk when that window is full, so the memory of
-  the waiting lists stays bounded. The chunks and the search of each subject are those of
-  `TBNOIDCHUNK`, so the report is the same. Not in the set (off unless set to any value); with
-  `LOSAT_X_TBNOIDCHUNK=0` (or `LOSAT_X_DEFAULT=0` alone) there are no chunks and it changes
-  nothing. With `LOSAT_WASI_THREADS_DEBUG=1` the search is one entry (`pool_entries=1`) and the
-  line adds `flow_chunks=` and `flow_peak_waiting=` (the most finished chunks that waited at
-  once); `LOSAT/tests/tblastn_oid_chunk.rs` reads them.
-- `LOSAT_X_TBNOIDUNITS=1` tblastn with 2+ threads and several subjects, where `TBNOIDCHUNK` makes
-  the chunks (with or without `TBNOIDNEXT`): a subject longer than a chunk's budget (a chunk of its
-  own, such as a chromosome) runs its (frame, chunk) units on the pool, as the single subject of a
-  search does with `TBNPAR`, instead of one after another on the thread that took it. Threads that
-  have no chunk to search (at the end of an entry, or when no chunk is left) take its units; its
-  merge in NCBI order, linking, E-values and reaping run on its thread after its last unit, so the
-  report is the same. NCBI's thread searches a subject whole, so at 16 and 32 threads the longest
-  chromosome bounds both programs; this goes beyond NCBI. Other subjects keep their units on their
-  thread. With `TBNOIDNEXT` the threads of the flow start together (each waits until all have
-  entered the flow) so that a thread waiting for a unit can only take units, never a loop of the
-  flow. Not in the set (off unless set to any value). With `LOSAT_WASI_THREADS_DEBUG=1` each subject
-  whose units ran on the pool prints a `prelim_units` stage line with `parallel_selected=true`;
-  `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
+- `LOSAT_X_TBNOIDNEXT=1` (in the strict set since 2026-10-15) tblastn with 2+ threads and several
+  subjects, where `TBNOIDCHUNK` makes the chunks: no wait between entries. The threads of the pool
+  take the next chunk when they are free, as NCBI's search threads ask the database for the next
+  chunk (`seqdbimpl.cpp:333-344`), instead of waiting at the end of each entry for its last chunk.
+  The thread that owns the search takes the lists back chunk by chunk in OID order and enters them
+  into the collector as before, and searches a chunk itself while the next one in order is not
+  finished (`tblastn/x_oid_flow.rs`). At most `4 * threads` chunks are taken or finished beyond the
+  oldest one not taken back; a thread waits before a new chunk when that window is full, so the
+  memory of the waiting lists stays bounded. The chunks and the search of each subject are those of
+  `TBNOIDCHUNK`, so the report is the same. `=0` turns it off; with `LOSAT_X_TBNOIDCHUNK=0` (or
+  `LOSAT_X_DEFAULT=0` alone) there are no chunks and it changes nothing. With
+  `LOSAT_WASI_THREADS_DEBUG=1` the search is one entry (`pool_entries=1`) and the line adds
+  `flow_chunks=` and `flow_peak_waiting=` (the most finished chunks that waited at once);
+  `LOSAT/tests/tblastn_oid_chunk.rs` reads them.
+- `LOSAT_X_TBNOIDUNITS=1` (in the strict set since 2026-10-15) tblastn with 2+ threads and several
+  subjects, where `TBNOIDCHUNK` makes the chunks (with or without `TBNOIDNEXT`): a subject longer
+  than a chunk's budget (a chunk of its own, such as a chromosome) runs its (frame, chunk) units on
+  the pool, as the single subject of a search does with `TBNPAR`, instead of one after another on
+  the thread that took it. Threads that have no chunk to search (at the end of an entry, or when no
+  chunk is left) take its units; its merge in NCBI order, linking, E-values and reaping run on its
+  thread after its last unit, so the report is the same. NCBI's thread searches a subject whole, so
+  at 16 and 32 threads the longest chromosome bounds both programs; this goes beyond NCBI. Other
+  subjects keep their units on their thread. With `TBNOIDNEXT` the threads of the flow start
+  together (each waits until all have entered the flow) so that a thread waiting for a unit can only
+  take units, never a loop of the flow. `=0` turns it off. With `LOSAT_WASI_THREADS_DEBUG=1` each
+  subject whose units ran on the pool prints a `prelim_units` stage line with
+  `parallel_selected=true`; `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
 - `LOSAT_X_TBNSTATE=1` (in the strict set since 2026-10-15) tblastn, the unit path (`TBNPAR`): the
   scan state of a subject's (frame, chunk) units (the diagonal table of the two-hit word finder, the
   offset pairs, the initial hits, the gapped alignment memory) is kept by the thread from one

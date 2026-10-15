@@ -733,7 +733,12 @@ Rebuilding less:
   the noise (6 rounds each: ratios 1.23 and 1.14 against 1.19 for 64), and 1,024 kept 160 MiB. That form
   searched blocks of `threads x 64` subjects and handed a block over before the next started; on the
   workstation (2026-10-15, 8 pairs) it took 1.11 times the wall time, the threads idle at ~110 block ends of
-  ~10 ms each, which the window above removes.
+  ~10 ms each, which the window above removes. The window, on the same workstation (2026-10-16, node 0
+  pinned, rounds of four arms in rotating order, output unchanged): 8 threads, 8 rounds, wall time 0.944 of the
+  default (pair ratios 0.900-0.957; the block form 1.103), max RSS 202 -> 141 MiB; 16 threads, 4 rounds, 0.882
+  (0.834-0.890; block form 1.145), 211 -> 145 MiB; one query at 8 threads 0.998, 79 -> 67 MiB. It is faster than
+  the default, probably because the hand-over runs while the threads search instead of after them and fewer
+  results are held (not measured separately).
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks

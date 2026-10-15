@@ -39,7 +39,7 @@ use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
 
 use super::{
     ncbistdaa_to_ascii, update_blastp_preliminary_hit_lists, BlastpHitList, BlastpSubjectRef,
-    BlastpSubjectResult, BlastpSubjectScratch, EncodedProtein,
+    BlastpSubjectResult, BlastpSubjectScratch, EncodedProtein, XPrelimHsp,
 };
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
@@ -586,9 +586,9 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 /// `ListedSubjects` holds the sequences of the listed subjects). A block that cannot be
 /// read or searched does not stop the other blocks of its round; the round's first
 /// error in ordinal order is returned, the error of the one-thread order (the blocks
-/// are cut alike). The subject scan of a database keeps no compact list (EXPERIMENT
-/// LOSAT_X_BPPCOMPACT is skipped with `-db`, `run_resolved_in_pool`), so the hit-list
-/// updates are given none.
+/// are cut alike). EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact lists
+/// (`x_compact_hit_lists`) are updated with the hit lists, in the same order.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn search_blocks<S, K>(
     database: &BlastpDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
@@ -596,6 +596,7 @@ pub(super) fn search_blocks<S, K>(
     new_scratch: &S,
     process_subject: &K,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     prelim_hitlist_size: usize,
 ) -> Result<()>
 where
@@ -621,6 +622,7 @@ where
         new_scratch,
         process_subject,
         preliminary_hit_lists,
+        x_compact_hit_lists,
         prelim_hitlist_size,
     )
 }
@@ -637,6 +639,7 @@ fn search_blocks_of<S, K>(
     new_scratch: &S,
     process_subject: &K,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     prelim_hitlist_size: usize,
 ) -> Result<()>
 where
@@ -695,7 +698,11 @@ where
                                     block_subject(&block, i),
                                     &mut subject_result,
                                 );
-                                if !subject_result.query_hsp_lists.is_empty() {
+                                // (EXPERIMENT LOSAT_X_BPPCOMPACT: the HSP lists may all
+                                // be compact ones.)
+                                if !subject_result.query_hsp_lists.is_empty()
+                                    || !subject_result.x_compact_hsp_lists.is_empty()
+                                {
                                     with_hits.push(std::mem::replace(
                                         &mut subject_result,
                                         BlastpSubjectResult::new(0),
@@ -713,7 +720,7 @@ where
                 for mut subject_result in block_results? {
                     update_blastp_preliminary_hit_lists(
                         preliminary_hit_lists,
-                        &mut [],
+                        x_compact_hit_lists,
                         &mut subject_result,
                         prelim_hitlist_size,
                     );
@@ -742,7 +749,7 @@ where
             );
             update_blastp_preliminary_hit_lists(
                 preliminary_hit_lists,
-                &mut [],
+                x_compact_hit_lists,
                 &mut subject_result,
                 prelim_hitlist_size,
             );
@@ -811,18 +818,24 @@ impl ListedSubjects {
     // 307. So the redo reads the stored bytes; its matrices score O as X
     // (`adjust_scores.rs`, composition_adjustment.c:681-703). The preliminary stage uses
     // scores only, which are the same for O and X (`prepare_search_block`).
-    /// Reads the sequences of the ordinal ids in `hit_lists` and renames the subjects of
-    /// the hit lists to their ranks.
+    /// Reads the sequences of the ordinal ids in `hit_lists` and `x_compact_hit_lists`
+    /// (EXPERIMENT LOSAT_X_BPPCOMPACT: the lists not expanded yet, `x_prelim_compact.rs`) and
+    /// renames the subjects of both to their ranks.
     pub(super) fn read(
         database: &BlastpDatabase,
         hit_lists: &mut [Option<BlastpHitList>],
+        x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Self> {
         let db = &database.db;
-        let mut ordinals: Vec<u32> = hit_lists
-            .iter()
-            .flatten()
-            .flat_map(|hit_list| hit_list.hsplist_array.iter().map(|hsp_list| hsp_list.oid))
-            .collect();
+        let mut ordinals: Vec<u32> =
+            hit_lists
+                .iter()
+                .flatten()
+                .flat_map(|hit_list| hit_list.hsplist_array.iter().map(|hsp_list| hsp_list.oid))
+                .chain(x_compact_hit_lists.iter().flatten().flat_map(|hit_list| {
+                    hit_list.hsplist_array.iter().map(|hsp_list| hsp_list.oid)
+                }))
+                .collect();
         ordinals.sort_unstable();
         ordinals.dedup();
         let mut encoded = Vec::with_capacity(ordinals.len());
@@ -850,6 +863,14 @@ impl ListedSubjects {
                 hsp_list.oid = rank(hsp_list.oid);
                 for hsp in &mut hsp_list.hsps {
                     hsp.s_idx = rank(hsp.s_idx);
+                }
+            }
+        }
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+            for hsp_list in &mut hit_list.hsplist_array {
+                hsp_list.oid = rank(hsp_list.oid);
+                for hsp in &mut hsp_list.hsps {
+                    hsp.hsp.s_idx = rank(hsp.hsp.s_idx);
                 }
             }
         }
@@ -1135,6 +1156,52 @@ impl ListedTitles<'_> {
         }
         Ok(())
     }
+}
+
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the block search writes a block's rows before the next block is
+// searched (`x_query_blocks.rs`), so with `-db` it may run only where the search of all queries
+// would not fail after some rows. Past the preliminary stage (whose reader errors come in the
+// first block, which reads the whole database as every batch does), the failures of a database
+// search that depend on its hits are those of the definition lines of the reported subjects:
+// NCBI's reader error (`HeaderReadError`, the batch of the query that reaches it fails after the
+// reports of the batches before) and LOSAT's refusals (`ListedSubjects::read_titles`,
+// `ListedTitles::check_reported_titles`, `ListedTitles::tabular_subject_ids`). When every
+// definition line of the database reads and none of them is refused, none of these failures can
+// happen in any batch.
+// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence of the database has one definition line
+/// that reads, holds no byte outside ' ' ..= '~' and gives a tabular subject id as NCBI writes
+/// it. Read in `pool` over the ordinal ids; a reader error is `false` (the search of all queries
+/// then reports it where NCBI does).
+pub(super) fn x_titles_allow_blocks(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    let db = &database.db;
+    let allowed = |ordinal: u32| -> bool {
+        match db.deflines(ordinal) {
+            Ok(deflines) => {
+                deflines.len() == 1
+                    && deflines[0].replaced_title_bytes == 0
+                    && crate::report::defline::database_subject_id(&deflines[0].title, true).is_ok()
+            }
+            Err(_) => false,
+        }
+    };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() {
+        return pool.install(|| {
+            (0..db.num_seqs())
+                .into_par_iter()
+                .with_min_len(4096)
+                .all(allowed)
+        });
+    }
+    let _ = pool;
+    (0..db.num_seqs()).all(allowed)
 }
 
 #[cfg(test)]
@@ -1517,6 +1584,7 @@ mod tests {
                 &|| BlastpSubjectScratch::new(16, 64, window, 21),
                 &recording_kernel(window, &seen),
                 &mut hit_lists,
+                &mut [],
                 500,
             )
         })
@@ -1631,7 +1699,7 @@ mod tests {
         second.update(list(2, 70));
         second.update(list(0, 65));
         let mut hit_lists = vec![Some(first), None, Some(second)];
-        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 2, 7, 9]);
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
         let oids = |hit_list: &Option<BlastpHitList>| -> Vec<(u32, Vec<u32>)> {
@@ -1724,7 +1792,7 @@ mod tests {
         // Query 1 reports ordinal id 3 (volume 01); ordinal id 1 (volume 00, no header
         // file) is in its list past the count, and is not read.
         let mut hit_lists = vec![None, hit_list(vec![list(3, 1e-9), list(1, 1e-3)], 1)];
-        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [1, 3]);
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
         assert_eq!(
@@ -1740,7 +1808,7 @@ mod tests {
             hit_list(vec![list(3, 1e-9), list(1, 1e-3)], 1),
             hit_list(vec![list(9, 1e-9), list(0, 1e-5)], 2),
         ];
-        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 1, 3, 9]);
         let error = listed
             .read_titles(&database, &hit_lists)
@@ -1805,7 +1873,7 @@ mod tests {
         let mut clean = BlastpHitList::new(10);
         clean.update(list(0));
         let mut hit_lists = vec![Some(clean)];
-        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
         titles.check_reported_titles(&hit_lists).unwrap();
         // The subject with the bad byte: read as `#`, and rejected when it is reported.
@@ -1813,7 +1881,7 @@ mod tests {
         bad.update(list(9));
         bad.update(list(0));
         let mut hit_lists = vec![Some(bad)];
-        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
         assert_eq!(titles.records[1].title(), b"p10 l#st protein");
         let error = titles.check_reported_titles(&hit_lists).unwrap_err();
@@ -1824,6 +1892,116 @@ mod tests {
             "{error:#}"
         );
         drop(database);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact preliminary lists (`x_prelim_compact.rs`) are
+    // listed and renamed to ranks with the off path's lists, before they are expanded.
+    #[test]
+    fn compact_lists_are_listed_and_renamed_with_the_others() {
+        use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
+        let database = open("prot_mv");
+        let compact = |oid: u32| BlastpHspList {
+            oid,
+            query_index: 1,
+            hsps: vec![XPrelimHsp {
+                hsp: BlastpPreliminaryHsp {
+                    query_start: 0,
+                    query_end: 10,
+                    subject_start: 0,
+                    subject_end: 10,
+                    gapped_query_start: 1,
+                    gapped_subject_start: 1,
+                    raw_score: 60,
+                    query_context: 1,
+                    query_frame: 0,
+                    subject_frame: 0,
+                    query_length: 20,
+                    q_idx: 1,
+                    s_idx: oid,
+                },
+                e_value: 1e-5,
+            }],
+            best_evalue: 1e-5,
+        };
+        let mut off = BlastpHitList::new(10);
+        off.update(BlastpHspList {
+            oid: 7,
+            query_index: 0,
+            hsps: vec![test_hsp(7, 60)],
+            best_evalue: 1e-5,
+        });
+        let mut compact_list = BlastpHitList::new(10);
+        compact_list.update(compact(9));
+        compact_list.update(compact(2));
+        let mut hit_lists = vec![Some(off), None];
+        let mut compact_lists = vec![None, Some(compact_list)];
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut compact_lists).unwrap();
+        assert_eq!(listed.ordinals, [2, 7, 9]);
+        assert_eq!(listed.encoded.len(), 3);
+        let off = &hit_lists[0].as_ref().unwrap().hsplist_array[0];
+        assert_eq!((off.oid, off.hsps[0].s_idx), (1, 1));
+        let mut renamed: Vec<(u32, u32)> = compact_lists[1]
+            .as_ref()
+            .unwrap()
+            .hsplist_array
+            .iter()
+            .map(|list| (list.oid, list.hsps[0].hsp.s_idx))
+            .collect();
+        renamed.sort();
+        assert_eq!(renamed, [(0, 0), (2, 2)]);
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of `-db` runs only when every definition
+    // line of the database reads and none is refused (`x_titles_allow_blocks`), at one thread and
+    // in a pool. (A path in the system's temporary directory: Unix spelling.)
+    #[cfg(unix)]
+    #[test]
+    fn blocks_are_allowed_only_when_every_title_reads_and_is_reported() {
+        let allowed = |database: &BlastpDatabase| -> [bool; 2] {
+            [1, 4].map(|threads| {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    Ok(x_titles_allow_blocks(database, pool))
+                })
+                .unwrap()
+            })
+        };
+        assert_eq!(allowed(&open("prot_v4")), [true, true]);
+        let dir = std::env::temp_dir().join(format!(
+            "losat-db-qblock-titles-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        // A header file that cannot be read: the search of all queries reports NCBI's error.
+        for entry in
+            std::fs::read_dir(fixture("prot_mv.pal").trim_end_matches("prot_mv.pal")).unwrap()
+        {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            if name.starts_with("prot_mv.") && name != "prot_mv.05.phr" {
+                std::fs::copy(&path, dir.join(&name)).unwrap();
+            }
+        }
+        let missing =
+            BlastpDatabase::open(dir.join("prot_mv").to_str().unwrap(), &Default::default())
+                .unwrap();
+        assert_eq!(allowed(&missing), [false, false]);
+        // A stored title with a byte outside ' ' ..= '~' (LOSAT's refusal when it is reported).
+        for ext in ["pin", "psq"] {
+            std::fs::copy(fixture("prot_v4") + "." + ext, dir.join(format!("b.{ext}"))).unwrap();
+        }
+        let mut header = std::fs::read(fixture("prot_v4") + ".phr").unwrap();
+        let at = header
+            .windows(16)
+            .position(|window| window == b"p10 last protein")
+            .expect("the title of p10");
+        header[at + 5] = 0xE9;
+        std::fs::write(dir.join("b.phr"), header).unwrap();
+        let bad =
+            BlastpDatabase::open(dir.join("b").to_str().unwrap(), &Default::default()).unwrap();
+        assert_eq!(allowed(&bad), [false, false]);
+        drop((missing, bad));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

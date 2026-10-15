@@ -562,8 +562,12 @@ Rebuilding less:
   reference path's other refusals that come before its rows (a `-window_size` whose diagonal table with all
   queries passes 2^30, a query split that LOSAT rejects, or with the compressed table a query batch whose
   offsets add more than four times NCBI's overflow cells, about 859 million words, counted before the search);
-  otherwise the search of all queries. The output file is created when the first block's rows are written; a
-  run that fails in a later block leaves the rows of the blocks before.
+  otherwise the search of all queries. With `-db` the same, and the blocks run only when every definition line
+  of the database reads and none of LOSAT's refusals of a reported title applies (`x_titles_allow_blocks`, one
+  pass over the header files in the search pool before the first block); a query whose effective search space
+  could pass NCBI's `Int8` (with `-db` or `-dbsize`) or an empty database also takes the search of all queries.
+  The output file is created when the first block's rows are written; a run that fails in a later block leaves
+  the rows of the blocks before.
   With `LOSAT_TIMING=1` each block prints its own `[TIMING]` lines.
   The block search's set-up uses its thread pool (no value changes): the count of the query batches' words
   for the overflow banks runs on the pool before the first block (groups of consecutive batches, one counter
@@ -587,7 +591,8 @@ Rebuilding less:
   made generic over the element (`blastp/x_prelim_compact.rs`, exactness argument in its header); the redo
   reads lists rebuilt as the off path holds them: the one-thread redo rebuilds each query's list when it
   reaches it and drops it after its redo, a search with more than one thread rebuilds all lists before the
-  redo, query chunks hand on rebuilt lists. `LOSAT_X_BPPCOMPACT=shadow` builds both lists, compares every
+  redo, query chunks hand on rebuilt lists; with `-db` the compact lists are listed and renamed to ranks with the
+  others (`ListedSubjects::read`). `LOSAT_X_BPPCOMPACT=shadow` builds both lists, compares every
   rebuilt list field by field with the off path's (it panics on a difference) and prints
   `[X_SHADOW] BPPCOMPACT compared=<lists> hsps=<n>` at exit. With `LOSAT_TIMING=1` each search of a query
   set prints `[TIMING] x_bppcompact: expanded_lists=<n>`.

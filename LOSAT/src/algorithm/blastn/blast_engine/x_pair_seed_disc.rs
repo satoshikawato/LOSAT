@@ -538,7 +538,6 @@ fn fold_two_hit(
         } else {
             extend_hit_ungapped_approx_ncbi(
                 x.encoded_query_concat_blastna,
-                x.query_four_base,
                 search_seq_packed,
                 q_off,
                 s_off,
@@ -831,8 +830,8 @@ pub(super) fn summary() {
 mod tests {
     use super::super::super::{
         build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
-        build_query_four_base_bytes, diag_hash_insert_window, scan_subject_disc_words_with_ranges,
-        QueryContext, QueryContextIndex,
+        diag_hash_insert_window, scan_subject_disc_words_with_ranges, QueryContext,
+        QueryContextIndex,
     };
     use super::*;
     use crate::algorithm::blastn::disc_lookup::DiscWordType;
@@ -885,7 +884,6 @@ mod tests {
         masks: Vec<Vec<MaskedInterval>>,
         concat: Vec<u8>,
         concat_sentinels: Vec<u8>,
-        four_base: Vec<u8>,
         packed: Vec<u8>,
         s_len: usize,
         seq_ranges: [(i32, i32); 1],
@@ -959,7 +957,6 @@ mod tests {
             })
             .collect();
         let index = QueryContextIndex::new(&contexts);
-        let four_base = build_query_four_base_bytes(&concat);
         Case {
             contexts,
             index,
@@ -968,7 +965,6 @@ mod tests {
             masks,
             concat,
             concat_sentinels,
-            four_base,
             packed,
             s_len,
             seq_ranges: [(0, s_len as i32)],
@@ -998,7 +994,6 @@ mod tests {
             query_contexts: &c.contexts,
             encoded_query_concat_blastna: &c.concat,
             encoded_query_concat_blastna_with_sentinels: &c.concat_sentinels,
-            query_four_base: &c.four_base,
             cutoff_scores: &[30, 30],
             x_dropoff_scores: &[20, 20],
             reduced_cutoff_scores: &[24, 24],

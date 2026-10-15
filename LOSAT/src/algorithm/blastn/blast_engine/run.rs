@@ -72,8 +72,8 @@ use super::super::coordination::{
 };
 use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use super::super::extension::{
-    build_compressed_query, build_nucl_score_table, build_query_four_base_bytes,
-    extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, type_of_word, SmallNaWord,
+    build_compressed_query, build_nucl_score_table, extend_hit_ungapped_approx_ncbi,
+    extend_hit_ungapped_exact_ncbi, type_of_word, SmallNaWord,
 };
 use super::super::filtering::{
     blast_hsp_test_identity_and_length, hsp_test, purge_hsps_with_common_endpoints,
@@ -7995,18 +7995,6 @@ fn search_query_batch(
     // masks restrict lookup-table entries through query_context_masks below,
     // while the encoded traceback/scoring sequence remains unmodified.
 
-    // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294,324,740-749
-    // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
-    // if (word_params->matrix_only_scoring || word_length < 11)
-    //     s_NuclUngappedExtendExact(...);
-    // Use the same encoded concat/context slices as extension, including their
-    // sentinels. Exact-only word sizes do not allocate this search-local table.
-    let query_four_base = if config.effective_word_size >= 11 {
-        build_query_four_base_bytes(&encoded_query_concat_blastna)
-    } else {
-        Vec::new()
-    };
-
     // Finalize configuration with query-dependent parameters (adaptive lookup table selection)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:46-47
     // ```c
@@ -9451,7 +9439,6 @@ fn search_query_batch(
                             encoded_query_concat_blastna: &encoded_query_concat_blastna,
                             encoded_query_concat_blastna_with_sentinels:
                                 &encoded_query_concat_blastna_with_sentinels,
-                            query_four_base: &query_four_base,
                             cutoff_scores: &cutoff_scores,
                             x_dropoff_scores: &x_dropoff_scores,
                             reduced_cutoff_scores: &reduced_cutoff_scores,
@@ -10512,7 +10499,6 @@ fn search_query_batch(
                                 } else {
                                     extend_hit_ungapped_approx_ncbi(
                                         encoded_query_concat_blastna,
-                                        &query_four_base,
                                         search_seq_packed,
                                         q_off,
                                         s_off,
@@ -11636,9 +11622,6 @@ fn search_query_batch(
                                 } else {
                                     extend_hit_ungapped_approx_ncbi(
                                         q_seq_blastna,
-                                        &query_four_base[query_context_offsets[context_idx] as usize
-                                            ..query_context_offsets[context_idx] as usize
-                                                + q_seq_blastna.len().saturating_sub(3)],
                                         search_seq_packed,
                                         q_off,
                                         s_off,

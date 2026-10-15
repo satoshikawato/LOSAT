@@ -120,7 +120,6 @@ pub(super) struct Inputs<'a> {
     pub(super) query_contexts: &'a [QueryContext],
     pub(super) encoded_query_concat_blastna: &'a [u8],
     pub(super) encoded_query_concat_blastna_with_sentinels: &'a [u8],
-    pub(super) query_four_base: &'a [u8],
     pub(super) cutoff_scores: &'a [i32],
     pub(super) x_dropoff_scores: &'a [i32],
     pub(super) reduced_cutoff_scores: &'a [i32],
@@ -735,7 +734,6 @@ fn fold(
         } else {
             extend_hit_ungapped_approx_ncbi(
                 x.encoded_query_concat_blastna,
-                x.query_four_base,
                 search_seq_packed,
                 q_off,
                 s_off,
@@ -1370,7 +1368,7 @@ pub(super) fn summary() {
 mod tests {
     use super::super::{
         build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
-        build_query_four_base_bytes, diag_hash_insert_window, scan_subject_kmers_with_ranges,
+        diag_hash_insert_window, scan_subject_kmers_with_ranges,
     };
     use super::*;
     use crate::algorithm::blastn::lookup::{build_two_stage_lookup, reverse_complement};
@@ -1655,7 +1653,6 @@ mod tests {
                 })
                 .collect();
             let index = QueryContextIndex::new(&contexts);
-            let four_base = build_query_four_base_bytes(&concat);
             let score_matrix = build_blastna_matrix(1, -2);
             let nucl_score_table = build_nucl_score_table(1, -2);
             let seq_ranges = [(0i32, s_len as i32)];
@@ -1671,7 +1668,6 @@ mod tests {
                 query_contexts: &contexts,
                 encoded_query_concat_blastna: &concat,
                 encoded_query_concat_blastna_with_sentinels: &concat_sentinels,
-                query_four_base: &four_base,
                 cutoff_scores: &[22, 22],
                 x_dropoff_scores: &[16, 16],
                 reduced_cutoff_scores: &[18, 18],

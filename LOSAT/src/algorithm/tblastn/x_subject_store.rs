@@ -10,10 +10,11 @@ use crate::sequence::packed_subject::{PackedNucleotide, SubjectNt};
 
 // No NCBI counterpart: reads the LOSAT_X_TBNSTORE variable once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_TBNSTORE): off unless the variable is set (it is not in the strict set).
+/// EXPERIMENT (LOSAT_X_TBNSTORE): a switch of the strict set (`utils/xswitch.rs`): on unless it
+/// is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
 pub(super) fn x_tbn_store() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNSTORE").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSTORE"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520

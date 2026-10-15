@@ -78,10 +78,10 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 53 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 54 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
-`LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` joined),
-and their variables mean (`LOSAT/src/utils/xswitch.rs`):
+`LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE` and
+`LOSAT_X_TBNSTORE` joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -113,7 +113,7 @@ and their variables mean (`LOSAT/src/utils/xswitch.rs`):
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 53 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 54 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -143,6 +143,7 @@ export LOSAT_X_GREEDYFUSE=1
 export LOSAT_X_LINKSORT=1
 export LOSAT_X_NEWTONLANES8=1
 export LOSAT_X_TBNSTATE=1 LOSAT_X_TBNXLATE=1
+export LOSAT_X_TBNSTORE=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -215,6 +216,19 @@ of a subject are read from codon tables instead of through letters. Neither chan
 are timed together because `TBNSTATE` alone was 3 % slower on the fly genome at 8 threads. The
 shadow `LOSAT_X_TBNXLATESHADOW` stays opt-in; `LOSAT_X_TBNPARSHADOW` compares the unit path, with
 both switches, with the serial reference.
+
+`LOSAT_X_TBNSTORE` was added after the default changed, as a switch that was off unless set, and
+joined the set on 2026-10-16. tblastn `-subject` holds each subject packed (about a quarter of a
+byte per base) instead of its letters, translates a subject's frames from the packed bases and
+makes only the windows of a subject that the redo and the report read; it changes where the bases
+are held, not a value. Timed on the workstation (main 4441c2d5 with the switch's PRs, rounds
+alternating with `LOSAT_X_TBNSTORE=0`, the same reports): at 8 threads 0.95-1.01 of the time
+without it (one protein against the zebrafish transcriptome 0.95 and genome 0.96, 55 proteins
+against 16S 1.00, searches of 2 to 4 batches against the fly and zebrafish genomes and the
+transcriptomes 0.98-1.01), at one thread 0.98 (zebrafish genome) and 0.995 (zebrafish
+transcriptome, 12 rounds on one CPU, 3.4 % fewer instructions); peak memory fell in every case,
+for example 2,455-2,575 to 1,154-1,278 MiB (one protein against the zebrafish genome, 8 threads)
+and 1,952 to 1,065 MiB (the human transcriptome).
 
 What runs per target:
 
@@ -843,7 +857,10 @@ Scheduling (each value computed by one thread with the original function; order 
   packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
   database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of
   letters other than `ACGT` as ncbi4na codes, the lower-case intervals), so the letters of the
-  whole set are never held; the records keep their deflines. The unit path of the preliminary
+  whole set are never held; the records keep their deflines. With two or more threads a second
+  thread packs the records while the reader reads the next ones (`x_packed_while_read`: batches of
+  up to 1,024 records or 4 MiB of letters, handed over one at a time), so the packing does not add
+  to the read; the records and their stores are those of the one-thread read, in the same order. The unit path of the preliminary
   stage (`TBNPAR`, on by default) translates a subject's six frames straight from its packed bases
   (`x_packed_plan` in `tblastn/x_subject_translate.rs`: the codon tables of `TBNXLATE`, the 2-bit
   codes unpacked 49,152 bases at a time, each frame filled at its residues' places), as NCBI's
@@ -864,7 +881,8 @@ Scheduling (each value computed by one thread with the original function; order 
   (letters or resolved bases, reverse complement, frames). A subject range keeps the letters (the
   records are cut before the search), and so does a set with a byte that has no ncbi4na code
   (only an API caller can make one); the library entry `run_local` reads the caller's records.
-  Not in the set (off unless set to any value). With `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE
+  In the set since 2026-10-16 (on unless `0`, or `LOSAT_X_DEFAULT=0` and not set). With
+  `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE
   subjects= stored_bytes= letters_made= resolved_made= packed_plans=` line gives the subjects held
   packed, the bytes of their stores, the times their whole letters and their resolved bases were
   made, and the plans translated from the packed bases; `LOSAT/tests/tblastn_subject_store.rs`

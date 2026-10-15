@@ -311,7 +311,7 @@ Design and measurements of 2026-10-12 are kept outside the repository by the cam
 `LOSAT/src/seqdb/tests.rs` with fixtures written by NCBI BLAST+ 2.17.0 under
 `LOSAT/tests/seqdb`. The writer's tests are in `LOSAT/src/writedb` (`tests.rs`,
 `fasta_source/tests.rs`) with runs of makeblastdb 2.17.0 recorded in the generated tables
-beside them. The tests of `-db` are frozen NCBI outputs replayed by
+beside them. The tests of `-db` (BLASTP and BLASTN) are frozen NCBI outputs replayed by
 `LOSAT/tests/db_search_fixtures.py` (rows in `LOSAT/tests/db_search_manifest.tsv`, inputs in
 `LOSAT/tests/db_search`, outputs in `LOSAT/tests/fixtures/db_search`; run by
 `ci_fast_regressions.py` at 1 and 4 threads), the search-path cases recorded from NCBI in

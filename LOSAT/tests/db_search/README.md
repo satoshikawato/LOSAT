@@ -1,7 +1,8 @@
 # Inputs of the `-db` fixtures
 
 Used by `LOSAT/tests/db_search_fixtures.py` and `LOSAT/tests/db_search_manifest.tsv` (rows that run
-`LOSAT blastp -db ...` against frozen NCBI BLAST+ 2.17.0 `blastp -db ... -num_threads 1` bytes). NCBI is the
+`LOSAT blastp -db ...` or `LOSAT blastn -db ...` against frozen NCBI BLAST+ 2.17.0 `blastp -db ...` or
+`blastn -db ... -num_threads 1` bytes; the manifest's `program` column says which). NCBI is the
 comparison oracle only; the tests read the committed files and run no NCBI program.
 
 FASTA files:
@@ -49,6 +50,31 @@ makeblastdb also writes was deleted). Run from `LOSAT/`:
 its header file. `vol2_nophr` (one sequence per volume, `vol2_nophr.pal`) lacks the header file of its second
 volume. NCBI opens a volume's header file when it first reads a header of it, after the search and for the
 final hit lists only, so these searches succeed when no reported subject is in such a volume.
+
+Nucleotide inputs (BLASTN rows, `db.blastn.*`), written by `make_nucl_inputs.py` (run from `LOSAT/`; slices
+of `tests/fasta/LC738875.fasta` and `AP027202.fasta`, two related viruses, mutations from a seeded generator):
+
+- `nslice.fna`: six records for the database `nslice`: `a_l6k` (LC738875 bases 1-6000), `a_mut_8pct` (the same
+  with 8 % substitutions and six short indels), `b_p6k` (AP027202 bases 1-6000), `c_amb` (LC738875 20001-23000
+  with the codes R Y K M S W B D H V N, a block of 60 N and further runs of ambiguity letters), `d_mut_15pct`
+  (LC738875 40001-44000 with 15 % substitutions), `e_p2k` (AP027202 30001-32500).
+- `nslice_q.fna`: five queries: `q_a` (1500 bases of `a_l6k`), `q_c_amb` (1400 bases across the ambiguity codes of
+  `c_amb`, 4 % substitutions), `q_d_minus` (reverse complement of `d_mut_15pct` bases, 12 % substitutions),
+  `q_e_p` (1600 bases of `e_p2k`, 20 % substitutions) and `q_nohit` (900 random bases).
+- `nslice_nohit.fna`: `q_nohit` alone.
+- `nnophr.nin` and `nnophr.nsq` are copies of `LOSAT/tests/seqdb/db/nucl_v4.nin` and `.nsq`: the nucleotide
+  database without its header file (NCBI's `blastn` fails with exit 2 when it opens the header file).
+
+The database (version 4, no `-parse_seqids`; only `.nin .nsq .nhr` are kept, the `.njs` file makeblastdb also
+writes was deleted). Run from `LOSAT/`:
+
+    python3 tests/db_search/make_nucl_inputs.py
+    makeblastdb -in tests/db_search/nslice.fna -dbtype nucl -out tests/db_search/nslice \
+        -title "nucleotide slices of two viruses" -blastdb_version 4
+    rm tests/db_search/nslice.njs
+
+The nucleotide rows also use `tests/seqdb/db/nucl_v4`, `nucl_v5` and `nucl_mv` with queries cut from
+`tests/seqdb/nucl.fna`.
 
 `residues_gap` is the database LOSAT rejects (a stored `-`). The other databases of the rows are the ones of
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index

@@ -1,0 +1,42 @@
+BLASTN 2.17.0+
+
+
+Reference: Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb
+Miller (2000), "A greedy algorithm for aligning DNA sequences", J
+Comput Biol 2000; 7(1-2):203-14.
+
+
+
+Database: LOSAT seqdb fixture, nucleotide, version 4
+           12 sequences; 850 total letters
+
+
+
+Query= nohit random
+
+Length=900
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+    1.33    0.621     1.12 
+
+Gapped
+Lambda      K        H
+    1.28    0.460    0.850 
+
+Effective search space used: 626928
+
+
+  Database: LOSAT seqdb fixture, nucleotide, version 4
+    Posted date:  Oct 12, 2026  4:12 PM
+  Number of letters in database: 850
+  Number of sequences in database:  12
+
+
+
+Matrix: blastn matrix 1 -2
+Gap Penalties: Existence: 0, Extension: 2.5

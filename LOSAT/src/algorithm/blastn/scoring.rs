@@ -304,6 +304,10 @@ pub(crate) fn karlin_error(message: &str, batch_queries: usize) -> anyhow::Error
 /// tables, without the queries: the checks that a host can run before a search. A table
 /// error is reported as for a batch of one query.
 pub fn check_scoring(args: &BlastnArgs) -> anyhow::Result<()> {
+    // The host has no database files (`run_local`).
+    if args.db.is_some() {
+        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+    }
     check_scoring_options(args)?;
     check_losat_limits(args)?;
     let spec = scoring_spec(args);

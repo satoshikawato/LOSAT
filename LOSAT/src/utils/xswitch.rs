@@ -32,7 +32,7 @@ use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: the switches of the strict set, the variables that are on by default.
-/// The last eleven joined after the set became the default. `LOSAT_X_PAIRLUT` and
+/// The last twelve joined after the set became the default. `LOSAT_X_PAIRLUT` and
 /// `LOSAT_X_HSPINPLACE` were added after the change as switches that are off unless set and
 /// joined the set once they were verified with it on. `LOSAT_X_SEEDBUCKET` was left out at the
 /// change: it numbered the lookup hits of a chunk scan in a `u32`, exact only up to 2^32 hits
@@ -47,15 +47,19 @@ use std::sync::OnceLock;
 /// of megablast's score-only greedy alignment, `blastn/alignment/x_greedy_fused.rs`) and
 /// `LOSAT_X_LINKSORT` (the index sorts of the TBLASTX linking call, `tblastx/x_link_sort.rs`) were
 /// added after the change as switches that are off unless set and joined the set once they were
-/// verified with it on. `LOSAT_X_TBNSTATE` (the scan state of TBLASTN's unit path kept by a
-/// thread from one subject to the next, `tblastn/search_gapped.rs`) and `LOSAT_X_TBNXLATE` (the
-/// translated frames of a TBLASTN subject read from tables, `tblastn/x_subject_translate.rs`)
-/// were added after the change as switches that are off unless set and joined the set together
-/// once they were verified and timed with it on. `LOSAT_X_TBNOIDNEXT` (the threads take the next
-/// chunk of subjects when they are free, `tblastn/x_oid_flow.rs`) and `LOSAT_X_TBNOIDUNITS` (the
-/// units of a subject longer than a chunk's budget on the pool, `tblastn/stage_d_pipeline.rs`)
-/// joined the same way, together, after them.
-pub(crate) const STRICT_SET: [&str; 54] = [
+/// verified with it on. `LOSAT_X_NEWTONLANES8` (eight Newton problems per round in the lanes of
+/// `LOSAT_X_NEWTONLANES`, `composition_adjustment/x_newton_lanes.rs`; it acts on aarch64 only)
+/// was added after the change as a switch that is off unless set and joined the set once it was
+/// verified on the arm64 runners with it on. `LOSAT_X_TBNSTATE` (the scan state of TBLASTN's unit
+/// path kept by a thread from one subject to the next, `tblastn/search_gapped.rs`) and
+/// `LOSAT_X_TBNXLATE` (the translated frames of a TBLASTN subject read from tables,
+/// `tblastn/x_subject_translate.rs`) were added after the change as switches that are off unless
+/// set and joined the set together once they were verified and timed with it on.
+/// `LOSAT_X_TBNOIDNEXT` (the threads take the next chunk of subjects when they are free,
+/// `tblastn/x_oid_flow.rs`) and `LOSAT_X_TBNOIDUNITS` (the units of a subject longer than a
+/// chunk's budget on the pool, `tblastn/stage_d_pipeline.rs`) joined the same way, together,
+/// after them.
+pub(crate) const STRICT_SET: [&str; 55] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_PURGEFAST",
@@ -106,6 +110,7 @@ pub(crate) const STRICT_SET: [&str; 54] = [
     "LOSAT_X_SEEDRELEASE",
     "LOSAT_X_GREEDYFUSE",
     "LOSAT_X_LINKSORT",
+    "LOSAT_X_NEWTONLANES8",
     "LOSAT_X_TBNSTATE",
     "LOSAT_X_TBNXLATE",
     "LOSAT_X_TBNOIDNEXT",

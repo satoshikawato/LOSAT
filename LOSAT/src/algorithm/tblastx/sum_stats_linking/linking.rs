@@ -71,6 +71,26 @@ pub use x_hsp_inplace::print_summary as x_hsp_inplace_print_summary;
 mod x_link_sort;
 pub use x_link_sort::print_summary as x_link_sort_print_summary;
 
+// EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW, off unless set): the groups of the
+// linking call of `x_hsp_inplace` linked as disjoint sub-slices of the one sorted list instead of
+// Vecs cut off it and put together again; a child module of this file so that it calls the
+// per-group functions below unchanged (see tblastx/x_link_slices.rs).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
+// ```c
+// for (frame_index=0; frame_index<num_query_frames; frame_index++)
+// {
+//    hp_start = s_LinkHSPStructReset(hp_start);
+//    hp_start->next = hp_frame_start[frame_index];
+//    hp_frame_start[frame_index]->prev = hp_start;
+//    number_of_hsps = hp_frame_number[frame_index];
+// ```
+// NCBI's groups are sublists of the one sorted array, linked in place; the module is used only
+// when one of its switches is set.
+#[path = "../x_link_slices.rs"]
+mod x_link_slices;
+pub use x_link_slices::print_summary as x_link_slices_print_summary;
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -1347,6 +1367,74 @@ fn link_hsp_group_incremental(
         assert_same_linking(&expected, &linked);
     }
     linked
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,589
+// ```c
+// s_BlastEvenGapLinkHSPs(EBlastProgramType program_number, BlastHSPList* hsp_list,
+// ...
+//       while (number_of_hsps > 0)
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
+// ```c
+// for (frame_index=0; frame_index<num_query_frames; frame_index++)
+// {
+//    hp_start = s_LinkHSPStructReset(hp_start);
+//    hp_start->next = hp_frame_start[frame_index];
+//    hp_frame_start[frame_index]->prev = hp_start;
+//    number_of_hsps = hp_frame_number[frame_index];
+// ```
+// EXPERIMENT (LOSAT_X_LINKSLICES, tblastx/x_link_slices.rs): `link_hsp_group_incremental` on the
+// group's records where they lie, a sub-slice of the linking call's list, as NCBI links a sublist
+// of its one array. The same kernel with the same arguments; under LOSAT_LINK_FAST_SHADOW the
+// literal port links a copy of the group (`to_vec`, as `clone` above) and the two results must be
+// equal. It changes no value of the result.
+/// `link_hsp_group_incremental` on the group's records in place.
+#[allow(clippy::too_many_arguments)]
+fn link_hsp_group_incremental_slice(
+    group_hits: &mut [UngappedHit],
+    params: &KarlinParams,
+    cutoffs: &LinkHspCutoffs,
+    gap_decay_rate: f64,
+    subject_len_nucl: i64,
+    query_contexts: &[QueryContext],
+    subject_frame_bases: &[i32],
+    length_adj_per_context: &[i64],
+    eff_searchsp_per_context: &[i64],
+    log_k_by_ctx: &[f64],
+    pool_lh_helpers: &mut Vec<LhHelper>,
+    pool_hsp_links: &mut Vec<HspLink>,
+) {
+    let expected = link_shadow_enabled().then(|| {
+        link_hsp_group_ncbi(
+            group_hits.to_vec(),
+            params,
+            cutoffs,
+            gap_decay_rate,
+            false,
+            subject_len_nucl,
+            query_contexts,
+            subject_frame_bases,
+            length_adj_per_context,
+            eff_searchsp_per_context,
+            log_k_by_ctx,
+            pool_lh_helpers,
+            pool_hsp_links,
+        )
+    });
+    super::linking_incr::link_hsp_group_incr_slice(
+        group_hits,
+        cutoffs,
+        gap_decay_rate,
+        subject_len_nucl,
+        query_contexts,
+        length_adj_per_context,
+        eff_searchsp_per_context,
+        log_k_by_ctx,
+    );
+    if let Some(expected) = expected {
+        assert_same_linking(&expected, group_hits);
+    }
 }
 
 /// NCBI-style HSP linking for moderate-sized groups

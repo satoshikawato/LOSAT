@@ -83,11 +83,6 @@ pub struct SubjectMetadata {
     // ```
     pub db_len_total: usize,
     pub db_num_seqs: usize,
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-155
-    // ```c
-    // Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    // ```
-    pub subject_ids: Vec<String>,
 }
 
 /// Sequence data and metadata (`R`: the query records, `InputRecord`)
@@ -102,11 +97,6 @@ pub struct SequenceData<R = FastaRecord> {
     // ```
     pub db_len_total: usize,
     pub db_num_seqs: usize,
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-155
-    // ```c
-    // Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    // ```
-    pub subject_ids: Vec<String>,
 }
 
 /// The option values of a task, which the command line options replace (NCBI
@@ -794,27 +784,26 @@ pub fn finalize_task_config(
 //        != BLAST_SEQSRC_EOF) {
 // ```
 pub fn subject_metadata_from_records<R: InputRecord>(records: &[R]) -> SubjectMetadata {
-    let mut subject_ids = Vec::with_capacity(records.len());
-    let mut db_len_total: usize = 0;
-    for record in records {
-        // The title up to its first space: the ID of a `bio` record (whose ID has no white
-        // space), "unknown" when it is empty.
-        let title = record.title_bytes();
-        let end = title
-            .iter()
-            .position(|&byte| byte == b' ')
-            .unwrap_or(title.len());
-        subject_ids.push(if end == 0 {
-            "unknown".to_string()
-        } else {
-            String::from_utf8_lossy(&title[..end]).into_owned()
-        });
-        db_len_total += record.seq().len();
-    }
     SubjectMetadata {
-        db_len_total,
+        db_len_total: records.iter().map(|record| record.seq().len()).sum(),
         db_num_seqs: records.len(),
-        subject_ids,
+    }
+}
+
+// No NCBI counterpart: the name of a subject in LOSAT's debug and trace lines
+// (`LOSAT_DEBUG_BLASTN`, `blastn_trace`), made only when they are on; it changes no value
+// NCBI computes.
+/// The title of a subject record up to its first space (the ID of a `bio` record, whose ID
+/// has no white space), "unknown" when that is empty.
+pub fn subject_trace_id(title: &[u8]) -> String {
+    let end = title
+        .iter()
+        .position(|&byte| byte == b' ')
+        .unwrap_or(title.len());
+    if end == 0 {
+        "unknown".to_string()
+    } else {
+        String::from_utf8_lossy(&title[..end]).into_owned()
     }
 }
 
@@ -1231,11 +1220,6 @@ pub fn prepare_sequence_data<R>(
     // ```
     let db_len_total = subject_metadata.db_len_total;
     let db_num_seqs = subject_metadata.db_num_seqs;
-    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-155
-    // ```c
-    // Int4 oid;/**< The ordinal id of the subject sequence this HSP list is for */
-    // ```
-    let subject_ids = subject_metadata.subject_ids;
 
     SequenceData {
         queries,
@@ -1243,7 +1227,6 @@ pub fn prepare_sequence_data<R>(
         query_masks,
         db_len_total,
         db_num_seqs,
-        subject_ids,
     }
 }
 
@@ -1377,5 +1360,17 @@ mod tests {
             merged,
             vec![MaskedInterval::new(0, 5), MaskedInterval::new(6, 7)]
         );
+    }
+
+    // No NCBI counterpart: the name of LOSAT's debug and trace lines (`subject_trace_id`).
+    #[test]
+    fn subject_trace_id_is_the_title_up_to_its_first_space() {
+        assert_eq!(
+            subject_trace_id(b"NR_181915.1 Pseudomonas abyssi"),
+            "NR_181915.1"
+        );
+        assert_eq!(subject_trace_id(b"no_space"), "no_space");
+        assert_eq!(subject_trace_id(b""), "unknown");
+        assert_eq!(subject_trace_id(b" leading space"), "unknown");
     }
 }

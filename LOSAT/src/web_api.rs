@@ -248,6 +248,9 @@ fn parse_blastn_args(
     let mut args = blastn::BlastnArgs {
         query,
         subject: Some(subject),
+        // The frozen web ABI v1 (plan TD-1) has no database search.
+        db: None,
+        dbsize: None,
         task: "megablast".to_string(),
         template_type: None,
         template_length: None,

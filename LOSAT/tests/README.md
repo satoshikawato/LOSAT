@@ -307,7 +307,7 @@ pass only with their listed output); an entry that matches again, or is not
 executed, fails so the list is cleaned. Pull requests run
 `ci_fast_regressions.py` instead: the `capture_outputs.py` cases of the programs
 selected from the changed paths against the S02 baseline and the frozen hashes,
-and the outfmt 0 fixtures, without NCBI executables (TBLASTX runs only its short
+the outfmt 0 fixtures and the BLASTP/BLASTN `-db` fixtures (`db_search_fixtures.py`), without NCBI executables (TBLASTX runs only its short
 cases; `--all-cases` runs all of them nightly). `--jobs` overlaps independent
 comparison processes; it does not change a search's requested thread count.
 The frozen runner uses a 3600-second per-search deadline, configurable with a

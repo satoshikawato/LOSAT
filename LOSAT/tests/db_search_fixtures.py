@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Frozen `blastp -db` fixtures: LOSAT against the bytes NCBI BLAST+ 2.17.0 wrote (comparison only).
+"""Frozen `blastp -db` and `blastn -db` fixtures: LOSAT against the bytes NCBI BLAST+ 2.17.0 wrote (comparison only).
 
-LOSAT/tests/db_search_manifest.tsv lists the rows (columns: row_id, kind, db, query, extra_args,
+LOSAT/tests/db_search_manifest.tsv lists the rows (columns: row_id, program, kind, db, query, extra_args,
 outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers). Every row runs from LOSAT/ as
-`blastp -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT` (an empty `db` cell is the literal empty
+`PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
+(`blastp` or `blastn`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
 argument `-db ""`; `extra_args` is split like a shell line; `outfmt` is one argument, so a custom
 `7 qseqid sseqid ...` spec stays whole). The databases are under LOSAT/tests/seqdb/db and
 LOSAT/tests/db_search (README.md there says how they were built).
@@ -15,12 +16,13 @@ LOSAT/tests/db_search (README.md there says how they were built).
   its stderr must contain the text that follows `expect: ` in the `covers` cell (up to the end of
   the cell or a ` | ` separator). The hash columns stay empty.
 
-`freeze --ncbi-bin DIR [--only PREFIX]` runs NCBI for the `ncbi` rows, writes the frozen files and
-rewrites the rc, hash and size columns of the manifest (rows outside --only keep theirs). It
+`freeze --ncbi-bin DIR [--program NAME] [--only PREFIX]` runs NCBI for the `ncbi` rows, writes the frozen files and
+rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
+the default is every program). It
 refuses to run when ~/.ncbirc exists or when BLASTDB, NCBI, BATCH_SIZE, CHUNK_SIZE, OLD_FSC or
 BL2SEQ_LEGACY is set, because each one changes NCBI's result.
 
-`check --losat BIN [--threads N] [--only PREFIX] [--out TSV]` runs LOSAT with `-num_threads N`
+`check --losat BIN [--threads N] [--program NAME] [--only PREFIX] [--out TSV]` runs LOSAT with `-num_threads N`
 (default 1) in a cleaned environment (no NCBI*, BLAST* or LOSAT_* variable), compares stdout,
 stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
@@ -41,8 +43,9 @@ ENGINE = Path(__file__).resolve().parents[1]
 TESTS = ENGINE / "tests"
 MANIFEST = TESTS / "db_search_manifest.tsv"
 FROZEN = TESTS / "fixtures" / "db_search"
-COLUMNS = ["row_id", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
+COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
+PROGRAMS = ("blastp", "blastn")
 NCBI_ENV = ("BLASTDB", "NCBI", "BATCH_SIZE", "CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY")
 TIMEOUT = 600
 
@@ -61,7 +64,10 @@ def read_manifest() -> tuple[list[str], list[dict[str, str]]]:
             cells = line.split("\t")
             if len(cells) != len(COLUMNS):
                 raise SystemExit(f"{MANIFEST.name}: {len(cells)} cells in {line[:60]!r}")
-            rows.append(dict(zip(COLUMNS, cells)))
+            row = dict(zip(COLUMNS, cells))
+            if row["program"] not in PROGRAMS:
+                raise SystemExit(f"{MANIFEST.name}: unknown program {row['program']!r} in {row['row_id']}")
+            rows.append(row)
     return comments, rows
 
 
@@ -94,6 +100,10 @@ def expected_text(row: dict[str, str]) -> str:
     return rest.split(" | ")[0]
 
 
+def selected(row: dict[str, str], args: argparse.Namespace) -> bool:
+    return row["row_id"].startswith(args.only) and args.program in ("", row["program"])
+
+
 def freeze(args: argparse.Namespace) -> int:
     if (Path.home() / ".ncbirc").exists():
         raise SystemExit("~/.ncbirc exists: it changes NCBI's result")
@@ -102,9 +112,9 @@ def freeze(args: argparse.Namespace) -> int:
     comments, rows = read_manifest()
     FROZEN.mkdir(parents=True, exist_ok=True)
     for row in rows:
-        if row["kind"] != "ncbi" or not row["row_id"].startswith(args.only):
+        if row["kind"] != "ncbi" or not selected(row, args):
             continue
-        run = subprocess.run([str(Path(args.ncbi_bin) / "blastp"), *search_argv(row), "-num_threads", "1"],
+        run = subprocess.run([str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"],
                              cwd=ENGINE, capture_output=True, timeout=TIMEOUT)
         (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         err = FROZEN / f"{row['row_id']}.err"
@@ -120,7 +130,7 @@ def freeze(args: argparse.Namespace) -> int:
 
 
 def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str]) -> tuple[str, str]:
-    run = subprocess.run([str(losat), "blastp", *search_argv(row), "-num_threads", str(threads)],
+    run = subprocess.run([str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)],
                          cwd=ENGINE, capture_output=True, env=env, timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":
         problems = []
@@ -153,7 +163,7 @@ def check(args: argparse.Namespace) -> int:
     losat = args.losat.resolve()
     lines, bad = [], 0
     for row in read_manifest()[1]:
-        if not row["row_id"].startswith(args.only):
+        if not selected(row, args):
             continue
         status, detail = check_row(row, losat, args.threads, env)
         bad += status == "differs"
@@ -171,10 +181,12 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     fz = sub.add_parser("freeze", help="run NCBI and write the frozen bytes and the manifest columns")
     fz.add_argument("--ncbi-bin", required=True)
+    fz.add_argument("--program", choices=PROGRAMS, default="", help="only the rows of this program (default: all)")
     fz.add_argument("--only", default="")
     ck = sub.add_parser("check", help="compare LOSAT with the frozen bytes")
     ck.add_argument("--losat", type=Path, required=True)
     ck.add_argument("--threads", type=int, default=1)
+    ck.add_argument("--program", choices=PROGRAMS, default="", help="only the rows of this program (default: all)")
     ck.add_argument("--only", default="")
     ck.add_argument("--out", type=Path)
     args = parser.parse_args()

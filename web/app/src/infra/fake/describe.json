@@ -19,6 +19,16 @@
     "takes_value": true
    },
    {
+    "flag": "-db",
+    "help": "BLAST database name (a nucleotide database without parsed Seq-ids)",
+    "takes_value": true
+   },
+   {
+    "flag": "-dbsize",
+    "help": "Effective length of the database",
+    "takes_value": true
+   },
+   {
     "flag": "-task",
     "help": "Task to execute: megablast, blastn, dc-megablast or blastn-short",
     "takes_value": true,

@@ -401,12 +401,14 @@ fn write_subject_alignments<W: Write>(
 /// ```
 /// Nothing was written after `>` for a `BL_ORD_ID` id, so `tellp()` is 1 and no space
 /// follows it. A stored title is a VisibleString (bytes from ' ' to '~'), so the title
-/// that `GenerateDefline` makes of an empty one is `unnamed protein product` and its
-/// encoding is never unknown.
+/// that `GenerateDefline` makes of an empty one (for a protein, `unnamed protein product`)
+/// has an encoding that is never unknown. `protein` is the database's molecule type (BLASTP
+/// and BLASTN share this heading).
 fn write_database_subject_alignments<W: Write>(
     writer: &mut W,
     mut probe: Option<&mut FormatProbe<'_>>,
     title: &[u8],
+    protein: bool,
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
     mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
@@ -418,7 +420,7 @@ fn write_database_subject_alignments<W: Write>(
     }
     let generated;
     let heading: &[u8] = if title.is_empty() {
-        generated = super::defline::generate_defline(title, true, false)
+        generated = super::defline::generate_defline(title, protein, false)
             .map(|defline| defline.text)
             .unwrap_or_default();
         &generated
@@ -2034,6 +2036,7 @@ pub fn write_blastp_pairwise_report<W: Write>(
                     writer,
                     probe.as_deref_mut(),
                     &subject_titles[&s_idx],
+                    true,
                     &subject_hits[&s_idx],
                     &subject_hit_indices[&s_idx],
                     |writer, hit| {
@@ -2124,6 +2127,9 @@ pub struct BlastnPairwiseReport {
     pub database_name: String,
     pub database_num_sequences: usize,
     pub database_total_letters: usize,
+    /// The database of a `-db` search (its `Database:` lines); `None` for a subject set,
+    /// whose lines are `database_name` with a period and the counts.
+    pub database: Option<PairwiseDatabase>,
     pub reward: i32,
     pub penalty: i32,
     pub gap_open: i32,
@@ -2495,12 +2501,15 @@ fn write_blastn_final_footer<W: Write>(
     writer: &mut W,
     report: &BlastnPairwiseReport,
 ) -> io::Result<()> {
-    write_final_database_report(
-        writer,
-        &report.database_name,
-        report.database_num_sequences,
-        report.database_total_letters,
-    )?;
+    match report.database.as_ref() {
+        Some(database) => write_final_database_block(writer, database)?,
+        None => write_final_database_report(
+            writer,
+            &report.database_name,
+            report.database_num_sequences,
+            report.database_total_letters,
+        )?,
+    }
     writeln!(
         writer,
         "Matrix: blastn matrix {} {}",
@@ -2547,7 +2556,8 @@ fn write_blastn_final_footer<W: Write>(
 }
 
 /// The start of the BLASTN report, which NCBI writes before it searches: the program
-/// and its reference, then the subjects.
+/// and its reference, then the subjects (the subject set's name and counts, or the
+/// `Database:` lines of a database, `write_blast_database_header`).
 ///
 /// NCBI reference: c++/src/app/blast/blastn_app.cpp:258-261
 /// ```c
@@ -2563,11 +2573,15 @@ pub fn write_blastn_pairwise_prolog<W: Write>(
     database_name: &str,
     database_num_sequences: usize,
     database_total_letters: usize,
+    database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     if megablast {
         write_megablast_pairwise_intro(writer, version)?;
     } else {
         write_translated_pairwise_intro(writer, "BLASTN", version)?;
+    }
+    if let Some(database) = database {
+        return write_blast_database_header(writer, database);
     }
     write_blastp_database_header_spacing(
         writer,
@@ -2627,6 +2641,7 @@ pub fn write_blastn_pairwise_report<W: Write>(
             &report.database_name,
             report.database_num_sequences,
             report.database_total_letters,
+            report.database.as_ref(),
         )?;
     }
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
@@ -2714,6 +2729,23 @@ pub fn write_blastn_pairwise_report<W: Write>(
         // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
         let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
         for &s_idx in aligned {
+            // A database sequence's heading is its stored title after `>` (a `BL_ORD_ID`
+            // id is not shown), as BLASTP's (`write_database_subject_alignments`).
+            if report.database.is_some() {
+                write_database_subject_alignments(
+                    writer,
+                    probe.as_deref_mut(),
+                    &subject_titles[&s_idx],
+                    false,
+                    &subject_hits[&s_idx],
+                    &subject_hit_indices[&s_idx],
+                    |writer, hit| {
+                        write_hsp_info(writer, hit, config)?;
+                        write_alignment(writer, hit, config)
+                    },
+                )?;
+                continue;
+            }
             write_subject_alignments(
                 writer,
                 probe.as_deref_mut(),
@@ -3608,6 +3640,7 @@ mod tests {
             &mut written,
             None,
             title,
+            true,
             &[&hit],
             &[0],
             |writer: &mut Vec<u8>, _| writer.write_all(b"<hsp>\n"),

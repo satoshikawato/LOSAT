@@ -315,7 +315,7 @@ const COMPO_HEAP_RESIZE_FACTOR: f64 = 1.5;
 // /** by what factor might initially reported E-value exceed true E-value */
 // #define EVALUE_STRETCH 5
 // ```
-const COMPO_HEAP_EVALUE_STRETCH: f64 = 5.0;
+pub(crate) const COMPO_HEAP_EVALUE_STRETCH: f64 = 5.0;
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1389-1403
 // ```c

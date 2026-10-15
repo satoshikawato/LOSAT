@@ -29,8 +29,9 @@ mod query_split;
 mod x_query_blocks;
 // EXPERIMENT (LOSAT_X_BPREDOFIT): redone HSP lists without spare room.
 mod x_redo_fit;
-// EXPERIMENT (LOSAT_X_BPREDOPAR / LOSAT_X_BPREDOPARSHADOW): the composition-based redo with one
-// job per match on the pool, replayed in stream order. Built where the parallel redo paths are.
+// EXPERIMENT (LOSAT_X_BPREDOPAR / LOSAT_X_BPREDOPARSHADOW): the composition-based redo with jobs
+// of up to four matches on the pool, replayed in stream order. Built where the parallel redo paths
+// are.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -69,6 +70,23 @@ pub fn x_bp_redo_par_print_summary() {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     x_redo_par::x_bp_redo_par_print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): a search's result against the new path's when the
+/// one-thread redo of the search ended with an error (it returns before the shadow compares the
+/// hit lists).
+// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
+fn x_bp_redo_par_shadow_error(result: &anyhow::Result<()>) {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    x_redo_par::x_redo_par_shadow_error(result);
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    let _ = result;
 }
 
 pub use args::BlastpArgs;

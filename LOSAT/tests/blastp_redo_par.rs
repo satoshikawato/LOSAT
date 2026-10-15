@@ -3,14 +3,18 @@
 //!
 //! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
 //! set. With it on, more than one thread and at least two matches, the matches of the redo run on
-//! the pool in jobs of up to four consecutive matches of one query, and the early termination test and the heap insertions are replayed in the
-//! order of the one-thread loop. These tests compare the reports with the switch off at one thread
-//! (the one-thread loop) and with the switch off and on at one, two and four threads, for blastp
-//! and blastp-fast, alone and with the block search of `LOSAT_X_BPQBLOCK`; a search with
-//! `-max_target_seqs 1`, where the early termination test ends matches; one query; the release of
-//! the preliminary lists (`LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`) and the per-worker SEG cache
-//! (`LOSAT_X_SEGSHARE=0`); and the shadow mode (`LOSAT_X_BPREDOPARSHADOW`). The
-//! `[TIMING] x_bpredopar:` lines show that the path ran, not only that the report is equal.
+//! the pool in jobs of up to four consecutive matches of one query, in windows of jobs, and the
+//! early termination test and the heap insertions are replayed in the order of the one-thread
+//! loop. These tests compare the reports with the switch off at one thread (the one-thread loop)
+//! and with the switch off and on at one, two and four threads, for blastp and blastp-fast, alone
+//! and with the block search of `LOSAT_X_BPQBLOCK`; a search with `-max_target_seqs 1`, where the
+//! early termination test ends matches; one query; the release of the preliminary lists
+//! (`LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`) and the per-worker SEG cache (`LOSAT_X_SEGSHARE=0`);
+//! small windows (`LOSAT_X_BPREDOPARWINDOW=1`) that end inside queries and leave out the matches
+//! the test has ended before them, at two and eight threads; and the shadow mode
+//! (`LOSAT_X_BPREDOPARSHADOW`), also with small windows, ended matches and released lists. The
+//! `[TIMING] x_bpredopar:` lines show that the path ran and what it did, not only that the report
+//! is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3447-3449,3525-3529
 //! ```c
@@ -48,11 +52,58 @@ fn one_query() -> &'static PathBuf {
     })
 }
 
-/// What one run printed: the report, and the (matches, windows, ended) of each
-/// `[TIMING] x_bpredopar` line (one per search the path ran), and standard error.
+/// The counts of one `[TIMING] x_bpredopar:` line, or their sums.
+#[derive(Clone, Copy, Debug, Default)]
+struct RedoPar {
+    matches: usize,
+    windows: usize,
+    /// Windows that end inside a query.
+    split: usize,
+    /// Matches the early termination test ended ...
+    ended: usize,
+    /// ... before their window (not computed) ...
+    skipped: usize,
+    /// ... and at their replay (computed).
+    wasted: usize,
+}
+
+impl RedoPar {
+    fn parse(line: &str) -> Self {
+        let count = |name: &str| -> usize {
+            line.split(' ')
+                .find_map(|field| field.strip_prefix(name))
+                .and_then(|value| value.parse().ok())
+                .unwrap_or_else(|| panic!("{name} in {line}"))
+        };
+        Self {
+            matches: count("matches="),
+            windows: count("windows="),
+            split: count("split="),
+            ended: count("ended="),
+            skipped: count("skipped="),
+            wasted: count("wasted="),
+        }
+    }
+
+    fn sum(lines: &[Self]) -> Self {
+        lines.iter().fold(Self::default(), |sum, line| Self {
+            matches: sum.matches + line.matches,
+            windows: sum.windows + line.windows,
+            split: sum.split + line.split,
+            ended: sum.ended + line.ended,
+            skipped: sum.skipped + line.skipped,
+            wasted: sum.wasted + line.wasted,
+        })
+    }
+}
+
+/// What one run printed: the report, the counts of each `[TIMING] x_bpredopar:` line (one per
+/// search the path ran), the lists `LOSAT_X_BPPFREE` freed (`[TIMING] x_bppfree:`, summed), and
+/// standard error.
 struct Run {
     stdout: Vec<u8>,
-    redo_par: Vec<(usize, usize, usize)>,
+    redo_par: Vec<RedoPar>,
+    freed_lists: usize,
     stderr: String,
 }
 
@@ -101,24 +152,24 @@ fn blastp(query: &Path, threads: u32, vars: &[(&str, &str)], args: &[&str]) -> R
     let redo_par = stderr
         .lines()
         .filter_map(|line| line.strip_prefix("[TIMING] x_bpredopar: "))
-        .map(|line| {
-            let count = |name: &str| -> usize {
-                line.split(' ')
-                    .find_map(|field| field.strip_prefix(name))
-                    .and_then(|value| value.parse().ok())
-                    .unwrap_or_else(|| panic!("{name} in {line}"))
-            };
-            (count("matches="), count("windows="), count("ended="))
-        })
+        .map(RedoPar::parse)
         .collect();
+    let freed_lists = stderr
+        .lines()
+        .filter_map(|line| line.strip_prefix("[TIMING] x_bppfree: freed_lists="))
+        .map(|count| count.trim().parse::<usize>().expect("a count"))
+        .sum();
     Run {
         stdout: output.stdout,
         redo_par,
+        freed_lists,
         stderr,
     }
 }
 
 const SWITCH: (&str, &str) = ("LOSAT_X_BPREDOPAR", "1");
+/// Windows of one job per thread.
+const SMALL_WINDOWS: (&str, &str) = ("LOSAT_X_BPREDOPARWINDOW", "1");
 
 /// The reports with the switch off and on at 1, 2 and 4 threads equal the one-thread report; the
 /// path runs (one line per search, at least two matches) at 2 and 4 threads only.
@@ -146,13 +197,7 @@ fn same_rows_at_every_thread_count(query: &Path, vars: &[(&str, &str)], args: &[
             );
         } else {
             assert!(
-                !on.redo_par.is_empty()
-                    && on
-                        .redo_par
-                        .iter()
-                        .map(|(matches, ..)| matches)
-                        .sum::<usize>()
-                        > 1,
+                !on.redo_par.is_empty() && RedoPar::sum(&on.redo_par).matches > 1,
                 "{vars:?} {args:?} threads {threads}: the path did not run: {}",
                 on.stderr
             );
@@ -186,7 +231,7 @@ fn match_jobs_of_one_query_give_its_rows() {
 
 /// With `-max_target_seqs 1` the early termination test ends matches of the last query of a
 /// batch (and of a query alone in its batch) once the heaps of the batch hold a subject within
-/// the cutoff; the path computes them and the replay drops them.
+/// the cutoff; the path leaves them out before their window or drops them at their replay.
 #[test]
 fn early_termination_ends_the_matches_it_ends_in_the_one_thread_redo() {
     let query = fixture("MeenMJNV.faa");
@@ -206,7 +251,7 @@ fn early_termination_ends_the_matches_it_ends_in_the_one_thread_redo() {
                 on.stdout == reference.stdout,
                 "-max_target_seqs {max_target_seqs} threads {threads}: the report differs"
             );
-            let ended: usize = on.redo_par.iter().map(|(_, _, ended)| ended).sum();
+            let ended = RedoPar::sum(&on.redo_par).ended;
             assert!(
                 !on.redo_par.is_empty(),
                 "-max_target_seqs {max_target_seqs} threads {threads}: the path did not run"
@@ -245,6 +290,47 @@ fn released_lists_the_per_worker_seg_cache_and_pairwise_reports_are_unchanged() 
         );
         assert!(!on.redo_par.is_empty(), "{vars:?} {args:?}: the path ran");
     }
+}
+
+/// The input of the small-window tests: `-evalue 10` gives the last queries of some batches (all
+/// of whose queries hit) more matches than a window of one job per thread holds, so with
+/// `-max_target_seqs 1` the test ends matches in later windows than the one that fills the heaps.
+const SMALL_WINDOW_ARGS: [&str; 6] = ["-evalue", "10", "-max_target_seqs", "1", "-outfmt", "6"];
+const RELEASE: [(&str, &str); 2] = [("LOSAT_X_BPPFREE", "1"), ("LOSAT_X_BPPCOMPACT", "1")];
+
+/// Windows of one job per thread end inside queries; the matches that the test has ended before a
+/// window are not computed; the preliminary lists are released after their last match. The
+/// report, the lists freed and the matches ended are those of the one-thread loop.
+#[test]
+fn small_windows_split_queries_and_leave_out_the_matches_the_test_ended() {
+    let query = fixture("MeenMJNV.faa");
+    let reference = blastp(&query, 1, &RELEASE, &SMALL_WINDOW_ARGS);
+    assert!(reference.freed_lists > 0, "{}", reference.stderr);
+    let vars: Vec<(&str, &str)> = RELEASE
+        .iter()
+        .copied()
+        .chain([SWITCH, SMALL_WINDOWS])
+        .collect();
+    let mut ended = Vec::new();
+    for threads in [2, 8] {
+        let on = blastp(&query, threads, &vars, &SMALL_WINDOW_ARGS);
+        assert!(
+            on.stdout == reference.stdout,
+            "threads {threads}: the report differs"
+        );
+        assert_eq!(
+            on.freed_lists, reference.freed_lists,
+            "threads {threads}: lists freed"
+        );
+        let counts = RedoPar::sum(&on.redo_par);
+        assert!(
+            counts.windows > 1 && counts.split > 0 && counts.ended > 0 && counts.skipped > 0,
+            "threads {threads}: {counts:?}"
+        );
+        assert_eq!(counts.ended, counts.skipped + counts.wasted, "{counts:?}");
+        ended.push(counts.ended);
+    }
+    assert_eq!(ended[0], ended[1], "the matches ended at 2 and 8 threads");
 }
 
 /// The counts of the shadow mode's line at exit.
@@ -298,4 +384,41 @@ fn the_shadow_mode_compares_every_redone_match_and_hit_list() {
             assert!(searches > 1, "one search per block");
         }
     }
+}
+
+/// The shadow mode where the replay ends matches (before their window and at their replay), the
+/// windows end inside queries and the one-thread loop releases its lists (the shadow keeps them
+/// for its own path).
+#[test]
+fn the_shadow_mode_compares_with_ended_matches_released_lists_and_small_windows() {
+    let query = fixture("MeenMJNV.faa");
+    let reference = blastp(&query, 1, &RELEASE, &SMALL_WINDOW_ARGS);
+    let vars: Vec<(&str, &str)> = RELEASE
+        .iter()
+        .copied()
+        .chain([("LOSAT_X_BPREDOPARSHADOW", "1"), SMALL_WINDOWS])
+        .collect();
+    let shadow = blastp(&query, 4, &vars, &SMALL_WINDOW_ARGS);
+    assert!(
+        shadow.stdout == reference.stdout,
+        "the report differs in the shadow mode"
+    );
+    let [searches, queries, matches, lists, diffs] = shadow_counts(&shadow.stderr);
+    assert!(
+        searches == 1 && queries > 0 && matches > 0 && lists > 0 && diffs == 0,
+        "{}",
+        shadow.stderr
+    );
+    // Every match that the replay redoes is compared; the others were ended.
+    let counts = RedoPar::sum(&shadow.redo_par);
+    assert!(
+        counts.split > 0 && counts.skipped > 0,
+        "the shadow's path: {counts:?}"
+    );
+    assert_eq!(
+        counts.matches - counts.ended,
+        matches as usize,
+        "{counts:?}"
+    );
+    assert_eq!(shadow.freed_lists, reference.freed_lists, "lists freed");
 }

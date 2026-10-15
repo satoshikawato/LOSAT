@@ -5694,7 +5694,7 @@ fn search(
                         hits: None,
                         observer: None,
                     };
-                    run_resolved_in_pool(
+                    let result = run_resolved_in_pool(
                         args.clone(),
                         block_queries,
                         subject_source,
@@ -5714,7 +5714,10 @@ fn search(
                             epilog: epilog && index + 1 == blocks.len(),
                             v1_titles: v1.is_some(),
                         },
-                    )?;
+                    );
+                    // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
+                    super::x_bp_redo_par_shadow_error(&result);
+                    result?;
                 }
                 sink.flush()?;
                 Ok(true)
@@ -5759,7 +5762,7 @@ fn search(
                 epilog,
                 v1_titles: v1.is_some(),
             };
-            run_resolved_in_pool(
+            let result = run_resolved_in_pool(
                 args,
                 &searched_queries[..searched_done],
                 subject_source,
@@ -5770,7 +5773,10 @@ fn search(
                 None,
                 &ranges,
                 &reports,
-            )
+            );
+            // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
+            super::x_bp_redo_par_shadow_error(&result);
+            result
         };
         crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
             let result = search_batches(
@@ -8727,11 +8733,12 @@ fn run_resolved_in_pool(
     // ```
     // EXPERIMENT (LOSAT_X_BPREDOPAR / LOSAT_X_BPREDOPARSHADOW, off unless set): NCBI splits one
     // loop over the matches of all queries between its threads. With the switch, more than one
-    // thread and at least two matches, each match is one job on the pool, and the early
-    // termination test, the heap insertions and the error that ends the redo are replayed in the
-    // order of the one-thread loop below; it replaces both parallel paths (`x_redo_par.rs`). The
-    // shadow mode runs it into separate heaps first, then the one-thread loop for the output, and
-    // compares the hit lists.
+    // thread and at least two matches, the matches run on the pool in jobs of up to four matches
+    // of one query, and the early termination test, the heap insertions and the error that ends
+    // the redo are replayed in the order of the one-thread loop below; it replaces both parallel
+    // paths (`x_redo_par.rs`). The shadow mode runs it into separate heaps first, then the
+    // one-thread loop for the output, and compares the hit lists (or the errors, at the callers of
+    // this function).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")

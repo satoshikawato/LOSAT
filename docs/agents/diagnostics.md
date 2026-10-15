@@ -407,25 +407,46 @@ Rebuilding less:
   matches, in jobs of up to four consecutive matches of one query, instead of one job per query (or the
   matches of the only query with matches); the early termination test, the heap insertions and the error
   that ends the redo are then replayed on the calling thread in the order of the one-thread loop, on the
-  same heaps (`blastp/x_redo_par.rs`, exactness argument in its header). A job builds its query's
-  workspace once per window (`OnceLock`) and its own parameters, prefetches the first Newton problems of
-  its own matches with `LOSAT_X_NEWTONLANES` (one vector of four), and redoes its matches with per-worker
-  scratch and the search's `LOSAT_X_SEGSHARE` store. Windows of whole queries (at least 64 jobs per thread,
-  one `pool.install` each) bound the results held before their replay, and the preliminary lists are
-  released after each window as the one-thread loop releases them (`LOSAT_X_BPPFREE`,
-  `LOSAT_X_BPPCOMPACT`). With `LOSAT_TIMING=1` each search the path runs prints
-  `[TIMING] x_bpredopar: matches=<n> jobs=<j> windows=<w> ended=<e> par_s=<s> replay_s=<s>` (`ended`:
-  computed results the early termination test dropped). Reason: the query-level redo waits for the largest
-  query of a search (in the blocks of the human x yeast blastp-fast job with `LOSAT_X_BPQBLOCK=20000`, 33 %
-  of a block's redo work at the median, 54 % at p90).
+  same heaps (`blastp/x_redo_par.rs`, exactness argument in its header). The jobs run in windows of
+  consecutive jobs, one `pool.install` each, that may end inside a query: at most 64 jobs per thread
+  (`LOSAT_X_BPREDOPARWINDOW` below), so at most 4 x 64 x threads redone results are held before their
+  replay. A job builds its query's workspace once per window (`OnceLock`; a query that spans windows has it
+  built again from the same inputs) and its own parameters, prefetches the first Newton problems of its own
+  matches with `LOSAT_X_NEWTONLANES` (one vector of four, against the heaps as the window's start left
+  them), and redoes its matches with per-worker scratch and the search's `LOSAT_X_SEGSHARE` store. A
+  query's preliminary list is released after the replay of the window that holds its last match, as the
+  one-thread loop releases it (`LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`). The early termination test is
+  monotone over the replay (once true for a match's E-value, true afterwards), so a match whose test is
+  already true at its window's start is not computed; a match can be ended at all only for a query whose
+  batch's heaps can all be filled (with fresh heaps, the last query of a batch whose queries all have at
+  least `max_target_seqs` matches) and with a best E-value above 5 x the cutoff, and a window holds at most
+  one job per thread with such a match. So the redo computes and drops at most 4 x threads matches per
+  batch, in the window during which the batch's heaps fill (the one-thread loop computes none). With
+  `LOSAT_TIMING=1` each search the path runs prints
+  `[TIMING] x_bpredopar: matches=<n> jobs=<j> windows=<w> split=<s> ended=<e> skipped=<k> wasted=<x>
+  par_s=<s> replay_s=<s>` (on one line; `split`: windows that end inside a query; `ended`: the matches the
+  early termination test ended, as many as in the one-thread loop; `skipped`: those not computed;
+  `wasted`: those computed and dropped). Diagnostics only, the output bytes do not change: the counters
+  and traces of the redo count the `wasted` matches as well (`[TIMING] x_bpredofit: lists= hsps=`, the
+  kappa range counters, `LOSAT_DEBUG_BLASTP_TRACE_HSP` lines), and `[X_STATS] NEWTONLANES` counts the
+  prefetches of the jobs (four matches each, the one-thread loop prefetches 16 ahead). With
+  `LOSAT_X_NEWTONLANES8` (aarch64) a job's prefetch of at most four problems never fills eight lanes.
+  Reason: the query-level redo waits for the largest query of a search (in the blocks of the human x yeast
+  blastp-fast job with `LOSAT_X_BPQBLOCK=20000`, 33 % of a block's redo work at the median, 54 % at p90).
+- `LOSAT_X_BPREDOPARWINDOW=<jobs per thread>` (tuning variable of `LOSAT_X_BPREDOPAR`; not in the strict set,
+  read once when the path first runs) the job budget of a window per thread, a positive integer; 64 when
+  unset or not a positive integer. The tests set 1 to make windows that end inside queries. The output does
+  not depend on it.
 - `LOSAT_X_BPREDOPARSHADOW=1` shadow of `LOSAT_X_BPREDOPAR` (implies it): the new path runs first into
   separate heaps without releasing the preliminary lists, and every match that its replay redoes is
   computed again on the calling thread with one set of scratch, as the one-thread loop holds it, and the
   two results are compared (error or not, best score, E-value bits, every HSP field); then the one-thread
   loop runs for the output and the hit lists of both sets of heaps (`fill_results_from_compo_heaps`) are
-  compared field by field, floating-point values by their bits. The first difference stops the run
-  (panic). One line at exit:
-  `[X_SHADOW] BPREDOPAR searches= queries= matches_compared= lists_compared= diffs=`.
+  compared field by field, floating-point values by their bits. When the one-thread loop ends with an error
+  instead, its error is compared with the new path's (both must end, with the same message). The first
+  difference stops the run (panic) after printing the line that is otherwise printed at exit:
+  `[X_SHADOW] BPREDOPAR searches= queries= matches_compared= lists_compared= diffs=`. With `LOSAT_TIMING=1`
+  the new path's `[TIMING] x_bpredopar:` line is printed as well.
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the two-hit seed stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one

@@ -7681,8 +7681,8 @@ fn search_query_batch(
     //                  EBlastProgramType prog,
     //                  ...)
     // ```
-    // The search owns its copy of the query records (`prepare_sequence_data`).
-    let queries = query_records.to_vec();
+    // The search reads the query records of its caller (`prepare_sequence_data`).
+    let queries = query_records;
     let query_ids = queries
         .iter()
         .map(|record| String::from_utf8_lossy(record.shown_id()).into_owned())
@@ -7780,7 +7780,7 @@ fn search_query_batch(
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
     let masks = match stage {
-        BatchStage::Search { .. } => query_masks(args, &queries),
+        BatchStage::Search { .. } => query_masks(args, queries),
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
     let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);

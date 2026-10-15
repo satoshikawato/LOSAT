@@ -26,6 +26,11 @@
 //! searches the subjects in NCBI's loop order, and read the `pool_entries` field of the
 //! `[losat-thread-activity]` line (`LOSAT_WASI_THREADS_DEBUG=1`) to check which entries ran.
 //!
+//! Two more switches of the set act on the chunks: `LOSAT_X_TBNOIDNEXT` (the threads take the
+//! next chunk when they are free, one entry for the search) and `LOSAT_X_TBNOIDUNITS` (the units
+//! of a subject longer than a chunk's budget on the pool). The tests that count entries of chunks
+//! turn the first off (`LOSAT_X_TBNOIDNEXT=0`).
+//!
 //! The last test checks `LOSAT_X_TBNSTATE` (`src/algorithm/tblastn/search_gapped.rs`, in the
 //! strict set), the scan state of the unit path kept by a thread from one subject to the next, on
 //! the same searches.
@@ -267,17 +272,19 @@ fn the_report_is_the_one_thread_report_by_default_and_with_the_switch_off() {
 //         Int8 tot_length = m_Atlas.GetSliceSize() / (4*m_NumThreads) + 1;
 // ```
 // 240 subjects of 1,000 bases: F = 60,000, and at `THREADS` = 4 a chunk may hold 3,751 bases,
-// three subjects. With no variable an entry takes 4 * `THREADS` chunks (5 entries). With
-// `LOSAT_X_TBNOIDCHUNK=0`, and with `LOSAT_X_DEFAULT=0` and no variable for the switch, it takes
-// `THREADS` subjects (60 entries); `LOSAT_X_DEFAULT=0` with `LOSAT_X_TBNOIDCHUNK=1` gives the
-// chunks again. The report is the same in all four.
+// three subjects. With `LOSAT_X_TBNOIDNEXT=0` an entry takes 4 * `THREADS` chunks (5 entries);
+// with no variable the threads take the chunks as one entry (`LOSAT_X_TBNOIDNEXT`, which needs
+// the chunks). With `LOSAT_X_TBNOIDCHUNK=0`, and with `LOSAT_X_DEFAULT=0` and no variable for the
+// switch, an entry takes `THREADS` subjects (60 entries); `LOSAT_X_DEFAULT=0` with
+// `LOSAT_X_TBNOIDCHUNK=1` gives the entries of chunks again. The report is the same in all five.
 #[test]
 fn the_switch_is_on_by_default_and_follows_its_variable_and_the_global_one() {
     let debug = ("LOSAT_WASI_THREADS_DEBUG", "1");
     let chunks = SUBJECTS / (4 * THREADS * 3);
     let subjects = SUBJECTS / THREADS;
-    let cases: [(&[(&str, &str)], usize); 4] = [
-        (&[debug], chunks),
+    let cases: [(&[(&str, &str)], usize); 5] = [
+        (&[debug, ("LOSAT_X_TBNOIDNEXT", "0")], chunks),
+        (&[debug], 1),
         (&[debug, ("LOSAT_X_TBNOIDCHUNK", "0")], subjects),
         (&[debug, ("LOSAT_X_DEFAULT", "0")], subjects),
         (
@@ -309,7 +316,9 @@ fn the_switch_is_on_by_default_and_follows_its_variable_and_the_global_one() {
 // ```
 // A subject longer than a chunk's budget is a chunk of its own, wherever it stands; the chunks
 // before and after it are cut short or start anew. With the long subject first, in the middle
-// and last the report at 2, 3 and 8 threads must be the one-thread report. The 248,000 bases
+// and last the report at 2, 3 and 8 threads must be the one-thread report; the entries of
+// chunks are counted with `LOSAT_X_TBNOIDNEXT=0` (with it the search is one entry, as the next
+// test checks on the same sets). The 248,000 bases
 // give F = 62,000; at 2 threads a chunk may hold 7,751 bases (seven short subjects) and an entry
 // takes eight chunks, so by hand: first, {long}, 28 chunks of 7 and {4} (30 chunks, 4 entries);
 // in the middle, 14 of 7, {2}, {long}, 14 of 7 and {2} (31 chunks, 4 entries); last, 28 of 7,
@@ -327,13 +336,15 @@ fn a_long_subject_first_in_the_middle_or_last_gives_the_one_thread_report() {
             "{position:?}: the search must hit the long subject"
         );
         for threads in [2, 3, 8] {
-            let (report, stderr) = tblastn_on(&subjects, threads, &[debug]);
+            let (report, stderr) =
+                tblastn_on(&subjects, threads, &[debug, ("LOSAT_X_TBNOIDNEXT", "0")]);
             assert!(
                 report == expected,
                 "{position:?}: {threads} threads differ from one thread"
             );
             if threads == 2 {
                 assert_eq!(pool_entries(&stderr), entries_at_two, "{position:?}");
+                assert!(!stderr.contains(" flow_chunks="), "{position:?}");
             }
         }
     }
@@ -348,15 +359,15 @@ fn a_long_subject_first_in_the_middle_or_last_gives_the_one_thread_report() {
 //         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
 //         x_FillSeqBuffer(buffer, begin_chunk);
 // ```
-// With `LOSAT_X_TBNOIDNEXT` (off unless set) the threads take the next chunk when they are free,
-// as NCBI's do, and the lists come back in OID order (`src/algorithm/tblastn/x_oid_flow.rs`): the
-// search is one entry into the pool and the line names the chunks. The report must be the
-// one-thread report on the 240 pieces and on the sets with one long subject, at 2, 3 and 8
-// threads; with `LOSAT_X_TBNOIDCHUNK=0` there are no chunks and the switch does nothing.
+// With `LOSAT_X_TBNOIDNEXT` (in the strict set: on by default) the threads take the next chunk
+// when they are free, as NCBI's do, and the lists come back in OID order
+// (`src/algorithm/tblastn/x_oid_flow.rs`): the search is one entry into the pool and the line
+// names the chunks. The report must be the one-thread report on the 240 pieces and on the sets
+// with one long subject, at 2, 3 and 8 threads; with `LOSAT_X_TBNOIDCHUNK=0` there are no chunks
+// and the switch does nothing.
 #[test]
 fn the_chunks_taken_when_a_thread_is_free_give_the_one_thread_report() {
     let debug = ("LOSAT_WASI_THREADS_DEBUG", "1");
-    let next = ("LOSAT_X_TBNOIDNEXT", "1");
     let mut sets = vec![(None, inputs().1.clone())];
     for position in [Long::First, Long::Middle, Long::Last] {
         sets.push((Some(position), long_subject_set(position)));
@@ -364,7 +375,7 @@ fn the_chunks_taken_when_a_thread_is_free_give_the_one_thread_report() {
     for (position, subjects) in sets {
         let (expected, _) = tblastn_on(&subjects, 1, &[]);
         for threads in [2, 3, 8] {
-            let (report, stderr) = tblastn_on(&subjects, threads, &[debug, next]);
+            let (report, stderr) = tblastn_on(&subjects, threads, &[debug]);
             assert!(
                 report == expected,
                 "{position:?}: {threads} threads with the flow differ from one thread"
@@ -380,7 +391,7 @@ fn the_chunks_taken_when_a_thread_is_free_give_the_one_thread_report() {
             );
         }
     }
-    let (report, stderr) = tblastn(THREADS, &[debug, next, ("LOSAT_X_TBNOIDCHUNK", "0")]);
+    let (report, stderr) = tblastn(THREADS, &[debug, ("LOSAT_X_TBNOIDCHUNK", "0")]);
     assert!(
         report == tblastn(1, &[]).0,
         "LOSAT_X_TBNOIDCHUNK=0 with the flow"
@@ -398,25 +409,25 @@ fn the_chunks_taken_when_a_thread_is_free_give_the_one_thread_report() {
 //         if (status == SUBJECT_SPLIT_DONE) break;
 // ```
 // NCBI's thread searches the chunks of its subject one after another. With
-// `LOSAT_X_TBNOIDUNITS` (off unless set) the (frame, chunk) units of a subject longer than a
-// chunk's budget go to the pool, with the entries of `LOSAT_X_TBNOIDCHUNK` and with the flow of
-// `LOSAT_X_TBNOIDNEXT`. The report at 2, 3 and 8 threads must be the one-thread report with the
-// long subject first, in the middle and last. Only the long subject (48,000 bases; a chunk may
-// hold 7,751, 5,167 and 1,938 bases at 2, 3 and 8 threads) runs its units on the pool, and no
-// subject does without the switch.
+// `LOSAT_X_TBNOIDUNITS` (in the strict set: on by default) the (frame, chunk) units of a subject
+// longer than a chunk's budget go to the pool, with the flow of `LOSAT_X_TBNOIDNEXT` (the default)
+// and with the entries of `LOSAT_X_TBNOIDCHUNK` (`LOSAT_X_TBNOIDNEXT=0`). The report at 2, 3 and 8
+// threads must be the one-thread report with the long subject first, in the middle and last. Only
+// the long subject (48,000 bases; a chunk may hold 7,751, 5,167 and 1,938 bases at 2, 3 and 8
+// threads) runs its units on the pool, and no subject does with `LOSAT_X_TBNOIDUNITS=0`.
 #[test]
 fn the_units_of_a_long_subject_on_the_pool_give_the_one_thread_report() {
     let debug = ("LOSAT_WASI_THREADS_DEBUG", "1");
-    let units = ("LOSAT_X_TBNOIDUNITS", "1");
-    let next = ("LOSAT_X_TBNOIDNEXT", "1");
+    let entries = ("LOSAT_X_TBNOIDNEXT", "0");
+    let no_units = ("LOSAT_X_TBNOIDUNITS", "0");
     for position in [Long::First, Long::Middle, Long::Last] {
         let subjects = long_subject_set(position);
         let (expected, _) = tblastn_on(&subjects, 1, &[]);
         for threads in [2, 3, 8] {
             for (variables, on_the_pool) in [
-                (&[debug, units][..], 1),
-                (&[debug, units, next][..], 1),
-                (&[debug][..], 0),
+                (&[debug][..], 1),
+                (&[debug, entries][..], 1),
+                (&[debug, no_units][..], 0),
             ] {
                 let (report, stderr) = tblastn_on(&subjects, threads, variables);
                 assert!(
@@ -445,13 +456,14 @@ fn the_units_of_a_long_subject_on_the_pool_give_the_one_thread_report() {
 // on. With `LOSAT_X_TBNSTATE` (in the strict set: on by default) LOSAT's threads keep the scan
 // state of the unit path the same way. The report at 1, 2, 3 and 8 threads must be the one-thread
 // report without it (`LOSAT_X_TBNSTATE=0`), on the 240 pieces and on the sets with one long
-// subject, also with the long subject's units on the pool (`LOSAT_X_TBNOIDUNITS`). With
+// subject, with the long subject's units on the pool (`LOSAT_X_TBNOIDUNITS`, the default) and on
+// its thread (`LOSAT_X_TBNOIDUNITS=0`). With
 // `LOSAT_X_TBNPARSHADOW` the run compares the unit path with the serial reference on every subject
 // and stops if they differ.
 #[test]
 fn the_scan_state_kept_by_a_thread_gives_the_one_thread_report() {
     let without = ("LOSAT_X_TBNSTATE", "0");
-    let units = ("LOSAT_X_TBNOIDUNITS", "1");
+    let no_units = ("LOSAT_X_TBNOIDUNITS", "0");
     let mut sets = vec![(None, inputs().1.clone())];
     for position in [Long::First, Long::Middle, Long::Last] {
         sets.push((Some(position), long_subject_set(position)));
@@ -459,7 +471,7 @@ fn the_scan_state_kept_by_a_thread_gives_the_one_thread_report() {
     for (position, subjects) in sets {
         let (expected, _) = tblastn_on(&subjects, 1, &[without]);
         for threads in [1, 2, 3, 8] {
-            for variables in [&[][..], &[units][..]] {
+            for variables in [&[][..], &[no_units][..]] {
                 let (report, _) = tblastn_on(&subjects, threads, variables);
                 assert!(
                     report == expected,

@@ -654,11 +654,12 @@ impl XQuerySide {
 
 // No NCBI counterpart: reads the LOSAT_X_TBNSTATE switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_TBNSTATE): off unless set (to any value); not in the strict set.
+/// EXPERIMENT (LOSAT_X_TBNSTATE): a switch of the strict set (`utils/xswitch.rs`): on unless it is
+/// `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
 fn x_tbn_state() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNSTATE").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSTATE"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1003,1377-1379,1412-1413

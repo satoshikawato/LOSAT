@@ -21,13 +21,13 @@
 //!                   nucl_length, nucl_seq, frame, translation_buffer+offset);
 //! ```
 //! NCBI translates the compressed subject with one table read per codon. LOSAT's reference path
-//! reaches the same residues through letters; with `LOSAT_X_TBNXLATE` set (to any value; the
-//! switch is not in the strict set) the frames are read from the tables, and with
-//! `LOSAT_X_TBNXLATESHADOW` both translations are made and compared for every subject plan of
-//! the unit path (`LOSAT_X_TBNPAR`, on by default). The switch must change nothing in the
-//! report, so the tests compare the report with the one of a run without the variables, and
-//! read the `[X_STATS] TBNXLATE` and `[X_SHADOW] TBNXLATE` lines to check which translation
-//! ran.
+//! reaches the same residues through letters; with `LOSAT_X_TBNXLATE` (a switch of the strict set:
+//! on by default, off with `LOSAT_X_TBNXLATE=0`, and off with `LOSAT_X_DEFAULT=0` unless its
+//! variable is set) the frames are read from the tables, and with `LOSAT_X_TBNXLATESHADOW` both
+//! translations are made and compared for every subject plan of the unit path (`LOSAT_X_TBNPAR`,
+//! on by default). The switch must change nothing in the report, so the tests compare the report
+//! with the one of a run with `LOSAT_X_TBNXLATE=0`, and read the `[X_STATS] TBNXLATE` and
+//! `[X_SHADOW] TBNXLATE` lines to check which translation ran.
 //!
 //! The subjects are pieces of `tests/fasta/MelaMJNV.fasta` with what the two translations
 //! treat differently: lowercase runs (soft masking with `-lcase_masking`), every ambiguous
@@ -189,6 +189,7 @@ fn hit_subjects(report: &[u8]) -> std::collections::BTreeSet<String> {
 }
 
 const TABLES: (&str, &str) = ("LOSAT_X_TBNXLATE", "1");
+const REFERENCE: (&str, &str) = ("LOSAT_X_TBNXLATE", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBNXLATESHADOW", "1");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
@@ -198,11 +199,12 @@ const SHADOW: (&str, &str) = ("LOSAT_X_TBNXLATESHADOW", "1");
 //                                      subject->gen_code_string, &translation_buffer,
 //                                      &frame_offsets, NULL);
 // ```
-// Every search below gives one report without the variables, with the frames from the tables
-// and in the shadow mode: the default options and `-lcase_masking` at one and three threads,
-// another genetic code, and four query batches. The run without the variables makes no plan
-// from the tables; the run with `LOSAT_X_TBNXLATE` makes one for each of the six subjects that
-// are long enough for a word (more if a batch makes its own); the shadow mode compares them.
+// Every search below gives one report with `LOSAT_X_TBNXLATE=0`, with the frames from the tables
+// (no variable: the default) and in the shadow mode: the default options and `-lcase_masking` at
+// one and three threads, another genetic code, and four query batches. The run with
+// `LOSAT_X_TBNXLATE=0` makes no plan from the tables; the default run makes one for each of the
+// six subjects that are long enough for a word (more if a batch makes its own); the shadow mode
+// compares them.
 #[test]
 fn the_report_is_the_same_with_the_frames_from_the_tables_and_in_the_shadow_mode() {
     let (ten, all, _) = inputs();
@@ -218,7 +220,7 @@ fn the_report_is_the_same_with_the_frames_from_the_tables_and_in_the_shadow_mode
         ),
     ];
     for (query, options) in searches {
-        let (expected, stderr) = tblastn(query, options, &[]);
+        let (expected, stderr) = tblastn(query, options, &[REFERENCE]);
         assert_eq!(
             counter(&stderr, "[X_STATS] TBNXLATE", "table_plans"),
             0,
@@ -229,7 +231,7 @@ fn the_report_is_the_same_with_the_frames_from_the_tables_and_in_the_shadow_mode
             assert!(hits.contains(subject), "{options:?}: no hit on {subject}");
         }
 
-        let (report, stderr) = tblastn(query, options, &[TABLES]);
+        let (report, stderr) = tblastn(query, options, &[]);
         assert!(
             report == expected,
             "{options:?}: the tables change the report"
@@ -252,7 +254,8 @@ fn the_report_is_the_same_with_the_frames_from_the_tables_and_in_the_shadow_mode
 // subject plans of the unit path (`LOSAT_X_TBNPAR`, on by default). With `LOSAT_X_DEFAULT=0`
 // the reference loop searches each subject and translates it itself, so the variable changes
 // nothing there: no plan is made, the shadow mode says that it compared nothing, and the report
-// is the same. The variable acts again once `LOSAT_X_TBNPAR` is set.
+// is the same. With `LOSAT_X_TBNPAR` set as well the unit path runs again, and the switch is off
+// unless its variable is set, as before it joined the set.
 #[test]
 fn the_switch_acts_on_the_subject_plans_of_the_unit_path_only() {
     let (ten, _, _) = inputs();
@@ -272,7 +275,11 @@ fn the_switch_acts_on_the_subject_plans_of_the_unit_path_only() {
             assert!(stderr.contains("nothing compared"), "{stderr}");
         }
     }
-    let (report, stderr) = tblastn(ten, &options, &[previous, ("LOSAT_X_TBNPAR", "1"), TABLES]);
+    let unit_path = ("LOSAT_X_TBNPAR", "1");
+    let (report, stderr) = tblastn(ten, &options, &[previous, unit_path]);
+    assert!(report == expected);
+    assert_eq!(counter(&stderr, "[X_STATS] TBNXLATE", "table_plans"), 0);
+    let (report, stderr) = tblastn(ten, &options, &[previous, unit_path, TABLES]);
     assert!(report == expected);
     assert!(counter(&stderr, "[X_STATS] TBNXLATE", "table_plans") >= 6);
 }

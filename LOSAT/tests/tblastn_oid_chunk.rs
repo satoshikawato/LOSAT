@@ -26,8 +26,9 @@
 //! searches the subjects in NCBI's loop order, and read the `pool_entries` field of the
 //! `[losat-thread-activity]` line (`LOSAT_WASI_THREADS_DEBUG=1`) to check which entries ran.
 //!
-//! The last test checks `LOSAT_X_TBNSTATE` (`src/algorithm/tblastn/search_gapped.rs`), the scan
-//! state of the unit path kept by a thread from one subject to the next, on the same searches.
+//! The last test checks `LOSAT_X_TBNSTATE` (`src/algorithm/tblastn/search_gapped.rs`, in the
+//! strict set), the scan state of the unit path kept by a thread from one subject to the next, on
+//! the same searches.
 //!
 //! The fixture suites have no search of many subjects, so the tests cut
 //! `tests/fasta/MelaMJNV.fasta` into subjects of 1,000 bases (240 of them, or 200 with one subject
@@ -441,23 +442,24 @@ fn the_units_of_a_long_subject_on_the_pool_give_the_one_thread_report() {
 //            != BLAST_SEQSRC_EOF) {
 // ```
 // NCBI's thread keeps its diagonal table from one subject to the next and only moves its offset
-// on. With `LOSAT_X_TBNSTATE` (off unless set) LOSAT's threads keep the scan state of the unit
-// path the same way. The report at 1, 2, 3 and 8 threads must be the one-thread report without
-// it, on the 240 pieces and on the sets with one long subject, also with the long subject's units
-// on the pool (`LOSAT_X_TBNOIDUNITS`). With `LOSAT_X_TBNPARSHADOW` the run compares the unit path
-// with the serial reference on every subject and stops if they differ.
+// on. With `LOSAT_X_TBNSTATE` (in the strict set: on by default) LOSAT's threads keep the scan
+// state of the unit path the same way. The report at 1, 2, 3 and 8 threads must be the one-thread
+// report without it (`LOSAT_X_TBNSTATE=0`), on the 240 pieces and on the sets with one long
+// subject, also with the long subject's units on the pool (`LOSAT_X_TBNOIDUNITS`). With
+// `LOSAT_X_TBNPARSHADOW` the run compares the unit path with the serial reference on every subject
+// and stops if they differ.
 #[test]
 fn the_scan_state_kept_by_a_thread_gives_the_one_thread_report() {
-    let state = ("LOSAT_X_TBNSTATE", "1");
+    let without = ("LOSAT_X_TBNSTATE", "0");
     let units = ("LOSAT_X_TBNOIDUNITS", "1");
     let mut sets = vec![(None, inputs().1.clone())];
     for position in [Long::First, Long::Middle, Long::Last] {
         sets.push((Some(position), long_subject_set(position)));
     }
     for (position, subjects) in sets {
-        let (expected, _) = tblastn_on(&subjects, 1, &[]);
+        let (expected, _) = tblastn_on(&subjects, 1, &[without]);
         for threads in [1, 2, 3, 8] {
-            for variables in [&[state][..], &[state, units][..]] {
+            for variables in [&[][..], &[units][..]] {
                 let (report, _) = tblastn_on(&subjects, threads, variables);
                 assert!(
                     report == expected,
@@ -466,9 +468,9 @@ fn the_scan_state_kept_by_a_thread_gives_the_one_thread_report() {
             }
         }
     }
-    let (expected, _) = tblastn(1, &[]);
+    let (expected, _) = tblastn(1, &[without]);
     for threads in [1, THREADS] {
-        let (report, _) = tblastn(threads, &[state, ("LOSAT_X_TBNPARSHADOW", "1")]);
+        let (report, _) = tblastn(threads, &[("LOSAT_X_TBNPARSHADOW", "1")]);
         assert!(
             report == expected,
             "the shadow run at {threads} threads differs from one thread"

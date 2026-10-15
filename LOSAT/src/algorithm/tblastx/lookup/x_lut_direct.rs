@@ -858,4 +858,74 @@ mod tests {
         // Mode 0 is the reference itself.
         same_bp(0, &queries, 11, false);
     }
+
+    /// The query offsets of every cell of `table`, as the scan reads them.
+    fn cell_lists(table: &BlastAaLookupTable) -> impl Iterator<Item = &[i32]> {
+        table.backbone.iter().map(|cell| {
+            let n = cell.num_used as usize;
+            if n <= AA_HITS_PER_CELL {
+                &cell.entries[..n]
+            } else {
+                let cursor = cell.entries[0] as usize;
+                &table.overflow[cursor..cursor + n]
+            }
+        })
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:504-518
+    // ```c
+    //     if (lookup->threshold == 0 || score < lookup->threshold) {
+    //         for (i = 0; i < offset_list[1]; i++) {
+    //             BlastLookupAddWordHit(lookup->thin_backbone, lookup->word_length,
+    //                                   lookup->charsize, w,
+    //                                   query_bias + offset_list[i + 2]);
+    //         }
+    //     }
+    //     ...
+    //     if (lookup->threshold == 0)
+    //         return;
+    // ```
+    /// LOSAT_X_BPDIAG (`blastp/x_seed_fused.rs`) tests the hits of a cell in batches, which is
+    /// exact because a cell lists a query offset at most once (the word itself is added only when
+    /// the neighbour enumeration does not return it). Both BLASTP builders, thresholds without
+    /// neighbours (0), with few and with every word as a neighbour, masks and the overflow array.
+    #[test]
+    fn every_cell_lists_a_query_offset_once() {
+        let mut seed = 31u64;
+        let mut low_complexity = vec![1u8; 200];
+        low_complexity.extend(residues(&mut seed, 30));
+        let queries = vec![
+            bp_query(residues(&mut seed, 900), vec![(40, 90)], true),
+            bp_query(residues(&mut seed, 2), vec![], false),
+            bp_query(low_complexity, vec![(150, 199)], true),
+            bp_query(residues(&mut seed, 1500), vec![], false),
+            bp_query(residues(&mut seed, 60), vec![(0, 59)], true),
+        ];
+        let short: Vec<Vec<QueryFrame>> = (0..3)
+            .map(|_| bp_query(residues(&mut seed, 15), vec![], false))
+            .collect();
+        let params = blosum62_ideal_karlin_params();
+        let mut long_cells = 0;
+        for mode in [0, 1] {
+            for (set, threshold) in [
+                (&queries, 0),
+                (&queries, 11),
+                (&queries, 13),
+                (&short, 1),
+                (&short, i32::MIN),
+            ] {
+                let (table, _) = x_bp_build_lookup(mode, set, threshold, &params, false);
+                for hits in cell_lists(&table) {
+                    let mut sorted = hits.to_vec();
+                    sorted.sort_unstable();
+                    assert!(
+                        sorted.windows(2).all(|pair| pair[0] != pair[1]),
+                        "mode {mode} threshold {threshold}: a cell lists an offset twice: {hits:?}"
+                    );
+                    long_cells += usize::from(hits.len() > 16);
+                }
+            }
+        }
+        assert!(long_cells > 0, "the fixture must give long cells");
+    }
 }

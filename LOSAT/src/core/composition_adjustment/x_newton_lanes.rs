@@ -44,15 +44,17 @@
 //! and never re-associates sums; SIMD add / sub / mul / div / sqrt are
 //! IEEE-754 per element, so a lane gives the scalar result.
 //!
-//! EXPERIMENT (LOSAT_X_NEWTONLANES8, aarch64): eight problems per round, value
-//! `k` of eight problems in one `[f64; 8]` (`F8`), so each operation is four
-//! 128-bit NEON operations on independent values.  The lane body is the same
-//! generic code; each lane still runs the operation sequence above.  When the
-//! queue is empty and at most four lanes hold a problem, those problems move to
-//! a four-lane state (bit copies of the values that persist between rounds) and
-//! finish there.  Other targets keep four lanes (on x86-64 the two 256-bit
-//! operations per value gave no gain); the unit tests run the eight-lane body
-//! on every target.
+//! LOSAT_X_NEWTONLANES8 (aarch64; a switch of the strict set, `utils/xswitch.rs`:
+//! on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set): eight
+//! problems per round, value `k` of eight problems in one `[f64; 8]` (`F8`), so
+//! each operation is four 128-bit NEON operations on independent values.  The
+//! lane body is the same generic code; each lane still runs the operation
+//! sequence above.  When the queue is empty and at most four lanes hold a
+//! problem, those problems move to a four-lane state (bit copies of the values
+//! that persist between rounds) and finish there.  On x86-64 and Wasm the switch
+//! does nothing and the lanes stay four wide (on x86-64 the two 256-bit
+//! operations per value gave no gain; Wasm is not measured); the unit tests run
+//! the eight-lane body on every target.
 //!
 //! No NCBI counterpart: batching of independent problems, the result store
 //! and its lookup by bitwise-equal input. NCBI solves one problem per call;
@@ -123,15 +125,15 @@ pub(crate) fn mode() -> u8 {
     })
 }
 
-// No NCBI counterpart: reads LOSAT_X_NEWTONLANES8 once (off unless set to any value; not in the
-// strict set). On aarch64 it chooses how many problems share a round when the lanes run; it does
-// not turn them on. Other targets keep four lanes (x86-64 AVX2 measured no gain). It does not
-// change any value NCBI computes.
+// No NCBI counterpart: reads LOSAT_X_NEWTONLANES8 once (a strict-set switch: on unless it is `0`,
+// or `LOSAT_X_DEFAULT=0` and it is not set). On aarch64 it chooses how many problems share a round
+// when the lanes run; it does not turn them on. On x86-64 and Wasm it is not read and the lanes
+// stay four wide (x86-64 AVX2 measured no gain). It does not change any value NCBI computes.
 /// Whether batches of `MIN_LANE8_BATCH` or more problems use eight lanes.
 fn eight_lanes() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
-        cfg!(target_arch = "aarch64") && std::env::var_os("LOSAT_X_NEWTONLANES8").is_some()
+        cfg!(target_arch = "aarch64") && crate::utils::xswitch::on("LOSAT_X_NEWTONLANES8")
     })
 }
 

@@ -10,9 +10,10 @@
 - Implementation status: stage DB-1 added the database reader (`LOSAT/src/seqdb`). Stage
   DB-2 added the subcommand `LOSAT makedb` (`LOSAT/src/writedb`, section "What `LOSAT makedb`
   of stage DB-2 writes and rejects"). Stage DB-3 adds `-db` and `-dbsize` to BLASTP (section
-  "What BLASTP `-db` of stage DB-3 does and rejects"). `-searchsp` stays an explicit
-  rejection until a stage of its own, and the other programs keep `-db` and `-dbsize` as
-  rejections until their stages (DB-4, DB-5).
+  "What BLASTP `-db` of stage DB-3 does and rejects"). Stage DB-4 adds `-db` and `-dbsize` to
+  BLASTN (section "What BLASTN `-db` of stage DB-4 does and rejects"). `-searchsp` stays an
+  explicit rejection until a stage of its own, and BLASTX, TBLASTN and TBLASTX keep `-db` and
+  `-dbsize` as rejections until their stage (DB-5).
 
 ## Scope
 
@@ -255,6 +256,54 @@ Known differences that remain: the reader's (section above), and a version 5 dat
 copied under another name, which NCBI refuses (`Input db vol does not match lmdb vol`) and
 LOSAT searches.
 
+## What BLASTN `-db` of stage DB-4 does and rejects
+
+`LOSAT blastn -db NAME` (megablast, blastn, dc-megablast) searches a nucleotide database of the
+reader above and gives the output of NCBI BLAST+ 2.17.0 `blastn -db NAME -num_threads 1` for
+outfmt 0, 6 and 7, the same bytes at every `-num_threads` (P1, P1.1). The `-subject` path is
+unchanged; both paths run the same per-subject search, the same traceback and the same report
+writers with a different subject source. The database opener, the reader's error texts and the
+title rules are those of BLASTP's `-db`.
+
+- Bases: the search reads the stored 2-bit bases, where makeblastdb (and `LOSAT makedb`) put a
+  random base for each ambiguous letter, and the alignments read the letters rebuilt from the
+  2-bit bases and the stored ambiguity codes, as NCBI's search and traceback do. With `-subject`
+  NCBI and LOSAT pick the random bases at search time instead, so `-db` and `-subject` of the
+  same sequences can differ where a word hits an ambiguous letter, in NCBI and in LOSAT alike.
+- Statistics: the number of sequences and the total length of the database, kept in 64 bits as
+  NCBI keeps them (the 2^31 - 1 limit of `-subject`, NCBI's `int` there, does not apply). BLASTN
+  has no shortest-subject cutoff (BLASTP's 10 does not apply). `-dbsize N` (NCBI's `Int8`), for
+  `-db` and `-subject`: a value above 0 replaces the database length in the length adjustment
+  and the effective search space; the counts, the reports and the query batching keep the real
+  numbers.
+- The database is read in blocks of about 1 MiB of 2-bit data. With more threads the blocks are
+  searched in parallel and their results merged in database order. After the preliminary stage
+  only the sequences of the hit lists are read again, one at a time, for the alignments; the
+  definition lines are read for the final hit lists of each query batch, where NCBI reads them.
+  A sequence longer than 5,000,000 bases is searched in NCBI's overlapping chunks, as with
+  `-subject`. The alignments decode the whole sequence in hand (NCBI decodes the ranges it
+  needs and refetches the whole sequence when an alignment leaves them, with the same result),
+  and outfmt 0 holds the letters of the reported sequences until the reports are written.
+- Reports: the `Database:` lines of outfmt 0 (title, counts, `Posted date`), `>` and the stored
+  title, subject ids made from the title as for BLASTP, `# Database:` of outfmt 7 with the `-db`
+  value as given. A title of punctuation that NCBI's cleaner reads past (`, ,`; NCBI BLAST+
+  2.17.0 crashes on it in every format) is written in outfmt 0 as BLASTN writes it for
+  `-subject` (PD-LOSAT-NCBI-DEFECTS) and rejected in the tabular formats, as for BLASTP.
+- Errors: NCBI's texts and exit statuses for a database that is not found or cannot be read,
+  at the point where NCBI reports them, as for BLASTP. A database without sequences fails in the
+  first searched query batch, as in NCBI.
+- `-db` with `-subject` or `-subject_loc` is a usage error, as for BLASTP. LOSAT Web rejects
+  `-db` until stage DB-7.
+
+Rejected explicitly, besides what BLASTP `-db` and the reader reject (the same rules apply):
+
+| Rejected | Why |
+| --- | --- |
+| `-searchsp`, `-db_soft_mask`, `-db_hard_mask` | a stage of its own; masks are not read (P4) |
+| A reported subject whose title gives no subject id: a title of spaces, or an empty title (NCBI writes `gnl|BL_ORD_ID|n` and `BL_ORD_ID:n`; for a protein an empty title gives `unnamed`, which BLASTP writes) | as BLASTP: ids of the general form are not written |
+| `-dbsize` whose effective search space overflows NCBI's `Int8` | NCBI's arithmetic overflows |
+| A database of more letters than the target's `usize` (32-bit targets) | |
+
 ## Evidence
 
 Design and measurements of 2026-10-12 are kept outside the repository by the campaign
@@ -262,9 +311,11 @@ Design and measurements of 2026-10-12 are kept outside the repository by the cam
 `LOSAT/src/seqdb/tests.rs` with fixtures written by NCBI BLAST+ 2.17.0 under
 `LOSAT/tests/seqdb`. The writer's tests are in `LOSAT/src/writedb` (`tests.rs`,
 `fasta_source/tests.rs`) with runs of makeblastdb 2.17.0 recorded in the generated tables
-beside them. The tests of `-db` are frozen NCBI outputs replayed by
+beside them. The tests of `-db` (BLASTP and BLASTN) are frozen NCBI outputs replayed by
 `LOSAT/tests/db_search_fixtures.py` (rows in `LOSAT/tests/db_search_manifest.tsv`, inputs in
 `LOSAT/tests/db_search`, outputs in `LOSAT/tests/fixtures/db_search`; run by
 `ci_fast_regressions.py` at 1 and 4 threads), the search-path cases recorded from NCBI in
-`LOSAT/tests/seqdb/expected/search_path`, and the unit tests of
-`LOSAT/src/algorithm/blastp/blast_engine/database.rs`.
+`LOSAT/tests/seqdb/expected/search_path`, the unit tests of
+`LOSAT/src/algorithm/blastp/blast_engine/database.rs` and
+`LOSAT/src/algorithm/blastn/blast_engine/database.rs`, and `LOSAT/tests/blastn_db_search.rs`
+(BLASTN `-db` at 1, 2 and 4 threads).

@@ -108,7 +108,7 @@ use crate::blastinput::seq_range::{
 };
 use crate::report::pairwise::{
     write_blastn_pairwise_prolog, write_blastn_pairwise_report, BlastnPairwiseQuery,
-    BlastnPairwiseReport, PairwiseConfig,
+    BlastnPairwiseReport, PairwiseConfig, PairwiseDatabase,
 };
 use crate::report::query_warnings::{few_matches_warning, invalid_query_warning, query_warning};
 use crate::stats::KarlinParams;
@@ -133,6 +133,20 @@ use crate::utils::dust::MaskedInterval;
 // the private types and kernels of this file without changing them).
 #[path = "x_pair_seed.rs"]
 mod x_pair_seed;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
+// ```c++
+//     if (args.Exist(kArgDb) && args[kArgDb]) {
+// 	std::string local_dblist = NStr::TruncateSpaces( args[kArgDb].AsString() );
+//
+//         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
+//                                              mol_type));
+// ```
+// The search of an NCBI BLAST database (`-db`): its reading and its drivers of the
+// per-subject kernel of this file (a child module, so that it uses the kernel's private
+// types).
+#[path = "database.rs"]
+mod database;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
 // ```c
@@ -3707,6 +3721,32 @@ fn prelim_hits_by_subject(hit_lists: PrelimHitLists, num_subjects: usize) -> Vec
     by_subject
 }
 
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:196-203
+// ```c
+//    /* sort in order of decreasing subject OID. HSPLists will be
+//       read out from the end of hsplist_array later */
+//
+//    hsp_stream->num_hsplists = num_hsplists;
+//    if (num_hsplists > 1) {
+//       qsort(hsp_stream->sorted_hsplists, num_hsplists,
+//                     sizeof(BlastHSPList *), s_SortHSPListByOid);
+//    }
+// ```
+/// `prelim_hits_by_subject` for a database: the ordinal ids of the kept lists, ascending,
+/// each with its kept HSPs in the same order (the lists of the queries, a query after
+/// another), so that the traceback reads only these sequences
+/// (`database::traceback_listed`).
+fn listed_prelim_hits(hit_lists: PrelimHitLists) -> Vec<(u32, Vec<PrelimHit>)> {
+    let mut by_subject: std::collections::BTreeMap<u32, Vec<PrelimHit>> =
+        std::collections::BTreeMap::new();
+    for hit_list in hit_lists.into_iter().flatten() {
+        for list in hit_list.hsplist_array {
+            by_subject.entry(list.oid).or_default().extend(list.hsps);
+        }
+    }
+    by_subject.into_iter().collect()
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
 // ```c
 // hsp_list = Blast_HSPListFree(hsp_list);
@@ -4857,6 +4897,14 @@ struct BlastnReportInputs<'a> {
     max_target_seqs: Option<usize>,
     db_num_seqs: usize,
     db_len_total: usize,
+    /// The `Database:` lines of a database search's outfmt 0 report.
+    database: Option<&'a PairwiseDatabase>,
+    /// The tabular subject ids of a database search's reported sequences, by rank
+    /// (`database::ReportedSubjects::tabular_subject_ids`); `None` for a subject set.
+    database_subject_ids: Option<&'a [Arc<[u8]>]>,
+    /// Whether the hit lists were finished after each query batch's traceback (a database
+    /// search, `run_in_pool`), not by `post_process_hits_and_write`.
+    finished_hit_lists: bool,
     /// Whether NCBI's epilog (`PrintEpilog`: the outfmt 0 footer, outfmt 7's last line)
     /// follows the reports; an error in a later batch skips it.
     epilog: bool,
@@ -4929,6 +4977,7 @@ fn blastn_pairwise_report(
         database_name: subject_title.to_string(),
         database_num_sequences: report.db_num_seqs,
         database_total_letters: report.db_len_total,
+        database: report.database.cloned(),
         reward: report.reward,
         penalty: report.penalty,
         gap_open: report.gap_open,
@@ -5072,6 +5121,113 @@ fn tabular_subject_ids(
         .collect())
 }
 
+/// The end of the traceback for the final hit list of one query (`hit_list`, of a query of
+/// `query_len` letters): the HSP lists cut to `max_hsps_per_subject` and their subject
+/// best hits (`-subject_besthit`), the lists sorted by e-value and cut to `hitlist_size`,
+/// and the HSPs of each list sorted for the Seq-aligns (`post_process_hits_and_write`;
+/// a database search does it after each query batch's traceback, `run_in_pool`).
+fn finish_query_hit_list(
+    hit_list: &mut BlastnHitList,
+    query_len: usize,
+    hitlist_size: usize,
+    max_hsps_per_subject: usize,
+    subject_besthit: bool,
+) {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:836-867
+    // ```c
+    // for (subject_index = 0; subject_index < hit_list->hsplist_count; ++subject_index) {
+    //     BlastHSPList * hsp_list = hit_list->hsplist_array[subject_index];
+    //     if (hit_options->max_hsps_per_subject) {
+    //         Blast_TrimHSPListByMaxHsps(hsp_list, hit_options);
+    //     }
+    //     if ((hit_options->hsp_filt_opt != NULL) &&
+    //         (hit_options->hsp_filt_opt->subject_besthit_opts != NULL)) {
+    //         Blast_HSPListSubjectBestHit(program_number,
+    //             hit_options->hsp_filt_opt->subject_besthit_opts,
+    //             query_info, hsp_list);
+    //     }
+    // }
+    // ```
+    for hsp_list in &mut hit_list.hsplist_array {
+        if max_hsps_per_subject > 0 {
+            trim_by_max_hsps(hsp_list, max_hsps_per_subject);
+        }
+        if subject_besthit {
+            subject_best_hit(&mut hsp_list.hsps, query_len);
+        }
+    }
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3383-3400
+    // ```c
+    // Int2 Blast_HSPResultsSortByEvalue(BlastHSPResults* results)
+    // {
+    //    for (index = 0; index < results->num_queries; ++index) {
+    //       hit_list = results->hitlist_array[index];
+    //       if (hit_list != NULL && hit_list->hsplist_count > 1) {
+    //          qsort(hit_list->hsplist_array, hit_list->hsplist_count,
+    //                sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
+    //       }
+    //       s_BlastHitListPurge(hit_list);
+    //    }
+    // }
+    // ```
+    hit_list.sort_by_evalue();
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892
+    // ```c
+    // static void s_BlastPruneExtraHits(BlastHSPResults* results, Int4 hitlist_size)
+    // {
+    //    for (subject_index = hitlist_size;
+    //         subject_index < hit_list->hsplist_count; ++subject_index) {
+    //       hit_list->hsplist_array[subject_index] =
+    //       Blast_HSPListFree(hit_list->hsplist_array[subject_index]);
+    //    }
+    //    hit_list->hsplist_count = MIN(hit_list->hsplist_count, hitlist_size);
+    // }
+    // ```
+    hit_list.prune_by_size(hitlist_size);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1571-1577
+    // ```c
+    //         // Sort HSPs with e-values as first priority and scores as
+    //         // tie-breakers, since that is the order we want to see them in
+    //         // in Seq-aligns.
+    //         Blast_HSPListSortByEvalue(hsp_list);
+    // ```
+    // Every format shows the HSPs of a subject in this order. It is the score order,
+    // except where the two strands of a query have different gapped blocks.
+    for hsp_list in &mut hit_list.hsplist_array {
+        sort_hsplist_by_evalue(hsp_list);
+    }
+}
+
+/// The HSPs of score 0 dropped from the finished hit list `hit_list`, and the HSP lists
+/// left without HSPs (`post_process_hits_and_write`).
+fn drop_hsps_of_score_zero(hit_list: &mut BlastnHitList) {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:672-674
+    // ```c
+    //     if (hsp->score == 0) {
+    //         return CRef<CSeq_align>();
+    //     }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1485-1490
+    // ```c
+    //             seqalign =
+    //                 s_BlastHSP2SeqAlign(program, hsp, query_id, subject_id,
+    //                                     query_length, subject_length);
+    //         }
+    //
+    //         if (seqalign.Empty()) continue;
+    // ```
+    // An HSP of score 0 (the traceback reads the ambiguity codes that the preliminary
+    // search read as random bases) has no Seq-align, so no format shows it, and a
+    // subject without other HSPs has no alignments.
+    for hsp_list in &mut hit_list.hsplist_array {
+        hsp_list.hsps.retain(|hsp| hsp.raw_score != 0);
+    }
+    hit_list
+        .hsplist_array
+        .retain(|hsp_list| !hsp_list.hsps.is_empty());
+    hit_list.hsplist_count = hit_list.hsplist_array.len();
+}
+
 fn post_process_hits_and_write(
     mut hit_lists: Vec<Option<BlastnHitList>>,
     hitlist_size: usize,
@@ -5129,85 +5285,24 @@ fn post_process_hits_and_write(
     //     }
     // }
     // ```
-    for (q_idx, hit_list_opt) in hit_lists.iter_mut().enumerate() {
-        let hit_list = match hit_list_opt {
-            Some(value) => value,
-            None => continue,
-        };
-        for hsp_list in &mut hit_list.hsplist_array {
-            if max_hsps_per_subject > 0 {
-                trim_by_max_hsps(hsp_list, max_hsps_per_subject);
-            }
-            if subject_besthit {
-                let query_len = query_lengths.get(q_idx).copied().unwrap_or_default();
-                subject_best_hit(&mut hsp_list.hsps, query_len);
-            }
+    // A database search has finished the hit lists of each query batch after its traceback
+    // (`run_in_pool`: NCBI reads the definition lines of the batch's final hit lists between
+    // the two steps), so they are not finished again.
+    if !report.finished_hit_lists {
+        for (q_idx, hit_list_opt) in hit_lists.iter_mut().enumerate() {
+            let hit_list = match hit_list_opt {
+                Some(value) => value,
+                None => continue,
+            };
+            finish_query_hit_list(
+                hit_list,
+                query_lengths.get(q_idx).copied().unwrap_or_default(),
+                hitlist_size,
+                max_hsps_per_subject,
+                subject_besthit,
+            );
+            drop_hsps_of_score_zero(hit_list);
         }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3383-3400
-        // ```c
-        // Int2 Blast_HSPResultsSortByEvalue(BlastHSPResults* results)
-        // {
-        //    for (index = 0; index < results->num_queries; ++index) {
-        //       hit_list = results->hitlist_array[index];
-        //       if (hit_list != NULL && hit_list->hsplist_count > 1) {
-        //          qsort(hit_list->hsplist_array, hit_list->hsplist_count,
-        //                sizeof(BlastHSPList*), s_EvalueCompareHSPLists);
-        //       }
-        //       s_BlastHitListPurge(hit_list);
-        //    }
-        // }
-        // ```
-        hit_list.sort_by_evalue();
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892
-        // ```c
-        // static void s_BlastPruneExtraHits(BlastHSPResults* results, Int4 hitlist_size)
-        // {
-        //    for (subject_index = hitlist_size;
-        //         subject_index < hit_list->hsplist_count; ++subject_index) {
-        //       hit_list->hsplist_array[subject_index] =
-        //       Blast_HSPListFree(hit_list->hsplist_array[subject_index]);
-        //    }
-        //    hit_list->hsplist_count = MIN(hit_list->hsplist_count, hitlist_size);
-        // }
-        // ```
-        hit_list.prune_by_size(hitlist_size);
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1571-1577
-        // ```c
-        //         // Sort HSPs with e-values as first priority and scores as
-        //         // tie-breakers, since that is the order we want to see them in
-        //         // in Seq-aligns.
-        //         Blast_HSPListSortByEvalue(hsp_list);
-        // ```
-        // Every format shows the HSPs of a subject in this order. It is the score order,
-        // except where the two strands of a query have different gapped blocks.
-        for hsp_list in &mut hit_list.hsplist_array {
-            sort_hsplist_by_evalue(hsp_list);
-        }
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:672-674
-        // ```c
-        //     if (hsp->score == 0) {
-        //         return CRef<CSeq_align>();
-        //     }
-        // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_seqalign.cpp:1485-1490
-        // ```c
-        //             seqalign =
-        //                 s_BlastHSP2SeqAlign(program, hsp, query_id, subject_id,
-        //                                     query_length, subject_length);
-        //         }
-        //
-        //         if (seqalign.Empty()) continue;
-        // ```
-        // An HSP of score 0 (the traceback reads the ambiguity codes that the preliminary
-        // search read as random bases) has no Seq-align, so no format shows it, and a
-        // subject without other HSPs has no alignments.
-        for hsp_list in &mut hit_list.hsplist_array {
-            hsp_list.hsps.retain(|hsp| hsp.raw_score != 0);
-        }
-        hit_list
-            .hsplist_array
-            .retain(|hsp_list| !hsp_list.hsps.is_empty());
-        hit_list.hsplist_count = hit_list.hsplist_array.len();
     }
 
     let total_hits: usize = hit_lists
@@ -5342,7 +5437,10 @@ fn post_process_hits_and_write(
         .iter()
         .any(|&format| format != BlastnOutputFormat::Pairwise)
     {
-        tabular_subject_ids(&hit_lists, report.subjects)?
+        match report.database_subject_ids {
+            Some(ids) => ids.to_vec(),
+            None => tabular_subject_ids(&hit_lists, report.subjects)?,
+        }
     } else {
         Vec::new()
     };
@@ -5548,6 +5646,133 @@ pub fn run(
     // ```
     // The handler of the database arguments raises it, before the query and the output
     // are opened (`CStdCmdLineArgs` comes after it).
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
+    // ```c++
+    //     if (args.Exist(kArgDb) && args[kArgDb]) {
+    // 	std::string local_dblist = NStr::TruncateSpaces( args[kArgDb].AsString() );
+    //
+    //         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
+    //                                              mol_type));
+    // ```
+    // With `-db` the handler of the database arguments only keeps the name: the database
+    // is opened after every option handler has run (`search_cli`). With `-subject` it
+    // reads the subjects here, before the query and the output are opened.
+    let cli_subjects = if args.db.is_some() {
+        None
+    } else {
+        Some(read_cli_subjects(&args, &settings)?)
+    };
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
+    // ```c
+    //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
+    //         m_InputStream == NULL) {
+    // ...
+    //         else {
+    //             m_InputStream = &args[kArgQuery].AsInputFile();
+    //         }
+    //     }
+    // ...
+    //     else {
+    //         m_OutputStream = &args[kArgOutput].AsOutputFile();
+    //     }
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/corelib/ncbiargs.cpp:777-781
+    // ```c
+    //     if (AsString() == "-") {
+    // #if defined(NCBI_OS_MSWIN)
+    //         NcbiSys_setmode(NcbiSys_fileno(stdout), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
+    // #endif
+    //         m_Ios = &cout;
+    // ```
+    // The output file is created here, before the options are checked, so a run that
+    // stops at a check leaves an empty file; `-` is standard output.
+    check_utf8_file_name(&args.query, "query", "BLASTN")?;
+    let query_file = open_input(&args.query, "query", "BLASTN")?;
+    // The output file is opened once, as NCBI's stream (a named pipe gives one reader one
+    // end of file).
+    if let Some(path) = args.out.as_deref() {
+        check_utf8_file_name(path, "out", "BLASTN")?;
+    }
+    let out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
+        Some(path) => Some(std::io::BufWriter::new(
+            std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
+        )),
+        None => None,
+    };
+    let outfmt = args.outfmt.clone();
+    let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
+    let mut stderr = std::io::stderr();
+    let mut report = crate::cli::ReportStream {
+        inner: match out_file {
+            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
+            None => crate::cli::report_standard_output(),
+        },
+        failed: false,
+    };
+    let result = {
+        let mut outputs =
+            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut stderr);
+        search_cli(
+            args,
+            query_file,
+            cli_subjects.as_ref().map(|read| {
+                (
+                    read.subjects.as_slice(),
+                    SubjectRanges {
+                        placements: &read.placements,
+                        records: read.records.as_deref(),
+                    },
+                )
+            }),
+            &mut outputs,
+            output_formats,
+            settings,
+        )
+    };
+    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
+    let flushed = std::io::Write::flush(&mut report);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
+    // ```c
+    // {
+    //     m_Outfile.exceptions(NcbiBadbit);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
+    // ```c
+    //     catch (const std::ios::failure&) {                                      \
+    //         LOG_POST(Error << "BLAST failed to write output");                  \
+    //         exit_code = BLAST_OUTPUT_ERROR;                                     \
+    //     }                                                                       \
+    // ```
+    // The outfmt 0 formatter's stream throws when a write fails (oracle: `-out /dev/full`,
+    // exit 6). For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
+    if report.failed && pairwise {
+        return Err(crate::cli::NativeError {
+            exit: 6,
+            message: "BLAST failed to write output\n".to_string(),
+        }
+        .into());
+    }
+    result?;
+    flushed.context("failed to write the output")
+}
+
+/// The subjects of `-subject` as the handler of the database arguments reads them (`run`):
+/// the searched records (their intervals with `-subject_loc`), where their letters lie in
+/// the records, and the records as read (with `-subject_loc`).
+struct CliSubjects {
+    subjects: Vec<FastaRecord>,
+    placements: Placements,
+    records: Option<Vec<FastaRecord>>,
+}
+
+/// Reads the subjects of `-subject` where NCBI's handler of the database arguments reads
+/// them (`run`; NCBI references there), with NCBI's error when `-subject` is missing (a
+/// search without `-db`).
+fn read_cli_subjects(
+    args: &BlastnArgs,
+    settings: &crate::blastinput::ncbi_environment::ApplicationSettings,
+) -> Result<CliSubjects> {
     let Some(subject_path) = args.subject.as_deref() else {
         return Err(crate::cli::NativeError {
             exit: 1,
@@ -5605,105 +5830,21 @@ pub fn run(
         None => (read_subjects, Placements::default(), None),
     };
     check_subjects_not_empty(&subjects)?;
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3456-3481
-    // ```c
-    //     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue() &&
-    //         m_InputStream == NULL) {
-    // ...
-    //         else {
-    //             m_InputStream = &args[kArgQuery].AsInputFile();
-    //         }
-    //     }
-    // ...
-    //     else {
-    //         m_OutputStream = &args[kArgOutput].AsOutputFile();
-    //     }
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/corelib/ncbiargs.cpp:777-781
-    // ```c
-    //     if (AsString() == "-") {
-    // #if defined(NCBI_OS_MSWIN)
-    //         NcbiSys_setmode(NcbiSys_fileno(stdout), (mode & IOS_BASE::binary) ? O_BINARY : O_TEXT);
-    // #endif
-    //         m_Ios = &cout;
-    // ```
-    // The output file is created here, before the options are checked, so a run that
-    // stops at a check leaves an empty file; `-` is standard output.
-    check_utf8_file_name(&args.query, "query", "BLASTN")?;
-    let query_file = open_input(&args.query, "query", "BLASTN")?;
-    // The output file is opened once, as NCBI's stream (a named pipe gives one reader one
-    // end of file).
-    if let Some(path) = args.out.as_deref() {
-        check_utf8_file_name(path, "out", "BLASTN")?;
-    }
-    let out_file = match args.out.as_deref().filter(|path| path.as_os_str() != "-") {
-        Some(path) => Some(std::io::BufWriter::new(
-            std::fs::File::create(path).map_err(|_| crate::cli::inaccessible("out", path))?,
-        )),
-        None => None,
-    };
-    let outfmt = args.outfmt.clone();
-    let pairwise = output_formats.contains(&BlastnOutputFormat::Pairwise);
-    let mut stderr = std::io::stderr();
-    let mut report = crate::cli::ReportStream {
-        inner: match out_file {
-            Some(file) => Box::new(file) as Box<dyn std::io::Write + Send>,
-            None => crate::cli::report_standard_output(),
-        },
-        failed: false,
-    };
-    let result = {
-        let mut outputs =
-            ReportOutputs::single(&outfmt, OutputSink::Writer(&mut report), &mut stderr);
-        search_cli(
-            args,
-            query_file,
-            &subjects,
-            SubjectRanges {
-                placements: &subject_placements,
-                records: full_subjects.as_deref(),
-            },
-            &mut outputs,
-            output_formats,
-            settings,
-        )
-    };
-    // What was written before an error (such as the outfmt 0 prolog) stays in the file.
-    let flushed = std::io::Write::flush(&mut report);
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:118-119
-    // ```c
-    // {
-    //     m_Outfile.exceptions(NcbiBadbit);
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/app/blast/blast_app_util.hpp:252-255
-    // ```c
-    //     catch (const std::ios::failure&) {                                      \
-    //         LOG_POST(Error << "BLAST failed to write output");                  \
-    //         exit_code = BLAST_OUTPUT_ERROR;                                     \
-    //     }                                                                       \
-    // ```
-    // The outfmt 0 formatter's stream throws when a write fails (oracle: `-out /dev/full`,
-    // exit 6). For outfmt 6/7 NCBI aborts instead, and LOSAT reports the error
-    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES).
-    if report.failed && pairwise {
-        return Err(crate::cli::NativeError {
-            exit: 6,
-            message: "BLAST failed to write output\n".to_string(),
-        }
-        .into());
-    }
-    result?;
-    flushed.context("failed to write the output")
+    Ok(CliSubjects {
+        subjects,
+        placements: subject_placements,
+        records: full_subjects,
+    })
 }
 
 /// The part of `run` after the output is opened: NCBI's filtering handler (`-dust`), the
-/// processing of the options, `Query is Empty!`, the reading of the queries and the search.
-#[allow(clippy::too_many_arguments)]
+/// processing of the options, the opening of the database of `-db`, `Query is Empty!`, the
+/// reading of the queries and the search. `subjects` are those of `-subject` (`None` with
+/// `-db`).
 fn search_cli(
     mut args: BlastnArgs,
     query_file: std::fs::File,
-    subjects: &[FastaRecord],
-    subject_ranges: SubjectRanges<'_>,
+    subjects: Option<(&[FastaRecord], SubjectRanges<'_>)>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
@@ -5711,6 +5852,32 @@ fn search_cli(
     args.resolve_dust()?;
     let query_range = parse_query_range(&args)?;
     process_options(&args, outputs)?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
+    // ```c++
+    //         /*** Initialize the database/subject ***/
+    //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+    //         CRef<CLocalDbAdapter> db_adapter;
+    //         CRef<CScope> scope;
+    //         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+    //                          db_adapter, scope);
+    //         _ASSERT(db_adapter && scope);
+    // ```
+    // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:213-219
+    // ```c++
+    //         try {
+    //             // Try to open the BLAST database even for remote searches, as if
+    //             // it is available locally, it will be better to fetch the
+    //             // sequence data for formatting from this (local) source
+    //             CRef<CSeqDB> seqdb = search_db->GetSeqDb();
+    //             db_adapter.Reset(new CLocalDbAdapter(*search_db));
+    //             dl = RegisterOMDataLoader(seqdb);
+    // ```
+    // The database of `-db` is opened here: after the option handlers (the query file is
+    // open and the output file exists) and before the test for an empty query.
+    let database = match args.database_name() {
+        Some(name) => Some(database::BlastnDatabase::open(name, &settings)?),
+        None => None,
+    };
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:201-214
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -5770,6 +5937,19 @@ fn search_cli(
         QueryEnd::Input => QueryReading::End,
         QueryEnd::EofError => QueryReading::BlankLines,
         QueryEnd::Error { error, warnings } => QueryReading::Error { error, warnings },
+    };
+    // A database has no subject ranges (`-subject_loc` excludes `-db`).
+    let no_placements = Placements::default();
+    let (subjects, subject_ranges) = match (subjects, database.as_ref()) {
+        (Some((records, ranges)), _) => (Subjects::Records(records), ranges),
+        (None, Some(database)) => (
+            Subjects::Database(database),
+            SubjectRanges {
+                placements: &no_placements,
+                records: None,
+            },
+        ),
+        (None, None) => unreachable!("`run` reads the subjects of a search without -db"),
     };
     search(
         args,
@@ -5945,6 +6125,11 @@ pub fn run_local(
     subject_records: &[FastaRecord],
     outputs: &mut ReportOutputs<'_>,
 ) -> Result<()> {
+    // The callers of `run_local` (LOSAT Web's adapter, ABI v1) give subject records; a
+    // database is read from files by the command line only.
+    if args.db.is_some() {
+        anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
+    }
     let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
@@ -5973,7 +6158,7 @@ pub fn run_local(
                 records: ranged_subjects.is_some().then_some(subject_records),
             },
         },
-        searched_subjects,
+        Subjects::Records(searched_subjects),
         outputs,
         output_formats,
     )
@@ -5984,7 +6169,7 @@ fn search(
     query_records: &[FastaRecord],
     reading: QueryReading,
     ranges: Ranges<'_>,
-    subject_records: &[FastaRecord],
+    subjects: Subjects<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
 ) -> Result<()> {
@@ -6023,8 +6208,10 @@ fn search(
     // The formatter, made after `Query is Empty!` and before the outfmt 0 prolog, sets up
     // the subjects: a subject without letters (a record without residues, or an interval
     // that starts just past its record's end) gets its warning, stays in the database
-    // statistics with no letters, and never hits.
-    write_empty_subject_warnings(subject_records, "blastn", outputs.diagnostics)?;
+    // statistics with no letters, and never hits. (A database is not set up so.)
+    if let Subjects::Records(subject_records) = subjects {
+        write_empty_subject_warnings(subject_records, "blastn", outputs.diagnostics)?;
+    }
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
     // NCBI's x_CleanAndCompress reads past the end of some titles of punctuation (NCBI
@@ -6033,7 +6220,7 @@ fn search(
     // LOSAT's limits come where NCBI starts the search, after its checks and its
     // `Query is Empty!` success.
     check_losat_limits(&args)?;
-    check_unsupported_environment()?;
+    check_unsupported_environment(matches!(subjects, Subjects::Database(_)))?;
     let batching = query_batching_from_environment(
         super::super::coordination::task_uses_megablast_chunks(&args.task),
     )?;
@@ -6064,15 +6251,18 @@ fn search(
     //         }
     // ```
     // The report and the query batches (`GetDbTotalLength`) take the total through an
-    // `int`, which LOSAT does not reproduce beyond its range.
-    let subject_letters: usize = subject_records
-        .iter()
-        .map(|record| record.seq().len())
-        .sum();
-    if subject_letters > i32::MAX as usize {
-        anyhow::bail!(
-            "the subjects have {subject_letters} letters; NCBI BLAST+ reports a total of 2^31 letters or more through a 32-bit int, which is not supported by LOSAT's BLASTN"
-        );
+    // `int`, which LOSAT does not reproduce beyond its range. (A database's total is the
+    // `Int8` of `GetBlastDbInfo`, blast_format.cpp:140-154.)
+    if let Subjects::Records(subject_records) = subjects {
+        let subject_letters: usize = subject_records
+            .iter()
+            .map(|record| record.seq().len())
+            .sum();
+        if subject_letters > i32::MAX as usize {
+            anyhow::bail!(
+                "the subjects have {subject_letters} letters; NCBI BLAST+ reports a total of 2^31 letters or more through a 32-bit int, which is not supported by LOSAT's BLASTN"
+            );
+        }
     }
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // TBlastThreads the_threads(GetNumberOfThreads());
@@ -6084,7 +6274,7 @@ fn search(
             reading,
             &query_records,
             &query_input,
-            subject_records,
+            subjects,
             ranges.subjects,
             outputs,
             output_formats,
@@ -6116,9 +6306,10 @@ fn search(
 /// ```
 /// `BL2SEQ_LEGACY` (any value, also an empty one) turns off the scan of the subjects as a
 /// database: `CLocalBlast` then searches each subject on its own (local_blast.cpp:189,289)
-/// and `CBlastFormat` writes the legacy bl2seq report (`m_IsBl2Seq && !m_IsDbScan`).
-fn check_unsupported_environment() -> Result<()> {
-    if std::env::var_os("BL2SEQ_LEGACY").is_some() {
+/// and `CBlastFormat` writes the legacy bl2seq report (`m_IsBl2Seq && !m_IsDbScan`). NCBI
+/// reads it in that branch only: a database search (`database`) does not read it.
+fn check_unsupported_environment(database: bool) -> Result<()> {
+    if !database && std::env::var_os("BL2SEQ_LEGACY").is_some() {
         anyhow::bail!(
             "the environment variable BL2SEQ_LEGACY, which makes NCBI BLAST+ search each subject on its own and write its legacy bl2seq report, is not supported by LOSAT's BLASTN"
         );
@@ -6170,6 +6361,49 @@ impl std::fmt::Display for ErrorAfterInvalidBatches {
 }
 
 impl std::error::Error for ErrorAfterInvalidBatches {}
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:295-312
+// ```c++
+//                 CLocalBlast lcl_blast(queries, m_OptsHndl, db_adapter);
+//                 lcl_blast.SetNumberOfThreads(m_CmdLineArgs->GetNumThreads());
+// 		        lcl_blast.SetBatchNumber( batch_num );
+//                 results = lcl_blast.Run();
+//     ...
+//                 ITERATE(CSearchResultSet, result, *results) {
+//                     formatter.PrintOneResultSet(**result, query_batch);
+//                 }
+// ```
+/// A database error of a query batch's search (`database::search_blocks`,
+/// `database::traceback_listed`) as NCBI reports it: a sequence file that the preliminary
+/// search cannot read is NCBI's `BLAST engine error` (`database::PreliminaryReadError`,
+/// local_blast.cpp:240-251), one that the traceback cannot read its `BLAST Database
+/// error`. NCBI raises it in the batch's search, after the outfmt 0 prolog and the reports
+/// of the batches before (`ErrorAfterInvalidBatches`; for the first batch, the prolog of a
+/// file sink is written here, the others were written before the search). LOSAT's
+/// refusals are errors of their own.
+fn database_search_error(
+    error: anyhow::Error,
+    first_batch: bool,
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    megablast: bool,
+    shown: &ShownSubjects,
+) -> anyhow::Error {
+    let error = match error.downcast::<database::PreliminaryReadError>() {
+        Ok(read_error) => crate::blastinput::app::engine_error(read_error.0),
+        Err(error) => error,
+    };
+    if !error.is::<crate::cli::NativeError>() {
+        return error;
+    }
+    if !first_batch {
+        return ErrorAfterInvalidBatches(error).into();
+    }
+    match write_pairwise_prologs(outputs, output_formats, megablast, shown, false) {
+        Ok(()) => error,
+        Err(write_error) => write_error,
+    }
+}
 
 /// NCBI's query batch size (`GetQueryBatchSize`, 0 for the adaptive `CBatchSizeMixer`) and
 /// query chunk sizes, as a query batch of the search uses them.
@@ -6263,6 +6497,140 @@ struct PreparedSubjects<'a> {
     packed: Vec<Vec<u8>>,
 }
 
+/// The subjects of a search as its caller gives them.
+#[derive(Clone, Copy)]
+enum Subjects<'a> {
+    /// A FASTA subject set (`-subject`, or the records of `run_local`): the searched
+    /// records (their intervals with `-subject_loc`).
+    Records(&'a [FastaRecord]),
+    /// An NCBI BLAST database (`-db`).
+    Database(&'a database::BlastnDatabase),
+}
+
+/// What the query batches search (`search_query_batch`): the prepared subject set, or the
+/// database, which is read in blocks for each batch (`database::search_blocks`).
+#[derive(Clone, Copy)]
+enum SubjectSource<'a> {
+    Prepared(&'a PreparedSubjects<'a>),
+    Database(&'a database::BlastnDatabase),
+}
+
+impl<'a> SubjectSource<'a> {
+    /// The number of sequences and the total length (the real ones, also with `-dbsize`).
+    fn metadata(self) -> &'a SubjectMetadata {
+        match self {
+            SubjectSource::Prepared(prepared) => &prepared.metadata,
+            SubjectSource::Database(database) => database.metadata(),
+        }
+    }
+
+    /// The prepared subject set; none for a database.
+    fn prepared(self) -> Option<&'a PreparedSubjects<'a>> {
+        match self {
+            SubjectSource::Prepared(prepared) => Some(prepared),
+            SubjectSource::Database(_) => None,
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:129-153
+// ```c++
+//     if(m_IsDbScan) {
+// 	int num_seqs=0;
+//         int total_length=0;
+// 	if (!is_remote_search)
+//         {
+//                 BlastSeqSrc* seqsrc = db_adapter.MakeSeqSrc();
+//                 num_seqs=BlastSeqSrcGetNumSeqs(seqsrc);
+//                 total_length=static_cast<int>(BlastSeqSrcGetTotLen(seqsrc));
+//         }
+// 	CBlastFormatUtil::FillScanModeBlastDbInfo(m_DbInfo, m_DbIsAA,
+//                 num_seqs, total_length, m_SubjectTag);
+//     } else {
+//     ...
+//         CBlastFormatUtil::GetBlastDbInfo(m_DbInfo, m_DbName, m_DbIsAA,
+//                                    dbfilt_algorithm, is_remote_search);
+//     }
+// ```
+/// What the reports show of the subjects (NCBI's `m_DbInfo` and `m_DbName`): the name of
+/// outfmt 7's `# Database:` line and of the outfmt 0 `Database:` lines of a subject set
+/// (`User specified sequence set (Input: PATH)`; the `-db` value for a database), the
+/// counts, and for a database the lines of `GetBlastDbInfo` (`PairwiseDatabase`).
+struct ShownSubjects {
+    name: String,
+    num_seqs: usize,
+    total_letters: usize,
+    database: Option<PairwiseDatabase>,
+}
+
+impl ShownSubjects {
+    fn new(args: &BlastnArgs, source: SubjectSource<'_>) -> Self {
+        let metadata = source.metadata();
+        match source {
+            SubjectSource::Prepared(_) => ShownSubjects {
+                name: format!(
+                    "User specified sequence set (Input: {})",
+                    args.subject_path().display()
+                ),
+                num_seqs: metadata.db_num_seqs,
+                total_letters: metadata.db_len_total,
+                database: None,
+            },
+            SubjectSource::Database(database) => ShownSubjects {
+                name: database.name().to_string(),
+                num_seqs: metadata.db_num_seqs,
+                total_letters: metadata.db_len_total,
+                database: Some(database.pairwise_database()),
+            },
+        }
+    }
+}
+
+/// One subject as the per-subject kernel (`process_subject` of `search_query_batch`)
+/// reads it: a record of a subject set, or a sequence of a database.
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
+/// ```c
+/// if (subj_is_na) {
+///     BlastSeqBlkSetSequence(subj, sequence.data.release(),
+///        ((sentinels == eSentinels) ? sequence.length - 2 :
+///         sequence.length));
+///     ...
+///     SBlastSequence compressed_seq =
+///         subjects.GetBlastSequence(i, eBlastEncodingNcbi2na,
+///                                   eNa_strand_plus, eNoSentinels);
+///     BlastSeqBlkSetCompressedSequence(subj,
+///                               compressed_seq.data.release());
+/// }
+/// ```
+#[derive(Clone, Copy)]
+struct BlastnSubjectRef<'a> {
+    /// The number of bases.
+    length: usize,
+    /// The packed ncbi2na letters that the preliminary stage scans (four bases per byte,
+    /// the count of the last byte's bases in its two low bits): the subject set's
+    /// (`encode_subject_ncbi2na_packed`) or the database's stored data.
+    packed: &'a [u8],
+    /// The letters of a subject set's record: its lowercase masks (`-lcase_masking`) and
+    /// the traceback's BLASTNA letters come from them. `None` for a database sequence.
+    letters: Option<&'a [u8]>,
+    /// The BLASTNA letters of a database sequence in the traceback
+    /// (`database::traceback_listed`), without sentinel bytes; `None` otherwise.
+    blastna: Option<&'a [u8]>,
+}
+
+impl<'a> BlastnSubjectRef<'a> {
+    /// The record `record` of a subject set, with its packed letters `packed`.
+    fn record(record: &'a FastaRecord, packed: &'a [u8]) -> Self {
+        BlastnSubjectRef {
+            length: record.seq().len(),
+            packed,
+            letters: Some(record.seq()),
+            blastna: None,
+        }
+    }
+}
+
 /// The results of one query batch, with the values of its query contexts that the reports
 /// use.
 struct QueryBatch {
@@ -6329,28 +6697,41 @@ fn run_in_pool(
     reading: QueryReading,
     query_records: &[FastaRecord],
     query_input: &QueryInput,
-    subject_records: &[FastaRecord],
+    subjects: Subjects<'_>,
     subject_ranges: SubjectRanges<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     mut batching: QueryBatching,
 ) -> Result<()> {
-    let metadata = subject_metadata_from_records(subject_records);
-    if metadata.db_num_seqs == 0 {
-        for record in input_records {
-            outputs.diagnostics.write_all(&record.warnings)?;
+    let prepared: PreparedSubjects<'_>;
+    let source = match subjects {
+        Subjects::Records(subject_records) => {
+            let metadata = subject_metadata_from_records(subject_records);
+            if metadata.db_num_seqs == 0 {
+                for record in input_records {
+                    outputs.diagnostics.write_all(&record.warnings)?;
+                }
+                return Ok(());
+            }
+            prepared = PreparedSubjects {
+                records: subject_records,
+                packed: subject_records
+                    .iter()
+                    .map(|record| encode_subject_ncbi2na_packed(record.seq()))
+                    .collect(),
+                metadata,
+            };
+            SubjectSource::Prepared(&prepared)
         }
-        return Ok(());
-    }
-    let subjects = PreparedSubjects {
-        records: subject_records,
-        packed: subject_records
-            .iter()
-            .map(|record| encode_subject_ncbi2na_packed(record.seq()))
-            .collect(),
-        metadata,
+        // A database without sequences fails in the first searched batch
+        // (`search_query_batch`).
+        Subjects::Database(database) => SubjectSource::Database(database),
     };
+    // The subjects as the reports show them, and the stored titles of the database
+    // sequences that the final hit lists of the batches name (`database::read_titles`).
+    let shown = ShownSubjects::new(&args, source);
+    let mut titles = database::DatabaseTitles::new();
     let megablast = args.task == "megablast";
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:258-261
     // ```c
@@ -6362,21 +6743,11 @@ fn run_in_pool(
     // NCBI writes the outfmt 0 prolog before it reads the first query batch, and its stream
     // throws at the prolog's first flush when the write fails (blast_format.cpp:118-119),
     // before any query is read or searched.
-    let subject_title = format!(
-        "User specified sequence set (Input: {})",
-        args.subject_path().display()
-    );
-    write_pairwise_prologs(
-        outputs,
-        &output_formats,
-        megablast,
-        &subject_title,
-        &subjects.metadata,
-        true,
-    )?;
+    write_pairwise_prologs(outputs, &output_formats, megablast, &shown, true)?;
     let mut mixer = BatchSizeMixer::new(batching.split.mixer_max_batch_size());
     if batching.fixed_batch_size == 0 {
-        let total_length = subjects.metadata.db_len_total as i64;
+        // A database's total is the `Int8` of its index files (`GetDbTotalLength`).
+        let total_length = source.metadata().db_len_total as i64;
         if total_length > 0 {
             mixer.set_target_hits((total_length / 3000) as i32);
         }
@@ -6405,7 +6776,11 @@ fn run_in_pool(
         return write_batch_reports(
             &args,
             &[],
-            &subjects,
+            ReportSubjects {
+                source,
+                shown: &shown,
+                titles: &titles,
+            },
             &ReportRanges {
                 queries: query_input,
                 subjects: subject_ranges,
@@ -6427,14 +6802,7 @@ fn run_in_pool(
     // A batch size of 0 (`CHUNK_SIZE` 1000 without `BATCH_SIZE`: the mixer's maximum is
     // 0) reads no query, so the first batch fails after the prolog (outfmt 0).
     if batching.batch_size == 0 {
-        write_pairwise_prologs(
-            outputs,
-            &output_formats,
-            megablast,
-            &subject_title,
-            &subjects.metadata,
-            false,
-        )?;
+        write_pairwise_prologs(outputs, &output_formats, megablast, &shown, false)?;
         return Err(crate::cli::NativeError {
             exit: 3,
             message: "BLAST engine error: Empty CBlastQueryVector\n".to_string(),
@@ -6528,11 +6896,14 @@ fn run_in_pool(
                 write_before_failed_batch(
                     &args,
                     &query_records[..start],
-                    &subjects,
+                    ReportSubjects {
+                        source,
+                        shown: &shown,
+                        titles: &titles,
+                    },
                     &report_ranges,
                     outputs,
                     &output_formats,
-                    &subject_title,
                     BatchResults {
                         hit_lists,
                         warnings: &warnings[..start],
@@ -6564,11 +6935,14 @@ fn run_in_pool(
             write_before_failed_batch(
                 &args,
                 &query_records[..start],
-                &subjects,
+                ReportSubjects {
+                    source,
+                    shown: &shown,
+                    titles: &titles,
+                },
                 &report_ranges,
                 outputs,
                 &output_formats,
-                &subject_title,
                 BatchResults {
                     hit_lists,
                     warnings: &warnings[..start],
@@ -6629,11 +7003,14 @@ fn run_in_pool(
             write_before_failed_batch(
                 &args,
                 &query_records[..start],
-                &subjects,
+                ReportSubjects {
+                    source,
+                    shown: &shown,
+                    titles: &titles,
+                },
                 &report_ranges,
                 outputs,
                 &output_formats,
-                &subject_title,
                 BatchResults {
                     hit_lists,
                     warnings: &warnings[..start],
@@ -6658,7 +7035,7 @@ fn run_in_pool(
         let batch = match search_query_batch(
             &args,
             &query_records[start..end],
-            &subjects,
+            source,
             outputs,
             &output_formats,
             parallel_pool,
@@ -6691,7 +7068,11 @@ fn run_in_pool(
                     write_batch_reports(
                         &args,
                         &query_records[..start],
-                        &subjects,
+                        ReportSubjects {
+                            source,
+                            shown: &shown,
+                            titles: &titles,
+                        },
                         &report_ranges,
                         outputs,
                         &output_formats,
@@ -6720,9 +7101,87 @@ fn run_in_pool(
                 }
             },
         };
+        let mut batch_hit_lists = batch.hit_lists;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/api/traceback_stage.cpp:264-275
+        // ```c++
+        //     CRef<ILocalQueryData> qdata = m_QueryFactory->MakeLocalQueryData(m_Options);
+        //
+        //     vector<TSeqLocInfoVector> subj_masks;
+        //     TSeqAlignVector aligns =
+        //         LocalBlastResults2SeqAlign(hsp_results,
+        //                                    *qdata,
+        //                                    *m_SeqInfoSrc,
+        //                                    m_OptsMemento->m_ProgramType,
+        //                                    m_Options->GetGappedMode(),
+        //                                    m_Options->GetOutOfFrameMode(),
+        //                                    subj_masks,
+        //                                    m_ResultType);
+        // ```
+        // A database: the batch's hit lists are finished now (`finish_query_hit_list`, the
+        // end of NCBI's traceback), and the definition lines of the sequences they name are
+        // read in NCBI's order where NCBI makes the batch's Seq-aligns
+        // (`database::read_titles`), before the HSPs of score 0 are dropped. A header file
+        // that NCBI cannot read fails this batch, after the reports of the batches before
+        // and the messages of this batch's reading.
+        if let SubjectSource::Database(database) = source {
+            let hitlist_size = match args.max_target_seqs {
+                Some(max_target_seqs) if max_target_seqs > 0 => max_target_seqs,
+                _ => args.hitlist_size,
+            };
+            for (q_idx, hit_list) in batch_hit_lists.iter_mut().enumerate() {
+                if let Some(hit_list) = hit_list {
+                    finish_query_hit_list(
+                        hit_list,
+                        lengths[start + q_idx],
+                        hitlist_size,
+                        args.max_hsps_per_subject.unwrap_or(0),
+                        args.subject_besthit,
+                    );
+                }
+            }
+            if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
+                let error = match error.downcast::<database::HeaderReadError>() {
+                    Ok(failure) => failure.error,
+                    // LOSAT's refusal: the warnings of the batches read so far, as for the
+                    // other errors of a batch (below).
+                    Err(error) => {
+                        for query_warnings in &warnings[..=start] {
+                            outputs.diagnostics.write_all(query_warnings)?;
+                        }
+                        return Err(error);
+                    }
+                };
+                write_before_failed_batch(
+                    &args,
+                    &query_records[..start],
+                    ReportSubjects {
+                        source,
+                        shown: &shown,
+                        titles: &titles,
+                    },
+                    &report_ranges,
+                    outputs,
+                    &output_formats,
+                    BatchResults {
+                        hit_lists,
+                        warnings: &warnings[..start],
+                        lengths: &lengths[..start],
+                        unsearched,
+                        query_masks: &query_masks,
+                        context_karlin: &context_karlin,
+                        query_eff_searchsp: &query_eff_searchsp,
+                    },
+                )?;
+                outputs.diagnostics.write_all(&warnings[start])?;
+                return Err(error);
+            }
+            for hit_list in batch_hit_lists.iter_mut().flatten() {
+                drop_hsps_of_score_zero(hit_list);
+            }
+        }
         // The batch numbers its queries from 0.
         let first = start as u32;
-        hit_lists.extend(batch.hit_lists.into_iter().map(|list| {
+        hit_lists.extend(batch_hit_lists.into_iter().map(|list| {
             list.map(|mut list| {
                 for hsp_list in &mut list.hsplist_array {
                     hsp_list.query_index += first;
@@ -6769,7 +7228,11 @@ fn run_in_pool(
     write_batch_reports(
         &args,
         query_records,
-        &subjects,
+        ReportSubjects {
+            source,
+            shown: &shown,
+            titles: &titles,
+        },
         &report_ranges,
         outputs,
         &output_formats,
@@ -6799,8 +7262,7 @@ fn write_pairwise_prologs(
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
     megablast: bool,
-    subject_title: &str,
-    metadata: &SubjectMetadata,
+    shown: &ShownSubjects,
     before_search: bool,
 ) -> Result<()> {
     for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
@@ -6812,9 +7274,10 @@ fn write_pairwise_prologs(
                 &mut writer,
                 NCBI_BLASTN_VERSION,
                 megablast,
-                subject_title,
-                metadata.db_num_seqs,
-                metadata.db_len_total,
+                &shown.name,
+                shown.num_seqs,
+                shown.total_letters,
+                shown.database.as_ref(),
             )?;
             writer.flush()?;
         }
@@ -6858,11 +7321,10 @@ pub(crate) const NO_DATA_MESSAGE: &str = "Sequence contains no data";
 fn write_before_failed_batch(
     args: &BlastnArgs,
     before: &[FastaRecord],
-    subjects: &PreparedSubjects<'_>,
+    subjects: ReportSubjects<'_>,
     ranges: &ReportRanges<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
-    subject_title: &str,
     results: BatchResults<'_>,
 ) -> Result<()> {
     if before.is_empty() {
@@ -6870,8 +7332,7 @@ fn write_before_failed_batch(
             outputs,
             output_formats,
             args.task == "megablast",
-            subject_title,
-            &subjects.metadata,
+            subjects.shown,
             false,
         )
     } else {
@@ -6888,13 +7349,23 @@ fn write_before_failed_batch(
     }
 }
 
+/// The subjects as the reports read them: what the batches searched, how the reports show
+/// it, and for a database the stored titles of the sequences that the final hit lists
+/// name (`database::read_titles`; empty for a subject set).
+#[derive(Clone, Copy)]
+struct ReportSubjects<'a> {
+    source: SubjectSource<'a>,
+    shown: &'a ShownSubjects,
+    titles: &'a database::DatabaseTitles,
+}
+
 /// Writes the reports of `query_records` (the queries of the batches searched), with
 /// NCBI's epilog (`PrintEpilog`) when `epilog`.
 #[allow(clippy::too_many_arguments)]
 fn write_batch_reports(
     args: &BlastnArgs,
     query_records: &[FastaRecord],
-    subjects: &PreparedSubjects<'_>,
+    subjects: ReportSubjects<'_>,
     ranges: &ReportRanges<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
@@ -6903,9 +7374,41 @@ fn write_batch_reports(
 ) -> Result<()> {
     let megablast = args.task == "megablast";
     let config = configure_task(args);
+    let mut hit_lists = results.hit_lists;
+    // A database: the reported sequences, named by rank from here on, with their stored
+    // titles, and their stored letters where a report shows them (outfmt 0 and the hit
+    // records; `database::reported_subjects`).
+    let reported = match subjects.source {
+        SubjectSource::Prepared(_) => None,
+        SubjectSource::Database(database) => {
+            let letters =
+                outputs.hits.is_some() || output_formats.contains(&BlastnOutputFormat::Pairwise);
+            Some(database::reported_subjects(
+                database,
+                subjects.titles,
+                &mut hit_lists,
+                letters,
+            )?)
+        }
+    };
+    let database_subject_ids = match &reported {
+        Some(reported)
+            if output_formats
+                .iter()
+                .any(|&format| format != BlastnOutputFormat::Pairwise) =>
+        {
+            Some(reported.tabular_subject_ids()?)
+        }
+        _ => None,
+    };
+    let subject_records: &[FastaRecord] = match (&reported, subjects.source) {
+        (Some(reported), _) => &reported.records,
+        (None, SubjectSource::Prepared(prepared)) => prepared.records,
+        (None, SubjectSource::Database(_)) => &[],
+    };
     let report_inputs = BlastnReportInputs {
         queries: query_records,
-        subjects: subjects.records,
+        subjects: subject_records,
         ranges,
         query_masks: results.query_masks,
         lcase_masking: args.lcase_masking,
@@ -6923,8 +7426,11 @@ fn write_batch_reports(
         window_size: config.window_size,
         context_karlin: results.context_karlin,
         max_target_seqs: args.max_target_seqs,
-        db_num_seqs: subjects.metadata.db_num_seqs,
-        db_len_total: subjects.metadata.db_len_total,
+        db_num_seqs: subjects.shown.num_seqs,
+        db_len_total: subjects.shown.total_letters,
+        database: subjects.shown.database.as_ref(),
+        database_subject_ids: database_subject_ids.as_deref(),
+        finished_hit_lists: reported.is_some(),
         epilog,
         prolog: outputs
             .formats
@@ -6959,16 +7465,15 @@ fn write_batch_reports(
         .map(|record| Arc::from(record.shown_id()))
         .collect();
     let query_titles: Vec<Arc<[u8]>> = query_records.iter().map(record_title).collect();
-    let subject_title = format!(
-        "User specified sequence set (Input: {})",
-        args.subject_path().display()
-    );
+    // `User specified sequence set (Input: PATH)` for a subject set, the `-db` value for a
+    // database (`ShownSubjects`).
+    let subject_title = subjects.shown.name.as_str();
     let hitlist_size = match args.max_target_seqs {
         Some(max_target_seqs) if max_target_seqs > 0 => max_target_seqs,
         _ => args.hitlist_size,
     };
     post_process_hits_and_write(
-        results.hit_lists,
+        hit_lists,
         hitlist_size,
         args.max_hsps_per_subject.unwrap_or(0),
         args.subject_besthit,
@@ -6978,7 +7483,7 @@ fn write_batch_reports(
         &query_ids,
         output_formats,
         &query_titles,
-        &subject_title,
+        subject_title,
         None,
         &report_inputs,
         results.unsearched,
@@ -6992,7 +7497,7 @@ fn write_batch_reports(
 fn search_query_batch(
     args: &BlastnArgs,
     query_records: &[FastaRecord],
-    subjects: &PreparedSubjects<'_>,
+    subjects: SubjectSource<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
@@ -7201,8 +7706,9 @@ fn search_query_batch(
     //     }
     // }
     // ```
-    let subject_records: Option<&[FastaRecord]> = Some(subjects.records);
-    let subject_metadata = subjects.metadata.clone();
+    let subject_records: Option<&[FastaRecord]> =
+        subjects.prepared().map(|prepared| prepared.records);
+    let subject_metadata = subjects.metadata().clone();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1409-1475
     // ```c
@@ -7247,7 +7753,9 @@ fn search_query_batch(
     //                               compressed_seq.data.release());
     // }
     // ```
-    let subject_packed_cache_ref = Some(subjects.packed.as_slice());
+    let subject_packed_cache_ref = subjects
+        .prepared()
+        .map(|prepared| prepared.packed.as_slice());
 
     // Prepare sequence data (including DUST masking)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1401-1405
@@ -7274,10 +7782,8 @@ fn search_query_batch(
             .map(record_title)
             .collect::<Vec<Arc<[u8]>>>(),
     );
-    let subject_title = Arc::<str>::from(format!(
-        "User specified sequence set (Input: {})",
-        args.subject_path().display()
-    ));
+    // The subjects as the reports show them (the outfmt 0 prolog of an error below).
+    let shown = ShownSubjects::new(args, subjects);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2589-2593
     // ```c
@@ -7661,9 +8167,10 @@ fn search_query_batch(
                         &mut writer,
                         NCBI_BLASTN_VERSION,
                         megablast,
-                        &subject_title,
-                        seq_data.db_num_seqs,
-                        seq_data.db_len_total,
+                        &shown.name,
+                        shown.num_seqs,
+                        shown.total_letters,
+                        shown.database.as_ref(),
                     )?;
                     writer.flush()?;
                 }
@@ -7746,16 +8253,55 @@ fn search_query_batch(
     // (blast_setup.c:475-480): a batch with a valid context stops NCBI when the subjects
     // have fewer letters than subjects (subjects without letters count with none). A batch
     // without a valid context is not searched (`CheckInternalData`), so it does not.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_seqdb.cpp:448-458
+    // ```c++
+    // static Int4
+    // s_SeqDbGetSeqLen(void* seqdb_handle, void* args)
+    // {
+    //     Int4* oid = (Int4*) args;
+    //
+    //     if (!seqdb_handle || !oid)
+    //        return BLAST_SEQSRC_ERROR;
+    //
+    //     CSeqDB & seqdb = **(TSeqDBData *) seqdb_handle;
+    //     return seqdb.GetSeqLength(*oid);
+    // }
+    // ```
+    // A database without sequences (makeblastdb builds none; a volume whose index holds
+    // none) has a total length of 0, so the setup above asks its reader for the length of
+    // ordinal id 0, which it does not have: NCBI's search stage reports the reader's error
+    // as a database file that cannot be read (local_blast.cpp:240-251). Shown with the
+    // oracle (campaign dbsearch-20261012, `$BUILD_ROOT/dbsearch/db4/smoke/empty`: the
+    // nucleotide fixture's index with no sequence): the outfmt 0 prolog, then `BLAST engine
+    // error: Database memory map file error`, exit status 3, for outfmt 0, 6 and 7.
+    if any_valid_context {
+        if let SubjectSource::Database(database) = subjects {
+            if database.metadata().db_num_seqs == 0 {
+                return Err(database_search_error(
+                    database::PreliminaryReadError("Database memory map file error").into(),
+                    first_batch,
+                    outputs,
+                    output_formats,
+                    megablast,
+                    &shown,
+                ));
+            }
+        }
+    }
     if any_valid_context {
         let total_length = seq_data.db_len_total as i64;
         let (total_length, num_seqs) = if total_length > 0 {
             (total_length, seq_data.db_num_seqs as i64)
         } else {
+            // A database with a total length of 0 holds sequences without letters only:
+            // the length of its first sequence (`BlastSeqSrcGetSeqLen` of ordinal id 0) is 0.
             (
-                subjects
-                    .records
-                    .first()
-                    .map_or(0, |record| record.seq().len()) as i64,
+                subjects.prepared().map_or(0, |prepared| {
+                    prepared
+                        .records
+                        .first()
+                        .map_or(0, |record| record.seq().len())
+                }) as i64,
                 1,
             )
         };
@@ -7771,14 +8317,7 @@ fn search_query_batch(
             if !first_batch {
                 return Err(ErrorAfterInvalidBatches(error).into());
             }
-            write_pairwise_prologs(
-                outputs,
-                output_formats,
-                megablast,
-                &subject_title,
-                &subjects.metadata,
-                false,
-            )?;
+            write_pairwise_prologs(outputs, output_formats, megablast, &shown, false)?;
             return Err(error);
         }
     }
@@ -7811,7 +8350,23 @@ fn search_query_batch(
     // effective_search_space = effective_db_length * (query_length - length_adjustment);
     // query_info->contexts[index].eff_searchsp = effective_search_space;
     // ```
-    let db_len_total_i64 = seq_data.db_len_total as i64;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-721
+    // ```c
+    //    /* use overriding value from effective lengths options or the real value
+    //       from effective lengths parameters. */
+    //    if (eff_len_options->db_length > 0)
+    //       db_length = eff_len_options->db_length;
+    //    else
+    //       db_length = eff_len_params->real_db_length;
+    // ```
+    // A `-dbsize` above 0 replaces the total length in the effective lengths (with `-db`
+    // and with `-subject`); the number of sequences, the average subject length above, the
+    // batch mixer and the reports keep the real numbers.
+    let db_len_total_i64 = if args.db_length() > 0 {
+        args.db_length()
+    } else {
+        seq_data.db_len_total as i64
+    };
     let db_num_seqs_i64 = seq_data.db_num_seqs as i64;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:778-786
     // ```c
@@ -7866,7 +8421,7 @@ fn search_query_batch(
                 } => batch_eff_searchsp[index],
             };
             if !valid || options_searchsp != 0 {
-                return options_searchsp;
+                return Ok(options_searchsp);
             }
             let query_len = ctx.seq.len() as i64;
             let result = compute_length_adjustment_ncbi(
@@ -7876,12 +8431,27 @@ fn search_query_batch(
                 &blocks.gapped,
             );
             let length_adjustment = result.length_adjustment;
-            let effective_db_length =
-                (db_len_total_i64 - db_num_seqs_i64 * length_adjustment).max(1);
+            // NCBI's `Int8` arithmetic, which overflows where the database length (a
+            // `-dbsize`, or the total of a large database) times the query length passes
+            // 2^63 (never for a subject set without `-dbsize`: its total and the query
+            // lengths are below 2^31); LOSAT rejects such a search instead of reproducing
+            // the overflow.
+            let overflow = || {
+                anyhow::anyhow!(
+                    "a database length of {db_len_total_i64} letters with a query of {query_len} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's BLASTN"
+                )
+            };
+            let effective_db_length = db_num_seqs_i64
+                .checked_mul(length_adjustment)
+                .and_then(|adjusted| db_len_total_i64.checked_sub(adjusted))
+                .ok_or_else(overflow)?
+                .max(1);
             let effective_query_length = (query_len - length_adjustment).max(1);
-            effective_db_length * effective_query_length
+            effective_db_length
+                .checked_mul(effective_query_length)
+                .ok_or_else(overflow)
         })
-        .collect();
+        .collect::<Result<_>>()?;
 
     // NCBI searches a batch of at least two query chunks chunk by chunk in its preliminary
     // stage, after it has set up the whole batch (the errors and warnings above are the
@@ -8270,7 +8840,7 @@ fn search_query_batch(
     // size the next batch.
     let good_init_extends = std::sync::atomic::AtomicU64::new(0);
     let process_subject = |s_idx: usize,
-                           s_record: &FastaRecord,
+                           subject: BlastnSubjectRef<'_>,
                            gap_scratch: &mut GapAlignScratch,
                            subject_scratch: &mut SubjectScratch,
                            prelim_source: Option<&Vec<PrelimHit>>,
@@ -8316,8 +8886,7 @@ fn search_query_batch(
         // hsp_list = Blast_HSPListFree(hsp_list);
         // BlastInitHitListReset(init_hitlist);
         // ```
-        let s_seq_full = s_record.seq();
-        let s_len_full = s_seq_full.len();
+        let s_len_full = subject.length;
         // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
         // ```c
         // typedef struct BlastHSPList {
@@ -8369,10 +8938,22 @@ fn search_query_batch(
         //     BlastSeqBlkSetSeqRanges(..., eSoftSubjMasking);
         // }
         // ```
-        let subject_masks = if lcase_masking {
-            collect_lowercase_masks(s_seq_full)
-        } else {
-            Vec::new()
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2550-2556
+        // ```c++
+        //         const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking)
+        // 	    ? bool(args[kArgUseLCaseMasking])
+        //             : kDfltArgUseLCaseMasking;
+        //         CRef<blast::CBlastQueryVector> subjects;
+        //         m_Scope = ReadSequencesToBlast(*subj_input_stream, IsProtein(),
+        //                                        subj_range, parse_deflines,
+        //                                        use_lcase_masks, subjects, m_IsMapper);
+        // ```
+        // The lowercase masks of the subjects are those of the FASTA records of
+        // `-subject`; a database sequence has none (its masks would come from
+        // `-db_soft_mask`, which LOSAT does not implement).
+        let subject_masks = match subject.letters {
+            Some(letters) if lcase_masking => collect_lowercase_masks(letters),
+            _ => Vec::new(),
         };
         let subject_masked = !subject_masks.is_empty();
         let soft_ranges = if subject_masked {
@@ -8399,18 +8980,9 @@ fn search_query_batch(
         //                               compressed_seq.data.release());
         // }
         // ```
-        let mut s_seq_packed_full_vec: Option<Vec<u8>> = None;
-        let s_seq_packed_full = if let Some(packed_cache) = subject_packed_cache_ref {
-            if let Some(packed) = packed_cache.get(s_idx) {
-                packed.as_slice()
-            } else {
-                s_seq_packed_full_vec = Some(encode_subject_ncbi2na_packed(s_seq_full));
-                s_seq_packed_full_vec.as_ref().unwrap().as_slice()
-            }
-        } else {
-            s_seq_packed_full_vec = Some(encode_subject_ncbi2na_packed(s_seq_full));
-            s_seq_packed_full_vec.as_ref().unwrap().as_slice()
-        };
+        // The packed letters of the subject set's record (`PreparedSubjects::packed`) or the
+        // stored data of the database sequence (`BlastnSubjectRef::packed`).
+        let s_seq_packed_full = subject.packed;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4019-4025
         // ```c
         //             status = BLAST_GreedyGappedAlignment(
@@ -12341,9 +12913,20 @@ fn search_query_batch(
         // The traceback fetches the uncompressed (blastna) subject of each subject with
         // preliminary HSPs; the preliminary stage reads only the packed one. The blastna letters
         // are made here, for this subject only, instead of being kept for every subject of the
-        // search.
-        let s_seq_blastna_vec = encode_iupac_to_blastna(s_seq_full);
-        let s_seq_blastna = s_seq_blastna_vec.as_slice();
+        // search. A database sequence comes with its blastna letters, read with its
+        // ambiguity codes (`database::traceback_listed`).
+        let s_seq_blastna_vec: Vec<u8>;
+        let s_seq_blastna: &[u8] = match subject.blastna {
+            Some(blastna) => blastna,
+            None => {
+                s_seq_blastna_vec = encode_iupac_to_blastna(
+                    subject
+                        .letters
+                        .expect("a subject reaches the traceback with its letters"),
+                );
+                s_seq_blastna_vec.as_slice()
+            }
+        };
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:371-373
         // ```c
@@ -14099,7 +14682,13 @@ fn search_query_batch(
         context_karlin: context_karlin.clone(),
         query_eff_searchsp: query_eff_searchsp.clone(),
     };
-    let subject_records_ref = subjects.records;
+    // The records of a subject set and their packed letters (none for a database, which
+    // has drivers of its own below).
+    let subject_records_ref: &[FastaRecord] =
+        subjects.prepared().map_or(&[], |prepared| prepared.records);
+    let subject_packed_ref: &[Vec<u8>] = subjects
+        .prepared()
+        .map_or(&[], |prepared| prepared.packed.as_slice());
     // One pass over the subjects in subject order: the preliminary stage gives each subject's
     // preliminary HSPs (`kept` is `None`), the traceback saves the final HSPs of the kept
     // preliminary HSPs in the final hit lists of `hitlist_size` subjects
@@ -14178,7 +14767,10 @@ fn search_query_batch(
                                             let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                                             process_subject(
                                                 s_idx,
-                                                s_record,
+                                                BlastnSubjectRef::record(
+                                                    s_record,
+                                                    &subject_packed_ref[s_idx],
+                                                ),
                                                 gap_scratch,
                                                 subject_scratch,
                                                 kept.map(|kept| &kept[s_idx]),
@@ -14219,7 +14811,7 @@ fn search_query_batch(
                     let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                     process_subject(
                         s_idx,
-                        s_record,
+                        BlastnSubjectRef::record(s_record, &subject_packed_ref[s_idx]),
                         &mut gap_scratch,
                         &mut subject_scratch,
                         kept.map(|kept| &kept[s_idx]),
@@ -14247,25 +14839,145 @@ fn search_query_batch(
     //    eff_len_params, db_options, psi_options, rps_info, pattern_blk,
     //    results, interrupt_search, progress_info);
     // ```
+    // A database has its own drivers of the two passes (`database::search_blocks`,
+    // `database::traceback_listed`), with a scratch per worker made as the subject set's
+    // parallel pass makes them.
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+    // ```c
+    // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+    // ...
+    // aux_struct->offset_pairs =
+    //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+    // ```
+    let new_scratch = || {
+        (
+            GapAlignScratch::new(),
+            SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
+        )
+    };
     let prelim_lists = match split_prelim_lists {
         Some(lists) => lists,
-        None => {
-            let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
-            search_subjects(None, &mut |oid, _, prelim| collector.add(oid, prelim));
-            collector.hit_lists
-        }
+        None => match subjects {
+            SubjectSource::Prepared(_) => {
+                let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
+                search_subjects(None, &mut |oid, _, prelim| collector.add(oid, prelim));
+                collector.hit_lists
+            }
+            SubjectSource::Database(database) => {
+                // The subjects come one at a time in the order of their ordinal ids
+                // (`database::search_blocks`), as the subject set's come in OID order.
+                let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/api/local_blast.cpp:177-180
+                // ```c
+                //     int status = m_PrelimSearch->CheckInternalData();
+                //     if (status != 0)
+                //     {
+                //          // Search was not run, but we send back an empty CSearchResultSet.
+                // ```
+                // With no valid context NCBI does not search, and reads no sequence.
+                if any_valid_context {
+                    database::search_blocks(
+                        database,
+                        parallel_pool,
+                        use_parallel,
+                        &new_scratch,
+                        &|state: &mut (GapAlignScratch, SubjectScratch),
+                          ordinal: u32,
+                          subject: BlastnSubjectRef<'_>| {
+                            let (gap_scratch, subject_scratch) = state;
+                            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                            let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                            process_subject(
+                                ordinal as usize,
+                                subject,
+                                gap_scratch,
+                                subject_scratch,
+                                None,
+                                &mut subject_hits,
+                                &mut prelim_hits,
+                            );
+                            (!prelim_hits.is_empty()).then_some(prelim_hits)
+                        },
+                        &mut |ordinal, prelim_hits| collector.add(ordinal as usize, prelim_hits),
+                    )
+                    .map_err(|error| {
+                        database_search_error(
+                            error,
+                            first_batch,
+                            outputs,
+                            output_formats,
+                            megablast,
+                            &shown,
+                        )
+                    })?;
+                }
+                collector.hit_lists
+            }
+        },
     };
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
-    let kept = prelim_hits_by_subject(prelim_lists, subject_records_ref.len());
-    let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
-    hit_lists.resize_with(queries_ref.len(), || None);
-    search_subjects(Some(&kept), &mut |_, hits, _| {
-        if let Some(hits) = hits {
-            update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
+    let hit_lists = match subjects {
+        SubjectSource::Prepared(_) => {
+            let kept = prelim_hits_by_subject(prelim_lists, subject_records_ref.len());
+            let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
+            hit_lists.resize_with(queries_ref.len(), || None);
+            search_subjects(Some(&kept), &mut |_, hits, _| {
+                if let Some(hits) = hits {
+                    update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
+                }
+            });
+            hit_lists
         }
-    });
+        SubjectSource::Database(database) => {
+            let listed = listed_prelim_hits(prelim_lists);
+            let found = database::traceback_listed(
+                database,
+                parallel_pool,
+                use_parallel,
+                &listed,
+                &new_scratch,
+                &|state: &mut (GapAlignScratch, SubjectScratch),
+                  ordinal: u32,
+                  subject: BlastnSubjectRef<'_>,
+                  kept: &Vec<PrelimHit>| {
+                    let (gap_scratch, subject_scratch) = state;
+                    let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                    let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                    process_subject(
+                        ordinal as usize,
+                        subject,
+                        gap_scratch,
+                        subject_scratch,
+                        Some(kept),
+                        &mut subject_hits,
+                        &mut prelim_hits,
+                    );
+                    subject_hits
+                },
+            )
+            .map_err(|error| {
+                database_search_error(
+                    error,
+                    first_batch,
+                    outputs,
+                    output_formats,
+                    megablast,
+                    &shown,
+                )
+            })?;
+            // The final HSPs of the listed sequences in the order of their ordinal ids, as
+            // the subject set's traceback saves those of its subjects
+            // (`Blast_HSPResultsInsertHSPList`, `search_subjects`).
+            let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(queries_ref.len());
+            hit_lists.resize_with(queries_ref.len(), || None);
+            for hits in found {
+                update_hitlists_with_subject_hits(&mut hit_lists, hits, hitlist_size);
+            }
+            hit_lists
+        }
+    };
 
     if let Some(bar) = progress_bar.as_ref() {
         bar.finish();
@@ -14322,7 +15034,7 @@ fn search_query_chunks(
     query_offsets: &[usize],
     batch_eff_searchsp: &[i64],
     context_offsets: &[i32],
-    subjects: &PreparedSubjects<'_>,
+    subjects: SubjectSource<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
     parallel_pool: &crate::utils::threading::SearchPool<'_>,

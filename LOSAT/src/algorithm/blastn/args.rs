@@ -30,6 +30,53 @@ pub struct BlastnArgs {
     // (`blastn/blast_engine/run.rs`).
     #[arg(long, value_parser = blastn_input_path(), value_name = "PATH")]
     pub subject: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199
+    // ```c++
+    //     arg_desc.SetCurrentGroup("General search options");
+    //     // database filename
+    //     if (m_IsIgBlast){
+    //         arg_desc.AddOptionalKey(kArgDb, "database_name", "Optional additional database name",
+    //                                 CArgDescriptions::eString);
+    //     } else {
+    //         arg_desc.AddOptionalKey(kArgDb, "database_name", "BLAST database name",
+    //                                 CArgDescriptions::eString);
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
+    // ```c++
+    //         arg_desc.AddOptionalKey(kArgSubject, "subject_input_file",
+    //                                 "Subject sequence(s) to search",
+    //                                 CArgDescriptions::eInputFile);
+    //         ITERATE(vector<string>, dbarg, database_args) {
+    //             arg_desc.SetDependency(kArgSubject, CArgDescriptions::eExcludes,
+    //                                    *dbarg);
+    //         }
+    // ```
+    // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). The exclusion
+    // is an error of the argument parser: LOSAT's parser reports it with its own text
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The database is searched by
+    // `blastn/blast_engine/database.rs`.
+    #[arg(
+        long,
+        value_name = "NAME",
+        conflicts_with_all = ["subject", "subject_loc"],
+        help = "BLAST database name (a nucleotide database without parsed Seq-ids)"
+    )]
+    pub db: Option<String>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
+    // ```c++
+    //     // DB size
+    //     if (!m_IsMapper) {
+    //         arg_desc.SetCurrentGroup("Statistical options");
+    //         arg_desc.AddOptionalKey(kArgDbSize, "num_letters",
+    //                                 "Effective length of the database ",
+    //                                 CArgDescriptions::eInt8);
+    //     }
+    // ```
+    // No constraint and no dependency: read with `-db` and with `-subject`
+    // (`BlastnArgs::db_length`).
+    #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
+    pub dbsize: Option<i64>,
     #[arg(long, default_value = "megablast", help = "Task to execute: megablast, blastn, dc-megablast or blastn-short", long_help = "Implemented tasks: megablast, blastn, dc-megablast and blastn-short. Task defaults: megablast uses word size 28, reward 1, penalty -2, gaps 0/0; blastn uses word size 11, reward 2, penalty -3, gaps 5/2; dc-megablast uses the 11-of-18 coding template, reward 2, penalty -3, gaps 5/2 and two hits in a window of 40; blastn-short uses word size 7, reward 1, penalty -3, gaps 5/2, e-value 1000 and no DUST. An omitted option takes the default of the task.", value_parser = blastn_task)]
     pub task: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:708-730
@@ -302,6 +349,37 @@ impl BlastnArgs {
     /// The `-subject` path (empty before NCBI's check that it is given).
     pub fn subject_path(&self) -> &std::path::Path {
         self.subject.as_deref().unwrap_or(std::path::Path::new(""))
+    }
+
+    /// The `-db` value as NCBI keeps it: without the white space at its ends; `None` for a
+    /// search of `-subject`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
+    /// ```c++
+    ///     if (args.Exist(kArgDb) && args[kArgDb]) {
+    /// 	std::string local_dblist = NStr::TruncateSpaces( args[kArgDb].AsString() );
+    ///
+    ///         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
+    ///                                              mol_type));
+    /// ```
+    pub fn database_name(&self) -> Option<&str> {
+        self.db.as_deref().map(crate::seqdb::db_argument_name)
+    }
+
+    /// The database length of the options: the `-dbsize` value, 0 without it.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2570-2572
+    /// ```c++
+    ///     if (args.Exist(kArgDbSize) && args[kArgDbSize]) {
+    ///         opts.SetDbLength(args[kArgDbSize].AsInt8());
+    ///     }
+    /// ```
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_nucl_options.cpp:275
+    /// ```c++
+    ///     SetDbLength(0);
+    /// ```
+    pub fn db_length(&self) -> i64 {
+        self.dbsize.unwrap_or(0)
     }
 
     /// Reads the `-dust` value (`parse_dust_filtering`) where NCBI's filtering handler reads

@@ -30,8 +30,9 @@
 //! construction; the ambiguous letters draw from the same generator with the same seed in the
 //! same order.
 //!
-//! Both variables are off unless set to any value (they are not in the strict set,
-//! `utils/xswitch.rs`). They act where the subject plans of the unit path are made
+//! `LOSAT_X_TBNXLATE` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set. `LOSAT_X_TBNXLATESHADOW` is not: it counts when set to
+//! any value and wins over the switch. They act where the subject plans of the unit path are made
 //! (`search_seed::x_scan_plan`, `LOSAT_X_TBNPAR`, on by default); the reference loop that
 //! searches a subject without that switch translates it itself and reads neither variable.
 //! `LOSAT_X_TBNXLATESHADOW` makes both translations for every such plan and stops the search
@@ -62,14 +63,15 @@ pub(super) enum XTranslate {
 
 // No NCBI counterpart: reads the LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW variables once; it
 // does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): off unless a variable is set (they
-/// are not in the strict set).
+/// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): `LOSAT_X_TBNXLATE` is a strict-set
+/// switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set); the shadow counts when
+/// set to any value and wins.
 pub(super) fn x_translate() -> XTranslate {
     static MODE: OnceLock<XTranslate> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_TBNXLATESHADOW").is_some() {
             XTranslate::Shadow
-        } else if std::env::var_os("LOSAT_X_TBNXLATE").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_TBNXLATE") {
             XTranslate::Tables
         } else {
             XTranslate::Reference

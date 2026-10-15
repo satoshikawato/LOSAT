@@ -772,7 +772,8 @@ impl XSubjectSide {
 /// EXPERIMENT (LOSAT_X_TBNPAR): `None` when the subject is too short to be searched.
 pub(super) fn x_scan_plan(
     queries: &[&[u8]],
-    subject: &[u8],
+    // EXPERIMENT (LOSAT_X_TBNSTORE): the subject's letters, or its packed store.
+    subject: crate::sequence::packed_subject::SubjectNt<'_>,
     db_gencode: u8,
     seg: Option<&SegParams>,
     threshold: i32,
@@ -813,7 +814,7 @@ pub(super) fn x_scan_plan(
     // ```
     // Translation and chunking of the subject, as above: the reference path of the plan that the
     // shared plan memoises.
-    let x_reference_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
+    let x_reference_subject = |subject: &[u8]| -> Result<std::sync::Arc<XSubjectPlan>> {
         // Letters that are all `A`, `C`, `G`, `T` resolve to themselves (no base is ambiguous,
         // so nothing is drawn): read them in place (LOSAT_X_TBNSTORE gives resolved bases).
         let resolved_subject = if subject
@@ -872,14 +873,31 @@ pub(super) fn x_scan_plan(
     // read from the codon table of its strand, as BLAST_GetAllTranslations does for the compressed
     // subject (tblastn/x_subject_translate.rs); the frames and units are the same values. With
     // LOSAT_X_TBNXLATESHADOW both are made for every plan and the search stops if they differ.
+    // EXPERIMENT (LOSAT_X_TBNSTORE): a packed subject is translated from its packed bases
+    // (x_packed_subject_plan); a stage that reads the case gets the letters instead.
     let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
-        super::x_subject_translate::x_subject_plan(
-            super::x_subject_translate::x_translate(),
-            subject,
-            db_gencode,
-            mask_lowercase,
-            &x_reference_subject,
-        )
+        use crate::sequence::packed_subject::SubjectNt;
+        match subject {
+            SubjectNt::Letters(letters) => super::x_subject_translate::x_subject_plan(
+                super::x_subject_translate::x_translate(),
+                letters,
+                db_gencode,
+                mask_lowercase,
+                || x_reference_subject(letters),
+            ),
+            SubjectNt::Packed(store) => {
+                anyhow::ensure!(
+                    !mask_lowercase,
+                    "TBLASTN: a packed subject searched with lowercase masking"
+                );
+                super::x_subject_translate::x_packed_subject_plan(
+                    super::x_subject_translate::x_translate(),
+                    store,
+                    db_gencode,
+                    &x_reference_subject,
+                )
+            }
+        }
     };
     let x_slot = x_subject.and_then(|(side, oid)| {
         side.slot(oid, db_gencode, mask_lowercase)
@@ -2062,7 +2080,7 @@ mod tests {
                         barrier.wait();
                         x_scan_plan(
                             &[query],
-                            &subject,
+                            crate::sequence::packed_subject::SubjectNt::Letters(&subject),
                             1,
                             None,
                             13,
@@ -2110,7 +2128,7 @@ mod tests {
         let scan = |side: Option<&XSubjectSide>| {
             x_scan_plan(
                 &[query],
-                &subject,
+                crate::sequence::packed_subject::SubjectNt::Letters(&subject),
                 1,
                 None,
                 13,

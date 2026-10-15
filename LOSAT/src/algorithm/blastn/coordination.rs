@@ -783,9 +783,14 @@ pub fn finalize_task_config(
 // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //        != BLAST_SEQSRC_EOF) {
 // ```
-pub fn subject_metadata_from_records<R: InputRecord>(records: &[R]) -> SubjectMetadata {
+/// `length(index)` is the number of letters of record `index` (its letters, or with
+/// `LOSAT_X_BNSTORE` its packed subject's).
+pub fn subject_metadata_from_records<R: InputRecord>(
+    records: &[R],
+    length: impl Fn(usize) -> usize,
+) -> SubjectMetadata {
     SubjectMetadata {
-        db_len_total: records.iter().map(|record| record.seq().len()).sum(),
+        db_len_total: (0..records.len()).map(length).sum(),
         db_num_seqs: records.len(),
     }
 }

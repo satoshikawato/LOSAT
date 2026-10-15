@@ -423,13 +423,14 @@ Rebuilding less:
   least `max_target_seqs` matches) and with a best E-value above 5 x the cutoff; at a window's start, not
   when a query of its batch whose matches are all replayed has a heap that is not filled, nor among its
   query's next `max_target_seqs - n` matches (`n`: the lists its heap holds). A job with a match left open
-  is at risk. The cap on a window's jobs at risk applies per window, shared across batches: `threads` at
-  first and after a window in which the test ended a computed match; otherwise it grows by the jobs at risk
-  that the window computed (doubling when it closed the window), up to the job budget. A computed match is
-  dropped only in the window during which its batch's heaps fill, so a window drops at most 4 x (threads +
-  the jobs at risk computed, and all used, since the last window that dropped one) matches (the one-thread
-  loop computes none), and where the heaps never fill the windows are back to their budget after a number
-  of windows logarithmic in the work at risk. With
+  is at risk. A window holds at most cap(q) jobs at risk of a query q (it may hold jobs at risk of several
+  queries): `threads` at first and after a window that dropped a computed match of q; otherwise cap(q)
+  grows by q's jobs at risk that the window computed (doubling when it closed the window), up to the job
+  budget. A computed match is dropped only in the window during which its batch's heaps fill, so at most
+  one window drops matches of q, and it drops at most 4 x cap(q) of them, cap(q) <= threads + q's jobs at
+  risk computed, and all used, before (the one-thread loop computes none); where q's batch's heaps never
+  fill, q's windows are back to their budget after a number of windows logarithmic in q's work at risk.
+  With
   `LOSAT_TIMING=1` each search the path runs prints
   `[TIMING] x_bpredopar: matches=<n> jobs=<j> windows=<w> split=<s> ended=<e> skipped=<k> wasted=<x>
   par_s=<s> replay_s=<s>` (on one line; `split`: windows that end inside a query; `ended`: the matches the

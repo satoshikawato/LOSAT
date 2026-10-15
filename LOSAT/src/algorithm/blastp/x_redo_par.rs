@@ -20,9 +20,9 @@
 //!    consecutive of them of one query (one vector of `LOSAT_X_NEWTONLANES`);
 //! 2. windows of consecutive jobs, each computed on the pool (one `pool.install`) and then
 //!    replayed. A window holds at most 64 jobs per thread (`LOSAT_X_BPREDOPARWINDOW` sets another
-//!    number, for tests) and at most a cap of jobs at risk (below), and it may end inside a query,
-//!    so it holds at most 4 x 64 x threads results before their replay. A window boundary changes
-//!    nothing: the replay is in stream order and the heaps carry over;
+//!    number, for tests) and at most a cap of jobs at risk per query (below), and it may end inside
+//!    a query, so it holds at most 4 x 64 x threads results before their replay. A window boundary
+//!    changes nothing: the replay is in stream order and the heaps carry over;
 //! 3. a job builds its query's workspace (`build_query_workspace`) if no other job of the window has
 //!    (one `OnceLock` per query and window, read only afterwards; a query that spans two windows
 //!    has it built again from the same inputs, a small cost that grows with the query's length),
@@ -63,14 +63,15 @@
 //!   these conditions leave open, not ended at its window's start, is at risk; the other jobs are
 //!   never ended and are computed ahead freely;
 //! - a computed result is dropped only in a job at risk, in the window during which its batch's
-//!   heaps become filled (at the start of any later window the test is already true for it). The
-//!   cap on a window's jobs at risk applies per window, shared across batches: it starts at
-//!   `threads`, returns there after a window that dropped a result, and otherwise grows by the
-//!   jobs at risk the window computed (it doubles when it closed the window), up to the job
-//!   budget. So a window drops at most 4 x (threads + the jobs at risk computed since the last
-//!   window that dropped a result, whose results were all used) results; where the heaps never
-//!   fill, the windows are back to their job budget after a number of windows logarithmic in the
-//!   work at risk.
+//!   heaps become filled; at the start of any later window the test is already true for the
+//!   query's matches that it can end, so at most one window drops results of a query. A window
+//!   holds at most cap(q) jobs at risk of a query q, and may hold jobs at risk of several
+//!   queries. cap(q) is `threads` at first and after a window that dropped a result of q;
+//!   otherwise it grows by q's jobs at risk that the window computed (it doubles when it closed
+//!   the window), up to the job budget. So that window drops at most 4 x cap(q) results of q,
+//!   with cap(q) <= threads + q's jobs at risk computed, and all used, before it; and where q's
+//!   batch's heaps never fill, q's windows are back to their job budget after a number of windows
+//!   logarithmic in q's work at risk.
 //!
 //! Why the output is the one-thread loop's: a match's result is a function of that match's inputs
 //! (the same query workspace values, parameter values, subject and matrix), computed by the same
@@ -335,8 +336,9 @@ fn x_end_above(
         .collect()
 }
 
-/// The bounds of a window: its jobs, and its jobs at risk (those with a match that the early
-/// termination test may end and had not ended at the window's start; `x_window`).
+/// The bounds of the windows of a search: their jobs, and the jobs at risk of a query that a
+/// window holds at first (those with a match that the early termination test may end and had not
+/// ended at the window's start; `x_window`), which `x_redo_windows` adapts per query.
 #[derive(Clone, Copy, Debug)]
 struct XWindowLimits {
     jobs: usize,
@@ -355,12 +357,23 @@ struct XWindow {
     jobs: Vec<Range<usize>>,
     /// The first match after the window, where the next one starts (`None`: no match is left).
     next: Option<XMatch>,
-    /// Its jobs at risk.
-    at_risk_jobs: usize,
+    /// Its jobs at risk: (query, jobs) for each query that has any, in stream order.
+    at_risk: Vec<(usize, usize)>,
 }
 
 /// The results of a window's matches in order; `None` for a match not computed.
 type XWindowResults = Vec<Option<Result<BlastpPostprocessResult>>>;
+
+/// What the early termination test ended in a window's replay.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct XReplayed {
+    /// Matches without a result (not computed).
+    skipped: usize,
+    /// Matches with a result (computed and dropped).
+    wasted: usize,
+    /// The queries of the dropped results, each once.
+    dropped: Vec<usize>,
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3421
 // ```c
@@ -405,8 +418,8 @@ fn x_next_job(lists: &[Option<BlastpHitList>], cursor: &mut XMatch, job: &mut Ve
 //                 )) {
 // ```
 /// The window that starts at `start`, on the heaps as the replay of the windows before left them:
-/// the jobs from there while it holds fewer than `limits.jobs` jobs and, for a job at risk, fewer
-/// than `limits.at_risk_jobs` jobs at risk. A match whose test is already true is marked ended;
+/// the jobs from there while it holds fewer than `jobs` jobs and, for a job at risk of query q,
+/// fewer than `caps[q]` jobs at risk of q. A match whose test is already true is marked ended;
 /// the test stays true until its replay. A match may be ended later only if all of these hold
 /// (each is necessary for the test to be true at its replay; a job with such a match, not ended,
 /// is at risk):
@@ -422,35 +435,38 @@ fn x_window(
     heaps: &[BlastCompoHeap],
     query_batches: &[Range<usize>],
     end_above: &[Option<f64>],
+    caps: &[usize],
     start: XMatch,
-    limits: XWindowLimits,
+    jobs: usize,
 ) -> XWindow {
     let mut window = XWindow {
         matches: Vec::new(),
         ended: Vec::new(),
         jobs: Vec::new(),
         next: None,
-        at_risk_jobs: 0,
+        at_risk: Vec::new(),
     };
     let mut cursor = start;
     let mut job = Vec::with_capacity(X_JOB_MATCHES);
-    // The query of the last job: whether its batch can still end matches, and how many of its
-    // matches the window holds.
-    let mut query: Option<(usize, bool, usize)> = None;
+    // The query of the last job: whether its batch can still end matches, how many of its
+    // matches the window holds, and how many of its jobs at risk.
+    let mut query: Option<(usize, bool, usize, usize)> = None;
     loop {
         x_next_job(lists, &mut cursor, &mut job);
         let Some(&first) = job.first() else {
             return window;
         };
         let q_idx = first.q_idx;
-        let (batch_open, in_window) = match query {
-            Some((current, batch_open, in_window)) if current == q_idx => (batch_open, in_window),
+        let (batch_open, in_window, at_risk_jobs) = match query {
+            Some((current, batch_open, in_window, at_risk_jobs)) if current == q_idx => {
+                (batch_open, in_window, at_risk_jobs)
+            }
             _ => {
                 let batch = query_batches[q_idx].clone();
                 let open = end_above[q_idx].is_some()
                     && (batch.start..batch.end.min(start.q_idx))
                         .all(|done| heaps[done].filled_to_cutoff());
-                (open, 0)
+                (open, 0, 0)
             }
         };
         let heap = &heaps[q_idx];
@@ -468,15 +484,24 @@ fn x_window(
         }
         // A window holds at least one job.
         if !window.jobs.is_empty()
-            && (window.jobs.len() >= limits.jobs
-                || (at_risk && window.at_risk_jobs >= limits.at_risk_jobs))
+            && (window.jobs.len() >= jobs || (at_risk && at_risk_jobs >= caps[q_idx]))
         {
             window.ended.truncate(mark);
             window.next = Some(first);
             return window;
         }
-        window.at_risk_jobs += usize::from(at_risk);
-        query = Some((q_idx, batch_open, in_window + job.len()));
+        if at_risk {
+            match window.at_risk.last_mut() {
+                Some((current, count)) if *current == q_idx => *count += 1,
+                _ => window.at_risk.push((q_idx, 1)),
+            }
+        }
+        query = Some((
+            q_idx,
+            batch_open,
+            in_window + job.len(),
+            at_risk_jobs + usize::from(at_risk),
+        ));
         window.matches.extend_from_slice(&job);
         window.jobs.push(mark..window.matches.len());
     }
@@ -714,8 +739,7 @@ where
 /// The steps of the one-thread loop that depend on order, for a window's matches in stream order,
 /// with the results computed for them: the early termination test on the heaps of the query's
 /// batch, the match's error, and the heap insertion. `redone` sees each match that the test does
-/// not end, before its result is used. Returns the numbers of matches that the test ended without
-/// a result (not computed) and with one (computed and dropped).
+/// not end, before its result is used.
 fn x_replay(
     matches: &[XMatch],
     results: XWindowResults,
@@ -723,9 +747,9 @@ fn x_replay(
     heaps: &mut [BlastCompoHeap],
     query_batches: &[Range<usize>],
     redone: &mut dyn FnMut(XMatch, &BlastpHspList, &Result<BlastpPostprocessResult>),
-) -> Result<(usize, usize)> {
+) -> Result<XReplayed> {
     assert_eq!(matches.len(), results.len(), "one result per match");
-    let (mut skipped, mut wasted) = (0, 0);
+    let mut replayed = XReplayed::default();
     for (&matched, postprocessed) in matches.iter().zip(results) {
         let local_match = x_local_match(lists, matched);
         if blast_compo_early_termination(
@@ -733,9 +757,12 @@ fn x_replay(
             &heaps[query_batches[matched.q_idx].clone()],
         ) {
             if postprocessed.is_some() {
-                wasted += 1;
+                replayed.wasted += 1;
+                if replayed.dropped.last() != Some(&matched.q_idx) {
+                    replayed.dropped.push(matched.q_idx);
+                }
             } else {
-                skipped += 1;
+                replayed.skipped += 1;
             }
             continue;
         }
@@ -759,7 +786,7 @@ fn x_replay(
             redone_match.insert(hsp_list, best_evalue, best_score, local_match.oid);
         }
     }
-    Ok((skipped, wasted))
+    Ok(replayed)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3447-3449,3735-3738
@@ -801,23 +828,22 @@ fn x_redo_windows(
         position: 0,
     });
     let mut released_to = 0;
-    // The cap on a window's jobs at risk, shared by the batches of the window:
-    // `limits.at_risk_jobs` at first and after a window in which the test ended a computed match;
-    // otherwise grown by the jobs at risk that the window computed (all used; it doubles when it
-    // closed the window), up to the job budget. So it is `limits.at_risk_jobs` plus the jobs at
-    // risk computed and used since the last window that dropped a result.
-    let mut at_risk_cap = limits.at_risk_jobs;
+    // The cap on the jobs at risk of query q in a window, `caps[q]`: `limits.at_risk_jobs` at
+    // first and after a window that dropped a computed result of q; otherwise grown by q's jobs
+    // at risk that the window computed (all used; it doubles when it closed the window), up to
+    // the job budget. So it is at most `limits.at_risk_jobs` plus q's jobs at risk computed and
+    // used before.
+    let budget = limits.jobs.max(limits.at_risk_jobs);
+    let mut caps = vec![limits.at_risk_jobs; lists.len()];
     while let Some(cursor) = start {
         let window = x_window(
             lists,
             heaps,
             query_batches,
             &end_above,
+            &caps,
             cursor,
-            XWindowLimits {
-                jobs: limits.jobs,
-                at_risk_jobs: at_risk_cap,
-            },
+            limits.jobs,
         );
         if !window.jobs.is_empty() {
             counts.windows += 1;
@@ -836,7 +862,7 @@ fn x_redo_windows(
                 counts.par_s += par_start.elapsed().as_secs_f64();
             }
             let replay_start = timing.then(Instant::now);
-            let (skipped, wasted) = x_replay(
+            let replayed = x_replay(
                 &window.matches,
                 results,
                 lists,
@@ -844,18 +870,19 @@ fn x_redo_windows(
                 query_batches,
                 redone,
             )?;
-            counts.skipped += skipped;
-            counts.wasted += wasted;
+            counts.skipped += replayed.skipped;
+            counts.wasted += replayed.wasted;
             if let Some(replay_start) = replay_start {
                 counts.replay_s += replay_start.elapsed().as_secs_f64();
             }
-            at_risk_cap = if wasted > 0 {
-                limits.at_risk_jobs
-            } else {
-                at_risk_cap
-                    .saturating_add(window.at_risk_jobs)
-                    .min(limits.jobs.max(limits.at_risk_jobs))
-            };
+            for &(q_idx, at_risk_jobs) in &window.at_risk {
+                caps[q_idx] = caps[q_idx].saturating_add(at_risk_jobs).min(budget);
+            }
+            // A dropped result is of a job at risk; after its window the pre-check leaves out
+            // every match of the query that the test ends.
+            for &q_idx in &replayed.dropped {
+                caps[q_idx] = limits.at_risk_jobs;
+            }
         }
         // EXPERIMENT (LOSAT_X_BPPFREE / LOSAT_X_BPPCOMPACT): nothing reads a query's preliminary
         // list after its redo; the one-thread loop releases each one after its query
@@ -1406,20 +1433,42 @@ mod tests {
         XMatch { q_idx, position }
     }
 
-    const UNLIMITED: XWindowLimits = XWindowLimits {
-        jobs: usize::MAX,
-        at_risk_jobs: usize::MAX,
-    };
+    /// The window from `start` of at most `jobs` jobs, without a cap on jobs at risk.
+    fn window_from(
+        lists: &[Option<BlastpHitList>],
+        heaps: &[BlastCompoHeap],
+        batches: &[Range<usize>],
+        end_above: &[Option<f64>],
+        start: XMatch,
+        jobs: usize,
+    ) -> XWindow {
+        let caps = vec![usize::MAX; lists.len()];
+        x_window(lists, heaps, batches, end_above, &caps, start, jobs)
+    }
+
+    impl XWindow {
+        fn at_risk_jobs(&self) -> usize {
+            self.at_risk.iter().map(|&(_, jobs)| jobs).sum()
+        }
+    }
+
+    fn replayed(skipped: usize, wasted: usize, dropped: &[usize]) -> XReplayed {
+        XReplayed {
+            skipped,
+            wasted,
+            dropped: dropped.to_vec(),
+        }
+    }
 
     /// All matches of `lists` in stream order.
     fn stream(lists: &[Option<BlastpHitList>]) -> Vec<XMatch> {
-        let window = x_window(
+        let window = window_from(
             lists,
             &heaps_of(lists.len(), 1),
             &alone(lists.len()),
             &vec![None; lists.len()],
             at(0, 0),
-            UNLIMITED,
+            usize::MAX,
         );
         assert_eq!(window.next, None);
         window.matches
@@ -1444,19 +1493,7 @@ mod tests {
         ];
         assert_eq!(x_matches(&lists), 9);
         let (heaps, batches, none) = (heaps_of(5, 1), alone(5), vec![None; 5]);
-        let window = |start, jobs| {
-            x_window(
-                &lists,
-                &heaps,
-                &batches,
-                &none,
-                start,
-                XWindowLimits {
-                    jobs,
-                    at_risk_jobs: 1,
-                },
-            )
-        };
+        let window = |start, jobs| window_from(&lists, &heaps, &batches, &none, start, jobs);
         // The list without HSPs (query 0, position 1) is no match.
         let all = window(at(0, 0), usize::MAX);
         assert_eq!(
@@ -1559,8 +1596,11 @@ mod tests {
             .expect("no error is redone");
             assert_eq!(
                 ended,
-                if computed { (0, 1) } else { (1, 0) },
-                "skipped, wasted"
+                if computed {
+                    replayed(0, 1, &[1])
+                } else {
+                    replayed(1, 0, &[])
+                }
             );
             // Query 1 keeps its best subject: 22 (E 0.005, above the cutoff) does not replace 20.
             let hit_lists = fill_results_from_compo_heaps(1, &mut heaps);
@@ -1603,7 +1643,10 @@ mod tests {
             None,
             hit_list(vec![list(20, 1e-20, false), list(21, 1.0, false)]),
         ];
-        for (batches, wasted) in [(vec![0..2, 0..2], 0), (vec![0..1, 1..2], 1)] {
+        for (batches, ended) in [
+            (vec![0..2, 0..2], replayed(0, 0, &[])),
+            (vec![0..1, 1..2], replayed(0, 1, &[1])),
+        ] {
             let mut heaps = heaps_of(2, 1);
             let matches = stream(&lists);
             let results = vec![Some(redone(20, 1e-20)), Some(redone(21, 1.0))];
@@ -1617,7 +1660,7 @@ mod tests {
                     &mut |_, _, _| {}
                 )
                 .expect("no error"),
-                (0, wasted),
+                ended,
                 "{batches:?}"
             );
         }
@@ -1804,7 +1847,7 @@ mod tests {
         };
         let mut at_risk = Vec::new();
         let (counts, computed) = drive(&mut lists, &mut heaps, &alone(1), limits, |_, window| {
-            at_risk.push(window.at_risk_jobs)
+            at_risk.push(window.at_risk_jobs())
         });
         // The first window: the first job (its matches fit in the empty heap) and four at risk;
         // then the cap doubles with each window up to the job budget (256): 1,000 jobs in nine
@@ -1816,6 +1859,55 @@ mod tests {
             (0, 0, MATCHES as usize)
         );
         assert_eq!(heaps[0].n, 5);
+    }
+
+    /// Batches whose heaps never fill before one that fills: each query's cap on jobs at risk
+    /// grows with its own work only, so the batch that fills drops at most its own cap's results.
+    #[test]
+    fn a_batch_that_fills_drops_at_most_its_own_cap_after_batches_that_never_fill() {
+        const THREADS: usize = 4;
+        // `-max_target_seqs 1`, each query alone in its batch: queries 0 and 1 keep a list above
+        // the cutoff (E 1.0), so their heaps are never filled; query 2's first match fills its
+        // heap, and the test ends the others.
+        let weak = |count: u32| hit_list((0..count).map(|oid| list(oid, 1.0, false)).collect());
+        let mut lists = vec![
+            weak(200),
+            weak(200),
+            hit_list(
+                (0..400)
+                    .map(|oid| list(oid, if oid == 0 { 1e-20 } else { 1.0 }, false))
+                    .collect(),
+            ),
+        ];
+        let mut heaps = heaps_of(3, 1);
+        let limits = XWindowLimits {
+            jobs: X_WINDOW_JOBS_PER_THREAD * THREADS,
+            at_risk_jobs: THREADS,
+        };
+        let mut at_risk = Vec::new();
+        let (counts, computed) = drive(&mut lists, &mut heaps, &alone(3), limits, |_, window| {
+            at_risk.push(window.at_risk.clone())
+        });
+        // The caps of queries 0 and 1 double over their own windows (50 jobs each; the first
+        // match of each fits in the empty heap), and a window holds jobs at risk of two queries
+        // where the first one's end within its cap. Query 2 starts at four: its first window
+        // computes 16 matches, the test drops 15 of them, and the later 384 are ended before
+        // their window.
+        assert_eq!(
+            at_risk,
+            [
+                vec![(0, 4)],
+                vec![(0, 8)],
+                vec![(0, 16)],
+                vec![(0, 22), (1, 4)],
+                vec![(1, 8)],
+                vec![(1, 16)],
+                vec![(1, 22), (2, 4)],
+                vec![],
+            ]
+        );
+        assert_eq!((counts.wasted, counts.skipped, computed), (15, 384, 416));
+        assert_eq!((counts.windows, counts.split), (8, 7));
     }
 
     #[test]
@@ -1830,7 +1922,7 @@ mod tests {
         let end_above = x_end_above(&lists, &heaps_of(2, 1), &batches);
         assert_eq!(end_above, [None, Some(COMPO_HEAP_EVALUE_STRETCH * ECUTOFF)]);
         let at_risk = |heaps: &[BlastCompoHeap], start| {
-            x_window(&lists, heaps, &batches, &end_above, start, UNLIMITED).at_risk_jobs
+            window_from(&lists, heaps, &batches, &end_above, start, usize::MAX).at_risk_jobs()
         };
         // Query 0 kept a list above the cutoff: its heap is not filled and stays so, so no
         // match of query 1 can be ended.
@@ -1854,8 +1946,8 @@ mod tests {
             for oid in 0..kept {
                 heaps[0].insert(list(oid, 1.0, false), 1.0, 40, oid);
             }
-            let window = x_window(&lists, &heaps, &alone(1), &end_above, at(0, 4), UNLIMITED);
-            assert_eq!(window.at_risk_jobs, jobs_at_risk, "{kept} kept");
+            let window = window_from(&lists, &heaps, &alone(1), &end_above, at(0, 4), usize::MAX);
+            assert_eq!(window.at_risk_jobs(), jobs_at_risk, "{kept} kept");
         }
     }
 

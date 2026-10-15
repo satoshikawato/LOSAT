@@ -6816,6 +6816,10 @@ fn run_in_pool(
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     mut batching: QueryBatching,
 ) -> Result<()> {
+    // EXPERIMENT (LOSAT_X_QBATCHPAR): its summary line comes at the end of every search with the
+    // switch and LOSAT_X_STATS set, also one that ends before its batch loop.
+    let qbp_shared =
+        x_qbatch_par::Shared::<Result<QueryBatch>>::new(x_qbatch_par::Switches::from_env());
     let prepared: PreparedSubjects<'_>;
     let source = match subjects {
         Subjects::Records(subject_set) => {
@@ -6946,8 +6950,11 @@ fn run_in_pool(
     // other threads (`x_qbatch_par.rs`); the loop computes every batch's key itself and takes a
     // slot's result only under that key. A slot's search is the loop's call for that batch
     // without the outputs (it never searches the first batch).
-    let qbp_shared = x_qbatch_par::Shared::new(x_qbatch_par::Switches::from_env());
-    let qbp_off = x_qbatch_par_off(&args, source, parallel_pool.threads());
+    let qbp_off = if qbp_shared.switches().on {
+        x_qbatch_par_off(&args, source, parallel_pool.threads())
+    } else {
+        Some(x_qbatch_par::Off::NotSet)
+    };
     let qbp_batching = batching;
     let qbp_search = |job: &x_qbatch_par::Job, pool: &crate::utils::threading::SearchPool<'_>| {
         search_query_batch(
@@ -7065,6 +7072,8 @@ fn run_in_pool(
                     warnings: error_warnings,
                 } = std::mem::replace(&mut reading, QueryReading::End)
                 {
+                    // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes.
+                    qbp.finish();
                     write_before_failed_batch(
                         &args,
                         &query_records[..start],
@@ -7104,6 +7113,8 @@ fn run_in_pool(
             // ends before its first record, fails after the reports of the batches before,
             // without the epilog.
             if start == end {
+                // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes.
+                qbp.finish();
                 write_before_failed_batch(
                     &args,
                     &query_records[..start],
@@ -7172,6 +7183,8 @@ fn run_in_pool(
                 .iter()
                 .all(|record| record.seq().is_empty())
             {
+                // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes.
+                qbp.finish();
                 write_before_failed_batch(
                     &args,
                     &query_records[..start],
@@ -7234,6 +7247,11 @@ fn run_in_pool(
                     reference
                 }
             };
+            // EXPERIMENT (LOSAT_X_QBATCHPAR): an error ends the loop here, and what it writes
+            // comes after every slot has stopped.
+            if searched.is_err() {
+                qbp.finish();
+            }
             let batch = match searched {
                 Ok(batch) => batch,
                 Err(error) => match error.downcast::<ErrorAfterInvalidBatches>() {
@@ -7334,6 +7352,9 @@ fn run_in_pool(
                     }
                 }
                 if let Err(error) = database::read_titles(database, &batch_hit_lists, &mut titles) {
+                    // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes (the
+                    // path is off with a database; for uniformity).
+                    qbp.finish();
                     let error = match error.downcast::<database::HeaderReadError>() {
                         Ok(failure) => failure.error,
                         // LOSAT's refusal: the warnings of the batches read so far, as for the
@@ -7427,6 +7448,8 @@ fn run_in_pool(
             input_start = input_end;
         }
 
+        // EXPERIMENT (LOSAT_X_QBATCHPAR): every slot has stopped before the reports are written.
+        qbp.finish();
         write_batch_reports(
             &args,
             query_records,
@@ -7497,6 +7520,59 @@ fn x_qbatch_par_off(
         return Some(Off::Subjects);
     }
     None
+}
+
+// No NCBI counterpart: what LOSAT_X_QBATCHPAR's slots need to know of a batch's result
+// (scheduling only).
+impl x_qbatch_par::SlotResult for Result<QueryBatch> {
+    fn failed(&self) -> bool {
+        matches!(self, Err(error) if !error.is::<x_qbatch_par::Cancelled>())
+    }
+
+    fn cancelled(&self) -> bool {
+        matches!(self, Err(error) if error.is::<x_qbatch_par::Cancelled>())
+    }
+
+    /// The memory of the hit lists (lists, HSPs and edit scripts) and the per-query values.
+    fn held_bytes(&self) -> u64 {
+        let Ok(batch) = self else {
+            return 0;
+        };
+        let hits: usize = batch
+            .hit_lists
+            .iter()
+            .flatten()
+            .map(|list| {
+                std::mem::size_of_val(list.hsplist_array.as_slice())
+                    + list
+                        .hsplist_array
+                        .iter()
+                        .map(|hsp_list| {
+                            std::mem::size_of_val(hsp_list.hsps.as_slice())
+                                + hsp_list
+                                    .hsps
+                                    .iter()
+                                    .map(|hsp| {
+                                        hsp.gap_info
+                                            .as_ref()
+                                            .map_or(0, |ops| std::mem::size_of_val(ops.as_slice()))
+                                    })
+                                    .sum::<usize>()
+                        })
+                        .sum::<usize>()
+            })
+            .sum();
+        let per_query = std::mem::size_of_val(batch.hit_lists.as_slice())
+            + batch
+                .query_masks
+                .iter()
+                .map(|masks| std::mem::size_of_val(masks.as_slice()))
+                .sum::<usize>()
+            + std::mem::size_of_val(batch.context_karlin.as_slice())
+            + std::mem::size_of_val(batch.query_eff_searchsp.as_slice())
+            + batch.timing.len();
+        (hits + per_query) as u64
+    }
 }
 
 // No NCBI counterpart: LOSAT_X_QBATCHPARSHADOW compares two LOSAT results of one batch.
@@ -7894,6 +7970,13 @@ fn search_query_batch(
     // TBlastThreads the_threads(GetNumberOfThreads());
     // (*thread)->Run(); (*thread)->Join(&result);
     let num_threads = parallel_pool.threads();
+    // EXPERIMENT (LOSAT_X_QBATCHPAR): a slot's search ends early once its batch is cancelled
+    // (the flag of its pool; the loop's own searches have none), here, between subjects and
+    // subject chunks, and before the traceback. A cancelled result is never taken.
+    let x_cancelled = || x_qbatch_par::cancelled(parallel_pool);
+    if x_cancelled() {
+        return Err(x_qbatch_par::Cancelled.into());
+    }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:493-555
     // ```c
@@ -13020,6 +13103,9 @@ fn search_query_batch(
                     let mut chunk_batch: Vec<SubjectChunk> = Vec::with_capacity(max_in_flight);
                     let mut done = false;
                     loop {
+                        if x_cancelled() {
+                            break;
+                        }
                         chunk_batch.clear();
                         while chunk_batch.len() < max_in_flight && !done {
                             match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
@@ -13153,6 +13239,9 @@ fn search_query_batch(
                 // }
                 // ```
                 loop {
+                    if x_cancelled() {
+                        break;
+                    }
                     match split_state.next_chunk(subject_masked, dbseq_chunk_overlap) {
                         SubjectChunkStatus::Done => break,
                         SubjectChunkStatus::NoRange => continue,
@@ -15140,6 +15229,9 @@ fn search_query_batch(
                                             )
                                         },
                                         |state, s_idx| {
+                                            if x_cancelled() {
+                                                return (None, Vec::new());
+                                            }
                                             let (gap_scratch, subject_scratch) = state;
                                             let mut subject_hits: Option<Vec<BlastnHsp>> = None;
                                             let mut prelim_hits: Vec<PrelimHit> = Vec::new();
@@ -15182,6 +15274,9 @@ fn search_query_batch(
                 let mut subject_scratch =
                     SubjectScratch::new(queries_ref.len(), offset_array_size, window_size);
                 for s_idx in 0..subject_records_ref.len() {
+                    if x_cancelled() {
+                        break;
+                    }
                     let mut subject_hits: Option<Vec<BlastnHsp>> = None;
                     let mut prelim_hits: Vec<PrelimHit> = Vec::new();
                     process_subject(
@@ -15289,6 +15384,9 @@ fn search_query_batch(
             }
         },
     };
+    if x_cancelled() {
+        return Err(x_qbatch_par::Cancelled.into());
+    }
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
@@ -15354,6 +15452,9 @@ fn search_query_batch(
 
     if let Some(bar) = progress_bar.as_ref() {
         bar.finish();
+    }
+    if x_cancelled() {
+        return Err(x_qbatch_par::Cancelled.into());
     }
     let mut batch = batch_result(hit_lists, Vec::new());
     if let Some(timing) = timing.as_ref() {
@@ -15437,6 +15538,10 @@ fn search_query_chunks(
     let mut merged: PrelimHitLists = Vec::with_capacity(queries.len());
     merged.resize_with(queries.len(), || None);
     for chunk in &chunks {
+        // EXPERIMENT (LOSAT_X_QBATCHPAR): a cancelled slot's batch ends between query chunks.
+        if x_qbatch_par::cancelled(parallel_pool) {
+            return Err(x_qbatch_par::Cancelled.into());
+        }
         // NCBI fails to make the query factory of a chunk without a query ("Empty
         // CBlastQueryVector"); `split_query_batch` makes none.
         anyhow::ensure!(

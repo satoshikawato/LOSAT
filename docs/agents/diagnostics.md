@@ -844,36 +844,47 @@ Scheduling (each value computed by one thread with the original function; order 
   batch boundaries, the errors, the warnings, the appends and the order of the output; the first batch is
   always its own; its thread waits while slots search, and it searches on the whole pool only when no
   slot runs. After every batch the plan is made again from the true mixer: planned batches the new plan
-  no longer holds are dropped (queued) or discarded (finished, or when they finish); two mispredicted
-  next keys within eight batches stop the speculation for the search. A batch's `LOSAT_TIMING` block is
-  printed when the loop takes the batch (discarded batches print none). Off (the loop as before) with
-  `-db`, one thread, `-verbose`, `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the
-  blastn trace or `LOSAT_WASI_THREADS_DEBUG`, subjects of at least as many 5 Mb work units as threads,
-  fewer than two batches after the first, or a budget of fewer than two slots; not in WebAssembly or
-  without the `parallel` feature. Slots: one batch in flight is estimated at `4^w x 4` bytes of lookup
-  table plus 21 bytes per query letter plus 220 bytes per predicted extension (`w` the batch's lookup
-  width; calibrated to 50 MiB per 1 Mb blastn batch and 116 MiB per 5 Mb dc-megablast batch), the budget
-  of the batches beyond the loop's one is `LOSAT_X_QBATCHPARMEM` MiB, by default 96 MiB (blastn,
-  blastn-short) or 28 MiB (megablast, dc-megablast) per thread beyond the first (0.8 of NCBI BLAST+
-  2.17.0's max-RSS growth per thread on the audit input; provisional), `k = min(1 + budget / estimate, n,
-  units of work left)` lowered to the fewest slots that need as many rounds, and `m = n / k`;
-  `LOSAT_X_QBATCHPARSLOTS=k` sets `k` (tuning). With the switch set one line on stderr at the end of the
-  search: `[X_STATS] QBATCHPAR batches= precomputed= loop= mispredicted= discarded= k= m= budget_mib=
-  estimate_mib= off=` (`precomputed`: batches taken from a slot; `off`: why it did not, or stopped to,
-  speculate). Shadow: `LOSAT_X_QBATCHPARSHADOW=1` (implies the switch) searches every batch the loop takes
-  from a slot on the loop as well (on the whole pool while the slots run, so more than `n` threads are
-  active) and compares every field (each query's hit list with every HSP field and edit script through its
-  `Debug` text, the extensions, the masks, the Karlin-Altschul blocks, the search spaces, or the two
-  errors); the first difference prints the summary line and panics; at the end
+  no longer holds are dropped (queued), cancelled (running) or discarded (finished). Before the loop writes
+  anything (the reports, or what an error writes) every slot is cancelled and joined, and once a slot's
+  batch returns an error no batch planned after it starts. Cancellation: a slot's search carries a flag
+  that `search_query_batch` reads at its start, between subjects and 5 Mb subject chunks, between query
+  chunks and before its traceback; a cancelled search ends with an error the loop never takes (the loop's
+  own searches have no flag). Memory: a slot starts a batch only while the estimates of the running
+  batches and the sizes of the finished results not yet taken, with it, stay within the budget plus the
+  loop's next batch (always admitted). Waste: two mispredicted next keys within eight batches, or more
+  discarded batches (finished results dropped and searches cancelled) than `2k` plus a quarter of the
+  batches taken, stop the speculation for the search. A batch's `LOSAT_TIMING` block is printed when the
+  loop takes the batch (discarded batches print none). Off (the loop as before) with `-db`, one thread,
+  `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace or
+  `LOSAT_WASI_THREADS_DEBUG`, subjects of at least as many 5 Mb work units as threads, fewer than two
+  batches after the first, or a budget of fewer than two slots; not in WebAssembly or without the
+  `parallel` feature. Slots: one batch in flight is estimated at `4^w x 4` bytes of lookup table plus 21
+  bytes per query letter plus 220 bytes per predicted extension (`w` the batch's lookup width; calibrated
+  to 50 MiB per 1 Mb blastn batch and 116 MiB per 5 Mb dc-megablast batch), the budget of the batches
+  beyond the loop's one is `LOSAT_X_QBATCHPARMEM` MiB, by default 96 MiB (blastn, blastn-short) or 28 MiB
+  (megablast, dc-megablast) per thread beyond the first (0.8 of NCBI BLAST+ 2.17.0's max-RSS growth per
+  thread on the audit input; provisional; dc-megablast's 5 Mb batches then need six threads or more),
+  `k = min(1 + budget / estimate, n, units of work left)` lowered to the fewest slots that need as many
+  rounds, and `m = n / k`; `LOSAT_X_QBATCHPARSLOTS=k` sets `k` (tuning). Without `LOSAT_X_STATS` the switch
+  writes nothing of its own; with it, one line on stderr at the end of the search: `[X_STATS] QBATCHPAR
+  batches= precomputed= loop= mispredicted= discarded= cancelled= waste_bound= k= m= idle= budget_mib=
+  estimate_mib= peak_mib= off=` (`precomputed`: batches taken from a slot; `discarded`: finished or
+  cancelled batches dropped; `waste_bound`: the discards that stop the speculation, at the end; `idle`:
+  threads no slot uses; `peak_mib`: the most memory admitted at once; `off`: why it did not, or stopped
+  to, speculate). Shadow: `LOSAT_X_QBATCHPARSHADOW=1` (implies the switch) searches every batch the loop
+  takes from a slot on the loop as well (on the whole pool while the slots run, so more than `n` threads
+  are active) and compares every field (each query's hit list with every HSP field and edit script
+  through its `Debug` text, the extensions, the masks, the Karlin-Altschul blocks, the search spaces, or
+  the two errors); the first difference prints the summary line and panics; at the end
   `[X_SHADOW] QBATCHPAR batches= compared= diffs= mispredicted= wasted=`. `LOSAT_X_QBATCHPARMISS=N` (test
   only) corrupts every N-th prediction. A slot's panic is kept and resumed only if the loop takes its
-  batch; the release profile aborts on a panic, so there a panic in any batch a slot searches ends the
-  process. Tests: the unit tests of `x_qbatch_par.rs` and `LOSAT/tests/blastn_qbatchpar.rs`. With the
-  default budget dc-megablast's 5 Mb batches (about 117 MiB each) need six threads or more. Measured
-  2026-10-15 on the WSL machine (31,168 D. melanogaster cDNAs x 3 Mb of 2L, outfmt 6, 16 threads, one run
-  each, load 8-16; the same bytes): blastn k = 15 x m = 1, 28.7 -> 11.3 s, max RSS 653 -> 1,268 MiB;
-  dc-megablast k = 4 x m = 4, 53.5 -> 14.1 s (7.9 s with `LOSAT_X_PAIRPARDISC`), 284 -> 639 MiB; no
-  misprediction on either.
+  batch; the release profile aborts on a panic, so there a panic in a batch a slot searches ends the
+  process (no slot runs while output is written). With debug assertions, a check after the slots are
+  joined fails if a slot started rayon's global pool. The counters and `LOSAT_TIMING` end-of-run lines of
+  other switches (PAIRPAR, PAIRPARDISC, GREEDYPRELIM, the megablast lookup fill) and
+  `LOSAT_X_DPCAPTURE` files count the work of the slots' threads too, discarded batches included, so
+  they differ from a run without the switch. Tests: the unit tests of `x_qbatch_par.rs` and
+  `LOSAT/tests/blastn_qbatchpar.rs`.
 - `LOSAT_X_TBNPAR=1` tblastn: preliminary stage per (frame, chunk) and redo per match in
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
 - `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE` and its kept translations, so four or more query

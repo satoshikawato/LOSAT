@@ -5,21 +5,25 @@
 //! two LOSAT code paths with the same result: the loop searching every batch itself, or slots
 //! searching the planned batches ahead of it, whose results the loop takes only under the key it
 //! computes itself. So the property under test is that nothing the run writes depends on it:
-//! standard output (or the `-out` file), standard error without the path's summary lines, and
-//! the exit status equal those of the same search without the switch, for every task, outfmt
-//! 0/6/7, fixed and adaptive batch sizes (with the mixer's alternation of tiny and full batches),
-//! `-max_target_seqs 1`, an error at a batch with slots searching past it (each kind of error of
-//! a batch), corrupted predictions (`LOSAT_X_QBATCHPARMISS`, two slots), and the shadow
+//! standard output (or the `-out` file), standard error (byte for byte without `LOSAT_X_STATS`;
+//! with it, without the `[X_STATS]` lines it adds) and the exit status equal those of the same
+//! search without the switch, for every task, outfmt 0/6/7, fixed and adaptive batch sizes (with
+//! the mixer's alternation of tiny and full batches, and a batch split into query chunks),
+//! `-max_target_seqs 1`, warnings of later batches (the reader's, and an invalid query's),
+//! `-query_loc` skipping records, `LOSAT_TIMING` blocks, an error at a batch with slots searching
+//! past it (each kind of error of a batch), corrupted predictions (`LOSAT_X_QBATCHPARMISS`, two
+//! slots), dc-megablast's `LOSAT_X_PAIRPARDISC` inside a slot's pool, and the shadow
 //! (`LOSAT_X_QBATCHPARSHADOW`), which also compares every batch taken from a slot with the loop's
-//! own search of it. The summary line (`[X_STATS] QBATCHPAR ...`) shows that the slots' path ran
-//! (`precomputed=` batches taken from a slot). That the bytes equal NCBI's is the business of the
-//! BLASTN fixtures.
+//! own search of it. With `LOSAT_X_STATS` the summary line (`[X_STATS] QBATCHPAR ...`) shows that
+//! the slots' path ran (`precomputed=` batches taken from a slot), or why it did not. That the
+//! bytes equal NCBI's is the business of the BLASTN fixtures.
 //!
 //! The queries are 32 pieces of LC738874 and the subject LC738868 (one subject, so its 5 Mb work
-//! units are fewer than the threads). The tasks are megablast and dc-megablast: `-task blastn`
-//! on these inputs stops a build with debug assertions (this test's binary) at
-//! `debug_assert!(ungapped.q_start >= q_context_start)` in `search_query_batch`, with or without
-//! the switch (also on main f3785b9b); the release-binary checks cover it.
+//! units are fewer than the threads). `-task blastn` runs on pieces of LC738884 one query per
+//! batch: on most inputs of several queries per batch a build with debug assertions (this test's
+//! binary) stops at `debug_assert!(ungapped.q_start >= q_context_start)` in
+//! `search_query_batch`, with or without the switch (a wrong assertion, fixed separately);
+//! the release-binary checks cover the rest.
 
 #![cfg(feature = "parallel")]
 
@@ -30,6 +34,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const SWITCH: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_QBATCHPARSHADOW", "1");
+const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -121,13 +126,12 @@ struct Run {
 }
 
 impl Run {
-    /// Standard error without the lines of the path's summary.
+    /// Standard error without the counter lines of `LOSAT_X_STATS` and the shadow's line.
     fn stderr_without_summary(&self) -> String {
         self.stderr
             .lines()
             .filter(|line| {
-                !line.starts_with("[X_STATS] QBATCHPAR")
-                    && !line.starts_with("[X_SHADOW] QBATCHPAR")
+                !line.starts_with("[X_STATS] ") && !line.starts_with("[X_SHADOW] QBATCHPAR")
             })
             .map(|line| format!("{line}\n"))
             .collect()
@@ -186,12 +190,14 @@ fn blastn(args: &[&str], env: &[(&str, &str)]) -> Run {
     }
 }
 
-/// The run with `switches` added gives what the run without them gives (standard output,
-/// standard error without the summary lines, exit status); returns it.
+/// The run with `switches` (and `LOSAT_X_STATS`, for its counters) gives what the run without
+/// them gives (standard output, standard error without the counter and shadow lines, exit
+/// status); returns it.
 fn same_as_without(args: &[&str], env: &[(&str, &str)], switches: &[(&str, &str)]) -> Run {
     let reference = blastn(args, env);
     let mut with = env.to_vec();
     with.extend_from_slice(switches);
+    with.push(STATS);
     let run = blastn(args, &with);
     let what = format!("{args:?} {env:?} {switches:?}");
     assert_eq!(
@@ -369,7 +375,13 @@ fn errors_as_without_the_switch(query: &TempFasta, subject: &str, extra: &[&str]
                 let what = format!("{args:?} {switches:?}");
                 assert_eq!(run.code, reference.code, "{what}\n{}", run.stderr);
                 assert!(run.stdout == reference.stdout, "{what}: standard output");
-                assert_eq!(run.stderr_without_summary(), reference.stderr, "{what}");
+                // Without LOSAT_X_STATS the switch writes nothing of its own: the same bytes
+                // (the shadow writes its line).
+                if switches.contains(&SHADOW) {
+                    assert_eq!(run.stderr_without_summary(), reference.stderr, "{what}");
+                } else {
+                    assert_eq!(run.stderr, reference.stderr, "{what}");
+                }
                 if let Some(expected) = &reference_file {
                     assert!(
                         std::fs::read(&out).expect("read -out") == *expected,
@@ -509,12 +521,73 @@ fn the_shadow_compares_every_batch_taken_from_a_slot() {
     }
 }
 
-// `LOSAT_TIMING`: each batch's block comes when the loop takes the batch, in batch order (the
-// per-batch counts of `traceback_counts` are the same lines as without the switch), and no
-// block of a discarded batch.
+/// The queries with warnings in later batches: the reader's (invalid residues, record 12) and an
+/// invalid query's (N only, record 8; not searched), as NCBI writes them before the report of
+/// the query.
+fn queries_with_warnings() -> TempFasta {
+    let mut records = queries();
+    records[8] = ("q8 only N".to_string(), vec![b'N'; 60]);
+    let mut text = Vec::new();
+    for (index, (title, letters)) in records.iter().enumerate() {
+        text.extend_from_slice(format!(">{title}\n").as_bytes());
+        for (line, chunk) in letters.chunks(70).enumerate() {
+            text.extend_from_slice(chunk);
+            if index == 12 && line == 3 {
+                text.extend_from_slice(b"123");
+            }
+            text.push(b'\n');
+        }
+    }
+    let file = TempFasta::new("warn", &[]);
+    std::fs::write(&file.0, text).expect("write temporary FASTA");
+    file
+}
+
+/// `text` with the seconds of `LOSAT_TIMING` lines (`0.123s`) replaced by `#s`, and without the
+/// end-of-run lines of other switches (`[TIMING] x_...`: their work counters count what each
+/// thread did, so they differ when slots search the batches).
+fn without_seconds(text: &str) -> String {
+    text.lines()
+        .filter(|line| !line.starts_with("[TIMING] x_"))
+        .map(|line| {
+            if !line.starts_with("[TIMING]") {
+                return format!("{line}\n");
+            }
+            let bytes = line.as_bytes();
+            let mut masked = String::new();
+            let mut at = 0;
+            while at < bytes.len() {
+                let digits = bytes[at..]
+                    .iter()
+                    .take_while(|b| b.is_ascii_digit())
+                    .count();
+                if digits > 0 && bytes.get(at + digits) == Some(&b'.') {
+                    let fraction = bytes[at + digits + 1..]
+                        .iter()
+                        .take_while(|b| b.is_ascii_digit())
+                        .count();
+                    if fraction > 0 && bytes.get(at + digits + 1 + fraction) == Some(&b's') {
+                        masked.push_str("#s");
+                        at += digits + 2 + fraction;
+                        continue;
+                    }
+                }
+                masked.push(bytes[at] as char);
+                at += 1;
+            }
+            masked.push('\n');
+            masked
+        })
+        .collect()
+}
+
+// `LOSAT_TIMING`: each batch's block comes when the loop takes the batch, in batch order and in
+// its place among the warnings, and no block of a discarded batch: standard error is that of
+// the search without the switch, but for the seconds (and the end-of-run counters of other
+// switches).
 #[test]
 fn timing_blocks_come_in_batch_order() {
-    let query = TempFasta::new("q", &queries());
+    let query = queries_with_warnings();
     let subject = fixture("LC738868.fasta");
     let args = [
         "-query",
@@ -526,16 +599,18 @@ fn timing_blocks_come_in_batch_order() {
         "-num_threads",
         "4",
     ];
-    let counts = |run: &Run| -> Vec<String> {
-        run.stderr
-            .lines()
-            .filter(|line| line.starts_with("[TIMING] traceback_counts:"))
-            .map(str::to_string)
-            .collect()
-    };
     let env = [("BATCH_SIZE", "3000"), ("LOSAT_TIMING", "1")];
     let reference = blastn(&args, &env);
-    assert!(counts(&reference).len() > 4);
+    assert!(
+        reference.stderr.matches("[TIMING] total:").count() > 4,
+        "{}",
+        reference.stderr
+    );
+    assert!(
+        reference.stderr.contains("FASTA-Reader"),
+        "{}",
+        reference.stderr
+    );
     for switches in [
         vec![SWITCH],
         vec![
@@ -548,9 +623,241 @@ fn timing_blocks_come_in_batch_order() {
         with.extend_from_slice(&switches);
         let run = blastn(&args, &with);
         assert!(run.stdout == reference.stdout, "{switches:?}");
-        assert_eq!(counts(&run), counts(&reference), "{switches:?}");
+        assert_eq!(
+            without_seconds(&run.stderr),
+            without_seconds(&reference.stderr),
+            "{switches:?}"
+        );
+        with.push(STATS);
+        let run = blastn(&args, &with);
         assert!(run.stat("precomputed") > 0, "{}", run.stderr);
     }
+}
+
+// Without LOSAT_X_STATS the switch writes nothing of its own: standard error is the same bytes
+// as without it, with warnings of later batches, at one thread (where the path is off) and four.
+#[test]
+fn the_switch_writes_nothing_of_its_own() {
+    let query = queries_with_warnings();
+    let subject = fixture("LC738868.fasta");
+    for threads in ["1", "4"] {
+        let args = [
+            "-query",
+            path(&query),
+            "-subject",
+            subject.to_str().expect("UTF-8 path"),
+            "-outfmt",
+            "7",
+            "-num_threads",
+            threads,
+        ];
+        let env = [("BATCH_SIZE", "1")];
+        let reference = blastn(&args, &env);
+        assert!(
+            reference.stderr.contains("FASTA-Reader"),
+            "{}",
+            reference.stderr
+        );
+        assert!(
+            reference.stderr.contains("q8 only N"),
+            "{}",
+            reference.stderr
+        );
+        let run = blastn(&args, &[env[0], SWITCH]);
+        assert_eq!(run.code, reference.code);
+        assert!(run.stdout == reference.stdout, "{threads}");
+        assert_eq!(run.stderr, reference.stderr, "{threads}");
+    }
+}
+
+// Warnings of records in later batches (the reader's, an invalid query's) come where they come
+// without the switch, with the batches taken from slots.
+#[test]
+fn warnings_of_later_batches_come_as_without_the_switch() {
+    let query = queries_with_warnings();
+    let subject = fixture("LC738868.fasta");
+    for outfmt in ["0", "6"] {
+        let args = [
+            "-query",
+            path(&query),
+            "-subject",
+            subject.to_str().expect("UTF-8 path"),
+            "-outfmt",
+            outfmt,
+            "-num_threads",
+            "4",
+        ];
+        let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SWITCH]);
+        assert!(run.stat("precomputed") > 0, "{}", run.stderr);
+        let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SHADOW]);
+        assert_eq!(run.summary("[X_SHADOW] QBATCHPAR")["diffs"], "0");
+    }
+}
+
+// `-task blastn`, one query per batch (pieces of LC738884, whose batches of one query do not
+// stop a build with debug assertions; see the module comment), with the shadow.
+#[test]
+fn blastn_task_gives_the_reports_without_the_switch() {
+    let query = TempFasta::new("q", &pieces("LC738884.fasta"));
+    let subject = fixture("LC738868.fasta");
+    for outfmt in ["6", "7"] {
+        let args = [
+            "-task",
+            "blastn",
+            "-query",
+            path(&query),
+            "-subject",
+            subject.to_str().expect("UTF-8 path"),
+            "-outfmt",
+            outfmt,
+            "-num_threads",
+            "4",
+        ];
+        let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SWITCH]);
+        assert_eq!(run.stat("precomputed"), 31, "{}", run.stderr);
+        let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SHADOW]);
+        assert_eq!(run.summary("[X_SHADOW] QBATCHPAR")["compared"], "31");
+        assert_eq!(run.summary("[X_SHADOW] QBATCHPAR")["diffs"], "0");
+    }
+}
+
+// A batch that NCBI splits into query chunks, searched in a slot: a 50,000-letter record in the
+// middle of the input with `CHUNK_SIZE=21000` (a batch of more than 41,800 letters is split).
+// With `BATCH_SIZE=1` the record is a batch of its own; with the mixer (dc-megablast, whose
+// full batch is 20,000 letters with this `CHUNK_SIZE`) the batch that holds it is split too, and
+// the planner predicts it without extensions.
+#[test]
+fn a_batch_split_into_query_chunks_in_a_slot() {
+    let mut records = queries();
+    let long = genome("LC738874.fasta")[100_000..150_000].to_vec();
+    records.insert(10, ("long 50 kb".to_string(), long));
+    let query = TempFasta::new("q", &records);
+    let subject = fixture("LC738868.fasta");
+    for (task, batch) in [("megablast", Some("1")), ("dc-megablast", None)] {
+        let args = [
+            "-task",
+            task,
+            "-query",
+            path(&query),
+            "-subject",
+            subject.to_str().expect("UTF-8 path"),
+            "-outfmt",
+            "6",
+            "-num_threads",
+            "4",
+        ];
+        let mut env = vec![("CHUNK_SIZE", "21000")];
+        env.extend(batch.map(|size| ("BATCH_SIZE", size)));
+        let run = same_as_without(&args, &env, &[SWITCH]);
+        assert!(run.stat("precomputed") > 0, "{task}: {}", run.stderr);
+        let run = same_as_without(&args, &env, &[SHADOW]);
+        assert_eq!(run.summary("[X_SHADOW] QBATCHPAR")["diffs"], "0");
+    }
+}
+
+// `-query_loc` that skips records in the middle of the input (they join the next batch), and a
+// successful search into an `-out` file.
+#[test]
+fn skipped_records_and_an_out_file_give_the_reports_without_the_switch() {
+    let mut records = queries();
+    for index in [5, 6, 13] {
+        records[index].1.truncate(600);
+    }
+    let query = TempFasta::new("q", &records);
+    let subject = fixture("LC738868.fasta");
+    let out = temp_path("out.txt");
+    let out = out.to_str().expect("UTF-8 path").to_string();
+    for outfmt in ["0", "6"] {
+        let args = [
+            "-query",
+            path(&query),
+            "-subject",
+            subject.to_str().expect("UTF-8 path"),
+            "-query_loc",
+            "1001-1400",
+            "-outfmt",
+            outfmt,
+            "-num_threads",
+            "4",
+            "-out",
+            &out,
+        ];
+        let env = [("BATCH_SIZE", "1")];
+        let reference = blastn(&args, &env);
+        assert_eq!(reference.code, Some(0), "{}", reference.stderr);
+        let expected = std::fs::read(&out).expect("read -out");
+        assert!(!expected.is_empty());
+        let run = blastn(&args, &[env[0], SWITCH]);
+        assert_eq!(run.code, reference.code);
+        assert_eq!(run.stderr, reference.stderr);
+        assert!(
+            std::fs::read(&out).expect("read -out") == expected,
+            "{outfmt}: -out"
+        );
+        let run = blastn(&args, &[env[0], SWITCH, STATS]);
+        assert!(run.stat("precomputed") > 0, "{}", run.stderr);
+        assert!(
+            std::fs::read(&out).expect("read -out") == expected,
+            "{outfmt}: -out"
+        );
+    }
+    let _ = std::fs::remove_file(&out);
+}
+
+// dc-megablast's `LOSAT_X_PAIRPARDISC` inside a slot's pool of two threads: batches of 10,000
+// letters or more (the stage takes a query block over 8,000 letters), two slots of two threads
+// at four threads. The stage's shadow compares the chunks of every batch, the loop's first
+// and the slots'.
+#[test]
+fn pairpardisc_runs_inside_a_slots_pool() {
+    let query = TempFasta::new("q", &queries());
+    let subject = fixture("LC738868.fasta");
+    let args = [
+        "-task",
+        "dc-megablast",
+        "-query",
+        path(&query),
+        "-subject",
+        subject.to_str().expect("UTF-8 path"),
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "4",
+    ];
+    let env = [("BATCH_SIZE", "10000")];
+    let switches = [
+        SWITCH,
+        ("LOSAT_X_QBATCHPARSLOTS", "2"),
+        ("LOSAT_X_PAIRPARDISC", "1"),
+        ("LOSAT_X_PAIRPARDISCSHADOW", "1"),
+    ];
+    let reference = blastn(&args, &env);
+    let mut with = env.to_vec();
+    with.extend_from_slice(&switches);
+    with.push(STATS);
+    let run = blastn(&args, &with);
+    assert_eq!(run.code, reference.code, "{}", run.stderr);
+    assert!(run.stdout == reference.stdout);
+    let batches = run.stat("batches");
+    assert_eq!((run.stat("k"), run.stat("m")), (2, 2), "{}", run.stderr);
+    assert!(run.stat("precomputed") > 0, "{}", run.stderr);
+    let line = run
+        .stderr
+        .lines()
+        .find(|line| line.starts_with("[X_PAIRPARDISCSHADOW] blastn: seed chunks equal="))
+        .unwrap_or_else(|| panic!("no PAIRPARDISC shadow line:\n{}", run.stderr));
+    let chunks: u64 = line
+        .trim_start_matches("[X_PAIRPARDISCSHADOW] blastn: seed chunks equal=")
+        .split_whitespace()
+        .next()
+        .and_then(|value| value.parse().ok())
+        .expect("a chunk count");
+    // The loop searches the first batch; every other chunk was a slot's (the last batch may be
+    // below the stage's 8,000 letters).
+    assert!(
+        chunks > 1 && chunks + 1 >= batches,
+        "{line} for {batches} batches"
+    );
 }
 
 // Where the loop keeps every batch: one thread, as many subject work units as threads, and the
@@ -565,6 +872,11 @@ fn the_loop_keeps_the_batches_where_the_path_is_off() {
     let cases = [
         ("1", None, "threads"),
         ("4", Some(("LOSAT_WASI_THREADS_DEBUG", "1")), "debug"),
+        (
+            "4",
+            Some(("LOSAT_TRACE_BLASTN_SUBJECT", "no_such_subject")),
+            "debug",
+        ),
     ];
     for (threads, variable, off) in cases {
         let mut args = base.to_vec();
@@ -601,4 +913,67 @@ fn the_loop_keeps_the_batches_where_the_path_is_off() {
     ];
     let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SWITCH]);
     assert_eq!(run.summary("[X_STATS] QBATCHPAR")["off"], "subjects");
+}
+
+// Debug output (written while a batch is searched) and a BLAST database (`-db`, made here by
+// `LOSAT makedb`) keep the loop: the reports are those without the switch. (`-verbose` is not a
+// command-line option of LOSAT's blastn.)
+#[test]
+fn debug_output_and_a_database_keep_the_loop() {
+    let records: Vec<(String, Vec<u8>)> = queries().into_iter().take(4).collect();
+    let query = TempFasta::new("q", &records);
+    let subject = fixture("LC738868.fasta");
+    let subject = subject.to_str().expect("UTF-8 path");
+    for variable in [
+        ("LOSAT_DEBUG_BLASTN", "1"),
+        ("LOSAT_DEBUG_COORDS", "1"),
+        ("BLEMIR_DEBUG", "1"),
+    ] {
+        let args = [
+            "-query",
+            path(&query),
+            "-subject",
+            subject,
+            "-outfmt",
+            "6",
+            "-num_threads",
+            "4",
+        ];
+        let env = [variable, ("BATCH_SIZE", "1")];
+        let reference = blastn(&args, &env);
+        let run = blastn(&args, &[env[0], env[1], SWITCH, STATS]);
+        assert_eq!(run.code, reference.code, "{variable:?}");
+        assert!(run.stdout == reference.stdout, "{variable:?}");
+        assert_eq!(
+            run.summary("[X_STATS] QBATCHPAR")["off"],
+            "debug",
+            "{variable:?}"
+        );
+    }
+    let db = temp_path("db");
+    std::fs::create_dir_all(&db).expect("make the database directory");
+    let name = db.join("subject");
+    let name = name.to_str().expect("UTF-8 path");
+    let made = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        .args(["makedb", "-in", subject, "-dbtype", "nucl", "-out", name])
+        .output()
+        .expect("run LOSAT makedb");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    let args = [
+        "-query",
+        path(&query),
+        "-db",
+        name,
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "4",
+    ];
+    let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SWITCH]);
+    assert_eq!(run.summary("[X_STATS] QBATCHPAR")["off"], "db");
+    let _ = std::fs::remove_dir_all(&db);
 }

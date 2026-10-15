@@ -272,21 +272,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
     // }
     // ```
-    // The database of `-db` opens where the subject file opens (NCBI's `InitializeSubject`
-    // before the query is read). NCBI's application layer has read its environment and
-    // registry files by then; LOSAT reads them for `-db` (the registry's `BLASTDB`), as its
-    // other programs with `-db`, and leaves `-subject`'s path as it was.
-    let database = match args.database_name() {
-        Some(name) => {
-            let settings =
-                crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
-                    .map_err(anyhow::Error::msg)?;
-            Some(BlastxDatabase::open(name, &settings)?)
-        }
-        None => None,
-    };
+    // `-db`: the database opens after the options are processed (below).
     let subject_path = args.subject.as_deref();
-    let subject_file = match (&database, subject_path) {
+    let subject_file = match (&args.db, subject_path) {
         (Some(_), _) => None,
         (None, Some(path)) => Some(File::open(path).map_err(|_| inaccessible("subject", path))?),
         (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
@@ -325,7 +313,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
     //     }
     // ```
-    if database.is_none() && subjects.is_empty() {
+    if args.db.is_none() && subjects.is_empty() {
         return Err(engine("Empty CBlastQueryVector"));
     }
     let query_file = File::open(&args.query).map_err(|_| inaccessible("query", &args.query))?;
@@ -356,6 +344,29 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             "BLAST query/options error: {e}\nPlease refer to the BLAST+ user manual.\n"
         ),
     })?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
+    // ```c++
+    //         /*** Initialize the database/subject ***/
+    //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+    //         CRef<CLocalDbAdapter> db_adapter;
+    //         CRef<CScope> scope;
+    //         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+    //                          db_adapter, scope);
+    // ```
+    // The database of `-db` opens after the arguments (the query and output files) and the
+    // options are processed and before the query is read, as NCBI's `InitializeSubject`.
+    // NCBI's application layer has read its environment and registry files by then; LOSAT
+    // reads them for `-db` (the registry's `BLASTDB`), as its other programs with `-db`, and
+    // leaves `-subject`'s path as it was.
+    let database = match args.database_name() {
+        Some(name) => {
+            let settings =
+                crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
+                    .map_err(anyhow::Error::msg)?;
+            Some(BlastxDatabase::open(name, &settings)?)
+        }
+        None => None,
+    };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
     // ```c++
     // 	char c;
@@ -427,6 +438,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         },
     };
     report::write_prolog(&mut writer, &options, &subjects, &shown_run).map_err(report_error)?;
+    // NCBI writes the prolog out before it searches the first batch, so the warnings of the
+    // batch come after it when both streams go to one place.
+    writer.flush().map_err(output_error)?;
     // The database's sequences, read once for every batch; an error belongs to the first
     // batch with a valid context (`Subjects::Unreadable`, `search_error`).
     let (stores, unreadable) = match database.as_ref().map(BlastxDatabase::read_stores) {
@@ -441,6 +455,10 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         (Some(_), None) => Subjects::Unreadable,
     };
     let search_error = |error: anyhow::Error| -> anyhow::Error {
+        // LOSAT's refusal, not an error of NCBI's engine.
+        if error.is::<super::parameters::SearchSpaceOverflow>() {
+            return error;
+        }
         if error.is::<UnreadableSubjects>() {
             let kept = unreadable
                 .borrow_mut()

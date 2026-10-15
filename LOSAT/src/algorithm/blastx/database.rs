@@ -161,10 +161,11 @@ impl ReportedSubjects {
                 shared::check_shown_protein_title(&title, ordinal, PROGRAM)?;
             }
             if tabular {
-                let id = if title.is_empty() {
-                    Vec::new()
-                } else {
+                // An unreported subject's id is never written.
+                let id = if shown {
                     shared::tabular_subject_id(&title, ordinal, true, PROGRAM)?
+                } else {
+                    Vec::new()
                 };
                 // A stored title is a VisibleString (checked above), so its id is ASCII.
                 reported

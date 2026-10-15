@@ -184,6 +184,27 @@ pub fn gumbel_db_length(options: &ResolvedOptions, db_length: i64) -> i64 {
 //       query_info->contexts[index].eff_searchsp = effective_search_space;
 //       query_info->contexts[index].length_adjustment = length_adjustment;
 // ```
+/// LOSAT's refusal of a search whose effective search space overflows NCBI's `Int8`
+/// (`db_length` letters of the database, or of `-dbsize`, against a context of
+/// `query_length` residues): NCBI's arithmetic overflows there (as BLASTP's `-dbsize`).
+#[derive(Debug)]
+pub struct SearchSpaceOverflow {
+    pub db_length: i64,
+    pub query_length: usize,
+}
+
+impl std::fmt::Display for SearchSpaceOverflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "a database length of {} letters with a query of {} letters overflows NCBI BLAST+'s 64-bit effective search space, which is not supported by LOSAT's BLASTX",
+            self.db_length, self.query_length
+        )
+    }
+}
+
+impl std::error::Error for SearchSpaceOverflow {}
+
 pub fn effective_lengths(
     batch: &PreparedQueryBatch,
     parameters: &mut [ContextParameters],
@@ -241,7 +262,10 @@ pub fn effective_lengths(
             None => (db_length - db_count * adj)
                 .max(1)
                 .checked_mul(c.length as i64 - adj)
-                .ok_or_else(|| anyhow::anyhow!("BLASTX effective search space exceeds Int8"))?,
+                .ok_or(SearchSpaceOverflow {
+                    db_length,
+                    query_length: c.length,
+                })?,
         };
     }
     Ok(())

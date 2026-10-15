@@ -1132,12 +1132,16 @@ impl ShownSubjects<'_> {
         }
     }
 
-    /// `stitle` of subject `oid`: `N/A` for a record (NCBI's subject set has no title in
-    /// its Seq-align), the stored title of a database sequence.
+    /// `stitle` of subject `oid`: `N/A` for a record (NCBI's subject set has no BLAST
+    /// definition line), the stored title of a database sequence, or `N/A` for an empty one
+    /// (tabular.cpp's `NA`, as BLASTP's `blastp_subject_stitle`).
     fn stitle(&self, oid: usize) -> &str {
         match self {
             ShownSubjects::Fasta { .. } => "N/A",
-            ShownSubjects::Database { reported, .. } => reported.title(oid),
+            ShownSubjects::Database { reported, .. } => match reported.title(oid) {
+                "" => "N/A",
+                title => title,
+            },
         }
     }
 

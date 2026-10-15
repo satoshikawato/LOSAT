@@ -32,7 +32,7 @@ use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: the switches of the strict set, the variables that are on by default.
-/// The last nine joined after the set became the default. `LOSAT_X_PAIRLUT` and
+/// The last eleven joined after the set became the default. `LOSAT_X_PAIRLUT` and
 /// `LOSAT_X_HSPINPLACE` were added after the change as switches that are off unless set and
 /// joined the set once they were verified with it on. `LOSAT_X_SEEDBUCKET` was left out at the
 /// change: it numbered the lookup hits of a chunk scan in a `u32`, exact only up to 2^32 hits
@@ -51,8 +51,11 @@ use std::sync::OnceLock;
 /// thread from one subject to the next, `tblastn/search_gapped.rs`) and `LOSAT_X_TBNXLATE` (the
 /// translated frames of a TBLASTN subject read from tables, `tblastn/x_subject_translate.rs`)
 /// were added after the change as switches that are off unless set and joined the set together
-/// once they were verified and timed with it on.
-pub(crate) const STRICT_SET: [&str; 52] = [
+/// once they were verified and timed with it on. `LOSAT_X_TBNOIDNEXT` (the threads take the next
+/// chunk of subjects when they are free, `tblastn/x_oid_flow.rs`) and `LOSAT_X_TBNOIDUNITS` (the
+/// units of a subject longer than a chunk's budget on the pool, `tblastn/stage_d_pipeline.rs`)
+/// joined the same way, together, after them.
+pub(crate) const STRICT_SET: [&str; 54] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_PURGEFAST",
@@ -105,6 +108,8 @@ pub(crate) const STRICT_SET: [&str; 52] = [
     "LOSAT_X_LINKSORT",
     "LOSAT_X_TBNSTATE",
     "LOSAT_X_TBNXLATE",
+    "LOSAT_X_TBNOIDNEXT",
+    "LOSAT_X_TBNOIDUNITS",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that

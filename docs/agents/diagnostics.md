@@ -78,9 +78,10 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 50 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
-`LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE` and
-`LOSAT_X_LINKSORT` joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
+strict set are on by default (43 then, 52 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+`LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
+`LOSAT_X_LINKSORT`, `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` joined), and their variables mean
+(`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -96,7 +97,8 @@ strict set are on by default (43 then, 50 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `TBNQSIDE` and `TBNBATCH` only with `TBNPAR` (`TBNEVENTS` only without it); `TBNBATCH` needs
   `TBNSSIDE`; `BXBATCH` needs `BXPOOL`; `AHEAD` needs `GREEDYSPEC` for megablast; `MBBATCH` runs
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
-  in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search.
+  in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search; `TBNSTATE` and
+  `TBNXLATE` act only with `TBNPAR`.
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
   Only `0` means off; `00`, `false` or `off` are "any other value".
 - The variables are read once per process (once per Wasm instance), except `GREEDYSPEC`,
@@ -110,7 +112,7 @@ strict set are on by default (43 then, 50 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 50 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 52 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -138,6 +140,7 @@ export LOSAT_X_TBNOIDCHUNK=1
 export LOSAT_X_SEEDRELEASE=1
 export LOSAT_X_GREEDYFUSE=1
 export LOSAT_X_LINKSORT=1
+export LOSAT_X_TBNSTATE=1 LOSAT_X_TBNXLATE=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -193,6 +196,15 @@ its output order once where it sorted twice, and a long index sort runs as a sta
 on the search pool. It changes only how an index order is computed, not the order, and acts only
 where `LOSAT_X_HSPINPLACE` does (the reference bodies have their own sorts). The shadow
 `LOSAT_X_LINKSORTSHADOW` stays opt-in.
+
+`LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` were added after the default changed, as switches that
+were off unless set, and joined the set together on 2026-10-15. They cut the work tblastn does per
+subject on the unit path (`LOSAT_X_TBNPAR`): a thread keeps the scan state of the units from one
+subject to the next instead of making and clearing it per subject and per unit, and the six frames
+of a subject are read from codon tables instead of through letters. Neither changes a value; they
+are timed together because `TBNSTATE` alone was 3 % slower on the fly genome at 8 threads. The
+shadow `LOSAT_X_TBNXLATESHADOW` stays opt-in; `LOSAT_X_TBNPARSHADOW` compares the unit path, with
+both switches, with the serial reference.
 
 What runs per target:
 
@@ -744,49 +756,48 @@ Scheduling (each value computed by one thread with the original function; order 
   flow. Not in the set (off unless set to any value). With `LOSAT_WASI_THREADS_DEBUG=1` each subject
   whose units ran on the pool prints a `prelim_units` stage line with `parallel_selected=true`;
   `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
-- `LOSAT_X_TBNSTATE=1` tblastn, the unit path (`TBNPAR`): the scan state of a subject's (frame,
-  chunk) units (the diagonal table of the two-hit word finder, the offset pairs, the initial hits,
-  the gapped alignment memory) is kept by the thread from one subject to the next, as NCBI's search
-  thread keeps its word-finder and gapped alignment structures for every subject of its loop
-  (`blast_engine.c:1002-1003,1412-1413`), and each unit ends with NCBI's step of the diagonal offset
-  (`Blast_ExtendWordExit`, `blast_extend.c:166-171`: the offset moves on by the unit's length plus
-  the window; the table is cleared only when the offset reaches INT4_MAX / 4) instead of the next
-  unit clearing the whole table. After the step every entry lies more than a window behind any hit
-  of the next unit, so its first hit on a diagonal only records it, as on a cleared table: the same
-  initial hits by construction. Without the switch each subject makes its own state and each unit
-  clears a table of next_pow2(query residues + window) entries of 8 bytes (1 MB for 84,000 query
-  residues); on the human transcriptome (465,769 subjects, 118 fly proteins, 8 threads) glibc's
-  per-thread heaps were created and deleted about 250,000 times for these states (munmap 461,484,
-  mmap 249,858 against 36 and 71 before #161). On the workstation (8 threads on 8 cores of one NUMA
-  node, other work on the machine, alternating rounds against a placebo variable, the same reports):
-  that search 161.9 -> 133.2 s (CPU 1,261 -> 1,031 s, minor faults 3.8-22 M -> 0.87 M, munmap
-  415,942 -> 55), the zebrafish transcriptome 15.2 -> 12.0 s, the 16S rRNA genes (28,036 subjects,
-  55 proteins) 1.18 -> 1.01 s, and at one thread 8.15 -> 6.82 s. The units of a long subject that
-  run on the pool (`TBNOIDUNITS`, the single subject of a search) take the offset step too, on a
-  state per task.
-  The thread that runs the search keeps one set (the table and the largest offset-pair and hit
-  buffers) until it ends or its next tblastn search takes it over. Not in the set (off unless set
-  to any value); it acts at every thread count. With `LOSAT_X_DEFAULT=0` the reference loop runs
-  instead of the unit path and the variable changes nothing. `LOSAT_X_TBNPARSHADOW=1` compares the
-  unit path of every subject with the serial reference. Tests: `tblastn/search_init.rs` (the table
-  kept across units, across the clear and taken over by another query set), the last test of
-  `LOSAT/tests/tblastn_oid_chunk.rs`.
-- `LOSAT_X_TBNXLATE=1` tblastn: the six translated frames of a subject are read from tables, as
-  NCBI makes them from the compressed subject (`blast_util.c:1071-1090`: one table of 64 residues
-  per strand, `s_BlastGetTranslationTable`, and one table read per codon,
-  `BLAST_TranslateCompressedSequence`). The subject's letters become ncbi2na in one pass; a gap or
-  an ambiguous letter draws from the generator seeded with the subject's length, in subject
-  order, as `s_Ncbi4naToNcbi2na` does (`blast_objmgr_tools.cpp:427-475`). The reference path
-  reaches the same residues through letters (the subject as ncbi4na, as ncbi2na, as `ACGT`, its
-  reverse complement, then `GeneticCode::get` per codon). The tables are filled from the
-  reference path's own functions, so every residue is the reference's by construction. Not in the
-  set (off unless set to any value). It acts where the subject plans of the unit path are made
-  (`TBNPAR`, on by default); with `LOSAT_X_DEFAULT=0` the reference loop translates each subject
-  itself and the variable changes nothing. Shadow: `LOSAT_X_TBNXLATESHADOW=1` makes both
+- `LOSAT_X_TBNSTATE=1` (in the strict set since 2026-10-15) tblastn, the unit path (`TBNPAR`): the
+  scan state of a subject's (frame, chunk) units (the diagonal table of the two-hit word finder, the
+  offset pairs, the initial hits, the gapped alignment memory) is kept by the thread from one
+  subject to the next, as NCBI's search thread keeps its word-finder and gapped alignment structures
+  for every subject of its loop (`blast_engine.c:1002-1003,1412-1413`), and each unit ends with
+  NCBI's step of the diagonal offset (`Blast_ExtendWordExit`, `blast_extend.c:166-171`: the offset
+  moves on by the unit's length plus the window; the table is cleared only when the offset reaches
+  INT4_MAX / 4) instead of the next unit clearing the whole table. After the step every entry lies
+  more than a window behind any hit of the next unit, so its first hit on a diagonal only records
+  it, as on a cleared table: the same initial hits by construction. Without the switch each subject
+  makes its own state and each unit clears a table of next_pow2(query residues + window) entries of
+  8 bytes (1 MB for 84,000 query residues); on the human transcriptome (465,769 subjects, 118 fly
+  proteins, 8 threads) glibc's per-thread heaps were created and deleted about 250,000 times for
+  these states (munmap 461,484, mmap 249,858 against 36 and 71 before #161). On the workstation (8
+  threads on 8 cores of one NUMA node, other work on the machine, alternating rounds against a
+  placebo variable, the same reports): that search 161.9 -> 133.2 s (CPU 1,261 -> 1,031 s, minor
+  faults 3.8-22 M -> 0.87 M, munmap 415,942 -> 55), the zebrafish transcriptome 15.2 -> 12.0 s, the
+  16S rRNA genes (28,036 subjects, 55 proteins) 1.18 -> 1.01 s, and at one thread 8.15 -> 6.82 s.
+  The units of a long subject that run on the pool (`TBNOIDUNITS`, the single subject of a search)
+  take the offset step too, on a state per task. The thread that runs the search keeps one set (the
+  table and the largest offset-pair and hit buffers) until it ends or its next tblastn search takes
+  it over. `=0` turns it off; it acts at every thread count. With `LOSAT_X_DEFAULT=0` the reference
+  loop runs instead of the unit path and the variable changes nothing. `LOSAT_X_TBNPARSHADOW=1`
+  compares the unit path of every subject with the serial reference. Tests: `tblastn/search_init.rs`
+  (the table kept across units, across the clear and taken over by another query set), the last test
+  of `LOSAT/tests/tblastn_oid_chunk.rs`.
+- `LOSAT_X_TBNXLATE=1` (in the strict set since 2026-10-15) tblastn: the six translated frames of a
+  subject are read from tables, as NCBI makes them from the compressed subject
+  (`blast_util.c:1071-1090`: one table of 64 residues per strand, `s_BlastGetTranslationTable`, and
+  one table read per codon, `BLAST_TranslateCompressedSequence`). The subject's letters become
+  ncbi2na in one pass; a gap or an ambiguous letter draws from the generator seeded with the
+  subject's length, in subject order, as `s_Ncbi4naToNcbi2na` does
+  (`blast_objmgr_tools.cpp:427-475`). The reference path reaches the same residues through letters
+  (the subject as ncbi4na, as ncbi2na, as `ACGT`, its reverse complement, then `GeneticCode::get`
+  per codon). The tables are filled from the reference path's own functions, so every residue is the
+  reference's by construction. `=0` turns it off. It acts where the subject plans of the unit path
+  are made (`TBNPAR`, on by default); with `LOSAT_X_DEFAULT=0` the reference loop translates each
+  subject itself and the variable changes nothing. Shadow: `LOSAT_X_TBNXLATESHADOW=1` makes both
   translations for every plan and stops (panic) if a frame, a unit or an error text differs; one
   `[X_SHADOW] TBNXLATE` line on stderr at the end gives the plans and residues compared, or says
-  that nothing was compared. With `LOSAT_X_STATS=1` a `[X_STATS] TBNXLATE table_plans=` line
-  counts the plans made from the tables; `LOSAT/tests/tblastn_subject_translate.rs` reads both.
+  that nothing was compared. With `LOSAT_X_STATS=1` a `[X_STATS] TBNXLATE table_plans=` line counts
+  the plans made from the tables; `LOSAT/tests/tblastn_subject_translate.rs` reads both.
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject` without `-subject_loc`: each subject record's letters are
   packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
   database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of

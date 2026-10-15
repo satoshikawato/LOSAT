@@ -78,10 +78,11 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 53 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 55 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
-`LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` joined),
-and their variables mean (`LOSAT/src/utils/xswitch.rs`):
+`LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE`,
+`LOSAT_X_TBNOIDNEXT` and `LOSAT_X_TBNOIDUNITS` joined), and their variables mean
+(`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -99,7 +100,7 @@ and their variables mean (`LOSAT/src/utils/xswitch.rs`):
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
   `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
-  act only with `TBNPAR`.
+  act only with `TBNPAR`; `TBNOIDNEXT` and `TBNOIDUNITS` act only with `TBNOIDCHUNK`.
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
   Only `0` means off; `00`, `false` or `off` are "any other value".
 - The variables are read once per process (once per Wasm instance), except `GREEDYSPEC`,
@@ -113,7 +114,7 @@ and their variables mean (`LOSAT/src/utils/xswitch.rs`):
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 53 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 55 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -143,6 +144,7 @@ export LOSAT_X_GREEDYFUSE=1
 export LOSAT_X_LINKSORT=1
 export LOSAT_X_NEWTONLANES8=1
 export LOSAT_X_TBNSTATE=1 LOSAT_X_TBNXLATE=1
+export LOSAT_X_TBNOIDNEXT=1 LOSAT_X_TBNOIDUNITS=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -215,6 +217,16 @@ of a subject are read from codon tables instead of through letters. Neither chan
 are timed together because `TBNSTATE` alone was 3 % slower on the fly genome at 8 threads. The
 shadow `LOSAT_X_TBNXLATESHADOW` stays opt-in; `LOSAT_X_TBNPARSHADOW` compares the unit path, with
 both switches, with the serial reference.
+
+`LOSAT_X_TBNOIDNEXT` and `LOSAT_X_TBNOIDUNITS` were added after the default changed, as switches
+that were off unless set, and joined the set together on 2026-10-15. They change how tblastn hands
+the chunks of `LOSAT_X_TBNOIDCHUNK` to its threads (2 or more threads, several subjects): the
+threads take the next chunk when they are free instead of waiting at the end of each entry, and
+the units of a subject longer than a chunk's budget (a chromosome) run on the pool instead of on
+the thread that took it. Neither changes a value or the order in which the results are entered;
+they are timed together because `TBNOIDUNITS` alone was slower on the human genome at 8 and 16
+threads. On main's path before `TBNSTATE` joined the set they cost 5-11 % more CPU time on genomes;
+with it the CPU time is the same.
 
 What runs per target:
 
@@ -739,6 +751,28 @@ Rebuilding less:
   (0.834-0.890; block form 1.145), 211 -> 145 MiB; one query at 8 threads 0.998, 79 -> 67 MiB. It is faster than
   the default, probably because the hand-over runs while the threads search instead of after them and fewer
   results are held (not measured separately).
+- `LOSAT_X_BNSTORE=1` (BLASTN, all tasks, `-subject` without `-subject_loc`, memory; not in the strict set: off
+  unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) each subject record's letters are packed as
+  soon as the reader has read it (`sequence/packed_subject.rs`, the module of `LOSAT_X_TBNSTORE`: ncbi2na 4 bases
+  per byte with the remainder count in the last byte, the runs of letters other than `ACGT` as ncbi4na codes, the
+  lower-case intervals), so the letters of the whole set are never held; the records keep their deflines. The
+  search reads each form from `SubjectLetters` (`blastn/x_subject_store.rs`): the length, the lower-case intervals
+  (`-lcase_masking`), the packed bases of the preliminary stage (those of the packed subject, not a second copy;
+  the bytes of `encode_subject_ncbi2na_packed`), the blastna letters of a subject in the traceback
+  (`blastna_into`) and the upper-case letters of each outfmt 0 row (`letters_into`), each the bytes the record's
+  letters give (the comparison tests of `packed_subject.rs`). A subject range keeps the letters (the records
+  are cut before the search), and so does a set with a byte that has no ncbi4na code (the CLI reader admits
+  none); the library entry `run_local` (and LOSAT Web) reads the caller's records. With `LOSAT_X_STATS=1` a
+  `[X_STATS] BNSTORE subjects= stored_bytes= blastna_made= rows_made=` line gives the subjects held packed, the
+  bytes of their packed forms, the times the traceback made blastna letters and the report rows made from them;
+  `LOSAT/tests/blastn_subject_store.rs` compares reports and messages with and without the switch and reads it.
+  Measured 2026-10-15 on the WSL machine (megablast against 28,036 16S subjects, 40.6 Mb; max RSS, one run each
+  in one series, the same output in every run): one thread, one query 68.0 -> 30.5 MiB (NCBI BLAST+ 2.17.0 `-db`
+  42.0), a query without hits 67.2 -> 29.4 (34.6), 100 queries 135.3 -> 97.7 (95.8); 8 threads, one query 81.1 ->
+  44.7, 34.8 with `LOSAT_X_BNSTREAM` (43.8), 100 queries 206.7 -> 170.8, 108.9 with `LOSAT_X_BNSTREAM` (145.0 with it
+  alone; NCBI 115.0). One 5.5 Mb subject (Sakai x MG1655, 8 threads) keeps its peak (196.2 -> 194.3; NCBI 152.8):
+  there the query's copies dominate, not the subject.
+  Time: 100 queries at one thread, 4 alternating pairs (load 6-12), pair ratio median 1.06 (0.87-1.11).
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks
@@ -845,33 +879,33 @@ Scheduling (each value computed by one thread with the original function; order 
   side by side (each batch on one thread). With `LOSAT_WASI_THREADS_DEBUG=1` the
   `[losat-thread-activity]` line of the subject stage ends with `pool_entries=` (the entries of
   one query batch); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.
-- `LOSAT_X_TBNOIDNEXT=1` tblastn with 2+ threads and several subjects, where `TBNOIDCHUNK` makes
-  the chunks: no wait between entries. The threads of the pool take the next chunk when they are
-  free, as NCBI's search threads ask the database for the next chunk (`seqdbimpl.cpp:333-344`),
-  instead of waiting at the end of each entry for its last chunk. The thread that owns the
-  search takes the lists back chunk by chunk in OID order and enters them into the collector as
-  before, and searches a chunk itself while the next one in order is not finished
-  (`tblastn/x_oid_flow.rs`). At most `4 * threads` chunks are taken or finished beyond the oldest
-  one not taken back; a thread waits before a new chunk when that window is full, so the memory of
-  the waiting lists stays bounded. The chunks and the search of each subject are those of
-  `TBNOIDCHUNK`, so the report is the same. Not in the set (off unless set to any value); with
-  `LOSAT_X_TBNOIDCHUNK=0` (or `LOSAT_X_DEFAULT=0` alone) there are no chunks and it changes
-  nothing. With `LOSAT_WASI_THREADS_DEBUG=1` the search is one entry (`pool_entries=1`) and the
-  line adds `flow_chunks=` and `flow_peak_waiting=` (the most finished chunks that waited at
-  once); `LOSAT/tests/tblastn_oid_chunk.rs` reads them.
-- `LOSAT_X_TBNOIDUNITS=1` tblastn with 2+ threads and several subjects, where `TBNOIDCHUNK` makes
-  the chunks (with or without `TBNOIDNEXT`): a subject longer than a chunk's budget (a chunk of its
-  own, such as a chromosome) runs its (frame, chunk) units on the pool, as the single subject of a
-  search does with `TBNPAR`, instead of one after another on the thread that took it. Threads that
-  have no chunk to search (at the end of an entry, or when no chunk is left) take its units; its
-  merge in NCBI order, linking, E-values and reaping run on its thread after its last unit, so the
-  report is the same. NCBI's thread searches a subject whole, so at 16 and 32 threads the longest
-  chromosome bounds both programs; this goes beyond NCBI. Other subjects keep their units on their
-  thread. With `TBNOIDNEXT` the threads of the flow start together (each waits until all have
-  entered the flow) so that a thread waiting for a unit can only take units, never a loop of the
-  flow. Not in the set (off unless set to any value). With `LOSAT_WASI_THREADS_DEBUG=1` each subject
-  whose units ran on the pool prints a `prelim_units` stage line with `parallel_selected=true`;
-  `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
+- `LOSAT_X_TBNOIDNEXT=1` (in the strict set since 2026-10-15) tblastn with 2+ threads and several
+  subjects, where `TBNOIDCHUNK` makes the chunks: no wait between entries. The threads of the pool
+  take the next chunk when they are free, as NCBI's search threads ask the database for the next
+  chunk (`seqdbimpl.cpp:333-344`), instead of waiting at the end of each entry for its last chunk.
+  The thread that owns the search takes the lists back chunk by chunk in OID order and enters them
+  into the collector as before, and searches a chunk itself while the next one in order is not
+  finished (`tblastn/x_oid_flow.rs`). At most `4 * threads` chunks are taken or finished beyond the
+  oldest one not taken back; a thread waits before a new chunk when that window is full, so the
+  memory of the waiting lists stays bounded. The chunks and the search of each subject are those of
+  `TBNOIDCHUNK`, so the report is the same. `=0` turns it off; with `LOSAT_X_TBNOIDCHUNK=0` (or
+  `LOSAT_X_DEFAULT=0` alone) there are no chunks and it changes nothing. With
+  `LOSAT_WASI_THREADS_DEBUG=1` the search is one entry (`pool_entries=1`) and the line adds
+  `flow_chunks=` and `flow_peak_waiting=` (the most finished chunks that waited at once);
+  `LOSAT/tests/tblastn_oid_chunk.rs` reads them.
+- `LOSAT_X_TBNOIDUNITS=1` (in the strict set since 2026-10-15) tblastn with 2+ threads and several
+  subjects, where `TBNOIDCHUNK` makes the chunks (with or without `TBNOIDNEXT`): a subject longer
+  than a chunk's budget (a chunk of its own, such as a chromosome) runs its (frame, chunk) units on
+  the pool, as the single subject of a search does with `TBNPAR`, instead of one after another on
+  the thread that took it. Threads that have no chunk to search (at the end of an entry, or when no
+  chunk is left) take its units; its merge in NCBI order, linking, E-values and reaping run on its
+  thread after its last unit, so the report is the same. NCBI's thread searches a subject whole, so
+  at 16 and 32 threads the longest chromosome bounds both programs; this goes beyond NCBI. Other
+  subjects keep their units on their thread. With `TBNOIDNEXT` the threads of the flow start
+  together (each waits until all have entered the flow) so that a thread waiting for a unit can only
+  take units, never a loop of the flow. `=0` turns it off. With `LOSAT_WASI_THREADS_DEBUG=1` each
+  subject whose units ran on the pool prints a `prelim_units` stage line with
+  `parallel_selected=true`; `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
 - `LOSAT_X_TBNSTATE=1` (in the strict set since 2026-10-15) tblastn, the unit path (`TBNPAR`): the
   scan state of a subject's (frame, chunk) units (the diagonal table of the two-hit word finder, the
   offset pairs, the initial hits, the gapped alignment memory) is kept by the thread from one
@@ -918,22 +952,31 @@ Scheduling (each value computed by one thread with the original function; order 
   packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
   database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of
   letters other than `ACGT` as ncbi4na codes, the lower-case intervals), so the letters of the
-  whole set are never held; the records keep their deflines. The preliminary stage of a subject
-  reads its packed bases as letters (`ACGT`, each ambiguous base as resolved): the bases it would
-  make from the letters, which resolve to themselves (`x_reference_subject` reads letters that are
-  all `ACGT` in place); with `-lcase_masking` it reads the letters. A subject's letters are made
-  again into a buffer when it is redone (composition mode 2), traced back (mode 0) or reported
-  (outfmt 0), exactly as the reader gave them (the comparison tests in `packed_subject.rs`). The
-  packed bases are those NCBI's subject set-up makes (`encode_subject_ncbi2na_packed`,
-  `s_Ncbi4naToNcbi2na` in `blast_objmgr_tools.cpp:427-475`; one pass over the letters). Memory:
-  about a quarter of a byte per base held instead of one; per thread the subject in hand as
-  without the switch (a thread keeps a buffer of at most 8 MiB between subjects). A subject
-  range keeps the letters (the records are cut before
-  the search), and so does a set with a byte that has no ncbi4na code (only an API caller can
-  make one); the library entry `run_local` reads the caller's records. Not in the set (off unless
-  set to any value). With `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE subjects= stored_bytes=
-  letters_made= resolved_made=` line gives the subjects held packed, the bytes of their stores and
-  the times their letters and their resolved bases were made; `LOSAT/tests/tblastn_subject_store.rs`
+  whole set are never held; the records keep their deflines. The unit path of the preliminary
+  stage (`TBNPAR`, on by default) translates a subject's six frames straight from its packed bases
+  (`x_packed_plan` in `tblastn/x_subject_translate.rs`: the codon tables of `TBNXLATE`, the 2-bit
+  codes unpacked 49,152 bases at a time, each frame filled at its residues' places), as NCBI's
+  `BLAST_GetAllTranslations` translates the compressed subject, so a thread holds the frames of
+  the subject in hand and no letters, resolved bases or reverse complement; this is the
+  translation whatever `TBNXLATE` says, and `LOSAT_X_TBNXLATESHADOW=1` also makes the reference
+  plan from the resolved bases and stops if they differ. The reference loops (`LOSAT_X_DEFAULT=0`)
+  read the packed bases as letters (`ACGT`, each ambiguous base as resolved), which resolve to
+  themselves; with `-lcase_masking` the stage reads the letters. The redo (composition mode 2),
+  its translations and the pairwise rows (outfmt 0) read windows of the subject (`SubjectNt` in
+  `packed_subject.rs`: the HSP's codons, or the window around an HSP that NCBI translates), made
+  in upper case from the store when read (every reader ignores the case); only the traceback of
+  composition mode 0 makes a subject's whole letters again, exactly as the reader gave them (the
+  comparison tests in `packed_subject.rs`). The packed bases are those NCBI's subject set-up makes
+  (`encode_subject_ncbi2na_packed`, `s_Ncbi4naToNcbi2na` in `blast_objmgr_tools.cpp:427-475`; one
+  pass over the letters). Memory: about a quarter of a byte per base held instead of one; per
+  thread the frames of the subject in hand (two bytes per base) instead of four bytes per base
+  (letters or resolved bases, reverse complement, frames). A subject range keeps the letters (the
+  records are cut before the search), and so does a set with a byte that has no ncbi4na code
+  (only an API caller can make one); the library entry `run_local` reads the caller's records.
+  Not in the set (off unless set to any value). With `LOSAT_X_STATS=1` a `[X_STATS] TBNSTORE
+  subjects= stored_bytes= letters_made= resolved_made= packed_plans=` line gives the subjects held
+  packed, the bytes of their stores, the times their whole letters and their resolved bases were
+  made, and the plans translated from the packed bases; `LOSAT/tests/tblastn_subject_store.rs`
   reads it.
 - `LOSAT_X_BPGAP=1` blastp preliminary stage: the restricted gapped alignment (NCBI
   `s_RestrictedGappedAlign`, `blast_gapalign.c:991-1300`, which `s_BlastProtGappedAlignment` runs

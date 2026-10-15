@@ -94,12 +94,16 @@ use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
+// EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
+use super::super::x_subject_store::{
+    x_blastna_into, x_bnstore, x_read_subject_stores, SubjectLetters,
+};
 use crate::blastinput::fasta_reader::{
     read_queries, read_subjects, FastaInputSource, FastaRecord, QueryEnd, QueryRecords, ReadError,
     ReaderConfig,
 };
 use crate::blastinput::input_files::{
-    check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings,
+    check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings_by_length,
 };
 use crate::blastinput::query_batch::{next_query_batch_end, BatchSizeMixer};
 use crate::blastinput::seq_range::{
@@ -111,6 +115,7 @@ use crate::report::pairwise::{
     BlastnPairwiseReport, PairwiseConfig, PairwiseDatabase,
 };
 use crate::report::query_warnings::{few_matches_warning, invalid_query_warning, query_warning};
+use crate::sequence::packed_subject::PackedNucleotide;
 use crate::stats::KarlinParams;
 // NCBI reference: c++/src/algo/blast/core/blast_parameters.c:342-344,370-374
 // gap_trigger = (Int4)((kOptions->gap_trigger * NCBIMATH_LN2 + kbp->logK) / kbp->Lambda);
@@ -4880,7 +4885,9 @@ fn update_hitlists_with_subject_hits(
 /// final hit list.
 struct BlastnReportInputs<'a> {
     queries: &'a [FastaRecord],
-    subjects: &'a [FastaRecord],
+    /// The subject records and their letters (theirs, or with LOSAT_X_BNSTORE their packed
+    /// subjects').
+    subjects: SubjectLetters<'a>,
     /// Where the searched letters lie in the records (`-query_loc`, `-subject_loc`).
     ranges: &'a ReportRanges<'a>,
     /// Per query, plus strand: DUST and, with `-lcase_masking`, the input lowercase.
@@ -5386,11 +5393,14 @@ fn post_process_hits_and_write(
     shift_to_records(&mut hit_lists, report.ranges);
     let pairwise_hits =
         if outputs.hits.is_some() || output_formats.contains(&BlastnOutputFormat::Pairwise) {
-            let subject_records = report.ranges.subjects.records.unwrap_or(report.subjects);
+            // The records as read with `-subject_loc` (never packed), else the searched ones.
+            let subject_records = match report.ranges.subjects.records {
+                Some(records) => SubjectLetters::new(records, None),
+                None => report.subjects,
+            };
             let subject_masks = report.lcase_masking.then(|| {
-                subject_records
-                    .iter()
-                    .map(|subject| collect_lowercase_masks(subject.seq()))
+                (0..subject_records.records().len())
+                    .map(|index| subject_records.lowercase_masks(index))
                     .collect::<Vec<_>>()
             });
             let mut hits = pairwise_hits(
@@ -5445,7 +5455,7 @@ fn post_process_hits_and_write(
     {
         match report.database_subject_ids {
             Some(ids) => ids.to_vec(),
-            None => tabular_subject_ids(&hit_lists, report.subjects)?,
+            None => tabular_subject_ids(&hit_lists, report.subjects.records())?,
         }
     } else {
         Vec::new()
@@ -5462,7 +5472,7 @@ fn post_process_hits_and_write(
     // The outfmt 0 descriptions and headings are made from the subjects' title bytes
     // (`report::defline::generate_defline`), by subject index.
     let subject_titles: Vec<Arc<[u8]>> = if output_formats.contains(&BlastnOutputFormat::Pairwise) {
-        report.subjects.iter().map(record_title).collect()
+        report.subjects.records().iter().map(record_title).collect()
     } else {
         Vec::new()
     };
@@ -5723,7 +5733,7 @@ pub fn run(
             query_file,
             cli_subjects.as_ref().map(|read| {
                 (
-                    read.subjects.as_slice(),
+                    read.subjects(),
                     SubjectRanges {
                         placements: &read.placements,
                         records: read.records.as_deref(),
@@ -5770,6 +5780,16 @@ struct CliSubjects {
     subjects: Vec<FastaRecord>,
     placements: Placements,
     records: Option<Vec<FastaRecord>>,
+    /// EXPERIMENT (LOSAT_X_BNSTORE): the letters of `subjects`, packed (`x_read_subject_stores`;
+    /// the records keep none).
+    stores: Option<Vec<PackedNucleotide>>,
+}
+
+impl CliSubjects {
+    /// The searched subjects.
+    fn subjects(&self) -> Subjects<'_> {
+        Subjects::Records(SubjectLetters::new(&self.subjects, self.stores.as_deref()))
+    }
 }
 
 /// Reads the subjects of `-subject` where NCBI's handler of the database arguments reads
@@ -5819,13 +5839,19 @@ fn read_cli_subjects(
         subject_file,
         ReaderConfig::subject("BLASTN", false, settings.data_loaders),
     );
-    let read_subjects = {
+    // EXPERIMENT (LOSAT_X_BNSTORE): without a subject range, each record's letters are packed as
+    // soon as it has been read, and the records keep none (`x_read_subject_stores`).
+    let (read_subjects, stores) = {
         let mut stderr = std::io::stderr();
-        read_subjects(
-            &mut subject_source,
-            subject_range.as_ref(),
-            &mut |message: &[u8]| std::io::Write::write_all(&mut stderr, message),
-        )?
+        let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
+        if x_bnstore() && subject_range.is_none() {
+            x_read_subject_stores(&mut subject_source, &mut warn)?
+        } else {
+            (
+                read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?,
+                None,
+            )
+        }
     };
     drop(subject_source);
     // NCBI reads records without residues (and intervals without letters) without a message
@@ -5840,6 +5866,7 @@ fn read_cli_subjects(
         subjects,
         placements: subject_placements,
         records: full_subjects,
+        stores,
     })
 }
 
@@ -5850,7 +5877,7 @@ fn read_cli_subjects(
 fn search_cli(
     mut args: BlastnArgs,
     query_file: std::fs::File,
-    subjects: Option<(&[FastaRecord], SubjectRanges<'_>)>,
+    subjects: Option<(Subjects<'_>, SubjectRanges<'_>)>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
     settings: crate::blastinput::ncbi_environment::ApplicationSettings,
@@ -5947,7 +5974,7 @@ fn search_cli(
     // A database has no subject ranges (`-subject_loc` excludes `-db`).
     let no_placements = Placements::default();
     let (subjects, subject_ranges) = match (subjects, database.as_ref()) {
-        (Some((records, ranges)), _) => (Subjects::Records(records), ranges),
+        (Some((subjects, ranges)), _) => (subjects, ranges),
         (None, Some(database)) => (
             Subjects::Database(database),
             SubjectRanges {
@@ -6164,7 +6191,7 @@ pub fn run_local(
                 records: ranged_subjects.is_some().then_some(subject_records),
             },
         },
-        Subjects::Records(searched_subjects),
+        Subjects::Records(SubjectLetters::new(searched_subjects, None)),
         outputs,
         output_formats,
     )
@@ -6215,8 +6242,13 @@ fn search(
     // the subjects: a subject without letters (a record without residues, or an interval
     // that starts just past its record's end) gets its warning, stays in the database
     // statistics with no letters, and never hits. (A database is not set up so.)
-    if let Subjects::Records(subject_records) = subjects {
-        write_empty_subject_warnings(subject_records, "blastn", outputs.diagnostics)?;
+    if let Subjects::Records(subject_set) = subjects {
+        write_empty_subject_warnings_by_length(
+            subject_set.records(),
+            |index| subject_set.len(index),
+            "blastn",
+            outputs.diagnostics,
+        )?;
     }
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
@@ -6259,10 +6291,9 @@ fn search(
     // The report and the query batches (`GetDbTotalLength`) take the total through an
     // `int`, which LOSAT does not reproduce beyond its range. (A database's total is the
     // `Int8` of `GetBlastDbInfo`, blast_format.cpp:140-154.)
-    if let Subjects::Records(subject_records) = subjects {
-        let subject_letters: usize = subject_records
-            .iter()
-            .map(|record| record.seq().len())
+    if let Subjects::Records(subject_set) = subjects {
+        let subject_letters: usize = (0..subject_set.records().len())
+            .map(|index| subject_set.len(index))
             .sum();
         if subject_letters > i32::MAX as usize {
             anyhow::bail!(
@@ -6499,16 +6530,36 @@ fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
 /// ```
 struct PreparedSubjects<'a> {
     records: &'a [FastaRecord],
+    /// EXPERIMENT (LOSAT_X_BNSTORE): the letters of the records, packed (the records keep
+    /// none); the preliminary stage reads their packed bytes.
+    stores: Option<&'a [PackedNucleotide]>,
     metadata: SubjectMetadata,
+    /// The packed letters of each record; empty when `stores` holds them.
     packed: Vec<Vec<u8>>,
+}
+
+impl<'a> PreparedSubjects<'a> {
+    /// The records and their letters.
+    fn letters(&self) -> SubjectLetters<'a> {
+        SubjectLetters::new(self.records, self.stores)
+    }
+
+    /// Subject `index` as the per-subject kernel reads it.
+    fn subject(&self, index: usize) -> BlastnSubjectRef<'_> {
+        match self.stores {
+            Some(stores) => BlastnSubjectRef::packed_record(&stores[index]),
+            None => BlastnSubjectRef::record(&self.records[index], &self.packed[index]),
+        }
+    }
 }
 
 /// The subjects of a search as its caller gives them.
 #[derive(Clone, Copy)]
 enum Subjects<'a> {
     /// A FASTA subject set (`-subject`, or the records of `run_local`): the searched
-    /// records (their intervals with `-subject_loc`).
-    Records(&'a [FastaRecord]),
+    /// records (their intervals with `-subject_loc`), and their letters (with
+    /// LOSAT_X_BNSTORE, packed).
+    Records(SubjectLetters<'a>),
     /// An NCBI BLAST database (`-db`).
     Database(&'a database::BlastnDatabase),
 }
@@ -6623,6 +6674,9 @@ struct BlastnSubjectRef<'a> {
     /// The BLASTNA letters of a database sequence in the traceback
     /// (`database::traceback_listed`), without sentinel bytes; `None` otherwise.
     blastna: Option<&'a [u8]>,
+    /// EXPERIMENT (LOSAT_X_BNSTORE): the packed subject of a subject set's record that keeps
+    /// no letters: its lowercase masks and the traceback's BLASTNA letters come from it.
+    store: Option<&'a PackedNucleotide>,
 }
 
 impl<'a> BlastnSubjectRef<'a> {
@@ -6633,6 +6687,19 @@ impl<'a> BlastnSubjectRef<'a> {
             packed,
             letters: Some(record.seq()),
             blastna: None,
+            store: None,
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNSTORE): a record of a subject set held as the packed subject
+    /// `store`; the preliminary stage scans its own packed bytes.
+    fn packed_record(store: &'a PackedNucleotide) -> Self {
+        BlastnSubjectRef {
+            length: store.len(),
+            packed: store.packed(),
+            letters: None,
+            blastna: None,
+            store: Some(store),
         }
     }
 }
@@ -6712,8 +6779,10 @@ fn run_in_pool(
 ) -> Result<()> {
     let prepared: PreparedSubjects<'_>;
     let source = match subjects {
-        Subjects::Records(subject_records) => {
-            let metadata = subject_metadata_from_records(subject_records);
+        Subjects::Records(subject_set) => {
+            let subject_records = subject_set.records();
+            let metadata =
+                subject_metadata_from_records(subject_records, |index| subject_set.len(index));
             if metadata.db_num_seqs == 0 {
                 for record in input_records {
                     outputs.diagnostics.write_all(&record.warnings)?;
@@ -6722,10 +6791,16 @@ fn run_in_pool(
             }
             prepared = PreparedSubjects {
                 records: subject_records,
-                packed: subject_records
-                    .iter()
-                    .map(|record| encode_subject_ncbi2na_packed(record.seq()))
-                    .collect(),
+                stores: subject_set.stores(),
+                // The packed subjects hold the packed letters (LOSAT_X_BNSTORE).
+                packed: if subject_set.stores().is_some() {
+                    Vec::new()
+                } else {
+                    subject_records
+                        .iter()
+                        .map(|record| encode_subject_ncbi2na_packed(record.seq()))
+                        .collect()
+                },
                 metadata,
             };
             SubjectSource::Prepared(&prepared)
@@ -7407,14 +7482,14 @@ fn write_batch_reports(
         }
         _ => None,
     };
-    let subject_records: &[FastaRecord] = match (&reported, subjects.source) {
-        (Some(reported), _) => &reported.records,
-        (None, SubjectSource::Prepared(prepared)) => prepared.records,
-        (None, SubjectSource::Database(_)) => &[],
+    let subject_letters = match (&reported, subjects.source) {
+        (Some(reported), _) => SubjectLetters::new(&reported.records, None),
+        (None, SubjectSource::Prepared(prepared)) => prepared.letters(),
+        (None, SubjectSource::Database(_)) => SubjectLetters::new(&[], None),
     };
     let report_inputs = BlastnReportInputs {
         queries: query_records,
-        subjects: subject_records,
+        subjects: subject_letters,
         ranges,
         query_masks: results.query_masks,
         lcase_masking: args.lcase_masking,
@@ -7759,8 +7834,11 @@ fn search_query_batch(
     //                               compressed_seq.data.release());
     // }
     // ```
+    // The packed letters of each record for the lookup build, which reads them only for
+    // `limit_lookup` (not a BLASTN option, always off); `None` with LOSAT_X_BNSTORE.
     let subject_packed_cache_ref = subjects
         .prepared()
+        .filter(|prepared| prepared.stores.is_none())
         .map(|prepared| prepared.packed.as_slice());
 
     // Prepare sequence data (including DUST masking)
@@ -8303,10 +8381,11 @@ fn search_query_batch(
             // the length of its first sequence (`BlastSeqSrcGetSeqLen` of ordinal id 0) is 0.
             (
                 subjects.prepared().map_or(0, |prepared| {
-                    prepared
-                        .records
-                        .first()
-                        .map_or(0, |record| record.seq().len())
+                    if prepared.records.is_empty() {
+                        0
+                    } else {
+                        prepared.letters().len(0)
+                    }
                 }) as i64,
                 1,
             )
@@ -8957,8 +9036,9 @@ fn search_query_batch(
         // The lowercase masks of the subjects are those of the FASTA records of
         // `-subject`; a database sequence has none (its masks would come from
         // `-db_soft_mask`, which LOSAT does not implement).
-        let subject_masks = match subject.letters {
-            Some(letters) if lcase_masking => collect_lowercase_masks(letters),
+        let subject_masks = match (subject.letters, subject.store) {
+            (Some(letters), _) if lcase_masking => collect_lowercase_masks(letters),
+            (None, Some(store)) if lcase_masking => store.lowercase().to_vec(),
             _ => Vec::new(),
         };
         let subject_masked = !subject_masks.is_empty();
@@ -12921,10 +13001,16 @@ fn search_query_batch(
         // are made here, for this subject only, instead of being kept for every subject of the
         // search. A database sequence comes with its blastna letters, read with its
         // ambiguity codes (`database::traceback_listed`).
-        let s_seq_blastna_vec: Vec<u8>;
-        let s_seq_blastna: &[u8] = match subject.blastna {
-            Some(blastna) => blastna,
-            None => {
+        let mut s_seq_blastna_vec: Vec<u8>;
+        let s_seq_blastna: &[u8] = match (subject.blastna, subject.store) {
+            (Some(blastna), _) => blastna,
+            // EXPERIMENT (LOSAT_X_BNSTORE): made from the packed subject.
+            (None, Some(store)) => {
+                s_seq_blastna_vec = Vec::new();
+                x_blastna_into(store, &mut s_seq_blastna_vec);
+                s_seq_blastna_vec.as_slice()
+            }
+            (None, None) => {
                 s_seq_blastna_vec = encode_iupac_to_blastna(
                     subject
                         .letters
@@ -14688,13 +14774,15 @@ fn search_query_batch(
         context_karlin: context_karlin.clone(),
         query_eff_searchsp: query_eff_searchsp.clone(),
     };
-    // The records of a subject set and their packed letters (none for a database, which
-    // has drivers of its own below).
-    let subject_records_ref: &[FastaRecord] =
-        subjects.prepared().map_or(&[], |prepared| prepared.records);
-    let subject_packed_ref: &[Vec<u8>] = subjects
-        .prepared()
-        .map_or(&[], |prepared| prepared.packed.as_slice());
+    // The records of a subject set and their letters (none for a database, which has
+    // drivers of its own below).
+    let prepared_ref = subjects.prepared();
+    let subject_records_ref: &[FastaRecord] = prepared_ref.map_or(&[], |prepared| prepared.records);
+    let prepared_subject = |s_idx: usize| {
+        prepared_ref
+            .expect("the subjects of a subject set")
+            .subject(s_idx)
+    };
     // One pass over the subjects in subject order: the preliminary stage gives each subject's
     // preliminary HSPs (`kept` is `None`), the traceback saves the final HSPs of the kept
     // preliminary HSPs in the final hit lists of `hitlist_size` subjects
@@ -14747,7 +14835,7 @@ fn search_query_batch(
             let mut prelim_hits: Vec<PrelimHit> = Vec::new();
             process_subject(
                 s_idx,
-                BlastnSubjectRef::record(&subject_records_ref[s_idx], &subject_packed_ref[s_idx]),
+                prepared_subject(s_idx),
                 gap_scratch,
                 subject_scratch,
                 kept.map(|kept| &kept[s_idx]),

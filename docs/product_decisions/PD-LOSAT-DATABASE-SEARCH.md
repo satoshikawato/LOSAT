@@ -335,9 +335,13 @@ opener, the reader's error texts and the title rules are those of BLASTP's and B
   NCBI reads them; the `Database:` lines of outfmt 0, `>` and the stored title, subject ids made
   from the title as for BLASTN, `# Database:` of outfmt 7 with the `-db` value as given.
 - Errors: NCBI's texts and exit statuses for a database that is not found or cannot be read, at
-  the point where NCBI reports them; a database without sequences fails in the first searched
-  query batch. Ambiguity data that the reader cannot read are LOSAT's refusal before the search
-  (NCBI reads them only for the reported sequences).
+  the point where NCBI reports them. A database without sequences or a sequence file that cannot
+  be read fails the first query batch with a valid context (NCBI does not search a batch without
+  one), after the reports of the batches before; a run without such a batch succeeds. Damaged
+  files are LOSAT's refusal, with no report: ambiguity data that the reader cannot read (NCBI
+  reads them only for the sequences it aligns), a sequence file shorter than its index (NCBI
+  reads past its end), and a definition line that cannot be decoded (NCBI throws after the
+  reports of the batches before).
 - `-db` with `-subject` or `-subject_loc` is a usage error, as for BLASTP. LOSAT Web rejects
   `-db` until stage DB-7.
 
@@ -359,5 +363,6 @@ beside them. The tests of `-db` (BLASTP and BLASTN) are frozen NCBI outputs repl
 `LOSAT/src/algorithm/blastp/blast_engine/database.rs` and
 `LOSAT/src/algorithm/blastn/blast_engine/database.rs`, and `LOSAT/tests/blastn_db_search.rs`
 (BLASTN `-db` at 1, 2 and 4 threads); for TBLASTN the unit tests of
-`LOSAT/src/sequence/packed_subject.rs` (`from_stored` against the reader's letters) and the
-TBLASTN rows of the same manifest.
+`LOSAT/src/sequence/packed_subject.rs` (`from_stored` against the reader's letters), `LOSAT/tests/tblastn_db_search.rs` (TBLASTN
+`-db` at 1, 2 and 4 threads, the shortest length of a database, the sequence file read by the
+first batch with a valid context) and the TBLASTN rows of the same manifest.

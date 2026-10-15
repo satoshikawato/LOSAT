@@ -323,8 +323,13 @@ fn small_windows_split_queries_and_leave_out_the_matches_the_test_ended() {
             "threads {threads}: lists freed"
         );
         let counts = RedoPar::sum(&on.redo_par);
+        // Ended before their window (not computed) and at their replay (computed and dropped).
         assert!(
-            counts.windows > 1 && counts.split > 0 && counts.ended > 0 && counts.skipped > 0,
+            counts.windows > 1
+                && counts.split > 0
+                && counts.ended > 0
+                && counts.skipped > 0
+                && counts.wasted > 0,
             "threads {threads}: {counts:?}"
         );
         assert_eq!(counts.ended, counts.skipped + counts.wasted, "{counts:?}");

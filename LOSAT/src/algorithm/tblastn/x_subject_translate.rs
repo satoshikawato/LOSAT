@@ -615,6 +615,38 @@ pub(super) fn x_subject_plan(
 /// block starts a codon of frame 1.
 const X_PACKED_BLOCK: usize = 3 << 14;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058,1063-1064
+// ```c
+//    Uint4 buffer_length =2*(nucl_length+1)+2;
+// ...
+//    if ((translation_buffer =
+//         (Uint1*) malloc(buffer_length)) == NULL)
+// ```
+// No NCBI counterpart for the size: NCBI holds the six frames of a subject in one buffer of
+// about two bytes per base, which glibc maps for a chromosome and unmaps when NCBI frees it.
+// Here each frame is an allocation of a third of a byte per base. glibc maps an allocation of
+// at least its mmap threshold, but it raises the threshold to the size of each mapped block
+// that is freed (up to 32 MiB), so after the first chromosome the frames of the next ones
+// (13 to 26 MB each on the zebrafish genome) come from a thread's arena, and the freed frames
+// stay resident there (zebrafish genome, 61 proteins, 8 threads: 1,612 MiB, 1,366 MiB with a
+// fixed threshold). A frame of at least `X_MAPPED_FRAME` bytes is given a capacity above that
+// ceiling, so that it is always mapped and returned when dropped; the pages beyond its length
+// are never touched and are not resident. Other allocators return large blocks on their own.
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the frames from which a frame is mapped (Linux with glibc).
+const X_MAPPED_FRAME: usize = 1 << 20;
+
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the capacity of a frame of `length` bytes (see
+/// `X_MAPPED_FRAME`).
+fn x_frame_capacity(length: usize) -> usize {
+    if cfg!(all(target_os = "linux", target_env = "gnu")) && length >= X_MAPPED_FRAME {
+        // glibc's largest dynamic mmap threshold (DEFAULT_MMAP_THRESHOLD_MAX on 64-bit), and
+        // one page more
+        length.max((32 << 20) + 4096)
+    } else {
+        length
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1090
 // ```c
 //    for (context = 0; context < NUM_FRAMES; ++context) {
@@ -645,7 +677,8 @@ fn x_packed_frames(
     let frame_count = (0..3).filter(|&i| i + 3 <= seq_len).count();
     let empty_frame = |i: usize| {
         let aa_len = (seq_len - i) / 3;
-        let mut aa_seq = vec![0u8; aa_len + 2];
+        let mut aa_seq = Vec::with_capacity(x_frame_capacity(aa_len + 2));
+        aa_seq.resize(aa_len + 2, 0u8);
         aa_seq[0] = SENTINEL_BYTE;
         aa_seq[aa_len + 1] = SENTINEL_BYTE;
         aa_seq

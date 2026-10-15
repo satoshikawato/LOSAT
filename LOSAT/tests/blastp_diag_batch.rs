@@ -151,9 +151,13 @@ fn next(seed: &mut u64) -> u32 {
 /// long repeats (lookup cells far above three hits, so batches of eight and the overflow array),
 /// and subjects that are copies of the queries with every sixth letter changed (two hits on a
 /// diagonal, extensions with and without a reset of the diagonal), plus unrelated proteins.
-fn generated_pair() -> (PathBuf, PathBuf) {
+/// The generated pair in the directory `test` of its own: the tests of this file run side by
+/// side, and a pair written over another test's would be read while it is truncated.
+fn generated_pair(test: &str) -> (PathBuf, PathBuf) {
     const AMINO: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastp_diag_batch");
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("blastp_diag_batch")
+        .join(test);
     std::fs::create_dir_all(&dir).expect("test directory");
     let mut seed = 0xd1a9_u64;
     let mut protein = |n: usize| -> Vec<u8> {
@@ -198,7 +202,7 @@ fn generated_pair() -> (PathBuf, PathBuf) {
 
 #[test]
 fn batched_cells_give_the_reports_of_the_per_hit_loop() {
-    let (query, subject) = generated_pair();
+    let (query, subject) = generated_pair("batched");
     let pairs = [
         (query, subject),
         (fixture("MeenMJNV.faa"), fixture("MejoMJNV.faa")),
@@ -256,7 +260,7 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
 
 #[test]
 fn the_shadow_compares_the_batched_loop_with_the_reference() {
-    let (query, subject) = generated_pair();
+    let (query, subject) = generated_pair("shadow");
     let (reference, _, _) = blastp(&query, &subject, 1, &[], &["-outfmt", "6"]);
     for simd in ["1", "0"] {
         let (rows, counts, stderr) = blastp(

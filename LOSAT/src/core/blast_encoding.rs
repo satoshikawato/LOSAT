@@ -554,14 +554,16 @@ pub fn resolve_ncbi4na_to_ncbi2na(ncbi4na: &[u8]) -> Vec<u8> {
     let mut random = NcbiRandom::new(ncbi4na.len() as u32);
     ncbi4na
         .iter()
-        .map(|&mask| resolve_ncbi4na_letter(mask, &mut random))
+        .map(|&mask| resolve_ncbi4na_base(mask, &mut random))
         .collect()
 }
 
-/// The ncbi2na code of one ncbi4na letter (`resolve_ncbi4na_to_ncbi2na`): an ambiguous
-/// letter draws from `random`, an unambiguous one does not.
+/// The ncbi2na code of one ncbi4na code, an ambiguous one drawn from `random` (the next base
+/// of `resolve_ncbi4na_to_ncbi2na`).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-474 (above)
 #[inline]
-fn resolve_ncbi4na_letter(mask: u8, random: &mut NcbiRandom) -> u8 {
+pub(crate) fn resolve_ncbi4na_base(mask: u8, random: &mut NcbiRandom) -> u8 {
     match mask {
         1 => 0,
         2 => 1,
@@ -644,7 +646,7 @@ pub fn encode_subject_ncbi2na_packed(seq: &[u8]) -> Vec<u8> {
         }
         let mask = iupacna_to_ncbi4na(letter).unwrap_or(15);
         let random = random.get_or_insert_with(|| NcbiRandom::new(length as u32));
-        resolve_ncbi4na_letter(mask, random)
+        resolve_ncbi4na_base(mask, random)
     };
     let mut packed = Vec::with_capacity(length / COMPRESSION_RATIO + 1);
     let mut groups = seq.chunks_exact(COMPRESSION_RATIO);

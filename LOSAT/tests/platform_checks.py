@@ -5,16 +5,22 @@ Standard library only; it runs with the stock Python of the Linux, Windows and m
 
 run: for each case of platform_check_cases.json, run the binary with the performance switches on
 (the default) and with LOSAT_X_DEFAULT=0 (the reference paths), at 1 and 4 threads, and require
-exit code 0 and one output (one SHA-256) over all four runs.  Writes DIR/rows.tsv with the columns
-case, threads, mode, exit_code, sha256, seconds.  Exit code 1 on any difference or failure.
+exit code 0 and one output (one SHA-256) over all four runs.  Each --extra-mode NAME=VAR=VALUE
+adds a mode: the default plus that one variable (for a switch that is off unless set, such as
+LOSAT_X_DPNEON on aarch64), whose outputs must equal the others too.  Writes DIR/rows.tsv with
+the columns case, threads, mode, exit_code, sha256, seconds.  Exit code 1 on any difference or
+failure.
 
 compare: reads the rows.tsv of several platforms and requires, for every (case, threads, mode),
-the same SHA-256 on all of them.  No expected hash is stored: the frozen hashes are checked on
-Linux by ci.yml (ci_fast_regressions.py).  Exit code 1 when a table is missing or empty, the
-tables do not hold the same keys, or any hash differs; the differing rows are printed.
+the same SHA-256 on all of them.  The default and reference modes must be in every table; an
+extra mode is compared among the tables that have it.  No expected hash is stored: the frozen
+hashes are checked on Linux by ci.yml (ci_fast_regressions.py).  Exit code 1 when a table is
+missing or empty, the tables do not hold the same default and reference keys, or any hash
+differs; the differing rows are printed.
 
 usage:
   platform_checks.py run --losat BIN --out DIR [--cases FILE] [--limit N] [--timeout SECONDS]
+                     [--extra-mode NAME=VAR=VALUE ...]
   platform_checks.py compare --table ID=PATH [--table ID=PATH ...]
 """
 import argparse
@@ -43,18 +49,25 @@ def run_command(args: argparse.Namespace) -> int:
     cases = json.loads(Path(args.cases).read_text())
     if args.limit is not None:
         cases = cases[: args.limit]
-    # Every LOSAT_* variable of the caller is dropped; the reference mode sets the only one used.
+    # Every LOSAT_* variable of the caller is dropped; the reference mode and the extra modes set
+    # the only ones used.
     base = {k: v for k, v in os.environ.items() if not k.startswith("LOSAT_")}
+    modes = {"default": {}, "reference": {"LOSAT_X_DEFAULT": "0"}}
+    for spec in args.extra_mode:
+        name, _, assignment = spec.partition("=")
+        var, sep, value = assignment.partition("=")
+        if not name or name in modes or not var.startswith("LOSAT_") or not sep:
+            raise SystemExit(f"--extra-mode {spec!r}: expected NAME=LOSAT_VAR=VALUE with a new NAME")
+        modes[name] = {var: value}
     rows, failures = [], []
     print(f"platform {platform.platform()} machine {platform.machine()} cases {len(cases)}", flush=True)
     for case in cases:
         argv = [str(ROOT / a) if a.startswith("LOSAT/tests/") else a for a in case["argv"]]
         results = {}
         for threads in THREADS:
-            for mode in MODES:
+            for mode, variables in modes.items():
                 env = dict(base)
-                if mode == "reference":
-                    env["LOSAT_X_DEFAULT"] = "0"
+                env.update(variables)
                 target = out / "run.out"
                 if target.exists():
                     target.unlink()
@@ -77,7 +90,7 @@ def run_command(args: argparse.Namespace) -> int:
         detail = " ".join(f"n{t}:{m}:{h[:10]}:rc{c}" for (t, m), (c, h) in sorted(results.items()))
         print(f"{'SAME' if same else 'DIFFER'}\t{case['case_id']}\t{detail}", flush=True)
     (out / "rows.tsv").write_text("\n".join("\t".join(r) for r in [HEADER, *rows]) + "\n")
-    print(f"default = LOSAT_X_DEFAULT=0 at 1 and 4 threads, exit code 0: {len(cases) - len(failures)}/{len(cases)}; "
+    print(f"{' = '.join(modes)} at 1 and 4 threads, exit code 0: {len(cases) - len(failures)}/{len(cases)}; "
           f"failures: {failures}")
     return 1 if failures else 0
 
@@ -110,7 +123,10 @@ def compare_command(args: argparse.Namespace) -> int:
     differing = 0
     lines = []
     for key in keys:
-        entries = {n: tables[n].get(key) for n in names}
+        if key[2] in MODES:
+            entries = {n: tables[n].get(key) for n in names}
+        else:
+            entries = {n: tables[n][key] for n in names if key in tables[n]}
         if any(e is None for e in entries.values()):
             problems.append(f"{'/'.join(key)}: missing on " + ", ".join(n for n, e in entries.items() if e is None))
         elif len({e for e in entries.values()}) != 1 or any(e[0] != "0" for e in entries.values()):
@@ -139,6 +155,8 @@ def main() -> int:
     run.add_argument("--cases", default=str(CASES))
     run.add_argument("--limit", type=int, default=None, help="run only the first N cases (smoke runs)")
     run.add_argument("--timeout", type=float, default=1800, help="seconds per LOSAT run")
+    run.add_argument("--extra-mode", action="append", default=[], metavar="NAME=VAR=VALUE",
+                     help="another mode: the default plus one LOSAT_* variable")
     run.set_defaults(func=run_command)
     compare = sub.add_parser("compare", help="compare the tables of several platforms")
     compare.add_argument("--table", action="append", required=True, metavar="ID=PATH")

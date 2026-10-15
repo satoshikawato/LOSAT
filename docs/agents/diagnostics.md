@@ -78,10 +78,10 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 55 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 56 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
 `LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE`,
-`LOSAT_X_TBNOIDNEXT` and `LOSAT_X_TBNOIDUNITS` joined), and their variables mean
+`LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS` and `LOSAT_X_BNSTREAM` joined), and their variables mean
 (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
@@ -114,7 +114,7 @@ strict set are on by default (43 then, 55 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 55 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 56 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -145,6 +145,7 @@ export LOSAT_X_LINKSORT=1
 export LOSAT_X_NEWTONLANES8=1
 export LOSAT_X_TBNSTATE=1 LOSAT_X_TBNXLATE=1
 export LOSAT_X_TBNOIDNEXT=1 LOSAT_X_TBNOIDUNITS=1
+export LOSAT_X_BNSTREAM=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -227,6 +228,15 @@ the thread that took it. Neither changes a value or the order in which the resul
 they are timed together because `TBNOIDUNITS` alone was slower on the human genome at 8 and 16
 threads. On main's path before `TBNSTATE` joined the set they cost 5-11 % more CPU time on genomes;
 with it the CPU time is the same.
+
+`LOSAT_X_BNSTREAM` was added after the default changed, as a switch that was off unless set, and
+joined the set on 2026-10-16. With two or more threads blastn hands each subject's HSPs of a
+subject set (`-subject`) to the hit lists in OID order from a window of at most 64 subjects per
+thread while the threads search the next ones, instead of holding the HSPs of every subject of a
+query batch until all are searched (one thread always hands them over at once). It changes no
+value and not the order in which the hit lists take the subjects; it lowers the peak memory and,
+on the workstation, the time (0.94 at 8 threads and 0.88 at 16 on 100 16S queries against 28,036
+16S sequences). A database search (`-db`) has its own drivers and is not affected.
 
 What runs per target:
 
@@ -722,8 +732,8 @@ Rebuilding less:
   rebuilt list field by field with the off path's (it panics on a difference) and prints
   `[X_SHADOW] BPPCOMPACT compared=<lists> hsps=<n>` at exit. With `LOSAT_TIMING=1` each search of a query
   set prints `[TIMING] x_bppcompact: expanded_lists=<n>`.
-- `LOSAT_X_BNSTREAM=1` (BLASTN, all tasks, `-subject` with two or more threads, memory; not in the strict
-  set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the threads claim the subjects
+- `LOSAT_X_BNSTREAM=1` (BLASTN, all tasks, `-subject` with two or more threads, memory; in the strict set
+  since 2026-10-16, on by default) the threads claim the subjects
   of a query batch one at a time in OID order and one of them (the owner) hands the results to the hit lists in
   OID order while the others go on with the next subjects; a thread claims a subject only while it is fewer
   than `threads x 64` subjects past the last one handed over, so at most that many subjects' results wait

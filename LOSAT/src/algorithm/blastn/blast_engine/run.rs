@@ -3646,17 +3646,17 @@ fn collect_prelim_hit_lists(
     collector.hit_lists
 }
 
-/// EXPERIMENT (LOSAT_X_BNSTREAM, off unless set): with two or more threads, the subjects of a
+/// EXPERIMENT (LOSAT_X_BNSTREAM, a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+/// and it is not set): with two or more threads, the subjects of a
 /// query batch are claimed by the threads in OID order and their results go to the hit lists in
 /// OID order while the threads search the next subjects (`x_bnstream::search_in_order`); a
 /// thread claims a subject only while it is fewer than `X_BNSTREAM_SUBJECTS_PER_THREAD`
 /// subjects per thread past the last one handed over, so that the HSPs of that window are held
-/// at a time instead of those of every subject. The hit lists are the same. Not in the strict
-/// set.
+/// at a time instead of those of every subject. The hit lists are the same.
 // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
 fn x_bnstream() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BNSTREAM").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNSTREAM"))
 }
 
 /// No NCBI counterpart: the subjects per thread of the window of `LOSAT_X_BNSTREAM`.

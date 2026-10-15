@@ -1387,24 +1387,29 @@ mod tests {
                     assert_eq!(up[i], if i == 0 { 0 } else { x[i - 1] });
                 }
                 // prefix maxima
+                // the signed forms are applied to `H`, which is never negative: inputs 0..=i16::MAX
+                // (zeros are shifted in, so negative lanes would give a mix of 0 and the inputs)
+                let xp: [u8; 32] =
+                    core::array::from_fn(|i| if i % 2 == 1 { x[i] & 0x7F } else { x[i] });
+                let xp16 = u16s(xp);
                 let pu = u16s(wb(pmax_u16w(wv(x))));
-                let ps = u16s(wb(pmax_s16w(wv(x))));
-                // zeros are shifted in, so each lane's signed maximum includes 0 (`H` is never negative)
-                let (mut mu, mut ms) = (0u16, 0i16);
+                let ps = u16s(wb(pmax_s16w(wv(xp))));
+                let (mut mu, mut ms) = (0u16, 0u16);
                 for i in 0..16 {
                     mu = mu.max(x16[i]);
-                    ms = ms.max(x16[i] as i16);
+                    ms = ms.max(xp16[i]);
                     assert_eq!(pu[i], mu);
-                    assert_eq!(ps[i], ms as u16);
+                    assert_eq!(ps[i], ms);
                 }
+                let x7: [u8; 32] = core::array::from_fn(|i| x[i] & 0x7F);
                 let pu = wb(pmax_u8w(wv(x)));
-                let ps = wb(pmax_s8w(wv(x)));
-                let (mut mu, mut ms) = (0u8, 0i8);
+                let ps = wb(pmax_s8w(wv(x7)));
+                let (mut mu, mut ms) = (0u8, 0u8);
                 for i in 0..32 {
                     mu = mu.max(x[i]);
-                    ms = ms.max(x[i] as i8);
+                    ms = ms.max(x7[i]);
                     assert_eq!(pu[i], mu);
-                    assert_eq!(ps[i], ms as u8);
+                    assert_eq!(ps[i], ms);
                 }
                 // last lane to all lanes
                 let l = b(last16(wv(x)));

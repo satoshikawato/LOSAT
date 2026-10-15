@@ -481,6 +481,31 @@ Rebuilding less:
   With more than one thread the pool's build runs too and its outcome and table (every field, slot for slot)
   are compared with the serial flat build's. One line at exit: `[X_SHADOW] BPCLUT tables_compared=
   refusals_compared= hits= parallel_tables_compared= parallel_refusals_compared= identical`.
+- `LOSAT_X_BPDIAG=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and `LOSAT_X_DEFAULT`
+  does not touch it; acts only in the fused loop of `LOSAT_X_BPSEED` or `LOSAT_X_BPSEEDSHADOW`) the two-hit
+  diagonal test of the hits of one lookup cell in batches of eight instead of one after the other
+  (`blastp/x_seed_fused.rs`, exactness argument in its header): for each hit the entry's new value and whether
+  the hit is a candidate are computed without branches on the entry in AVX2 registers (the eight entries read
+  with scalar loads, compared in i32 lanes, blended; a cell's last batch of fewer than eight hits takes a
+  scalar batch), all eight entries are stored, then the candidates go to the context check and the extension
+  in the cell's order. Exact because a cell lists a query offset at most once (`s_AddWordHits`; checked for
+  both BLASTP builders by `x_lut_direct` test `every_cell_lists_a_query_offset_once`, and per batch by a
+  `debug_assert`), so a batch's hits fall on distinct entries, and a candidate's entry is stored back unchanged
+  before its call. The 31-bit truncation and the i32 wrapping are those of the per-hit test. Without AVX2
+  (another architecture, or an x86-64 CPU without it) the switch keeps the per-hit loop, because the scalar
+  batch was slower than the per-hit loop on both machines (workstation 12.56 s against 11.59 s, local about
+  7.3 s against 6.8 s); `LOSAT_X_BPDIAG_SIMD=0` forces the scalar batch (diagnostic; the tests use it). The
+  AVX2 batch does not use the AVX2 gather: on the workstation (Xeon 6338, Gather Data Sampling microcode
+  mitigation on) the gather was slower than eight scalar loads; locally both were equal. The batches prefetch
+  nothing (`LOSAT_X_BPSEED_PREFETCH` is the per-hit loop's). Shadow: `LOSAT_X_BPSEEDSHADOW=1` with
+  `LOSAT_X_BPDIAG=1` compares the batched loop with the reference for every subject. With `LOSAT_TIMING=1`
+  each search of a query set prints `[TIMING] x_bpdiag: mode=<avx2|scalar|per-hit> cells=<n> batched_hits=<m>
+  candidates=<k>` (the path that ran, cells tested in batches, their hits, the hits passed on; zeros with
+  `per-hit`). Measured 2026-10-14 on the workstation (one pinned core, alternating, the other 8 exact switches
+  and `LOSAT_X_BPQBLOCK=50000`, x human proteome by `-subject`, rows identical in every arm; `blastp_scan_ungapped`
+  (wall) in s): human block 1 per-hit 11.59 (20.61), gather 10.17 (18.90), scalar loads 9.13 (17.86), scalar
+  batch 12.56 (21.53); C. elegans block 5 per-hit 32.68 (70.68), gather 28.55 (66.16), scalar loads 26.45
+  (64.62).
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; not in the
   strict set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the word loop and the
   X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte

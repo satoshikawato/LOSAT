@@ -9,9 +9,9 @@
 //! `x_hsp_inplace.rs` calls it at its two index sort sites (`sort_in_place`,
 //! `replay_in_place_counted`); nothing else does.
 //!
-//! The switch is not in the strict set (`utils/xswitch.rs`): it is on when `LOSAT_X_LINKSORT` is
-//! set, to any value, and off otherwise, and `LOSAT_X_DEFAULT` does not touch it. With it off the
-//! statements of `x_hsp_inplace.rs` run as before, after one read of `mode()` per index sort. It
+//! The switch is in the strict set (`utils/xswitch.rs`): it is on unless `LOSAT_X_LINKSORT` is
+//! `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it off the statements of
+//! `x_hsp_inplace.rs` run as before it existed, after one read of `mode()` per index sort. It
 //! acts only where `LOSAT_X_HSPINPLACE` does: the reference bodies (`LOSAT_X_HSPINPLACE=0`,
 //! `LOSAT_X_DEFAULT=0`) have their own sorts and are not touched.
 //!
@@ -257,15 +257,16 @@ impl Site {
 //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_RevCompareHSPsTbx);
 // ```
-// Dispatch switch, read once: 0 = today's statements, 1 = this path, 2 = both, compared. Not in
-// `xswitch::STRICT_SET`, so not read with `xswitch::on`.
+// Dispatch switch, read once: 0 = the statements from before the switch existed, 1 = this path,
+// 2 = both, compared. The shadow is opt-in (set to any value) and wins; the switch is a
+// strict-set switch, read with `xswitch::on`.
 /// 0 = off, 1 = LOSAT_X_LINKSORT, 2 = LOSAT_X_LINKSORTSHADOW.
 pub(super) fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_LINKSORTSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_LINKSORT").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_LINKSORT") {
             1
         } else {
             0

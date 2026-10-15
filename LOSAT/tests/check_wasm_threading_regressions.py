@@ -43,7 +43,7 @@ def main():
     oracles = {program: (args.oracle_dir / program).resolve() for program in ['blastn', 'blastp', 'tblastx']}
     steps = authority.build_steps(ROOT, out, catalog, args.native.resolve(), oracles)
     authority.stage_required_fixtures(ROOT, head, steps, out)
-    native_authority = authority.load_native_authority(ROOT, head, TESTS / 'ncbi_platform_variance_v010.json')
+    native_authority = authority.load_native_authority(ROOT, head, TESTS / authority.NATIVE_AUTHORITY_REPO_RELATIVE.name)
     environment = {k: v for k, v in os.environ.items() if not k.startswith(('LOSAT_', 'RAYON_')) and k != 'BL2SEQ_LEGACY'}
     environment.update(LC_ALL='C', NODE_NO_WARNINGS='1')
     records = []; record_lock=threading.Lock(); pending=[]

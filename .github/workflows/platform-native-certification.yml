@@ -1,4 +1,4 @@
-name: Windows And macOS Native Certification
+name: Native Platform Certification
 
 run-name: Platform native certification ${{ inputs.candidate_sha }}
 
@@ -32,7 +32,7 @@ jobs:
     name: ${{ matrix.display_name }} (${{ matrix.target_triple }})
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 4
       matrix:
         include:
           - platform_id: windows-x64
@@ -53,6 +53,12 @@ jobs:
             target_triple: x86_64-apple-darwin
             executable_suffix: ""
             oracle_archive: ncbi-blast-2.17.0+-x64-macosx.tar.gz
+          - platform_id: linux-aarch64
+            display_name: Linux arm64
+            runner: ubuntu-24.04-arm
+            target_triple: aarch64-unknown-linux-gnu
+            executable_suffix: ""
+            oracle_archive: ncbi-blast-2.17.0+-aarch64-linux.tar.gz
     runs-on: ${{ matrix.runner }}
     env:
       PLATFORM_ID: ${{ matrix.platform_id }}
@@ -327,8 +333,9 @@ jobs:
           # NCBI reference:
           # ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:770-832
           # Existing program authorities build and classify the raw outputs;
-          # the platform driver only invokes them and checks PR 5 SHA-256 values
-          # (for a case in frozen_mismatch_allowlist.json, its listed SHA-256).
+          # the platform driver only invokes them and checks the SHA-256 values of
+          # the Gate A manifest (platform_native_v011_canonical.tsv; for a case
+          # in frozen_mismatch_allowlist.json, its listed SHA-256).
           set +e
           python LOSAT/tests/certify_platform_native_v010.py certify \
             --expected-sha "$CANDIDATE_SHA" \
@@ -392,7 +399,7 @@ jobs:
           retention-days: 30
 
   cross-platform-aggregation:
-    name: Aggregate three exact native platform certificates
+    name: Aggregate four exact native platform certificates
     needs: [platform-certification]
     runs-on: ubuntu-24.04
     env:
@@ -427,7 +434,13 @@ jobs:
           name: platform-native-macos-x64
           path: ${{ env.AGGREGATE_INPUT }}/platform-native-macos-x64
 
-      - name: Require all three authority-bound 61-execution certificates
+      - name: Download exact Linux arm64 certificate
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-native-linux-aarch64
+          path: ${{ env.AGGREGATE_INPUT }}/platform-native-linux-aarch64
+
+      - name: Require all four authority-bound 61-execution certificates
         run: |
           mkdir -p "$AGGREGATE_OUTPUT"
           # NCBI references:

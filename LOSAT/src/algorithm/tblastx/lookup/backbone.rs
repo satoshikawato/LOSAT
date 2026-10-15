@@ -751,6 +751,64 @@ pub(crate) fn x_lookup_table_for_profile(
     Some(build_lookup_from_prepared(prepared, threshold, matrix, word_length).0)
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803
+// ```c
+// Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
+// ...
+// loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+// if (loop_status) {
+//     contexts[context].is_valid = FALSE;
+//     ...
+//     continue;
+// }
+// if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
+//     Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
+// ```
+/// A context's validity and Karlin block, from its frame alone (the statements of
+/// `x_prepare_lookup_query`'s loop).
+fn x_context_karlin(
+    frame: &QueryFrame,
+    std_comp: &[f64; LOOKUP_ALPHABET_SIZE],
+    bounds: (i32, i32),
+    matrix: ScoringMatrix,
+    check_ideal: bool,
+    ideal_params: KarlinParams,
+) -> (bool, KarlinParams) {
+    let ctx_comp = compute_aa_composition(&frame.aa_seq, frame.aa_len);
+    // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803:
+    // score frequencies use this score block's matrix and lo/hi scores.
+    let sfp =
+        compute_score_freq_profile_for_matrix(&ctx_comp, std_comp, bounds.0, bounds.1, matrix);
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2803
+    // ```c
+    // loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+    // if (loop_status) {
+    //     contexts[context].is_valid = FALSE;
+    //     sbp->sfp[context] = Blast_ScoreFreqFree(sbp->sfp[context]);
+    //     sbp->kbp_std[context] = Blast_KarlinBlkFree(sbp->kbp_std[context]);
+    //     continue;
+    // }
+    // if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
+    //     Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
+    // ```
+    match compute_karlin_params_ungapped(&sfp) {
+        Ok(computed_params) => {
+            let final_params = if check_ideal {
+                apply_check_ideal(computed_params, ideal_params)
+            } else {
+                computed_params
+            };
+            (true, final_params)
+        }
+        Err(_) => {
+            // NCBI leaves no valid per-context Karlin block behind on failure.
+            // Rust stores a placeholder and requires later stages to honor
+            // `is_valid`, matching `query_info->contexts[context].is_valid`.
+            (false, KarlinParams::default())
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2797
 // ```c
 // Blast_ResFreqString(sbp, rfp, (char*)buffer, query_length);
@@ -761,7 +819,8 @@ pub(crate) fn x_lookup_table_for_profile(
 //    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
 // ```
 // This is prepare_lookup_query with a flag: x_with_karlin = true runs the code of the reference
-// path unchanged (the Karlin computation cited below); false skips it for LOSAT_X_LUTSPLIT.
+// path unchanged (the Karlin computation of `x_context_karlin`); false skips it for LOSAT_X_LUTSPLIT
+// (and for `x_prepare_blosum62_lookup_query_in_pool`, which computes it on a pool).
 fn x_prepare_lookup_query(
     queries: &[Vec<QueryFrame>],
     ideal_params: KarlinParams,
@@ -822,40 +881,12 @@ fn x_prepare_lookup_query(
                 query_offset += frame.aa_seq.len() as i32 - 1;
                 continue;
             }
-            let ctx_comp = compute_aa_composition(&frame.aa_seq, frame.aa_len);
-            // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803:
-            // score frequencies use this score block's matrix and lo/hi scores.
-            let sfp = compute_score_freq_profile_for_matrix(
-                &ctx_comp, std_comp, bounds.0, bounds.1, matrix,
-            );
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2778-2803
             // ```c
             // loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
-            // if (loop_status) {
-            //     contexts[context].is_valid = FALSE;
-            //     sbp->sfp[context] = Blast_ScoreFreqFree(sbp->sfp[context]);
-            //     sbp->kbp_std[context] = Blast_KarlinBlkFree(sbp->kbp_std[context]);
-            //     continue;
-            // }
-            // if (check_ideal && kbp->Lambda >= sbp->kbp_ideal->Lambda)
-            //     Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
             // ```
-            let (is_valid, final_params) = match compute_karlin_params_ungapped(&sfp) {
-                Ok(computed_params) => {
-                    let final_params = if check_ideal {
-                        apply_check_ideal(computed_params, ideal_params)
-                    } else {
-                        computed_params
-                    };
-                    (true, final_params)
-                }
-                Err(_) => {
-                    // NCBI leaves no valid per-context Karlin block behind on failure.
-                    // Rust stores a placeholder and requires later stages to honor
-                    // `is_valid`, matching `query_info->contexts[context].is_valid`.
-                    (false, KarlinParams::default())
-                }
-            };
+            let (is_valid, final_params) =
+                x_context_karlin(frame, std_comp, bounds, matrix, check_ideal, ideal_params);
 
             prepared.contexts.push(QueryContext {
                 q_idx: q_idx as u32,
@@ -906,6 +937,74 @@ pub(crate) fn prepare_blosum62_lookup_query_for_word_size(
         ScoringMatrix::Blosum62,
         (-4, 11),
     );
+    (
+        prepared.concat_query,
+        prepared.lookup_locations,
+        prepared.contexts,
+    )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803
+// ```c
+//    for (context = query_info->first_context;
+//         context <= query_info->last_context; ++context) {
+//       ...
+//       if ( !contexts[context].is_valid )
+//           continue;
+//       ...
+//       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+// ```
+// NCBI computes the contexts' Karlin blocks one after the other; each reads only its own context's
+// letters (`x_context_karlin`), so computing them on several threads gives each context the same
+// block. Scheduling only.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): `prepare_blosum62_lookup_query_for_word_size` with the contexts'
+/// Karlin blocks (`x_context_karlin`) computed on `pool`'s threads; the same three values.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) fn x_prepare_blosum62_lookup_query_in_pool(
+    queries: &[Vec<QueryFrame>],
+    word_length: usize,
+    check_ideal: bool,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> (Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
+    use rayon::prelude::*;
+    let ideal_params = blosum62_ideal_karlin_params();
+    let std_comp = compute_std_aa_composition();
+    let bounds = (-4, 11);
+    let mut prepared = x_prepare_lookup_query(
+        queries,
+        ideal_params,
+        &std_comp,
+        word_length,
+        check_ideal,
+        ScoringMatrix::Blosum62,
+        bounds,
+        false,
+    );
+    // The frames in the order of the contexts (`x_prepare_lookup_query`'s loops).
+    let frames: Vec<&QueryFrame> = queries.iter().flatten().collect();
+    let karlin: Vec<(bool, KarlinParams)> = pool.install(|| {
+        frames
+            .par_iter()
+            .map(|frame| {
+                x_context_karlin(
+                    frame,
+                    &std_comp,
+                    bounds,
+                    ScoringMatrix::Blosum62,
+                    check_ideal,
+                    ideal_params,
+                )
+            })
+            .collect()
+    });
+    assert_eq!(karlin.len(), prepared.contexts.len());
+    for (context, (is_valid, karlin_params)) in prepared.contexts.iter_mut().zip(karlin) {
+        context.is_valid = is_valid;
+        context.karlin_params = karlin_params;
+    }
     (
         prepared.concat_query,
         prepared.lookup_locations,

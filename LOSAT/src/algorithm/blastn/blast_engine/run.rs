@@ -6201,7 +6201,9 @@ fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
 // TBlastThreads the_threads(GetNumberOfThreads());
 // (*thread)->Run(); (*thread)->Join(&result);
 /// The subjects of a search, read and encoded once for all query batches, as NCBI's
-/// `CLocalDbAdapter` of the subject set serves every batch.
+/// `CLocalDbAdapter` of the subject set serves every batch. Only the packed (ncbi2na)
+/// letters that the preliminary stage reads are kept for every subject; the traceback
+/// makes the blastna letters of a subject with preliminary HSPs from its record.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
 /// ```c
@@ -6219,7 +6221,6 @@ fn query_batching_from_environment(megablast: bool) -> Result<QueryBatching> {
 struct PreparedSubjects<'a> {
     records: &'a [FastaRecord],
     metadata: SubjectMetadata,
-    blastna: Vec<Vec<u8>>,
     packed: Vec<Vec<u8>>,
 }
 
@@ -6305,10 +6306,6 @@ fn run_in_pool(
     }
     let subjects = PreparedSubjects {
         records: subject_records,
-        blastna: subject_records
-            .iter()
-            .map(|record| encode_iupac_to_blastna(record.seq()))
-            .collect(),
         packed: subject_records
             .iter()
             .map(|record| encode_subject_ncbi2na_packed(record.seq()))
@@ -7211,7 +7208,6 @@ fn search_query_batch(
     //                               compressed_seq.data.release());
     // }
     // ```
-    let subject_blastna_cache_ref = Some(subjects.blastna.as_slice());
     let subject_packed_cache_ref = Some(subjects.packed.as_slice());
 
     // Prepare sequence data (including DUST masking)
@@ -8352,25 +8348,6 @@ fn search_query_batch(
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
         // ```c
-        // BlastSeqBlkSetSequence(subj, sequence.data.release(), ...);
-        // ...
-        // BlastSeqBlkSetCompressedSequence(subj,
-        //                                  compressed_seq.data.release());
-        // ```
-        let mut s_seq_blastna_full_vec: Option<Vec<u8>> = None;
-        let s_seq_blastna_full = if let Some(blastna_cache) = subject_blastna_cache_ref {
-            if let Some(blastna) = blastna_cache.get(s_idx) {
-                blastna.as_slice()
-            } else {
-                s_seq_blastna_full_vec = Some(encode_iupac_to_blastna(s_seq_full));
-                s_seq_blastna_full_vec.as_ref().unwrap().as_slice()
-            }
-        } else {
-            s_seq_blastna_full_vec = Some(encode_iupac_to_blastna(s_seq_full));
-            s_seq_blastna_full_vec.as_ref().unwrap().as_slice()
-        };
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
-        // ```c
         // if (subj_is_na) {
         //     BlastSeqBlkSetSequence(subj, sequence.data.release(),
         //        ((sentinels == eSentinels) ? sequence.length - 2 :
@@ -8562,7 +8539,6 @@ fn search_query_batch(
             let subject_masked = chunk.masked;
 
             let packed_offset = chunk.offset / COMPRESSION_RATIO;
-            let s_seq_blastna = &s_seq_blastna_full[chunk.offset..chunk.offset + chunk.length];
             let s_seq_packed = &s_seq_packed_full[packed_offset..];
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
@@ -11369,7 +11345,7 @@ fn search_query_batch(
                             extend_gapped_heuristic_with_scratch(
                                 q_seq_blastna,
                                 s_seq_packed,
-                                s_seq_blastna.len(),
+                                s_len,
                                 seed_qs,
                                 seed_ss,
                                 1,
@@ -11392,7 +11368,7 @@ fn search_query_batch(
                             x_prelim_s,
                             q_seq_blastna,
                             s_seq_packed,
-                            s_seq_blastna.len(),
+                            s_len,
                             seed_qs,
                             seed_ss,
                             reward,
@@ -11490,7 +11466,7 @@ fn search_query_batch(
 
                         let q_seq_blastna =
                             encoded_queries_blastna[uh.context_idx as usize].as_slice();
-                        let subject_len = s_seq_blastna.len();
+                        let subject_len = s_len;
 
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
                         // ```c
@@ -11504,7 +11480,6 @@ fn search_query_batch(
                         // ```
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
                         let s_seq_score = s_seq_packed;
-                        let s_seq_trace = s_seq_blastna;
 
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
                         // ```c
@@ -12315,7 +12290,21 @@ fn search_query_batch(
 
         let hits = &mut subject_scratch.hits;
         hits.clear();
-        let s_seq_blastna = s_seq_blastna_full;
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1528, 1567-1573
+        // ```c
+        //             const EBlastEncoding encoding = Blast_TracebackGetEncoding(program_number);
+        // ...
+        //                 seq_arg.oid = batch->hsplist_array[0]->oid;
+        //                 seq_arg.encoding = encoding;
+        // ...
+        //                 if (BlastSeqSrcGetSequence(seqsrc, &seq_arg) < 0) {
+        // ```
+        // The traceback fetches the uncompressed (blastna) subject of each subject with
+        // preliminary HSPs; the preliminary stage reads only the packed one. The blastna letters
+        // are made here, for this subject only, instead of being kept for every subject of the
+        // search.
+        let s_seq_blastna_vec = encode_iupac_to_blastna(s_seq_full);
+        let s_seq_blastna = s_seq_blastna_vec.as_slice();
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:371-373
         // ```c

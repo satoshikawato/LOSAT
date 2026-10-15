@@ -652,6 +652,47 @@ impl XQuerySide {
     }
 }
 
+// No NCBI counterpart: reads the LOSAT_X_TBNSTATE switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_TBNSTATE): off unless set (to any value); not in the strict set.
+fn x_tbn_state() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNSTATE").is_some())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1002-1003,1377-1379,1412-1413
+// ```c
+//     if ((status = BlastExtendWordNew(query->length, word_params,
+//                                     &aux_struct->ewp)) != 0)
+// ...
+//        s_BlastSetUpAuxStructures(seq_src, lookup_wrap, word_params,
+//           ext_options, hit_options, query, query_info, &aux_struct)) != 0)
+// ...
+//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//            != BLAST_SEQSRC_EOF) {
+// ```
+// NCBI's search thread sets up its word-finder state (diagonal table, offset pairs, initial hit
+// list) and its gapped alignment memory once, before its loop over the subjects, and keeps them for
+// every subject. These are the same buffers of the unit path, kept by a thread between subjects.
+/// EXPERIMENT (LOSAT_X_TBNSTATE): the scan state of the unit path that a thread keeps from one
+/// subject to the next (`X_UNIT_STATE`). Without the switch each subject makes its own: on a
+/// search of many short subjects that is hundreds of thousands of tables of up to a megabyte,
+/// which glibc's per-thread heaps create and delete again.
+struct XUnitBuffers {
+    diagonals: super::search_init::Diagonals,
+    pairs: Vec<crate::algorithm::tblastx::blast_aascan::BlastOffsetPair>,
+    hits: Vec<InitHsp>,
+    scratch: GapAlignScratch,
+}
+
+thread_local! {
+    /// EXPERIMENT (LOSAT_X_TBNSTATE): this thread's `XUnitBuffers`, taken while a subject's units
+    /// run on the thread and put back after them. A thread that finds it empty (its first subject,
+    /// or a subject started while another one on the same thread holds them) makes new buffers.
+    static X_UNIT_STATE: std::cell::Cell<Option<XUnitBuffers>> = const { std::cell::Cell::new(None) };
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-584,844
 // ```c
 //     while (TRUE) {
@@ -745,20 +786,31 @@ fn x_preliminary_protein_hsps_by_unit(
         hits: Vec<InitHsp>,
         scratch: GapAlignScratch,
     }
-    let new_state = || UnitState {
-        two_hit: XTwoHit::new(
-            &query_sequence,
-            &init_context_offsets,
-            profile.word_xdrop,
-            profile.word_cutoff,
-            profile.matrix,
-            profile.window,
-            profile.word_size,
-        ),
-        pairs: Vec::new(),
-        hits: Vec::new(),
-        scratch: GapAlignScratch::new(),
+    // EXPERIMENT (LOSAT_X_TBNSTATE): the units end with NCBI's offset step instead of starting on a
+    // cleared table, and the sequential path below runs on this thread's kept buffers.
+    let x_keep = x_tbn_state();
+    let state_on = |kept: Option<XUnitBuffers>| {
+        let (table, pairs, hits, scratch) = match kept {
+            Some(kept) => (Some(kept.diagonals), kept.pairs, kept.hits, kept.scratch),
+            None => (None, Vec::new(), Vec::new(), GapAlignScratch::new()),
+        };
+        UnitState {
+            two_hit: XTwoHit::with_table(
+                table,
+                &query_sequence,
+                &init_context_offsets,
+                profile.word_xdrop,
+                profile.word_cutoff,
+                profile.matrix,
+                profile.window,
+                profile.word_size,
+            ),
+            pairs,
+            hits,
+            scratch,
+        }
     };
+    let new_state = || state_on(None);
     let run_unit = |state: &mut UnitState<'_>, unit: usize| -> Result<Vec<(usize, GappedHsp)>> {
         let (frame_index, chunk, _) = &plan.subject.units[unit];
         let frame = &plan.subject.frames[*frame_index];
@@ -771,11 +823,20 @@ fn x_preliminary_protein_hsps_by_unit(
             hits,
             scratch,
         } = state;
-        two_hit.reset();
+        if !x_keep {
+            two_hit.reset();
+        }
         hits.clear();
         x_scan_unit(&plan, unit, pairs, |filled| {
             two_hit.pairs(frame.frame, chunk_offset, subject_sequence, filled, hits);
         });
+        // NCBI c++/src/algo/blast/core/aa_ungapped.c:608-609:
+        // Blast_ExtendWordExit(ewp, subject->length);
+        // Right after the scan, before anything that can fail, so that the table is ready for the
+        // next unit whatever this one returns.
+        if x_keep {
+            two_hit.exit(chunk.length);
+        }
         XTwoHit::sort(hits);
         // NCBI c++/src/algo/blast/core/blast_engine.c:489-493:
         // if (init_hitlist->total == 0) continue;
@@ -834,9 +895,27 @@ fn x_preliminary_protein_hsps_by_unit(
         });
     }
     if purged.is_empty() {
-        let mut state = new_state();
+        let mut state = if x_keep {
+            state_on(X_UNIT_STATE.take())
+        } else {
+            new_state()
+        };
         for unit in 0..unit_count {
             purged.push(run_unit(&mut state, unit));
+        }
+        if x_keep {
+            let UnitState {
+                two_hit,
+                pairs,
+                hits,
+                scratch,
+            } = state;
+            X_UNIT_STATE.set(Some(XUnitBuffers {
+                diagonals: two_hit.into_table(),
+                pairs,
+                hits,
+                scratch,
+            }));
         }
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:581-584,844

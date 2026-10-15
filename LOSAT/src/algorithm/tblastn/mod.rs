@@ -10,6 +10,8 @@ mod search_seed;
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);
 // EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the subject frames read from tables.
 mod x_subject_translate;
+// EXPERIMENT (LOSAT_X_TBNSTORE): the subjects held packed, their letters made when read.
+mod x_subject_store;
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:200-234:
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
 // Blast_InitHitListSortByScore(init_hitlist);
@@ -52,3 +54,6 @@ pub use args::{check_options, run_local, ResolvedTblastnArgs, TblastnArgs};
 // EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the summary lines `main` prints at
 // exit. No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub use x_subject_translate::print_summary as x_subject_translate_print_summary;
+// EXPERIMENT (LOSAT_X_TBNSTORE): the summary line `main` prints at exit. No NCBI counterpart: it
+// prints counters and changes no value NCBI computes.
+pub use x_subject_store::print_summary as x_subject_store_print_summary;

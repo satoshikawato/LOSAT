@@ -147,13 +147,27 @@
 //! `blastp/x_seed_fused_compressed.rs` (`x_scan_cells`, exactness argument in that file's header) with
 //! the slice in place of `x_cell_hits`.
 //!
+//! With more than one thread the search's pool builds the same table (`x_clut_par.rs`, exactness
+//! argument in its header); at one thread the builder above runs.
+//!
 //! Off unless `LOSAT_X_BPCLUT` is set (any value); `LOSAT_X_BPCLUTSHADOW` builds both tables, compares
 //! them (every cell's sequence, the PV array, the header) and the refusal, and searches with the
-//! reference's table. Not in the strict set.
+//! reference's table; with more than one thread it also builds the pool's table and compares it with
+//! the flat one, slot for slot. Not in the strict set.
 
 use super::*;
 use crate::algorithm::tblastx::scan::OffsetPair;
+use crate::utils::threading::SearchPool;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+// EXPERIMENT (LOSAT_X_BPCLUT at more than one thread): the same table built by the search's pool
+// (exactness argument in the file's header).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[path = "x_clut_par.rs"]
+mod x_clut_par;
 
 // No NCBI counterpart: reads the switches once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW, off unless set): 0 = off (the reference
@@ -176,6 +190,8 @@ pub(crate) fn x_bpclut_mode() -> u8 {
 static X_SHADOW_TABLES: AtomicU64 = AtomicU64::new(0);
 static X_SHADOW_REFUSED: AtomicU64 = AtomicU64::new(0);
 static X_SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
+static X_SHADOW_PARALLEL_TABLES: AtomicU64 = AtomicU64::new(0);
+static X_SHADOW_PARALLEL_REFUSED: AtomicU64 = AtomicU64::new(0);
 
 /// EXPERIMENT (LOSAT_X_BPCLUTSHADOW): the shadow mode's line at exit (printed by `main`).
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
@@ -184,8 +200,10 @@ pub fn x_bpclut_print_summary() {
         let tables = X_SHADOW_TABLES.load(Ordering::Relaxed);
         let refused = X_SHADOW_REFUSED.load(Ordering::Relaxed);
         let hits = X_SHADOW_HITS.load(Ordering::Relaxed);
+        let parallel_tables = X_SHADOW_PARALLEL_TABLES.load(Ordering::Relaxed);
+        let parallel_refused = X_SHADOW_PARALLEL_REFUSED.load(Ordering::Relaxed);
         eprintln!(
-            "[X_SHADOW] BPCLUT tables_compared={tables} refusals_compared={refused} hits={hits} identical"
+            "[X_SHADOW] BPCLUT tables_compared={tables} refusals_compared={refused} hits={hits} parallel_tables_compared={parallel_tables} parallel_refusals_compared={parallel_refused} identical"
         );
     }
 }
@@ -676,6 +694,29 @@ pub(crate) fn x_try_build_flat_compressed_lookup(
 // table, as the reference does after each query offset); it bounds the record kept before a refusal.
 const X_COUNT_CHUNK: usize = 1 << 20;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1168-1175 (the loop over the
+// segments, see `x_for_each_offset`)
+// ```c
+//     for (loc = location; loc; loc = loc->next){
+// ```
+/// The segments (ranges of `locations`) before, inside and between NCBI's tables, in order, each with
+/// whether it is one of NCBI's tables (the words between tables, a split query batch, are added
+/// without a test of the overflow banks).
+fn x_count_ranges(
+    tables: &[std::ops::Range<usize>],
+    locations: usize,
+) -> Vec<(std::ops::Range<usize>, bool)> {
+    let mut ranges: Vec<(std::ops::Range<usize>, bool)> = Vec::with_capacity(2 * tables.len() + 1);
+    let mut next = 0usize;
+    for table in tables {
+        ranges.push((next..table.start, false));
+        ranges.push((table.clone(), true));
+        next = table.end;
+    }
+    ranges.push((next..locations, false));
+    ranges
+}
+
 /// The count pass's state: the cell of each append in order, (query offset, appends) of each query
 /// offset with any, each cell's count of the appends counted so far, and the overflow cells that
 /// those appends take in the reference's table of all batches.
@@ -736,14 +777,7 @@ fn x_try_build_flat_with_capacity(
 
     // Count pass, over the segments before, inside and between NCBI's tables (the words between
     // tables, a split query batch, are added without a test).
-    let mut ranges: Vec<(std::ops::Range<usize>, bool)> = Vec::with_capacity(2 * tables.len() + 1);
-    let mut next = 0usize;
-    for table in tables {
-        ranges.push((next..table.start, false));
-        ranges.push((table.clone(), true));
-        next = table.end;
-    }
-    ranges.push((next..locations.len(), false));
+    let ranges = x_count_ranges(tables, locations.len());
     let mut st = XCount {
         targets: Vec::new(),
         per_offset: Vec::new(),
@@ -1279,34 +1313,33 @@ pub(crate) enum XCompressedLookup {
 //     s_CompressedLookupFinalize(lookup);
 // ```
 /// EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW): `try_build_blosum62_compressed_lookup` for
-/// BLASTP. Mode 0 calls it; mode 1 builds the flat table (the reference builder where it declines);
-/// mode 2 builds both, compares the refusal and the tables (panics on a difference) and returns the
-/// reference's.
+/// BLASTP. Mode 0 calls it; mode 1 builds the flat table (the reference builder where it declines), on
+/// `pool`'s threads when it has more than one (`x_clut_par.rs`); mode 2 builds both, and the flat table
+/// on `pool`'s threads too when it has more than one, compares the refusals and the tables (panics on a
+/// difference) and returns the reference's.
 pub(crate) fn x_bp_build_compressed_lookup(
     word_size: usize,
     scaled_threshold: i32,
     query: &[u8],
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
+    pool: &SearchPool<'_>,
 ) -> Option<Result<XCompressedLookup, ()>> {
     let reference = || {
         try_build_blosum62_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
     };
     match x_bpclut_mode() {
         0 => reference().map(|built| built.map(XCompressedLookup::Reference)),
-        1 => match x_try_build_flat_compressed_lookup(
-            word_size,
-            scaled_threshold,
-            query,
-            locations,
-            tables,
-        )? {
-            XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
-            XFlatBuild::Refused => Some(Err(())),
-            XFlatBuild::TooLarge => {
-                reference().map(|built| built.map(XCompressedLookup::Reference))
+        1 => {
+            match x_build_flat_in_pool(word_size, scaled_threshold, query, locations, tables, pool)?
+            {
+                XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
+                XFlatBuild::Refused => Some(Err(())),
+                XFlatBuild::TooLarge => {
+                    reference().map(|built| built.map(XCompressedLookup::Reference))
+                }
             }
-        },
+        }
         _ => {
             let built = reference()?;
             let flat = x_try_build_flat_compressed_lookup(
@@ -1332,8 +1365,119 @@ pub(crate) fn x_bp_build_compressed_lookup(
                     matches!(flat, XFlatBuild::Refused)
                 ),
             }
+            if x_pool_builds(pool) {
+                let parallel = x_build_flat_in_pool(
+                    word_size,
+                    scaled_threshold,
+                    query,
+                    locations,
+                    tables,
+                    pool,
+                )?;
+                match (&flat, &parallel) {
+                    (XFlatBuild::Table(flat), XFlatBuild::Table(parallel)) => {
+                        x_assert_same_flat_tables(parallel, flat);
+                        X_SHADOW_PARALLEL_TABLES.fetch_add(1, Ordering::Relaxed);
+                    }
+                    (XFlatBuild::Refused, XFlatBuild::Refused) => {
+                        X_SHADOW_PARALLEL_REFUSED.fetch_add(1, Ordering::Relaxed);
+                    }
+                    (XFlatBuild::TooLarge, _) | (_, XFlatBuild::TooLarge) => {}
+                    (XFlatBuild::Table(_), XFlatBuild::Refused)
+                    | (XFlatBuild::Refused, XFlatBuild::Table(_)) => panic!(
+                        "LOSAT_X_BPCLUTSHADOW: parallel refusal differs (serial refused: {}, parallel refused: {})",
+                        matches!(flat, XFlatBuild::Refused),
+                        matches!(parallel, XFlatBuild::Refused)
+                    ),
+                }
+            }
             Some(built.map(XCompressedLookup::Reference))
         }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
+// ```c
+//     TBlastThreads the_threads(GetNumberOfThreads());
+// ```
+/// Whether the flat table is built by `pool`'s threads: a pool of more than one thread, in a build
+/// with threads.
+fn x_pool_builds(pool: &SearchPool<'_>) -> bool {
+    cfg!(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )) && pool.enabled()
+        && pool.threads() > 1
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
+// ```c
+//     s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                     query, locations);
+//     s_CompressedLookupFinalize(lookup);
+// ```
+/// EXPERIMENT (LOSAT_X_BPCLUT): the flat table, by `pool`'s threads when `x_pool_builds` (the same
+/// table, `x_clut_par.rs`), else by the serial builder.
+fn x_build_flat_in_pool(
+    word_size: usize,
+    scaled_threshold: i32,
+    query: &[u8],
+    locations: &[(i32, i32)],
+    tables: &[std::ops::Range<usize>],
+    pool: &SearchPool<'_>,
+) -> Option<XFlatBuild> {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if x_pool_builds(pool) {
+        return x_clut_par::x_try_build_flat_in_pool(
+            word_size,
+            scaled_threshold,
+            query,
+            locations,
+            tables,
+            pool,
+        );
+    }
+    let _ = pool;
+    x_try_build_flat_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
+}
+
+// No NCBI counterpart: compares two of LOSAT's flat tables (the shadow's and the tests' check).
+/// EXPERIMENT (LOSAT_X_BPCLUTSHADOW): panics unless the two flat tables are equal, field by field and
+/// slot by slot.
+pub(crate) fn x_assert_same_flat_tables(got: &XFlatCompressedLookup, want: &XFlatCompressedLookup) {
+    assert!(
+        got.word_length == want.word_length
+            && got.compressed_alphabet_size == want.compressed_alphabet_size
+            && got.reciprocal_alphabet_size == want.reciprocal_alphabet_size
+            && got.longest_chain == want.longest_chain
+            && got.pv_array_bts == want.pv_array_bts
+            && got.scaled_compress_table_u8 == want.scaled_compress_table_u8,
+        "LOSAT_X_BPCLUTSHADOW: parallel table header differs"
+    );
+    assert!(
+        got.pv == want.pv,
+        "LOSAT_X_BPCLUTSHADOW: parallel pv differs"
+    );
+    if let Some(index) = got
+        .starts
+        .iter()
+        .zip(&want.starts)
+        .position(|(got, want)| got != want)
+        .or((got.starts.len() != want.starts.len()).then_some(0))
+    {
+        panic!("LOSAT_X_BPCLUTSHADOW: parallel starts differ at cell {index}");
+    }
+    if let Some(slot) = got
+        .hits
+        .iter()
+        .zip(&want.hits)
+        .position(|(got, want)| got != want)
+        .or((got.hits.len() != want.hits.len()).then_some(0))
+    {
+        panic!("LOSAT_X_BPCLUTSHADOW: parallel hits differ at slot {slot}");
     }
 }
 
@@ -1388,10 +1532,10 @@ mod tests {
     use crate::utils::matrix::ncbistdaa;
 
     // A small deterministic generator (xorshift64).
-    struct XorShift(u64);
+    pub(super) struct XorShift(pub(super) u64);
 
     impl XorShift {
-        fn below(&mut self, n: usize) -> usize {
+        pub(super) fn below(&mut self, n: usize) -> usize {
             let mut x = self.0;
             x ^= x << 13;
             x ^= x >> 7;
@@ -1402,11 +1546,12 @@ mod tests {
     }
 
     // NCBISTDAA letters inside the 15-letter compressed alphabet and outside it (NULLB, X, U, *, O).
-    const LETTERS: [u8; 23] = [
+    pub(super) const LETTERS: [u8; 23] = [
         1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 27,
     ];
     const OUTSIDE: [u8; 5] = [0, 21, 24, 25, 26];
-    const FEW_LETTERS: [u8; 4] = [ncbistdaa::A, ncbistdaa::L, ncbistdaa::S, ncbistdaa::K];
+    pub(super) const FEW_LETTERS: [u8; 4] =
+        [ncbistdaa::A, ncbistdaa::L, ncbistdaa::S, ncbistdaa::K];
 
     fn flat_table(build: Option<XFlatBuild>) -> XFlatCompressedLookup {
         match build.expect("word size 5") {
@@ -1531,7 +1676,7 @@ mod tests {
     // Queries of `lengths` letters from `letters`, concatenated as BLASTP's lookup query (each query
     // followed by a sentinel). Each query has one lookup segment, or `masked` gaps (SEG-masked runs)
     // that cut it into several.
-    fn queries(
+    pub(super) fn queries(
         rng: &mut XorShift,
         lengths: &[usize],
         letters: &[u8],

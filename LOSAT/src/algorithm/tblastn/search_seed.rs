@@ -814,7 +814,16 @@ pub(super) fn x_scan_plan(
     // Translation and chunking of the subject, as above: the reference path of the plan that the
     // shared plan memoises.
     let x_reference_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
-        let resolved_subject = resolve_local_subject_ncbi2na(subject)?;
+        // Letters that are all `A`, `C`, `G`, `T` resolve to themselves (no base is ambiguous,
+        // so nothing is drawn): read them in place (LOSAT_X_TBNSTORE gives resolved bases).
+        let resolved_subject = if subject
+            .iter()
+            .all(|&letter| matches!(letter, b'A' | b'C' | b'G' | b'T'))
+        {
+            std::borrow::Cow::Borrowed(subject)
+        } else {
+            std::borrow::Cow::Owned(resolve_local_subject_ncbi2na(subject)?)
+        };
         let frames = generate_frames(&resolved_subject, &code);
         let negative_first_length = frames
             .iter()

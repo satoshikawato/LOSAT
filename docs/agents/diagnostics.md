@@ -266,6 +266,16 @@ Same values, faster computation:
   x86_64 and wasm32 run). Without it aarch64 runs the scalar port, as before the NEON layer.
   `LOSAT_X_DPSHADOW=1` runs and compares the NEON kernels on aarch64 whether it is set or not.
   Platform checks hash it on the Linux and macOS arm64 runners (mode `dpneon`).
+- `LOSAT_X_DPNEON2=1` (aarch64 only, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the X-drop DP kernels of `LOSAT_X_DPAVX2` on NEON, each
+  256-bit vector in two registers (32 x i8 or 16 x i16 lanes per block, the same band steps, the
+  row gap in the form of `LOSAT_X_DPW128`): the same values and result as the 128-bit kernels; a
+  call they do not take (8-bit lanes with `32 * gap_extend - (gap_open + gap_extend) > 128`, 16-bit
+  lanes with `16 * gap_extend - (gap_open + gap_extend) > 32768`) runs on the `LOSAT_X_DPW128` /
+  128-bit kernels (`utils/x_xdrop_neon2.rs`). It turns the NEON kernels on as `LOSAT_X_DPNEON`
+  does and takes the place `LOSAT_X_DPAVX2` has on x86_64 (first in the dispatch). Covered by
+  `LOSAT_X_DPSHADOW=1` when set. Platform checks hash it on the Linux and macOS arm64 runners
+  (mode `dpneon2`).
 - `LOSAT_X_GREEDYFAST=1` megablast greedy alignment, one distance in three passes of 256 cells,
   match extension 8 bases at a time. Shadow: `LOSAT_X_GREEDYSHADOW=1`.
 - `LOSAT_X_GREEDYPRELIM=1` (strict-set candidate, S-G, round 5) the preliminary (score-only)

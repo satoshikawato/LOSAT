@@ -47,6 +47,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, BlastCompoAdjustMode, BlastCompoQueryInfo, BlastCompoSequenceData,
     EMatrixAdjustRule,
 };
+use crate::sequence::packed_subject::SubjectNt;
 use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::spouge::{blast_spouge_stoe, lookup_protein_gumbel_params, BlastGumbelBlk};
 use crate::stats::tables::{
@@ -940,9 +941,9 @@ fn run_local_search_with_pool(
                      scratch: &mut GapAlignScratch,
                      workspace: &mut BlastCompositionWorkspace|
      -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
-        // The letters of the subject (made from its packed form with LOSAT_X_TBNSTORE).
-        let mut x_letters = Vec::new();
-        let subject = subjects.letters(oid, &mut x_letters);
+        // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form: the redo and
+        // the translations below read windows of it, as NCBI's do.
+        let subject = subjects.nt(oid);
         let incoming: Vec<_> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
         let mut redo = redo_preliminary_match(
             &incoming,
@@ -1004,7 +1005,7 @@ fn run_local_search_with_pool(
             best_score: postredo.hsps[0].hsp.score,
         };
         let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
-        let mut target = TargetTranslation::new(subject, &code);
+        let mut target = TargetTranslation::of(subject, &code);
         let mut owned: Vec<_> = survivors.into_iter().map(Some).collect();
         let payloads = postredo
             .hsps
@@ -1938,7 +1939,7 @@ fn run_preliminary_subjects(
     // The other subjects, and every subject without the switch, keep `unit_pool`. Scheduling only.
     #[cfg(feature = "parallel")]
     let x_units_beyond = x_chunk_bases.filter(|_| x_tbn_oid_units());
-    let x_unit_pool = |subject: &[u8]| {
+    let x_unit_pool = |subject: SubjectNt<'_>| {
         #[cfg(feature = "parallel")]
         if x_units_beyond
             .is_some_and(|bases| u64::try_from(subject.len()).unwrap_or(u64::MAX) > bases)
@@ -1976,66 +1977,67 @@ fn run_preliminary_subjects(
     let x_subject_side = pool.and_then(|pool| pool.x_ext::<super::search_seed::XSubjectSide>());
     // No NCBI counterpart: x_oid is only the index of the subject among the shared subject plans;
     // it does not change any value NCBI computes.
-    let subject_core =
-        |x_oid: usize, subject: &[u8]| -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1469-1470
-            // ```c
-            //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-            //            != BLAST_SEQSRC_EOF) {
-            // ...
-            //       status =
-            //           s_BlastSearchEngineCore(program_number, query, query_info,
-            // ```
-            // Dispatch point: the call that runs the preliminary stage for one subject
-            // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search chooses the original
-            // port or the unit-wise stage by switch.
-            let preliminary = super::search_gapped::preliminary_protein_hsps_for_search(
-                inputs.queries,
-                subject,
-                inputs.genetic_code,
-                inputs.search,
-                x_unit_pool(subject),
-                x_query_side.as_ref(),
-                x_subject_side.map(|side| (side, x_oid)),
-            )?;
-            // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-            // BLAST_LinkHsps(..., hsp_list_out, ...);
-            // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
-            // Even an allocated empty subject list enters link/E-value.
-            let mut linked = if let Some(link) = inputs.link {
-                link_preliminary_hsps(
-                    &preliminary,
-                    inputs.query_lengths,
-                    inputs.lengths,
-                    i32::try_from(subject.len())?,
-                    inputs.gapped_by_context,
-                    inputs
-                        .gumbel
-                        .context("TBLASTN sum-statistics Spouge state is missing")?,
-                    &link,
-                )?
-            } else {
-                // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
-                // if (subject->length > 0) stat_length = subject->length;
-                // Blast_HSPListGetEvalues(..., stat_length, ...);
-                let stat_length = initial_translated_stat_length(subject.len());
-                direct_local_evalues(
-                    &preliminary,
-                    inputs.query_lengths,
-                    i32::try_from(stat_length)?,
-                    inputs.gapped_by_context,
-                    inputs.lengths,
-                    inputs.gumbel,
-                )
-            };
-            reap_by_evalue(&mut linked, inputs.prelim_evalue);
-            Ok((preliminary, linked))
+    let subject_core = |x_oid: usize,
+                        subject: SubjectNt<'_>|
+     -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1469-1470
+        // ```c
+        //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+        //            != BLAST_SEQSRC_EOF) {
+        // ...
+        //       status =
+        //           s_BlastSearchEngineCore(program_number, query, query_info,
+        // ```
+        // Dispatch point: the call that runs the preliminary stage for one subject
+        // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search chooses the original
+        // port or the unit-wise stage by switch.
+        let preliminary = super::search_gapped::preliminary_protein_hsps_for_search(
+            inputs.queries,
+            subject,
+            inputs.genetic_code,
+            inputs.search,
+            x_unit_pool(subject),
+            x_query_side.as_ref(),
+            x_subject_side.map(|side| (side, x_oid)),
+        )?;
+        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
+        // BLAST_LinkHsps(..., hsp_list_out, ...);
+        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
+        // Even an allocated empty subject list enters link/E-value.
+        let mut linked = if let Some(link) = inputs.link {
+            link_preliminary_hsps(
+                &preliminary,
+                inputs.query_lengths,
+                inputs.lengths,
+                i32::try_from(subject.len())?,
+                inputs.gapped_by_context,
+                inputs
+                    .gumbel
+                    .context("TBLASTN sum-statistics Spouge state is missing")?,
+                &link,
+            )?
+        } else {
+            // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
+            // if (subject->length > 0) stat_length = subject->length;
+            // Blast_HSPListGetEvalues(..., stat_length, ...);
+            let stat_length = initial_translated_stat_length(subject.len());
+            direct_local_evalues(
+                &preliminary,
+                inputs.query_lengths,
+                i32::try_from(stat_length)?,
+                inputs.gapped_by_context,
+                inputs.lengths,
+                inputs.gumbel,
+            )
         };
-    // The letters of subject `x_oid` for its preliminary stage: the record's own, or (EXPERIMENT,
-    // LOSAT_X_TBNSTORE) made from its packed form for the time of the call, as NCBI makes a
-    // subject's search forms from its scope (its resolved bases unless the stage reads the case).
+        reap_by_evalue(&mut linked, inputs.prelim_evalue);
+        Ok((preliminary, linked))
+    };
+    // Subject `x_oid` for its preliminary stage: the record's letters, or (EXPERIMENT,
+    // LOSAT_X_TBNSTORE) its packed form, translated from its packed bases as NCBI translates a
+    // subject from ncbi2na (the letters made for the time of the call if the stage reads the case).
     let subject_core_oid = |x_oid: usize| {
-        subjects.with_search_letters(x_oid, inputs.search.mask_lowercase, |subject| {
+        subjects.with_search_subject(x_oid, inputs.search.mask_lowercase, |subject| {
             subject_core(x_oid, subject)
         })
     };

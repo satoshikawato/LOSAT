@@ -16,6 +16,7 @@ use crate::algorithm::blastp::gapalign::{
 use crate::algorithm::tblastx::translation::{generate_frames, QueryFrame};
 use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
+use crate::sequence::packed_subject::SubjectNt;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::protein_score;
 use crate::utils::seg::SegParams;
@@ -454,13 +455,16 @@ fn x_tbn_units() -> u8 {
 /// EXPERIMENT: the preliminary stage without the test-only event log.
 pub(super) fn preliminary_protein_hsps_for_search(
     queries: &[&[u8]],
-    subject: &[u8],
+    // EXPERIMENT (LOSAT_X_TBNSTORE): the subject's letters, or its packed store (the unit path
+    // translates the store; the other paths read its resolved bases).
+    subject: SubjectNt<'_>,
     db_gencode: u8,
     profile: PreliminaryProfile<'_>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
     x_query_side: Option<&XQuerySide>,
     x_subject: Option<(&super::search_seed::XSubjectSide, usize)>,
 ) -> Result<Vec<(usize, GappedHsp)>> {
+    use super::x_subject_store::x_with_search_letters;
     match x_tbn_units() {
         1 => {
             return x_preliminary_protein_hsps_by_unit(
@@ -483,13 +487,15 @@ pub(super) fn preliminary_protein_hsps_for_search(
                 x_query_side,
                 x_subject,
             )?;
-            let serial = preliminary_protein_hsps_with_comparison_input(
-                queries,
-                subject,
-                db_gencode,
-                profile,
-                |_, _, _| Ok(()),
-            )?
+            let serial = x_with_search_letters(subject, |subject| {
+                preliminary_protein_hsps_with_comparison_input(
+                    queries,
+                    subject,
+                    db_gencode,
+                    profile,
+                    |_, _, _| Ok(()),
+                )
+            })?
             .0;
             assert!(
                 by_unit == serial,
@@ -503,13 +509,15 @@ pub(super) fn preliminary_protein_hsps_for_search(
     if skip {
         X_COLLECT_EVENTS.with(|c| c.set(false));
     }
-    let result = preliminary_protein_hsps_with_comparison_input(
-        queries,
-        subject,
-        db_gencode,
-        profile,
-        |_, _, _| Ok(()),
-    );
+    let result = x_with_search_letters(subject, |subject| {
+        preliminary_protein_hsps_with_comparison_input(
+            queries,
+            subject,
+            db_gencode,
+            profile,
+            |_, _, _| Ok(()),
+        )
+    });
     if skip {
         X_COLLECT_EVENTS.with(|c| c.set(true));
     }
@@ -733,7 +741,7 @@ thread_local! {
 // consumed straight from the scan buffer, so no per-frame seed list is kept.
 fn x_preliminary_protein_hsps_by_unit(
     queries: &[&[u8]],
-    subject: &[u8],
+    subject: SubjectNt<'_>,
     db_gencode: u8,
     profile: PreliminaryProfile<'_>,
     pool: Option<&crate::utils::threading::SearchPool<'_>>,
@@ -1518,17 +1526,40 @@ pub(super) fn window_index(position: i32, base: isize) -> Option<usize> {
 }
 
 pub(super) struct TargetTranslation<'a> {
-    subject: &'a [u8],
+    subject: SubjectNt<'a>,
     code: &'a GeneticCode,
     frames: [TargetFrameTranslation; 6],
+    /// EXPERIMENT (LOSAT_X_TBNSTORE): the letters of the window being translated, when the
+    /// subject is packed.
+    window: Vec<u8>,
 }
 
 impl<'a> TargetTranslation<'a> {
     pub(super) fn new(subject: &'a [u8], code: &'a GeneticCode) -> Self {
+        Self::of(SubjectNt::Letters(subject), code)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1197-1201,1216-1218
+    // ```c
+    //          if (start_shift < start || start_shift+translation_length > stop) {
+    //                /* needs re-translation */
+    //                Int4 length = 0; /* actual translation length */
+    //                Uint1* nucl_seq = target_t->subject_blk->sequence + nucl_shift;
+    //                Uint1* nucl_seq_rev = NULL;
+    // ...
+    //                length = BLAST_GetTranslation(nucl_seq, nucl_seq_rev,
+    //                        nucl_length, hsp->subject.frame, target_t->translations[context],
+    //                        target_t->gen_code_string);
+    // ```
+    // NCBI translates `nucl_length` nucleotides from `nucl_shift`; a packed subject (EXPERIMENT,
+    // LOSAT_X_TBNSTORE) gives the letters of that window when it is translated.
+    /// The translations of `subject`, letters or (EXPERIMENT, LOSAT_X_TBNSTORE) packed.
+    pub(super) fn of(subject: SubjectNt<'a>, code: &'a GeneticCode) -> Self {
         Self {
             subject,
             code,
             frames: std::array::from_fn(|_| TargetFrameTranslation::default()),
+            window: Vec::new(),
         }
     }
 
@@ -1582,7 +1613,8 @@ impl<'a> TargetTranslation<'a> {
             if start_shift < target.start || start_shift + translation_length > target.stop {
                 let nucl_shift = if frame < 0 { n - nucl_end } else { nucl_start };
                 let translated = generate_frames(
-                    &self.subject[nucl_shift..nucl_shift + nucl_length],
+                    self.subject
+                        .fetch(nucl_shift, nucl_shift + nucl_length, &mut self.window),
                     self.code,
                 );
                 let translated = translated

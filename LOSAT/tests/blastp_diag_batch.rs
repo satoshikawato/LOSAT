@@ -27,7 +27,6 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::OnceLock;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -149,59 +148,56 @@ fn next(seed: &mut u64) -> u32 {
     (*seed >> 33) as u32
 }
 
-/// A generated query and subject set in the test's own directory: random proteins, a protein with
+/// A generated query and subject set in a directory of the calling test (`test`; the tests run in
+/// parallel, so they must not share files): random proteins, a protein with
 /// long repeats (lookup cells far above three hits, so batches of eight and the overflow array),
 /// and subjects that are copies of the queries with every sixth letter changed (two hits on a
 /// diagonal, extensions with and without a reset of the diagonal), plus unrelated proteins.
-fn generated_pair() -> (PathBuf, PathBuf) {
-    // Written once per test binary: the tests run in parallel threads, and a second write of
-    // the same files truncates them while another test's search reads them ("Query is Empty!").
-    static PAIR: OnceLock<(PathBuf, PathBuf)> = OnceLock::new();
-    PAIR.get_or_init(|| {
-        const AMINO: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastp_diag_batch");
-        std::fs::create_dir_all(&dir).expect("test directory");
-        let mut seed = 0xd1a9_u64;
-        let mut protein = |n: usize| -> Vec<u8> {
-            (0..n)
-                .map(|_| AMINO[next(&mut seed) as usize % AMINO.len()])
+fn generated_pair(test: &str) -> (PathBuf, PathBuf) {
+    const AMINO: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("blastp_diag_batch")
+        .join(test);
+    std::fs::create_dir_all(&dir).expect("test directory");
+    let mut seed = 0xd1a9_u64;
+    let mut protein = |n: usize| -> Vec<u8> {
+        (0..n)
+            .map(|_| AMINO[next(&mut seed) as usize % AMINO.len()])
+            .collect()
+    };
+    let mut queries: Vec<Vec<u8>> = (0..12).map(|i| protein(120 + 37 * i)).collect();
+    let mut repeats = Vec::new();
+    for _ in 0..12 {
+        repeats.extend_from_slice(b"KLSEELLKKAEE");
+    }
+    repeats.extend(protein(60));
+    for _ in 0..10 {
+        repeats.extend_from_slice(b"GSGSPGTPGS");
+    }
+    queries.push(repeats);
+    let mut subjects: Vec<Vec<u8>> = queries
+        .iter()
+        .map(|q| {
+            q.iter()
+                .enumerate()
+                .map(|(i, &a)| if i % 6 == 5 { AMINO[(i * 7) % 20] } else { a })
                 .collect()
-        };
-        let mut queries: Vec<Vec<u8>> = (0..12).map(|i| protein(120 + 37 * i)).collect();
-        let mut repeats = Vec::new();
-        for _ in 0..12 {
-            repeats.extend_from_slice(b"KLSEELLKKAEE");
+        })
+        .collect();
+    subjects.extend((0..8).map(|i| protein(90 + 61 * i)));
+    let write = |name: &str, seqs: &[Vec<u8>], tag: &str| {
+        let mut text = String::new();
+        for (i, seq) in seqs.iter().enumerate() {
+            text.push_str(&format!(">{tag}{i}\n{}\n", String::from_utf8_lossy(seq)));
         }
-        repeats.extend(protein(60));
-        for _ in 0..10 {
-            repeats.extend_from_slice(b"GSGSPGTPGS");
-        }
-        queries.push(repeats);
-        let mut subjects: Vec<Vec<u8>> = queries
-            .iter()
-            .map(|q| {
-                q.iter()
-                    .enumerate()
-                    .map(|(i, &a)| if i % 6 == 5 { AMINO[(i * 7) % 20] } else { a })
-                    .collect()
-            })
-            .collect();
-        subjects.extend((0..8).map(|i| protein(90 + 61 * i)));
-        let write = |name: &str, seqs: &[Vec<u8>], tag: &str| {
-            let mut text = String::new();
-            for (i, seq) in seqs.iter().enumerate() {
-                text.push_str(&format!(">{tag}{i}\n{}\n", String::from_utf8_lossy(seq)));
-            }
-            let path = dir.join(name);
-            std::fs::write(&path, text).expect("write FASTA");
-            path
-        };
-        (
-            write("query.faa", &queries, "q"),
-            write("subject.faa", &subjects, "s"),
-        )
-    })
-    .clone()
+        let path = dir.join(name);
+        std::fs::write(&path, text).expect("write FASTA");
+        path
+    };
+    (
+        write("query.faa", &queries, "q"),
+        write("subject.faa", &subjects, "s"),
+    )
 }
 
 /// The reference loop: every switch of the strict set off.
@@ -209,7 +205,7 @@ const REFERENCE: &[(&str, &str)] = &[("LOSAT_X_DEFAULT", "0")];
 
 #[test]
 fn batched_cells_give_the_reports_of_the_per_hit_loop() {
-    let (query, subject) = generated_pair();
+    let (query, subject) = generated_pair("per_hit_loop");
     let pairs = [
         (query, subject),
         (fixture("MeenMJNV.faa"), fixture("MejoMJNV.faa")),
@@ -267,7 +263,7 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
 
 #[test]
 fn the_shadow_compares_the_batched_loop_with_the_reference() {
-    let (query, subject) = generated_pair();
+    let (query, subject) = generated_pair("shadow");
     let (reference, _, _) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
     for simd in ["1", "0"] {
         let (rows, counts, stderr) = blastp(

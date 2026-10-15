@@ -236,3 +236,77 @@ impl ReportedSubjects {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::algorithm::blastx::subjects::Subjects;
+
+    fn fixture(name: &str) -> String {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/seqdb/db")
+            .join(name)
+            .to_str()
+            .expect("fixture path is UTF-8")
+            .to_string()
+    }
+
+    fn open(name: &str) -> BlastxDatabase {
+        BlastxDatabase::open(&fixture(name), &ApplicationSettings::default())
+            .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+    }
+
+    #[test]
+    fn the_stores_hold_the_bytes_the_reader_reads_in_ordinal_order() {
+        // LOSAT/tests/seqdb/expected/prot_mv.info.tsv: 10 sequences, 801 residues, in six
+        // volumes (the stores span them in ordinal order).
+        let database = open("prot_mv");
+        let stores = database.read_stores().unwrap();
+        assert_eq!((stores.len(), stores.total_length()), (10, 801));
+        let subjects = Subjects::Database(&stores);
+        let mut letters = 0;
+        for ordinal in 0..stores.len() {
+            let block = database.db.read_sequence(ordinal as u32).unwrap();
+            let stored = block.protein(0);
+            assert_eq!(&*subjects.encoded(ordinal), stored, "{ordinal}");
+            let with_sentinel = subjects.encoded_with_sentinel(ordinal);
+            assert_eq!(&with_sentinel[..stored.len()], stored, "{ordinal}");
+            assert_eq!(with_sentinel.last(), Some(&0), "{ordinal}");
+            assert_eq!(subjects.length(ordinal), stored.len());
+            letters += stored.len();
+        }
+        assert_eq!(letters, 801);
+        assert_eq!(
+            (subjects.total_length().unwrap(), subjects.shortest_length()),
+            (801, 10)
+        );
+    }
+
+    #[test]
+    fn a_record_of_the_stored_letters_encodes_to_the_stored_bytes() {
+        // Every residue byte 1..=27 (O = 26 included) reads back as itself through its
+        // letter: the records of the reported sequences and `-subject` records alike.
+        let bytes: Vec<u8> = (1..28).collect();
+        let record = FastaRecord {
+            internal_id: "gnl|BL_ORD_ID|0".into(),
+            title: String::new(),
+            sequence: bytes
+                .iter()
+                .map(|&residue| NCBISTDAA_TO_AMINOACID[usize::from(residue)])
+                .collect(),
+            lowercase_masks: Vec::new(),
+            warnings: Vec::new(),
+        };
+        let records = [record];
+        assert_eq!(&*Subjects::Fasta(&records).encoded(0), &bytes[..]);
+    }
+
+    #[test]
+    fn an_empty_database_fails_as_ncbis_preliminary_search() {
+        let error = open("empty").read_stores().unwrap_err();
+        let error = error
+            .downcast::<PreliminaryReadError>()
+            .expect("NCBI's error of the preliminary search");
+        assert_eq!(error.0, "Database memory map file error");
+    }
+}

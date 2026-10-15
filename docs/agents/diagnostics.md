@@ -78,10 +78,10 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 52 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 53 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
-`LOSAT_X_LINKSORT`, `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` joined), and their variables mean
-(`LOSAT/src/utils/xswitch.rs`):
+`LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` joined),
+and their variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -97,8 +97,9 @@ strict set are on by default (43 then, 52 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `TBNQSIDE` and `TBNBATCH` only with `TBNPAR` (`TBNEVENTS` only without it); `TBNBATCH` needs
   `TBNSSIDE`; `BXBATCH` needs `BXPOOL`; `AHEAD` needs `GREEDYSPEC` for megablast; `MBBATCH` runs
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
-  in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search; `TBNSTATE` and
-  `TBNXLATE` act only with `TBNPAR`.
+  in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
+  `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
+  act only with `TBNPAR`.
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
   Only `0` means off; `00`, `false` or `off` are "any other value".
 - The variables are read once per process (once per Wasm instance), except `GREEDYSPEC`,
@@ -112,7 +113,7 @@ strict set are on by default (43 then, 52 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 52 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 53 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -140,6 +141,7 @@ export LOSAT_X_TBNOIDCHUNK=1
 export LOSAT_X_SEEDRELEASE=1
 export LOSAT_X_GREEDYFUSE=1
 export LOSAT_X_LINKSORT=1
+export LOSAT_X_NEWTONLANES8=1
 export LOSAT_X_TBNSTATE=1 LOSAT_X_TBNXLATE=1
 ```
 
@@ -197,6 +199,14 @@ on the search pool. It changes only how an index order is computed, not the orde
 where `LOSAT_X_HSPINPLACE` does (the reference bodies have their own sorts). The shadow
 `LOSAT_X_LINKSORTSHADOW` stays opt-in.
 
+`LOSAT_X_NEWTONLANES8` was added after the default changed, as a switch that was off unless set,
+and joined the set on 2026-10-15. On aarch64 the Newton lanes of `LOSAT_X_NEWTONLANES` (blastp and
+tblastn) solve eight problems per round instead of four. It changes only which independent
+problems share a vector, not the operations of a problem, and acts only where
+`LOSAT_X_NEWTONLANES` runs. On x86-64 and Wasm it does nothing: the lanes stay four wide there.
+`LOSAT_X_DEFAULT=0` runs no lanes (the reference Newton port), so on the arm64 runners
+platform-checks compares eight lanes with no lanes.
+
 `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` were added after the default changed, as switches that
 were off unless set, and joined the set together on 2026-10-15. They cut the work tblastn does per
 subject on the unit path (`LOSAT_X_TBNPAR`): a thread keeps the scan state of the units from one
@@ -216,7 +226,8 @@ What runs per target:
   without AVX2.
 - aarch64 and any other target: no vector X-drop DP is compiled, so `DPFAST`, `DPAVX2` and
   `DPW128` do nothing (the scalar port runs); `MBBATCH` instead of `MBDELAY`; `DEKKER` does
-  nothing (it is compiled for wasm32 only); everything else as on wasm32.
+  nothing (it is compiled for wasm32 only); everything else as on wasm32, except that on
+  aarch64 `NEWTONLANES8` gives the Newton lanes eight problems per round.
 - One thread (`-num_threads 1`, a build without the `parallel` feature, wasm32 without
   `wasm-threads`): the scheduling switches (`AHEAD`, `GREEDYSPEC`, `PAIRPAR` for
   blastn/megablast, `SEGSHARE`, `TBNBATCH`, `TBNOIDCHUNK`, `TBNOIDNEXT`, `TBNOIDUNITS`, `BXPAR`,
@@ -297,17 +308,17 @@ Same values, faster computation:
   tblastn range with a fresh `get_range`). With `LOSAT_X_STATS=1` it prints
   `[X_STATS] NEWTONLANES prefetched= hits= misses= unused= ...` (no `xstats` feature needed).
   Strict-set candidate (S-F, round 5).
-- `LOSAT_X_NEWTONLANES8=1` (aarch64 only; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it) the Newton lanes of `LOSAT_X_NEWTONLANES` solve eight problems
-  per round instead of four (`F8`, four 128-bit NEON operations per value) in batches of five or more
-  problems; once the queue is empty and at most four lanes hold a problem, those problems move to
-  four lanes (bit copies of the values kept between rounds) and finish there. Each problem keeps its
-  operation sequence, so the results are the same bits (`x_newton_lanes.rs`, module header). It
-  only widens the lanes: with `LOSAT_X_NEWTONLANES` off it does nothing. On other targets it is
-  ignored: on x86-64 the two 256-bit operations per value gained nothing (0 to 3 % slower on
-  blastp / tblastn), and Wasm is not measured. Measured 2026-10-15 on the GitHub runners, bench5's
-  blastp_wssv / tblastn_small at one thread, wall relative to four lanes: Linux arm64 (Neoverse-N2)
-  0.981 / 0.959, macOS arm64 0.974 / 0.893 (macOS rounds are noisy); on Neoverse-N2
+- `LOSAT_X_NEWTONLANES8=1` (aarch64 only; in the strict set since 2026-10-15) the Newton lanes of
+  `LOSAT_X_NEWTONLANES` solve eight problems per round instead of four (`F8`, four 128-bit NEON
+  operations per value) in batches of five or more problems; once the queue is empty and at most
+  four lanes hold a problem, those problems move to four lanes (bit copies of the values kept
+  between rounds) and finish there. Each problem keeps its operation sequence, so the results are
+  the same bits (`x_newton_lanes.rs`, module header). It only widens the lanes: with
+  `LOSAT_X_NEWTONLANES` off it does nothing, and `LOSAT_X_NEWTONLANES8=0` runs four lanes. On other
+  targets it is ignored: on x86-64 the two 256-bit operations per value gained nothing (0 to 3 %
+  slower on blastp / tblastn), and Wasm is not measured. Measured 2026-10-15 on the GitHub runners,
+  bench5's blastp_wssv / tblastn_small at one thread, wall relative to four lanes: Linux arm64
+  (Neoverse-N2) 0.981 / 0.959, macOS arm64 0.974 / 0.893 (macOS rounds are noisy); on Neoverse-N2
   `LOSAT_X_NEWTONLANES=0` gave 0.967 / 0.941. Shadow: `LOSAT_X_NEWTONLANESSHADOW=1` compares the
   eight-lane results too. With `LOSAT_X_STATS=1` it adds
   `[X_STATS] NEWTONLANES8 batches8= rounds8= tail_rounds=` (rounds on eight lanes and after the move).
@@ -574,8 +585,12 @@ Rebuilding less:
   reference path's other refusals that come before its rows (a `-window_size` whose diagonal table with all
   queries passes 2^30, a query split that LOSAT rejects, or with the compressed table a query batch whose
   offsets add more than four times NCBI's overflow cells, about 859 million words, counted before the search);
-  otherwise the search of all queries. The output file is created when the first block's rows are written; a
-  run that fails in a later block leaves the rows of the blocks before.
+  otherwise the search of all queries. With `-db` the same, and the blocks run only when every definition line
+  of the database reads and none of LOSAT's refusals of a reported title applies (`x_titles_allow_blocks`, one
+  pass over the header files in the search pool before the first block); a query whose effective search space
+  could pass NCBI's `Int8` (with `-db` or `-dbsize`) or an empty database also takes the search of all queries.
+  The output file is created when the first block's rows are written; a run that fails in a later block leaves
+  the rows of the blocks before.
   With `LOSAT_TIMING=1` each block prints its own `[TIMING]` lines.
   The block search's set-up uses its thread pool (no value changes): the count of the query batches' words
   for the overflow banks runs on the pool before the first block (groups of consecutive batches, one counter
@@ -599,7 +614,8 @@ Rebuilding less:
   made generic over the element (`blastp/x_prelim_compact.rs`, exactness argument in its header); the redo
   reads lists rebuilt as the off path holds them: the one-thread redo rebuilds each query's list when it
   reaches it and drops it after its redo, a search with more than one thread rebuilds all lists before the
-  redo, query chunks hand on rebuilt lists. `LOSAT_X_BPPCOMPACT=shadow` builds both lists, compares every
+  redo, query chunks hand on rebuilt lists; with `-db` the compact lists are listed and renamed to ranks with the
+  others (`ListedSubjects::read`). `LOSAT_X_BPPCOMPACT=shadow` builds both lists, compares every
   rebuilt list field by field with the off path's (it panics on a difference) and prints
   `[X_SHADOW] BPPCOMPACT compared=<lists> hsps=<n>` at exit. With `LOSAT_TIMING=1` each search of a query
   set prints `[TIMING] x_bppcompact: expanded_lists=<n>`.

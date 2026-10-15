@@ -134,6 +134,11 @@ use crate::utils::dust::MaskedInterval;
 #[path = "x_pair_seed.rs"]
 mod x_pair_seed;
 
+// EXPERIMENT (LOSAT_X_BNSTREAM): the subjects of a subject set searched by the pool threads in
+// OID order with a bounded window of results that the owner hands over in OID order.
+#[path = "x_bnstream.rs"]
+mod x_bnstream;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
 // ```c++
 //     if (args.Exist(kArgDb) && args[kArgDb]) {
@@ -3637,18 +3642,19 @@ fn collect_prelim_hit_lists(
 }
 
 /// EXPERIMENT (LOSAT_X_BNSTREAM, off unless set): with two or more threads, the subjects of a
-/// query batch are searched in blocks of `X_BNSTREAM_SUBJECTS_PER_THREAD` subjects per thread,
-/// and the results of a block go to the hit lists, in OID order, before the next block starts
-/// (`search_query_batch`), so that the HSPs of one block are held at a time instead of those of
-/// every subject. The hit lists are the same; only the threads wait for each other at the end of
-/// a block. Not in the strict set.
+/// query batch are claimed by the threads in OID order and their results go to the hit lists in
+/// OID order while the threads search the next subjects (`x_bnstream::search_in_order`); a
+/// thread claims a subject only while it is fewer than `X_BNSTREAM_SUBJECTS_PER_THREAD`
+/// subjects per thread past the last one handed over, so that the HSPs of that window are held
+/// at a time instead of those of every subject. The hit lists are the same. Not in the strict
+/// set.
 // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
 fn x_bnstream() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_BNSTREAM").is_some())
 }
 
-/// No NCBI counterpart: the subjects per thread of one block of `LOSAT_X_BNSTREAM`.
+/// No NCBI counterpart: the subjects per thread of the window of `LOSAT_X_BNSTREAM`.
 const X_BNSTREAM_SUBJECTS_PER_THREAD: usize = 64;
 
 /// The preliminary hit lists of a batch filled one subject at a time, in OID order
@@ -14718,110 +14724,85 @@ fn search_query_batch(
     // `Blast_HitListUpdate` does, one HSP list at a time. One thread hands each subject over as
     // soon as it is searched, so only the HSPs the hit lists keep stay in memory. Two or more
     // threads search all subjects of the batch and then hand them over, or, with
-    // `LOSAT_X_BNSTREAM`, search them in blocks and hand each block over before the next.
-    let search_subjects =
-        |kept: Option<&[Vec<PrelimHit>]>,
-         sink: &mut dyn FnMut(usize, Option<Vec<BlastnHsp>>, Vec<PrelimHit>)| {
-            if use_parallel {
-                #[cfg(all(
-                    feature = "parallel",
-                    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-                ))]
-                {
-                    let num_subjects = subject_records_ref.len();
-                    let block = if x_bnstream() {
-                        (parallel_pool.threads() * X_BNSTREAM_SUBJECTS_PER_THREAD).max(1)
-                    } else {
-                        num_subjects
-                    };
-                    let mut start = 0;
-                    while start < num_subjects {
-                        let end = (start + block).min(num_subjects);
-                        let results: Vec<(Option<Vec<BlastnHsp>>, Vec<PrelimHit>)> = parallel_pool
-                            .install(|| {
-                                subject_records_ref[start..end]
-                                    .par_iter()
-                                    .enumerate()
-                                    .map(|(index, s_record)| (start + index, s_record))
-                                    .map_init(
-                                        || {
-                                            (
-                                                GapAlignScratch::new(),
-                                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                                                // ```c
-                                                // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                                                // ...
-                                                // aux_struct->offset_pairs =
-                                                //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                                                // ```
-                                                SubjectScratch::new(
-                                                    queries_ref.len(),
-                                                    offset_array_size,
-                                                    window_size,
-                                                ),
-                                            )
-                                        },
-                                        |state, (s_idx, s_record)| {
-                                            let (gap_scratch, subject_scratch) = state;
-                                            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-                                            let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                                            process_subject(
-                                                s_idx,
-                                                BlastnSubjectRef::record(
-                                                    s_record,
-                                                    &subject_packed_ref[s_idx],
-                                                ),
-                                                gap_scratch,
-                                                subject_scratch,
-                                                kept.map(|kept| &kept[s_idx]),
-                                                &mut subject_hits,
-                                                &mut prelim_hits,
-                                            );
-                                            (subject_hits, prelim_hits)
-                                        },
-                                    )
-                                    .collect()
-                            });
-                        for (index, (hits, prelim)) in results.into_iter().enumerate() {
-                            sink(start + index, hits, prelim);
-                        }
-                        start = end;
+    // `LOSAT_X_BNSTREAM`, hand each subject over in OID order while they search the next ones.
+    let search_subjects = |kept: Option<&[Vec<PrelimHit>]>,
+                           sink: &mut (dyn FnMut(usize, Option<Vec<BlastnHsp>>, Vec<PrelimHit>)
+                                     + Send)| {
+        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
+        // ```c
+        // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
+        // ...
+        // aux_struct->offset_pairs =
+        //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
+        // ```
+        let new_state = || {
+            (
+                GapAlignScratch::new(),
+                SubjectScratch::new(queries_ref.len(), offset_array_size, window_size),
+            )
+        };
+        let search_one = |state: &mut (GapAlignScratch, SubjectScratch), s_idx: usize| {
+            let (gap_scratch, subject_scratch) = state;
+            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+            let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+            process_subject(
+                s_idx,
+                BlastnSubjectRef::record(&subject_records_ref[s_idx], &subject_packed_ref[s_idx]),
+                gap_scratch,
+                subject_scratch,
+                kept.map(|kept| &kept[s_idx]),
+                &mut subject_hits,
+                &mut prelim_hits,
+            );
+            (subject_hits, prelim_hits)
+        };
+        let num_subjects = subject_records_ref.len();
+        if use_parallel {
+            #[cfg(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))]
+            {
+                if x_bnstream() {
+                    let threads = parallel_pool.threads().max(1);
+                    let window = threads * X_BNSTREAM_SUBJECTS_PER_THREAD;
+                    parallel_pool.install(|| {
+                        x_bnstream::search_in_order(
+                            num_subjects,
+                            window,
+                            &new_state,
+                            &search_one,
+                            &mut |s_idx, (hits, prelim)| sink(s_idx, hits, prelim),
+                        )
+                    });
+                } else {
+                    let results: Vec<(Option<Vec<BlastnHsp>>, Vec<PrelimHit>)> = parallel_pool
+                        .install(|| {
+                            (0..num_subjects)
+                                .into_par_iter()
+                                .map_init(new_state, search_one)
+                                .collect()
+                        });
+                    for (s_idx, (hits, prelim)) in results.into_iter().enumerate() {
+                        sink(s_idx, hits, prelim);
                     }
                 }
-                #[cfg(any(
-                    not(feature = "parallel"),
-                    all(target_arch = "wasm32", not(feature = "wasm-threads"))
-                ))]
-                {
-                    unreachable!("use_parallel is false when parallel threads are disabled");
-                }
-            } else {
-                let mut gap_scratch = GapAlignScratch::new();
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
-                // ```c
-                // Int4 offset_array_size = GetOffsetArraySize(lookup_wrap);
-                // ...
-                // aux_struct->offset_pairs =
-                //   (BlastOffsetPair*) malloc(offset_array_size * sizeof(BlastOffsetPair));
-                // ```
-                let mut subject_scratch =
-                    SubjectScratch::new(queries_ref.len(), offset_array_size, window_size);
-                for (s_idx, s_record) in subject_records_ref.iter().enumerate() {
-                    let mut subject_hits: Option<Vec<BlastnHsp>> = None;
-                    let mut prelim_hits: Vec<PrelimHit> = Vec::new();
-                    process_subject(
-                        s_idx,
-                        BlastnSubjectRef::record(s_record, &subject_packed_ref[s_idx]),
-                        &mut gap_scratch,
-                        &mut subject_scratch,
-                        kept.map(|kept| &kept[s_idx]),
-                        &mut subject_hits,
-                        &mut prelim_hits,
-                    );
-                    sink(s_idx, subject_hits, prelim_hits);
-                }
             }
-        };
+            #[cfg(any(
+                not(feature = "parallel"),
+                all(target_arch = "wasm32", not(feature = "wasm-threads"))
+            ))]
+            {
+                unreachable!("use_parallel is false when parallel threads are disabled");
+            }
+        } else {
+            let mut state = new_state();
+            for s_idx in 0..num_subjects {
+                let (hits, prelim) = search_one(&mut state, s_idx);
+                sink(s_idx, hits, prelim);
+            }
+        }
+    };
 
     // NCBI's preliminary stage keeps, for each query, the preliminary HSPs of at most
     // `prelim_hitlist_size` subjects (a split batch merges those of its query chunks), and

@@ -711,16 +711,18 @@ Rebuilding less:
   `[X_SHADOW] BPPCOMPACT compared=<lists> hsps=<n>` at exit. With `LOSAT_TIMING=1` each search of a query
   set prints `[TIMING] x_bppcompact: expanded_lists=<n>`.
 - `LOSAT_X_BNSTREAM=1` (BLASTN, all tasks, `-subject` with two or more threads, memory; not in the strict
-  set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the subjects of a query batch
-  are searched in blocks of 64 subjects per thread (`threads x 64` subjects), and the results of a block go to
-  the hit lists in OID order before the next block starts (`search_query_batch` in
-  `blastn/blast_engine/run.rs`), in both passes: the preliminary HSPs to the preliminary hit lists
+  set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it) the threads claim the subjects
+  of a query batch one at a time in OID order and one of them (the owner) hands the results to the hit lists in
+  OID order while the others go on with the next subjects; a thread claims a subject only while it is fewer
+  than `threads x 64` subjects past the last one handed over, so at most that many subjects' results wait
+  (`x_bnstream::search_in_order`, called from `search_query_batch` in `blastn/blast_engine/run.rs`; each
+  thread runs its loop as one `rayon::broadcast` job, so that a thread waiting inside a nested parallel stage
+  of a search never starts a second loop), in both passes: the preliminary HSPs to the preliminary hit lists
   (`PrelimHitCollector`, which keeps those of at most `prelim_hitlist_size` subjects per query) and the
   traceback's HSPs to the final hit lists (`update_hitlists_with_subject_hits`). Without it two or more threads
   search every subject of the batch and then hand all results over, so the HSPs of every subject are held at
   once. The hit lists take the subjects one at a time in OID order either way, as NCBI's
-  `Blast_HitListUpdate` takes one HSP list at a time, so the report is the same; the threads wait for each
-  other at the end of each block. One thread always hands each subject over as soon as it is searched (no
+  `Blast_HitListUpdate` takes one HSP list at a time, so the report is the same. One thread always hands each subject over as soon as it is searched (no
   switch). No value changes, so there is no shadow; `LOSAT/tests/blastn_subject_stream.rs` compares the
   reports of one thread and of two and four threads with and without the switch.
   Measured 2026-10-14 on the WSL machine (megablast, 100 16S queries against 28,036 16S subjects, 8 threads,
@@ -728,8 +730,10 @@ Rebuilding less:
   series, 207.6 MiB without the switch and 145.3 MiB with it (NCBI BLAST+ 2.17.0 `-db` 115.6 MiB); time on this
   branch, 8 alternating pairs (load 5-19), a median of 8.09 s without and 8.91 s with it (pair ratio median 1.13,
   1.04-1.25), and 0.39 / 0.47 s with one query. Blocks of 256 or 1,024 subjects per thread were not faster within
-  the noise (6 rounds each: ratios 1.23 and 1.14 against 1.19 for 64), and 1,024 kept 160 MiB, so where the time
-  goes is still open.
+  the noise (6 rounds each: ratios 1.23 and 1.14 against 1.19 for 64), and 1,024 kept 160 MiB. That form
+  searched blocks of `threads x 64` subjects and handed a block over before the next started; on the
+  workstation (2026-10-15, 8 pairs) it took 1.11 times the wall time, the threads idle at ~110 block ends of
+  ~10 ms each, which the window above removes.
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks

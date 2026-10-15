@@ -5696,7 +5696,7 @@ fn search(
                         hits: None,
                         observer: None,
                     };
-                    run_resolved_in_pool(
+                    let result = run_resolved_in_pool(
                         args.clone(),
                         block_queries,
                         subject_source,
@@ -5716,7 +5716,10 @@ fn search(
                             epilog: epilog && index + 1 == blocks.len(),
                             v1_titles: v1.is_some(),
                         },
-                    )?;
+                    );
+                    // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
+                    super::x_bp_redo_par_shadow_error(&result);
+                    result?;
                 }
                 sink.flush()?;
                 Ok(true)
@@ -5761,7 +5764,7 @@ fn search(
                 epilog,
                 v1_titles: v1.is_some(),
             };
-            run_resolved_in_pool(
+            let result = run_resolved_in_pool(
                 args,
                 &searched_queries[..searched_done],
                 subject_source,
@@ -5772,7 +5775,10 @@ fn search(
                 None,
                 &ranges,
                 &reports,
-            )
+            );
+            // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
+            super::x_bp_redo_par_shadow_error(&result);
+            result
         };
         crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
             let result = search_batches(
@@ -8719,7 +8725,113 @@ fn run_resolved_in_pool(
     ))]
     let use_parallel_kappa_match_redo = false;
 
-    if use_parallel_kappa_match_redo {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3447-3449
+    // ```c
+    //         while (BlastHSPStreamRead(hsp_stream, &localMatch)
+    //                 != kBlastHSPStream_Eof) {
+    // ...
+    //         int b;
+    // #pragma omp for schedule(static)
+    //         for (b = 0; b < numMatches; ++b) {
+    // ```
+    // EXPERIMENT (LOSAT_X_BPREDOPAR / LOSAT_X_BPREDOPARSHADOW, off unless set): NCBI splits one
+    // loop over the matches of all queries between its threads. With the switch, more than one
+    // thread and at least two matches, the matches run on the pool in jobs of up to four matches
+    // of one query, and the early termination test, the heap insertions and the error that ends
+    // the redo are replayed in the order of the one-thread loop below; it replaces both parallel
+    // paths (`x_redo_par.rs`). The shadow mode runs it into separate heaps first, then the
+    // one-thread loop for the output, and compares the hit lists (or the errors, at the callers of
+    // this function).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let x_redo_par_search = super::x_redo_par::XRedoParSearch {
+        pool: blastp_parallel_pool,
+        threads: blastp_num_threads,
+        contexts: &contexts,
+        query_nomask: query_nomask_sequence,
+        search_spaces: &search_spaces,
+        subjects,
+        query_batches: &kappa_query_batches,
+        matrix: args.scoring.matrix,
+        gapped_params: &gapped_params,
+        gapped_gumbel: &gapped_gumbel,
+        evalue: args.evalue,
+        build_redo_align_params: &build_redo_align_params,
+        timing: timing_enabled,
+    };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let x_redo_par_mode = super::x_redo_par::x_bp_redo_par();
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let x_redo_par_on = x_redo_par_mode != super::x_redo_par::XRedoPar::Off
+        && blastp_should_parallelize_stage(
+            "kappa-redo-par",
+            args.num_threads,
+            blastp_num_threads,
+            subjects.len(),
+            super::x_redo_par::x_matches(&preliminary_hit_lists),
+            total_db_len,
+        );
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let x_redo_par_shadow =
+        (x_redo_par_on && x_redo_par_mode == super::x_redo_par::XRedoPar::Shadow).then(|| {
+            super::x_redo_par::x_redo_par_shadow_run(
+                &x_redo_par_search,
+                &mut preliminary_hit_lists,
+                &redone_matches,
+                args.max_target_seqs,
+            )
+        });
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let x_redo_par_run = x_redo_par_on && x_redo_par_shadow.is_none();
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    let x_redo_par_run = false;
+    // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): the shadow's reference is the one-thread loop.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let (use_parallel_kappa_match_redo, use_parallel_kappa_redo) = if x_redo_par_shadow.is_some() {
+        (false, false)
+    } else {
+        (use_parallel_kappa_match_redo, use_parallel_kappa_redo)
+    };
+
+    if x_redo_par_run {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        {
+            // The parallel paths read the expanded lists of all queries (above).
+            debug_assert!(x_compact_hit_lists.iter().all(Option::is_none));
+            let released = super::x_redo_par::x_redo_par_run(
+                &x_redo_par_search,
+                &mut preliminary_hit_lists,
+                &mut redone_matches,
+                x_prelim_free || x_prelim_compact == XPrelimCompact::On,
+            )?;
+            if x_prelim_free {
+                x_prelim_freed += released;
+            }
+        }
+    } else if use_parallel_kappa_match_redo {
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -9369,6 +9481,14 @@ fn run_resolved_in_pool(
                 preliminary_hit_lists[q_idx] = None;
             }
         }
+    }
+    // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): the new path's hit lists against the one-thread loop's.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if let Some(shadow) = x_redo_par_shadow {
+        shadow.compare(&redone_matches);
     }
 
     if x_prelim_free && timing_enabled {

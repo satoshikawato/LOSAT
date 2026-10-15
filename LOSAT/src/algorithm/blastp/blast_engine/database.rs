@@ -17,7 +17,8 @@
 //!   (`ListedTitles::tabular_subject_ids`, `stitles`).
 //!
 //! The per-subject kernel, the composition redo and the report writers are those of the
-//! `-subject` path.
+//! `-subject` path. The opening of the database, the reader's errors and the rules for the
+//! stored titles are shared with BLASTN (`algorithm::common::database`).
 
 use std::sync::Arc;
 
@@ -28,18 +29,21 @@ use anyhow::{bail, Context, Result};
 ))]
 use rayon::prelude::*;
 
+use crate::algorithm::common::database as shared;
+pub(super) use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
+#[cfg(test)]
 use crate::cli::NativeError;
 use crate::report::pairwise::PairwiseDatabase;
-use crate::seqdb::{BlockRange, SearchPath, SeqDb, SeqDbError, SeqType, SequenceBlock};
+use crate::seqdb::{BlockRange, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{compute_length_adjustment_ncbi, KarlinParams};
 use crate::utils::matrix::{ncbistdaa, BLASTAA_SIZE};
 
 use super::{
     ncbistdaa_to_ascii, update_blastp_preliminary_hit_lists, BlastpHitList, BlastpSubjectRef,
-    BlastpSubjectResult, BlastpSubjectScratch, EncodedProtein,
+    BlastpSubjectResult, BlastpSubjectScratch, EncodedProtein, XPrelimHsp,
 };
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
@@ -85,164 +89,26 @@ pub(super) struct BlastpDatabase {
     name: String,
 }
 
-// NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
-// ```c++
-//     static const string GenerateSearchPath() {
-//         string splitter;
-//         string path;
-// #if defined(NCBI_OS_UNIX)
-//         splitter = ":";
-// #else
-//         splitter = ";";
-// #endif
-//         // Local directory first;
-//         path  = CDirEntry::NormalizePath(CDir::GetCwd(),eFollowLinks);
-//         path += splitter;
-//         // Then, BLASTDB;
-//         CNcbiEnvironment env;
-//         path += CDirEntry::NormalizePath(env.Get("BLASTDB"),eFollowLinks);
-//         path += splitter;
-//         // Finally, the config file.
-//         CNcbiApplicationAPI* app = CNcbiApplicationAPI::Instance();
-//         if (app) {
-//             const CNcbiRegistry& registry = app->GetConfig();
-//             if (registry.HasEntry("BLAST", "BLASTDB")) {
-//                 path += CDirEntry::NormalizePath(registry.Get("BLAST", "BLASTDB"),eFollowLinks);
-//                 path += splitter;
-//             }
-//         }
-//         return path;
-//     }
-// ```
-/// Opens the protein database `name` (the `-db` value as NCBI keeps it,
-/// `seqdb::db_argument_name`) for a BLASTP search: the one function through which BLASTP
-/// opens a database. The name is looked for as NCBI looks for it: in the current
-/// directory, then in the directories of the `BLASTDB` variable, then in those of the
-/// registry entry `[BLAST] BLASTDB` (`settings.blastdb`, read from
-/// `NCBI_CONFIG__BLAST__BLASTDB`, `blastp.ini` and `.ncbirc`).
-pub(super) fn open_search_database(
-    name: &str,
-    settings: &ApplicationSettings,
-) -> Result<SeqDb, DatabaseOpenError> {
-    let registry = match &settings.blastdb {
-        Ok(value) => value.as_deref(),
-        Err(reason) => return Err(DatabaseOpenError::Registry(reason.clone())),
-    };
-    let path = SearchPath::from_environment(registry).map_err(DatabaseOpenError::Reader)?;
-    SeqDb::open_in(name, SeqType::Protein, &path).map_err(DatabaseOpenError::Reader)
+/// The program that LOSAT's refusals name.
+const PROGRAM: &str = "BLASTP";
+
+/// A reader error outside the preliminary search as the command line reports it
+/// (`algorithm::common::database::database_error`).
+fn database_error(error: SeqDbError) -> anyhow::Error {
+    shared::database_error(error, PROGRAM)
 }
 
-/// Why `open_search_database` could not open a database.
-#[derive(Debug)]
-pub(super) enum DatabaseOpenError {
-    /// The registry entry `[BLAST] BLASTDB` has a value that LOSAT does not read as NCBI
-    /// does (`ApplicationSettings::blastdb`).
-    Registry(String),
-    /// An error of the reader (NCBI's own, or LOSAT's refusal: `database_error`).
-    Reader(SeqDbError),
-}
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:185-203
-// ```c++
-//     catch (const CSeqDBException& e) {                                      \
-// 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {         \
-// 			string err_msg =                                                \
-//                 "Too many open files, please raise the open file limit";    \
-//         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
-//             exit_code = BLAST_DATABASE_ERROR;                               \
-// 		}                                                                   \
-// 		else if (e.GetErrCode() == CSeqDBException::eMemoryMappingFailure){ \
-// 			string err_msg = "Database memory map file error";              \
-//             if (!e.GetMsg().empty())                                        \
-//                 err_msg += " - " + e.GetMsg();                              \
-//         	LOG_POST(Error << "BLAST Database error: " << err_msg);         \
-//             exit_code = BLAST_DATABASE_ERROR;                               \
-// 		}                                                                   \
-//         else {                                                              \
-//         	LOG_POST(Error << "BLAST Database error: " << e.GetMsg());      \
-//         	exit_code = BLAST_DATABASE_ERROR;                               \
-//         }                                                                   \
-//     }                                                                       \
-// ```
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:153
-// ```c++
-// #define BLAST_DATABASE_ERROR                    2
-// ```
-/// A reader error outside the preliminary search (when the database is opened, and when
-/// the sequences and titles of the hit lists are read) as the command line reports it:
-/// NCBI's own errors (`SeqDbError::ncbi_message`: a database that is not found, a file
-/// that is no database file or cannot be opened) as `BLAST Database error: <text>` with
-/// exit status 2; everything else is LOSAT's refusal, in LOSAT's wording.
-pub(super) fn database_error(error: SeqDbError) -> anyhow::Error {
-    match error.ncbi_message() {
-        Some(text) => NativeError {
-            exit: 2,
-            message: format!("BLAST Database error: {text}\n"),
-        }
-        .into(),
-        None => refusal(&error.to_string()),
-    }
-}
-
-/// LOSAT's refusal of a database that it does not search as NCBI does.
-fn refusal(reason: &str) -> anyhow::Error {
-    anyhow::anyhow!("{reason}; this database is not supported by LOSAT's BLASTP")
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:240-251
-// ```c++
-// 	catch (CSeqDBException & e) {
-// 		if (e.GetErrCode() == CSeqDBException::eTooManyOpenFiles) {
-//             _TRACE(e.GetMsg());
-// 			string err_msg = BlastErrorCode2String(BLASTERR_DB_TOO_MANY_OPEN_FILES);
-// 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
-// 		}
-// 		else {
-//             _TRACE(e.GetMsg());
-// 			string err_msg = BlastErrorCode2String(BLASTERR_DB_MEMORY_MAP);
-// 			NCBI_THROW(CBlastException, eCoreBlastError, err_msg);
-// 		}
-// 	}
-// ```
-// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:225-227
-// ```c++
-//         } else {                                                            \
-//             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
-//             exit_code = BLAST_ENGINE_ERROR;                                 \
-// ```
-/// A reader error while the preliminary search reads the sequences: NCBI's search stage
-/// replaces the reader's text (`SeqDbError::ncbi_search_message`), and the application
-/// reports `BLAST engine error: <text>` with exit status 3. The error is kept apart from
-/// the others (`PreliminaryReadError`), because NCBI has written the outfmt 0 prolog and
-/// read the first query batch before it (`blast_engine::run_resolved_in_pool`).
+/// A reader error while the preliminary search reads the sequences
+/// (`algorithm::common::database::search_read_error`).
 fn search_read_error(error: SeqDbError) -> anyhow::Error {
-    match error.ncbi_search_message() {
-        Some(text) => PreliminaryReadError(text).into(),
-        None => refusal(&error.to_string()),
-    }
+    shared::search_read_error(error, PROGRAM)
 }
-
-/// NCBI's error of a database file that cannot be read during the preliminary search
-/// (`search_read_error`), with the text after `BLAST engine error: `.
-#[derive(Debug)]
-pub(super) struct PreliminaryReadError(pub(super) &'static str);
-
-impl std::fmt::Display for PreliminaryReadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "BLAST engine error: {}", self.0)
-    }
-}
-
-impl std::error::Error for PreliminaryReadError {}
 
 impl BlastpDatabase {
-    /// Opens the database of `-db name` (`open_search_database`) with the command line's
-    /// errors (`database_error`).
+    /// Opens the database of `-db name` (`algorithm::common::database::open_database`)
+    /// with the command line's errors.
     pub(super) fn open(name: &str, settings: &ApplicationSettings) -> Result<Self> {
-        let db = open_search_database(name, settings).map_err(|error| match error {
-            DatabaseOpenError::Registry(reason) => refusal(&reason),
-            DatabaseOpenError::Reader(error) => database_error(error),
-        })?;
+        let db = shared::open_database(name, SeqType::Protein, settings, PROGRAM)?;
         Ok(Self {
             db,
             name: name.to_string(),
@@ -277,30 +143,11 @@ impl BlastpDatabase {
             })
     }
 
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:385-391
-    // ```c++
-    //     info.name = seqdb->GetDBNameList();
-    //     info.definition = seqdb->GetTitle();
-    //     if (info.definition.empty())
-    //         info.definition = info.name;
-    //     info.date = seqdb->GetDate();
-    //     info.total_length = seqdb->GetTotalLength();
-    //     info.number_seqs = seqdb->GetNumSeqs();
-    // ```
-    /// What the `Database:` lines of the pairwise report show: the title (the name as
-    /// given for an empty title), the date and the real totals, also with `-dbsize`.
+    /// What the `Database:` lines of the pairwise report show
+    /// (`algorithm::common::database::pairwise_database`): the title (the name as given
+    /// for an empty title), the date and the real totals, also with `-dbsize`.
     pub(super) fn pairwise_database(&self) -> PairwiseDatabase {
-        let title = self.db.title();
-        PairwiseDatabase {
-            definition: if title.is_empty() {
-                self.name.as_bytes().to_vec()
-            } else {
-                title.to_vec()
-            },
-            date: self.db.date().to_string(),
-            num_sequences: u64::from(self.db.num_seqs()),
-            total_letters: self.db.total_length(),
-        }
+        shared::pairwise_database(&self.db, &self.name)
     }
 }
 
@@ -586,9 +433,9 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 /// `ListedSubjects` holds the sequences of the listed subjects). A block that cannot be
 /// read or searched does not stop the other blocks of its round; the round's first
 /// error in ordinal order is returned, the error of the one-thread order (the blocks
-/// are cut alike). The subject scan of a database keeps no compact list (EXPERIMENT
-/// LOSAT_X_BPPCOMPACT is skipped with `-db`, `run_resolved_in_pool`), so the hit-list
-/// updates are given none.
+/// are cut alike). EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact lists
+/// (`x_compact_hit_lists`) are updated with the hit lists, in the same order.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn search_blocks<S, K>(
     database: &BlastpDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
@@ -596,6 +443,7 @@ pub(super) fn search_blocks<S, K>(
     new_scratch: &S,
     process_subject: &K,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     prelim_hitlist_size: usize,
 ) -> Result<()>
 where
@@ -621,6 +469,7 @@ where
         new_scratch,
         process_subject,
         preliminary_hit_lists,
+        x_compact_hit_lists,
         prelim_hitlist_size,
     )
 }
@@ -637,6 +486,7 @@ fn search_blocks_of<S, K>(
     new_scratch: &S,
     process_subject: &K,
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
+    x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     prelim_hitlist_size: usize,
 ) -> Result<()>
 where
@@ -695,7 +545,11 @@ where
                                     block_subject(&block, i),
                                     &mut subject_result,
                                 );
-                                if !subject_result.query_hsp_lists.is_empty() {
+                                // (EXPERIMENT LOSAT_X_BPPCOMPACT: the HSP lists may all
+                                // be compact ones.)
+                                if !subject_result.query_hsp_lists.is_empty()
+                                    || !subject_result.x_compact_hsp_lists.is_empty()
+                                {
                                     with_hits.push(std::mem::replace(
                                         &mut subject_result,
                                         BlastpSubjectResult::new(0),
@@ -713,7 +567,7 @@ where
                 for mut subject_result in block_results? {
                     update_blastp_preliminary_hit_lists(
                         preliminary_hit_lists,
-                        &mut [],
+                        x_compact_hit_lists,
                         &mut subject_result,
                         prelim_hitlist_size,
                     );
@@ -742,7 +596,7 @@ where
             );
             update_blastp_preliminary_hit_lists(
                 preliminary_hit_lists,
-                &mut [],
+                x_compact_hit_lists,
                 &mut subject_result,
                 prelim_hitlist_size,
             );
@@ -811,18 +665,24 @@ impl ListedSubjects {
     // 307. So the redo reads the stored bytes; its matrices score O as X
     // (`adjust_scores.rs`, composition_adjustment.c:681-703). The preliminary stage uses
     // scores only, which are the same for O and X (`prepare_search_block`).
-    /// Reads the sequences of the ordinal ids in `hit_lists` and renames the subjects of
-    /// the hit lists to their ranks.
+    /// Reads the sequences of the ordinal ids in `hit_lists` and `x_compact_hit_lists`
+    /// (EXPERIMENT LOSAT_X_BPPCOMPACT: the lists not expanded yet, `x_prelim_compact.rs`) and
+    /// renames the subjects of both to their ranks.
     pub(super) fn read(
         database: &BlastpDatabase,
         hit_lists: &mut [Option<BlastpHitList>],
+        x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     ) -> Result<Self> {
         let db = &database.db;
-        let mut ordinals: Vec<u32> = hit_lists
-            .iter()
-            .flatten()
-            .flat_map(|hit_list| hit_list.hsplist_array.iter().map(|hsp_list| hsp_list.oid))
-            .collect();
+        let mut ordinals: Vec<u32> =
+            hit_lists
+                .iter()
+                .flatten()
+                .flat_map(|hit_list| hit_list.hsplist_array.iter().map(|hsp_list| hsp_list.oid))
+                .chain(x_compact_hit_lists.iter().flatten().flat_map(|hit_list| {
+                    hit_list.hsplist_array.iter().map(|hsp_list| hsp_list.oid)
+                }))
+                .collect();
         ordinals.sort_unstable();
         ordinals.dedup();
         let mut encoded = Vec::with_capacity(ordinals.len());
@@ -850,6 +710,14 @@ impl ListedSubjects {
                 hsp_list.oid = rank(hsp_list.oid);
                 for hsp in &mut hsp_list.hsps {
                     hsp.s_idx = rank(hsp.s_idx);
+                }
+            }
+        }
+        for hit_list in x_compact_hit_lists.iter_mut().flatten() {
+            for hsp_list in &mut hit_list.hsplist_array {
+                hsp_list.oid = rank(hsp_list.oid);
+                for hsp in &mut hsp_list.hsps {
+                    hsp.hsp.s_idx = rank(hsp.hsp.s_idx);
                 }
             }
         }
@@ -933,27 +801,8 @@ impl ListedSubjects {
                     continue;
                 }
                 let ordinal = self.ordinals[rank];
-                let mut deflines = database.db.deflines(ordinal).map_err(|error| {
-                    if error.ncbi_message().is_some() {
-                        anyhow::Error::new(HeaderReadError {
-                            query,
-                            error: database_error(error),
-                        })
-                    } else {
-                        database_error(error)
-                    }
-                })?;
-                // makeblastdb without -parse_seqids writes one definition line per
-                // sequence; NCBI shows the others of a sequence as ` >id title` after the
-                // first.
-                if deflines.len() != 1 {
-                    bail!(
-                        "database sequence {ordinal} has {} definition lines; a sequence with more or fewer than one is not supported by LOSAT's BLASTP",
-                        deflines.len()
-                    );
-                }
-                let defline = deflines.remove(0);
-                titles[rank] = Some((defline.title, defline.replaced_title_bytes > 0));
+                let stored = shared::read_title(&database.db, ordinal, query, PROGRAM)?;
+                titles[rank] = Some((stored.title, stored.replaced_bytes));
             }
         }
         let mut records = Vec::with_capacity(self.ordinals.len());
@@ -981,24 +830,6 @@ impl ListedSubjects {
     }
 }
 
-/// A reader error of NCBI's own while the definition lines of the final hit lists are
-/// read (`ListedSubjects::read_titles`): `query` is the query whose hit list reached it.
-/// NCBI fails that query's batch, after the reports of the batches before
-/// (`blast_engine::search`).
-#[derive(Debug)]
-pub(super) struct HeaderReadError {
-    pub(super) query: usize,
-    pub(super) error: anyhow::Error,
-}
-
-impl std::fmt::Display for HeaderReadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.error)
-    }
-}
-
-impl std::error::Error for HeaderReadError {}
-
 /// The stored titles and letters of the listed subjects as the reports read them, by rank
 /// (`ListedSubjects::read_titles`).
 pub(super) struct ListedTitles<'a> {
@@ -1012,53 +843,17 @@ pub(super) struct ListedTitles<'a> {
 }
 
 impl ListedTitles<'_> {
-    // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1865-1886
-    // ```c++
-    //         string message;
-    //         if (io != NULL) {
-    //             message += io->GetStackTrace() + "\n";
-    //         }
-    //         message += "Bad char [0x" +
-    //                    NStr::NumericToString((unsigned char)c,0,16)+
-    //                    "] in string";
-    //         if (io != NULL) {
-    //             message += " at " + io->GetPosition();
-    //         }
-    //         if (!str.empty()) {
-    //             message += "\n" + str;
-    //         }
-    //         switch (fix_method) {
-    //         case eFNP_ReplaceAndWarn:
-    // #if 0
-    //             CNcbiDiag(eDiag_Error, eDPF_Default)
-    //                 << ErrCode(NCBI_ERRCODE_X, 7) << message << Endm;
-    // #else
-    //             ERR_POST_X(7, message);
-    // #endif
-    //             break;
-    // ```
-    // NCBI BLAST+ 2.17.0 `blastp -db` on a version 4 database whose header file holds
-    // the bytes 0xE9 and 0x7F in two titles (campaign dbsearch-20261012,
-    // `$BUILD_ROOT/dbsearch/db3/exp_badbyte`): the report shows `#` for the byte, and
-    // standard error gets, for each reported subject and bad byte,
-    //   Error: (803.7) [blastp] Blast-def-line-set.E.title
-    //   Bad char [0xE9] in string at byte 21
-    //   <the stored title>
-    // as often as the formatter reads the definition line: twice per subject for the
-    // default outfmt 6, three times for `6 sseqid stitle`, five times for outfmt 0. The
-    // number of readings is the formatter's, not ported; makeblastdb and `LOSAT makedb`
-    // store `#` for such a byte, so only a header file written otherwise holds one.
     /// LOSAT's rejection of a reported subject (one with rows in the final `hit_lists`)
-    /// whose stored title holds a byte outside ' ' ..= '~': NCBI writes an error message
+    /// whose stored title holds a byte outside ' ' ..= '~'
+    /// (`algorithm::common::database::check_reported_title`): NCBI writes an error message
     /// for the byte each time its formatter reads the definition line.
     pub(super) fn check_reported_titles(&self, hit_lists: &[Option<BlastpHitList>]) -> Result<()> {
         for rank in Self::reported(hit_lists) {
-            if self.replaced_title_bytes[rank] {
-                bail!(
-                    "database sequence {} has a stored title with a byte outside ' ' to '~' (NCBI BLAST+ shows it as '#' and writes an error message each time it reads the definition line); this is not supported by LOSAT's BLASTP",
-                    self.listed.ordinals[rank]
-                );
-            }
+            shared::check_reported_title(
+                self.replaced_title_bytes[rank],
+                self.listed.ordinals[rank],
+                PROGRAM,
+            )?;
         }
         Ok(())
     }
@@ -1093,12 +888,7 @@ impl ListedTitles<'_> {
                 continue;
             }
             let ordinal = self.listed.ordinals[rank];
-            let id = crate::report::defline::database_subject_id(&record.title, true)
-                .map_err(|problem| {
-                    anyhow::anyhow!(
-                        "database sequence {ordinal} has a title {problem}, which is not supported by LOSAT's BLASTP"
-                    )
-                })?;
+            let id = shared::tabular_subject_id(&record.title, ordinal, true, PROGRAM)?;
             ids.push(Arc::from(id));
         }
         Ok(ids)
@@ -1123,18 +913,60 @@ impl ListedTitles<'_> {
         shown: &std::collections::BTreeSet<usize>,
     ) -> Result<()> {
         for &rank in shown {
-            let title = &self.records[rank].title;
-            let reads_past_end = crate::report::defline::generate_defline(title, true, true)
-                .is_ok_and(|defline| defline.reads_past_end);
-            if reads_past_end {
-                bail!(
-                    "database sequence {} has a title of punctuation that NCBI BLAST+'s x_CleanAndCompress reads past the end of (NCBI BLAST+ 2.17.0 crashes in outfmt 0); this is not supported by LOSAT's BLASTP",
-                    self.listed.ordinals[rank]
-                );
-            }
+            shared::check_shown_protein_title(
+                &self.records[rank].title,
+                self.listed.ordinals[rank],
+                PROGRAM,
+            )?;
         }
         Ok(())
     }
+}
+
+// EXPERIMENT (LOSAT_X_BPQBLOCK): the block search writes a block's rows before the next block is
+// searched (`x_query_blocks.rs`), so with `-db` it may run only where the search of all queries
+// would not fail after some rows. Past the preliminary stage (whose reader errors come in the
+// first block, which reads the whole database as every batch does), the failures of a database
+// search that depend on its hits are those of the definition lines of the reported subjects:
+// NCBI's reader error (`HeaderReadError`, the batch of the query that reaches it fails after the
+// reports of the batches before) and LOSAT's refusals (`ListedSubjects::read_titles`,
+// `ListedTitles::check_reported_titles`, `ListedTitles::tabular_subject_ids`). When every
+// definition line of the database reads and none of them is refused, none of these failures can
+// happen in any batch.
+// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence of the database has one definition line
+/// that reads, holds no byte outside ' ' ..= '~' and gives a tabular subject id as NCBI writes
+/// it. Read in `pool` over the ordinal ids; a reader error is `false` (the search of all queries
+/// then reports it where NCBI does).
+pub(super) fn x_titles_allow_blocks(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    let db = &database.db;
+    let allowed = |ordinal: u32| -> bool {
+        match db.deflines(ordinal) {
+            Ok(deflines) => {
+                deflines.len() == 1
+                    && deflines[0].replaced_title_bytes == 0
+                    && crate::report::defline::database_subject_id(&deflines[0].title, true).is_ok()
+            }
+            Err(_) => false,
+        }
+    };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() {
+        return pool.install(|| {
+            (0..db.num_seqs())
+                .into_par_iter()
+                .with_min_len(4096)
+                .all(allowed)
+        });
+    }
+    let _ = pool;
+    (0..db.num_seqs()).all(allowed)
 }
 
 #[cfg(test)]
@@ -1517,6 +1349,7 @@ mod tests {
                 &|| BlastpSubjectScratch::new(16, 64, window, 21),
                 &recording_kernel(window, &seen),
                 &mut hit_lists,
+                &mut [],
                 500,
             )
         })
@@ -1631,7 +1464,7 @@ mod tests {
         second.update(list(2, 70));
         second.update(list(0, 65));
         let mut hit_lists = vec![Some(first), None, Some(second)];
-        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 2, 7, 9]);
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
         let oids = |hit_list: &Option<BlastpHitList>| -> Vec<(u32, Vec<u32>)> {
@@ -1724,7 +1557,7 @@ mod tests {
         // Query 1 reports ordinal id 3 (volume 01); ordinal id 1 (volume 00, no header
         // file) is in its list past the count, and is not read.
         let mut hit_lists = vec![None, hit_list(vec![list(3, 1e-9), list(1, 1e-3)], 1)];
-        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [1, 3]);
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
         assert_eq!(
@@ -1740,7 +1573,7 @@ mod tests {
             hit_list(vec![list(3, 1e-9), list(1, 1e-3)], 1),
             hit_list(vec![list(9, 1e-9), list(0, 1e-5)], 2),
         ];
-        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         assert_eq!(listed.ordinals, [0, 1, 3, 9]);
         let error = listed
             .read_titles(&database, &hit_lists)
@@ -1805,7 +1638,7 @@ mod tests {
         let mut clean = BlastpHitList::new(10);
         clean.update(list(0));
         let mut hit_lists = vec![Some(clean)];
-        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
         titles.check_reported_titles(&hit_lists).unwrap();
         // The subject with the bad byte: read as `#`, and rejected when it is reported.
@@ -1813,7 +1646,7 @@ mod tests {
         bad.update(list(9));
         bad.update(list(0));
         let mut hit_lists = vec![Some(bad)];
-        let listed = ListedSubjects::read(&database, &mut hit_lists).unwrap();
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
         assert_eq!(titles.records[1].title(), b"p10 l#st protein");
         let error = titles.check_reported_titles(&hit_lists).unwrap_err();
@@ -1824,6 +1657,116 @@ mod tests {
             "{error:#}"
         );
         drop(database);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact preliminary lists (`x_prelim_compact.rs`) are
+    // listed and renamed to ranks with the off path's lists, before they are expanded.
+    #[test]
+    fn compact_lists_are_listed_and_renamed_with_the_others() {
+        use crate::algorithm::blastp::gapalign::BlastpPreliminaryHsp;
+        let database = open("prot_mv");
+        let compact = |oid: u32| BlastpHspList {
+            oid,
+            query_index: 1,
+            hsps: vec![XPrelimHsp {
+                hsp: BlastpPreliminaryHsp {
+                    query_start: 0,
+                    query_end: 10,
+                    subject_start: 0,
+                    subject_end: 10,
+                    gapped_query_start: 1,
+                    gapped_subject_start: 1,
+                    raw_score: 60,
+                    query_context: 1,
+                    query_frame: 0,
+                    subject_frame: 0,
+                    query_length: 20,
+                    q_idx: 1,
+                    s_idx: oid,
+                },
+                e_value: 1e-5,
+            }],
+            best_evalue: 1e-5,
+        };
+        let mut off = BlastpHitList::new(10);
+        off.update(BlastpHspList {
+            oid: 7,
+            query_index: 0,
+            hsps: vec![test_hsp(7, 60)],
+            best_evalue: 1e-5,
+        });
+        let mut compact_list = BlastpHitList::new(10);
+        compact_list.update(compact(9));
+        compact_list.update(compact(2));
+        let mut hit_lists = vec![Some(off), None];
+        let mut compact_lists = vec![None, Some(compact_list)];
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut compact_lists).unwrap();
+        assert_eq!(listed.ordinals, [2, 7, 9]);
+        assert_eq!(listed.encoded.len(), 3);
+        let off = &hit_lists[0].as_ref().unwrap().hsplist_array[0];
+        assert_eq!((off.oid, off.hsps[0].s_idx), (1, 1));
+        let mut renamed: Vec<(u32, u32)> = compact_lists[1]
+            .as_ref()
+            .unwrap()
+            .hsplist_array
+            .iter()
+            .map(|list| (list.oid, list.hsps[0].hsp.s_idx))
+            .collect();
+        renamed.sort();
+        assert_eq!(renamed, [(0, 0), (2, 2)]);
+    }
+
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): the block search of `-db` runs only when every definition
+    // line of the database reads and none is refused (`x_titles_allow_blocks`), at one thread and
+    // in a pool. (A path in the system's temporary directory: Unix spelling.)
+    #[cfg(unix)]
+    #[test]
+    fn blocks_are_allowed_only_when_every_title_reads_and_is_reported() {
+        let allowed = |database: &BlastpDatabase| -> [bool; 2] {
+            [1, 4].map(|threads| {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    Ok(x_titles_allow_blocks(database, pool))
+                })
+                .unwrap()
+            })
+        };
+        assert_eq!(allowed(&open("prot_v4")), [true, true]);
+        let dir = std::env::temp_dir().join(format!(
+            "losat-db-qblock-titles-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        // A header file that cannot be read: the search of all queries reports NCBI's error.
+        for entry in
+            std::fs::read_dir(fixture("prot_mv.pal").trim_end_matches("prot_mv.pal")).unwrap()
+        {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            if name.starts_with("prot_mv.") && name != "prot_mv.05.phr" {
+                std::fs::copy(&path, dir.join(&name)).unwrap();
+            }
+        }
+        let missing =
+            BlastpDatabase::open(dir.join("prot_mv").to_str().unwrap(), &Default::default())
+                .unwrap();
+        assert_eq!(allowed(&missing), [false, false]);
+        // A stored title with a byte outside ' ' ..= '~' (LOSAT's refusal when it is reported).
+        for ext in ["pin", "psq"] {
+            std::fs::copy(fixture("prot_v4") + "." + ext, dir.join(format!("b.{ext}"))).unwrap();
+        }
+        let mut header = std::fs::read(fixture("prot_v4") + ".phr").unwrap();
+        let at = header
+            .windows(16)
+            .position(|window| window == b"p10 last protein")
+            .expect("the title of p10");
+        header[at + 5] = 0xE9;
+        std::fs::write(dir.join("b.phr"), header).unwrap();
+        let bad =
+            BlastpDatabase::open(dir.join("b").to_str().unwrap(), &Default::default()).unwrap();
+        assert_eq!(allowed(&bad), [false, false]);
+        drop((missing, bad));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

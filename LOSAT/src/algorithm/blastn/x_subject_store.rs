@@ -5,7 +5,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::blastinput::fasta_reader::{FastaInputSource, FastaRecord};
-use crate::core::blast_encoding::encode_iupac_to_blastna;
 use crate::sequence::packed_subject::PackedNucleotide;
 use crate::utils::dust::MaskedInterval;
 
@@ -19,9 +18,9 @@ pub(crate) fn x_bnstore() -> bool {
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_BNSTORE").is_some())
 }
 
-/// The letters of the subjects of a search, by subject index: the records' own, or (EXPERIMENT,
-/// `LOSAT_X_BNSTORE`) the packed subjects of records that keep none. Every read gives the bytes
-/// the records' letters give (the comparison tests of `packed_subject.rs`).
+/// The records of a FASTA subject set and their letters, by subject index: the records' own, or
+/// (EXPERIMENT, `LOSAT_X_BNSTORE`) the packed subjects of records that keep none. Every read gives
+/// the bytes the records' letters give (the comparison tests of `packed_subject.rs`).
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
 /// ```c
@@ -43,31 +42,23 @@ pub(crate) struct SubjectLetters<'a> {
 }
 
 impl<'a> SubjectLetters<'a> {
-    /// The letters of the records.
-    pub(crate) fn records(records: &'a [FastaRecord]) -> Self {
-        Self {
-            records,
-            stores: None,
+    /// The letters of `records`: their own, or with `stores` (EXPERIMENT, LOSAT_X_BNSTORE) those
+    /// of their packed subjects, one per record.
+    pub(crate) fn new(records: &'a [FastaRecord], stores: Option<&'a [PackedNucleotide]>) -> Self {
+        if let Some(stores) = stores {
+            assert_eq!(records.len(), stores.len(), "one packed subject per record");
         }
+        Self { records, stores }
     }
 
-    /// EXPERIMENT (LOSAT_X_BNSTORE): the letters of `records` held in `stores`, one per record.
-    pub(crate) fn packed(records: &'a [FastaRecord], stores: &'a [PackedNucleotide]) -> Self {
-        assert_eq!(records.len(), stores.len(), "one packed subject per record");
-        Self {
-            records,
-            stores: Some(stores),
-        }
+    /// The records.
+    pub(crate) fn records(&self) -> &'a [FastaRecord] {
+        self.records
     }
 
     /// EXPERIMENT (LOSAT_X_BNSTORE): the packed subjects, when the records keep no letters.
     pub(crate) fn stores(&self) -> Option<&'a [PackedNucleotide]> {
         self.stores
-    }
-
-    /// The number of subjects.
-    pub(crate) fn count(&self) -> usize {
-        self.records.len()
     }
 
     /// The number of letters of subject `index`.
@@ -78,29 +69,11 @@ impl<'a> SubjectLetters<'a> {
         }
     }
 
-    /// The letters of every subject (`len` summed).
-    pub(crate) fn total(&self) -> usize {
-        (0..self.count()).map(|index| self.len(index)).sum()
-    }
-
     /// The lower-case intervals of subject `index` (`collect_lowercase_masks` of its letters).
     pub(crate) fn lowercase_masks(&self, index: usize) -> Vec<MaskedInterval> {
         match self.stores {
             Some(stores) => stores[index].lowercase().to_vec(),
             None => collect_lowercase_masks(self.records[index].seq()),
-        }
-    }
-
-    /// The blastna letters of subject `index` (`encode_iupac_to_blastna` of its letters).
-    pub(crate) fn blastna(&self, index: usize) -> Vec<u8> {
-        match self.stores {
-            Some(stores) => {
-                BLASTNA_MADE.fetch_add(1, Ordering::Relaxed);
-                let mut letters = Vec::new();
-                stores[index].blastna_into(&mut letters);
-                letters
-            }
-            None => encode_iupac_to_blastna(self.records[index].seq()),
         }
     }
 
@@ -116,6 +89,13 @@ impl<'a> SubjectLetters<'a> {
             None => self.records[index].seq()[from..to].to_ascii_uppercase(),
         }
     }
+}
+
+/// EXPERIMENT (LOSAT_X_BNSTORE): the blastna letters of a packed subject in its traceback
+/// (`encode_iupac_to_blastna` of the record's letters), into `out`.
+pub(crate) fn x_blastna_into(store: &PackedNucleotide, out: &mut Vec<u8>) {
+    BLASTNA_MADE.fetch_add(1, Ordering::Relaxed);
+    store.blastna_into(out);
 }
 
 /// EXPERIMENT (LOSAT_X_BNSTORE): the subject records (`read_subjects` without a range), each one's

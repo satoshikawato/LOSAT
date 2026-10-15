@@ -38,8 +38,7 @@ pub(crate) struct DisplayMasks<'a> {
 pub(crate) fn pairwise_hits(
     hit_lists: &[Option<BlastnHitList>],
     queries: &[FastaRecord],
-    subjects: &[FastaRecord],
-    subject_letters: SubjectLetters<'_>,
+    subjects: SubjectLetters<'_>,
     masks: &DisplayMasks<'_>,
 ) -> Result<Vec<PairwiseHit>> {
     let mut hits = Vec::new();
@@ -71,12 +70,13 @@ pub(crate) fn pairwise_hits(
                     .context("BLASTN HSP of an unknown query")?;
                 let s_idx = hsp.s_idx as usize;
                 let subject = subjects
+                    .records()
                     .get(s_idx)
                     .context("BLASTN HSP of an unknown subject")?;
-                let subject_length = subject_letters.len(s_idx);
+                let subject_length = subjects.len(s_idx);
                 let (mut query_row, mut subject_row) =
                     displayed_rows(hsp, query.seq(), subject_length, |from, to| {
-                        subject_letters.upper_letters(s_idx, from, to)
+                        subjects.upper_letters(s_idx, from, to)
                     })?;
                 lowercase_masked(
                     &mut query_row,

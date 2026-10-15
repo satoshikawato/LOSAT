@@ -866,8 +866,9 @@ pub(super) fn x_scan_plan(
     //                BLAST_TranslateCompressedSequence(translation_table_rc,
     //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
     // ```
-    // Dispatch point: what the shared plan memoises. Without the variables it is the closure above,
-    // as before. With LOSAT_X_TBNXLATE the subject becomes ncbi2na in one pass and each frame is
+    // Dispatch point: what the shared plan memoises. With LOSAT_X_TBNXLATE off (`0`, or
+    // LOSAT_X_DEFAULT=0 and it is not set) it is the closure above, as before. With
+    // LOSAT_X_TBNXLATE (in the strict set) the subject becomes ncbi2na in one pass and each frame is
     // read from the codon table of its strand, as BLAST_GetAllTranslations does for the compressed
     // subject (tblastn/x_subject_translate.rs); the frames and units are the same values. With
     // LOSAT_X_TBNXLATESHADOW both are made for every plan and the search stops if they differ.

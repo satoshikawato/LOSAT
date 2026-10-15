@@ -162,15 +162,14 @@ fn same_reports(
     shadow.shadow()
 }
 
-/// The counters of a shadow run where the switch acted in `searches` searches of every subject
-/// (at most one run per subject, at least one per search): every subject compared, every subject
-/// but the first of each run searched without a fill and with its table checked, no INT4_MAX / 4
-/// reset (the fixture's offsets stay far below it).
-fn assert_engaged(counts: &HashMap<String, u64>, searches: u64, what: &str) {
+/// The counters of a shadow run where the switch acted in `searches` searches of `subjects`
+/// subjects each (at most one run per subject, at least one per search): every subject compared,
+/// every subject but the first of each run searched without a fill and with its table checked.
+fn assert_counts(counts: &HashMap<String, u64>, searches: u64, subjects: u64, what: &str) {
     assert_eq!(counts["searches"], searches, "{what}: {counts:?}");
     assert_eq!(
         counts["subjects"],
-        SUBJECTS * searches,
+        subjects * searches,
         "{what}: {counts:?}"
     );
     assert_eq!(
@@ -190,10 +189,18 @@ fn assert_engaged(counts: &HashMap<String, u64>, searches: u64, what: &str) {
         counts["tables_checked"], counts["fills_saved"],
         "{what}: {counts:?}"
     );
+}
+
+/// `assert_counts` for the fixture's subjects, with no INT4_MAX / 4 reset (with the default window
+/// the fixture's offsets stay far below it).
+fn assert_engaged(counts: &HashMap<String, u64>, searches: u64, what: &str) {
+    assert_counts(counts, searches, SUBJECTS, what);
     assert_eq!(counts["resets_in_runs"], 0, "{what}: {counts:?}");
 }
 
-// blastp and blastp-fast at 2 and 4 threads, the reference loops and the fused loop of
+// blastp and blastp-fast at 2 and 4 threads, the reference loops (the two-hit loop of
+// `blastp_for_each_offset_pair` and the reference compressed scan; `LOSAT_X_DEFAULT=0`, so that they
+// stay the reference loops where the strict set turns `LOSAT_X_BPSEED` on) and the fused loop of
 // `LOSAT_X_BPSEED` (with the flat table of `LOSAT_X_BPCLUT` for blastp-fast): one search of all
 // queries, run by the switch.
 #[test]
@@ -201,9 +208,9 @@ fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     for (task, base) in [
-        ("blastp", &[][..]),
+        ("blastp", &[("LOSAT_X_DEFAULT", "0")][..]),
         ("blastp", &[("LOSAT_X_BPSEED", "1")][..]),
-        ("blastp-fast", &[][..]),
+        ("blastp-fast", &[("LOSAT_X_DEFAULT", "0")][..]),
         (
             "blastp-fast",
             &[("LOSAT_X_BPSEED", "1"), ("LOSAT_X_BPCLUT", "1")][..],
@@ -240,6 +247,64 @@ fn block_search_and_pairwise_reports_with_the_switch_are_the_reports_without_it(
     assert_engaged(&counts, counts["searches"], "block search");
     let counts = same_reports("blastp-fast", &subject, 2, &base, &[], "0");
     assert_engaged(&counts, 1, "pairwise report");
+}
+
+// `-window_size 10000000`: each subject moves the diagonal offset by its length and 10,000,000, so
+// the offset passes INT4_MAX / 4 twice in the fixture's subjects (after the 54th and the 108th
+// subject; at 2 threads both inside runs). `finish_subject` (`Blast_ExtendWordExit`) puts it back
+// to the window and clears the table inside the run, and the later subjects of the run start from
+// there as in the one-thread loop. Each run allocates diagonal tables of 64 MiB (two per thread in
+// the shadow mode).
+#[test]
+fn the_int4_max_quarter_reset_inside_a_run_gives_the_reports_without_the_switch() {
+    let subject = subject_file();
+    let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    let counts = same_reports(
+        "blastp",
+        &subject,
+        2,
+        &[],
+        &["-window_size", "10000000"],
+        "6",
+    );
+    assert_counts(&counts, 1, SUBJECTS, "window 10000000");
+    assert!(counts["resets_in_runs"] > 0, "{counts:?}");
+}
+
+/// The fixture's subject proteome with a record without letters before its 61st record, in a file
+/// of the test; returns its path.
+fn subject_file_with_an_empty_record() -> PathBuf {
+    let text = std::fs::read_to_string(subject_file()).unwrap();
+    let mut out = String::new();
+    let mut records = 0;
+    for line in text.lines() {
+        if line.starts_with('>') {
+            if records == 60 {
+                out.push_str(">empty_record\n");
+            }
+            records += 1;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    assert_eq!(records, SUBJECTS as usize);
+    let path =
+        std::env::temp_dir().join(format!("losat-bpsubjrun-empty-{}.faa", std::process::id()));
+    std::fs::write(&path, out).unwrap();
+    path
+}
+
+// A subject without letters (NCBI's warning, not searched, the diagonal offset not moved) inside a
+// run: at 2 threads the record at index 60 falls in the run of indices 55..67 (the cut depends only
+// on the lengths and the thread count).
+#[test]
+fn a_subject_without_letters_inside_a_run_gives_the_reports_without_the_switch() {
+    let path = subject_file_with_an_empty_record();
+    let subject = [OsStr::new("-subject"), path.as_os_str()];
+    let counts = same_reports("blastp", &subject, 2, &[], &[], "6");
+    assert_counts(&counts, 1, SUBJECTS + 1, "empty record");
+    assert_eq!(counts["resets_in_runs"], 0, "{counts:?}");
+    let _ = std::fs::remove_file(&path);
 }
 
 /// A protein database of the subject proteome, made with `LOSAT makedb` in a directory of the

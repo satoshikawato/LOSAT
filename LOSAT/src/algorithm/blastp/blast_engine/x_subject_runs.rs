@@ -22,7 +22,10 @@
 //! and moves neither). Every other per-subject reset of `prepare_independent_subject`
 //! (`BlastpSubjectScratch::reset_subject_state`: the initial HSPs, the chaining nodes, the
 //! preliminary HSP lists, the restricted-alignment arrays, the interval tree) still runs before
-//! each subject. Each subject's result goes to its own slot, and the slots are merged in subject
+//! each subject. The results do not need it (`process_subject` takes, clears or resets each of
+//! these fields itself, which the database path relies on for the later subjects of a block); it
+//! is kept so that a later subject of a run starts from the state of the loop without the switch,
+//! field by field, except for the diagonal table. Each subject's result goes to its own slot, and the slots are merged in subject
 //! order afterwards as without the switch (`merge_blastp_subject_results_in_order`).
 //!
 //! Why the reports do not change. A subject's result depends on the diagonal table only through
@@ -35,14 +38,26 @@
 //! `last_hit <= diag_offset` takes the "start a new hit" branch for every subject offset, which
 //! also sets `last_hit` to `subject_offset + diag_offset` and the flag to 0, as the cleared entry
 //! does. Every entry a subject of length L writes at offset `d` has `last_hit <= d + L - 1`
-//! (`subject_offset + diag_offset`, or `s_last_off - (wordsize - 1) + diag_offset` with
-//! `s_last_off < L`), and the next subject's offset is `d + L + window`, so at the start of every
+//! (`subject_offset + diag_offset` with `subject_offset <= L - wordsize`, or
+//! `s_last_off - (wordsize - 1) + diag_offset` with `s_last_off <= L` and `wordsize >= 2`), and
+//! the next subject's offset is `d + L + window`, so at the start of every
 //! later subject of a run each entry reads as a cleared one: the subject's decisions, and so its
 //! result, are those of the loop without the switch, which starts it from a cleared table at the
 //! same offset. When the offset reaches INT4_MAX / 4, `finish_subject` puts it back to `window`
 //! and clears the table (`s_BlastDiagClear`) inside the run, as the one-thread loop does, and
 //! `blastp_subject_diag_offsets` gives the next subject the offset `window` too. This is the
-//! property the database path uses for its blocks (`database::search_blocks`). Which thread
+//! property the database path uses for its blocks (`database::search_blocks`).
+//!
+//! The argument is in integers; `last_hit` is a 31-bit field (`DiagStruct`), whose stored values
+//! are exact while `d + L < 2^30`. The offsets stay below INT4_MAX / 4 plus one subject and one
+//! window, so this holds for every subject shorter than 2^29 letters. Only one subject of more than
+//! 2^29 letters in one-hit mode could leave a wrapped entry that a later subject of its run reads
+//! differently from a cleared one; there the run path keeps the leftovers as the one-thread loop
+//! and NCBI do, and it is the loop without the switch that departs from them. The shadow's
+//! recompute would show such a difference; its table check, which reads the sign-extended field,
+//! would not.
+//!
+//! Which thread
 //! searches a run and in what order the runs end change nothing: the results are merged by
 //! subject index, and no floating-point operation changes order.
 //!
@@ -100,9 +115,10 @@
 //!         diag_struct_array[i].flag = 0;
 //!         diag_struct_array[i].last_hit = -diag->window;
 //! ```
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-543
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-544
 //! ```c
 //!             diag_coord = (query_offset - subject_offset) & diag_mask;
+//!
 //!             /* If the reset bit is set, an extension just happened. */
 //!             if (diag_array[diag_coord].flag) {
 //!                 /* If we've already extended past this hit, skip it. */
@@ -271,6 +287,21 @@ fn x_first_uncleared(table: &[DiagStruct], diag_offset: i32, window: i32) -> Opt
     })
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
+// ```c
+//     /* iterate over all subject sequences */
+//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//            != BLAST_SEQSRC_EOF) {
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-172
+// ```c
+//         if (ewp->diag_table->offset >= INT4_MAX / 4) {
+//             ewp->diag_table->offset = ewp->diag_table->window;
+//             s_BlastDiagClear(ewp->diag_table);
+//         } else {
+//             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+//         }
+// ```
 /// The subjects of one run, `run`, searched with `scratch` into `slots` (the run's slots of the
 /// subject results), and with `reference` (shadow mode) searched again as the loop without the
 /// switch searches them and compared.
@@ -424,6 +455,8 @@ fn x_search_runs<S, K>(
     });
 }
 
+// No NCBI counterpart: scheduling of the preliminary loop over the subjects (the cut into runs and
+// their tasks); it changes no value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPSUBJRUN): the parallel loop of a `-subject` search in runs of
 /// subjects (module header) on `pool`, into `subject_results`.
 #[allow(clippy::too_many_arguments)]

@@ -574,9 +574,10 @@ impl BlastpSubjectScratch {
         self.reset_subject_state();
     }
 
-    // The per-subject resets of `prepare_independent_subject` other than the diagonal table's;
-    // EXPERIMENT (LOSAT_X_BPSUBJRUN) runs them alone before each later subject of a run
-    // (`blast_engine/x_subject_runs.rs`).
+    // No NCBI counterpart as a function: the per-subject resets of `prepare_independent_subject`
+    // other than the diagonal table's, split out of it unchanged (each with its NCBI reference
+    // below); EXPERIMENT (LOSAT_X_BPSUBJRUN) runs them alone before each later subject of a run
+    // (`blast_engine/x_subject_runs.rs`). It changes no value NCBI computes.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")

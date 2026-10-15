@@ -699,7 +699,12 @@ pub(crate) fn search_core(
                         continue;
                     };
                     let batch = &chunk.prepared;
-                    for (oid, computed) in results.into_iter().enumerate() {
+                    let mut kept = results.into_iter().peekable();
+                    for oid in 0..subjects.len() {
+                        let computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
+                            Some((_, computed)) => computed,
+                            None => SubjectComputation::empty(),
+                        };
                         sink.subject_start(oid, batch, &params, computed.prepared_link)?;
                         for (h, contained) in &computed.containment {
                             sink.containment(h, *contained);
@@ -1179,7 +1184,7 @@ fn x_compute_chunk(
     db_count: i64,
     min_subject_length: usize,
     x_containment: bool,
-) -> Result<Option<(Vec<ContextParameters>, Vec<SubjectComputation>)>> {
+) -> Result<Option<(Vec<ContextParameters>, Vec<(usize, SubjectComputation)>)>> {
     let batch = &chunk.prepared;
     let mut params = score_block(batch);
     if !params.iter().any(|p| p.valid) {
@@ -1197,7 +1202,11 @@ fn x_compute_chunk(
         min_subject_length,
         Some(fixed_spaces),
     )?;
-    let mut results = Vec::with_capacity(subjects.len());
+    // Only the subjects with something for the sink are kept, by oid: the chunks of a wave are
+    // all in memory at once, and a database holds hundreds of thousands of subjects, most
+    // without a hit. The sink gets the others as empty computations (`SubjectComputation::
+    // empty`), so it sees the same calls as from the serial chunk loop.
+    let mut results = Vec::new();
     for oid in 0..subjects.len() {
         let mut computed = compute_subject(
             subjects,
@@ -1217,7 +1226,9 @@ fn x_compute_chunk(
         // stages read, to save memory; it does not change any value NCBI computes.
         computed.seeds = Vec::new();
         computed.initial = Vec::new();
-        results.push(computed);
+        if !computed.is_empty() {
+            results.push((oid, computed));
+        }
     }
     Ok(Some((params, results)))
 }
@@ -1229,6 +1240,29 @@ struct SubjectComputation {
     purged: Vec<PreliminaryHsp>,
     containment: Vec<(PreliminaryHsp, bool)>,
     prepared_link: Option<([i32; 2], f64)>,
+}
+
+#[cfg(feature = "parallel")]
+impl SubjectComputation {
+    /// A subject without anything for the sink (LOSAT_X_BXPAR's chunks keep only the others).
+    fn empty() -> Self {
+        Self {
+            seeds: Vec::new(),
+            initial: Vec::new(),
+            raw: Vec::new(),
+            purged: Vec::new(),
+            containment: Vec::new(),
+            prepared_link: None,
+        }
+    }
+
+    /// Whether the sink would get nothing from this subject but its oid.
+    fn is_empty(&self) -> bool {
+        self.raw.is_empty()
+            && self.purged.is_empty()
+            && self.containment.is_empty()
+            && self.prepared_link.is_none()
+    }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-179
 // ```c++

@@ -965,7 +965,7 @@ pub fn apply_dust_masking<R: InputRecord>(
 pub fn build_lookup_tables<R: InputRecord>(
     config: &TaskConfig,
     args: &BlastnArgs,
-    queries_blastna: &[Vec<u8>],
+    queries_blastna: &[&[u8]],
     query_masks: &[Vec<MaskedInterval>],
     query_offsets: &[i32],
     subjects: &[R],

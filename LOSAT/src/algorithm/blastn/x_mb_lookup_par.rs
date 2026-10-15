@@ -134,7 +134,7 @@ pub(super) struct Tables<'a> {
 
 /// The read-only inputs of the fill loop.
 pub(super) struct Words<'a> {
-    pub(super) queries_blastna: &'a [Vec<u8>],
+    pub(super) queries_blastna: &'a [&'a [u8]],
     pub(super) query_offsets: &'a [i32],
     pub(super) query_masks: &'a [Vec<MaskedInterval>],
     pub(super) word_length: usize,
@@ -261,7 +261,7 @@ fn fill_part(part: u8, owner: &[u8], block_shift: usize, words: &Words<'_>, t: S
     #[cfg(target_arch = "x86_64")]
     let mut x_ring_len = 0usize;
     for (q_idx, seq_blastna) in words.queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
+        let seq = seq_blastna;
         if seq.len() < lut_word_length {
             continue;
         }
@@ -569,10 +569,11 @@ mod tests {
         let mut rng = Lcg(0x5EED_1234);
         for case in 0..60 {
             let (queries, offsets, masks, word_length, lut_word_length) = random_case(&mut rng);
+            let query_refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
             let ascending_cells = case % 2 == 1;
             let approx = queries.iter().map(Vec::len).sum::<usize>();
             let reference = build_two_stage_lookup(
-                &queries,
+                &query_refs,
                 &offsets,
                 word_length,
                 lut_word_length,
@@ -589,7 +590,7 @@ mod tests {
                 let mut pv_array = vec![0 as PvArrayType; mb.pv_array.len()];
                 let mut helper_array = vec![0u32; (mb.hashtable.len() >> 11).max(1)];
                 let words = Words {
-                    queries_blastna: &queries,
+                    queries_blastna: &query_refs,
                     query_offsets: &offsets,
                     query_masks: &masks,
                     word_length,
@@ -631,9 +632,10 @@ mod tests {
         let mut rng = Lcg(0xFACE_0FF5);
         for case in 0..12 {
             let (queries, offsets, masks, word_length, lut_word_length) = random_case(&mut rng);
+            let query_refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
             let ascending_cells = case % 2 == 0;
             let reference = build_two_stage_lookup(
-                &queries,
+                &query_refs,
                 &offsets,
                 word_length,
                 lut_word_length,
@@ -655,7 +657,7 @@ mod tests {
                     let mut pv_array = vec![0 as PvArrayType; mb.pv_array.len()];
                     let mut helper_array = vec![0u32; (mb.hashtable.len() >> 11).max(1)];
                     let words = Words {
-                        queries_blastna: &queries,
+                        queries_blastna: &query_refs,
                         query_offsets: &offsets,
                         query_masks: &masks,
                         word_length,

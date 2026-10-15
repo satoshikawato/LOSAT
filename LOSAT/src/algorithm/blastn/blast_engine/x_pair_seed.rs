@@ -434,9 +434,8 @@ fn seed_of_pair(
     // ```
     let context_idx = x.query_context_index.context_for_offset(q_off0);
     let ctx = &x.query_contexts[context_idx];
-    let q_seq = ctx.seq.as_slice();
     let q_context_start = ctx.query_offset as usize;
-    let q_context_end = q_context_start + q_seq.len();
+    let q_context_end = q_context_start + ctx.len;
 
     if q_off0 + lut_word_length > q_context_end || kmer_start + lut_word_length > s_len {
         return;
@@ -584,7 +583,7 @@ fn fold(
         let ctx = &x.query_contexts[context_idx];
         let q_idx = context_idx as u32;
         let q_context_start = ctx.query_offset as usize;
-        let q_context_end = q_context_start + ctx.seq.len();
+        let q_context_end = q_context_start + ctx.len;
         let cutoff_score = x.cutoff_scores[context_idx];
         let q_ext_start = seed.q as usize;
         let s_ext_start = seed.s as usize;
@@ -1370,7 +1369,7 @@ pub(super) fn summary() {
 #[cfg(test)]
 mod tests {
     use super::super::{
-        build_blastna_matrix, build_nucl_score_table, build_query_blastna_concat_buffers,
+        build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
         build_query_four_base_bytes, diag_hash_insert_window, scan_subject_kmers_with_ranges,
     };
     use super::*;
@@ -1632,10 +1631,11 @@ mod tests {
                 Vec::new(),
             ];
             let concat_len = 2 * q_len + 1;
-            let (concat, concat_sentinels) =
-                build_query_blastna_concat_buffers(&ctx_seqs, &offsets, concat_len);
+            let concat_sentinels = build_query_blastna_buffer(&[&query], &offsets, concat_len);
+            let concat = concat_sentinels[1..concat_len + 1].to_vec();
+            let ctx_refs: Vec<&[u8]> = ctx_seqs.iter().map(Vec::as_slice).collect();
             let lookup = build_two_stage_lookup(
-                &ctx_seqs,
+                &ctx_refs,
                 &offsets,
                 word_length,
                 lut_word_length,
@@ -1650,7 +1650,7 @@ mod tests {
                     query_idx: 0,
                     frame: if c == 0 { 1 } else { -1 },
                     query_offset: offsets[c],
-                    seq: ctx_seqs[c].clone(),
+                    len: ctx_seqs[c].len(),
                     masks: masks[c].clone(),
                 })
                 .collect();

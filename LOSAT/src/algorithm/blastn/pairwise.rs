@@ -394,15 +394,30 @@ fn lowercase_masked(row: &mut [u8], first: usize, step: isize, masks: &[MaskedIn
 /// can differ in the last bits; the search computes one per strand (`scoring.rs`). A
 /// query of `N` only has no counted residue, so every score probability is 0 and the
 /// calculation fails.
+#[cfg(test)]
 pub(crate) fn query_ungapped_karlin(
     query: &[u8],
+    reward: i32,
+    penalty: i32,
+) -> Option<KarlinParams> {
+    query_ungapped_karlin_blastna(
+        &encode_iupac_to_blastna(&query.to_ascii_uppercase()),
+        reward,
+        penalty,
+    )
+}
+
+/// `query_ungapped_karlin` of a context already in BLASTNA (the search holds its contexts
+/// only in that encoding).
+pub(crate) fn query_ungapped_karlin_blastna(
+    blastna: &[u8],
     reward: i32,
     penalty: i32,
 ) -> Option<KarlinParams> {
     const BLASTNA_N: usize = 14;
     const BLASTNA_GAP: usize = 15;
     let mut counts = [0f64; 16];
-    for code in encode_iupac_to_blastna(&query.to_ascii_uppercase()) {
+    for &code in blastna {
         counts[(code & 0x0f) as usize] += 1.0;
     }
     counts[BLASTNA_N] = 0.0;
@@ -509,6 +524,32 @@ mod tests {
         let mut row = b"AC-GT".to_vec();
         lowercase_masked(&mut row, 10, -1, &[MaskedInterval { start: 7, end: 9 }]);
         assert_eq!(row, b"Ac-gT");
+    }
+
+    // A context in BLASTNA (either letter case, no uppercase copy) gives the block of the
+    // letters it was encoded from.
+    #[test]
+    fn karlin_of_blastna_equals_karlin_of_letters() {
+        for seq in [
+            &b"ACGTACGTTTGA"[..],
+            b"acgtnACGTRYKMSWBDHVnn-",
+            b"NNNN",
+            b"",
+            b"aaaaCCCCggggTTTTUu",
+        ] {
+            let blastna = encode_iupac_to_blastna(seq);
+            let from_letters = query_ungapped_karlin(seq, 2, -3);
+            let from_blastna = query_ungapped_karlin_blastna(&blastna, 2, -3);
+            match (from_letters, from_blastna) {
+                (None, None) => {}
+                (Some(a), Some(b)) => {
+                    assert_eq!(a.lambda.to_bits(), b.lambda.to_bits());
+                    assert_eq!(a.k.to_bits(), b.k.to_bits());
+                    assert_eq!(a.h.to_bits(), b.h.to_bits());
+                }
+                other => panic!("{seq:?}: {other:?}"),
+            }
+        }
     }
 
     #[test]

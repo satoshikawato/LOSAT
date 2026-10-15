@@ -27,6 +27,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -153,48 +154,54 @@ fn next(seed: &mut u64) -> u32 {
 /// and subjects that are copies of the queries with every sixth letter changed (two hits on a
 /// diagonal, extensions with and without a reset of the diagonal), plus unrelated proteins.
 fn generated_pair() -> (PathBuf, PathBuf) {
-    const AMINO: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastp_diag_batch");
-    std::fs::create_dir_all(&dir).expect("test directory");
-    let mut seed = 0xd1a9_u64;
-    let mut protein = |n: usize| -> Vec<u8> {
-        (0..n)
-            .map(|_| AMINO[next(&mut seed) as usize % AMINO.len()])
-            .collect()
-    };
-    let mut queries: Vec<Vec<u8>> = (0..12).map(|i| protein(120 + 37 * i)).collect();
-    let mut repeats = Vec::new();
-    for _ in 0..12 {
-        repeats.extend_from_slice(b"KLSEELLKKAEE");
-    }
-    repeats.extend(protein(60));
-    for _ in 0..10 {
-        repeats.extend_from_slice(b"GSGSPGTPGS");
-    }
-    queries.push(repeats);
-    let mut subjects: Vec<Vec<u8>> = queries
-        .iter()
-        .map(|q| {
-            q.iter()
-                .enumerate()
-                .map(|(i, &a)| if i % 6 == 5 { AMINO[(i * 7) % 20] } else { a })
+    // Written once per test binary: the tests run in parallel threads, and a second write of
+    // the same files truncates them while another test's search reads them ("Query is Empty!").
+    static PAIR: OnceLock<(PathBuf, PathBuf)> = OnceLock::new();
+    PAIR.get_or_init(|| {
+        const AMINO: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastp_diag_batch");
+        std::fs::create_dir_all(&dir).expect("test directory");
+        let mut seed = 0xd1a9_u64;
+        let mut protein = |n: usize| -> Vec<u8> {
+            (0..n)
+                .map(|_| AMINO[next(&mut seed) as usize % AMINO.len()])
                 .collect()
-        })
-        .collect();
-    subjects.extend((0..8).map(|i| protein(90 + 61 * i)));
-    let write = |name: &str, seqs: &[Vec<u8>], tag: &str| {
-        let mut text = String::new();
-        for (i, seq) in seqs.iter().enumerate() {
-            text.push_str(&format!(">{tag}{i}\n{}\n", String::from_utf8_lossy(seq)));
+        };
+        let mut queries: Vec<Vec<u8>> = (0..12).map(|i| protein(120 + 37 * i)).collect();
+        let mut repeats = Vec::new();
+        for _ in 0..12 {
+            repeats.extend_from_slice(b"KLSEELLKKAEE");
         }
-        let path = dir.join(name);
-        std::fs::write(&path, text).expect("write FASTA");
-        path
-    };
-    (
-        write("query.faa", &queries, "q"),
-        write("subject.faa", &subjects, "s"),
-    )
+        repeats.extend(protein(60));
+        for _ in 0..10 {
+            repeats.extend_from_slice(b"GSGSPGTPGS");
+        }
+        queries.push(repeats);
+        let mut subjects: Vec<Vec<u8>> = queries
+            .iter()
+            .map(|q| {
+                q.iter()
+                    .enumerate()
+                    .map(|(i, &a)| if i % 6 == 5 { AMINO[(i * 7) % 20] } else { a })
+                    .collect()
+            })
+            .collect();
+        subjects.extend((0..8).map(|i| protein(90 + 61 * i)));
+        let write = |name: &str, seqs: &[Vec<u8>], tag: &str| {
+            let mut text = String::new();
+            for (i, seq) in seqs.iter().enumerate() {
+                text.push_str(&format!(">{tag}{i}\n{}\n", String::from_utf8_lossy(seq)));
+            }
+            let path = dir.join(name);
+            std::fs::write(&path, text).expect("write FASTA");
+            path
+        };
+        (
+            write("query.faa", &queries, "q"),
+            write("subject.faa", &subjects, "s"),
+        )
+    })
+    .clone()
 }
 
 /// The reference loop: every switch of the strict set off.

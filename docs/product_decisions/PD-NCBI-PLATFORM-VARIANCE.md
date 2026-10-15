@@ -1,8 +1,8 @@
 # Product Decision: Bounded native-NCBI platform variance
 
 - Decision ID: `PD-NCBI-PLATFORM-VARIANCE`
-- Version: 1.2
-- Date: 2026-09-02 (1.1: 2026-10-12, 1.2: 2026-10-14, see Amendments)
+- Version: 1.3
+- Date: 2026-09-02 (1.1: 2026-10-12, 1.2 and 1.3: 2026-10-14, see Amendments)
 - Status: Accepted
 
 ## Scope
@@ -13,7 +13,8 @@ release-certification jobs. It replaces
 the former requirement that one LOSAT output simultaneously equal the frozen
 Linux canonical bytes and every platform-local official NCBI binary output.
 
-It does not change LOSAT production code, the 43-case LOSAT canonical manifest,
+It does not change LOSAT production code, the 43 cases of the LOSAT canonical
+manifest (1.3 puts one approved output into a new manifest version, see Gate A),
 the existing BLASTN source-underdetermined class, or the accepted local-subject
 TBLASTX `db_gencode` deviation.
 
@@ -41,47 +42,59 @@ Release certification has two distinct gates.
 Each of the 43 LOSAT cases on each certified platform must satisfy:
 
 ```text
-SHA256(raw LOSAT output bytes) == frozen PR 5 canonical SHA256
+SHA256(raw LOSAT output bytes) == Gate A manifest SHA256
 ```
+
+The Gate A manifest is `LOSAT/tests/platform_native_v011_canonical.tsv`
+(v0.1.1, since 1.3): the 43 frozen PR 5 hashes of
+`LOSAT/tests/platform_native_v010_canonical.tsv` with each approved output in
+place of its frozen hash. Its one approved output is `blastn
+Sakai.MG1655.megablast` (below). The v0.1.0 file is not edited. The certifier
+reads both files from the candidate commit and requires v0.1.1 to be exactly
+v0.1.0 with the approved outputs; v0.1.1's comments name the v0.1.0 file, its
+SHA-256 and the approved record. A further approved output needs a new
+manifest version; a manifest is never rewritten in place.
 
 Gate A permits no normalization, sorting, field tolerance, platform baseline,
 or platform key in production behavior. A native-NCBI fingerprint can never
 compensate for a Gate A failure and never becomes expected LOSAT output.
 
-#### Known frozen mismatches (version 1.1)
+#### Known frozen mismatches (version 1.1; empty since 1.3)
 
 `LOSAT/tests/frozen_mismatch_allowlist.json` lists the Gate A cases whose
-approved LOSAT output is no longer the frozen PR 5 bytes. For a listed case
+approved LOSAT output is not yet in the Gate A manifest. For a listed case
 the certifier requires, on each certified platform:
 
 ```text
 SHA256(raw LOSAT output bytes) == allowed_actual_sha256 of the entry
 ```
 
-and records the step as `ALLOWED_KNOWN_MISMATCH`, never as exact PR 5 bytes;
-the platform summary then reports `all_exact_pr5_raw_bytes: false` and names
-the case. Any other output of a listed case fails, including the frozen PR 5
-bytes (a stale entry, which is to be removed). Every case that is not listed
-keeps the frozen-hash rule above.
+and records the step as `ALLOWED_KNOWN_MISMATCH`, never as exact manifest
+bytes; the platform summary then reports `all_exact_canonical_raw_bytes: false`
+(`all_exact_pr5_raw_bytes` before 1.3) and names the case. Any other output of
+a listed case fails, including the manifest bytes (a stale entry, which is to
+be removed). Every case that is not listed keeps the manifest rule above.
 
 An entry is one byte string for all platforms. It is not a platform baseline,
-a tolerance or a normalization, and the frozen hashes in
-`LOSAT/tests/platform_native_v010_canonical.tsv` are not rewritten. The
-certifier reads the allowlist from the candidate commit, requires each Gate A
+a tolerance or a normalization, and the manifest's hashes are not rewritten.
+The certifier reads the allowlist from the candidate commit, requires each Gate A
 entry to declare exactly the matrix and repeatability steps of its case
 (`frozen_gate_a_steps`), and binds the file's SHA-256 into platform identity,
 resume and the cross-platform aggregate.
 
 Adding or changing an entry needs its own approved record of the new output.
-The one entry, `blastn Sakai.MG1655.megablast` (Gate A steps 11, 52 and 53),
-was approved on 2026-09-28
+From 1.1 to 1.2 the list had one entry, `blastn Sakai.MG1655.megablast` (Gate A
+steps 11, 52 and 53); 1.3 moved its output into manifest v0.1.1 and emptied the
+list. That output was approved on 2026-09-28
 (`docs/evidence/losatx_stage_g_authority_v3/run-20260928T121516Z/`): the
 frozen v0.1.0 bytes differ from the Linux NCBI BLAST+ 2.17.0 output in 5 of
 6482 lines (an equal-score greedy traceback), and the current LOSAT output is
 byte-identical to that Linux output for the same command (the authority's
 `retained_linux_raw_sha256`). It is not the Windows or macOS native
 fingerprint of the case, which differ from it and stay Gate B's alone, and
-the case stays `SOURCE_UNDETERMINED_ACCEPTED` on the LOSAT parity axis.
+the case stays `SOURCE_UNDETERMINED_ACCEPTED` on the LOSAT parity axis (NCBI's
+choice among equal-score edit scripts depends on its sort; the approved bytes
+are the Linux NCBI choice).
 
 ### Gate B — `PLATFORM_NATIVE_NCBI_REFERENCE`
 
@@ -195,6 +208,15 @@ are not edited or auto-learned in place.
   platforms and an aggregate of exactly the four expected artifacts. The
   Non-goal "No expansion beyond the three platforms" reads "beyond the
   platforms recorded in the authority".
+- 1.3 (2026-10-14, Owner): Gate A reads manifest v0.1.1
+  (`LOSAT/tests/platform_native_v011_canonical.tsv`), which is v0.1.0's with
+  the approved `blastn Sakai.MG1655.megablast` output (`ac8177764f...`,
+  approved 2026-09-28) in place of its frozen PR 5 hash (`3f27c1f1...`, the
+  v0.1.0 LOSAT output). The allowlist entry for it is removed, so Gate A
+  reports 43 exact cases again; the allowlist and its rules stay for a future
+  approved output. The v0.1.0 manifest is not edited. Gate A labels drop
+  "PR 5": `CANONICAL_RAW_BYTES` and `all_exact_canonical_raw_bytes`. The Sakai
+  and TBLASTX d06 ratchets, Gate B and the authority are unchanged.
 
 ## Non-goals
 

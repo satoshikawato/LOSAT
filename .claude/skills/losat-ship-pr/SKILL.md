@@ -25,11 +25,24 @@ contains.
 3. Write the body to a file in `$TASK_DIR`: what changed and why, the stages and DW decisions it
    covers, the gate record paths and results, the evidence hashes, the residuals, and
    Owner-delegated choices. Then `gh pr create --base main --head <branch> --body-file <file>`.
+4. Open the PR as a draft (`--draft`) while its content may still change: a draft runs the fast
+   checks only, and the platform jobs run once, when it is marked ready for review.
 
 ## Watch CI
 
 - `ci.yml` (`rust`, `fast output regressions`) runs on every PR; `web.yml` runs when `web/**`,
   `LOSAT/src/**`, `LOSAT/Cargo.*`, or the WASI test files changed. Expect 5-20 minutes.
+  `platform-checks.yml` (`platform checks result`) runs its platform jobs when `LOSAT/src/**`,
+  `LOSAT/Cargo.*`, `LOSAT/build.rs` or its own files changed and the PR is not a draft: outputs on
+  Linux x64, Linux arm64, Windows x64 and macOS arm64 and `cargo test` on Linux arm64 and Windows.
+  Expect 1-2 hours, most of it the one macOS job waiting for a runner (GitHub runs five macOS
+  jobs at a time for the whole account; the full five-platform set runs on `main` and weekly).
+- Do not push to a ready PR unless it is `DIRTY` (merge conflict) or a check failed. A push cancels
+  its Platform checks run and queues it again behind every other PR (2026-10-16: eight cancelled
+  runs cost 41 hours of queue). The `main` ruleset does not require an up-to-date branch, so do
+  not merge `origin/main` into a PR that has no conflict.
+- Keep one ready PR per program (blastn, blastp, blastx, tblastn, tblastx) at a time. The next one
+  stays a draft, and merges `origin/main` once, after the previous one merged.
 - Run one watcher per session, not one per agent:
   `python3 .claude/skills/losat-ship-pr/scripts/watch_prs.py --prs <n>` under Monitor or in the
   background, and act on its event lines (merged, closed, conflict, failed, cancelled, green).

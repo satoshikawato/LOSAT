@@ -14,8 +14,8 @@ lowercase masking) and for TBLASTX those of tblastx_regression_fixtures.py (quer
 batches, warnings, hit lists, ambiguity, empty inputs, failed writes); for each
 selected program the FASTA-input fixtures of fasta_input_fixtures.py (`check --rows
 <program>`: stdout, stderr, exit code and combined stream against the frozen NCBI
-hashes, and LOSAT's explicit rejections where it rejects an input or option); for BLASTP
-and BLASTN the `-db` fixtures of db_search_fixtures.py (`check --program <program>`: stdout,
+hashes, and LOSAT's explicit rejections where it rejects an input or option); for BLASTP,
+BLASTN, TBLASTN and BLASTX the `-db` fixtures of db_search_fixtures.py (`check --program <program>`: stdout,
 stderr and exit status against the frozen NCBI `<program> -db -num_threads 1` bytes, at 1 and
 4 threads).
 
@@ -57,6 +57,7 @@ from frozen_allowlist import Allowlist  # noqa: E402
 
 PROGRAMS = capture_outputs.PROGRAMS
 FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")
+DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx")  # the programs of db_search_manifest.tsv
 REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
 # TBLASTX manifest cases that finish in under 30 s (2026-10-01, native release binary);
 # the other 13 (46 s to over 10 min) run in the nightly workflow.
@@ -216,7 +217,7 @@ def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
         log.write_text(result.stdout + result.stderr)
         if result.returncode != 0:
             failures.append(f"outfmt 0 fixtures differ at {threads} thread(s): see {log.name}")
-    for program in ("blastp", "blastn"):
+    for program in DB_SEARCH_PROGRAMS:
         if program not in programs:
             continue
         for threads in (1, 4):

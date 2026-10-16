@@ -2101,8 +2101,8 @@ fn run_in_pool(
                 let error = stores_error
                     .take()
                     .expect("unreadable subjects keep their read error");
-                let read_error = error
-                    .downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
+                let read_error =
+                    error.downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
                 reports.write_before_failed_batch(outputs, done, &warnings)?;
                 outputs.diagnostics.write_all(&batch_warnings)?;
                 return Err(crate::blastinput::app::engine_error(read_error.0));

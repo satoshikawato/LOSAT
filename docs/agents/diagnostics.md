@@ -1212,6 +1212,89 @@ Scheduling (each value computed by one thread with the original function; order 
   chunk, the hit list and the whole diagonal hash compared with the original code; one
   `[X_PAIRPARSHADOW]` summary line on stderr at the end). With `LOSAT_TIMING` a
   `[TIMING] x_pairpar_seed` line gives the strips, seeds and the owner's fold, scan and wait time.
+- `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
+  `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; not in the strict set: off unless set
+  to any value, whatever `LOSAT_X_DEFAULT` says) the discontiguous megablast lookup tables
+  (`lookup.rs` `build_disc_mb_lookup`, NCBI `s_FillDiscMBTable`: `hashtable`, `next_pos` and the counters
+  of the longest chain, and with two templates `hashtable2`, `next_pos2` and their counters, both
+  templates sharing one presence vector) are filled by the threads of the search pool
+  (`blastn/x_disc_lookup_par.rs`). The words are read in chunks of 524,288 positions, each in three
+  phases on the pool: (A) the chunk's positions are cut into one span per thread, and each thread
+  reads the words of its span with the loop's statements (entering a range up to `template_length - 1`
+  positions early, so the words and their template indices are the loop's) and sorts them into
+  buckets by the owner of their cell (blocks of `2^max(11, pv_array_bts)` cells dealt round robin, the
+  plan of `LOSAT_X_PAIRPAR`'s megablast table); (B) each owner applies the loop's update to the words of
+  its cells span by span, so each cell gets its words in the original order, and keeps each word's
+  previous head; (C) each thread writes `next_pos` (and `next_pos2`) of the words of its span from the
+  kept heads. Each presence-vector word and counter is written by one owner (a presence bit is only
+  ever set), and `longest_chain` is computed afterwards by the original code. The buckets hold one
+  8-byte entry per word of the current chunk and template; before each chunk a bucket gives back the
+  room it grew above four times its share of a chunk, so the buckets of one template reserve at most
+  24 MiB plus 544 bytes x threads^2 whatever the input. Measured (unit test, chunks of 524,288
+  positions): 8 MiB per template on random letters at 4, 16 and 64 threads; 16 / 15 / 12 MiB on
+  blocks of unmasked short repeats (each chunk's words on the cells of one or two owners, changing
+  from chunk to chunk), where buckets that kept their room reserved 16 / 32 / 48 MiB (up to 2 x
+  threads x 4 MiB); on (a) below 6.0 MiB at 4 threads and 7.8 MiB at 16. It acts only where a LOSAT search pool
+  of two threads or more is current: the search's pool, or the private pool of a `LOSAT_X_QBATCHPAR`
+  slot of two or more threads (never rayon's global pool); with one thread, a slot of one thread, a
+  build without the `parallel` feature or WebAssembly without `wasm-threads` the original loop runs.
+  Shadow: `LOSAT_X_DISCLUTPARSHADOW=1` (implies the switch) builds the tables again the other way
+  (serially when the pool built them, otherwise in four parts one after another) and compares every
+  element and the longest chain; a difference prints `[X_SHADOW] DISCLUTPAR ... DIFFERENT ...` and
+  panics; at exit `main` prints `[X_SHADOW] DISCLUTPAR tables= pool= two_templates= cells= diffs=0
+  identical` (tables compared, of them built on a pool, of them with two templates, elements
+  compared). With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] disc_lookup_build: <s>s
+  (builds=<n> parallel=<n>)` when a table was built: the summed wall time of the builds (allocation,
+  fill and longest chain, not the shadow's second build; with `LOSAT_X_QBATCHPAR` it includes the
+  slots' concurrent builds) and how many were filled on a pool. A second line, `[TIMING]
+  disc_lookup_split: alloc= loop= pool_fill= chain= chunks= read_wall= read_max= read_sum= read_late=
+  update_... link_... buckets_peak=`, splits the same builds: the allocation, the fill by the original
+  loop, the fill on the pool and the longest chain (seconds, summed); for the pool fills (not the
+  shadow's) their chunks and, per phase (read = A, update = B, link = C) summed over the chunks, the
+  calling worker's wall time, the longest job, the jobs' summed time and the latest job start; and the
+  most the buckets of one fill reserved. The jobs' times are taken only with `LOSAT_TIMING`. Measured on the workstation (2x Xeon
+  Gold 6338, powersave, 16 idle physical cores of one node with the siblings idle, `numactl --membind`;
+  `-outfmt 6`, subject 3 Mb of D. melanogaster 2L, `LOSAT_X_PAIRPARDISC=1`; off runs carry an unread
+  `LOSAT_X_PADDISCLUTPAR=1`; build times from `LOSAT_TIMING` runs, walls from runs without it),
+  medians of alternating off/on pairs: (a) 1,775 cDNAs (5.0 Mb; one big query batch and two small
+  ones), 16 threads: build 0.206 -> 0.089 s, wall 2.173 -> 2.050 s (on/off 0.943, 8 pairs); (b) 3,492
+  cDNAs (two big batches), 16 threads: build 0.378 -> 0.158 s, wall 4.640 -> 4.433 s (0.955, 6 pairs);
+  (a) at 4 threads: build 0.21 s either way, wall 2.184 -> 2.180 s (1.00, 6 pairs; in the machine's fast
+  phase the build took 0.140 s without and 0.204 s with the switch). A first version in which every
+  thread read every word and wrote `next_pos` itself built (a) in 0.127 s at 16 threads. Max RSS within
+  the pairs 91-96 MiB on / 91-93 off for (a) at 16 threads, 104-107 / 105-107 for (b). At 4 threads
+  the build was not faster. The split line on the workstation (fix round 1, node 0 CPUs 16-31, (a),
+  three tables in 21 chunks, medians of 4 `LOSAT_TIMING` runs per variant; the 4-thread runs were all
+  in the fast phase, 1.75-1.80 GHz, the 16-thread runs all in the slow phase, 1.28-1.38 GHz) shows
+  where the time goes. 4 threads: the loop 0.204 s; the pool fill 0.224 s = phases A / B / C 0.081 /
+  0.133 / 0.014 s of wall, longest jobs 0.077 / 0.130 / 0.009 s, jobs' summed time 0.238 / 0.497 /
+  0.033 s. 16 threads: the loop 0.219 s; the pool fill 0.086 s = 0.017 / 0.061 / 0.009 s, longest
+  jobs 0.011 / 0.057 / 0.005 s, summed 0.159 / 0.853 / 0.061 s. So the joins cost little: the latest
+  job start is 0.0024-0.0033 s per phase summed over the 21 chunks, and the walls exceed the longest
+  jobs by 0.011 s (4 threads) and 0.013 s (16 threads) in all, about 0.2 ms per join. The time is in
+  the jobs' own work, whose sum is 3.8 times (4 threads) and 4.9 times (16 threads) the loop's whole
+  fill; phase B (the owners' updates) alone sums to 2.4 and 3.9 times the loop, with balanced jobs
+  (longest / mean 1.04 and 1.08); at 4 threads phase A is also costly (the longest reader 1.29 times
+  the mean). The runs with the switch also have more system time (0.22 against 0.15 s at 4 threads,
+  0.90 against 0.60 s at 16). What makes a word's work dearer in the phases is not measured;
+  candidates are the first touch of the fresh tables by many threads (transparent huge pages are
+  `madvise` there, so 4 KiB page faults) and cache lines of the buckets moving between cores (written
+  in A, read and rewritten in B, read in C). Fewer joins would save at most the 0.01 s above. Fix round
+  1's bucket bound costs nothing measurable: (a) at 16 threads, 4 rounds old (24c714fd) / new
+  (b1e3df69) / off, all slow phase: walls 2.056 / 2.055 / 2.174 s (new/old 1.000, 0.999-1.001; new/off
+  0.945), max RSS 91.3-95.3 / 91.3-94.3 / 88.9-92.9 MiB; (b) at 16 threads one round in a common phase
+  4.419 / 4.419 s (the other mixed the phases). Every output equals the sha256 of the run without the
+  switch. Tests: the unit tests of
+  `x_disc_lookup_par.rs` (partitioned and pool fills equal the original loop for every template type,
+  length and word size, one and two templates, 1-20 parts, chunks of 1 to 5,000 positions and random
+  layouts of queries and masks, pools of 1, 2, 3, 5, 8 and 16 threads, a 2.6 M-position query in the
+  default chunks on pools; the template indices read only the last `template_length` bases; the owners
+  run on at least two workers of a 3-thread pool; the shadow names a change in any one array or the
+  longest chain; the buckets' bound) and `LOSAT/tests/blastn_disc_lookup_par.rs`
+  (off / on / shadow equal at 1 and 4 threads, `-subject` and `-db`, one and two templates, with
+  `LOSAT_X_PAIRPARDISC`, `LOSAT_X_QBATCHPAR` slots and split query chunks, megablast with and without a
+  template, the timing and split lines, and AP027131 against NZ_CP006932 with one and two templates,
+  whose tables span two chunks).
 - `LOSAT_X_PAIRPARDISC=1` (not in the strict set: off unless set to any value, whatever
   `LOSAT_X_DEFAULT` and `LOSAT_X_PAIRPAR` say) blastn `-task dc-megablast`, one query-subject pair
   on a pool of 2+ threads: the two-hit seed stage of a subject chunk with a discontiguous megablast

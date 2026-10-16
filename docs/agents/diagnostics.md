@@ -1009,12 +1009,13 @@ Scheduling (each value computed by one thread with the original function; order 
   tests, insert), `s_TypeOfWord` and the ungapped extension read only inputs, and with `scan_range == 0`
   there is no off-diagonal read; the argument is written out in the module's header. The partition
   tables stay in the subject scratch from one partitioned stage to the next (no copy per chunk), checked
-  by a stamp that `x_pair_seed::run` takes at the start of every chunk; a helper leaves after 2 ms
-  without work and a helper job that starts on a participant's thread returns at once, so a thread that
-  waits inside a nested parallel call never runs a helper that waits for the work below it; no
-  `thread::sleep` on wasm32. With LOSAT_TIMING the partitions' ungapped-extension times are added to
-  the shared counters once per stage, and the `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end
-  with `partitions= merges= merge=`. Shadow: `LOSAT_X_PAIRPARSHADOW=1` / `LOSAT_X_PAIRPARDISCSHADOW=1`
+  by a stamp that `x_pair_seed::run` takes at the start of every chunk; a helper that finds nothing to do
+  leaves when the whole stage has made no progress for 10 ms, and a helper job that starts on a
+  participant's thread returns at once, so a thread that waits inside a nested parallel call never runs
+  a helper that waits for the work below it; no `thread::sleep` on wasm32. With LOSAT_TIMING the
+  partitions' ungapped-extension times are added to the shared counters once per stage, and the
+  `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end with `partitions= merges= merge=
+  helpers_left=`. Shadow: `LOSAT_X_PAIRPARSHADOW=1` / `LOSAT_X_PAIRPARDISCSHADOW=1`
   with the switch run the partitioned stage on the copies (and check every reuse of the kept tables
   against the chunk's table); their lines end with `fold=part partitions= merges= kept=` (`fold=owner`
   without the switch; `kept`: stages that started from the kept tables). On the command line a subject

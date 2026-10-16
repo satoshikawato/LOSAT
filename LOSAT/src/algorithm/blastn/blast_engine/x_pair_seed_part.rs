@@ -64,9 +64,10 @@
 //! diagonal; a stable counting sort, so each partition keeps the seeds in scan order) and folds
 //! partition p of the next strip of any partition p it can lock (`try_lock`), into a table of
 //! that partition (`PartState::hash`). The owner alone can scan every strip and fold every
-//! partition, so no participant waits for a job that may never start. A helper leaves when it has
-//! found nothing to do for `HELPER_IDLE` (the owner never does), and a helper job that starts on
-//! a thread that is inside a participant returns at once: a thread that waits inside a nested
+//! partition, so no participant waits for a job that may never start. A helper that finds nothing
+//! to do leaves when the whole stage has made no progress (no strip scanned, no partition folded)
+//! for `HELPER_STALL` (the owner never leaves), and a helper job that starts on a thread that is
+//! inside a participant returns at once: a thread that waits inside a nested
 //! parallel call (in a participant's scan or fold, or in a piece of such a call it stole) may
 //! run a helper job above the work it interrupted, and that helper must not wait for the stage
 //! while the stage waits for that work (the pattern that hung LOSAT_X_BNSTREAM, #218; test
@@ -342,6 +343,8 @@ pub(super) struct PartStats {
     pub(super) ungapped_calls: u64,
     pub(super) kept: bool,
     pub(super) merge_ns: u64,
+    /// helpers that left a stalled stage before its end
+    pub(super) helpers_left: u64,
 }
 
 thread_local! {
@@ -379,11 +382,12 @@ impl Drop for Failing<'_> {
     }
 }
 
-/// No NCBI counterpart (scheduling only): how long a helper looks for work before it leaves the
-/// stage. While there is work, a helper always finds some (a partition's next strip or a strip
-/// to scan), so it waits only when the stage ends or the work it needs runs below it on its own
-/// thread (a nested parallel call).
-const HELPER_IDLE: std::time::Duration = std::time::Duration::from_millis(2);
+/// No NCBI counterpart (scheduling only): how long a helper that finds nothing to do waits for
+/// the stage to make progress before it leaves. A helper waits while a partition that lags
+/// holds back the window of strips; the stage still makes progress then, so the helper stays.
+/// The stage stops making progress only when the work it needs runs below a waiting helper on
+/// that helper's own thread (a nested parallel call), and then the helper has to leave.
+const HELPER_STALL: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// No NCBI counterpart: a participant's wait when it found nothing to do. It spins a little,
 /// then yields; a native helper that keeps finding nothing sleeps 50 us between looks. On
@@ -478,6 +482,9 @@ where
     let done: Vec<AtomicUsize> = (0..n).map(|_| AtomicUsize::new(0)).collect();
     let cursor = AtomicUsize::new(0);
     let failed = AtomicBool::new(false);
+    // strips scanned plus partitions of strips folded, and the helpers that left a stalled stage
+    let progress = AtomicUsize::new(0);
+    let left = AtomicUsize::new(0);
 
     // A strip's seeds, cut by partition with a stable counting sort.
     let produce = |i: usize, raw: &mut Vec<Seed>, fill: &mut Vec<u32>| {
@@ -532,7 +539,7 @@ where
         let (mut scan_ns, mut wait_ns) = (0u64, 0u64);
         let mut wait_start: Option<std::time::Instant> = None;
         let mut idle = 0u32;
-        let mut idle_since: Option<std::time::Instant> = None;
+        let mut stall: Option<(std::time::Instant, usize)> = None;
         loop {
             if failed.load(Ordering::Acquire) {
                 if owner {
@@ -569,6 +576,7 @@ where
                 st.next = i + 1;
                 part_next[p].store(i + 1, Ordering::Release);
                 drop(st);
+                progress.fetch_add(1, Ordering::Relaxed);
                 if done[i].fetch_add(1, Ordering::AcqRel) + 1 == parts {
                     if let Some(buf) = lock(&slots[i]).take() {
                         if let Ok(buf) = Arc::try_unwrap(buf) {
@@ -597,6 +605,7 @@ where
                 if i < n {
                     let t0 = (timed && owner).then(std::time::Instant::now);
                     produce(i, &mut raw, &mut fill);
+                    progress.fetch_add(1, Ordering::Relaxed);
                     if let Some(t0) = t0 {
                         scan_ns += t0.elapsed().as_nanos() as u64;
                     }
@@ -605,7 +614,7 @@ where
             }
             if did {
                 idle = 0;
-                idle_since = None;
+                stall = None;
                 if let Some(t0) = wait_start.take() {
                     wait_ns += t0.elapsed().as_nanos() as u64;
                 }
@@ -616,11 +625,17 @@ where
                 idle = idle.saturating_add(1);
                 if !owner && idle.is_multiple_of(64) {
                     // the owner can finish the stage alone
-                    let since = *idle_since.get_or_insert_with(std::time::Instant::now);
-                    if since.elapsed() >= HELPER_IDLE {
-                        failing.done = true;
-                        lock(&raw_spare).push(raw);
-                        return (scan_ns, wait_ns);
+                    let now = progress.load(Ordering::Relaxed);
+                    match stall {
+                        Some((since, seen)) if seen == now => {
+                            if since.elapsed() >= HELPER_STALL {
+                                left.fetch_add(1, Ordering::Relaxed);
+                                failing.done = true;
+                                lock(&raw_spare).push(raw);
+                                return (scan_ns, wait_ns);
+                            }
+                        }
+                        _ => stall = Some((std::time::Instant::now(), now)),
                     }
                 }
                 pause(idle, owner);
@@ -639,6 +654,7 @@ where
         owner_scan_ns,
         wait_ns,
         kept: reuse,
+        helpers_left: left.into_inner() as u64,
         ..PartStats::default()
     };
     for st in &states {
@@ -895,6 +911,7 @@ static MERGES: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 static KEPT: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 static PARTS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 static MERGE_NS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+static LEFT: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 static VERIFIED: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart: counts one partitioned stage of `kind` (once per stage).
@@ -905,6 +922,7 @@ pub(super) fn record(kind: usize, parts: usize, stats: &PartStats) {
     }
     PARTS[kind].fetch_max(parts as u64, Ordering::Relaxed);
     MERGE_NS[kind].fetch_add(stats.merge_ns, Ordering::Relaxed);
+    LEFT[kind].fetch_add(stats.helpers_left, Ordering::Relaxed);
 }
 
 /// No NCBI counterpart: the fields the shadow summary lines of `kind` end with: `fold=part`
@@ -925,10 +943,11 @@ pub(super) fn shadow_fields(kind: usize) -> String {
 pub(super) fn timing_fields(kind: usize) -> String {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     format!(
-        " partitions={} merges={} merge={:.3}s",
+        " partitions={} merges={} merge={:.3}s helpers_left={}",
         load(&PARTS[kind]),
         load(&MERGES[kind]),
-        load(&MERGE_NS[kind]) as f64 / 1e9
+        load(&MERGE_NS[kind]) as f64 / 1e9,
+        load(&LEFT[kind])
     )
 }
 
@@ -1358,9 +1377,11 @@ mod tests {
     }
 
     // A parallel iterator inside every scan and fold call of every participant (the pattern
-    // that hung LOSAT_X_BNSTREAM, #218): a participant waiting inside it may steal a helper job
-    // of its own stage, which must not join and wait for the partition the participant holds.
-    // The stages end and give the reference's hits and table.
+    // that hung LOSAT_X_BNSTREAM, #218): a thread waiting inside it (the participant, or a thread
+    // that stole a piece of the call) may steal a helper job of the stage, which must not wait
+    // for the stage while the stage waits for the call below it (the helper returns at once on a
+    // participant's thread, and leaves a stage that has stalled for `HELPER_STALL`). The stages
+    // end and give the reference's hits and table.
     #[test]
     fn a_nested_parallel_call_in_every_participant_does_not_hang() {
         let mut rng = Lcg(0x4E57_ED00);

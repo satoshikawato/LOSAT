@@ -874,7 +874,8 @@ pub(super) fn x_scan_plan(
     // subject (tblastn/x_subject_translate.rs); the frames and units are the same values. With
     // LOSAT_X_TBNXLATESHADOW both are made for every plan and the search stops if they differ.
     // EXPERIMENT (LOSAT_X_TBNSTORE): a packed subject is translated from its packed bases
-    // (x_packed_subject_plan); a stage that reads the case gets the letters instead.
+    // (x_packed_subject_plan); a stage that reads the case of a subject with lower-case letters
+    // gets the letters instead.
     let x_build_subject = || -> Result<std::sync::Arc<XSubjectPlan>> {
         use crate::sequence::packed_subject::SubjectNt;
         match subject {
@@ -887,8 +888,8 @@ pub(super) fn x_scan_plan(
             ),
             SubjectNt::Packed(store) => {
                 anyhow::ensure!(
-                    !mask_lowercase,
-                    "TBLASTN: a packed subject searched with lowercase masking"
+                    !mask_lowercase || store.lowercase().is_empty(),
+                    "TBLASTN: a packed subject with lower-case letters searched with lowercase masking"
                 );
                 super::x_subject_translate::x_packed_subject_plan(
                     super::x_subject_translate::x_translate(),

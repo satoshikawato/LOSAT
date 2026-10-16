@@ -1,7 +1,8 @@
 //! BLASTN hands each subject's HSPs to the hit lists in OID order as it is searched (one
-//! thread) or block by block (`LOSAT_X_BNSTREAM`, two or more threads). The hit lists, and so
-//! the report, must not depend on either: these searches have more subjects than one block of
-//! two or four threads holds (64 subjects per thread), and a short hit list that drops subjects.
+//! thread) or from a window of subjects searched ahead (`LOSAT_X_BNSTREAM`, two or more
+//! threads). The hit lists, and so the report, must not depend on either: these searches have
+//! more subjects than the window of two or four threads holds (64 subjects per thread), and a
+//! short hit list that drops subjects.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

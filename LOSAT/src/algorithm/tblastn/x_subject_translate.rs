@@ -734,8 +734,9 @@ fn x_packed_frames(
 //                                      &frame_offsets, NULL);
 // ```
 // The plan of a packed subject as `x_table_plan` makes it from the subject's letters. Only a
-// stage that does not read the case of the letters takes the store (`-lcase_masking` gives the
-// letters), so every frame has one unit per chunk with one range, as without lowercase masking.
+// stage that does not read the case of the letters, or a subject without lower-case letters,
+// takes the store (`-lcase_masking` gives the letters of the others), so every frame has one unit
+// per chunk with one range, as without lowercase masking.
 /// EXPERIMENT (LOSAT_X_TBNSTORE): the plan of one packed subject, from its codes.
 fn x_packed_plan(
     store: &crate::sequence::packed_subject::PackedNucleotide,
@@ -1330,21 +1331,32 @@ mod tests {
             }
         }
         assert_eq!(compared, 4 * (44 * 3 + 2 * 27 + 21 * 3));
-        // a packed subject is never searched with lowercase masking (the letters are given)
+        // a packed subject with lower-case letters is never searched with lowercase masking (the
+        // letters are given); one without them (every `-db` sequence) gives the plan of the
+        // search without the mask
+        let scan = |store: &PackedNucleotide, mask_lowercase: bool| {
+            x_scan_plan(
+                &[query],
+                SubjectNt::Packed(store),
+                1,
+                None,
+                11,
+                mask_lowercase,
+                ScoringMatrix::Blosum62,
+                3,
+                Some(&lookup),
+                None,
+            )
+        };
+        let mut lower = letters(b"ACGT", 300, 1);
+        lower[100..160].make_ascii_lowercase();
+        let store = PackedNucleotide::from_subject_letters(&lower).unwrap();
+        assert!(scan(&store, true).is_err());
         let store = PackedNucleotide::from_subject_letters(&letters(b"ACGT", 300, 1)).unwrap();
-        let masked = x_scan_plan(
-            &[query],
-            SubjectNt::Packed(&store),
-            1,
-            None,
-            11,
-            true,
-            ScoringMatrix::Blosum62,
-            3,
-            None,
-            None,
-        );
-        assert!(masked.is_err());
+        let unmasked = scan(&store, false).unwrap().unwrap();
+        let masked = scan(&store, true).unwrap().unwrap();
+        let masked = Arc::try_unwrap(masked.subject).ok().expect("one owner");
+        assert_eq!(x_plan_difference(&Ok(masked), &Ok(unmasked.subject)), None);
     }
 
     // No NCBI counterpart: the shadow mode stops the search when the plan of a packed subject

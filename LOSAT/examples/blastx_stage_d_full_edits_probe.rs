@@ -90,7 +90,11 @@ fn main() -> Result<()> {
     };
     let options = args.resolve()?;
     let query = read_fasta(&args.query, false, args.lcase_masking)?;
-    let subject = read_fasta(&args.subject, true, false)?;
+    let subject = read_fasta(
+        args.subject.as_deref().expect("the probes take -subject"),
+        true,
+        false,
+    )?;
     let db_length = subject.iter().map(|s| s.sequence.len() as i64).sum();
     for batch in search_preliminary(&query, &subject, &options)? {
         let mut final_call = 0;

@@ -66,7 +66,11 @@ pub fn evaluate_gapped(
     };
     let mut ka = lookup_protein_params(&spec);
     ka.lambda /= scale;
-    let gumbel = lookup_protein_gumbel_params(&spec, db_length).expect("validated BLASTX Gumbel");
+    let gumbel = lookup_protein_gumbel_params(
+        &spec,
+        super::parameters::gumbel_db_length(options, db_length),
+    )
+    .expect("validated BLASTX Gumbel");
     let query_lengths: Vec<_> = batch.contexts.iter().map(|c| c.length as i32).collect();
     if let Some(link) = link_parameters(options) {
         return link_uneven(

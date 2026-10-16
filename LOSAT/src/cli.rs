@@ -696,7 +696,7 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
 fn is_unported_blastx_arg(name: &str) -> bool {
     matches!(
         name,
-        "db" | "query_loc"
+        "query_loc"
             | "subject_loc"
             | "show_gis"
             | "num_descriptions"
@@ -722,7 +722,6 @@ fn is_unported_blastx_arg(name: &str) -> bool {
             | "qcov_hsp_perc"
             | "best_hit_overhang"
             | "best_hit_score_edge"
-            | "dbsize"
             | "searchsp"
             | "import_search_strategy"
             | "export_search_strategy"

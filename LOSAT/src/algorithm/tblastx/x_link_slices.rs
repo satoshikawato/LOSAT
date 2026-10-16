@@ -12,9 +12,9 @@
 //! without changing them. `x_hsp_inplace::link_in_place` calls it at its group step; nothing else
 //! does.
 //!
-//! The switch is not in the strict set (`utils/xswitch.rs`): it is on when `LOSAT_X_LINKSLICES`
-//! is set, to any value, and off otherwise, and `LOSAT_X_DEFAULT` does not touch it. With it off
-//! the statements of `link_in_place` run as before, after one read of `mode()` per linking call.
+//! The switch is in the strict set (`utils/xswitch.rs`): it is on unless `LOSAT_X_LINKSLICES` is
+//! `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it off the statements of `link_in_place`
+//! run as before it existed, after one read of `mode()` per linking call.
 //! It acts only where `LOSAT_X_HSPINPLACE` does: the reference body (`LOSAT_X_HSPINPLACE=0`,
 //! `LOSAT_X_DEFAULT=0`, `LOSAT_DIAGNOSTICS`, `LOSAT_DEBUG_CUTOFFS`) has its own group loop and is
 //! not touched.
@@ -204,15 +204,16 @@ const SHADOW_SWITCH: &str = "LOSAT_X_LINKSLICESSHADOW";
 //    hp_start = s_LinkHSPStructReset(hp_start);
 //    hp_start->next = hp_frame_start[frame_index];
 // ```
-// Dispatch switch, read once: 0 = today's statements, 1 = this path, 2 = both, compared. Not in
-// `xswitch::STRICT_SET`, so not read with `xswitch::on`.
+// Dispatch switch, read once: 0 = the statements from before the switch existed, 1 = this path,
+// 2 = both, compared. The shadow is opt-in (set to any value) and wins; the switch is a
+// strict-set switch, read with `xswitch::on`.
 /// 0 = off, 1 = LOSAT_X_LINKSLICES, 2 = LOSAT_X_LINKSLICESSHADOW.
 pub(super) fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_LINKSLICESSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_LINKSLICES").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_LINKSLICES") {
             1
         } else {
             0

@@ -152,17 +152,17 @@ pub(crate) fn read_titles(
 pub(crate) struct ReportedSubjects {
     /// The ordinal id of each rank.
     pub(crate) ordinals: Vec<u32>,
-    /// The records of the ranks: `gnl|BL_ORD_ID|n`, the stored title and the letters of the
-    /// stored codes.
+    /// The records of the ranks: `gnl|BL_ORD_ID|n` and the stored title, without letters (the
+    /// reports read them from the stored codes, `report::SubjectLetters::Stored`).
     pub(crate) records: Vec<FastaRecord>,
 }
 
 /// The reported database sequences of `ordered` (the reported hits of all query batches in
 /// report order, subjects named by ordinal id): the hits name them by rank from here on (the
 /// rank grows with the ordinal id, so every comparison that breaks a tie by the subject index
-/// gives the same order), and their records (`titles`, the letters of `stores`, by ordinal id)
-/// are kept for the reports. A reported sequence whose stored title LOSAT does not report as
-/// NCBI does is LOSAT's refusal.
+/// gives the same order), and their records (`titles`, by ordinal id; each is a sequence of
+/// `stores`) are kept for the reports. A reported sequence whose stored title LOSAT does not
+/// report as NCBI does is LOSAT's refusal.
 pub(crate) fn reported_subjects(
     titles: &DatabaseTitles,
     ordered: &mut [TblastxHsp],
@@ -183,15 +183,14 @@ pub(crate) fn reported_subjects(
             .get(&ordinal)
             .with_context(|| format!("database sequence {ordinal} has no title read"))?;
         shared::check_reported_title(stored.replaced_bytes, ordinal, PROGRAM)?;
-        let mut sequence = Vec::new();
-        stores
-            .get(ordinal as usize)
-            .with_context(|| format!("database sequence {ordinal} was not read"))?
-            .ascii_into(&mut sequence);
+        anyhow::ensure!(
+            (ordinal as usize) < stores.len(),
+            "database sequence {ordinal} was not read"
+        );
         records.push(FastaRecord {
             local_id: format!("gnl|BL_ORD_ID|{ordinal}"),
             title: stored.title.clone(),
-            sequence,
+            sequence: Vec::new(),
             warnings: Vec::new(),
         });
     }

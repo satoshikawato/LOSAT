@@ -1407,6 +1407,9 @@ pub(crate) struct TblastxReportRun<'a> {
     /// The queries reported (those of the batches searched so far) and the subjects.
     pub queries: &'a [FastaRecord],
     pub subjects: &'a [FastaRecord],
+    /// The subjects' letters that the displayed rows read (`-db`: the stored codes of the
+    /// reported sequences; their records hold none).
+    pub subject_letters: report::SubjectLetters<'a>,
     /// `-db`: the database and its reported sequences (`subjects` are their records, by rank).
     pub database: Option<ReportDatabase<'a>>,
     /// The tabular query IDs (`FastaRecord::shown_id`), by query.
@@ -1595,7 +1598,13 @@ fn write_tblastx_outputs(
     if run.v1_titles && output_formats.contains(&report::TblastxOutputFormat::Pairwise) {
         check_shown_subject_titles(&hits, run.subjects)?;
     }
-    report::set_displayed_identities(&mut hits, run.queries, run.subjects, &query_code, &db_code);
+    report::set_displayed_identities(
+        &mut hits,
+        run.queries,
+        run.subject_letters,
+        &query_code,
+        &db_code,
+    );
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
     // ```c
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
@@ -1609,6 +1618,7 @@ fn write_tblastx_outputs(
             &hits,
             run.queries,
             run.subjects,
+            run.subject_letters,
             run.query_stats,
             &query_code,
             &db_code,
@@ -1725,8 +1735,15 @@ fn write_tblastx_outputs(
                 let pairwise_report = crate::report::pairwise::TblastxPairwiseReport {
                     version: report::NCBI_TBLASTX_VERSION.to_string(),
                     database_name: database.clone(),
-                    database_num_sequences: run.subjects.len(),
-                    database_total_letters: run.subjects.iter().map(|r| r.seq().len()).sum(),
+                    // `-db`: the `Database:` lines are the database's (`database` below).
+                    database_num_sequences: match &run.database {
+                        Some(database) => database.pairwise.num_sequences as usize,
+                        None => run.subjects.len(),
+                    },
+                    database_total_letters: match &run.database {
+                        Some(database) => database.pairwise.total_letters as usize,
+                        None => run.subjects.iter().map(|r| r.seq().len()).sum(),
+                    },
                     word_threshold: args.threshold,
                     window_size: args.window_size as usize,
                     num_descriptions,
@@ -2262,11 +2279,13 @@ impl BatchReports<'_> {
         let reported = done.searched.len();
         let queries = &self.query_runs.records[..reported];
         let mut hits = report_order(self.args, queries, done.hits);
-        // `-db`: the reported sequences by rank (their records hold the letters of the stored
-        // codes and the stored titles).
+        // `-db`: the reported sequences by rank (their records hold the stored titles, their
+        // letters are read from the stored codes).
         let reported_subjects;
-        let (subjects, database) = match self.subjects {
-            ShownSubjects::Fasta(records) => (*records, None),
+        let (subjects, subject_letters, database) = match self.subjects {
+            ShownSubjects::Fasta(records) => {
+                (*records, report::SubjectLetters::Records(records), None)
+            }
             ShownSubjects::Database {
                 database,
                 pairwise,
@@ -2279,6 +2298,10 @@ impl BatchReports<'_> {
                 )?;
                 (
                     reported_subjects.records.as_slice(),
+                    report::SubjectLetters::Stored {
+                        stores,
+                        ordinals: &reported_subjects.ordinals,
+                    },
                     Some(ReportDatabase {
                         name: database.name(),
                         pairwise,
@@ -2294,6 +2317,7 @@ impl BatchReports<'_> {
                 args: self.args,
                 queries,
                 subjects,
+                subject_letters,
                 database,
                 query_ids: &self.query_ids[..reported],
                 query_stats: &done.query_stats,
@@ -3078,7 +3102,9 @@ fn search_query_batch(
     // 3. Initial word cutoff: cutoff_score_for_update_tblastx with CUTOFF_E_TBLASTX=1e-300
     // 4. Final cutoff = MIN(update_cutoff, gap_trigger, cutoff_score_max)
     //
-    // The word cutoff uses the average subject nucleotide length.
+    // The word cutoff uses the average subject nucleotide length. With E = 1e-300 (step 3) its
+    // score exceeds gap_trigger whatever the lengths (above 2,000 against about 40), so step 4
+    // never takes it and no output depends on this average; it is computed as NCBI computes it.
     let subject_len_nucl = db_length_nucl / db_num_seqs;
     // NCBI: cutoff scores are stored per query context (no subject-frame dimension).
     // Reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:320-324

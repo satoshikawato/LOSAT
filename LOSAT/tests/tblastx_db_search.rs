@@ -2,10 +2,9 @@
 //! campaign) on a whole run of the binary.
 //!
 //! The properties under test are LOSAT's own: the report of a database search is the same
-//! at every thread count; for a subject set without ambiguity codes, the tabular rows of `-db`
+//! at every thread count; for a subject set of A, C, G and T only, the tabular rows of `-db`
 //! are those of `-subject` with the same records (NCBI scans a subject set as a database, and
-//! TBLASTX has no Gumbel block, so the statistics are the same; the bases differ only where
-//! makeblastdb has replaced an ambiguity code by a random base); `-dbsize` gives the same
+//! TBLASTX has no Gumbel block, so the statistics are the same); `-dbsize` gives the same
 //! statistics to both; and the database's errors come where NCBI raises them. That the bytes
 //! equal NCBI BLAST+ `tblastx -db` is the business of the campaign's comparison runs.
 
@@ -262,6 +261,90 @@ fn the_sequence_file_is_read_by_the_first_batch_with_a_valid_context() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.ends_with("BLAST engine error: Database memory map file error\n"),
+        "{stderr}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// tblastx_app.cpp:203-209: NCBI writes each query batch's report after its search, and reads
+// the titles of the batch's reported sequences there. In batches of one query (`BATCH_SIZE=1`)
+// two queries that report the same sequences give the rows of `-subject` (the reported
+// sequences are named by rank over all batches); without the `.nhr`, the second batch, the first
+// with hits, fails with NCBI's database error after the first batch's report.
+#[test]
+fn query_batches_read_the_titles_of_their_reported_sequences() {
+    let dir = temp_dir("batches");
+    let (query, set) = inputs(&dir);
+    let db = makedb(&dir, &set, "set");
+    let genome = letters("MjeNMV.fasta");
+    let two = dir.join("two.fna");
+    std::fs::write(
+        &two,
+        record("q1 MjeNMV 1-3000", &genome[..3000])
+            + &record("q2 MjeNMV 3001-6000", &genome[3000..6000]),
+    )
+    .unwrap();
+    let search = |subjects: &[&str], query: &Path| {
+        let output = losat()
+            .arg("tblastx")
+            .arg("-query")
+            .arg(query)
+            .args(subjects)
+            .args(["-outfmt", "6"])
+            .env("BATCH_SIZE", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    let rows = search(&["-db", &db], &two);
+    let text = String::from_utf8_lossy(&rows);
+    for (query_id, subject_id) in [
+        ("q1", "mela"),
+        ("q1", "pemo"),
+        ("q2", "mela"),
+        ("q2", "pemo"),
+    ] {
+        assert!(
+            text.lines()
+                .any(|row| row.starts_with(&format!("{query_id}\t{subject_id}\t"))),
+            "{query_id} x {subject_id}: {text}"
+        );
+    }
+    assert!(rows == search(&["-subject", set.to_str().unwrap()], &two));
+    std::fs::remove_file(format!("{db}.nhr")).unwrap();
+    let first_unsearched = dir.join("nn_q.fna");
+    std::fs::write(
+        &first_unsearched,
+        record("nn all N", &"N".repeat(60)) + &std::fs::read_to_string(&query).unwrap(),
+    )
+    .unwrap();
+    let output = losat()
+        .arg("tblastx")
+        .arg("-query")
+        .arg(&first_unsearched)
+        .args(["-db", &db])
+        .env("BATCH_SIZE", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let report = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        report.contains("Query= nn all N") && report.matches("Query= ").count() == 1,
+        "{report}"
+    );
+    // The first batch's warning (no valid context), then the error.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("Warning: [tblastx] Query_1 nn all N: ")
+            && stderr
+                .lines()
+                .last()
+                .is_some_and(|line| line.starts_with("BLAST Database error: ")),
         "{stderr}"
     );
     std::fs::remove_dir_all(&dir).unwrap();

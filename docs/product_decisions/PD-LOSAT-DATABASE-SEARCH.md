@@ -357,11 +357,12 @@ every `-num_threads` (P1, P1.1). The `-subject` path is unchanged; both paths ru
 search, the same re-evaluation and linking, and the same report writers. The database opener,
 the reader's error texts and the title rules are those of TBLASTN's `-db`.
 
-- Bases: the seed and ungapped stages translate the stored 2-bit bases (makeblastdb's random
-  base for each ambiguous letter), and the ungapped re-evaluation, the identities and the reports
-  read the letters with the stored ambiguity codes, as NCBI's search does. With `-subject` NCBI and
-  LOSAT pick the random bases at search time instead, so `-db` and `-subject` of the same
-  sequences can differ where a word hits a codon with an ambiguous letter.
+- Bases: the seed and ungapped stages translate the stored 2-bit bases, and the ungapped
+  re-evaluation, the identities and the reports read the letters with the stored ambiguity codes,
+  as NCBI's search does. makeblastdb (and `LOSAT makedb`) draw the 2-bit base of each ambiguous
+  letter from `CRandom` seeded with the sequence length, as `-subject` draws it at search time
+  (writedb_convert.cpp, blast_objmgr_tools.cpp), so the bases of `-db` and `-subject` differ only
+  for a database written otherwise; a frozen row searches such a database.
 - Statistics: the number of sequences and the total length of the database, in 64 bits as NCBI
   keeps them. TBLASTX has no shortest-length cutoff (an ungapped search: the hit-saving length is
   the average length), so `-db` and `-subject` of sequences without ambiguous letters give the

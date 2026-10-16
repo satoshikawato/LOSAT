@@ -1085,6 +1085,49 @@ Scheduling (each value computed by one thread with the original function; order 
   stderr at the end, with the number of chunks compared). With `LOSAT_TIMING` a
   `[TIMING] x_pairpardisc_seed` line gives the strips, seeds and the owner's fold, scan and wait
   time. Test: `LOSAT/tests/blastn_pairpar_disc.rs`.
+- `LOSAT_X_QDUSTPAR=1` (BLASTN, all tasks with DUST on, which is the default of megablast, dc-megablast and
+  blastn, and blastn-short with `-dust yes`; not in the strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT` says) the DUST masks
+  of a query batch are made on the search pool instead of one query after the other
+  (`blastn/x_query_dust_par.rs`, called from `coordination.rs` `apply_dust_masking`, so by `query_masks` for
+  every query batch and by `chunk_query_masks` for the parts of a split query; `-db` searches too). NCBI makes
+  a fresh `CSymDustMasker` for each query; the mask of a query is a function of its letters and the three
+  DUST parameters only (`DustMasker` keeps no state across calls, each call makes its own random generator for
+  `N`, and the statics of `utils/dust.rs` are switches read once), so the per-query map is
+  `par_iter().map().collect()` in query order (rayon splits the queries into ranges; the masks are per query,
+  the jobs are not) with `SearchPool::install`: on the pool of the search that calls
+  it (the whole search pool, or the private pool of a `LOSAT_X_QBATCHPAR` slot of two or more threads), never
+  on rayon's global pool. It acts only with a pool of two or more threads and two or more queries in the
+  batch; with one thread, a slot of one thread, a build without the `parallel` feature, WebAssembly without
+  `wasm-threads`, or the switch off, the serial map runs (with `-dust no` there is no map at all). The verbose lines and totals stay as
+  they were. Shadow: `LOSAT_X_QDUSTPARSHADOW=1` (implies the switch) also makes the masks serially and compares
+  them element for element; a difference counts in `diffs`, prints
+  `[X_SHADOW] QDUSTPAR batches= queries= intervals= diffs= DIFFERENT` and panics; at the end of a run `main`
+  prints `[X_SHADOW] QDUSTPAR batches= queries= intervals= diffs=0 identical` (the batches, queries and masked
+  intervals compared, all 0 when no batch had a pool and two queries; the line ends in `DIFFERENT` when
+  `diffs` is not 0, which can happen at exit only when a `LOSAT_X_QBATCHPAR` slot's batch differed and the
+  loop discarded that batch, in a build that unwinds). With `LOSAT_TIMING` (any switch state) `main` prints
+  `[TIMING] query_dust: <s>s`, and with `LOSAT_X_STATS` `[X_STATS] QDUSTPAR dust_s=<s>`, only when at least one
+  batch was masked (not for BLASTP, BLASTX, TBLASTN, TBLASTX or `-dust no`). `<s>` is the sum of the wall
+  times of every DUST call of the process, not the wall time of the step: with `LOSAT_X_QBATCHPAR` it includes
+  the slots' batches, which run concurrently, and those the loop discards; with `LOSAT_X_QDUSTPARSHADOW` it
+  includes the serial reference pass. The ws numbers below have neither, so there it is the step's time.
+  Measured on the workstation (2x Xeon Gold 6338, powersave, 16 idle physical cores of one node with the
+  siblings idle, `numactl --membind`; `-outfmt 6`, subject 3 Mb of D. melanogaster 2L, `LOSAT_X_PAIRPARDISC=1`
+  for the dc-megablast inputs, `LOSAT_X_STATS=1` in the timed pairs; off runs carry an unread
+  `LOSAT_X_PADQDUSTPAR=1`), 16 threads, alternating off/on pairs, medians: (a) 1,775 cDNAs (5.0 Mb),
+  dc-megablast, one query batch: DUST step (`dust_s`) 0.211 -> 0.019 s, wall 2.19 -> 2.01 s (on/off 0.92, 18
+  pairs in two windows); (b) 3,492 cDNAs (10 Mb), two big batches: 0.286 -> 0.040 s, 2.95 -> 2.71 s (0.92, 4
+  pairs); (c) blastn with (a)'s queries (6 batches): 0.211 -> 0.022 s, 1.83 -> 1.67 s (0.91, 8 pairs). Max RSS
+  within the pairs: (a) 89-93 MiB off, 90-95 on (1-2 MiB higher with the switch on in every window, within the
+  spread between runs); (b) 104-108 / 103-106; (c) 137-148 / 126-131. The speed of
+  one thread on that machine changes between runs by up to 1.6x (the DUST step of (a) takes 0.131 s or 0.211
+  s with the switch off); pairs run in different speed states give other ratios, so compare `dust_s` and
+  pairs of the same state. Every output equals the sha256 of the run without the switch (and of NCBI
+  `-subject`). Tests: the unit tests of `x_query_dust_par.rs` (pool == serial at 1, 2, 3 and 7 threads, with
+  empty sequences and batches of one; and a probe called once per query shows that the masks are made by
+  at least two workers of a 3-thread pool, and by none with the switch off, one thread or one query) and
+  `LOSAT/tests/blastn_query_dust_par.rs` (off / on / shadow equal at 1 and 4 threads for the three tasks, with
+  `-dust 10 32 2 -lcase_masking`, `-dust no`, `LOSAT_X_QBATCHPAR` slots of two threads, and split query chunks).
 - `LOSAT_X_QBATCHPAR=1` (BLASTN, all tasks, `-subject` with two or more threads; not in the strict set:
   off unless set to any value, whatever `LOSAT_X_DEFAULT` says) NCBI's query batches are searched side by
   side ahead of the batch loop of `run_in_pool` (`blastn/blast_engine/x_qbatch_par.rs`). The size of each

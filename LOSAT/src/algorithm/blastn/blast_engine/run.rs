@@ -8246,7 +8246,7 @@ fn search_query_batch(
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
     let masks = match stage {
-        BatchStage::Search { .. } => query_masks(args, queries),
+        BatchStage::Search { .. } => query_masks(args, queries, parallel_pool),
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
     let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);
@@ -15576,7 +15576,7 @@ fn search_query_chunks(
             .iter()
             .map(|part| restrict_masks(&query_masks[part.query], part, query_offsets[part.query]))
             .collect();
-        let part_masks = chunk_query_masks(args, &parts, restricted);
+        let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool);
         let batch = search_query_batch(
             args,
             &parts,

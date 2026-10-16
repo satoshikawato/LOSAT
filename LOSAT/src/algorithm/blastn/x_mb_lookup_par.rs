@@ -61,7 +61,7 @@ use std::sync::OnceLock;
 ///          }
 /// ```
 /// `kCompressionFactor`, the number of cells that share one counter.
-const K_COMPRESSION_FACTOR_SHIFT: usize = 11;
+pub(super) const K_COMPRESSION_FACTOR_SHIFT: usize = 11;
 
 /// No NCBI counterpart: reads the switches once; they do not change any value NCBI computes.
 /// (LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARSHADOW)
@@ -81,12 +81,13 @@ pub(crate) static SHADOW_TABLES: AtomicU64 = AtomicU64::new(0);
 pub(crate) static SHADOW_CELLS: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart: the number of threads of the search pool this thread runs in, when
-/// there is one with two threads or more (scheduling only).
+/// there is one with two threads or more (scheduling only). Also the dispatch test of
+/// LOSAT_X_DISCLUTPAR (`x_disc_lookup_par.rs`).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn pool_threads() -> Option<usize> {
+pub(super) fn pool_threads() -> Option<usize> {
     rayon::current_thread_index()?;
     let threads = rayon::current_num_threads();
     (threads > 1).then_some(threads)
@@ -96,7 +97,7 @@ fn pool_threads() -> Option<usize> {
     not(feature = "parallel"),
     all(target_arch = "wasm32", not(feature = "wasm-threads"))
 ))]
-fn pool_threads() -> Option<usize> {
+pub(super) fn pool_threads() -> Option<usize> {
     None
 }
 
@@ -134,7 +135,7 @@ pub(super) struct Tables<'a> {
 
 /// The read-only inputs of the fill loop.
 pub(super) struct Words<'a> {
-    pub(super) queries_blastna: &'a [Vec<u8>],
+    pub(super) queries_blastna: &'a [&'a [u8]],
     pub(super) query_offsets: &'a [i32],
     pub(super) query_masks: &'a [Vec<MaskedInterval>],
     pub(super) word_length: usize,
@@ -144,11 +145,12 @@ pub(super) struct Words<'a> {
 }
 
 // No NCBI counterpart: a slice shared by the workers, each of which reads and writes only the
-// elements it owns (see the module documentation); the pointer outlives the scope.
+// elements it owns (see the module documentation); the pointer outlives the scope. Also used by
+// LOSAT_X_DISCLUTPAR (`x_disc_lookup_par.rs`), whose workers own elements the same way.
 #[derive(Clone, Copy)]
-struct Shared<T> {
-    ptr: *mut T,
-    len: usize,
+pub(super) struct Shared<T> {
+    pub(super) ptr: *mut T,
+    pub(super) len: usize,
 }
 
 // SAFETY: the workers access disjoint elements only (ownership by cell block, and by the
@@ -158,7 +160,7 @@ unsafe impl<T: Send> Send for Shared<T> {}
 unsafe impl<T: Send> Sync for Shared<T> {}
 
 impl<T: Copy> Shared<T> {
-    fn new(slice: &mut [T]) -> Self {
+    pub(super) fn new(slice: &mut [T]) -> Self {
         Self {
             ptr: slice.as_mut_ptr(),
             len: slice.len(),
@@ -167,14 +169,14 @@ impl<T: Copy> Shared<T> {
 
     /// SAFETY: `i < len`, and no other worker accesses element `i`.
     #[inline(always)]
-    unsafe fn get(self, i: usize) -> T {
+    pub(super) unsafe fn get(self, i: usize) -> T {
         debug_assert!(i < self.len);
         unsafe { *self.ptr.add(i) }
     }
 
     /// SAFETY: `i < len`, and no other worker accesses element `i`.
     #[inline(always)]
-    unsafe fn set(self, i: usize, value: T) {
+    pub(super) unsafe fn set(self, i: usize, value: T) {
         debug_assert!(i < self.len);
         unsafe { *self.ptr.add(i) = value }
     }
@@ -261,7 +263,7 @@ fn fill_part(part: u8, owner: &[u8], block_shift: usize, words: &Words<'_>, t: S
     #[cfg(target_arch = "x86_64")]
     let mut x_ring_len = 0usize;
     for (q_idx, seq_blastna) in words.queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
+        let seq = seq_blastna;
         if seq.len() < lut_word_length {
             continue;
         }
@@ -365,8 +367,9 @@ fn fill_part(part: u8, owner: &[u8], block_shift: usize, words: &Words<'_>, t: S
 }
 
 /// No NCBI counterpart: the cell blocks and their owners (scheduling only). Blocks of
-/// `2^block_shift` cells, dealt round robin to `parts` workers.
-fn plan(table_size: usize, pv_array_bts: usize, parts: usize) -> (usize, Vec<u8>) {
+/// `2^block_shift` cells, dealt round robin to `parts` workers. Also the plan of
+/// LOSAT_X_DISCLUTPAR (`x_disc_lookup_par.rs`), for both templates' tables.
+pub(super) fn plan(table_size: usize, pv_array_bts: usize, parts: usize) -> (usize, Vec<u8>) {
     let block_shift = K_COMPRESSION_FACTOR_SHIFT.max(pv_array_bts);
     let blocks = (table_size >> block_shift).max(1);
     let parts = parts.clamp(1, 255);
@@ -569,10 +572,11 @@ mod tests {
         let mut rng = Lcg(0x5EED_1234);
         for case in 0..60 {
             let (queries, offsets, masks, word_length, lut_word_length) = random_case(&mut rng);
+            let query_refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
             let ascending_cells = case % 2 == 1;
             let approx = queries.iter().map(Vec::len).sum::<usize>();
             let reference = build_two_stage_lookup(
-                &queries,
+                &query_refs,
                 &offsets,
                 word_length,
                 lut_word_length,
@@ -589,7 +593,7 @@ mod tests {
                 let mut pv_array = vec![0 as PvArrayType; mb.pv_array.len()];
                 let mut helper_array = vec![0u32; (mb.hashtable.len() >> 11).max(1)];
                 let words = Words {
-                    queries_blastna: &queries,
+                    queries_blastna: &query_refs,
                     query_offsets: &offsets,
                     query_masks: &masks,
                     word_length,
@@ -631,9 +635,10 @@ mod tests {
         let mut rng = Lcg(0xFACE_0FF5);
         for case in 0..12 {
             let (queries, offsets, masks, word_length, lut_word_length) = random_case(&mut rng);
+            let query_refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
             let ascending_cells = case % 2 == 0;
             let reference = build_two_stage_lookup(
-                &queries,
+                &query_refs,
                 &offsets,
                 word_length,
                 lut_word_length,
@@ -655,7 +660,7 @@ mod tests {
                     let mut pv_array = vec![0 as PvArrayType; mb.pv_array.len()];
                     let mut helper_array = vec![0u32; (mb.hashtable.len() >> 11).max(1)];
                     let words = Words {
-                        queries_blastna: &queries,
+                        queries_blastna: &query_refs,
                         query_offsets: &offsets,
                         query_masks: &masks,
                         word_length,

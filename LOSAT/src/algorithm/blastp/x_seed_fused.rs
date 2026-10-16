@@ -16,7 +16,8 @@
 //! The buffer's capacity (`array_size`) only cuts the reference's scan into rounds; it changes
 //! neither the order nor the set of hits.
 //!
-//! Off unless `LOSAT_X_BPSEED` is set (any value). Not in the strict set.
+//! `LOSAT_X_BPSEED` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set.
 //!
 //! EXPERIMENT (LOSAT_X_BPDIAG): with the fused loop on, the hits of one subject offset (one lookup
 //! cell) are tested in batches of eight instead of one after the other: for every hit of a batch
@@ -38,15 +39,16 @@
 //! - The values are the bit-field's (31-bit `last_hit`, sign-extended on read, truncated on
 //!   write) and the i32 arithmetic of `x_test_hit`, which wraps (see there).
 //!
-//! Off unless `LOSAT_X_BPDIAG` is set (any value); it needs `LOSAT_X_BPSEED` (or
-//! `LOSAT_X_BPSEEDSHADOW`, which then compares the batched loop with the reference). Without AVX2
+//! `LOSAT_X_BPDIAG` is a switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+//! and it is not set. It needs `LOSAT_X_BPSEED` (or `LOSAT_X_BPSEEDSHADOW`, which then compares
+//! the batched loop with the reference). Without AVX2
 //! (another architecture, or an x86-64 CPU without it) the switch keeps the per-hit loop: the
 //! scalar batch was slower than the per-hit loop on both machines it was timed on (2026-10-14,
 //! human block 1 x Species4, one thread, scan_ungapped: workstation 12.56 s against 11.59 s,
 //! local 7.53 / 7.08 s against 6.78 / 6.88 s). The scalar batch remains as the AVX2 path's handler
 //! of a cell's last batch of fewer than eight hits and as the cell-by-cell version the tests
-//! compare with; `LOSAT_X_BPDIAG_SIMD=0` forces it (diagnostic, used by the tests). Not in the
-//! strict set. With `LOSAT_TIMING=1` each search of a query set prints
+//! compare with; `LOSAT_X_BPDIAG_SIMD=0` forces it (diagnostic, used by the tests; not in the
+//! strict set). With `LOSAT_TIMING=1` each search of a query set prints
 //! `[TIMING] x_bpdiag: mode=<avx2|avx2-defer|scalar|per-hit> cells=<n> batched_hits=<m>
 //! candidates=<k>` (the path that ran, the cells tested in batches, their hits, and the hits passed
 //! to the closure; zeros with `per-hit`).
@@ -73,11 +75,12 @@ use crate::algorithm::tblastx::lookup::{
 
 // No NCBI counterpart: reads the LOSAT_X_BPSEED switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPSEED): off unless set to any value.
+/// EXPERIMENT (LOSAT_X_BPSEED): a strict-set switch, on unless it is `0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set.
 pub(crate) fn x_bp_seed() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BPSEED").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPSEED"))
 }
 
 // No NCBI counterpart: how many hits ahead the fused loop reads the diagonal entries
@@ -112,11 +115,12 @@ pub(super) fn x_prefetch(diag_array: &[DiagStruct], index: usize) {
 
 // No NCBI counterpart: reads the LOSAT_X_BPDIAG switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPDIAG): off unless set to any value. It acts in the fused loop only.
+/// EXPERIMENT (LOSAT_X_BPDIAG): a strict-set switch, on unless it is `0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set. It acts in the fused loop only.
 pub(crate) fn x_bp_diag() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BPDIAG").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDIAG"))
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPDEFER switch once; it does not change any value NCBI

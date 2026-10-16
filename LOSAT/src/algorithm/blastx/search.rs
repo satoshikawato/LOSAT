@@ -7,8 +7,8 @@ use super::{
     query_setup::{batch_ranges, prepare_queries, PreparedQueryBatch},
     seed::{word_finder, Diagonals, InitHsp, Lookup},
     split::{adjust_chunk_hsps, merge_chunk_hsps, split_queries, QueryChunk},
+    subjects::Subjects,
 };
-use crate::utils::matrix::aa_char_to_ncbistdaa;
 use anyhow::{ensure, Result};
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:235-271
@@ -432,7 +432,14 @@ pub fn search_preliminary(
     options: &ResolvedOptions,
 ) -> Result<Vec<BatchStage>> {
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
-        search_core(records, subjects, options, true, &mut DiagnosticOnly, pool)
+        search_core(
+            records,
+            subjects.into(),
+            options,
+            true,
+            &mut DiagnosticOnly,
+            pool,
+        )
     })
 }
 
@@ -494,14 +501,14 @@ fn x_bx_chunk() -> Option<usize> {
 
 pub(crate) fn search_core(
     records: &[FastaRecord],
-    subjects: &[FastaRecord],
+    subjects: Subjects<'_>,
     options: &ResolvedOptions,
     diagnostics: bool,
     sink: &mut impl PreliminarySink,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<Vec<BatchStage>> {
     ensure!(
-        !subjects.is_empty(),
+        !subjects.is_empty() || subjects.is_unreadable(),
         "BLASTX preliminary requires a protein subject"
     );
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/seqsrc_multiseq.cpp:175-181
@@ -528,30 +535,27 @@ pub(crate) fn search_core(
     //         backup->next = backup->offset + MAX_DBSEQ_LEN - dbseq_chunk_overlap;
     // ```
     ensure!(
-        subjects.iter().all(|s| s.sequence.len() <= 5_000_000),
+        subjects.longest_length() <= 5_000_000,
         "BLASTX preliminary protein-subject splitting above 5000000 residues is not implemented"
     );
-    let db_length = subjects
-        .iter()
-        .try_fold(0i64, |sum, s| {
-            sum.checked_add(i64::try_from(s.sequence.len()).ok()?)
-        })
-        .ok_or_else(|| anyhow::anyhow!("BLASTX subject-set length exceeds Int8"))?;
+    let db_length = subjects.total_length()?;
     let db_count = i64::try_from(subjects.len())?;
-    let min_subject_length = subjects
-        .iter()
-        .map(|s| s.sequence.len())
-        .min()
-        .expect("protein subject");
+    let min_subject_length = subjects.shortest_length();
     let mut result = Vec::new();
     let mut call = 0;
     // No NCBI counterpart: decides whether candidate HSPs are copied for the containment callback;
     // it does not change any value NCBI computes.
     let x_containment = diagnostics || sink.x_wants_containment();
+    use super::x_timing::Batch as XBatch;
     for range in batch_ranges(records) {
+        // Diagnostic (LOSAT_TIMING): the clocks of the batch's stages (x_timing.rs). No NCBI
+        // counterpart.
+        let x_t_batch = super::x_timing::lap();
+        let x_t = x_t_batch;
         let queries = &records[range.clone()];
         let mut full = prepare_queries(queries, options)?;
         let mut full_params = score_block(&full);
+        super::x_timing::batch(XBatch::QuerySetup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
         // ```c++
         //
@@ -586,6 +590,12 @@ pub(crate) fn search_core(
             }
             continue;
         }
+        // NCBI reads the database's sequences in the preliminary search of the first batch
+        // with a valid context (batches without one are not searched, above).
+        if subjects.is_unreadable() {
+            return Err(super::subjects::UnreadableSubjects.into());
+        }
+        let x_t = super::x_timing::lap();
         effective_lengths(&full, &mut full_params, options, db_length, db_count, None)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2781-2787
         // ```c++
@@ -610,6 +620,7 @@ pub(crate) fn search_core(
         // ```
         sink.batch_start(range.start, &full, &full_params)?;
         let chunks = split_queries(queries, &full, options)?;
+        super::x_timing::batch(XBatch::Setup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
         // ```c++
         //     if (query_splitter->IsQuerySplit()) {
@@ -619,7 +630,13 @@ pub(crate) fn search_core(
         // ```
         let is_split = chunks.len() > 1;
         let mut stages = Vec::new();
-        let mut merged = vec![vec![Vec::new(); subjects.len()]; queries.len()];
+        // Read only with diagnostics (`merged_by_query`): queries x subjects vectors are
+        // not made otherwise (a database holds hundreds of thousands of subjects).
+        let mut merged = if diagnostics {
+            vec![vec![Vec::new(); subjects.len()]; queries.len()]
+        } else {
+            Vec::new()
+        };
         // EXPERIMENT (LOSAT_X_BXPAR): one job per query chunk instead of one per
         // subject.  NCBI c++/src/algo/blast/api/prelim_stage.cpp:235-271 searches
         // the chunks one after another and only `BlastHSPStreamMerge` relates
@@ -648,6 +665,7 @@ pub(crate) fn search_core(
         // BlastHSPStreamMerge. With LOSAT_X_BXPAR a wave of chunks is searched on the pool
         // (x_compute_chunk) and written to the sink in chunk order below. Each chunk is searched
         // exactly as before.
+        let x_t = super::x_timing::lap();
         #[cfg(feature = "parallel")]
         let chunks = if super::runtime::x_bx_parallel()
             && pool.enabled()
@@ -690,7 +708,12 @@ pub(crate) fn search_core(
                         continue;
                     };
                     let batch = &chunk.prepared;
-                    for (oid, computed) in results.into_iter().enumerate() {
+                    let mut kept = results.into_iter().peekable();
+                    for oid in 0..subjects.len() {
+                        let computed = match kept.next_if(|(kept_oid, _)| *kept_oid == oid) {
+                            Some((_, computed)) => computed,
+                            None => SubjectComputation::empty(),
+                        };
                         sink.subject_start(oid, batch, &params, computed.prepared_link)?;
                         for (h, contained) in &computed.containment {
                             sink.containment(h, *contained);
@@ -709,6 +732,7 @@ pub(crate) fn search_core(
         } else {
             chunks
         };
+        super::x_timing::batch(XBatch::ChunksPar, x_t);
         for chunk in chunks {
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-244
             // ```c++
@@ -764,6 +788,7 @@ pub(crate) fn search_core(
             //     }
             //     return retval;
             // ```
+            let x_t = super::x_timing::lap();
             let fixed_spaces = &spaces;
             let lookup = Lookup::new(batch, &params, options)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
@@ -849,8 +874,13 @@ pub(crate) fn search_core(
             } else {
                 Vec::new()
             };
+            super::x_timing::batch(XBatch::Lookup, x_t);
             let mut subject_stages = Vec::new();
-            for (wave_index, wave) in subjects.chunks(wave_size).enumerate() {
+            for wave_index in 0..subjects.len().div_ceil(wave_size) {
+                let wave_start = wave_index * wave_size;
+                let wave: Vec<usize> =
+                    (wave_start..subjects.len().min(wave_start + wave_size)).collect();
+                let x_t = super::x_timing::lap();
                 let mut scheduled = {
                     #[cfg(feature = "parallel")]
                     {
@@ -879,9 +909,15 @@ pub(crate) fn search_core(
                                             x_part
                                                 .iter()
                                                 .enumerate()
-                                                .map(|(x_within, subject)| {
+                                                .map(|(x_within, &oid)| {
+                                                    debug_assert_eq!(
+                                                        oid,
+                                                        wave_index * wave_size
+                                                            + x_slot * x_k
+                                                            + x_within
+                                                    );
                                                     compute_subject(
-                                                        subject,
+                                                        subjects,
                                                         batch,
                                                         &params,
                                                         options,
@@ -890,9 +926,7 @@ pub(crate) fn search_core(
                                                         xdrop,
                                                         diagnostics,
                                                         db_length,
-                                                        wave_index * wave_size
-                                                            + x_slot * x_k
-                                                            + x_within,
+                                                        oid,
                                                         x_containment,
                                                     )
                                                 })
@@ -903,9 +937,10 @@ pub(crate) fn search_core(
                                 wave.par_iter()
                                     .zip(worker_diagonals.par_iter_mut())
                                     .enumerate()
-                                    .map(|(within, (subject, scratch))| {
+                                    .map(|(within, (&oid, scratch))| {
+                                        debug_assert_eq!(oid, wave_index * wave_size + within);
                                         compute_subject(
-                                            subject,
+                                            subjects,
                                             batch,
                                             &params,
                                             options,
@@ -914,7 +949,7 @@ pub(crate) fn search_core(
                                             xdrop,
                                             diagnostics,
                                             db_length,
-                                            wave_index * wave_size + within,
+                                            oid,
                                             x_containment,
                                         )
                                     })
@@ -930,13 +965,15 @@ pub(crate) fn search_core(
                     }
                 }
                 .into_iter();
-                for (within, subject) in wave.iter().enumerate() {
-                    let oid = wave_index * wave_size + within;
+                super::x_timing::batch(XBatch::ScanPar, x_t);
+                let x_t_replay = super::x_timing::lap();
+                for &oid in &wave {
                     let computed = if let Some(computed) = scheduled.next() {
                         computed?
                     } else {
-                        compute_subject(
-                            subject,
+                        let x_t = super::x_timing::lap();
+                        let computed = compute_subject(
+                            subjects,
                             batch,
                             &params,
                             options,
@@ -947,7 +984,9 @@ pub(crate) fn search_core(
                             db_length,
                             oid,
                             x_containment,
-                        )?
+                        );
+                        super::x_timing::batch(XBatch::ScanInline, x_t);
+                        computed?
                     };
                     sink.subject_start(oid, batch, &params, computed.prepared_link)?;
                     for (h, contained) in &computed.containment {
@@ -1066,6 +1105,7 @@ pub(crate) fn search_core(
                     }
                     call += 1;
                 }
+                super::x_timing::batch(XBatch::Replay, x_t_replay);
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:268-271
             // ```c++
@@ -1074,7 +1114,9 @@ pub(crate) fn search_core(
             //                                 chunk_data->m_HspStream->GetPointer(),
             //                                 m_InternalData->m_HspStream->GetPointer());
             // ```
+            let x_t = super::x_timing::lap();
             sink.chunk_end(&chunk, is_split)?;
+            super::x_timing::batch(XBatch::ChunkEnd, x_t);
             if diagnostics {
                 stages.push(ChunkStage {
                     statistically_valid: true,
@@ -1097,7 +1139,11 @@ pub(crate) fn search_core(
         //             m_InternalData->m_Queries = query_data->GetSequenceBlk();
         //         }
         // ```
+        let x_t = super::x_timing::lap();
         sink.batch_end(&full, &full_params)?;
+        super::x_timing::batch(XBatch::BatchEnd, x_t);
+        super::x_timing::batch(XBatch::Sum, x_t_batch);
+        super::x_timing::batch_count();
         if diagnostics {
             result.push(BatchStage {
                 query_ordinal: range.start,
@@ -1156,14 +1202,14 @@ pub(crate) fn search_core(
 #[allow(clippy::type_complexity)]
 fn x_compute_chunk(
     chunk: &QueryChunk,
-    subjects: &[FastaRecord],
+    subjects: Subjects<'_>,
     options: &ResolvedOptions,
     fixed_spaces: &[i64],
     db_length: i64,
     db_count: i64,
     min_subject_length: usize,
     x_containment: bool,
-) -> Result<Option<(Vec<ContextParameters>, Vec<SubjectComputation>)>> {
+) -> Result<Option<(Vec<ContextParameters>, Vec<(usize, SubjectComputation)>)>> {
     let batch = &chunk.prepared;
     let mut params = score_block(batch);
     if !params.iter().any(|p| p.valid) {
@@ -1181,10 +1227,14 @@ fn x_compute_chunk(
         min_subject_length,
         Some(fixed_spaces),
     )?;
-    let mut results = Vec::with_capacity(subjects.len());
-    for (oid, subject) in subjects.iter().enumerate() {
+    // Only the subjects with something for the sink are kept, by oid: the chunks of a wave are
+    // all in memory at once, and a database holds hundreds of thousands of subjects, most
+    // without a hit. The sink gets the others as empty computations (`SubjectComputation::
+    // empty`), so it sees the same calls as from the serial chunk loop.
+    let mut results = Vec::new();
+    for oid in 0..subjects.len() {
         let mut computed = compute_subject(
-            subject,
+            subjects,
             batch,
             &params,
             options,
@@ -1201,7 +1251,9 @@ fn x_compute_chunk(
         // stages read, to save memory; it does not change any value NCBI computes.
         computed.seeds = Vec::new();
         computed.initial = Vec::new();
-        results.push(computed);
+        if !computed.is_empty() {
+            results.push((oid, computed));
+        }
     }
     Ok(Some((params, results)))
 }
@@ -1213,6 +1265,29 @@ struct SubjectComputation {
     purged: Vec<PreliminaryHsp>,
     containment: Vec<(PreliminaryHsp, bool)>,
     prepared_link: Option<([i32; 2], f64)>,
+}
+
+#[cfg(feature = "parallel")]
+impl SubjectComputation {
+    /// A subject without anything for the sink (LOSAT_X_BXPAR's chunks keep only the others).
+    fn empty() -> Self {
+        Self {
+            seeds: Vec::new(),
+            initial: Vec::new(),
+            raw: Vec::new(),
+            purged: Vec::new(),
+            containment: Vec::new(),
+            prepared_link: None,
+        }
+    }
+
+    /// Whether the sink would get nothing from this subject but its oid.
+    fn is_empty(&self) -> bool {
+        self.raw.is_empty()
+            && self.purged.is_empty()
+            && self.containment.is_empty()
+            && self.prepared_link.is_none()
+    }
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:172-179
 // ```c++
@@ -1229,7 +1304,7 @@ struct SubjectComputation {
 // utils::threading owns pool lifetime; all sink state is replayed by input OID.
 #[allow(clippy::too_many_arguments)]
 fn compute_subject(
-    subject: &FastaRecord,
+    subjects: Subjects<'_>,
     batch: &PreparedQueryBatch,
     params: &[ContextParameters],
     options: &ResolvedOptions,
@@ -1238,19 +1313,14 @@ fn compute_subject(
     xdrop: i32,
     diagnostics: bool,
     db_length: i64,
-    _oid: usize,
+    oid: usize,
     x_containment: bool,
 ) -> Result<SubjectComputation> {
     #[cfg(feature = "blastx-worker-probe")]
-    worker_probe("start", _oid);
+    worker_probe("start", oid);
     let mut containment = Vec::new();
-    let mut encoded: Vec<_> = subject
-        .sequence
-        .iter()
-        .copied()
-        .map(aa_char_to_ncbistdaa)
-        .collect();
-    encoded.push(0);
+    let encoded = subjects.encoded_with_sentinel(oid);
+    let subject_length = subjects.length(oid);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
     // ```c++
     //       if (hit_params->link_hsp_params && !kNucleotide &&
@@ -1265,7 +1335,7 @@ fn compute_subject(
         Some(super::even_gap::cutoffs(
             batch,
             params,
-            subject.sequence.len() as i32,
+            subject_length as i32,
             db_length,
         ))
     } else {
@@ -1403,7 +1473,7 @@ fn compute_subject(
         sort_by_score(&mut purged);
     }
     #[cfg(feature = "blastx-worker-probe")]
-    worker_probe("finish", _oid);
+    worker_probe("finish", oid);
     Ok(SubjectComputation {
         seeds,
         initial,

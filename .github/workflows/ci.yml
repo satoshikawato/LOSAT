@@ -1,11 +1,12 @@
 name: CI
 
 # Pull requests run the fast checks (no NCBI executable); pushes run them on main
-# only. The two-hour WASI matrix and the full TBLASTX output set run in
-# nightly.yml (schedule, workflow_dispatch) and in release-readiness.yml.
+# and on the integration branch dev only. The two-hour WASI matrix and the full
+# TBLASTX output set run in nightly.yml (schedule, workflow_dispatch) and in
+# release-readiness.yml.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 concurrency:

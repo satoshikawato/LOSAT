@@ -22,6 +22,13 @@ pub mod compressed;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 pub(crate) use backbone::x_prepare_blosum62_lookup_query_in_pool;
+// EXPERIMENT (LOSAT_X_BPLKPFLAT): the lookup query with the contexts' Karlin blocks left to the
+// caller (`blastp/x_query_blocks.rs`); no NCBI counterpart for the re-export itself.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) use backbone::XBlosum62LookupQuery;
 pub use backbone::{
     build_direct_lookup, build_ncbi_lookup, BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL,
 };
@@ -218,7 +225,7 @@ pub(crate) use backbone::build_ncbi_lookup_from_prepared;
 // EXPERIMENT (LOSAT_X_BXLUTSHADOW): shadow counter for the exit summary; no NCBI counterpart, it
 // does not change any value NCBI computes.
 pub(crate) use backbone::x_bxlut_shadow_tables;
-// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): BLASTP's table built in place
+// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): BLASTP's table built in place
 // (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export itself.
 pub(crate) use backbone::x_bp_build_ncbi_lookup;
 

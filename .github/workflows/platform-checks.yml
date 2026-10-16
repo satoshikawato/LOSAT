@@ -5,21 +5,52 @@ name: Platform checks
 # paths):
 #  - outputs: release binary, 49 cases (all five programs) at 1 and 4 threads in both modes; the
 #    outputs of the two modes must be byte-identical and the exit codes 0 (LOSAT/tests/platform_checks.py);
-#    on the two arm64 platforms two more modes, LOSAT_X_DPNEON=1 (the NEON X-drop kernels, off unless
-#    set) and LOSAT_X_DPNEON2=1 (the same kernels in register pairs, off unless set), must give the
-#    same outputs as well;
-#  - compare: the hashes of the five platforms must equal each other (no expected hash is stored;
-#    the frozen hashes are checked on Linux x64 by ci.yml);
-#  - tests: cargo test --all-features in both modes on the four platforms other than Linux x64
-#    (ci.yml runs both modes on Linux x64).
-# Pull requests always start it (so that `platform checks result` exists and can be required), but
-# its jobs run only when the engine, the Cargo files or this workflow's own files change (job
-# `changes`); the schedule and workflow_dispatch run them always.
+#    on the two arm64 platforms two more modes, LOSAT_X_DPNEON=0 (the other switches on, the scalar
+#    X-drop instead of the NEON kernels the default runs) and LOSAT_X_DPNEON2=1 (the NEON kernels in
+#    register pairs, off unless set), must give the same outputs as well;
+#  - compare: the hashes of the platforms of the run must equal each other (no expected hash is
+#    stored; the frozen hashes are checked on Linux x64 by ci.yml);
+#  - tests: cargo test --all-features in both modes, built once per platform, on the platforms other
+#    than Linux x64 (ci.yml runs both modes on Linux x64).
+#
+# Two sets of platforms (job `changes` chooses):
+#  - pull-request (a pull request into main, normally the promotion of dev): outputs on Linux
+#    x64, Linux arm64, Windows x64 and macOS arm64; tests on Linux arm64 and Windows x64. One
+#    macOS job per pull request: GitHub runs five macOS jobs at a time for the whole account,
+#    and the macOS jobs were the queue (2026-10-16: six per pull request, three to four hours of
+#    runner time each).
+#  - full (push to main, the weekly schedule, workflow_dispatch): the pull-request set plus
+#    outputs on macOS x64 and tests on macOS arm64 and macOS x64.
+# Pull requests always start the workflow (so that `platform checks result` exists and can be
+# required), but its jobs run only when the engine, the Cargo files or this workflow's own files
+# change and the pull request is not a draft (a draft runs them when it is marked ready for
+# review). A pull request into the integration branch dev runs no platform job (its
+# `platform checks result` passes); the promotion pull request from dev to main runs them once
+# for the batch. A push to main runs the full set when those files changed; its runs do not
+# cancel each other, so at most one runs and one waits (the newest), and every run of main
+# completes.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+    paths:
+      - 'LOSAT/src/**'
+      - 'LOSAT/Cargo.toml'
+      - 'LOSAT/Cargo.lock'
+      - 'LOSAT/build.rs'
+      - '.github/workflows/platform-checks.yml'
+      - 'LOSAT/tests/platform_checks.py'
+      - 'LOSAT/tests/platform_check_cases.json'
   schedule:
     - cron: '23 19 * * 0'
   workflow_dispatch:
+    inputs:
+      set:
+        description: 'Platforms: full (five platforms) or pull-request (the set a pull request runs)'
+        type: choice
+        options: [full, pull-request]
+        default: full
 
 permissions:
   contents: read
@@ -35,7 +66,8 @@ defaults:
 jobs:
   # One always-present gate for the required check: the `on.pull_request` trigger has no `paths:`
   # filter (a required check of a workflow that did not run would block the pull request forever),
-  # so this job decides whether the pull request touches relevant files.
+  # so this job decides whether the pull request touches relevant files, and which set of
+  # platforms the run uses.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -45,36 +77,88 @@ jobs:
       pull-requests: read
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
+      set: ${{ steps.filter.outputs.set }}
+      outputs_matrix: ${{ steps.filter.outputs.outputs_matrix }}
+      outputs_ids: ${{ steps.filter.outputs.outputs_ids }}
+      tests_matrix: ${{ steps.filter.outputs.tests_matrix }}
     steps:
       - id: filter
         env:
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          BASE_REF: ${{ github.base_ref }}
+          INPUT_SET: ${{ github.event.inputs.set }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" != pull_request ]; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            exit 0
+          # The platforms. `extra` adds the modes of the arm64 platforms (LOSAT_X_DPNEON=0: the scalar
+          # X-drop with the other switches on; LOSAT_X_DPNEON2 is off unless set); the entries
+          # without it run the two standard modes.
+          neon='--extra-mode noneon=LOSAT_X_DPNEON=0 --extra-mode dpneon2=LOSAT_X_DPNEON2=1'
+          o_linux_x64='{"runner":"ubuntu-24.04","id":"linux-x64","python":"python3"}'
+          o_linux_arm64='{"runner":"ubuntu-24.04-arm","id":"linux-arm64","python":"python3","extra":"'"$neon"'"}'
+          o_windows_x64='{"runner":"windows-2025","id":"windows-x64","python":"python"}'
+          o_macos_arm64='{"runner":"macos-15","id":"macos-arm64","python":"python3","extra":"'"$neon"'"}'
+          o_macos_x64='{"runner":"macos-15-intel","id":"macos-x64","python":"python3"}'
+          t_linux_arm64='{"runner":"ubuntu-24.04-arm","id":"linux-arm64"}'
+          t_windows_x64='{"runner":"windows-2025","id":"windows-x64"}'
+          t_macos_arm64='{"runner":"macos-15","id":"macos-arm64"}'
+          t_macos_x64='{"runner":"macos-15-intel","id":"macos-x64"}'
+
+          set_name=full
+          if [ "$EVENT_NAME" = pull_request ]; then set_name=pull-request; fi
+          if [ "$EVENT_NAME" = workflow_dispatch ] && [ -n "$INPUT_SET" ]; then set_name=$INPUT_SET; fi
+          case "$set_name" in
+            pull-request)
+              outputs="[$o_linux_x64,$o_linux_arm64,$o_windows_x64,$o_macos_arm64]"
+              tests="[$t_linux_arm64,$t_windows_x64]"
+              ;;
+            full)
+              outputs="[$o_linux_x64,$o_linux_arm64,$o_windows_x64,$o_macos_arm64,$o_macos_x64]"
+              tests="[$t_linux_arm64,$t_windows_x64,$t_macos_arm64,$t_macos_x64]"
+              ;;
+            *)
+              echo "unknown set '$set_name'" >&2
+              exit 1
+              ;;
+          esac
+          ids=$(python3 -c 'import json, sys; print(" ".join(e["id"] for e in json.loads(sys.argv[1])))' "$outputs")
+
+          relevant=true
+          if [ "$EVENT_NAME" = pull_request ]; then
+            if [ "$BASE_REF" = dev ]; then
+              echo "Pull request into dev: the platform jobs run on the promotion to main."
+              relevant=false
+            elif [ "$PR_DRAFT" = true ]; then
+              echo "Draft pull request: the platform jobs run when it is marked ready for review."
+              relevant=false
+            else
+              # Pattern = the former `pull_request: paths:` list (the `on.push.paths` list above), as
+              # anchored extended regular expressions (`**` = .*, `*` = [^/]*).
+              pattern='^(LOSAT/src/.*|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/build\.rs|\.github/workflows/platform-checks\.yml|LOSAT/tests/platform_checks\.py|LOSAT/tests/platform_check_cases\.json)$'
+              files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" -q '.[].filename')
+              echo "Changed files:"
+              printf '%s\n' "$files"
+              if grep -Eq "$pattern" <<< "$files"; then
+                relevant=true
+              else
+                echo "No relevant file changed: the platform jobs are skipped."
+                relevant=false
+              fi
+            fi
           fi
-          # Pattern = the former `pull_request: paths:` list, as anchored extended regular
-          # expressions (`**` = .*, `*` = [^/]*):
-          #   LOSAT/src/**
-          #   LOSAT/Cargo.toml
-          #   LOSAT/Cargo.lock
-          #   LOSAT/build.rs
-          #   .github/workflows/platform-checks.yml
-          #   LOSAT/tests/platform_checks.py
-          #   LOSAT/tests/platform_check_cases.json
-          pattern='^(LOSAT/src/.*|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/build\.rs|\.github/workflows/platform-checks\.yml|LOSAT/tests/platform_checks\.py|LOSAT/tests/platform_check_cases\.json)$'
-          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" -q '.[].filename')
-          echo "Changed files:"
-          printf '%s\n' "$files"
-          if grep -Eq "$pattern" <<< "$files"; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-          fi
+
+          echo "set=$set_name relevant=$relevant"
+          echo "outputs: $ids"
+          echo "tests: $(python3 -c 'import json, sys; print(" ".join(e["id"] for e in json.loads(sys.argv[1])))' "$tests")"
+          {
+            echo "relevant=$relevant"
+            echo "set=$set_name"
+            echo "outputs_matrix=$outputs"
+            echo "outputs_ids=$ids"
+            echo "tests_matrix=$tests"
+          } >> "$GITHUB_OUTPUT"
 
   outputs:
     name: default = LOSAT_X_DEFAULT=0 (${{ matrix.id }})
@@ -83,12 +167,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { runner: ubuntu-24.04, id: linux-x64, python: python3 }
-          - { runner: ubuntu-24.04-arm, id: linux-arm64, python: python3, extra: '--extra-mode dpneon=LOSAT_X_DPNEON=1 --extra-mode dpneon2=LOSAT_X_DPNEON2=1' }
-          - { runner: windows-2025, id: windows-x64, python: python }
-          - { runner: macos-15, id: macos-arm64, python: python3, extra: '--extra-mode dpneon=LOSAT_X_DPNEON=1 --extra-mode dpneon2=LOSAT_X_DPNEON2=1' }
-          - { runner: macos-15-intel, id: macos-x64, python: python3 }
+        include: ${{ fromJSON(needs.changes.outputs.outputs_matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
@@ -130,31 +209,30 @@ jobs:
         with:
           pattern: platform-checks-*
           path: tables
-      - name: Compare the tables of the five platforms
+      - name: Compare the tables of the platforms of this run
+        env:
+          IDS: ${{ needs.changes.outputs.outputs_ids }}
         run: |
-          python3 LOSAT/tests/platform_checks.py compare \
-            --table linux-x64=tables/platform-checks-linux-x64/rows.tsv \
-            --table linux-arm64=tables/platform-checks-linux-arm64/rows.tsv \
-            --table windows-x64=tables/platform-checks-windows-x64/rows.tsv \
-            --table macos-arm64=tables/platform-checks-macos-arm64/rows.tsv \
-            --table macos-x64=tables/platform-checks-macos-x64/rows.tsv
+          set -euo pipefail
+          args=()
+          for id in $IDS; do
+            args+=(--table "$id=tables/platform-checks-$id/rows.tsv")
+          done
+          python3 LOSAT/tests/platform_checks.py compare "${args[@]}"
 
   tests:
-    name: cargo test, ${{ matrix.mode }} (${{ matrix.id }})
+    name: cargo test, default and reference (${{ matrix.id }})
     needs: [changes]
     if: needs.changes.outputs.relevant == 'true'
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04-arm, windows-2025, macos-15, macos-15-intel]
-        mode: [default, reference]
-        include:
-          - { runner: ubuntu-24.04-arm, id: linux-arm64 }
-          - { runner: windows-2025, id: windows-x64 }
-          - { runner: macos-15, id: macos-arm64 }
-          - { runner: macos-15-intel, id: macos-x64 }
+        include: ${{ fromJSON(needs.changes.outputs.tests_matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    # Two full cargo test runs in debug. On Windows x64 the default run took 49 min and the
+    # reference run did not finish within the former 90 min (2026-10-17, dev with the eight blastp
+    # default switches: their integration tests take 2-6 min each there).
+    timeout-minutes: 150
     steps:
       - name: Check out without line-ending conversion
         if: runner.os == 'Windows'
@@ -169,18 +247,26 @@ jobs:
         with:
           workspaces: LOSAT -> target
           key: tests-${{ matrix.id }}
-      - name: cargo test --all-features
-        run: |
-          if [ "${{ matrix.mode }}" = reference ]; then export LOSAT_X_DEFAULT=0; fi
-          cd LOSAT && cargo test --locked --all-features --no-fail-fast
+      # The switches are read at run time (LOSAT/src/utils/xswitch.rs), so one build serves both
+      # modes; the second step runs the test binaries the first one built.
+      - name: cargo test --all-features, default
+        run: cd LOSAT && cargo test --locked --all-features --no-fail-fast
         env:
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
           # Optimized test code; the test profile keeps the dev profile's debug assertions
           # and overflow checks (as in ci.yml).
           CARGO_PROFILE_TEST_OPT_LEVEL: '1'
+      - name: cargo test --all-features, reference (LOSAT_X_DEFAULT=0)
+        if: ${{ !cancelled() }}
+        run: cd LOSAT && cargo test --locked --all-features --no-fail-fast
+        env:
+          LOSAT_X_DEFAULT: '0'
+          LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
+          CARGO_PROFILE_TEST_OPT_LEVEL: '1'
 
   # The check to require in the ruleset: it always runs and fails only if a job failed or was
-  # cancelled (jobs skipped because no relevant file changed count as passed).
+  # cancelled (jobs skipped because no relevant file changed, or because the pull request is a
+  # draft, count as passed).
   result:
     name: platform checks result
     if: always()

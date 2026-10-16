@@ -23,7 +23,7 @@ pub const AA_HITS_PER_CELL: usize = 3;
 #[path = "x_lut_direct.rs"]
 mod x_lut_direct;
 pub(crate) use x_lut_direct::x_shadow_tables as x_bxlut_shadow_tables;
-// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): BLASTP's table built in place
+// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): BLASTP's table built in place
 // by the same builder (x_lut_direct.rs); the shadow counter for the exit summary.
 pub(crate) use x_lut_direct::x_bplut_shadow_tables;
 // EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the direct builder of the TBLASTX unit
@@ -970,46 +970,110 @@ pub(crate) fn x_prepare_blosum62_lookup_query_in_pool(
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> (Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
     use rayon::prelude::*;
-    let ideal_params = blosum62_ideal_karlin_params();
-    let std_comp = compute_std_aa_composition();
-    let bounds = (-4, 11);
-    let mut prepared = x_prepare_lookup_query(
-        queries,
-        ideal_params,
-        &std_comp,
-        word_length,
-        check_ideal,
-        ScoringMatrix::Blosum62,
-        bounds,
-        false,
-    );
+    let lookup_query = XBlosum62LookupQuery::new(check_ideal);
+    let (concat_query, lookup_locations, mut contexts) =
+        lookup_query.without_karlin(queries, word_length);
     // The frames in the order of the contexts (`x_prepare_lookup_query`'s loops).
     let frames: Vec<&QueryFrame> = queries.iter().flatten().collect();
     let karlin: Vec<(bool, KarlinParams)> = pool.install(|| {
         frames
             .par_iter()
-            .map(|frame| {
-                x_context_karlin(
-                    frame,
-                    &std_comp,
-                    bounds,
-                    ScoringMatrix::Blosum62,
-                    check_ideal,
-                    ideal_params,
-                )
-            })
+            .map(|frame| lookup_query.context_karlin(frame))
             .collect()
     });
-    assert_eq!(karlin.len(), prepared.contexts.len());
-    for (context, (is_valid, karlin_params)) in prepared.contexts.iter_mut().zip(karlin) {
+    assert_eq!(karlin.len(), contexts.len());
+    for (context, (is_valid, karlin_params)) in contexts.iter_mut().zip(karlin) {
         context.is_valid = is_valid;
         context.karlin_params = karlin_params;
     }
-    (
-        prepared.concat_query,
-        prepared.lookup_locations,
-        prepared.contexts,
-    )
+    (concat_query, lookup_locations, contexts)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (above)
+// The values of `prepare_blosum62_lookup_query_for_word_size`, made in two steps: the lookup query,
+// whose contexts carry no Karlin block yet, and each context's block (`x_context_karlin` with the
+// arguments of `prepare_blosum62_lookup_query_for_word_size`), which reads only its own context's
+// letters, so the caller may compute the blocks in any order and on any thread. Scheduling only.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK, LOSAT_X_BPLKPFLAT): the lookup query of
+/// `prepare_blosum62_lookup_query_for_word_size` with the contexts' Karlin blocks left to the caller.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+pub(crate) struct XBlosum62LookupQuery {
+    ideal_params: KarlinParams,
+    std_comp: [f64; LOOKUP_ALPHABET_SIZE],
+    check_ideal: bool,
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+impl XBlosum62LookupQuery {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2833-2852 (the ideal block, as
+    // `prepare_blosum62_lookup_query_for_word_size` reads it)
+    // ```c
+    //    Blast_ResFreqStdComp(sbp, stdrfp);
+    //    BlastScoreFreqCalc(sbp, sfp, stdrfp, stdrfp);
+    //    Blast_KarlinBlkUngappedCalc(sbp->kbp_ideal, sfp);
+    // ```
+    pub(crate) fn new(check_ideal: bool) -> Self {
+        Self {
+            ideal_params: blosum62_ideal_karlin_params(),
+            std_comp: compute_std_aa_composition(),
+            check_ideal,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:634-637 (the lookup segments,
+    // `prepare_blosum62_lookup_query_for_word_size`)
+    // ```c
+    //     if (lookup_segments) {
+    //         BLAST_ComplementMaskLocations(program_number, query_info,
+    //                                       filter_maskloc, lookup_segments);
+    //     }
+    // ```
+    /// The query, the lookup segments and the contexts of
+    /// `prepare_blosum62_lookup_query_for_word_size`, each context valid with the default Karlin
+    /// parameters until the caller sets them from `context_karlin` of its frame.
+    pub(crate) fn without_karlin(
+        &self,
+        queries: &[Vec<QueryFrame>],
+        word_length: usize,
+    ) -> (Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
+        let prepared = x_prepare_lookup_query(
+            queries,
+            self.ideal_params,
+            &self.std_comp,
+            word_length,
+            self.check_ideal,
+            ScoringMatrix::Blosum62,
+            (-4, 11),
+            false,
+        );
+        (
+            prepared.concat_query,
+            prepared.lookup_locations,
+            prepared.contexts,
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2778-2803 (`x_context_karlin`)
+    // ```c
+    //       loop_status = Blast_KarlinBlkUngappedCalc(kbp, sbp->sfp[context]);
+    // ```
+    /// The validity and Karlin block of the context of `frame`.
+    pub(crate) fn context_karlin(&self, frame: &QueryFrame) -> (bool, KarlinParams) {
+        x_context_karlin(
+            frame,
+            &self.std_comp,
+            (-4, 11),
+            ScoringMatrix::Blosum62,
+            self.check_ideal,
+            self.ideal_params,
+        )
+    }
 }
 
 #[inline(always)]
@@ -1382,7 +1446,7 @@ pub fn build_ncbi_lookup(
 //         }
 //     }
 // ```
-/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): [`build_ncbi_lookup`] for
+/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): [`build_ncbi_lookup`] for
 /// BLASTP; with the switch the table is filled in place from the per-cell counts, in the same
 /// append order as the loop above and BlastAaLookupFinalize (x_lut_direct.rs), so the chains of
 /// the reference builder are never held.

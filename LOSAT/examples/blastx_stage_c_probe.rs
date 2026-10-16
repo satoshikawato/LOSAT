@@ -115,7 +115,11 @@ fn main() -> Result<()> {
         bail!("blastx required");
     };
     let options = args.resolve()?;
-    let subjects = read_fasta(&args.subject, true, args.lcase_masking)?;
+    let subjects = read_fasta(
+        args.subject.as_deref().expect("the probes take -subject"),
+        true,
+        args.lcase_masking,
+    )?;
     let queries = read_fasta(&args.query, false, args.lcase_masking)?;
     let batches = search_preliminary(&queries, &subjects, &options)?;
     for batch in batches {

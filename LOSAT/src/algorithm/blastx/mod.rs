@@ -338,6 +338,9 @@ pub mod kappa;
 // EXPERIMENT (LOSAT_X_BXSEGMEMO): the redo-stage subject SEG memoised per subject.
 mod x_seg_memo;
 
+// Diagnostic (LOSAT_TIMING): the stage times of a BLASTX run. No NCBI counterpart.
+mod x_timing;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1486-1508
 // ```c++
 //     } else if (ext_params->options->compositionBasedStats > 0 ||
@@ -470,3 +473,7 @@ pub mod native;
 //                 results = lcl_blast.Run();
 // ```
 pub(crate) mod web;
+// The subjects of a search by oid: `-subject` records or the stored sequences of `-db`.
+pub(crate) mod subjects;
+// The database path (`-db`): opening, the stored sequences, titles and ranks per batch.
+pub(crate) mod database;

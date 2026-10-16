@@ -15,9 +15,9 @@ use super::{
     statistics::{
         evaluate_gapped, identity_and_positive, normalize_scores, reap_final, reap_preliminary,
     },
+    subjects::Subjects,
     traceback::ordinary_traceback,
 };
-use crate::utils::matrix::aa_char_to_ncbistdaa;
 use anyhow::Result;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1777
 // ```c++
@@ -335,7 +335,7 @@ fn x_speculate_match(
     batch: &PreparedQueryBatch,
     full: &[ContextParameters],
     options: &ResolvedOptions,
-    subjects: &[FastaRecord],
+    subjects: Subjects<'_>,
     db_length: i64,
 ) -> Option<(
     HspList,
@@ -345,12 +345,7 @@ fn x_speculate_match(
     use crate::core::composition_adjustment::redo_alignment::X_REDO_PROBE;
     worker.x_set_matrix(None);
     X_REDO_PROBE.with(|probe| probe.set(0));
-    let encoded: Vec<_> = subjects[list.oid]
-        .sequence
-        .iter()
-        .copied()
-        .map(aa_char_to_ncbistdaa)
-        .collect();
+    let encoded = subjects.encoded(list.oid);
     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
     let redone = worker
         .redo_list_observed(&input, batch, &encoded, &mut |_| {})
@@ -378,9 +373,9 @@ fn x_speculate_match(
     };
     Some((output, best_score, matrix))
 }
-pub fn search_internal(
+pub fn search_internal<'a>(
     records: &[FastaRecord],
-    subjects: &[FastaRecord],
+    subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
 ) -> Result<Vec<BatchResults>> {
     search_internal_observed(records, subjects, options, &mut Noop)
@@ -419,6 +414,16 @@ pub(crate) fn x_bx_batch() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXBATCH"))
+}
+
+// No NCBI counterpart: when the queued batches of LOSAT_X_BXBATCH are searched (as a flow instead
+// of waves); the reports, their order and the values in them are those of the waves.
+/// EXPERIMENT (LOSAT_X_BXFLOW): `LOSAT_X_BXFLOW` set (off unless set; not in the strict set; acts
+/// with LOSAT_X_BXBATCH and LOSAT_X_BXPOOL).
+pub(crate) fn x_bx_flow() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXFLOW").is_some())
 }
 
 thread_local! {
@@ -465,9 +470,9 @@ impl Drop for XInnerSerial {
 /// EXPERIMENT (LOSAT_X_BXBATCH): `search_internal` as the one-thread search,
 /// whatever thread it is called on. The caller runs several of these side by
 /// side; each takes the serial path of every stage.
-pub fn x_search_internal_serial(
+pub fn x_search_internal_serial<'a>(
     records: &[FastaRecord],
-    subjects: &[FastaRecord],
+    subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
 ) -> Result<Vec<BatchResults>> {
     let _serial = XInnerSerial::enter();
@@ -489,19 +494,20 @@ pub fn x_search_internal_serial(
 // itself is search_internal.
 /// EXPERIMENT (LOSAT_X_BXPOOL): `search_internal` on a pool that the caller
 /// keeps for all its query batches.
-pub fn x_search_internal_in_pool(
+pub fn x_search_internal_in_pool<'a>(
     records: &[FastaRecord],
-    subjects: &[FastaRecord],
+    subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Result<Vec<BatchResults>> {
+    let subjects = subjects.into();
     let mut observer = Noop;
     let mut pipeline = Runtime {
         observer: &mut observer,
         ungapped_link_state: None,
         options,
         subjects,
-        db_length: subjects.iter().map(|s| s.sequence.len() as i64).sum(),
+        db_length: subjects.total_length()?,
         ordinal: 0,
         stream: None,
         chunk: None,
@@ -537,18 +543,19 @@ pub fn x_search_internal_in_pool(
 //                     }
 //
 // ```
-pub fn search_internal_observed(
+pub fn search_internal_observed<'a>(
     records: &[FastaRecord],
-    subjects: &[FastaRecord],
+    subjects: impl Into<Subjects<'a>>,
     options: &ResolvedOptions,
     observer: &mut dyn RuntimeObserver,
 ) -> Result<Vec<BatchResults>> {
+    let subjects = subjects.into();
     let mut pipeline = Runtime {
         observer,
         ungapped_link_state: None,
         options,
         subjects,
-        db_length: subjects.iter().map(|s| s.sequence.len() as i64).sum(),
+        db_length: subjects.total_length()?,
         ordinal: 0,
         stream: None,
         chunk: None,
@@ -563,7 +570,7 @@ struct Runtime<'a> {
     ungapped_link_state: Option<([i32; 2], f64)>,
     observer: &'a mut dyn RuntimeObserver,
     options: &'a ResolvedOptions,
-    subjects: &'a [FastaRecord],
+    subjects: Subjects<'a>,
     db_length: i64,
     ordinal: usize,
     stream: Option<HspStream>,
@@ -782,7 +789,7 @@ impl PreliminarySink for Runtime<'_> {
     ) -> Result<()> {
         self.ungapped_link_state = prepared;
         if let Some(prepared) = prepared {
-            let length = self.subjects[oid].sequence.len() as i32;
+            let length = self.subjects.length(oid) as i32;
             let link = super::linking::link_parameters(self.options)
                 .expect("ungapped sum-stat parameters");
             self.observer
@@ -961,12 +968,7 @@ impl PreliminarySink for Runtime<'_> {
         //          }
         // ```
         if !self.options.gapped {
-            let encoded: Vec<_> = self.subjects[oid]
-                .sequence
-                .iter()
-                .copied()
-                .map(aa_char_to_ncbistdaa)
-                .collect();
+            let encoded = self.subjects.encoded(oid);
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1765-1789
             // ```c++
             // {
@@ -998,7 +1000,7 @@ impl PreliminarySink for Runtime<'_> {
             if !input.is_empty() {
                 if let Some(link) = super::linking::link_parameters(self.options) {
                     self.observer
-                        .link_run(self.subjects[oid].sequence.len() as i32, false, &link);
+                        .link_run(self.subjects.length(oid) as i32, false, &link);
                 }
             }
             let mut linked = super::statistics::evaluate_ungapped(
@@ -1149,7 +1151,7 @@ impl PreliminarySink for Runtime<'_> {
             if !input.is_empty() {
                 if let Some(link) = super::linking::link_parameters(self.options) {
                     self.observer
-                        .link_run(self.subjects[oid].sequence.len() as i32, false, &link);
+                        .link_run(self.subjects.length(oid) as i32, false, &link);
                 }
             }
             let mut linked = super::statistics::evaluate_ungapped(
@@ -1259,7 +1261,7 @@ impl PreliminarySink for Runtime<'_> {
         if !input.is_empty() {
             if let Some(link) = super::linking::link_parameters(self.options) {
                 self.observer
-                    .link_run(self.subjects[oid].sequence.len() as i32, true, &link);
+                    .link_run(self.subjects.length(oid) as i32, true, &link);
             }
         }
         let mut linked = evaluate_gapped(
@@ -1267,7 +1269,7 @@ impl PreliminarySink for Runtime<'_> {
             batch,
             params,
             self.options,
-            self.subjects[oid].sequence.len() as i32,
+            self.subjects.length(oid) as i32,
             self.db_length,
             1.0,
         )?;
@@ -1390,6 +1392,11 @@ impl PreliminarySink for Runtime<'_> {
         batch: &PreparedQueryBatch,
         params: &[ContextParameters],
     ) -> Result<()> {
+        // Diagnostic (LOSAT_TIMING): the clocks of the intervals of this function
+        // (x_timing.rs). No NCBI counterpart.
+        use super::x_timing::End as XEnd;
+        let x_t = super::x_timing::lap();
+        let mut x_t_finish = None;
         let mut stream = self.stream.take().expect("batch stream");
 
         let mut full = params.to_vec();
@@ -1399,11 +1406,7 @@ impl PreliminarySink for Runtime<'_> {
             self.options,
             self.db_length,
             self.subjects.len() as i64,
-            self.subjects
-                .iter()
-                .map(|s| s.sequence.len())
-                .min()
-                .expect("subjects"),
+            self.subjects.shortest_length(),
             None,
         )?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1842-1846
@@ -1543,6 +1546,7 @@ impl PreliminarySink for Runtime<'_> {
         } else {
             None
         };
+        super::x_timing::end(XEnd::Init, x_t);
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3543
         // ```c++
@@ -1676,10 +1680,12 @@ impl PreliminarySink for Runtime<'_> {
             //             head = head->next;
             //             sfree(here);
             // ```
+            let x_t = super::x_timing::lap();
             let mut matches = Vec::new();
             while let Some(list) = stream.read_observed(self.observer) {
                 matches.push(list);
             }
+            super::x_timing::end(XEnd::Read, x_t);
             // EXPERIMENT (LOSAT_X_BXPAR): redo the matches of one batch on the
             // search pool before walking them in stream order.  A match is a
             // function of its own HSP list and of the matrix left by the match
@@ -1760,6 +1766,7 @@ impl PreliminarySink for Runtime<'_> {
             // order; it does not change any value NCBI computes.
             let mut x_reused = 0usize;
             let mut x_serial = 0usize;
+            let x_t_loop = super::x_timing::lap();
             for (match_index, list) in matches.iter().enumerate() {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
                 // ```c
@@ -1786,6 +1793,7 @@ impl PreliminarySink for Runtime<'_> {
                         (self.options, self.subjects, self.db_length);
                     let full = &full;
                     let workers = &x_workers;
+                    let x_t = super::x_timing::lap();
                     speculated = batch_lists
                         .par_iter()
                         .zip(wanted.par_iter())
@@ -1806,6 +1814,7 @@ impl PreliminarySink for Runtime<'_> {
                             )
                         })
                         .collect();
+                    super::x_timing::end(XEnd::KappaSpec, x_t);
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1582
                 // ```c++
@@ -1867,18 +1876,14 @@ impl PreliminarySink for Runtime<'_> {
                     (output, best_score)
                 } else {
                     x_serial += 1;
-                    let encoded: Vec<_> = self.subjects[list.oid]
-                        .sequence
-                        .iter()
-                        .copied()
-                        .map(aa_char_to_ncbistdaa)
-                        .collect();
+                    let x_t = super::x_timing::lap();
+                    let encoded = self.subjects.encoded(list.oid);
                     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
                     let redone =
                         state.redo_list_observed(&input, batch, &encoded, &mut |event| {
                             self.observer.matrix(list.oid, event)
                         })?;
-                    finalize_redone(
+                    let finalized = finalize_redone(
                         &redone,
                         batch,
                         &full,
@@ -1888,7 +1893,9 @@ impl PreliminarySink for Runtime<'_> {
                         list.query_index,
                         list.oid,
                         self.observer,
-                    )?
+                    );
+                    super::x_timing::end(XEnd::KappaSerial, x_t);
+                    finalized?
                 };
                 if output.hsps.is_empty() {
                     continue;
@@ -1997,6 +2004,11 @@ impl PreliminarySink for Runtime<'_> {
             //     }
             //     if (COMPO_INTENSE_DEBUG) {
             // ```
+            super::x_timing::end(XEnd::Loop, x_t_loop);
+            super::x_timing::end_add(XEnd::Matches, matches.len() as u64);
+            super::x_timing::end_add(XEnd::Reused, x_reused as u64);
+            super::x_timing::end_add(XEnd::Serial, x_serial as u64);
+            x_t_finish = super::x_timing::lap();
             let _ = (x_reused, x_serial);
             for (q, (heap, query)) in heaps.iter_mut().zip(&mut queries).enumerate() {
                 loop {
@@ -2173,12 +2185,7 @@ impl PreliminarySink for Runtime<'_> {
             //         ASSERT(batches);
             // ```
             for lists in result_batches {
-                let encoded: Vec<_> = self.subjects[lists[0].oid]
-                    .sequence
-                    .iter()
-                    .copied()
-                    .map(aa_char_to_ncbistdaa)
-                    .collect();
+                let encoded = self.subjects.encoded(lists[0].oid);
                 for list in lists {
                     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:402-407
@@ -2437,6 +2444,7 @@ impl PreliminarySink for Runtime<'_> {
             parameters: full,
             search_skipped: false,
         });
+        super::x_timing::end(XEnd::Finish, x_t_finish);
         Ok(())
     }
 }

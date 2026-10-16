@@ -1,5 +1,5 @@
 //! BLASTX options and native serial local-subject search/report dispatch.
-use crate::blastinput::value_parsers::{genetic_code, nonnegative_f64};
+use crate::blastinput::value_parsers::{genetic_code, ncbi_int8, nonnegative_f64};
 use anyhow::{bail, Result};
 use clap::Args;
 use std::path::PathBuf;
@@ -48,8 +48,46 @@ pub struct BlastxArgs {
     //                                 "Subject sequence(s) to search",
     //                                 CArgDescriptions::eInputFile);
     // ```
+    // Optional for the parser: without `-subject` and `-db` the run fails with NCBI's error
+    // after the parsing (`blastinput/app.rs` `missing_subject_error`).
     #[arg(long, value_name = "PATH")]
-    pub subject: PathBuf,
+    pub subject: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2191-2199
+    // ```c++
+    //     arg_desc.SetCurrentGroup("General search options");
+    //     // database filename
+    //     if (m_IsIgBlast){
+    //         arg_desc.AddOptionalKey(kArgDb, "database_name", "Optional additional database name",
+    //                                 CArgDescriptions::eString);
+    //     } else {
+    //         arg_desc.AddOptionalKey(kArgDb, "database_name", "BLAST database name",
+    //                                 CArgDescriptions::eString);
+    //     }
+    // ```
+    // NCBI excludes `-subject` (and `-subject_loc`, which LOSAT's BLASTX rejects) with
+    // `-db` (blast_args.cpp:2364-2381). The exclusion is an error of the argument parser:
+    // LOSAT's parser reports it with its own text (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES,
+    // exception 1).
+    #[arg(
+        long,
+        value_name = "NAME",
+        conflicts_with = "subject",
+        help = "BLAST database name (a protein database without parsed Seq-ids)"
+    )]
+    pub db: Option<String>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
+    // ```c++
+    //     // DB size
+    //     if (!m_IsMapper) {
+    //         arg_desc.SetCurrentGroup("Statistical options");
+    //         arg_desc.AddOptionalKey(kArgDbSize, "num_letters",
+    //                                 "Effective length of the database ",
+    //                                 CArgDescriptions::eInt8);
+    //     }
+    // ```
+    // No constraint and no dependency: read with `-db` and with `-subject`.
+    #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
+    pub dbsize: Option<i64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3441-3443
     // ```c++
     //     arg_desc.AddDefaultKey(kArgOutput, "output_file",
@@ -734,7 +772,12 @@ impl BlastxArgs {
     // 	}
     // ```
     pub fn resolve(&self) -> Result<ResolvedOptions> {
-        if self.query.as_os_str() == "-" || self.subject.as_os_str() == "-" {
+        if self.query.as_os_str() == "-"
+            || self
+                .subject
+                .as_deref()
+                .is_some_and(|subject| subject.as_os_str() == "-")
+        {
             bail!("unsupported BLASTX stdin query/subject");
         }
         if self.matrix.as_deref().is_some_and(|m| m != "BLOSUM62") {
@@ -903,7 +946,8 @@ impl BlastxArgs {
             //     SetEffectiveSearchSpace(0);
             // }
             // ```
-            db_length: 0,
+            // `-dbsize` (`CBlastOptions::SetDbLength`, blast_args.cpp:2570-2572).
+            db_length: self.dbsize.unwrap_or(0),
             effective_search_space: 0,
             window_size: self.window_size.unwrap_or(40),
             evalue: self.evalue,
@@ -974,6 +1018,11 @@ impl BlastxArgs {
     // ```
     pub fn run(self) -> Result<()> {
         super::native::run(&self)
+    }
+
+    /// The `-db` value as NCBI keeps it (`seqdb::db_argument_name`), when given.
+    pub fn database_name(&self) -> Option<&str> {
+        self.db.as_deref().map(crate::seqdb::db_argument_name)
     }
 }
 

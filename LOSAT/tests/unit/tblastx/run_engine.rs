@@ -46,6 +46,8 @@ fn db_gencode_controls_local_subject_search_translation() {
     let args = TblastxArgs {
         query: query.clone(),
         subject: Some(subject.clone()),
+        db: None,
+        dbsize: None,
         evalue: 10.0,
         threshold: 13.0,
         word_size: 3,

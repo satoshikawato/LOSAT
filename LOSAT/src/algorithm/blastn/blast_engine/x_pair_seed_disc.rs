@@ -263,7 +263,7 @@ fn fold_two_hit(
         let ctx = &x.query_contexts[context_idx];
         let q_idx = context_idx as u32;
         let q_context_start = ctx.query_offset as usize;
-        let q_context_end = q_context_start + ctx.seq.len();
+        let q_context_end = q_context_start + ctx.len;
         let cutoff_score = x.cutoff_scores[context_idx];
         let q_ext_start = seed.q as usize;
         let s_ext_start = seed.s as usize;
@@ -538,7 +538,6 @@ fn fold_two_hit(
         } else {
             extend_hit_ungapped_approx_ncbi(
                 x.encoded_query_concat_blastna,
-                x.query_four_base,
                 search_seq_packed,
                 q_off,
                 s_off,
@@ -846,9 +845,9 @@ pub(super) fn summary() {
 #[cfg(test)]
 mod tests {
     use super::super::super::{
-        build_blastna_matrix, build_nucl_score_table, build_query_blastna_concat_buffers,
-        build_query_four_base_bytes, diag_hash_insert_window, scan_subject_disc_words_with_ranges,
-        QueryContext, QueryContextIndex,
+        build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
+        diag_hash_insert_window, scan_subject_disc_words_with_ranges, QueryContext,
+        QueryContextIndex,
     };
     use super::*;
     use crate::algorithm::blastn::disc_lookup::DiscWordType;
@@ -901,7 +900,6 @@ mod tests {
         masks: Vec<Vec<MaskedInterval>>,
         concat: Vec<u8>,
         concat_sentinels: Vec<u8>,
-        four_base: Vec<u8>,
         packed: Vec<u8>,
         s_len: usize,
         seq_ranges: [(i32, i32); 1],
@@ -963,19 +961,18 @@ mod tests {
             Vec::new(),
         ];
         let concat_len = 2 * q_len + 1;
-        let (concat, concat_sentinels) =
-            build_query_blastna_concat_buffers(&ctx_seqs, &offsets, concat_len);
+        let concat_sentinels = build_query_blastna_buffer(&[&query], &offsets, concat_len);
+        let concat = concat_sentinels[1..concat_len + 1].to_vec();
         let contexts: Vec<QueryContext> = (0..2)
             .map(|c| QueryContext {
                 query_idx: 0,
                 frame: if c == 0 { 1 } else { -1 },
                 query_offset: offsets[c],
-                seq: ctx_seqs[c].clone(),
+                len: ctx_seqs[c].len(),
                 masks: masks[c].clone(),
             })
             .collect();
         let index = QueryContextIndex::new(&contexts);
-        let four_base = build_query_four_base_bytes(&concat);
         Case {
             contexts,
             index,
@@ -984,13 +981,16 @@ mod tests {
             masks,
             concat,
             concat_sentinels,
-            four_base,
             packed,
             s_len,
             seq_ranges: [(0, s_len as i32)],
             score_matrix: build_blastna_matrix(2, -3),
             nucl_score_table: build_nucl_score_table(2, -3),
         }
+    }
+
+    fn ctx_refs(c: &Case) -> Vec<&[u8]> {
+        c.ctx_seqs.iter().map(Vec::as_slice).collect()
     }
 
     fn inputs<'a>(
@@ -1010,7 +1010,6 @@ mod tests {
             query_contexts: &c.contexts,
             encoded_query_concat_blastna: &c.concat,
             encoded_query_concat_blastna_with_sentinels: &c.concat_sentinels,
-            query_four_base: &c.four_base,
             cutoff_scores: &[30, 30],
             x_dropoff_scores: &[20, 20],
             reduced_cutoff_scores: &[24, 24],
@@ -1062,7 +1061,7 @@ mod tests {
                     case_no += 1;
                     let c = make_case(&mut rng, 30_000);
                     let lookup = build_disc_mb_lookup(
-                        &c.ctx_seqs,
+                        &ctx_refs(&c),
                         &c.offsets,
                         word_size,
                         template_length,
@@ -1197,7 +1196,7 @@ mod tests {
         let mut rng = Lcg(0x5C0_9E);
         let c = make_case(&mut rng, 5_000);
         let disc = build_disc_mb_lookup(
-            &c.ctx_seqs,
+            &ctx_refs(&c),
             &c.offsets,
             11,
             18,
@@ -1232,7 +1231,7 @@ mod tests {
             ..inputs(&c, &disc, 40, 40)
         }));
         let contiguous = build_two_stage_lookup(
-            &c.ctx_seqs,
+            &ctx_refs(&c),
             &c.offsets,
             28,
             12,

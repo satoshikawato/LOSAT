@@ -32,7 +32,7 @@ use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: the switches of the strict set, the variables that are on by default.
-/// The last twelve joined after the set became the default. `LOSAT_X_PAIRLUT` and
+/// The last seventeen joined after the set became the default. `LOSAT_X_PAIRLUT` and
 /// `LOSAT_X_HSPINPLACE` were added after the change as switches that are off unless set and
 /// joined the set once they were verified with it on. `LOSAT_X_SEEDBUCKET` was left out at the
 /// change: it numbered the lookup hits of a chunk scan in a `u32`, exact only up to 2^32 hits
@@ -59,7 +59,23 @@ use std::sync::OnceLock;
 /// `tblastn/x_oid_flow.rs`) and `LOSAT_X_TBNOIDUNITS` (the units of a subject longer than a
 /// chunk's budget on the pool, `tblastn/stage_d_pipeline.rs`) joined the same way, together,
 /// after them.
-pub(crate) const STRICT_SET: [&str; 55] = [
+/// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
+/// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
+/// joined the set once it was verified with it on.
+/// `LOSAT_X_BPSUBJRUN` (BLASTP's parallel `-subject` loop searches the subjects in runs of
+/// consecutive subjects, each run with one diagonal table that is cleared once,
+/// `blastp/blast_engine/x_subject_runs.rs`) was added after the change as a switch that is off
+/// unless set and joined the set once it was verified and timed with it on.
+/// `LOSAT_X_TBNSTORE` (TBLASTN `-subject` records held packed, `tblastn/x_subject_store.rs`) was
+/// added after the change as a switch that is off unless set and joined the set once it was
+/// verified and timed with it on.
+/// `LOSAT_X_DPNEON` (the NEON build of the vector X-drop kernels on aarch64, `utils/xdrop_simd.rs`)
+/// was added after the change as a switch that is off unless set and joined the set once it was
+/// verified with it on the Linux and macOS arm64 runners.
+/// `LOSAT_X_TBNBATCHRULE` (which query batches `LOSAT_X_TBNBATCH` searches side by side, only the
+/// full waves of a small subject set, `tblastn/stage_d_pipeline.rs`) was added after the change as
+/// a switch that is off unless set and joined the set once it was verified and timed with it on.
+pub(crate) const STRICT_SET: [&str; 60] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_PURGEFAST",
@@ -115,6 +131,11 @@ pub(crate) const STRICT_SET: [&str; 55] = [
     "LOSAT_X_TBNXLATE",
     "LOSAT_X_TBNOIDNEXT",
     "LOSAT_X_TBNOIDUNITS",
+    "LOSAT_X_LINKSLICES",
+    "LOSAT_X_BPSUBJRUN",
+    "LOSAT_X_TBNSTORE",
+    "LOSAT_X_DPNEON",
+    "LOSAT_X_TBNBATCHRULE",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that

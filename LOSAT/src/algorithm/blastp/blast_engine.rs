@@ -66,6 +66,9 @@ mod database;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_subject_runs;
+// EXPERIMENT (LOSAT_X_BPSUBJMETA / LOSAT_X_BPSUBJMETASHADOW): the subjects' tabular IDs and titles
+// of the block search made once for all blocks (held by `x_query_blocks::XBlockSubjects`).
+pub(super) mod x_subject_meta;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{BlastpArgs, BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs};
@@ -1068,6 +1071,17 @@ pub(crate) fn x_bp_subj_run_print_summary() {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     x_subject_runs::x_bp_subj_run_print_summary();
+}
+
+// No NCBI counterpart: prints counters and changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the shadow mode's line at exit.
+pub(crate) fn x_bp_db_cut_print_summary() {
+    database::x_bp_db_cut_print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BPSUBJMETASHADOW): the shadow mode's line at exit.
+pub(crate) fn x_bp_subj_meta_print_summary() {
+    x_subject_meta::x_bp_subj_meta_print_summary();
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
@@ -2615,7 +2629,28 @@ fn tabular_subject_ids(
     hit_lists: &[Option<BlastpHitList>],
     subjects: &[FastaRecord],
 ) -> Result<Vec<Arc<[u8]>>> {
-    let ids: Vec<Option<Arc<[u8]>>> = subjects
+    let ids = tabular_subject_id_results(subjects);
+    check_tabular_subject_ids(hit_lists, subjects, &ids)?;
+    Ok(ids
+        .into_iter()
+        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
+        .collect())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:225-231
+// ```c++
+// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
+//             vector<string> title_tokens;
+//             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
+//             if (defline != NcbiEmptyString) {
+//                 id_token =
+//                     NStr::Split(defline, " ", title_tokens)[0];
+//             }
+// ```
+/// `report::defline::tabular_subject_id` of every subject, by subject index
+/// (`tabular_subject_ids`): `None` for a subject whose ID cannot be written.
+fn tabular_subject_id_results(subjects: &[FastaRecord]) -> Vec<Option<Arc<[u8]>>> {
+    subjects
         .iter()
         .map(|subject| {
             crate::report::defline::tabular_subject_id(
@@ -2626,7 +2661,27 @@ fn tabular_subject_ids(
             .ok()
             .map(Arc::from)
         })
-        .collect();
+        .collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
+// ```c++
+//         } catch (const CException&) {
+//             list<CRef<CSeq_id> > subject_ids;
+//             CRef<CSeq_id> id(new CSeq_id());
+//             id->Assign(align.GetSeq_id(1));
+//             subject_ids.push_back(id);
+//             SetSubjectId(subject_ids);
+//             bioseqs_found = false;
+//         }
+// ```
+/// The check of `tabular_subject_ids`: the first subject, in the order of the hit lists' HSPs,
+/// whose ID in `ids` (`tabular_subject_id_results`) cannot be written is the error.
+fn check_tabular_subject_ids(
+    hit_lists: &[Option<BlastpHitList>],
+    subjects: &[FastaRecord],
+    ids: &[Option<Arc<[u8]>>],
+) -> Result<()> {
     for hit_list in hit_lists.iter().flatten() {
         let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
         for hsp in hit_list.hsplist_array[..count]
@@ -2643,10 +2698,34 @@ fn tabular_subject_ids(
             }
         }
     }
-    Ok(ids
-        .into_iter()
-        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
-        .collect())
+    Ok(())
+}
+
+// No NCBI counterpart: values NCBI makes per row (tabular.cpp above), made once for all blocks;
+// reuse only.
+/// EXPERIMENT (LOSAT_X_BPSUBJMETA): `tabular_subject_ids` of a block of the block search with the
+/// subjects' ID results made once for all blocks (`blast_engine/x_subject_meta.rs`): the same
+/// check over the block's hit lists, with the stored results, and the shown IDs borrowed.
+/// The stored results are `tabular_subject_id_results` of the same records, a function of each
+/// record only (`tabular_subject_id(local_id, title, true)`), so the check fails for the same block
+/// and names the same record as `tabular_subject_ids`, and otherwise the shown IDs are its IDs.
+/// No floating-point operation is involved. With `LOSAT_X_BPSUBJMETASHADOW` the block's values are
+/// made again as without the switch and compared (`XSubjectMeta::x_shadow_compare`).
+fn x_tabular_subject_ids_cached<'m>(
+    hit_lists: &[Option<BlastpHitList>],
+    subjects: &[FastaRecord],
+    meta: &'m x_subject_meta::XSubjectMeta,
+) -> Result<&'m [Arc<[u8]>]> {
+    let result = check_tabular_subject_ids(hit_lists, subjects, meta.ids()).map(|()| meta.shown());
+    if meta.shadow() {
+        meta.x_shadow_compare(
+            subjects,
+            &tabular_subject_id_results(subjects),
+            &tabular_subject_ids(hit_lists, subjects),
+            &result,
+        );
+    }
+    result
 }
 
 fn blastp_tabular_field_text(
@@ -5713,8 +5792,14 @@ fn search(
                     x_bp_encode_block_subjects(&subjects.records, args.num_threads, pool)?;
                 let pool = &pool.x_with_ext(&x_subjects);
                 let mut sink = super::x_query_blocks::XBlockSink::new(&mut formats[0].sink);
+                // EXPERIMENT (LOSAT_X_BPLKPAHEAD): each block's search builds the next block's lookup
+                // table beside it, on the pool (`blast_engine/x_lookup_ahead.rs`).
+                let mut x_ahead = x_lookup_ahead::XLookupAhead::new(&args, pool, batch_size);
                 for (index, block) in blocks.iter().enumerate() {
                     let block_queries = &searched_queries[block.clone()];
+                    let x_next_queries = blocks
+                        .get(index + 1)
+                        .map(|next| &searched_queries[next.clone()]);
                     let block_input = seq_range::QueryInput::whole(block_queries);
                     let mut block_outputs = ReportOutputs {
                         formats: vec![crate::api::local_blast::FormatOutput {
@@ -5725,27 +5810,30 @@ fn search(
                         hits: None,
                         observer: None,
                     };
-                    let result = run_resolved_in_pool(
-                        args.clone(),
-                        block_queries,
-                        subject_source,
-                        "",
-                        subject_label,
-                        &mut block_outputs,
-                        pool,
-                        None,
-                        &BlastpRanges {
-                            input_records: &query_records[block.clone()],
-                            query_input: &block_input,
-                            subject_placements: &subjects.placements,
-                            x_ordinal_base: block.start,
-                        },
-                        &BlastpReports {
-                            reader_warnings: &reader_warnings[block.clone()],
-                            epilog: epilog && index + 1 == blocks.len(),
-                            v1_titles: v1.is_some(),
-                        },
-                    );
+                    let result = x_ahead.run_block(x_next_queries, |x_block| {
+                        run_resolved_in_pool(
+                            args.clone(),
+                            block_queries,
+                            subject_source,
+                            "",
+                            subject_label,
+                            &mut block_outputs,
+                            pool,
+                            None,
+                            &BlastpRanges {
+                                input_records: &query_records[block.clone()],
+                                query_input: &block_input,
+                                subject_placements: &subjects.placements,
+                                x_ordinal_base: block.start,
+                            },
+                            &BlastpReports {
+                                reader_warnings: &reader_warnings[block.clone()],
+                                epilog: epilog && index + 1 == blocks.len(),
+                                v1_titles: v1.is_some(),
+                            },
+                            x_block,
+                        )
+                    });
                     // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
                     super::x_bp_redo_par_shadow_error(&result);
                     result?;
@@ -5804,6 +5892,7 @@ fn search(
                 None,
                 &ranges,
                 &reports,
+                x_lookup_ahead::XAheadBlock::none(),
             );
             // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
             super::x_bp_redo_par_shadow_error(&result);
@@ -6462,6 +6551,7 @@ fn search_split_query_batches(
                     epilog: false,
                     v1_titles: false,
                 },
+                x_lookup_ahead::XAheadBlock::none(),
             )?;
             let chunk_parts: Vec<super::query_split::BlastpChunkPart> = chunk
                 .queries
@@ -6507,6 +6597,113 @@ fn search_split_query_batches(
     Ok(())
 }
 
+// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the next query block's query frames, lookup table and contexts
+// built during the block before it (`x_query_blocks.rs` block search).
+pub(super) mod x_lookup_ahead;
+
+// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:337-370
+// ```c
+// BlastSetUp_Filter(..., query_blk, ...);
+// query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
+// query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
+// ```
+/// The query frames of a search: each record encoded with the search's SEG parameters
+/// (`encode_protein_query_frame_with_seg`). `run_resolved_in_pool` encodes its queries with it, and so
+/// does the build of the next block's lookup ahead of that block (LOSAT_X_BPLKPAHEAD,
+/// `x_lookup_ahead.rs`).
+fn blastp_query_frames(
+    args: &ResolvedBlastpArgs,
+    query_records: &[FastaRecord],
+) -> Vec<Vec<QueryFrame>> {
+    let seg_params = args.seg.params();
+    query_records
+        .iter()
+        .map(|record| {
+            vec![encode_protein_query_frame_with_seg(
+                record.seq(),
+                seg_params.as_ref(),
+            )]
+        })
+        .collect()
+}
+
+// NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
+// ```c
+// s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+//                                 query, locations);
+// s_CompressedLookupFinalize(lookup);
+// ```
+/// The compressed lookup table of blastp-fast (`CompressedAaLookupTable`) and the query contexts of
+/// `query_frames`, as the lookup region of `run_resolved_in_pool` builds them: `query_batches` and
+/// `query_lengths` are the search's (its batches of the whole input, its records' lengths), and
+/// `x_for` says which build of a block search this is (the spare vectors it takes,
+/// `x_query_blocks::XLookupFor`; a query chunk's NCBI tables are its one table). The build of the
+/// next block's table ahead of that block (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`) calls it too,
+/// with `XLookupFor::Ahead`.
+fn blastp_compressed_lookup(
+    args: &ResolvedBlastpArgs,
+    query_frames: &[Vec<QueryFrame>],
+    query_batches: &[seq_range::RangedBatch],
+    query_lengths: &[usize],
+    blastp_parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    x_for: super::x_query_blocks::XLookupFor,
+) -> Result<(BlastpRuntimeLookup, Vec<QueryContext>)> {
+    let query_chunk = x_for == super::x_query_blocks::XLookupFor::QueryChunk;
+    // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts' Karlin blocks on the search's pool
+    // (`x_query_blocks::x_bp_lookup_query`); without the switch
+    // `prepare_blosum62_lookup_query_for_word_size`. EXPERIMENT (LOSAT_X_BPLKPFLAT): they
+    // can be left to the build below and set after it (`x_query_blocks::XLookupFlat`); a
+    // query chunk takes no spare table vectors.
+    let (x_flat, query, locations, mut contexts) = super::x_query_blocks::XLookupFlat::lookup_query(
+        query_frames,
+        args.word_size,
+        blastp_parallel_pool,
+        x_for,
+    );
+    // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:1292
+    // ```c
+    //     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
+    // ```
+    // One table for all query batches; NCBI's tables (`ncbi_compressed_lookup_tables`)
+    // only bound the overflow cells. With LOSAT_X_BPQBLOCK the queries are a block of
+    // whole batches, and `query_batches` are the block's batches of the whole input, as
+    // ranges of the block's lookup segments.
+    let ncbi_tables = ncbi_compressed_lookup_tables(
+        query_batches,
+        query_lengths,
+        &contexts,
+        &locations,
+        query_chunk,
+    )?;
+    // EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW, off unless set): the same table built
+    // flat, each cell's hits in one slice in NCBI's scan order, with the same refusal
+    // (lookup/x_clut_direct.rs), by the search's pool when it has more than one thread
+    // (lookup/x_clut_par.rs); without the switches `try_build_blosum62_compressed_lookup`.
+    let lookup = x_bp_build_compressed_lookup(
+        args.word_size,
+        crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
+        &query,
+        &locations,
+        &ncbi_tables,
+        blastp_parallel_pool,
+        x_flat.build_args(),
+    )
+    .context("failed to build NCBI compressed amino-acid lookup table")?
+    .map_err(|()| {
+        anyhow::anyhow!(
+            "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's BLASTP: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
+            args.threshold,
+            args.word_size
+        )
+    })?;
+    let lookup = match lookup {
+        XCompressedLookup::Reference(lookup) => BlastpRuntimeLookup::Compressed(lookup),
+        XCompressedLookup::Flat(lookup) => BlastpRuntimeLookup::CompressedFlat(lookup),
+    };
+    x_flat.finish(&mut contexts, &query, &locations, blastp_parallel_pool);
+    Ok((lookup, contexts))
+}
+
 fn run_resolved_in_pool(
     args: ResolvedBlastpArgs,
     query_records: &[FastaRecord],
@@ -6518,6 +6715,7 @@ fn run_resolved_in_pool(
     chunk_prelim: Option<&mut Vec<Option<BlastpHitList>>>,
     ranges: &BlastpRanges<'_>,
     reports: &BlastpReports<'_>,
+    mut x_ahead: x_lookup_ahead::XAheadBlock<'_>,
 ) -> Result<()> {
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1633-1681
     // ```c
@@ -6610,16 +6808,14 @@ fn run_resolved_in_pool(
         .collect();
 
     let query_encoding_start = blastp_timing_start(timing_enabled);
-    let seg_params = args.seg.params();
-    let query_frames: Vec<Vec<QueryFrame>> = query_records
-        .iter()
-        .map(|record| {
-            vec![encode_protein_query_frame_with_seg(
-                record.seq(),
-                seg_params.as_ref(),
-            )]
-        })
-        .collect();
+    // EXPERIMENT (LOSAT_X_BPLKPAHEAD): a block's query frames, lookup table and contexts built ahead
+    // of it, during the block before it (`blast_engine/x_lookup_ahead.rs`); else encoded here and
+    // built in the lookup region below.
+    let mut x_prebuilt = x_ahead.take_prebuilt(query_records);
+    let query_frames: Vec<Vec<QueryFrame>> = match x_prebuilt.as_mut() {
+        Some(prebuilt) => prebuilt.take_query_frames(),
+        None => blastp_query_frames(&args, query_records),
+    };
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.query_encoding_ns, query_encoding_start);
     }
@@ -6664,11 +6860,19 @@ fn run_resolved_in_pool(
             .collect();
         &x_owned_subjects
     };
-    // The subjects' titles by subject index, as the reports write them.
-    let subject_titles: Vec<Arc<[u8]>> = subject_records
-        .iter()
-        .map(|record| Arc::from(record.title()))
-        .collect();
+    // The subjects' titles by subject index, as the reports write them. EXPERIMENT
+    // (LOSAT_X_BPSUBJMETA): the block search's titles and tabular IDs, made once for all blocks
+    // (`blast_engine/x_subject_meta.rs`); the same values, borrowed.
+    let x_meta = super::x_query_blocks::x_block_subject_meta(blastp_parallel_pool, subject_records);
+    let subject_titles: std::borrow::Cow<'_, [Arc<[u8]>]> = match x_meta {
+        Some(meta) => std::borrow::Cow::Borrowed(meta.titles()),
+        None => std::borrow::Cow::Owned(
+            subject_records
+                .iter()
+                .map(|record| Arc::from(record.title()))
+                .collect(),
+        ),
+    };
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.subject_encoding_ns, subject_encoding_start);
     }
@@ -6734,63 +6938,42 @@ fn run_resolved_in_pool(
             );
             (BlastpRuntimeLookup::Aa(lookup), contexts)
         }
-        BlastpLookupTableType::CompressedAaLookupTable => {
-            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
-            // ```c
-            // s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
-            //                                 query, locations);
-            // s_CompressedLookupFinalize(lookup);
-            // ```
-            // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts' Karlin blocks on the search's pool
-            // (`x_query_blocks::x_bp_lookup_query`); without the switch
-            // `prepare_blosum62_lookup_query_for_word_size`.
-            let (query, locations, contexts) = super::x_query_blocks::x_bp_lookup_query(
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
+        // ```c
+        // s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
+        //                                 query, locations);
+        // s_CompressedLookupFinalize(lookup);
+        // ```
+        // `blastp_compressed_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
+        // ahead of this block by the same calls (`blast_engine/x_lookup_ahead.rs`; its shadow builds
+        // them again here and compares).
+        BlastpLookupTableType::CompressedAaLookupTable => match x_prebuilt.take() {
+            Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(
+                prebuilt,
+                &args,
+                query_records,
                 &query_frames,
-                args.word_size,
-                blastp_parallel_pool,
-            );
-            // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:1292
-            // ```c
-            //     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
-            // ```
-            // One table for all query batches; NCBI's tables (`ncbi_compressed_lookup_tables`)
-            // only bound the overflow cells. With LOSAT_X_BPQBLOCK the queries are a block of
-            // whole batches, and `query_batches` are the block's batches of the whole input, as
-            // ranges of the block's lookup segments.
-            let ncbi_tables = ncbi_compressed_lookup_tables(
                 &query_batches,
                 &query_lengths,
-                &contexts,
-                &locations,
-                chunk_prelim.is_some(),
-            )?;
-            // EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW, off unless set): the same table built
-            // flat, each cell's hits in one slice in NCBI's scan order, with the same refusal
-            // (lookup/x_clut_direct.rs), by the search's pool when it has more than one thread
-            // (lookup/x_clut_par.rs); without the switches `try_build_blosum62_compressed_lookup`.
-            let lookup = x_bp_build_compressed_lookup(
-                args.word_size,
-                crate::core::blast_util::ncbi_int4_from_double(100.0 * args.threshold),
-                &query,
-                &locations,
-                &ncbi_tables,
                 blastp_parallel_pool,
-            )
-            .context("failed to build NCBI compressed amino-acid lookup table")?
-            .map_err(|()| {
-                anyhow::anyhow!(
-                    "-threshold {} with the compressed lookup table of -word_size {} is not supported by LOSAT's BLASTP: the neighboring words of a query batch fill NCBI BLAST+'s 1024 overflow banks, past which NCBI BLAST+ 2.17.0 writes and corrupts its heap",
-                    args.threshold,
-                    args.word_size
-                )
-            })?;
-            let lookup = match lookup {
-                XCompressedLookup::Reference(lookup) => BlastpRuntimeLookup::Compressed(lookup),
-                XCompressedLookup::Flat(lookup) => BlastpRuntimeLookup::CompressedFlat(lookup),
-            };
-            (lookup, contexts)
-        }
+            ),
+            None => blastp_compressed_lookup(
+                &args,
+                &query_frames,
+                &query_batches,
+                &query_lengths,
+                blastp_parallel_pool,
+                if chunk_prelim.is_some() {
+                    super::x_query_blocks::XLookupFor::QueryChunk
+                } else {
+                    super::x_query_blocks::XLookupFor::Search
+                },
+            )?,
+        },
     };
+    // EXPERIMENT (LOSAT_X_BPLKPAHEAD): this block's table is ready; the build of the next block's
+    // starts now, on the pool, beside this block's search (`blast_engine/x_lookup_ahead.rs`).
+    x_ahead.lookup_ready(&lookup);
     let context_lookup_bounds = blastp_context_lookup_bounds(&contexts);
     let concatenated_query = build_blastp_concatenated_query(&contexts);
     // EXPERIMENT (LOSAT_X_BPSEED): the context of every query offset, for the candidates of the
@@ -9851,17 +10034,21 @@ fn run_resolved_in_pool(
         titles.check_reported_titles(&hit_lists)?;
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
-    // format is written (`tabular_subject_ids`).
-    let subject_ids: Vec<Arc<[u8]>> = if format_plans
+    // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPSUBJMETA): the block
+    // search's IDs made once for all blocks, with the same check (`x_tabular_subject_ids_cached`).
+    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> = if format_plans
         .iter()
         .any(|(outfmt, _, _)| *outfmt != OutputFormat::Pairwise)
     {
-        match listed_titles.as_ref() {
-            Some(titles) => titles.tabular_subject_ids(&hit_lists)?,
-            None => tabular_subject_ids(&hit_lists, subject_records)?,
+        match (listed_titles.as_ref(), x_meta) {
+            (Some(titles), _) => titles.tabular_subject_ids(&hit_lists)?.into(),
+            (None, Some(meta)) => {
+                x_tabular_subject_ids_cached(&hit_lists, subject_records, meta)?.into()
+            }
+            (None, None) => tabular_subject_ids(&hit_lists, subject_records)?.into(),
         }
     } else {
-        Vec::new()
+        Vec::new().into()
     };
     // The `stitle` text of the tabular formats by subject: the stored titles of a
     // database; none for the records of a subject set, which have no BLAST definition
@@ -10095,6 +10282,14 @@ fn run_resolved_in_pool(
         );
     }
     output_result?;
+    // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
+    // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed.
+    if let (Some(spare), BlastpRuntimeLookup::CompressedFlat(table)) = (
+        super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool),
+        lookup,
+    ) {
+        spare.give(table);
+    }
 
     if let Some(timing) = timing.as_ref() {
         print_blastp_timing(timing, t_total);

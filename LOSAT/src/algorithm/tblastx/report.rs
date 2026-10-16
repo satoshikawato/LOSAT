@@ -11,6 +11,7 @@ use crate::blastinput::seq_range::{record_frame, Placements};
 use crate::config::ScoringMatrix;
 use crate::report::outfmt6::{write_hit_fields_bytes, OutputConfig};
 use crate::report::pairwise::PairwiseHit;
+use crate::sequence::packed_subject::PackedNucleotide;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::protein_display_score;
 
@@ -133,11 +134,13 @@ pub(crate) fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &
 /// The displayed query and subject rows of an HSP, in uppercase: the HSP's codons of each
 /// sequence translated again from the nucleotides, the query with `-query_gencode` and the
 /// subject with `-db_gencode` (`query_code`, `db_code`). The HSP's residue offsets within
-/// its frames are those of the search (`Hit::sort_*`).
-pub(crate) fn displayed_rows(
+/// its frames are those of the search (`Hit::sort_*`); `subject` holds the subject's letters
+/// from the codon of residue `subject_first` on (`SubjectLetters`; 0 for a whole record).
+fn displayed_rows(
     hsp: &TblastxHsp,
     query: &[u8],
     subject: &[u8],
+    subject_first: usize,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
 ) -> (Vec<u8>, Vec<u8>) {
@@ -147,9 +150,77 @@ pub(crate) fn displayed_rows(
         .map(|offset| display_residue(query, query_frame, offset, query_code))
         .collect();
     let subject_row = (hit.sort_subject_offset..hit.sort_subject_end)
-        .map(|offset| display_residue(subject, hsp.subject_frame, offset, db_code))
+        .map(|offset| display_residue(subject, hsp.subject_frame, offset - subject_first, db_code))
         .collect();
     (query_row, subject_row)
+}
+
+/// The letters of the subjects that the displayed rows read, by subject index.
+#[derive(Clone, Copy)]
+pub(crate) enum SubjectLetters<'a> {
+    /// The records of `-subject`: their letters.
+    Records(&'a [FastaRecord]),
+    /// The reported sequences of a `-db` search by rank (`ordinals`, the ordinal id of each
+    /// rank, into `stores`): a row reads the letters of its HSP's codons only, made from the
+    /// stored codes (`codon_window`).
+    Stored {
+        stores: &'a [PackedNucleotide],
+        ordinals: &'a [u32],
+    },
+}
+
+impl SubjectLetters<'_> {
+    /// The number of bases of subject `s_idx`.
+    pub(crate) fn length(&self, s_idx: usize) -> usize {
+        match self {
+            Self::Records(records) => records[s_idx].seq().len(),
+            Self::Stored { stores, ordinals } => stores[ordinals[s_idx] as usize].len(),
+        }
+    }
+
+    /// The displayed rows of `hsp` (`displayed_rows`) against its subject; `window` is the
+    /// buffer of a stored subject's letters.
+    fn rows(
+        &self,
+        hsp: &TblastxHsp,
+        query: &[u8],
+        query_code: &GeneticCode,
+        db_code: &GeneticCode,
+        window: &mut Vec<u8>,
+    ) -> (Vec<u8>, Vec<u8>) {
+        let s_idx = hsp.hit.s_idx as usize;
+        match self {
+            Self::Records(records) => {
+                displayed_rows(hsp, query, records[s_idx].seq(), 0, query_code, db_code)
+            }
+            Self::Stored { stores, ordinals } => {
+                let store = &stores[ordinals[s_idx] as usize];
+                let (from, to) = (hsp.hit.sort_subject_offset, hsp.hit.sort_subject_end);
+                let (start, length) = codon_window(store.len(), hsp.subject_frame, from, to);
+                store.letters_into(start, start + length, window);
+                displayed_rows(hsp, query, window, from, query_code, db_code)
+            }
+        }
+    }
+}
+
+/// The nucleotides `(start, number)` of the codons of residues `[from, to)` of `frame` in a
+/// subject of `length` bases. Within them, the codon of residue `o` is the one
+/// `display_residue` reads for `o - from`: from `3 * (o - from) + |frame| - 1` on the plus
+/// strand, and as far from the window's end as from the subject's on the minus strand (the
+/// window of TBLASTN's report rows, tblastn/stage_e_report.rs `aligned_sequences`).
+///
+/// No NCBI counterpart: NCBI's formatter reads the subject through its object manager
+/// (`CAlnVec`); LOSAT makes only these letters of a stored subject.
+fn codon_window(length: usize, frame: i8, from: usize, to: usize) -> (usize, usize) {
+    let shift = usize::from(frame.unsigned_abs());
+    let number = 3 * (to - from) + shift - 1;
+    let start = if frame > 0 {
+        3 * from
+    } else {
+        length + 1 - 3 * to - shift
+    };
+    (start, number)
 }
 
 // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2131-2150
@@ -208,17 +279,18 @@ fn row_counts(query_row: &[u8], subject_row: &[u8]) -> (usize, usize) {
 pub(crate) fn set_displayed_identities(
     hits: &mut [TblastxHsp],
     queries: &[FastaRecord],
-    subjects: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
 ) {
+    let mut window = Vec::new();
     for hsp in hits {
-        let (query_row, subject_row) = displayed_rows(
+        let (query_row, subject_row) = subjects.rows(
             hsp,
             queries[hsp.hit.q_idx as usize].seq(),
-            subjects[hsp.hit.s_idx as usize].seq(),
             query_code,
             db_code,
+            &mut window,
         );
         let (identities, positives) = row_counts(&query_row, &subject_row);
         let hit = &mut hsp.hit;
@@ -455,12 +527,14 @@ fn lowercase_query_row(
 ///
 /// With `-query_loc` and `-subject_loc` the rows are read from the searched letters, and
 /// the hits move into the records (`shift_to_records`) with the records' frames and
-/// lengths.
+/// lengths. The subjects' titles come from `subjects`, their letters and lengths from
+/// `subject_letters`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn pairwise_hits(
     hits: &[TblastxHsp],
     queries: &[FastaRecord],
     subjects: &[FastaRecord],
+    subject_letters: SubjectLetters<'_>,
     query_stats: &[TblastxQueryStats],
     query_code: &GeneticCode,
     db_code: &GeneticCode,
@@ -479,18 +553,19 @@ pub(crate) fn pairwise_hits(
             )
         })
         .collect();
+    let mut window = Vec::new();
     hits.iter()
         .map(|hsp| {
             let query = &queries[hsp.hit.q_idx as usize];
             let subject = &subjects[hsp.hit.s_idx as usize];
             let (mut query_row, subject_row) =
-                displayed_rows(hsp, query.seq(), subject.seq(), query_code, db_code);
+                subject_letters.rows(hsp, query.seq(), query_code, db_code, &mut window);
             let (identities, positives) = row_counts(&query_row, &subject_row);
             let (q_idx, s_idx) = (hsp.hit.q_idx as usize, hsp.hit.s_idx as usize);
             let mut hit = hsp.hit.clone();
             shift_hit(&mut hit, query_placements, subject_placements);
             let query_length = query_placements.length(q_idx, query.seq().len());
-            let subject_length = subject_placements.length(s_idx, subject.seq().len());
+            let subject_length = subject_placements.length(s_idx, subject_letters.length(s_idx));
             let (low, high) = (
                 hit.q_start.min(hit.q_end) as i32 - 1,
                 hit.q_start.max(hit.q_end) as i32 - 1,

@@ -1,8 +1,8 @@
 # Inputs of the `-db` fixtures
 
 Used by `LOSAT/tests/db_search_fixtures.py` and `LOSAT/tests/db_search_manifest.tsv` (rows that run
-`LOSAT blastp -db ...` or `LOSAT blastn -db ...` against frozen NCBI BLAST+ 2.17.0 `blastp -db ...` or
-`blastn -db ... -num_threads 1` bytes; the manifest's `program` column says which). NCBI is the
+`LOSAT blastp -db ...`, `LOSAT blastn -db ...`, `LOSAT tblastn -db ...`, `LOSAT blastx -db ...` or `LOSAT tblastx -db ...` against frozen NCBI BLAST+ 2.17.0
+`blastp -db ...`, `blastn -db ...`, `tblastn -db ...`, `blastx -db ...` or `tblastx -db ... -num_threads 1` bytes; the manifest's `program` column says which). NCBI is the
 comparison oracle only; the tests read the committed files and run no NCBI program.
 
 FASTA files:
@@ -75,6 +75,120 @@ writes was deleted). Run from `LOSAT/`:
 
 The nucleotide rows also use `tests/seqdb/db/nucl_v4`, `nucl_v5` and `nucl_mv` with queries cut from
 `tests/seqdb/nucl.fna`.
+
+Translated-search inputs (TBLASTN rows, `db.tblastn.*`), written by `make_tblastn_inputs.py` (run from `LOSAT/`;
+slices of `tests/fasta/MelaMJNV.fasta`, `LvMJNV.fasta` and `AP027133.fasta`; the protein queries are proteins of
+`PemoMJNVA.faa`, `LvMJNV.faa` and `AP027131.faa` that NCBI `tblastn -subject` finds in those genomes; mutations
+and ambiguity codes come from a seeded generator):
+
+- `tslice.fna`: five records for the database `tslice`: `m_plus` (MelaMJNV 36001-44000: plus-strand genes, a run
+  of 15 ambiguity letters and an N block of 30 inside a gene, single codes every 97 bases in another),
+  `m_minus` (MelaMJNV 59001-62000: a minus-strand gene with a run of the codes R Y K M S W B D H V N and single
+  codes every 151 bases), `v_slice` (LvMJNV 21001-39000: genes on both strands, ambiguity runs on both),
+  `v_mut_8pct` (LvMJNV 28501-30700 with 8 % substitutions and whole-codon indels) and `v_far_22pct` (the same
+  region with 22 % substitutions).
+- `tslice_q.faa`: seven queries (PemoMJNVA BDT61857.1, BDT61859.1, BDT61866.1; LvMJNV BDT62090.1, BDT62091.1,
+  BDT62092.1, BDT62096.1). With the default options NCBI `tblastn -db tslice -outfmt 6` prints 37 rows and
+  `tblastn -subject tslice.fna` prints 36 (D1: a database answers 3 as the shortest subject length, a FASTA
+  set its real shortest; the extra row is BDT62092.1 against `m_plus`, E value 0.11).
+- `tslice_q_lc.faa`: LvMJNV BDT62095.1 with residues 41-100 and 191-230 in lower case.
+- `tslice_nohit.faa`: a random protein of 40 residues with no hit in `tslice` or `tgc4`;
+  `tslice_nohit_masked.faa`: a 72-residue glycine/serine sequence that SEG masks completely (NCBI warns that it
+  cannot calculate Karlin-Altschul parameters).
+- `tgc4.fna`: three records for the database `tgc4`: `h_slice` (AP027133 106001-121000, genetic code 4 with an N
+  block, a run of ambiguity letters and single codes), `h_mut_10pct` (AP027133 118901-120300, 10 % substitutions
+  and indels) and `tiny` (8 bases, shorter than a translated search can use). `tgc4_q.faa`: five AP027131 proteins.
+- `nnophr` (above) is also the database without a header file for `db.tblastn.no_nhr.nohit.0`.
+
+The databases (version 4, no `-parse_seqids`; only `.nin .nsq .nhr` are kept, the `.njs` files were deleted).
+Run from `LOSAT/`:
+
+    python3 tests/db_search/make_tblastn_inputs.py
+    makeblastdb -in tests/db_search/tslice.fna -dbtype nucl -out tests/db_search/tslice \
+        -title "nucleotide slices of two shrimp viruses" -blastdb_version 4
+    makeblastdb -in tests/db_search/tgc4.fna -dbtype nucl -out tests/db_search/tgc4 \
+        -title "slices of a genetic code 4 genome" -blastdb_version 4
+    rm tests/db_search/tslice.njs tests/db_search/tgc4.njs
+
+Translated-query inputs (BLASTX rows, `db.blastx.*`), written by `make_blastx_inputs.py` (run from `LOSAT/`;
+slices of `tests/fasta/MelaMJNV.fasta`, proteins of `tests/fasta/PemoMJNVA.faa`; the decoy proteins and the query
+without hits come from seeded generators):
+
+- `bslice.faa`: 35 proteins for the database `bslice` (14,391 residues, shortest 75): the 11 PemoMJNVA proteins that
+  NCBI `blastx -subject` finds in the two query slices (BDT61857.1, BDT61858.1, BDT61861.1, BDT61866.1, BDT61876.1,
+  BDT61959.1 to BDT61964.1) and 24 more proteins of at most 1,000 residues.
+- `bslice_q.fna`: two queries: `m_fam` (MelaMJNV 26001-31000: minus-strand genes, a family of five related proteins
+  with several HSPs each) and `m_mix` (MelaMJNV 56001-61600: a plus-strand and a minus-strand gene). With the
+  default options NCBI `blastx -db bslice -outfmt 6` prints 36 rows and `blastx -subject bslice.faa` prints 35
+  (D1: a database answers 3 as the shortest subject length, a FASTA set its real shortest; the extra row is
+  `m_fam` against BDT61959.1, E value 0.21). Query codes 1 and 11 give the same output (they differ in start codons
+  only); code 4 changes the scores.
+- `bslice_q_lc.fna`: `m_fam` bases 1-3000 with 301-700 and 1501-1800 in lower case (`-lcase_masking`).
+- `bslice_nohit.fna`: 300 random bases with no hit in `bslice` (candidate 25 of 40 from `random.Random(20261019)`;
+  the others all have weak hits at the default E value). `bslice_alln.fna`: 300 N (NCBI warns that it cannot
+  calculate Karlin-Altschul parameters).
+- `bnophr.pin` and `bnophr.psq` are copies of `bslice.pin` and `.psq`: the database without its header file, used
+  with the query without hits (with a hit NCBI fails with exit 2).
+
+The database (version 4, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file was deleted).
+Run from `LOSAT/`:
+
+    python3 tests/db_search/make_blastx_inputs.py
+    makeblastdb -in tests/db_search/bslice.faa -dbtype prot -out tests/db_search/bslice \
+        -title "protein slice of a shrimp virus proteome" -blastdb_version 4
+    rm tests/db_search/bslice.pjs
+    cp tests/db_search/bslice.pin tests/db_search/bnophr.pin; cp tests/db_search/bslice.psq tests/db_search/bnophr.psq
+
+Nucleotide-versus-nucleotide translated inputs (TBLASTX rows, `db.tblastx.*`), written by `make_tblastx_inputs.py`
+(run from `LOSAT/`; slices of `tests/fasta/MelaMJNV.fasta`, `LvMJNV.fasta` and `PemoMJNVA.fasta`; mutations and
+ambiguity codes come from a seeded generator). TBLASTX is slow, so the database holds 14 kb and the queries 5 kb:
+
+- `xslice.fna`: six records for the database `xslice`: `m_plus` (MelaMJNV 37001-41500: a plus-strand gene with a
+  run of 15 ambiguity letters, an N block of 30 and single codes every 97 bases, all inside the region the
+  queries are homologous to), `m_minus` (MelaMJNV 59301-61700: a minus-strand gene with a run of the codes
+  R Y K M S W B D H V N and single codes every 151 bases), `v_mut_8pct` (LvMJNV 28501-30700 with 8 % substitutions
+  and whole-codon indels), `v_far_22pct` (the same region with 22 % substitutions), `v_slice` (LvMJNV 37001-39000:
+  genes on both strands with an ambiguity run, an N block of 12 and single codes) and `tiny` (8 bases). The
+  codes are stored by makeblastdb as random bases, which the seed stage reads (D2), and as the real codes, which
+  the ungapped extension and the alignments read.
+- `xslice_q.fna`: four queries: `q_p_plus` (PemoMJNVA 10601-12200, 1600 bases of the plus-strand gene BDT61858.1,
+  about 71 % identical to the MelaMJNV gene), `q_p_minus` (PemoMJNVA 32001-33500, 1500 bases of the minus-strand
+  gene BDT61866.1), `q_v_a` (LvMJNV 28501-29500) and `q_v_b` (LvMJNV 37801-38600). With the default options NCBI
+  `tblastx -db xslice -outfmt 6` prints 188 rows (`-db` and `-subject` agree: the search is ungapped, so
+  there is no D1).
+- `xslice_nohit.fna`: a random query of 45 bases without hits (every random query of 60 bases or more has weak hits
+  at E value 10 in this database); `xslice_nohit_masked.fna`: 300 bases of CAG repeats that SEG masks completely
+  (NCBI warns that it cannot calculate Karlin-Altschul parameters).
+- `nnophr` (above) is also the database without a header file for `db.tblastx.no_nhr.nohit.0`.
+- No row has a second query batch: NCBI's TBLASTX batch is 10,002 bases and a search of that size is too slow
+  for the fixtures; the batches are covered by the `-subject` fixtures.
+
+The database (version 4, no `-parse_seqids`; only `.nin .nsq .nhr` are kept, the `.njs` file was deleted). Run from
+`LOSAT/`:
+
+    python3 tests/db_search/make_tblastx_inputs.py
+    makeblastdb -in tests/db_search/xslice.fna -dbtype nucl -out tests/db_search/xslice \
+        -title "nucleotide slices of two shrimp viruses for TBLASTX" -blastdb_version 4
+    rm tests/db_search/xslice.njs
+
+`xslice_flip.{nin,nhr,nsq}` is `xslice` with the stored 2-bit base changed at every ambiguous position (126 positions;
+the ambiguity data, the index and the header file are copies). makeblastdb stores at each ambiguous
+letter the base that `-subject` also draws (`CRandom(length)`), so for `xslice` a `-db` search that translates the
+stored bases and one that re-resolves the letters as `-subject` does give the same bytes. `xslice_flip` tells them
+apart (rows `db.tblastx.flipped.6` and `.0`; D2: the preliminary stage translates the stored bases, the
+re-evaluation and the reports read the stored codes). It is hand-edited, not written by makeblastdb: copy the three
+files of `xslice` and rewrite the copy's `.nsq` in place with `flip_stored_bases.py` (the rule is in its docstring).
+Run from `LOSAT/`:
+
+    cp tests/db_search/xslice.nin tests/db_search/xslice_flip.nin
+    cp tests/db_search/xslice.nhr tests/db_search/xslice_flip.nhr
+    cp tests/db_search/xslice.nsq tests/db_search/xslice_flip.nsq
+    python3 tests/db_search/flip_stored_bases.py tests/db_search/xslice.fna tests/db_search/xslice.nin \
+        tests/db_search/xslice_flip.nsq tests/db_search/xslice_flip.nsq
+
+NCBI `tblastx -db xslice_flip -query tests/db_search/xslice_q.fna -outfmt 6 -num_threads 1` prints 184 rows (188
+for `xslice`). `db.tblastx.dbsize.0` and `.6` use `-dbsize 1000000000` (112 rows in outfmt 6): at that value a
+search that feeds `-dbsize` to the link cutoffs gives 111 rows, at 100000000 it gave the same bytes.
 
 `residues_gap` is the database LOSAT rejects (a stored `-`). The other databases of the rows are the ones of
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index

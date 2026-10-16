@@ -950,7 +950,11 @@ fn main() -> Result<()> {
         bail!("BLASTX internal runtime comparison only")
     };
     let options = args.resolve()?;
-    let subjects = read_fasta(&args.subject, true, args.lcase_masking)?;
+    let subjects = read_fasta(
+        args.subject.as_deref().expect("the probes take -subject"),
+        true,
+        args.lcase_masking,
+    )?;
     let queries = read_fasta(&args.query, false, args.lcase_masking)?;
     for (b, batch) in search_internal_observed(
         &queries,

@@ -932,12 +932,21 @@ pub(super) fn timing_fields(kind: usize) -> String {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 pub(super) fn test_verified() -> u64 {
     VERIFIED.load(Ordering::Relaxed)
 }
 
-#[cfg(test)]
+// (every test runs stages in a pool of its own)
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
 mod tests {
     use super::super::super::{advance_diag_table_offset, x_diag_lv::LvSeeds};
     use super::super::copy_hash;

@@ -1331,21 +1331,32 @@ mod tests {
             }
         }
         assert_eq!(compared, 4 * (44 * 3 + 2 * 27 + 21 * 3));
-        // a packed subject is never searched with lowercase masking (the letters are given)
+        // a packed subject with lower-case letters is never searched with lowercase masking (the
+        // letters are given); one without them (every `-db` sequence) gives the plan of the
+        // search without the mask
+        let scan = |store: &PackedNucleotide, mask_lowercase: bool| {
+            x_scan_plan(
+                &[query],
+                SubjectNt::Packed(store),
+                1,
+                None,
+                11,
+                mask_lowercase,
+                ScoringMatrix::Blosum62,
+                3,
+                Some(&lookup),
+                None,
+            )
+        };
+        let mut lower = letters(b"ACGT", 300, 1);
+        lower[100..160].make_ascii_lowercase();
+        let store = PackedNucleotide::from_subject_letters(&lower).unwrap();
+        assert!(scan(&store, true).is_err());
         let store = PackedNucleotide::from_subject_letters(&letters(b"ACGT", 300, 1)).unwrap();
-        let masked = x_scan_plan(
-            &[query],
-            SubjectNt::Packed(&store),
-            1,
-            None,
-            11,
-            true,
-            ScoringMatrix::Blosum62,
-            3,
-            None,
-            None,
-        );
-        assert!(masked.is_err());
+        let unmasked = scan(&store, false).unwrap().unwrap();
+        let masked = scan(&store, true).unwrap().unwrap();
+        let masked = Arc::try_unwrap(masked.subject).ok().expect("one owner");
+        assert_eq!(x_plan_difference(&Ok(masked), &Ok(unmasked.subject)), None);
     }
 
     // No NCBI counterpart: the shadow mode stops the search when the plan of a packed subject

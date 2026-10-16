@@ -600,6 +600,33 @@ Rebuilding less:
   identical` (`recycled` / `recycled_hits`: builds whose `starts` / whose `hits` are the buffer of an earlier
   table, `hits` only where it had the room; `contexts_from_tasks`: contexts computed by the builds' tasks). With `LOSAT_X_BPCLUTSHADOW` the pool's build is the switch's (on the vectors that the
   previous block's pool build gave back) and is compared with the serial flat build as well.
+- `LOSAT_X_BPLKPAHEAD=1` (BLASTP `-task blastp-fast`, speed; not in the strict set: off unless set, to any value,
+  and `LOSAT_X_DEFAULT` does not touch it; acts only in the block search of `LOSAT_X_BPQBLOCK`, with `-subject`
+  or `-db`, where `LOSAT_X_BPLKPFLAT` acts on the pool's flat table of `LOSAT_X_BPCLUT`: more than one thread;
+  not with `LOSAT_X_BPCLUTSHADOW`, not for exact blastp) builds the next query block's query frames, lookup
+  table and contexts during the block before it, as one task on the search's pool, instead of at the start
+  of the next block's own search (`blastp/blast_engine/x_lookup_ahead.rs`, exactness argument in its
+  header): the block loop runs each block's search in a `rayon::in_place_scope`, and when the block's own
+  table is ready (at once when it was itself built ahead) the next block's build is spawned there; the next
+  block's search then takes the values instead of computing them. They are the values of the same calls
+  (`blastp_query_frames`, `blastp_compressed_lookup`) on the same records, batches and pool, so the reports
+  do not change. A build ahead that fails, refuses, would need the reference builder (`TooLarge`) or lacks
+  the room in its vectors gives nothing, and the block builds inline, so an error is raised where it is
+  without the switch; a panic of the build is kept and resumed where the block's search would start (with
+  `panic = "abort"`, the release profile, it ends the process when it happens). Memory: one more table
+  (`starts`, `hits`, PV array) and one block's frames and contexts are alive while the next block's table
+  is built; every vector of that table is allocated by the block search's thread, never by a pool task:
+  that thread keeps a second spare (`x_query_blocks.rs` `XBlockSubjects`) with the room for the largest
+  table so far plus a half (new vectors of twice its hits where they are short; untouched capacity is not
+  resident), which the build ahead takes whole (`XFlatArgs::x_ahead`). At one thread nothing changes.
+- `LOSAT_X_BPLKPAHEADSHADOW=1` shadow of `LOSAT_X_BPLKPAHEAD` (implies it): each block that takes values
+  built ahead also builds them inline as without the switch (on the block spare's vectors, given back
+  after) and compares them: the query frames field for field, the flat tables field for field and slot for
+  slot, the contexts with their Karlin blocks bit for bit. The first difference prints the line below with
+  `DIFFERENT` and stops the run (panic). One line at exit: `[X_SHADOW] BPLKPAHEAD blocks= prebuilt= dropped=
+  compared= identical` (`blocks`: blocks searched where the switch acts; `prebuilt`: blocks that took
+  values built ahead; `dropped`: builds ahead that gave none, whose blocks built inline; `compared`: blocks
+  compared; every block but the last starts one build, so `prebuilt + dropped = blocks - 1`).
 - `LOSAT_X_BPDIAG=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and `LOSAT_X_DEFAULT`
   does not touch it; acts only in the fused loop of `LOSAT_X_BPSEED` or `LOSAT_X_BPSEEDSHADOW`) the two-hit
   diagonal test of the hits of one lookup cell in batches of eight instead of one after the other

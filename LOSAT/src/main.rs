@@ -237,6 +237,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastp::x_bp_seed_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();
+    LOSAT::algorithm::blastp::x_bp_lkp_ahead_print_summary();
     LOSAT::algorithm::blastp::x_restricted_gap_print_summary();
     LOSAT::algorithm::blastn::alignment::greedy::x_greedy_fuse_print_summary();
     LOSAT::algorithm::blastp::x_bp_prelim_compact_print_summary();

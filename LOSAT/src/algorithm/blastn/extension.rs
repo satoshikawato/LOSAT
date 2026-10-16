@@ -242,12 +242,22 @@ pub fn extend_hit_ungapped_exact_ncbi(
 
 // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:292-294,322-324
 // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
-// Retain NCBI's overlapping BLASTNA bit expression, including ambiguities.
-// Every starting phase has its own byte; this is not an ACGT encoding table.
+// NCBI's overlapping BLASTNA bit expression of the query letters `start..start + 4`,
+// ambiguities included, computed where it is read as NCBI does (LOSAT's memory: no array
+// of these bytes at every offset of the query).
+#[inline(always)]
+pub fn query_four_base_byte(query: &[u8], start: usize) -> u8 {
+    let q: &[u8; 4] = query[start..start + 4]
+        .try_into()
+        .expect("four query letters");
+    (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3]
+}
+
+// The byte of `query_four_base_byte` at every starting offset (the tests' reference).
+#[cfg(test)]
 pub fn build_query_four_base_bytes(query: &[u8]) -> Vec<u8> {
-    query
-        .windows(4)
-        .map(|q| (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3])
+    (0..query.len().saturating_sub(3))
+        .map(|start| query_four_base_byte(query, start))
         .collect()
 }
 
@@ -726,7 +736,6 @@ mod small_na_tests {
 /// ```
 pub fn extend_hit_ungapped_approx_ncbi(
     q_seq: &[u8],        // BLASTNA (1 byte/base)
-    q_four_base: &[u8],  // NCBI 4-base expression at every starting offset
     s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
     q_off: usize,
     s_off: usize,
@@ -766,7 +775,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
         let s_byte = unsafe { *s_seq_packed.get_unchecked((s_idx - 1) as usize) };
         // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294
         // Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
-        let q_byte = q_four_base[(q_idx - 4) as usize];
+        let q_byte = query_four_base_byte(q_seq, (q_idx - 4) as usize);
         sum += score_table[(q_byte ^ s_byte) as usize];
         if sum > 0 {
             new_q = q_idx - 4;
@@ -801,7 +810,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
         let s_byte = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
         // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:324
         // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
-        let q_byte = q_four_base[q_idx as usize];
+        let q_byte = query_four_base_byte(q_seq, q_idx as usize);
         sum += score_table[(q_byte ^ s_byte) as usize];
         if sum > 0 {
             new_q = q_idx + 3;
@@ -883,9 +892,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
 // bases, so it runs into the previous context. The exact extension stops at the sentinel.
 #[cfg(test)]
 mod approx_context_tests {
-    use super::{
-        build_nucl_score_table, build_query_four_base_bytes, extend_hit_ungapped_approx_ncbi,
-    };
+    use super::{build_nucl_score_table, extend_hit_ungapped_approx_ncbi};
     use crate::algorithm::blastn::alignment::build_blastna_matrix;
 
     fn blastna(text: &str) -> Vec<u8> {
@@ -921,7 +928,6 @@ mod approx_context_tests {
         query.push(15);
         query.extend(blastna("GACCGGTTAATTTTGGGG"));
         let context_start = 17;
-        let four_base = build_query_four_base_bytes(&query);
         let subject = packed("GTACTTGACCGGTTAATTAA");
         let subject_len = 20;
         let score_table = build_nucl_score_table(2, -3);
@@ -930,7 +936,6 @@ mod approx_context_tests {
         let extend = |reduced_cutoff: i32| {
             extend_hit_ungapped_approx_ncbi(
                 &query,
-                &four_base,
                 &subject,
                 q_off,
                 s_off,
@@ -966,7 +971,6 @@ mod approx_context_tests {
         // the hit that NCBI saves.
         let clamped = extend_hit_ungapped_approx_ncbi(
             &query[context_start..],
-            &four_base[context_start..query.len() - 3],
             &subject,
             0,
             s_off,

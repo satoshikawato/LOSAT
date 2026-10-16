@@ -6749,12 +6749,16 @@ fn run_resolved_in_pool(
             // ```
             // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts' Karlin blocks on the search's pool
             // (`x_query_blocks::x_bp_lookup_query`); without the switch
-            // `prepare_blosum62_lookup_query_for_word_size`.
-            let (query, locations, contexts) = super::x_query_blocks::x_bp_lookup_query(
-                &query_frames,
-                args.word_size,
-                blastp_parallel_pool,
-            );
+            // `prepare_blosum62_lookup_query_for_word_size`. EXPERIMENT (LOSAT_X_BPLKPFLAT): they
+            // can be left to the build below and set after it (`x_query_blocks::XLookupFlat`); a
+            // query chunk takes no spare table vectors.
+            let (x_flat, query, locations, mut contexts) =
+                super::x_query_blocks::XLookupFlat::lookup_query(
+                    &query_frames,
+                    args.word_size,
+                    blastp_parallel_pool,
+                    chunk_prelim.is_some(),
+                );
             // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:1292
             // ```c
             //     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
@@ -6781,6 +6785,7 @@ fn run_resolved_in_pool(
                 &locations,
                 &ncbi_tables,
                 blastp_parallel_pool,
+                x_flat.build_args(),
             )
             .context("failed to build NCBI compressed amino-acid lookup table")?
             .map_err(|()| {
@@ -6794,6 +6799,7 @@ fn run_resolved_in_pool(
                 XCompressedLookup::Reference(lookup) => BlastpRuntimeLookup::Compressed(lookup),
                 XCompressedLookup::Flat(lookup) => BlastpRuntimeLookup::CompressedFlat(lookup),
             };
+            x_flat.finish(&mut contexts, &query, &locations, blastp_parallel_pool);
             (lookup, contexts)
         }
     };
@@ -10101,6 +10107,14 @@ fn run_resolved_in_pool(
         );
     }
     output_result?;
+    // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
+    // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed.
+    if let (Some(spare), BlastpRuntimeLookup::CompressedFlat(table)) = (
+        super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool),
+        lookup,
+    ) {
+        spare.give(table);
+    }
 
     if let Some(timing) = timing.as_ref() {
         print_blastp_timing(timing, t_total);

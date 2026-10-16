@@ -1674,6 +1674,267 @@ mod tests {
         shadow_check(&words, Some(2), &tables_ref(&b, bts), b.longest_chain);
     }
 
+    // The shadow compares every array and the longest chain: correct tables with one element of
+    // one array changed (or the longest chain off by one) make it panic, naming that array,
+    // whichever array it is, when it compares with the original loop (tables built on a pool) and
+    // with the partitioned fill (tables built without one). A shadow that skipped an array would
+    // pass that array's change.
+    #[test]
+    fn shadow_check_compares_every_array() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        let mut rng = Lcg(0x5AAD_0003);
+        let case = Case {
+            queries: vec![(0..3000).map(|_| rng.below(4) as u8).collect()],
+            offsets: vec![0],
+            masks: Vec::new(),
+        };
+        let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
+        let combo = (11usize, DiscWordType::TwoTemplates, 16usize);
+        let (_, bts) = compute_mb_pv_params(1 << 22, 3000, false, 11);
+        let words = words_of(&case, &query_refs, combo);
+        let good = build(&case, combo, How::Serial);
+        assert_not_trivial(&good, true);
+        for pool_parts in [Some(2), None] {
+            shadow_check(
+                &words,
+                pool_parts,
+                &tables_ref(&good, bts),
+                good.longest_chain,
+            );
+        }
+        let flip = |v: &mut [u32]| {
+            // An element the fill wrote, when there is one (a chain head, a link, a counter).
+            let i = v.iter().position(|&x| x > 1).unwrap_or(v.len() / 2);
+            v[i] ^= 1;
+        };
+        for target in [
+            "hashtable",
+            "next_pos",
+            "helper_array",
+            "hashtable2",
+            "next_pos2",
+            "helper_array2",
+            "pv_array",
+            "longest_chain",
+        ] {
+            let mut b = good.clone();
+            match target {
+                "hashtable" => flip(&mut b.hashtable),
+                "next_pos" => flip(&mut b.next_pos),
+                "helper_array" => flip(&mut b.helper_array),
+                "hashtable2" => flip(&mut b.hashtable2),
+                "next_pos2" => flip(&mut b.next_pos2),
+                "helper_array2" => flip(&mut b.helper_array2),
+                "pv_array" => flip(&mut b.pv_array),
+                _ => b.longest_chain += 1,
+            }
+            assert!(b != good, "{target} unchanged");
+            for pool_parts in [Some(2), None] {
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    shadow_check(&words, pool_parts, &tables_ref(&b, bts), b.longest_chain)
+                }));
+                let payload = result
+                    .err()
+                    .unwrap_or_else(|| panic!("{target} {pool_parts:?}: the shadow passed"));
+                let message = payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|m| m.to_string()))
+                    .unwrap_or_default();
+                let named = if target == "longest_chain" {
+                    "differ: longest_chain: ".to_string()
+                } else {
+                    format!("differ: {target}[")
+                };
+                assert!(
+                    message.starts_with("LOSAT_X_DISCLUTPARSHADOW") && message.contains(&named),
+                    "{target} {pool_parts:?}: {message}"
+                );
+            }
+        }
+    }
+
+    // The premise of the warm-up of phase A: every index function of the twelve templates (the
+    // second template of two included) reads only the last `template_length` bases of `accum`
+    // (its low `2 * template_length` bits), and the index is a cell of the table.
+    #[test]
+    fn template_indices_use_only_the_last_template_length_bases() {
+        let mut rng = Lcg(0x1234_5678);
+        let mut uses = 0;
+        for word_size in [11i32, 12] {
+            for template_length in [16u8, 18, 21] {
+                for word_type in [
+                    DiscWordType::Coding,
+                    DiscWordType::Optimal,
+                    DiscWordType::TwoTemplates,
+                ] {
+                    let first = get_disc_template_type(word_size, template_length, word_type);
+                    let mut templates = vec![first];
+                    if word_type == DiscWordType::TwoTemplates {
+                        templates.push(first.next());
+                    }
+                    let mask = (1u64 << (2 * template_length as u64)) - 1;
+                    for t in templates {
+                        assert!(
+                            t != crate::algorithm::blastn::disc_lookup::DiscTemplateType::Contiguous
+                        );
+                        for _ in 0..20_000 {
+                            let accum = (rng.next() << 33) ^ rng.next() ^ (rng.next() << 62);
+                            let index = compute_discontiguous_index(accum, t);
+                            assert_eq!(
+                                index,
+                                compute_discontiguous_index(accum & mask, t),
+                                "{t:?} template_length {template_length}"
+                            );
+                            assert!((index as u64) < (1u64 << (2 * word_size as u64)), "{t:?}");
+                        }
+                        uses += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(uses, 24);
+    }
+
+    /// Random layouts: up to 12 queries with gaps of 0-2 letters between their offsets, ranges of
+    /// a few letters, masks that touch or overlap, short motifs, 2 % ambiguity codes.
+    fn random_layout(rng: &mut Lcg) -> Case {
+        let n_queries = 1 + rng.below(12) as usize;
+        let mut queries = Vec::new();
+        let mut offsets = Vec::new();
+        let mut masks = Vec::new();
+        let mut offset = rng.below(3) as i32;
+        for _ in 0..n_queries {
+            let len = match rng.below(5) {
+                0 => rng.below(25) as usize,
+                1 => 1 + rng.below(200) as usize,
+                _ => 1 + rng.below(4000) as usize,
+            };
+            let motif: Vec<u8> = (0..1 + rng.below(6)).map(|_| rng.below(4) as u8).collect();
+            let mut seq = Vec::with_capacity(len);
+            while seq.len() < len {
+                let r = rng.below(100);
+                if r < 2 {
+                    seq.push(4 + rng.below(12) as u8);
+                } else if r < 60 {
+                    seq.push(motif[seq.len() % motif.len()]);
+                } else {
+                    seq.push(rng.below(4) as u8);
+                }
+            }
+            let mut m = Vec::new();
+            let mut cursor = 0usize;
+            while cursor < len && rng.below(4) != 0 {
+                let start = cursor + rng.below(30) as usize;
+                let end = start + rng.below(25) as usize;
+                if start >= len {
+                    break;
+                }
+                m.push(MaskedInterval {
+                    start,
+                    end: end.min(len),
+                });
+                cursor = if rng.below(3) == 0 { start } else { end };
+            }
+            offsets.push(offset);
+            offset += len as i32 + 1 + rng.below(3) as i32;
+            queries.push(seq);
+            masks.push(m);
+        }
+        Case {
+            queries,
+            offsets,
+            masks,
+        }
+    }
+
+    // Random layouts (gaps between query offsets, touching and overlapping masks, many short
+    // ranges) partitioned in 1-20 parts with chunks of 1-5,000 positions: the original loop's
+    // tables.
+    #[test]
+    fn random_layouts_partitioned_equal_the_loop() {
+        let mut rng = Lcg(0xBEEF_0001);
+        let combos = combos();
+        let mut words = 0usize;
+        for round in 0..200 {
+            let case = random_layout(&mut rng);
+            let combo = combos[rng.below(combos.len() as u64) as usize];
+            let reference = build(&case, combo, How::Serial);
+            words += reference.hashtable.iter().filter(|&&c| c != 0).count();
+            for _ in 0..4 {
+                let parts = 1 + rng.below(20) as usize;
+                let chunk = 1 + rng.below(5000) as usize;
+                let got = build(&case, combo, How::Chunked(parts, chunk, false));
+                assert!(
+                    got == reference,
+                    "round {round} {combo:?} parts {parts} chunk {chunk}"
+                );
+            }
+        }
+        assert!(words > 10_000, "{words}");
+    }
+
+    // On search pools of 2, 5 and 16 threads: random layouts in 1-24 parts and chunks of 1-3,000
+    // positions, then a query of 1.3 million letters and its reverse complement in the default
+    // chunks (five chunk boundaries, one inside a mask), one and two templates: the original
+    // loop's tables.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn pool_fill_in_default_chunks() {
+        let mut rng = Lcg(0xBEEF_0002);
+        let combos = combos();
+        for threads in [2usize, 5, 16] {
+            crate::utils::threading::with_search_pool(threads, "blastn", |_pool| {
+                for round in 0..30 {
+                    let case = random_layout(&mut rng);
+                    let combo = combos[rng.below(combos.len() as u64) as usize];
+                    let reference = build(&case, combo, How::Serial);
+                    let chunk = 1 + rng.below(3000) as usize;
+                    let parts = 1 + rng.below(24) as usize;
+                    let got = build(&case, combo, How::Chunked(parts, chunk, true));
+                    assert!(
+                        got == reference,
+                        "threads {threads} round {round} {combo:?} parts {parts} chunk {chunk}"
+                    );
+                }
+                let seq: Vec<u8> = (0..1_300_000)
+                    .map(|i| if i % 9973 < 3 { 14 } else { rng.below(4) as u8 })
+                    .collect();
+                let reverse: Vec<u8> = seq
+                    .iter()
+                    .rev()
+                    .map(|&b| if b < 4 { 3 - b } else { b })
+                    .collect();
+                let case = Case {
+                    queries: vec![seq, reverse],
+                    offsets: vec![0, 1_300_001],
+                    masks: vec![
+                        vec![MaskedInterval {
+                            start: 524_280,
+                            end: 524_300,
+                        }],
+                        Vec::new(),
+                    ],
+                };
+                for combo in [
+                    (11usize, DiscWordType::TwoTemplates, 21usize),
+                    (12, DiscWordType::Coding, 16),
+                ] {
+                    let reference = build(&case, combo, How::Serial);
+                    let (got, stats) =
+                        build_stats(&case, combo, How::Chunked(threads, CHUNK_POSITIONS, true));
+                    assert_eq!(stats.chunks, 5, "threads {threads}");
+                    assert!(got == reference, "threads {threads} long {combo:?}");
+                }
+                Ok(())
+            })
+            .unwrap();
+        }
+    }
+
     /// Blocks of `chunk` letters, each a different repeat of period 1 to 4 (unmasked): each
     /// chunk's words fall on a few cells, of one owner or two, which change from block to block.
     fn repeat_blocks(chunk: usize, blocks: usize) -> Case {

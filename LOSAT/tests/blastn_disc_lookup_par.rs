@@ -13,9 +13,11 @@
 //! and how many tables had two templates. The same holds with `LOSAT_X_PAIRPARDISC`, in
 //! `LOSAT_X_QBATCHPAR` slots (private pools of two threads), for split query chunks
 //! (`CHUNK_SIZE`), and for megablast with a template (`-word_size 11 -template_type ...`);
-//! megablast without a template never builds this table. That the parts run on several workers of
-//! the pool is checked by the unit test `the_fill_runs_on_several_workers_of_the_pool`; that the
-//! bytes equal NCBI's is the business of the blastn fixtures.
+//! megablast without a template never builds this table. One search fills its table in several
+//! chunks of the pool fill (a query of 0.66 Mb, both strands), with one template and with two.
+//! That the parts run on several workers of the pool is checked by the unit test
+//! `the_fill_runs_on_several_workers_of_the_pool`; that the bytes equal NCBI's is the business of
+//! the blastn fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -487,4 +489,51 @@ fn split_field(stderr: &str, name: &str) -> String {
         .find_map(|word| word.strip_prefix(name))
         .unwrap_or_else(|| panic!("no {name} in: {line}"))
         .to_string()
+}
+
+// A table filled in several chunks of the pool fill: AP027131 (0.66 Mb, so about 1.3 million
+// positions on both strands, against chunks of 524,288) against NZ_CP006932, dc-megablast with
+// one template and with two (`coding_and_optimal`, 18): off at 1 thread, on and the shadow at 4
+// threads give the same bytes, the shadow compares pool-built tables with the original loop's,
+// and LOSAT_TIMING's split counts more chunks than tables.
+#[test]
+fn dc_megablast_across_chunk_boundaries() {
+    let query = fasta("AP027131.fasta");
+    let subject_path = fasta("NZ_CP006932.fasta");
+    let subject = ["-subject", subject_path.to_str().unwrap()];
+    for (extra, two_templates) in [
+        (&["-task", "dc-megablast"][..], false),
+        (
+            &[
+                "-task",
+                "dc-megablast",
+                "-template_type",
+                "coding_and_optimal",
+                "-template_length",
+                "18",
+            ][..],
+            true,
+        ),
+    ] {
+        let (expected, expected_stderr) = blastn(&query, &subject, extra, 1, &[]);
+        assert!(!expected.is_empty(), "{extra:?}: no hits");
+        let (report, stderr) = blastn(&query, &subject, extra, 4, &[SWITCH]);
+        assert!(report == expected, "{extra:?}: on differs");
+        assert_eq!(stderr, expected_stderr, "{extra:?}");
+        let (report, stderr) = blastn(&query, &subject, extra, 4, &[SHADOW]);
+        assert!(report == expected, "{extra:?}: shadow differs");
+        let (tables, pool, two) = shadow_counts(&stderr, &expected_stderr);
+        assert!(tables > 0 && pool == tables, "{extra:?}: {stderr}");
+        assert_eq!(two, if two_templates { tables } else { 0 }, "{stderr}");
+        let (report, stderr) = blastn(&query, &subject, extra, 4, &[SWITCH, ("LOSAT_TIMING", "1")]);
+        assert!(
+            report == expected,
+            "{extra:?}: on with LOSAT_TIMING differs"
+        );
+        let chunks: u64 = split_field(&stderr, "chunks=").parse().unwrap();
+        assert!(
+            chunks > tables,
+            "{extra:?}: {chunks} chunks for {tables} tables:\n{stderr}"
+        );
+    }
 }

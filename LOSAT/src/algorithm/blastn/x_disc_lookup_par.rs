@@ -105,9 +105,19 @@
 //! `next_pos` entries were written by different workers (a cache line moving between cores for
 //! most writes): at 4 threads that build was no faster than the loop (ws, `logs/disclutpar_report.md`).
 //! Here each position is read once, each owner reads only its own words, and `next_pos` is
-//! written by spans. The buckets hold 8 bytes per word of one chunk and template (4 MiB per
-//! template for `CHUNK_POSITIONS`), reused from chunk to chunk; phase B prefetches the cells 16
-//! entries ahead on x86_64.
+//! written by spans; phase B prefetches the cells 16 entries ahead on x86_64.
+//!
+//! Bucket memory. The buckets hold one entry of 8 bytes per word of the current chunk and
+//! template, and a bucket's capacity is the power of two above its largest fill. On words that
+//! spread over the cells (random letters, P = 4, 16 and 64 parts) the buckets of one template
+//! reserve 8 MiB (twice a chunk's 4 MiB of entries), and nothing is reallocated from chunk to
+//! chunk. Before each chunk a reader gives back the room above `bucket_keep` (four times a
+//! bucket's share of a chunk, plus 64 entries) that one of its buckets grew for an earlier chunk,
+//! so that the buckets of one template reserve at most `6 * CHUNK_POSITIONS + 68 * P^2` entries
+//! (24 MiB plus 544 bytes per bucket) whatever the input. Measured on blocks of one chunk, each a
+//! different unmasked repeat of period 1 to 4 (each chunk's words on the cells of one or two
+//! owners, which change from chunk to chunk): 16, 15 and 12 MiB per template at P = 4, 16 and 64,
+//! where buckets that kept their room reserved 16, 32 and 48 MiB (up to 2 x P x 4 MiB).
 //!
 //! The pool. The switch acts only where a LOSAT search pool of two threads or more is current
 //! (`x_mb_lookup_par::pool_threads`: the calling thread is a rayon worker, and its pool has two
@@ -549,6 +559,8 @@ struct Fill<'a, 'w> {
     owner: &'a [u8],
     block_shift: usize,
     parts: usize,
+    /// The entries a bucket keeps room for from one chunk to the next (`bucket_keep`).
+    keep: usize,
     tables: SharedTables,
     first: SharedBuckets,
     second: SharedBuckets,
@@ -584,6 +596,9 @@ impl Fill<'_, '_> {
     /// the template window of `accum` and the test `valid_bases < template_length` at the
     /// positions from `s0` on are those of the loop.
     ///
+    /// The job first empties its buckets, giving back the room above `keep` entries that a bucket
+    /// grew in an earlier chunk (`empty`).
+    ///
     /// SAFETY: no other job of the phase uses the buckets `(a, *)`.
     unsafe fn read(&self, a: usize, s0: usize, s1: usize) {
         let words = self.words;
@@ -592,9 +607,9 @@ impl Fill<'_, '_> {
         for o in 0..self.parts {
             // SAFETY: row `a` is this job's.
             unsafe {
-                self.first.at(a, o).clear();
+                empty(self.first.at(a, o), self.keep);
                 if two_templates {
-                    self.second.at(a, o).clear();
+                    empty(self.second.at(a, o), self.keep);
                 }
             }
         }
@@ -731,6 +746,29 @@ unsafe fn update_all(t: SharedTables, second: bool, entries: &mut [Entry]) {
 /// No NCBI counterpart (scheduling only): the positions read per chunk (each chunk is read, updated
 /// and linked before the next; the buckets hold the words of one chunk).
 const CHUNK_POSITIONS: usize = 1 << 19;
+
+/// No NCBI counterpart (scheduling only): the entries a bucket keeps room for from one chunk to
+/// the next: four times a bucket's share of a chunk (`chunk / parts^2` words), plus 64. On input
+/// whose words spread over the cells, a bucket's capacity (the power of two above its largest
+/// fill) stays below this, so nothing is given back and nothing is reallocated from chunk to
+/// chunk; a bucket that once held many more words (a chunk whose words fall on the cells of one
+/// owner, such as an unmasked short repeat) gives the rest back before the next chunk. So the
+/// buckets of one template reserve at most `parts^2 * keep + 2 * chunk` entries at any time
+/// (each bucket at most `keep`, or twice what it holds after growing in the current chunk):
+/// `6 * chunk + 68 * parts^2` entries of 8 bytes, whatever the input.
+fn bucket_keep(chunk: usize, parts: usize) -> usize {
+    4 * chunk.div_ceil(parts * parts) + 64
+}
+
+/// No NCBI counterpart (scheduling only): a bucket emptied for the next chunk, its capacity cut
+/// back to `keep` entries when it is larger (`bucket_keep`).
+#[inline]
+fn empty(bucket: &mut Vec<Entry>, keep: usize) {
+    bucket.clear();
+    if bucket.capacity() > keep {
+        bucket.shrink_to(keep);
+    }
+}
 
 /// No NCBI counterpart (scheduling only): `job(0)`, ..., `job(parts - 1)`, on the pool of the
 /// calling worker (`in_pool`) or one after another; returns when all have returned. The jobs never
@@ -873,6 +911,7 @@ fn fill_with<P: Fn(u8) + Sync>(
         owner: &owner,
         block_shift,
         parts,
+        keep: bucket_keep(chunk, parts),
         tables: SharedTables::new(tables),
         first: SharedBuckets::new(&mut first, parts),
         second: SharedBuckets::new(&mut second, parts),
@@ -1633,5 +1672,73 @@ mod tests {
         let last = b.next_pos2.len() - 1;
         b.next_pos2[last] ^= 1;
         shadow_check(&words, Some(2), &tables_ref(&b, bts), b.longest_chain);
+    }
+
+    /// Blocks of `chunk` letters, each a different repeat of period 1 to 4 (unmasked): each
+    /// chunk's words fall on a few cells, of one owner or two, which change from block to block.
+    fn repeat_blocks(chunk: usize, blocks: usize) -> Case {
+        let mut seq = Vec::with_capacity(chunk * blocks);
+        for b in 0..blocks {
+            let period = 1 + b % 4;
+            let motif: Vec<u8> = (0..period)
+                .map(|k| ((b * 7 + k * 3 + b / 4) % 4) as u8)
+                .collect();
+            seq.extend((0..chunk).map(|i| motif[i % period]));
+        }
+        Case {
+            queries: vec![seq],
+            offsets: vec![0],
+            masks: Vec::new(),
+        }
+    }
+
+    // The buckets' memory has a bound that does not grow with the parts (`bucket_keep`): at most
+    // `6 * chunk + 68 * parts^2` entries per template, also when the chunks' words fall on the
+    // cells of one owner after another (repeat blocks, where buckets that kept their room grew to
+    // `2 * parts` times a chunk); and about twice a chunk per template on random letters. In the
+    // default chunks, 4 and 16 parts, one and two templates.
+    #[test]
+    fn bucket_memory_is_bounded() {
+        let chunk = CHUNK_POSITIONS;
+        let blocks = 20;
+        let mut rng = Lcg(0xBEEF_0003);
+        let random = Case {
+            queries: vec![(0..chunk * blocks).map(|_| rng.below(4) as u8).collect()],
+            offsets: vec![0],
+            masks: Vec::new(),
+        };
+        let repeats = repeat_blocks(chunk, blocks);
+        for (name, case) in [("random", &random), ("repeats", &repeats)] {
+            for word_type in [DiscWordType::Coding, DiscWordType::TwoTemplates] {
+                let templates = if word_type == DiscWordType::TwoTemplates {
+                    2
+                } else {
+                    1
+                };
+                for parts in [4usize, 16] {
+                    let (_, stats) =
+                        build_stats(case, (11, word_type, 18), How::Chunked(parts, chunk, false));
+                    let bound = templates * (6 * chunk + 68 * parts * parts);
+                    eprintln!(
+                        "bucket peak {name} {word_type:?} parts {parts}: {} entries = {:.1} MiB (bound {:.1} MiB)",
+                        stats.peak_entries,
+                        stats.peak_entries as f64 * 8.0 / 1048576.0,
+                        bound as f64 * 8.0 / 1048576.0
+                    );
+                    assert_eq!(stats.chunks, blocks);
+                    assert!(
+                        stats.peak_entries <= bound,
+                        "{name} {word_type:?} parts {parts}"
+                    );
+                    if name == "random" {
+                        assert!(
+                            stats.peak_entries <= templates * (2 * chunk + 64 * parts * parts),
+                            "{name} {word_type:?} parts {parts}: {}",
+                            stats.peak_entries
+                        );
+                    }
+                }
+            }
+        }
     }
 }

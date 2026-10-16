@@ -92,6 +92,19 @@ fn blastp(
     vars: &[(&str, &str)],
     outfmt: &str,
 ) -> Run {
+    blastp_with(dir, task, subject, threads, vars, outfmt, &[])
+}
+
+/// `blastp` with the arguments `extra` after the others (e.g. `-max_target_seqs 3`).
+fn blastp_with(
+    dir: &Path,
+    task: &str,
+    subject: &[&OsStr],
+    threads: u32,
+    vars: &[(&str, &str)],
+    outfmt: &str,
+    extra: &[&str],
+) -> Run {
     let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
@@ -114,6 +127,7 @@ fn blastp(
         .args(subject)
         .args(["-evalue", "0.001", "-outfmt", outfmt])
         .args(["-num_threads", &threads.to_string()])
+        .args(extra)
         .env("BATCH_SIZE", "3000")
         .envs(vars.iter().copied())
         .output()
@@ -144,13 +158,42 @@ fn same_runs(
     base: &[(&str, &str)],
     outfmt: &str,
 ) -> (Run, Option<HashMap<String, u64>>) {
-    let what = format!("{task} {base:?} threads {threads} outfmt {outfmt}");
-    let off = blastp(dir, task, subject, threads, base, outfmt);
-    let on = blastp(dir, task, subject, threads, &with(base, &[ON]), outfmt);
+    same_runs_with(dir, task, subject, threads, base, outfmt, &[])
+}
+
+/// `same_runs` with the arguments `extra` in every run.
+fn same_runs_with(
+    dir: &Path,
+    task: &str,
+    subject: &[&OsStr],
+    threads: u32,
+    base: &[(&str, &str)],
+    outfmt: &str,
+    extra: &[&str],
+) -> (Run, Option<HashMap<String, u64>>) {
+    let what = format!("{task} {base:?} threads {threads} outfmt {outfmt} {extra:?}");
+    let off = blastp_with(dir, task, subject, threads, base, outfmt, extra);
+    let on = blastp_with(
+        dir,
+        task,
+        subject,
+        threads,
+        &with(base, &[ON]),
+        outfmt,
+        extra,
+    );
     assert!(on.stdout == off.stdout, "{what}: the report differs");
     assert_eq!(on.stderr, off.stderr, "{what}: standard error differs");
     assert_eq!(on.code, off.code, "{what}: the exit code differs");
-    let shadow = blastp(dir, task, subject, threads, &with(base, &[SHADOW]), outfmt);
+    let shadow = blastp_with(
+        dir,
+        task,
+        subject,
+        threads,
+        &with(base, &[SHADOW]),
+        outfmt,
+        extra,
+    );
     assert!(
         shadow.stdout == off.stdout,
         "{what}: the report differs in the shadow mode"
@@ -278,13 +321,14 @@ fn subject_file_with_an_undecodable_reported_title(dir: &Path, first_row: &[u8])
     path
 }
 
-// A reported subject whose tabular ID cannot be written: the run fails with the same message, exit
-// code and rows (none: LOSAT rejects it before any format is written) with the switch off, on and
-// in its shadow mode. The block search is not taken for such a subject set (`x_query_block_plan`),
-// so the switch is not reached; the check of the stored values with such records is tested in
-// `x_subject_meta.rs`.
+// A reported subject whose tabular ID cannot be written: the run is refused with the same message,
+// exit code and rows (none: LOSAT rejects it before any format is written) with the switch off, on
+// and in its shadow mode. The block search is not taken for such a subject set
+// (`x_query_block_plan`), so the switch is not reached and the shadow prints no line; this test
+// shows that the switch does not change the refusal. The check of the stored values with such
+// records is tested in `x_subject_meta.rs`.
 #[test]
-fn a_reported_subject_without_a_tabular_id_fails_alike_with_the_switch() {
+fn a_reported_subject_without_a_tabular_id_is_refused_alike_with_the_switch() {
     let dir = test_dir("undecodable");
     let subject = fixture("MejoMJNV.faa");
     let reference = blastp(
@@ -317,6 +361,117 @@ fn a_reported_subject_without_a_tabular_id_fails_alike_with_the_switch() {
             );
             assert!(off.stdout.is_empty(), "{what}");
             assert!(counts.is_none(), "{what}: {counts:?}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The fixture's subject proteome with the titles of the subjects that the report `reference`
+/// names first replaced by `titles` (a title is the header's text after `>`, so a title without a
+/// space replaces the ID too), in `dir`; returns its path.
+fn subject_file_with_retitled_reported_subjects(
+    dir: &Path,
+    reference: &[u8],
+    titles: &[&[u8]],
+) -> PathBuf {
+    let mut reported: Vec<&[u8]> = Vec::new();
+    for row in reference.split(|&byte| byte == b'\n') {
+        if let Some(sseqid) = row.split(|&byte| byte == b'\t').nth(1) {
+            if !reported.contains(&sseqid) {
+                reported.push(sseqid);
+            }
+        }
+    }
+    assert!(
+        reported.len() >= titles.len(),
+        "{} reported",
+        reported.len()
+    );
+    let text = std::fs::read(fixture("MejoMJNV.faa")).unwrap();
+    let mut out = Vec::new();
+    let mut replaced = 0;
+    for line in text.split_inclusive(|&byte| byte == b'\n') {
+        let first_word = line.strip_prefix(b">").map(|header| {
+            let end = header
+                .iter()
+                .position(|&byte| byte == b' ' || byte == b'\n')
+                .unwrap_or(header.len());
+            &header[..end]
+        });
+        match first_word
+            .and_then(|word| reported.iter().take(titles.len()).position(|r| *r == word))
+        {
+            Some(index) => {
+                out.extend_from_slice(b">");
+                out.extend_from_slice(titles[index]);
+                out.push(b'\n');
+                replaced += 1;
+            }
+            None => out.extend_from_slice(line),
+        }
+    }
+    assert_eq!(replaced, titles.len());
+    let path = dir.join("retitled.faa");
+    std::fs::write(&path, out).unwrap();
+    path
+}
+
+// Subjects whose tabular ID is not the title's first word: an empty title (`unnamed`), a
+// whitespace-only title, `Subject_` first words (NCBI generates their definition line: `Subject_99`,
+// a cp1252 / latin-1 byte, `Subject_ `, `Subject_3`) and `lcl|Subject_7`. With the stored IDs the
+// block search writes the same rows, in the columns that show the ID, accession and title, with
+// `-max_target_seqs 3`, in both tasks.
+#[test]
+fn generated_subject_ids_are_written_alike_with_the_switch() {
+    let dir = test_dir("generated-ids");
+    let original = fixture("MejoMJNV.faa");
+    let reference = blastp(
+        &dir,
+        "blastp",
+        &[OsStr::new("-subject"), original.as_os_str()],
+        1,
+        &[],
+        "6",
+    );
+    assert_eq!(reference.code, Some(0), "{}", reference.stderr);
+    let titles: [&[u8]; 7] = [
+        b"",
+        b"Subject_99 some desc",
+        b"Subject_\xe9 latin1 desc",
+        b"lcl|Subject_7 foo",
+        b"   ",
+        b"Subject_ x",
+        b"Subject_3",
+    ];
+    let path = subject_file_with_retitled_reported_subjects(&dir, &reference.stdout, &titles);
+    let subject = [OsStr::new("-subject"), path.as_os_str()];
+    let outfmt = "6 qseqid sseqid sacc saccver stitle slen evalue bitscore";
+    let base = [("LOSAT_X_BPQBLOCK", "1")];
+    for task in ["blastp", "blastp-fast"] {
+        let (off, counts) = same_runs_with(
+            &dir,
+            task,
+            &subject,
+            4,
+            &base,
+            outfmt,
+            &["-max_target_seqs", "3"],
+        );
+        assert_eq!(off.code, Some(0), "{task}: {}", off.stderr);
+        let counts = counts.expect("a line at exit");
+        assert!(counts["blocks"] > 0, "{task}: {counts:?}");
+        assert_eq!(
+            counts["subjects_compared"],
+            counts["blocks"] * SUBJECTS,
+            "{task}: {counts:?}"
+        );
+        // The generated IDs are in the report, so the stored IDs were written.
+        for generated in [&b"unnamed"[..], b"Subject_99"] {
+            assert!(
+                off.stdout.windows(generated.len()).any(|w| w == generated),
+                "{task}: {} is not in the report",
+                String::from_utf8_lossy(generated)
+            );
         }
     }
     let _ = std::fs::remove_dir_all(&dir);

@@ -37,6 +37,10 @@
 //! of subjects) and `LOSAT_X_BPLKPFLAT` (the lookup tables, #221) read and write none of these
 //! values.
 //!
+//! Memory: the IDs and titles of the subject set now live for the whole block search, alongside the
+//! search's peak (about 80 B per subject: about 0.5 MiB for 6,600 subjects, 8 MiB per 100k), and are
+//! freed when the block search ends.
+//!
 //! Off unless `LOSAT_X_BPSUBJMETA` is set (to any value); not in the strict set.
 //!
 //! `LOSAT_X_BPSUBJMETASHADOW=1` (shadow mode, implies the switch): in each block whose output stage
@@ -109,7 +113,9 @@ pub(crate) struct XSubjectMeta {
 
 impl XSubjectMeta {
     // No NCBI counterpart: values NCBI makes per row, made once (module comment above).
-    /// The values of `records`, with the shadow mode's flag `shadow`.
+    /// The values of `records`, with the shadow mode's flag `shadow`. The block plan
+    /// (`x_query_block_plan`) has already computed each ID once; this second pass (about 1-2 ms for
+    /// 6,600 subjects) is kept so that the plan's hunks stay unchanged.
     pub(crate) fn new(records: &[FastaRecord], shadow: bool) -> Self {
         let ids = super::tabular_subject_id_results(records);
         let shown = ids

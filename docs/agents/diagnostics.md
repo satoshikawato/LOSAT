@@ -490,7 +490,9 @@ Rebuilding less:
   subject's ID can be written). The values are functions of each subject record only, so reports, errors
   and their order do not change. The search of all queries, `-db` (no subject records; its titles are read
   per block from the database) and one-thread or many-thread searches without `LOSAT_X_BPQBLOCK` are not
-  changed. Memory: the IDs and titles of the subject set, once for the search (they were made per block).
+  changed. Memory: the IDs and titles of the subject set, once for the search (they were made per block). They now live
+  for the whole block search, alongside the search's peak, about 80 B per subject (about 0.5 MiB for 6,600
+  subjects, 8 MiB per 100k), and are freed when the block search ends.
   Measured on the workstation (16 threads, 4 alternating pairs, `LOSAT_X_BPSUBJRUN` and the other blastp
   switches on both sides, same outputs): human x yeast blastp-fast `-subject` with `LOSAT_X_BPQBLOCK=50000`
   (254 blocks) 7.82 -> 7.45 s (0.952), with `LOSAT_X_BPQBLOCK=20000` (633 blocks) 10.58 -> 9.81 s (0.927);

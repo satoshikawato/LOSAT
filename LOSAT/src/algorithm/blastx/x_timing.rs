@@ -24,10 +24,11 @@
 //!   last batch does). `tail` counts the batches searched one after another, each with the whole
 //!   pool, because fewer than the threads were queued (the end of the input, or a long query,
 //!   which is searched at once); `tail_wall` is their wall time.
-//! - `[TIMING] blastx_flow: batches=N main_jobs=N main_job_time ..s blocked ..s`: with
-//!   `LOSAT_X_BXFLOW` (instead of the waves), the batches spawned as tasks, the tasks the reading
-//!   thread ran itself while it waited (and their time), and the time it waited for a result
-//!   with no task to run. Both waits count as `search` of `blastx_run`.
+//! - `[TIMING] blastx_flow: batches=N alone=N main_jobs=N main_job_time ..s blocked ..s`: with
+//!   `LOSAT_X_BXFLOW` (instead of the waves), the batches read, those searched alone (with the
+//!   pool inside) at the end of the input, the tasks the reading thread ran itself while it
+//!   waited (and their time), and the time it waited for a result with no task to run. Both
+//!   waits count as `search` of `blastx_run`.
 //! - `[TIMING] blastx_batch_<mode>: batches=N query_setup .. setup .. chunks_par .. lookup ..
 //!   scan_par .. scan_inline .. replay .. chunk_end .. batch_end .. sum ..`: the stages of
 //!   `search::search_core`, per query batch, in the order they run. Mode `side` is a batch
@@ -103,8 +104,9 @@ pub(crate) enum Run {
     FlowJobs,
     FlowJobTime,
     FlowBlocked,
+    FlowAlone,
 }
-const RUN_LEN: usize = Run::FlowBlocked as usize + 1;
+const RUN_LEN: usize = Run::FlowAlone as usize + 1;
 
 // No NCBI counterpart: names of the stages of `search_core`.
 /// The stages of one query batch in `search::search_core`, in the order they run.
@@ -249,8 +251,9 @@ pub(crate) fn write(out: &mut dyn Write, threads: usize) -> io::Result<()> {
     )?;
     writeln!(
         out,
-        "[TIMING] blastx_flow: batches={} main_jobs={} main_job_time {:.3}s blocked {:.3}s",
+        "[TIMING] blastx_flow: batches={} alone={} main_jobs={} main_job_time {:.3}s blocked {:.3}s",
         n(r(Run::FlowBatches)),
+        n(r(Run::FlowAlone)),
         n(r(Run::FlowJobs)),
         s(r(Run::FlowJobTime)),
         s(r(Run::FlowBlocked)),

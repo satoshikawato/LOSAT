@@ -433,12 +433,13 @@ fn x_batches_side_by_side(
 
 // No NCBI counterpart: reads the LOSAT_X_TBNOWNPOOLS variable once; it does not change any value
 // NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): off unless the variable is set (it is not in the strict set).
-/// It acts only together with `LOSAT_X_TBNBATCH` and `LOSAT_X_TBNBATCHRULE`.
+/// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only together with
+/// `LOSAT_X_TBNBATCH` and `LOSAT_X_TBNBATCHRULE`.
 #[cfg(feature = "parallel")]
 fn x_tbn_own_pools() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOWNPOOLS").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOWNPOOLS"))
 }
 
 // No NCBI counterpart: chooses which query batches are searched at the same time on pools of

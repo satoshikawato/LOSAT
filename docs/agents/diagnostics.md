@@ -93,14 +93,15 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 71 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 72 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
 `LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE`,
 `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_LINKSLICES`, `LOSAT_X_BPSUBJRUN`,
 `LOSAT_X_TBNSTORE`, `LOSAT_X_DPNEON`, `LOSAT_X_TBNBATCHRULE` and the eight blastp switches
 `LOSAT_X_BPSEED`, `LOSAT_X_BPUNGAP`, `LOSAT_X_BPGAP`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPFREE`,
-`LOSAT_X_BPPCOMPACT`, `LOSAT_X_BPREDOFIT` and `LOSAT_X_BPQBLOCK`, `LOSAT_X_BNSTREAM`, and
-`LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES` joined), and their variables mean
+`LOSAT_X_BPPCOMPACT`, `LOSAT_X_BPREDOFIT` and `LOSAT_X_BPQBLOCK`, `LOSAT_X_BNSTREAM`,
+`LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES`, and `LOSAT_X_TBNOWNPOOLS` joined), and their variables
+mean
 (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
@@ -119,7 +120,8 @@ strict set are on by default (43 then, 71 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
   `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
-  act only with `TBNPAR`; `TBNBATCHRULE` only with `TBNBATCH`; `TBNOIDNEXT` and `TBNOIDUNITS`
+  act only with `TBNPAR`; `TBNBATCHRULE` only with `TBNBATCH`; `TBNOWNPOOLS` only with `TBNBATCH` and
+  `TBNBATCHRULE`; `TBNOIDNEXT` and `TBNOIDUNITS`
   act only with `TBNOIDCHUNK`; `BPSUBJRUN` acts only in the
   parallel `-subject` loop of blastp (2 or more threads, several subjects); `BPSEED` acts on the two-hit
   seed stage only; `BPGAP` runs the vector alignment only with AVX2, BMI1 and LZCNT (else the reference
@@ -140,7 +142,7 @@ strict set are on by default (43 then, 71 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 71 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 72 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -180,6 +182,7 @@ export LOSAT_X_BPSEED=1 LOSAT_X_BPUNGAP=1 LOSAT_X_BPGAP=1 LOSAT_X_BPLUT=1
 export LOSAT_X_BPPFREE=1 LOSAT_X_BPPCOMPACT=1 LOSAT_X_BPREDOFIT=1 LOSAT_X_BPQBLOCK=50000
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_TBXNEXT=1 LOSAT_X_TBXFRAMES=1
+export LOSAT_X_TBNOWNPOOLS=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -344,6 +347,12 @@ transcripts against the fruit fly genome database (1,870 sequences) 11.59 -> 9.7
 (NCBI 2.73 s), 257 -> 316 MiB (NCBI 359); 3.52 s at 4 threads (NCBI 3.50) and 2.58 s at 16 (NCBI
 2.71); 10 transcripts against the zebrafish cDNA database x0.98 at one thread and x0.94 at 8. The
 paths without them (`LOSAT_X_DEFAULT=0`) ran at x0.991-1.000 of main's time (V-PERF).
+
+`LOSAT_X_TBNOWNPOOLS` was added after the default changed, as a switch that was off unless set,
+and joined the set on 2026-10-17. With `LOSAT_X_TBNBATCH` and `LOSAT_X_TBNBATCHRULE` it searches
+the tblastn query batches the rule leaves one after another at the same time, each on a search
+pool of its own with its share of the threads; every batch is the same search and the reports
+keep the batch order, so no value changes. Timings are in its entry below.
 
 What runs per target:
 
@@ -540,7 +549,7 @@ Rebuilding less:
   as before, the reports keep the batch order). With `LOSAT_WASI_THREADS_DEBUG=1` a line
   `[losat-thread-stage] program=tblastn stage=query_batches batches= threads= side_by_side=
   one_after_another= own_pools=` gives the split (printed whenever `TBNBATCH`'s block runs, with
-  or without the rule; `own_pools` is 0 unless `LOSAT_X_TBNOWNPOOLS` is set). Timed on the workstation (perf-si-20261012 session 17, node 1, one hash per
+  or without the rule; `own_pools` is 0 with `LOSAT_X_TBNOWNPOOLS=0`, without the rule, and where its conditions below are not met). Timed on the workstation (perf-si-20261012 session 17, node 1, one hash per
   case; time of each arm / time of main's side by side): 16S (28,036 records, 40.6 Mb) x 10
   batches at 8 threads 0.68 (13.2 -> 8.9 s), 5 batches at 4 threads 0.69 with
   `LOSAT_X_TBNBATCH=0`; one 0.6 Mb genome x 10 batches at 8 threads 0.77 with the rule (8 side
@@ -550,7 +559,7 @@ Rebuilding less:
   Where all batches are a multiple of the threads and the set is small (0.3-15.7 Mb, one to
   5,000 subjects) side by side took 0.26-0.96 of the time of one after another.
 - `LOSAT_X_TBNOWNPOOLS=1` tblastn, with `LOSAT_X_TBNBATCH` and `LOSAT_X_TBNBATCHRULE` (speed;
-  not in the strict set: off unless set, to any value; `tblastn/stage_d_pipeline.rs`
+  in the strict set since 2026-10-17, on by default, `=0` turns it off; `tblastn/stage_d_pipeline.rs`
   `x_batches_on_own_pools`): the query batches `TBNBATCHRULE` leaves one after another (all of
   them when there are fewer batches than threads, else those after the full waves) are searched
   at the same time instead, each on a search pool of its own with its share of the threads
@@ -569,7 +578,7 @@ Rebuilding less:
   of them on pools of their own: three fly chromosomes x 5 batches at 8 threads 1.44 (two pools
   of one thread), 5,000 16S records (7.7 Mb) x 5 batches at 8 / 16 threads 1.38 / 1.09, 28,036
   16S records x 5 batches at 8 / 16 threads 1.67 / 0.98, the fly transcriptome x 5 batches at
-  16 threads 1.16. Without the switch, 16 batches on the 4.7 Mb genome at 32 threads took 1.60
+  16 threads 1.16. With `=0`, 16 batches on the 4.7 Mb genome at 32 threads took 1.60
   (`-subject`) and 2.86 (`-db`) times NCBI BLAST+ 2.17.0 `-db` at 32 threads (1.59 s).
 - `LOSAT_X_LUTSPLIT=1` tblastn: build only the half (contexts or table) a caller uses.
 - `LOSAT_X_IDEALMEMO=1` BLOSUM62 ideal Karlin block once per process.

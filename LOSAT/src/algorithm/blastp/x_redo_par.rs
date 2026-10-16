@@ -112,7 +112,8 @@
 //! over a job's computed matches of query letters times subject letters, largest first, ties by
 //! job index), and stores each job's results in the job's slot (`x_compute_window_lpt`). The
 //! window's results are read by job index as without it. With it on, the `[TIMING] x_bpredopar:`
-//! line ends with `lpt_windows=<windows computed so>`, and the shadow mode's line with `lpt=1`.
+//! line ends with `lpt_windows=<windows computed so>`, and the shadow mode's line with `lpt=1`
+//! (which says only that the switch is set; `lpt_windows=` counts the windows that ran with it).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3421,3447-3449
 //! ```c
@@ -829,6 +830,8 @@ fn x_compute_window_lpt<S, R>(
 where
     R: Send + Sync,
 {
+    // A disabled pool would run the scope on the global pool, not the search pool.
+    debug_assert!(pool.enabled());
     let slots: Vec<OnceLock<R>> = order.iter().map(|_| OnceLock::new()).collect();
     let next = AtomicUsize::new(0);
     pool.install(|| {
@@ -1492,7 +1495,9 @@ fn x_shadow_print_line() {
         X_SHADOW_MATCHES.load(Ordering::Relaxed),
         X_SHADOW_LISTS.load(Ordering::Relaxed),
         X_SHADOW_DIFFS.load(Ordering::Relaxed),
-        // EXPERIMENT (LOSAT_X_BPREDOLPT): the shadow checked the windows computed with it.
+        // EXPERIMENT (LOSAT_X_BPREDOLPT): ` lpt=1` says the switch is set (the shadow checked the
+        // windows computed with it, if any: one thread or one-job windows have none); the windows
+        // that ran with it are counted by `lpt_windows=` on the `[TIMING]` line.
         if x_bp_redo_lpt() { " lpt=1" } else { "" },
     );
 }
@@ -2281,6 +2286,36 @@ mod tests {
                         "{made} scratches for {tasks} tasks"
                     );
                 }
+                Ok(())
+            })
+            .expect("a pool");
+        }
+    }
+
+    /// A job that panics: the panic comes out of the scope (the other tasks finish first, so
+    /// nothing hangs) and the same pool computes the next call correctly.
+    #[test]
+    fn a_panicking_job_propagates_and_the_pool_stays_usable() {
+        for threads in [2, 3, 7] {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                let jobs = 40_usize;
+                let order: Vec<usize> = (0..jobs).collect();
+                let run = |panicking: bool| {
+                    x_compute_window_lpt(
+                        pool,
+                        threads.min(jobs),
+                        &order,
+                        || (),
+                        |_: &mut (), job| {
+                            assert!(!(panicking && (job == 5 || job == 30)), "job {job} panics");
+                            job * 3
+                        },
+                    )
+                };
+                let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(true)));
+                assert!(caught.is_err(), "threads {threads}: the panic was lost");
+                let expected: Vec<usize> = (0..jobs).map(|job| job * 3).collect();
+                assert_eq!(run(false), expected, "threads {threads}");
                 Ok(())
             })
             .expect("a pool");

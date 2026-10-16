@@ -105,6 +105,16 @@
 //! `[X_SHADOW] BPREDOPAR searches= queries= matches_compared= lists_compared= diffs=`. With
 //! `LOSAT_TIMING=1` the new path's `[TIMING] x_bpredopar:` line is printed as well.
 //!
+//! `LOSAT_X_BPREDOLPT=1` (off unless set; it acts only where this path runs, the shadow mode
+//! included) computes a window of two or more jobs in one `rayon::scope` of `min(threads, jobs)`
+//! tasks instead of a `par_iter` over its jobs: each task holds one set of scratch and takes the
+//! window's jobs one at a time from one counter, in the order of their estimated cost (the sum
+//! over a job's computed matches of query letters times subject letters, largest first, ties by
+//! job index), and stores each job's results in the job's slot (`x_compute_window_lpt`). The
+//! window's results are read by job index as without it. With it on, the `[TIMING] x_bpredopar:`
+//! line ends with `lpt_windows=<windows computed so>`, and the shadow mode's line with `lpt=1`
+//! (which says only that the switch is set; `lpt_windows=` counts the windows that ran with it).
+//!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3421,3447-3449
 //! ```c
 //!         while (BlastHSPStreamRead(hsp_stream, &localMatch)
@@ -118,7 +128,7 @@
 //! ```
 
 use std::ops::Range;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Instant;
 
@@ -168,6 +178,15 @@ pub(crate) fn x_bp_redo_par() -> XRedoPar {
             XRedoPar::Off
         }
     })
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPREDOLPT switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPREDOLPT): off unless set to any value. It acts only where the redo runs
+/// in windows (`LOSAT_X_BPREDOPAR` or `LOSAT_X_BPREDOPARSHADOW`).
+pub(crate) fn x_bp_redo_lpt() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BPREDOLPT").is_some())
 }
 
 /// Jobs per thread that a window holds at most, unless `LOSAT_X_BPREDOPARWINDOW` gives another
@@ -267,6 +286,8 @@ struct XCounts {
     released: usize,
     par_s: f64,
     replay_s: f64,
+    /// With `LOSAT_X_BPREDOLPT`: the windows computed in one scope with jobs largest first.
+    lpt_windows: Option<usize>,
 }
 
 /// The matches of one query's preliminary hit list: its lists with HSPs.
@@ -601,22 +622,25 @@ fn x_redo_match<P>(
 /// matches of one query; the results in match order, `None` for a match ended before the window
 /// (not computed). `heaps` are the heaps as the window's start left them; nothing changes them
 /// while the jobs run. NCBI's loop also runs the early termination test and the heap insertion of
-/// each match on its thread; here they are replayed afterwards (`x_replay`).
+/// each match on its thread; here they are replayed afterwards (`x_replay`). With `lpt`
+/// (`LOSAT_X_BPREDOLPT`), more than one thread on the search's pool and two or more jobs, the
+/// jobs run as `x_compute_window_lpt` runs them; the second value says whether they did.
 fn x_compute_window<P>(
     search: &XRedoParSearch<'_, P>,
     lists: &[Option<BlastpHitList>],
     heaps: &[BlastCompoHeap],
     window: &XWindow,
     shared: &Option<Arc<XSharedSubjectRanges>>,
-) -> XWindowResults
+    lpt: bool,
+) -> (XWindowResults, bool)
 where
     P: Fn(usize) -> Result<BlastRedoAlignParams> + Sync,
 {
     let (Some(first), Some(last)) = (window.matches.first(), window.matches.last()) else {
-        return Vec::new();
+        return (Vec::new(), false);
     };
     if window.ended.iter().all(|&ended| ended) {
-        return window.ended.iter().map(|_| None).collect();
+        return (window.ended.iter().map(|_| None).collect(), false);
     }
     let queries = first.q_idx..last.q_idx + 1;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3244-3248
@@ -632,84 +656,205 @@ where
         queries.clone().map(|_| OnceLock::new()).collect();
     // EXPERIMENT (LOSAT_X_NEWTONLANES): read as the one-thread loop reads it.
     let newton_lanes = crate::core::composition_adjustment::x_newton_lanes::mode() != 0;
-    let per_job: Vec<XWindowResults> = search.pool.install(|| {
-        window
-            .jobs
-            .par_iter()
-            .map_init(
+    // One job's results in match order, with one set of scratch; both ways of running the jobs
+    // below call it.
+    let run_job = |scratch: &mut XScratch, job: &Range<usize>| -> XWindowResults {
+        let job_matches = &window.matches[job.clone()];
+        let job_ended = &window.ended[job.clone()];
+        if job_ended.iter().all(|&ended| ended) {
+            return job_ended.iter().map(|_| None).collect();
+        }
+        let q_idx = job_matches[0].q_idx;
+        let query_workspace =
+            workspaces[q_idx - queries.start].get_or_init(|| x_query_workspace(search, q_idx));
+        // The parameters of the one-thread loop for this query, used for the job's matches one
+        // after another as that loop uses them for all of the query's.
+        let redo_align_params = match (search.build_redo_align_params)(q_idx) {
+            Ok(params) => params,
+            Err(error) => {
+                return job_ended
+                    .iter()
+                    .map(|&ended| (!ended).then(|| Err(anyhow::anyhow!("{error:#}"))))
+                    .collect();
+            }
+        };
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
+        // ```c
+        //                 if (BlastCompo_EarlyTermination(
+        //                         localMatch->best_evalue,
+        //                         redoneMatches,
+        //                         numQueries
+        //                 )) {
+        // ```
+        // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of the job's
+        // matches, four per vector (kappa::x_newton_lanes_prefetch_matches); a result is used
+        // only by a call on this thread with the same input bits. It does not change any value
+        // NCBI computes. Given the heaps of the batch as the window's start left them, as the
+        // one-thread loop gives its heaps, it leaves out the matches the test ends on them: those
+        // not computed here.
+        if newton_lanes {
+            let list = lists[q_idx]
+                .as_ref()
+                .expect("a match's query has its preliminary hit list");
+            x_newton_lanes_prefetch_matches(
+                &list.hsplist_array
+                    [job_matches[0].position..=job_matches[job_matches.len() - 1].position],
+                search.subjects,
+                &heaps[search.query_batches[q_idx].clone()],
+                query_workspace,
+                &scratch.composition_workspace,
+                &redo_align_params,
+                &mut scratch.range_cache,
+            );
+        }
+        job_matches
+            .iter()
+            .zip(job_ended)
+            .map(|(&matched, &ended)| {
+                (!ended).then(|| {
+                    x_redo_match(
+                        search,
+                        q_idx,
+                        x_local_match(lists, matched),
+                        query_workspace,
+                        &redo_align_params,
+                        scratch,
+                    )
+                })
+            })
+            .collect()
+    };
+    let new_scratch = || XScratch::new(BlastpKappaSubjectRangeCache::x_with_shared(shared.clone()));
+    let lpt = lpt && search.pool.enabled() && search.threads > 1 && window.jobs.len() > 1;
+    let per_job: Vec<XWindowResults> = if lpt {
+        let order = x_lpt_order(&x_job_costs(search, lists, window));
+        x_compute_window_lpt(
+            search.pool,
+            search.threads.min(window.jobs.len()),
+            &order,
+            new_scratch,
+            |scratch, job| run_job(scratch, &window.jobs[job]),
+        )
+    } else {
+        search.pool.install(|| {
+            window
+                .jobs
+                .par_iter()
                 // Each rayon work unit owns its scratch; how many are made depends on the
                 // scheduler, and no value depends on it.
-                || XScratch::new(BlastpKappaSubjectRangeCache::x_with_shared(shared.clone())),
-                |scratch, job| {
-                    let job_matches = &window.matches[job.clone()];
-                    let job_ended = &window.ended[job.clone()];
-                    if job_ended.iter().all(|&ended| ended) {
-                        return job_ended.iter().map(|_| None).collect();
+                .map_init(new_scratch, run_job)
+                .collect()
+        })
+    };
+    (per_job.into_iter().flatten().collect(), lpt)
+}
+
+// No NCBI counterpart: an estimate that decides only the order in which the threads take a
+// window's jobs (`x_lpt_order`); it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPREDOLPT): the estimated cost of each job of `window`: the sum over its
+/// matches that it computes (those not ended before the window) of the query's letters times the
+/// subject's letters.
+fn x_job_costs<P>(
+    search: &XRedoParSearch<'_, P>,
+    lists: &[Option<BlastpHitList>],
+    window: &XWindow,
+) -> Vec<u64> {
+    window
+        .jobs
+        .iter()
+        .map(|job| {
+            window.matches[job.clone()]
+                .iter()
+                .zip(&window.ended[job.clone()])
+                .filter(|&(_, &ended)| !ended)
+                .map(|(&matched, _)| {
+                    let query = search.contexts[matched.q_idx].aa_len as u64;
+                    let subject = search
+                        .subjects
+                        .get(x_local_match(lists, matched).oid as usize)
+                        .map_or(0, |subject| subject.aa_len as u64);
+                    query.saturating_mul(subject)
+                })
+                .fold(0, u64::saturating_add)
+        })
+        .collect()
+}
+
+// No NCBI counterpart: the order in which the threads take a window's jobs; it changes no value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPREDOLPT): the job indices by `costs`, largest first; jobs of equal cost
+/// in index order.
+fn x_lpt_order(costs: &[u64]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..costs.len()).collect();
+    order.sort_by_key(|&job| (std::cmp::Reverse(costs[job]), job));
+    order
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3447-3449,3493-3497
+// ```c
+//         int b;
+// #pragma omp for schedule(static)
+//         for (b = 0; b < numMatches; ++b) {
+// ...
+//                 seqSrc               = seqsrc_tld[tid];
+//                 scoringParams        = score_params_tld[tid];
+//                 hitParams            = hit_params_tld[tid];
+// ```
+// No NCBI counterpart for the order: NCBI's threads take fixed shares of its loop; here the
+// threads take the jobs one at a time, largest first. Scheduling only.
+/// EXPERIMENT (LOSAT_X_BPREDOLPT): `run_job(scratch, job)` for every job index of `order`, run
+/// in one `rayon::scope` on `pool` by `tasks` tasks. Each task takes the next index of `order`
+/// from one counter until none is left, with one scratch (`new_scratch`, made for its first job);
+/// each job's result goes to the job's own slot. Returns the results by job index.
+///
+/// Why the window's results are the `par_iter` path's: a job's results are a function of its
+/// matches (`run_job` is the same function with the same arguments); the query workspaces it
+/// reads are per-query `OnceLock`s of the same values, whichever job builds one; every scratch
+/// carries no value from one call to the next, so it does not matter how many jobs a task runs
+/// with it, and the memos (the SEG store, a thread's prefetched Newton results) return the values
+/// a computation would (module header; the `par_iter` path also runs several jobs with one
+/// scratch, as many as the scheduler gives a work unit); the results are read by job index, so
+/// `x_replay` sees the same sequence, errors included (each job's error is its own value in its
+/// slot; the replay reports the first one in stream order, as from the `par_iter` path's
+/// results). The order only changes which thread computes what, and when. No floating-point
+/// operation changes order: jobs share no reduction. A task waits for nothing but a workspace
+/// another job is building, and that building runs no rayon work, so no task depends on a task
+/// that could be stolen below it.
+fn x_compute_window_lpt<S, R>(
+    pool: &SearchPool<'_>,
+    tasks: usize,
+    order: &[usize],
+    new_scratch: impl Fn() -> S + Sync,
+    run_job: impl Fn(&mut S, usize) -> R + Sync,
+) -> Vec<R>
+where
+    R: Send + Sync,
+{
+    // A disabled pool would run the scope on the global pool, not the search pool.
+    debug_assert!(pool.enabled());
+    let slots: Vec<OnceLock<R>> = order.iter().map(|_| OnceLock::new()).collect();
+    let next = AtomicUsize::new(0);
+    pool.install(|| {
+        rayon::scope(|scope| {
+            for _ in 0..tasks {
+                scope.spawn(|_| {
+                    let mut scratch = None;
+                    while let Some(&job) = order.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        let result = run_job(scratch.get_or_insert_with(&new_scratch), job);
+                        assert!(slots[job].set(result).is_ok(), "job {job} ran twice");
                     }
-                    let q_idx = job_matches[0].q_idx;
-                    let query_workspace = workspaces[q_idx - queries.start]
-                        .get_or_init(|| x_query_workspace(search, q_idx));
-                    // The parameters of the one-thread loop for this query, used for the job's
-                    // matches one after another as that loop uses them for all of the query's.
-                    let redo_align_params = match (search.build_redo_align_params)(q_idx) {
-                        Ok(params) => params,
-                        Err(error) => {
-                            return job_ended
-                                .iter()
-                                .map(|&ended| (!ended).then(|| Err(anyhow::anyhow!("{error:#}"))))
-                                .collect();
-                        }
-                    };
-                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
-                    // ```c
-                    //                 if (BlastCompo_EarlyTermination(
-                    //                         localMatch->best_evalue,
-                    //                         redoneMatches,
-                    //                         numQueries
-                    //                 )) {
-                    // ```
-                    // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of
-                    // the job's matches, four per vector (kappa::x_newton_lanes_prefetch_matches);
-                    // a result is used only by a call on this thread with the same input bits. It
-                    // does not change any value NCBI computes. Given the heaps of the batch as the
-                    // window's start left them, as the one-thread loop gives its heaps, it leaves
-                    // out the matches the test ends on them: those not computed here.
-                    if newton_lanes {
-                        let list = lists[q_idx]
-                            .as_ref()
-                            .expect("a match's query has its preliminary hit list");
-                        x_newton_lanes_prefetch_matches(
-                            &list.hsplist_array[job_matches[0].position
-                                ..=job_matches[job_matches.len() - 1].position],
-                            search.subjects,
-                            &heaps[search.query_batches[q_idx].clone()],
-                            query_workspace,
-                            &scratch.composition_workspace,
-                            &redo_align_params,
-                            &mut scratch.range_cache,
-                        );
-                    }
-                    job_matches
-                        .iter()
-                        .zip(job_ended)
-                        .map(|(&matched, &ended)| {
-                            (!ended).then(|| {
-                                x_redo_match(
-                                    search,
-                                    q_idx,
-                                    x_local_match(lists, matched),
-                                    query_workspace,
-                                    &redo_align_params,
-                                    scratch,
-                                )
-                            })
-                        })
-                        .collect()
-                },
-            )
-            .collect()
+                });
+            }
+        });
     });
-    per_job.into_iter().flatten().collect()
+    slots
+        .into_iter()
+        .enumerate()
+        .map(|(job, slot)| {
+            slot.into_inner()
+                .unwrap_or_else(|| panic!("job {job} did not run"))
+        })
+        .collect()
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529,3705-3719
@@ -925,26 +1070,35 @@ where
         jobs: x_window_jobs_per_thread().saturating_mul(threads),
         at_risk_jobs: threads,
     };
-    x_redo_windows(
+    // EXPERIMENT (LOSAT_X_BPREDOLPT): the windows' jobs in one scope, largest first.
+    let lpt = x_bp_redo_lpt();
+    let mut lpt_windows = 0;
+    let mut counts = x_redo_windows(
         lists,
         heaps,
         search.query_batches,
         limits,
         release,
         search.timing,
-        &mut |lists, heaps, window| x_compute_window(search, lists, heaps, window, &shared),
+        &mut |lists, heaps, window| {
+            let (results, lpt_ran) = x_compute_window(search, lists, heaps, window, &shared, lpt);
+            lpt_windows += usize::from(lpt_ran);
+            results
+        },
         &mut |matched, local_match, computed| {
             if let Some(reference) = reference.as_deref_mut() {
                 reference.compare(search, matched, local_match, computed);
             }
         },
-    )
+    )?;
+    counts.lpt_windows = lpt.then_some(lpt_windows);
+    Ok(counts)
 }
 
 // No NCBI counterpart: prints counters and changes no value NCBI computes.
 fn x_print_timing(counts: &XCounts) {
     eprintln!(
-        "[TIMING] x_bpredopar: matches={} jobs={} windows={} split={} ended={} skipped={} wasted={} par_s={:.6} replay_s={:.6}",
+        "[TIMING] x_bpredopar: matches={} jobs={} windows={} split={} ended={} skipped={} wasted={} par_s={:.6} replay_s={:.6}{}",
         counts.matches,
         counts.jobs,
         counts.windows,
@@ -953,7 +1107,10 @@ fn x_print_timing(counts: &XCounts) {
         counts.skipped,
         counts.wasted,
         counts.par_s,
-        counts.replay_s
+        counts.replay_s,
+        counts
+            .lpt_windows
+            .map_or(String::new(), |windows| format!(" lpt_windows={windows}"))
     );
 }
 
@@ -1332,12 +1489,16 @@ impl XRedoParShadow {
 // No NCBI counterpart: prints counters and changes no value NCBI computes.
 fn x_shadow_print_line() {
     eprintln!(
-        "[X_SHADOW] BPREDOPAR searches={} queries={} matches_compared={} lists_compared={} diffs={}",
+        "[X_SHADOW] BPREDOPAR searches={} queries={} matches_compared={} lists_compared={} diffs={}{}",
         X_SHADOW_SEARCHES.load(Ordering::Relaxed),
         X_SHADOW_QUERIES.load(Ordering::Relaxed),
         X_SHADOW_MATCHES.load(Ordering::Relaxed),
         X_SHADOW_LISTS.load(Ordering::Relaxed),
         X_SHADOW_DIFFS.load(Ordering::Relaxed),
+        // EXPERIMENT (LOSAT_X_BPREDOLPT): ` lpt=1` says the switch is set (the shadow checked the
+        // windows computed with it, if any: one thread or one-job windows have none); the windows
+        // that ran with it are counted by `lpt_windows=` on the `[TIMING]` line.
+        if x_bp_redo_lpt() { " lpt=1" } else { "" },
     );
 }
 
@@ -2045,6 +2206,464 @@ mod tests {
         assert_eq!(
             x_result_difference(&Err(anyhow::anyhow!("failed")), &Err("failed".to_string())),
             None
+        );
+    }
+
+    /// A fixed xorshift sequence.
+    struct XorShift(u64);
+
+    impl XorShift {
+        fn below(&mut self, bound: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % bound as u64) as usize
+        }
+    }
+
+    #[test]
+    fn the_lpt_order_is_a_permutation_largest_first_with_ties_in_index_order() {
+        assert!(x_lpt_order(&[]).is_empty());
+        assert_eq!(x_lpt_order(&[3, 9, 3, 0, 9, 4]), [1, 4, 5, 0, 2, 3]);
+        let mut rng = XorShift(0x2545_f491_4f6c_dd1d);
+        for len in [1, 2, 7, 64, 300] {
+            // Few distinct costs (many ties), and many.
+            for distinct in [1, 3, 1000] {
+                let costs: Vec<u64> = (0..len).map(|_| rng.below(distinct) as u64).collect();
+                let order = x_lpt_order(&costs);
+                let mut jobs = order.clone();
+                jobs.sort_unstable();
+                assert_eq!(jobs, (0..len).collect::<Vec<_>>(), "a permutation");
+                for pair in order.windows(2) {
+                    let (a, b) = (pair[0], pair[1]);
+                    assert!(
+                        costs[a] > costs[b] || (costs[a] == costs[b] && a < b),
+                        "job {a} (cost {}) before job {b} (cost {})",
+                        costs[a],
+                        costs[b]
+                    );
+                }
+            }
+        }
+    }
+
+    /// The scope runs every job once, with at most one scratch per task, and returns the results
+    /// by job index; also when the jobs run nested parallel work, where a thread that waits in it
+    /// may run another task's loop (no task waits for another one).
+    #[test]
+    fn the_lpt_scope_runs_every_job_once_and_returns_the_results_by_job_index() {
+        for threads in [2, 3, 7] {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                for jobs in [1_usize, 2, 5, 40] {
+                    let costs: Vec<u64> = (0..jobs as u64).map(|job| (job * 7919) % 13).collect();
+                    let order = x_lpt_order(&costs);
+                    let tasks = threads.min(jobs);
+                    let (scratches, runs) = (AtomicUsize::new(0), AtomicUsize::new(0));
+                    let results = x_compute_window_lpt(
+                        pool,
+                        tasks,
+                        &order,
+                        || {
+                            scratches.fetch_add(1, Ordering::Relaxed);
+                            Vec::new()
+                        },
+                        |scratch: &mut Vec<usize>, job| {
+                            runs.fetch_add(1, Ordering::Relaxed);
+                            scratch.push(job);
+                            let nested: u64 =
+                                (0..64_u64).into_par_iter().map(|x| x * job as u64).sum();
+                            (job, nested, rayon::current_thread_index().is_some())
+                        },
+                    );
+                    let expected: Vec<(usize, u64, bool)> = (0..jobs)
+                        .map(|job| (job, 2016 * job as u64, true))
+                        .collect();
+                    assert_eq!(results, expected, "threads {threads} jobs {jobs}");
+                    assert_eq!(runs.load(Ordering::Relaxed), jobs);
+                    let made = scratches.load(Ordering::Relaxed);
+                    assert!(
+                        (1..=tasks).contains(&made),
+                        "{made} scratches for {tasks} tasks"
+                    );
+                }
+                Ok(())
+            })
+            .expect("a pool");
+        }
+    }
+
+    /// A job that panics: the panic comes out of the scope (the other tasks finish first, so
+    /// nothing hangs) and the same pool computes the next call correctly.
+    #[test]
+    fn a_panicking_job_propagates_and_the_pool_stays_usable() {
+        for threads in [2, 3, 7] {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                let jobs = 40_usize;
+                let order: Vec<usize> = (0..jobs).collect();
+                let run = |panicking: bool| {
+                    x_compute_window_lpt(
+                        pool,
+                        threads.min(jobs),
+                        &order,
+                        || (),
+                        |_: &mut (), job| {
+                            assert!(!(panicking && (job == 5 || job == 30)), "job {job} panics");
+                            job * 3
+                        },
+                    )
+                };
+                let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(true)));
+                assert!(caught.is_err(), "threads {threads}: the panic was lost");
+                let expected: Vec<usize> = (0..jobs).map(|job| job * 3).collect();
+                assert_eq!(run(false), expected, "threads {threads}");
+                Ok(())
+            })
+            .expect("a pool");
+        }
+    }
+
+    const AMINO_ACIDS: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+
+    /// A redo's inputs made up from related proteins: random queries; subjects that hold a
+    /// mutated piece of one query between random flanks; per query a preliminary hit list with a
+    /// list for each related subject (one HSP over the piece, its gapped start in the middle), a
+    /// few lists of unrelated subjects, and one list without HSPs; one query without a list.
+    struct XRedoFixture {
+        contexts: Vec<QueryContext>,
+        search_spaces: Vec<SearchSpace>,
+        subjects: Vec<EncodedProtein>,
+        lists: Vec<Option<BlastpHitList>>,
+        batches: Vec<Range<usize>>,
+        gapped_params: KarlinParams,
+        gapped_gumbel: BlastGumbelBlk,
+        matrix_info: crate::core::composition_adjustment::adjust_scores::BlastMatrixInfo,
+    }
+
+    /// A list of subject `oid` for query `q_idx` (of `query_length` letters) with one HSP of
+    /// `length` letters from query offset `q0` and subject offset `s0` (0-based).
+    fn aligned_list(
+        q_idx: usize,
+        oid: usize,
+        (q0, s0, length): (usize, usize, usize),
+        query_length: usize,
+        e_value: f64,
+    ) -> BlastpHspList {
+        let mut hsp = hsp(oid as u32, e_value);
+        hsp.q_start = q0 + 1;
+        hsp.q_end = q0 + length;
+        hsp.s_start = s0 + 1;
+        hsp.s_end = s0 + length;
+        hsp.gapped_q_start = (q0 + length / 2) as i32;
+        hsp.gapped_s_start = (s0 + length / 2) as i32;
+        hsp.length = length;
+        hsp.raw_score = 2 * length as i32;
+        hsp.query_length = query_length;
+        hsp.q_idx = q_idx as u32;
+        BlastpHspList {
+            oid: oid as u32,
+            query_index: q_idx as u32,
+            hsps: vec![hsp],
+            best_evalue: e_value,
+        }
+    }
+
+    fn redo_fixture() -> XRedoFixture {
+        let spec = crate::config::ProteinScoringSpec::default();
+        let gapped_params = crate::stats::tables::lookup_protein_params(&spec);
+        let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
+        let random = |rng: &mut XorShift, len: usize| -> Vec<u8> {
+            (0..len).map(|_| AMINO_ACIDS[rng.below(20)]).collect()
+        };
+        let queries: Vec<Vec<u8>> = (0..6)
+            .map(|_| {
+                let len = 120 + rng.below(240);
+                random(&mut rng, len)
+            })
+            .collect();
+        let mut texts = Vec::new();
+        let mut related = Vec::new();
+        for oid in 0..48 {
+            let q_idx = rng.below(queries.len());
+            let query = &queries[q_idx];
+            let length = 50 + rng.below(query.len() - 60);
+            let q0 = rng.below(query.len() - length + 1);
+            let left = rng.below(80);
+            let mut subject = random(&mut rng, left);
+            for &residue in &query[q0..q0 + length] {
+                // About a quarter of the letters changed.
+                subject.push(if rng.below(4) == 0 {
+                    AMINO_ACIDS[rng.below(20)]
+                } else {
+                    residue
+                });
+            }
+            let right = rng.below(80);
+            subject.extend(random(&mut rng, right));
+            related.push((q_idx, oid, (q0, left, length)));
+            texts.push(subject);
+        }
+        let mut per_query: Vec<Vec<BlastpHspList>> = vec![Vec::new(); queries.len()];
+        for &(q_idx, oid, piece) in &related {
+            let e_value = 10_f64.powi(-(3 + rng.below(40) as i32));
+            per_query[q_idx].push(aligned_list(
+                q_idx,
+                oid,
+                piece,
+                queries[q_idx].len(),
+                e_value,
+            ));
+        }
+        for (q_idx, lists) in per_query.iter_mut().enumerate() {
+            let unrelated: Vec<usize> = related
+                .iter()
+                .filter(|&&(other, ..)| other != q_idx)
+                .map(|&(_, oid, _)| oid)
+                .collect();
+            for &oid in unrelated.iter().take(3) {
+                let length = 30;
+                let q0 = rng.below(queries[q_idx].len() - length);
+                let s0 = rng.below(texts[oid].len() - length);
+                lists.push(aligned_list(
+                    q_idx,
+                    oid,
+                    (q0, s0, length),
+                    queries[q_idx].len(),
+                    0.5,
+                ));
+            }
+            lists.push(BlastpHspList {
+                oid: unrelated[3] as u32,
+                query_index: q_idx as u32,
+                hsps: Vec::new(),
+                best_evalue: 1.0,
+            });
+            lists.sort_by(|a, b| a.best_evalue.total_cmp(&b.best_evalue));
+        }
+        let mut lists: Vec<Option<BlastpHitList>> = per_query.into_iter().map(hit_list).collect();
+        lists[4] = None;
+        let contexts: Vec<QueryContext> = queries
+            .iter()
+            .enumerate()
+            .map(|(q_idx, query)| {
+                let encoded = super::super::encoding::encode_protein_sequence(query);
+                QueryContext {
+                    q_idx: q_idx as u32,
+                    f_idx: 0,
+                    frame: 0,
+                    aa_seq: encoded.aa_seq,
+                    aa_seq_nomask: None,
+                    aa_len: encoded.aa_len,
+                    orig_len: encoded.aa_len,
+                    frame_base: 0,
+                    is_valid: true,
+                    karlin_params: gapped_params,
+                }
+            })
+            .collect();
+        let subjects: Vec<EncodedProtein> = texts
+            .iter()
+            .map(|text| super::super::encoding::encode_protein_sequence(text))
+            .collect();
+        let db_letters: usize = subjects.iter().map(|subject| subject.aa_len).sum();
+        let search_spaces = contexts
+            .iter()
+            .map(|ctx| {
+                let length_adjustment = 20_i64;
+                let effective_query_len = (ctx.aa_len as i64 - length_adjustment) as f64;
+                let effective_db_len =
+                    (db_letters as i64 - subjects.len() as i64 * length_adjustment) as f64;
+                SearchSpace {
+                    effective_query_len,
+                    effective_db_len,
+                    effective_space: effective_query_len * effective_db_len,
+                    length_adjustment,
+                }
+            })
+            .collect();
+        let ideal = crate::core::blast_stat::composition::compute_blosum62_ideal_karlin_params()
+            .expect("BLOSUM62 ideal parameters");
+        XRedoFixture {
+            contexts,
+            search_spaces,
+            subjects,
+            lists,
+            batches: vec![0..3, 0..3, 0..3, 3..6, 3..6, 3..6],
+            gapped_params,
+            gapped_gumbel: crate::stats::spouge::lookup_protein_gumbel_params(
+                &spec,
+                db_letters as i64,
+            )
+            .expect("BLOSUM62 11/1 Gumbel parameters"),
+            matrix_info: crate::core::composition_adjustment::adjust_scores::build_matrix_info(
+                ScoringMatrix::Blosum62,
+                ideal.lambda / 32.0,
+            )
+            .expect("BLOSUM62 matrix information"),
+        }
+    }
+
+    /// The redo parameters of blastp's defaults (composition matrix adjustment, scaled by 32), as
+    /// `run_resolved_in_pool` builds them.
+    fn redo_params(fixture: &XRedoFixture, q_idx: usize) -> BlastRedoAlignParams {
+        use crate::core::composition_adjustment::redo_alignment::{
+            BlastCompoAdjustMode, BlastCompoGappingParams,
+        };
+        const SCALE: f64 = 32.0;
+        let scaled_lambda = fixture.gapped_params.lambda / SCALE;
+        BlastRedoAlignParams {
+            matrix_info: fixture.matrix_info.clone(),
+            gapping_params: BlastCompoGappingParams {
+                gap_open: 11 * SCALE as i32,
+                gap_extend: SCALE as i32,
+                decline_align: 0,
+                x_dropoff: (25.0 * std::f64::consts::LN_2 / scaled_lambda) as i32,
+                context: std::cell::Cell::new(None),
+            },
+            compo_adjust_mode: BlastCompoAdjustMode::CompositionMatrixAdjust,
+            alphsize: crate::utils::matrix::BLASTAA_SIZE as i32,
+            composition_test_index: 0,
+            unified_p: false,
+            log_k: fixture.gapped_params.k.ln(),
+            score_divisor: SCALE,
+            restricted_alignment: false,
+            smith_waterman: false,
+            is_same_adjustment: false,
+            near_identical_cutoff: 1.74 * std::f64::consts::LN_2 / scaled_lambda,
+            position_based: false,
+            re_matrix_adjustment_pseudocounts: 20,
+            ccat_query_length: fixture.contexts[q_idx].aa_len as i32,
+            query_is_translated: false,
+            subject_is_translated: false,
+            cutoff_score: 1,
+            cutoff_evalue: 10.0,
+            do_link_hsps: false,
+        }
+    }
+
+    fn query_raw(ctx: &QueryContext) -> &[u8] {
+        &ctx.aa_seq[1..ctx.aa_seq.len() - 1]
+    }
+
+    /// `x_compute_window` with the switch gives the results of the `par_iter` path, match for
+    /// match (error or not, scores, E-value bits, every HSP field), on windows from random starts
+    /// with random job budgets and matches ended at random, at 1, 2, 3 and 7 threads, with and
+    /// without the search's SEG store, and when the parameters of one query fail.
+    #[test]
+    fn windows_computed_with_jobs_largest_first_equal_the_par_iter_windows() {
+        let fixture = redo_fixture();
+        let count = fixture.lists.len();
+        let heaps = heaps_of(count, 500);
+        let all = stream(&fixture.lists);
+        let mut rng = XorShift(0x5851_f42d_4c95_7f2d);
+        let windows: Vec<XWindow> = (0..10)
+            .map(|index| {
+                let start = all[rng.below(all.len())];
+                let mut window = window_from(
+                    &fixture.lists,
+                    &heaps,
+                    &fixture.batches,
+                    &vec![None; count],
+                    start,
+                    2 + rng.below(10),
+                );
+                // None ended, about one in four, about one in two.
+                let share = index % 3;
+                for ended in &mut window.ended {
+                    *ended = share > 0 && rng.below(4) < share;
+                }
+                window
+            })
+            .collect();
+        let failing = all[all.len() / 2].q_idx;
+        let (mut compared, mut with_list, mut errors, mut lpt_windows) = (0, 0, 0, 0);
+        for threads in [1, 2, 3, 7] {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                for (fail, seg_share) in [(None, true), (Some(failing), false)] {
+                    let build = |q_idx: usize| -> Result<BlastRedoAlignParams> {
+                        if Some(q_idx) == fail {
+                            anyhow::bail!("no parameters for query {q_idx}");
+                        }
+                        Ok(redo_params(&fixture, q_idx))
+                    };
+                    let search = XRedoParSearch {
+                        pool,
+                        threads,
+                        contexts: &fixture.contexts,
+                        query_nomask: query_raw,
+                        search_spaces: &fixture.search_spaces,
+                        subjects: &fixture.subjects,
+                        query_batches: &fixture.batches,
+                        matrix: ScoringMatrix::Blosum62,
+                        gapped_params: &fixture.gapped_params,
+                        gapped_gumbel: &fixture.gapped_gumbel,
+                        evalue: 10.0,
+                        build_redo_align_params: &build,
+                        timing: false,
+                    };
+                    let shared = || seg_share.then(|| Arc::new(XSharedSubjectRanges::new()));
+                    for window in &windows {
+                        let (reference, ran) = x_compute_window(
+                            &search,
+                            &fixture.lists,
+                            &heaps,
+                            window,
+                            &shared(),
+                            false,
+                        );
+                        assert!(!ran, "the par_iter path");
+                        let (lpt, ran) = x_compute_window(
+                            &search,
+                            &fixture.lists,
+                            &heaps,
+                            window,
+                            &shared(),
+                            true,
+                        );
+                        let acts = threads > 1
+                            && window.jobs.len() > 1
+                            && !window.ended.iter().all(|&ended| ended);
+                        assert_eq!(ran, acts, "threads {threads}: {window:?}");
+                        lpt_windows += usize::from(ran);
+                        assert_eq!(lpt.len(), reference.len());
+                        for (position, (computed, reference)) in
+                            lpt.iter().zip(reference).enumerate()
+                        {
+                            let at = (threads, fail, window.matches[position]);
+                            match (computed, reference) {
+                                (None, None) => {}
+                                (Some(computed), Some(reference)) => {
+                                    with_list += usize::from(
+                                        reference
+                                            .as_ref()
+                                            .is_ok_and(|result| result.hsp_list.is_some()),
+                                    );
+                                    errors += usize::from(reference.is_err());
+                                    let reference = reference.map_err(|error| format!("{error:#}"));
+                                    assert_eq!(
+                                        x_result_difference(computed, &reference),
+                                        None,
+                                        "{at:?}"
+                                    );
+                                    compared += 1;
+                                }
+                                (computed, reference) => panic!(
+                                    "{at:?}: computed {} / {}",
+                                    computed.is_some(),
+                                    reference.is_some()
+                                ),
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            })
+            .expect("a pool");
+        }
+        // Real work on every side: matches computed, alignments kept, the failing query's errors,
+        // and windows the switch computed.
+        assert!(
+            compared > 200 && with_list > 50 && errors > 0 && lpt_windows > 30,
+            "compared {compared} with a list {with_list} errors {errors} lpt windows {lpt_windows}"
         );
     }
 }

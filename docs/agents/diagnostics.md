@@ -706,6 +706,33 @@ Rebuilding less:
   any other value (0, a negative number, not a number) gives 64, without a message, as the value switches of
   `utils/xswitch.rs` give their built-in value. The tests set 1 to make windows that end inside queries. The
   output does not depend on it.
+- `LOSAT_X_BPREDOLPT=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it; acts only where `LOSAT_X_BPREDOPAR` runs, its shadow mode included,
+  with more than one thread, for a window of two or more jobs) each window of the redo is computed in one
+  `rayon::scope` of `min(threads, jobs)` tasks instead of a `par_iter` over its jobs (`blastp/x_redo_par.rs`,
+  `x_compute_window_lpt`, exactness argument on it). Each task makes one set of scratch for its first job and
+  takes the window's jobs one at a time from one counter, in the order of their estimated cost: the sum over
+  the job's matches not ended before the window of query letters times subject letters, largest first, jobs of
+  equal cost in index order. Each job's results go to its own slot, and the window's results are read by job
+  index as without the switch, so the replay, the matches the early termination test ends and the error that
+  ends the redo are those of the `par_iter` path. Without it, rayon's split of the jobs into halves and the
+  spread of the last jobs' ends leave threads idle at the end of each window. Measured on the workstation
+  (16 cores of one node, HT siblings idle; the human x yeast blastp-fast job at 16 threads with
+  `LOSAT_X_BPSUBJRUN=1` and the redo and memory switches, without `LOSAT_X_BPLKPFLAT`; 4 alternating pairs,
+  the same outputs): with the switch off the redo windows (`par_s` of the `[TIMING]` line) take 1.56 s of the
+  7.84 s with `LOSAT_X_BPQBLOCK=50000` and 2.05 s of 10.60 s with 20,000; with it on, 7.84 -> 7.56 s
+  (x0.964) and 10.60 -> 10.17 s (x0.960), the windows' time 1.56 -> 1.28 s and 2.05 -> 1.63 s; max RSS
+  101.8-103.0 -> 99.9-102.6 MiB and 82.6-85.1 -> 80.5-81.9 MiB. (The idle time at the windows' ends that
+  motivated it was measured before, on a build with `LOSAT_X_BPLKPFLAT=1`, #221, not on main, where the
+  job takes 6.9 s / 8.9 s: 0.39 / 0.77 s, of which the largest single job explains 0.01 / 0.10 s;
+  perf-mb-20261014 `logs/split2_report.md`.) With `LOSAT_TIMING=1` the `[TIMING] x_bpredopar:` line ends
+  with ` lpt_windows=<w>`, the number of windows that ran with the switch (windows of one job and runs at
+  one thread have none). `LOSAT_X_BPREDOPARSHADOW` checks it (every match the replay redoes against the
+  one-thread computation, every hit list against the one-thread loop's), and then the shadow line ends with
+  ` lpt=1` after `diffs=`; that says only that the switch is set (the fields before it and their order do
+  not change; in the repository only `tests/blastp_redo_par.rs` reads that line, by field name), and
+  `lpt_windows=` on the `[TIMING]` line counts the windows that ran with it. Memory: one scratch per task
+  instead of one per rayon work unit.
 - `LOSAT_X_BPREDOPARSHADOW=1` shadow of `LOSAT_X_BPREDOPAR` (implies it): the new path runs first into
   separate heaps without releasing the preliminary lists, and every match that its replay redoes is
   computed again on the calling thread with one set of scratch, as the one-thread loop holds it, and the

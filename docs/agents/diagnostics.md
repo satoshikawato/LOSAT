@@ -1040,6 +1040,36 @@ Scheduling (each value computed by one thread with the original function; order 
   chunk, the hit list and the whole diagonal hash compared with the original code; one
   `[X_PAIRPARSHADOW]` summary line on stderr at the end). With `LOSAT_TIMING` a
   `[TIMING] x_pairpar_seed` line gives the strips, seeds and the owner's fold, scan and wait time.
+- `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
+  `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; not in the strict set: off unless set
+  to any value, whatever `LOSAT_X_DEFAULT` says) the discontiguous megablast lookup tables
+  (`lookup.rs` `build_disc_mb_lookup`, NCBI `s_FillDiscMBTable`: `hashtable`, `next_pos` and the counters
+  of the longest chain, and with two templates `hashtable2`, `next_pos2` and their counters, both
+  templates sharing one presence vector) are filled by the threads of the search pool
+  (`blastn/x_disc_lookup_par.rs`). Every thread reads every query's unmasked ranges in the original
+  order (the same ambiguity resets and word offsets) and applies a word's update for a template only
+  when that template's cell lies in one of its blocks of `2^max(11, pv_array_bts)` cells (the plan of
+  `LOSAT_X_PAIRPAR`'s megablast table), so each cell gets its words in the original order, each
+  presence-vector word and counter is written by one thread (a presence bit is only ever set), and
+  `longest_chain` is computed afterwards by the original code. It acts only where a LOSAT search pool
+  of two threads or more is current: the search's pool, or the private pool of a `LOSAT_X_QBATCHPAR`
+  slot of two or more threads (never rayon's global pool); with one thread, a slot of one thread, a
+  build without the `parallel` feature or WebAssembly without `wasm-threads` the original loop runs.
+  Shadow: `LOSAT_X_DISCLUTPARSHADOW=1` (implies the switch) builds the tables again the other way
+  (serially when the pool built them, otherwise in four parts one after another) and compares every
+  element and the longest chain; a difference prints `[X_SHADOW] DISCLUTPAR ... DIFFERENT ...` and
+  panics; at exit `main` prints `[X_SHADOW] DISCLUTPAR tables= pool= two_templates= cells= diffs=0
+  identical` (tables compared, of them built on a pool, of them with two templates, elements
+  compared). With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] disc_lookup_build: <s>s
+  (builds=<n> parallel=<n>)` when a table was built: the summed wall time of the builds (allocation,
+  fill and longest chain, not the shadow's second build; with `LOSAT_X_QBATCHPAR` it includes the
+  slots' concurrent builds) and how many were filled on a pool. Tests: the unit tests of
+  `x_disc_lookup_par.rs` (partitioned and pool fills equal the original loop for every template type,
+  length and word size, one and two templates, 1-16 parts, pools of 1, 2, 3 and 8 threads; the parts run
+  on at least two workers of a 3-thread pool; the shadow) and `LOSAT/tests/blastn_disc_lookup_par.rs`
+  (off / on / shadow equal at 1 and 4 threads, `-subject` and `-db`, one and two templates, with
+  `LOSAT_X_PAIRPARDISC`, `LOSAT_X_QBATCHPAR` slots and split query chunks, megablast with and without a
+  template, the timing line).
 - `LOSAT_X_PAIRPARDISC=1` (not in the strict set: off unless set to any value, whatever
   `LOSAT_X_DEFAULT` and `LOSAT_X_PAIRPAR` say) blastn `-task dc-megablast`, one query-subject pair
   on a pool of 2+ threads: the two-hit seed stage of a subject chunk with a discontiguous megablast

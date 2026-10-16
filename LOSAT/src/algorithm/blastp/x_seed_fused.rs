@@ -16,7 +16,8 @@
 //! The buffer's capacity (`array_size`) only cuts the reference's scan into rounds; it changes
 //! neither the order nor the set of hits.
 //!
-//! Off unless `LOSAT_X_BPSEED` is set (any value). Not in the strict set.
+//! `LOSAT_X_BPSEED` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set.
 //!
 //! EXPERIMENT (LOSAT_X_BPDIAG): with the fused loop on, the hits of one subject offset (one lookup
 //! cell) are tested in batches of eight instead of one after the other: for every hit of a batch
@@ -58,11 +59,12 @@ use crate::algorithm::tblastx::lookup::{
 
 // No NCBI counterpart: reads the LOSAT_X_BPSEED switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPSEED): off unless set to any value.
+/// EXPERIMENT (LOSAT_X_BPSEED): a strict-set switch, on unless it is `0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set.
 pub(crate) fn x_bp_seed() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BPSEED").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPSEED"))
 }
 
 // No NCBI counterpart: how many hits ahead the fused loop reads the diagonal entries

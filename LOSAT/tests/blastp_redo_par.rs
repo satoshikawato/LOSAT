@@ -14,7 +14,9 @@
 //! the test has ended before them, at two and eight threads; and the shadow mode
 //! (`LOSAT_X_BPREDOPARSHADOW`), also with small windows, ended matches and released lists. The
 //! `[TIMING] x_bpredopar:` lines show that the path ran and what it did, not only that the report
-//! is equal.
+//! is equal. `LOSAT_X_BPQBLOCK` is in the strict set, on by default with blocks of 50,000 query
+//! letters (two blocks of the fixture's 77,448): the tests that count one search of all queries
+//! set `LOSAT_X_BPQBLOCK=0`.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3447-3449,3525-3529
 //! ```c
@@ -183,6 +185,8 @@ fn blastp(query: &Path, threads: u32, vars: &[(&str, &str)], args: &[&str]) -> R
 const SWITCH: (&str, &str) = ("LOSAT_X_BPREDOPAR", "1");
 /// Windows of one job per thread.
 const SMALL_WINDOWS: (&str, &str) = ("LOSAT_X_BPREDOPARWINDOW", "1");
+/// One search of all queries (the block search of `LOSAT_X_BPQBLOCK` off).
+const ONE_SEARCH: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
 
 /// The reports with the switch off and on at 1, 2 and 4 threads equal the one-thread report; the
 /// path runs (one line per search, at least two matches) at 2 and 4 threads only.
@@ -425,7 +429,12 @@ fn shadow_counts(stderr: &str) -> [u64; 5] {
 fn the_shadow_mode_compares_every_redone_match_and_hit_list() {
     let query = fixture("MeenMJNV.faa");
     let args = ["-evalue", "0.001", "-outfmt", "6"];
-    for vars in [vec![], vec![("LOSAT_X_BPQBLOCK", "1")]] {
+    // One search of all queries, the default blocks of 50,000 letters, and blocks of one batch.
+    for (vars, one_search) in [
+        (vec![ONE_SEARCH], true),
+        (vec![], false),
+        (vec![("LOSAT_X_BPQBLOCK", "1")], false),
+    ] {
         let reference = blastp(&query, 1, &vars, &args);
         let with_shadow: Vec<(&str, &str)> = vars
             .iter()
@@ -443,10 +452,10 @@ fn the_shadow_mode_compares_every_redone_match_and_hit_list() {
             "{vars:?}: {}",
             shadow.stderr
         );
-        if vars.is_empty() {
+        if one_search {
             assert_eq!(searches, 1, "one search of all queries");
         } else {
-            assert!(searches > 1, "one search per block");
+            assert!(searches > 1, "{vars:?}: one search per block");
         }
     }
 }
@@ -457,8 +466,9 @@ fn the_shadow_mode_compares_every_redone_match_and_hit_list() {
 #[test]
 fn the_shadow_mode_compares_with_ended_matches_released_lists_and_small_windows() {
     let query = fixture("MeenMJNV.faa");
-    let reference = blastp(&query, 1, &RELEASE, &SMALL_WINDOW_ARGS);
-    let vars: Vec<(&str, &str)> = RELEASE
+    let one_search: Vec<(&str, &str)> = RELEASE.iter().copied().chain([ONE_SEARCH]).collect();
+    let reference = blastp(&query, 1, &one_search, &SMALL_WINDOW_ARGS);
+    let vars: Vec<(&str, &str)> = one_search
         .iter()
         .copied()
         .chain([("LOSAT_X_BPREDOPARSHADOW", "1"), SMALL_WINDOWS])

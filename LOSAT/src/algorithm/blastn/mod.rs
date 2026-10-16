@@ -26,6 +26,9 @@ pub mod tracing;
 // from the scope. EXPERIMENT (LOSAT_X_BNSTORE): the subjects held packed, their letters made when
 // read.
 pub(crate) mod x_subject_store;
+// NCBI c++/src/algo/blast/api/dust_filter.cpp:92-102,171-180: the DUST masks of a query batch, one
+// fresh masker per query. EXPERIMENT (LOSAT_X_QDUSTPAR): made on the search pool, in query order.
+pub(crate) mod x_query_dust_par;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-166
 // ```c
 // typedef struct BlastHSP {
@@ -48,3 +51,6 @@ pub use blast_engine::run;
 // EXPERIMENT (LOSAT_X_BNSTORE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_subject_store::print_summary as x_subject_store_print_summary;
+// EXPERIMENT (LOSAT_X_QDUSTPARSHADOW): the summary line `main` prints at exit. No NCBI counterpart:
+// it prints counters and changes no value NCBI computes.
+pub use x_query_dust_par::print_summary as x_query_dust_par_print_summary;

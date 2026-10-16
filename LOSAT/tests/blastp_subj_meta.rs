@@ -269,8 +269,15 @@ fn the_switch_does_not_act_without_the_subject_block_search() {
         let counts = counts.expect("a line at exit");
         assert!(counts.values().all(|&count| count == 0), "{counts:?}");
     }
-    // The search of all queries (no block search).
-    let (_, counts) = same_runs(&dir, "blastp", &subject, 4, &[], "6");
+    // The search of all queries (no block search; the default searches this fixture in blocks).
+    let (_, counts) = same_runs(
+        &dir,
+        "blastp",
+        &subject,
+        4,
+        &[("LOSAT_X_BPQBLOCK", "0")],
+        "6",
+    );
     let counts = counts.expect("a line at exit");
     assert!(counts.values().all(|&count| count == 0), "{counts:?}");
     // A database made with `LOSAT makedb`; its block search reads the definition lines per block.

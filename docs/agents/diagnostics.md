@@ -1068,7 +1068,21 @@ Scheduling (each value computed by one thread with the original function; order 
   compared). With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] disc_lookup_build: <s>s
   (builds=<n> parallel=<n>)` when a table was built: the summed wall time of the builds (allocation,
   fill and longest chain, not the shadow's second build; with `LOSAT_X_QBATCHPAR` it includes the
-  slots' concurrent builds) and how many were filled on a pool. Tests: the unit tests of
+  slots' concurrent builds) and how many were filled on a pool. Measured on the workstation (2x Xeon
+  Gold 6338, powersave, 16 idle physical cores of one node with the siblings idle, `numactl --membind`;
+  `-outfmt 6`, subject 3 Mb of D. melanogaster 2L, `LOSAT_X_PAIRPARDISC=1`; off runs carry an unread
+  `LOSAT_X_PADDISCLUTPAR=1`; build times from `LOSAT_TIMING` runs, walls from runs without it),
+  medians of alternating off/on pairs: (a) 1,775 cDNAs (5.0 Mb; one big query batch and two small
+  ones), 16 threads: build 0.206 -> 0.089 s, wall 2.173 -> 2.050 s (on/off 0.943, 8 pairs); (b) 3,492
+  cDNAs (two big batches), 16 threads: build 0.378 -> 0.158 s, wall 4.640 -> 4.433 s (0.955, 6 pairs);
+  (a) at 4 threads: build 0.21 s either way, wall 2.184 -> 2.180 s (1.00, 6 pairs; in the machine's fast
+  phase the build took 0.140 s without and 0.204 s with the switch). A first version in which every
+  thread read every word and wrote `next_pos` itself built (a) in 0.127 s at 16 threads. Max RSS within
+  the pairs 91-96 MiB on / 91-93 off for (a) at 16 threads, 104-107 / 105-107 for (b). The three phases
+  of each chunk are three joins of the pool (63 for (a)); a local split put about 0.05, 0.08 and 0.03 s
+  in phases A, B and C at 4 and at 16 threads alike, so what remains is a cost per join (waking the
+  pool's threads, first-touch page faults), not the work, which falls with the thread count. Every
+  output equals the sha256 of the run without the switch. Tests: the unit tests of
   `x_disc_lookup_par.rs` (partitioned and pool fills equal the original loop for every template type,
   length and word size, one and two templates, 1-16 parts, chunks of 1 to 4,096 positions, pools of 1,
   2, 3 and 8 threads; the owners run on at least two workers of a 3-thread pool; the shadow) and `LOSAT/tests/blastn_disc_lookup_par.rs`

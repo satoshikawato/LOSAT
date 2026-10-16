@@ -539,7 +539,11 @@ Rebuilding less:
   redoes against the one-thread computation, every hit list against the one-thread loop's), and then the
   shadow line ends with ` lpt=1` after `diffs=` (the fields before it and their order do not change; in the
   repository only `tests/blastp_redo_par.rs` reads that line, by field name). Memory: one scratch per task
-  instead of one per rayon work unit.
+  instead of one per rayon work unit. Measured on the workstation (16 cores of one node, HT siblings idle;
+  that job with `LOSAT_X_BPSUBJRUN=1` and the redo and memory switches; 4 alternating pairs, the same outputs):
+  7.84 -> 7.56 s (x0.964) with `LOSAT_X_BPQBLOCK=50000` and 10.60 -> 10.17 s (x0.960) with 20,000; the
+  windows' time (`par_s`) 1.56 -> 1.28 s and 2.05 -> 1.63 s; max RSS 101.8-103.0 -> 99.9-102.6 MiB and
+  82.6-85.1 -> 80.5-81.9 MiB.
 - `LOSAT_X_BPREDOPARSHADOW=1` shadow of `LOSAT_X_BPREDOPAR` (implies it): the new path runs first into
   separate heaps without releasing the preliminary lists, and every match that its replay redoes is
   computed again on the calling thread with one set of scratch, as the one-thread loop holds it, and the

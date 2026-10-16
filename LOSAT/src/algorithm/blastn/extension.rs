@@ -892,9 +892,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
 // bases, so it runs into the previous context. The exact extension stops at the sentinel.
 #[cfg(test)]
 mod approx_context_tests {
-    use super::{
-        build_nucl_score_table, build_query_four_base_bytes, extend_hit_ungapped_approx_ncbi,
-    };
+    use super::{build_nucl_score_table, extend_hit_ungapped_approx_ncbi};
     use crate::algorithm::blastn::alignment::build_blastna_matrix;
 
     fn blastna(text: &str) -> Vec<u8> {
@@ -930,7 +928,6 @@ mod approx_context_tests {
         query.push(15);
         query.extend(blastna("GACCGGTTAATTTTGGGG"));
         let context_start = 17;
-        let four_base = build_query_four_base_bytes(&query);
         let subject = packed("GTACTTGACCGGTTAATTAA");
         let subject_len = 20;
         let score_table = build_nucl_score_table(2, -3);
@@ -939,7 +936,6 @@ mod approx_context_tests {
         let extend = |reduced_cutoff: i32| {
             extend_hit_ungapped_approx_ncbi(
                 &query,
-                &four_base,
                 &subject,
                 q_off,
                 s_off,
@@ -975,7 +971,6 @@ mod approx_context_tests {
         // the hit that NCBI saves.
         let clamped = extend_hit_ungapped_approx_ncbi(
             &query[context_start..],
-            &four_base[context_start..query.len() - 3],
             &subject,
             0,
             s_off,

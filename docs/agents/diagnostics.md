@@ -57,6 +57,21 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
   that takes the reference body (`LOSAT_X_HSPINPLACE=0`, `LOSAT_X_DEFAULT=0`,
   `LOSAT_DIAGNOSTICS`, `LOSAT_DEBUG_CUTOFFS`) is not timed there: `calls=0`;
   `tblastx/x_link_timing.rs`). The clock is not read without the variable.
+  BLASTX prints four kinds of lines at the end of a run (`blastx/x_timing.rs`):
+  `[TIMING] blastx_run: startup .. prolog .. read_stores .. loop .. epilog .. total .. (search .. render .. titles .. input ..)`
+  (wall times of the thread that runs the program; inside `loop`, the time it waits for searches, writes reports (of
+  which `titles` reads the reported sequences' titles with `-db`), and the rest, `input`);
+  `[TIMING] blastx_waves: waves=N batches=N wall .. busy .. threads=N idle .. tail=N tail_wall ..`
+  (with `LOSAT_X_BXBATCH`: the waves of query batches searched side by side, the searches' own times added over the
+  threads, `idle = wall x threads - busy`, and the batches searched one at a time with the whole pool: the end of the
+  input, or a long query);
+  `[TIMING] blastx_batch_side:` / `blastx_batch_alone: batches=N query_setup .. setup .. chunks_par .. lookup .. scan_par .. scan_inline .. replay .. chunk_end .. batch_end .. sum ..`
+  (the stages of a query batch in the order they run; `side` = batches searched on one thread beside others, times
+  added over the threads; `alone` = a batch searched by itself, with the pool if there is one, wall times; `replay`
+  hands the subjects to the sink in subject order and includes `scan_inline`) and
+  `[TIMING] blastx_batch_end_side:` / `blastx_batch_end_alone: init .. read .. kappa_spec .. kappa_serial .. loop .. finish .. (matches=N reused=N serial=N)`
+  (inside the end of a batch: the composition-based redo made ahead on the pool, the redo done in the in-order loop,
+  and the hit lists after it).
 - `LOSAT_DIAGNOSTICS=1` general diagnostics counters.
 - `LOSAT_STARTUP_TRACE=1` startup trace.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
@@ -1149,6 +1164,100 @@ Scheduling (each value computed by one thread with the original function; order 
   at least two workers of a 3-thread pool, and by none with the switch off, one thread or one query) and
   `LOSAT/tests/blastn_query_dust_par.rs` (off / on / shadow equal at 1 and 4 threads for the three tasks, with
   `-dust 10 32 2 -lcase_masking`, `-dust no`, `LOSAT_X_QBATCHPAR` slots of two threads, and split query chunks).
+- `LOSAT_X_DIAGLV=1` (not in the strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT` says)
+  blastn, every task, `-subject` and `-db`, with the diagonal hash (query block over 8000 letters): the
+  table keeps per bucket an upper bound of the levels of its cells (the largest level an insert wrote since
+  the table was made or cleared; 512 values), and a seed's retrieve of its own diagonal returns "no cell"
+  without walking the bucket's chain when that bound lies below the seed's level bound: `s_off_pos + 1`
+  and, with two hits, at most `s_end_pos - window_size` = `s_off_pos + word_length - window_size` (19 to
+  24 below `s_off_pos` for dc-megablast's window 40 and templates 21 to 16), a constant per chunk added
+  to `s_off_pos`. A cell below it makes the decisions of no cell (the `last_hit` test; the two-hit window
+  test), which are the only readers of the retrieve; the insert still walks the chain itself, and the next
+  seed reads only the table, so the bound needs no term for the insert, and the hit list and the table
+  are the reference's (`blastn/blast_engine/x_diag_lv.rs`, exactness argument in its header). It acts in
+  the reference fold (`process_offset_pairs`, not with debug, trace or window diagnostics, which print the
+  values read) and in the strips folds of `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARDISC`; the off-diagonal
+  retrieves (`scan_range`) stay walks. With the switch off the table has no bounds, an insert tests the
+  length of an empty vector, and the retrieves walk as before (callgrind, release: +0.005 to +0.10 %
+  instructions against the base).
+  Shadow: `LOSAT_X_DIAGLVSHADOW=1` (implies the switch) walks every skipped bucket and panics unless each
+  of its cells lies below the bound and at or below the bucket's bound (the bound invariant), and unless
+  the cell the retrieve's walk returns gives the seed's decisions (the `last_hit` test, then with two hits
+  the window test) of no cell (the bound's sufficiency); one `[X_SHADOW] DIAGLV retrieves= skipped=
+  verified= decisions= cells= identical` line on stderr at the end of the search (`cells`: skipped
+  retrieves whose walk found the diagonal's cell). `LOSAT_X_PAIRPARSHADOW` and `LOSAT_X_PAIRPARDISCSHADOW`
+  compare the bounds of the two tables too.
+  Measured on the workstation (alternating pairs, node 1 CPUs 32-47, `LOSAT_X_PAIRPARDISC=1` in the dc-megablast
+  runs; 1,775 or 3,492 D. melanogaster cDNAs against 3 Mb of chromosome 2L): dc-megablast one batch 2.237 ->
+  1.806 s at 1 thread (0.808, 4 pairs) and 2.089 -> 1.304 s at 16 (0.624, 4 pairs), two batches 4.442 -> 2.663
+  s at 16 (0.600, 2 pairs); blastn with the first query set 4.123 -> 4.136 s at 1 thread (1.003, 4 pairs;
+  instructions +0.1 %: it walks about two cells per seed, so the skips save about what the bound per seed and
+  its upkeep per insert cost) and 0.997 at 16 (2 pairs); peak memory unchanged. The shadow skipped 70 % of the
+  retrieves on the dc-megablast inputs (62 % with the prototype's bound, which also had the insert's stale
+  limit) and 69 % on blastn.
+  Tests: the unit tests of `x_diag_lv.rs`, the strips tests of `x_pair_seed.rs` and `x_pair_seed_disc.rs`
+  (with the bounds at 1, 2, 3 and 7 threads), and `LOSAT/tests/blastn_diag_lv.rs`.
+- `LOSAT_X_PAIRPARFOLD=1` (not in the strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT`
+  says) blastn, where the strips paths of `LOSAT_X_PAIRPAR` (one-hit fold: megablast, blastn) and
+  `LOSAT_X_PAIRPARDISC` (two-hit fold: dc-megablast) run, on a pool of 2+ threads: the diagonal-hash fold
+  of the chunk is split by bucket (`bucket % P`, one partition per thread) over the owner and `threads - 1`
+  jobs of an `in_place_scope` (`blastn/blast_engine/x_pair_seed_part.rs`). Each participant scans the
+  next strip when it lies within `2 x threads` strips of the slowest partition, cuts its seeds by
+  partition (a stable counting sort) and folds partition p of the next strip of any partition it can
+  lock, into p's own table, with the folds of the strips paths (`fold`, `fold_two_hit`, a const
+  parameter and a sink of (strip, position) keys for every pushed hit and every insert that appends a
+  cell). The merge puts the hits in key order and gives every appended cell the number `occ0 + rank` of
+  its key (links and heads mapped; the capacity of the reference's doublings; the bounds of
+  `LOSAT_X_DIAGLV` per bucket), and writes the changed buckets into the chunk's table. Exact because a
+  seed's fold reads and writes only its own diagonal's bucket chain (retrieve, the `last_hit` and window
+  tests, insert), `s_TypeOfWord` and the ungapped extension read only inputs, and with `scan_range == 0`
+  there is no off-diagonal read; the argument is written out in the module's header. Every stage copies
+  the chunk's table into every partition table; only their allocations stay in the subject scratch (until
+  the query batch ends). A helper job returns at once on a participant's thread; a helper on any other
+  thread leaves once the stage has stalled (no strip scanned, no partition folded) for 10 ms. Only that
+  exit ends the wait of a helper that a thread runs while it waits inside a piece of a participant's
+  nested parallel call that it stole (the pattern of #218). A stage also stalls for 10 ms when the OS
+  deschedules the owner on a loaded machine or when one long fold unit holds back the window of strips;
+  the idle helpers then leave for good and the stage ends on fewer threads (the same output, more time;
+  `helpers_left=` counts them). No `thread::sleep` on wasm32. With LOSAT_TIMING the partitions'
+  ungapped-extension times are added to the shared counters once per stage; with the switch the
+  `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end with `partitions= merges= merge=
+  helpers_left=` (without it they are as before), their `fold=` is the CPU time summed over the
+  participants (not wall time), and `[TIMING] scan_lookup` takes off only the owner's extension time, so
+  it stays a figure of the owner's wall time. Shadow: `LOSAT_X_PAIRPARSHADOW=1` /
+  `LOSAT_X_PAIRPARDISCSHADOW=1` with the switch run the partitioned stage on the copies; with the switch
+  their lines end with `fold=part partitions= merges=` (without the switch the lines are as before).
+  RSS grows with the thread count: every partition table is a full copy of the chunk's table (P =
+  threads, at most 512; about P x the table's capacity x 20 bytes), and up to `2 x threads` strips of
+  seeds are in flight. On the inputs below the tables are small (thousands of cells per chunk), so the
+  growth stayed below the spread of single runs, and max RSS with the switch did not rise from 16 to 64
+  threads (one run each on the workstation's node 1, 64 threads on 60 CPUs): dc-megablast one batch 104 /
+  98 / 96 MiB at 16 / 32 / 64 threads (off 93 / 90 / 89), two batches 119 / 121 / 111 (off 108 / 99 / 99),
+  blastn 127 / 127 / 120 (off 142 / 158 / 133). With LOSAT_TIMING at 16 threads no helper left a stage
+  of these inputs (`helpers_left=0`).
+  Measured on the workstation (alternating pairs, node 0 CPUs 16-31, `LOSAT_X_PAIRPARDISC=1` and
+  `LOSAT_X_DIAGLV=1` in every run, off runs with an unread placebo; 1,775 or 3,492 D. melanogaster cDNAs
+  against 3 Mb of chromosome 2L): dc-megablast one batch 1.374 -> 0.797 s at 16 threads (0.580, 8 pairs,
+  rounds 0.567-0.616), 0.687 at 8 (2 pairs), 0.835 at 4 (6 pairs); two batches 2.649 -> 1.527 s at 16
+  (0.577, 4 pairs), with `LOSAT_X_QBATCHPAR=1` 1.620 -> 0.959 s; blastn with the first query set 2.832 ->
+  1.435 s at 16 (0.507, 4 pairs). Instructions +12 % (dc-megablast) and +4 % (blastn): the keys, the
+  counting sort, the merge and the spinning of idle participants. Max RSS dc-megablast 90-92 -> 104-108 MiB
+  (one batch) and 105-107 -> 119-123 MiB (two batches; the partition tables and up to `2 x threads`
+  strips of seeds), blastn 137-151 -> 121-129 MiB. Against the prototype (`LOSAT_X_DCFOLDPART`,
+  tmp/dcfold-instr d537d145) in the same windows: dc-megablast 0.99-1.01 of its time, blastn 1.14-1.29 (two
+  windows, 4 rounds; instructions +0.8 %). Those numbers are of a build that still kept the partition tables
+  from one stage to the next (no stage on the command line used them); the build that copies the table at
+  every stage, against it with the switch on at 16 threads (4 alternating pairs each, node 1 CPUs 32-47, one
+  speed level): dc-megablast one batch 0.720 -> 0.720 s (1.001), two batches 1.373 -> 1.370 s (0.997),
+  blastn 1.357 -> 1.373 s (1.011, rounds 0.966-1.022; instructions equal), max RSS 3-6 MiB less for
+  dc-megablast.
+  Tests: the unit tests of `x_pair_seed_part.rs` (random op streams at 2, 3, 7 and 16 partitions on 1..8
+  threads with and without bounds, growth past 256 cells, a stage after an offset move, the clear, a
+  reference chunk in between, in every other case with the owner sleeping in its folds until a helper
+  has folded so that helpers fold on any machine; a table changed between two stages; a nested parallel
+  call in every participant; a panicking participant), the strips tests of `x_pair_seed.rs` and
+  `x_pair_seed_disc.rs` (partitioned, two chunks in a row), and `LOSAT/tests/blastn_pairpar_fold.rs` (also
+  the field names of the `[TIMING]` lines with and without the switch).
 - `LOSAT_X_QBATCHPAR=1` (BLASTN, all tasks, `-subject` with two or more threads; not in the strict set:
   off unless set to any value, whatever `LOSAT_X_DEFAULT` says) NCBI's query batches are searched side by
   side ahead of the batch loop of `run_in_pool` (`blastn/blast_engine/x_qbatch_par.rs`). The size of each

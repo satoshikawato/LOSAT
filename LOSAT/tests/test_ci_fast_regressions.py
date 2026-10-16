@@ -94,6 +94,9 @@ class DbSearchFixtureTests(unittest.TestCase):
     def test_manifest_rows_match_frozen_files(self):
         rows = db_fixtures.read_manifest()[1]
         self.assertEqual({r["program"] for r in rows}, set(db_fixtures.PROGRAMS))
+        # ci_fast runs the -db rows of every program the manifest has, at 1 and 4 threads.
+        self.assertEqual(set(fast.DB_SEARCH_PROGRAMS), set(db_fixtures.PROGRAMS))
+        self.assertTrue(set(fast.DB_SEARCH_PROGRAMS) <= set(fast.PROGRAMS))
         self.assertEqual(len({r["row_id"] for r in rows}), len(rows))
         for r in rows:
             if r["kind"] != "ncbi":

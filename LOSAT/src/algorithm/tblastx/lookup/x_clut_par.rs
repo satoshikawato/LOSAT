@@ -65,14 +65,53 @@
 //!   builder's bound; the reference then decides the table or the refusal.
 //! The cuts (chunks, stripes) depend on the thread count; by the above the table does not.
 //!
+//! With `LOSAT_X_BPLKPFLAT` the same passes are scheduled otherwise and the table's vectors may come
+//! from an earlier table (`XParallelCuts::passes`, `XParallelCuts::spare`); the table is the same:
+//! - one-latch passes (`x_one_latch_pass`): the appends pass and the stripes pass each run in one
+//!   `rayon::scope` with one spawned task per thread, instead of `par_iter`'s tree of joins; a task
+//!   takes the index of the next item (a chunk, a stripe) from one counter and stores the item's
+//!   result at that index. Each chunk's appends and each stripe's part are made by the same
+//!   functions from the same inputs (the chunks, the stripes and the shift are chosen before the
+//!   pass), the stripes write disjoint slices, and the results are read by index. The only state the
+//!   chunks share, `appended` and `too_large`, gives `TooLarge` exactly when the appends of all
+//!   chunks pass the bound, in any order (`x_chunk_appends`).
+//! - recycled vectors (`XFlatSpare`, the previous table of a block search): `starts` and `hits` are
+//!   that table's, cut or grown to their lengths (new entries 0), not zeroed. No entry of either is
+//!   read before the stripes write it: each stripe's layout writes every entry of its slice of
+//!   `starts`, the slices partition the cells, and `starts[backbone_size]` is set before the pass;
+//!   the stripes' slices of `hits` partition it (their lengths are the stripes' hits, which sum to
+//!   its length), each stripe's fill writes each slot of its slice once (a cell's cursor runs from
+//!   its first slot over its count, the next cell's first slot), and the move to the scan order reads
+//!   only slots the fill wrote. `pv` is zeroed as before (the stripes OR their bits into it). The
+//!   build takes and sizes the vectors itself, before the stripes pass, never in a pass's tasks; a
+//!   build that ends `TooLarge` drops the spare's vectors (the reference builder makes that table,
+//!   and they are not kept beside it). In the shadow mode the vectors are filled with `u32::MAX` /
+//!   `i32::MIN` first, so that an entry no stripe writes always differs from the fresh build's.
+//! - extra tasks (`XExtraTasks`: the contexts' Karlin blocks of a blastp block,
+//!   `blastp/x_query_blocks.rs`): the one-latch appends pass runs them after its chunks (the indices
+//!   past the chunks), each once, also when the build then ends `TooLarge` or refused. They read
+//!   nothing the build writes and the build reads nothing they write.
+//! - builds ahead (LOSAT_X_BPLKPAHEAD, `XFlatArgs::x_ahead`: the next query block's table, built by a
+//!   pool task during the block before it, `blastp/blast_engine/x_lookup_ahead.rs`): the same build,
+//!   whose `starts`, `hits` and `pv` all come from the spare that the block search's thread made ready
+//!   (`XFlatSpare::x_make_room`), so that no vector of the table is allocated by a pool thread (a
+//!   pool thread's allocations stay in its own glibc arena). `starts` and `hits` are sized and written
+//!   as above (the room is there, so `x_reuse` takes the buffers); `pv` is cleared and filled with
+//!   zeros, the values of a fresh zeroed vector. Where one of the three lacks the room the build stops
+//!   after the appends pass and makes no table (`None`, the spare keeps the vectors); the block then
+//!   builds its table itself.
+//!
 //! Off unless `LOSAT_X_BPCLUT` is set and the search's pool has more than one thread; at one thread
 //! the serial builder runs. `LOSAT_X_BPCLUTSHADOW` builds this table too (with more than one thread)
-//! and compares it with the serial one.
+//! and compares it with the serial one. `LOSAT_X_BPLKPFLATSHADOW` builds the table of
+//! `LOSAT_X_BPLKPFLAT` (one-latch passes, recycled vectors, extra tasks) and then again with the
+//! `par_iter` passes on fresh vectors, and compares the outcomes and the tables slot for slot.
 
 use super::*;
 use crate::utils::threading::SearchPool;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 // No NCBI counterpart: how the build is divided among the pool's threads. Scheduling only.
 /// Chunks per thread, and the fewest stripes per thread.
@@ -115,7 +154,9 @@ struct XChunkAppends {
 // (c++/src/algo/blast/api/prelim_stage.cpp:145-188 starts them for the search); here the pool that
 // will search builds it, the same table (module header).
 /// EXPERIMENT (LOSAT_X_BPCLUT): `x_try_build_flat_compressed_lookup` on `pool`'s threads; `pool` has
-/// more than one thread.
+/// more than one thread. With LOSAT_X_BPLKPFLAT (`x_flat_args.mode`) the one-latch passes on the
+/// spare's vectors, with the extra tasks (module header); its shadow then builds the table again
+/// with the `par_iter` passes on fresh vectors and compares the outcomes and the tables.
 pub(super) fn x_try_build_flat_in_pool(
     word_size: usize,
     scaled_threshold: i32,
@@ -123,24 +164,187 @@ pub(super) fn x_try_build_flat_in_pool(
     locations: &[(i32, i32)],
     tables: &[std::ops::Range<usize>],
     pool: &SearchPool<'_>,
+    x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
-    pool.install(|| {
-        x_try_build_flat_parallel_with(
-            word_size,
-            scaled_threshold,
-            query,
-            locations,
-            tables,
-            XParallelCuts {
-                overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
-                max_appends: None,
-                threads,
-                chunk_sizes: &[],
-                stripe_shift: None,
-            },
-        )
-    })
+    let build = |passes, spare, poison, x_ahead| {
+        pool.install(|| {
+            x_try_build_flat_parallel_with(
+                word_size,
+                scaled_threshold,
+                query,
+                locations,
+                tables,
+                XParallelCuts {
+                    overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                    max_appends: None,
+                    threads,
+                    chunk_sizes: &[],
+                    stripe_shift: None,
+                    passes,
+                    spare,
+                    poison,
+                    x_ahead,
+                },
+            )
+        })
+    };
+    if x_flat_args.mode == XLkpFlat::Off {
+        // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes only the switch's passes.
+        if x_flat_args.x_ahead {
+            return None;
+        }
+        return build(XPasses::Rayon, None, false, false);
+    }
+    let shadow = x_flat_args.mode == XLkpFlat::Shadow;
+    let built = build(
+        XPasses::OneLatch(x_flat_args.extra),
+        x_flat_args.spare,
+        shadow,
+        x_flat_args.x_ahead,
+    );
+    // LOSAT_X_BPLKPAHEAD: a build ahead of its block that makes no table is dropped, and its block
+    // builds the table itself, whose outcome the shadow then compares (`XFlatArgs::x_ahead`).
+    let x_dropped = x_flat_args.x_ahead && !matches!(built, Some(XFlatBuild::Table(_)));
+    if shadow && !x_dropped {
+        x_lkpflat_shadow(
+            built.as_ref(),
+            build(XPasses::Rayon, None, false, false).as_ref(),
+        );
+    }
+    built
+}
+
+// No NCBI counterpart: the check of LOSAT_X_BPLKPFLATSHADOW; it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLKPFLATSHADOW): panics unless `built` (the one-latch build) and `reference`
+/// (the `par_iter` build on fresh vectors) have the same outcome and, for a table, the same table.
+fn x_lkpflat_shadow(built: Option<&XFlatBuild>, reference: Option<&XFlatBuild>) {
+    let outcome = |build: Option<&XFlatBuild>| match build {
+        None => "none",
+        Some(XFlatBuild::Table(_)) => "table",
+        Some(XFlatBuild::Refused) => "refused",
+        Some(XFlatBuild::TooLarge) => "too large",
+    };
+    match (built, reference) {
+        (Some(XFlatBuild::Table(built)), Some(XFlatBuild::Table(reference))) => {
+            x_assert_same_flat_tables_as("LOSAT_X_BPLKPFLATSHADOW:", built, reference);
+            X_LKPFLAT_TABLES.fetch_add(1, Ordering::Relaxed);
+        }
+        (None, None)
+        | (Some(XFlatBuild::Refused), Some(XFlatBuild::Refused))
+        | (Some(XFlatBuild::TooLarge), Some(XFlatBuild::TooLarge)) => {
+            X_LKPFLAT_OUTCOMES.fetch_add(1, Ordering::Relaxed);
+        }
+        _ => panic!(
+            "LOSAT_X_BPLKPFLATSHADOW: outcome differs ({} vs {})",
+            outcome(built),
+            outcome(reference)
+        ),
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BPLKPFLAT): how the build's two passes reach the pool's threads.
+#[derive(Clone, Copy)]
+enum XPasses<'a> {
+    /// `par_iter` (rayon's tree of joins per pass).
+    Rayon,
+    /// One-latch passes (`x_one_latch_pass`), the extra tasks (if any) in the appends pass after the
+    /// chunks.
+    OneLatch(Option<&'a dyn XExtraTasks>),
+}
+
+impl XFlatSpare {
+    // No NCBI counterpart: buffer reuse only (`XFlatSpare`).
+    /// The vectors kept (empty ones when none are); the spare then keeps none.
+    fn take(&self) -> (Vec<u32>, Vec<i32>) {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    // No NCBI counterpart: which thread allocates the table's vectors (LOSAT_X_BPLKPAHEAD); it
+    // changes no value NCBI computes.
+    /// LOSAT_X_BPLKPAHEAD: whether the vectors kept have the room for `starts`, `hits` and `pv`
+    /// entries (`XFlatSpare::x_make_room`); if so, the PV array's vector is taken from the spare (the
+    /// others are taken with `take`).
+    fn x_room_for(&self, starts: usize, hits: usize, pv: usize) -> Option<Vec<u32>> {
+        let kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut kept_pv = self.1.lock().unwrap_or_else(PoisonError::into_inner);
+        (kept.0.capacity() >= starts && kept.1.capacity() >= hits && kept_pv.capacity() >= pv)
+            .then(|| std::mem::take(&mut *kept_pv))
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1224-1226 (`finalize`)
+// ```c
+//     pv = lookup->pv = (PV_ARRAY_TYPE *)calloc(
+//                               (lookup->backbone_size >> pv_array_bts) + 1,
+//                               sizeof(PV_ARRAY_TYPE));
+// ```
+// Buffer reuse (LOSAT_X_BPLKPAHEAD): the PV array is zeroed as `calloc` zeroes NCBI's.
+/// `len` zeroed entries in `pv`'s buffer, which has the room (`XFlatSpare::x_room_for`).
+fn x_zeroed_in(mut pv: Vec<u32>, len: usize) -> Vec<u32> {
+    debug_assert!(pv.capacity() >= len);
+    pv.clear();
+    pv.resize(len, 0);
+    pv
+}
+
+// No NCBI counterpart: buffer reuse (LOSAT_X_BPLKPFLAT; module header: no entry is read before the
+// stripes write it). It changes no value NCBI computes.
+/// `len` entries in `spare`'s buffer when it has room for them (its values kept, new entries 0),
+/// else in a fresh zeroed vector; and whether `spare`'s buffer was used.
+fn x_reuse<T: Copy + Default>(spare: Vec<T>, len: usize) -> (Vec<T>, bool) {
+    if spare.capacity() == 0 || spare.capacity() < len {
+        drop(spare);
+        return (vec![T::default(); len], false);
+    }
+    let mut reused = spare;
+    reused.resize(len, T::default());
+    (reused, true)
+}
+
+// No NCBI counterpart: how a pass's items reach the pool's threads (LOSAT_X_BPLKPFLAT). Scheduling
+// only: each item is made once, by the same call, and its result is stored at its index.
+/// The results of `item(scratch, i)` for i in 0..items, in order, made by `threads` tasks (at most
+/// one per item or extra task) spawned in one `rayon::scope` of the current pool: each task keeps one
+/// `scratch` (`init`) and takes the next index from one counter until none is left; the indices past
+/// the items run `extra(i - items)`, `extras` of them.
+fn x_one_latch_pass<S, R: Send + Sync>(
+    threads: usize,
+    items: usize,
+    extras: usize,
+    init: impl Fn() -> S + Sync,
+    item: impl Fn(&mut S, usize) -> R + Sync,
+    extra: impl Fn(usize) + Sync,
+) -> Vec<R> {
+    let total = items + extras;
+    let results: Vec<OnceLock<R>> = (0..items).map(|_| OnceLock::new()).collect();
+    if total > 0 {
+        let next = AtomicUsize::new(0);
+        let (results, next, init, item, extra) = (&results, &next, &init, &item, &extra);
+        rayon::scope(|scope| {
+            for _ in 0..threads.clamp(1, total) {
+                scope.spawn(move |_| {
+                    let mut scratch = init();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        if index >= total {
+                            break;
+                        }
+                        if index < items {
+                            let stored = results[index].set(item(&mut scratch, index)).is_ok();
+                            assert!(stored, "item {index} taken twice");
+                        } else {
+                            extra(index - items);
+                        }
+                    }
+                });
+            }
+        });
+    }
+    results
+        .into_iter()
+        .map(|result| result.into_inner().expect("every item taken"))
+        .collect()
 }
 
 /// The parameters of `x_try_build_flat_parallel_with` that the module header's argument leaves free
@@ -156,6 +360,17 @@ struct XParallelCuts<'a> {
     /// The stripes' width 2^shift; `None`: the widest that makes `X_PARTS_PER_THREAD` stripes per
     /// thread, or fewer so that the chunks' parts are at most `X_MAX_PARTS`.
     stripe_shift: Option<usize>,
+    /// LOSAT_X_BPLKPFLAT: how the passes are scheduled, and the extra tasks.
+    passes: XPasses<'a>,
+    /// LOSAT_X_BPLKPFLAT: the vectors of an earlier table for `starts` and `hits` (else fresh ones).
+    spare: Option<&'a XFlatSpare>,
+    /// LOSAT_X_BPLKPFLATSHADOW: `starts` and `hits` filled with `u32::MAX` / `i32::MIN` before the
+    /// stripes write them.
+    poison: bool,
+    /// LOSAT_X_BPLKPAHEAD: `starts`, `hits` and `pv` all come from `spare`, and without their room
+    /// the build makes no table (`None`); nothing of the table is allocated here
+    /// (`XFlatArgs::x_ahead`).
+    x_ahead: bool,
 }
 
 // No NCBI counterpart: the largest PV shift that `finalize` (blast_aalookup.c:1219-1222, below)
@@ -487,7 +702,10 @@ fn x_try_build_flat_parallel_with(
     let backbone_size = header.backbone_size;
     let largest_pv_shift = x_largest_pv_shift(backbone_size);
     if largest_pv_shift > X_MAX_STRIPE_SHIFT {
-        // A backbone past 2^21 * 2^11 cells: the serial builder.
+        // A backbone past 2^21 * 2^11 cells: the serial builder. It ignores `cuts.x_ahead` (the
+        // spare's vectors): a build ahead would allocate its table here, on the pool thread. This
+        // is unreachable for blastp-fast's compressed backbones (759,375 cells for word size 5,
+        // far below 2^32), and the table would have the same values.
         return x_try_build_flat_with_capacity(
             word_size,
             scaled_threshold,
@@ -536,27 +754,48 @@ fn x_try_build_flat_parallel_with(
     // The chunks' appends, sorted by stripe.
     let appended = AtomicUsize::new(0);
     let too_large = AtomicBool::new(false);
-    let appends: Vec<XChunkAppends> = chunks
-        .par_iter()
-        .map_init(
-            || (Vec::<u32>::new(), Vec::<(i32, u32)>::new()),
-            |(targets, per_offset), chunk| {
-                x_chunk_appends(
-                    &words,
-                    query,
-                    chunk,
-                    shift,
-                    stripes,
-                    max_appends,
-                    &appended,
-                    &too_large,
-                    targets,
-                    per_offset,
-                )
-            },
+    let chunk_appends = |(targets, per_offset): &mut (Vec<u32>, Vec<(i32, u32)>), chunk| {
+        x_chunk_appends(
+            &words,
+            query,
+            chunk,
+            shift,
+            stripes,
+            max_appends,
+            &appended,
+            &too_large,
+            targets,
+            per_offset,
         )
-        .collect();
+    };
+    let appends: Vec<XChunkAppends> = match cuts.passes {
+        XPasses::Rayon => chunks
+            .par_iter()
+            .map_init(
+                || (Vec::<u32>::new(), Vec::<(i32, u32)>::new()),
+                chunk_appends,
+            )
+            .collect(),
+        // LOSAT_X_BPLKPFLAT: the extra tasks after the chunks (module header).
+        XPasses::OneLatch(extra) => x_one_latch_pass(
+            threads,
+            chunks.len(),
+            extra.map_or(0, |extra| extra.count()),
+            || (Vec::<u32>::new(), Vec::<(i32, u32)>::new()),
+            |scratch, index| chunk_appends(scratch, &chunks[index]),
+            |index| {
+                if let Some(extra) = extra {
+                    extra.run(index);
+                }
+            },
+        ),
+    };
     if too_large.load(Ordering::Relaxed) {
+        // LOSAT_X_BPLKPFLAT: the reference builder makes this table; the spare's vectors are not
+        // kept beside it (module header).
+        if let Some(spare) = cuts.spare {
+            drop(spare.take());
+        }
         return Some(XFlatBuild::TooLarge);
     }
 
@@ -574,14 +813,40 @@ fn x_try_build_flat_parallel_with(
     // The PV shift is `PV_ARRAY_BTS` whatever the counts when `x_largest_pv_shift` is (`finalize`,
     // below): the stripes set their PV words; else the PV array is made from the starts below.
     let pv_in_stripes = largest_pv_shift == PV_ARRAY_BTS;
+    // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes every vector of its table from the spare
+    // (its PV array's here) and allocates none; without their room it makes no table and leaves them
+    // in the spare (module header). The PV array has at most `(backbone_size >> PV_ARRAY_BTS) + 1`
+    // words at any PV shift.
+    let mut x_ahead_pv = None;
+    if cuts.x_ahead {
+        let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
+        x_ahead_pv = cuts
+            .spare
+            .and_then(|spare| spare.x_room_for(backbone_size + 1, total, pv_words));
+        if x_ahead_pv.is_none() {
+            return None;
+        }
+    }
     let mut pv = if pv_in_stripes {
-        vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1]
+        match x_ahead_pv.take() {
+            Some(buffer) => x_zeroed_in(buffer, (backbone_size >> PV_ARRAY_BTS) + 1),
+            None => vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1],
+        }
     } else {
         Vec::new()
     };
-    let mut starts = vec![0u32; backbone_size + 1];
+    // LOSAT_X_BPLKPFLAT: an earlier table's vectors when the spare holds them (module header).
+    let (spare_starts, spare_hits) = cuts.spare.map(XFlatSpare::take).unwrap_or_default();
+    let (mut starts, starts_reused) = x_reuse(spare_starts, backbone_size + 1);
+    let (mut hits, hits_reused) = x_reuse(spare_hits, total);
+    X_LKPFLAT_RECYCLED.fetch_add(u64::from(starts_reused), Ordering::Relaxed);
+    X_LKPFLAT_RECYCLED_HITS.fetch_add(u64::from(hits_reused), Ordering::Relaxed);
+    if cuts.poison {
+        // LOSAT_X_BPLKPFLATSHADOW: an entry that no stripe writes keeps a value no build makes.
+        starts.fill(u32::MAX);
+        hits.fill(i32::MIN);
+    }
     starts[backbone_size] = total as u32;
-    let mut hits = vec![0i32; total];
 
     // The stripes: count, layout and fill.
     let mut parts = Vec::with_capacity(stripes);
@@ -615,10 +880,34 @@ fn x_try_build_flat_parallel_with(
         });
         base += stripe_total as u32;
     }
-    let stripe_counts: Vec<XStripeCounts> = parts
-        .into_par_iter()
-        .map(|part| x_stripe_build(part, shift, backbone_size, ranges.len(), &chunks, &appends))
-        .collect();
+    let stripe_counts: Vec<XStripeCounts> = match cuts.passes {
+        XPasses::Rayon => parts
+            .into_par_iter()
+            .map(|part| x_stripe_build(part, shift, backbone_size, ranges.len(), &chunks, &appends))
+            .collect(),
+        XPasses::OneLatch(_) => {
+            // Each stripe's part, taken by the task that takes its index.
+            let parts: Vec<Mutex<Option<XStripe<'_>>>> = parts
+                .into_iter()
+                .map(|part| Mutex::new(Some(part)))
+                .collect();
+            x_one_latch_pass(
+                threads,
+                parts.len(),
+                0,
+                || (),
+                |_, stripe| {
+                    let part = parts[stripe]
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .take()
+                        .expect("each stripe taken once");
+                    x_stripe_build(part, shift, backbone_size, ranges.len(), &chunks, &appends)
+                },
+                |_| {},
+            )
+        }
+    };
     drop(appends);
 
     // NCBI's tables (`x_try_build_flat_with_capacity`'s test, at each table's end).
@@ -680,7 +969,11 @@ fn x_try_build_flat_parallel_with(
         pv_array_bts += ilog2(backbone_size / (8 * X_TARGET_PV_BYTES));
     }
     if !pv_in_stripes {
-        pv = vec![0u32; (backbone_size >> pv_array_bts) + 1];
+        // LOSAT_X_BPLKPAHEAD: in the spare's buffer for a build ahead of its block (above).
+        pv = match x_ahead_pv.take() {
+            Some(buffer) => x_zeroed_in(buffer, (backbone_size >> pv_array_bts) + 1),
+            None => vec![0u32; (backbone_size >> pv_array_bts) + 1],
+        };
         for (index, bounds) in starts.windows(2).enumerate() {
             if bounds[1] > bounds[0] {
                 compressed_pv_set(&mut pv, index, pv_array_bts);
@@ -726,6 +1019,8 @@ mod tests {
         max_appends: Option<usize>,
         chunk_sizes: &[usize],
         stripe_shift: Option<usize>,
+        passes: XPasses<'_>,
+        spare: Option<(&XFlatSpare, bool)>,
     ) -> XFlatBuild {
         in_pool(threads, || {
             x_try_build_flat_parallel_with(
@@ -740,10 +1035,63 @@ mod tests {
                     threads,
                     chunk_sizes,
                     stripe_shift,
+                    passes,
+                    spare: spare.map(|(spare, _)| spare),
+                    poison: spare.is_some_and(|(_, poison)| poison),
+                    x_ahead: false,
                 },
             )
         })
         .expect("word size 5")
+    }
+
+    // The two pass implementations (LOSAT_X_BPLKPFLAT): `par_iter` and one-latch passes.
+    const PASSES: [XPasses<'static>; 2] = [XPasses::Rayon, XPasses::OneLatch(None)];
+
+    /// Extra tasks that count how often each one ran.
+    struct Counted(Vec<AtomicUsize>);
+
+    impl Counted {
+        fn new(count: usize) -> Self {
+            Self((0..count).map(|_| AtomicUsize::new(0)).collect())
+        }
+
+        fn assert_each_ran(&self, times: usize, what: &str) {
+            for (index, runs) in self.0.iter().enumerate() {
+                assert_eq!(
+                    runs.load(Ordering::Relaxed),
+                    times,
+                    "{what}: extra task {index}"
+                );
+            }
+        }
+    }
+
+    impl XExtraTasks for Counted {
+        fn count(&self) -> usize {
+            self.0.len()
+        }
+
+        fn run(&self, index: usize) {
+            self.0[index].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// A spare of garbage: `starts` with room for a word-size-5 table (759,376 cells and one), `hits`
+    /// of random length.
+    fn garbage_spare(rng: &mut XorShift) -> XFlatSpare {
+        let spare = XFlatSpare::default();
+        *spare.0.lock().unwrap() = (
+            vec![u32::MAX - 1; 759_377 + rng.below(9)],
+            vec![i32::MIN + 1; rng.below(4000)],
+        );
+        spare
+    }
+
+    /// The capacities of the spare's vectors.
+    fn spare_capacities(spare: &XFlatSpare) -> (usize, usize) {
+        let kept = spare.0.lock().unwrap();
+        (kept.0.capacity(), kept.1.capacity())
     }
 
     // The cuts of the tests: thread counts, chunk sizes (even and uneven), stripe widths (the
@@ -795,22 +1143,27 @@ mod tests {
                     .expect("not refused");
             x_assert_same_compressed_table(&serial, &reference);
             overflow_seen |= serial.longest_chain > 5;
-            // Every thread count with every chunk size; the stripe widths in turn.
+            // Every thread count with every chunk size and both pass implementations; the stripe
+            // widths in turn.
             for (i, threads) in THREADS.into_iter().enumerate() {
                 for (j, chunk_sizes) in CHUNK_SIZES.into_iter().enumerate() {
                     let stripe_shift = SHIFTS[(i + j + round) % SHIFTS.len()];
-                    let built = flat(Some(parallel(
-                        threads,
-                        threshold,
-                        &query,
-                        &locations,
-                        &tables,
-                        NCBI_OVERFLOW_CELL_CAPACITY,
-                        None,
-                        chunk_sizes,
-                        stripe_shift,
-                    )));
-                    x_assert_same_flat_tables(&built, &serial);
+                    for passes in PASSES {
+                        let built = flat(Some(parallel(
+                            threads,
+                            threshold,
+                            &query,
+                            &locations,
+                            &tables,
+                            NCBI_OVERFLOW_CELL_CAPACITY,
+                            None,
+                            chunk_sizes,
+                            stripe_shift,
+                            passes,
+                            None,
+                        )));
+                        x_assert_same_flat_tables(&built, &serial);
+                    }
                 }
             }
         }
@@ -838,18 +1191,22 @@ mod tests {
             ));
             for (threads, chunk_sizes) in [(2, &[usize::MAX][..]), (3, &[][..]), (7, &[40_000][..])]
             {
-                let built = flat(Some(parallel(
-                    threads,
-                    2000,
-                    &query,
-                    &locations,
-                    &tables,
-                    NCBI_OVERFLOW_CELL_CAPACITY,
-                    None,
-                    chunk_sizes,
-                    None,
-                )));
-                x_assert_same_flat_tables(&built, &serial);
+                for passes in PASSES {
+                    let built = flat(Some(parallel(
+                        threads,
+                        2000,
+                        &query,
+                        &locations,
+                        &tables,
+                        NCBI_OVERFLOW_CELL_CAPACITY,
+                        None,
+                        chunk_sizes,
+                        None,
+                        passes,
+                        None,
+                    )));
+                    x_assert_same_flat_tables(&built, &serial);
+                }
             }
         }
     }
@@ -864,7 +1221,11 @@ mod tests {
     // The refusal at small capacities (around each table's own cells and its cells of the table of
     // all batches, as the serial builder's test): at 2, 3 and 7 threads and uneven chunks the
     // parallel builder refuses exactly when the reference does, and otherwise builds its table.
-    // The bound on the appends: `TooLarge` exactly when the appends pass it.
+    // The bound on the appends: `TooLarge` exactly when the appends pass it. Both pass
+    // implementations; the one-latch passes with extra tasks, each of which runs exactly once, also
+    // when the build is refused or `TooLarge`, and on a spare of garbage (filled with the shadow's
+    // pattern or not), which a refused build consumes and a `TooLarge` build drops; the next build on
+    // a spare of garbage is still exact.
     #[test]
     fn parallel_refusal_and_bound_are_the_serial_ones() {
         let mut rng = XorShift(0x1f83_d9ab_fb41_bd6b);
@@ -900,29 +1261,46 @@ mod tests {
                 )
                 .expect("word size 5");
                 for (threads, chunk_sizes) in [(2, &[][..]), (3, &[7, 1, 50][..]), (7, &[1][..])] {
-                    match (
-                        &reference,
-                        parallel(
-                            threads,
-                            threshold,
-                            &query,
-                            &locations,
-                            &tables,
-                            capacity,
-                            None,
-                            chunk_sizes,
-                            None,
-                        ),
-                    ) {
-                        (Err(()), XFlatBuild::Refused) => refused_seen += 1,
-                        (Ok(reference), XFlatBuild::Table(built)) => {
-                            x_assert_same_compressed_table(&built, reference);
-                            built_seen += 1;
+                    for one_latch in [false, true] {
+                        let extra = Counted::new(1 + rng.below(40));
+                        let passes = if one_latch {
+                            XPasses::OneLatch(Some(&extra))
+                        } else {
+                            XPasses::Rayon
+                        };
+                        let spare = garbage_spare(&mut rng);
+                        let poison = rng.below(2) == 0;
+                        match (
+                            &reference,
+                            parallel(
+                                threads,
+                                threshold,
+                                &query,
+                                &locations,
+                                &tables,
+                                capacity,
+                                None,
+                                chunk_sizes,
+                                None,
+                                passes,
+                                one_latch.then_some((&spare, poison)),
+                            ),
+                        ) {
+                            (Err(()), XFlatBuild::Refused) => refused_seen += 1,
+                            (Ok(reference), XFlatBuild::Table(built)) => {
+                                x_assert_same_compressed_table(&built, reference);
+                                built_seen += 1;
+                            }
+                            (reference, _) => panic!(
+                                "round {round}, capacity {capacity}, threads {threads}: reference refused {}",
+                                reference.is_err()
+                            ),
                         }
-                        (reference, _) => panic!(
-                            "round {round}, capacity {capacity}, threads {threads}: reference refused {}",
-                            reference.is_err()
-                        ),
+                        extra.assert_each_ran(
+                            usize::from(one_latch),
+                            &format!("round {round}, capacity {capacity}, threads {threads}"),
+                        );
+                        assert_eq!(spare_capacities(&spare) == (0, 0), one_latch);
                     }
                 }
             }
@@ -936,24 +1314,395 @@ mod tests {
                 (appends, false),
                 (appends + 1, false),
             ] {
-                let built = parallel(
-                    3,
-                    threshold,
-                    &query,
-                    &locations,
-                    &tables,
-                    NCBI_OVERFLOW_CELL_CAPACITY,
-                    Some(max_appends),
-                    &[5],
-                    None,
-                );
-                assert_eq!(
-                    matches!(built, XFlatBuild::TooLarge),
-                    too_large,
-                    "round {round}, bound {max_appends}, appends {appends}"
-                );
+                for one_latch in [false, true] {
+                    let extra = Counted::new(1 + rng.below(40));
+                    let passes = if one_latch {
+                        XPasses::OneLatch(Some(&extra))
+                    } else {
+                        XPasses::Rayon
+                    };
+                    let spare = garbage_spare(&mut rng);
+                    let poison = rng.below(2) == 0;
+                    let built = parallel(
+                        3,
+                        threshold,
+                        &query,
+                        &locations,
+                        &tables,
+                        NCBI_OVERFLOW_CELL_CAPACITY,
+                        Some(max_appends),
+                        &[5],
+                        None,
+                        passes,
+                        one_latch.then_some((&spare, poison)),
+                    );
+                    assert_eq!(
+                        matches!(built, XFlatBuild::TooLarge),
+                        too_large,
+                        "round {round}, bound {max_appends}, appends {appends}"
+                    );
+                    if let XFlatBuild::Table(built) = built {
+                        x_assert_same_flat_tables(&built, &serial);
+                    }
+                    extra.assert_each_ran(
+                        usize::from(one_latch),
+                        &format!("round {round}, bound {max_appends}"),
+                    );
+                    // A `TooLarge` build drops the spare's vectors, a table takes them.
+                    assert_eq!(spare_capacities(&spare) == (0, 0), one_latch);
+                }
             }
         }
         assert!(refused_seen > 0 && built_seen > 0);
+    }
+
+    // LOSAT_X_BPLKPFLAT: a build on vectors of garbage (`u32::MAX`, `i32::MIN`, random values) longer
+    // or shorter than the table's, with and without the room for it, and then on the vectors that
+    // build gives back, is the fresh build slot for slot, with both pass implementations and at 1, 2,
+    // 3 and 7 threads; where the spare's `hits` has the room, the table holds that buffer.
+    #[test]
+    fn builds_on_recycled_vectors_equal_fresh_builds() {
+        let mut rng = XorShift(0x6a09_e667_f3bc_c908);
+        let spare = XFlatSpare::default();
+        let mut reused_seen = 0usize;
+        for round in 0..6 {
+            let (letters, threshold): (&[u8], i32) = match round % 3 {
+                0 => (&FEW_LETTERS[..], 1100),
+                1 => (&LETTERS[..], 1100),
+                _ => (&FEW_LETTERS[..], 1600),
+            };
+            let lengths: Vec<usize> = (0..2 + rng.below(5)).map(|_| 1 + rng.below(400)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, letters, round % 3);
+            let tables = [first[0]..first[lengths.len()]];
+            let serial = flat(x_try_build_flat_compressed_lookup(
+                5, threshold, &query, &locations, &tables,
+            ));
+            let cells = serial.starts.len();
+            let total = serial.hits.len();
+            for case in 0..3 {
+                for threads in THREADS {
+                    for passes in PASSES {
+                        let mut random = |len: usize| -> Vec<u32> {
+                            (0..len)
+                                .map(|_| rng.below(u32::MAX as usize) as u32)
+                                .collect()
+                        };
+                        let garbage: (Vec<u32>, Vec<i32>) = match case {
+                            // Longer than the table's.
+                            0 => (vec![u32::MAX; cells + 7], vec![i32::MIN; total + 100]),
+                            // Random values; `hits` shorter, with room to grow in place.
+                            1 => {
+                                let starts = random(cells);
+                                let mut hits = Vec::with_capacity(2 * total + 1);
+                                hits.extend(
+                                    random(total / 2).into_iter().map(|value| value as i32),
+                                );
+                                (starts, hits)
+                            }
+                            // No room: fresh vectors.
+                            _ => (Vec::new(), vec![i32::MIN; total.saturating_sub(1)]),
+                        };
+                        *spare.0.lock().unwrap() = garbage;
+                        // The garbage, then the vectors the first build gives back.
+                        for build in 0..2 {
+                            let (given, room) = {
+                                let kept = spare.0.lock().unwrap();
+                                (kept.1.as_ptr() as usize, kept.1.capacity() >= total)
+                            };
+                            let built = flat(Some(parallel(
+                                threads,
+                                threshold,
+                                &query,
+                                &locations,
+                                &tables,
+                                NCBI_OVERFLOW_CELL_CAPACITY,
+                                None,
+                                &[],
+                                None,
+                                passes,
+                                Some((&spare, build == 1)),
+                            )));
+                            x_assert_same_flat_tables(&built, &serial);
+                            if room && total > 0 {
+                                assert_eq!(
+                                    built.hits.as_ptr() as usize,
+                                    given,
+                                    "round {round}, case {case}, build {build}: the spare's buffer"
+                                );
+                                reused_seen += 1;
+                            }
+                            let kept = spare.0.lock().unwrap();
+                            assert!(
+                                kept.0.is_empty() && kept.1.is_empty(),
+                                "the build took them"
+                            );
+                            drop(kept);
+                            spare.give(built);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(reused_seen > 0);
+    }
+
+    // LOSAT_X_BPLKPFLAT: the extra tasks run in the one-latch appends pass, each exactly once, at
+    // every thread count and with any number of chunks (none included), and not in the serial
+    // builder that a one-thread pool runs (`x_build_flat_in_pool`); the table does not change.
+    #[test]
+    fn extra_tasks_run_once_in_the_parallel_build_only() {
+        let mut rng = XorShift(0xbb67_ae85_84ca_a73b);
+        let lengths = [120, 7, 300];
+        let (query, locations, first) = queries(&mut rng, &lengths, &FEW_LETTERS, 1);
+        let tables = [first[0]..first[3]];
+        let serial = flat(x_try_build_flat_compressed_lookup(
+            5, 1100, &query, &locations, &tables,
+        ));
+        for threads in THREADS {
+            for chunk_sizes in CHUNK_SIZES {
+                for count in [0, 1, 3, 64] {
+                    let extra = Counted::new(count);
+                    let built = flat(Some(parallel(
+                        threads,
+                        1100,
+                        &query,
+                        &locations,
+                        &tables,
+                        NCBI_OVERFLOW_CELL_CAPACITY,
+                        None,
+                        chunk_sizes,
+                        None,
+                        XPasses::OneLatch(Some(&extra)),
+                        None,
+                    )));
+                    x_assert_same_flat_tables(&built, &serial);
+                    extra.assert_each_ran(1, &format!("threads {threads}, {count} tasks"));
+                }
+            }
+        }
+        // No offsets: no chunk, the tasks still run once.
+        let extra = Counted::new(5);
+        let none = flat(Some(parallel(
+            3,
+            1100,
+            &query,
+            &[],
+            &[],
+            NCBI_OVERFLOW_CELL_CAPACITY,
+            None,
+            &[],
+            None,
+            XPasses::OneLatch(Some(&extra)),
+            None,
+        )));
+        assert!(none.hits.is_empty());
+        extra.assert_each_ran(1, "no chunks");
+        // The entry of the search: the pool's build at 3 threads, the serial builder at one thread
+        // (no task runs; the caller runs them), and nothing with the switch off.
+        for (threads, mode, runs) in [
+            (1, XLkpFlat::On, 0),
+            (3, XLkpFlat::On, 1),
+            (3, XLkpFlat::Shadow, 1),
+            (3, XLkpFlat::Off, 0),
+        ] {
+            let extra = Counted::new(9);
+            let built = crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                Ok(super::super::x_build_flat_in_pool(
+                    5,
+                    1100,
+                    &query,
+                    &locations,
+                    &tables,
+                    pool,
+                    XFlatArgs {
+                        mode,
+                        spare: None,
+                        extra: Some(&extra),
+                        x_ahead: false,
+                    },
+                ))
+            })
+            .expect("pool");
+            x_assert_same_flat_tables(&flat(built), &serial);
+            extra.assert_each_ran(runs, &format!("threads {threads}, {mode:?}"));
+        }
+    }
+
+    /// LOSAT_X_BPLKPAHEAD: the one-latch build ahead of its block (`x_ahead`) on `spare`.
+    #[allow(clippy::too_many_arguments)]
+    fn ahead(
+        threads: usize,
+        threshold: i32,
+        query: &[u8],
+        locations: &[(i32, i32)],
+        tables: &[std::ops::Range<usize>],
+        spare: Option<&XFlatSpare>,
+        poison: bool,
+    ) -> Option<XFlatBuild> {
+        in_pool(threads, || {
+            x_try_build_flat_parallel_with(
+                5,
+                threshold,
+                query,
+                locations,
+                tables,
+                XParallelCuts {
+                    overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                    max_appends: None,
+                    threads,
+                    chunk_sizes: &[],
+                    stripe_shift: None,
+                    passes: XPasses::OneLatch(None),
+                    spare,
+                    poison,
+                    x_ahead: true,
+                },
+            )
+        })
+    }
+
+    /// The addresses of the spare's three vectors (`starts`, `hits`, `pv`).
+    fn spare_addresses(spare: &XFlatSpare) -> [usize; 3] {
+        let kept = spare.0.lock().unwrap();
+        let pv = spare.1.lock().unwrap();
+        [
+            kept.0.as_ptr() as usize,
+            kept.1.as_ptr() as usize,
+            pv.as_ptr() as usize,
+        ]
+    }
+
+    // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes `starts`, `hits` and the PV array from the
+    // spare that `x_make_room` made ready (garbage in them, the hits shorter than the table's) and
+    // allocates none of them: the table holds the spare's three buffers and equals the fresh serial
+    // build slot for slot, at 1, 2, 3 and 7 threads, poisoned or not. A spare one entry short of the
+    // room for any of the three (or no spare) gives no table and keeps its vectors untouched.
+    #[test]
+    fn builds_ahead_take_every_vector_from_the_spare() {
+        let mut rng = XorShift(0x3c6e_f372_fe94_f82b);
+        let mut built_seen = 0usize;
+        for round in 0..4 {
+            let (letters, threshold): (&[u8], i32) = match round % 2 {
+                0 => (&FEW_LETTERS[..], 1100),
+                _ => (&LETTERS[..], 1100),
+            };
+            let lengths: Vec<usize> = (0..2 + rng.below(4)).map(|_| 1 + rng.below(400)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, letters, round % 3);
+            let tables = [first[0]..first[lengths.len()]];
+            let serial = flat(x_try_build_flat_compressed_lookup(
+                5, threshold, &query, &locations, &tables,
+            ));
+            let backbone_size = serial.starts.len() - 1;
+            let total = serial.hits.len();
+            let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
+            for threads in THREADS {
+                for poison in [false, true] {
+                    // The room, with garbage in it.
+                    let spare = XFlatSpare::default();
+                    let mut hits = Vec::with_capacity(total + 5);
+                    hits.extend((0..total / 2).map(|_| rng.below(1 << 20) as i32));
+                    *spare.0.lock().unwrap() = (vec![u32::MAX - 3; backbone_size + 1], hits);
+                    *spare.1.lock().unwrap() = vec![u32::MAX; pv_words];
+                    let block = XFlatSpare::default();
+                    assert_eq!(spare.x_make_room(&block, backbone_size, total, total), 0);
+                    let given = spare_addresses(&spare);
+                    let built = flat(ahead(
+                        threads,
+                        threshold,
+                        &query,
+                        &locations,
+                        &tables,
+                        Some(&spare),
+                        poison,
+                    ));
+                    x_assert_same_flat_tables(&built, &serial);
+                    let held = [
+                        built.starts.as_ptr() as usize,
+                        built.hits.as_ptr() as usize,
+                        built.pv.as_ptr() as usize,
+                    ];
+                    assert_eq!(held, given, "round {round}, threads {threads}");
+                    assert_eq!(spare_capacities(&spare), (0, 0));
+                    assert_eq!(spare.1.lock().unwrap().capacity(), 0);
+                    built_seen += 1;
+                    // One entry short of the room for each vector in turn, and no spare.
+                    for short in 0..3 {
+                        if short == 1 && total == 0 {
+                            continue;
+                        }
+                        let spare = XFlatSpare::default();
+                        *spare.0.lock().unwrap() = (
+                            Vec::with_capacity(backbone_size + usize::from(short != 0)),
+                            Vec::with_capacity(total + usize::from(short != 1) - 1),
+                        );
+                        *spare.1.lock().unwrap() =
+                            Vec::with_capacity(pv_words - usize::from(short == 2));
+                        let kept = spare_addresses(&spare);
+                        let none = ahead(
+                            threads,
+                            threshold,
+                            &query,
+                            &locations,
+                            &tables,
+                            Some(&spare),
+                            poison,
+                        );
+                        assert!(none.is_none(), "round {round}, short {short}: no table");
+                        assert_eq!(spare_addresses(&spare), kept, "the spare keeps them");
+                    }
+                    let none = ahead(
+                        threads, threshold, &query, &locations, &tables, None, poison,
+                    );
+                    assert!(none.is_none());
+                }
+            }
+        }
+        assert!(built_seen > 0);
+    }
+
+    // LOSAT_X_BPLKPAHEAD: `x_make_room` keeps the spare's own vectors when they have the room, else
+    // moves the block spare's (the same buffers), and replaces each vector short of its room by an
+    // empty one of the asked capacity; it writes nothing into them.
+    #[test]
+    fn make_room_keeps_or_moves_the_vectors_and_allocates_only_what_is_short() {
+        let backbone_size = 759_375;
+        let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
+        // Nothing kept anywhere: three new vectors.
+        let ahead_spare = XFlatSpare::default();
+        let block = XFlatSpare::default();
+        assert_eq!(
+            ahead_spare.x_make_room(&block, backbone_size, 1000, 1500),
+            3
+        );
+        {
+            let kept = ahead_spare.0.lock().unwrap();
+            assert!(kept.0.is_empty() && kept.0.capacity() >= backbone_size + 1);
+            assert!(kept.1.is_empty() && kept.1.capacity() >= 1500);
+            assert!(ahead_spare.1.lock().unwrap().capacity() >= pv_words);
+        }
+        // Enough room: nothing allocated, the same buffers.
+        let before = spare_addresses(&ahead_spare);
+        assert_eq!(
+            ahead_spare.x_make_room(&block, backbone_size, 1400, 3000),
+            0
+        );
+        assert_eq!(spare_addresses(&ahead_spare), before);
+        // `hits` short: only it is replaced (empty, with the grown capacity).
+        assert_eq!(
+            ahead_spare.x_make_room(&block, backbone_size, 1600, 3200),
+            1
+        );
+        let after = spare_addresses(&ahead_spare);
+        assert_eq!([after[0], after[2]], [before[0], before[2]]);
+        assert!(ahead_spare.0.lock().unwrap().1.capacity() >= 3200);
+        // An empty spare takes the block spare's vectors (the same buffers, contents kept).
+        let empty = XFlatSpare::default();
+        *block.0.lock().unwrap() = (vec![7; backbone_size + 1], vec![-7; 5000]);
+        let moved = spare_addresses(&block);
+        assert_eq!(empty.x_make_room(&block, backbone_size, 5000, 7500), 1);
+        let taken = spare_addresses(&empty);
+        assert_eq!([taken[0], taken[1]], [moved[0], moved[1]]);
+        assert_eq!(spare_capacities(&block), (0, 0));
+        assert_eq!(empty.0.lock().unwrap().1.len(), 5000);
     }
 }

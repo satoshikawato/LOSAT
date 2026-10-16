@@ -216,6 +216,12 @@ impl KappaResultHitList {
         &self.lists
     }
 
+    /// The lists, for a caller that renames their subjects (`database::reported_subjects`:
+    /// ordinal ids to ranks, in the same order).
+    pub(super) fn lists_mut(&mut self) -> &mut [KappaResultList] {
+        &mut self.lists
+    }
+
     pub(super) fn worst_evalue(&self) -> f64 {
         self.worst_evalue
     }

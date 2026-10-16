@@ -71,7 +71,7 @@ pub use x_hsp_inplace::print_summary as x_hsp_inplace_print_summary;
 mod x_link_sort;
 pub use x_link_sort::print_summary as x_link_sort_print_summary;
 
-// EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW, off unless set): the groups of the
+// EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW): the groups of the
 // linking call of `x_hsp_inplace` linked as disjoint sub-slices of the one sorted list instead of
 // Vecs cut off it and put together again; a child module of this file so that it calls the
 // per-group functions below unchanged (see tblastx/x_link_slices.rs).

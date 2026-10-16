@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { BUILD_HAS_ENGINE } from './support/browser';
+import { openSearch, paste, program } from './support/search';
 
 test('the page is cross-origin isolated, so the threaded engine can use shared memory', async ({ page }) => {
   await page.goto('/');
@@ -8,13 +9,14 @@ test('the page is cross-origin isolated, so the threaded engine can use shared m
 });
 
 test(`paste, queue, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' : 'the fake engine'}`, async ({ page }) => {
-  await page.goto('/');
+  await openSearch(page);
   // The banner shows exactly when the build has no engine (web/AGENTS.md rule 7).
   await expect(page.getByTestId('fake-engine-banner')).toHaveCount(BUILD_HAS_ENGINE ? 0 : 1);
 
-  await page.getByTestId('program-tblastx').check();
-  await page.getByTestId('query-input').fill('>q1\nACGTACGTACGT\n');
-  await page.getByTestId('subject-input').fill('>s1\nACGTACGTACGT\n');
+  // Each step waits until the form stops moving, or the click on "Run LOSAT" can be lost (WF1).
+  await program(page, 'tblastx');
+  await paste(page, 'query', '>q1\nACGTACGTACGT\n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGT\n');
   await page.getByTestId('add-to-queue').click();
 
   await expect(page.getByTestId('run-1-status')).toHaveText('completed');
@@ -43,10 +45,10 @@ test('a BLASTN query of white space only is refused with the index scan error, b
   // The adapter's register reads such a file as no records and the CLI then warns
   // "Query is Empty!", but the index scan (bio's reader) refuses it; the application follows
   // the scan and does not rebuild BLASTN's rules (S09, docs/evidence/losat_web_w1/README.md).
-  await page.goto('/');
-  await page.getByTestId('program-blastn').check();
-  await page.getByTestId('query-input').fill(' \n');
-  await page.getByTestId('subject-input').fill('>s1\nACGTACGTACGT\n');
+  await openSearch(page);
+  await program(page, 'blastn');
+  await paste(page, 'query', ' \n');
+  await paste(page, 'subject', '>s1\nACGTACGTACGT\n');
   await page.getByTestId('add-to-queue').click();
   await expect(page.getByTestId('search-message')).toHaveText('Query (pasted): Expected > at record start.');
   await expect(page.getByTestId('query-source-0-error')).toHaveText('This input cannot be read: Expected > at record start.');

@@ -372,8 +372,10 @@ the reader's error texts and the title rules are those of TBLASTN's `-db`.
   the database as it translates `-subject`.
 - Memory: the database's sequences are read once, in blocks of about 1 MiB, and kept packed
   (about the size of the `.nsq` file); each thread makes the letters and the frames of the
-  sequence it searches, as for `-subject`, and the reports hold the letters of the reported
-  sequences. A database larger than memory is not searched in blocks yet.
+  sequence it searches, as for `-subject`, and the reports read the letters of each reported
+  HSP's codons from the packed sequences. A long sequence with ambiguity codes is searched with
+  both its frame sets (about 6 bytes a base, above NCBI's peak; a later change). A database
+  larger than memory is not searched in blocks yet.
 - Reports: the definition lines are read for the reported sequences of each query batch, where
   NCBI reads them; the `Database:` lines of outfmt 0, `>` and the stored title, subject ids made
   from the title as for TBLASTN, `# Database:` of outfmt 7 with the `-db` value as given.

@@ -171,7 +171,7 @@ fn a_database_search_gives_the_same_report_at_every_thread_count() {
 
 // blast_setup.c:716-735: `-dbsize` replaces the database length of the effective lengths, with
 // `-db` and with `-subject` alike (the hit-saving average and the link cutoffs keep the real
-// total: blast_setup.c:976-978, blast_engine.c:1407). A database length whose search space
+// total: blast_setup.c:974-976, blast_engine.c:1407). A database length whose search space
 // overflows NCBI's Int8 is LOSAT's refusal.
 #[test]
 fn the_database_size_gives_both_paths_the_same_statistics() {

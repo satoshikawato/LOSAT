@@ -6,7 +6,7 @@ use std::cell::Cell;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::sequence::packed_subject::PackedNucleotide;
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1404-1405
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1403-1405
 // ```c
 //     /* Encoding is set so there are no sentinel bytes, and protein/nucleotide
 //       sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
@@ -189,7 +189,7 @@ impl std::error::Error for SubjectsUnreadable {}
 //    if (Blast_SubjectIsTranslated(program_number))
 //       db_length = db_length/3;
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-912,976-978
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:909-911,974-976
 // ```c
 //       total_length = BlastSeqSrcGetTotLenStats(seq_src);
 //       if (total_length <= 0)

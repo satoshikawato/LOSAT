@@ -36,6 +36,7 @@ fn fixture(name: &str) -> PathBuf {
 
 /// What one run printed: the report and standard error.
 struct Run {
+    code: Option<i32>,
     stdout: Vec<u8>,
     stderr: String,
 }
@@ -68,10 +69,16 @@ impl Run {
     }
 }
 
-/// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences, about 95 KB
-/// of sequence: one block of 1 MiB, 8 blocks of the cut at 2 threads, 16 at 4), made with
-/// `LOSAT makedb` in a directory of the test (`label`); returns the database name.
+/// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences, about 90 KB
+/// of sequence: one block of 1 MiB, about 4 x threads blocks of the cut: 9 at 2 threads, 19 at 4), made with
+/// `LOSAT makedb` in a directory of the test (`label`, which no other test uses); returns the
+/// database name.
 fn subject_database(label: &str) -> PathBuf {
+    subject_database_with(label, &[])
+}
+
+/// `subject_database` with `extra` arguments for `LOSAT makedb` (`-max_file_sz` for volumes).
+fn subject_database_with(label: &str, extra: &[&str]) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("losat-bpdbcut-{label}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -83,6 +90,7 @@ fn subject_database(label: &str) -> PathBuf {
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&name)
+        .args(extra)
         .output()
         .expect("run LOSAT makedb");
     assert!(
@@ -100,8 +108,8 @@ fn subject_database(label: &str) -> PathBuf {
 /// not depend on the strict set's default. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with
 /// the `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name
 /// as soon as a search has more than one thread, and it selects nothing; without the caller's value
-/// a file of the tests is named. The run must exit with 0.
-fn blastp(
+/// a file of the tests is named. The run is returned whatever its exit code.
+fn blastp_any_exit(
     task: &str,
     db: &Path,
     threads: u32,
@@ -141,15 +149,30 @@ fn blastp(
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    assert!(
-        output.status.success(),
-        "{task} {vars:?} {extra:?} threads {threads}: {stderr}"
-    );
     Run {
+        code: output.status.code(),
         stdout: output.stdout,
-        stderr,
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     }
+}
+
+/// `blastp_any_exit`, which must exit with 0.
+fn blastp(
+    task: &str,
+    db: &Path,
+    threads: u32,
+    vars: &[(&str, &str)],
+    extra: &[&str],
+    outfmt: &str,
+) -> Run {
+    let run = blastp_any_exit(task, db, threads, vars, extra, outfmt);
+    assert!(
+        run.code == Some(0),
+        "{task} {vars:?} {extra:?} threads {threads}: {:?} {}",
+        run.code,
+        run.stderr
+    );
+    run
 }
 
 /// `base` with `extra` added.
@@ -296,5 +319,68 @@ fn the_cut_does_not_act_at_one_thread() {
         run.stdout == blastp("blastp", &db, 1, &[], &[], "6").stdout,
         "the report differs"
     );
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+// A damaged database (its `.psq` cut short by 500 bytes) through the command line: the search fails
+// with the error of the one-thread order, so standard error and the exit code are the same at one
+// thread and, with the switch off, on and in its shadow mode, at 4 threads. The unit test compares
+// the texts of the errors; this one also pins their type, which the message of the error maps to.
+#[test]
+fn a_damaged_database_fails_with_the_same_error_with_the_cut() {
+    let db = subject_database("damaged");
+    let psq = db.with_extension("psq");
+    let bytes = std::fs::read(&psq).unwrap();
+    std::fs::write(&psq, &bytes[..bytes.len() - 500]).unwrap();
+    let one_thread = blastp_any_exit("blastp", &db, 1, &[], &[], "6");
+    assert!(
+        one_thread.code.is_some_and(|code| code != 0),
+        "the damaged database must fail: {:?} {}",
+        one_thread.code,
+        one_thread.stderr
+    );
+    assert!(!one_thread.stderr.is_empty());
+    for (what, vars) in [("off", vec![]), ("on", vec![ON]), ("shadow", vec![SHADOW])] {
+        let run = blastp_any_exit("blastp", &db, 4, &vars, &[], "6");
+        assert_eq!(run.code, one_thread.code, "{what}: exit code differs");
+        assert_eq!(
+            run.stderr_without_shadow(),
+            one_thread.stderr_without_shadow(),
+            "{what}: standard error differs from one thread's"
+        );
+        assert!(run.stdout == one_thread.stdout, "{what}: report differs");
+    }
+    let _ = std::fs::remove_dir_all(db.parent().unwrap());
+}
+
+// A database of several volumes (`-max_file_sz 20000`) with the real kernel: the cut ends blocks at
+// volume ends, and 4 threads with the switch on and in its shadow mode give one thread's report.
+#[test]
+fn a_database_of_volumes_reports_with_the_cut_are_the_reports_without_it() {
+    let db = subject_database_with("volumes", &["-max_file_sz", "20000"]);
+    let volumes = (0..100)
+        .take_while(|volume| {
+            db.with_file_name(format!("MejoMJNV.{volume:02}.psq"))
+                .exists()
+        })
+        .count();
+    assert!(volumes >= 3, "{volumes} volumes");
+    let one_thread = blastp("blastp", &db, 1, &[], &[], "6");
+    assert!(!one_thread.stdout.is_empty());
+    let on = blastp("blastp", &db, 4, &[ON], &[], "6");
+    assert!(
+        on.stdout == one_thread.stdout,
+        "the report differs with the switch"
+    );
+    let shadow = blastp("blastp", &db, 4, &[SHADOW], &[], "6");
+    assert!(
+        shadow.stdout == one_thread.stdout,
+        "the report differs in the shadow mode"
+    );
+    let counts = shadow.shadow();
+    assert_eq!(counts["searches"], 1, "{counts:?}");
+    assert!(counts["blocks_ref"] >= volumes as u64, "{counts:?}");
+    assert!(counts["blocks"] >= counts["blocks_ref"], "{counts:?}");
+    assert!(counts["lists_compared"] > 0, "{counts:?}");
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }

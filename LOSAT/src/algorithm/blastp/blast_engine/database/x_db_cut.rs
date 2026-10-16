@@ -22,11 +22,11 @@
 //! - the cut only moves where blocks end: `SeqDb::next_block` gives the consecutive sequences of a
 //!   volume that fit the size, at least one (a longer sequence is a block of its own), and the
 //!   blocks follow each other in ordinal order, so every sequence is searched once, in the order of
-//!   its ordinal id, as in NCBI's loop with one thread (blast_engine.c:1407-1426, quoted above
+//!   its ordinal id, as in NCBI's loop with one thread (blast_engine.c:1407-1413, quoted above
 //!   `search_blocks`);
 //! - every block starts from a cleared diagonal table at the offset that the one-thread order gives
 //!   its first sequence (`prepare_independent_subject`, `diag_offset_after`, the recurrence of
-//!   `Blast_ExtendWordExit`, blast_extend.c:160-172 quoted above `diag_offset_after`) and advances it
+//!   `Blast_ExtendWordExit`, blast_extend.c:166-173 quoted above `diag_offset_after`) and advances it
 //!   inside the block as the one-thread loop does, so each sequence is searched with the decisions
 //!   of the one-thread loop (an entry left by an earlier sequence reads as a cleared entry;
 //!   `x_subject_runs.rs` gives the argument in full, and its one exception, a sequence of more than
@@ -42,8 +42,8 @@
 //!   1 MiB block come in the other order), so the blocks of `BLOCK_BYTES` are read and prepared again
 //!   in order, until the first error.
 //!
-//! Memory: a worker holds one block, at most the cut, and a round covers at most
-//! `BLOCKS_PER_THREAD` x threads blocks, so the sequence memory does not grow. More threads search
+//! Memory: a worker holds one block, at most the cut (or one longer sequence), and a round covers at
+//! most `BLOCKS_PER_THREAD` x threads blocks, so the sequence memory does not grow. More threads search
 //! at once, each with its search scratch (diagonal table, offset pairs, alignment state), as in the
 //! `-subject` path: exact blastp of 3,000 human proteins against `BlastDBSpecies6` at 16 threads
 //! peaked at 42.9-44.1 MiB against 37.2 MiB without the switch (workstation, perf-mb-20261014
@@ -51,12 +51,12 @@
 //!
 //! No NCBI counterpart for the cut itself: NCBI's search threads take chunks of
 //! MAX(sequences / 100, 1) ordinal ids from one iterator (`BlastSeqSrcIteratorNewEx`,
-//! blast_engine.c:1407-1426; seqdbimpl.cpp:328-350, quoted above `SeqDb::next_block`), whatever the
+//! blast_engine.c:1409; seqdbimpl.cpp:328-350, quoted above `SeqDb::next_block`), whatever the
 //! thread count; LOSAT's blocks are cut by bytes, because one block is one read of one file.
 //!
 //! Off unless `LOSAT_X_BPDBCUT` is set (to any value); not in the strict set. It acts for every
-//! task of BLASTP with `-db` (blastp, blastp-fast), the only program whose search reaches this
-//! driver.
+//! task of BLASTP with `-db` (blastp, blastp-fast, blastp-short), the only program whose search
+//! reaches this driver.
 //!
 //! `LOSAT_X_BPDBCUTSHADOW=1` (shadow mode, implies the switch): after each search with the cut, the
 //! search runs again as without the switch (`search_blocks_of` with `BLOCK_BYTES`, the same pool,
@@ -248,7 +248,7 @@ fn x_compare_lists<H: std::fmt::Debug>(
     compared
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1426
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1407-1413
 // ```c
 //     db_length = BlastSeqSrcGetTotLen(seq_src);
 //
@@ -263,7 +263,7 @@ fn x_compare_lists<H: std::fmt::Debug>(
 //           /* Save the results. */
 //           status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
 // ```
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:160-172
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:166-173
 // ```c
 //     if (ewp->diag_table) {
 //         if (ewp->diag_table->offset >= INT4_MAX / 4) {
@@ -277,7 +277,8 @@ fn x_compare_lists<H: std::fmt::Debug>(
 /// (`x_db_cut_block_bytes`) and, on failure, the error of the one-thread order; in `mode`
 /// `Shadow`, the search again with `BLOCK_BYTES` and the comparison of the two (module header).
 ///
-/// The output is the one-thread order's for any cut: the cut only moves where blocks end, every
+/// The output is that of the blocks of `BLOCK_BYTES` (the one-thread order's, apart from the
+/// exception in the module header) for any cut: the cut only moves where blocks end, every
 /// block starts at the one-thread order's diagonal offset of its first sequence from a cleared
 /// table, and the round's results are merged in ordinal order (module header). No floating-point
 /// operation changes order.

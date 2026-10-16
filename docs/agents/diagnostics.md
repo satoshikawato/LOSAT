@@ -477,9 +477,9 @@ Rebuilding less:
   INT4_MAX / 4 resets inside a run; `tables_checked`: tables checked before a later subject of a run).
 - `LOSAT_X_BPDBCUT=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it; acts only where a `-db` search runs its preliminary stage on the pool:
-  more than one thread; blastp and blastp-fast, the only tasks whose search reaches the `-db` block driver) the
-  preliminary stage of `-db` reads the database in blocks of clamp(sequence bytes / (4 x threads), 4 KiB,
-  1 MiB) instead of 1 MiB, where the sequence bytes are the letters, one per sequence and one more (the size
+  more than one thread; every BLASTP task (blastp, blastp-fast, blastp-short), the only program whose search
+  reaches the `-db` block driver) the preliminary stage of `-db` reads the database in blocks of
+  clamp(sequence bytes / (4 x threads), 4 KiB, 1 MiB) instead of 1 MiB, where the sequence bytes are the letters, one per sequence and one more (the size
   of a one-volume `.psq` file) (`blastp/blast_engine/database/x_db_cut.rs`, exactness argument in its
   header). Without it a database of a few MiB is a few blocks, and a round of the parallel stage has fewer
   tasks than threads: OrthoFinder's `BlastDBSpecies6` (2.92 MB) is 3 blocks, so 3 of 16 threads search
@@ -491,8 +491,8 @@ Rebuilding less:
   round's results are merged in ordinal order, as for blocks of 1 MiB. A search that fails (a damaged
   database) returns the one-thread order's error: the blocks of 1 MiB are read and prepared again in order up
   to the first error, because a smaller block can meet another error first or name another byte range.
-  Memory: a worker holds one block of at most the cut, and a round covers at most the bytes it covers
-  without the switch; more threads search at once, each with its search scratch. Measured on the
+  Memory: a worker holds one block of at most the cut (or one longer sequence), and a round covers at most
+  the bytes it covers without the switch; more threads search at once, each with its search scratch. Measured on the
   workstation (alternating runs, node 0, the same outputs; NCBI `-db -num_threads 1` tables for the
   OrthoFinder jobs): blastp-fast human (23,879 proteins) x `BlastDBSpecies6` at 16 threads 19.92 -> 8.69 s
   (x0.44, 4 pairs; max RSS 95.1-96.8 -> 93.5-95.8 MiB), at 8 threads 21.0 -> 13.0 s, at 4 threads 26.0 -> 21.8 s;

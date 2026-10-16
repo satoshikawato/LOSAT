@@ -992,8 +992,11 @@ mod tests {
 
     /// The same ops as a partitioned stage: strips cut at `cuts`, `parts` partitions on
     /// `threads` threads (in a pool of that many). `nested` runs a parallel iterator inside
-    /// every scan and fold call. Returns the hits (op indices), the stage's counters and the
-    /// number of threads that folded.
+    /// every scan and fold call. With `owner_waits` a fold on the owner's thread first sleeps
+    /// 100 us while no helper has folded yet in this stage, so that the helpers get to fold on
+    /// any machine (even on one CPU, where the owner could otherwise fold the whole stage
+    /// before a helper job starts). Returns the hits (op indices), the stage's counters and
+    /// the number of threads that folded.
     #[allow(clippy::too_many_arguments)]
     fn partitioned(
         pool: &rayon::ThreadPool,
@@ -1006,10 +1009,13 @@ mod tests {
         ahead: usize,
         window: i32,
         nested: bool,
+        owner_waits: bool,
     ) -> (Vec<usize>, PartStats, usize) {
         let threads = pool.current_num_threads();
         let folders = Mutex::new(std::collections::BTreeSet::new());
+        let helper_folded = AtomicBool::new(false);
         pool.install(|| {
+            let owner = rayon::current_thread_index();
             let scan = |i: usize, out: &mut Vec<Seed>| {
                 if nested {
                     use rayon::prelude::*;
@@ -1026,7 +1032,15 @@ mod tests {
                     let sum: u64 = (0..64u64).into_par_iter().map(|v| v + 1).sum();
                     assert_eq!(sum, 2080);
                 }
-                lock(&folders).insert(rayon::current_thread_index());
+                let here = rayon::current_thread_index();
+                lock(&folders).insert(here);
+                if owner_waits {
+                    if here != owner {
+                        helper_folded.store(true, Ordering::Relaxed);
+                    } else if !helper_folded.load(Ordering::Relaxed) {
+                        std::thread::sleep(std::time::Duration::from_micros(100));
+                    }
+                }
                 for (k, seed) in seeds.iter().enumerate() {
                     let index = seed.context as usize;
                     let op = &ops[index - first];
@@ -1156,12 +1170,14 @@ mod tests {
     // third after the clear of the offset (occupancy 1), a chunk the reference folds, a stage
     // after it, a stage of no strips, and a stage with another partition count. Every stage
     // gives the reference's hits and table cell for cell (heads, cells, occupancy, capacity,
-    // bounds).
+    // bounds). In every other case on 2+ threads the owner sleeps in its folds until a helper
+    // has folded (`partitioned`), so that these cases check the equality on folds by several
+    // threads on any machine, which the test asserts for each of them.
     #[test]
     fn seed_stage_part_equals_the_reference_fold() {
         let mut rng = Lcg(0x9A27_F01D);
         let mut case = 0usize;
-        let (mut shared_cases, mut helper_cases) = (0usize, 0usize);
+        let mut waited_cases = 0usize;
         for parts in [2usize, 3, 7, 16] {
             for threads in 1..=8usize {
                 let pool = rayon::ThreadPoolBuilder::new()
@@ -1180,6 +1196,9 @@ mod tests {
                     let mut s = 50i32;
                     let mut first = 0usize;
                     let mut most_folders = 0usize;
+                    // one of the two cases of each (parts, threads), alternating with threads
+                    let owner_waits =
+                        threads >= 2 && (threads + usize::from(levels)).is_multiple_of(2);
                     for stage in 0..7 {
                         let at = format!("case {case} parts {parts} threads {threads} levels {levels} stage {stage}");
                         match stage {
@@ -1232,6 +1251,7 @@ mod tests {
                                 ahead,
                                 window,
                                 false,
+                                owner_waits,
                             );
                             most_folders = most_folders.max(folders);
                             assert_eq!(got, expected, "{at}: hits");
@@ -1251,19 +1271,18 @@ mod tests {
                         }
                         first += n;
                     }
-                    if threads >= 2 {
-                        shared_cases += 1;
-                        helper_cases += usize::from(most_folders >= 2);
+                    if owner_waits {
+                        // the helpers folded too
+                        waited_cases += 1;
+                        assert!(
+                            most_folders >= 2,
+                            "case {case} parts {parts} threads {threads} levels {levels}: the owner waited in its folds, but no stage was folded on more than one thread"
+                        );
                     }
                 }
             }
         }
-        // The helpers fold too. (Whether they get to a given stage before the owner has folded
-        // it alone depends on the scheduling of a loaded machine, so this asks it of the test.)
-        assert!(
-            helper_cases > 0,
-            "no stage of {shared_cases} cases on 2+ threads was folded on more than one thread"
-        );
+        assert_eq!(waited_cases, 28);
     }
 
     // A parallel iterator inside every scan and fold call of every participant (the pattern
@@ -1301,6 +1320,7 @@ mod tests {
                     2 * threads,
                     40,
                     true,
+                    false,
                 );
                 assert_eq!(got, expected, "threads {threads} stage {stage}");
                 assert_eq!(
@@ -1402,6 +1422,7 @@ mod tests {
                     2,
                     40,
                     false,
+                    false,
                 );
                 assert_eq!(got, expected, "threads {threads} {place}");
                 assert_eq!(
@@ -1442,6 +1463,7 @@ mod tests {
             2,
             40,
             false,
+            false,
         );
         assert_eq!(got, expected, "first stage: hits");
         assert_eq!(
@@ -1479,6 +1501,7 @@ mod tests {
             2,
             2,
             40,
+            false,
             false,
         );
         assert_eq!(got, expected, "second stage: hits");

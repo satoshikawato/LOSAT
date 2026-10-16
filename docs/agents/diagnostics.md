@@ -1017,8 +1017,8 @@ Scheduling (each value computed by one thread with the original function; order 
   `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end with `partitions= merges= merge=
   helpers_left=`. Shadow: `LOSAT_X_PAIRPARSHADOW=1` / `LOSAT_X_PAIRPARDISCSHADOW=1`
   with the switch run the partitioned stage on the copies (and check every reuse of the kept tables
-  against the chunk's table); their lines end with `fold=part partitions= merges= kept=` (`fold=owner`
-  without the switch; `kept`: stages that started from the kept tables). On the command line a subject
+  against the chunk's table); with the switch their lines end with `fold=part partitions= merges= kept=`
+  (`kept`: stages that started from the kept tables; without the switch the lines are as before). On the command line a subject
   scratch has one partitioned stage per query batch (a subject of several chunks has its chunks searched
   in parallel), so `kept` is 0 there; the unit tests cover the reuse.
   Tests: the unit tests of `x_pair_seed_part.rs` (random op streams at 2, 3, 7 and 16 partitions on 1..8

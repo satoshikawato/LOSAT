@@ -925,14 +925,17 @@ pub(super) fn record(kind: usize, parts: usize, stats: &PartStats) {
     LEFT[kind].fetch_add(stats.helpers_left, Ordering::Relaxed);
 }
 
-/// No NCBI counterpart: the fields the shadow summary lines of `kind` end with: `fold=part`
-/// with the switch (`fold=owner` without), the partition count of the stages, the number of
-/// partitioned stages merged, and of those the ones that started from the kept tables.
+/// No NCBI counterpart: the fields the shadow summary lines of `kind` end with when the switch
+/// is on: `fold=part`, the partition count of the stages, the number of partitioned stages
+/// merged, and of those the ones that started from the kept tables. Without the switch the
+/// lines are those of the strips paths alone.
 pub(super) fn shadow_fields(kind: usize) -> String {
+    if !switch_on() {
+        return String::new();
+    }
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     format!(
-        " fold={} partitions={} merges={} kept={}",
-        if switch_on() { "part" } else { "owner" },
+        " fold=part partitions={} merges={} kept={}",
         load(&PARTS[kind]),
         load(&MERGES[kind]),
         load(&KEPT[kind])

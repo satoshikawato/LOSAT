@@ -1019,6 +1019,34 @@ Rebuilding less:
   alive, a subject that arrives after a release stops the run, and an assertion that runs with and without
   the switch stops a frame loop that would run without the worker's table
   (`LOSAT/tests/tblastx_seed_release.rs` reads the counters).
+- `LOSAT_X_SEEDCOMPACT=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the seed stage of the unit path of `LOSAT_X_PAIRPAR` and its merge
+  hold fewer and exactly sized lists (`tblastx/x_pair_par.rs`, exactness argument in the section above
+  `XUnitHsp`). Without it each unit keeps its saved init HSPs as `InitHSP`s (72 bytes on 64-bit targets) in a
+  list grown by doubling, the lists of all units of a subject live until its merge, and the merge converts
+  each chunk's list into a list grown by doubling and copies the first chunk's list into the empty frame
+  list. With it a unit keeps each init HSP as a 28-byte record, NCBI's own record (`BlastUngappedData` and
+  the seed offsets: query and subject starts, length, score, the two seed offsets) and the context index,
+  built in a per-thread vector that is kept across units and copied out at its exact length; the merge
+  expands the records of a chunk's units, in unit order, into the same `InitHSP`s (the other fields come from
+  the unit's subject frame, the context and the subject), converts the chunk's list into a list reserved at
+  its length (`get_ungapped_hsp_list_into`, the body of `get_ungapped_hsp_list`), and moves the first
+  chunk's list into the empty frame list (what `merge_tblastx_subject_chunk_hits` computes for an empty
+  list, without its copy). No value, order or sort changes. With the switch off the statements of the unit
+  path run as before, after one read of the mode per subject (`x_hit` and the unit scan are generic over
+  the list they save into and compiled once for each). It acts only where the unit path runs (the
+  scan loop and `LOSAT_X_PAIRPAR=0` are untouched). There is no shadow variable of its own:
+  `LOSAT_X_PAIRPARSHADOW=1` with the switch compares the unit path's `combined_ungapped_hits`, made from
+  the compact lists, with the reference loop's for every subject. `LOSAT_X_STATS=1` prints, whenever the
+  switch is on, `[X_STATS] SEEDCOMPACT subjects= units= records= bytes_saved=` (subjects and units merged
+  from compact lists, records expanded, and records x (size of `InitHSP` - 28): the bytes the unit
+  outputs no longer request; all 0 where no unit path runs). `LOSAT/tests/tblastx_seed_compact.rs` reads
+  the counters. Measured once on 2026-10-17 (WSL machine under load, one binary, max RSS from `wait4`, means
+  of three alternating runs without -> with the switch, every report the frozen one): AP027131 x AP027133
+  (genetic code 4) 111.0 -> 88.7 MiB at one thread and 164.0 -> 154.5 at eight; NZ_CP006932 against itself
+  132.2 -> 123.9 and 226.3 -> 215.1 (at eight threads the peak is then the first linking call). The medians
+  of `units`, `merge` (`[TIMING] x_pairpar`) and `search_total` moved within the run-to-run spread of that
+  machine; the probe build measured the same memory on the workstation (-22.6, -7.5, -8.1 and -9.4 MiB).
 
 Scheduling (each value computed by one thread with the original function; order of output kept):
 

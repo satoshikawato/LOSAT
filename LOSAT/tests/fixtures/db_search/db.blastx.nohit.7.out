@@ -1,0 +1,5 @@
+# BLASTX 2.17.0+
+# Query: q_nohit 300 random bases
+# Database: tests/db_search/bslice
+# 0 hits found
+# BLAST processed 1 queries

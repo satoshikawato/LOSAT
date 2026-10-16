@@ -17,6 +17,14 @@ use super::{
     report,
     runtime::search_internal,
 };
+use super::{
+    database::{BlastxDatabase, ReportedSubjects},
+    input::FastaRecord,
+    report::ShownSubjects,
+    runtime::BatchResults,
+    subjects::{Subjects, UnreadableSubjects},
+};
+use crate::algorithm::common::database::{HeaderReadError, PreliminaryReadError};
 use anyhow::{bail, Result};
 use std::{
     fmt,
@@ -264,9 +272,13 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     //         (m_Stream->eof()  ||  CT_EQ_INT_TYPE(m_Stream->peek(), CT_EOF));
     // }
     // ```
-    let subject_file =
-        File::open(&args.subject).map_err(|_| inaccessible("subject", &args.subject))?;
-    let mut subject_stream = FastaStream::from_file(subject_file);
+    // `-db`: the database opens after the options are processed (below).
+    let subject_path = args.subject.as_deref();
+    let subject_file = match (&args.db, subject_path) {
+        (Some(_), _) => None,
+        (None, Some(path)) => Some(File::open(path).map_err(|_| inaccessible("subject", path))?),
+        (None, None) => return Err(crate::blastinput::app::missing_subject_error()),
+    };
     // EXPERIMENT (LOSAT_X_BXBATCH): batches are then searched on other
     // threads while this function runs. A diagnostic or a panic message
     // written there must not wait for a lock this thread keeps for the whole
@@ -280,15 +292,18 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     } else {
         Box::new(io::stderr().lock())
     };
-    let subjects = parse_fasta_stream_with_warnings(
-        &mut subject_stream,
-        true,
-        args.lcase_masking,
-        usize::MAX,
-        &mut |_| Ok(()),
-        &mut |warning| reader_warning(warning, &mut stderr),
-    )
-    .map_err(input_error)?;
+    let subjects = match subject_file {
+        Some(subject_file) => parse_fasta_stream_with_warnings(
+            &mut FastaStream::from_file(subject_file),
+            true,
+            args.lcase_masking,
+            usize::MAX,
+            &mut |_| Ok(()),
+            &mut |warning| reader_warning(warning, &mut stderr),
+        )
+        .map_err(input_error)?,
+        None => Vec::new(),
+    };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
     // ```c++
     // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
@@ -298,7 +313,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     //         NCBI_THROW(CBlastException, eInvalidArgument, "Empty CBlastQueryVector");
     //     }
     // ```
-    if subjects.is_empty() {
+    if args.db.is_none() && subjects.is_empty() {
         return Err(engine("Empty CBlastQueryVector"));
     }
     let query_file = File::open(&args.query).map_err(|_| inaccessible("query", &args.query))?;
@@ -329,6 +344,29 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             "BLAST query/options error: {e}\nPlease refer to the BLAST+ user manual.\n"
         ),
     })?;
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:195-200
+    // ```c++
+    //         /*** Initialize the database/subject ***/
+    //         CRef<CBlastDatabaseArgs> db_args(m_CmdLineArgs->GetBlastDatabaseArgs());
+    //         CRef<CLocalDbAdapter> db_adapter;
+    //         CRef<CScope> scope;
+    //         InitializeSubject(db_args, m_OptsHndl, m_CmdLineArgs->ExecuteRemotely(),
+    //                          db_adapter, scope);
+    // ```
+    // The database of `-db` opens after the arguments (the query and output files) and the
+    // options are processed and before the query is read, as NCBI's `InitializeSubject`.
+    // NCBI's application layer has read its environment and registry files by then; LOSAT
+    // reads them for `-db` (the registry's `BLASTDB`), as its other programs with `-db`, and
+    // leaves `-subject`'s path as it was.
+    let database = match args.database_name() {
+        Some(name) => {
+            let settings =
+                crate::blastinput::ncbi_environment::check_ncbi_application_settings("blastx")
+                    .map_err(anyhow::Error::msg)?;
+            Some(BlastxDatabase::open(name, &settings)?)
+        }
+        None => None,
+    };
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
     // ```c++
     // 	char c;
@@ -387,7 +425,106 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             s.internal_id, s.title
         )?;
     }
-    report::write_prolog(&mut writer, &options, &subjects, &args.subject).map_err(report_error)?;
+    let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
+    let no_reported = ReportedSubjects::default();
+    let shown_run = match (&database, &pairwise_database) {
+        (Some(database), Some(pairwise)) => ShownSubjects::Database {
+            name: database.name(),
+            pairwise,
+            reported: &no_reported,
+        },
+        _ => ShownSubjects::Fasta {
+            path: subject_path.expect("a subject file without -db"),
+        },
+    };
+    report::write_prolog(&mut writer, &options, &subjects, &shown_run).map_err(report_error)?;
+    // NCBI writes the prolog out before it searches the first batch, so the warnings of the
+    // batch come after it when both streams go to one place.
+    writer.flush().map_err(output_error)?;
+    // The database's sequences, read once for every batch; an error belongs to the first
+    // batch with a valid context (`Subjects::Unreadable`, `search_error`).
+    let (stores, unreadable) = match database.as_ref().map(BlastxDatabase::read_stores) {
+        Some(Ok(stores)) => (Some(stores), None),
+        Some(Err(error)) => (None, Some(error)),
+        None => (None, None),
+    };
+    let unreadable = std::cell::RefCell::new(unreadable);
+    let search_subjects = match (&database, &stores) {
+        (None, _) => Subjects::Fasta(&subjects),
+        (Some(_), Some(stores)) => Subjects::Database(stores),
+        (Some(_), None) => Subjects::Unreadable,
+    };
+    let search_error = |error: anyhow::Error| -> anyhow::Error {
+        // LOSAT's refusal, not an error of NCBI's engine.
+        if error.is::<super::parameters::SearchSpaceOverflow>() {
+            return error;
+        }
+        if error.is::<UnreadableSubjects>() {
+            let kept = unreadable
+                .borrow_mut()
+                .take()
+                .expect("the database's error, raised once");
+            return match kept.downcast::<PreliminaryReadError>() {
+                Ok(PreliminaryReadError(text)) => engine(text),
+                Err(refusal) => refusal,
+            };
+        }
+        engine(error)
+    };
+    // The reports of one query batch: with `-db`, the titles of its reported sequences are
+    // read first and its hit lists renamed to ranks (`ReportedSubjects::for_batch`); NCBI's
+    // reader error there stops the run at this batch, with no epilog.
+    let render_batch = |writer: &mut BufWriter<Box<dyn Write>>,
+                        diagnostics: &mut dyn Write,
+                        queries: &[FastaRecord],
+                        results: &mut Vec<BatchResults>|
+     -> Result<()> {
+        match (&database, &pairwise_database) {
+            (Some(database), Some(pairwise)) => {
+                let reported = match &stores {
+                    Some(stores) => ReportedSubjects::for_batch(
+                        database,
+                        stores,
+                        results,
+                        options.gapped,
+                        options.outfmt != 0,
+                        options.outfmt == 0,
+                    )
+                    .map_err(|error| {
+                        match error.downcast::<HeaderReadError>() {
+                            Ok(header) => header.error,
+                            Err(error) => error,
+                        }
+                    })?,
+                    None => ReportedSubjects::default(),
+                };
+                report::render_queries(
+                    writer,
+                    diagnostics,
+                    &options,
+                    queries,
+                    reported.records(),
+                    &ShownSubjects::Database {
+                        name: database.name(),
+                        pairwise,
+                        reported: &reported,
+                    },
+                    results,
+                )
+                .map_err(report_error)
+            }
+            _ => report::render_queries(
+                writer,
+                diagnostics,
+                &options,
+                queries,
+                &subjects,
+                &shown_run,
+                results,
+            )
+            .map_err(report_error),
+        }
+    };
     let mut processed = 0usize;
     {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:260-261
@@ -503,7 +640,10 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                             .iter()
                             .map(|queries| {
                                 super::runtime::x_search_internal_in_pool(
-                                    queries, &subjects, &options, pool,
+                                    queries,
+                                    search_subjects,
+                                    &options,
+                                    pool,
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -517,11 +657,16 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                                     // the pool; a short batch is one serial job.
                                     if x_large(queries) {
                                         super::runtime::x_search_internal_in_pool(
-                                            queries, &subjects, &options, pool,
+                                            queries,
+                                            search_subjects,
+                                            &options,
+                                            pool,
                                         )
                                     } else {
                                         super::runtime::x_search_internal_serial(
-                                            queries, &subjects, &options,
+                                            queries,
+                                            search_subjects,
+                                            &options,
                                         )
                                     }
                                 })
@@ -536,17 +681,13 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                                 let mut results = searched
                                     .next()
                                     .expect("one search per queued batch")
-                                    .map_err(engine)?;
-                                report::render_queries(
+                                    .map_err(search_error)?;
+                                render_batch(
                                     &mut writer,
                                     &mut **diagnostics.borrow_mut(),
-                                    &options,
                                     queries,
-                                    &subjects,
-                                    &args.subject,
                                     &mut results,
-                                )
-                                .map_err(report_error)?;
+                                )?;
                                 writer.flush().map_err(output_error)?;
                                 processed += queries.len();
                             }
@@ -630,21 +771,20 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                     // pool only changes who runs the work).
                     let mut results = match x_pool {
                         Some(pool) => super::runtime::x_search_internal_in_pool(
-                            queries, &subjects, &options, pool,
+                            queries,
+                            search_subjects,
+                            &options,
+                            pool,
                         ),
-                        None => search_internal(queries, &subjects, &options),
+                        None => search_internal(queries, search_subjects, &options),
                     }
-                    .map_err(engine)?;
-                    report::render_queries(
+                    .map_err(search_error)?;
+                    render_batch(
                         &mut writer,
                         &mut **diagnostics.borrow_mut(),
-                        &options,
                         queries,
-                        &subjects,
-                        &args.subject,
                         &mut results,
-                    )
-                    .map_err(report_error)?;
+                    )?;
                     writer.flush().map_err(output_error)?;
                     processed += queries.len();
                     Ok(())
@@ -677,7 +817,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         };
         x_batches.map_err(input_error)?;
     }
-    report::write_epilog(&mut writer, &options, &subjects, &args.subject, processed)
+    report::write_epilog(&mut writer, &options, &subjects, &shown_run, processed)
         .map_err(report_error)?;
     writer.flush().map_err(output_error)?;
     Ok(())

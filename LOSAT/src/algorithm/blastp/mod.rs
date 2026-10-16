@@ -62,6 +62,12 @@ pub fn x_bp_seed_print_summary() {
     x_seed_fused::x_bp_seed_print_summary();
 }
 
+/// EXPERIMENT (LOSAT_X_BPLKPAHEADSHADOW): the shadow mode's line at exit.
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_bp_lkp_ahead_print_summary() {
+    blast_engine::x_lookup_ahead::x_bp_lkp_ahead_print_summary();
+}
+
 /// EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): the shadow mode's line at exit.
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_bp_redo_par_print_summary() {
@@ -76,6 +82,18 @@ pub fn x_bp_redo_par_print_summary() {
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_bp_subj_run_print_summary() {
     blast_engine::x_bp_subj_run_print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the shadow mode's line at exit.
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_bp_db_cut_print_summary() {
+    blast_engine::x_bp_db_cut_print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BPSUBJMETASHADOW): the shadow mode's line at exit.
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_bp_subj_meta_print_summary() {
+    blast_engine::x_bp_subj_meta_print_summary();
 }
 
 /// EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): a search's result against the new path's when the

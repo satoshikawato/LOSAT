@@ -176,6 +176,92 @@ impl PackedNucleotide {
         })
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:834-842
+    // ```c++
+    //         if (position + row_len <= region.begin)
+    //             continue;
+    //
+    //         if(position >= region.end)
+    //         	break;
+    //
+    //         for (int j = 0; j < row_len; ++j, ++position)
+    //             if ( position >= region.begin  && position < region.end)
+    //                 seq[position] = trans_ch;
+    // ```
+    /// A sequence of a BLAST database as stored (`seqdb::volume::SequenceBlock`): `packed` is
+    /// its 2-bit data (`nucleotide_packed`: the bases makeblastdb stored, each ambiguous base
+    /// replaced by one of its bases, in the layout of a subject's packed bytes), `length` its
+    /// number of bases (`nucleotide_len`) and `runs` its ambiguity runs in stored order
+    /// (`ambiguity_runs`). No lowercase intervals.
+    ///
+    /// The runs are applied to the letters as NCBI's reader applies them to the whole sequence
+    /// (`nucleotide_blastna`): in stored order, a run starting at or past the end stops the
+    /// others, a later run overwrites an earlier one. Runs in order and apart are kept as they
+    /// are (makeblastdb writes them so); otherwise the runs are made again from the letters
+    /// that applying them gives: the bases whose ncbi4na code differs from the stored base's.
+    /// So the letters, ncbi4na and blastna codes are those of NCBI's traceback, and the packed
+    /// bytes those of its preliminary stage. A run may hold the code of `A`, `C`, `G` or `T`
+    /// (another letter than the stored base); it is kept, as the letters show it.
+    pub fn from_stored(packed: &[u8], length: usize, runs: &[AmbiguityRun]) -> Self {
+        let mut clipped: Vec<AmbiguityRun> = Vec::with_capacity(runs.len());
+        let mut in_order = true;
+        let mut previous_end = 0usize;
+        for run in runs {
+            let position = i64::from(run.offset as i32);
+            let row_end = position + i64::from(run.length);
+            if row_end <= 0 {
+                continue;
+            }
+            if position >= length as i64 {
+                break;
+            }
+            let start = position.max(0) as usize;
+            let end = row_end.min(length as i64) as usize;
+            in_order &= start >= previous_end;
+            previous_end = previous_end.max(end);
+            clipped.push(AmbiguityRun {
+                offset: start as u32,
+                length: (end - start) as u32,
+                ncbi4na: run.ncbi4na & 0x0F,
+            });
+        }
+        let mut store = Self {
+            packed: packed.into(),
+            length,
+            ambiguity: Box::default(),
+            lowercase: Box::default(),
+        };
+        if in_order {
+            store.ambiguity = clipped.into_boxed_slice();
+            return store;
+        }
+        let mut codes = Vec::new();
+        store.unpack_into(&mut codes, [1, 2, 4, 8]);
+        let stored = codes.clone();
+        for run in &clipped {
+            let start = run.offset as usize;
+            codes[start..start + run.length as usize].fill(run.ncbi4na);
+        }
+        let mut rebuilt: Vec<AmbiguityRun> = Vec::new();
+        for (index, (&code, &base)) in codes.iter().zip(&stored).enumerate() {
+            if code == base {
+                continue;
+            }
+            match rebuilt.last_mut() {
+                Some(run) if run.ncbi4na == code && (run.offset + run.length) as usize == index => {
+                    run.length += 1
+                }
+                _ => rebuilt.push(AmbiguityRun {
+                    offset: index as u32,
+                    length: 1,
+                    ncbi4na: code,
+                }),
+            }
+        }
+        store.ambiguity = rebuilt.into_boxed_slice();
+        store
+    }
+
     /// The number of bases.
     pub fn len(&self) -> usize {
         self.length
@@ -540,6 +626,133 @@ mod tests {
                 PackedNucleotide::from_subject_letters(seq).is_none(),
                 "{seq:?}"
             );
+        }
+    }
+
+    /// NCBI's reader applying `runs` to the letters of `packed` (seqdbvol.cpp:834-842), as
+    /// ncbi4na codes.
+    fn ncbi_letters(packed: &[u8], length: usize, runs: &[AmbiguityRun]) -> Vec<u8> {
+        let mut seq: Vec<u8> = (0..length)
+            .map(|index| 1 << ((packed[index >> 2] >> (6 - 2 * (index & 3))) & 3))
+            .collect();
+        for run in runs {
+            let mut position = i64::from(run.offset as i32);
+            let row_len = i64::from(run.length);
+            if position + row_len <= 0 {
+                continue;
+            }
+            if position >= length as i64 {
+                break;
+            }
+            for _ in 0..row_len {
+                if position >= 0 && position < length as i64 {
+                    seq[position as usize] = run.ncbi4na;
+                }
+                position += 1;
+            }
+        }
+        seq
+    }
+
+    /// Every form of `store` against the ncbi4na codes `codes` and the stored `packed` bytes.
+    fn assert_stored_forms(store: &PackedNucleotide, packed: &[u8], codes: &[u8], what: &str) {
+        let length = codes.len();
+        assert_eq!(store.len(), length, "{what}");
+        assert_eq!(store.packed(), packed, "{what}");
+        let mut out = Vec::new();
+        store.ncbi4na_into(&mut out);
+        assert_eq!(out, codes, "{what}: ncbi4na");
+        store.ascii_into(&mut out);
+        let letters: Vec<u8> = codes
+            .iter()
+            .map(|&code| NCBI4NA_TO_IUPACNA[usize::from(code)])
+            .collect();
+        assert_eq!(out, letters, "{what}: letters");
+        store.letters_into(length / 3, length, &mut out);
+        assert_eq!(out, &letters[length / 3..], "{what}: window");
+        store.resolved_letters_into(&mut out);
+        let resolved: Vec<u8> = (0..length)
+            .map(|index| b"ACGT"[usize::from((packed[index >> 2] >> (6 - 2 * (index & 3))) & 3)])
+            .collect();
+        assert_eq!(out, resolved, "{what}: resolved");
+        let runs = store.ambiguity_runs();
+        assert!(
+            runs.windows(2)
+                .all(|pair| pair[0].offset + pair[0].length <= pair[1].offset),
+            "{what}: runs in order and apart"
+        );
+        assert!(store.lowercase().is_empty(), "{what}");
+    }
+
+    #[test]
+    fn a_stored_sequence_reads_as_ncbis_reader_reads_it() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut checked = 0;
+        for name in [
+            "seqdb/db/nucl_v4",
+            "seqdb/db/nucl_v5",
+            "seqdb/db/nucl_mv",
+            "db_search/nslice",
+        ] {
+            let path = root.join("tests").join(name);
+            let db = crate::seqdb::SeqDb::open(
+                path.to_str().unwrap(),
+                crate::seqdb::SeqType::Nucleotide,
+            )
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+            let mut next = 0;
+            while let Some(range) = db.next_block(next, u64::MAX) {
+                next = range.end_ordinal();
+                let block = db.read_block(range).unwrap();
+                for i in 0..block.len() {
+                    let packed = block.nucleotide_packed(i);
+                    let length = block.nucleotide_len(i).unwrap();
+                    let runs = block.ambiguity_runs(i).unwrap();
+                    let store = PackedNucleotide::from_stored(packed, length, &runs);
+                    let blastna = block.nucleotide_blastna(i).unwrap();
+                    let mut out = Vec::new();
+                    store.blastna_into(&mut out);
+                    assert_eq!(out, &blastna[1..=length], "{name} {i}: blastna");
+                    let codes = ncbi_letters(packed, length, &runs);
+                    assert_stored_forms(&store, packed, &codes, &format!("{name} {i}"));
+                    checked += 1;
+                }
+            }
+            assert_eq!(next, db.num_seqs(), "{name}");
+        }
+        assert!(checked > 20, "{checked} sequences");
+    }
+
+    #[test]
+    fn stored_runs_out_of_order_are_applied_as_ncbi_applies_them() {
+        let letters = random_letters(203, 7, 0);
+        let plain = PackedNucleotide::from_subject_letters(&letters).unwrap();
+        let packed = plain.packed().to_vec();
+        let run = |offset: u32, length: u32, ncbi4na: u8| AmbiguityRun {
+            offset,
+            length,
+            ncbi4na,
+        };
+        let cases: Vec<Vec<AmbiguityRun>> = vec![
+            vec![],
+            vec![run(0, 3, 15), run(3, 1, 5), run(200, 3, 0)],
+            // overlapping, out of order, a plain base's code, and a run that passes the end
+            vec![
+                run(10, 8, 15),
+                run(12, 2, 10),
+                run(5, 1, 1),
+                run(198, 40, 6),
+            ],
+            // a run past the end stops the ones after it
+            vec![run(20, 2, 15), run(203, 1, 3), run(30, 2, 15)],
+            // a negative offset (NCBI's signed position) starts before the sequence
+            vec![run(u32::MAX - 1, 4, 9), run(1, 1, 15)],
+            vec![run(50, 4, 15), run(50, 4, 15), run(52, 6, 3)],
+        ];
+        for (number, runs) in cases.iter().enumerate() {
+            let store = PackedNucleotide::from_stored(&packed, letters.len(), runs);
+            let codes = ncbi_letters(&packed, letters.len(), runs);
+            assert_stored_forms(&store, &packed, &codes, &format!("case {number}"));
         }
     }
 }

@@ -418,6 +418,34 @@ fn write_database_subject_alignments<W: Write>(
         writer.flush()?;
         probe.subject_begin(first_index);
     }
+    write_database_subject_heading(writer, title, protein, hits[0].subject_length)?;
+    if let Some(probe) = probe.as_mut() {
+        writer.flush()?;
+        probe.subject_end(first_index);
+    }
+    for (hit, &hsp_index) in hits.iter().zip(hsp_indices) {
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.begin(hsp_index);
+        }
+        write_hsp(writer, hit)?;
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.end(hsp_index);
+        }
+    }
+    Ok(())
+}
+
+/// The heading of a database sequence's alignments (`write_database_subject_alignments`):
+/// `>` and the stored title wrapped as `s_WrapOutputLine` wraps it, then `Length=` when the
+/// length is known, and one blank line. BLASTX writes it with its own HSP blocks.
+fn write_database_subject_heading<W: Write>(
+    writer: &mut W,
+    title: &[u8],
+    protein: bool,
+    length: Option<usize>,
+) -> io::Result<()> {
     let generated;
     let heading: &[u8] = if title.is_empty() {
         generated = super::defline::generate_defline(title, protein, false)
@@ -463,26 +491,10 @@ fn write_database_subject_alignments<W: Write>(
         }
     }
     writeln!(writer)?;
-    if let Some(length) = hits[0].subject_length {
+    if let Some(length) = length {
         writeln!(writer, "Length={length}")?;
     }
-    writeln!(writer)?;
-    if let Some(probe) = probe.as_mut() {
-        writer.flush()?;
-        probe.subject_end(first_index);
-    }
-    for (hit, &hsp_index) in hits.iter().zip(hsp_indices) {
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.begin(hsp_index);
-        }
-        write_hsp(writer, hit)?;
-        if let Some(probe) = probe.as_mut() {
-            writer.flush()?;
-            probe.end(hsp_index);
-        }
-    }
-    Ok(())
+    writeln!(writer)
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:3152-3161
@@ -3938,8 +3950,12 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
     database_name: &str,
     database_num_sequences: usize,
     database_total_letters: usize,
+    database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     write_translated_pairwise_intro(writer, "TBLASTN", version)?;
+    if let Some(database) = database {
+        return write_blast_database_header(writer, database);
+    }
     write_blastp_database_header_spacing(
         writer,
         database_name,
@@ -3962,6 +3978,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     query_batch_skipped: &[bool],
     subject_titles: &[Arc<[u8]>],
     report: &BlastpPairwiseReport,
+    database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     epilog: bool,
@@ -3984,13 +4001,16 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     write_translated_pairwise_intro(&mut writer, "TBLASTN", &report.version)?;
     // The prolog ends with one blank line; each query's preamble starts with two
     // (blast_format.cpp:1491), after the query's warnings.
-    write_blastp_database_header_spacing(
-        &mut writer,
-        &report.database_name,
-        report.database_num_sequences,
-        report.database_total_letters,
-        1,
-    )?;
+    match database {
+        Some(database) => write_blast_database_header(&mut writer, database)?,
+        None => write_blastp_database_header_spacing(
+            &mut writer,
+            &report.database_name,
+            report.database_num_sequences,
+            report.database_total_letters,
+            1,
+        )?,
+    }
 
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
     // ```c++
@@ -4095,6 +4115,27 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
         let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
         for &s_idx in aligned {
+            // NCBI c++/src/objtools/align_format/showalign.cpp:3650-3668:
+            // display leaves an extra blank line after each translated HSP.
+            let write_hsp = |writer: &mut io::BufWriter<&mut W>, hit: &PairwiseHit| {
+                write_tblastn_hsp_info(writer, hit)?;
+                write_tblastn_alignment(writer, hit, config)?;
+                writeln!(writer)
+            };
+            // A database sequence's heading is its stored title after `>` (as BLASTP's
+            // and BLASTN's `-db` reports).
+            if database.is_some() {
+                write_database_subject_alignments(
+                    &mut writer,
+                    probe.as_deref_mut(),
+                    &subject_titles[&s_idx],
+                    false,
+                    &subject_hits[&s_idx],
+                    &subject_hit_indices[&s_idx],
+                    write_hsp,
+                )?;
+                continue;
+            }
             write_subject_alignments(
                 &mut writer,
                 probe.as_deref_mut(),
@@ -4103,13 +4144,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
                 false,
                 &subject_hits[&s_idx],
                 &subject_hit_indices[&s_idx],
-                // NCBI c++/src/objtools/align_format/showalign.cpp:3650-3668:
-                // display leaves an extra blank line after each translated HSP.
-                |writer, hit| {
-                    write_tblastn_hsp_info(writer, hit)?;
-                    write_tblastn_alignment(writer, hit, config)?;
-                    writeln!(writer)
-                },
+                write_hsp,
             )?;
         }
         write_blastp_query_footer_spacing(
@@ -4133,7 +4168,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     // The blank lines before the epilog (blast_format.cpp:2249).
     writeln!(&mut writer)?;
     writeln!(&mut writer)?;
-    write_blastp_final_footer(&mut writer, report, None)?;
+    write_blastp_final_footer(&mut writer, report, database)?;
     writer.flush()
 }
 
@@ -4490,6 +4525,7 @@ pub fn write_blastx_pairwise_report<W: Write>(
     subject_ids: &[Arc<str>],
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
+    database: Option<(&PairwiseDatabase, &[Arc<[u8]>])>,
 ) -> io::Result<()> {
     let mut writer = io::BufWriter::new(writer);
     let mut by_query: Vec<Vec<&PairwiseHit>> = vec![Vec::new(); queries.len()];
@@ -4539,12 +4575,22 @@ pub fn write_blastx_pairwise_report<W: Write>(
             for oid in order.iter().take(options.num_alignments) {
                 let shits = &grouped[oid];
                 let first = shits[0];
-                write_subject_header(
-                    &mut writer,
-                    subject_ids[*oid as usize].as_bytes(),
-                    first.subject_title.as_deref().map(str::as_bytes),
-                    first.subject_length,
-                )?;
+                // A database sequence's heading is its stored title after `>` (as
+                // BLASTP's, BLASTN's and TBLASTN's `-db` reports).
+                match database {
+                    Some((_, titles)) => write_database_subject_heading(
+                        &mut writer,
+                        &titles[*oid as usize],
+                        true,
+                        first.subject_length,
+                    )?,
+                    None => write_subject_header(
+                        &mut writer,
+                        subject_ids[*oid as usize].as_bytes(),
+                        first.subject_title.as_deref().map(str::as_bytes),
+                        first.subject_length,
+                    )?,
+                }
                 for hit in shits {
                     write_tblastn_hsp_info(&mut writer, hit)?;
                     write_blastx_alignment(&mut writer, hit, config)?;
@@ -4584,8 +4630,12 @@ pub fn write_blastx_pairwise_report<W: Write>(
 pub fn write_blastx_prolog(
     writer: &mut impl Write,
     report: &BlastpPairwiseReport,
+    database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     write_translated_pairwise_intro(writer, "BLASTX", &report.version)?;
+    if let Some(database) = database {
+        return write_blast_database_header(writer, database);
+    }
     write_blastp_database_header_spacing(
         writer,
         &report.database_name,
@@ -4626,6 +4676,7 @@ pub fn write_blastx_epilog(
     writer: &mut impl Write,
     report: &BlastpPairwiseReport,
     options: &BlastxPairwiseOptions,
+    database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2264-2288
     // ```c++
@@ -4661,26 +4712,30 @@ pub fn write_blastx_epilog(
     // ```
     writeln!(writer)?;
     writeln!(writer)?;
-    write!(writer, "  Database: ")?;
-    write_flatfile_wrapped(
-        writer,
-        ensure_trailing_period(&report.database_name).as_bytes(),
-        68,
-    )?;
-    writeln!(writer, "    Posted date:  Unknown")?;
-    writeln!(
-        writer,
-        "  Number of letters in database: {}",
-        format_count_with_commas(report.database_total_letters as i64)
-    )?;
-    writeln!(
-        writer,
-        "  Number of sequences in database:  {}",
-        format_count_with_commas(report.database_num_sequences as i64)
-    )?;
-    writeln!(writer)?;
-    writeln!(writer)?;
-    writeln!(writer)?;
+    if let Some(database) = database {
+        write_final_database_block(writer, database)?;
+    } else {
+        write!(writer, "  Database: ")?;
+        write_flatfile_wrapped(
+            writer,
+            ensure_trailing_period(&report.database_name).as_bytes(),
+            68,
+        )?;
+        writeln!(writer, "    Posted date:  Unknown")?;
+        writeln!(
+            writer,
+            "  Number of letters in database: {}",
+            format_count_with_commas(report.database_total_letters as i64)
+        )?;
+        writeln!(
+            writer,
+            "  Number of sequences in database:  {}",
+            format_count_with_commas(report.database_num_sequences as i64)
+        )?;
+        writeln!(writer)?;
+        writeln!(writer)?;
+        writeln!(writer)?;
+    }
     writeln!(writer, "Matrix: {}", report.matrix_name)?;
     if options.gapped {
         writeln!(

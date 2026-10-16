@@ -161,7 +161,9 @@
 //! (`XFlatSpare`), and tasks of another computation (the contexts' Karlin blocks of
 //! `blastp/x_query_blocks.rs`) run by the appends pass after its chunks (`XExtraTasks`).
 //! `LOSAT_X_BPLKPFLATSHADOW` builds the table again with the `par_iter` passes on fresh vectors and
-//! compares the two, slot for slot.
+//! compares the two, slot for slot. `LOSAT_X_BPLKPAHEAD` (off unless set; not in the strict set) runs
+//! the same build for the next query block ahead of that block, on vectors that the block search's
+//! thread allocated (`XFlatArgs::x_ahead`, `XFlatSpare::x_make_room`).
 
 use super::*;
 use crate::algorithm::tblastx::scan::OffsetPair;
@@ -305,9 +307,10 @@ pub fn x_bplkpflat_print_summary() {
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): the `starts` and `hits` of a flat table that its search no longer
 /// reads, kept by the block search (`blastp/x_query_blocks.rs` `XBlockSubjects`) for the next
 /// parallel build: the table's vectors are allocated by the caller of the builds, once, and then
-/// recycled instead of being zeroed again for each block.
+/// recycled instead of being zeroed again for each block. The second field (LOSAT_X_BPLKPAHEAD) holds
+/// a PV array's vector for a build ahead of its block (`x_make_room`); it is empty otherwise.
 #[derive(Default)]
-pub(crate) struct XFlatSpare(Mutex<(Vec<u32>, Vec<i32>)>);
+pub(crate) struct XFlatSpare(Mutex<(Vec<u32>, Vec<i32>)>, Mutex<Vec<u32>>);
 
 impl XFlatSpare {
     // No NCBI counterpart: buffer reuse only (above).
@@ -315,6 +318,52 @@ impl XFlatSpare {
     /// table is dropped.
     pub(crate) fn give(&self, table: XFlatCompressedLookup) {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = (table.starts, table.hits);
+    }
+
+    // No NCBI counterpart: buffer reuse, and the thread that allocates the table's vectors
+    // (LOSAT_X_BPLKPAHEAD); it changes no value NCBI computes (the build writes every entry it keeps
+    // before any is read, `x_clut_par.rs`).
+    /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): on the block search's thread, before the build of the next
+    /// block's table ahead of that block (`blastp/blast_engine/x_lookup_ahead.rs`) takes this spare,
+    /// which then allocates none of the table's vectors (`XFlatArgs::x_ahead`): keeps here vectors
+    /// with the room for a table of `backbone_size` cells and `hits` hits and for its PV array at any
+    /// PV shift. The vectors are this spare's own, else those `block` keeps (the block spare, which
+    /// the block before gave back), and each one short of its room is replaced here by an empty one
+    /// of `backbone_size + 1`, `hits_grown` (at least `hits`) and `(backbone_size >> PV_ARRAY_BTS) +
+    /// 1` entries of capacity. Nothing is written into them. Returns the number of vectors allocated.
+    pub(crate) fn x_make_room(
+        &self,
+        block: &XFlatSpare,
+        backbone_size: usize,
+        hits: usize,
+        hits_grown: usize,
+    ) -> usize {
+        // Each lock is held only around a move.
+        let take = |spare: &XFlatSpare| {
+            std::mem::take(&mut *spare.0.lock().unwrap_or_else(PoisonError::into_inner))
+        };
+        let mut kept = take(self);
+        if kept.0.capacity() == 0 && kept.1.capacity() == 0 {
+            kept = take(block);
+        }
+        let mut pv = std::mem::take(&mut *self.1.lock().unwrap_or_else(PoisonError::into_inner));
+        let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
+        let mut allocated = 0;
+        if kept.0.capacity() < backbone_size + 1 {
+            kept.0 = Vec::with_capacity(backbone_size + 1);
+            allocated += 1;
+        }
+        if kept.1.capacity() < hits {
+            kept.1 = Vec::with_capacity(hits_grown.max(hits));
+            allocated += 1;
+        }
+        if pv.capacity() < pv_words {
+            pv = Vec::with_capacity(pv_words);
+            allocated += 1;
+        }
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = kept;
+        *self.1.lock().unwrap_or_else(PoisonError::into_inner) = pv;
+        allocated
     }
 }
 
@@ -350,6 +399,12 @@ pub(crate) struct XFlatArgs<'a> {
     pub(crate) mode: XLkpFlat,
     pub(crate) spare: Option<&'a XFlatSpare>,
     pub(crate) extra: Option<&'a dyn XExtraTasks>,
+    /// LOSAT_X_BPLKPAHEAD: the build of a block's table ahead of that block, on a pool task
+    /// (`blastp/blast_engine/x_lookup_ahead.rs`): it allocates none of the table's vectors, takes
+    /// them all from `spare` (made ready by `XFlatSpare::x_make_room`), and makes no table where they
+    /// lack the room, the appends pass the bound (`TooLarge`) or the switch's mode is `Off`; the
+    /// block then builds its table itself.
+    pub(crate) x_ahead: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1189
@@ -1462,7 +1517,8 @@ pub(crate) enum XCompressedLookup {
 /// on `pool`'s threads too when it has more than one, compares the refusals and the tables (panics on a
 /// difference) and returns the reference's. `x_flat_args` goes to the pool's build
 /// (LOSAT_X_BPLKPFLAT); in mode 2 the pool's table then gives its vectors to the spare, so that the
-/// next build reuses them as in mode 1.
+/// next build reuses them as in mode 1. A build ahead of its block (`XFlatArgs::x_ahead`,
+/// LOSAT_X_BPLKPAHEAD) is only the pool's build of mode 1; elsewhere it returns `None` at once.
 pub(crate) fn x_bp_build_compressed_lookup(
     word_size: usize,
     scaled_threshold: i32,
@@ -1472,6 +1528,9 @@ pub(crate) fn x_bp_build_compressed_lookup(
     pool: &SearchPool<'_>,
     x_flat_args: XFlatArgs<'_>,
 ) -> Option<Result<XCompressedLookup, ()>> {
+    if x_flat_args.x_ahead && (x_bpclut_mode() != 1 || !x_pool_builds(pool)) {
+        return None;
+    }
     let reference = || {
         try_build_blosum62_compressed_lookup(word_size, scaled_threshold, query, locations, tables)
     };
@@ -1489,6 +1548,9 @@ pub(crate) fn x_bp_build_compressed_lookup(
             )? {
                 XFlatBuild::Table(table) => Some(Ok(XCompressedLookup::Flat(table))),
                 XFlatBuild::Refused => Some(Err(())),
+                // LOSAT_X_BPLKPAHEAD: a build ahead of its block runs no reference builder; the block
+                // builds its table itself (`XFlatArgs::x_ahead`).
+                XFlatBuild::TooLarge if x_flat_args.x_ahead => None,
                 XFlatBuild::TooLarge => {
                     reference().map(|built| built.map(XCompressedLookup::Reference))
                 }

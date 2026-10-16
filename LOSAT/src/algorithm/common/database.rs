@@ -1,8 +1,10 @@
 //! What the search programs share in a search of an NCBI BLAST database (`-db NAME`, read
 //! through `crate::seqdb`): the opening of the database by its name, the reader's errors
 //! as the command line reports them, the `Database:` lines of the pairwise report, and the
-//! rules for the stored titles of the reported sequences. BLASTP (stage DB-3) and BLASTN
-//! (stage DB-4) use them with their own name in LOSAT's refusals.
+//! rules for the stored titles of the reported sequences. BLASTP (stage DB-3), BLASTN
+//! (stage DB-4) and TBLASTN (stage DB-5) use them with their own name in LOSAT's refusals;
+//! TBLASTN also reads a nucleotide database whole into packed subjects
+//! (`read_nucleotide_stores`).
 //!
 //! The reader (`crate::seqdb`) knows nothing of the command line; this module maps its
 //! errors to NCBI's application errors (`crate::cli::NativeError`) and to LOSAT's
@@ -14,6 +16,7 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{SearchPath, SeqDb, SeqDbError, SeqType};
+use crate::sequence::packed_subject::PackedNucleotide;
 
 // NCBI reference (598d8ae6): c++/include/objtools/blast/seqdb_reader/impl/seqdbatlas.hpp:509-535
 // ```c++
@@ -166,6 +169,69 @@ pub(crate) fn search_read_error(error: SeqDbError, program: &str) -> anyhow::Err
         Some(text) => PreliminaryReadError(text).into(),
         None => refusal(&error.to_string(), program),
     }
+}
+
+/// Bytes of the sequence file that one read of `read_nucleotide_stores` holds at most
+/// (`SeqDb::next_block`; a longer sequence is a read of its own). No NCBI counterpart (NCBI
+/// maps the volume files); the size does not change what is read.
+const STORE_BLOCK_BYTES: u64 = 1 << 20;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1401-1405
+// ```c
+//     memset((void*) &seq_arg, 0, sizeof(seq_arg));
+//
+//     /* Encoding is set so there are no sentinel bytes, and protein/nucleotide
+//        sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
+//     seq_arg.encoding = eBlastEncodingProtein;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:771-775
+// ```c
+//         } else {
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ```
+/// Every sequence of the nucleotide database `db`, in ordinal order, as a packed subject
+/// (`PackedNucleotide::from_stored`): the stored 2-bit data, which a translated search's
+/// preliminary stage translates as NCBI does (makeblastdb's bases for the ambiguous ones),
+/// and the stored ambiguity runs, from which the traceback and the reports read the real
+/// codes. The file is read in blocks of at most `STORE_BLOCK_BYTES`, each dropped once its
+/// sequences are packed, so the database is held packed only. NCBI reads every sequence's
+/// 2-bit data in the first query batch's preliminary search, so a block that cannot be read
+/// is that search's error (`search_read_error`).
+pub(crate) fn read_nucleotide_stores(db: &SeqDb, program: &str) -> Result<Vec<PackedNucleotide>> {
+    let mut stores = Vec::with_capacity(db.num_seqs() as usize);
+    let mut next_ordinal = 0u32;
+    while let Some(range) = db.next_block(next_ordinal, STORE_BLOCK_BYTES) {
+        let block = db
+            .read_block(range)
+            .map_err(|error| search_read_error(error, program))?;
+        for i in 0..block.len() {
+            let length = block
+                .nucleotide_len(i)
+                .map_err(|error| search_read_error(error, program))?;
+            // NCBI's preliminary search reads the 2-bit data only; it reads the ambiguity
+            // data in the traceback, of the reported sequences. LOSAT reads them for every
+            // sequence here, so data it cannot read are LOSAT's refusal, not an NCBI error.
+            let runs = block.ambiguity_runs(i).map_err(|error| {
+                refusal(
+                    &format!(
+                        "the ambiguity data of database sequence {} cannot be read ({error})",
+                        range.first_ordinal + i as u32
+                    ),
+                    program,
+                )
+            })?;
+            stores.push(PackedNucleotide::from_stored(
+                block.nucleotide_packed(i),
+                length,
+                &runs,
+            ));
+        }
+        next_ordinal = range.end_ordinal();
+    }
+    Ok(stores)
 }
 
 /// NCBI's error of a database file that cannot be read during the preliminary search

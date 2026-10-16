@@ -339,6 +339,10 @@ pub(crate) struct XBlockSubjects {
     records: (usize, usize),
     encoded: Vec<EncodedProtein>,
     x_lookup_spare: XFlatSpare,
+    /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the second spare: the vectors of the next block's table,
+    /// allocated or moved here by the block search's thread for the build of that table ahead of its
+    /// block (`blast_engine/x_lookup_ahead.rs`, `x_bp_lookup_spares`).
+    x_lookup_ahead: XFlatSpare,
 }
 
 impl XBlockSubjects {
@@ -349,6 +353,7 @@ impl XBlockSubjects {
             records: (records.as_ptr() as usize, records.len()),
             encoded,
             x_lookup_spare: XFlatSpare::default(),
+            x_lookup_ahead: XFlatSpare::default(),
         }
     }
 }
@@ -423,6 +428,31 @@ pub(crate) fn x_bp_lookup_spare<'p>(pool: &SearchPool<'p>) -> Option<&'p XFlatSp
         .map(|subjects| &subjects.x_lookup_spare)
 }
 
+// No NCBI counterpart: buffer reuse between the blocks' lookup tables (`XFlatSpare`).
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the block search's two spares, where LOSAT_X_BPLKPFLAT acts: the
+/// block spare (`x_bp_lookup_spare`) and the second spare, which the build of the next block's table
+/// ahead of that block takes (`blast_engine/x_lookup_ahead.rs`).
+pub(crate) fn x_bp_lookup_spares<'p>(
+    pool: &SearchPool<'p>,
+) -> Option<(&'p XFlatSpare, &'p XFlatSpare)> {
+    x_bp_lookup_spare(pool)?;
+    pool.x_ext::<XBlockSubjects>()
+        .map(|subjects| (&subjects.x_lookup_spare, &subjects.x_lookup_ahead))
+}
+
+/// EXPERIMENT (LOSAT_X_BPLKPFLAT, LOSAT_X_BPLKPAHEAD): which build of a block search the lookup query
+/// is for, which decides the spare vectors the pool's build of the flat table takes (`XLookupFlat`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum XLookupFor {
+    /// A block's (or a search's) own build: the block spare.
+    Search,
+    /// A query chunk of a split batch (`x_query_chunk`): none.
+    QueryChunk,
+    /// The next block's build ahead of it, on a pool task (LOSAT_X_BPLKPAHEAD): the second spare,
+    /// and no vector of the table allocated by the build (`XFlatArgs::x_ahead`).
+    Ahead,
+}
+
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT): the lookup query of blastp-fast's compressed table and what the
 /// pool's build of its flat table gets with the switch (`lookup/x_clut_par.rs`): the block search's
 /// spare vectors, and with `LOSAT_X_BPQBLOCK` the contexts' Karlin blocks as extra tasks of the
@@ -430,6 +460,8 @@ pub(crate) fn x_bp_lookup_spare<'p>(pool: &SearchPool<'p>) -> Option<&'p XFlatSp
 pub(crate) struct XLookupFlat<'a> {
     mode: XLkpFlat,
     spare: Option<&'a XFlatSpare>,
+    /// LOSAT_X_BPLKPAHEAD: the build ahead of its block (`XLookupFor::Ahead`).
+    x_ahead: bool,
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -445,32 +477,38 @@ impl<'a> XLookupFlat<'a> {
     // ```
     /// The values of `x_bp_lookup_query(query_frames, word_size, pool)`; where the switch acts with
     /// `LOSAT_X_BPQBLOCK`, the contexts come without their Karlin blocks, which `finish` sets after
-    /// the build (`XKarlinTasks`). A query chunk of a split batch (`x_query_chunk`, a search that
-    /// ends after its preliminary stage, inside its block's search, and drops its table there)
-    /// takes no spare vectors: the block's table keeps them.
+    /// the build (`XKarlinTasks`). A query chunk of a split batch (`XLookupFor::QueryChunk`, a search
+    /// that ends after its preliminary stage, inside its block's search, and drops its table there)
+    /// takes no spare vectors: the block's table keeps them. The build of the next block's table
+    /// ahead of it (`XLookupFor::Ahead`, LOSAT_X_BPLKPAHEAD) takes the second spare's.
     pub(crate) fn lookup_query<'p: 'a>(
         query_frames: &'a [Vec<QueryFrame>],
         word_size: usize,
         pool: &SearchPool<'p>,
-        x_query_chunk: bool,
+        x_for: XLookupFor,
     ) -> (Self, Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
         let mode = x_lkpflat_mode_for_pool(pool);
-        let spare = if x_query_chunk {
-            None
-        } else {
-            x_bp_lookup_spare(pool)
+        let spare = match x_for {
+            XLookupFor::Search => x_bp_lookup_spare(pool),
+            XLookupFor::QueryChunk => None,
+            XLookupFor::Ahead => x_bp_lookup_spares(pool).map(|(_, ahead)| ahead),
         };
+        let x_ahead = x_for == XLookupFor::Ahead;
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         if mode != XLkpFlat::Off && x_bp_qblock().is_some() {
-            return Self::with_karlin_tasks(query_frames, word_size, mode, spare);
+            let (mut flat, query, locations, contexts) =
+                Self::with_karlin_tasks(query_frames, word_size, mode, spare);
+            flat.x_ahead = x_ahead;
+            return (flat, query, locations, contexts);
         }
         let (query, locations, contexts) = x_bp_lookup_query(query_frames, word_size, pool);
         let flat = Self {
             mode,
             spare,
+            x_ahead,
             #[cfg(all(
                 feature = "parallel",
                 any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -520,6 +558,7 @@ impl<'a> XLookupFlat<'a> {
         let flat = Self {
             mode,
             spare,
+            x_ahead: false,
             karlin: Some(karlin),
         };
         (flat, query, locations, contexts)
@@ -545,6 +584,7 @@ impl<'a> XLookupFlat<'a> {
             mode: self.mode,
             spare: self.spare,
             extra,
+            x_ahead: self.x_ahead,
         }
     }
 

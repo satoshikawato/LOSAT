@@ -88,11 +88,13 @@ impl<'a> SubjectLetters<'a> {
     }
 
     /// `f` of subject `oid` as its preliminary stage reads it. With `case` (the stage reads the
-    /// lower-case letters, `-lcase_masking`) it is the record's letters (`with_letters`).
-    /// Without it a packed subject is given as its store: the stage translates its packed bases
-    /// (the bases the letters resolve to), so a worker holds the frames alone and neither the
-    /// letters nor the resolved bases (`x_with_search_letters` makes the bases where a stage
-    /// reads letters).
+    /// lower-case letters, `-lcase_masking`) it is the record's letters (`with_letters`) where it
+    /// has lower-case letters. Otherwise a packed subject is given as its store: the stage
+    /// translates its packed bases (the bases the letters resolve to), so a worker holds the
+    /// frames alone and neither the letters nor the resolved bases (`x_with_search_letters` makes
+    /// the bases where a stage reads letters). A database sequence (`-db`) has no lower-case
+    /// letters, so its stage always reads its stored bases, as NCBI's (no subject mask without
+    /// `-db_soft_mask`).
     pub(super) fn with_search_subject<R>(
         &self,
         oid: usize,
@@ -100,7 +102,9 @@ impl<'a> SubjectLetters<'a> {
         f: impl FnOnce(SubjectNt<'_>) -> R,
     ) -> R {
         match self {
-            Self::Packed(subjects) if !case => f(SubjectNt::Packed(&subjects[oid])),
+            Self::Packed(subjects) if !case || subjects[oid].lowercase().is_empty() => {
+                f(SubjectNt::Packed(&subjects[oid]))
+            }
             _ => self.with_letters(oid, |letters| f(SubjectNt::Letters(letters))),
         }
     }

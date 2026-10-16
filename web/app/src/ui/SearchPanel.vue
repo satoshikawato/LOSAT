@@ -49,6 +49,15 @@ const buttonLabel = computed(() => {
   if (waiting.value > 0) notes.push('add to queue');
   return notes.length === 0 ? 'Run LOSAT' : `Run LOSAT (${notes.join(', ')})`;
 });
+/**
+ * Whether the engine's describe of the program has come. It comes after the page or the
+ * program changes, and adds the task's help and the task to the line next to the button,
+ * which moves the controls below them; the E2E tests wait for it before they click.
+ */
+const describeState = computed(() => {
+  if (state.value.description !== undefined) return 'ready';
+  return state.value.descriptionError === undefined ? 'loading' : 'failed';
+});
 const taskFields = computed(() => sectionsAt(program.value, options.value, 'program').flatMap((section) => section.fields));
 const summaryLine = computed(() => searchSummary(program.value, effectiveValue('-task', values.value, options.value)));
 /** One line about the queue next to the button; on narrow screens the queue is far below. */
@@ -99,7 +108,7 @@ function onThreads(event: Event): void {
 </script>
 
 <template>
-  <div class="search-panel">
+  <div class="search-panel" data-testid="search-panel" :data-describe="describeState">
     <h2 class="visually-hidden">Search</h2>
     <fieldset class="program-tabs" data-testid="program-tabs">
       <legend class="visually-hidden">Program</legend>

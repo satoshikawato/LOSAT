@@ -4,7 +4,7 @@
 use super::args::BlastnArgs;
 use super::coordination::determine_scoring_params;
 use super::ncbi_cutoffs::NCBIMATH_LN2;
-use super::pairwise::query_ungapped_karlin;
+use super::pairwise::query_ungapped_karlin_blastna;
 use crate::cli::NativeError;
 use crate::config::NuclScoringSpec;
 use crate::stats::{KarlinParams, NuclValues};
@@ -359,6 +359,7 @@ pub(crate) struct ContextKarlin {
 /// ```
 /// A context without letters (a query without letters) is invalid from its set-up
 /// (`s_QueryInfo_SetContext`): it gets no block and no message here.
+/// The contexts come in BLASTNA (the search holds them in no other encoding).
 pub(crate) fn context_ungapped_blocks<'a>(
     contexts: impl Iterator<Item = &'a [u8]>,
     spec: &NuclScoringSpec,
@@ -368,7 +369,7 @@ pub(crate) fn context_ungapped_blocks<'a>(
             if context.is_empty() {
                 None
             } else {
-                query_ungapped_karlin(context, spec.reward, spec.penalty)
+                query_ungapped_karlin_blastna(context, spec.reward, spec.penalty)
             }
         })
         .collect()
@@ -462,6 +463,7 @@ pub(crate) fn gap_x_dropoffs(
 
 #[cfg(test)]
 mod tests {
+    use super::super::pairwise::query_ungapped_karlin;
     use super::*;
 
     fn args(words: &[&str]) -> BlastnArgs {

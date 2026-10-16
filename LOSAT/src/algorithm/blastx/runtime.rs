@@ -1382,6 +1382,11 @@ impl PreliminarySink for Runtime<'_> {
         batch: &PreparedQueryBatch,
         params: &[ContextParameters],
     ) -> Result<()> {
+        // Diagnostic (LOSAT_TIMING): the clocks of the intervals of this function
+        // (x_timing.rs). No NCBI counterpart.
+        use super::x_timing::End as XEnd;
+        let x_t = super::x_timing::lap();
+        let mut x_t_finish = None;
         let mut stream = self.stream.take().expect("batch stream");
 
         let mut full = params.to_vec();
@@ -1531,6 +1536,7 @@ impl PreliminarySink for Runtime<'_> {
         } else {
             None
         };
+        super::x_timing::end(XEnd::Init, x_t);
 
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3543
         // ```c++
@@ -1664,10 +1670,12 @@ impl PreliminarySink for Runtime<'_> {
             //             head = head->next;
             //             sfree(here);
             // ```
+            let x_t = super::x_timing::lap();
             let mut matches = Vec::new();
             while let Some(list) = stream.read_observed(self.observer) {
                 matches.push(list);
             }
+            super::x_timing::end(XEnd::Read, x_t);
             // EXPERIMENT (LOSAT_X_BXPAR): redo the matches of one batch on the
             // search pool before walking them in stream order.  A match is a
             // function of its own HSP list and of the matrix left by the match
@@ -1748,6 +1756,7 @@ impl PreliminarySink for Runtime<'_> {
             // order; it does not change any value NCBI computes.
             let mut x_reused = 0usize;
             let mut x_serial = 0usize;
+            let x_t_loop = super::x_timing::lap();
             for (match_index, list) in matches.iter().enumerate() {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3448-3451
                 // ```c
@@ -1774,6 +1783,7 @@ impl PreliminarySink for Runtime<'_> {
                         (self.options, self.subjects, self.db_length);
                     let full = &full;
                     let workers = &x_workers;
+                    let x_t = super::x_timing::lap();
                     speculated = batch_lists
                         .par_iter()
                         .zip(wanted.par_iter())
@@ -1794,6 +1804,7 @@ impl PreliminarySink for Runtime<'_> {
                             )
                         })
                         .collect();
+                    super::x_timing::end(XEnd::KappaSpec, x_t);
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1560-1582
                 // ```c++
@@ -1855,13 +1866,14 @@ impl PreliminarySink for Runtime<'_> {
                     (output, best_score)
                 } else {
                     x_serial += 1;
+                    let x_t = super::x_timing::lap();
                     let encoded = self.subjects.encoded(list.oid);
                     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
                     let redone =
                         state.redo_list_observed(&input, batch, &encoded, &mut |event| {
                             self.observer.matrix(list.oid, event)
                         })?;
-                    finalize_redone(
+                    let finalized = finalize_redone(
                         &redone,
                         batch,
                         &full,
@@ -1871,7 +1883,9 @@ impl PreliminarySink for Runtime<'_> {
                         list.query_index,
                         list.oid,
                         self.observer,
-                    )?
+                    );
+                    super::x_timing::end(XEnd::KappaSerial, x_t);
+                    finalized?
                 };
                 if output.hsps.is_empty() {
                     continue;
@@ -1980,6 +1994,11 @@ impl PreliminarySink for Runtime<'_> {
             //     }
             //     if (COMPO_INTENSE_DEBUG) {
             // ```
+            super::x_timing::end(XEnd::Loop, x_t_loop);
+            super::x_timing::end_add(XEnd::Matches, matches.len() as u64);
+            super::x_timing::end_add(XEnd::Reused, x_reused as u64);
+            super::x_timing::end_add(XEnd::Serial, x_serial as u64);
+            x_t_finish = super::x_timing::lap();
             let _ = (x_reused, x_serial);
             for (q, (heap, query)) in heaps.iter_mut().zip(&mut queries).enumerate() {
                 loop {
@@ -2415,6 +2434,7 @@ impl PreliminarySink for Runtime<'_> {
             parameters: full,
             search_skipped: false,
         });
+        super::x_timing::end(XEnd::Finish, x_t_finish);
         Ok(())
     }
 }

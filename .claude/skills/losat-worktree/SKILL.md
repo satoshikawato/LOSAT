@@ -33,8 +33,9 @@ git switch --no-track -c <prefix>/<topic> origin/main   # fix, feature, docs, au
 ```
 
 - At the start of a session: `git status` must be clean, then `git pull --ff-only`. Merge
-  `origin/main` only when the task needs a change from it, and resolve conflicts in their own
-  commit (README rule 2).
+  `origin/main` only when the task needs a change from it or the PR reports a merge conflict
+  (`DIRTY`), never to refresh a PR that merges cleanly (skill `losat-ship-pr`), and resolve
+  conflicts in their own commit (README rule 2).
 
 ## Builds and temporary files
 

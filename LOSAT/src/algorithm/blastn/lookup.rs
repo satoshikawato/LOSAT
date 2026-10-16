@@ -3,7 +3,9 @@ use super::disc_lookup::{
     compute_discontiguous_index, get_disc_template_type, DiscTemplateType, DiscWordType,
 };
 use crate::blastinput::fasta_reader::InputRecord;
-use crate::core::blast_encoding::{encode_subject_ncbi2na_packed, COMPRESSION_RATIO};
+use crate::core::blast_encoding::{
+    encode_iupac_to_blastna, encode_subject_ncbi2na_packed, COMPRESSION_RATIO,
+};
 use crate::utils::dust::MaskedInterval;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1090-1091
@@ -107,6 +109,30 @@ pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
             NCBI4NA_TO_IUPACNA[rc as usize]
         })
         .collect()
+}
+
+/// The BLASTNA code of the reverse complement of each byte: entry `b` is
+/// `encode_iupac_to_blastna(&reverse_complement(&[b]))[0]`. Both functions work letter by
+/// letter, so the minus strand of a query in BLASTNA is its letters, last to first,
+/// through this table (LOSAT's memory: the minus strand is never held as IUPAC letters).
+pub fn blastna_reverse_complement_table() -> &'static [u8; 256] {
+    static TABLE: std::sync::OnceLock<[u8; 256]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = [0u8; 256];
+        for (b, slot) in table.iter_mut().enumerate() {
+            *slot = encode_iupac_to_blastna(&reverse_complement(&[b as u8]))[0];
+        }
+        table
+    })
+}
+
+/// `encode_iupac_to_blastna(&reverse_complement(seq))` into `out` (`out.len() == seq.len()`).
+pub fn encode_reverse_complement_blastna_into(seq: &[u8], out: &mut [u8]) {
+    assert_eq!(seq.len(), out.len());
+    let table = blastna_reverse_complement_table();
+    for (slot, &b) in out.iter_mut().zip(seq.iter().rev()) {
+        *slot = table[b as usize];
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_nalookup.h:109-156
@@ -266,7 +292,7 @@ fn packed_kmer_at(packed: &[u8], start: usize, k: usize) -> u64 {
 /// if ((counts[index] & 0xf) < max_word_count) counts[index]++;
 /// ```
 pub fn build_db_word_counts<R: InputRecord>(
-    queries_blastna: &[Vec<u8>],
+    queries_blastna: &[&[u8]],
     query_masks: &[Vec<MaskedInterval>],
     subjects: &[R],
     lut_word_length: usize,
@@ -522,7 +548,7 @@ fn compute_mb_pv_params(
 // PV_SET(pv_array, ecode, pv_array_bts);
 // ```
 fn build_query_pv(
-    queries_blastna: &[Vec<u8>],
+    queries_blastna: &[&[u8]],
     query_masks: &[Vec<MaskedInterval>],
     lut_word_length: usize,
     full_word_size: usize,
@@ -542,7 +568,7 @@ fn build_query_pv(
 
     let kmer_mask: u64 = (1u64 << (2 * lut_word_length)) - 1;
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
+        let seq = seq_blastna;
         if seq.len() < lut_word_length {
             continue;
         }
@@ -1068,7 +1094,7 @@ pub(crate) fn build_unmasked_ranges(
 /// 1. O(1) sliding window k-mer extraction (Phase 1 optimization)
 /// 2. Presence-Vector for fast filtering (Phase 2 optimization)
 pub fn build_pv_direct_lookup(
-    queries_blastna: &[Vec<u8>],
+    queries_blastna: &[&[u8]],
     query_offsets: &[i32],
     word_size: usize,
     full_word_size: usize,
@@ -1153,7 +1179,7 @@ pub fn build_pv_direct_lookup(
     //
     // LOSAT mirrors this by iterating unmasked ranges derived from query masks.
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
+        let seq = seq_blastna;
         // NCBI reference: blast_lookup.c:99-100
         // if (word_length > to - from + 1) continue;
         if seq.len() < safe_word_size {
@@ -1275,7 +1301,7 @@ pub fn build_pv_direct_lookup(
     // chain[1]++;
     // ```
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
+        let seq = seq_blastna;
         if seq.len() < safe_word_size {
             continue;
         }
@@ -1396,7 +1422,7 @@ pub fn build_pv_direct_lookup(
 /// s_BlastNaLookupFinalize(thin_backbone, lookup);
 /// ```
 pub fn build_na_lookup(
-    queries_blastna: &[Vec<u8>],
+    queries_blastna: &[&[u8]],
     query_offsets: &[i32],
     word_length: usize,
     lut_word_length: usize,
@@ -1435,7 +1461,7 @@ pub fn build_na_lookup(
     // NCBI processes only unmasked regions (locations parameter)
     // Reference: blast_nalookup.c:571-575 (calls BlastLookupIndexQueryExactMatches)
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
+        let seq = seq_blastna;
         if seq.len() < lut_word_length {
             continue;
         }
@@ -1539,7 +1565,7 @@ pub fn build_na_lookup(
     // NCBI reference: blast_lookup.c:BlastLookupAddWordHit (lines 33-77)
     // Adds ALL hits without any frequency limit - no query-side filtering
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
+        let seq = seq_blastna;
         if seq.len() < lut_word_length {
             continue;
         }
@@ -1633,7 +1659,7 @@ pub fn build_na_lookup(
 /// - word_length: Used for extension triggering (typically 28 for megablast)
 /// This allows O(1) direct array access even for large word_length values
 fn build_mb_lookup(
-    queries_blastna: &[Vec<u8>],
+    queries_blastna: &[&[u8]],
     query_offsets: &[i32],
     word_length: usize,
     lut_word_length: usize,
@@ -1764,7 +1790,7 @@ fn build_mb_lookup(
         );
     } else {
         for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-            let seq = seq_blastna.as_slice();
+            let seq = seq_blastna;
             if seq.len() < lut_word_length {
                 continue;
             }
@@ -1915,7 +1941,7 @@ fn build_mb_lookup(
 }
 
 pub fn build_two_stage_lookup(
-    queries_blastna: &[Vec<u8>],
+    queries_blastna: &[&[u8]],
     query_offsets: &[i32],
     word_length: usize,
     lut_word_length: usize,
@@ -2103,7 +2129,7 @@ pub fn build_two_stage_lookup(
 /// `build_mb_lookup`; `left`/`right` are offsets in the concatenated query.
 #[allow(clippy::too_many_arguments)]
 pub fn build_disc_mb_lookup(
-    queries_blastna: &[Vec<u8>],
+    queries_blastna: &[&[u8]],
     query_offsets: &[i32],
     word_size: usize,
     template_length: usize,
@@ -2146,7 +2172,7 @@ pub fn build_disc_mb_lookup(
     let mut pv_array = vec![0u32; pv_size];
 
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
+        let seq = seq_blastna;
         let masks = query_masks.get(q_idx).map(|v| v.as_slice()).unwrap_or(&[]);
         let query_offset = query_offsets[q_idx].max(0) as usize;
         for (range_start, range_end) in build_unmasked_ranges(seq.len(), masks) {
@@ -2228,7 +2254,7 @@ pub fn build_disc_mb_lookup(
 /// Build direct address table for k-mer lookup (O(1) access)
 /// This is much faster than HashMap for small word sizes
 pub fn build_direct_lookup(
-    queries_blastna: &[Vec<u8>],
+    queries_blastna: &[&[u8]],
     query_offsets: &[i32],
     word_size: usize,
     query_masks: &[Vec<MaskedInterval>],
@@ -2271,7 +2297,7 @@ pub fn build_direct_lookup(
     //
     // LOSAT processes entire sequence and filters masked regions (equivalent behavior)
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
+        let seq = seq_blastna;
         // NCBI reference: blast_lookup.c:99-100
         // if (word_length > to - from + 1) continue;
         if seq.len() < safe_word_size {
@@ -2331,7 +2357,7 @@ pub fn build_direct_lookup(
     // chain[1]++;
     // ```
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
+        let seq = seq_blastna;
         if seq.len() < safe_word_size {
             continue;
         }
@@ -2480,7 +2506,7 @@ fn x_mb_apply(t: &mut XMbTables<'_>, ascending_cells: bool, bucket: usize, q_off
 #[allow(clippy::too_many_arguments)]
 fn x_fill_mb_queued(
     queue: XMbQueue,
-    queries_blastna: &[Vec<u8>],
+    queries_blastna: &[&[u8]],
     query_offsets: &[i32],
     query_masks: &[Vec<MaskedInterval>],
     word_length: usize,
@@ -2501,7 +2527,7 @@ fn x_fill_mb_queued(
     let mut x_batch_buf: Vec<(u32, u32)> = Vec::with_capacity(x_batch_size);
     let mut x_touched = 0u32;
     for (q_idx, seq_blastna) in queries_blastna.iter().enumerate() {
-        let seq = seq_blastna.as_slice();
+        let seq = seq_blastna;
         if seq.len() < lut_word_length {
             continue;
         }
@@ -2594,7 +2620,66 @@ fn x_fill_mb_queued(
 
 #[cfg(test)]
 mod reverse_complement_tests {
-    use super::reverse_complement;
+    use super::{
+        blastna_reverse_complement_table, encode_reverse_complement_blastna_into,
+        reverse_complement,
+    };
+    use crate::core::blast_encoding::{encode_iupac_to_blastna, encode_iupac_to_blastna_into};
+
+    // The table is the composition of the two functions for every byte.
+    #[test]
+    fn blastna_reverse_complement_table_is_the_composition() {
+        let table = blastna_reverse_complement_table();
+        for b in 0..=255u8 {
+            assert_eq!(
+                table[b as usize],
+                encode_iupac_to_blastna(&reverse_complement(&[b]))[0],
+                "byte {b}"
+            );
+        }
+    }
+
+    // The BLASTNA table gives an uppercase and a lowercase letter the same code, so the
+    // karlin counts need no uppercase copy of the query.
+    #[test]
+    fn blastna_encoding_ignores_letter_case() {
+        for b in 0..=255u8 {
+            assert_eq!(
+                encode_iupac_to_blastna(&[b]),
+                encode_iupac_to_blastna(&[b.to_ascii_uppercase()]),
+                "byte {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn strand_encodings_into_equal_the_copying_forms() {
+        let mut seqs: Vec<Vec<u8>> = vec![
+            Vec::new(),
+            b"ACGT".to_vec(),
+            b"acgt".to_vec(),
+            b"ACgtRYKMSWBDHVNrykmswbdhvnUu-*0123456789".to_vec(),
+            b"ACGTRYKMSWBDHVNUacgtrykmswbdhvnu-*".to_vec(),
+            vec![b'A', 128, 200, 255, b'c', 0, 127],
+        ];
+        // Every byte alone and between letters.
+        for b in 0..=255u8 {
+            seqs.push(vec![b]);
+            seqs.push(vec![b'A', b, b'g']);
+        }
+        for seq in &seqs {
+            let mut plus = vec![0u8; seq.len()];
+            encode_iupac_to_blastna_into(seq, &mut plus);
+            assert_eq!(plus, encode_iupac_to_blastna(seq), "plus {seq:?}");
+            let mut minus = vec![0u8; seq.len()];
+            encode_reverse_complement_blastna_into(seq, &mut minus);
+            assert_eq!(
+                minus,
+                encode_iupac_to_blastna(&reverse_complement(seq)),
+                "minus {seq:?}"
+            );
+        }
+    }
 
     // A lowercase (soft-masked) letter is the same base on the minus strand.
     #[test]
@@ -2612,9 +2697,8 @@ mod chain_order_tests {
         // of the first context and of the second (offset 21 in the block).
         let unit = [0u8, 1, 2, 3];
         let context: Vec<u8> = unit.iter().cycle().take(20).copied().collect();
-        let queries = vec![context.clone(), context];
         let lookup = build_two_stage_lookup(
-            &queries,
+            &[&context, &context],
             &[0, 21],
             8,
             4,
@@ -2699,7 +2783,7 @@ mod disc_lookup_tests {
         second.extend(&word);
         second[20 + 5] = 14;
         let lookup = build_disc_mb_lookup(
-            &[first.clone(), second.clone()],
+            &[&first, &second],
             &[0, 41],
             11,
             18,
@@ -2718,7 +2802,7 @@ mod disc_lookup_tests {
         assert_eq!(chain(&lookup, optimal, true), vec![42, 1]);
         // A masked range is not indexed.
         let masked = build_disc_mb_lookup(
-            &[first, second],
+            &[&first, &second],
             &[0, 41],
             11,
             18,

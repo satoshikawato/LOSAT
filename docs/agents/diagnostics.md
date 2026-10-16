@@ -57,6 +57,21 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
   that takes the reference body (`LOSAT_X_HSPINPLACE=0`, `LOSAT_X_DEFAULT=0`,
   `LOSAT_DIAGNOSTICS`, `LOSAT_DEBUG_CUTOFFS`) is not timed there: `calls=0`;
   `tblastx/x_link_timing.rs`). The clock is not read without the variable.
+  BLASTX prints four kinds of lines at the end of a run (`blastx/x_timing.rs`):
+  `[TIMING] blastx_run: startup .. prolog .. read_stores .. loop .. epilog .. total .. (search .. render .. titles .. input ..)`
+  (wall times of the thread that runs the program; inside `loop`, the time it waits for searches, writes reports (of
+  which `titles` reads the reported sequences' titles with `-db`), and the rest, `input`);
+  `[TIMING] blastx_waves: waves=N batches=N wall .. busy .. threads=N idle .. tail=N tail_wall ..`
+  (with `LOSAT_X_BXBATCH`: the waves of query batches searched side by side, the searches' own times added over the
+  threads, `idle = wall x threads - busy`, and the batches searched one at a time with the whole pool: the end of the
+  input, or a long query);
+  `[TIMING] blastx_batch_side:` / `blastx_batch_alone: batches=N query_setup .. setup .. chunks_par .. lookup .. scan_par .. scan_inline .. replay .. chunk_end .. batch_end .. sum ..`
+  (the stages of a query batch in the order they run; `side` = batches searched on one thread beside others, times
+  added over the threads; `alone` = a batch searched by itself, with the pool if there is one, wall times; `replay`
+  hands the subjects to the sink in subject order and includes `scan_inline`) and
+  `[TIMING] blastx_batch_end_side:` / `blastx_batch_end_alone: init .. read .. kappa_spec .. kappa_serial .. loop .. finish .. (matches=N reused=N serial=N)`
+  (inside the end of a batch: the composition-based redo made ahead on the pool, the redo done in the in-order loop,
+  and the hit lists after it).
 - `LOSAT_DIAGNOSTICS=1` general diagnostics counters.
 - `LOSAT_STARTUP_TRACE=1` startup trace.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.

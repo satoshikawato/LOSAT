@@ -93,15 +93,15 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 72 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 73 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
 `LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE`,
 `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_LINKSLICES`, `LOSAT_X_BPSUBJRUN`,
 `LOSAT_X_TBNSTORE`, `LOSAT_X_DPNEON`, `LOSAT_X_TBNBATCHRULE` and the eight blastp switches
 `LOSAT_X_BPSEED`, `LOSAT_X_BPUNGAP`, `LOSAT_X_BPGAP`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPFREE`,
 `LOSAT_X_BPPCOMPACT`, `LOSAT_X_BPREDOFIT` and `LOSAT_X_BPQBLOCK`, `LOSAT_X_BNSTREAM`,
-`LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES`, and `LOSAT_X_BPDIAG` joined), and their variables mean
-(`LOSAT/src/utils/xswitch.rs`):
+`LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES`, `LOSAT_X_BPDIAG` and `LOSAT_X_BPDEFER` joined), and their
+variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -122,7 +122,8 @@ strict set are on by default (43 then, 72 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   act only with `TBNPAR`; `TBNBATCHRULE` only with `TBNBATCH`; `TBNOIDNEXT` and `TBNOIDUNITS` act
   only with `TBNOIDCHUNK`; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPSEED` acts on the two-hit seed stage only; `BPDIAG` acts only
-  in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPGAP` runs the
+  in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
+  in `BPDIAG`'s AVX2 batch; `BPGAP` runs the
   vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPLUT` declines in
   diagnostics mode; `BPQBLOCK` takes the block path only for one `-outfmt 6` report with more than
   one block (see its entry); `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
@@ -141,7 +142,7 @@ strict set are on by default (43 then, 72 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 72 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 73 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -182,6 +183,7 @@ export LOSAT_X_BPPFREE=1 LOSAT_X_BPPCOMPACT=1 LOSAT_X_BPREDOFIT=1 LOSAT_X_BPQBLO
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_TBXNEXT=1 LOSAT_X_TBXFRAMES=1
 export LOSAT_X_BPDIAG=1
+export LOSAT_X_BPDEFER=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -354,6 +356,14 @@ difference), the max RSS below NCBI's on every job, and the sum of the job times
 (0.597 with the eight; NCBI's times from an earlier run of the same jobs). It changes no value and
 no order of computation; without AVX2 it keeps the per-hit loop. Its diagnostic
 `LOSAT_X_BPDIAG_SIMD=0` (the scalar batch) stays outside the set.
+
+`LOSAT_X_BPDEFER` (the candidates of a lookup cell's AVX2 batches called after the cell's last batch
+of eight) was added after `LOSAT_X_BPDIAG`, off unless set, and joined the set on 2026-10-17 after a
+third run of the 49 jobs with all ten on: every output equal to the run with the nine, the max RSS
+below NCBI's on every job (at most 0.923 of it), and the sum of the job times 0.407 of NCBI's (0.457
+with the nine; NCBI's times from the same earlier run). On the same jobs, both arms in one run, its
+summed CPU cycles were 0.938 of the run without it. It changes no value and keeps the order of the
+calls; it acts only where `LOSAT_X_BPDIAG`'s AVX2 batch runs.
 
 What runs per target:
 
@@ -941,8 +951,8 @@ Rebuilding less:
   (wall) in s): human block 1 per-hit 11.59 (20.61), gather 10.17 (18.90), scalar loads 9.13 (17.86), scalar
   batch 12.56 (21.53); C. elegans block 5 per-hit 32.68 (70.68), gather 28.55 (66.16), scalar loads 26.45
   (64.62).
-- `LOSAT_X_BPDEFER=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and `LOSAT_X_DEFAULT`
-  does not touch it; acts only where `LOSAT_X_BPDIAG`'s AVX2 batch runs, not with `LOSAT_X_BPDIAG_SIMD=0` or
+- `LOSAT_X_BPDEFER=1` (BLASTP, speed; in the strict set since 2026-10-17; `=0` turns it off; acts only
+  where `LOSAT_X_BPDIAG`'s AVX2 batch runs, not with `LOSAT_X_BPDIAG_SIMD=0` or
   without AVX2) the candidates of a lookup cell's batches of eight are called after the cell's last batch of
   eight instead of at the end of each batch (`blastp/x_seed_fused.rs`, exactness argument in its header): each
   batch moves its candidates' query offsets to the front of its register (a permutation from a table of the 256

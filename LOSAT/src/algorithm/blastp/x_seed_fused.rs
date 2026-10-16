@@ -64,9 +64,10 @@
 //! candidate neither read nor write what its call reads or writes, and the calls keep their order
 //! (the batches' order, then the lanes'); a candidate's entry still holds the value its test read.
 //! A cell's last batch of fewer than eight hits is the scalar batch, called after the buffer.
-//! Off unless `LOSAT_X_BPDEFER` is set (any value); it acts only where the AVX2 batch runs
-//! (`LOSAT_X_BPDIAG` with AVX2, not with `LOSAT_X_BPDIAG_SIMD=0`). `LOSAT_X_BPSEEDSHADOW` compares
-//! it with the reference like the other modes. Not in the strict set.
+//! `LOSAT_X_BPDEFER` is a switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+//! and it is not set. It acts only where the AVX2 batch runs (`LOSAT_X_BPDIAG` with AVX2, not
+//! with `LOSAT_X_BPDIAG_SIMD=0`). `LOSAT_X_BPSEEDSHADOW` compares it with the reference like the
+//! other modes.
 
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::{
@@ -125,11 +126,12 @@ pub(crate) fn x_bp_diag() -> bool {
 
 // No NCBI counterpart: reads the LOSAT_X_BPDEFER switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPDEFER): off unless set to any value. It acts on the AVX2 batches only.
+/// EXPERIMENT (LOSAT_X_BPDEFER): a strict-set switch, on unless it is `0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set. It acts on the AVX2 batches only.
 pub(crate) fn x_bp_defer() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BPDEFER").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDEFER"))
 }
 
 /// How the fused loop tests the hits of one lookup cell.
@@ -140,7 +142,7 @@ enum XDiagMode {
     /// LOSAT_X_BPDIAG with LOSAT_X_BPDIAG_SIMD=0 (diagnostic): batches of [`X_DIAG_LANES`] hits in
     /// scalar code ([`x_test_batch_scalar`]).
     Scalar,
-    /// LOSAT_X_BPDIAG with AVX2: batches of eight hits in AVX2 registers
+    /// LOSAT_X_BPDIAG with AVX2 and LOSAT_X_BPDEFER off: batches of eight hits in AVX2 registers
     /// ([`x_test_batch_avx2`]); a cell's last batch of fewer than eight hits is a scalar batch.
     #[cfg(target_arch = "x86_64")]
     Avx2,

@@ -58,11 +58,19 @@ use std::sync::OnceLock;
 /// `LOSAT_X_TBNOIDNEXT` (the threads take the next chunk of subjects when they are free,
 /// `tblastn/x_oid_flow.rs`) and `LOSAT_X_TBNOIDUNITS` (the units of a subject longer than a
 /// chunk's budget on the pool, `tblastn/stage_d_pipeline.rs`) joined the same way, together,
-/// after them. `LOSAT_X_BNSTREAM` (BLASTN hands each subject's HSPs to the hit lists in OID order
-/// from a bounded window while the threads search, `blastn/blast_engine/x_bnstream.rs`) was added
-/// after the change as a switch that is off unless set and joined the set once it was verified
-/// and timed with it on.
-pub(crate) const STRICT_SET: [&str; 56] = [
+/// after them.
+/// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
+/// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
+/// joined the set once it was verified with it on.
+/// `LOSAT_X_BPSUBJRUN` (BLASTP's parallel `-subject` loop searches the subjects in runs of
+/// consecutive subjects, each run with one diagonal table that is cleared once,
+/// `blastp/blast_engine/x_subject_runs.rs`) was added after the change as a switch that is off
+/// unless set and joined the set once it was verified and timed with it on.
+/// `LOSAT_X_BNSTREAM` (BLASTN hands each subject's HSPs to the hit lists in OID order from a
+/// bounded window while the threads search, `blastn/blast_engine/x_bnstream.rs`) was added after
+/// the change as a switch that is off unless set and joined the set once it was verified and timed
+/// with it on.
+pub(crate) const STRICT_SET: [&str; 58] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_PURGEFAST",
@@ -118,6 +126,8 @@ pub(crate) const STRICT_SET: [&str; 56] = [
     "LOSAT_X_TBNXLATE",
     "LOSAT_X_TBNOIDNEXT",
     "LOSAT_X_TBNOIDUNITS",
+    "LOSAT_X_LINKSLICES",
+    "LOSAT_X_BPSUBJRUN",
     "LOSAT_X_BNSTREAM",
 ];
 

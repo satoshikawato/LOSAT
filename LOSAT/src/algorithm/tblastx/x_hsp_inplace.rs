@@ -159,12 +159,12 @@
 //! from a stable parallel sort for long lists (its header has the argument). With the switch off
 //! the statements described in items 1 and 5 run.
 //!
-//! EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW, off unless set): `link_in_place`
-//! then hands the group step to `x_link_slices.rs`, which links the groups as disjoint sub-slices
-//! of the one sorted list (the runs `group_starts` finds, as in item 2), so items 2-4 need neither
-//! the cut nor the assembly (its header has the argument). With the switch off the statements
-//! described in items 2-4 run; with its shadow they run, and their result is compared with the
-//! slices on a copy of the list.
+//! EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW, on by default as a strict-set
+//! switch): `link_in_place` then hands the group step to `x_link_slices.rs`, which links the
+//! groups as disjoint sub-slices of the one sorted list (the runs `group_starts` finds, as in
+//! item 2), so items 2-4 need neither the cut nor the assembly (its header has the argument).
+//! With the switch off the statements described in items 2-4 run; with its shadow they run, and
+//! their result is compared with the slices on a copy of the list.
 
 use super::*;
 // Diagnostic (LOSAT_TIMING): the clock of a linking call (tblastx/x_link_timing.rs). It reads
@@ -981,7 +981,7 @@ fn link_in_place(
     // ```
     let total_hits = hits.len(); // NCBI: hsp_list->hspcnt
 
-    // EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW, off unless set), dispatch: the
+    // EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW), dispatch: the
     // groups linked as disjoint sub-slices of the one sorted list, with no cut and no second list
     // (tblastx/x_link_slices.rs, exactness argument in its header). With the switch off the
     // statements of the `else` branch run as before. With its shadow they run as well, and the

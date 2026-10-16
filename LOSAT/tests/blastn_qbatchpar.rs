@@ -19,11 +19,9 @@
 //! bytes equal NCBI's is the business of the BLASTN fixtures.
 //!
 //! The queries are 32 pieces of LC738874 and the subject LC738868 (one subject, so its 5 Mb work
-//! units are fewer than the threads). `-task blastn` runs on pieces of LC738884 one query per
-//! batch: on most inputs of several queries per batch a build with debug assertions (this test's
-//! binary) stops at `debug_assert!(ungapped.q_start >= q_context_start)` in
-//! `search_query_batch`, with or without the switch (a wrong assertion, fixed separately);
-//! the release-binary checks cover the rest.
+//! units are fewer than the threads). `-task blastn` runs on pieces of LC738884 with one query
+//! per batch, and on both sets of pieces with several queries per batch (the adaptive batch size
+//! and fixed ones).
 
 #![cfg(feature = "parallel")]
 
@@ -703,8 +701,8 @@ fn warnings_of_later_batches_come_as_without_the_switch() {
     }
 }
 
-// `-task blastn`, one query per batch (pieces of LC738884, whose batches of one query do not
-// stop a build with debug assertions; see the module comment), with the shadow.
+// `-task blastn`, one query per batch (pieces of LC738884), with the shadow. Batches of several
+// queries are in the next test.
 #[test]
 fn blastn_task_gives_the_reports_without_the_switch() {
     let query = TempFasta::new("q", &pieces("LC738884.fasta"));
@@ -727,6 +725,56 @@ fn blastn_task_gives_the_reports_without_the_switch() {
         let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SHADOW]);
         assert_eq!(run.summary("[X_SHADOW] QBATCHPAR")["compared"], "31");
         assert_eq!(run.summary("[X_SHADOW] QBATCHPAR")["diffs"], "0");
+    }
+}
+
+// `-task blastn` with several queries per batch (pieces of LC738874 and of LC738884, outfmt 0, 6
+// and 7). With the adaptive batch size the first batch is 5,000 letters (two queries) and the
+// second holds the other 30: two batches, so the slots have nothing to search ahead (the path is
+// off, `off=single`). With `BATCH_SIZE` 5,000 and 10,000 there are 14 and 8 batches of two to
+// four queries, taken from the slots, and the shadow compares each with the loop's own search.
+#[test]
+fn blastn_task_with_several_queries_per_batch_gives_the_reports_without_the_switch() {
+    let subject = fixture("LC738868.fasta");
+    let subject = subject.to_str().expect("UTF-8 path");
+    for name in ["LC738874.fasta", "LC738884.fasta"] {
+        let query = TempFasta::new("q", &pieces(name));
+        for outfmt in ["6", "7", "0"] {
+            let args = [
+                "-task",
+                "blastn",
+                "-query",
+                path(&query),
+                "-subject",
+                subject,
+                "-outfmt",
+                outfmt,
+                "-num_threads",
+                "4",
+            ];
+            let run = same_as_without(&args, &[], &[SWITCH]);
+            assert_eq!(run.stat("batches"), 2, "{name} {outfmt}: {}", run.stderr);
+            assert_eq!(run.stat("precomputed"), 0, "{name} {outfmt}");
+            for (size, batches) in [("5000", 14), ("10000", 8)] {
+                let env = [("BATCH_SIZE", size)];
+                let run = same_as_without(&args, &env, &[SWITCH]);
+                assert_eq!(run.stat("batches"), batches, "{name} {outfmt} {size}");
+                assert_eq!(
+                    run.stat("precomputed"),
+                    batches - 1,
+                    "{name} {outfmt} {size}"
+                );
+                let run = same_as_without(&args, &env, &[SHADOW]);
+                let shadow = run.summary("[X_SHADOW] QBATCHPAR");
+                assert_eq!(
+                    shadow["compared"],
+                    (batches - 1).to_string(),
+                    "{name} {outfmt} {size}: {}",
+                    run.stderr
+                );
+                assert_eq!(shadow["diffs"], "0");
+            }
+        }
     }
 }
 

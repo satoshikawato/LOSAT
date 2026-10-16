@@ -43,7 +43,11 @@
 //!   in order, until the first error.
 //!
 //! Memory: a worker holds one block, at most the cut, and a round covers at most
-//! `BLOCKS_PER_THREAD` x threads blocks, so neither grows.
+//! `BLOCKS_PER_THREAD` x threads blocks, so the sequence memory does not grow. More threads search
+//! at once, each with its search scratch (diagonal table, offset pairs, alignment state), as in the
+//! `-subject` path: exact blastp of 3,000 human proteins against `BlastDBSpecies6` at 16 threads
+//! peaked at 42.9-44.1 MiB against 37.2 MiB without the switch (workstation, perf-mb-20261014
+//! `logs/dbcut_report.md`).
 //!
 //! No NCBI counterpart for the cut itself: NCBI's search threads take chunks of
 //! MAX(sequences / 100, 1) ordinal ids from one iterator (`BlastSeqSrcIteratorNewEx`,

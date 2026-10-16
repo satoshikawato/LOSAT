@@ -492,7 +492,13 @@ Rebuilding less:
   database) returns the one-thread order's error: the blocks of 1 MiB are read and prepared again in order up
   to the first error, because a smaller block can meet another error first or name another byte range.
   Memory: a worker holds one block of at most the cut, and a round covers at most the bytes it covers
-  without the switch.
+  without the switch; more threads search at once, each with its search scratch. Measured on the
+  workstation (alternating runs, node 0, the same outputs; NCBI `-db -num_threads 1` tables for the
+  OrthoFinder jobs): blastp-fast human (23,879 proteins) x `BlastDBSpecies6` at 16 threads 19.92 -> 8.69 s
+  (x0.44, 4 pairs; max RSS 95.1-96.8 -> 93.5-95.8 MiB), at 8 threads 21.0 -> 13.0 s, at 4 threads 26.0 -> 21.8 s;
+  exact blastp of 3,000 human proteins at 16 threads 29.5 -> 9.3 s (x0.31, 2 pairs; max RSS 37.2 -> 43-44
+  MiB); OrthoFinder jobs atha x scer 281.3 -> 87.7 s and cele x scer 217.1 -> 68.4 s at 16 threads (max RSS
+  55 -> 57 and 53 -> 48 MiB). User time grows for exact blastp (82.8 -> 114 s) where all 16 cores now run.
 - `LOSAT_X_BPDBCUTSHADOW=1` shadow of `LOSAT_X_BPDBCUT` (implies it): after each `-db` search with the cut,
   the search runs again with blocks of 1 MiB (the same pool, rounds and kernel) into separate hit lists, and
   the two are compared (every preliminary and compact hit list of every query, every field, by their `Debug`

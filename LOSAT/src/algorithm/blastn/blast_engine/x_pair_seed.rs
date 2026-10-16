@@ -120,7 +120,6 @@ pub(super) struct Inputs<'a> {
     pub(super) query_contexts: &'a [QueryContext],
     pub(super) encoded_query_concat_blastna: &'a [u8],
     pub(super) encoded_query_concat_blastna_with_sentinels: &'a [u8],
-    pub(super) query_four_base: &'a [u8],
     pub(super) cutoff_scores: &'a [i32],
     pub(super) x_dropoff_scores: &'a [i32],
     pub(super) reduced_cutoff_scores: &'a [i32],
@@ -434,9 +433,8 @@ fn seed_of_pair(
     // ```
     let context_idx = x.query_context_index.context_for_offset(q_off0);
     let ctx = &x.query_contexts[context_idx];
-    let q_seq = ctx.seq.as_slice();
     let q_context_start = ctx.query_offset as usize;
-    let q_context_end = q_context_start + q_seq.len();
+    let q_context_end = q_context_start + ctx.len;
 
     if q_off0 + lut_word_length > q_context_end || kmer_start + lut_word_length > s_len {
         return;
@@ -584,7 +582,7 @@ fn fold(
         let ctx = &x.query_contexts[context_idx];
         let q_idx = context_idx as u32;
         let q_context_start = ctx.query_offset as usize;
-        let q_context_end = q_context_start + ctx.seq.len();
+        let q_context_end = q_context_start + ctx.len;
         let cutoff_score = x.cutoff_scores[context_idx];
         let q_ext_start = seed.q as usize;
         let s_ext_start = seed.s as usize;
@@ -736,7 +734,6 @@ fn fold(
         } else {
             extend_hit_ungapped_approx_ncbi(
                 x.encoded_query_concat_blastna,
-                x.query_four_base,
                 search_seq_packed,
                 q_off,
                 s_off,
@@ -1386,8 +1383,8 @@ pub(super) fn summary() {
 #[cfg(test)]
 mod tests {
     use super::super::{
-        build_blastna_matrix, build_nucl_score_table, build_query_blastna_concat_buffers,
-        build_query_four_base_bytes, diag_hash_insert_window, scan_subject_kmers_with_ranges,
+        build_blastna_matrix, build_nucl_score_table, build_query_blastna_buffer,
+        diag_hash_insert_window, scan_subject_kmers_with_ranges,
     };
     use super::*;
     use crate::algorithm::blastn::lookup::{build_two_stage_lookup, reverse_complement};
@@ -1648,10 +1645,11 @@ mod tests {
                 Vec::new(),
             ];
             let concat_len = 2 * q_len + 1;
-            let (concat, concat_sentinels) =
-                build_query_blastna_concat_buffers(&ctx_seqs, &offsets, concat_len);
+            let concat_sentinels = build_query_blastna_buffer(&[&query], &offsets, concat_len);
+            let concat = concat_sentinels[1..concat_len + 1].to_vec();
+            let ctx_refs: Vec<&[u8]> = ctx_seqs.iter().map(Vec::as_slice).collect();
             let lookup = build_two_stage_lookup(
-                &ctx_seqs,
+                &ctx_refs,
                 &offsets,
                 word_length,
                 lut_word_length,
@@ -1666,12 +1664,11 @@ mod tests {
                     query_idx: 0,
                     frame: if c == 0 { 1 } else { -1 },
                     query_offset: offsets[c],
-                    seq: ctx_seqs[c].clone(),
+                    len: ctx_seqs[c].len(),
                     masks: masks[c].clone(),
                 })
                 .collect();
             let index = QueryContextIndex::new(&contexts);
-            let four_base = build_query_four_base_bytes(&concat);
             let score_matrix = build_blastna_matrix(1, -2);
             let nucl_score_table = build_nucl_score_table(1, -2);
             let seq_ranges = [(0i32, s_len as i32)];
@@ -1687,7 +1684,6 @@ mod tests {
                 query_contexts: &contexts,
                 encoded_query_concat_blastna: &concat,
                 encoded_query_concat_blastna_with_sentinels: &concat_sentinels,
-                query_four_base: &four_base,
                 cutoff_scores: &[22, 22],
                 x_dropoff_scores: &[16, 16],
                 reduced_cutoff_scores: &[18, 18],

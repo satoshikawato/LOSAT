@@ -37,7 +37,8 @@ use std::sync::Arc;
 
 use crate::config::NuclScoringSpec;
 use crate::core::blast_encoding::{
-    encode_iupac_to_blastna, encode_subject_ncbi2na_packed, COMPRESSION_RATIO,
+    encode_iupac_to_blastna, encode_iupac_to_blastna_into, encode_subject_ncbi2na_packed,
+    COMPRESSION_RATIO,
 };
 use crate::stats::length_adjustment::compute_length_adjustment_ncbi;
 
@@ -71,8 +72,8 @@ use super::super::coordination::{
 };
 use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use super::super::extension::{
-    build_compressed_query, build_nucl_score_table, build_query_four_base_bytes,
-    extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, type_of_word, SmallNaWord,
+    build_compressed_query, build_nucl_score_table, extend_hit_ungapped_approx_ncbi,
+    extend_hit_ungapped_exact_ncbi, type_of_word, SmallNaWord,
 };
 use super::super::filtering::{
     blast_hsp_test_identity_and_length, hsp_test, purge_hsps_with_common_endpoints,
@@ -85,7 +86,9 @@ use super::super::hsp::{
     BlastnHsp, BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
-use super::super::lookup::{build_unmasked_ranges, reverse_complement, DiscTemplates};
+use super::super::lookup::{
+    build_unmasked_ranges, encode_reverse_complement_blastna_into, DiscTemplates,
+};
 use super::super::pairwise::{pairwise_hits, DisplayMasks};
 use super::super::query_split::{
     calculate_num_chunks, restrict_masks, split_query_batch, QueryChunk, SplitSizes,
@@ -3979,7 +3982,8 @@ struct QueryContext {
     query_idx: u32,
     frame: i32,
     query_offset: i32,
-    seq: Vec<u8>,
+    /// The context's letter count. The letters are held once, in BLASTNA, in the query buffer.
+    len: usize,
     masks: Vec<MaskedInterval>,
 }
 
@@ -4089,11 +4093,11 @@ impl QueryContextIndex {
             .collect();
         let min_length = contexts
             .iter()
-            .map(|ctx| ctx.seq.len())
+            .map(|ctx| ctx.len)
             .filter(|&len| len > 0)
             .min()
             .unwrap_or(0);
-        let max_length = contexts.iter().map(|ctx| ctx.seq.len()).max().unwrap_or(0);
+        let max_length = contexts.iter().map(|ctx| ctx.len).max().unwrap_or(0);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-238 (BSearchContextInfo)
         // ```c
         // if (A->contexts[m].query_offset > n) e = m;
@@ -4103,7 +4107,7 @@ impl QueryContextIndex {
         // ```
         let total_len = contexts
             .iter()
-            .map(|ctx| ctx.query_offset.max(0) as usize + ctx.seq.len())
+            .map(|ctx| ctx.query_offset.max(0) as usize + ctx.len)
             .max()
             .unwrap_or(0);
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:225-227,235-241
@@ -4126,7 +4130,7 @@ impl QueryContextIndex {
         if x_mode != 0 {
             for (idx, ctx) in contexts.iter().enumerate() {
                 let start = ctx.query_offset.max(0) as usize;
-                let end = start.saturating_add(ctx.seq.len());
+                let end = start.saturating_add(ctx.len);
                 if start < end && end <= total_len && idx != 0 {
                     x_ranges.push((start, end, idx as u32));
                 }
@@ -4135,7 +4139,7 @@ impl QueryContextIndex {
                 .iter()
                 .map(|ctx| {
                     let start = ctx.query_offset.max(0) as usize;
-                    (start, start.saturating_add(ctx.seq.len()))
+                    (start, start.saturating_add(ctx.len))
                 })
                 .filter(|&(start, end)| start < end && end <= total_len)
                 .collect();
@@ -4151,7 +4155,7 @@ impl QueryContextIndex {
             direct_map = vec![0u32; total_len];
             for (idx, ctx) in contexts.iter().enumerate() {
                 let start = ctx.query_offset.max(0) as usize;
-                let end = start.saturating_add(ctx.seq.len());
+                let end = start.saturating_add(ctx.len);
                 if start < end && end <= direct_map.len() {
                     direct_map[start..end].fill(idx as u32);
                 }
@@ -4292,27 +4296,38 @@ fn bsearch_context_info(n: usize, index: &QueryContextIndex) -> usize {
 // const Uint1 kProtSentinel = NULLB;
 // const Uint1 kNuclSentinel = 0xF;
 // ```
-fn build_query_blastna_concat_buffers(
-    encoded_contexts: &[Vec<u8>],
+/// The query buffer with its sentinels (`query_concat_length + 2` bytes), every context
+/// written straight into it in BLASTNA: for query `q` with context offsets
+/// `context_offsets[2 * q]` (plus) and `context_offsets[2 * q + 1]` (minus), the plus
+/// context is the BLASTNA code of the letters and the minus context that of their reverse
+/// complement. The searched block (`query_concat_length` bytes) is `[1..n + 1]` of it
+/// (LOSAT's memory: no second copy of the block, no IUPAC copy of either strand).
+fn build_query_blastna_buffer(
+    query_letters: &[&[u8]],
     context_offsets: &[i32],
     query_concat_length: usize,
-) -> (Vec<u8>, Vec<u8>) {
-    debug_assert_eq!(encoded_contexts.len(), context_offsets.len());
+) -> Vec<u8> {
+    debug_assert_eq!(2 * query_letters.len(), context_offsets.len());
 
-    let mut logical = vec![NUCL_SENTINEL; query_concat_length];
     let mut with_sentinels = vec![NUCL_SENTINEL; query_concat_length + 2];
 
-    for (encoded, &offset) in encoded_contexts.iter().zip(context_offsets.iter()) {
-        let start = offset.max(0) as usize;
-        let end = start.saturating_add(encoded.len());
-        if start >= end || end > logical.len() {
-            continue;
+    for (letters, offsets) in query_letters.iter().zip(context_offsets.chunks_exact(2)) {
+        let length = letters.len();
+        // A context that is empty or does not end inside the block stays sentinels.
+        let place = |offset: i32| -> Option<std::ops::Range<usize>> {
+            let start = offset.max(0) as usize;
+            let end = start.saturating_add(length);
+            (start < end && end <= query_concat_length).then(|| start + 1..end + 1)
+        };
+        if let Some(range) = place(offsets[0]) {
+            encode_iupac_to_blastna_into(letters, &mut with_sentinels[range]);
         }
-        logical[start..end].copy_from_slice(encoded);
-        with_sentinels[start + 1..end + 1].copy_from_slice(encoded);
+        if let Some(range) = place(offsets[1]) {
+            encode_reverse_complement_blastna_into(letters, &mut with_sentinels[range]);
+        }
     }
 
-    (logical, with_sentinels)
+    with_sentinels
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/lookup_util.c:190-203
@@ -4346,11 +4361,11 @@ fn compute_lookup_query_stats(
     // contexts marked invalid) before its ungapped blocks mark contexts invalid
     // (blast_setup.c:633-653), so every context of a query with letters counts.
     for (ctx, masks) in contexts.iter().zip(context_masks.iter()) {
-        if ctx.seq.is_empty() {
+        if ctx.len == 0 {
             continue;
         }
         let ctx_offset = ctx.query_offset.max(0) as usize;
-        let ranges = build_unmasked_ranges(ctx.seq.len(), masks);
+        let ranges = build_unmasked_ranges(ctx.len, masks);
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1081-1115
         // ```c
         //          if (first) {
@@ -4375,7 +4390,7 @@ fn compute_lookup_query_stats(
         // (end_offset + 1, end_offset): one entry less, and its end in `max_off`.
         if ranges.is_empty() {
             approx_entries -= 1;
-            max_q_off = max_q_off.max(ctx_offset + ctx.seq.len() - 1);
+            max_q_off = max_q_off.max(ctx_offset + ctx.len - 1);
             continue;
         }
         for (start, end) in ranges {
@@ -4865,7 +4880,15 @@ fn update_hitlists_with_subject_hits(
         return;
     }
 
-    let mut per_query: Vec<Vec<BlastnHsp>> = vec![Vec::new(); hit_lists.len()];
+    // Each query's HSPs get a vector of their exact count (LOSAT's memory: a vector grown by
+    // `push` holds four HSPs from the first one, and most subjects give a query one HSP).
+    let mut counts = vec![0usize; hit_lists.len()];
+    for hit in &hits {
+        if let Some(count) = counts.get_mut(hit.q_idx as usize) {
+            *count += 1;
+        }
+    }
+    let mut per_query: Vec<Vec<BlastnHsp>> = counts.into_iter().map(Vec::with_capacity).collect();
     for hit in hits {
         let q_idx = hit.q_idx as usize;
         if q_idx < per_query.len() {
@@ -8115,8 +8138,8 @@ fn search_query_batch(
     //                  EBlastProgramType prog,
     //                  ...)
     // ```
-    // The search owns its copy of the query records (`prepare_sequence_data`).
-    let queries = query_records.to_vec();
+    // The search reads the query records of its caller (`prepare_sequence_data`).
+    let queries = query_records;
     let query_ids = queries
         .iter()
         .map(|record| String::from_utf8_lossy(record.shown_id()).into_owned())
@@ -8217,7 +8240,7 @@ fn search_query_batch(
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
     let masks = match stage {
-        BatchStage::Search { .. } => query_masks(args, &queries),
+        BatchStage::Search { .. } => query_masks(args, queries),
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
     let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);
@@ -8317,7 +8340,6 @@ fn search_query_batch(
     for (q_idx, q_record) in seq_data.queries.iter().enumerate() {
         let seq = q_record.seq();
         let q_len = seq.len();
-        let rc_seq = reverse_complement(seq);
         let plus_masks = seq_data.query_masks[q_idx].clone();
         let minus_masks = reverse_mask_intervals(&plus_masks, q_len);
         let plus_offset = query_concat_offset;
@@ -8328,14 +8350,14 @@ fn search_query_batch(
             query_idx: q_idx as u32,
             frame: 1,
             query_offset: plus_offset as i32,
-            seq: seq.to_vec(),
+            len: q_len,
             masks: plus_masks.clone(),
         });
         query_contexts.push(QueryContext {
             query_idx: q_idx as u32,
             frame: -1,
             query_offset: minus_offset as i32,
-            seq: rc_seq.clone(),
+            len: q_len,
             masks: minus_masks.clone(),
         });
 
@@ -8359,7 +8381,7 @@ fn search_query_batch(
     // The searched block leaves out the first and the last sentinel of the buffer. A batch
     // has a query with letters (`run_in_pool` stops on a batch without one).
     let query_concat_length = query_contexts.last().map_or(0, |last| {
-        let length = last.seq.len();
+        let length = last.len;
         (last.query_offset.max(0) as usize + length + if length == 0 { 1 } else { 2 })
             .saturating_sub(2)
     });
@@ -8381,9 +8403,36 @@ fn search_query_batch(
     // memcpy(&buf.get()[offset], sequence.data.get(),
     //        sequence.length);
     // ```
-    let encoded_queries_blastna: Vec<Vec<u8>> = query_contexts
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603
+    // ```c
+    // int buflen = QueryInfo_GetSeqBufLen(qinfo);
+    // TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
+    // ...
+    // memcpy(&buf.get()[offset], sequence.data.get(), sequence.length);
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_encoding.c:120-121
+    // ```c
+    // const Uint1 kProtSentinel = NULLB;
+    // const Uint1 kNuclSentinel = 0xF;
+    // ```
+    // The buffer is the one BLASTNA copy of the query contexts; the searched block is the
+    // buffer without its first and last sentinel, and a context is a slice of it.
+    let query_letters: Vec<&[u8]> = seq_data.queries.iter().map(|r| r.seq()).collect();
+    let encoded_query_buffer =
+        build_query_blastna_buffer(&query_letters, &query_context_offsets, query_concat_length);
+    let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
+    let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];
+    let encoded_queries_blastna: Vec<&[u8]> = query_contexts
         .iter()
-        .map(|ctx| encode_iupac_to_blastna(ctx.seq.as_slice()))
+        .map(|ctx| {
+            let start = ctx.query_offset.max(0) as usize;
+            // The offset of an empty context can be past the block.
+            if ctx.len == 0 {
+                &[][..]
+            } else {
+                &encoded_query_concat_blastna[start..start + ctx.len]
+            }
+        })
         .collect();
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_setup.c:609-619
     // ```c
@@ -8397,31 +8446,6 @@ fn search_query_batch(
     // LOSATN currently exposes the NCBI soft-query-masking path: DUST/lcase
     // masks restrict lookup-table entries through query_context_masks below,
     // while the encoded traceback/scoring sequence remains unmodified.
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603
-    // ```c
-    // int buflen = QueryInfo_GetSeqBufLen(qinfo);
-    // TAutoUint1Ptr buf((Uint1*) calloc(buflen+1, sizeof(Uint1)));
-    // ...
-    // memcpy(&buf.get()[offset], sequence.data.get(), sequence.length);
-    // ```
-    let (encoded_query_concat_blastna, encoded_query_concat_blastna_with_sentinels) =
-        build_query_blastna_concat_buffers(
-            &encoded_queries_blastna,
-            &query_context_offsets,
-            query_concat_length,
-        );
-
-    // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294,324,740-749
-    // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
-    // if (word_params->matrix_only_scoring || word_length < 11)
-    //     s_NuclUngappedExtendExact(...);
-    // Use the same encoded concat/context slices as extension, including their
-    // sentinels. Exact-only word sizes do not allocate this search-local table.
-    let query_four_base = if config.effective_word_size >= 11 {
-        build_query_four_base_bytes(&encoded_query_concat_blastna)
-    } else {
-        Vec::new()
-    };
 
     // Finalize configuration with query-dependent parameters (adaptive lookup table selection)
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:46-47
@@ -8446,10 +8470,8 @@ fn search_query_batch(
         gap_open: config.gap_open,
         gap_extend: config.gap_extend,
     };
-    let context_ungapped = context_ungapped_blocks(
-        query_contexts.iter().map(|context| context.seq.as_slice()),
-        &scoring_spec,
-    );
+    let context_ungapped =
+        context_ungapped_blocks(encoded_queries_blastna.iter().copied(), &scoring_spec);
     let (approx_table_entries, max_q_off) =
         compute_lookup_query_stats(&query_contexts, &query_context_masks);
     let max_query_length = max_q_off.saturating_add(1).max(1);
@@ -8592,7 +8614,7 @@ fn search_query_batch(
             if query_contexts
                 .iter()
                 .zip(&context_ungapped)
-                .any(|(context, block)| !context.seq.is_empty() && block.is_none())
+                .any(|(context, block)| context.len != 0 && block.is_none())
             {
                 anyhow::bail!(
                     "these scoring options have no Karlin-Altschul values, and the query batch (up to {} residues) has an invalid query; NCBI BLAST+ goes on without the gapped values and crashes, which is not supported by LOSAT's BLASTN",
@@ -8877,7 +8899,7 @@ fn search_query_batch(
             if !valid || options_searchsp != 0 {
                 return Ok(options_searchsp);
             }
-            let query_len = ctx.seq.len() as i64;
+            let query_len = ctx.len as i64;
             let result = compute_length_adjustment_ncbi(
                 query_len,
                 db_len_total_i64,
@@ -9871,7 +9893,6 @@ fn search_query_batch(
                             encoded_query_concat_blastna: &encoded_query_concat_blastna,
                             encoded_query_concat_blastna_with_sentinels:
                                 &encoded_query_concat_blastna_with_sentinels,
-                            query_four_base: &query_four_base,
                             cutoff_scores: &cutoff_scores,
                             x_dropoff_scores: &x_dropoff_scores,
                             reduced_cutoff_scores: &reduced_cutoff_scores,
@@ -10026,9 +10047,8 @@ fn search_query_batch(
                                 let ctx = &query_contexts[context_idx];
                                 let q_idx = context_idx as u32;
                                 let query_idx = ctx.query_idx as usize;
-                                let q_seq = ctx.seq.as_slice();
                                 let q_context_start = ctx.query_offset as usize;
-                                let q_context_end = q_context_start + q_seq.len();
+                                let q_context_end = q_context_start + ctx.len;
                                 let q_pos_usize = q_off0 - q_context_start;
 
                                 // Use pre-computed cutoff score (computed once per query-subject pair)
@@ -10106,7 +10126,7 @@ fn search_query_batch(
                                         kmer_start
                                             .saturating_add(lut_word_length)
                                             .saturating_add(chunk.offset),
-                                        ctx.seq.len(),
+                                        ctx.len,
                                         ctx.frame,
                                     )
                                 {
@@ -10471,7 +10491,7 @@ fn search_query_batch(
                                         s_ext_start
                                             .saturating_add(word_length)
                                             .saturating_add(chunk.offset),
-                                        ctx.seq.len(),
+                                        ctx.len,
                                         ctx.frame,
                                     )
                                 {
@@ -10831,7 +10851,7 @@ fn search_query_batch(
                                         s_end_pos
                                             .saturating_sub(diag_offset as usize)
                                             .saturating_add(chunk.offset),
-                                        ctx.seq.len(),
+                                        ctx.len,
                                         ctx.frame,
                                     )
                                 {
@@ -10922,7 +10942,7 @@ fn search_query_batch(
                                 };
                                 let ungapped = if word_length < 11 {
                                     extend_hit_ungapped_exact_ncbi(
-                                        encoded_query_concat_blastna.as_slice(),
+                                        encoded_query_concat_blastna,
                                         search_seq_packed,
                                         q_off,
                                         s_off,
@@ -10932,8 +10952,7 @@ fn search_query_batch(
                                     )
                                 } else {
                                     extend_hit_ungapped_approx_ncbi(
-                                        encoded_query_concat_blastna.as_slice(),
-                                        &query_four_base,
+                                        encoded_query_concat_blastna,
                                         search_seq_packed,
                                         q_off,
                                         s_off,
@@ -10988,7 +11007,7 @@ fn search_query_batch(
                                         trace_qe.max(0) as usize,
                                         ss.saturating_add(chunk.offset),
                                         ungapped_se.saturating_add(chunk.offset),
-                                        ctx.seq.len(),
+                                        ctx.len,
                                         ctx.frame,
                                     ) {
                                         blastn_trace::log(
@@ -11527,8 +11546,7 @@ fn search_query_batch(
                                 // ```c
                                 // Uint1 *q_start = query->sequence;
                                 // ```
-                                let q_seq = ctx.seq.as_slice();
-                                let q_seq_blastna = encoded_queries_blastna[context_idx].as_slice();
+                                let q_seq_blastna = encoded_queries_blastna[context_idx];
                                 let q_pos_usize = q_off0 - ctx.query_offset as usize;
 
                                 // Use pre-computed cutoff score (computed once per query-subject pair)
@@ -11602,7 +11620,7 @@ fn search_query_batch(
                                         kmer_start
                                             .saturating_add(safe_k)
                                             .saturating_add(chunk.offset),
-                                        ctx.seq.len(),
+                                        ctx.len,
                                         ctx.frame,
                                     )
                                 {
@@ -11782,7 +11800,7 @@ fn search_query_batch(
                                         q_off,
                                         s_off,
                                         !query_mask.is_empty(),
-                                        q_seq.len(),
+                                        ctx.len,
                                         s_range,
                                         safe_k, // word_length
                                         safe_k, // lut_word_length (same for non-two-stage)
@@ -11980,7 +11998,7 @@ fn search_query_batch(
                                         q_off,
                                         s_off,
                                         !query_mask.is_empty(),
-                                        q_seq.len(),
+                                        ctx.len,
                                         s_range,
                                         safe_k, // word_length
                                         safe_k, // lut_word_length (same for non-two-stage)
@@ -12080,9 +12098,6 @@ fn search_query_batch(
                                 } else {
                                     extend_hit_ungapped_approx_ncbi(
                                         q_seq_blastna,
-                                        &query_four_base[query_context_offsets[context_idx] as usize
-                                            ..query_context_offsets[context_idx] as usize
-                                                + q_seq_blastna.len().saturating_sub(3)],
                                         search_seq_packed,
                                         q_off,
                                         s_off,
@@ -12131,7 +12146,7 @@ fn search_query_batch(
                                         qe,
                                         ss.saturating_add(chunk.offset),
                                         ungapped_se.saturating_add(chunk.offset),
-                                        ctx.seq.len(),
+                                        ctx.len,
                                         ctx.frame,
                                     )
                                 {
@@ -12419,7 +12434,7 @@ fn search_query_batch(
                  x_scratch: &mut XAheadScratch<'_>|
                  -> Option<(usize, usize, usize, usize, i32, usize, usize)> {
                     let uh = &x_ungapped[x_index];
-                    let q_seq_blastna = encoded_queries_blastna[uh.context_idx as usize].as_slice();
+                    let q_seq_blastna = encoded_queries_blastna[uh.context_idx as usize];
                     if use_dp {
                         let mut seed_qs = uh.seed_q_off;
                         let mut seed_ss = uh.seed_s_off;
@@ -12533,8 +12548,7 @@ fn search_query_batch(
                                     subject_end: u.se as i32,
                                     score: u.score,
                                     query_frame: u.query_frame,
-                                    query_length: query_contexts[u.context_idx as usize].seq.len()
-                                        as i32,
+                                    query_length: query_contexts[u.context_idx as usize].len as i32,
                                     query_context_offset: u.query_context_offset,
                                     subject_frame_sign: 1,
                                 };
@@ -12549,10 +12563,7 @@ fn search_query_batch(
                         }
                         // Get query sequence for this hit (context-specific)
                         let ctx = &query_contexts[uh.context_idx as usize];
-                        let q_seq = ctx.seq.as_slice();
-
-                        let q_seq_blastna =
-                            encoded_queries_blastna[uh.context_idx as usize].as_slice();
+                        let q_seq_blastna = encoded_queries_blastna[uh.context_idx as usize];
                         let subject_len = s_len;
 
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2793
@@ -12585,7 +12596,7 @@ fn search_query_batch(
                             subject_end: uh.se as i32,
                             score: uh.score,
                             query_frame: uh.query_frame,
-                            query_length: ctx.seq.len() as i32,
+                            query_length: ctx.len as i32,
                             query_context_offset: uh.query_context_offset,
                             subject_frame_sign,
                         };
@@ -12618,7 +12629,7 @@ fn search_query_batch(
                                 uh.qe,
                                 uh.ss.saturating_add(chunk.offset),
                                 uh.se.saturating_add(chunk.offset),
-                                ctx.seq.len(),
+                                ctx.len,
                                 ctx.frame,
                             )
                         {
@@ -12887,7 +12898,7 @@ fn search_query_batch(
                                     prelim_qe,
                                     prelim_ss.saturating_add(chunk.offset),
                                     prelim_se.saturating_add(chunk.offset),
-                                    ctx.seq.len(),
+                                    ctx.len,
                                     ctx.frame,
                                 ))
                         {
@@ -12931,7 +12942,7 @@ fn search_query_batch(
                             subject_end: prelim_se as i32,
                             score: prelim_score,
                             query_frame: uh.query_frame,
-                            query_length: ctx.seq.len() as i32,
+                            query_length: ctx.len as i32,
                             query_context_offset: uh.query_context_offset,
                             subject_frame_sign: 1,
                         };
@@ -13477,7 +13488,7 @@ fn search_query_batch(
             // N02 scheduling only: speculative values have no externally visible effects;
             // the original ordered contains/materialize/add sequence remains authoritative.
             let prepare_traceback = |prelim: &PrelimHit| {
-                let q_seq_blastna = encoded_queries_blastna[prelim.context_idx as usize].as_slice();
+                let q_seq_blastna = encoded_queries_blastna[prelim.context_idx as usize];
                 let mut trace_q_start = prelim.seed_qs;
                 let mut trace_s_start = prelim.seed_ss;
 
@@ -13761,8 +13772,7 @@ fn search_query_batch(
                                     subject_end: p.prelim_se as i32,
                                     score: p.prelim_score,
                                     query_frame: p.query_frame,
-                                    query_length: query_contexts[p.context_idx as usize].seq.len()
-                                        as i32,
+                                    query_length: query_contexts[p.context_idx as usize].len as i32,
                                     query_context_offset: p.query_context_offset,
                                     subject_frame_sign: 1,
                                 };
@@ -13812,8 +13822,7 @@ fn search_query_batch(
                                     subject_end: p.prelim_se as i32,
                                     score: p.prelim_score,
                                     query_frame: p.query_frame,
-                                    query_length: query_contexts[p.context_idx as usize].seq.len()
-                                        as i32,
+                                    query_length: query_contexts[p.context_idx as usize].len as i32,
                                     query_context_offset: p.query_context_offset,
                                     subject_frame_sign: 1,
                                 };
@@ -13925,10 +13934,9 @@ fn search_query_batch(
 
                         let prelim = &prelim_hits[prelim_index];
                         let ctx = &query_contexts[prelim.context_idx as usize];
-                        let q_seq_blastna =
-                            encoded_queries_blastna[prelim.context_idx as usize].as_slice();
+                        let q_seq_blastna = encoded_queries_blastna[prelim.context_idx as usize];
                         let q_seq_nomask_blastna =
-                            encoded_queries_blastna[prelim.context_idx as usize].as_slice();
+                            encoded_queries_blastna[prelim.context_idx as usize];
 
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:403-405
                         // ```c
@@ -13949,7 +13957,7 @@ fn search_query_batch(
                             subject_end: prelim.prelim_se as i32,
                             score: prelim.prelim_score,
                             query_frame: prelim.query_frame,
-                            query_length: ctx.seq.len() as i32,
+                            query_length: ctx.len as i32,
                             query_context_offset: prelim.query_context_offset,
                             subject_frame_sign,
                         };
@@ -13993,7 +14001,7 @@ fn search_query_batch(
                                     prelim.prelim_qe,
                                     prelim.prelim_ss,
                                     prelim.prelim_se,
-                                    ctx.seq.len(),
+                                    ctx.len,
                                     ctx.frame,
                                 ))
                         {
@@ -14395,7 +14403,7 @@ fn search_query_batch(
                                     final_qe,
                                     final_ss,
                                     final_se,
-                                    ctx.seq.len(),
+                                    ctx.len,
                                     ctx.frame,
                                 ))
                         {
@@ -14473,7 +14481,7 @@ fn search_query_batch(
                             subject_end: final_se as i32,
                             score,
                             query_frame: prelim.query_frame,
-                            query_length: ctx.seq.len() as i32,
+                            query_length: ctx.len as i32,
                             query_context_offset: prelim.query_context_offset,
                             subject_frame_sign,
                         };
@@ -14691,8 +14699,8 @@ fn search_query_batch(
             };
 
             // NCBI reference: blast_traceback.c:653-665 (reevaluate with blastna sequences)
-            let q_seq_blastna = encoded_queries_blastna[context_idx].as_slice();
-            let q_seq_nomask_blastna = encoded_queries_blastna[context_idx].as_slice();
+            let q_seq_blastna = encoded_queries_blastna[context_idx];
+            let q_seq_nomask_blastna = encoded_queries_blastna[context_idx];
             let s_seq_eval = s_seq_blastna;
             let reeval_start = if timing_enabled {
                 Some(std::time::Instant::now())
@@ -15845,6 +15853,65 @@ mod tests {
             &mut |_| Ok(()),
         )
         .unwrap()
+    }
+
+    /// The query buffer as it was built from per-context IUPAC copies: every context encoded
+    /// on its own, then copied into the block and into the block with sentinels.
+    fn query_buffers_from_context_copies(
+        queries: &[&[u8]],
+        offsets: &[i32],
+        concat_len: usize,
+    ) -> (Vec<u8>, Vec<u8>) {
+        let mut logical = vec![NUCL_SENTINEL; concat_len];
+        let mut with_sentinels = vec![NUCL_SENTINEL; concat_len + 2];
+        for (q, seq) in queries.iter().enumerate() {
+            let contexts = [
+                encode_iupac_to_blastna(seq),
+                encode_iupac_to_blastna(&super::super::super::lookup::reverse_complement(seq)),
+            ];
+            for (encoded, &offset) in contexts.iter().zip(&offsets[2 * q..2 * q + 2]) {
+                let start = offset.max(0) as usize;
+                let end = start.saturating_add(encoded.len());
+                if start >= end || end > logical.len() {
+                    continue;
+                }
+                logical[start..end].copy_from_slice(encoded);
+                with_sentinels[start + 1..end + 1].copy_from_slice(encoded);
+            }
+        }
+        (logical, with_sentinels)
+    }
+
+    // One buffer written context by context equals the two buffers of the IUPAC copies,
+    // with an empty query (no room) between queries and letters of both cases.
+    #[test]
+    fn query_buffer_equals_the_buffers_of_the_context_copies() {
+        let queries: [&[u8]; 5] = [
+            b"ACGTTGCAAC",
+            b"",
+            b"acgtnRYKMSWBDHVNu-acgt",
+            b"A",
+            b"GGGGCCCCTTTTAAAAccgg*0",
+        ];
+        let mut offsets = Vec::new();
+        let mut at = 0usize;
+        let room = |length: usize| if length == 0 { 0 } else { length + 1 };
+        for seq in &queries {
+            offsets.push(at as i32);
+            at += room(seq.len());
+            offsets.push(at as i32);
+            at += room(seq.len());
+        }
+        let concat_len = at - 1;
+        let (logical, with_sentinels) =
+            query_buffers_from_context_copies(&queries, &offsets, concat_len);
+        let buffer = build_query_blastna_buffer(&queries, &offsets, concat_len);
+        assert_eq!(buffer, with_sentinels);
+        assert_eq!(&buffer[1..concat_len + 1], logical.as_slice());
+        assert_eq!(
+            (buffer[0], buffer[concat_len + 1]),
+            (NUCL_SENTINEL, NUCL_SENTINEL)
+        );
     }
 
     #[test]

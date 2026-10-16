@@ -93,14 +93,15 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 69 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 71 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
 `LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE`,
 `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_LINKSLICES`, `LOSAT_X_BPSUBJRUN`,
 `LOSAT_X_TBNSTORE`, `LOSAT_X_DPNEON`, `LOSAT_X_TBNBATCHRULE` and the eight blastp switches
 `LOSAT_X_BPSEED`, `LOSAT_X_BPUNGAP`, `LOSAT_X_BPGAP`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPFREE`,
-`LOSAT_X_BPPCOMPACT`, `LOSAT_X_BPREDOFIT` and `LOSAT_X_BPQBLOCK`, and `LOSAT_X_BNSTREAM` joined),
-and their variables mean (`LOSAT/src/utils/xswitch.rs`):
+`LOSAT_X_BPPCOMPACT`, `LOSAT_X_BPREDOFIT` and `LOSAT_X_BPQBLOCK`, `LOSAT_X_BNSTREAM`, and
+`LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES` joined), and their variables mean
+(`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -124,7 +125,8 @@ and their variables mean (`LOSAT/src/utils/xswitch.rs`):
   seed stage only; `BPGAP` runs the vector alignment only with AVX2, BMI1 and LZCNT (else the reference
   function); `BPLUT` declines in diagnostics mode; `BPQBLOCK` takes the block path only for one
   `-outfmt 6` report with more than one block (see its entry); `BNSTREAM` only in
-  blastn's `-subject` search at 2 or more threads.
+  blastn's `-subject` search at 2 or more threads; `TBXNEXT` only in TBLASTX's parallel subject
+  loop (2 or more threads, several subjects, native builds).
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
   Only `0` means off; `00`, `false` or `off` are "any other value".
 - The variables are read once per process (once per Wasm instance), except `GREEDYSPEC`,
@@ -138,7 +140,7 @@ and their variables mean (`LOSAT/src/utils/xswitch.rs`):
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 69 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 71 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -177,6 +179,7 @@ export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_BPSEED=1 LOSAT_X_BPUNGAP=1 LOSAT_X_BPGAP=1 LOSAT_X_BPLUT=1
 export LOSAT_X_BPPFREE=1 LOSAT_X_BPPCOMPACT=1 LOSAT_X_BPREDOFIT=1 LOSAT_X_BPQBLOCK=50000
 export LOSAT_X_BNSTREAM=1
+export LOSAT_X_TBXNEXT=1 LOSAT_X_TBXFRAMES=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -326,6 +329,21 @@ query batch until all are searched (one thread always hands them over at once). 
 value and not the order in which the hit lists take the subjects; it lowers the peak memory and,
 on the workstation, the time (0.94 at 8 threads and 0.88 at 16 on 100 16S queries against 28,036
 16S sequences). A database search (`-db`) has its own drivers and is not affected.
+
+`LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES` were added after the default changed, as switches that
+were off unless set, and joined the set together on 2026-10-17. With two or more threads TBLASTX's
+subject loop gives each thread the next subject when it is free, instead of rayon's pieces of the
+subject range cut before the search (a genome's chromosome arms, listed first, fell into one piece
+and were searched one after another on one thread); and a subject's frames are made in windows when
+the seed stage reads them and freed after it, the frames of its letters only when HSPs reach the
+re-evaluation. Neither changes a value or the order of the reports. They joined together because
+the hand-out alone holds the frames of several long subjects at once. On the workstation (node 0,
+medians of alternating pairs, every report equal to NCBI's `-num_threads 1` report): 3 fruit fly
+transcripts against the fruit fly genome database (1,870 sequences) 11.59 -> 9.75 s at one thread
+(NCBI BLAST+ 2.17.0 `-db` 10.05 s), max RSS 257 -> 107 MiB (NCBI 162); 11.48 -> 2.58 s at 8 threads
+(NCBI 2.73 s), 257 -> 316 MiB (NCBI 359); 3.52 s at 4 threads (NCBI 3.50) and 2.58 s at 16 (NCBI
+2.71); 10 transcripts against the zebrafish cDNA database x0.98 at one thread and x0.94 at 8. The
+paths without them (`LOSAT_X_DEFAULT=0`) ran at x0.991-1.000 of main's time (V-PERF).
 
 What runs per target:
 
@@ -1122,8 +1140,8 @@ Rebuilding less:
   the switch stops a frame loop that would run without the worker's table
   (`LOSAT/tests/tblastx_seed_release.rs` reads the counters).
 
-- `LOSAT_X_TBXFRAMES=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it) a subject's frames are made when they are read and only as long
+- `LOSAT_X_TBXFRAMES=1` (TBLASTX, memory; in the strict set since 2026-10-17, on by default) a
+  subject's frames are made when they are read and only as long
   as they are read (`Subjects::x_preliminary_frames` / `x_letter_frames` in `tblastx/subjects.rs`,
   `x_generate_frames_in_windows` in `tblastx/translation.rs`). Without it `process_subject` makes, before
   the seed stage, the six frames of the subject's letters and, for a subject with ambiguous bases, the six
@@ -1445,9 +1463,8 @@ Scheduling (each value computed by one thread with the original function; order 
   take units, never a loop of the flow. `=0` turns it off. With `LOSAT_WASI_THREADS_DEBUG=1` each
   subject whose units ran on the pool prints a `prelim_units` stage line with
   `parallel_selected=true`; `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
-- `LOSAT_X_TBXNEXT=1` (TBLASTX, speed; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it; acts only where the parallel subject loop runs: two or more threads
-  and more than one subject, native builds) each thread of the pool takes the next subject from one
+- `LOSAT_X_TBXNEXT=1` (TBLASTX, speed; in the strict set since 2026-10-17, on by default; acts only
+  where the parallel subject loop runs: two or more threads and more than one subject, native builds) each thread of the pool takes the next subject from one
   counter when it is free (`tblastx/x_subject_next.rs`, one broadcast job per thread), with one worker
   state per thread made when it takes its first subject. Without it the loop gives rayon the subject indices
   as one indexed range (`for_each_init`), which rayon cuts into pieces before the search, so the long

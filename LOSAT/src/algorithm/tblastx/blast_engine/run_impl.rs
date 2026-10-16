@@ -2919,6 +2919,8 @@ fn search_query_batch(
         chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
         // LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW: the groups built at dispatch point 0.
         lut: x_pair_lut_batch,
+        // LOSAT_X_PAIRPARGATE: the thread count dispatch point 0 decided with.
+        threads: parallel_pool.threads(),
     });
     // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 1 (per batch): the batch's tables move
     // into two holders, `x_seed_batch.lookup` (the lookup table) and `x_seed_batch.units` (the

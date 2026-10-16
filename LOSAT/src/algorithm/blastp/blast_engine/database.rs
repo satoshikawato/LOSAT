@@ -46,6 +46,14 @@ use super::{
     BlastpSubjectResult, BlastpSubjectScratch, EncodedProtein, XPrelimHsp,
 };
 
+// EXPERIMENT (LOSAT_X_BPDBCUT / LOSAT_X_BPDBCUTSHADOW): the blocks of the preliminary stage cut by
+// the database size and the thread count.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+mod x_db_cut;
+
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
 // ```c
 // #define BLAST_SEQSRC_MINLENGTH  10    /**< Default minimal sequence length */
@@ -410,6 +418,9 @@ fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window
 /// error in ordinal order is returned, the error of the one-thread order (the blocks
 /// are cut alike). EXPERIMENT (LOSAT_X_BPPCOMPACT): the compact lists
 /// (`x_compact_hit_lists`) are updated with the hit lists, in the same order.
+/// EXPERIMENT (LOSAT_X_BPDBCUT): with more than one thread the blocks are cut by the
+/// database size and the thread count, and a failed search returns the one-thread order's
+/// error (`database/x_db_cut.rs`, exactness argument in its header).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn search_blocks<S, K>(
     database: &BlastpDatabase,
@@ -435,6 +446,28 @@ where
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let blocks_per_thread = 1;
+    // EXPERIMENT (LOSAT_X_BPDBCUT / LOSAT_X_BPDBCUTSHADOW): `database/x_db_cut.rs`.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    {
+        let mode = x_db_cut::x_bp_db_cut();
+        if mode != x_db_cut::XDbCut::Off {
+            return x_db_cut::x_search_blocks_cut(
+                mode,
+                database,
+                pool,
+                window,
+                blocks_per_thread,
+                new_scratch,
+                process_subject,
+                preliminary_hit_lists,
+                x_compact_hit_lists,
+                prelim_hitlist_size,
+            );
+        }
+    }
     search_blocks_of(
         database,
         pool,
@@ -447,6 +480,16 @@ where
         x_compact_hit_lists,
         prelim_hitlist_size,
     )
+}
+
+// No NCBI counterpart: prints counters and changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the shadow mode's line at exit.
+pub(super) fn x_bp_db_cut_print_summary() {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    x_db_cut::x_bp_db_cut_print_summary();
 }
 
 /// `search_blocks` with blocks of at most `block_bytes` and rounds of `blocks_per_thread`
@@ -1417,6 +1460,316 @@ mod tests {
                 scratch.diag_offset,
                 "from {start} with window {window}"
             );
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPDBCUT): the blocks cut by the database size and the thread count
+    /// (`database/x_db_cut.rs`) against the blocks of `BLOCK_BYTES`.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    mod x_db_cut_blocks {
+        use super::super::x_db_cut::{
+            x_count_blocks, x_cut_block_bytes, x_db_cut_block_bytes, x_search_blocks_cut,
+            x_sequence_bytes, XDbCut,
+        };
+        use super::*;
+        use std::path::{Path, PathBuf};
+
+        type Seen = Vec<(usize, i32, Vec<u8>)>;
+
+        /// What the recording kernel saw (sorted by ordinal id) and the listed ordinal ids of a
+        /// search of `database` at `threads` threads in rounds of `blocks_per_thread` blocks per
+        /// thread: `search_blocks_of` with blocks of `block_bytes` (`Err`), or the cut's driver
+        /// in a mode (`Ok`).
+        fn search(
+            database: &BlastpDatabase,
+            threads: usize,
+            blocks_per_thread: usize,
+            how: std::result::Result<XDbCut, u64>,
+        ) -> Result<(Seen, Vec<u32>)> {
+            let window = 40;
+            let seen = std::sync::Mutex::new(Vec::new());
+            let mut hit_lists: Vec<Option<BlastpHitList>> = vec![None];
+            let mut compact: Vec<Option<BlastpHitList<XPrelimHsp>>> = vec![None];
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                let new_scratch = || BlastpSubjectScratch::new(16, 64, window, 21);
+                let kernel = recording_kernel(window, &seen);
+                match how {
+                    Ok(mode) => x_search_blocks_cut(
+                        mode,
+                        database,
+                        pool,
+                        window,
+                        blocks_per_thread,
+                        &new_scratch,
+                        &kernel,
+                        &mut hit_lists,
+                        &mut compact,
+                        500,
+                    ),
+                    Err(block_bytes) => search_blocks_of(
+                        database,
+                        pool,
+                        window,
+                        block_bytes,
+                        blocks_per_thread,
+                        &new_scratch,
+                        &kernel,
+                        &mut hit_lists,
+                        &mut compact,
+                        500,
+                    ),
+                }
+            })?;
+            let mut seen = seen.into_inner().unwrap();
+            seen.sort_by_key(|entry| entry.0);
+            let listed = hit_lists[0]
+                .as_ref()
+                .map(|list| {
+                    list.hsplist_array[..list.hsplist_count]
+                        .iter()
+                        .map(|l| l.oid)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok((seen, listed))
+        }
+
+        /// The cut of `database` on a pool of `threads` threads.
+        fn cut_of(database: &BlastpDatabase, threads: usize) -> u64 {
+            crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                Ok(x_db_cut_block_bytes(database, pool))
+            })
+            .unwrap()
+        }
+
+        /// The letters of the generated database: 300 sequences of 1 to 1,500 letters from a fixed
+        /// generator, with sequences of 40,000 and 70,000 letters at ordinal ids 100 and 250.
+        fn generated_lengths() -> Vec<usize> {
+            let mut state = 0x2545_f491_4f6c_dd1du64;
+            (0..300)
+                .map(|ordinal| match ordinal {
+                    100 => 40_000,
+                    250 => 70_000,
+                    _ => {
+                        state = state
+                            .wrapping_mul(6_364_136_223_846_793_005)
+                            .wrapping_add(1_442_695_040_888_963_407);
+                        1 + (state >> 33) as usize % 1_500
+                    }
+                })
+                .collect()
+        }
+
+        /// The generated database written by `LOSAT makedb` into a new directory of the test
+        /// (`label`), with volumes of at most `max_file_sz` bytes; returns the directory and the
+        /// database name.
+        fn generated_database(label: &str, max_file_sz: &str) -> (PathBuf, String) {
+            const LETTERS: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+            let mut fasta = Vec::new();
+            let mut state = 7u64;
+            for (ordinal, length) in generated_lengths().into_iter().enumerate() {
+                fasta.extend_from_slice(format!(">s{ordinal} generated\n").as_bytes());
+                for i in 0..length {
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    fasta.push(LETTERS[(state >> 33) as usize % LETTERS.len()]);
+                    if i % 80 == 79 || i + 1 == length {
+                        fasta.push(b'\n');
+                    }
+                }
+            }
+            let dir =
+                std::env::temp_dir().join(format!("losat-bpdbcut-{label}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let name = dir.join("gen").to_str().unwrap().to_string();
+            let args = crate::writedb::makeblastdb::MakedbArgs {
+                input: "-".to_string(),
+                input_type: "fasta".to_string(),
+                dbtype: "prot".to_string(),
+                title: Some("gen".to_string()),
+                out: Some(name.clone()),
+                blastdb_version: 4,
+                max_file_sz: max_file_sz.to_string(),
+            };
+            let now = crate::writedb::time::LocalTime {
+                year: 2026,
+                month: 10,
+                day: 16,
+                hour: 13,
+                minute: 30,
+                second: 0,
+            };
+            let (mut log, mut messages) = (Vec::new(), Vec::new());
+            crate::writedb::makeblastdb::build_database(
+                &args,
+                Some(&now),
+                &mut fasta.as_slice(),
+                &mut log,
+                &mut messages,
+            )
+            .unwrap_or_else(|error| panic!("makedb: {error}"));
+            (dir, name)
+        }
+
+        fn open_path(name: &str) -> BlastpDatabase {
+            BlastpDatabase::open(name, &ApplicationSettings::default())
+                .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+        }
+
+        // The cut of the fixture databases (812 bytes of sequence, one volume or six): one thread
+        // keeps 1 MiB, more threads the 4 KiB floor, and every volume is one block either way. The
+        // sequence bytes are those of the one-volume sequence file.
+        #[test]
+        fn the_cut_of_tiny_and_multi_volume_databases() {
+            let single = open("prot_v4");
+            let volumes = open("prot_mv");
+            let psq_bytes = |names: &[&str]| -> u64 {
+                names
+                    .iter()
+                    .map(|name| std::fs::metadata(fixture(name)).unwrap().len())
+                    .sum()
+            };
+            assert_eq!(x_sequence_bytes(&single), psq_bytes(&["prot_v4.psq"]));
+            assert_eq!(x_sequence_bytes(&single), 812);
+            let mv: Vec<String> = (0..6).map(|v| format!("prot_mv.{v:02}.psq")).collect();
+            let mv: Vec<&str> = mv.iter().map(String::as_str).collect();
+            // Each further volume has its own leading sentinel byte.
+            assert_eq!(x_sequence_bytes(&volumes) + 5, psq_bytes(&mv));
+            assert_eq!(x_sequence_bytes(&volumes), x_sequence_bytes(&single));
+            assert_eq!(cut_of(&single, 1), BLOCK_BYTES);
+            assert_eq!(cut_of(&volumes, 1), BLOCK_BYTES);
+            for threads in [2, 3, 4, 8] {
+                assert_eq!(cut_of(&single, threads), x_cut_block_bytes(812, threads));
+                assert_eq!(cut_of(&single, threads), 4096);
+                assert_eq!(cut_of(&volumes, threads), 4096);
+            }
+            for block_bytes in [BLOCK_BYTES, 4096] {
+                assert_eq!(x_count_blocks(&single.db, block_bytes), 1);
+                assert_eq!(x_count_blocks(&volumes.db, block_bytes), 6);
+            }
+        }
+
+        // blast_engine.c:1411-1554 and blast_extend.c:160-172: with the cut, the kernel gets every
+        // sequence once with the one-thread order's diagonal offset, and the hit list gets the
+        // one-thread order's updates, at 1, 2, 3 and 7 threads, in rounds of 2 and of
+        // `BLOCKS_PER_THREAD` blocks per thread, on one volume and on several; the sequences of
+        // 40,000 and 70,000 letters are larger than the cut at 2 threads and more (blocks of their
+        // own).
+        #[test]
+        fn blocks_of_the_cut_give_the_one_thread_search() {
+            let (single_dir, single_name) = generated_database("one", "3GB");
+            let (multi_dir, multi_name) = generated_database("multi", "100000");
+            let single = open_path(&single_name);
+            let multi = open_path(&multi_name);
+            let lengths = generated_lengths();
+            let letters: usize = lengths.iter().sum();
+            assert_eq!(single.total_letters(), letters as u64);
+            assert_eq!(multi.total_letters(), letters as u64);
+            assert_eq!(single.db.volumes().len(), 1);
+            assert!(multi.db.volumes().len() > 2, "{}", multi.db.volumes().len());
+            let (reference, reference_listed) = search(&single, 1, 2, Err(BLOCK_BYTES)).unwrap();
+            assert_eq!(reference.len(), lengths.len());
+            assert_eq!(reference_listed.len(), 100);
+            assert_eq!(x_count_blocks(&single.db, BLOCK_BYTES), 1);
+            for threads in [1usize, 2, 3, 7] {
+                let cut = cut_of(&single, threads);
+                if threads == 1 {
+                    assert_eq!(cut, BLOCK_BYTES);
+                } else {
+                    assert_eq!(
+                        cut,
+                        x_cut_block_bytes(letters as u64 + lengths.len() as u64 + 1, threads)
+                    );
+                    // Both long sequences at 3 threads and more, the longer one at 2.
+                    assert!(cut < 70_000 + 2, "{threads} threads: {cut}");
+                    assert!(
+                        x_count_blocks(&single.db, cut) > 2 * threads as u64,
+                        "{threads} threads: {} blocks",
+                        x_count_blocks(&single.db, cut)
+                    );
+                }
+                for blocks_per_thread in [2, BLOCKS_PER_THREAD] {
+                    for (what, db) in [("one volume", &single), ("volumes", &multi)] {
+                        let (seen, listed) =
+                            search(db, threads, blocks_per_thread, Ok(XDbCut::On)).unwrap();
+                        let context = format!(
+                            "{what}, {threads} threads, {blocks_per_thread} blocks per thread"
+                        );
+                        assert!(seen == reference, "{context}");
+                        assert_eq!(listed, reference_listed, "{context}");
+                    }
+                }
+            }
+            // The shadow searches twice (the kernel sees every sequence twice) and finds the
+            // lists equal.
+            for threads in [2usize, 7] {
+                let (seen, listed) = search(&multi, threads, 2, Ok(XDbCut::Shadow)).unwrap();
+                assert_eq!(seen.len(), 2 * lengths.len());
+                assert_eq!(listed, reference_listed);
+            }
+            let _ = std::fs::remove_dir_all(single_dir);
+            let _ = std::fs::remove_dir_all(multi_dir);
+        }
+
+        fn error_text(result: Result<(Seen, Vec<u32>)>) -> String {
+            match result {
+                Ok(_) => panic!("the search of the damaged database succeeded"),
+                Err(error) => format!("{error:#}"),
+            }
+        }
+
+        // A damaged database fails as with one thread at every thread count: a sequence file 500
+        // bytes shorter than its index says (the byte range of the read names the block), and
+        // then also a gap byte in sequence 100 (a refusal of the search block that a smaller block
+        // meets before the read that fails, while the one-thread order's 1 MiB block fails to read
+        // first).
+        #[test]
+        fn a_damaged_database_gives_the_one_thread_error_with_the_cut() {
+            let (dir, name) = generated_database("damaged", "3GB");
+            let psq = Path::new(&name).with_extension("psq");
+            let sequence_100 =
+                open_path(&name).db.volumes()[0].index().sequence_offsets()[100] as usize;
+            let mut bytes = std::fs::read(&psq).unwrap();
+            bytes.truncate(bytes.len() - 500);
+            std::fs::write(&psq, &bytes).unwrap();
+            for gap in [false, true] {
+                if gap {
+                    bytes[sequence_100 + 1_000] = NCBISTDAA_GAP;
+                    std::fs::write(&psq, &bytes).unwrap();
+                }
+                let database = open_path(&name);
+                let expected = error_text(search(&database, 1, 2, Err(BLOCK_BYTES)));
+                assert!(
+                    expected.contains("passes the end of the file"),
+                    "{expected}"
+                );
+                assert_eq!(
+                    error_text(search(&database, 4, 2, Err(BLOCK_BYTES))),
+                    expected
+                );
+                for threads in [2usize, 4, 7] {
+                    let cut = cut_of(&database, threads);
+                    // Without the one-thread order's error, the cut's own error differs.
+                    let own = error_text(search(&database, threads, 2, Err(cut)));
+                    assert_ne!(own, expected, "{threads} threads");
+                    if gap {
+                        assert!(own.contains("holds a gap character"), "{own}");
+                    }
+                    for mode in [XDbCut::On, XDbCut::Shadow] {
+                        assert_eq!(
+                            error_text(search(&database, threads, 2, Ok(mode))),
+                            expected,
+                            "{threads} threads, {mode:?}"
+                        );
+                    }
+                }
+            }
+            let _ = std::fs::remove_dir_all(dir);
         }
     }
 

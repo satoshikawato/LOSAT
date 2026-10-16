@@ -1070,6 +1070,12 @@ pub(crate) fn x_bp_subj_run_print_summary() {
     x_subject_runs::x_bp_subj_run_print_summary();
 }
 
+// No NCBI counterpart: prints counters and changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the shadow mode's line at exit.
+pub(crate) fn x_bp_db_cut_print_summary() {
+    database::x_bp_db_cut_print_summary();
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
 // ```c
 // #pragma omp parallel ... num_threads(actual_num_threads)

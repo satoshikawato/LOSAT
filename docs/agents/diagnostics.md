@@ -869,6 +869,24 @@ Scheduling (each value computed by one thread with the original function; order 
   stderr at the end, with the number of chunks compared). With `LOSAT_TIMING` a
   `[TIMING] x_pairpardisc_seed` line gives the strips, seeds and the owner's fold, scan and wait
   time. Test: `LOSAT/tests/blastn_pairpar_disc.rs`.
+- `LOSAT_X_DIAGLV=1` (not in the strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT` says)
+  blastn, every task, `-subject` and `-db`, with the diagonal hash (query block over 8000 letters): the
+  table keeps per bucket an upper bound of the levels of its cells (the largest level an insert wrote since
+  the table was made or cleared; 512 values), and a seed's retrieve of its own diagonal returns "no cell"
+  without walking the bucket's chain when that bound lies below the seed's level bound, the smallest of
+  `s_off_pos + 1`, `s_off_pos - (window_size + Delta + 1)` and, with two hits, `s_off_pos + word_length -
+  window_size`. A cell below it makes the decisions of no cell (the `last_hit` test; the two-hit window
+  test), and the insert still walks the chain, so the hit list and the table are the reference's
+  (`blastn/blast_engine/x_diag_lv.rs`, exactness argument in its header). It acts in the reference fold
+  (`process_offset_pairs`, not with debug, trace or window diagnostics, which print the values read) and in
+  the strips folds of `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARDISC`; the off-diagonal retrieves (`scan_range`)
+  stay walks. With the switch off the table has no bounds, an insert tests the length of an empty vector,
+  and the retrieves walk as before. Shadow: `LOSAT_X_DIAGLVSHADOW=1` (implies the switch) walks every
+  skipped bucket and panics unless each of its cells lies below the bound and at or below the bucket's
+  bound; one `[X_SHADOW] DIAGLV retrieves= skipped= verified= identical` line on stderr at the end of the
+  search. `LOSAT_X_PAIRPARSHADOW` and `LOSAT_X_PAIRPARDISCSHADOW` compare the bounds of the two tables too.
+  Tests: the unit tests of `x_diag_lv.rs`, the strips tests of `x_pair_seed.rs` and `x_pair_seed_disc.rs`
+  (with the bounds at 1, 2, 3 and 7 threads), and `LOSAT/tests/blastn_diag_lv.rs`.
 - `LOSAT_X_QBATCHPAR=1` (BLASTN, all tasks, `-subject` with two or more threads; not in the strict set:
   off unless set to any value, whatever `LOSAT_X_DEFAULT` says) NCBI's query batches are searched side by
   side ahead of the batch loop of `run_in_pool` (`blastn/blast_engine/x_qbatch_par.rs`). The size of each

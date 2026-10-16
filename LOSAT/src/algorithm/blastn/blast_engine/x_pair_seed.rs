@@ -576,6 +576,8 @@ fn fold(
     let diag_offset = x.diag_offset;
     let diag_hash_window = x.diag_hash_window;
     let timing_enabled = timing.is_some();
+    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the table has level bounds.
+    let x_lv = diag_hash.x_lv_on();
     counts.seeds += seeds.len() as u64;
     for seed in seeds {
         let context_idx = seed.context as usize;
@@ -599,8 +601,23 @@ fn fold(
         // ```
         let diag = s_ext_start as isize - q_ext_start as isize;
         let (last_hit, _hit_saved) = {
-            let (level, _hit_len, hit_saved) =
-                diag_hash.retrieve(diag as i32).unwrap_or((0, 0, false));
+            // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
+            // of a bucket below the bound (one hit: `window_size` is 0 in the scope).
+            let (level, _hit_len, hit_saved) = if x_lv {
+                diag_hash.retrieve_below(
+                    diag as i32,
+                    super::x_diag_lv::level_bound(
+                        s_ext_start + diag_offset as usize,
+                        diag_hash_window,
+                        x.window_size > 0,
+                        word_length,
+                        x.window_size,
+                    ),
+                )
+            } else {
+                diag_hash.retrieve(diag as i32)
+            }
+            .unwrap_or((0, 0, false));
             (level, hit_saved)
         };
         let s_off_pos = s_ext_start + diag_offset as usize;
@@ -1164,6 +1181,8 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
         chain: h.chain.clone(),
         offset: h.offset,
         window: h.window,
+        max_level: h.max_level.clone(),
+        x_lv_shadow: h.x_lv_shadow,
     }
 }
 
@@ -1315,6 +1334,11 @@ pub(super) fn shadow_check(ungapped_hits: &[UngappedHit], diag_hash: &DiagHashTa
         diag_hash.capacity,
         h.occupancy,
         h.capacity
+    );
+    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): both folds keep the level bounds alike.
+    assert!(
+        h.max_level == diag_hash.max_level,
+        "{name}: the level bounds of the diagonal hash (LOSAT_X_DIAGLV) differ"
     );
     if let Some(b) = (0..diag_hash.backbone.len()).find(|&b| diag_hash.backbone[b] != h.backbone[b])
     {
@@ -1780,6 +1804,60 @@ mod tests {
                     hash_state(&serial_hash),
                     "case {case} threads {threads}"
                 );
+            }
+            // LOSAT_X_DIAGLV (`x_diag_lv.rs`): on a table with level bounds (and with the
+            // shadow, which walks and checks every skipped bucket) the serial fold and the
+            // strips on 1, 2, 3 and 7 threads skip walks and give the hits and the table of
+            // the fold without bounds, and the same bounds.
+            for shadow in [false, true] {
+                let new_lv_hash = || {
+                    let mut h = new_hash();
+                    h.x_lv_start(shadow);
+                    h
+                };
+                let mut lv_hash = new_lv_hash();
+                let mut lv_hits = Vec::new();
+                let before = super::super::x_diag_lv::test_skips();
+                fold(
+                    &x,
+                    &seeds,
+                    &mut lv_hash,
+                    &mut lv_hits,
+                    None,
+                    &mut pause,
+                    &mut FoldCounts::default(),
+                );
+                let skipped = super::super::x_diag_lv::test_skips() - before;
+                assert!(skipped > 0, "case {case}: no walk skipped");
+                assert_eq!(lv_hits.iter().map(key).collect::<Vec<_>>(), serial_keys);
+                assert_eq!(
+                    hash_state(&lv_hash),
+                    hash_state(&serial_hash),
+                    "case {case}"
+                );
+                for threads in [1usize, 2, 3, 7] {
+                    let pool = rayon::ThreadPoolBuilder::new()
+                        .num_threads(threads)
+                        .build()
+                        .unwrap();
+                    let (state, keys, max_level, skipped) = pool.install(|| {
+                        let mut hash = new_lv_hash();
+                        let mut hits = Vec::new();
+                        let before = super::super::x_diag_lv::test_skips();
+                        seed_stage(&x, threads, &mut hash, &mut hits, None, false);
+                        (
+                            hash_state(&hash),
+                            hits.iter().map(key).collect::<Vec<_>>(),
+                            hash.max_level.clone(),
+                            super::super::x_diag_lv::test_skips() - before,
+                        )
+                    });
+                    let at = format!("case {case} threads {threads} shadow {shadow}");
+                    assert!(skipped > 0, "{at}: no walk skipped");
+                    assert_eq!(keys, serial_keys, "{at}");
+                    assert_eq!(state, hash_state(&serial_hash), "{at}");
+                    assert_eq!(max_level, lv_hash.max_level, "{at}");
+                }
             }
         }
     }

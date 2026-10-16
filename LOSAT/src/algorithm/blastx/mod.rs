@@ -470,3 +470,7 @@ pub mod native;
 //                 results = lcl_blast.Run();
 // ```
 pub(crate) mod web;
+// The subjects of a search by oid: `-subject` records or the stored sequences of `-db`.
+pub(crate) mod subjects;
+// The database path (`-db`): opening, the stored sequences, titles and ranks per batch.
+pub(crate) mod database;

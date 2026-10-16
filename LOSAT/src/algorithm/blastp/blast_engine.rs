@@ -66,6 +66,9 @@ mod database;
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_subject_runs;
+// EXPERIMENT (LOSAT_X_BPSUBJMETA / LOSAT_X_BPSUBJMETASHADOW): the subjects' tabular IDs and titles
+// of the block search made once for all blocks (held by `x_query_blocks::XBlockSubjects`).
+pub(super) mod x_subject_meta;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{BlastpArgs, BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs};
@@ -1068,6 +1071,17 @@ pub(crate) fn x_bp_subj_run_print_summary() {
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     x_subject_runs::x_bp_subj_run_print_summary();
+}
+
+// No NCBI counterpart: prints counters and changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPDBCUTSHADOW): the shadow mode's line at exit.
+pub(crate) fn x_bp_db_cut_print_summary() {
+    database::x_bp_db_cut_print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BPSUBJMETASHADOW): the shadow mode's line at exit.
+pub(crate) fn x_bp_subj_meta_print_summary() {
+    x_subject_meta::x_bp_subj_meta_print_summary();
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
@@ -2615,7 +2629,28 @@ fn tabular_subject_ids(
     hit_lists: &[Option<BlastpHitList>],
     subjects: &[FastaRecord],
 ) -> Result<Vec<Arc<[u8]>>> {
-    let ids: Vec<Option<Arc<[u8]>>> = subjects
+    let ids = tabular_subject_id_results(subjects);
+    check_tabular_subject_ids(hit_lists, subjects, &ids)?;
+    Ok(ids
+        .into_iter()
+        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
+        .collect())
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:225-231
+// ```c++
+// 		(*itr)->AsFastaString().find("lcl|Subject_") != string::npos) {
+//             vector<string> title_tokens;
+//             string defline = sequence::CDeflineGenerator().GenerateDefline(bh);
+//             if (defline != NcbiEmptyString) {
+//                 id_token =
+//                     NStr::Split(defline, " ", title_tokens)[0];
+//             }
+// ```
+/// `report::defline::tabular_subject_id` of every subject, by subject index
+/// (`tabular_subject_ids`): `None` for a subject whose ID cannot be written.
+fn tabular_subject_id_results(subjects: &[FastaRecord]) -> Vec<Option<Arc<[u8]>>> {
+    subjects
         .iter()
         .map(|subject| {
             crate::report::defline::tabular_subject_id(
@@ -2626,7 +2661,27 @@ fn tabular_subject_ids(
             .ok()
             .map(Arc::from)
         })
-        .collect();
+        .collect()
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:863-870
+// ```c++
+//         } catch (const CException&) {
+//             list<CRef<CSeq_id> > subject_ids;
+//             CRef<CSeq_id> id(new CSeq_id());
+//             id->Assign(align.GetSeq_id(1));
+//             subject_ids.push_back(id);
+//             SetSubjectId(subject_ids);
+//             bioseqs_found = false;
+//         }
+// ```
+/// The check of `tabular_subject_ids`: the first subject, in the order of the hit lists' HSPs,
+/// whose ID in `ids` (`tabular_subject_id_results`) cannot be written is the error.
+fn check_tabular_subject_ids(
+    hit_lists: &[Option<BlastpHitList>],
+    subjects: &[FastaRecord],
+    ids: &[Option<Arc<[u8]>>],
+) -> Result<()> {
     for hit_list in hit_lists.iter().flatten() {
         let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
         for hsp in hit_list.hsplist_array[..count]
@@ -2643,10 +2698,34 @@ fn tabular_subject_ids(
             }
         }
     }
-    Ok(ids
-        .into_iter()
-        .map(|id| id.unwrap_or_else(|| Arc::from(&b""[..])))
-        .collect())
+    Ok(())
+}
+
+// No NCBI counterpart: values NCBI makes per row (tabular.cpp above), made once for all blocks;
+// reuse only.
+/// EXPERIMENT (LOSAT_X_BPSUBJMETA): `tabular_subject_ids` of a block of the block search with the
+/// subjects' ID results made once for all blocks (`blast_engine/x_subject_meta.rs`): the same
+/// check over the block's hit lists, with the stored results, and the shown IDs borrowed.
+/// The stored results are `tabular_subject_id_results` of the same records, a function of each
+/// record only (`tabular_subject_id(local_id, title, true)`), so the check fails for the same block
+/// and names the same record as `tabular_subject_ids`, and otherwise the shown IDs are its IDs.
+/// No floating-point operation is involved. With `LOSAT_X_BPSUBJMETASHADOW` the block's values are
+/// made again as without the switch and compared (`XSubjectMeta::x_shadow_compare`).
+fn x_tabular_subject_ids_cached<'m>(
+    hit_lists: &[Option<BlastpHitList>],
+    subjects: &[FastaRecord],
+    meta: &'m x_subject_meta::XSubjectMeta,
+) -> Result<&'m [Arc<[u8]>]> {
+    let result = check_tabular_subject_ids(hit_lists, subjects, meta.ids()).map(|()| meta.shown());
+    if meta.shadow() {
+        meta.x_shadow_compare(
+            subjects,
+            &tabular_subject_id_results(subjects),
+            &tabular_subject_ids(hit_lists, subjects),
+            &result,
+        );
+    }
+    result
 }
 
 fn blastp_tabular_field_text(
@@ -6781,11 +6860,19 @@ fn run_resolved_in_pool(
             .collect();
         &x_owned_subjects
     };
-    // The subjects' titles by subject index, as the reports write them.
-    let subject_titles: Vec<Arc<[u8]>> = subject_records
-        .iter()
-        .map(|record| Arc::from(record.title()))
-        .collect();
+    // The subjects' titles by subject index, as the reports write them. EXPERIMENT
+    // (LOSAT_X_BPSUBJMETA): the block search's titles and tabular IDs, made once for all blocks
+    // (`blast_engine/x_subject_meta.rs`); the same values, borrowed.
+    let x_meta = super::x_query_blocks::x_block_subject_meta(blastp_parallel_pool, subject_records);
+    let subject_titles: std::borrow::Cow<'_, [Arc<[u8]>]> = match x_meta {
+        Some(meta) => std::borrow::Cow::Borrowed(meta.titles()),
+        None => std::borrow::Cow::Owned(
+            subject_records
+                .iter()
+                .map(|record| Arc::from(record.title()))
+                .collect(),
+        ),
+    };
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.subject_encoding_ns, subject_encoding_start);
     }
@@ -9947,17 +10034,21 @@ fn run_resolved_in_pool(
         titles.check_reported_titles(&hit_lists)?;
     }
     // The subject IDs of the tabular formats, checked for the subjects with rows before any
-    // format is written (`tabular_subject_ids`).
-    let subject_ids: Vec<Arc<[u8]>> = if format_plans
+    // format is written (`tabular_subject_ids`). EXPERIMENT (LOSAT_X_BPSUBJMETA): the block
+    // search's IDs made once for all blocks, with the same check (`x_tabular_subject_ids_cached`).
+    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> = if format_plans
         .iter()
         .any(|(outfmt, _, _)| *outfmt != OutputFormat::Pairwise)
     {
-        match listed_titles.as_ref() {
-            Some(titles) => titles.tabular_subject_ids(&hit_lists)?,
-            None => tabular_subject_ids(&hit_lists, subject_records)?,
+        match (listed_titles.as_ref(), x_meta) {
+            (Some(titles), _) => titles.tabular_subject_ids(&hit_lists)?.into(),
+            (None, Some(meta)) => {
+                x_tabular_subject_ids_cached(&hit_lists, subject_records, meta)?.into()
+            }
+            (None, None) => tabular_subject_ids(&hit_lists, subject_records)?.into(),
         }
     } else {
-        Vec::new()
+        Vec::new().into()
     };
     // The `stitle` text of the tabular formats by subject: the stored titles of a
     // database; none for the records of a subject set, which have no BLAST definition

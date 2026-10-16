@@ -821,7 +821,11 @@ impl TblastnArgs {
                 let mut stderr = std::io::stderr();
                 let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
                 if super::x_subject_store::x_tbn_store() && subject_range.is_none() {
-                    super::x_subject_store::x_read_subject_stores(&mut subject_source, &mut warn)?
+                    super::x_subject_store::x_read_subject_stores(
+                        &mut subject_source,
+                        &mut warn,
+                        args.num_threads,
+                    )?
                 } else {
                     (
                         read_subjects(&mut subject_source, subject_range.as_ref(), &mut warn)?,

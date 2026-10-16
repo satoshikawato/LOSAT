@@ -228,6 +228,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastx::blast_engine::x_pair_par_print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_seed_release_print_summary();
     LOSAT::algorithm::tblastx::lookup::x_bplut_print_summary();
+    LOSAT::algorithm::tblastx::lookup::x_tbxlut_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_hsp_inplace_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_sort_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_slices_print_summary();

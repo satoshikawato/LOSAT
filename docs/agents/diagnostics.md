@@ -1691,6 +1691,19 @@ Scheduling (each value computed by one thread with the original function; order 
   every subject, the subject's combined ungapped HSP list compared field by field (the first
   difference stops the run with subject, frame, index and both values); one `[X_SHADOW] PAIRPAR`
   summary line at exit (subjects, units, HSPs compared, fallbacks).
+- `LOSAT_X_TBXLUT=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) the full lookup table of a query batch, the table of the
+  reference frame loop (`LOSAT_X_PAIRPAR=0`, `LOSAT_X_DEFAULT=0`, and the batches the unit path's
+  guard sends back), filled in place from per-cell counts by the builder of `LOSAT_X_BXLUT` /
+  `LOSAT_X_BPLUT` (`x_tbx_build_ncbi_lookup` in `tblastx/lookup/backbone.rs`, `x_build_direct` in
+  `x_lut_direct.rs`; same appends in the same order, so the same table field by field) instead of
+  being copied out of one chain per cell. The chain builder holds every chain, and with
+  `LOSAT_X_LUTARENA` the blocks the chains left when they doubled, until the table is complete (NCBI
+  frees each chain as it copies it); with `-threshold +inf` (NCBI's INT_MIN: every word) all chains
+  grow in step and the dead blocks are never reused. Diagnostics mode keeps the chain builder.
+  Shadow: `LOSAT_X_TBXLUTSHADOW=1` (both builders, every table compared field by field, the chain
+  builder's table used; one `[X_SHADOW] TBXLUT tables_compared=` line at exit).
+  `LOSAT/tests/tblastx_ref_lut.rs` compares reports with and without the switch and its shadow.
 - `LOSAT_X_PAIRLUT=1` (in the strict set; acts while `LOSAT_X_PAIRPAR` is on, not with its
   shadow) TBLASTX:
   the lookup tables of the unit path, one per context group, built directly from the query instead

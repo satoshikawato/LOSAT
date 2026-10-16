@@ -1,12 +1,13 @@
 //! blastp's parallel `-subject` loop in runs of subjects with `LOSAT_X_BPSUBJRUN`
 //! (`src/algorithm/blastp/blast_engine/x_subject_runs.rs`) on whole searches.
 //!
-//! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
-//! set, and it acts only where the subjects of a `-subject` search are searched on the pool (more
-//! than one thread and more than one subject). With it on, the subjects are cut into runs of
+//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on by default, `LOSAT_X_BPSUBJRUN=0`
+//! turns it off, and `LOSAT_X_DEFAULT=0` leaves it off unless it is set. It acts only where the
+//! subjects of a `-subject` search are searched on the pool (more than one thread and more than
+//! one subject). With it on, the subjects are cut into runs of
 //! consecutive subjects, each run searched with one diagonal table that is filled once, at the
 //! one-thread order's offset of the run's first subject. These tests compare the reports with the
-//! switch off and on (blastp and blastp-fast, one hit and two hits, the block search of
+//! switch off (`LOSAT_X_BPSUBJRUN=0`) and on (blastp and blastp-fast, one hit and two hits, the block search of
 //! `LOSAT_X_BPQBLOCK`, `-db`) and run its shadow mode (`LOSAT_X_BPSUBJRUNSHADOW`), which checks
 //! every later subject of a run's offset and table and compares every subject's result with the
 //! result from a cleared table; its line at exit shows that the path ran. A difference stops the
@@ -128,6 +129,7 @@ fn with<'a>(base: &[(&'a str, &'a str)], extra: &[(&'a str, &'a str)]) -> Vec<(&
 }
 
 const ON: (&str, &str) = ("LOSAT_X_BPSUBJRUN", "1");
+const OFF: (&str, &str) = ("LOSAT_X_BPSUBJRUN", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_BPSUBJRUNSHADOW", "1");
 
 /// The switch off, on and in its shadow mode give the same report; returns the shadow's counters.
@@ -140,7 +142,7 @@ fn same_reports(
     outfmt: &str,
 ) -> HashMap<String, u64> {
     let what = format!("{task} {base:?} {extra:?} threads {threads} outfmt {outfmt}");
-    let off = blastp(task, subject, threads, base, extra, outfmt);
+    let off = blastp(task, subject, threads, &with(base, &[OFF]), extra, outfmt);
     assert!(!off.stdout.is_empty(), "{what}: the fixture pair has rows");
     let on = blastp(task, subject, threads, &with(base, &[ON]), extra, outfmt);
     assert!(
@@ -219,6 +221,33 @@ fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
         for threads in [2, 4] {
             let counts = same_reports(task, &subject, threads, base, &[], "6");
             assert_engaged(&counts, 1, &format!("{task} {base:?} threads {threads}"));
+        }
+    }
+}
+
+// The switch is on by default: the report with no variable, with `LOSAT_X_BPSUBJRUN=0`, with
+// `LOSAT_X_DEFAULT=0` (off unless set) and with `LOSAT_X_DEFAULT=0` and the switch set are one
+// report, at 4 threads for blastp and blastp-fast.
+#[test]
+fn the_default_the_switch_off_and_the_global_off_give_one_report() {
+    let subject = subject_file();
+    let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    for task in ["blastp", "blastp-fast"] {
+        let default = blastp(task, &subject, 4, &[], &[], "6");
+        assert!(
+            !default.stdout.is_empty(),
+            "{task}: the fixture pair has rows"
+        );
+        for vars in [
+            &[OFF][..],
+            &[("LOSAT_X_DEFAULT", "0")][..],
+            &[("LOSAT_X_DEFAULT", "0"), ON][..],
+        ] {
+            let run = blastp(task, &subject, 4, vars, &[], "6");
+            assert!(
+                run.stdout == default.stdout,
+                "{task} {vars:?}: the report differs from the default's"
+            );
         }
     }
 }

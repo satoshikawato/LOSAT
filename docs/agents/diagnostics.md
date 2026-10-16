@@ -446,6 +446,35 @@ Rebuilding less:
   `[TIMING] x_bpredofit: lists=<n> hsps=<m>`. Measured once (human proteome block 1, 566 proteins, 50,404
   letters, x human proteome, one thread, with `LOSAT_X_BPQBLOCK=50000` and the other memory switches; max RSS):
   121,304 -> 82,180 kB (NCBI -db 151,476 kB in the same run).
+- `LOSAT_X_BPSUBJRUN=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it; acts only where a `-subject` search gives its subjects to the pool:
+  more than one thread and more than one subject) the parallel preliminary loop searches the subjects in
+  runs of consecutive subjects instead of one by one (`blastp/blast_engine/x_subject_runs.rs`, exactness
+  argument in its header). Without it each piece rayon splits the subjects into makes its own scratch
+  (with its own diagonal table and offset-pair array) and every subject starts by filling the whole
+  diagonal table (`prepare_independent_subject`; 65,536 entries of 4 bytes for a query block of 50,000
+  letters). With it the subjects are cut into runs as guided self-scheduling cuts work (each run the next
+  1 / (4 x threads) of the letters left, so the runs shrink to single subjects at the end and end together;
+  runs of equal size made exact blastp up to 2.5 % slower at 16 threads), one task per thread takes the runs
+  in order from one counter (one `rayon::scope`) with one scratch, and a run fills the table once,
+  at the one-thread order's diagonal offset of its first subject; its later subjects are searched as the
+  one-thread loop searches them, at the offset the previous subject's `finish_subject`
+  (`Blast_ExtendWordExit`) left, which is the one-thread order's, and with every other per-subject reset.
+  An entry left by an earlier subject of the run lies below the later subject's offset by at least the
+  window, so it reads as a cleared entry (the property the `-db` path uses for its blocks); the reset at
+  INT4_MAX / 4 (offset back to the window, table cleared) happens inside a run as in the one-thread loop.
+  Results are merged by subject index as without the switch. Memory: one scratch per thread instead of one
+  per rayon piece. At one thread, and with `-db`, nothing changes.
+- `LOSAT_X_BPSUBJRUNSHADOW=1` shadow of `LOSAT_X_BPSUBJRUN` (implies it): before each later subject of a run
+  the run's diagonal offset is compared with the one-thread order's and every table entry is checked to read
+  as a cleared one at that offset (flag 0: `last_hit <= offset - window`; flag 1: `last_hit <= offset`), which
+  a wrong offset, a reset that does not clear the table or an entry left too high fails; then each subject
+  is searched again with a second scratch of the task from a cleared table at the same offset (the loop
+  without the switch) and the two results are compared (every HSP list of every query, every field, by their
+  `Debug` text). The first difference stops the run (panic) after printing the line that is otherwise printed
+  at exit: `[X_SHADOW] BPSUBJRUN searches= runs= subjects= fills_saved= resets_in_runs= subjects_compared=
+  tables_checked= identical` (`fills_saved`: subjects searched without a fill of their own; `resets_in_runs`:
+  INT4_MAX / 4 resets inside a run; `tables_checked`: tables checked before a later subject of a run).
 - `LOSAT_X_BPREDOPAR=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the composition-based redo of a search with more than one thread and
   at least two matches splits its matches between the threads, as NCBI's `omp for` over its array of

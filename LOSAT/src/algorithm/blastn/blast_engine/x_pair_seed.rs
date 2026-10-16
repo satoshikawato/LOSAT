@@ -83,6 +83,12 @@ use std::sync::{Mutex, OnceLock};
 #[path = "x_pair_seed_disc.rs"]
 mod disc;
 
+// EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold of both strips paths split by diagonal-hash bucket
+// over the pool (`x_pair_seed_part.rs`); its scratch is a field of `SubjectScratch`.
+#[path = "x_pair_seed_part.rs"]
+mod part;
+pub(super) use part::PartScratch;
+
 /// No NCBI counterpart: reads the switches once (LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARSHADOW); they
 /// do not change any value NCBI computes.
 fn switches() -> (bool, bool) {
@@ -559,7 +565,14 @@ struct FoldCounts {
 /// order, statement for statement for the diagonal hash in one-hit mode (`two_hits` false,
 /// so `off_found` stays false and `hit_ready` true until the cutoff test); the debug, trace
 /// and diagonal-array branches are outside the scope and left out.
-fn fold(
+///
+/// With `PT` (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`) the seeds are one partition's seeds
+/// of one strip, `diag_hash` and `ungapped_hits` are the partition's, and `out` gets the key
+/// (`out.strip`, `pos[k]`) of every pushed hit and of every insert that appends a cell, the
+/// buckets the inserts change, and the time of the ungapped extensions (instead of the shared
+/// LOSAT_TIMING counters); without it `out` and `pos` are not read.
+#[allow(clippy::too_many_arguments)]
+fn fold<const PT: bool>(
     x: &Inputs<'_>,
     seeds: &[Seed],
     diag_hash: &mut DiagHashTable,
@@ -567,6 +580,8 @@ fn fold(
     timing: Option<&BlastnTiming>,
     scan_pause_ns: &mut u64,
     counts: &mut FoldCounts,
+    out: &mut part::PartOut,
+    pos: &[u32],
 ) {
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
@@ -581,7 +596,9 @@ fn fold(
     let x_lv = diag_hash.x_lv_on();
     let x_lv_seeds = super::x_diag_lv::LvSeeds::new(x.window_size > 0, word_length, x.window_size);
     counts.seeds += seeds.len() as u64;
-    for seed in seeds {
+    for (x_k, seed) in seeds.iter().enumerate() {
+        // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the seed's place in the stage.
+        let x_key = if PT { out.key(pos, x_k) } else { 0 };
         let context_idx = seed.context as usize;
         let ctx = &x.query_contexts[context_idx];
         let q_idx = context_idx as u32;
@@ -702,7 +719,10 @@ fn fold(
         // ```
         // (`hit_ready` is still 1 in one-hit mode; the reference keeps this test.)
         if !hit_ready {
-            diag_hash.insert(
+            part::insert::<PT>(
+                diag_hash,
+                out,
+                x_key,
                 diag as i32,
                 s_end_pos as i32,
                 (s_end_pos - s_off_pos) as i32,
@@ -761,7 +781,11 @@ fn fold(
         };
         if let Some(ungapped_start) = ungapped_start {
             let elapsed_ns = ungapped_start.elapsed().as_nanos() as u64;
-            if let Some(timing) = timing {
+            if PT {
+                // a partition's own counters, added to the shared ones once per stage
+                out.ungapped_ns += elapsed_ns;
+                out.ungapped_calls += 1;
+            } else if let Some(timing) = timing {
                 timing
                     .ungapped_ns
                     .fetch_add(elapsed_ns, std::sync::atomic::Ordering::Relaxed);
@@ -798,7 +822,10 @@ fn fold(
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
             //                       hit_ready, s_off_pos, window_size + Delta + 1);
             // ```
-            diag_hash.insert(
+            part::insert::<PT>(
+                diag_hash,
+                out,
+                x_key,
                 diag as i32,
                 s_end_pos as i32,
                 if hit_ready {
@@ -846,6 +873,9 @@ fn fold(
             se: ungapped_se,
             score: ungapped_score,
         });
+        if PT {
+            out.hit_keys.push(x_key);
+        }
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:939-941
         // ```c
@@ -853,7 +883,10 @@ fn fold(
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                       hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        diag_hash.insert(
+        part::insert::<PT>(
+            diag_hash,
+            out,
+            x_key,
             diag as i32,
             ungapped_s_end_pos as i32,
             0,
@@ -1097,6 +1130,29 @@ struct StageStats {
     wait_ns: u64,
 }
 
+impl StageStats {
+    /// No NCBI counterpart: a partitioned stage's counters (LOSAT_X_PAIRPARFOLD); its
+    /// partitions' time in ungapped extensions goes to the LOSAT_TIMING counters here, once.
+    fn of_part(strips: usize, r: part::PartStats, timing: Option<&BlastnTiming>) -> Self {
+        if let Some(timing) = timing {
+            timing
+                .ungapped_ns
+                .fetch_add(r.ungapped_ns, Ordering::Relaxed);
+            timing
+                .ungapped_calls
+                .fetch_add(r.ungapped_calls, Ordering::Relaxed);
+        }
+        StageStats {
+            strips,
+            counts: r.counts,
+            scan_pause_ns: r.scan_pause_ns,
+            fold_ns: r.fold_ns,
+            owner_scan_ns: r.owner_scan_ns,
+            wait_ns: r.wait_ns,
+        }
+    }
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
 /// ```c
 ///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
@@ -1107,7 +1163,8 @@ struct StageStats {
 /// ```
 /// The seed stage of one chunk on `threads` threads (this one and `threads - 1` helpers of
 /// its pool): strips scanned by any thread, folded here in strip order into `hash` and
-/// `hits`.
+/// `hits`. With `fold_part` (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`) the fold is split by
+/// diagonal-hash bucket over the threads instead.
 fn seed_stage(
     x: &Inputs<'_>,
     threads: usize,
@@ -1115,6 +1172,7 @@ fn seed_stage(
     hits: &mut Vec<UngappedHit>,
     timing: Option<&BlastnTiming>,
     timed: bool,
+    fold_part: Option<part::FoldPart<'_>>,
 ) -> StageStats {
     let jobs = plan_strips(
         x.subject_seq_ranges,
@@ -1125,6 +1183,43 @@ fn seed_stage(
         8 * threads.max(4),
     );
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip(x, &jobs[i], out);
+    if let Some(fold_part) = fold_part {
+        let parts = fold_part.parts;
+        let fold_one = |st: &mut part::PartState, seeds: &[Seed], pos: &[u32]| {
+            let part::PartState {
+                hash,
+                hits,
+                out,
+                counts,
+                scan_pause_ns,
+                ..
+            } = st;
+            fold::<true>(
+                x,
+                seeds,
+                hash,
+                hits,
+                timing,
+                scan_pause_ns,
+                counts,
+                out,
+                pos,
+            );
+        };
+        let r = part::seed_stage_part(
+            jobs.len(),
+            threads,
+            2 * threads,
+            hash,
+            hits,
+            fold_part,
+            &produce,
+            &fold_one,
+            timed,
+        );
+        part::record(part::ONE_HIT, parts, &r);
+        return StageStats::of_part(jobs.len(), r, timing);
+    }
     let mut stats = StageStats {
         strips: jobs.len(),
         ..StageStats::default()
@@ -1144,7 +1239,17 @@ fn seed_stage(
         &produce,
         |_, seeds| {
             let t0 = timed.then(std::time::Instant::now);
-            fold(x, seeds, hash, hits, timing, scan_pause_ns, counts);
+            fold::<false>(
+                x,
+                seeds,
+                hash,
+                hits,
+                timing,
+                scan_pause_ns,
+                counts,
+                &mut part::PartOut::default(),
+                &[],
+            );
             if let Some(t0) = t0 {
                 *fold_ns += t0.elapsed().as_nanos() as u64;
             }
@@ -1198,15 +1303,20 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
 /// with its one-hit extension) when the switch is on and the chunk is in scope; `true` means
 /// it has run and the reference scan is skipped. With LOSAT_X_PAIRPARSHADOW the stage runs on
 /// copies of the diagonal hash and the hit list, `false` is returned so the reference runs,
-/// and `shadow_check` compares the two.
+/// and `shadow_check` compares the two. `fold_scratch` is the subject scratch's
+/// LOSAT_X_PAIRPARFOLD state (`x_pair_seed_part.rs`); its kept partition tables follow the
+/// table only from one partitioned stage to the next, so their stamp is taken here for every
+/// chunk, before anything changes the table.
 pub(super) fn run(
     x: &Inputs<'_>,
     diag_hash: &mut DiagHashTable,
     ungapped_hits: &mut Vec<UngappedHit>,
+    fold_scratch: &mut PartScratch,
 ) -> bool {
+    let kept = fold_scratch.take_stamp();
     // A discontiguous megablast table: LOSAT_X_PAIRPARDISC and its shadow decide.
     if x.two_stage.disc().is_some() {
-        return disc::run(x, diag_hash, ungapped_hits);
+        return disc::run(x, diag_hash, ungapped_hits, fold_scratch, kept);
     }
     let (on, shadow) = switches();
     if !on && !shadow {
@@ -1236,12 +1346,21 @@ pub(super) fn run(
     let t_start = timed.then(std::time::Instant::now);
     let mut shadow_hash = shadow.then(|| copy_hash(diag_hash));
     let mut shadow_hits: Vec<UngappedHit> = Vec::new();
+    // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold split over the pool's threads (with the shadow,
+    // on the copies; the reference then makes the table the kept partition tables follow, and
+    // `shadow_check` compares it with the copy).
+    let fold_part = part::partitions(threads).map(|parts| part::FoldPart {
+        scratch: fold_scratch,
+        kept,
+        parts,
+        verify: shadow || cfg!(debug_assertions),
+    });
     let stats = {
         let (hash, hits): (&mut DiagHashTable, &mut Vec<UngappedHit>) = match shadow_hash.as_mut() {
             Some(hash) => (hash, &mut shadow_hits),
             None => (diag_hash, ungapped_hits),
         };
-        seed_stage(x, threads, hash, hits, timing, timed)
+        seed_stage(x, threads, hash, hits, timing, timed, fold_part)
     };
     if let (Some(t_start), Some(timing)) = (t_start, timing) {
         // `[TIMING] scan_lookup`: the time of the stage minus the ungapped extensions, as
@@ -1376,26 +1495,28 @@ pub(super) fn summary() {
         let lookup = &crate::algorithm::blastn::lookup::x_mb_lookup_par::SHADOW_TABLES;
         let lookup_cells = &crate::algorithm::blastn::lookup::x_mb_lookup_par::SHADOW_CELLS;
         eprintln!(
-            "[X_PAIRPARSHADOW] blastn: lookup tables equal={} (elements {}), seed chunks equal={} (ungapped hits {}, hash cells {})",
+            "[X_PAIRPARSHADOW] blastn: lookup tables equal={} (elements {}), seed chunks equal={} (ungapped hits {}, hash cells {}){}",
             load(lookup),
             load(lookup_cells),
             load(&SHADOW_CHUNKS),
             load(&SHADOW_HITS),
-            load(&SHADOW_CELLS)
+            load(&SHADOW_CELLS),
+            part::shadow_fields(part::ONE_HIT)
         );
     }
     if (on || shadow) && std::env::var_os("LOSAT_TIMING").is_some() {
         let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
         let s = |c: &AtomicU64| c.load(Ordering::Relaxed) as f64 / 1e9;
         eprintln!(
-            "[TIMING] x_pairpar_seed: chunks={} strips={} seeds={} skipped={} fold={:.3}s owner_scan={:.3}s owner_wait={:.3}s",
+            "[TIMING] x_pairpar_seed: chunks={} strips={} seeds={} skipped={} fold={:.3}s owner_scan={:.3}s owner_wait={:.3}s{}",
             load(&X_CHUNKS),
             load(&X_STRIPS),
             load(&X_SEEDS),
             load(&X_SKIPPED),
             s(&X_FOLD_NS),
             s(&X_OWNER_SCAN_NS),
-            s(&X_WAIT_NS)
+            s(&X_WAIT_NS),
+            part::timing_fields(part::ONE_HIT)
         );
     }
     disc::summary();
@@ -1747,7 +1868,7 @@ mod tests {
             let mut serial_hits = Vec::new();
             let mut counts = FoldCounts::default();
             let mut pause = 0u64;
-            fold(
+            fold::<false>(
                 &x,
                 &seeds,
                 &mut serial_hash,
@@ -1755,6 +1876,8 @@ mod tests {
                 None,
                 &mut pause,
                 &mut counts,
+                &mut part::PartOut::default(),
+                &[],
             );
             assert!(
                 serial_hits.len() > 5 && counts.skipped > 0,
@@ -1783,7 +1906,7 @@ mod tests {
                 let (state, keys, stats_seeds) = pool.install(|| {
                     let mut hash = new_hash();
                     let mut hits = Vec::new();
-                    let stats = seed_stage(&x, threads, &mut hash, &mut hits, None, false);
+                    let stats = seed_stage(&x, threads, &mut hash, &mut hits, None, false, None);
                     (
                         hash_state(&hash),
                         hits.iter().map(key).collect::<Vec<_>>(),
@@ -1815,7 +1938,7 @@ mod tests {
                 let mut lv_hash = new_lv_hash();
                 let mut lv_hits = Vec::new();
                 let before = super::super::x_diag_lv::test_skips();
-                fold(
+                fold::<false>(
                     &x,
                     &seeds,
                     &mut lv_hash,
@@ -1823,6 +1946,8 @@ mod tests {
                     None,
                     &mut pause,
                     &mut FoldCounts::default(),
+                    &mut part::PartOut::default(),
+                    &[],
                 );
                 let skipped = super::super::x_diag_lv::test_skips() - before;
                 assert!(skipped > 0, "case {case}: no walk skipped");
@@ -1841,7 +1966,7 @@ mod tests {
                         let mut hash = new_lv_hash();
                         let mut hits = Vec::new();
                         let before = super::super::x_diag_lv::test_skips();
-                        seed_stage(&x, threads, &mut hash, &mut hits, None, false);
+                        seed_stage(&x, threads, &mut hash, &mut hits, None, false, None);
                         (
                             hash_state(&hash),
                             hits.iter().map(key).collect::<Vec<_>>(),
@@ -1854,6 +1979,94 @@ mod tests {
                     assert_eq!(keys, serial_keys, "{at}");
                     assert_eq!(state, hash_state(&serial_hash), "{at}");
                     assert_eq!(max_level, lv_hash.max_level, "{at}");
+                }
+            }
+            // LOSAT_X_PAIRPARFOLD (`x_pair_seed_part.rs`): the fold split into 2, 3, 7, 8 and 16
+            // partitions on 1..8 threads, on tables with and without level bounds, for two
+            // chunks in a row (the second with the hash offset moved on, from the kept
+            // partition tables): the hits and the table of the serial fold.
+            let x2 = Inputs {
+                diag_offset: diag_offset + s_len as isize + 16,
+                ..x
+            };
+            for levels in [false, true] {
+                let new_table = || {
+                    let mut h = new_hash();
+                    if levels {
+                        h.x_lv_start(false);
+                    }
+                    h
+                };
+                let mut expected_hash = new_table();
+                let mut expected = Vec::new();
+                for (chunk, xc) in [&x, &x2].into_iter().enumerate() {
+                    expected_hash.offset = xc.diag_offset as i32;
+                    let mut hits = Vec::new();
+                    fold::<false>(
+                        xc,
+                        &seeds,
+                        &mut expected_hash,
+                        &mut hits,
+                        None,
+                        &mut pause,
+                        &mut FoldCounts::default(),
+                        &mut part::PartOut::default(),
+                        &[],
+                    );
+                    expected.push((
+                        hits.iter().map(key).collect::<Vec<_>>(),
+                        hash_state(&expected_hash),
+                        expected_hash.max_level.clone(),
+                    ));
+                    assert!(chunk == 0 || !hits.is_empty());
+                }
+                for (threads, parts) in [
+                    (1usize, 2usize),
+                    (2, 2),
+                    (3, 3),
+                    (3, 7),
+                    (4, 4),
+                    (5, 16),
+                    (7, 7),
+                    (8, 8),
+                    (8, 16),
+                ] {
+                    let pool = rayon::ThreadPoolBuilder::new()
+                        .num_threads(threads)
+                        .build()
+                        .unwrap();
+                    pool.install(|| {
+                        let mut hash = new_table();
+                        let mut scratch = part::PartScratch::default();
+                        for (chunk, xc) in [&x, &x2].into_iter().enumerate() {
+                            let at = format!(
+                                "case {case} threads {threads} parts {parts} levels {levels} chunk {chunk}"
+                            );
+                            hash.offset = xc.diag_offset as i32;
+                            let kept = scratch.take_stamp();
+                            assert_eq!(kept.is_some(), chunk > 0, "{at}");
+                            let mut hits = Vec::new();
+                            let stats = seed_stage(
+                                xc,
+                                threads,
+                                &mut hash,
+                                &mut hits,
+                                None,
+                                false,
+                                Some(part::FoldPart {
+                                    scratch: &mut scratch,
+                                    kept,
+                                    parts,
+                                    verify: true,
+                                }),
+                            );
+                            assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");
+                            let (keys, state, max_level) = &expected[chunk];
+                            assert_eq!(&hits.iter().map(key).collect::<Vec<_>>(), keys, "{at}");
+                            assert_eq!(&hash_state(&hash), state, "{at}");
+                            assert_eq!(&hash.max_level, max_level, "{at}");
+                        }
+                    });
                 }
             }
         }

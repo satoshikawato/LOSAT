@@ -3903,6 +3903,10 @@ struct SubjectScratch {
     // } BLAST_DiagHash;
     // ```
     diag_hash: DiagHashTable,
+    // EXPERIMENT (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`): the partition tables of the
+    // partitioned fold of the strips paths, which follow `diag_hash` from one partitioned stage
+    // to the next. Empty while the switch is off. No NCBI counterpart.
+    x_pair_fold: x_pair_seed::PartScratch,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
     // ```c
     // if (ewp->diag_table->offset >= INT4_MAX / 4) {
@@ -3984,6 +3988,8 @@ impl SubjectScratch {
             hit_level_array: Vec::new(),
             hit_len_array: Vec::new(),
             diag_hash: DiagHashTable::new(window_size as i32),
+            // No NCBI counterpart: empty until a partitioned stage runs (LOSAT_X_PAIRPARFOLD).
+            x_pair_fold: x_pair_seed::PartScratch::default(),
             diag_table_offset: window_size as i32,
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
             // ```c
@@ -9962,6 +9968,7 @@ fn search_query_batch(
                         },
                         diag_hash,
                         ungapped_hits,
+                        &mut subject_scratch.x_pair_fold,
                     ) {
                         continue;
                     }

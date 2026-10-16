@@ -993,6 +993,38 @@ Scheduling (each value computed by one thread with the original function; order 
   limit) and 69 % on blastn.
   Tests: the unit tests of `x_diag_lv.rs`, the strips tests of `x_pair_seed.rs` and `x_pair_seed_disc.rs`
   (with the bounds at 1, 2, 3 and 7 threads), and `LOSAT/tests/blastn_diag_lv.rs`.
+- `LOSAT_X_PAIRPARFOLD=1` (not in the strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT`
+  says) blastn, where the strips paths of `LOSAT_X_PAIRPAR` (one-hit fold: megablast, blastn) and
+  `LOSAT_X_PAIRPARDISC` (two-hit fold: dc-megablast) run, on a pool of 2+ threads: the diagonal-hash fold
+  of the chunk is split by bucket (`bucket % P`, one partition per thread) over the owner and `threads - 1`
+  jobs of an `in_place_scope` (`blastn/blast_engine/x_pair_seed_part.rs`). Each participant scans the
+  next strip when it lies within `2 x threads` strips of the slowest partition, cuts its seeds by
+  partition (a stable counting sort) and folds partition p of the next strip of any partition it can
+  lock, into p's own table, with the folds of the strips paths (`fold`, `fold_two_hit`, a const
+  parameter and a sink of (strip, position) keys for every pushed hit and every insert that appends a
+  cell). The merge puts the hits in key order and gives every appended cell the number `occ0 + rank` of
+  its key (links and heads mapped; the capacity of the reference's doublings; the bounds of
+  `LOSAT_X_DIAGLV` per bucket), and writes the changed buckets into the chunk's table. Exact because a
+  seed's fold reads and writes only its own diagonal's bucket chain (retrieve, the `last_hit` and window
+  tests, insert), `s_TypeOfWord` and the ungapped extension read only inputs, and with `scan_range == 0`
+  there is no off-diagonal read; the argument is written out in the module's header. The partition
+  tables stay in the subject scratch from one partitioned stage to the next (no copy per chunk), checked
+  by a stamp that `x_pair_seed::run` takes at the start of every chunk; a helper leaves after 2 ms
+  without work and a helper job that starts on a participant's thread returns at once, so a thread that
+  waits inside a nested parallel call never runs a helper that waits for the work below it; no
+  `thread::sleep` on wasm32. With LOSAT_TIMING the partitions' ungapped-extension times are added to
+  the shared counters once per stage, and the `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end
+  with `partitions= merges= merge=`. Shadow: `LOSAT_X_PAIRPARSHADOW=1` / `LOSAT_X_PAIRPARDISCSHADOW=1`
+  with the switch run the partitioned stage on the copies (and check every reuse of the kept tables
+  against the chunk's table); their lines end with `fold=part partitions= merges= kept=` (`fold=owner`
+  without the switch; `kept`: stages that started from the kept tables). On the command line a subject
+  scratch has one partitioned stage per query batch (a subject of several chunks has its chunks searched
+  in parallel), so `kept` is 0 there; the unit tests cover the reuse.
+  Tests: the unit tests of `x_pair_seed_part.rs` (random op streams at 2, 3, 7 and 16 partitions on 1..8
+  threads with and without bounds, growth past 256 cells, a kept table after an offset move, the clear,
+  a reference chunk in between; a nested parallel call in every participant; a panicking participant;
+  a kept table that does not follow), the strips tests of `x_pair_seed.rs` and `x_pair_seed_disc.rs`
+  (partitioned, two chunks in a row), and `LOSAT/tests/blastn_pairpar_fold.rs`.
 - `LOSAT_X_QBATCHPAR=1` (BLASTN, all tasks, `-subject` with two or more threads; not in the strict set:
   off unless set to any value, whatever `LOSAT_X_DEFAULT` says) NCBI's query batches are searched side by
   side ahead of the batch loop of `run_in_pool` (`blastn/blast_engine/x_qbatch_par.rs`). The size of each

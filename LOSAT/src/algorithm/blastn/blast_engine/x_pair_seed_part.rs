@@ -220,6 +220,7 @@ pub(super) struct PartState {
     pub(super) hits: Vec<UngappedHit>,
     pub(super) out: PartOut,
     pub(super) counts: FoldCounts,
+    /// the time in ungapped extensions of the folds of this partition (LOSAT_TIMING)
     pub(super) scan_pause_ns: u64,
     fold_ns: u64,
     /// The next strip this partition folds.
@@ -307,7 +308,11 @@ pub(super) struct FoldPart<'a> {
 #[derive(Default)]
 pub(super) struct PartStats {
     pub(super) counts: FoldCounts,
+    /// the owner's time in ungapped extensions (in the partitions it folded): the strips paths
+    /// take it off the stage's wall time for `[TIMING] scan_lookup`, which so stays a figure of
+    /// the owner's wall time as without the switch
     pub(super) scan_pause_ns: u64,
+    /// the time in folds summed over the participants (CPU time, not wall time)
     pub(super) fold_ns: u64,
     pub(super) owner_scan_ns: u64,
     pub(super) wait_ns: u64,
@@ -484,11 +489,12 @@ where
         ready[i].store(true, Ordering::Release);
     };
 
-    let participant = |me: usize, owner: bool| -> (u64, u64) {
+    // (the owner's time in scans, in waits and in the ungapped extensions of its folds)
+    let participant = |me: usize, owner: bool| -> (u64, u64, u64) {
         // A helper job that this thread steals while it waits inside a participant (a nested
         // parallel call) does not join: it could wait for the partition that participant holds.
         if !owner && IN_STAGE.with(Cell::get) {
-            return (0, 0);
+            return (0, 0, 0);
         }
         let _in_stage = InStage::enter();
         let mut failing = Failing {
@@ -497,7 +503,7 @@ where
         };
         let mut raw = lock(&raw_spare).pop().unwrap_or_default();
         let mut fill: Vec<u32> = Vec::with_capacity(parts);
-        let (mut scan_ns, mut wait_ns) = (0u64, 0u64);
+        let (mut scan_ns, mut wait_ns, mut pause_ns) = (0u64, 0u64, 0u64);
         let mut wait_start: Option<std::time::Instant> = None;
         let mut idle = 0u32;
         let mut stall: Option<(std::time::Instant, usize)> = None;
@@ -507,7 +513,7 @@ where
                     panic!("LOSAT_X_PAIRPARFOLD: a participant of the partitioned fold failed");
                 }
                 failing.done = true;
-                return (scan_ns, wait_ns);
+                return (scan_ns, wait_ns, pause_ns);
             }
             let mut did = false;
             for k in 0..parts {
@@ -528,9 +534,13 @@ where
                 if a < b {
                     st.out.strip = i as u64;
                     let t0 = timed.then(std::time::Instant::now);
+                    let pause0 = st.scan_pause_ns;
                     fold(&mut st, &strip.seeds[a..b], &strip.pos[a..b]);
                     if let Some(t0) = t0 {
                         st.fold_ns += t0.elapsed().as_nanos() as u64;
+                    }
+                    if owner {
+                        pause_ns += st.scan_pause_ns - pause0;
                     }
                 }
                 drop(strip);
@@ -558,7 +568,7 @@ where
                     wait_ns += t0.elapsed().as_nanos() as u64;
                 }
                 lock(&raw_spare).push(raw);
-                return (scan_ns, wait_ns);
+                return (scan_ns, wait_ns, pause_ns);
             }
             let c = cursor.load(Ordering::Relaxed);
             if c < n && c < min_next + ahead {
@@ -593,7 +603,7 @@ where
                                 left.fetch_add(1, Ordering::Relaxed);
                                 failing.done = true;
                                 lock(&raw_spare).push(raw);
-                                return (scan_ns, wait_ns);
+                                return (scan_ns, wait_ns, pause_ns);
                             }
                         }
                         _ => stall = Some((std::time::Instant::now(), now)),
@@ -604,7 +614,7 @@ where
         }
     };
 
-    let (owner_scan_ns, wait_ns) = run_participants(threads, &participant);
+    let (owner_scan_ns, wait_ns, owner_pause_ns) = run_participants(threads, &participant);
 
     let mut states: Vec<PartState> = states
         .into_iter()
@@ -612,6 +622,7 @@ where
         .collect();
     let t_merge = timed.then(std::time::Instant::now);
     let mut stats = PartStats {
+        scan_pause_ns: owner_pause_ns,
         owner_scan_ns,
         wait_ns,
         helpers_left: left.into_inner() as u64,
@@ -620,7 +631,6 @@ where
     for st in &states {
         stats.counts.seeds += st.counts.seeds;
         stats.counts.skipped += st.counts.skipped;
-        stats.scan_pause_ns += st.scan_pause_ns;
         stats.fold_ns += st.fold_ns;
         stats.ungapped_ns += st.out.ungapped_ns;
         stats.ungapped_calls += st.out.ungapped_calls;
@@ -650,8 +660,8 @@ where
 /// pool; outside a pool, only the owner. Returns the owner's result.
 fn run_participants(
     threads: usize,
-    participant: &(impl Fn(usize, bool) -> (u64, u64) + Sync),
-) -> (u64, u64) {
+    participant: &(impl Fn(usize, bool) -> (u64, u64, u64) + Sync),
+) -> (u64, u64, u64) {
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -835,8 +845,14 @@ pub(super) fn shadow_fields(kind: usize) -> String {
     )
 }
 
-/// No NCBI counterpart: the fields the LOSAT_TIMING lines of `kind` end with.
+/// No NCBI counterpart: the fields the LOSAT_TIMING lines of `kind` end with when the switch is
+/// on: the partition count of the stages, the number of partitioned stages merged, the time in
+/// merges and the number of helpers that left a stalled stage. Without the switch the lines are
+/// those of the strips paths alone.
 pub(super) fn timing_fields(kind: usize) -> String {
+    if !switch_on() {
+        return String::new();
+    }
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     format!(
         " partitions={} merges={} merge={:.3}s helpers_left={}",

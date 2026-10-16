@@ -234,3 +234,64 @@ fn dc_megablast_without_its_strips_path_is_not_taken() {
     );
     assert_eq!((fold.as_str(), merges), ("part", 0), "{stderr}");
 }
+
+// LOSAT_TIMING: the strips paths' `[TIMING] x_pairpar_seed` / `x_pairpardisc_seed` lines end
+// with the partitioned fold's fields (`partitions= merges= merge= helpers_left=`) only with the
+// switch; without it they end with `owner_wait=`, as before the switch existed. (Names and
+// counts only; no duration is compared.)
+#[test]
+fn timing_lines_have_the_fold_fields_only_with_the_switch() {
+    let dir = TestDir::new("timing");
+    let timing = ("LOSAT_TIMING", "1");
+    for (task, extra, prefix) in [
+        ("megablast", &[][..], "[TIMING] x_pairpar_seed:"),
+        (
+            "dc-megablast",
+            &[PAIRPARDISC][..],
+            "[TIMING] x_pairpardisc_seed:",
+        ),
+    ] {
+        for on in [false, true] {
+            let mut switches = extra.to_vec();
+            switches.push(timing);
+            if on {
+                switches.push(SWITCH);
+            }
+            let at = format!("{task} switch {on}");
+            let (_, stderr) = blastn(&dir, task, 4, &switches);
+            let line = stderr
+                .lines()
+                .find(|line| line.starts_with(prefix))
+                .unwrap_or_else(|| panic!("{at}: no {prefix} line:\n{stderr}"));
+            let names: Vec<&str> = line
+                .split_whitespace()
+                .skip(2)
+                .map(|word| word.split('=').next().unwrap_or(word))
+                .collect();
+            let mut expected = vec![
+                "chunks",
+                "strips",
+                "seeds",
+                "skipped",
+                "fold",
+                "owner_scan",
+                "owner_wait",
+            ];
+            if on {
+                expected.extend(["partitions", "merges", "merge", "helpers_left"]);
+            }
+            assert_eq!(names, expected, "{at}: {line}");
+            if on {
+                let number = |name: &str| -> u64 {
+                    line.split_whitespace()
+                        .find_map(|word| word.strip_prefix(name))
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or_else(|| panic!("{at}: {name} in: {line}"))
+                };
+                assert_eq!(number("partitions="), 4, "{at}: {line}");
+                assert!(number("chunks=") > 0, "{at}: {line}");
+                assert_eq!(number("merges="), number("chunks="), "{at}: {line}");
+            }
+        }
+    }
+}

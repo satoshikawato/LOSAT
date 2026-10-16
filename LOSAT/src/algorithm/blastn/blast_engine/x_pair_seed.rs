@@ -1359,7 +1359,9 @@ pub(super) fn run(
     };
     if let (Some(t_start), Some(timing)) = (t_start, timing) {
         // `[TIMING] scan_lookup`: the time of the stage minus the ungapped extensions, as
-        // the reference counts its scan (which also leaves out the last flush).
+        // the reference counts its scan (which also leaves out the last flush). With
+        // LOSAT_X_PAIRPARFOLD only the owner's extensions are taken off (the partitions'
+        // extension times summed over the threads exceed the stage's wall time).
         let elapsed_ns = t_start.elapsed().as_nanos() as u64;
         let scan_ns = elapsed_ns.saturating_sub(stats.scan_pause_ns);
         timing.scan_ns.fetch_add(scan_ns, Ordering::Relaxed);

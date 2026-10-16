@@ -24,6 +24,7 @@ use crate::report::pairwise::{
     write_tblastn_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, PairwiseConfig,
     PairwiseHit,
 };
+use crate::sequence::packed_subject::SubjectNt;
 use crate::stats::spouge::lookup_protein_gumbel_params;
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
@@ -632,7 +633,7 @@ fn pairwise_hits(
 ) -> Result<Vec<PairwiseHit>> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut hits = Vec::new();
-    let mut x_letters = Vec::new();
+    let mut x_window = Vec::new();
     for (q_idx, hitlist) in hitlists.iter().enumerate() {
         let query = query_records[q_idx].seq();
         // NCBI c++/src/algo/blast/format/blast_format.cpp:1541-1557:
@@ -649,9 +650,10 @@ fn pairwise_hits(
                 list.payloads.len() == list.hsps.hsps.len(),
                 "TBLASTN report payload count mismatch"
             );
-            // The subject's letters (made from its packed form with LOSAT_X_TBNSTORE).
-            let subject_seq = subject_letters.letters(oid, &mut x_letters);
-            let mut translation = TargetTranslation::new(subject_seq, &code);
+            // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form, of which
+            // the translations and the rows below read windows.
+            let subject_seq = subject_letters.nt(oid);
+            let mut translation = TargetTranslation::of(subject_seq, &code);
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
                 let hsp = &linked.hsp;
                 let frame = i32::from(hsp.frame);
@@ -670,6 +672,7 @@ fn pairwise_hits(
                 let (qseq, sseq) = aligned_sequences(
                     query,
                     subject_seq,
+                    &mut x_window,
                     &code,
                     &mut translation,
                     hsp.frame,
@@ -952,7 +955,9 @@ fn write_pairwise(
 #[allow(clippy::too_many_arguments)]
 fn aligned_sequences(
     query: &[u8],
-    subject: &[u8],
+    // EXPERIMENT (LOSAT_X_TBNSTORE): the letters, or a packed subject.
+    subject: SubjectNt<'_>,
+    window_buffer: &mut Vec<u8>,
     code: &GeneticCode,
     target: &mut TargetTranslation<'_>,
     frame: i8,
@@ -967,11 +972,50 @@ fn aligned_sequences(
     let mut q = usize::try_from(q_start)?;
     let mut s = super::search_gapped::window_index(s_start, base)
         .context("TBLASTN report translation window starts after HSP")?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1508-1516
+    // ```c
+    //     translation_frame = range->context;
+    //     if (translation_frame > 0) {
+    //         translation_start = 3 * range->begin;
+    //     } else {
+    //         translation_start =
+    //             self->length - 3 * range->end + translation_frame + 1;
+    //     }
+    //     num_nucleotides =
+    //         3 * (range->end - range->begin) + ABS(translation_frame) - 1;
+    // ```
+    // The nucleotides the row is translated from: the record's letters, or (EXPERIMENT,
+    // LOSAT_X_TBNSTORE) the letters of the HSP's codons made from the store, the window NCBI
+    // translates for the residues the script reads (from `s_start` on). Its codon of residue `o`
+    // is the one `display_residue` reads in the whole subject: from `3 * (o - s_start) +
+    // |frame| - 1` on the plus strand, and as far from the window's end as from the subject's on
+    // the minus strand.
+    let (nucleotides, first) = match subject {
+        SubjectNt::Letters(letters) => (letters, 0),
+        SubjectNt::Packed(_) => {
+            let first = usize::try_from(s_start)?;
+            let residues: usize = script
+                .iter()
+                .filter(|op| !matches!(op, GapEditOp::Ins(_)))
+                .map(|op| op.num() as usize)
+                .sum();
+            let frame_shift = usize::from(frame.unsigned_abs());
+            let length = 3 * residues + frame_shift - 1;
+            let start = if frame > 0 {
+                Some(3 * first)
+            } else {
+                (subject.len() + 1).checked_sub(3 * (first + residues) + frame_shift)
+            }
+            .filter(|start| start + length <= subject.len())
+            .context("TBLASTN report HSP outside the subject")?;
+            (subject.fetch(start, start + length, window_buffer), first)
+        }
+    };
     let displayed_subject = |s: usize| -> u8 {
         crate::algorithm::tblastx::report::display_residue(
-            subject,
+            nucleotides,
             frame,
-            (base + s as isize) as usize,
+            (base + s as isize) as usize - first,
             code,
         )
     };

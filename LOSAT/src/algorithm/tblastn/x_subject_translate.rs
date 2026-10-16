@@ -611,6 +611,203 @@ pub(super) fn x_subject_plan(
     }
 }
 
+/// Bases whose codes `x_packed_frames` unpacks at a time: a multiple of three, so that every
+/// block starts a codon of frame 1.
+const X_PACKED_BLOCK: usize = 3 << 14;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058,1063-1064
+// ```c
+//    Uint4 buffer_length =2*(nucl_length+1)+2;
+// ...
+//    if ((translation_buffer =
+//         (Uint1*) malloc(buffer_length)) == NULL)
+// ```
+// No NCBI counterpart for the size: NCBI holds the six frames of a subject in one buffer of
+// about two bytes per base, which glibc maps for a chromosome and unmaps when NCBI frees it.
+// Here each frame is an allocation of a third of a byte per base. glibc maps an allocation of
+// at least its mmap threshold, but it raises the threshold to the size of each mapped block
+// that is freed (up to 32 MiB), so after the first chromosome the frames of the next ones
+// (13 to 26 MB each on the zebrafish genome) come from a thread's arena, and the freed frames
+// stay resident there (zebrafish genome, 61 proteins, 8 threads: 1,612 MiB, 1,366 MiB with a
+// fixed threshold). A frame of at least `X_MAPPED_FRAME` bytes is given a capacity above that
+// ceiling, so that it is always mapped and returned when dropped; the pages beyond its length
+// are never touched and are not resident. Other allocators return large blocks on their own.
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the frames from which a frame is mapped (Linux with glibc).
+const X_MAPPED_FRAME: usize = 1 << 20;
+
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the capacity of a frame of `length` bytes (see
+/// `X_MAPPED_FRAME`).
+fn x_frame_capacity(length: usize) -> usize {
+    if cfg!(all(target_os = "linux", target_env = "gnu")) && length >= X_MAPPED_FRAME {
+        // glibc's largest dynamic mmap threshold (DEFAULT_MMAP_THRESHOLD_MAX on 64-bit), and
+        // one page more
+        length.max((32 << 20) + 4096)
+    } else {
+        length
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1090
+// ```c
+//    for (context = 0; context < NUM_FRAMES; ++context) {
+//       frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+//       if (encoding == eBlastEncodingNcbi2na) {
+//          if (frame > 0) {
+//             length =
+//                BLAST_TranslateCompressedSequence(translation_table,
+//                   nucl_length, nucl_seq, frame, translation_buffer+offset);
+//          } else {
+//             length =
+//                BLAST_TranslateCompressedSequence(translation_table_rc,
+//                   nucl_length, nucl_seq, frame, translation_buffer+offset);
+// ```
+// NCBI translates the six frames from the packed subject, holding nothing but the frames.
+// `x_generate_frames` on the ncbi2na values of the store, with the values unpacked one block
+// at a time instead of for the whole subject: the codon that starts at base `p` is residue
+// `p / 3` of frame `p % 3 + 1`, and, read on the minus strand, residue `q / 3` of frame
+// `-(q % 3 + 1)` where `q = length - 3 - p` (the codons of `seq[..length - i]` counted from its
+// end). Each frame is filled at those places, so every residue is the one `x_generate_frames`
+// puts there.
+/// EXPERIMENT (LOSAT_X_TBNSTORE): `x_generate_frames` of a packed subject's codes.
+fn x_packed_frames(
+    store: &crate::sequence::packed_subject::PackedNucleotide,
+    tables: &XCodonTables,
+) -> Vec<QueryFrame> {
+    let seq_len = store.len();
+    let frame_count = (0..3).filter(|&i| i + 3 <= seq_len).count();
+    let empty_frame = |i: usize| {
+        let aa_len = (seq_len - i) / 3;
+        let mut aa_seq = Vec::with_capacity(x_frame_capacity(aa_len + 2));
+        aa_seq.resize(aa_len + 2, 0u8);
+        aa_seq[0] = SENTINEL_BYTE;
+        aa_seq[aa_len + 1] = SENTINEL_BYTE;
+        aa_seq
+    };
+    let mut forward: Vec<Vec<u8>> = (0..frame_count).map(empty_frame).collect();
+    let mut reverse: Vec<Vec<u8>> = (0..frame_count).map(empty_frame).collect();
+    let mut codes = vec![0u8; X_PACKED_BLOCK + 2];
+    let mut start = 0;
+    // the codons that start in [start, end), with the two bases after the last one
+    while start + 3 <= seq_len {
+        let end = (start + X_PACKED_BLOCK).min(seq_len - 2);
+        let codes = &mut codes[..end - start + 2];
+        store.codes_into(start, codes);
+        for phase in 0..3 {
+            let first = start + phase;
+            if first >= end {
+                break;
+            }
+            let minus = seq_len - 3 - first;
+            let (plus_frame, minus_frame) = (&mut forward[phase], &mut reverse[minus % 3]);
+            let mut minus_residue = 1 + minus / 3;
+            for (residue, codon) in plus_frame[1 + first / 3..]
+                .iter_mut()
+                .zip(codes[phase..].chunks_exact(3))
+            {
+                let index = x_codon_index(codon);
+                *residue = tables.forward[index];
+                minus_frame[minus_residue] = tables.reverse[index];
+                minus_residue -= 1;
+            }
+        }
+        start = end;
+    }
+    let frame = |frame: i8, aa_seq: Vec<u8>| QueryFrame {
+        frame,
+        aa_len: aa_seq.len() - 2,
+        aa_seq,
+        aa_seq_nomask: None,
+        orig_len: seq_len,
+        seg_masks: Vec::new(),
+    };
+    let mut frames = Vec::with_capacity(2 * frame_count);
+    frames.extend((1..).zip(forward).map(|(i, aa_seq)| frame(i, aa_seq)));
+    frames.extend((1..).zip(reverse).map(|(i, aa_seq)| frame(-i, aa_seq)));
+    frames
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ```
+// The plan of a packed subject as `x_table_plan` makes it from the subject's letters. Only a
+// stage that does not read the case of the letters takes the store (`-lcase_masking` gives the
+// letters), so every frame has one unit per chunk with one range, as without lowercase masking.
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the plan of one packed subject, from its codes.
+fn x_packed_plan(
+    store: &crate::sequence::packed_subject::PackedNucleotide,
+    db_gencode: u8,
+) -> Result<XSubjectPlan> {
+    let tables = x_codon_tables(db_gencode)?;
+    let frames = x_packed_frames(store, tables);
+    let negative_first_length = frames
+        .iter()
+        .find(|frame| frame.frame == -1)
+        .map(|frame| frame.aa_len)
+        .unwrap_or(0);
+    let mut units = Vec::new();
+    for (index, frame) in frames.iter().enumerate() {
+        // Without lowercase masking the ranges read no letter of the subject.
+        for (chunk, ranges) in translated_chunk_scan_ranges(
+            &[],
+            frame.frame,
+            frame.aa_len,
+            negative_first_length,
+            false,
+        )? {
+            units.push((index, chunk, ranges));
+        }
+    }
+    super::x_subject_store::x_count_packed_plan();
+    Ok(XSubjectPlan { frames, units })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
+// ```c
+//             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
+//                                      backup.full_range.right,
+//                                      subject->gen_code_string, &translation_buffer,
+//                                      &frame_offsets, NULL);
+// ```
+// Dispatch point: a packed subject is translated from its codes (`x_packed_plan`) whichever
+// translation the variables select, since the reference path reads letters. With
+// `LOSAT_X_TBNXLATESHADOW` the letters the reference path reads (the resolved bases) are made
+// too and the search stops if the two plans differ.
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the plan of one packed subject; `reference` makes the plan of
+/// the letters it is given.
+pub(super) fn x_packed_subject_plan(
+    mode: XTranslate,
+    store: &crate::sequence::packed_subject::PackedNucleotide,
+    db_gencode: u8,
+    reference: impl Fn(&[u8]) -> Result<Arc<XSubjectPlan>>,
+) -> Result<Arc<XSubjectPlan>> {
+    let packed = x_packed_plan(store, db_gencode);
+    if mode == XTranslate::Shadow {
+        let mut letters = Vec::new();
+        store.resolved_letters_into(&mut letters);
+        if let Some(difference) = x_plan_difference(&packed, &reference(&letters)) {
+            panic!(
+                "LOSAT_X_TBNXLATESHADOW: the subject translation from the packed subject differs from the reference one (subject of {} bases, genetic code {db_gencode}): {difference}",
+                store.len()
+            );
+        }
+        match &packed {
+            Ok(plan) => {
+                SHADOW_PLANS.fetch_add(1, Ordering::Relaxed);
+                let residues: usize = plan.frames.iter().map(|frame| frame.aa_seq.len()).sum();
+                SHADOW_RESIDUES.fetch_add(residues as u64, Ordering::Relaxed);
+            }
+            Err(_) => {
+                SHADOW_ERRORS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+    packed.map(Arc::new)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::search_seed::{resolve_local_subject_ncbi2na, x_scan_plan};
@@ -873,7 +1070,7 @@ mod tests {
                         // test run has one of the variables set) is the copy's too.
                         let scan = x_scan_plan(
                             &[query],
-                            &subject,
+                            crate::sequence::packed_subject::SubjectNt::Letters(&subject),
                             db_gencode,
                             None,
                             11,
@@ -960,7 +1157,7 @@ mod tests {
             let query: &[u8] = b"MKVLAAGIVGLLLAQWSTRE";
             let scan = x_scan_plan(
                 &[query],
-                &subject,
+                crate::sequence::packed_subject::SubjectNt::Letters(&subject),
                 db_gencode,
                 None,
                 11,
@@ -1043,6 +1240,128 @@ mod tests {
             x_plan_difference(&failed(), &Err(anyhow::anyhow!("one"))),
             None
         );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1090
+    // ```c
+    //    for (context = 0; context < NUM_FRAMES; ++context) {
+    //       frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+    //       if (encoding == eBlastEncodingNcbi2na) {
+    //          if (frame > 0) {
+    //             length =
+    //                BLAST_TranslateCompressedSequence(translation_table,
+    //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
+    // ```
+    // The plan of a packed subject against the reference plan of its letters without lowercase
+    // masking: every length from 0 to 40 bases, lengths around the blocks of `x_packed_frames`
+    // (every remainder of a block and of a frame), of the four bases, with lowercase runs, of
+    // every IUPAC letter with gaps, and of `N` only; for every genetic code on the long subjects.
+    // In every mode of the variables, and as `x_scan_plan` makes it from the store.
+    #[test]
+    fn x_packed_plans_are_the_reference_plans() {
+        use crate::sequence::packed_subject::{PackedNucleotide, SubjectNt};
+        let alphabets: [&[u8]; 4] = [
+            b"ACGT",
+            b"ACGTACGTACGTacgtn",
+            b"ACGTMRSVWYHKDBN-acgtmrsvwyhkdbn",
+            b"N",
+        ];
+        let query: &[u8] = b"MKVLAAGIVGLLLAQWSTRE";
+        let lookup = OnceLock::new();
+        let mut compared = 0usize;
+        for (which, alphabet) in alphabets.iter().enumerate() {
+            let around_blocks = [1, 2, 3]
+                .into_iter()
+                .flat_map(|blocks| (0..7).map(move |extra| blocks * X_PACKED_BLOCK + extra - 3));
+            let lengths = (0..=40)
+                .chain([99, 100, 101, 1_000, 4_999])
+                .chain(around_blocks);
+            for length in lengths {
+                let subject = letters(alphabet, length, (which * 100_000 + length) as u64);
+                let store = PackedNucleotide::from_subject_letters(&subject).expect("letters");
+                let codes = if (1_000..10_000).contains(&length) {
+                    genetic_codes()
+                } else {
+                    vec![1, 4, 11]
+                };
+                for db_gencode in codes {
+                    let reference = reference_plan(&subject, db_gencode, false);
+                    let packed = x_packed_plan(&store, db_gencode);
+                    assert_eq!(
+                        x_plan_difference(&packed, &reference),
+                        None,
+                        "alphabet {which}, {length} bases, genetic code {db_gencode}"
+                    );
+                    compared += 1;
+                    if db_gencode != 11 {
+                        continue;
+                    }
+                    for mode in [
+                        XTranslate::Reference,
+                        XTranslate::Tables,
+                        XTranslate::Shadow,
+                    ] {
+                        let plan = x_packed_subject_plan(mode, &store, db_gencode, |letters| {
+                            reference_plan(letters, db_gencode, false)
+                        })
+                        .map(|plan| Arc::try_unwrap(plan).ok().expect("one owner"));
+                        assert_eq!(x_plan_difference(&plan, &reference), None, "{mode:?}");
+                    }
+                    let scan = x_scan_plan(
+                        &[query],
+                        SubjectNt::Packed(&store),
+                        db_gencode,
+                        None,
+                        11,
+                        false,
+                        ScoringMatrix::Blosum62,
+                        3,
+                        Some(&lookup),
+                        None,
+                    )
+                    .unwrap();
+                    assert_eq!(scan.is_some(), length >= 11);
+                    if let Some(scan) = scan {
+                        let reference =
+                            reference.map(|plan| Arc::try_unwrap(plan).ok().expect("one owner"));
+                        assert_eq!(x_plan_difference(&reference, &Ok(scan.subject)), None);
+                    }
+                }
+            }
+        }
+        assert_eq!(compared, 4 * (44 * 3 + 2 * 27 + 21 * 3));
+        // a packed subject is never searched with lowercase masking (the letters are given)
+        let store = PackedNucleotide::from_subject_letters(&letters(b"ACGT", 300, 1)).unwrap();
+        let masked = x_scan_plan(
+            &[query],
+            SubjectNt::Packed(&store),
+            1,
+            None,
+            11,
+            true,
+            ScoringMatrix::Blosum62,
+            3,
+            None,
+            None,
+        );
+        assert!(masked.is_err());
+    }
+
+    // No NCBI counterpart: the shadow mode stops the search when the plan of a packed subject
+    // differs from the reference plan of its letters.
+    #[test]
+    #[should_panic(
+        expected = "LOSAT_X_TBNXLATESHADOW: the subject translation from the packed subject differs"
+    )]
+    fn x_shadow_mode_stops_on_a_difference_of_a_packed_plan() {
+        let subject = letters(b"ACGT", 300, 5);
+        let other = letters(b"ACGT", 300, 6);
+        let store =
+            crate::sequence::packed_subject::PackedNucleotide::from_subject_letters(&subject)
+                .unwrap();
+        let _ = x_packed_subject_plan(XTranslate::Shadow, &store, 1, |_| {
+            reference_plan(&other, 1, false)
+        });
     }
 
     // No NCBI counterpart: the shadow mode stops the search when the two plans differ.

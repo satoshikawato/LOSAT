@@ -760,9 +760,6 @@ fn fold(
             }
             *scan_pause_ns = scan_pause_ns.saturating_add(elapsed_ns);
         }
-        debug_assert!(ungapped.q_start >= q_context_start);
-        let qs = ungapped.q_start - q_context_start;
-        let qe = qs + ungapped.length;
         let ss = ungapped.s_start;
         let ungapped_se = ungapped.s_start + ungapped.length;
         let ungapped_score = ungapped.score;
@@ -804,6 +801,25 @@ fn fold(
             );
             continue;
         }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392
+        // ```c
+        //     init_hsp->offsets.qs_offsets.q_off -= query_start;
+        //     if (init_hsp->ungapped_data) {
+        //         init_hsp->ungapped_data->q_start -= query_start;
+        //     }
+        //     ASSERT(init_hsp->ungapped_data == NULL ||
+        //            init_hsp->ungapped_data->q_start >= 0);
+        // ```
+        // NCBI checks the start against the context only for saved hits. A rejected
+        // approximate result may start left of its context: the left loop of
+        // s_NuclUngappedExtend runs over the concatenated query and reads the sentinel as
+        // bases (na_ungapped.c:284-305, `len = MIN(q_ext, s_ext) / COMPRESSION_RATIO;`),
+        // and that result is kept only below reduced_nucl_cutoff_score = 0.8 * cutoff_score
+        // (blast_parameters.c:412), so it is rejected above and never reaches this point.
+        debug_assert!(ungapped.q_start >= q_context_start);
+        let qs = ungapped.q_start - q_context_start;
+        let qe = qs + ungapped.length;
 
         // NCBI architecture: Collect ungapped hit for batch processing
         ungapped_hits.push(UngappedHit {

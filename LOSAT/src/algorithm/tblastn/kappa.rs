@@ -428,11 +428,12 @@ const TBLASTN_REDO_CALLBACKS: BlastRedoAlignCallbacks = BlastRedoAlignCallbacks 
 //     query_info, numContexts, matrix, BLASTAA_SIZE, NRrecord, ...);
 // ```
 #[allow(dead_code)] // The public TBLASTN path stays gated until D and E complete.
-pub(super) fn redo_preliminary_match(
+pub(super) fn redo_preliminary_match<'s>(
     preliminary_hits: &[GappedHsp],
     query_context: i32,
     query_infos: &[BlastCompoQueryInfo],
-    subject_nt: &[u8],
+    // EXPERIMENT (LOSAT_X_TBNSTORE): the letters, or a packed subject.
+    subject_nt: impl Into<crate::sequence::packed_subject::SubjectNt<'s>>,
     genetic_code_id: u8,
     params: &BlastRedoAlignParams,
     lambda: f64,
@@ -463,7 +464,8 @@ pub(super) fn redo_preliminary_match(
             .expect("TBLASTN incoming alignment inserted")
             .next;
     }
-    let matching_seq = BlastCompoMatchingSequence::new_translated(0, subject_nt, genetic_code_id)?;
+    let matching_seq =
+        BlastCompoMatchingSequence::new_translated(0, subject_nt.into(), genetic_code_id)?;
     let context = TblastnRedoContext {
         preliminary_hits,
         matrix,

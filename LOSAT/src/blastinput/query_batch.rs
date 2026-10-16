@@ -161,6 +161,7 @@ pub fn get_query_batch_size(value: Option<&std::ffi::OsStr>) -> Result<i32, Stri
 ///         m_BatchSize = m_TargetHits / 200;
 ///     }
 /// ```
+#[derive(Clone, Debug)]
 pub struct BatchSizeMixer {
     target_hits: i32,
     ratio: f64,

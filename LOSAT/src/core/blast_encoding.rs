@@ -432,6 +432,15 @@ pub fn encode_iupac_to_blastna(seq: &[u8]) -> Vec<u8> {
     out
 }
 
+/// `encode_iupac_to_blastna` into a caller-owned slice (`out.len() == seq.len()`), so the
+/// search writes a context straight into its query buffer.
+pub fn encode_iupac_to_blastna_into(seq: &[u8], out: &mut [u8]) {
+    assert_eq!(seq.len(), out.len());
+    for (slot, &base) in out.iter_mut().zip(seq) {
+        *slot = IUPACNA_TO_BLASTNA_FULL[base as usize];
+    }
+}
+
 /// Encode an ASCII sequence to ncbi2na 2-bit codes (one base per byte).
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:476-489
 /// ```c

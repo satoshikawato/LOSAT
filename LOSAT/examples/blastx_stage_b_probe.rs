@@ -325,7 +325,14 @@ fn main() -> Result<()> {
     //         }
     // ```
     if mode == "warnings" {
-        for (kind, path, protein) in [("S", &args.subject, true), ("Q", &args.query, false)] {
+        for (kind, path, protein) in [
+            (
+                "S",
+                args.subject.as_deref().expect("the probes take -subject"),
+                true,
+            ),
+            ("Q", args.query.as_path(), false),
+        ] {
             for (i, record) in read_fasta(path, protein, args.lcase_masking)?
                 .iter()
                 .enumerate()
@@ -346,7 +353,11 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
-    let s = read_fasta(&args.subject, true, args.lcase_masking)?;
+    let s = read_fasta(
+        args.subject.as_deref().expect("the probes take -subject"),
+        true,
+        args.lcase_masking,
+    )?;
     records(&s, "S", 0);
     let q = read_fasta(&args.query, false, args.lcase_masking)?;
     for (batch, r) in batch_ranges(&q).into_iter().enumerate() {

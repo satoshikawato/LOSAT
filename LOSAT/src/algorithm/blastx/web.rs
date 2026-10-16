@@ -12,6 +12,13 @@ use std::{cell::RefCell, io::Write, path::Path};
 // The existing CLI v2 parser owns all defaults, lexical/scope validation and
 // code32 rejection. Synthetic paths identify memory input; no file is opened.
 pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
+    // The CLI's `-db` (a database search) waits for stage DB-7 in LOSAT Web, as BLASTP's.
+    if extra
+        .iter()
+        .any(|key| key.split('=').next().unwrap_or(key) == "-db")
+    {
+        bail!("-db (a database search) is not supported by LOSAT Web yet");
+    }
     if extra.iter().any(|key| {
         matches!(
             key.split('=').next().unwrap_or(key),
@@ -82,6 +89,7 @@ pub(crate) fn run_pair(
     }
     let mut output = Vec::new();
     let label = Path::new(subject_label);
+    let shown = report::ShownSubjects::Fasta { path: label };
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:784-788
     // ```c++
     //         		if(warning != kEmptyStr){
@@ -102,7 +110,7 @@ pub(crate) fn run_pair(
     // ```c++
     //         formatter.PrintProlog();
     // ```
-    report::write_prolog(&mut output, &options, &subjects, label)?;
+    report::write_prolog(&mut output, &options, &subjects, &shown)?;
     let mut processed = 0;
     // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-262
     // ```c++
@@ -204,7 +212,7 @@ pub(crate) fn run_pair(
                                 &options,
                                 queries,
                                 &subjects,
-                                label,
+                                &shown,
                                 &mut results,
                             )?;
                             processed += queries.len();
@@ -286,7 +294,7 @@ pub(crate) fn run_pair(
                     &options,
                     queries,
                     &subjects,
-                    label,
+                    &shown,
                     &mut results,
                 )?;
                 processed += queries.len();
@@ -317,6 +325,6 @@ pub(crate) fn run_pair(
     // ```c++
     //         formatter.PrintEpilog(opt);
     // ```
-    report::write_epilog(&mut output, &options, &subjects, label, processed)?;
+    report::write_epilog(&mut output, &options, &subjects, &shown, processed)?;
     Ok(output)
 }

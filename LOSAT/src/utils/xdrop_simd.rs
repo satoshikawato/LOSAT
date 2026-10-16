@@ -2337,7 +2337,7 @@ const KERNEL_COMPILED: bool = cfg!(any(
 /// LOSAT_X_DPFAST is on by default (`utils/xswitch.rs`); on a target without a vector kernel
 /// (`KERNEL_COMPILED` false) the mode stays 0, because `xdrop_align` returns `None` for every
 /// call there and mode 1 would only build the kernel's tables before the scalar port runs.
-/// On aarch64 mode 1 also needs LOSAT_X_DPNEON (`neon_on`).
+/// On aarch64 mode 1 also needs LOSAT_X_DPNEON (`neon_on`), which is on by default as well.
 pub(crate) fn mode() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();
@@ -2352,17 +2352,17 @@ pub(crate) fn mode() -> u8 {
     })
 }
 
-/// No NCBI counterpart: EXPERIMENT (LOSAT_X_DPNEON, off unless set): on aarch64 the NEON build of
-/// the vector kernels runs only when this variable is set (any value), so that the kernels enter
-/// as an opt-in path; without it aarch64 keeps the scalar port, as before the NEON layer
-/// existed. LOSAT_X_DEFAULT does not touch it. Always true on the other targets.
-/// LOSAT_X_DPSHADOW (mode 2) runs and compares the kernels without it. EXPERIMENT
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_DPNEON, a switch of the strict set,
+/// `utils/xswitch.rs`: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set): on
+/// aarch64 the NEON build of the vector kernels runs only while this switch is on; off, aarch64
+/// keeps the scalar port, as before the NEON layer existed. Always true on the other targets.
+/// LOSAT_X_DPSHADOW (mode 2) runs and compares the kernels whatever it says. EXPERIMENT
 /// (LOSAT_X_DPNEON2, off unless set): that variable turns the NEON kernels on as well, with the
 /// two-register kernels of `x_xdrop_neon2.rs` first (`x_extra_switches`).
 fn neon_on() -> bool {
     #[cfg(target_arch = "aarch64")]
     {
-        std::env::var_os("LOSAT_X_DPNEON").is_some() || x_neon2::switch_on()
+        crate::utils::xswitch::on("LOSAT_X_DPNEON") || x_neon2::switch_on()
     }
     #[cfg(not(target_arch = "aarch64"))]
     {

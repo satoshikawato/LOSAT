@@ -2378,9 +2378,9 @@ pub fn build_disc_mb_lookup(
     query_masks: &[Vec<MaskedInterval>],
     approx_table_entries: usize,
 ) -> TwoStageLookup {
-    // No NCBI counterpart: the start of the `[TIMING] disc_lookup_build` interval (only with
-    // LOSAT_TIMING; LOSAT_X_DISCLUTPAR's module).
-    let x_start = x_disc_lookup_par::timer_start();
+    // No NCBI counterpart: the start of the `[TIMING] disc_lookup_build` interval and its split
+    // (only with LOSAT_TIMING; LOSAT_X_DISCLUTPAR's module).
+    let mut x_clock = x_disc_lookup_par::BuildClock::start();
     debug_assert_eq!(queries_blastna.len(), query_offsets.len());
     let lut_word_length = word_size;
     let hashsize = 1usize << (2 * lut_word_length);
@@ -2453,16 +2453,18 @@ pub fn build_disc_mb_lookup(
         pv_array: &mut pv_array,
         pv_array_bts,
     };
+    x_clock.fill();
     match x_parts {
         Some(x_parts) => x_disc_lookup_par::fill(x_parts, &words, tables, true),
         None => fill_disc_mb_tables(&words, tables),
     }
 
+    x_clock.chain();
     let total_longest_chain = disc_longest_chain(&helper_array, &helper_array2, two_templates);
     // No NCBI counterpart: the end of the `[TIMING] disc_lookup_build` interval; then, with
     // LOSAT_X_DISCLUTPARSHADOW, the tables are built again the other way (serially when the pool
     // built them, otherwise partitioned) and compared element by element.
-    x_disc_lookup_par::record_build(x_start, x_parts.is_some());
+    x_clock.record(x_parts.is_some());
     if x_disc_lookup_par::shadow() {
         x_disc_lookup_par::shadow_check(
             &words,

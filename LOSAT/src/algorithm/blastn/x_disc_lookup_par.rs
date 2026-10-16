@@ -146,7 +146,15 @@
 //! (builds=<n> parallel=<n on a pool>)` when at least one table was built: `<s>` is the sum of
 //! the wall times of every build of the process (allocation, fill and longest chain, not the
 //! shadow's second build); with LOSAT_X_QBATCHPAR it includes the slots' builds, which run
-//! concurrently.
+//! concurrently. A second line, `[TIMING] disc_lookup_split: alloc= loop= pool_fill= chain=
+//! chunks= read_wall= read_max= read_sum= read_late= update_... link_... buckets_peak=`, splits
+//! the same builds: the allocation of the tables, the fill by the original loop, the fill on the
+//! pool and the longest chain (seconds, summed); then, for the pool fills only (not the shadow's
+//! partitioned build), their chunks, and per phase (read = A, update = B, link = C), summed over
+//! the chunks: the calling worker's wall time from before the phase's first job to the return of
+//! its last (`wall`), the longest job (`max`), the jobs' summed running time (`sum`) and the
+//! latest start of a job after the phase began (`late`); and the most the buckets of one fill
+//! reserved (both templates). The jobs' start and end are taken only with LOSAT_TIMING.
 
 use super::x_mb_lookup_par::{plan, pool_threads, Shared, K_COMPRESSION_FACTOR_SHIFT};
 use super::{
@@ -204,38 +212,139 @@ static BUILD_NANOS: AtomicU64 = AtomicU64::new(0);
 static BUILDS: AtomicU64 = AtomicU64::new(0);
 static BUILDS_ON_POOL: AtomicU64 = AtomicU64::new(0);
 
+// No NCBI counterpart: LOSAT_TIMING's split of the builds (any switch state), summed over the
+// builds of the process, in ns: the allocation of the tables, the fill by the original loop, the
+// fill on the pool, and the longest chain.
+static ALLOC_NANOS: AtomicU64 = AtomicU64::new(0);
+static LOOP_NANOS: AtomicU64 = AtomicU64::new(0);
+static POOL_FILL_NANOS: AtomicU64 = AtomicU64::new(0);
+static CHAIN_NANOS: AtomicU64 = AtomicU64::new(0);
+
+/// No NCBI counterpart: LOSAT_TIMING's split of one phase of the pool fills (read, update, link),
+/// summed over the pool fills and their chunks, in ns: the calling worker's wall time from before
+/// the phase's first job to the return of its last (`wall`), the longest job (`max`), the jobs'
+/// summed running time (`sum`) and the latest start of a job after the phase began (`late`).
+struct PhaseTimes {
+    wall: AtomicU64,
+    max: AtomicU64,
+    sum: AtomicU64,
+    late: AtomicU64,
+}
+
+impl PhaseTimes {
+    const fn new() -> Self {
+        Self {
+            wall: AtomicU64::new(0),
+            max: AtomicU64::new(0),
+            sum: AtomicU64::new(0),
+            late: AtomicU64::new(0),
+        }
+    }
+}
+
+// No NCBI counterpart (LOSAT_TIMING only): the phases' split, the chunks of the pool fills and the
+// largest bucket memory of one pool fill (bytes reserved after a phase A, both templates).
+static PHASE_TIMES: [PhaseTimes; 3] = [const { PhaseTimes::new() }; 3];
+const PHASE_NAMES: [&str; 3] = ["read", "update", "link"];
+static POOL_CHUNKS: AtomicU64 = AtomicU64::new(0);
+static BUCKET_PEAK_BYTES: AtomicU64 = AtomicU64::new(0);
+
 /// No NCBI counterpart: LOSAT_TIMING is set (read once).
 fn timing_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LOSAT_TIMING").is_some())
 }
 
-/// No NCBI counterpart: the start of a build's `[TIMING]` interval (only with LOSAT_TIMING).
-pub(super) fn timer_start() -> Option<std::time::Instant> {
-    timing_on().then(std::time::Instant::now)
+/// No NCBI counterpart: the marks of one build's `[TIMING]` intervals (only with LOSAT_TIMING): the
+/// start of the build, of the fill and of the longest chain.
+pub(super) struct BuildClock {
+    start: Option<std::time::Instant>,
+    fill: Option<std::time::Instant>,
+    chain: Option<std::time::Instant>,
 }
 
-/// No NCBI counterpart: the end of a build's `[TIMING]` interval.
-pub(super) fn record_build(start: Option<std::time::Instant>, on_pool: bool) {
-    if let Some(start) = start {
-        BUILD_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+impl BuildClock {
+    /// The start of a build (before the allocation of the tables).
+    pub(super) fn start() -> Self {
+        Self {
+            start: timing_on().then(std::time::Instant::now),
+            fill: None,
+            chain: None,
+        }
+    }
+
+    /// The start of the fill (the original loop or the pool fill).
+    pub(super) fn fill(&mut self) {
+        if self.start.is_some() {
+            self.fill = Some(std::time::Instant::now());
+        }
+    }
+
+    /// The start of the longest chain (the end of the fill).
+    pub(super) fn chain(&mut self) {
+        if self.start.is_some() {
+            self.chain = Some(std::time::Instant::now());
+        }
+    }
+
+    /// The end of the build: adds its intervals to the `[TIMING]` counters.
+    pub(super) fn record(self, on_pool: bool) {
+        let (Some(start), Some(fill), Some(chain)) = (self.start, self.fill, self.chain) else {
+            return;
+        };
+        let end = std::time::Instant::now();
+        let ns = |from: std::time::Instant, to: std::time::Instant| {
+            to.saturating_duration_since(from).as_nanos() as u64
+        };
+        BUILD_NANOS.fetch_add(ns(start, end), Ordering::Relaxed);
+        ALLOC_NANOS.fetch_add(ns(start, fill), Ordering::Relaxed);
+        if on_pool {
+            &POOL_FILL_NANOS
+        } else {
+            &LOOP_NANOS
+        }
+        .fetch_add(ns(fill, chain), Ordering::Relaxed);
+        CHAIN_NANOS.fetch_add(ns(chain, end), Ordering::Relaxed);
         BUILDS.fetch_add(1, Ordering::Relaxed);
         BUILDS_ON_POOL.fetch_add(u64::from(on_pool), Ordering::Relaxed);
     }
 }
 
-/// The `[TIMING]` line (with LOSAT_TIMING, when a table was built) and the shadow's summary line
+/// The `[TIMING]` lines (with LOSAT_TIMING, when a table was built) and the shadow's summary line
 /// (with LOSAT_X_DISCLUTPARSHADOW), printed by `main` at exit.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     if timing_on() && load(&BUILDS) > 0 {
+        let s = |c: &AtomicU64| load(c) as f64 / 1e9;
         eprintln!(
             "[TIMING] disc_lookup_build: {:.3}s (builds={} parallel={})",
-            load(&BUILD_NANOS) as f64 / 1e9,
+            s(&BUILD_NANOS),
             load(&BUILDS),
             load(&BUILDS_ON_POOL)
         );
+        let mut split = format!(
+            "[TIMING] disc_lookup_split: alloc={:.4}s loop={:.4}s pool_fill={:.4}s chain={:.4}s chunks={}",
+            s(&ALLOC_NANOS),
+            s(&LOOP_NANOS),
+            s(&POOL_FILL_NANOS),
+            s(&CHAIN_NANOS),
+            load(&POOL_CHUNKS)
+        );
+        for (name, t) in PHASE_NAMES.iter().zip(&PHASE_TIMES) {
+            split.push_str(&format!(
+                " {name}_wall={:.4}s {name}_max={:.4}s {name}_sum={:.4}s {name}_late={:.4}s",
+                s(&t.wall),
+                s(&t.max),
+                s(&t.sum),
+                s(&t.late)
+            ));
+        }
+        split.push_str(&format!(
+            " buckets_peak={:.1}MiB",
+            load(&BUCKET_PEAK_BYTES) as f64 / 1048576.0
+        ));
+        eprintln!("{split}");
     }
     if shadow() {
         let diffs = load(&SHADOW_DIFFS);
@@ -355,6 +464,7 @@ struct Entry {
 struct SharedBuckets {
     ptr: *mut Vec<Entry>,
     parts: usize,
+    len: usize,
 }
 
 // SAFETY: the jobs of a phase use disjoint buckets (see `SharedBuckets`), the phases are separated
@@ -369,7 +479,17 @@ impl SharedBuckets {
         Self {
             ptr: buckets.as_mut_ptr(),
             parts,
+            len: buckets.len(),
         }
+    }
+
+    /// The entries the buckets have room for (their summed capacity).
+    ///
+    /// SAFETY: no job is running (between two phases).
+    unsafe fn capacity(self) -> usize {
+        (0..self.len)
+            .map(|i| unsafe { (*self.ptr.add(i)).capacity() })
+            .sum()
     }
 
     /// SAFETY: no other job of the current phase uses the bucket `(a, o)`, and the buckets outlive
@@ -609,7 +729,7 @@ unsafe fn update_all(t: SharedTables, second: bool, entries: &mut [Entry]) {
 }
 
 /// No NCBI counterpart (scheduling only): the positions read per chunk (each chunk is read, updated
-/// and linked before the next; it bounds the buckets to 8 bytes per word of a chunk per template).
+/// and linked before the next; the buckets hold the words of one chunk).
 const CHUNK_POSITIONS: usize = 1 << 19;
 
 /// No NCBI counterpart (scheduling only): `job(0)`, ..., `job(parts - 1)`, on the pool of the
@@ -639,6 +759,64 @@ fn run_jobs<F: Fn(usize) + Sync>(parts: usize, in_pool: bool, job: F) {
     }
 }
 
+/// No NCBI counterpart (LOSAT_TIMING only): when each job of the current phase started and ended,
+/// in ns after the phase began.
+struct JobClock {
+    begun: std::time::Instant,
+    start: Vec<AtomicU64>,
+    end: Vec<AtomicU64>,
+}
+
+impl JobClock {
+    fn new(parts: usize) -> Self {
+        Self {
+            begun: std::time::Instant::now(),
+            start: (0..parts).map(|_| AtomicU64::new(0)).collect(),
+            end: (0..parts).map(|_| AtomicU64::new(0)).collect(),
+        }
+    }
+}
+
+/// No NCBI counterpart (scheduling only): one phase, `run_jobs`; with a clock (LOSAT_TIMING, pool
+/// fills only) each job's start and end are taken and the phase's wall time, longest job, summed
+/// job time and latest start are added to `PHASE_TIMES[phase]`. The jobs are the same either way.
+fn run_phase<F: Fn(usize) + Sync>(
+    clock: &mut Option<JobClock>,
+    phase: usize,
+    parts: usize,
+    in_pool: bool,
+    job: F,
+) {
+    let Some(clock) = clock.as_mut() else {
+        run_jobs(parts, in_pool, job);
+        return;
+    };
+    clock.begun = std::time::Instant::now();
+    let c = &*clock;
+    let ns = |at: std::time::Instant| at.saturating_duration_since(c.begun).as_nanos() as u64;
+    run_jobs(parts, in_pool, |i| {
+        let start = ns(std::time::Instant::now());
+        job(i);
+        let end = ns(std::time::Instant::now());
+        c.start[i].store(start, Ordering::Relaxed);
+        c.end[i].store(end, Ordering::Relaxed);
+    });
+    let wall = ns(std::time::Instant::now());
+    let (mut max, mut sum, mut late) = (0u64, 0u64, 0u64);
+    for i in 0..parts {
+        let start = c.start[i].load(Ordering::Relaxed);
+        let took = c.end[i].load(Ordering::Relaxed).saturating_sub(start);
+        max = max.max(took);
+        sum += took;
+        late = late.max(start);
+    }
+    let t = &PHASE_TIMES[phase];
+    t.wall.fetch_add(wall, Ordering::Relaxed);
+    t.max.fetch_add(max, Ordering::Relaxed);
+    t.sum.fetch_add(sum, Ordering::Relaxed);
+    t.late.fetch_add(late, Ordering::Relaxed);
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:733-806
 /// ```c
 ///    for (loc = location; loc; loc = loc->next) {
@@ -655,6 +833,15 @@ pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, 
     fill_with(parts, words, tables, in_pool, CHUNK_POSITIONS, &|_| {});
 }
 
+/// No NCBI counterpart (scheduling only): what one fill did, for LOSAT_TIMING and the tests: its
+/// chunks and the largest summed capacity of the buckets of both templates after a phase A (the
+/// most they reserve: phases B and C add nothing), in entries; 0 when not measured.
+#[derive(Clone, Copy, Debug, Default)]
+struct FillStats {
+    chunks: usize,
+    peak_entries: usize,
+}
+
 /// `fill` with the chunk size and a `probe` that each phase-B job calls first, on its thread.
 fn fill_with<P: Fn(u8) + Sync>(
     parts: usize,
@@ -663,7 +850,7 @@ fn fill_with<P: Fn(u8) + Sync>(
     in_pool: bool,
     chunk: usize,
     probe: &P,
-) {
+) -> FillStats {
     let table_size = tables.hashtable.len();
     debug_assert!(!words.two_templates || tables.hashtable2.len() == table_size);
     let (block_shift, owner) = plan(table_size, tables.pv_array_bts, parts);
@@ -690,6 +877,10 @@ fn fill_with<P: Fn(u8) + Sync>(
         first: SharedBuckets::new(&mut first, parts),
         second: SharedBuckets::new(&mut second, parts),
     };
+    // LOSAT_TIMING's split covers the pool fills only (not the shadow's partitioned build).
+    let mut clock = (in_pool && timing_on()).then(|| JobClock::new(parts));
+    let measure = clock.is_some() || cfg!(test);
+    let mut stats = FillStats::default();
     let mut start = 0usize;
     while start < total {
         let end = total.min(start.saturating_add(chunk));
@@ -702,17 +893,31 @@ fn fill_with<P: Fn(u8) + Sync>(
         // SAFETY (all three phases): job `i` of a phase uses only its own buckets and cells (see
         // `SharedBuckets`, `Fill::read`, `Fill::update`, `Fill::link`); `run_jobs` returns after
         // every job of the phase has returned.
-        run_jobs(parts, in_pool, |a| {
+        run_phase(&mut clock, 0, parts, in_pool, |a| {
             let (s0, s1) = span(a);
             unsafe { fill.read(a, s0, s1) }
         });
-        run_jobs(parts, in_pool, |o| {
+        if measure {
+            // SAFETY: between two phases.
+            let reserved = unsafe { fill.first.capacity() + fill.second.capacity() };
+            stats.peak_entries = stats.peak_entries.max(reserved);
+        }
+        run_phase(&mut clock, 1, parts, in_pool, |o| {
             probe(o as u8);
             unsafe { fill.update(o) }
         });
-        run_jobs(parts, in_pool, |a| unsafe { fill.link(a) });
+        run_phase(&mut clock, 2, parts, in_pool, |a| unsafe { fill.link(a) });
+        stats.chunks += 1;
         start = end;
     }
+    if clock.is_some() {
+        POOL_CHUNKS.fetch_add(stats.chunks as u64, Ordering::Relaxed);
+        BUCKET_PEAK_BYTES.fetch_max(
+            (stats.peak_entries * std::mem::size_of::<Entry>()) as u64,
+            Ordering::Relaxed,
+        );
+    }
+    stats
 }
 
 /// No NCBI counterpart (scheduling only): the parts of the shadow's partitioned build when no
@@ -938,7 +1143,7 @@ mod tests {
         v
     }
 
-    #[derive(Debug, PartialEq, Eq)]
+    #[derive(Clone, Debug, PartialEq, Eq)]
     struct Built {
         hashtable: Vec<u32>,
         next_pos: Vec<u32>,
@@ -960,6 +1165,15 @@ mod tests {
 
     /// The tables of `case` allocated as `build_disc_mb_lookup` allocates them and filled `how`.
     fn build(case: &Case, combo: (usize, DiscWordType, usize), how: How) -> Built {
+        build_stats(case, combo, how).0
+    }
+
+    /// `build`, and what the fill did (`How::Chunked` only; else the default).
+    fn build_stats(
+        case: &Case,
+        combo: (usize, DiscWordType, usize),
+        how: How,
+    ) -> (Built, FillStats) {
         let (word_size, word_type, template_length) = combo;
         let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
         let hashsize = 1usize << (2 * word_size);
@@ -1016,15 +1230,21 @@ mod tests {
             pv_array: &mut b.pv_array,
             pv_array_bts,
         };
-        match how {
-            How::Serial => fill_disc_mb_tables(&words, tables),
-            How::Parts(parts, in_pool) => fill(parts, &words, tables, in_pool),
+        let stats = match how {
+            How::Serial => {
+                fill_disc_mb_tables(&words, tables);
+                FillStats::default()
+            }
+            How::Parts(parts, in_pool) => {
+                fill(parts, &words, tables, in_pool);
+                FillStats::default()
+            }
             How::Chunked(parts, chunk, in_pool) => {
                 fill_with(parts, &words, tables, in_pool, chunk, &|_| {})
             }
-        }
+        };
         b.longest_chain = disc_longest_chain(&b.helper_array, &b.helper_array2, two_templates);
-        b
+        (b, stats)
     }
 
     /// The serial tables have work in them: chains (counters above zero), and for two templates

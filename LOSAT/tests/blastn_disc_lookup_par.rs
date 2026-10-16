@@ -64,6 +64,14 @@ impl Drop for Temp {
     }
 }
 
+impl std::ops::Deref for Temp {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
 /// A query file: 14 pieces of LC738874 of 900 to 4,500 letters, every fourth with a run of `N`s
 /// and every third with an IUPAC ambiguity code, then a query shorter than every template
 /// (`short`, 12 letters), one of `N`s only (`allN`, for which NCBI warns on standard error) and
@@ -159,7 +167,7 @@ type Var = (&'static str, &'static str);
 /// standard output, with `vars` as its only variables that choose a code path. Returns the report
 /// and the standard error.
 fn blastn(
-    queries: &Temp,
+    queries: &Path,
     subject: &[&str],
     extra: &[&str],
     threads: u32,
@@ -168,7 +176,7 @@ fn blastn(
     let output = losat()
         .arg("blastn")
         .arg("-query")
-        .arg(&queries.0)
+        .arg(queries)
         .args(subject)
         .args(extra)
         .args(["-outfmt", "6"])
@@ -417,7 +425,8 @@ fn megablast_with_and_without_a_template() {
 
 // With LOSAT_TIMING the builds print their summed wall time at exit, with or without the switch,
 // and how many were built on a pool: all of them with the switch at 4 threads, none without it
-// or at 1 thread.
+// or at 1 thread; and the split line: the chunks and phases of the pool fills, or the time of the
+// original loop.
 #[test]
 fn timing_line_is_printed() {
     let queries = queries();
@@ -449,6 +458,13 @@ fn timing_line_is_printed() {
             if on_pool { builds } else { 0 },
             "{line}"
         );
+        // The split: the pool fills' chunks and phases, or the original loop's time.
+        let chunks: u64 = split_field(&stderr, "chunks=").parse().unwrap();
+        assert_eq!(chunks > 0, on_pool, "{stderr}");
+        let nonzero = |name: &str| split_field(&stderr, name) != "0.0000s";
+        assert_eq!(nonzero("pool_fill="), on_pool, "{stderr}");
+        assert_eq!(nonzero("read_wall="), on_pool, "{stderr}");
+        assert_eq!(nonzero("loop="), !on_pool, "{stderr}");
     }
     // Megablast builds no discontiguous table: no line.
     let (_, stderr) = blastn(
@@ -459,4 +475,16 @@ fn timing_line_is_printed() {
         &[("LOSAT_TIMING", "1"), SWITCH],
     );
     assert!(!stderr.contains("disc_lookup_build"), "{stderr}");
+}
+
+// The value of `name` (`name=VALUE`) in the `[TIMING] disc_lookup_split` line of `stderr`.
+fn split_field(stderr: &str, name: &str) -> String {
+    let line = stderr
+        .lines()
+        .find(|line| line.starts_with("[TIMING] disc_lookup_split: "))
+        .unwrap_or_else(|| panic!("no split line:\n{stderr}"));
+    line.split(' ')
+        .find_map(|word| word.strip_prefix(name))
+        .unwrap_or_else(|| panic!("no {name} in: {line}"))
+        .to_string()
 }

@@ -1840,7 +1840,10 @@ impl<R: Read> FastaReader<R> {
             self.seq_data.clear();
             sequence
         } else {
-            std::mem::take(&mut self.seq_data)
+            // LOSAT's memory: the record keeps no growth slack of the buffer.
+            let mut sequence = std::mem::take(&mut self.seq_data);
+            sequence.shrink_to_fit();
+            sequence
         };
         if !self.config.protein {
             // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:1444-1447

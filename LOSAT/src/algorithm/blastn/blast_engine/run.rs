@@ -10586,9 +10586,6 @@ fn search_query_batch(
                                         *scan_pause_ns = scan_pause_ns.saturating_add(elapsed_ns);
                                     }
                                 }
-                                debug_assert!(ungapped.q_start >= q_context_start);
-                                let qs = ungapped.q_start - q_context_start;
-                                let qe = qs + ungapped.length;
                                 let ss = ungapped.s_start;
                                 let ungapped_se = ungapped.s_start + ungapped.length;
                                 let ungapped_score = ungapped.score;
@@ -10601,40 +10598,46 @@ fn search_query_batch(
                                 //     BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
                                 // }
                                 // ```
-                                if blastn_trace_enabled
-                                    && blastn_trace::should_trace_range(
+                                if blastn_trace_enabled {
+                                    // No NCBI counterpart (LOSAT_TRACE_BLASTN_* diagnostics): a rejected approximate
+                                    // result may start left of its context (see the NCBI reference at the assertion
+                                    // below), so the trace uses signed context offsets.
+                                    let trace_qs =
+                                        ungapped.q_start as isize - q_context_start as isize;
+                                    let trace_qe = trace_qs + ungapped.length as isize;
+                                    if blastn_trace::should_trace_range(
                                         "ungapped",
                                         q_idx,
                                         s_idx,
                                         s_id,
-                                        qs,
-                                        qe,
+                                        trace_qs.max(0) as usize,
+                                        trace_qe.max(0) as usize,
                                         ss.saturating_add(chunk.offset),
                                         ungapped_se.saturating_add(chunk.offset),
                                         ctx.seq.len(),
                                         ctx.frame,
-                                    )
-                                {
-                                    blastn_trace::log(
-                                        "ungapped",
-                                        format!(
-                                            "subject={}({}) context={} seed=({}, {}) ungapped=q{}..{} s{}..{} raw_score={} cutoff={} x_dropoff={} off_found={} accepted={}",
-                                            s_id,
-                                            s_idx,
-                                            q_idx,
-                                            q_off.saturating_sub(q_context_start),
-                                            s_off.saturating_add(chunk.offset),
-                                            qs,
-                                            qe,
-                                            ss.saturating_add(chunk.offset),
-                                            ungapped_se.saturating_add(chunk.offset),
-                                            ungapped_score,
-                                            cutoff_score,
-                                            x_dropoff,
-                                            off_found,
-                                            off_found || ungapped_score >= cutoff_score
-                                        ),
-                                    );
+                                    ) {
+                                        blastn_trace::log(
+                                            "ungapped",
+                                            format!(
+                                                "subject={}({}) context={} seed=({}, {}) ungapped=q{}..{} s{}..{} raw_score={} cutoff={} x_dropoff={} off_found={} accepted={}",
+                                                s_id,
+                                                s_idx,
+                                                q_idx,
+                                                q_off.saturating_sub(q_context_start),
+                                                s_off.saturating_add(chunk.offset),
+                                                trace_qs,
+                                                trace_qe,
+                                                ss.saturating_add(chunk.offset),
+                                                ungapped_se.saturating_add(chunk.offset),
+                                                ungapped_score,
+                                                cutoff_score,
+                                                x_dropoff,
+                                                off_found,
+                                                off_found || ungapped_score >= cutoff_score
+                                            ),
+                                        );
+                                    }
                                 }
 
                                 // NCBI reference: na_ungapped.c:757-758
@@ -10700,6 +10703,25 @@ fn search_query_batch(
                                     }
                                     continue;
                                 }
+
+                                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:2384-2392
+                                // ```c
+                                //     init_hsp->offsets.qs_offsets.q_off -= query_start;
+                                //     if (init_hsp->ungapped_data) {
+                                //         init_hsp->ungapped_data->q_start -= query_start;
+                                //     }
+                                //     ASSERT(init_hsp->ungapped_data == NULL ||
+                                //            init_hsp->ungapped_data->q_start >= 0);
+                                // ```
+                                // NCBI checks the start against the context only for saved hits. A rejected
+                                // approximate result may start left of its context: the left loop of
+                                // s_NuclUngappedExtend runs over the concatenated query and reads the sentinel as
+                                // bases (na_ungapped.c:284-305, `len = MIN(q_ext, s_ext) / COMPRESSION_RATIO;`),
+                                // and that result is kept only below reduced_nucl_cutoff_score = 0.8 * cutoff_score
+                                // (blast_parameters.c:412), so it is rejected above and never reaches this point.
+                                debug_assert!(ungapped.q_start >= q_context_start);
+                                let qs = ungapped.q_start - q_context_start;
+                                let qe = qs + ungapped.length;
 
                                 if debug_enabled {
                                     dbg_gapped_attempted += 1;

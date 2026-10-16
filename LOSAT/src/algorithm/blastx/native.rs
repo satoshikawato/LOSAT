@@ -619,6 +619,63 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                 let x_large = |queries: &[super::input::FastaRecord]| {
                     queries.iter().map(|q| q.sequence.len()).sum::<usize>() > 2 * BATCH_SIZE
                 };
+                // EXPERIMENT (LOSAT_X_BXFLOW): the queued batches as a flow instead of waves.
+                //
+                // The waves below search `x_wave` batches and then wait for the last of them
+                // before any is written or the next wave is read; at the end of the input the
+                // remaining batches are searched one after another. Here every batch becomes a
+                // task of its own as soon as the reader delivers it, and this thread (worker 0 of
+                // the pool) writes the queued warnings and reports in the reader's order as the
+                // results come in. At most `x_wave` batches are searched and not yet written; at
+                // that bound, and at the end of the input, this thread runs pending tasks itself
+                // and blocks on the results only when no task is left to run. Each batch is
+                // searched by the function the waves use, so the reports, the warnings, their
+                // order, and the stop at a batch that fails are those of the waves; only the time
+                // at which a batch is searched changes.
+                // No NCBI counterpart: NCBI's -mt_mode 1 (blastx_app.cpp x_RunMTBySplitQuery, cited
+                // above x_flush) also searches several query batches at once and prints them in
+                // order; the flow changes only LOSAT's scheduling of the searches above.
+                if super::runtime::x_bx_flow() {
+                    return x_flow(
+                        x_wave,
+                        &mut query_stream,
+                        args.lcase_masking,
+                        &|queries: &[super::input::FastaRecord]| {
+                            if x_large(queries) {
+                                super::runtime::x_search_internal_in_pool(
+                                    queries,
+                                    search_subjects,
+                                    &options,
+                                    pool,
+                                )
+                            } else {
+                                super::runtime::x_search_internal_serial(
+                                    queries,
+                                    search_subjects,
+                                    &options,
+                                )
+                            }
+                        },
+                        &mut |queries: &[super::input::FastaRecord],
+                              results: Result<Vec<BatchResults>>|
+                         -> Result<()> {
+                            let mut results = results.map_err(search_error)?;
+                            render_batch(
+                                &mut writer,
+                                &mut **diagnostics.borrow_mut(),
+                                queries,
+                                &mut results,
+                            )?;
+                            writer.flush().map_err(output_error)?;
+                            processed += queries.len();
+                            Ok(())
+                        },
+                        &mut |bytes: &[u8]| -> Result<()> {
+                            diagnostics.borrow_mut().write_all(bytes)?;
+                            Ok(())
+                        },
+                    );
+                }
                 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:259-291
                 // ```c
                 //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -996,4 +1053,159 @@ pub(crate) fn reader_warning(warning: &InputWarning, stderr: &mut dyn Write) -> 
         };
     writeln!(stderr, "{message}")?;
     Ok(())
+}
+
+// EXPERIMENT (LOSAT_X_BXFLOW): the reading loop of `run` with every query batch searched as a task
+// of its own (see the call in `run`). `search` searches one batch (the waves' function),
+// `write_batch` writes one batch's reports (or ends the run at its error), `write_warning` writes
+// the bytes of one reader warning. Returns what the reader returns.
+// No NCBI counterpart: scheduling of the batch searches only (NCBI's -mt_mode 1 runs batches as
+// nodes and prints them in order, blastx_app.cpp:345-357, cited in `run`); every value written
+// is computed by the same calls as without the switch, in the same order of writing.
+#[cfg(feature = "parallel")]
+fn x_flow(
+    bound: usize,
+    query_stream: &mut FastaStream<File>,
+    lcase_masking: bool,
+    search: &(dyn Fn(&[FastaRecord]) -> Result<Vec<BatchResults>> + Sync),
+    write_batch: &mut dyn FnMut(&[FastaRecord], Result<Vec<BatchResults>>) -> Result<()>,
+    write_warning: &mut dyn FnMut(&[u8]) -> Result<()>,
+) -> Result<Vec<FastaRecord>> {
+    use super::x_timing::Run as XRun;
+    use std::cell::{Cell, RefCell};
+    use std::collections::{BTreeMap, VecDeque};
+    use std::sync::{mpsc, Arc};
+    // A reader event, written in the reader's order: a warning's bytes, or a batch by its number.
+    enum XEvent {
+        Warn(Vec<u8>),
+        Batch(usize, Arc<Vec<FastaRecord>>),
+    }
+    // A batch's search, or the panic it ended with (raised again where the batch is written).
+    type XSearched = std::thread::Result<Result<Vec<BatchResults>>>;
+    struct XState {
+        events: VecDeque<XEvent>,
+        searched: BTreeMap<usize, XSearched>,
+        spawned: usize,
+        unwritten: usize,
+    }
+    debug_assert!(rayon::current_thread_index().is_some());
+    rayon::in_place_scope(|scope| {
+        let (sender, receiver) = mpsc::channel::<(usize, XSearched)>();
+        let state = RefCell::new(XState {
+            events: VecDeque::new(),
+            searched: BTreeMap::new(),
+            spawned: 0,
+            unwritten: 0,
+        });
+        let failed = Cell::new(false);
+        // Writes the events at the front whose batches are searched; then, until fewer than
+        // `bound` batches are unwritten (or, with `all`, until every event is written), runs a
+        // pending task or waits for a result, and writes again.
+        let mut write = |all: bool| -> Result<()> {
+            loop {
+                {
+                    let mut state = state.borrow_mut();
+                    while let Ok((index, searched)) = receiver.try_recv() {
+                        state.searched.insert(index, searched);
+                    }
+                }
+                loop {
+                    let event = {
+                        let mut state = state.borrow_mut();
+                        let ready = match state.events.front() {
+                            Some(XEvent::Warn(_)) => true,
+                            Some(XEvent::Batch(index, _)) => state.searched.contains_key(index),
+                            None => false,
+                        };
+                        if ready {
+                            state.events.pop_front()
+                        } else {
+                            None
+                        }
+                    };
+                    let x_t = super::x_timing::lap();
+                    match event {
+                        None => break,
+                        Some(XEvent::Warn(bytes)) => write_warning(&bytes)?,
+                        Some(XEvent::Batch(index, queries)) => {
+                            let searched = {
+                                let mut state = state.borrow_mut();
+                                state.unwritten -= 1;
+                                state.searched.remove(&index).expect("a searched batch")
+                            };
+                            match searched {
+                                Ok(results) => write_batch(&queries, results)?,
+                                Err(panic) => std::panic::resume_unwind(panic),
+                            }
+                        }
+                    }
+                    super::x_timing::run(XRun::Render, x_t);
+                }
+                {
+                    let state = state.borrow();
+                    if (all && state.events.is_empty()) || (!all && state.unwritten < bound) {
+                        return Ok(());
+                    }
+                }
+                let x_t = super::x_timing::lap();
+                if let Some(rayon::Yield::Executed) = rayon::yield_now() {
+                    let x_ns = super::x_timing::run(XRun::FlowJobTime, x_t);
+                    super::x_timing::run_add(XRun::FlowJobs, 1);
+                    super::x_timing::run_add(XRun::Search, x_ns);
+                } else {
+                    // No task is pending: every unwritten batch is being searched on another
+                    // thread, and each sends its result once.
+                    let (index, searched) = receiver.recv().expect("a spawned batch's result");
+                    state.borrow_mut().searched.insert(index, searched);
+                    let x_ns = super::x_timing::run(XRun::FlowBlocked, x_t);
+                    super::x_timing::run_add(XRun::Search, x_ns);
+                }
+            }
+        };
+        let parsed = parse_fasta_stream_with_warnings(
+            query_stream,
+            false,
+            lcase_masking,
+            BATCH_SIZE,
+            &mut |queries| {
+                if queries.is_empty() {
+                    return Err(engine("Empty CBlastQueryVector"));
+                }
+                let queries = Arc::new(queries.to_vec());
+                let index = {
+                    let mut state = state.borrow_mut();
+                    let index = state.spawned;
+                    state.spawned += 1;
+                    state.unwritten += 1;
+                    state
+                        .events
+                        .push_back(XEvent::Batch(index, Arc::clone(&queries)));
+                    index
+                };
+                super::x_timing::run_add(XRun::FlowBatches, 1);
+                let sender = sender.clone();
+                scope.spawn(move |_| {
+                    let searched =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| search(&queries)));
+                    // The receiver is gone only when the run already ended at an error.
+                    let _ = sender.send((index, searched));
+                });
+                let written = write(false);
+                if written.is_err() {
+                    failed.set(true);
+                }
+                written
+            },
+            &mut |warning| {
+                let mut bytes = Vec::new();
+                reader_warning(warning, &mut bytes)?;
+                state.borrow_mut().events.push_back(XEvent::Warn(bytes));
+                Ok(())
+            },
+        );
+        if !failed.get() {
+            write(true)?;
+        }
+        parsed
+    })
 }

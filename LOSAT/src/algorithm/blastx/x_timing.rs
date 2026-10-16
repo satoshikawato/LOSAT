@@ -7,7 +7,7 @@
 //!
 //! # What is measured
 //!
-//! `native::run` prints four lines after the epilog (`write`):
+//! `native::run` prints these lines after the epilog (`write`):
 //!
 //! - `[TIMING] blastx_run: startup .. prolog .. read_stores .. loop .. epilog .. total ..
 //!   (search .. render .. titles .. input ..)`: wall times on the thread that runs `run`.
@@ -24,6 +24,10 @@
 //!   last batch does). `tail` counts the batches searched one after another, each with the whole
 //!   pool, because fewer than the threads were queued (the end of the input, or a long query,
 //!   which is searched at once); `tail_wall` is their wall time.
+//! - `[TIMING] blastx_flow: batches=N main_jobs=N main_job_time ..s blocked ..s`: with
+//!   `LOSAT_X_BXFLOW` (instead of the waves), the batches spawned as tasks, the tasks the reading
+//!   thread ran itself while it waited (and their time), and the time it waited for a result
+//!   with no task to run. Both waits count as `search` of `blastx_run`.
 //! - `[TIMING] blastx_batch_<mode>: batches=N query_setup .. setup .. chunks_par .. lookup ..
 //!   scan_par .. scan_inline .. replay .. chunk_end .. batch_end .. sum ..`: the stages of
 //!   `search::search_core`, per query batch, in the order they run. Mode `side` is a batch
@@ -95,8 +99,12 @@ pub(crate) enum Run {
     WaveBusy,
     TailBatches,
     TailWall,
+    FlowBatches,
+    FlowJobs,
+    FlowJobTime,
+    FlowBlocked,
 }
-const RUN_LEN: usize = Run::TailWall as usize + 1;
+const RUN_LEN: usize = Run::FlowBlocked as usize + 1;
 
 // No NCBI counterpart: names of the stages of `search_core`.
 /// The stages of one query batch in `search::search_core`, in the order they run.
@@ -238,6 +246,14 @@ pub(crate) fn write(out: &mut dyn Write, threads: usize) -> io::Result<()> {
         (wall * threads as f64 - busy).max(0.0),
         n(r(Run::TailBatches)),
         s(r(Run::TailWall)),
+    )?;
+    writeln!(
+        out,
+        "[TIMING] blastx_flow: batches={} main_jobs={} main_job_time {:.3}s blocked {:.3}s",
+        n(r(Run::FlowBatches)),
+        n(r(Run::FlowJobs)),
+        s(r(Run::FlowJobTime)),
+        s(r(Run::FlowBlocked)),
     )?;
     for (m, name) in [(0, "side"), (1, "alone")] {
         let b = |stage: Batch| &BATCH[m][stage as usize];

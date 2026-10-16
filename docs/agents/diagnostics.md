@@ -619,6 +619,13 @@ Rebuilding less:
   that thread keeps a second spare (`x_query_blocks.rs` `XBlockSubjects`) with the room for the largest
   table so far plus a half (new vectors of twice its hits where they are short; untouched capacity is not
   resident), which the build ahead takes whole (`XFlatArgs::x_ahead`). At one thread nothing changes.
+  Measured 2026-10-16 on the workstation (node 0, 16 physical cores, siblings idle; Species4 hsap x Species6 scer
+  blastp-fast `-subject`, #199's blastp switches + `LOSAT_X_BPCLUT` `LOSAT_X_BPREDOPAR` `LOSAT_X_BPLKPFLAT`
+  `LOSAT_X_BPSUBJRUN` in every run; alternating pairs, medians): `LOSAT_X_BPQBLOCK=50000` 16 threads 6.858 -> 6.476 s
+  (x0.944), max RSS 101.8-103.9 -> 125.9-128.1 MiB, `blastp_build_lookup` 1.89 -> 0.01 s; `=20000` 8.904 -> 8.139 s
+  (x0.914), 75.4-77.1 -> 93.3-95.4 MiB; 8 threads x0.980 / x0.965. The extra memory is the second table (`starts`
+  about 3 MiB, `hits` up to 19 MiB at 50,000 letters). `-db` (`BlastDBSpecies6`, 1 MiB database blocks) 2 pairs
+  inconclusive (pairs x1.143 and x0.987; the job has two speed modes), max RSS 93-95 -> 128-129 MiB.
 - `LOSAT_X_BPLKPAHEADSHADOW=1` shadow of `LOSAT_X_BPLKPAHEAD` (implies it): each block that takes values
   built ahead also builds them inline as without the switch (on the block spare's vectors, given back
   after) and compares them: the query frames field for field, the flat tables field for field and slot for
@@ -626,7 +633,8 @@ Rebuilding less:
   `DIFFERENT` and stops the run (panic). One line at exit: `[X_SHADOW] BPLKPAHEAD blocks= prebuilt= dropped=
   compared= identical` (`blocks`: blocks searched where the switch acts; `prebuilt`: blocks that took
   values built ahead; `dropped`: builds ahead that gave none, whose blocks built inline; `compared`: blocks
-  compared; every block but the last starts one build, so `prebuilt + dropped = blocks - 1`).
+  compared; every block but the last starts one build once its own table is ready, if that table is a flat
+  one, as it is unless the reference builder made it, so `prebuilt + dropped = blocks - 1`).
 - `LOSAT_X_BPDIAG=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and `LOSAT_X_DEFAULT`
   does not touch it; acts only in the fused loop of `LOSAT_X_BPSEED` or `LOSAT_X_BPSEEDSHADOW`) the two-hit
   diagonal test of the hits of one lookup cell in batches of eight instead of one after the other

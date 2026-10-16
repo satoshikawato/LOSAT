@@ -1021,6 +1021,17 @@ Scheduling (each value computed by one thread with the original function; order 
   (`kept`: stages that started from the kept tables; without the switch the lines are as before). On the command line a subject
   scratch has one partitioned stage per query batch (a subject of several chunks has its chunks searched
   in parallel), so `kept` is 0 there; the unit tests cover the reuse.
+  Measured on the workstation (alternating pairs, node 0 CPUs 16-31, `LOSAT_X_PAIRPARDISC=1` and
+  `LOSAT_X_DIAGLV=1` in every run, off runs with an unread placebo; 1,775 or 3,492 D. melanogaster cDNAs
+  against 3 Mb of chromosome 2L): dc-megablast one batch 1.374 -> 0.797 s at 16 threads (0.580, 8 pairs,
+  rounds 0.567-0.616), 0.687 at 8 (2 pairs), 0.835 at 4 (6 pairs); two batches 2.649 -> 1.527 s at 16
+  (0.577, 4 pairs), with `LOSAT_X_QBATCHPAR=1` 1.620 -> 0.959 s; blastn with the first query set 2.832 ->
+  1.435 s at 16 (0.507, 4 pairs). Instructions +12 % (dc-megablast) and +4 % (blastn): the keys, the
+  counting sort, the merge and the spinning of idle participants. Max RSS dc-megablast 90-92 -> 104-108 MiB
+  (one batch) and 105-107 -> 119-123 MiB (two batches; the partition tables and up to `2 x threads`
+  strips of seeds), blastn 137-151 -> 121-129 MiB. Against the prototype (`LOSAT_X_DCFOLDPART`,
+  tmp/dcfold-instr d537d145) in the same window: dc-megablast 1.011 of its time, blastn 1.14 (two rounds;
+  0.8 % more instructions, the steady runs within a few percent).
   Tests: the unit tests of `x_pair_seed_part.rs` (random op streams at 2, 3, 7 and 16 partitions on 1..8
   threads with and without bounds, growth past 256 cells, a kept table after an offset move, the clear,
   a reference chunk in between; a nested parallel call in every participant; a panicking participant;

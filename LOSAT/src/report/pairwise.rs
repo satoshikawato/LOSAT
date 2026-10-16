@@ -2865,8 +2865,12 @@ pub fn write_tblastx_pairwise_prolog<W: Write>(
     database_name: &str,
     database_num_sequences: usize,
     database_total_letters: usize,
+    database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     write_translated_pairwise_intro(writer, "TBLASTX", version)?;
+    if let Some(database) = database {
+        return write_blast_database_header(writer, database);
+    }
     write_blastp_database_header_spacing(
         writer,
         database_name,
@@ -3158,14 +3162,18 @@ fn write_tblastx_query_footer<W: Write>(
 fn write_tblastx_epilog<W: Write>(
     writer: &mut W,
     report: &TblastxPairwiseReport,
+    database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     writer.write_all(b"\n\n")?;
-    write_final_database_report(
-        writer,
-        &report.database_name,
-        report.database_num_sequences,
-        report.database_total_letters,
-    )?;
+    match database {
+        Some(database) => write_final_database_block(writer, database)?,
+        None => write_final_database_report(
+            writer,
+            &report.database_name,
+            report.database_num_sequences,
+            report.database_total_letters,
+        )?,
+    }
     writeln!(writer, "Matrix: BLOSUM62")?;
     if report.word_threshold != 0.0 {
         // `GetWordThreshold()` is a double, written with the stream's default format.
@@ -3252,6 +3260,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     queries: &[TblastxPairwiseQuery],
     subject_titles: &[Arc<[u8]>],
     report: &TblastxPairwiseReport,
+    database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
@@ -3265,6 +3274,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             &report.database_name,
             report.database_num_sequences,
             report.database_total_letters,
+            database,
         )?;
     }
     let mut hits_by_query: Vec<Vec<(HspIndex, &PairwiseHit)>> = vec![Vec::new(); queries.len()];
@@ -3354,6 +3364,31 @@ pub fn write_tblastx_pairwise_report<W: Write>(
         // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
         let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
         for &s_idx in aligned {
+            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3971-3980
+            // ```c++
+            // 		x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
+            // 	...
+            //     out<<"\n";
+            // ```
+            let write_hsp = |writer: &mut io::BufWriter<&mut W>, hit: &PairwiseHit| {
+                write_tblastx_hsp_info(writer, hit)?;
+                write_tblastx_alignment(writer, hit, config)?;
+                writeln!(writer)
+            };
+            // A database sequence's heading is its stored title after `>` (as BLASTP's,
+            // BLASTN's and TBLASTN's `-db` reports).
+            if database.is_some() {
+                write_database_subject_alignments(
+                    writer,
+                    probe.as_deref_mut(),
+                    &subject_titles[&s_idx],
+                    false,
+                    &subject_hits[&s_idx],
+                    &subject_hit_indices[&s_idx],
+                    write_hsp,
+                )?;
+                continue;
+            }
             write_subject_alignments(
                 writer,
                 probe.as_deref_mut(),
@@ -3362,17 +3397,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
                 false,
                 &subject_hits[&s_idx],
                 &subject_hit_indices[&s_idx],
-                // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3971-3980
-                // ```c++
-                // 		x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
-                // 	...
-                //     out<<"\n";
-                // ```
-                |writer, hit| {
-                    write_tblastx_hsp_info(writer, hit)?;
-                    write_tblastx_alignment(writer, hit, config)?;
-                    writeln!(writer)
-                },
+                write_hsp,
             )?;
         }
 
@@ -3386,7 +3411,7 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     // An error in a later query batch skips the epilog, and nothing follows the last
     // query's footer.
     if report.epilog {
-        write_tblastx_epilog(writer, report)?;
+        write_tblastx_epilog(writer, report, database)?;
     }
     writer.flush()
 }

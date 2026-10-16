@@ -83,8 +83,10 @@
 //! (`x_block_words_fit`, tested before the first block), so that the reference path's refusal,
 //! which comes before any row, is never made in a later block.
 //!
-//! Off unless `LOSAT_X_BPQBLOCK` is set to a positive number of query letters (the block closes
-//! at the first batch end at or past it). Not in the strict set.
+//! `LOSAT_X_BPQBLOCK` is a value switch of the strict set (`utils/xswitch.rs`): a positive number
+//! of query letters (the block closes at the first batch end at or past it), 50,000 when it is
+//! not set or is not a positive number. `0`, or `LOSAT_X_DEFAULT=0` with the variable not set,
+//! turns the block path off.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:562-572
 //! ```c
@@ -214,17 +216,13 @@ use {
 
 // No NCBI counterpart: reads the LOSAT_X_BPQBLOCK switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPQBLOCK): the number of query letters of a block, or `None` (off) unless
-/// the variable is a positive integer.
+/// EXPERIMENT (LOSAT_X_BPQBLOCK): the number of query letters of a block, or `None` (off). A
+/// strict-set value switch: the positive integer given, else 50,000; `None` for `0`, or for
+/// `LOSAT_X_DEFAULT=0` with the variable not set.
 pub(crate) fn x_bp_qblock() -> Option<usize> {
     use std::sync::OnceLock;
     static N: OnceLock<Option<usize>> = OnceLock::new();
-    *N.get_or_init(|| {
-        std::env::var("LOSAT_X_BPQBLOCK")
-            .ok()
-            .and_then(|value| value.trim().parse::<usize>().ok())
-            .filter(|&letters| letters > 0)
-    })
+    *N.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BPQBLOCK", 1..=usize::MAX, 50_000))
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-287

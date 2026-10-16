@@ -1,8 +1,9 @@
 //! BLASTN hands each subject's HSPs to the hit lists in OID order as it is searched (one
 //! thread) or from a window of subjects searched ahead (`LOSAT_X_BNSTREAM`, two or more
-//! threads). The hit lists, and so the report, must not depend on either: these searches have
-//! more subjects than the window of two or four threads holds (64 subjects per thread), and a
-//! short hit list that drops subjects.
+//! threads, on by default; `LOSAT_X_BNSTREAM=0` or `LOSAT_X_DEFAULT=0` hands them over after
+//! all subjects are searched). The hit lists, and so the report, must not depend on any of
+//! these: the searches have more subjects than the window of two or four threads holds (64
+//! subjects per thread), and a short hit list that drops subjects.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -91,7 +92,12 @@ fn the_report_does_not_depend_on_when_subjects_reach_the_hit_lists() {
             let expected = blastn(&query, &subjects, task, 1, extra, &[]);
             assert!(!expected.is_empty(), "{task} {extra:?}: no hits");
             for threads in [2, 4] {
-                for switches in [&[][..], &[("LOSAT_X_BNSTREAM", "1")][..]] {
+                for switches in [
+                    &[][..],
+                    &[("LOSAT_X_BNSTREAM", "0")][..],
+                    &[("LOSAT_X_DEFAULT", "0")][..],
+                    &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_X_BNSTREAM", "1")][..],
+                ] {
                     let report = blastn(&query, &subjects, task, threads, extra, switches);
                     assert_eq!(
                         report, expected,

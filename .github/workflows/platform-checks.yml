@@ -14,17 +14,21 @@ name: Platform checks
 #    than Linux x64 (ci.yml runs both modes on Linux x64).
 #
 # Two sets of platforms (job `changes` chooses):
-#  - pull-request (every pull request): outputs on Linux x64, Linux arm64, Windows x64 and
-#    macOS arm64; tests on Linux arm64 and Windows x64. One macOS job per pull request: GitHub
-#    runs five macOS jobs at a time for the whole account, and the macOS jobs were the queue
-#    (2026-10-16: six per pull request, three to four hours of runner time each).
+#  - pull-request (a pull request into main, normally the promotion of dev): outputs on Linux
+#    x64, Linux arm64, Windows x64 and macOS arm64; tests on Linux arm64 and Windows x64. One
+#    macOS job per pull request: GitHub runs five macOS jobs at a time for the whole account,
+#    and the macOS jobs were the queue (2026-10-16: six per pull request, three to four hours of
+#    runner time each).
 #  - full (push to main, the weekly schedule, workflow_dispatch): the pull-request set plus
 #    outputs on macOS x64 and tests on macOS arm64 and macOS x64.
 # Pull requests always start the workflow (so that `platform checks result` exists and can be
 # required), but its jobs run only when the engine, the Cargo files or this workflow's own files
 # change and the pull request is not a draft (a draft runs them when it is marked ready for
-# review). A push to main runs the full set when those files changed; its runs do not cancel each
-# other, so at most one runs and one waits (the newest), and every run of main completes.
+# review). A pull request into the integration branch dev runs no platform job (its
+# `platform checks result` passes); the promotion pull request from dev to main runs them once
+# for the batch. A push to main runs the full set when those files changed; its runs do not
+# cancel each other, so at most one runs and one waits (the newest), and every run of main
+# completes.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -84,6 +88,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_DRAFT: ${{ github.event.pull_request.draft }}
+          BASE_REF: ${{ github.base_ref }}
           INPUT_SET: ${{ github.event.inputs.set }}
         run: |
           set -euo pipefail
@@ -122,7 +127,10 @@ jobs:
 
           relevant=true
           if [ "$EVENT_NAME" = pull_request ]; then
-            if [ "$PR_DRAFT" = true ]; then
+            if [ "$BASE_REF" = dev ]; then
+              echo "Pull request into dev: the platform jobs run on the promotion to main."
+              relevant=false
+            elif [ "$PR_DRAFT" = true ]; then
               echo "Draft pull request: the platform jobs run when it is marked ready for review."
               relevant=false
             else

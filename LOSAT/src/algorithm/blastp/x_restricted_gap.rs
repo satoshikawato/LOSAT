@@ -78,9 +78,10 @@
 //!   runs the reference function; the tests run them to check the arrays apart from the vector
 //!   code.
 //!
-//! The variables are read once. `LOSAT_X_BPGAP` (off unless set to any value; not in the strict
-//! set, `utils/xswitch.rs`) runs this module; `LOSAT_X_BPGAPSHADOW` runs both for every
-//! restricted alignment and panics if they differ, and `main` prints one `[X_SHADOW] BPGAP` line.
+//! The variables are read once. `LOSAT_X_BPGAP` (a strict-set switch, `utils/xswitch.rs`: on
+//! unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) runs this module;
+//! `LOSAT_X_BPGAPSHADOW` runs both for every restricted alignment and panics if they differ, and
+//! `main` prints one `[X_SHADOW] BPGAP` line.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -122,14 +123,15 @@ pub(super) enum XBpGap {
     Shadow,
 }
 
-// No NCBI counterpart: reads LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW once (off unless set to any
-// value; not in the strict set); it does not change any value NCBI computes.
+// No NCBI counterpart: reads LOSAT_X_BPGAP / LOSAT_X_BPGAPSHADOW once (the shadow variable
+// first, set to any value; LOSAT_X_BPGAP is a strict-set switch); it does not change any value NCBI
+// computes.
 pub(super) fn x_bpgap() -> XBpGap {
     static MODE: OnceLock<XBpGap> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BPGAPSHADOW").is_some() {
             XBpGap::Shadow
-        } else if std::env::var_os("LOSAT_X_BPGAP").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BPGAP") {
             XBpGap::Fast
         } else {
             XBpGap::Reference

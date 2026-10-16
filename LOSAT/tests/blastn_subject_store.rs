@@ -225,7 +225,8 @@ type Search<'a> = (&'a [&'a str], &'a [(&'a str, &'a str)]);
 // Every search below gives one report and the same messages (the warning of the subject without
 // letters among them) without the variable and with it: tabular, commented tabular and pairwise
 // reports, megablast, blastn and dc-megablast, `-lcase_masking`, one and three threads, and three
-// threads with the subjects searched in blocks (`LOSAT_X_BNSTREAM`). With the variable the six
+// threads with every subject searched before the hand-over (`LOSAT_X_BNSTREAM=0`; it is on by
+// default). With the variable the six
 // subjects are held packed, the traceback makes the blastna letters of each subject with hits and
 // the pairwise report the letters of each row; without it none.
 #[test]
@@ -261,7 +262,7 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
         ),
         (
             &["-outfmt", "0", "-num_threads", "3", "-task", "blastn"],
-            &[("LOSAT_X_BNSTREAM", "1")],
+            &[("LOSAT_X_BNSTREAM", "0")],
         ),
         (&["-outfmt", "6", "-num_threads", "1", "-dust", "no"], &[]),
     ];

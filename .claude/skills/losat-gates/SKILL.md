@@ -22,7 +22,7 @@ Notation: `$N` = the LOSAT release binary under test; all cargo calls use
 
 ## Which tier
 
-| Diff touches | Per commit | Before push | Before a PR to `main` or a parity/performance claim |
+| Diff touches | Per commit | Before push | Before a PR (to `dev`) or a parity/performance claim |
 | --- | --- | --- | --- |
 | Docs, evidence records, instructions only | none | none | none (CI `rust` runs; fast regressions select no program) |
 | `web/app` only | quick | standard (app) | `run_gate.sh` once at the end of the stage |
@@ -73,7 +73,7 @@ App: `cd web/app && npm ci && npm run check && npm run e2e` (FakeEngine build, a
 Add the engine-build E2E (`LOSAT_WEB_REACTORS=... LOSAT_WEB_NATIVE=... npm run e2e`, 2.5-4.4 min)
 only when engine-worker, data-worker, or adapter-facing code changed.
 
-## Full (before a PR to `main` or a release-facing claim; one gate at a time)
+## Full (before a PR to `dev` or a release-facing claim; one gate at a time)
 
 The stage's gate script (copy of `docs/evidence/losat_web_e2d/gates/s11_gates.sh` with a new
 `GATE=` prefix), restricted to the program groups the diff touches, run stage after stage under

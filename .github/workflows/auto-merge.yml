@@ -2,10 +2,12 @@ name: Auto-merge
 
 # Turns on GitHub auto-merge (merge commit, as for the repository's other merges) for every pull
 # request of this repository that is opened as ready, reopened, or marked ready for review. The
-# pull request then merges by itself as soon as the required checks of main pass (`rust`,
-# `fast output regressions`, `platform checks result`, `web result`; the ruleset is set by the
-# repository owner). Draft pull requests are skipped until they are marked ready; pull requests
-# from forks are never touched. "Disable auto-merge" on a pull request's page turns it off again.
+# pull request then merges by itself as soon as the required checks of its base pass: for dev
+# (the integration branch every work pull request targets) `rust`, `fast output regressions` and
+# `web result`; for main (the promotion pull request of dev) also `platform checks result`. The
+# rulesets are set by the repository owner. Draft pull requests are skipped until they are marked
+# ready; pull requests from forks are never touched. "Disable auto-merge" on a pull request's
+# page turns it off again.
 #
 # The job runs on pull_request_target and does not check out pull-request code.
 #

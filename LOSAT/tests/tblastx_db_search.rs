@@ -267,6 +267,39 @@ fn the_sequence_file_is_read_by_the_first_batch_with_a_valid_context() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+// A sequence file shorter than its index says is LOSAT's refusal where NCBI reads past its
+// mapping: it is raised by the first batch with a valid context, as NCBI's read errors are, and
+// stops the run there without the reports of the batches before (as TBLASTN's does).
+#[test]
+fn a_truncated_sequence_file_stops_the_run() {
+    let dir = temp_dir("cut");
+    let (query, set) = inputs(&dir);
+    let db = makedb(&dir, &set, "set");
+    let nsq = format!("{db}.nsq");
+    let bytes = std::fs::read(&nsq).unwrap();
+    std::fs::write(&nsq, &bytes[..bytes.len() / 2]).unwrap();
+    let two = dir.join("nn_q.fna");
+    std::fs::write(
+        &two,
+        record("nn all N", &"N".repeat(60)) + &std::fs::read_to_string(&query).unwrap(),
+    )
+    .unwrap();
+    let output = losat()
+        .arg("tblastx")
+        .arg("-query")
+        .arg(&two)
+        .args(["-db", &db])
+        .env("BATCH_SIZE", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report = String::from_utf8_lossy(&output.stdout);
+    assert!(!report.contains("Query= "), "{report}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("passes the end of the file"), "{stderr}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // blast_args.cpp:2364-2381: `-db` excludes `-subject` and `-subject_loc` (LOSAT's parser
 // reports it); blast_app_util.hpp:185-203: a database that is not found is NCBI's
 // `BLAST Database error`, exit status 2.

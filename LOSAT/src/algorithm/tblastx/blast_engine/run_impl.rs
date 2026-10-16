@@ -1291,8 +1291,9 @@ fn search(
     // where NCBI reads them first, in the preliminary search of the first batch with a valid
     // context (a batch without one is not searched, `CheckInternalData`). A database without
     // sequences (BLASTN's `Database memory map file error`) or a sequence file that cannot be
-    // read fails that batch, after the reports of the batches before (`run_in_pool`); a run
-    // without such a batch never reads the file.
+    // read fails that batch, after the reports of the batches before (`run_in_pool`), and
+    // LOSAT's refusal of a damaged file stops the run there; a run without such a batch never
+    // reads the file.
     let whole_subjects = Placements::default();
     let (stores, stores_error) = match &source {
         SubjectSource::Database(database) => {
@@ -2094,21 +2095,17 @@ fn run_in_pool(
             Ok(batch) => batch,
             Err(error) if error.is::<SubjectsUnreadable>() => {
                 // The first batch with a valid context of a `-db` search whose sequences could
-                // not be read (`search`): NCBI's read error is an engine error; LOSAT's
-                // refusals are errors of their own.
-                reports.write_before_failed_batch(outputs, done, &warnings)?;
-                outputs.diagnostics.write_all(&batch_warnings)?;
+                // not be read (`search`): NCBI's read error is an engine error after the
+                // reports of the batches before; LOSAT's refusal (a truncated sequence file,
+                // unreadable ambiguity data) stops the run, as any other refusal does.
                 let error = stores_error
                     .take()
                     .expect("unreadable subjects keep their read error");
-                return Err(
-                    match error
-                        .downcast::<crate::algorithm::common::database::PreliminaryReadError>()
-                    {
-                        Ok(read_error) => crate::blastinput::app::engine_error(read_error.0),
-                        Err(error) => error,
-                    },
-                );
+                let read_error = error
+                    .downcast::<crate::algorithm::common::database::PreliminaryReadError>()?;
+                reports.write_before_failed_batch(outputs, done, &warnings)?;
+                outputs.diagnostics.write_all(&batch_warnings)?;
+                return Err(crate::blastinput::app::engine_error(read_error.0));
             }
             Err(error) => match error.downcast::<ErrorAfterBatchReports>() {
                 // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:203-209

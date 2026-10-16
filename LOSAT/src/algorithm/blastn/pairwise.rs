@@ -17,6 +17,7 @@ use crate::utils::dust::MaskedInterval;
 use super::alignment::build_blastna_matrix;
 use super::hsp::{BlastnHitList, BlastnHsp};
 use super::lookup::reverse_complement;
+use super::x_subject_store::SubjectLetters;
 
 /// The regions that the report prints in lowercase.
 pub(crate) struct DisplayMasks<'a> {
@@ -37,7 +38,7 @@ pub(crate) struct DisplayMasks<'a> {
 pub(crate) fn pairwise_hits(
     hit_lists: &[Option<BlastnHitList>],
     queries: &[FastaRecord],
-    subjects: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
     masks: &DisplayMasks<'_>,
 ) -> Result<Vec<PairwiseHit>> {
     let mut hits = Vec::new();
@@ -67,11 +68,16 @@ pub(crate) fn pairwise_hits(
                 let query = queries
                     .get(hsp.q_idx as usize)
                     .context("BLASTN HSP of an unknown query")?;
+                let s_idx = hsp.s_idx as usize;
                 let subject = subjects
-                    .get(hsp.s_idx as usize)
+                    .records()
+                    .get(s_idx)
                     .context("BLASTN HSP of an unknown subject")?;
+                let subject_length = subjects.len(s_idx);
                 let (mut query_row, mut subject_row) =
-                    displayed_rows(hsp, query.seq(), subject.seq())?;
+                    displayed_rows(hsp, query.seq(), subject_length, |from, to| {
+                        subjects.upper_letters(s_idx, from, to)
+                    })?;
                 lowercase_masked(
                     &mut query_row,
                     hsp.q_start,
@@ -97,7 +103,7 @@ pub(crate) fn pairwise_hits(
                     subject_frame: None,
                     positives: None,
                     gaps: Some(gaps),
-                    subject_length: Some(subject.seq().len()),
+                    subject_length: Some(subject_length),
                     // The title after its first word (the `bio` description of the
                     // inputs that `bio` read alike); the reports take the subject's title
                     // bytes by subject index.
@@ -137,12 +143,19 @@ pub(crate) fn pairwise_hits(
 // Reversing the alignment of a minus-strand HSP reverse-complements both rows. The
 // residues are the input letters in uppercase (NCBI's IUPAC sequence data); masking is
 // applied afterwards. Only the aligned segments are read: the segment of the minus-strand
-// context `[qs, qe)` is the reverse complement of query `[len - qe, len - qs)`.
-fn displayed_rows(hsp: &BlastnHsp, query: &[u8], subject: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
+// context `[qs, qe)` is the reverse complement of query `[len - qe, len - qs)`. The subject
+// has `subject_length` letters, and `subject_letters(from, to)` gives its letters
+// `[from, to)` in uppercase.
+fn displayed_rows(
+    hsp: &BlastnHsp,
+    query: &[u8],
+    subject_length: usize,
+    subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
+) -> Result<(Vec<u8>, Vec<u8>)> {
     let (qs, qe) = (hsp.internal_q_offset_0, hsp.internal_q_end_0);
     let (ss, se) = (hsp.internal_s_offset_0, hsp.internal_s_end_0);
     ensure!(
-        qs <= qe && qe <= query.len() && ss <= se && se <= subject.len(),
+        qs <= qe && qe <= query.len() && ss <= se && se <= subject_length,
         "BLASTN HSP outside its sequences"
     );
     let context = if hsp.query_frame < 0 {
@@ -150,7 +163,7 @@ fn displayed_rows(hsp: &BlastnHsp, query: &[u8], subject: &[u8]) -> Result<(Vec<
     } else {
         query[qs..qe].to_ascii_uppercase()
     };
-    let subject = subject[ss..se].to_ascii_uppercase();
+    let subject = subject_letters(ss, se);
     let ungapped = [GapEditOp::Sub((qe - qs) as u32)];
     let ops = hsp.gap_info.as_deref().unwrap_or(&ungapped);
     // Offsets into the two segments.
@@ -394,15 +407,30 @@ fn lowercase_masked(row: &mut [u8], first: usize, step: isize, masks: &[MaskedIn
 /// can differ in the last bits; the search computes one per strand (`scoring.rs`). A
 /// query of `N` only has no counted residue, so every score probability is 0 and the
 /// calculation fails.
+#[cfg(test)]
 pub(crate) fn query_ungapped_karlin(
     query: &[u8],
+    reward: i32,
+    penalty: i32,
+) -> Option<KarlinParams> {
+    query_ungapped_karlin_blastna(
+        &encode_iupac_to_blastna(&query.to_ascii_uppercase()),
+        reward,
+        penalty,
+    )
+}
+
+/// `query_ungapped_karlin` of a context already in BLASTNA (the search holds its contexts
+/// only in that encoding).
+pub(crate) fn query_ungapped_karlin_blastna(
+    blastna: &[u8],
     reward: i32,
     penalty: i32,
 ) -> Option<KarlinParams> {
     const BLASTNA_N: usize = 14;
     const BLASTNA_GAP: usize = 15;
     let mut counts = [0f64; 16];
-    for code in encode_iupac_to_blastna(&query.to_ascii_uppercase()) {
+    for &code in blastna {
         counts[(code & 0x0f) as usize] += 1.0;
     }
     counts[BLASTNA_N] = 0.0;
@@ -478,7 +506,8 @@ mod tests {
         let (q, s) = displayed_rows(
             &hsp(1, (0, 8), (0, 7), Some(ops)),
             query.seq(),
-            subject.seq(),
+            subject.seq().len(),
+            |from, to| subject.seq()[from..to].to_ascii_uppercase(),
         )
         .unwrap();
         assert_eq!(
@@ -498,7 +527,8 @@ mod tests {
         let (q, s) = displayed_rows(
             &hsp(-1, (1, 6), (0, 4), Some(ops)),
             query.seq(),
-            subject.seq(),
+            subject.seq().len(),
+            |from, to| subject.seq()[from..to].to_ascii_uppercase(),
         )
         .unwrap();
         assert_eq!((q.as_slice(), s.as_slice()), (&b"CCGGT"[..], &b"CCGG-"[..]));
@@ -509,6 +539,32 @@ mod tests {
         let mut row = b"AC-GT".to_vec();
         lowercase_masked(&mut row, 10, -1, &[MaskedInterval { start: 7, end: 9 }]);
         assert_eq!(row, b"Ac-gT");
+    }
+
+    // A context in BLASTNA (either letter case, no uppercase copy) gives the block of the
+    // letters it was encoded from.
+    #[test]
+    fn karlin_of_blastna_equals_karlin_of_letters() {
+        for seq in [
+            &b"ACGTACGTTTGA"[..],
+            b"acgtnACGTRYKMSWBDHVnn-",
+            b"NNNN",
+            b"",
+            b"aaaaCCCCggggTTTTUu",
+        ] {
+            let blastna = encode_iupac_to_blastna(seq);
+            let from_letters = query_ungapped_karlin(seq, 2, -3);
+            let from_blastna = query_ungapped_karlin_blastna(&blastna, 2, -3);
+            match (from_letters, from_blastna) {
+                (None, None) => {}
+                (Some(a), Some(b)) => {
+                    assert_eq!(a.lambda.to_bits(), b.lambda.to_bits());
+                    assert_eq!(a.k.to_bits(), b.k.to_bits());
+                    assert_eq!(a.h.to_bits(), b.h.to_bits());
+                }
+                other => panic!("{seq:?}: {other:?}"),
+            }
+        }
     }
 
     #[test]

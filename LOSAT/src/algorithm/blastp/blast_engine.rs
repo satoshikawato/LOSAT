@@ -59,6 +59,13 @@ use crate::stats::{
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, protein_score, BLASTAA_SIZE};
 
 mod database;
+// EXPERIMENT (LOSAT_X_BPSUBJRUN / LOSAT_X_BPSUBJRUNSHADOW): the parallel `-subject` loop in runs of
+// subjects, one diagonal table fill per run.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+mod x_subject_runs;
 
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{BlastpArgs, BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs};
@@ -564,6 +571,18 @@ impl BlastpSubjectScratch {
     fn prepare_independent_subject(&mut self, diag_offset: i32) {
         self.diag_offset = diag_offset;
         self.diag_array.fill(DiagStruct::default());
+        self.reset_subject_state();
+    }
+
+    // No NCBI counterpart as a function: the per-subject resets of `prepare_independent_subject`
+    // other than the diagonal table's, split out of it unchanged (each with its NCBI reference
+    // below); EXPERIMENT (LOSAT_X_BPSUBJRUN) runs them alone before each later subject of a run
+    // (`blast_engine/x_subject_runs.rs`). It changes no value NCBI computes.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    fn reset_subject_state(&mut self) {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:229-235
         // ```c
         // for (index = 0; index < init_hitlist->total; ++index)
@@ -1039,6 +1058,16 @@ fn blastp_subject_diag_offsets(subjects: &[EncodedProtein], window: i32) -> Vec<
         }
     }
     offsets
+}
+
+// No NCBI counterpart: prints counters and changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPSUBJRUNSHADOW): the shadow mode's line at exit.
+pub(crate) fn x_bp_subj_run_print_summary() {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    x_subject_runs::x_bp_subj_run_print_summary();
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3429-3449
@@ -6714,12 +6743,16 @@ fn run_resolved_in_pool(
             // ```
             // EXPERIMENT (LOSAT_X_BPQBLOCK): the contexts' Karlin blocks on the search's pool
             // (`x_query_blocks::x_bp_lookup_query`); without the switch
-            // `prepare_blosum62_lookup_query_for_word_size`.
-            let (query, locations, contexts) = super::x_query_blocks::x_bp_lookup_query(
-                &query_frames,
-                args.word_size,
-                blastp_parallel_pool,
-            );
+            // `prepare_blosum62_lookup_query_for_word_size`. EXPERIMENT (LOSAT_X_BPLKPFLAT): they
+            // can be left to the build below and set after it (`x_query_blocks::XLookupFlat`); a
+            // query chunk takes no spare table vectors.
+            let (x_flat, query, locations, mut contexts) =
+                super::x_query_blocks::XLookupFlat::lookup_query(
+                    &query_frames,
+                    args.word_size,
+                    blastp_parallel_pool,
+                    chunk_prelim.is_some(),
+                );
             // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:1292
             // ```c
             //     lookup->threshold = (Int4)(kMatrixScale * opt->threshold);
@@ -6746,6 +6779,7 @@ fn run_resolved_in_pool(
                 &locations,
                 &ncbi_tables,
                 blastp_parallel_pool,
+                x_flat.build_args(),
             )
             .context("failed to build NCBI compressed amino-acid lookup table")?
             .map_err(|()| {
@@ -6759,6 +6793,7 @@ fn run_resolved_in_pool(
                 XCompressedLookup::Reference(lookup) => BlastpRuntimeLookup::Compressed(lookup),
                 XCompressedLookup::Flat(lookup) => BlastpRuntimeLookup::CompressedFlat(lookup),
             };
+            x_flat.finish(&mut contexts, &query, &locations, blastp_parallel_pool);
             (lookup, contexts)
         }
     };
@@ -8308,29 +8343,46 @@ fn run_resolved_in_pool(
                 std::iter::repeat_with(|| None)
                     .take(subjects.len())
                     .collect();
-            pool.install(|| {
-                subject_results.par_iter_mut().enumerate().for_each_init(
-                    || {
-                        BlastpSubjectScratch::new(
-                            offset_array_size,
-                            diag_array_size,
-                            window,
-                            total_query_span,
-                        )
-                    },
-                    |scratch, (s_idx, subject_result_slot)| {
-                        scratch.prepare_independent_subject(subject_diag_offsets[s_idx]);
-                        let mut subject_result = BlastpSubjectResult::new(s_idx);
-                        process_subject(
-                            scratch,
-                            s_idx,
-                            BlastpSubjectRef::of(&subjects[s_idx]),
-                            &mut subject_result,
-                        );
-                        *subject_result_slot = Some(subject_result);
-                    },
+            let new_scratch = || {
+                BlastpSubjectScratch::new(
+                    offset_array_size,
+                    diag_array_size,
+                    window,
+                    total_query_span,
+                )
+            };
+            // EXPERIMENT (LOSAT_X_BPSUBJRUN): runs of consecutive subjects, one scratch per
+            // thread and one diagonal table fill per run (`x_subject_runs.rs`).
+            let x_subj_run = x_subject_runs::x_bp_subj_run();
+            if x_subj_run != x_subject_runs::XSubjRun::Off {
+                x_subject_runs::x_search_subject_runs(
+                    pool,
+                    &subjects,
+                    &subject_diag_offsets,
+                    window,
+                    &new_scratch,
+                    &process_subject,
+                    x_subj_run == x_subject_runs::XSubjRun::Shadow,
+                    &mut subject_results,
                 );
-            });
+            } else {
+                pool.install(|| {
+                    subject_results.par_iter_mut().enumerate().for_each_init(
+                        new_scratch,
+                        |scratch, (s_idx, subject_result_slot)| {
+                            scratch.prepare_independent_subject(subject_diag_offsets[s_idx]);
+                            let mut subject_result = BlastpSubjectResult::new(s_idx);
+                            process_subject(
+                                scratch,
+                                s_idx,
+                                BlastpSubjectRef::of(&subjects[s_idx]),
+                                &mut subject_result,
+                            );
+                            *subject_result_slot = Some(subject_result);
+                        },
+                    );
+                });
+            }
             let merge_sort_start = blastp_timing_start(timing_enabled);
             merge_blastp_subject_results_in_order(
                 &mut preliminary_hit_lists,
@@ -10049,6 +10101,14 @@ fn run_resolved_in_pool(
         );
     }
     output_result?;
+    // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
+    // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed.
+    if let (Some(spare), BlastpRuntimeLookup::CompressedFlat(table)) = (
+        super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool),
+        lookup,
+    ) {
+        spare.give(table);
+    }
 
     if let Some(timing) = timing.as_ref() {
         print_blastp_timing(timing, t_total);

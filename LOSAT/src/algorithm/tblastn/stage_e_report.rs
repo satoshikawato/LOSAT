@@ -8,7 +8,7 @@ use anyhow::{bail, ensure, Context, Result};
 
 use super::search_gapped::TargetTranslation;
 use super::search_seed::encode_tblastn_lookup_query;
-use super::stage_d_pipeline::LocalStageDScoring;
+use super::stage_d_pipeline::{LocalStageDScoring, SubjectSetNumbers};
 use super::stage_d_results::KappaResultHitList;
 use super::stage_d_stats::LocalSubjectParameters;
 use super::x_subject_store::SubjectLetters;
@@ -22,12 +22,53 @@ use crate::report::outfmt6::{
 };
 use crate::report::pairwise::{
     write_tblastn_pairwise_report, BlastpPairwiseQuery, BlastpPairwiseReport, PairwiseConfig,
-    PairwiseHit,
+    PairwiseDatabase, PairwiseHit,
 };
+use crate::sequence::packed_subject::SubjectNt;
 use crate::stats::spouge::lookup_protein_gumbel_params;
 use crate::stats::tables::lookup_protein_params;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::seg::SegParams;
+
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:385-391
+// ```c++
+//     info.name = seqdb->GetDBNameList();
+//     info.definition = seqdb->GetTitle();
+//     if (info.definition.empty())
+//         info.definition = info.name;
+// ```
+/// The subject set as the reports name it.
+pub(super) enum ShownSubjects<'a> {
+    /// `-subject`: `User specified sequence set (Input: PATH)`; the records are the whole set.
+    Fasta { path: &'a Path },
+    /// `-db`: the `-db` value (outfmt 7's `# Database:` line), the database's `Database:`
+    /// lines (outfmt 0) and the reported sequences by rank (their tabular ids).
+    Database {
+        name: &'a str,
+        pairwise: &'a PairwiseDatabase,
+        reported: &'a super::database::ReportedSubjects,
+    },
+}
+
+impl ShownSubjects<'_> {
+    /// The name after `# Database: ` (outfmt 7) and in the pairwise report of a subject set.
+    fn name(&self) -> String {
+        match self {
+            Self::Fasta { path } => {
+                format!("User specified sequence set (Input: {})", path.display())
+            }
+            Self::Database { name, .. } => name.to_string(),
+        }
+    }
+
+    /// The `Database:` lines of a database search's pairwise report.
+    fn pairwise_database(&self) -> Option<&PairwiseDatabase> {
+        match self {
+            Self::Fasta { .. } => None,
+            Self::Database { pairwise, .. } => Some(pairwise),
+        }
+    }
+}
 
 // NCBI c++/src/algo/blast/format/blast_format.cpp:759-835,1411-1458:
 // if (m_FormatType == eTabular || m_FormatType == eTabularWithComments) {
@@ -63,7 +104,8 @@ pub(super) fn render(
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,
-    subject_path: &Path,
+    shown: &ShownSubjects<'_>,
+    subject_set: SubjectSetNumbers,
     hitlists: &mut [KappaResultHitList],
     parameters: &LocalSubjectParameters,
     ungapped_karlin: &[crate::stats::tables::KarlinParams],
@@ -97,7 +139,10 @@ pub(super) fn render(
         .iter()
         .any(|format| matches!(format_number(format.outfmt), 6 | 7))
     {
-        tabular_subject_ids(hitlists, subject_records)?
+        match shown {
+            ShownSubjects::Fasta { .. } => tabular_subject_ids(hitlists, subject_records)?,
+            ShownSubjects::Database { reported, .. } => reported.tabular_subject_ids()?,
+        }
     } else {
         Vec::new()
     };
@@ -150,7 +195,7 @@ pub(super) fn render(
                 subject_records,
                 subject_letters,
                 &subject_ids,
-                subject_path,
+                shown,
                 hitlists,
                 query_batch_skipped,
                 ranges,
@@ -165,7 +210,8 @@ pub(super) fn render(
                 query_records,
                 subject_records,
                 subject_letters,
-                subject_path,
+                shown,
+                subject_set,
                 parameters,
                 ungapped_karlin,
                 query_validity,
@@ -197,7 +243,7 @@ fn write_tabular(
     subject_records: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,
     subject_ids: &[Arc<[u8]>],
-    subject_path: &Path,
+    shown: &ShownSubjects<'_>,
     hitlists: &[KappaResultHitList],
     query_batch_skipped: &[bool],
     ranges: &ReportRanges<'_>,
@@ -238,11 +284,7 @@ fn write_tabular(
             // ```
             // The title's bytes (`write_outfmt7_query_line`).
             crate::report::outfmt6::write_outfmt7_query_line(writer, query.title())?;
-            writeln!(
-                writer,
-                "# Database: User specified sequence set (Input: {})",
-                subject_path.display()
-            )?;
+            writeln!(writer, "# Database: {}", shown.name())?;
             if hit_count > 0 {
                 writeln!(writer, "# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score")?;
             }
@@ -537,6 +579,7 @@ mod tests {
                     expect_value: 10.0,
                     max_target_seqs: 500,
                     query_offsets: &[],
+                    subject_set: Default::default(),
                 },
                 mode == 2,
                 true,
@@ -564,7 +607,8 @@ mod tests {
                 &queries,
                 &subjects,
                 crate::algorithm::tblastn::x_subject_store::SubjectLetters::Records(&subject_seqs),
-                subject_path,
+                &ShownSubjects::Fasta { path: subject_path },
+                SubjectSetNumbers::default(),
                 &mut results,
                 &parameters,
                 &ungapped_karlin,
@@ -632,7 +676,7 @@ fn pairwise_hits(
 ) -> Result<Vec<PairwiseHit>> {
     let code = GeneticCode::try_from_id(genetic_code).map_err(anyhow::Error::msg)?;
     let mut hits = Vec::new();
-    let mut x_letters = Vec::new();
+    let mut x_window = Vec::new();
     for (q_idx, hitlist) in hitlists.iter().enumerate() {
         let query = query_records[q_idx].seq();
         // NCBI c++/src/algo/blast/format/blast_format.cpp:1541-1557:
@@ -649,9 +693,10 @@ fn pairwise_hits(
                 list.payloads.len() == list.hsps.hsps.len(),
                 "TBLASTN report payload count mismatch"
             );
-            // The subject's letters (made from its packed form with LOSAT_X_TBNSTORE).
-            let subject_seq = subject_letters.letters(oid, &mut x_letters);
-            let mut translation = TargetTranslation::new(subject_seq, &code);
+            // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form, of which
+            // the translations and the rows below read windows.
+            let subject_seq = subject_letters.nt(oid);
+            let mut translation = TargetTranslation::of(subject_seq, &code);
             for (linked, payload) in list.hsps.hsps.iter().zip(&list.payloads) {
                 let hsp = &linked.hsp;
                 let frame = i32::from(hsp.frame);
@@ -670,6 +715,7 @@ fn pairwise_hits(
                 let (qseq, sseq) = aligned_sequences(
                     query,
                     subject_seq,
+                    &mut x_window,
                     &code,
                     &mut translation,
                     hsp.frame,
@@ -824,7 +870,8 @@ fn write_pairwise(
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     subject_letters: SubjectLetters<'_>,
-    subject_path: &Path,
+    shown: &ShownSubjects<'_>,
+    subject_set: SubjectSetNumbers,
     parameters: &LocalSubjectParameters,
     ungapped_karlin: &[crate::stats::tables::KarlinParams],
     query_validity: &[bool],
@@ -845,16 +892,24 @@ fn write_pairwise(
         gap_open: scoring.gap_open,
         gap_extend: scoring.gap_extend,
     };
-    let total_nt: usize = subject_letters.lengths().sum();
-    let gumbel = lookup_protein_gumbel_params(&spec, i64::try_from(total_nt / 3)?)
+    // The set's numbers: a database's, or those of the subject records (the whole set).
+    let (num_sequences, total_nt) = match shown {
+        ShownSubjects::Fasta { .. } => (
+            subject_records.len(),
+            subject_letters.lengths().sum::<usize>(),
+        ),
+        ShownSubjects::Database { pairwise, .. } => (
+            usize::try_from(pairwise.num_sequences)?,
+            usize::try_from(pairwise.total_letters)?,
+        ),
+    };
+    // The Gumbel block's database length takes `-dbsize` (`SubjectSetNumbers`).
+    let gumbel = lookup_protein_gumbel_params(&spec, subject_set.gumbel_db_length(total_nt as u64))
         .context("TBLASTN pairwise Spouge parameters are unavailable")?;
     let report = BlastpPairwiseReport {
         version: "2.17.0+".into(),
-        database_name: format!(
-            "User specified sequence set (Input: {})",
-            subject_path.display()
-        ),
-        database_num_sequences: subject_records.len(),
+        database_name: shown.name(),
+        database_num_sequences: num_sequences,
         database_total_letters: total_nt,
         // NCBI blast_format.cpp:2267: options.GetMatrixName(), as typed.
         matrix_name: matrix_name.to_string(),
@@ -923,6 +978,7 @@ fn write_pairwise(
         query_batch_skipped,
         &subject_titles,
         &report,
+        shown.pairwise_database(),
         probe,
         warnings,
         ranges.epilog,
@@ -952,7 +1008,9 @@ fn write_pairwise(
 #[allow(clippy::too_many_arguments)]
 fn aligned_sequences(
     query: &[u8],
-    subject: &[u8],
+    // EXPERIMENT (LOSAT_X_TBNSTORE): the letters, or a packed subject.
+    subject: SubjectNt<'_>,
+    window_buffer: &mut Vec<u8>,
     code: &GeneticCode,
     target: &mut TargetTranslation<'_>,
     frame: i8,
@@ -967,11 +1025,50 @@ fn aligned_sequences(
     let mut q = usize::try_from(q_start)?;
     let mut s = super::search_gapped::window_index(s_start, base)
         .context("TBLASTN report translation window starts after HSP")?;
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1508-1516
+    // ```c
+    //     translation_frame = range->context;
+    //     if (translation_frame > 0) {
+    //         translation_start = 3 * range->begin;
+    //     } else {
+    //         translation_start =
+    //             self->length - 3 * range->end + translation_frame + 1;
+    //     }
+    //     num_nucleotides =
+    //         3 * (range->end - range->begin) + ABS(translation_frame) - 1;
+    // ```
+    // The nucleotides the row is translated from: the record's letters, or (EXPERIMENT,
+    // LOSAT_X_TBNSTORE) the letters of the HSP's codons made from the store, the window NCBI
+    // translates for the residues the script reads (from `s_start` on). Its codon of residue `o`
+    // is the one `display_residue` reads in the whole subject: from `3 * (o - s_start) +
+    // |frame| - 1` on the plus strand, and as far from the window's end as from the subject's on
+    // the minus strand.
+    let (nucleotides, first) = match subject {
+        SubjectNt::Letters(letters) => (letters, 0),
+        SubjectNt::Packed(_) => {
+            let first = usize::try_from(s_start)?;
+            let residues: usize = script
+                .iter()
+                .filter(|op| !matches!(op, GapEditOp::Ins(_)))
+                .map(|op| op.num() as usize)
+                .sum();
+            let frame_shift = usize::from(frame.unsigned_abs());
+            let length = 3 * residues + frame_shift - 1;
+            let start = if frame > 0 {
+                Some(3 * first)
+            } else {
+                (subject.len() + 1).checked_sub(3 * (first + residues) + frame_shift)
+            }
+            .filter(|start| start + length <= subject.len())
+            .context("TBLASTN report HSP outside the subject")?;
+            (subject.fetch(start, start + length, window_buffer), first)
+        }
+    };
     let displayed_subject = |s: usize| -> u8 {
         crate::algorithm::tblastx::report::display_residue(
-            subject,
+            nucleotides,
             frame,
-            (base + s as isize) as usize,
+            (base + s as isize) as usize - first,
             code,
         )
     };

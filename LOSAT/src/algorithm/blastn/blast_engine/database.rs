@@ -132,9 +132,6 @@ impl BlastnDatabase {
         let metadata = SubjectMetadata {
             db_len_total,
             db_num_seqs: db.num_seqs() as usize,
-            // The ids of the subject records are for tracing only; a database sequence is
-            // traced by its ordinal id.
-            subject_ids: Vec::new(),
         };
         Ok(Self {
             db,
@@ -199,6 +196,7 @@ fn block_subject(block: &SequenceBlock, i: usize) -> Result<BlastnSubjectRef<'_>
         packed: block.nucleotide_packed(i),
         letters: None,
         blastna: None,
+        store: None,
     })
 }
 
@@ -446,6 +444,7 @@ where
             letters: None,
             // The kernel's BLASTNA has no sentinel bytes.
             blastna: Some(&blastna[1..=length]),
+            store: None,
         };
         Ok(traceback(scratch, ordinal, subject, kept))
     };
@@ -763,7 +762,6 @@ mod tests {
         let database = open("nucl_mv");
         assert_eq!(database.metadata().db_num_seqs, 12);
         assert_eq!(database.metadata().db_len_total, 850);
-        assert!(database.metadata().subject_ids.is_empty());
         let shown = database.pairwise_database();
         assert_eq!(shown.definition, b"nucleotide in volumes");
         assert_eq!(shown.date, "Oct 12, 2026  4:12 PM");

@@ -13,7 +13,8 @@
 //! NCBI keeps the subjects in its scope and makes each one's search forms from it. With
 //! `LOSAT_X_TBNSTORE` set (to any value; the switch is not in the strict set) the reader's records
 //! keep their deflines and the letters are held packed (2 bits per base, the runs of ambiguous
-//! letters, the lower-case intervals), made again when a subject is searched, redone or reported.
+//! letters, the lower-case intervals): a subject is translated from its packed bases, and the
+//! letters of a window are made again when the redo or a report reads it.
 //! The switch must change nothing a user sees, so the tests compare the report and the messages
 //! with those of a run without the variable, and read the `[X_STATS] TBNSTORE` line to check that
 //! the subjects were held packed.
@@ -211,7 +212,8 @@ const STORE: (&str, &str) = ("LOSAT_X_TBNSTORE", "1");
 // letters among them) without the variable and with it: tabular, commented tabular and pairwise
 // reports, the default options and `-lcase_masking` at one and three threads, another genetic
 // code, composition mode 0, and four query batches. With the variable the eight subjects are held
-// packed and their letters are made again (at least once per searched subject); without it none.
+// packed and translated from their packed bases (their letters made again only where a stage
+// reads the case or composition mode 0 traces back); without it none.
 #[test]
 fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
     let (ten, all, subjects) = inputs();
@@ -289,18 +291,23 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
         assert_eq!(store_messages, messages, "{options:?}");
         assert_eq!(counter(&stats, "subjects"), 8, "{options:?}");
         assert!(counter(&stats, "stored_bytes") > 0, "{options:?}");
-        // the preliminary stage reads the resolved bases unless it reads the case; the later
-        // stages of the subjects with hits read the letters
+        // the preliminary stage translates the packed bases of the six subjects long enough to
+        // search unless it reads the case of a subject with lower-case letters (lower, ambiguous,
+        // runs, few_codons; then it reads the letters); the redo and the reports read windows of
+        // the packed subjects, and only the traceback of composition mode 0 reads the letters of
+        // the subjects with hits
         if options.contains(&"-lcase_masking") {
-            assert!(counter(&stats, "letters_made") >= 7, "{options:?}: {stats}");
-            assert_eq!(counter(&stats, "resolved_made"), 0, "{options:?}");
-        } else {
-            assert!(
-                counter(&stats, "resolved_made") >= 7,
-                "{options:?}: {stats}"
-            );
             assert!(counter(&stats, "letters_made") >= 4, "{options:?}: {stats}");
+            assert!(counter(&stats, "packed_plans") >= 1, "{options:?}: {stats}");
+        } else {
+            assert!(counter(&stats, "packed_plans") >= 6, "{options:?}: {stats}");
+            if options.contains(&"-comp_based_stats") {
+                assert!(counter(&stats, "letters_made") >= 4, "{options:?}: {stats}");
+            } else {
+                assert_eq!(counter(&stats, "letters_made"), 0, "{options:?}: {stats}");
+            }
         }
+        assert_eq!(counter(&stats, "resolved_made"), 0, "{options:?}");
     }
 }
 
@@ -328,5 +335,7 @@ fn a_subject_range_keeps_the_letters_and_the_reference_loops_read_the_packed_sub
     assert!(report == expected);
     assert_eq!(store_messages, messages);
     assert_eq!(counter(&stats, "subjects"), 8);
-    assert!(counter(&stats, "letters_made") + counter(&stats, "resolved_made") >= 7);
+    // the reference loops read letters: the resolved bases of the packed subjects
+    assert!(counter(&stats, "resolved_made") >= 7, "{stats}");
+    assert_eq!(counter(&stats, "packed_plans"), 0, "{stats}");
 }

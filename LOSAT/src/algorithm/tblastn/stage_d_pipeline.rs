@@ -47,6 +47,7 @@ use crate::core::composition_adjustment::redo_alignment::{
     build_query_word_hashes, BlastCompoAdjustMode, BlastCompoQueryInfo, BlastCompoSequenceData,
     EMatrixAdjustRule,
 };
+use crate::sequence::packed_subject::SubjectNt;
 use crate::stats::karlin::evalue_from_raw_score;
 use crate::stats::spouge::{blast_spouge_stoe, lookup_protein_gumbel_params, BlastGumbelBlk};
 use crate::stats::tables::{
@@ -73,6 +74,118 @@ pub(super) struct LocalStageDProfile<'a> {
     /// Where each query's searched letters start in its record (`-query_loc`; empty: 0),
     /// which the masks of a split query's chunks depend on (`protein_chunk_part`).
     pub query_offsets: &'a [usize],
+    /// The numbers of the subject set that the statistics read (a database's, `-dbsize`).
+    pub subject_set: SubjectSetNumbers,
+}
+
+/// The numbers of a database (`-db`) as NCBI's search reads them from its sequence source:
+/// the total length (`BlastSeqSrcGetTotLen`, an `Int8`) and the number of sequences
+/// (`BlastSeqSrcGetNumSeqs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct DatabaseNumbers {
+    pub total_length: u64,
+    pub num_seqs: u64,
+}
+
+/// The numbers of the subject set behind the statistics: a database's (`database`), or,
+/// without one, those of the FASTA subject set (`-subject`: the total and the number of its
+/// records, its shortest record raised to `BLAST_SEQSRC_MINLENGTH`); and `-dbsize`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct SubjectSetNumbers {
+    pub database: Option<DatabaseNumbers>,
+    pub dbsize: Option<i64>,
+}
+
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:131-136
+// ```c++
+//             m_MinLength   = x_GetMinLength();
+//
+//             // Do not bother scanning the db... it would be slow
+//             // FIXME: future implementation should probably have the
+//             // shortest length encoded in index file...
+//             if ( m_MinLength <= 0)  m_MinLength = BLAST_SEQSRC_MINLENGTH;
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:908-922
+// ```c
+//       total_length = BlastSeqSrcGetTotLenStats(seq_src);
+//       if (total_length <= 0)
+//           total_length = BlastSeqSrcGetTotLen(seq_src);
+//
+//       /* Set the database length for new FSC */
+//       if (sbp->gbp) {
+//           Int8 dbl = total_length;
+//           /* Override the database length or set one (e.g., blast2seq). */
+//           if (eff_len_options->db_length) {
+//               dbl = eff_len_options->db_length;
+//           }
+//           sbp->gbp->db_length =
+//               (Blast_SubjectIsTranslated(program_number))?
+//               dbl/3 : dbl;
+//       }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:716-735
+// ```c
+//    if (eff_len_options->db_length > 0)
+//       db_length = eff_len_options->db_length;
+//    else
+//       db_length = eff_len_params->real_db_length;
+//    ...
+//    if (Blast_SubjectIsTranslated(program_number))
+//       db_length = db_length/3;
+// ```
+impl SubjectSetNumbers {
+    /// `BLAST_SEQSRC_MINLENGTH` (blast_seqsrc.h): the shortest length a sequence source
+    /// answers.
+    const MIN_LENGTH: usize = 10;
+
+    /// The total length in nucleotides: the database's, or the sum of the subjects'.
+    pub(super) fn total_nt(&self, subjects: &SubjectLetters<'_>) -> u64 {
+        match self.database {
+            Some(database) => database.total_length,
+            None => subjects.lengths().map(|length| length as u64).sum(),
+        }
+    }
+
+    /// The number of sequences.
+    pub(super) fn num_seqs(&self, subjects: &SubjectLetters<'_>) -> usize {
+        match self.database {
+            Some(database) => database.num_seqs as usize,
+            None => subjects.count(),
+        }
+    }
+
+    /// The database length of the effective lengths in nucleotides (divided by 3 there): a
+    /// positive `-dbsize`, else the total `total_nt` (blast_setup.c:716-735).
+    pub(super) fn eff_length_nt(&self, total_nt: u64) -> u64 {
+        match self.dbsize {
+            Some(dbsize) if dbsize > 0 => dbsize as u64,
+            _ => total_nt,
+        }
+    }
+
+    /// The Gumbel block's database length in residues: a `-dbsize` other than 0, else the
+    /// total `total_nt`, divided by 3 (blast_setup.c:916-922; C's `Int8` division).
+    pub(super) fn gumbel_db_length(&self, total_nt: u64) -> i64 {
+        match self.dbsize {
+            Some(dbsize) if dbsize != 0 => dbsize / 3,
+            _ => (total_nt / 3) as i64,
+        }
+    }
+
+    /// The shortest subject length of the hit-saving cutoff, in residues
+    /// (`BlastSeqSrcGetMinSeqLen / 3`): a database answers `BLAST_SEQSRC_MINLENGTH`, a FASTA
+    /// set its shortest record raised to it.
+    pub(super) fn min_subject_length(&self, subjects: &SubjectLetters<'_>) -> usize {
+        let shortest = match self.database {
+            Some(_) => Self::MIN_LENGTH,
+            None => subjects
+                .lengths()
+                .min()
+                .unwrap_or(i32::MAX as usize)
+                .max(Self::MIN_LENGTH),
+        };
+        shortest / 3
+    }
 }
 
 // NCBI c++/src/algo/blast/core/blast_options.c:903-936;
@@ -568,8 +681,10 @@ fn run_local_search_with_pool(
         !queries.is_empty(),
         "TBLASTN Stage D requires a protein query"
     );
+    // A database search has no subjects in hand when its sequences could not be read: its
+    // batches are set up and reported, and `args::search` fails the first with a valid context.
     ensure!(
-        subjects.count() > 0,
+        subjects.count() > 0 || profile.subject_set.database.is_some(),
         "TBLASTN Stage D requires a local subject"
     );
     ensure!(
@@ -577,7 +692,10 @@ fn run_local_search_with_pool(
         "TBLASTN hitlist size must be positive"
     );
     let code = GeneticCode::try_from_id(profile.genetic_code).map_err(anyhow::Error::msg)?;
-    let total_nt: usize = subjects.lengths().sum();
+    // The set's numbers: a database's, or those of the FASTA subjects (`SubjectSetNumbers`).
+    let total_nt = usize::try_from(profile.subject_set.total_nt(&subjects))?;
+    let stats_nt = usize::try_from(profile.subject_set.eff_length_nt(total_nt as u64))?;
+    let num_subjects = profile.subject_set.num_seqs(&subjects);
     // NCBI reference: c++/src/algo/blast/api/local_db_adapter.cpp:133-135
     // ```c
     //             if ( !m_Subjects.empty() ) {
@@ -615,14 +733,9 @@ fn run_local_search_with_pool(
     //        }
     // ```
     // The local `-subject` sequences are a multi-sequence source: the shortest record (an
-    // empty one counts as 0, in nucleotides) is raised to 10 before the division.
-    const BLAST_SEQSRC_MINLENGTH: usize = 10;
-    let min_subject_length = subjects
-        .lengths()
-        .min()
-        .unwrap_or(i32::MAX as usize)
-        .max(BLAST_SEQSRC_MINLENGTH)
-        / 3;
+    // empty one counts as 0, in nucleotides) is raised to 10 before the division. A database
+    // answers 10 (`SubjectSetNumbers::min_subject_length`).
+    let min_subject_length = profile.subject_set.min_subject_length(&subjects);
     let query_lengths: Vec<i32> = queries
         .iter()
         .map(|query| i32::try_from(query.len()))
@@ -648,7 +761,8 @@ fn run_local_search_with_pool(
     // NCBI c++/src/algo/blast/core/blast_stat.c:4091-4171;
     // core/blast_hits.c:1870-1895: gbp is optional; absent gbp selects
     // BLAST_KarlinStoE_simple with the context's effective search space.
-    let gumbel = lookup_protein_gumbel_params(&spec, (total_nt / 3) as i64);
+    let gumbel =
+        lookup_protein_gumbel_params(&spec, profile.subject_set.gumbel_db_length(total_nt as u64));
     let QuerySetSetup {
         working_frames,
         contexts,
@@ -663,8 +777,8 @@ fn run_local_search_with_pool(
             gapped,
             ungapped: &ungapped,
             gumbel: gumbel.as_ref(),
-            total_nt,
-            num_subjects: subjects.count(),
+            total_nt: stats_nt,
+            num_subjects,
             min_subject_length,
             composition_mode2,
             do_sum_stats,
@@ -703,7 +817,7 @@ fn run_local_search_with_pool(
     // if (valid_context == FALSE) status = 1;
     // Preserve the parameter/validity state for reporting, then skip subject
     // search when every query context has failed Karlin setup.
-    if !valid_contexts.iter().any(|&valid| valid) {
+    if !valid_contexts.iter().any(|&valid| valid) || subjects.count() == 0 {
         return (0..queries.len())
             .map(|_| KappaResultHitList::new(profile.max_target_seqs))
             .collect();
@@ -774,8 +888,8 @@ fn run_local_search_with_pool(
                 gapped,
                 ungapped: &ungapped,
                 gumbel: gumbel.as_ref(),
-                total_nt,
-                num_subjects: subjects.count(),
+                total_nt: stats_nt,
+                num_subjects,
                 min_subject_length,
                 composition_mode2,
                 do_sum_stats,
@@ -940,9 +1054,9 @@ fn run_local_search_with_pool(
                      scratch: &mut GapAlignScratch,
                      workspace: &mut BlastCompositionWorkspace|
      -> Result<Option<(CompoHeapRecord, KappaResultList)>> {
-        // The letters of the subject (made from its packed form with LOSAT_X_TBNSTORE).
-        let mut x_letters = Vec::new();
-        let subject = subjects.letters(oid, &mut x_letters);
+        // The subject's letters, or (EXPERIMENT, LOSAT_X_TBNSTORE) its packed form: the redo and
+        // the translations below read windows of it, as NCBI's do.
+        let subject = subjects.nt(oid);
         let incoming: Vec<_> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
         let mut redo = redo_preliminary_match(
             &incoming,
@@ -1004,7 +1118,7 @@ fn run_local_search_with_pool(
             best_score: postredo.hsps[0].hsp.score,
         };
         let bits = normalize_postredo_scores(&mut postredo, scaled.lambda, gapped.k.ln(), 32.0);
-        let mut target = TargetTranslation::new(subject, &code);
+        let mut target = TargetTranslation::of(subject, &code);
         let mut owned: Vec<_> = survivors.into_iter().map(Some).collect();
         let payloads = postredo
             .hsps
@@ -1270,24 +1384,26 @@ fn x_tbn_oid_chunk() -> bool {
 
 // No NCBI counterpart: reads the LOSAT_X_TBNOIDNEXT switch once; it does not change any value
 // NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNOIDNEXT): off unless set (to any value); not in the strict set. It
-/// acts only where `LOSAT_X_TBNOIDCHUNK` makes the chunks.
+/// EXPERIMENT (LOSAT_X_TBNOIDNEXT): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only where `LOSAT_X_TBNOIDCHUNK`
+/// makes the chunks.
 #[cfg(feature = "parallel")]
 fn x_tbn_oid_next() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOIDNEXT").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOIDNEXT"))
 }
 
 // No NCBI counterpart: reads the LOSAT_X_TBNOIDUNITS switch once; it does not change any value
 // NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNOIDUNITS): off unless set (to any value); not in the strict set. It
-/// acts only where `LOSAT_X_TBNOIDCHUNK` makes the chunks.
+/// EXPERIMENT (LOSAT_X_TBNOIDUNITS): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only where `LOSAT_X_TBNOIDCHUNK`
+/// makes the chunks.
 #[cfg(feature = "parallel")]
 fn x_tbn_oid_units() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOIDUNITS").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOIDUNITS"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:153-154
@@ -1698,6 +1814,8 @@ struct QuerySetInputs<'a> {
     gapped: KarlinParams,
     ungapped: &'a KarlinParams,
     gumbel: Option<&'a BlastGumbelBlk>,
+    /// The database length of the effective lengths in nucleotides
+    /// (`SubjectSetNumbers::eff_length_nt`).
     total_nt: usize,
     num_subjects: usize,
     min_subject_length: usize,
@@ -1936,7 +2054,7 @@ fn run_preliminary_subjects(
     // The other subjects, and every subject without the switch, keep `unit_pool`. Scheduling only.
     #[cfg(feature = "parallel")]
     let x_units_beyond = x_chunk_bases.filter(|_| x_tbn_oid_units());
-    let x_unit_pool = |subject: &[u8]| {
+    let x_unit_pool = |subject: SubjectNt<'_>| {
         #[cfg(feature = "parallel")]
         if x_units_beyond
             .is_some_and(|bases| u64::try_from(subject.len()).unwrap_or(u64::MAX) > bases)
@@ -1974,66 +2092,67 @@ fn run_preliminary_subjects(
     let x_subject_side = pool.and_then(|pool| pool.x_ext::<super::search_seed::XSubjectSide>());
     // No NCBI counterpart: x_oid is only the index of the subject among the shared subject plans;
     // it does not change any value NCBI computes.
-    let subject_core =
-        |x_oid: usize, subject: &[u8]| -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1469-1470
-            // ```c
-            //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-            //            != BLAST_SEQSRC_EOF) {
-            // ...
-            //       status =
-            //           s_BlastSearchEngineCore(program_number, query, query_info,
-            // ```
-            // Dispatch point: the call that runs the preliminary stage for one subject
-            // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search chooses the original
-            // port or the unit-wise stage by switch.
-            let preliminary = super::search_gapped::preliminary_protein_hsps_for_search(
-                inputs.queries,
-                subject,
-                inputs.genetic_code,
-                inputs.search,
-                x_unit_pool(subject),
-                x_query_side.as_ref(),
-                x_subject_side.map(|side| (side, x_oid)),
-            )?;
-            // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
-            // BLAST_LinkHsps(..., hsp_list_out, ...);
-            // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
-            // Even an allocated empty subject list enters link/E-value.
-            let mut linked = if let Some(link) = inputs.link {
-                link_preliminary_hsps(
-                    &preliminary,
-                    inputs.query_lengths,
-                    inputs.lengths,
-                    i32::try_from(subject.len())?,
-                    inputs.gapped_by_context,
-                    inputs
-                        .gumbel
-                        .context("TBLASTN sum-statistics Spouge state is missing")?,
-                    &link,
-                )?
-            } else {
-                // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
-                // if (subject->length > 0) stat_length = subject->length;
-                // Blast_HSPListGetEvalues(..., stat_length, ...);
-                let stat_length = initial_translated_stat_length(subject.len());
-                direct_local_evalues(
-                    &preliminary,
-                    inputs.query_lengths,
-                    i32::try_from(stat_length)?,
-                    inputs.gapped_by_context,
-                    inputs.lengths,
-                    inputs.gumbel,
-                )
-            };
-            reap_by_evalue(&mut linked, inputs.prelim_evalue);
-            Ok((preliminary, linked))
+    let subject_core = |x_oid: usize,
+                        subject: SubjectNt<'_>|
+     -> Result<(Vec<(usize, GappedHsp)>, LinkedHspList)> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1412-1413,1469-1470
+        // ```c
+        //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+        //            != BLAST_SEQSRC_EOF) {
+        // ...
+        //       status =
+        //           s_BlastSearchEngineCore(program_number, query, query_info,
+        // ```
+        // Dispatch point: the call that runs the preliminary stage for one subject
+        // (s_BlastSearchEngineCore). preliminary_protein_hsps_for_search chooses the original
+        // port or the unit-wise stage by switch.
+        let preliminary = super::search_gapped::preliminary_protein_hsps_for_search(
+            inputs.queries,
+            subject,
+            inputs.genetic_code,
+            inputs.search,
+            x_unit_pool(subject),
+            x_query_side.as_ref(),
+            x_subject_side.map(|side| (side, x_oid)),
+        )?;
+        // NCBI c++/src/algo/blast/core/blast_engine.c:870-905:
+        // BLAST_LinkHsps(..., hsp_list_out, ...);
+        // s_Blast_HSPListReapByPrelimEvalue(hsp_list_out, ...);
+        // Even an allocated empty subject list enters link/E-value.
+        let mut linked = if let Some(link) = inputs.link {
+            link_preliminary_hsps(
+                &preliminary,
+                inputs.query_lengths,
+                inputs.lengths,
+                i32::try_from(subject.len())?,
+                inputs.gapped_by_context,
+                inputs
+                    .gumbel
+                    .context("TBLASTN sum-statistics Spouge state is missing")?,
+                &link,
+            )?
+        } else {
+            // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:
+            // if (subject->length > 0) stat_length = subject->length;
+            // Blast_HSPListGetEvalues(..., stat_length, ...);
+            let stat_length = initial_translated_stat_length(subject.len());
+            direct_local_evalues(
+                &preliminary,
+                inputs.query_lengths,
+                i32::try_from(stat_length)?,
+                inputs.gapped_by_context,
+                inputs.lengths,
+                inputs.gumbel,
+            )
         };
-    // The letters of subject `x_oid` for its preliminary stage: the record's own, or (EXPERIMENT,
-    // LOSAT_X_TBNSTORE) made from its packed form for the time of the call, as NCBI makes a
-    // subject's search forms from its scope (its resolved bases unless the stage reads the case).
+        reap_by_evalue(&mut linked, inputs.prelim_evalue);
+        Ok((preliminary, linked))
+    };
+    // Subject `x_oid` for its preliminary stage: the record's letters, or (EXPERIMENT,
+    // LOSAT_X_TBNSTORE) its packed form, translated from its packed bases as NCBI translates a
+    // subject from ncbi2na (the letters made for the time of the call if the stage reads the case).
     let subject_core_oid = |x_oid: usize| {
-        subjects.with_search_letters(x_oid, inputs.search.mask_lowercase, |subject| {
+        subjects.with_search_subject(x_oid, inputs.search.mask_lowercase, |subject| {
             subject_core(x_oid, subject)
         })
     };
@@ -2545,6 +2664,7 @@ mod tests {
                 expect_value: 10.0,
                 max_target_seqs: 500,
                 query_offsets: &[],
+                subject_set: Default::default(),
             },
             true,
             true,
@@ -2592,6 +2712,7 @@ mod tests {
                 expect_value: 10.0,
                 max_target_seqs: 500,
                 query_offsets: &[],
+                subject_set: Default::default(),
             },
             true,
             true,
@@ -2879,6 +3000,7 @@ mod tests {
                 expect_value: 10.0,
                 max_target_seqs: 2,
                 query_offsets: &[],
+                subject_set: Default::default(),
             },
             true,
             true,
@@ -2964,6 +3086,7 @@ mod tests {
                 expect_value: 10.0,
                 max_target_seqs: 500,
                 query_offsets: &[],
+                subject_set: Default::default(),
             },
             true,
             true,
@@ -3118,6 +3241,7 @@ mod tests {
                 expect_value: 10.0,
                 max_target_seqs: 500,
                 query_offsets: &[],
+                subject_set: Default::default(),
             },
         )
         .unwrap();
@@ -3208,6 +3332,7 @@ mod tests {
                     expect_value: 10.0,
                     max_target_seqs: 500,
                     query_offsets: &[],
+                    subject_set: Default::default(),
                 },
             )
             .unwrap();
@@ -3389,6 +3514,7 @@ mod tests {
                     expect_value: 10000.0,
                     max_target_seqs: 500,
                     query_offsets: &[],
+                    subject_set: Default::default(),
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -3613,6 +3739,7 @@ mod tests {
                     expect_value: 10000.0,
                     max_target_seqs: 500,
                     query_offsets: &[],
+                    subject_set: Default::default(),
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -3820,6 +3947,7 @@ mod tests {
                 expect_value: 10000.0,
                 max_target_seqs: 500,
                 query_offsets: &[],
+                subject_set: Default::default(),
             },
             false,
             false,
@@ -3965,6 +4093,7 @@ mod tests {
                 expect_value: 10000.0,
                 max_target_seqs: 500,
                 query_offsets: &[],
+                subject_set: Default::default(),
             },
             false,
             false,
@@ -4131,6 +4260,7 @@ mod tests {
                 expect_value: 10.0,
                 max_target_seqs: 500,
                 query_offsets: &[],
+                subject_set: Default::default(),
             };
             let mut boundary = StageDBoundaryTrace::default();
             let result = run_local_search(
@@ -4325,6 +4455,7 @@ mod tests {
                     expect_value: 10000.0,
                     max_target_seqs: 500,
                     query_offsets: &[],
+                    subject_set: Default::default(),
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -4482,6 +4613,7 @@ mod tests {
                         expect_value: 10.0,
                         max_target_seqs: 500,
                         query_offsets: &[],
+                        subject_set: Default::default(),
                     },
                     true,
                     true,
@@ -4790,6 +4922,7 @@ mod tests {
                 expect_value: 10.0,
                 max_target_seqs: 112,
                 query_offsets: &[],
+                subject_set: Default::default(),
             },
         )
         .unwrap();
@@ -4977,6 +5110,7 @@ mod tests {
                     expect_value: 10.0,
                     max_target_seqs: 500,
                     query_offsets: &[],
+                    subject_set: Default::default(),
                 },
             )
             .unwrap();
@@ -5089,6 +5223,7 @@ mod tests {
                 expect_value: 10000.0,
                 max_target_seqs: 1,
                 query_offsets: &[],
+                subject_set: Default::default(),
             },
         )
         .unwrap();
@@ -5183,6 +5318,7 @@ mod tests {
                 expect_value: 10000.0,
                 max_target_seqs: 1,
                 query_offsets: &[],
+                subject_set: Default::default(),
             },
         )
         .unwrap();
@@ -5294,6 +5430,7 @@ mod tests {
                 expect_value: 10000.0,
                 max_target_seqs: 1,
                 query_offsets: &[],
+                subject_set: Default::default(),
             },
         )
         .unwrap();
@@ -5520,6 +5657,7 @@ mod tests {
             expect_value: 10.0,
             max_target_seqs: 500,
             query_offsets: &[],
+            subject_set: Default::default(),
         };
         let taken = x_tbn_parallel() && super::super::search_seed::XSubjectSide::enabled();
         for ranges in [

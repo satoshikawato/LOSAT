@@ -147,12 +147,11 @@ fn next(seed: &mut u64) -> u32 {
     (*seed >> 33) as u32
 }
 
-/// A generated query and subject set in the test's own directory: random proteins, a protein with
+/// A generated query and subject set in a directory of the calling test (`test`; the tests run in
+/// parallel, so they must not share files): random proteins, a protein with
 /// long repeats (lookup cells far above three hits, so batches of eight and the overflow array),
 /// and subjects that are copies of the queries with every sixth letter changed (two hits on a
 /// diagonal, extensions with and without a reset of the diagonal), plus unrelated proteins.
-/// The generated pair in the directory `test` of its own: the tests of this file run side by
-/// side, and a pair written over another test's would be read while it is truncated.
 fn generated_pair(test: &str) -> (PathBuf, PathBuf) {
     const AMINO: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
@@ -202,7 +201,7 @@ fn generated_pair(test: &str) -> (PathBuf, PathBuf) {
 
 #[test]
 fn batched_cells_give_the_reports_of_the_per_hit_loop() {
-    let (query, subject) = generated_pair("batched");
+    let (query, subject) = generated_pair("per_hit_loop");
     let pairs = [
         (query, subject),
         (fixture("MeenMJNV.faa"), fixture("MejoMJNV.faa")),

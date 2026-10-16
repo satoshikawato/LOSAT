@@ -72,6 +72,12 @@ pub fn x_bp_redo_par_print_summary() {
     x_redo_par::x_bp_redo_par_print_summary();
 }
 
+/// EXPERIMENT (LOSAT_X_BPSUBJRUNSHADOW): the shadow mode's line at exit.
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_bp_subj_run_print_summary() {
+    blast_engine::x_bp_subj_run_print_summary();
+}
+
 /// EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): a search's result against the new path's when the
 /// one-thread redo of the search ended with an error (it returns before the shadow compares the
 /// hit lists).

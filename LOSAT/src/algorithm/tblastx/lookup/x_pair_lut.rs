@@ -684,10 +684,21 @@ pub(crate) fn x_assert_stub_scalars(stub: &BlastAaLookupTable, full: &BlastAaLoo
 // (the Karlin parameters bitwise).
 /// EXPERIMENT (LOSAT_X_PAIRLUTSHADOW): assert that two context lists are equal.
 pub(crate) fn x_assert_same_contexts(direct: &[QueryContext], reference: &[QueryContext]) {
+    x_assert_same_contexts_as("LOSAT_X_PAIRLUTSHADOW:", direct, reference);
+}
+
+// No NCBI counterpart: the check of `x_assert_same_contexts` for another shadow.
+/// EXPERIMENT (LOSAT_X_PAIRLUTSHADOW, LOSAT_X_BPLKPFLATSHADOW): `x_assert_same_contexts` with the
+/// messages starting with `what`.
+pub(crate) fn x_assert_same_contexts_as(
+    what: &str,
+    direct: &[QueryContext],
+    reference: &[QueryContext],
+) {
     assert_eq!(
         direct.len(),
         reference.len(),
-        "LOSAT_X_PAIRLUTSHADOW: number of contexts differs"
+        "{what} number of contexts differs"
     );
     for (c, (a, b)) in direct.iter().zip(reference).enumerate() {
         let QueryContext {
@@ -722,7 +733,7 @@ pub(crate) fn x_assert_same_contexts(direct: &[QueryContext], reference: &[Query
                 && *frame_base == b.frame_base
                 && *is_valid == b.is_valid
                 && bits(karlin_params) == bits(&b.karlin_params),
-            "LOSAT_X_PAIRLUTSHADOW: context {c} differs"
+            "{what} context {c} differs"
         );
     }
 }

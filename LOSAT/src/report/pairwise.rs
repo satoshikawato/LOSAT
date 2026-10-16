@@ -3950,8 +3950,12 @@ pub fn write_tblastn_pairwise_prolog<W: Write>(
     database_name: &str,
     database_num_sequences: usize,
     database_total_letters: usize,
+    database: Option<&PairwiseDatabase>,
 ) -> io::Result<()> {
     write_translated_pairwise_intro(writer, "TBLASTN", version)?;
+    if let Some(database) = database {
+        return write_blast_database_header(writer, database);
+    }
     write_blastp_database_header_spacing(
         writer,
         database_name,
@@ -3974,6 +3978,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     query_batch_skipped: &[bool],
     subject_titles: &[Arc<[u8]>],
     report: &BlastpPairwiseReport,
+    database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     epilog: bool,
@@ -3996,13 +4001,16 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     write_translated_pairwise_intro(&mut writer, "TBLASTN", &report.version)?;
     // The prolog ends with one blank line; each query's preamble starts with two
     // (blast_format.cpp:1491), after the query's warnings.
-    write_blastp_database_header_spacing(
-        &mut writer,
-        &report.database_name,
-        report.database_num_sequences,
-        report.database_total_letters,
-        1,
-    )?;
+    match database {
+        Some(database) => write_blast_database_header(&mut writer, database)?,
+        None => write_blastp_database_header_spacing(
+            &mut writer,
+            &report.database_name,
+            report.database_num_sequences,
+            report.database_total_letters,
+            1,
+        )?,
+    }
 
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411
     // ```c++
@@ -4107,6 +4115,27 @@ pub fn write_tblastn_pairwise_report<W: Write>(
         // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
         let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
         for &s_idx in aligned {
+            // NCBI c++/src/objtools/align_format/showalign.cpp:3650-3668:
+            // display leaves an extra blank line after each translated HSP.
+            let write_hsp = |writer: &mut io::BufWriter<&mut W>, hit: &PairwiseHit| {
+                write_tblastn_hsp_info(writer, hit)?;
+                write_tblastn_alignment(writer, hit, config)?;
+                writeln!(writer)
+            };
+            // A database sequence's heading is its stored title after `>` (as BLASTP's
+            // and BLASTN's `-db` reports).
+            if database.is_some() {
+                write_database_subject_alignments(
+                    &mut writer,
+                    probe.as_deref_mut(),
+                    &subject_titles[&s_idx],
+                    false,
+                    &subject_hits[&s_idx],
+                    &subject_hit_indices[&s_idx],
+                    write_hsp,
+                )?;
+                continue;
+            }
             write_subject_alignments(
                 &mut writer,
                 probe.as_deref_mut(),
@@ -4115,13 +4144,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
                 false,
                 &subject_hits[&s_idx],
                 &subject_hit_indices[&s_idx],
-                // NCBI c++/src/objtools/align_format/showalign.cpp:3650-3668:
-                // display leaves an extra blank line after each translated HSP.
-                |writer, hit| {
-                    write_tblastn_hsp_info(writer, hit)?;
-                    write_tblastn_alignment(writer, hit, config)?;
-                    writeln!(writer)
-                },
+                write_hsp,
             )?;
         }
         write_blastp_query_footer_spacing(
@@ -4145,7 +4168,7 @@ pub fn write_tblastn_pairwise_report<W: Write>(
     // The blank lines before the epilog (blast_format.cpp:2249).
     writeln!(&mut writer)?;
     writeln!(&mut writer)?;
-    write_blastp_final_footer(&mut writer, report, None)?;
+    write_blastp_final_footer(&mut writer, report, database)?;
     writer.flush()
 }
 

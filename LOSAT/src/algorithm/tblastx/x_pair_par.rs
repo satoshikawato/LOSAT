@@ -113,7 +113,8 @@
 //! dispatch stops it if the reference frame loop would run on the stub. `LOSAT_X_PAIRLUTSHADOW=1`
 //! builds the full table and `build_groups` as before and compares the direct groups with them.
 //!
-//! `LOSAT_X_SEEDCOMPACT` (not in the strict set: off unless set): a unit keeps its saved init HSPs
+//! `LOSAT_X_SEEDCOMPACT` (in the strict set, `utils/xswitch.rs`: on unless `LOSAT_X_SEEDCOMPACT` is
+//! `0`, or `LOSAT_X_DEFAULT=0` and it is not set): a unit keeps its saved init HSPs
 //! as 28-byte records, NCBI's own record shape, copied out of a per-thread vector at their exact
 //! length; the merge expands them into today's `InitHSP`s, converts each chunk's list into a list
 //! of its exact length and moves the first chunk's list into the empty frame list. The section
@@ -223,11 +224,11 @@ pub(super) fn lut_mode() -> u8 {
 // No NCBI counterpart: chooses how LOSAT holds a unit's saved init HSPs between the units and the
 // merge (as NCBI's own record, `XUnitHsp`, or as today's `InitHSP`); it does not change any value
 // NCBI computes. Read once per process, as the other modes of this file.
-/// True while `LOSAT_X_SEEDCOMPACT` is set, to any value. Not in the strict set: off unless set,
-/// and `LOSAT_X_DEFAULT` does not touch it.
+/// A strict-set switch (on unless `LOSAT_X_SEEDCOMPACT` is `0`, or `LOSAT_X_DEFAULT=0` and it is
+/// not set; `utils/xswitch.rs`).
 fn seed_compact() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_SEEDCOMPACT").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SEEDCOMPACT"))
 }
 
 // No NCBI counterpart: LOSAT_TIMING read once; it does not change any value NCBI computes.

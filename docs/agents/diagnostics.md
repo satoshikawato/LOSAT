@@ -93,14 +93,14 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 71 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 72 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
 `LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE`,
 `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_LINKSLICES`, `LOSAT_X_BPSUBJRUN`,
 `LOSAT_X_TBNSTORE`, `LOSAT_X_DPNEON`, `LOSAT_X_TBNBATCHRULE` and the eight blastp switches
 `LOSAT_X_BPSEED`, `LOSAT_X_BPUNGAP`, `LOSAT_X_BPGAP`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPFREE`,
 `LOSAT_X_BPPCOMPACT`, `LOSAT_X_BPREDOFIT` and `LOSAT_X_BPQBLOCK`, `LOSAT_X_BNSTREAM`, and
-`LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES` joined), and their variables mean
+`LOSAT_X_TBXNEXT`, `LOSAT_X_TBXFRAMES` and `LOSAT_X_SEEDCOMPACT` joined), and their variables mean
 (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
@@ -140,7 +140,7 @@ strict set are on by default (43 then, 71 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 71 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 72 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -180,6 +180,7 @@ export LOSAT_X_BPSEED=1 LOSAT_X_BPUNGAP=1 LOSAT_X_BPGAP=1 LOSAT_X_BPLUT=1
 export LOSAT_X_BPPFREE=1 LOSAT_X_BPPCOMPACT=1 LOSAT_X_BPREDOFIT=1 LOSAT_X_BPQBLOCK=50000
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_TBXNEXT=1 LOSAT_X_TBXFRAMES=1
+export LOSAT_X_SEEDCOMPACT=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -344,6 +345,16 @@ transcripts against the fruit fly genome database (1,870 sequences) 11.59 -> 9.7
 (NCBI 2.73 s), 257 -> 316 MiB (NCBI 359); 3.52 s at 4 threads (NCBI 3.50) and 2.58 s at 16 (NCBI
 2.71); 10 transcripts against the zebrafish cDNA database x0.98 at one thread and x0.94 at 8. The
 paths without them (`LOSAT_X_DEFAULT=0`) ran at x0.991-1.000 of main's time (V-PERF).
+
+`LOSAT_X_SEEDCOMPACT` was added after the default changed, as a switch that was off unless set, and
+joined the set on 2026-10-17. A unit of TBLASTX's parallel seed stage keeps its saved ungapped hits
+as 28-byte records, the shape NCBI BLAST+ keeps them in, copied out at their exact length, and the
+merge makes each chunk's list at its exact length and moves the first one into the frame's list
+instead of copying it. It changes no value and no order. On the workstation (8 rounds, every report
+equal to NCBI BLAST+ 2.17.0) max RSS went from 109 to 87 MiB at one thread and from 157 to 148 MiB at
+8 threads on the 0.66 Mb by 0.61 Mb pair (AP027131 x AP027133, genetic code 4), and from 130 to 121
+MiB and from 215 to 209 MiB on a genome against itself (NZ_CP006932); the whole search took
+x0.97-0.99 of the time.
 
 What runs per target:
 
@@ -1139,9 +1150,9 @@ Rebuilding less:
   alive, a subject that arrives after a release stops the run, and an assertion that runs with and without
   the switch stops a frame loop that would run without the worker's table
   (`LOSAT/tests/tblastx_seed_release.rs` reads the counters).
-- `LOSAT_X_SEEDCOMPACT=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it) the seed stage of the unit path of `LOSAT_X_PAIRPAR` and its merge
-  hold fewer and exactly sized lists (`tblastx/x_pair_par.rs`, exactness argument in the section above
+- `LOSAT_X_SEEDCOMPACT=1` (TBLASTX, memory; in the strict set since 2026-10-17, on by default) the seed
+  stage of the unit path of `LOSAT_X_PAIRPAR` and its merge hold fewer and exactly sized lists
+  (`tblastx/x_pair_par.rs`, exactness argument in the section above
   `XUnitHsp`). Without it each unit keeps its saved init HSPs as `InitHSP`s (72 bytes on 64-bit targets) in a
   list grown by doubling, the lists of all units of a subject live until its merge, and the merge converts
   each chunk's list into a list grown by doubling and copies the first chunk's list into the empty frame

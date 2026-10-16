@@ -888,8 +888,19 @@ Scheduling (each value computed by one thread with the original function; order 
   (the batches, queries and masked intervals compared; all 0 when no batch had a pool and two queries).
   With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] query_dust: <s>s`, and with `LOSAT_X_STATS`
   `[X_STATS] QDUSTPAR dust_s=<s>`: the wall time of the DUST step of all batches.
-  Tests: the unit tests of `x_query_dust_par.rs` (pool == serial at 1, 2, 3 and 7 threads, with empty
-  sequences and batches of one) and `LOSAT/tests/blastn_query_dust_par.rs`.
+  Measured on the workstation (2x Xeon Gold 6338, powersave, 16 idle physical cores of one node with the
+  siblings idle, `numactl --membind`; `-outfmt 6`, subject 3 Mb of D. melanogaster 2L, `LOSAT_X_PAIRPARDISC=1`
+  for the dc-megablast inputs, `LOSAT_X_STATS=1` in the timed pairs; off runs carry an unread
+  `LOSAT_X_PADQDUSTPAR=1`), 16 threads, alternating off/on pairs, medians: (a) 1,775 cDNAs (5.0 Mb),
+  dc-megablast, one query batch: DUST step (`dust_s`) 0.211 -> 0.019 s, wall 2.19 -> 2.01 s (on/off 0.92, 18
+  pairs in two windows); (b) 3,492 cDNAs (10 Mb), two big batches: 0.286 -> 0.040 s, 2.95 -> 2.71 s (0.92, 4
+  pairs); (c) blastn with (a)'s queries (6 batches): 0.211 -> 0.022 s, 1.83 -> 1.67 s (0.91, 8 pairs). Max RSS
+  within the pairs: (a) 89-93 MiB off, 90-95 on; (b) 104-108 / 103-106; (c) 137-148 / 126-131. The speed of
+  one thread on that machine changes between runs by up to 1.6x (the DUST step of (a) takes 0.131 s or 0.211
+  s with the switch off); pairs run in different speed states give other ratios, so compare `dust_s` and
+  pairs of the same state. Every output equals the sha256 of the run without the switch (and of NCBI
+  `-subject`). Tests: the unit tests of `x_query_dust_par.rs` (pool == serial at 1, 2, 3 and 7 threads, with
+  empty sequences and batches of one) and `LOSAT/tests/blastn_query_dust_par.rs`.
 - `LOSAT_X_QBATCHPAR=1` (BLASTN, all tasks, `-subject` with two or more threads; not in the strict set:
   off unless set to any value, whatever `LOSAT_X_DEFAULT` says) NCBI's query batches are searched side by
   side ahead of the batch loop of `run_in_pool` (`blastn/blast_engine/x_qbatch_par.rs`). The size of each

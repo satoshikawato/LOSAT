@@ -61,6 +61,17 @@ pub use x_seed_release::print_summary as x_seed_release_print_summary;
 // No NCBI counterpart: a timer; it computes no value NCBI computes and none the search reads.
 #[path = "../x_search_timing.rs"]
 mod x_search_timing;
+// EXPERIMENT (LOSAT_X_TBXNEXT): the subjects of the parallel subject loop handed to the threads one
+// at a time, each thread taking the next subject when it is free, with one worker state per
+// thread (see tblastx/x_subject_next.rs). A child module of this file, as x_seed_release is.
+// No NCBI counterpart: scheduling only; NCBI's threads take the next subjects from the database
+// when they are free (blast_engine.c:1411-1413), which is what the module does.
+#[path = "../x_subject_next.rs"]
+#[cfg_attr(
+    not(all(feature = "parallel", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+mod x_subject_next;
 use x_search_timing::XStage;
 // Diagnostic (LOSAT_TIMING): the stage times of the two linking calls, two more `[TIMING]`
 // lines after those (see tblastx/x_link_timing.rs).
@@ -3410,13 +3421,32 @@ fn search_query_batch(
         // ```
         // The letters and the preliminary bases of the subject (`Subjects::with_search_bases`:
         // a database sequence's are made from its store, D2) live only while it is translated.
-        let (s_frames, s_frames_preliminary_owned) =
+        //
+        // EXPERIMENT (LOSAT_X_TBXFRAMES): only the frames the preliminary stage translates are
+        // made here, in windows (`Subjects::x_preliminary_frames`). For a subject with ambiguous
+        // bases the frames of its letters (`s_frames`) are made after the seed stage, once the
+        // preliminary frames are freed, and only when HSPs are left for the re-evaluation
+        // (`x_letter_frames_later`, below); until then `s_frames` is empty and the HSP lists
+        // index the preliminary frames, which have the same number and lengths
+        // (`s_frames_listed`). For a subject without ambiguous bases both are the same frames.
+        let x_frames_late = crate::algorithm::tblastx::subjects::x_frames_late();
+        let mut x_letter_frames_later = false;
+        let (s_frames, s_frames_preliminary_owned) = if x_frames_late {
+            let (frames, of_letters) = subjects.x_preliminary_frames(s_idx, &db_code);
+            if of_letters {
+                (frames, None)
+            } else {
+                x_letter_frames_later = true;
+                (Vec::new(), Some(frames))
+            }
+        } else {
             subjects.with_search_bases(s_idx, |letters, bases| {
                 (
                     generate_frames(letters, &db_code),
                     bases.map(|bases| generate_frames(bases, &db_code)),
                 )
-            });
+            })
+        };
         let s_frames_report = &s_frames;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:772-775
         // ```c
@@ -3440,6 +3470,14 @@ fn search_query_batch(
         // read the frames of the ncbi4na subject (`s_frames`, ambiguous codons are X).
         let s_frames_preliminary: &[QueryFrame] =
             s_frames_preliminary_owned.as_deref().unwrap_or(&s_frames);
+        // The frames the HSP lists of the seed stage index (`get_ungapped_hsp_list`, the frame
+        // bases of the first linking call): only their number and lengths are read, which the
+        // frames of the letters and the preliminary frames share.
+        let s_frames_listed: &[QueryFrame] = if x_letter_frames_later {
+            s_frames_preliminary
+        } else {
+            &s_frames
+        };
         x_lap.lap(XStage::Translate);
 
         // [C] BlastOffsetPair *offset_pairs
@@ -3525,7 +3563,7 @@ fn search_query_batch(
             Some(x) => {
                 let x_subject = x_pair_par::XSubject {
                     s_frames_preliminary,
-                    s_frames: &s_frames,
+                    s_frames: s_frames_listed,
                     contexts: contexts_ref,
                     cutoff_scores: &cutoff_scores,
                     x_dropoff_per_context: &x_dropoff_per_context,
@@ -4171,7 +4209,7 @@ fn search_query_batch(
                     // status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
                     //      kHspNumMax, &(backup.offset), INT4_MIN, overlap, ...);
                     // ```
-                    get_ungapped_hsp_list(init_hsps, contexts_ref, &s_frames)
+                    get_ungapped_hsp_list(init_hsps, contexts_ref, s_frames_listed)
                 };
                 adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
                 TblastxChunkScanResult { chunk, hits, stats }
@@ -4827,7 +4865,7 @@ fn search_query_batch(
                     // status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
                     //      kHspNumMax, &(backup.offset), INT4_MIN, overlap, ...);
                     // ```
-                    get_ungapped_hsp_list(init_hsps, contexts_ref, &s_frames)
+                    get_ungapped_hsp_list(init_hsps, contexts_ref, s_frames_listed)
                 };
                 adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
                 TblastxChunkScanResult { chunk, hits, stats }
@@ -5246,15 +5284,20 @@ fn search_query_batch(
         // In NCBI, HSP coords live in a concatenated translation buffer with sentinels.
         // LOSAT uses per-frame sequences; for linking we emulate absolute offsets by
         // concatenating frames in the same order as `generate_frames()`.
-        let mut subject_frame_bases: Vec<i32> = Vec::with_capacity(s_frames.len());
+        let mut subject_frame_bases: Vec<i32> = Vec::with_capacity(s_frames_listed.len());
         let mut base: i32 = 0;
-        for f in &s_frames {
+        for f in s_frames_listed {
             subject_frame_bases.push(base);
             // NCBI concatenation shares the trailing NULLB sentinel between frames:
             //   offset += length + 1;
             // where `length` is the number of residues (excluding sentinels).
             // Source: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
             base += f.aa_seq.len() as i32 - 1;
+        }
+        // EXPERIMENT (LOSAT_X_TBXFRAMES): nothing below reads the preliminary frames (the seed
+        // stage has ended); they are freed before the linking call, where the heap peaks.
+        if x_frames_late {
+            drop(s_frames_preliminary_owned);
         }
 
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899
@@ -5341,10 +5384,26 @@ fn search_query_batch(
         // NCBI: Blast_HSPListReevaluateUngapped equivalent
         // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
         // Perform batch reevaluation on all HSPs after merging all frames
+        //
+        // EXPERIMENT (LOSAT_X_TBXFRAMES): a subject with ambiguous bases gets the frames of its
+        // letters here, after its preliminary frames were freed, when HSPs are left for the
+        // re-evaluation (none are read otherwise).
+        let x_letter_frames: Vec<QueryFrame>;
+        let (s_frames, s_frames_report): (&[QueryFrame], &[QueryFrame]) = if x_letter_frames_later {
+            x_letter_frames = if prelinked_ungapped_hits.is_empty() {
+                Vec::new()
+            } else {
+                subjects.x_letter_frames(s_idx, &db_code)
+            };
+            x_lap.lap(XStage::Translate);
+            (&x_letter_frames, &x_letter_frames)
+        } else {
+            (&s_frames, s_frames_report)
+        };
         let mut ungapped_hits = reevaluate_ungapped_hsp_list(
             prelinked_ungapped_hits,
             contexts_ref,
-            &s_frames,
+            s_frames,
             s_frames_report,
             &cutoff_scores,
             timing_enabled,
@@ -5983,7 +6042,34 @@ fn search_query_batch(
     }
 
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
+    if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 && x_subject_next::on() {
+        // EXPERIMENT (LOSAT_X_TBXNEXT): each thread of the pool takes the next subject when it is
+        // free, with one worker state per thread, made by the same initializer as below when the
+        // thread takes its first subject (tblastx/x_subject_next.rs). Same `process_subject`.
+        let parallel_pool = parallel_pool;
+        parallel_pool.install(|| {
+            x_subject_next::for_each_subject(
+                subjects.count(),
+                &|| WorkerState {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
+                    // ```c
+                    //     /* iterate over all subject sequences */
+                    //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+                    //            != BLAST_SEQSRC_EOF) {
+                    // ```
+                    // The state of one thread's iterations of this loop (as below).
+                    tx: tx_opt.clone(),
+                    hits: Vec::new(),
+                    offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                    diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
+                    // NCBI: diag_table->offset = window_size;
+                    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
+                    diag_offset: window,
+                },
+                &process_subject,
+            );
+        });
+    } else if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
         let parallel_pool = parallel_pool;
         parallel_pool.install(|| {
             (0..subjects.count()).into_par_iter().for_each_init(

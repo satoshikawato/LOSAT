@@ -556,6 +556,35 @@ Rebuilding less:
   identical` (`blocks`: blocks of the cut; `blocks_ref`: blocks of 1 MiB; `lists_compared`: hit lists
   compared that are not empty on either side). The preliminary stage runs twice, so its `LOSAT_TIMING`
   counts double.
+- `LOSAT_X_BPSUBJMETA=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it; acts only in the `-subject` block search of `LOSAT_X_BPQBLOCK`, for
+  blastp and blastp-fast) the subjects' tabular IDs and titles are made once for all blocks instead of once
+  per block (`blastp/blast_engine/x_subject_meta.rs`, exactness argument in its header). Without it each
+  block's search makes one title `Arc` per subject before its lookup table and every subject's tabular ID
+  (`tabular_subject_ids`: the title's first word, or for a `Subject_` first word the first word of NCBI's
+  generated definition line) in its output stage, and drops them at its end, on the block's thread while the
+  pool's other threads wait. With it the block search's subjects (`x_query_blocks::XBlockSubjects`, made with
+  the subjects' encoding) also hold each subject's ID result (`None` where the ID cannot be written: not an
+  error until a row needs it), the shown IDs and the titles, and every block borrows them; the check that
+  stops a block whose rows name a subject without a writable ID runs over that block's hit lists as before,
+  with the stored results (in the block search it never fails: the block search is taken only when every
+  subject's ID can be written). The values are functions of each subject record only, so reports, errors
+  and their order do not change. The search of all queries, `-db` (no subject records; its titles are read
+  per block from the database) and one-thread or many-thread searches without `LOSAT_X_BPQBLOCK` are not
+  changed. Memory: the IDs and titles of the subject set, once for the search (they were made per block). They now live
+  for the whole block search, alongside the search's peak, about 80 B per subject (about 0.5 MiB for 6,600
+  subjects, 8 MiB per 100k), and are freed when the block search ends.
+  Measured on the workstation (16 threads, 4 alternating pairs, `LOSAT_X_BPSUBJRUN` and the other blastp
+  switches on both sides, same outputs): human x yeast blastp-fast `-subject` with `LOSAT_X_BPQBLOCK=50000`
+  (254 blocks) 7.82 -> 7.45 s (0.952), with `LOSAT_X_BPQBLOCK=20000` (633 blocks) 10.58 -> 9.81 s (0.927);
+  exact blastp of 3,000 human proteins (23 blocks) unchanged (6.09 / 6.11 s); max RSS within the runs' spread.
+- `LOSAT_X_BPSUBJMETASHADOW=1` shadow of `LOSAT_X_BPSUBJMETA` (implies it): in each block whose output takes
+  the stored values, each subject's ID result and title and the result of `tabular_subject_ids` over the
+  block's hit lists (the shown IDs, or the error's text) are made again as without the switch and compared
+  element for element with the stored ones. The first difference stops the run (panic) after printing the
+  line that is otherwise printed at exit: `[X_SHADOW] BPSUBJMETA blocks= subjects_compared= identical`
+  (`blocks`: blocks whose output took the stored values; `subjects_compared`: the subjects compared in them;
+  both 0 where the block search of `-subject` is not taken).
 - `LOSAT_X_BPREDOPAR=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the composition-based redo of a search with more than one thread and
   at least two matches splits its matches between the threads, as NCBI's `omp for` over its array of

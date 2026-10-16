@@ -239,9 +239,9 @@ fn legacy_and_unsupported_syntax_is_unknown() {
         ] {
             let err = parse(program, &["-outfmt", "6", old]).unwrap_err();
             // The programs name the NCBI options that they do not implement (AGENTS.md
-            // rule 2). BLASTP, BLASTN and TBLASTN have `-db` (it takes a value, which is
-            // missing here).
-            if matches!(program, "blastp" | "blastn" | "tblastn") && old == "-db" {
+            // rule 2). BLASTP, BLASTN, TBLASTN and TBLASTX have `-db` (it takes a value,
+            // which is missing here).
+            if matches!(program, "blastp" | "blastn" | "tblastn" | "tblastx") && old == "-db" {
                 assert!(err.to_string().contains("-db requires one value"), "{err}");
                 continue;
             } else if matches!(old, "-db" | "-remote") {
@@ -922,7 +922,8 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastn", &["-db_hard_mask", "11"]),
         ("tblastn", &["-searchsp", "1000"]),
         ("tblastn", &["-db_soft_mask", "11"]),
-        ("tblastx", &["-db", "nt"]),
+        ("tblastx", &["-searchsp", "1000"]),
+        ("tblastx", &["-db_soft_mask", "11"]),
         ("blastp", &["-searchsp", "1000"]),
         ("blastp", &["-gilist", "ids.gil"]),
         ("blastp", &["-seqidlist", "ids.txt"]),
@@ -1166,6 +1167,57 @@ fn tblastn_takes_a_database_and_its_size() {
     // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
     let error =
         LOSAT::algorithm::tblastn::check_options(&tblastn(&["-db", "d"]).unwrap()).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("-db (a database search) is not supported by LOSAT Web yet"),
+        "{error:#}"
+    );
+}
+
+// TBLASTX's `-db NAME` and `-dbsize N`, as TBLASTN's: `-db` excludes `-subject` and
+// `-subject_loc`, `-dbsize` is an Int8 read with either of them.
+#[test]
+fn tblastx_takes_a_database_and_its_size() {
+    let tblastx = |words: &[&str]| {
+        let mut argv = vec!["losat", "tblastx", "-query", "q.fa"];
+        argv.extend(words);
+        try_parse_from::<Cli, _, _>(argv).map(|cli| match cli.command {
+            Commands::Tblastx(args) => args,
+            _ => unreachable!("tblastx"),
+        })
+    };
+    let args = tblastx(&["-db", " dir/name\t", "-dbsize", "3000000000"]).unwrap();
+    assert_eq!(args.db.as_deref(), Some(" dir/name\t"));
+    assert_eq!(args.subject, None);
+    assert_eq!(args.dbsize, Some(3_000_000_000));
+    assert_eq!(args.database_name(), Some("dir/name"));
+    for (word, value) in [("-5", -5), ("0x10", 16), ("9223372036854775807", i64::MAX)] {
+        let args = tblastx(&["-subject", "s.fa", "-dbsize", word]).unwrap();
+        assert_eq!(args.dbsize, Some(value), "{word}");
+    }
+    for word in ["abc", "1.5", "", "9223372036854775808"] {
+        let error = tblastx(&["-db", "d", "-dbsize", word]).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::ValueValidation,
+            "{word}"
+        );
+    }
+    for words in [
+        &["-db", "d", "-subject", "s.fa"][..],
+        &["-subject", "s.fa", "-db", "d"],
+        &["-db", "d", "-subject_loc", "1-10"],
+    ] {
+        let error = tblastx(words).unwrap_err();
+        assert_eq!(
+            error.kind(),
+            clap::error::ErrorKind::ArgumentConflict,
+            "{words:?}: {error}"
+        );
+    }
+    // LOSAT Web has no database files: its validation (`check_options`) rejects `-db`.
+    let error =
+        LOSAT::algorithm::tblastx::blast_engine::check_options(&tblastx(&["-db", "d"]).unwrap())
+            .unwrap_err();
     assert!(
         format!("{error:#}").contains("-db (a database search) is not supported by LOSAT Web yet"),
         "{error:#}"

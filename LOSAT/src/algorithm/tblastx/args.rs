@@ -45,6 +45,41 @@ pub struct TblastxArgs {
     pub query: PathBuf,
     #[arg(long, value_parser = ncbi_input_path(), value_name = "PATH")]
     pub subject: Option<PathBuf>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2364-2371
+    // ```c++
+    //         arg_desc.AddOptionalKey(kArgSubject, "subject_input_file",
+    //                                 "Subject sequence(s) to search",
+    //                                 CArgDescriptions::eInputFile);
+    //         ITERATE(vector<string>, dbarg, database_args) {
+    //             arg_desc.SetDependency(kArgSubject, CArgDescriptions::eExcludes,
+    //                                    *dbarg);
+    //         }
+    // ```
+    // (and the same exclusion for `-subject_loc`, blast_args.cpp:2377-2381). The exclusion
+    // is an error of the argument parser: LOSAT's parser reports it with its own text
+    // (PD-LOSAT-CLI-NONSEARCH-DIFFERENCES, exception 1). The database is searched by
+    // `tblastx/database.rs`.
+    #[arg(
+        long,
+        value_name = "NAME",
+        conflicts_with_all = ["subject", "subject_loc"],
+        help = "BLAST database name (a nucleotide database without parsed Seq-ids)"
+    )]
+    pub db: Option<String>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2231-2237
+    // ```c++
+    //     // DB size
+    //     if (!m_IsMapper) {
+    //         arg_desc.SetCurrentGroup("Statistical options");
+    //         arg_desc.AddOptionalKey(kArgDbSize, "num_letters",
+    //                                 "Effective length of the database ",
+    //                                 CArgDescriptions::eInt8);
+    //     }
+    // ```
+    // No constraint and no dependency: read with `-db` and with `-subject`
+    // (`subjects::SubjectSetNumbers`).
+    #[arg(long, value_parser = ncbi_int8, value_name = "LETTERS", help = "Effective length of the database")]
+    pub dbsize: Option<i64>,
     #[arg(long, default_value_t = 10.0, value_parser = tblastx_real)]
     pub evalue: f64,
     // NCBI blast_args.cpp:578-583: a double of at least 0; the lookup table takes its
@@ -172,6 +207,21 @@ impl TblastxArgs {
     /// errors first).
     pub fn seg_spec(&self) -> anyhow::Result<SegSpec> {
         crate::blastinput::app::parse_seg_option(&self.seg, "TBLASTX")
+    }
+
+    /// The `-db` value as NCBI keeps it (white space at its ends removed), `None` for a
+    /// search of `-subject`.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
+    /// ```c++
+    ///     if (args.Exist(kArgDb) && args[kArgDb]) {
+    /// 	std::string local_dblist = NStr::TruncateSpaces( args[kArgDb].AsString() );
+    ///
+    ///         m_SearchDb.Reset(new CSearchDatabase( local_dblist,
+    ///                                              mol_type));
+    /// ```
+    pub fn database_name(&self) -> Option<&str> {
+        self.db.as_deref().map(crate::seqdb::db_argument_name)
     }
 
     /// The subject file name as the reports show it.

@@ -645,10 +645,8 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
         name,
         "best_hit_overhang"
             | "best_hit_score_edge"
-            | "db"
             | "db_hard_mask"
             | "db_soft_mask"
-            | "dbsize"
             | "entrez_query"
             | "export_search_strategy"
             | "gilist"

@@ -216,6 +216,9 @@ fn report_error(error: anyhow::Error) -> anyhow::Error {
 //         formatter.PrintEpilog(opt);
 // ```
 pub fn run(args: &BlastxArgs) -> Result<()> {
+    // Diagnostic (LOSAT_TIMING): the clock of the run (x_timing.rs). No NCBI counterpart.
+    let x_t_run = super::x_timing::lap();
+    use super::x_timing::Run as XRun;
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3631-3639
     // ```c++
     //     NON_CONST_ITERATE(TBlastCmdLineArgs, arg, m_Args) {
@@ -437,10 +440,14 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             path: subject_path.expect("a subject file without -db"),
         },
     };
+    super::x_timing::run(XRun::Startup, x_t_run);
+    let x_t = super::x_timing::lap();
     report::write_prolog(&mut writer, &options, &subjects, &shown_run).map_err(report_error)?;
     // NCBI writes the prolog out before it searches the first batch, so the warnings of the
     // batch come after it when both streams go to one place.
     writer.flush().map_err(output_error)?;
+    super::x_timing::run(XRun::Prolog, x_t);
+    let x_t = super::x_timing::lap();
     // The database's sequences, read once for every batch; an error belongs to the first
     // batch with a valid context (`Subjects::Unreadable`, `search_error`).
     let (stores, unreadable) = match database.as_ref().map(BlastxDatabase::read_stores) {
@@ -448,6 +455,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         Some(Err(error)) => (None, Some(error)),
         None => (None, None),
     };
+    super::x_timing::run(XRun::ReadStores, x_t);
     let unreadable = std::cell::RefCell::new(unreadable);
     let search_subjects = match (&database, &stores) {
         (None, _) => Subjects::Fasta(&subjects),
@@ -482,20 +490,22 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         match (&database, &pairwise_database) {
             (Some(database), Some(pairwise)) => {
                 let reported = match &stores {
-                    Some(stores) => ReportedSubjects::for_batch(
-                        database,
-                        stores,
-                        results,
-                        options.gapped,
-                        options.outfmt != 0,
-                        options.outfmt == 0,
-                    )
-                    .map_err(|error| {
-                        match error.downcast::<HeaderReadError>() {
+                    Some(stores) => {
+                        let x_t = super::x_timing::lap();
+                        let reported = ReportedSubjects::for_batch(
+                            database,
+                            stores,
+                            results,
+                            options.gapped,
+                            options.outfmt != 0,
+                            options.outfmt == 0,
+                        );
+                        super::x_timing::run(XRun::Titles, x_t);
+                        reported.map_err(|error| match error.downcast::<HeaderReadError>() {
                             Ok(header) => header.error,
                             Err(error) => error,
-                        }
-                    })?,
+                        })?
+                    }
                     None => ReportedSubjects::default(),
                 };
                 report::render_queries(
@@ -526,6 +536,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         }
     };
     let mut processed = 0usize;
+    let x_t_loop = super::x_timing::lap();
     {
         // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:260-261
         // ```c++
@@ -635,7 +646,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         .collect();
                     // Fewer batches than threads (the end of the input): each one
                     // uses the pool inside, as the unbatched loop does.
-                    let searched = if batches.len() < pool.threads() {
+                    let x_t = super::x_timing::lap();
+                    let x_tail = batches.len() < pool.threads();
+                    let searched = if x_tail {
                         batches
                             .iter()
                             .map(|queries| {
@@ -653,9 +666,10 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                                 .par_iter()
                                 .with_max_len(1)
                                 .map(|queries| {
+                                    let x_t = super::x_timing::lap();
                                     // A long query is split into chunks that use
                                     // the pool; a short batch is one serial job.
-                                    if x_large(queries) {
+                                    let searched = if x_large(queries) {
                                         super::runtime::x_search_internal_in_pool(
                                             queries,
                                             search_subjects,
@@ -668,11 +682,25 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                                             search_subjects,
                                             &options,
                                         )
-                                    }
+                                    };
+                                    super::x_timing::run(XRun::WaveBusy, x_t);
+                                    searched
                                 })
                                 .collect::<Vec<_>>()
                         })
                     };
+                    // Diagnostic (LOSAT_TIMING): the wall time of the searches. No NCBI
+                    // counterpart.
+                    let x_wall = super::x_timing::run(XRun::Search, x_t);
+                    let (x_count, x_wall_stage) = if x_tail {
+                        (XRun::TailBatches, XRun::TailWall)
+                    } else {
+                        super::x_timing::run_add(XRun::Waves, 1);
+                        (XRun::WaveBatches, XRun::WaveWall)
+                    };
+                    super::x_timing::run_add(x_count, batches.len() as u64);
+                    super::x_timing::run_add(x_wall_stage, x_wall);
+                    let x_t = super::x_timing::lap();
                     let mut searched = searched.into_iter();
                     for event in &events {
                         match event {
@@ -693,6 +721,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                             }
                         }
                     }
+                    super::x_timing::run(XRun::Render, x_t);
                     Ok(())
                 };
                 let parsed = parse_fasta_stream_with_warnings(
@@ -769,7 +798,8 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                     // Dispatch point: with a kept pool the batch is searched on it; without one,
                     // search_internal runs as before. Both searches compute the same result (the
                     // pool only changes who runs the work).
-                    let mut results = match x_pool {
+                    let x_t = super::x_timing::lap();
+                    let searched = match x_pool {
                         Some(pool) => super::runtime::x_search_internal_in_pool(
                             queries,
                             search_subjects,
@@ -777,8 +807,10 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                             pool,
                         ),
                         None => search_internal(queries, search_subjects, &options),
-                    }
-                    .map_err(search_error)?;
+                    };
+                    super::x_timing::run(XRun::Search, x_t);
+                    let x_t = super::x_timing::lap();
+                    let mut results = searched.map_err(search_error)?;
                     render_batch(
                         &mut writer,
                         &mut **diagnostics.borrow_mut(),
@@ -786,6 +818,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         &mut results,
                     )?;
                     writer.flush().map_err(output_error)?;
+                    super::x_timing::run(XRun::Render, x_t);
                     processed += queries.len();
                     Ok(())
                 },
@@ -817,9 +850,14 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         };
         x_batches.map_err(input_error)?;
     }
+    super::x_timing::run(XRun::Loop, x_t_loop);
+    let x_t = super::x_timing::lap();
     report::write_epilog(&mut writer, &options, &subjects, &shown_run, processed)
         .map_err(report_error)?;
     writer.flush().map_err(output_error)?;
+    super::x_timing::run(XRun::Epilog, x_t);
+    super::x_timing::run(XRun::Total, x_t_run);
+    super::x_timing::write(&mut *stderr, options.num_threads as usize)?;
     Ok(())
 }
 // NCBI reference (598d8ae6): c++/src/objtools/readers/fasta.cpp:989-1013

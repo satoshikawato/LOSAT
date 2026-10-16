@@ -754,6 +754,9 @@ fn advance_diag_table_offset(
         diag_hash.occupancy = 1;
         diag_hash.offset = diag_hash.window;
         diag_hash.backbone.fill(0);
+        // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): every chain is empty now. No NCBI
+        // counterpart (empty while the switch is off).
+        diag_hash.max_level.fill(i32::MIN);
     } else {
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:180-181
         // ```c
@@ -816,6 +819,12 @@ struct DiagHashTable {
     chain: Vec<DiagHashCell>,
     offset: i32,
     window: i32,
+    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): per bucket, an upper bound of the levels of
+    // its cells (the largest level `insert` wrote since the table was made or cleared;
+    // `i32::MIN` for none), and whether `LOSAT_X_DIAGLVSHADOW` checks the skipped walks. Empty
+    // and false while the switch is off. No NCBI counterpart.
+    max_level: Vec<i32>,
+    x_lv_shadow: bool,
 }
 
 impl DiagHashTable {
@@ -833,6 +842,8 @@ impl DiagHashTable {
     // ```
     fn new(window: i32) -> Self {
         let capacity = DIAGHASH_CHAIN_LENGTH as u32;
+        // EXPERIMENT (LOSAT_X_DIAGLV): the level bounds when the switch is on.
+        let (max_level, x_lv_shadow) = x_diag_lv::new_levels();
         Self {
             num_buckets: DIAGHASH_NUM_BUCKETS,
             occupancy: 1,
@@ -841,6 +852,8 @@ impl DiagHashTable {
             chain: vec![DiagHashCell::default(); capacity as usize],
             offset: window,
             window,
+            max_level,
+            x_lv_shadow,
         }
     }
 
@@ -922,6 +935,14 @@ impl DiagHashTable {
     ) -> bool {
         let bucket =
             ((diag as u32).wrapping_mul(0x9E370001) % DIAGHASH_NUM_BUCKETS as u32) as usize;
+        // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): this insert writes `level` into one cell
+        // of this bucket (the match, a take-over or the append below). No NCBI counterpart;
+        // with the switch off `max_level` is empty and this is one length test.
+        if let Some(max_level) = self.max_level.get_mut(bucket) {
+            if *max_level < level {
+                *max_level = level;
+            }
+        }
         let mut index = self.backbone[bucket];
         while index != 0 {
             let cell = &mut self.chain[index as usize];
@@ -959,6 +980,22 @@ impl DiagHashTable {
         true
     }
 }
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:833-839
+// ```c
+//     rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
+//
+//     /* if there is no record in hashtable, we set last_hit to be a very negative number */
+//     if(!rc)  last_hit = 0;
+//
+//     /* hit within the explored area should be rejected*/
+//     if (s_off_pos < last_hit) return 0;
+// ```
+// EXPERIMENT (LOSAT_X_DIAGLV, shadow LOSAT_X_DIAGLVSHADOW): a fold's retrieve skips the walk of
+// a bucket whose cells all lie below the level that could change a decision of the seed (a
+// child module, so that it uses the private table of this file).
+#[path = "x_diag_lv.rs"]
+mod x_diag_lv;
 
 #[inline(always)]
 fn diag_hash_insert_window(window_size: usize, scan_range: usize, word_length: usize) -> i32 {
@@ -3665,17 +3702,17 @@ fn collect_prelim_hit_lists(
     collector.hit_lists
 }
 
-/// EXPERIMENT (LOSAT_X_BNSTREAM, off unless set): with two or more threads, the subjects of a
+/// EXPERIMENT (LOSAT_X_BNSTREAM, a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+/// and it is not set): with two or more threads, the subjects of a
 /// query batch are claimed by the threads in OID order and their results go to the hit lists in
 /// OID order while the threads search the next subjects (`x_bnstream::search_in_order`); a
 /// thread claims a subject only while it is fewer than `X_BNSTREAM_SUBJECTS_PER_THREAD`
 /// subjects per thread past the last one handed over, so that the HSPs of that window are held
-/// at a time instead of those of every subject. The hit lists are the same. Not in the strict
-/// set.
+/// at a time instead of those of every subject. The hit lists are the same.
 // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
 fn x_bnstream() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BNSTREAM").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNSTREAM"))
 }
 
 /// No NCBI counterpart: the subjects per thread of the window of `LOSAT_X_BNSTREAM`.
@@ -3872,6 +3909,11 @@ struct SubjectScratch {
     // } BLAST_DiagHash;
     // ```
     diag_hash: DiagHashTable,
+    // EXPERIMENT (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`): the allocations of the partition
+    // tables and buffers of the partitioned fold of the strips paths. Every partitioned stage
+    // copies `diag_hash` into the partition tables, so no content carries over from one stage
+    // to the next. Empty while the switch is off. No NCBI counterpart.
+    x_pair_fold: x_pair_seed::PartScratch,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176
     // ```c
     // if (ewp->diag_table->offset >= INT4_MAX / 4) {
@@ -3953,6 +3995,8 @@ impl SubjectScratch {
             hit_level_array: Vec::new(),
             hit_len_array: Vec::new(),
             diag_hash: DiagHashTable::new(window_size as i32),
+            // No NCBI counterpart: empty until a partitioned stage runs (LOSAT_X_PAIRPARFOLD).
+            x_pair_fold: x_pair_seed::PartScratch::default(),
             diag_table_offset: window_size as i32,
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
             // ```c
@@ -6377,6 +6421,8 @@ fn search(
     // No NCBI counterpart: the summary line of LOSAT_X_PAIRPARSHADOW (and the LOSAT_X_PAIRPAR
     // counters with LOSAT_TIMING); nothing without those switches.
     x_pair_seed::summary();
+    // No NCBI counterpart: the summary line of LOSAT_X_DIAGLVSHADOW; nothing without it.
+    x_diag_lv::summary();
     // No NCBI counterpart: the summary lines of LOSAT_X_GREEDYPRELIMSHADOW (and the
     // LOSAT_X_GREEDYPRELIM counters with LOSAT_X_STATS); nothing without those switches.
     x_greedy_prelim::summary();
@@ -9801,6 +9847,11 @@ fn search_query_batch(
                 let hit_level_array = &mut subject_scratch.hit_level_array;
                 let hit_len_array = &mut subject_scratch.hit_len_array;
                 let diag_hash = &mut subject_scratch.diag_hash;
+                // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the two retrieves of the
+                // diagonal hash in `process_offset_pairs` below skip the walk of a bucket whose
+                // cells all lie below the level bound, unless diagnostics print what they read.
+                let x_lv_ref = diag_hash.x_lv_on()
+                    && !(debug_enabled || blastn_trace_enabled || debug_window.is_some());
                 if use_array_indexing {
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:145-149
                     // ```c
@@ -9924,6 +9975,7 @@ fn search_query_batch(
                         },
                         diag_hash,
                         ungapped_hits,
+                        &mut subject_scratch.x_pair_fold,
                     ) {
                         continue;
                     }
@@ -9977,6 +10029,9 @@ fn search_query_batch(
                     };
 
                     let two_hits = window_size > 0;
+                    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants
+                    // of this chunk's seeds.
+                    let x_lv_seeds = x_diag_lv::LvSeeds::new(two_hits, word_length, window_size);
 
                     // DEBUG: Count loop iterations
                     let mut dbg_left_ext_iters = 0usize;
@@ -10435,18 +10490,27 @@ fn search_query_batch(
                                     s_ext_start as isize - q_ext_start as isize
                                 };
                                 let diag_idx = if use_array_indexing { diag as usize } else { 0 };
-                                let (last_hit, hit_saved) = if use_array_indexing
-                                    && diag_idx < diag_array_size
-                                {
-                                    let diag_entry = &hit_level_array[diag_idx];
-                                    (diag_entry.last_hit, diag_entry.flag != 0)
-                                } else if !use_array_indexing {
-                                    let (level, _hit_len, hit_saved) =
-                                        diag_hash.retrieve(diag as i32).unwrap_or((0, 0, false));
-                                    (level, hit_saved)
-                                } else {
-                                    (0, false)
-                                };
+                                let (last_hit, hit_saved) =
+                                    if use_array_indexing && diag_idx < diag_array_size {
+                                        let diag_entry = &hit_level_array[diag_idx];
+                                        (diag_entry.last_hit, diag_entry.flag != 0)
+                                    } else if !use_array_indexing {
+                                        // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same
+                                        // decisions without the walk of a bucket below the bound.
+                                        let (level, _hit_len, hit_saved) = if x_lv_ref {
+                                            diag_hash.retrieve_below(
+                                                diag as i32,
+                                                &x_lv_seeds,
+                                                s_ext_start + diag_offset as usize,
+                                            )
+                                        } else {
+                                            diag_hash.retrieve(diag as i32)
+                                        }
+                                        .unwrap_or((0, 0, false));
+                                        (level, hit_saved)
+                                    } else {
+                                        (0, false)
+                                    };
                                 let s_off_pos = s_ext_start + diag_offset as usize;
                                 let s_off_pos_i32 = s_off_pos as i32;
 
@@ -11478,6 +11542,9 @@ fn search_query_batch(
                     };
                     let mut scan_pause_ns: u64 = 0;
                     let mb_scan_kind = select_mb_scan_kind(safe_k, scan_step, subject_masked);
+                    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants
+                    // of this chunk's seeds (`s_end` adds `safe_k`).
+                    let x_lv_seeds = x_diag_lv::LvSeeds::new(window_size > 0, safe_k, window_size);
                     scan_subject_kmers_with_ranges(
                         search_seq_packed,
                         s_len,
@@ -11670,23 +11737,33 @@ fn search_query_batch(
                                 };
 
                                 // Get current diagonal state
-                                let (last_hit, hit_saved) = if use_array_indexing
-                                    && diag_idx < diag_array_size
-                                {
-                                    let diag_entry = &hit_level_array[diag_idx];
-                                    (diag_entry.last_hit, diag_entry.flag != 0)
-                                } else if !use_array_indexing {
-                                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:833-836
-                                    // ```c
-                                    // rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
-                                    // if(!rc)  last_hit = 0;
-                                    // ```
-                                    let (level, _hit_len, hit_saved) =
-                                        diag_hash.retrieve(diag as i32).unwrap_or((0, 0, false));
-                                    (level, hit_saved)
-                                } else {
-                                    (0, false)
-                                };
+                                let (last_hit, hit_saved) =
+                                    if use_array_indexing && diag_idx < diag_array_size {
+                                        let diag_entry = &hit_level_array[diag_idx];
+                                        (diag_entry.last_hit, diag_entry.flag != 0)
+                                    } else if !use_array_indexing {
+                                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:833-836
+                                        // ```c
+                                        // rc = s_BlastDiagHashRetrieve(hash_table, diag, &last_hit, &s_l, &hit_saved);
+                                        // if(!rc)  last_hit = 0;
+                                        // ```
+                                        // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same
+                                        // decisions without the walk of a bucket below the bound
+                                        // (`s_off_pos` below).
+                                        let (level, _hit_len, hit_saved) = if x_lv_ref {
+                                            diag_hash.retrieve_below(
+                                                diag as i32,
+                                                &x_lv_seeds,
+                                                kmer_start + diag_offset as usize,
+                                            )
+                                        } else {
+                                            diag_hash.retrieve(diag as i32)
+                                        }
+                                        .unwrap_or((0, 0, false));
+                                        (level, hit_saved)
+                                    } else {
+                                        (0, false)
+                                    };
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:656-672
                                 // ```c

@@ -11,6 +11,24 @@ export type Role = 'query' | 'subject';
 /** A FASTA file of LOSAT/tests/fasta. */
 export const fasta = (path: string): Buffer => readFileSync(join(REPOSITORY, 'LOSAT/tests/fasta', path));
 
+/**
+ * Waits until the engine's describe of the chosen program has come (or failed). It comes after
+ * the page opens (the Data worker starts its session and loads the serial reactor first: up to
+ * a second in Firefox) or the program changes, and its help and task move every control below
+ * "Program Selection" down. A click on such a control while it moves is lost: Firefox and
+ * WebKit press and release some 20-300 ms apart, Playwright checks the target at the press
+ * only, and the release lands on the panel (WF1, losat-baselines/web-flaky-20261016).
+ */
+export async function described(page: Page): Promise<void> {
+  await expect(page.getByTestId('search-panel')).toHaveAttribute('data-describe', /^(ready|failed)$/, { timeout: 30_000 });
+}
+
+/** Opens the application at its search form, once the form no longer moves (`described`). */
+export async function openSearch(page: Page): Promise<void> {
+  await page.goto('/');
+  await described(page);
+}
+
 /** Waits until input source `index` of a role is read, and its engine check (if any) has answered. */
 export async function settled(page: Page, role: Role, index = 0): Promise<void> {
   const source = page.getByTestId(`${role}-source-${index}`);
@@ -47,8 +65,10 @@ export async function showRecords(page: Page, role: Role, index = 0): Promise<vo
     .evaluate((details) => ((details as HTMLDetailsElement).open = true));
 }
 
+/** Chooses a program, and waits for its describe (`described`). */
 export async function program(page: Page, id: string): Promise<void> {
   await page.getByTestId(`program-${id}`).check();
+  await described(page);
 }
 
 /** Opens "Algorithm parameters" (W4b: it starts closed), where most options are set. */

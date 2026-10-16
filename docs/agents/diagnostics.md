@@ -1628,6 +1628,26 @@ Scheduling (each value computed by one thread with the original function; order 
   `[X_SHADOW] TBNXLATE` line on stderr at the end gives the plans and residues compared, or says
   that nothing was compared. With `LOSAT_X_STATS=1` a `[X_STATS] TBNXLATE table_plans=` line counts
   the plans made from the tables; `LOSAT/tests/tblastn_subject_translate.rs` reads both.
+- `LOSAT_X_TBNSCANBF=1` tblastn (speed; not in the strict set: off unless set, to any value;
+  `tblastn/x_scan_bf.rs`): the lookup scan of the unit path (`TBNPAR`, `search_seed.rs`
+  `x_scan_unit`) takes the subject in blocks of 256 words. Each word's position and table index are
+  written to a list whose length advances by the word's presence-vector bit, without a branch; the
+  hits of the listed words are then copied in position order. When the offset array has no room for
+  a word's hits, the scan stops at that word and the next call resumes there, as NCBI's
+  `s_BlastAaScanSubject` (`blast_aascan.c:75-127`) does, so every call returns NCBI's pairs and scan
+  range (test `x_scan_bf_equals_ncbi_scan_on_random_subjects` against
+  `s_blast_aa_scan_subject_one_range` on random subjects, with offset arrays down to the longest
+  chain). A backbone cell's hits are copied as three pairs, so the offset array has three entries
+  more. With `LOSAT_X_DEFAULT=0` the reference loop scans and the variable changes nothing; tblastx,
+  blastp and blastx keep their scans. perf stat on the workstation (one thread, a 411-residue
+  protein x the human genome `-db`, the same output): branch misses 1.96 G -> 0.46 G, cycles
+  136.0 G -> 96.7 G, instructions 285 G -> 348 G. Timed on the workstation (perf-si-20261012
+  session 20, node 0, NCBI BLAST+ 2.17.0 `-db`, LOSAT without and with the switch in turn, one
+  hash per case; time with the switch / without): human genome x one protein 0.73 at one thread
+  (45.6 -> 33.2 s, NCBI 44.9 s) and 0.77 at 8 threads (6.79 -> 5.21 s, NCBI 7.35 s); zebrafish
+  genome x one protein at one thread 0.79 (31.3 -> 24.6 s, NCBI 31.3 s). With many query proteins
+  the bit is set at most words and the branch is predicted: 0.98-0.99 (fly genome x one batch at
+  1 / 8 threads, E. coli MG1655 x 16 batches at 8, 16S x one batch at 8).
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject` without `-subject_loc`: each subject record's letters are
   packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
   database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of

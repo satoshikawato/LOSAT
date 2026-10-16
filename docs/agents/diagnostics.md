@@ -1046,12 +1046,17 @@ Scheduling (each value computed by one thread with the original function; order 
   (`lookup.rs` `build_disc_mb_lookup`, NCBI `s_FillDiscMBTable`: `hashtable`, `next_pos` and the counters
   of the longest chain, and with two templates `hashtable2`, `next_pos2` and their counters, both
   templates sharing one presence vector) are filled by the threads of the search pool
-  (`blastn/x_disc_lookup_par.rs`). Every thread reads every query's unmasked ranges in the original
-  order (the same ambiguity resets and word offsets) and applies a word's update for a template only
-  when that template's cell lies in one of its blocks of `2^max(11, pv_array_bts)` cells (the plan of
-  `LOSAT_X_PAIRPAR`'s megablast table), so each cell gets its words in the original order, each
-  presence-vector word and counter is written by one thread (a presence bit is only ever set), and
-  `longest_chain` is computed afterwards by the original code. It acts only where a LOSAT search pool
+  (`blastn/x_disc_lookup_par.rs`). The words are read in chunks of 524,288 positions, each in three
+  phases on the pool: (A) the chunk's positions are cut into one span per thread, and each thread
+  reads the words of its span with the loop's statements (entering a range up to `template_length - 1`
+  positions early, so the words and their template indices are the loop's) and sorts them into
+  buckets by the owner of their cell (blocks of `2^max(11, pv_array_bts)` cells dealt round robin, the
+  plan of `LOSAT_X_PAIRPAR`'s megablast table); (B) each owner applies the loop's update to the words of
+  its cells span by span, so each cell gets its words in the original order, and keeps each word's
+  previous head; (C) each thread writes `next_pos` (and `next_pos2`) of the words of its span from the
+  kept heads. Each presence-vector word and counter is written by one owner (a presence bit is only
+  ever set), and `longest_chain` is computed afterwards by the original code. The buckets hold 8 bytes
+  per word of a chunk and template (4 MiB per template). It acts only where a LOSAT search pool
   of two threads or more is current: the search's pool, or the private pool of a `LOSAT_X_QBATCHPAR`
   slot of two or more threads (never rayon's global pool); with one thread, a slot of one thread, a
   build without the `parallel` feature or WebAssembly without `wasm-threads` the original loop runs.
@@ -1065,8 +1070,8 @@ Scheduling (each value computed by one thread with the original function; order 
   fill and longest chain, not the shadow's second build; with `LOSAT_X_QBATCHPAR` it includes the
   slots' concurrent builds) and how many were filled on a pool. Tests: the unit tests of
   `x_disc_lookup_par.rs` (partitioned and pool fills equal the original loop for every template type,
-  length and word size, one and two templates, 1-16 parts, pools of 1, 2, 3 and 8 threads; the parts run
-  on at least two workers of a 3-thread pool; the shadow) and `LOSAT/tests/blastn_disc_lookup_par.rs`
+  length and word size, one and two templates, 1-16 parts, chunks of 1 to 4,096 positions, pools of 1,
+  2, 3 and 8 threads; the owners run on at least two workers of a 3-thread pool; the shadow) and `LOSAT/tests/blastn_disc_lookup_par.rs`
   (off / on / shadow equal at 1 and 4 threads, `-subject` and `-db`, one and two templates, with
   `LOSAT_X_PAIRPARDISC`, `LOSAT_X_QBATCHPAR` slots and split query chunks, megablast with and without a
   template, the timing line).

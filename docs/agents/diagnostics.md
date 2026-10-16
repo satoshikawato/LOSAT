@@ -649,8 +649,55 @@ Rebuilding less:
   bit). The first difference stops the run (panic). One line at exit: `[X_SHADOW] BPLKPFLAT tables_compared=
   outcomes_compared= recycled= recycled_hits= context_sets_compared= contexts_compared= contexts_from_tasks=
   identical` (`recycled` / `recycled_hits`: builds whose `starts` / whose `hits` are the buffer of an earlier
-  table, `hits` only where it had the room; `contexts_from_tasks`: contexts computed by the builds' tasks). With `LOSAT_X_BPCLUTSHADOW` the pool's build is the switch's (on the vectors that the
+  table, `hits` only where it had the room; with `LOSAT_X_BPLKPAHEAD` on, also builds ahead on the second
+  spare's vectors, which `x_make_room` allocated or moved there, since the reuse test sees only capacity; `contexts_from_tasks`: contexts computed by the builds' tasks). With `LOSAT_X_BPCLUTSHADOW` the pool's build is the switch's (on the vectors that the
   previous block's pool build gave back) and is compared with the serial flat build as well.
+- `LOSAT_X_BPLKPAHEAD=1` (BLASTP `-task blastp-fast`, speed; not in the strict set: off unless set, to any value,
+  and `LOSAT_X_DEFAULT` does not touch it; acts only in the block search of `LOSAT_X_BPQBLOCK`, with `-subject`
+  or `-db`, where `LOSAT_X_BPLKPFLAT` acts on the pool's flat table of `LOSAT_X_BPCLUT`: more than one thread;
+  not with `LOSAT_X_BPCLUTSHADOW`, not for exact blastp) builds the next query block's query frames, lookup
+  table and contexts during the block before it, as one task on the search's pool, instead of at the start
+  of the next block's own search (`blastp/blast_engine/x_lookup_ahead.rs`, exactness argument in its
+  header): the block loop runs each block's search in a `rayon::in_place_scope`, and when the block's own
+  table is ready (at once when it was itself built ahead) the next block's build is spawned there; the next
+  block's search then takes the values instead of computing them. They are the values of the same calls
+  (`blastp_query_frames`, `blastp_compressed_lookup`) on the same records, batches and pool, so the reports
+  do not change. A build ahead that fails, refuses, would need the reference builder (`TooLarge`) or lacks
+  the room in its vectors gives nothing, and the block builds inline, so an error is raised where it is
+  without the switch; a panic of the build is kept and resumed where the block's search would start (with
+  `panic = "abort"`, the release profile, it ends the process when it happens). Memory: one more table
+  (`starts`, `hits`, PV array) and one block's frames and contexts are alive while the next block's table
+  is built; every vector of that table is allocated by the block search's thread, never by a pool task:
+  that thread keeps a second spare (`x_query_blocks.rs` `XBlockSubjects`) with the room for the largest
+  table so far plus a half (new vectors of twice its hits where they are short; untouched capacity is not
+  resident), which the build ahead takes whole (`XFlatArgs::x_ahead`). At one thread nothing changes.
+  Measured 2026-10-16 on the workstation (node 0, 16 physical cores, siblings idle; Species4 hsap x Species6 scer
+  blastp-fast `-subject`, #199's blastp switches + `LOSAT_X_BPCLUT` `LOSAT_X_BPREDOPAR` `LOSAT_X_BPLKPFLAT`
+  `LOSAT_X_BPSUBJRUN` in every run; alternating pairs, medians; binary built from a local merge of this branch
+  with main 61b2a124, for `LOSAT_X_BPSUBJRUN`): `LOSAT_X_BPQBLOCK=50000` 16 threads 6.858 -> 6.476 s
+  (x0.944), max RSS 101.8-103.9 -> 125.9-128.1 MiB, `blastp_build_lookup` 1.89 -> 0.01 s; `=20000` 8.904 -> 8.139 s
+  (x0.914), 75.4-77.1 -> 93.3-95.4 MiB; 8 threads x0.980 / x0.965. The second table is 21.4 MiB at 50,000-letter
+  blocks (largest table: `hits` 18.4 MiB, `starts` 2.9 MiB, PV 0.1 MiB) and 13.2 MiB at 20,000 (largest
+  `hits` 10.3 MiB), counted on the hsap x scer queries with 8 threads. That accounts for the 50,000 arm's +24 MiB
+  (within about 3 MiB), but not for all of the 20,000 arm's +18 MiB (3.5-5 MiB more than one table) nor for
+  `-db`'s +34 MiB without `LOSAT_X_BPDBCUT` (13 MiB more). The rest is not attributed by measurement; the most
+  likely cause is the build's own transient buffers (up to 19 MiB of packed appends at 50,000 letters, frames,
+  contexts), which now coincide with the current block's search peak (with `-db`, including the scan's
+  per-thread blocks). `-db` (`BlastDBSpecies6`, 1 MiB database blocks) without `LOSAT_X_BPDBCUT`: 2 pairs
+  inconclusive (pairs x1.143 and x0.987; the job has two speed modes; the scan runs 3 of 16 threads), max RSS
+  93-95 -> 128-129 MiB. With `LOSAT_X_BPDBCUT=1` (binary from a local merge of this branch, main 61b2a124 and
+  #231; `-db`, 16 threads, 4 alternating pairs): 7.072 -> 6.602 s (x0.932, pairs 0.928-0.937), `blastp_build_lookup`
+  summed over the blocks 1.85 -> 0.015 s, max RSS 92.9-95.8 -> 116.4-120.6 MiB (+23 MiB), all outputs
+  equal (sha f4ecd9f36f7f2ea1).
+- `LOSAT_X_BPLKPAHEADSHADOW=1` shadow of `LOSAT_X_BPLKPAHEAD` (implies it): each block that takes values
+  built ahead also builds them inline as without the switch (on the block spare's vectors, given back
+  after) and compares them: the query frames field for field, the flat tables field for field and slot for
+  slot, the contexts with their Karlin blocks bit for bit. The first difference prints the line below with
+  `DIFFERENT` and stops the run (panic). One line at exit: `[X_SHADOW] BPLKPAHEAD blocks= prebuilt= dropped=
+  compared= identical` (`blocks`: blocks searched where the switch acts; `prebuilt`: blocks that took
+  values built ahead; `dropped`: builds ahead that gave none, whose blocks built inline; `compared`: blocks
+  compared; every block but the last starts one build once its own table is ready, if that table is a flat
+  one, as it is unless the reference builder made it, so `prebuilt + dropped = blocks - 1`).
 - `LOSAT_X_BPDIAG=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and `LOSAT_X_DEFAULT`
   does not touch it; acts only in the fused loop of `LOSAT_X_BPSEED` or `LOSAT_X_BPSEEDSHADOW`) the two-hit
   diagonal test of the hits of one lookup cell in batches of eight instead of one after the other

@@ -91,6 +91,15 @@
 //!   `blastp/x_query_blocks.rs`): the one-latch appends pass runs them after its chunks (the indices
 //!   past the chunks), each once, also when the build then ends `TooLarge` or refused. They read
 //!   nothing the build writes and the build reads nothing they write.
+//! - builds ahead (LOSAT_X_BPLKPAHEAD, `XFlatArgs::x_ahead`: the next query block's table, built by a
+//!   pool task during the block before it, `blastp/blast_engine/x_lookup_ahead.rs`): the same build,
+//!   whose `starts`, `hits` and `pv` all come from the spare that the block search's thread made ready
+//!   (`XFlatSpare::x_make_room`), so that no vector of the table is allocated by a pool thread (a
+//!   pool thread's allocations stay in its own glibc arena). `starts` and `hits` are sized and written
+//!   as above (the room is there, so `x_reuse` takes the buffers); `pv` is cleared and filled with
+//!   zeros, the values of a fresh zeroed vector. Where one of the three lacks the room the build stops
+//!   after the appends pass and makes no table (`None`, the spare keeps the vectors); the block then
+//!   builds its table itself.
 //!
 //! Off unless `LOSAT_X_BPCLUT` is set and the search's pool has more than one thread; at one thread
 //! the serial builder runs. `LOSAT_X_BPCLUTSHADOW` builds this table too (with more than one thread)
@@ -158,7 +167,7 @@ pub(super) fn x_try_build_flat_in_pool(
     x_flat_args: XFlatArgs<'_>,
 ) -> Option<XFlatBuild> {
     let threads = pool.threads();
-    let build = |passes, spare, poison| {
+    let build = |passes, spare, poison, x_ahead| {
         pool.install(|| {
             x_try_build_flat_parallel_with(
                 word_size,
@@ -175,21 +184,33 @@ pub(super) fn x_try_build_flat_in_pool(
                     passes,
                     spare,
                     poison,
+                    x_ahead,
                 },
             )
         })
     };
     if x_flat_args.mode == XLkpFlat::Off {
-        return build(XPasses::Rayon, None, false);
+        // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes only the switch's passes.
+        if x_flat_args.x_ahead {
+            return None;
+        }
+        return build(XPasses::Rayon, None, false, false);
     }
     let shadow = x_flat_args.mode == XLkpFlat::Shadow;
     let built = build(
         XPasses::OneLatch(x_flat_args.extra),
         x_flat_args.spare,
         shadow,
+        x_flat_args.x_ahead,
     );
-    if shadow {
-        x_lkpflat_shadow(built.as_ref(), build(XPasses::Rayon, None, false).as_ref());
+    // LOSAT_X_BPLKPAHEAD: a build ahead of its block that makes no table is dropped, and its block
+    // builds the table itself, whose outcome the shadow then compares (`XFlatArgs::x_ahead`).
+    let x_dropped = x_flat_args.x_ahead && !matches!(built, Some(XFlatBuild::Table(_)));
+    if shadow && !x_dropped {
+        x_lkpflat_shadow(
+            built.as_ref(),
+            build(XPasses::Rayon, None, false, false).as_ref(),
+        );
     }
     built
 }
@@ -238,6 +259,33 @@ impl XFlatSpare {
     fn take(&self) -> (Vec<u32>, Vec<i32>) {
         std::mem::take(&mut *self.0.lock().unwrap_or_else(PoisonError::into_inner))
     }
+
+    // No NCBI counterpart: which thread allocates the table's vectors (LOSAT_X_BPLKPAHEAD); it
+    // changes no value NCBI computes.
+    /// LOSAT_X_BPLKPAHEAD: whether the vectors kept have the room for `starts`, `hits` and `pv`
+    /// entries (`XFlatSpare::x_make_room`); if so, the PV array's vector is taken from the spare (the
+    /// others are taken with `take`).
+    fn x_room_for(&self, starts: usize, hits: usize, pv: usize) -> Option<Vec<u32>> {
+        let kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut kept_pv = self.1.lock().unwrap_or_else(PoisonError::into_inner);
+        (kept.0.capacity() >= starts && kept.1.capacity() >= hits && kept_pv.capacity() >= pv)
+            .then(|| std::mem::take(&mut *kept_pv))
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1224-1226 (`finalize`)
+// ```c
+//     pv = lookup->pv = (PV_ARRAY_TYPE *)calloc(
+//                               (lookup->backbone_size >> pv_array_bts) + 1,
+//                               sizeof(PV_ARRAY_TYPE));
+// ```
+// Buffer reuse (LOSAT_X_BPLKPAHEAD): the PV array is zeroed as `calloc` zeroes NCBI's.
+/// `len` zeroed entries in `pv`'s buffer, which has the room (`XFlatSpare::x_room_for`).
+fn x_zeroed_in(mut pv: Vec<u32>, len: usize) -> Vec<u32> {
+    debug_assert!(pv.capacity() >= len);
+    pv.clear();
+    pv.resize(len, 0);
+    pv
 }
 
 // No NCBI counterpart: buffer reuse (LOSAT_X_BPLKPFLAT; module header: no entry is read before the
@@ -319,6 +367,10 @@ struct XParallelCuts<'a> {
     /// LOSAT_X_BPLKPFLATSHADOW: `starts` and `hits` filled with `u32::MAX` / `i32::MIN` before the
     /// stripes write them.
     poison: bool,
+    /// LOSAT_X_BPLKPAHEAD: `starts`, `hits` and `pv` all come from `spare`, and without their room
+    /// the build makes no table (`None`); nothing of the table is allocated here
+    /// (`XFlatArgs::x_ahead`).
+    x_ahead: bool,
 }
 
 // No NCBI counterpart: the largest PV shift that `finalize` (blast_aalookup.c:1219-1222, below)
@@ -650,7 +702,10 @@ fn x_try_build_flat_parallel_with(
     let backbone_size = header.backbone_size;
     let largest_pv_shift = x_largest_pv_shift(backbone_size);
     if largest_pv_shift > X_MAX_STRIPE_SHIFT {
-        // A backbone past 2^21 * 2^11 cells: the serial builder.
+        // A backbone past 2^21 * 2^11 cells: the serial builder. It ignores `cuts.x_ahead` (the
+        // spare's vectors): a build ahead would allocate its table here, on the pool thread. This
+        // is unreachable for blastp-fast's compressed backbones (759,375 cells for word size 5,
+        // far below 2^32), and the table would have the same values.
         return x_try_build_flat_with_capacity(
             word_size,
             scaled_threshold,
@@ -758,8 +813,25 @@ fn x_try_build_flat_parallel_with(
     // The PV shift is `PV_ARRAY_BTS` whatever the counts when `x_largest_pv_shift` is (`finalize`,
     // below): the stripes set their PV words; else the PV array is made from the starts below.
     let pv_in_stripes = largest_pv_shift == PV_ARRAY_BTS;
+    // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes every vector of its table from the spare
+    // (its PV array's here) and allocates none; without their room it makes no table and leaves them
+    // in the spare (module header). The PV array has at most `(backbone_size >> PV_ARRAY_BTS) + 1`
+    // words at any PV shift.
+    let mut x_ahead_pv = None;
+    if cuts.x_ahead {
+        let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
+        x_ahead_pv = cuts
+            .spare
+            .and_then(|spare| spare.x_room_for(backbone_size + 1, total, pv_words));
+        if x_ahead_pv.is_none() {
+            return None;
+        }
+    }
     let mut pv = if pv_in_stripes {
-        vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1]
+        match x_ahead_pv.take() {
+            Some(buffer) => x_zeroed_in(buffer, (backbone_size >> PV_ARRAY_BTS) + 1),
+            None => vec![0u32; (backbone_size >> PV_ARRAY_BTS) + 1],
+        }
     } else {
         Vec::new()
     };
@@ -897,7 +969,11 @@ fn x_try_build_flat_parallel_with(
         pv_array_bts += ilog2(backbone_size / (8 * X_TARGET_PV_BYTES));
     }
     if !pv_in_stripes {
-        pv = vec![0u32; (backbone_size >> pv_array_bts) + 1];
+        // LOSAT_X_BPLKPAHEAD: in the spare's buffer for a build ahead of its block (above).
+        pv = match x_ahead_pv.take() {
+            Some(buffer) => x_zeroed_in(buffer, (backbone_size >> pv_array_bts) + 1),
+            None => vec![0u32; (backbone_size >> pv_array_bts) + 1],
+        };
         for (index, bounds) in starts.windows(2).enumerate() {
             if bounds[1] > bounds[0] {
                 compressed_pv_set(&mut pv, index, pv_array_bts);
@@ -962,6 +1038,7 @@ mod tests {
                     passes,
                     spare: spare.map(|(spare, _)| spare),
                     poison: spare.is_some_and(|(_, poison)| poison),
+                    x_ahead: false,
                 },
             )
         })
@@ -1441,6 +1518,7 @@ mod tests {
                         mode,
                         spare: None,
                         extra: Some(&extra),
+                        x_ahead: false,
                     },
                 ))
             })
@@ -1448,5 +1526,183 @@ mod tests {
             x_assert_same_flat_tables(&flat(built), &serial);
             extra.assert_each_ran(runs, &format!("threads {threads}, {mode:?}"));
         }
+    }
+
+    /// LOSAT_X_BPLKPAHEAD: the one-latch build ahead of its block (`x_ahead`) on `spare`.
+    #[allow(clippy::too_many_arguments)]
+    fn ahead(
+        threads: usize,
+        threshold: i32,
+        query: &[u8],
+        locations: &[(i32, i32)],
+        tables: &[std::ops::Range<usize>],
+        spare: Option<&XFlatSpare>,
+        poison: bool,
+    ) -> Option<XFlatBuild> {
+        in_pool(threads, || {
+            x_try_build_flat_parallel_with(
+                5,
+                threshold,
+                query,
+                locations,
+                tables,
+                XParallelCuts {
+                    overflow_cell_capacity: NCBI_OVERFLOW_CELL_CAPACITY,
+                    max_appends: None,
+                    threads,
+                    chunk_sizes: &[],
+                    stripe_shift: None,
+                    passes: XPasses::OneLatch(None),
+                    spare,
+                    poison,
+                    x_ahead: true,
+                },
+            )
+        })
+    }
+
+    /// The addresses of the spare's three vectors (`starts`, `hits`, `pv`).
+    fn spare_addresses(spare: &XFlatSpare) -> [usize; 3] {
+        let kept = spare.0.lock().unwrap();
+        let pv = spare.1.lock().unwrap();
+        [
+            kept.0.as_ptr() as usize,
+            kept.1.as_ptr() as usize,
+            pv.as_ptr() as usize,
+        ]
+    }
+
+    // LOSAT_X_BPLKPAHEAD: a build ahead of its block takes `starts`, `hits` and the PV array from the
+    // spare that `x_make_room` made ready (garbage in them, the hits shorter than the table's) and
+    // allocates none of them: the table holds the spare's three buffers and equals the fresh serial
+    // build slot for slot, at 1, 2, 3 and 7 threads, poisoned or not. A spare one entry short of the
+    // room for any of the three (or no spare) gives no table and keeps its vectors untouched.
+    #[test]
+    fn builds_ahead_take_every_vector_from_the_spare() {
+        let mut rng = XorShift(0x3c6e_f372_fe94_f82b);
+        let mut built_seen = 0usize;
+        for round in 0..4 {
+            let (letters, threshold): (&[u8], i32) = match round % 2 {
+                0 => (&FEW_LETTERS[..], 1100),
+                _ => (&LETTERS[..], 1100),
+            };
+            let lengths: Vec<usize> = (0..2 + rng.below(4)).map(|_| 1 + rng.below(400)).collect();
+            let (query, locations, first) = queries(&mut rng, &lengths, letters, round % 3);
+            let tables = [first[0]..first[lengths.len()]];
+            let serial = flat(x_try_build_flat_compressed_lookup(
+                5, threshold, &query, &locations, &tables,
+            ));
+            let backbone_size = serial.starts.len() - 1;
+            let total = serial.hits.len();
+            let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
+            for threads in THREADS {
+                for poison in [false, true] {
+                    // The room, with garbage in it.
+                    let spare = XFlatSpare::default();
+                    let mut hits = Vec::with_capacity(total + 5);
+                    hits.extend((0..total / 2).map(|_| rng.below(1 << 20) as i32));
+                    *spare.0.lock().unwrap() = (vec![u32::MAX - 3; backbone_size + 1], hits);
+                    *spare.1.lock().unwrap() = vec![u32::MAX; pv_words];
+                    let block = XFlatSpare::default();
+                    assert_eq!(spare.x_make_room(&block, backbone_size, total, total), 0);
+                    let given = spare_addresses(&spare);
+                    let built = flat(ahead(
+                        threads,
+                        threshold,
+                        &query,
+                        &locations,
+                        &tables,
+                        Some(&spare),
+                        poison,
+                    ));
+                    x_assert_same_flat_tables(&built, &serial);
+                    let held = [
+                        built.starts.as_ptr() as usize,
+                        built.hits.as_ptr() as usize,
+                        built.pv.as_ptr() as usize,
+                    ];
+                    assert_eq!(held, given, "round {round}, threads {threads}");
+                    assert_eq!(spare_capacities(&spare), (0, 0));
+                    assert_eq!(spare.1.lock().unwrap().capacity(), 0);
+                    built_seen += 1;
+                    // One entry short of the room for each vector in turn, and no spare.
+                    for short in 0..3 {
+                        if short == 1 && total == 0 {
+                            continue;
+                        }
+                        let spare = XFlatSpare::default();
+                        *spare.0.lock().unwrap() = (
+                            Vec::with_capacity(backbone_size + usize::from(short != 0)),
+                            Vec::with_capacity(total + usize::from(short != 1) - 1),
+                        );
+                        *spare.1.lock().unwrap() =
+                            Vec::with_capacity(pv_words - usize::from(short == 2));
+                        let kept = spare_addresses(&spare);
+                        let none = ahead(
+                            threads,
+                            threshold,
+                            &query,
+                            &locations,
+                            &tables,
+                            Some(&spare),
+                            poison,
+                        );
+                        assert!(none.is_none(), "round {round}, short {short}: no table");
+                        assert_eq!(spare_addresses(&spare), kept, "the spare keeps them");
+                    }
+                    let none = ahead(
+                        threads, threshold, &query, &locations, &tables, None, poison,
+                    );
+                    assert!(none.is_none());
+                }
+            }
+        }
+        assert!(built_seen > 0);
+    }
+
+    // LOSAT_X_BPLKPAHEAD: `x_make_room` keeps the spare's own vectors when they have the room, else
+    // moves the block spare's (the same buffers), and replaces each vector short of its room by an
+    // empty one of the asked capacity; it writes nothing into them.
+    #[test]
+    fn make_room_keeps_or_moves_the_vectors_and_allocates_only_what_is_short() {
+        let backbone_size = 759_375;
+        let pv_words = (backbone_size >> PV_ARRAY_BTS) + 1;
+        // Nothing kept anywhere: three new vectors.
+        let ahead_spare = XFlatSpare::default();
+        let block = XFlatSpare::default();
+        assert_eq!(
+            ahead_spare.x_make_room(&block, backbone_size, 1000, 1500),
+            3
+        );
+        {
+            let kept = ahead_spare.0.lock().unwrap();
+            assert!(kept.0.is_empty() && kept.0.capacity() >= backbone_size + 1);
+            assert!(kept.1.is_empty() && kept.1.capacity() >= 1500);
+            assert!(ahead_spare.1.lock().unwrap().capacity() >= pv_words);
+        }
+        // Enough room: nothing allocated, the same buffers.
+        let before = spare_addresses(&ahead_spare);
+        assert_eq!(
+            ahead_spare.x_make_room(&block, backbone_size, 1400, 3000),
+            0
+        );
+        assert_eq!(spare_addresses(&ahead_spare), before);
+        // `hits` short: only it is replaced (empty, with the grown capacity).
+        assert_eq!(
+            ahead_spare.x_make_room(&block, backbone_size, 1600, 3200),
+            1
+        );
+        let after = spare_addresses(&ahead_spare);
+        assert_eq!([after[0], after[2]], [before[0], before[2]]);
+        assert!(ahead_spare.0.lock().unwrap().1.capacity() >= 3200);
+        // An empty spare takes the block spare's vectors (the same buffers, contents kept).
+        let empty = XFlatSpare::default();
+        *block.0.lock().unwrap() = (vec![7; backbone_size + 1], vec![-7; 5000]);
+        let moved = spare_addresses(&block);
+        assert_eq!(empty.x_make_room(&block, backbone_size, 5000, 7500), 1);
+        let taken = spare_addresses(&empty);
+        assert_eq!([taken[0], taken[1]], [moved[0], moved[1]]);
+        assert_eq!(spare_capacities(&block), (0, 0));
+        assert_eq!(empty.0.lock().unwrap().1.len(), 5000);
     }
 }

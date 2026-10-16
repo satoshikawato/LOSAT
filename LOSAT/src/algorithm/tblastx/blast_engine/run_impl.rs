@@ -6051,13 +6051,13 @@ fn search_query_batch(
             x_subject_next::for_each_subject(
                 subjects.count(),
                 &|| WorkerState {
-                    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
                     // ```c
-                    // while (...) {
-                    //    ...
-                    //    status = s_BlastSearchEngineCore(..., &hsp_list, ...);
-                    // }
+                    //     /* iterate over all subject sequences */
+                    //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+                    //            != BLAST_SEQSRC_EOF) {
                     // ```
+                    // The state of one thread's iterations of this loop (as below).
                     tx: tx_opt.clone(),
                     hits: Vec::new(),
                     offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],

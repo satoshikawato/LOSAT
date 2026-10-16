@@ -199,6 +199,7 @@ fn block_subject(block: &SequenceBlock, i: usize) -> Result<BlastnSubjectRef<'_>
         packed: block.nucleotide_packed(i),
         letters: None,
         blastna: None,
+        store: None,
     })
 }
 
@@ -446,6 +447,7 @@ where
             letters: None,
             // The kernel's BLASTNA has no sentinel bytes.
             blastna: Some(&blastna[1..=length]),
+            store: None,
         };
         Ok(traceback(scratch, ordinal, subject, kept))
     };

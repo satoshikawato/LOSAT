@@ -137,7 +137,7 @@ impl<R> Window<R> {
                     if idle < 128 {
                         std::hint::spin_loop();
                     } else {
-                        std::thread::sleep(std::time::Duration::from_micros(nap));
+                        pause(nap);
                         nap = (nap * 2).min(1000);
                     }
                 }
@@ -192,6 +192,21 @@ impl<R> Window<R> {
                 }
             }
         }
+    }
+}
+
+/// No NCBI counterpart: a helper's wait for room in the window. A native helper sleeps
+/// `micros`; a wasm helper yields instead, because `std::thread::sleep` panics under the
+/// browser's WASI shim (@bjorn3/browser_wasi_shim 0.4.2 returns from `poll_oneoff` without
+/// writing the event count that std checks: "thread::sleep(): unexpected result of
+/// poll_oneoff").
+fn pause(micros: u64) {
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::sleep(std::time::Duration::from_micros(micros));
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = micros;
+        std::thread::yield_now();
     }
 }
 

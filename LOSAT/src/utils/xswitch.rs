@@ -32,7 +32,7 @@ use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: the switches of the strict set, the variables that are on by default.
-/// The last eighteen joined after the set became the default. `LOSAT_X_PAIRLUT` and
+/// The last twenty-six joined after the set became the default. `LOSAT_X_PAIRLUT` and
 /// `LOSAT_X_HSPINPLACE` were added after the change as switches that are off unless set and
 /// joined the set once they were verified with it on. `LOSAT_X_SEEDBUCKET` was left out at the
 /// change: it numbered the lookup hits of a chunk scan in a `u32`, exact only up to 2^32 hits
@@ -75,11 +75,15 @@ use std::sync::OnceLock;
 /// `LOSAT_X_TBNBATCHRULE` (which query batches `LOSAT_X_TBNBATCH` searches side by side, only the
 /// full waves of a small subject set, `tblastn/stage_d_pipeline.rs`) was added after the change as
 /// a switch that is off unless set and joined the set once it was verified and timed with it on.
+/// The eight blastp switches of the OrthoFinder work (`LOSAT_X_BPSEED`,
+/// `LOSAT_X_BPUNGAP`, `LOSAT_X_BPGAP`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`,
+/// `LOSAT_X_BPREDOFIT` and `LOSAT_X_BPQBLOCK`) joined after a 49-job full-scale run with all of
+/// them on: the outputs equal NCBI's and the max RSS is below NCBI's on every job.
 /// `LOSAT_X_BNSTREAM` (BLASTN hands each subject's HSPs to the hit lists in OID order from a
 /// bounded window while the threads search, `blastn/blast_engine/x_bnstream.rs`) was added after
 /// the change as a switch that is off unless set and joined the set once it was verified and timed
 /// with it on.
-pub(crate) const STRICT_SET: [&str; 61] = [
+pub(crate) const STRICT_SET: [&str; 69] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_PURGEFAST",
@@ -140,6 +144,14 @@ pub(crate) const STRICT_SET: [&str; 61] = [
     "LOSAT_X_TBNSTORE",
     "LOSAT_X_DPNEON",
     "LOSAT_X_TBNBATCHRULE",
+    "LOSAT_X_BPSEED",
+    "LOSAT_X_BPUNGAP",
+    "LOSAT_X_BPGAP",
+    "LOSAT_X_BPLUT",
+    "LOSAT_X_BPPFREE",
+    "LOSAT_X_BPPCOMPACT",
+    "LOSAT_X_BPREDOFIT",
+    "LOSAT_X_BPQBLOCK",
     "LOSAT_X_BNSTREAM",
 ];
 

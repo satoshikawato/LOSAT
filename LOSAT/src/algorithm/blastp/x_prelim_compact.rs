@@ -24,8 +24,9 @@
 //! floating-point values), panics on the first difference, then runs the redo on the off path's
 //! lists. `main` prints `[X_SHADOW] BPPCOMPACT compared=<lists> hsps=<n>`.
 //!
-//! Off unless `LOSAT_X_BPPCOMPACT` is set (any value other than `shadow` turns it on). Not in the
-//! strict set. With `LOSAT_TIMING=1` a search with the switch prints
+//! `LOSAT_X_BPPCOMPACT` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`,
+//! or `LOSAT_X_DEFAULT=0` and it is not set; the value `shadow` builds and compares both lists.
+//! With `LOSAT_TIMING=1` a search with the switch prints
 //! `[TIMING] x_bppcompact: expanded_lists=<n>` (the hit lists expanded during the search, those of
 //! its query chunks included).
 
@@ -56,13 +57,18 @@ impl XPrelimCompact {
 
 // No NCBI counterpart: reads the LOSAT_X_BPPCOMPACT switch once; it does not change any value
 // NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPPCOMPACT): off unless set; `shadow` builds and compares both lists.
+/// EXPERIMENT (LOSAT_X_BPPCOMPACT): a strict-set switch, on unless it is `0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set; the value `shadow` builds and compares both lists.
 pub(crate) fn x_bp_prelim_compact() -> XPrelimCompact {
     static MODE: OnceLock<XPrelimCompact> = OnceLock::new();
-    *MODE.get_or_init(|| match std::env::var_os("LOSAT_X_BPPCOMPACT") {
-        None => XPrelimCompact::Off,
-        Some(value) if value == "shadow" => XPrelimCompact::Shadow,
-        Some(_) => XPrelimCompact::On,
+    *MODE.get_or_init(|| {
+        if !crate::utils::xswitch::on("LOSAT_X_BPPCOMPACT") {
+            XPrelimCompact::Off
+        } else if std::env::var("LOSAT_X_BPPCOMPACT").is_ok_and(|v| v.trim() == "shadow") {
+            XPrelimCompact::Shadow
+        } else {
+            XPrelimCompact::On
+        }
     })
 }
 

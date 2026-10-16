@@ -5,7 +5,8 @@
 //! set, and it acts in the fused seed loop of `LOSAT_X_BPSEED`. With it on, the hits of one lookup
 //! cell are tested in batches of eight in AVX2 registers where the CPU has AVX2; without it the
 //! per-hit loop runs, and `LOSAT_X_BPDIAG_SIMD=0` forces the scalar batch. These tests compare the
-//! reports with the reference loop and the per-hit fused loop at one and four threads, on a
+//! reports with the reference loop (`LOSAT_X_DEFAULT=0`: `LOSAT_X_BPSEED` is in the strict set, on
+//! by default) and the per-hit fused loop at one and four threads, on a
 //! generated pair (long lookup cells from repeats, related proteins for two-hit extensions) and on
 //! the fixture pair, run the shadow of `LOSAT_X_BPSEEDSHADOW` (the batched loop against the
 //! reference for every subject), and check from the
@@ -199,6 +200,9 @@ fn generated_pair(test: &str) -> (PathBuf, PathBuf) {
     )
 }
 
+/// The reference loop: every switch of the strict set off.
+const REFERENCE: &[(&str, &str)] = &[("LOSAT_X_DEFAULT", "0")];
+
 #[test]
 fn batched_cells_give_the_reports_of_the_per_hit_loop() {
     let (query, subject) = generated_pair("per_hit_loop");
@@ -209,7 +213,7 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
     for (query, subject) in &pairs {
         for threads in [1, 4] {
             let (reference, reference_counts, _) =
-                blastp(query, subject, threads, &[], &["-outfmt", "6"]);
+                blastp(query, subject, threads, REFERENCE, &["-outfmt", "6"]);
             assert!(!reference.is_empty(), "the pair has a report");
             assert!(reference_counts.is_empty(), "no line without the switch");
             let (fused, fused_counts, _) = blastp(
@@ -246,7 +250,7 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
     }
     // The pairwise report too, on the fixture pair.
     let (query, subject) = &pairs[1];
-    let (reference, _, _) = blastp(query, subject, 1, &[], &["-outfmt", "0"]);
+    let (reference, _, _) = blastp(query, subject, 1, REFERENCE, &["-outfmt", "0"]);
     let (report, _, _) = blastp(
         query,
         subject,
@@ -260,7 +264,7 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
 #[test]
 fn the_shadow_compares_the_batched_loop_with_the_reference() {
     let (query, subject) = generated_pair("shadow");
-    let (reference, _, _) = blastp(&query, &subject, 1, &[], &["-outfmt", "6"]);
+    let (reference, _, _) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
     for simd in ["1", "0"] {
         let (rows, counts, stderr) = blastp(
             &query,

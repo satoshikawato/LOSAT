@@ -23,7 +23,7 @@ pub const AA_HITS_PER_CELL: usize = 3;
 #[path = "x_lut_direct.rs"]
 mod x_lut_direct;
 pub(crate) use x_lut_direct::x_shadow_tables as x_bxlut_shadow_tables;
-// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): BLASTP's table built in place
+// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): BLASTP's table built in place
 // by the same builder (x_lut_direct.rs); the shadow counter for the exit summary.
 pub(crate) use x_lut_direct::x_bplut_shadow_tables;
 // EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the direct builder of the TBLASTX unit
@@ -1446,7 +1446,7 @@ pub fn build_ncbi_lookup(
 //         }
 //     }
 // ```
-/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): [`build_ncbi_lookup`] for
+/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): [`build_ncbi_lookup`] for
 /// BLASTP; with the switch the table is filled in place from the per-cell counts, in the same
 /// append order as the loop above and BlastAaLookupFinalize (x_lut_direct.rs), so the chains of
 /// the reference builder are never held.

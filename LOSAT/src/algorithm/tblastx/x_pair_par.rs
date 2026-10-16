@@ -382,6 +382,13 @@ const X_LAST_HIT_MARGIN: i64 = 1 << 16;
 /// (x1.03-1.72).
 const X_GATE_DIAG_CELLS: i32 = 1 << 18;
 
+/// No NCBI counterpart: LOSAT_X_PAIRPARGATE acts only for a lookup threshold of at least TBLASTX's
+/// default (13), where it was measured. A lower threshold puts more words in every query position:
+/// more hits share each scan position (the units' extra scans weigh less) and the full table grows
+/// faster than the group tables (`-threshold +inf`, which NCBI converts to INT_MIN, every word: 14.2
+/// GB for the reference loop, 3.3 GB for the units, 5.9 GB for NCBI on the option-sweep inputs).
+const X_GATE_MIN_THRESHOLD: i32 = 13;
+
 /// The per-batch inputs of `XPairPar::prepare`.
 pub(super) struct XBatch<'a> {
     pub lookup: &'a BlastAaLookupTable,
@@ -398,6 +405,8 @@ pub(super) struct XBatch<'a> {
     pub lut: Option<XLutBatch>,
     /// The threads of the batch's search pool (`SearchPool::threads`), as the build site reads them.
     pub threads: usize,
+    /// The lookup threshold, as the build site reads it (`XLutEarly::threshold`).
+    pub threshold: i32,
 }
 
 /// What the unit path does with a batch (`decide`).
@@ -429,6 +438,8 @@ pub(super) struct XGates<'a> {
     pub threads: usize,
     /// `cost_gate()`: LOSAT_X_PAIRPARGATE acts.
     pub cost_gate: bool,
+    /// The lookup threshold (`lookup->threshold`, `ncbi_int4_from_double` of `-threshold`).
+    pub threshold: i32,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
@@ -479,12 +490,13 @@ pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
 // No NCBI counterpart: a choice between two LOSAT paths with the same result (module doc items
 // 1-4), from the batch's sizes and the thread count only.
 /// LOSAT_X_PAIRPARGATE: whether the unit path is expected to be faster than the reference loop for
-/// a batch. Either the reference's diagonal table is large (`X_GATE_DIAG_CELLS`), or the search has
+/// a batch. Either the lookup threshold is below `X_GATE_MIN_THRESHOLD` (not measured; the units
+/// stay), or the reference's diagonal table is large (`X_GATE_DIAG_CELLS`), or the search has
 /// several threads and one subject holds more than one and a half thread's share of the bases
 /// (`2 * longest * threads > 3 * total`): the reference loop searches a subject on one thread, the
 /// units split it over the pool, at up to about 1.5 times the work on short queries.
 fn units_gain(g: &XGates<'_>) -> bool {
-    if g.diag_array_size >= X_GATE_DIAG_CELLS {
+    if g.threshold < X_GATE_MIN_THRESHOLD || g.diag_array_size >= X_GATE_DIAG_CELLS {
         return true;
     }
     if g.threads <= 1 {
@@ -651,6 +663,7 @@ fn lut_direct(e: &XLutEarly<'_>, shadow: bool) -> Option<XLutBatch> {
         ),
         threads: e.pool.threads(),
         cost_gate: cost_gate(),
+        threshold: e.threshold,
     };
     if decide(mode(), &gates) != XDecision::Units {
         return None;
@@ -881,6 +894,7 @@ impl XPairPar {
                 chunk_switches: b.chunk_switches,
                 threads: b.threads,
                 cost_gate: cost_gate(),
+                threshold: b.threshold,
             },
         );
         if decision != XDecision::Off {
@@ -2458,6 +2472,7 @@ mod tests {
                     chunk_switches,
                     threads: 1,
                     cost_gate: false,
+                    threshold: 13,
                 },
             )
         };
@@ -2487,15 +2502,16 @@ mod tests {
                 chunk_switches: false,
                 threads: 1,
                 cost_gate: false,
+                threshold: 13,
             };
             assert_eq!(decide(m, &gates), XDecision::Guard);
         }
     }
 
     // No NCBI counterpart: LOSAT_X_PAIRPARGATE chooses between two LOSAT paths with the same result.
-    // The cost gate comes after the gates and the guard, acts only in mode 1, keeps the units for a
-    // reference table of 2^18 cells or more, and at several threads for a subject that holds more
-    // than one and a half thread's share of the bases.
+    // The cost gate comes after the gates and the guard, acts only in mode 1, keeps the units below
+    // the default threshold, for a reference table of 2^18 cells or more, and at several threads
+    // for a subject that holds more than one and a half thread's share of the bases.
     #[test]
     fn the_cost_gate_keeps_the_units_where_they_gain() {
         let mut rng = Rng(7);
@@ -2517,12 +2533,13 @@ mod tests {
             FastaRecord::new("", b"s", &[b'A'; 30]),
             FastaRecord::new("", b"l", &[b'A'; 123]),
         ];
-        let decision = |m: u8,
-                        diag_array_size: i32,
-                        subjects: &[FastaRecord],
-                        debugging: bool,
-                        threads: usize,
-                        cost_gate: bool| {
+        let decision_at = |threshold: i32,
+                           m: u8,
+                           diag_array_size: i32,
+                           subjects: &[FastaRecord],
+                           debugging: bool,
+                           threads: usize,
+                           cost_gate: bool| {
             decide(
                 m,
                 &XGates {
@@ -2534,7 +2551,24 @@ mod tests {
                     chunk_switches: false,
                     threads,
                     cost_gate,
+                    threshold,
                 },
+            )
+        };
+        let decision = |m: u8,
+                        diag_array_size: i32,
+                        subjects: &[FastaRecord],
+                        debugging: bool,
+                        threads: usize,
+                        cost_gate: bool| {
+            decision_at(
+                13,
+                m,
+                diag_array_size,
+                subjects,
+                debugging,
+                threads,
+                cost_gate,
             )
         };
         // Without the gate (or in shadow mode) nothing changes.
@@ -2556,6 +2590,19 @@ mod tests {
         assert_eq!(
             decision(1, 1 << 18, &mixed, false, 2, true),
             XDecision::Units
+        );
+        // Below the default threshold (and INT_MIN, `-threshold +inf`) the units stay.
+        assert_eq!(
+            decision_at(12, 1, 256, &one, false, 1, true),
+            XDecision::Units
+        );
+        assert_eq!(
+            decision_at(i32::MIN, 1, 256, &one, false, 1, true),
+            XDecision::Units
+        );
+        assert_eq!(
+            decision_at(14, 1, 256, &one, false, 1, true),
+            XDecision::Cost
         );
         // The gates and the guard come first.
         assert_eq!(decision(1, 256, &one, true, 1, true), XDecision::Gate);

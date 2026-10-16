@@ -1543,7 +1543,11 @@ Scheduling (each value computed by one thread with the original function; order 
   reference frame loop (`units_gain` in `tblastx/x_pair_par.rs`): the reference's diagonal table has
   2^18 cells or more (query length plus window above 131,072 letters, a translated query batch of
   more than about 65 kb), or the search has two or more threads and one subject holds more than one
-  and a half thread's share of the bases (`2 * longest * threads > 3 * total`). Otherwise the batch
+  and a half thread's share of the bases (`2 * longest * threads > 3 * total`), or the lookup
+  threshold is below TBLASTX's default of 13 (not measured; a lower threshold puts more words in
+  every position, and the full table grows faster than the group tables: with `-threshold +inf`,
+  which NCBI converts to INT_MIN, every word, the option-sweep inputs took 14.2 GB in the reference
+  loop, 3.3 GB in the units and 5.9 GB in NCBI). Otherwise the batch
   runs the reference loop with the full lookup table, as for the guard (`LOSAT_X_STATS=1` counts it
   as `fallback_cost` at the end of the `[X_STATS] PAIRPAR` line). A unit scans its subject frame
   with one group's table, so each frame is scanned once per group (up to 6 times), and every unit

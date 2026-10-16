@@ -2,7 +2,8 @@
 //! for a batch where it is expected to be faster than the reference frame loop
 //! (`units_gain` in `src/algorithm/tblastx/x_pair_par.rs`): a reference diagonal table of 2^18
 //! cells or more, or several threads and one subject with more than one and a half thread's share
-//! of the bases. Other batches run the reference loop ("fallback: cost").
+//! of the bases, or a lookup threshold below the default (13). Other batches run the reference
+//! loop ("fallback: cost").
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:500-504
 //! ```c
@@ -95,6 +96,7 @@ fn tblastx(
     query: &Path,
     subject: &Path,
     threads: u32,
+    extra: &[&str],
     switches: &[(&str, &str)],
 ) -> (Vec<u8>, u64, u64) {
     let mut all = vec![("LOSAT_X_STATS", "1")];
@@ -106,6 +108,7 @@ fn tblastx(
         .arg("-subject")
         .arg(subject)
         .args(["-outfmt", "6", "-num_threads", &threads.to_string()])
+        .args(extra)
         .output()
         .expect("run LOSAT");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -130,15 +133,15 @@ fn tblastx(
 const GATE: (&str, &str) = ("LOSAT_X_PAIRPARGATE", "1");
 
 /// The reports with and without the gate are the same; returns (units, fallback_cost) with it.
-fn with_and_without(query: &Path, subject: &Path, threads: u32) -> (u64, u64) {
-    let (reference, units_without, cost_without) = tblastx(query, subject, threads, &[]);
+fn with_and_without(query: &Path, subject: &Path, threads: u32, extra: &[&str]) -> (u64, u64) {
+    let (reference, units_without, cost_without) = tblastx(query, subject, threads, extra, &[]);
     assert!(
         reference.iter().filter(|&&b| b == b'\n').count() > 5,
         "the search finds hits"
     );
     assert!(units_without > 0, "without the gate the units run");
     assert_eq!(cost_without, 0);
-    let (report, units, cost) = tblastx(query, subject, threads, &[GATE]);
+    let (report, units, cost) = tblastx(query, subject, threads, extra, &[GATE]);
     assert!(
         report == reference,
         "threads {threads} {}: the report differs with the gate",
@@ -156,11 +159,22 @@ fn a_short_query_against_short_subjects_takes_the_reference_loop() {
     let set = pieces(&dir);
     for threads in [1, 2, 4] {
         assert_eq!(
-            with_and_without(&q, &set, threads),
+            with_and_without(&q, &set, threads, &[]),
             (0, 1),
             "threads {threads}"
         );
     }
+}
+
+// Below the default threshold the gate does not act: the same search keeps the units.
+#[test]
+fn a_threshold_below_the_default_keeps_the_units() {
+    let dir = temp_dir("threshold");
+    let q = query(&dir, "MjeNMV.fasta", 6_000);
+    let set = pieces(&dir);
+    let (units, cost) = with_and_without(&q, &set, 1, &["-threshold", "12"]);
+    assert!(units > 0);
+    assert_eq!(cost, 0);
 }
 
 // The same query against one genome: the reference loop at one thread, the units (which split the
@@ -170,9 +184,9 @@ fn one_long_subject_keeps_the_units_at_several_threads() {
     let dir = temp_dir("one");
     let q = query(&dir, "MjeNMV.fasta", 6_000);
     let genome = fasta("PemoMJNVA.fasta");
-    assert_eq!(with_and_without(&q, &genome, 1), (0, 1));
+    assert_eq!(with_and_without(&q, &genome, 1, &[]), (0, 1));
     for threads in [2, 4] {
-        let (units, cost) = with_and_without(&q, &genome, threads);
+        let (units, cost) = with_and_without(&q, &genome, threads, &[]);
         assert!(units > 0, "threads {threads}");
         assert_eq!(cost, 0, "threads {threads}");
     }
@@ -184,7 +198,7 @@ fn a_long_query_keeps_the_units() {
     let dir = temp_dir("long");
     let q = query(&dir, "MelaMJNV.fasta", 70_000);
     let set = pieces(&dir);
-    let (units, cost) = with_and_without(&q, &set, 1);
+    let (units, cost) = with_and_without(&q, &set, 1, &[]);
     assert!(units > 0);
     assert_eq!(cost, 0);
 }

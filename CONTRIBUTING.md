@@ -139,5 +139,7 @@ Before opening a PR, please verify:
 
 - Pull requests of this repository get auto-merge (merge commit) when they are opened as ready or marked ready for review.
 - They merge when the required checks of `main` pass: `rust`, `fast output regressions`, `platform checks result`, and `web result` (the ruleset is set by the repository owner).
+- On a pull request, `platform checks result` (`.github/workflows/platform-checks.yml`) covers the outputs of the 49 platform-check cases on Linux x64, Linux arm64, Windows x64 and macOS arm64, and `cargo test --all-features` in both switch modes on Linux arm64 and Windows x64. Its platform jobs run only when the engine (`LOSAT/src/**`), the Cargo files, `LOSAT/build.rs` or the workflow's own files changed, and not on a draft (a draft runs them when it is marked ready for review). macOS x64 and the macOS `cargo test` jobs run on each push to `main` (one run at a time) and weekly.
+- Once a pull request is ready and its checks run, push to it only to resolve a merge conflict or to fix a failed check: each push cancels its Platform checks run and queues it again behind the other pull requests. `main` does not require the branch to be up to date, so merging `main` into a branch without conflicts is not needed.
 - Draft pull requests are not merged; mark one ready to turn auto-merge on.
 - Turn it off for one pull request with "Disable auto-merge" on its page.

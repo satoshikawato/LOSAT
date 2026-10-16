@@ -475,6 +475,32 @@ Rebuilding less:
   at exit: `[X_SHADOW] BPSUBJRUN searches= runs= subjects= fills_saved= resets_in_runs= subjects_compared=
   tables_checked= identical` (`fills_saved`: subjects searched without a fill of their own; `resets_in_runs`:
   INT4_MAX / 4 resets inside a run; `tables_checked`: tables checked before a later subject of a run).
+- `LOSAT_X_BPDBCUT=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it; acts only where a `-db` search runs its preliminary stage on the pool:
+  more than one thread; blastp and blastp-fast, the only tasks whose search reaches the `-db` block driver) the
+  preliminary stage of `-db` reads the database in blocks of clamp(sequence bytes / (4 x threads), 4 KiB,
+  1 MiB) instead of 1 MiB, where the sequence bytes are the letters, one per sequence and one more (the size
+  of a one-volume `.psq` file) (`blastp/blast_engine/database/x_db_cut.rs`, exactness argument in its
+  header). Without it a database of a few MiB is a few blocks, and a round of the parallel stage has fewer
+  tasks than threads: OrthoFinder's `BlastDBSpecies6` (2.92 MB) is 3 blocks, so 3 of 16 threads search
+  (12.85 s of wall for 33.7 s of CPU on the workstation). With it the same database is about 64 blocks at 16
+  threads; a database of at least 4 x threads MiB keeps blocks of 1 MiB, and one thread is unchanged. This
+  changes dbsearch decision (6) ("blocks of 1 MiB, 8 per thread and round") at more than one thread while the
+  switch is on; the rounds of 8 blocks per thread stay. The cut only moves where blocks end: every block
+  starts from a cleared diagonal table at the one-thread order's offset of its first sequence, and the
+  round's results are merged in ordinal order, as for blocks of 1 MiB. A search that fails (a damaged
+  database) returns the one-thread order's error: the blocks of 1 MiB are read and prepared again in order up
+  to the first error, because a smaller block can meet another error first or name another byte range.
+  Memory: a worker holds one block of at most the cut, and a round covers at most the bytes it covers
+  without the switch.
+- `LOSAT_X_BPDBCUTSHADOW=1` shadow of `LOSAT_X_BPDBCUT` (implies it): after each `-db` search with the cut,
+  the search runs again with blocks of 1 MiB (the same pool, rounds and kernel) into separate hit lists, and
+  the two are compared (every preliminary and compact hit list of every query, every field, by their `Debug`
+  text; or the texts of the two errors). The first difference stops the run (panic) after printing the line
+  that is otherwise printed at exit: `[X_SHADOW] BPDBCUT searches= blocks= blocks_ref= lists_compared=
+  identical` (`blocks`: blocks of the cut; `blocks_ref`: blocks of 1 MiB; `lists_compared`: hit lists
+  compared that are not empty on either side). The preliminary stage runs twice, so its `LOSAT_TIMING`
+  counts double.
 - `LOSAT_X_BPREDOPAR=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it) the composition-based redo of a search with more than one thread and
   at least two matches splits its matches between the threads, as NCBI's `omp for` over its array of

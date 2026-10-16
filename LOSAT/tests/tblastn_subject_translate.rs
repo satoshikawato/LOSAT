@@ -191,6 +191,10 @@ fn hit_subjects(report: &[u8]) -> std::collections::BTreeSet<String> {
 const TABLES: (&str, &str) = ("LOSAT_X_TBNXLATE", "1");
 const REFERENCE: (&str, &str) = ("LOSAT_X_TBNXLATE", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBNXLATESHADOW", "1");
+/// The subjects keep their letters: with the packed subjects of the default (`LOSAT_X_TBNSTORE`,
+/// `tests/tblastn_subject_store.rs`) the frames are translated from the packed bases whatever
+/// `LOSAT_X_TBNXLATE` says.
+const LETTERS: (&str, &str) = ("LOSAT_X_TBNSTORE", "0");
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
 // ```c
@@ -204,7 +208,7 @@ const SHADOW: (&str, &str) = ("LOSAT_X_TBNXLATESHADOW", "1");
 // one and three threads, another genetic code, and four query batches. The run with
 // `LOSAT_X_TBNXLATE=0` makes no plan from the tables; the default run makes one for each of the
 // six subjects that are long enough for a word (more if a batch makes its own); the shadow mode
-// compares them.
+// compares them. Every run keeps the subjects' letters (`LETTERS`).
 #[test]
 fn the_report_is_the_same_with_the_frames_from_the_tables_and_in_the_shadow_mode() {
     let (ten, all, _) = inputs();
@@ -220,7 +224,7 @@ fn the_report_is_the_same_with_the_frames_from_the_tables_and_in_the_shadow_mode
         ),
     ];
     for (query, options) in searches {
-        let (expected, stderr) = tblastn(query, options, &[REFERENCE]);
+        let (expected, stderr) = tblastn(query, options, &[REFERENCE, LETTERS]);
         assert_eq!(
             counter(&stderr, "[X_STATS] TBNXLATE", "table_plans"),
             0,
@@ -231,7 +235,7 @@ fn the_report_is_the_same_with_the_frames_from_the_tables_and_in_the_shadow_mode
             assert!(hits.contains(subject), "{options:?}: no hit on {subject}");
         }
 
-        let (report, stderr) = tblastn(query, options, &[]);
+        let (report, stderr) = tblastn(query, options, &[LETTERS]);
         assert!(
             report == expected,
             "{options:?}: the tables change the report"
@@ -240,7 +244,7 @@ fn the_report_is_the_same_with_the_frames_from_the_tables_and_in_the_shadow_mode
         assert!(table_plans >= 6, "{options:?}: {table_plans} plans");
         assert!(!stderr.contains("[X_SHADOW] TBNXLATE"));
 
-        let (report, stderr) = tblastn(query, options, &[SHADOW]);
+        let (report, stderr) = tblastn(query, options, &[SHADOW, LETTERS]);
         assert!(
             report == expected,
             "{options:?}: the shadow mode changes the report"

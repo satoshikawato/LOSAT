@@ -1,5 +1,5 @@
-//! Which TBLASTN query batches are searched side by side (`LOSAT_X_TBNBATCH`, in the strict set,
-//! and `LOSAT_X_TBNBATCHRULE`, opt-in; `src/algorithm/tblastn/stage_d_pipeline.rs`).
+//! Which TBLASTN query batches are searched side by side (`LOSAT_X_TBNBATCH` and
+//! `LOSAT_X_TBNBATCHRULE`, both in the strict set; `src/algorithm/tblastn/stage_d_pipeline.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
 //! ```c++
@@ -13,11 +13,13 @@
 //! NCBI searches each query batch on its own, one after another. With `LOSAT_X_TBNBATCH`, two or
 //! more threads, the subject plans shared (four or more batches) and at least one batch per
 //! thread, LOSAT searches the batches side by side, each as the one-thread search. With
-//! `LOSAT_X_TBNBATCHRULE` as well, only the batches of the full waves (a multiple of the threads)
-//! go side by side, and only for a small subject set or fewer than two subjects per thread; the rest
-//! are searched one after another with the pool inside each. Neither may change the report, so the tests compare it with the one-thread search and
-//! read the `[losat-thread-stage] ... stage=query_batches` line (`LOSAT_WASI_THREADS_DEBUG=1`)
-//! to check how many batches went side by side.
+//! `LOSAT_X_TBNBATCHRULE` as well (the default), only the batches of the full waves (a multiple of
+//! the threads) go side by side, and only for a small subject set or fewer than two subjects per
+//! thread; the rest are searched one after another with the pool inside each. With
+//! `LOSAT_X_TBNBATCHRULE=0` every batch goes side by side once there is one per thread. None of
+//! these may change the report, so the tests compare it with the one-thread search and read the
+//! `[losat-thread-stage] ... stage=query_batches` line (`LOSAT_WASI_THREADS_DEBUG=1`) to check how
+//! many batches went side by side.
 //!
 //! `tests/fasta/PemoMJNVA.faa` (115 proteins, 72,314 residues) is four query batches as NCBI's
 //! reader cuts them (20,000 residues each); the subject is `tests/fasta/MelaMJNV.fasta`.
@@ -96,22 +98,22 @@ fn the_report_is_the_one_thread_report_with_and_without_the_rule() {
     let (expected, _) = tblastn(1, &[]);
     assert!(!expected.is_empty(), "the search must report hits");
     for threads in [2, 3, 4, 8] {
-        // Without the rule: every batch side by side once there is one per thread.
+        // The default has the rule: the full waves only (one small subject).
         let (report, stderr) = tblastn(threads, &[]);
         assert_eq!(report, expected, "default, {threads} threads");
+        assert_eq!(
+            side_by_side(&stderr),
+            Some(BATCHES / threads * threads),
+            "default, {threads} threads"
+        );
+        // Without the rule: every batch side by side once there is one per thread.
+        let (report, stderr) = tblastn(threads, &[("LOSAT_X_TBNBATCHRULE", "0")]);
+        assert_eq!(report, expected, "rule off, {threads} threads");
         let all = if BATCHES >= threads { BATCHES } else { 0 };
         assert_eq!(
             side_by_side(&stderr),
             Some(all),
-            "default, {threads} threads"
-        );
-        // With it: the full waves only (one small subject).
-        let (report, stderr) = tblastn(threads, &[("LOSAT_X_TBNBATCHRULE", "1")]);
-        assert_eq!(report, expected, "rule, {threads} threads");
-        assert_eq!(
-            side_by_side(&stderr),
-            Some(BATCHES / threads * threads),
-            "rule, {threads} threads"
+            "rule off, {threads} threads"
         );
     }
 }
@@ -122,8 +124,8 @@ fn the_report_is_the_one_thread_report_with_and_without_the_rule() {
 fn the_rule_does_nothing_without_the_side_by_side_switch() {
     let (expected, _) = tblastn(1, &[]);
     for variables in [
-        &[("LOSAT_X_TBNBATCHRULE", "1"), ("LOSAT_X_TBNBATCH", "0")][..],
-        &[("LOSAT_X_TBNBATCHRULE", "1"), ("LOSAT_X_DEFAULT", "0")],
+        &[("LOSAT_X_TBNBATCH", "0")][..],
+        &[("LOSAT_X_DEFAULT", "0")],
     ] {
         let (report, stderr) = tblastn(3, variables);
         assert_eq!(report, expected, "{variables:?}");

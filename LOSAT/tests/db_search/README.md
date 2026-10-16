@@ -142,6 +142,25 @@ The database (version 4, no `-parse_seqids`; only `.nin .nsq .nhr` are kept, the
         -title "nucleotide slices of two shrimp viruses for TBLASTX" -blastdb_version 4
     rm tests/db_search/xslice.njs
 
+`xslice_flip.{nin,nhr,nsq}` is `xslice` with the stored 2-bit base changed at every ambiguous position (126 positions;
+the ambiguity data, the index and the header file are copies). makeblastdb stores at each ambiguous
+letter the base that `-subject` also draws (`CRandom(length)`), so for `xslice` a `-db` search that translates the
+stored bases and one that re-resolves the letters as `-subject` does give the same bytes. `xslice_flip` tells them
+apart (rows `db.tblastx.flipped.6` and `.0`; D2: the preliminary stage translates the stored bases, the
+re-evaluation and the reports read the stored codes). It is hand-edited, not written by makeblastdb: copy the three
+files of `xslice` and rewrite the copy's `.nsq` in place with `flip_stored_bases.py` (the rule is in its docstring).
+Run from `LOSAT/`:
+
+    cp tests/db_search/xslice.nin tests/db_search/xslice_flip.nin
+    cp tests/db_search/xslice.nhr tests/db_search/xslice_flip.nhr
+    cp tests/db_search/xslice.nsq tests/db_search/xslice_flip.nsq
+    python3 tests/db_search/flip_stored_bases.py tests/db_search/xslice.fna tests/db_search/xslice.nin \
+        tests/db_search/xslice_flip.nsq tests/db_search/xslice_flip.nsq
+
+NCBI `tblastx -db xslice_flip -query tests/db_search/xslice_q.fna -outfmt 6 -num_threads 1` prints 184 rows (188
+for `xslice`). `db.tblastx.dbsize.0` and `.6` use `-dbsize 1000000000` (112 rows in outfmt 6): at that value a
+search that feeds `-dbsize` to the link cutoffs gives 111 rows, at 100000000 it gave the same bytes.
+
 `residues_gap` is the database LOSAT rejects (a stored `-`). The other databases of the rows are the ones of
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index
 files, so the frozen outputs (`Posted date:` lines) must then be frozen again:

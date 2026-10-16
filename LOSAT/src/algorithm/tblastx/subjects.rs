@@ -207,10 +207,11 @@ impl<'a> Subjects<'a> {
 
 // No NCBI counterpart: the variable is read once per process; it chooses when LOSAT translates
 // a subject's frames, not a value NCBI computes.
-/// LOSAT_X_TBXFRAMES: off unless set, to any value (not in the strict set).
+/// LOSAT_X_TBXFRAMES: a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is
+/// not set; `utils/xswitch.rs`).
 pub(crate) fn x_frames_late() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBXFRAMES").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXFRAMES"))
 }
 
 /// Whether every letter is `A`, `C`, `G` or `T` in either case (`preliminary_subject_bases`

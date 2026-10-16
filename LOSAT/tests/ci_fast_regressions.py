@@ -15,7 +15,7 @@ batches, warnings, hit lists, ambiguity, empty inputs, failed writes); for each
 selected program the FASTA-input fixtures of fasta_input_fixtures.py (`check --rows
 <program>`: stdout, stderr, exit code and combined stream against the frozen NCBI
 hashes, and LOSAT's explicit rejections where it rejects an input or option); for BLASTP,
-BLASTN and TBLASTN the `-db` fixtures of db_search_fixtures.py (`check --program <program>`: stdout,
+BLASTN, TBLASTN and TBLASTX the `-db` fixtures of db_search_fixtures.py (`check --program <program>`: stdout,
 stderr and exit status against the frozen NCBI `<program> -db -num_threads 1` bytes, at 1 and
 4 threads).
 
@@ -57,7 +57,7 @@ from frozen_allowlist import Allowlist  # noqa: E402
 
 PROGRAMS = capture_outputs.PROGRAMS
 FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")
-DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn")  # the programs of db_search_manifest.tsv
+DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "tblastx")  # the programs of db_search_manifest.tsv
 REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
 # TBLASTX manifest cases that finish in under 30 s (2026-10-01, native release binary);
 # the other 13 (46 s to over 10 min) run in the nightly workflow.

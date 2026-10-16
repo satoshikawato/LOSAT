@@ -823,14 +823,13 @@ fn seed_stage(
 /// scope; `true` means it has run and the reference scan is skipped. With
 /// LOSAT_X_PAIRPARDISCSHADOW the stage runs on copies of the diagonal hash and the hit list,
 /// `false` is returned so the reference runs, and the parent's `shadow_check` compares the
-/// two. `fold_scratch` and `kept` (the stamp the parent took for this chunk) are those of
-/// LOSAT_X_PAIRPARFOLD (`x_pair_seed_part.rs`).
+/// two. `fold_scratch` holds the allocations of LOSAT_X_PAIRPARFOLD's partition tables and
+/// buffers (`x_pair_seed_part.rs`).
 pub(super) fn run(
     x: &Inputs<'_>,
     diag_hash: &mut DiagHashTable,
     ungapped_hits: &mut Vec<UngappedHit>,
     fold_scratch: &mut PartScratch,
-    kept: Option<part::Stamp>,
 ) -> bool {
     let (on, shadow) = switches();
     if !on && !shadow {
@@ -857,13 +856,11 @@ pub(super) fn run(
     let mut shadow_hash = shadow.then(|| copy_hash(diag_hash));
     let mut shadow_hits: Vec<UngappedHit> = Vec::new();
     // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold split over the pool's threads (with the shadow,
-    // on the copies; the reference then makes the table the kept partition tables follow, and
-    // `shadow_check` compares it with the copy).
+    // on the copies, which the parent's `shadow_check` compares with the reference's table and
+    // hits).
     let fold_part = part::partitions(threads).map(|parts| part::FoldPart {
         scratch: fold_scratch,
-        kept,
         parts,
-        verify: shadow || cfg!(debug_assertions),
     });
     let stats = {
         let (hash, hits): (&mut DiagHashTable, &mut Vec<UngappedHit>) = match shadow_hash.as_mut() {
@@ -1340,9 +1337,8 @@ mod tests {
                     }
                     // LOSAT_X_PAIRPARFOLD (`x_pair_seed_part.rs`): the two-hit fold split into
                     // 2, 3, 7, 8 and 16 partitions on 1..8 threads, on tables with and without
-                    // level bounds, for two chunks in a row (the second with the hash offset
-                    // moved on, from the kept partition tables): the hits and the table of the
-                    // serial fold.
+                    // level bounds, for two chunks in a row on one scratch (the second with the
+                    // hash offset moved on): the hits and the table of the serial fold.
                     let x2 = Inputs {
                         diag_offset: diag_offset + c.s_len as isize + window_size as isize,
                         ..x
@@ -1399,8 +1395,6 @@ mod tests {
                                         "case {case_no} threads {threads} parts {parts} levels {levels} chunk {chunk}"
                                     );
                                     hash.offset = xc.diag_offset as i32;
-                                    let kept = scratch.take_stamp();
-                                    assert_eq!(kept.is_some(), chunk > 0, "{at}");
                                     let mut hits = Vec::new();
                                     let stats = seed_stage(
                                         xc,
@@ -1412,9 +1406,7 @@ mod tests {
                                         false,
                                         Some(part::FoldPart {
                                             scratch: &mut scratch,
-                                            kept,
                                             parts,
-                                            verify: true,
                                         }),
                                     );
                                     assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");

@@ -1303,20 +1303,18 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
 /// with its one-hit extension) when the switch is on and the chunk is in scope; `true` means
 /// it has run and the reference scan is skipped. With LOSAT_X_PAIRPARSHADOW the stage runs on
 /// copies of the diagonal hash and the hit list, `false` is returned so the reference runs,
-/// and `shadow_check` compares the two. `fold_scratch` is the subject scratch's
-/// LOSAT_X_PAIRPARFOLD state (`x_pair_seed_part.rs`); its kept partition tables follow the
-/// table only from one partitioned stage to the next, so their stamp is taken here for every
-/// chunk, before anything changes the table.
+/// and `shadow_check` compares the two. `fold_scratch` holds the allocations of
+/// LOSAT_X_PAIRPARFOLD's partition tables and buffers (`x_pair_seed_part.rs`; every
+/// partitioned stage copies `diag_hash` into them).
 pub(super) fn run(
     x: &Inputs<'_>,
     diag_hash: &mut DiagHashTable,
     ungapped_hits: &mut Vec<UngappedHit>,
     fold_scratch: &mut PartScratch,
 ) -> bool {
-    let kept = fold_scratch.take_stamp();
     // A discontiguous megablast table: LOSAT_X_PAIRPARDISC and its shadow decide.
     if x.two_stage.disc().is_some() {
-        return disc::run(x, diag_hash, ungapped_hits, fold_scratch, kept);
+        return disc::run(x, diag_hash, ungapped_hits, fold_scratch);
     }
     let (on, shadow) = switches();
     if !on && !shadow {
@@ -1347,13 +1345,10 @@ pub(super) fn run(
     let mut shadow_hash = shadow.then(|| copy_hash(diag_hash));
     let mut shadow_hits: Vec<UngappedHit> = Vec::new();
     // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold split over the pool's threads (with the shadow,
-    // on the copies; the reference then makes the table the kept partition tables follow, and
-    // `shadow_check` compares it with the copy).
+    // on the copies, which `shadow_check` compares with the reference's table and hits).
     let fold_part = part::partitions(threads).map(|parts| part::FoldPart {
         scratch: fold_scratch,
-        kept,
         parts,
-        verify: shadow || cfg!(debug_assertions),
     });
     let stats = {
         let (hash, hits): (&mut DiagHashTable, &mut Vec<UngappedHit>) = match shadow_hash.as_mut() {
@@ -1983,8 +1978,8 @@ mod tests {
             }
             // LOSAT_X_PAIRPARFOLD (`x_pair_seed_part.rs`): the fold split into 2, 3, 7, 8 and 16
             // partitions on 1..8 threads, on tables with and without level bounds, for two
-            // chunks in a row (the second with the hash offset moved on, from the kept
-            // partition tables): the hits and the table of the serial fold.
+            // chunks in a row on one scratch (the second with the hash offset moved on): the
+            // hits and the table of the serial fold.
             let x2 = Inputs {
                 diag_offset: diag_offset + s_len as isize + 16,
                 ..x
@@ -2043,8 +2038,6 @@ mod tests {
                                 "case {case} threads {threads} parts {parts} levels {levels} chunk {chunk}"
                             );
                             hash.offset = xc.diag_offset as i32;
-                            let kept = scratch.take_stamp();
-                            assert_eq!(kept.is_some(), chunk > 0, "{at}");
                             let mut hits = Vec::new();
                             let stats = seed_stage(
                                 xc,
@@ -2055,9 +2048,7 @@ mod tests {
                                 false,
                                 Some(part::FoldPart {
                                     scratch: &mut scratch,
-                                    kept,
                                     parts,
-                                    verify: true,
                                 }),
                             );
                             assert_eq!(stats.counts.seeds, seeds.len() as u64, "{at}");

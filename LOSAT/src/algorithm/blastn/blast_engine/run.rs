@@ -3903,8 +3903,9 @@ struct SubjectScratch {
     // } BLAST_DiagHash;
     // ```
     diag_hash: DiagHashTable,
-    // EXPERIMENT (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`): the partition tables of the
-    // partitioned fold of the strips paths, which follow `diag_hash` from one partitioned stage
+    // EXPERIMENT (LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`): the allocations of the partition
+    // tables and buffers of the partitioned fold of the strips paths. Every partitioned stage
+    // copies `diag_hash` into the partition tables, so no content carries over from one stage
     // to the next. Empty while the switch is off. No NCBI counterpart.
     x_pair_fold: x_pair_seed::PartScratch,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:159-176

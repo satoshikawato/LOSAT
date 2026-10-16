@@ -64,30 +64,22 @@
 //! diagonal; a stable counting sort, so each partition keeps the seeds in scan order) and folds
 //! partition p of the next strip of any partition p it can lock (`try_lock`), into a table of
 //! that partition (`PartState::hash`). The owner alone can scan every strip and fold every
-//! partition, so no participant waits for a job that may never start. A helper that finds nothing
-//! to do leaves when the whole stage has made no progress (no strip scanned, no partition folded)
-//! for `HELPER_STALL` (the owner never leaves), and a helper job that starts on a thread that is
-//! inside a participant returns at once: a thread that waits inside a nested
-//! parallel call (in a participant's scan or fold, or in a piece of such a call it stole) may
-//! run a helper job above the work it interrupted, and that helper must not wait for the stage
-//! while the stage waits for that work (the pattern that hung LOSAT_X_BNSTREAM, #218; test
-//! `a_nested_parallel_call_in_every_participant_does_not_hang`). At the end the hits are put in
-//! the order of their seeds' keys
-//! (strip, position in the strip's scan order) and the changed buckets of every partition are
-//! written into the stage's table with the reference's cell numbers (`merge`).
+//! partition, so no participant waits for a job that may never start. A helper job that starts
+//! on a participant's thread (a thread that waits inside a nested parallel call of its own scan
+//! or fold) returns at once; a helper on any other thread that finds nothing to do leaves once
+//! the whole stage has made no progress (no strip scanned, no partition folded) for
+//! `HELPER_STALL` (the owner never leaves). A thread that waits inside a piece of a
+//! participant's nested call that it stole may run a helper job above the work it interrupted;
+//! that helper waits for the stage while the stage waits for that work (the pattern that hung
+//! LOSAT_X_BNSTREAM, #218; test `a_nested_parallel_call_in_every_participant_does_not_hang`)
+//! until the stall exit releases it. At the end the hits are put in the order of their seeds'
+//! keys (strip, position in the strip's scan order) and the changed buckets of every partition
+//! are written into the stage's table with the reference's cell numbers (`merge`).
 //!
-//! The partition tables stay in the subject scratch (`PartScratch`, a field of `run.rs`
-//! `SubjectScratch`) from one chunk to the next: after a merge, partition p's table holds the
-//! stage's chains of p's buckets with the same cell numbers and the same occupancy, so the next
-//! stage starts from it without a copy. `x_pair_seed::run` takes the stamp of the kept tables
-//! (`PartScratch::take_stamp`) at the start of every chunk, so a chunk that the reference fold,
-//! the owner's fold or a stage of another partition count folds leaves no stamp, and the next
-//! stage copies the stage's table into every partition's table (`rebuild`). The clear of
-//! `advance_diag_table_offset` sets the occupancy to 1, which a stamp of another occupancy does
-//! not fit; with occupancy 1 every chain is empty and every level bound `i32::MIN`, in the
-//! stage's table and in the kept ones. Moving the hash offset between subjects writes nothing
-//! a fold reads (the folds take the positions from `Inputs::diag_offset`). With the shadows
-//! (and in debug builds) every reuse is checked against the stage's table (`verify_kept`).
+//! Every stage copies the stage's table into every partition's table (`rebuild`), so the
+//! partition tables never carry anything from one stage to the next; only their allocations
+//! (and those of the strip and merge buffers) stay in the subject scratch (`PartScratch`, a
+//! field of `run.rs` `SubjectScratch`).
 //!
 //! Why the output is the same:
 //! - A seed's fold reads and writes the table only through its own diagonal's bucket: the
@@ -156,15 +148,6 @@ fn bucket_of(seed: &Seed) -> usize {
     bucket_of_diag((seed.s as isize - seed.q as isize) as i32)
 }
 
-/// What the kept partition tables follow: the occupancy of the stage's table after the merge,
-/// the partition count, and whether the table keeps level bounds (`LOSAT_X_DIAGLV`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct Stamp {
-    occupancy: u32,
-    parts: usize,
-    levels: bool,
-}
-
 /// What a fold call of one partition writes besides the table and the hit list: the keys of
 /// its hits and of its inserts that appended a cell, the buckets its inserts changed, and its
 /// time in ungapped extensions (LOSAT_TIMING, flushed once per stage). A fold without
@@ -228,10 +211,11 @@ pub(super) fn insert<const PT: bool>(
     }
 }
 
-/// The fold state of one partition, kept in the subject scratch between stages.
+/// The fold state of one partition (its allocations kept in the subject scratch between
+/// stages; its contents set by `rebuild` at the start of every stage).
 pub(super) struct PartState {
-    /// The partition's table: the stage's chains of the partition's buckets (the other
-    /// buckets are not read).
+    /// The partition's table: a copy of the stage's table at the start of the stage, of which
+    /// the partition reads and changes only the chains of its own buckets.
     pub(super) hash: DiagHashTable,
     pub(super) hits: Vec<UngappedHit>,
     pub(super) out: PartOut,
@@ -300,35 +284,23 @@ struct StripBuf {
     offs: Vec<u32>,
 }
 
-/// No NCBI counterpart (scheduling only): the partition tables and buffers of the partitioned
-/// fold, kept in the subject scratch (`run.rs` `SubjectScratch`) from one chunk to the next.
+/// No NCBI counterpart (scheduling only): the allocations of the partitioned fold's partition
+/// tables and buffers, kept in the subject scratch (`run.rs` `SubjectScratch`) from one stage
+/// to the next. No content is carried over: every stage copies the stage's table into the
+/// partition tables (`rebuild`).
 #[derive(Default)]
 pub(in super::super) struct PartScratch {
     parts: Vec<PartState>,
-    stamp: Option<Stamp>,
     spare: Vec<StripBuf>,
     raw: Vec<Vec<Seed>>,
     order: Vec<(u64, u32, u32)>,
     apps: Vec<(u64, u32, u32)>,
 }
 
-impl PartScratch {
-    /// No NCBI counterpart: the stamp of the kept partition tables, taken by `x_pair_seed::run`
-    /// at the start of every chunk (before anything changes the table), so that only a stage
-    /// that runs partitioned right after the previous merge finds one.
-    pub(super) fn take_stamp(&mut self) -> Option<Stamp> {
-        self.stamp.take()
-    }
-}
-
-/// How a strips stage folds when the switch is on: the scratch, the stamp `run` took for this
-/// chunk, the partition count, and whether a reuse of the kept tables is checked against the
-/// stage's table (the shadows; debug builds).
+/// How a strips stage folds when the switch is on: the scratch and the partition count.
 pub(super) struct FoldPart<'a> {
     pub(super) scratch: &'a mut PartScratch,
-    pub(super) kept: Option<Stamp>,
     pub(super) parts: usize,
-    pub(super) verify: bool,
 }
 
 /// What one partitioned stage did.
@@ -341,7 +313,6 @@ pub(super) struct PartStats {
     pub(super) wait_ns: u64,
     pub(super) ungapped_ns: u64,
     pub(super) ungapped_calls: u64,
-    pub(super) kept: bool,
     pub(super) merge_ns: u64,
     /// helpers that left a stalled stage before its end
     pub(super) helpers_left: u64,
@@ -384,9 +355,20 @@ impl Drop for Failing<'_> {
 
 /// No NCBI counterpart (scheduling only): how long a helper that finds nothing to do waits for
 /// the stage to make progress before it leaves. A helper waits while a partition that lags
-/// holds back the window of strips; the stage still makes progress then, so the helper stays.
-/// The stage stops making progress only when the work it needs runs below a waiting helper on
-/// that helper's own thread (a nested parallel call), and then the helper has to leave.
+/// holds back the window of strips; as long as the stage makes progress, the helper stays.
+/// The stage stops making progress for this long in three cases:
+/// - the work it needs runs below a waiting helper on that helper's own thread: a thread that
+///   is not a participant stole a piece of a participant's nested parallel call and then,
+///   while waiting inside it, a helper job (on a participant's own thread the guard `IN_STAGE`
+///   makes the job return at once). Only the stall exit ends this wait, so the helper has to
+///   leave;
+/// - the OS deschedules the owner (or the participant that holds the lagging partition) on a
+///   loaded machine;
+/// - one long fold unit (a partition of a strip with much work) holds back the window.
+///
+/// In the last two cases the idle helpers leave for good, and the rest of the stage runs on
+/// fewer threads. The output does not change (any participant can stop at any time and the
+/// owner finishes the stage), but the stage is slower.
 const HELPER_STALL: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// No NCBI counterpart: a participant's wait when it found nothing to do. It spins a little,
@@ -443,34 +425,13 @@ where
     FS: Fn(usize, &mut Vec<Seed>) + Sync,
     FF: Fn(&mut PartState, &[Seed], &[u32]) + Sync,
 {
-    let FoldPart {
-        scratch,
-        kept,
-        parts,
-        verify,
-    } = fold_part;
+    let FoldPart { scratch, parts } = fold_part;
     assert!(
         (1..=DIAGHASH_NUM_BUCKETS).contains(&parts),
         "LOSAT_X_PAIRPARFOLD: {parts} partitions"
     );
     let ahead = ahead.max(1);
-    let levels = hash.x_lv_on();
-    let start = Stamp {
-        occupancy: hash.occupancy,
-        parts,
-        levels,
-    };
-    let reuse = kept == Some(start) && scratch.parts.len() == parts;
-    if reuse {
-        if verify {
-            verify_kept(&scratch.parts, hash);
-        }
-        for st in &mut scratch.parts {
-            st.reset();
-        }
-    } else {
-        rebuild(scratch, hash, parts);
-    }
+    rebuild(scratch, hash, parts);
     let occ0 = hash.occupancy;
 
     let states: Vec<Mutex<PartState>> = scratch.parts.drain(..).map(Mutex::new).collect();
@@ -653,7 +614,6 @@ where
     let mut stats = PartStats {
         owner_scan_ns,
         wait_ns,
-        kept: reuse,
         helpers_left: left.into_inner() as u64,
         ..PartStats::default()
     };
@@ -665,7 +625,7 @@ where
         stats.ungapped_ns += st.out.ungapped_ns;
         stats.ungapped_calls += st.out.ungapped_calls;
     }
-    let occ_final = merge(
+    merge(
         hash,
         hits,
         &mut states,
@@ -673,22 +633,15 @@ where
         &mut scratch.order,
         &mut scratch.apps,
     );
-    for st in &mut states {
-        st.reset();
-    }
     if let Some(t0) = t_merge {
         stats.merge_ns = t0.elapsed().as_nanos() as u64;
     }
+    // (the allocations only: the next stage's `rebuild` sets every partition's contents)
     scratch.parts = states;
     scratch.spare = spare.into_inner().unwrap_or_else(PoisonError::into_inner);
     scratch.raw = raw_spare
         .into_inner()
         .unwrap_or_else(PoisonError::into_inner);
-    scratch.stamp = Some(Stamp {
-        occupancy: occ_final,
-        parts,
-        levels,
-    });
     stats
 }
 
@@ -717,8 +670,8 @@ fn run_participants(
     participant(0, true)
 }
 
-/// No NCBI counterpart: every partition's table made a copy of the stage's table (the kept
-/// tables do not follow it).
+/// No NCBI counterpart: every partition's table made a copy of the stage's table, and its
+/// per-stage fields reset (at the start of every stage; only the allocations are reused).
 fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize) {
     scratch.parts.truncate(parts);
     while scratch.parts.len() < parts {
@@ -743,49 +696,6 @@ fn rebuild(scratch: &mut PartScratch, hash: &DiagHashTable, parts: usize) {
     }
 }
 
-/// No NCBI counterpart: the check of a reuse of the kept tables (the shadows, debug builds):
-/// partition p's table must hold the stage's chains of p's buckets cell for cell with the same
-/// numbers, the same occupancy and the same level bounds. Anything else panics.
-#[cold]
-#[inline(never)]
-fn verify_kept(parts: &[PartState], hash: &DiagHashTable) {
-    let cell = |c: &DiagHashCell| (c.diag, c.level, c.hit_saved, c.hit_len, c.next);
-    for (p, st) in parts.iter().enumerate() {
-        let t = &st.hash;
-        assert!(
-            t.occupancy == hash.occupancy && t.num_buckets == hash.num_buckets,
-            "LOSAT_X_PAIRPARFOLD: the kept table of partition {p} has occupancy {}, the stage's table {}",
-            t.occupancy,
-            hash.occupancy
-        );
-        for b in (p..hash.num_buckets).step_by(parts.len()) {
-            let (mut i, mut j) = (hash.backbone[b], t.backbone[b]);
-            loop {
-                assert!(
-                    i == j,
-                    "LOSAT_X_PAIRPARFOLD: the kept table of partition {p} differs in bucket {b}: cell {j}, the stage's table cell {i}"
-                );
-                if i == 0 {
-                    break;
-                }
-                let (c, d) = (&hash.chain[i as usize], &t.chain[j as usize]);
-                assert!(
-                    cell(c) == cell(d),
-                    "LOSAT_X_PAIRPARFOLD: the kept table of partition {p} differs at cell {i} (bucket {b}): {:?}, the stage's table {:?}",
-                    cell(d),
-                    cell(c)
-                );
-                (i, j) = (c.next, d.next);
-            }
-            assert!(
-                hash.max_level.get(b) == t.max_level.get(b),
-                "LOSAT_X_PAIRPARFOLD: the kept table of partition {p} has other level bounds in bucket {b}"
-            );
-        }
-    }
-    VERIFIED.fetch_add(1, Ordering::Relaxed);
-}
-
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:428-447
 /// ```c
 ///     if (table->occupancy == table->capacity) {
@@ -803,9 +713,10 @@ fn verify_kept(parts: &[PartState], hash: &DiagHashTable) {
 ///     table->occupancy++;
 /// ```
 /// The end of a partitioned stage (module comment): the hits in key order after `hits`; the
-/// appended cells numbered `occ0 + rank` of their keys, in every partition's table (moved
-/// there, links and heads mapped) and in `hash`, with the changed buckets of every partition
-/// written into `hash`; the capacity of the reference's doublings. Returns the occupancy.
+/// appended cells numbered `occ0 + rank` of their keys; the chains of the changed buckets of
+/// every partition written into `hash` with those numbers (each cell at its number, its link
+/// and the bucket's head mapped; the partition tables themselves are left as they are); the
+/// capacity of the reference's doublings.
 fn merge(
     hash: &mut DiagHashTable,
     hits: &mut Vec<UngappedHit>,
@@ -813,7 +724,7 @@ fn merge(
     occ0: u32,
     order: &mut Vec<(u64, u32, u32)>,
     apps: &mut Vec<(u64, u32, u32)>,
-) -> u32 {
+) {
     let parts = states.len();
     order.clear();
     for (p, st) in states.iter().enumerate() {
@@ -862,10 +773,11 @@ fn merge(
     hash.capacity = capacity;
     hash.occupancy = occ_final;
     let levels = hash.x_lv_on();
-    for (p, st) in states.iter_mut().enumerate() {
+    for (p, st) in states.iter().enumerate() {
         let PartState {
             hash: t, out, map, ..
         } = st;
+        // a cell's number in the stage: the cells below occ0 keep theirs
         let remap = |index: u32| -> u32 {
             if index < occ0 {
                 index
@@ -873,72 +785,53 @@ fn merge(
                 map[(index - occ0) as usize]
             }
         };
-        if t.chain.len() < capacity as usize {
-            t.chain.resize(capacity as usize, DiagHashCell::default());
-        }
-        t.capacity = t.chain.len() as u32;
-        // highest first: a cell's number in the stage is at least its number in the partition
-        for k in (0..map.len()).rev() {
-            let mut cell = t.chain[occ0 as usize + k];
-            cell.next = remap(cell.next);
-            t.chain[map[k] as usize] = cell;
-        }
         for &bucket in &out.dirty {
             let b = bucket as usize;
             debug_assert_eq!(b % parts, p);
-            let head = remap(t.backbone[b]);
-            t.backbone[b] = head;
-            hash.backbone[b] = head;
-            let mut index = head;
-            while index != 0 {
-                let cell = t.chain[index as usize];
-                hash.chain[index as usize] = cell;
-                index = cell.next;
+            let mut local = t.backbone[b];
+            hash.backbone[b] = remap(local);
+            while local != 0 {
+                let mut cell = t.chain[local as usize];
+                let next = cell.next;
+                cell.next = remap(next);
+                hash.chain[remap(local) as usize] = cell;
+                local = next;
             }
             if levels {
                 hash.max_level[b] = t.max_level[b];
             }
         }
-        t.occupancy = occ_final;
     }
-    occ_final
 }
 
 // No NCBI counterpart: the counters of the summary fields, per fold (0: one hit, 1: two hits).
 pub(super) const ONE_HIT: usize = 0;
 pub(super) const TWO_HITS: usize = 1;
 static MERGES: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-static KEPT: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 static PARTS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 static MERGE_NS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 static LEFT: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-static VERIFIED: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart: counts one partitioned stage of `kind` (once per stage).
 pub(super) fn record(kind: usize, parts: usize, stats: &PartStats) {
     MERGES[kind].fetch_add(1, Ordering::Relaxed);
-    if stats.kept {
-        KEPT[kind].fetch_add(1, Ordering::Relaxed);
-    }
     PARTS[kind].fetch_max(parts as u64, Ordering::Relaxed);
     MERGE_NS[kind].fetch_add(stats.merge_ns, Ordering::Relaxed);
     LEFT[kind].fetch_add(stats.helpers_left, Ordering::Relaxed);
 }
 
 /// No NCBI counterpart: the fields the shadow summary lines of `kind` end with when the switch
-/// is on: `fold=part`, the partition count of the stages, the number of partitioned stages
-/// merged, and of those the ones that started from the kept tables. Without the switch the
-/// lines are those of the strips paths alone.
+/// is on: `fold=part`, the partition count of the stages and the number of partitioned stages
+/// merged. Without the switch the lines are those of the strips paths alone.
 pub(super) fn shadow_fields(kind: usize) -> String {
     if !switch_on() {
         return String::new();
     }
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     format!(
-        " fold=part partitions={} merges={} kept={}",
+        " fold=part partitions={} merges={}",
         load(&PARTS[kind]),
-        load(&MERGES[kind]),
-        load(&KEPT[kind])
+        load(&MERGES[kind])
     )
 }
 
@@ -952,15 +845,6 @@ pub(super) fn timing_fields(kind: usize) -> String {
         load(&MERGE_NS[kind]) as f64 / 1e9,
         load(&LEFT[kind])
     )
-}
-
-#[cfg(all(
-    test,
-    feature = "parallel",
-    any(not(target_arch = "wasm32"), feature = "wasm-threads")
-))]
-pub(super) fn test_verified() -> u64 {
-    VERIFIED.load(Ordering::Relaxed)
 }
 
 // (every test runs stages in a pool of its own)
@@ -1091,9 +975,9 @@ mod tests {
     }
 
     /// The same ops as a partitioned stage: strips cut at `cuts`, `parts` partitions on
-    /// `threads` threads (in a pool of that many), the stamp taken as `run` takes it. `nested`
-    /// runs a parallel iterator inside every scan and fold call; `panic_at` makes the fold of
-    /// that strip panic on the owner (`true`) or on a helper (`false`).
+    /// `threads` threads (in a pool of that many). `nested` runs a parallel iterator inside
+    /// every scan and fold call. Returns the hits (op indices), the stage's counters and the
+    /// number of threads that folded.
     #[allow(clippy::too_many_arguments)]
     fn partitioned(
         pool: &rayon::ThreadPool,
@@ -1165,7 +1049,6 @@ mod tests {
                     }
                 }
             };
-            let kept = scratch.take_stamp();
             let mut hits = Vec::new();
             let stats = seed_stage_part(
                 cuts.len() - 1,
@@ -1173,12 +1056,7 @@ mod tests {
                 ahead,
                 hash,
                 &mut hits,
-                FoldPart {
-                    scratch,
-                    kept,
-                    parts,
-                    verify: true,
-                },
+                FoldPart { scratch, parts },
                 &scan,
                 &fold,
                 false,
@@ -1256,13 +1134,13 @@ mod tests {
     //         table->capacity *= 2;
     // ```
     // `seed_stage_part` against the reference on random op streams, for 2, 3, 7 and 16
-    // partitions on 1..8 threads, with and without level bounds: a stage on a new table that
-    // grows past 256 cells (many diagonals within the insert window), a second stage on the
-    // kept tables after the offset moved on (the next subject or chunk), a third after the clear
-    // of the offset (occupancy 1: the kept tables do not fit), a chunk the reference folds (the
-    // stamp is taken and not given back), a stage after it, a stage of no strips, and a stage
-    // with another partition count. Every stage gives the reference's hits and table cell for
-    // cell (heads, cells, occupancy, capacity, bounds).
+    // partitions on 1..8 threads, with and without level bounds, all stages of a case on one
+    // scratch: a stage on a new table that grows past 256 cells (many diagonals within the
+    // insert window), a second stage after the offset moved on (the next subject or chunk), a
+    // third after the clear of the offset (occupancy 1), a chunk the reference folds, a stage
+    // after it, a stage of no strips, and a stage with another partition count. Every stage
+    // gives the reference's hits and table cell for cell (heads, cells, occupancy, capacity,
+    // bounds).
     #[test]
     fn seed_stage_part_equals_the_reference_fold() {
         let mut rng = Lcg(0x9A27_F01D);
@@ -1317,8 +1195,7 @@ mod tests {
                         let ops = random_ops(&mut rng, n, &mut s, diagonals);
                         let expected = reference(&mut reference_hash, &ops, first, window);
                         if stage == 3 {
-                            // a chunk folded by the reference: `run` takes the stamp
-                            let _ = scratch.take_stamp();
+                            // a chunk folded by the reference (the partition tables do not see it)
                             let _ = reference(&mut hash, &ops, first, window);
                         } else {
                             let stage_parts = if stage == 6 { parts + 1 } else { parts };
@@ -1328,7 +1205,6 @@ mod tests {
                                 random_cuts(&mut rng, n)
                             };
                             let ahead = 1 + rng.below(2 * threads as u64) as usize;
-                            let verified = test_verified();
                             let (got, stats, folders) = partitioned(
                                 &pool,
                                 &mut hash,
@@ -1344,17 +1220,6 @@ mod tests {
                             most_folders = most_folders.max(folders);
                             assert_eq!(got, expected, "{at}: hits");
                             assert_eq!(stats.counts.seeds, n as u64, "{at}");
-                            // the kept tables are used right after a partitioned stage of the
-                            // same partition count, with nothing changed in between but the offset
-                            let kept = matches!(stage, 1 | 5);
-                            assert_eq!(stats.kept, kept, "{at}: kept");
-                            if kept {
-                                // (a counter of the whole test binary: other tests only add)
-                                assert!(
-                                    test_verified() > verified,
-                                    "{at}: the kept tables were not checked"
-                                );
-                            }
                         }
                         assert_eq!(
                             hash_state(&hash),
@@ -1433,8 +1298,8 @@ mod tests {
     }
 
     // A participant that panics (in a fold on the owner, in a fold on a helper, in a scan) makes
-    // the stage panic instead of hang, leaves no stamp, and the next stage on the same scratch
-    // copies the table again and gives the reference's result.
+    // the stage panic instead of hang and leaves the table untouched, and the next stage on the
+    // same scratch gives the reference's result.
     #[test]
     fn a_panicking_participant_ends_the_stage() {
         let mut rng = Lcg(0x9A41_C000);
@@ -1484,7 +1349,6 @@ mod tests {
                             }
                             st.counts.seeds += seeds.len() as u64;
                         };
-                        let kept = scratch.take_stamp();
                         let mut hits = Vec::new();
                         seed_stage_part(
                             strips,
@@ -1494,9 +1358,7 @@ mod tests {
                             &mut hits,
                             FoldPart {
                                 scratch: &mut scratch,
-                                kept,
                                 parts: threads,
-                                verify: true,
                             },
                             &scan,
                             &fold,
@@ -1510,14 +1372,10 @@ mod tests {
                     result.is_err(),
                     "threads {threads} case {case} ({place}): no panic"
                 );
-                assert!(
-                    scratch.stamp.is_none(),
-                    "threads {threads} {place}: a stamp is left"
-                );
                 // the table is the one before the stage: a merge never ran
                 let fresh = DiagHashTable::new(16);
                 assert_eq!(hash_state(&hash), hash_state(&fresh), "{place}");
-                let (got, stats, _) = partitioned(
+                let (got, _, _) = partitioned(
                     &pool,
                     &mut hash,
                     &mut scratch,
@@ -1529,7 +1387,6 @@ mod tests {
                     40,
                     false,
                 );
-                assert!(!stats.kept);
                 assert_eq!(got, expected, "threads {threads} {place}");
                 assert_eq!(
                     hash_state(&hash),
@@ -1540,22 +1397,25 @@ mod tests {
         }
     }
 
-    // With the check of the kept tables on (the shadows), a table changed while the kept
-    // tables still claim to follow it is caught before the stage folds anything.
+    // Every stage starts from a copy of the stage's table: a change of the table between two
+    // partitioned stages on one scratch that keeps the occupancy (here the level of every cell
+    // raised, which no fold does) is seen by the next stage, which gives the reference's result
+    // on the changed table and not the one on the table before the change.
     #[test]
-    #[should_panic(expected = "the kept table of partition")]
-    fn a_kept_table_that_does_not_follow_the_table_is_caught() {
+    fn a_table_changed_between_stages_is_seen() {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(2)
             .build()
             .unwrap();
         let mut rng = Lcg(0xBAD0_7AB1);
-        let mut hash = DiagHashTable::new(16);
+        let mut reference_hash = DiagHashTable::new(16);
+        let mut hash = copy_hash(&reference_hash);
         let mut scratch = PartScratch::default();
         let mut s = 50i32;
         let ops = random_ops(&mut rng, 2000, &mut s, 300);
+        let expected = reference(&mut reference_hash, &ops, 0, 40);
         let cuts = random_cuts(&mut rng, ops.len());
-        let _ = partitioned(
+        let (got, _, _) = partitioned(
             &pool,
             &mut hash,
             &mut scratch,
@@ -1567,15 +1427,33 @@ mod tests {
             40,
             false,
         );
-        // a change the stamp does not see (the same occupancy)
-        let head = (0..hash.num_buckets)
-            .map(|b| hash.backbone[b])
-            .find(|&head| head != 0)
-            .expect("a used bucket");
-        hash.chain[head as usize].level += 1;
-        let more = random_ops(&mut rng, 100, &mut s, 300);
+        assert_eq!(got, expected, "first stage: hits");
+        assert_eq!(
+            hash_state(&hash),
+            hash_state(&reference_hash),
+            "first stage: table"
+        );
+        // the same diagonals again, further on
+        let more: Vec<Op> = ops
+            .iter()
+            .map(|op| Op {
+                s_off_pos: op.s_off_pos + 1000,
+                s_end_pos: op.s_end_pos + 1000,
+                ungapped_end: op.ungapped_end + 1000,
+                ..*op
+            })
+            .collect();
+        let unchanged = reference(&mut copy_hash(&reference_hash), &more, 2000, 40);
+        let occupancy = hash.occupancy;
+        for h in [&mut hash, &mut reference_hash] {
+            for cell in &mut h.chain[1..occupancy as usize] {
+                cell.level = i32::MAX / 2;
+            }
+        }
+        let expected = reference(&mut reference_hash, &more, 2000, 40);
+        assert_ne!(expected, unchanged, "the change does not matter");
         let cuts = random_cuts(&mut rng, more.len());
-        let _ = partitioned(
+        let (got, _, _) = partitioned(
             &pool,
             &mut hash,
             &mut scratch,
@@ -1586,6 +1464,12 @@ mod tests {
             2,
             40,
             false,
+        );
+        assert_eq!(got, expected, "second stage: hits");
+        assert_eq!(
+            hash_state(&hash),
+            hash_state(&reference_hash),
+            "second stage: table"
         );
     }
 }

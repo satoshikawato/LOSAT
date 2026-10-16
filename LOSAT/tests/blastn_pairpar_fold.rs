@@ -95,8 +95,8 @@ fn blastn(dir: &Path, task: &str, threads: u32, switches: &[(&str, &str)]) -> (V
 }
 
 /// The fields of a strips shadow's line (`prefix`, the only line of `stderr` besides the
-/// lines that start with one of `others`): the chunks compared, then `fold=`, `partitions=`,
-/// `merges=` and `kept=`.
+/// lines that start with one of `others`): the chunks compared, then `fold=`, `merges=` and
+/// `partitions=`.
 fn shadow_fields(stderr: &str, prefix: &str, others: &[&str], at: &str) -> (u64, String, u64, u64) {
     let line = stderr
         .lines()
@@ -120,7 +120,6 @@ fn shadow_fields(stderr: &str, prefix: &str, others: &[&str], at: &str) -> (u64,
             .unwrap_or_else(|_| panic!("{at}: {name} in: {line}"))
     };
     let (merges, partitions) = (number("merges="), number("partitions="));
-    let _ = number("kept=");
     let chunks = line
         .split("seed chunks equal=")
         .nth(1)

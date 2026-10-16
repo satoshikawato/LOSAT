@@ -873,18 +873,25 @@ Scheduling (each value computed by one thread with the original function; order 
   blastn, every task, `-subject` and `-db`, with the diagonal hash (query block over 8000 letters): the
   table keeps per bucket an upper bound of the levels of its cells (the largest level an insert wrote since
   the table was made or cleared; 512 values), and a seed's retrieve of its own diagonal returns "no cell"
-  without walking the bucket's chain when that bound lies below the seed's level bound, the smallest of
-  `s_off_pos + 1`, `s_off_pos - (window_size + Delta + 1)` and, with two hits, `s_off_pos + word_length -
-  window_size`. A cell below it makes the decisions of no cell (the `last_hit` test; the two-hit window
-  test), and the insert still walks the chain, so the hit list and the table are the reference's
-  (`blastn/blast_engine/x_diag_lv.rs`, exactness argument in its header). It acts in the reference fold
-  (`process_offset_pairs`, not with debug, trace or window diagnostics, which print the values read) and in
-  the strips folds of `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARDISC`; the off-diagonal retrieves (`scan_range`)
-  stay walks. With the switch off the table has no bounds, an insert tests the length of an empty vector,
-  and the retrieves walk as before. Shadow: `LOSAT_X_DIAGLVSHADOW=1` (implies the switch) walks every
-  skipped bucket and panics unless each of its cells lies below the bound and at or below the bucket's
-  bound; one `[X_SHADOW] DIAGLV retrieves= skipped= verified= identical` line on stderr at the end of the
-  search. `LOSAT_X_PAIRPARSHADOW` and `LOSAT_X_PAIRPARDISCSHADOW` compare the bounds of the two tables too.
+  without walking the bucket's chain when that bound lies below the seed's level bound: `s_off_pos + 1`
+  and, with two hits, at most `s_end_pos - window_size` = `s_off_pos + word_length - window_size` (19 to
+  24 below `s_off_pos` for dc-megablast's window 40 and templates 21 to 16), a constant per chunk added
+  to `s_off_pos`. A cell below it makes the decisions of no cell (the `last_hit` test; the two-hit window
+  test), which are the only readers of the retrieve; the insert still walks the chain itself, and the next
+  seed reads only the table, so the bound needs no term for the insert, and the hit list and the table
+  are the reference's (`blastn/blast_engine/x_diag_lv.rs`, exactness argument in its header). It acts in
+  the reference fold (`process_offset_pairs`, not with debug, trace or window diagnostics, which print the
+  values read) and in the strips folds of `LOSAT_X_PAIRPAR` and `LOSAT_X_PAIRPARDISC`; the off-diagonal
+  retrieves (`scan_range`) stay walks. With the switch off the table has no bounds, an insert tests the
+  length of an empty vector, and the retrieves walk as before (callgrind, release: +0.005 to +0.10 %
+  instructions against the base).
+  Shadow: `LOSAT_X_DIAGLVSHADOW=1` (implies the switch) walks every skipped bucket and panics unless each
+  of its cells lies below the bound and at or below the bucket's bound (the bound invariant), and unless
+  the cell the retrieve's walk returns gives the seed's decisions (the `last_hit` test, then with two hits
+  the window test) of no cell (the bound's sufficiency); one `[X_SHADOW] DIAGLV retrieves= skipped=
+  verified= decisions= cells= identical` line on stderr at the end of the search (`cells`: skipped
+  retrieves whose walk found the diagonal's cell). `LOSAT_X_PAIRPARSHADOW` and `LOSAT_X_PAIRPARDISCSHADOW`
+  compare the bounds of the two tables too.
   Measured on the workstation (alternating pairs, node 0 CPUs 16-31, `LOSAT_X_PAIRPARDISC=1` in the dc-megablast
   runs; 1,775 or 3,492 D. melanogaster cDNAs against 3 Mb of chromosome 2L): dc-megablast one batch 2.195 ->
   1.872 s at 1 thread (0.853, 4 pairs) and 1.429 -> 0.933 s at 16 (0.653, 4 pairs), two batches 4.514 -> 2.651

@@ -257,8 +257,10 @@ fn fold_two_hit(
     let scan_range = x.scan_range;
     let two_hits = window_size > 0;
     let timing_enabled = timing.is_some();
-    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the table has level bounds.
+    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the table has level bounds; the bound's
+    // constants of these seeds.
     let x_lv = diag_hash.x_lv_on();
+    let x_lv_seeds = super::super::x_diag_lv::LvSeeds::new(two_hits, word_length, window_size);
     counts.seeds += seeds.len() as u64;
     for seed in seeds {
         let context_idx = seed.context as usize;
@@ -293,13 +295,8 @@ fn fold_two_hit(
             let (level, _hit_len, hit_saved) = if x_lv {
                 diag_hash.retrieve_below(
                     diag as i32,
-                    super::super::x_diag_lv::level_bound(
-                        s_ext_start + diag_offset as usize,
-                        diag_hash_window,
-                        two_hits,
-                        word_length,
-                        window_size,
-                    ),
+                    &x_lv_seeds,
+                    s_ext_start + diag_offset as usize,
                 )
             } else {
                 diag_hash.retrieve(diag as i32)

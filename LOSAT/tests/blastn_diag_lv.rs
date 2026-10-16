@@ -6,8 +6,9 @@
 //! of the diagonal's bucket, or returns "no cell" without the walk when every cell of the
 //! bucket lies below the seed's level bound. So the property under test is that the report does
 //! not depend on it: with the switch, and with its shadow (`LOSAT_X_DIAGLVSHADOW`, which walks
-//! every skipped bucket and checks each cell against the bound), the searches give the bytes
-//! of the search without it at one thread, and the shadow skips walks. That those bytes equal
+//! every skipped bucket, checks each cell against the bound and checks that the cell the walk
+//! returns gives the seed's decisions of no cell), the searches give the bytes of the search
+//! without it at one thread, and the shadow skips walks. That those bytes equal
 //! NCBI's is the business of the BLASTN fixtures.
 //!
 //! The query (LC738874, 287 kb) makes a query block longer than 8000 letters, so the searches
@@ -32,11 +33,31 @@ fn fasta(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// A directory of this test process for one test.
-fn test_dir(test: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("losat-diaglv-{test}-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("make the test directory");
-    dir
+/// A directory of this test process for one test (`losat-diaglv-<test>-<pid>`), removed when
+/// the test ends; a failing test keeps it for its files.
+struct TestDir(PathBuf);
+
+impl TestDir {
+    fn new(test: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("losat-diaglv-{test}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("make the test directory");
+        TestDir(dir)
+    }
+}
+
+impl std::ops::Deref for TestDir {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 }
 
 /// The letters of a FASTA file's records, one string per record.
@@ -95,9 +116,11 @@ fn blastn(
 }
 
 /// The counters of the shadow's line (`[X_SHADOW] DIAGLV retrieves= skipped= verified=
-/// identical`), which must be the only line of `stderr` unless `others` lines start with one
-/// of the other prefixes.
-fn shadow_counts(stderr: &str, others: &[&str], at: &str) -> (u64, u64, u64) {
+/// decisions= cells= identical`), which must be the only line of `stderr` unless `others`
+/// lines start with one of the other prefixes: the retrieves and the skipped ones, after
+/// checking that every skipped walk passed both checks (its bucket's levels and its
+/// decisions).
+fn shadow_counts(stderr: &str, others: &[&str], at: &str) -> (u64, u64) {
     let line = stderr
         .lines()
         .find(|line| line.starts_with("[X_SHADOW] DIAGLV "))
@@ -115,12 +138,16 @@ fn shadow_counts(stderr: &str, others: &[&str], at: &str) -> (u64, u64, u64) {
             .and_then(|value| value.parse().ok())
             .unwrap_or_else(|| panic!("{at}: no {name} in: {line}"))
     };
-    (field("retrieves="), field("skipped="), field("verified="))
+    let (retrieves, skipped) = (field("retrieves="), field("skipped="));
+    assert_eq!(field("verified="), skipped, "{at}: {line}");
+    assert_eq!(field("decisions="), skipped, "{at}: {line}");
+    assert!(field("cells=") <= skipped, "{at}: {line}");
+    (retrieves, skipped)
 }
 
 /// For one task, query and subject: the search without the switch at one thread, then with
 /// the switch at 1 and 4 threads (the same bytes, nothing on standard error), the shadow at 1
-/// and 4 threads (the same bytes, walks skipped and every skipped walk verified), and the
+/// and 4 threads (the same bytes, walks skipped and every skipped walk checked), and the
 /// search without the switch at 4 threads; `extra` adds variables to every run but the first
 /// (the strips fold of dc-megablast).
 fn check(dir: &Path, query: &Path, subject: &Path, task: &str, extra: &[(&str, &str)]) -> Vec<u8> {
@@ -144,9 +171,8 @@ fn check(dir: &Path, query: &Path, subject: &Path, task: &str, extra: &[(&str, &
             report == expected,
             "{at}: the report differs with {SHADOW:?}"
         );
-        let (retrieves, skipped, verified) = shadow_counts(&stderr, &[], &at);
+        let (retrieves, skipped) = shadow_counts(&stderr, &[], &at);
         assert!(skipped > 0 && skipped <= retrieves, "{at}: {stderr}");
-        assert_eq!(verified, skipped, "{at}");
     }
     let (report, stderr) = blastn(dir, query, subject, task, 4, extra);
     assert!(
@@ -159,7 +185,7 @@ fn check(dir: &Path, query: &Path, subject: &Path, task: &str, extra: &[(&str, &
 
 #[test]
 fn one_subject_gives_the_same_report_with_the_level_bounds() {
-    let dir = test_dir("one");
+    let dir = TestDir::new("one");
     let query = fasta("LC738874.fasta");
     let subject = fasta("LC738868.fasta");
     for task in ["megablast", "dc-megablast", "blastn"] {
@@ -174,7 +200,7 @@ fn one_subject_gives_the_same_report_with_the_level_bounds() {
 // the switch.
 #[test]
 fn the_strips_shadows_compare_the_tables_with_the_level_bounds() {
-    let dir = test_dir("strips");
+    let dir = TestDir::new("strips");
     let query = fasta("LC738874.fasta");
     let subject = fasta("LC738868.fasta");
     for (task, strips_shadow, prefix) in [
@@ -195,7 +221,7 @@ fn the_strips_shadows_compare_the_tables_with_the_level_bounds() {
         let at = format!("{task} with {strips_shadow:?}");
         // (`LOSAT_X_PAIRPARSHADOW` also names the shadow of TBLASTX's own `PAIRPAR`, whose
         // line says it compared nothing)
-        let (_, skipped, _) = shadow_counts(&stderr, &[prefix, "[X_SHADOW] PAIRPAR "], &at);
+        let (_, skipped) = shadow_counts(&stderr, &[prefix, "[X_SHADOW] PAIRPAR "], &at);
         assert!(skipped > 0, "{at}: {stderr}");
         let line = stderr
             .lines()
@@ -213,7 +239,7 @@ fn the_strips_shadows_compare_the_tables_with_the_level_bounds() {
 // first 9,000 letters of LC738874 (both strands: a block of 18,001 letters).
 #[test]
 fn blastn_short_gives_the_same_report_with_the_level_bounds() {
-    let dir = test_dir("short");
+    let dir = TestDir::new("short");
     let letters = records(&fasta("LC738874.fasta")).remove(0);
     let query = dir.join("query.fna");
     std::fs::write(&query, format!(">q9000\n{}\n", &letters[..9_000])).expect("write the query");
@@ -226,7 +252,7 @@ fn blastn_short_gives_the_same_report_with_the_level_bounds() {
 // its cells and bounds from subject to subject with a growing offset.
 #[test]
 fn many_subjects_give_the_same_report_with_the_level_bounds() {
-    let dir = test_dir("many");
+    let dir = TestDir::new("many");
     let letters = records(&fasta("LC738868.fasta")).remove(0);
     let subjects = dir.join("subjects.fna");
     let mut text = String::new();

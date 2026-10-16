@@ -10015,6 +10015,9 @@ fn search_query_batch(
                     };
 
                     let two_hits = window_size > 0;
+                    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants
+                    // of this chunk's seeds.
+                    let x_lv_seeds = x_diag_lv::LvSeeds::new(two_hits, word_length, window_size);
 
                     // DEBUG: Count loop iterations
                     let mut dbg_left_ext_iters = 0usize;
@@ -10483,13 +10486,8 @@ fn search_query_batch(
                                         let (level, _hit_len, hit_saved) = if x_lv_ref {
                                             diag_hash.retrieve_below(
                                                 diag as i32,
-                                                x_diag_lv::level_bound(
-                                                    s_ext_start + diag_offset as usize,
-                                                    diag_hash_window,
-                                                    two_hits,
-                                                    word_length,
-                                                    window_size,
-                                                ),
+                                                &x_lv_seeds,
+                                                s_ext_start + diag_offset as usize,
                                             )
                                         } else {
                                             diag_hash.retrieve(diag as i32)
@@ -11530,6 +11528,9 @@ fn search_query_batch(
                     };
                     let mut scan_pause_ns: u64 = 0;
                     let mb_scan_kind = select_mb_scan_kind(safe_k, scan_step, subject_masked);
+                    // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants
+                    // of this chunk's seeds (`s_end` adds `safe_k`).
+                    let x_lv_seeds = x_diag_lv::LvSeeds::new(window_size > 0, safe_k, window_size);
                     scan_subject_kmers_with_ranges(
                         search_seq_packed,
                         s_len,
@@ -11734,21 +11735,12 @@ fn search_query_batch(
                                         // ```
                                         // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same
                                         // decisions without the walk of a bucket below the bound
-                                        // (`s_off_pos`, the window and the word length below).
+                                        // (`s_off_pos` below).
                                         let (level, _hit_len, hit_saved) = if x_lv_ref {
                                             diag_hash.retrieve_below(
                                                 diag as i32,
-                                                x_diag_lv::level_bound(
-                                                    kmer_start + diag_offset as usize,
-                                                    diag_hash_insert_window(
-                                                        window_size,
-                                                        scan_range,
-                                                        safe_k,
-                                                    ),
-                                                    window_size > 0,
-                                                    safe_k,
-                                                    window_size,
-                                                ),
+                                                &x_lv_seeds,
+                                                kmer_start + diag_offset as usize,
                                             )
                                         } else {
                                             diag_hash.retrieve(diag as i32)

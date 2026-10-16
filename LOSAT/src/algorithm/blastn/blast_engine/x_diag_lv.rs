@@ -74,11 +74,22 @@
 //!             ewp->hash_table->offset += subject_length + ewp->hash_table->window;
 //! ```
 //!
-//! The bound of a seed at `s_off_pos` (`level_bound`) is the smallest of `s_off_pos + 1` (the
-//! `last_hit` test), `s_off_pos - (window_size + Delta + 1)` (the insert's stale limit; it is
-//! not needed for the argument below and only lowers the bound, so fewer walks are skipped)
-//! and, with two hits, `s_off_pos + word_length - window_size` (the window test), in i64 and
-//! clamped to i32. `retrieve_below` returns `None` without a walk when the bucket's
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:939-941
+//! (`s_BlastnDiagHashExtendInitialHit`: the insert at the end of every seed)
+//! ```c
+//!     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
+//!                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
+//!                           hit_ready, s_off_pos, window_size + Delta + 1);
+//! ```
+//!
+//! The bound of a seed at `s_off_pos` (`LvSeeds::bound`; `level_bound` for one seed) is
+//! `s_off_pos + 1` (the `last_hit` test) and, with two hits, at most `s_end_pos - window_size`
+//! = `s_off_pos + word_length - window_size` (the window test). Both are `s_off_pos` plus a
+//! constant of the fold's seeds, so `LvSeeds::new` takes that constant (and the positions that
+//! have a bound) once per chunk or fold call, and a seed's bound is one add and two compares.
+//! For dc-megablast (window 40, template 16, 18 or 21) the window term binds, `s_off_pos - 24`
+//! to `s_off_pos - 19`; with one hit (megablast, blastn, blastn-short) the bound is
+//! `s_off_pos + 1`. `retrieve_below` returns `None` without a walk when the bucket's
 //! `max_level` is below the bound, and is `retrieve` otherwise. The callers: the two retrieves
 //! of `process_offset_pairs` (`run.rs`; not while the debug, trace or window diagnostics print
 //! what they read), the one-hit fold of `LOSAT_X_PAIRPAR` (`x_pair_seed.rs` `fold`) and the
@@ -103,14 +114,28 @@
 //!     `s_off_pos < 0` is false (`s_off_pos >= 0`; positions beyond `i32::MAX`, where the
 //!     decisions' `as i32` would wrap, get no bound);
 //!   - with two hits, the window test `hit_saved || s_end_pos > last_hit + window_size`, where
-//!     `s_end_pos = s_off_pos + word_length` at this point: `L < s_off_pos + word_length -
-//!     window_size` makes it true whatever `hit_saved` says, and with no cell it is true
-//!     because `s_end_pos > window_size` (the hash offset starts at `window_size` and only
-//!     grows or returns to it, so `s_off_pos >= window_size`; `level_bound` gives no bound
-//!     where that fails); with one hit (`window_size == 0`) the test is false either way and
-//!     the `check_masks` branch runs;
-//!   - nothing else reads this retrieve's `last_hit`, `hit_saved` or `hit_len` (the
-//!     off-diagonal retrieves are their own walks, and the insert walks the chain itself).
+//!     `s_end_pos = s_off_pos + word_length` at this point: `L < s_end_pos - window_size`
+//!     makes it true whatever `hit_saved` says, and with no cell it is true because
+//!     `s_end_pos > window_size` (the hash offset starts at `window_size` and only grows or
+//!     returns to it, so `s_off_pos >= window_size`; positions where that fails get no
+//!     bound); with one hit (`window_size == 0`) the test is false either way and the
+//!     `check_masks` branch runs;
+//!   - nothing else reads what the retrieve returns: `s_l` (`hit_len`) is never read, and
+//!     `last_hit` and `hit_saved` only by these two tests (na_ungapped.c:839, 841; the
+//!     off-diagonal block at 853-886 makes retrieves of its own).
+//!
+//!   So the bound needs no term for the insert. The prototype's third term, the insert's stale
+//!   limit `s_off_pos - (window_size + Delta + 1)`, only lowered the bound (it came from a
+//!   variant whose skip also covered the insert's walk): the insert at the end of the seed
+//!   (na_ungapped.c:939-941) takes `s_end_pos`, `hit_ready`, `s_off_pos` and the window, all of
+//!   this seed and its extension, and `hit_ready` depends on the retrieve only through the two
+//!   tests above; `s_BlastDiagHashInsert` walks the chain itself to find the cell it updates,
+//!   takes over or appends, whether the retrieve walked or not; and the next seed reads only
+//!   the table, which no retrieve writes.
+//!
+//!   The bound is tight: a cell at `s_off_pos + 1` is rejected where no cell is not, and with
+//!   two hits a cell at `s_end_pos - window_size` with `hit_saved = 0` fails the window test
+//!   where no cell passes it (test `the_bound_is_tight_at_every_reachable_setting`).
 //! - (iii) `insert` is not changed and still walks the chain, so the table is the reference's
 //!   cell for cell; only the retrieve's read-only walk is skipped. The decisions, the ungapped
 //!   extensions, the hit list and the table are therefore the reference's element for element.
@@ -123,6 +148,11 @@
 //!
 //! With the switch off the table has no bounds (`max_level` empty), `insert` does one length
 //! test of the empty vector, the clear fills an empty vector, and the callers call `retrieve`.
+//!
+//! The shadow (`LOSAT_X_DIAGLVSHADOW`) checks both parts on every skipped retrieve: it walks the
+//! bucket and checks (i) for each cell against the bound, then makes the walk of the retrieve and
+//! checks (ii), that the decisions the fold takes from the cell it returns (the `last_hit` test,
+//! then with two hits the window test) are those from no cell.
 
 use super::{DiagHashTable, DIAGHASH_NUM_BUCKETS};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -152,10 +182,14 @@ fn mode() -> Mode {
     })
 }
 
-// No NCBI counterpart: the counters of the shadow's summary line.
+// No NCBI counterpart: the counters of the shadow's summary line: the retrieves, the skipped
+// ones, those whose bucket passed the check of (i), those whose decisions passed the check of
+// (ii), and of those, the ones whose walk found a cell of the diagonal (below the bound).
 static RETRIEVES: AtomicU64 = AtomicU64::new(0);
 static SKIPPED: AtomicU64 = AtomicU64::new(0);
 static VERIFIED: AtomicU64 = AtomicU64::new(0);
+static DECISIONS: AtomicU64 = AtomicU64::new(0);
+static CELLS: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
 thread_local! {
@@ -173,48 +207,104 @@ pub(super) fn new_levels() -> (Vec<i32>, bool) {
     }
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:825,828-841,939-941
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:828-841
 /// ```c
-///     Int4 Delta = MIN(word_params->options->scan_range, window_size - word_length);
-/// ...
+///     s_end = s_off + word_length;
 ///     s_off_pos = s_off + hash_table->offset;
 ///     s_end_pos = s_end + hash_table->offset;
 /// ...
 ///     if (s_off_pos < last_hit) return 0;
 ///
 ///     if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
-/// ...
-///     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
-///                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
-///                           hit_ready, s_off_pos, window_size + Delta + 1);
 /// ```
-/// The bound of a seed at `s_off_pos` (`s_off + hash_table->offset`): a cell whose level lies
-/// below it makes the decisions of no cell (module comment, (ii)). `diag_hash_window` is the
-/// insert's `window_size + Delta + 1` (`diag_hash_insert_window`), `word_length` the length
-/// `s_end` adds to `s_off`. `i32::MIN` (nothing is below it) where the argument does not hold:
-/// a position past `i32::MAX`, or two hits with `s_end_pos <= window_size`.
-#[inline(always)]
+/// What the level bound and the shadow's decisions read of a fold's seeds, fixed for a chunk
+/// (the reference fold) or a fold call (the strips folds) and made there once: whether the
+/// seeds take two hits, the word length that `s_end` adds to `s_off`, and the window. A seed's
+/// bound (module comment, (ii)) is `s_off_pos + add`, where `add` is 1 (the `last_hit` test),
+/// with two hits at most `word_length - window_size` (the window test), for `s_off_pos` in
+/// `lo..=hi`, and `i32::MIN` (nothing is below it) elsewhere: where `s_end_pos` passes
+/// `i32::MAX` (the decisions' `as i32` would wrap) and, with two hits, where `s_end_pos <=
+/// window_size` (with no cell the window test would be false).
+#[derive(Clone, Copy, Debug)]
+pub(super) struct LvSeeds {
+    two_hits: bool,
+    word_length: usize,
+    window_size: usize,
+    lo: usize,
+    hi: usize,
+    add: i64,
+}
+
+impl LvSeeds {
+    /// The seeds' constants: `two_hits` (`window_size > 0`), `word_length` (the length that
+    /// `s_end` adds to `s_off`: the two-stage word length, or the lookup word without the
+    /// two-stage table) and `window_size`.
+    pub(super) fn new(two_hits: bool, word_length: usize, window_size: usize) -> Self {
+        // The positions with a bound: `s_end_pos = s_off_pos + word_length` at most `i32::MAX`
+        // (`word_length.max(1)`, so that the bound `s_off_pos + 1` fits too) and, with two hits,
+        // above `window_size`. No position has one when `lo > hi`.
+        let (lo, hi) = match (i32::MAX as usize).checked_sub(word_length.max(1)) {
+            Some(hi) if two_hits => ((window_size + 1).saturating_sub(word_length), hi),
+            Some(hi) => (0, hi),
+            None => (1, 0),
+        };
+        let add = if two_hits {
+            1.min(word_length as i64 - window_size as i64)
+        } else {
+            1
+        };
+        Self {
+            two_hits,
+            word_length,
+            window_size,
+            lo,
+            hi,
+            add,
+        }
+    }
+
+    /// The level bound of a seed at `s_off_pos` (`s_off + hash_table->offset`): a cell whose
+    /// level lies below it makes the decisions of no cell (module comment, (ii)). In `lo..=hi`
+    /// it lies in `1..=i32::MAX` (`s_off_pos + 1 <= i32::MAX`; with two hits and `add < 1`,
+    /// `s_off_pos + word_length - window_size >= 1` because `s_end_pos > window_size`).
+    #[inline(always)]
+    pub(super) fn bound(&self, s_off_pos: usize) -> i32 {
+        if s_off_pos < self.lo || s_off_pos > self.hi {
+            return i32::MIN;
+        }
+        let bound = s_off_pos as i64 + self.add;
+        debug_assert!((1..=i32::MAX as i64).contains(&bound));
+        bound as i32
+    }
+
+    /// The decisions of `s_BlastnDiagHashExtendInitialHit` that read the retrieve (module
+    /// comment, (ii)), as the four callers take them from `last_hit` and `hit_saved` (`0` and
+    /// `false` with no cell) before the seed is extended: rejected (`s_off_pos < last_hit`),
+    /// and if not, whether the two-hit branch runs (`two_hits && (hit_saved || s_end_pos >
+    /// last_hit + window_size)`, `s_end_pos = s_off_pos + word_length`).
+    pub(super) fn decisions(
+        &self,
+        found: Option<(i32, i32, bool)>,
+        s_off_pos: usize,
+    ) -> (bool, bool) {
+        let (last_hit, _hit_len, hit_saved) = found.unwrap_or((0, 0, false));
+        let rejected = (s_off_pos as i32) < last_hit;
+        let s_end_pos_i32 = (s_off_pos + self.word_length) as i32;
+        let window_end = last_hit.wrapping_add(self.window_size as i32);
+        let branch = self.two_hits && (hit_saved || s_end_pos_i32 > window_end);
+        (rejected, !rejected && branch)
+    }
+}
+
+/// The level bound of one seed (`LvSeeds::bound`; the folds make their `LvSeeds` once).
+#[cfg(test)]
 pub(super) fn level_bound(
     s_off_pos: usize,
-    diag_hash_window: i32,
     two_hits: bool,
     word_length: usize,
     window_size: usize,
 ) -> i32 {
-    let s_end_pos = s_off_pos.saturating_add(word_length);
-    if s_end_pos > i32::MAX as usize {
-        return i32::MIN;
-    }
-    let s_off_pos = s_off_pos as i64;
-    let mut bound = (s_off_pos + 1).min(s_off_pos - diag_hash_window as i64);
-    if two_hits {
-        let window_bound = s_end_pos as i64 - window_size as i64;
-        if window_bound <= 0 {
-            return i32::MIN;
-        }
-        bound = bound.min(window_bound);
-    }
-    bound.clamp(i32::MIN as i64, i32::MAX as i64) as i32
+    LvSeeds::new(two_hits, word_length, window_size).bound(s_off_pos)
 }
 
 impl DiagHashTable {
@@ -233,16 +323,23 @@ impl DiagHashTable {
     ///     while (index) {
     ///         if (table->chain[index].diag == diag) {
     /// ```
-    /// `retrieve`, or `None` without a walk when every cell of `diag`'s bucket has a level
-    /// below `bound` (`max_level`). A table without bounds always walks. With
-    /// LOSAT_X_DIAGLVSHADOW every skipped walk is done and checked (`x_lv_verify`).
+    /// `retrieve` for a seed of `seeds` at `s_off_pos`, or `None` without a walk when every cell
+    /// of `diag`'s bucket has a level below the seed's bound (`max_level`). A table without
+    /// bounds always walks. With LOSAT_X_DIAGLVSHADOW every skipped walk is done and checked
+    /// (`x_lv_verify`).
     #[inline(always)]
-    pub(super) fn retrieve_below(&self, diag: i32, bound: i32) -> Option<(i32, i32, bool)> {
+    pub(super) fn retrieve_below(
+        &self,
+        diag: i32,
+        seeds: &LvSeeds,
+        s_off_pos: usize,
+    ) -> Option<(i32, i32, bool)> {
         let bucket =
             ((diag as u32).wrapping_mul(0x9E370001) % DIAGHASH_NUM_BUCKETS as u32) as usize;
+        let bound = seeds.bound(s_off_pos);
         let below = matches!(self.max_level.get(bucket), Some(&max_level) if max_level < bound);
         if self.x_lv_shadow {
-            self.x_lv_verify(bucket, bound, below);
+            self.x_lv_verify(diag, bucket, seeds, s_off_pos, bound, below);
         }
         if below {
             #[cfg(test)]
@@ -254,11 +351,21 @@ impl DiagHashTable {
 
     /// No NCBI counterpart: LOSAT_X_DIAGLVSHADOW for one retrieve. A skipped walk is walked
     /// here: every cell of the bucket must lie below the bound and at or below the bucket's
-    /// `max_level` (so the walk would have returned no cell or a cell below the bound); any
-    /// other cell prints the summary line with `DIFFERENT` and panics.
+    /// `max_level` ((i): the walk would have returned no cell or a cell below the bound), and
+    /// the decisions the seed takes from the cell the retrieve's walk returns must be those it
+    /// takes from no cell ((ii): the bound is high enough to skip only what changes nothing).
+    /// Anything else prints the summary line with `DIFFERENT` and panics.
     #[cold]
     #[inline(never)]
-    fn x_lv_verify(&self, bucket: usize, bound: i32, below: bool) {
+    fn x_lv_verify(
+        &self,
+        diag: i32,
+        bucket: usize,
+        seeds: &LvSeeds,
+        s_off_pos: usize,
+        bound: i32,
+        below: bool,
+    ) {
         RETRIEVES.fetch_add(1, Ordering::Relaxed);
         if !below {
             return;
@@ -278,6 +385,19 @@ impl DiagHashTable {
             index = cell.next;
         }
         VERIFIED.fetch_add(1, Ordering::Relaxed);
+        let found = self.retrieve(diag);
+        let walked = seeds.decisions(found, s_off_pos);
+        let none = seeds.decisions(None, s_off_pos);
+        if walked != none {
+            print_line("DIFFERENT");
+            panic!(
+                "LOSAT_X_DIAGLVSHADOW: diagonal {diag} at s_off_pos {s_off_pos} (bound {bound}, {seeds:?}): the walk's cell {found:?} gives the decisions (rejected, two-hit branch) {walked:?}, no cell {none:?}"
+            );
+        }
+        DECISIONS.fetch_add(1, Ordering::Relaxed);
+        if found.is_some() {
+            CELLS.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Tests only: bounds (and the shadow flag) for a table made without them, from its cells.
@@ -299,10 +419,12 @@ impl DiagHashTable {
 /// No NCBI counterpart: the shadow's line, `identical` at the end of a search.
 fn print_line(verdict: &str) {
     eprintln!(
-        "[X_SHADOW] DIAGLV retrieves={} skipped={} verified={} {verdict}",
+        "[X_SHADOW] DIAGLV retrieves={} skipped={} verified={} decisions={} cells={} {verdict}",
         RETRIEVES.load(Ordering::Relaxed),
         SKIPPED.load(Ordering::Relaxed),
-        VERIFIED.load(Ordering::Relaxed)
+        VERIFIED.load(Ordering::Relaxed),
+        DECISIONS.load(Ordering::Relaxed),
+        CELLS.load(Ordering::Relaxed)
     );
 }
 
@@ -521,6 +643,7 @@ mod tests {
                 let window = window_size as i32;
                 let diag_hash_window =
                     diag_hash_insert_window(window_size, scan_range, word_length);
+                let seeds = LvSeeds::new(two_hits, word_length, window_size);
                 let mut h = table(window, true, shadow);
                 h.offset = window + rng.below(100_000) as i32;
                 let base = h.offset as usize;
@@ -533,11 +656,10 @@ mod tests {
                     s += rng.below(3) as usize;
                     // a probe at the current position (as the fold's seeds come in order)
                     let diag = diags[rng.below(diags.len() as u64) as usize];
-                    let bound =
-                        level_bound(s, diag_hash_window, two_hits, word_length, window_size);
+                    let bound = seeds.bound(s);
                     let full = h.retrieve(diag);
                     let before = test_skips();
-                    let fast = h.retrieve_below(diag, bound);
+                    let fast = h.retrieve_below(diag, &seeds, s);
                     let skip = test_skips() > before;
                     probes += 1;
                     if skip {
@@ -572,35 +694,139 @@ mod tests {
 
     #[test]
     fn the_bound_is_the_smallest_limit_and_none_where_the_argument_fails() {
-        // one hit: s_off_pos + 1 (the insert's limit 1 - word_length lies above it)
-        let w28 = diag_hash_insert_window(0, 0, 28);
-        assert_eq!(level_bound(1000, w28, false, 28, 0), 1001);
-        // two hits (window 40, template 18): the insert's limit, 41 below
-        let w18 = diag_hash_insert_window(40, 0, 18);
-        assert_eq!(w18, 41);
-        assert_eq!(level_bound(1000, w18, true, 18, 40), 959);
-        // two hits with a window limit below the insert's (word 11, window 40, Delta 2 -> 43;
-        // window limit 1000 + 11 - 40 = 971 > 957)
-        assert_eq!(
-            level_bound(1000, diag_hash_insert_window(40, 2, 11), true, 11, 40),
-            957
-        );
-        // and where only the window limit is smallest (a window above the insert's window)
-        assert_eq!(level_bound(1000, -100, true, 18, 40), 978);
+        // one hit: s_off_pos + 1
+        assert_eq!(level_bound(1000, false, 28, 0), 1001);
+        assert_eq!(level_bound(1000, false, 11, 0), 1001);
+        // two hits (window 40): the window limit s_end_pos - window_size lies below
+        // s_off_pos + 1 (template 18: 1000 + 18 - 40; word 11: 1000 + 11 - 40)
+        assert_eq!(level_bound(1000, true, 18, 40), 978);
+        assert_eq!(level_bound(1000, true, 11, 40), 971);
+        // a word longer than the window (not reachable): s_off_pos + 1
+        assert_eq!(level_bound(1000, true, 50, 40), 1001);
         // s_end_pos <= window_size: no bound
-        assert_eq!(level_bound(10, w18, true, 18, 40), i32::MIN);
-        assert_eq!(level_bound(22, w18, true, 18, 40), i32::MIN);
-        assert_ne!(level_bound(23, w18, true, 18, 40), i32::MIN);
+        assert_eq!(level_bound(10, true, 18, 40), i32::MIN);
+        assert_eq!(level_bound(22, true, 18, 40), i32::MIN);
+        assert_eq!(level_bound(23, true, 18, 40), 1);
         // past i32::MAX: no bound
-        assert_eq!(level_bound(i32::MAX as usize, w28, false, 28, 0), i32::MIN);
-        assert_eq!(level_bound(usize::MAX, w28, false, 28, 0), i32::MIN);
+        assert_eq!(level_bound(i32::MAX as usize, false, 28, 0), i32::MIN);
+        assert_eq!(level_bound(usize::MAX, false, 28, 0), i32::MIN);
+        assert_eq!(level_bound(i32::MAX as usize - 27, false, 28, 0), i32::MIN);
         assert_eq!(
-            level_bound(i32::MAX as usize - 28, w28, false, 28, 0),
+            level_bound(i32::MAX as usize - 28, false, 28, 0),
             i32::MAX - 27
+        );
+        assert_eq!(
+            level_bound(i32::MAX as usize - 28, true, 28, 40),
+            i32::MAX - 40
         );
         // an empty bucket (`i32::MIN`) is never below `i32::MIN`
         let h = table(40, true, false);
-        assert_eq!(h.retrieve_below(5, i32::MIN), None);
+        assert_eq!(h.retrieve_below(5, &LvSeeds::new(true, 18, 40), 10), None);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:839-841,939-941
+    // ```c
+    //     if (s_off_pos < last_hit) return 0;
+    //
+    //     if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
+    // ...
+    //     s_BlastDiagHashInsert(hash_table, diag, s_end_pos,
+    //                           (hit_ready) ? 0 : s_end_pos - s_off_pos,
+    //                           hit_ready, s_off_pos, window_size + Delta + 1);
+    // ```
+    // The bound at its edge, for every setting the command line reaches: two hits with window
+    // 40 and templates 16, 18 and 21 (`scan_range` 0), and one hit with words 7, 11 and 28. One
+    // cell on the probed diagonal at `bound - 1` (with `hit_saved` 0 and 1) is skipped, also
+    // by the shadow, and decides as no cell; at `bound` it is walked, and with `hit_saved` 0
+    // (with one hit, either) it decides otherwise than no cell, so a bound one higher would
+    // change a decision. The insert the fold makes at that seed then leaves the same table with
+    // the bounds as without, and the bounds hold.
+    #[test]
+    fn the_bound_is_tight_at_every_reachable_setting() {
+        let configs: [(bool, usize, usize); 6] = [
+            (true, 16, 40),
+            (true, 18, 40),
+            (true, 21, 40),
+            (false, 7, 0),
+            (false, 11, 0),
+            (false, 28, 0),
+        ];
+        let effective = |(rejected, branch): (bool, bool)| (rejected, !rejected && branch);
+        for &(two_hits, word_length, window_size) in &configs {
+            let seeds = LvSeeds::new(two_hits, word_length, window_size);
+            let diag_hash_window = diag_hash_insert_window(window_size, 0, word_length);
+            let window = window_size as i32;
+            for s_off_pos in [window_size, window_size + 1, 5_000, 1 << 20] {
+                let bound = seeds.bound(s_off_pos);
+                let expected = if two_hits {
+                    s_off_pos + word_length - window_size
+                } else {
+                    s_off_pos + 1
+                };
+                assert_eq!(bound as usize, expected);
+                assert_eq!(
+                    bound,
+                    level_bound(s_off_pos, two_hits, word_length, window_size)
+                );
+                for (level, hit_saved) in [
+                    (bound - 1, false),
+                    (bound - 1, true),
+                    (bound, false),
+                    (bound, true),
+                ] {
+                    let at = format!(
+                        "two_hits {two_hits} word {word_length} s_off_pos {s_off_pos} bound {bound} level {level} hit_saved {hit_saved}"
+                    );
+                    let diag = 4321;
+                    let hit_len = if hit_saved { 0 } else { word_length as i32 };
+                    // one cell, written by an earlier seed of this diagonal
+                    let earlier = (level as usize).saturating_sub(word_length) as i32;
+                    let mut on = table(window, true, true);
+                    let mut off = table(window, false, false);
+                    on.insert(diag, level, hit_len, hit_saved, earlier, diag_hash_window);
+                    off.insert(diag, level, hit_len, hit_saved, earlier, diag_hash_window);
+                    let full = off.retrieve(diag);
+                    assert_eq!(full, Some((level, hit_len, hit_saved)), "{at}");
+                    let before = test_skips();
+                    let fast = on.retrieve_below(diag, &seeds, s_off_pos);
+                    let skipped = test_skips() > before;
+                    let walked = decisions(full, s_off_pos, two_hits, word_length, window_size);
+                    let none = decisions(None, s_off_pos, two_hits, word_length, window_size);
+                    // the shadow's decisions are those of the test's
+                    assert_eq!(seeds.decisions(full, s_off_pos), effective(walked), "{at}");
+                    assert_eq!(seeds.decisions(None, s_off_pos), effective(none), "{at}");
+                    if level < bound {
+                        assert!(skipped, "{at}: not skipped");
+                        assert_eq!(fast, None, "{at}");
+                        assert_eq!(walked, none, "{at}");
+                    } else {
+                        assert!(!skipped, "{at}: skipped");
+                        assert_eq!(fast, full, "{at}");
+                        if !hit_saved || !two_hits {
+                            assert_ne!(effective(walked), effective(none), "{at}: not tight");
+                        }
+                    }
+                    // the insert at the end of this seed (unless it was rejected)
+                    if !walked.0 {
+                        let s_end_pos = (s_off_pos + word_length) as i32;
+                        let ready = walked.1;
+                        let len = if ready { 0 } else { word_length as i32 };
+                        for h in [&mut on, &mut off] {
+                            h.insert(
+                                diag,
+                                s_end_pos,
+                                len,
+                                ready,
+                                s_off_pos as i32,
+                                diag_hash_window,
+                            );
+                        }
+                    }
+                    check_bounds(&on, 0);
+                    assert_eq!(hash_state(&on), hash_state(&off), "{at}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -610,6 +836,37 @@ mod tests {
         h.insert(7, 500, 0, true, 480, 41);
         // a bound that lies wrong about the bucket
         h.max_level[bucket_of(7)] = 100;
-        let _ = h.retrieve_below(7 + 512, 200);
+        // one hit at 199: the seed's bound is 200
+        let _ = h.retrieve_below(7 + 512, &LvSeeds::new(false, 28, 0), 199);
+    }
+
+    // The shadow's check of (ii): with a one-hit bound one too high (`s_off_pos + 2`), a cell
+    // at `s_off_pos + 1` passes the check of (i) but is rejected where no cell is not.
+    #[test]
+    #[should_panic(expected = "gives the decisions")]
+    fn the_shadow_panics_on_a_bound_that_changes_a_decision() {
+        let seeds = LvSeeds {
+            add: 2,
+            ..LvSeeds::new(false, 28, 0)
+        };
+        let mut h = table(0, true, true);
+        h.insert(7, 1001, 0, true, 980, 1);
+        let _ = h.retrieve_below(7, &seeds, 1000);
+    }
+
+    // The same with a two-hit bound one too high (`s_end_pos - window_size + 1`, template 18):
+    // a cell at `s_end_pos - window_size` with `hit_saved` 0 fails the window test where no
+    // cell passes it.
+    #[test]
+    #[should_panic(expected = "gives the decisions")]
+    fn the_shadow_panics_on_a_two_hit_bound_that_changes_a_decision() {
+        let right = LvSeeds::new(true, 18, 40);
+        let seeds = LvSeeds {
+            add: right.add + 1,
+            ..right
+        };
+        let mut h = table(40, true, true);
+        h.insert(7, 1000 + 18 - 40, 18, false, 960, 41);
+        let _ = h.retrieve_below(7, &seeds, 1000);
     }
 }

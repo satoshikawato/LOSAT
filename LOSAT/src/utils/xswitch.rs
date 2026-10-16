@@ -83,7 +83,12 @@ use std::sync::OnceLock;
 /// bounded window while the threads search, `blastn/blast_engine/x_bnstream.rs`) was added after
 /// the change as a switch that is off unless set and joined the set once it was verified and timed
 /// with it on.
-pub(crate) const STRICT_SET: [&str; 69] = [
+/// `LOSAT_X_TBXNEXT` (the threads of TBLASTX's parallel subject loop take the next subject when
+/// they are free, `tblastx/x_subject_next.rs`) and `LOSAT_X_TBXFRAMES` (a TBLASTX subject's frames
+/// made when they are read and freed when they are no longer read, `tblastx/subjects.rs`) were
+/// added after the change as switches that are off unless set and joined the set together once
+/// they were verified and timed with it on.
+pub(crate) const STRICT_SET: [&str; 71] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_PURGEFAST",
@@ -153,6 +158,8 @@ pub(crate) const STRICT_SET: [&str; 69] = [
     "LOSAT_X_BPREDOFIT",
     "LOSAT_X_BPQBLOCK",
     "LOSAT_X_BNSTREAM",
+    "LOSAT_X_TBXNEXT",
+    "LOSAT_X_TBXFRAMES",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that

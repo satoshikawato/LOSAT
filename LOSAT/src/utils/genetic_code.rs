@@ -340,7 +340,7 @@ const X_BASE_INDEX: [u8; 256] = {
 //  0, 1,14, 2,13, 0, 0, 4,11, 0, 0,12, 0, 3,15, 0,
 //  0, 0, 5, 6, 8, 0, 7, 9, 0,10, 0, 0, 0, 0, 0,
 // ```
-fn base_mask(base: u8) -> u8 {
+pub(crate) fn base_mask(base: u8) -> u8 {
     match base.to_ascii_uppercase() {
         b'A' => 1,
         b'C' => 2,

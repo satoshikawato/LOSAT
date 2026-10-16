@@ -131,9 +131,264 @@ pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
     frames
 }
 
+/// The bases a window of `x_generate_frames_in_windows` holds: one window of a subject's letters
+/// and two letters of the window before it (3 x 2^16 bases, 192 KiB).
+const X_FRAME_WINDOW: usize = 3 << 16;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1299-1308
+// ```c
+//                /* First produce the reverse strand of the nucleotide sequence */
+//               GetReverseNuclSequence(subject_blk->sequence_start, subject_blk->length,
+//                     &nucl_seq_rev);
+//
+//               for (context = 0; context < num_frames; ++context) {
+//                  int frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+//                  retval->translations[context] = (Uint1*) malloc((2+subject_blk->length/3)*sizeof(Uint1));
+//                  BLAST_GetTranslation(subject_blk->sequence_start, nucl_seq_rev,
+//                     subject_blk->length, frame, retval->translations[context], gen_code_string);
+//               }
+// ```
+// EXPERIMENT (LOSAT_X_TBXFRAMES): `generate_frames` of a subject whose letters are read in
+// windows, without the subject's letters or their reverse complement in memory at once: the
+// six frames are filled in one pass over the letters, each codon start q (0 <= q <= len - 3)
+// giving the residue of forward frame q % 3 at index q / 3 (the codon letters q..q+3) and of
+// reverse frame r % 3 at index r / 3 with r = len - 3 - q (the complements of letters q+2, q+1,
+// q, in that order: `dna::revcomp` is `rev().map(complement)`). Every residue of the six frames
+// of `generate_frames` is the translation of the same three letters by the same
+// `codon_to_aa_ncbistdaa`, so the frames are the same: the frames that exist (`i + 3 <= len`),
+// in the same order, with the same lengths, sentinels and residues.
+/// The frames `generate_frames` makes of the `len` letters that `fill` writes: `fill(from, out)`
+/// writes the letters `[from, from + out.len())`; it is called for consecutive windows that cover
+/// `[0, len)` once, in order.
+pub(crate) fn x_generate_frames_in_windows(
+    len: usize,
+    fill: &mut dyn FnMut(usize, &mut [u8]),
+    table: &GeneticCode,
+) -> Vec<QueryFrame> {
+    x_frames_in_windows(len, X_FRAME_WINDOW, fill, table)
+}
+
+fn x_frames_in_windows(
+    len: usize,
+    window: usize,
+    fill: &mut dyn FnMut(usize, &mut [u8]),
+    table: &GeneticCode,
+) -> Vec<QueryFrame> {
+    let frame_of = |frame: i8, i: usize| {
+        let aa_len = (len - i) / 3;
+        QueryFrame {
+            frame,
+            aa_seq: vec![SENTINEL_BYTE; aa_len + 2],
+            aa_seq_nomask: None,
+            aa_len,
+            orig_len: len,
+            seg_masks: Vec::new(),
+        }
+    };
+    let mut forward: Vec<QueryFrame> = (0..3)
+        .filter(|i| i + 3 <= len)
+        .map(|i| frame_of(i as i8 + 1, i))
+        .collect();
+    let mut reverse: Vec<QueryFrame> = (0..3)
+        .filter(|i| i + 3 <= len)
+        .map(|i| frame_of(-(i as i8 + 1), i))
+        .collect();
+    let residues = x_codon_residues(table);
+    let masks = x_letter_masks();
+    // `letters` holds the letters [start, end): the codon starts not yet translated (at most two
+    // letters of the last window) and the window just filled.
+    let mut letters: Vec<u8> = Vec::with_capacity(window.min(len) + 2);
+    let mut start = 0usize;
+    let mut end = 0usize;
+    while end < len {
+        let to = (end + window).min(len);
+        let kept = letters.len();
+        letters.resize(kept + (to - end), 0);
+        fill(end, &mut letters[kept..]);
+        end = to;
+        // The codon starts whose three letters are in [start, end).
+        let codons_end = end.saturating_sub(2).max(start);
+        if forward.len() == 3 {
+            // Codon starts q = q0, q0 + 3, ... of forward frame f (q % 3 = f, index q / 3, ascending)
+            // are those of one reverse frame ((len - 3 - q) % 3, index (len - 3 - q) / 3, descending).
+            for f in 0..3 {
+                let q0 = start + (f + 3 - start % 3) % 3;
+                if q0 >= codons_end {
+                    continue;
+                }
+                let count = (codons_end - q0).div_ceil(3);
+                let k0 = q0 / 3;
+                let r0 = len - 3 - q0;
+                let (ir, kr0) = (r0 % 3, r0 / 3);
+                let fw = &mut forward[f].aa_seq[1 + k0..1 + k0 + count];
+                let rv = &mut reverse[ir].aa_seq[2 + kr0 - count..2 + kr0];
+                let codons = letters[q0 - start..end - start].chunks_exact(3);
+                for ((codon, out_f), out_r) in codons.zip(fw.iter_mut()).zip(rv.iter_mut().rev()) {
+                    let (b0, b1, b2) = (codon[0] as usize, codon[1] as usize, codon[2] as usize);
+                    *out_f = residues[usize::from(masks.forward[b0]) << 8
+                        | usize::from(masks.forward[b1]) << 4
+                        | usize::from(masks.forward[b2])];
+                    *out_r = residues[usize::from(masks.reverse[b2]) << 8
+                        | usize::from(masks.reverse[b1]) << 4
+                        | usize::from(masks.reverse[b0])];
+                }
+            }
+        } else {
+            for q in start..codons_end {
+                let at = q - start;
+                let (b0, b1, b2) = (letters[at], letters[at + 1], letters[at + 2]);
+                forward[q % 3].aa_seq[q / 3 + 1] = codon_to_aa_ncbistdaa(&[b0, b1, b2], table);
+                let r = len - 3 - q;
+                reverse[r % 3].aa_seq[r / 3 + 1] = codon_to_aa_ncbistdaa(
+                    &[
+                        dna::complement(b2),
+                        dna::complement(b1),
+                        dna::complement(b0),
+                    ],
+                    table,
+                );
+            }
+        }
+        letters.drain(..codons_end - start);
+        start = codons_end;
+    }
+    forward.append(&mut reverse);
+    forward
+}
+
+/// The ncbi4na mask (`base_mask`) of every byte as a codon letter, and of its complement
+/// (`dna::complement`, the map of `dna::revcomp`).
+struct XLetterMasks {
+    forward: [u8; 256],
+    reverse: [u8; 256],
+}
+
+fn x_letter_masks() -> &'static XLetterMasks {
+    static MASKS: std::sync::OnceLock<XLetterMasks> = std::sync::OnceLock::new();
+    MASKS.get_or_init(|| XLetterMasks {
+        forward: std::array::from_fn(|byte| crate::utils::genetic_code::base_mask(byte as u8)),
+        reverse: std::array::from_fn(|byte| {
+            crate::utils::genetic_code::base_mask(dna::complement(byte as u8))
+        }),
+    })
+}
+
+/// A letter of each ncbi4na mask: `base_mask(X_MASK_LETTERS[m]) == m`.
+const X_MASK_LETTERS: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:369-424 (`s_CodonToAA`; the
+// quote is at `GeneticCode::get`)
+// ```c
+// static Uint1 mapping[4] = { 8, 2, 1, 4 };
+// for (i = 0; i < 4; i++) if (codon[0] & mapping[i])
+// ```
+// `GeneticCode::get` reads a codon only through the masks of its three letters (`base_mask`;
+// `LOSAT_X_CODONFAST` gives the loop's residue for single-bit masks), so the residue of a codon
+// is the residue of any codon with the same masks: here, of the letters `X_MASK_LETTERS`.
+/// The NCBIstdaa residue `codon_to_aa_ncbistdaa` gives every codon with masks (m0, m1, m2), at
+/// index m0 << 8 | m1 << 4 | m2; one table per thread for the last genetic code asked for.
+fn x_codon_residues(table: &GeneticCode) -> std::rc::Rc<[u8; 4096]> {
+    thread_local! {
+        static LAST: std::cell::RefCell<Option<([u8; 64], std::rc::Rc<[u8; 4096]>)>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    LAST.with(|last| {
+        let mut last = last.borrow_mut();
+        if let Some((code, residues)) = last.as_ref() {
+            if *code == table.table {
+                return std::rc::Rc::clone(residues);
+            }
+        }
+        let residues = std::rc::Rc::new(std::array::from_fn(|index| {
+            let codon = [
+                X_MASK_LETTERS[index >> 8],
+                X_MASK_LETTERS[(index >> 4) & 15],
+                X_MASK_LETTERS[index & 15],
+            ];
+            codon_to_aa_ncbistdaa(&codon, table)
+        }));
+        *last = Some((table.table, std::rc::Rc::clone(&residues)));
+        residues
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `x_frames_in_windows` against `generate_frames`: every field of every frame.
+    fn assert_same_frames(seq: &[u8], window: usize, code: &GeneticCode) {
+        let expected = generate_frames(seq, code);
+        let mut fills: Vec<(usize, usize)> = Vec::new();
+        let got = x_frames_in_windows(
+            seq.len(),
+            window,
+            &mut |from, out| {
+                fills.push((from, out.len()));
+                out.copy_from_slice(&seq[from..from + out.len()]);
+            },
+            code,
+        );
+        assert_eq!(
+            got.len(),
+            expected.len(),
+            "len {} window {window}",
+            seq.len()
+        );
+        for (g, e) in got.iter().zip(&expected) {
+            assert_eq!(g.frame, e.frame);
+            assert_eq!(
+                g.aa_seq,
+                e.aa_seq,
+                "frame {} len {} window {window}",
+                e.frame,
+                seq.len()
+            );
+            assert!(g.aa_seq_nomask.is_none() && e.aa_seq_nomask.is_none());
+            assert_eq!(g.aa_len, e.aa_len);
+            assert_eq!(g.orig_len, e.orig_len);
+            assert!(g.seg_masks.is_empty() && e.seg_masks.is_empty());
+        }
+        // The windows cover the letters once, in order.
+        let mut next = 0;
+        for (from, n) in fills {
+            assert_eq!(from, next);
+            assert!(n > 0);
+            next += n;
+        }
+        assert_eq!(next, seq.len());
+    }
+
+    #[test]
+    fn the_mask_letters_have_their_masks() {
+        for (mask, &letter) in X_MASK_LETTERS.iter().enumerate() {
+            assert_eq!(crate::utils::genetic_code::base_mask(letter) as usize, mask);
+        }
+    }
+
+    #[test]
+    fn frames_in_windows_are_the_frames_of_the_letters() {
+        // Letters of both cases, every IUPAC code, U, a gap and bytes that are not letters.
+        let alphabet = b"ACGTACGTACGTacgtNnRYKMSWBDHVrykmswbdhvUu-*X.";
+        let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut letter = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            alphabet[(state % alphabet.len() as u64) as usize]
+        };
+        let codes = [1u8, 2, 4, 11];
+        for len in (0..40).chain([95, 96, 97, 98, 99, 100, 101, 1000, 3001]) {
+            let seq: Vec<u8> = (0..len).map(|_| letter()).collect();
+            for window in [1, 2, 3, 4, 5, 7, 32, 33, 34, 100, X_FRAME_WINDOW] {
+                for &id in &codes {
+                    assert_same_frames(&seq, window, &GeneticCode::from_id(id));
+                }
+            }
+        }
+        let long: Vec<u8> = (0..2 * X_FRAME_WINDOW + 5).map(|_| letter()).collect();
+        assert_same_frames(&long, X_FRAME_WINDOW, &GeneticCode::from_id(1));
+    }
 
     #[test]
     fn test_generate_frames() {

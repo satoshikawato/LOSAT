@@ -1095,6 +1095,30 @@ Rebuilding less:
   the switch stops a frame loop that would run without the worker's table
   (`LOSAT/tests/tblastx_seed_release.rs` reads the counters).
 
+- `LOSAT_X_TBXFRAMES=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it) a subject's frames are made when they are read and only as long
+  as they are read (`Subjects::x_preliminary_frames` / `x_letter_frames` in `tblastx/subjects.rs`,
+  `x_generate_frames_in_windows` in `tblastx/translation.rs`). Without it `process_subject` makes, before
+  the seed stage, the six frames of the subject's letters and, for a subject with ambiguous bases, the six
+  frames of the bases the preliminary stage translates, each from a whole copy of its sequence and of its
+  reverse complement, and keeps both sets to the end of the subject (a stored sequence with ambiguity codes:
+  about 7 bytes per base at once). With it only the preliminary frames are made before the seed stage, in
+  one pass over windows of 196,608 letters (a record's ambiguous letters resolved window by window from the
+  one `CRandom` of its length, in letter order, which draws what `preliminary_subject_bases` draws; a stored
+  sequence's 2-bit codes read directly) through a table of the residues of the 4,096 codons of ncbi4na masks
+  (`GeneticCode::get` reads a codon only through the masks of its letters); they are freed after the seed
+  stage, before the first linking call; and a subject with ambiguous bases gets the frames of its letters
+  (the re-evaluation's) only when HSPs are left for the re-evaluation, as NCBI translates the ncbi4na
+  subject there (blast_hits.c:2650-2653). The seed stage's HSP lists and the first linking call read only
+  the number and lengths of the frames, which both sets share, so they take the preliminary frames. Same
+  frames by construction (unit tests compare every frame with `generate_frames`, and the methods with
+  `with_search_bases`, for records and stored sequences with runs); `LOSAT/tests/tblastx_subject_next.rs`
+  compares whole reports. Measured on the workstation (node 0, CPUs 8-15, one thread, medians of 3
+  alternating pairs, reports identical): 3 fruit fly transcripts x the fruit fly genome database (1,870
+  sequences, N runs) 11.59 -> 9.75 s (NCBI `-db` 10.05 s), max RSS 257 -> 107 MiB (NCBI 162 MiB); the same
+  with the genome FASTA as `-subject` 12.96 -> 11.39 s, 328 -> 217 MiB; 10 transcripts x the zebrafish cDNA
+  database 62.74 -> 61.62 s, 46 -> 45 MiB.
+
 Scheduling (each value computed by one thread with the original function; order of output kept):
 
 - `LOSAT_X_AHEAD=16` blastn/megablast ordered gapped-extension and traceback loops: helpers compute
@@ -1394,6 +1418,19 @@ Scheduling (each value computed by one thread with the original function; order 
   take units, never a loop of the flow. `=0` turns it off. With `LOSAT_WASI_THREADS_DEBUG=1` each
   subject whose units ran on the pool prints a `prelim_units` stage line with
   `parallel_selected=true`; `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
+- `LOSAT_X_TBXNEXT=1` (TBLASTX, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it; acts only where the parallel subject loop runs: two or more threads
+  and more than one subject, native builds) each thread of the pool takes the next subject from one
+  counter when it is free (`tblastx/x_subject_next.rs`, one broadcast job per thread), with one worker
+  state per thread made when it takes its first subject. Without it the loop gives rayon the subject indices
+  as one indexed range (`for_each_init`), which rayon cuts into pieces before the search, so the long
+  subjects a genome lists first (the chromosome arms) fall into one piece and one thread searches them in
+  order. `process_subject` is unchanged and `report::final_hit_order` orders the HSP lists by query and
+  subject index, so the reports are the same. Use it with `LOSAT_X_TBXFRAMES`: alone it holds the frames of
+  several long subjects at once (3 fruit fly transcripts x the fruit fly genome database at 8 threads: 892
+  MiB, NCBI 359 MiB). With both at 8 threads (node 0, CPUs 8-15, medians of 3 alternating pairs, reports
+  identical): that search 11.48 -> 2.58 s (NCBI `-db` 2.73 s), max RSS 257 -> 316 MiB; with the genome FASTA
+  as `-subject` 12.83 -> 3.14 s (410 MiB); 10 transcripts x the zebrafish cDNA database 8.51 -> 8.01 s.
 - `LOSAT_X_TBNSTATE=1` (in the strict set since 2026-10-15) tblastn, the unit path (`TBNPAR`): the
   scan state of a subject's (frame, chunk) units (the diagonal table of the two-hit word finder, the
   offset pairs, the initial hits, the gapped alignment memory) is kept by the thread from one

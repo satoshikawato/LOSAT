@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW, off unless set): the BLOSUM62 protein
+//! EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW): the BLOSUM62 protein
 //! ungapped extension (`s_BlastAaExtendOneHit`, `s_BlastAaExtendTwoHit` and the
 //! `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks they share) with a tighter inner loop.
 //!
@@ -92,10 +92,11 @@ fn build_table() -> Option<Box<Table>> {
 fn state() -> &'static State {
     static STATE: OnceLock<State> = OnceLock::new();
     STATE.get_or_init(|| {
-        // Not in `xswitch::STRICT_SET`, so not read with `xswitch::on`.
+        // `LOSAT_X_BPUNGAP` is a strict-set switch; the shadow variable is read first, as "set to
+        // any value".
         let requested = if std::env::var_os("LOSAT_X_BPUNGAPSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_BPUNGAP").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BPUNGAP") {
             1
         } else {
             0

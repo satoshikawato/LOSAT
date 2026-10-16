@@ -225,7 +225,7 @@ pub(crate) use backbone::build_ncbi_lookup_from_prepared;
 // EXPERIMENT (LOSAT_X_BXLUTSHADOW): shadow counter for the exit summary; no NCBI counterpart, it
 // does not change any value NCBI computes.
 pub(crate) use backbone::x_bxlut_shadow_tables;
-// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): BLASTP's table built in place
+// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): BLASTP's table built in place
 // (lookup/x_lut_direct.rs); no NCBI counterpart for the re-export itself.
 pub(crate) use backbone::x_bp_build_ncbi_lookup;
 

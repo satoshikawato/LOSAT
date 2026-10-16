@@ -1,14 +1,16 @@
 //! The blastp search in blocks of whole query batches with `LOSAT_X_BPQBLOCK`
 //! (`src/algorithm/blastp/x_query_blocks.rs`) on whole searches.
 //!
-//! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable
-//! is a positive number of query letters. With it on, a search whose only report is tabular
-//! format 6 searches its queries block by block and writes each block's rows before it searches
-//! the next block. These tests compare the rows with the search of all queries (the variable
-//! unset) and check, from the `[TIMING] blastp_total` lines that each search of a query set
-//! prints with `LOSAT_TIMING`, that the block path ran (more searches than the reference) or did
-//! not (the same number), not only that the report is equal. `BATCH_SIZE` (NCBI's query batch
-//! size) makes small batches, so that the fixture pair has many batches and blocks. The same
+//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on by default, with blocks of
+//! 50,000 query letters, unless its variable is `0`, or `LOSAT_X_DEFAULT=0` and its variable is
+//! not set; a positive number in the variable sets the size of a block. With it on, a search
+//! whose only report is tabular format 6 searches its queries block by block and writes each
+//! block's rows before it searches the next block. Every test states the default it runs with:
+//! these tests compare the rows with the search of all queries (`LOSAT_X_BPQBLOCK=0`) and check,
+//! from the `[TIMING] blastp_total` lines that each search of a query set prints with
+//! `LOSAT_TIMING`, that the block path ran (more searches than the reference) or did not (the
+//! same number), not only that the report is equal. `BATCH_SIZE` (NCBI's query batch size) makes
+//! small batches, so that the fixture pair has many batches and blocks. The same
 //! comparisons run with `-db` on a database of the subject proteome made with `LOSAT makedb`.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-287
@@ -32,6 +34,8 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 const THREADS: [u32; 2] = [1, 4];
+const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
+const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 /// One blastp run of the fixture pair (two related nimavirus proteomes) with the given
 /// variables as its only `LOSAT_*` variables that choose a code path, and `extra` arguments.
@@ -46,6 +50,8 @@ fn blastp(threads: u32, vars: &[(&str, &str)], extra: &[&str]) -> (Vec<u8>, usiz
 }
 
 /// `blastp` with the subject arguments `subject` (`-subject FILE` or `-db NAME`).
+/// `LOSAT_X_DEFAULT` of the test's own environment is dropped as well: every test states the
+/// default it runs with.
 /// `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more
 /// than one thread, and it selects nothing; without the caller's value a file of the tests is
@@ -106,7 +112,9 @@ fn blocks_write_the_rows_of_the_search_of_all_queries() {
             .into_iter()
             .collect();
         for threads in THREADS {
-            let (reference, reference_searches) = blastp(threads, &batch, &["-outfmt", "6"]);
+            let mut off = batch.clone();
+            off.push(SWITCH_OFF);
+            let (reference, reference_searches) = blastp(threads, &off, &["-outfmt", "6"]);
             assert!(!reference.is_empty(), "the fixture pair has rows");
             for letters in ["1", "20000"] {
                 let mut vars = batch.clone();
@@ -137,7 +145,9 @@ fn blastp_fast_blocks_write_the_rows_of_the_search_of_all_queries() {
             .into_iter()
             .collect();
         for threads in THREADS {
-            let (reference, reference_searches) = blastp(threads, &batch, &fast);
+            let mut off = batch.clone();
+            off.push(SWITCH_OFF);
+            let (reference, reference_searches) = blastp(threads, &off, &fast);
             assert!(!reference.is_empty(), "the fixture pair has rows");
             for letters in ["1", "20000"] {
                 let mut vars = batch.clone();
@@ -165,7 +175,11 @@ fn blocks_write_the_rows_to_one_output_file() {
     let path = dir.join("rows.tsv");
     let path_text = path.to_str().unwrap();
     let custom = "6 qseqid sseqid pident length evalue bitscore qlen slen";
-    let (reference, _) = blastp(1, &[("BATCH_SIZE", "3000")], &["-outfmt", custom]);
+    let (reference, _) = blastp(
+        1,
+        &[("BATCH_SIZE", "3000"), SWITCH_OFF],
+        &["-outfmt", custom],
+    );
     let (stdout, searches) = blastp(
         1,
         &[("BATCH_SIZE", "3000"), ("LOSAT_X_BPQBLOCK", "1")],
@@ -184,7 +198,7 @@ fn blocks_write_the_rows_to_one_output_file() {
 fn other_reports_and_one_block_take_the_search_of_all_queries() {
     let batch = ("BATCH_SIZE", "3000");
     for (letters, outfmt) in [("1", "7"), ("1", "0"), ("100000000", "6")] {
-        let (reference, reference_searches) = blastp(1, &[batch], &["-outfmt", outfmt]);
+        let (reference, reference_searches) = blastp(1, &[batch, SWITCH_OFF], &["-outfmt", outfmt]);
         let (report, searches) = blastp(
             1,
             &[batch, ("LOSAT_X_BPQBLOCK", letters)],
@@ -199,6 +213,47 @@ fn other_reports_and_one_block_take_the_search_of_all_queries() {
             "outfmt {outfmt} blocks of {letters}: not the search of all queries"
         );
     }
+}
+
+// The default: with no variable the block is 50,000 query letters (the fixture's queries have
+// 77,448), `LOSAT_X_BPQBLOCK=0` and `LOSAT_X_DEFAULT=0` search all queries together, a value that
+// is not a positive number is the built-in size, and `LOSAT_X_DEFAULT=0` leaves a variable that
+// is set on. The same with `-db`.
+#[test]
+fn the_default_searches_in_blocks_of_50000_letters() {
+    let batch = ("BATCH_SIZE", "3000");
+    let fmt6 = ["-outfmt", "6"];
+    let fasta = fixture("MejoMJNV.faa");
+    let db = subject_database("default");
+    for subject in [
+        [OsStr::new("-subject"), fasta.as_os_str()],
+        [OsStr::new("-db"), db.as_os_str()],
+    ] {
+        for threads in THREADS {
+            let what = format!("{:?} threads {threads}", subject[0]);
+            let (reference, reference_searches) =
+                blastp_against(&subject, threads, &[batch, SWITCH_OFF], &fmt6);
+            assert!(!reference.is_empty(), "the fixture pair has rows");
+            let (rows, searches) = blastp_against(&subject, threads, &[batch, DEFAULT_OFF], &fmt6);
+            assert!(rows == reference, "{what}: LOSAT_X_DEFAULT=0 rows differ");
+            assert_eq!(searches, reference_searches, "{what}: LOSAT_X_DEFAULT=0");
+            for vars in [
+                &[batch][..],
+                &[batch, ("LOSAT_X_BPQBLOCK", "abc")][..],
+                &[batch, ("LOSAT_X_BPQBLOCK", "50000")][..],
+                &[batch, DEFAULT_OFF, ("LOSAT_X_BPQBLOCK", "50000")][..],
+            ] {
+                let (rows, searches) = blastp_against(&subject, threads, vars, &fmt6);
+                assert!(rows == reference, "{what} {vars:?}: rows differ");
+                assert_eq!(
+                    searches,
+                    reference_searches + 1,
+                    "{what} {vars:?}: two blocks of at least 50,000 letters"
+                );
+            }
+        }
+    }
+    std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
 }
 
 /// A protein database of the subject proteome, made with `LOSAT makedb` in a directory of the
@@ -241,8 +296,9 @@ fn database_blocks_write_the_rows_of_the_search_of_all_queries() {
                 .into_iter()
                 .collect();
             for threads in THREADS {
-                let (reference, reference_searches) =
-                    blastp_against(&subject, threads, &batch, task);
+                let mut off = batch.clone();
+                off.push(SWITCH_OFF);
+                let (reference, reference_searches) = blastp_against(&subject, threads, &off, task);
                 assert!(!reference.is_empty(), "the fixture pair has rows");
                 for letters in ["1", "20000"] {
                     let mut vars = batch.clone();
@@ -265,9 +321,12 @@ fn database_blocks_write_the_rows_of_the_search_of_all_queries() {
     std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
 }
 
-// The exact blastp experiments together with `-db`, in blocks and in the search of all queries:
-// the rows of the search without any of them. `LOSAT_X_BPPCOMPACT=shadow` compares every compact
-// preliminary list of the database search with the off path's list (it panics on a difference).
+// The exact blastp switches together with `-db`, in blocks and in the search of all queries: the
+// rows of the search with every switch of the strict set off (`LOSAT_X_DEFAULT=0`). The default
+// runs them all, in blocks of 50,000 letters (two blocks here); `LOSAT_X_DEFAULT=0` with the
+// variables set gives the runs they gave before they joined the set. `LOSAT_X_BPPCOMPACT=shadow`
+// compares every compact preliminary list of the database search with the off path's list (it
+// panics on a difference).
 #[test]
 fn database_search_with_the_exact_blastp_experiments() {
     const EXACT: [(&str, &str); 7] = [
@@ -283,34 +342,43 @@ fn database_search_with_the_exact_blastp_experiments() {
     let subject = [OsStr::new("-db"), db.as_os_str()];
     let batch = ("BATCH_SIZE", "3000");
     let outfmt = ["-outfmt", "6"];
+    let mut runs: Vec<(Vec<(&str, &str)>, bool)> = vec![
+        (vec![batch], true),
+        (vec![batch, SWITCH_OFF], false),
+        (vec![batch, ("LOSAT_X_BPQBLOCK", "1")], true),
+    ];
+    for blocks in [None, Some("1")] {
+        let mut vars = EXACT.to_vec();
+        vars.extend([batch, DEFAULT_OFF]);
+        vars.extend(blocks.map(|letters| ("LOSAT_X_BPQBLOCK", letters)));
+        runs.push((vars, blocks.is_some()));
+    }
     for threads in THREADS {
-        let (reference, reference_searches) = blastp_against(&subject, threads, &[batch], &outfmt);
-        for blocks in [None, Some("1")] {
-            let mut vars = EXACT.to_vec();
-            vars.push(batch);
-            vars.extend(blocks.map(|letters| ("LOSAT_X_BPQBLOCK", letters)));
-            let (rows, searches) = blastp_against(&subject, threads, &vars, &outfmt);
+        let (reference, reference_searches) =
+            blastp_against(&subject, threads, &[batch, DEFAULT_OFF], &outfmt);
+        for (vars, blocks) in &runs {
+            let (rows, searches) = blastp_against(&subject, threads, vars, &outfmt);
             assert!(
                 rows == reference,
-                "-db threads {threads} blocks {blocks:?}: rows differ"
+                "-db threads {threads} {vars:?}: rows differ"
             );
             assert_eq!(
                 searches > reference_searches,
-                blocks.is_some(),
-                "-db threads {threads} blocks {blocks:?}: {searches} searches, the reference \
+                *blocks,
+                "-db threads {threads} {vars:?}: {searches} searches, the reference \
                  {reference_searches}"
             );
         }
-        let (rows, _) = blastp_against(
-            &subject,
-            threads,
-            &[batch, ("LOSAT_X_BPPCOMPACT", "shadow")],
-            &outfmt,
-        );
-        assert!(
-            rows == reference,
-            "-db threads {threads} BPPCOMPACT=shadow: rows differ"
-        );
+        for vars in [
+            &[batch, ("LOSAT_X_BPPCOMPACT", "shadow")][..],
+            &[batch, DEFAULT_OFF, ("LOSAT_X_BPPCOMPACT", "shadow")][..],
+        ] {
+            let (rows, _) = blastp_against(&subject, threads, vars, &outfmt);
+            assert!(
+                rows == reference,
+                "-db threads {threads} {vars:?}: rows differ"
+            );
+        }
     }
     std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
 }

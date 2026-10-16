@@ -431,6 +431,62 @@ fn x_batches_side_by_side(
     batches / threads * threads
 }
 
+// No NCBI counterpart: reads the LOSAT_X_TBNOWNPOOLS variable once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): off unless the variable is set (it is not in the strict set).
+/// It acts only together with `LOSAT_X_TBNBATCH` and `LOSAT_X_TBNBATCHRULE`.
+#[cfg(feature = "parallel")]
+fn x_tbn_own_pools() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOWNPOOLS").is_some())
+}
+
+// No NCBI counterpart: chooses which query batches are searched at the same time on pools of
+// their own; every batch is searched as NCBI searches it and the reports keep the batch order.
+/// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): how many of the `left` batches that
+/// `x_batches_side_by_side` leaves to be searched one after another with the pool inside each
+/// are searched instead at the same time, each on a pool of its own with its share of the
+/// `threads` (all of them or none).
+///
+/// Only for fewer than two subjects per thread, and for two to `threads - 1` batches when the
+/// subjects hold at most `X_SIDE_BY_SIDE_MAX_BASES` (a pool may then have one thread, as each
+/// side-by-side batch has), otherwise for two to `threads / 2` (every pool two threads or more).
+/// A batch on a few subjects leaves most of a large pool idle: one 4.7 Mb genome x 16 batches
+/// at 32 threads took 0.20 of the time of the batches one after another, x 5 batches at 16
+/// threads 0.45 and at 8 threads 0.97, one 0.6 Mb genome x 16 batches at 32 threads 0.15 and x 5
+/// batches at 8 threads 0.61, three fly chromosomes (76.9 Mb) x 16 batches at 32 threads 0.81
+/// (workstation, perf-si-20261012 session 19). A batch on many subjects keeps a large pool busy,
+/// so pools of its own gained nothing there (5,000 16S records x 5 batches at 16 threads 1.09,
+/// 28,036 at 16 threads 0.98, the fly transcriptome 1.16), and a pool of one thread is slow
+/// where the subjects are long (three fly chromosomes x 5 batches at 8 threads, pools of 2, 2,
+/// 2, 1 and 1 threads: 1.44).
+#[cfg(feature = "parallel")]
+fn x_batches_on_own_pools(
+    left: usize,
+    subject_bases: usize,
+    subjects: usize,
+    threads: usize,
+) -> usize {
+    let few_subjects = subjects < threads.saturating_mul(2);
+    let most = if subject_bases <= X_SIDE_BY_SIDE_MAX_BASES {
+        threads.saturating_sub(1)
+    } else {
+        threads / 2
+    };
+    if few_subjects && left >= 2 && left <= most {
+        left
+    } else {
+        0
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the threads of the `index`-th of `pools` pools that share
+/// `threads` (the first `threads % pools` get one more).
+#[cfg(feature = "parallel")]
+fn x_own_pool_threads(threads: usize, pools: usize, index: usize) -> usize {
+    threads / pools + usize::from(index < threads % pools)
+}
+
 /// EXPERIMENT (LOSAT_X_TBNPAR, LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the query batches
 /// `ranges` of `search` (`args.rs`) searched ahead, each with its range, in the order of
 /// `ranges`; `None` when the switches leave the batches to the reference loop.
@@ -509,7 +565,11 @@ pub(super) fn x_search_batches<'p>(
             pool,
         )
     };
-    with_search_pool(threads, "tblastn", |pool| {
+    // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the last batches, searched after the shared pool at the
+    // same time, each on its own pool (x_batches_on_own_pools).
+    #[cfg(feature = "parallel")]
+    let mut x_own_pools: Vec<std::ops::Range<usize>> = Vec::new();
+    let searched = with_search_pool(threads, "tblastn", |pool| {
         let x_pool_with_plans;
         let pool = match x_subject_side.as_ref() {
             Some(side) => {
@@ -546,8 +606,8 @@ pub(super) fn x_search_batches<'p>(
             // EXPERIMENT (LOSAT_X_TBNBATCHRULE): side by side only for the full waves of a small
             // subject set (x_batches_side_by_side); without it every batch, once there is at
             // least one per thread.
+            let bases = subjects.lengths().fold(0usize, usize::saturating_add);
             let side_by_side = if x_tbn_batch_rule() {
-                let bases = subjects.lengths().fold(0usize, usize::saturating_add);
                 x_batches_side_by_side(bases, subjects.count(), ranges.len(), pool.threads())
             } else if ranges.len() >= pool.threads() {
                 ranges.len()
@@ -559,18 +619,32 @@ pub(super) fn x_search_batches<'p>(
             } else {
                 0
             };
+            // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the batches left after those, at the same time
+            // on pools of their own (x_batches_on_own_pools).
+            let own_pools = if x_tbn_own_pools() && x_tbn_batch_rule() {
+                x_batches_on_own_pools(
+                    ranges.len() - side_by_side,
+                    bases,
+                    subjects.count(),
+                    pool.threads(),
+                )
+            } else {
+                0
+            };
             if crate::utils::threading::diagnostics_enabled() {
                 eprintln!(
-                    "[losat-thread-stage] program=tblastn stage=query_batches batches={} threads={} side_by_side={} one_after_another={}",
+                    "[losat-thread-stage] program=tblastn stage=query_batches batches={} threads={} side_by_side={} one_after_another={} own_pools={}",
                     ranges.len(),
                     pool.threads(),
                     side_by_side,
-                    ranges.len() - side_by_side
+                    ranges.len() - side_by_side - own_pools,
+                    own_pools
                 );
             }
+            let (ranges, rest) = ranges.split_at(side_by_side);
+            let (rest, own) = rest.split_at(rest.len() - own_pools);
             if let Some(side) = x_subject_side.as_ref().filter(|_| side_by_side > 0) {
                 use rayon::prelude::*;
-                let (ranges, rest) = ranges.split_at(side_by_side);
                 let x_serial = SearchPool::x_serial();
                 let x_serial = x_serial.x_with_ext(side);
                 for wave in ranges.chunks(pool.threads() * 4) {
@@ -584,19 +658,57 @@ pub(super) fn x_search_batches<'p>(
                         searched.push((range.clone(), report?));
                     }
                 }
-                // EXPERIMENT (LOSAT_X_TBNBATCHRULE): the batches after the full waves, one
-                // after another with the pool inside each.
-                for range in rest {
-                    searched.push((range.clone(), search_in(range.clone(), pool)?));
-                }
-                return Ok(Some(searched));
             }
+            // EXPERIMENT (LOSAT_X_TBNBATCHRULE): the batches after the full waves, one
+            // after another with the pool inside each.
+            for range in rest {
+                searched.push((range.clone(), search_in(range.clone(), pool)?));
+            }
+            x_own_pools = own.to_vec();
+            return Ok(Some(searched));
         }
         for range in &ranges {
             searched.push((range.clone(), search_in(range.clone(), pool)?));
         }
         Ok(Some(searched))
-    })
+    })?;
+    let Some(mut searched) = searched else {
+        return Ok(None);
+    };
+    // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): each of the last batches on a pool of its own with its
+    // share of the threads, all at the same time, once the shared pool has ended (a pool cannot
+    // be started from a worker of another, `with_search_pool`). Each batch is the same search
+    // as on the shared pool, whose report does not depend on the number of threads; the reports
+    // are taken in batch order, and the first failing batch in that order gives the error.
+    #[cfg(feature = "parallel")]
+    if !x_own_pools.is_empty() {
+        let side = x_subject_side.as_ref();
+        let search_in = &search_in;
+        let pools = x_own_pools.len();
+        let reports: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = x_own_pools
+                .iter()
+                .enumerate()
+                .map(|(index, range)| {
+                    let own = x_own_pool_threads(threads, pools, index);
+                    scope.spawn(move || {
+                        with_search_pool(own, "tblastn", |own_pool| match side {
+                            Some(side) => search_in(range.clone(), &own_pool.x_with_ext(side)),
+                            None => search_in(range.clone(), own_pool),
+                        })
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|handle| handle.join()).collect()
+        });
+        for (range, report) in x_own_pools.iter().zip(reports) {
+            match report {
+                Ok(report) => searched.push((range.clone(), report?)),
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
+        }
+    }
+    Ok(Some(searched))
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:870-905;
@@ -5801,5 +5913,40 @@ mod tests {
         assert_eq!(x_batches_side_by_side(small + 1, 31, 40, 16), 32);
         assert_eq!(x_batches_side_by_side(small + 1, 32, 40, 16), 0);
         assert_eq!(x_batches_side_by_side(usize::MAX, 3, 20, 8), 16);
+    }
+
+    // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): two to threads - 1 batches left (threads / 2 above
+    // X_SIDE_BY_SIDE_MAX_BASES) go to pools of their own, all or none, and only with fewer than
+    // two subjects per thread; the threads are shared out with the remainder first.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn x_own_pools_take_the_batches_left_of_few_subjects() {
+        let small = X_SIDE_BY_SIDE_MAX_BASES;
+        assert_eq!(x_batches_on_own_pools(16, small, 1, 32), 16);
+        assert_eq!(x_batches_on_own_pools(5, small, 1, 8), 5);
+        assert_eq!(x_batches_on_own_pools(7, small, 1, 8), 7);
+        assert_eq!(x_batches_on_own_pools(8, small, 1, 8), 0);
+        assert_eq!(x_batches_on_own_pools(2, small, 1, 3), 2);
+        assert_eq!(x_batches_on_own_pools(1, small, 1, 8), 0);
+        assert_eq!(x_batches_on_own_pools(0, small, 1, 8), 0);
+        assert_eq!(x_batches_on_own_pools(5, small + 1, 3, 16), 5);
+        assert_eq!(x_batches_on_own_pools(8, small + 1, 3, 16), 8);
+        assert_eq!(x_batches_on_own_pools(9, small + 1, 3, 16), 0);
+        assert_eq!(x_batches_on_own_pools(5, small + 1, 3, 8), 0);
+        assert_eq!(x_batches_on_own_pools(16, small, 63, 32), 16);
+        assert_eq!(x_batches_on_own_pools(16, small, 64, 32), 0);
+        assert_eq!(x_batches_on_own_pools(5, small, 5_000, 16), 0);
+        let shares: Vec<_> = (0..5).map(|i| x_own_pool_threads(16, 5, i)).collect();
+        assert_eq!(shares, vec![4, 3, 3, 3, 3]);
+        assert_eq!(
+            (0..16)
+                .map(|i| x_own_pool_threads(32, 16, i))
+                .sum::<usize>(),
+            32
+        );
+        assert_eq!(
+            (0..7).map(|i| x_own_pool_threads(16, 7, i)).sum::<usize>(),
+            16
+        );
     }
 }

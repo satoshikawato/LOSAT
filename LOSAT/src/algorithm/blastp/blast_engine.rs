@@ -6928,7 +6928,7 @@ fn run_resolved_in_pool(
             //     lookup->threshold = (Int4)opt->threshold;
             // ```
             // The x86-64 conversion: `INT_MIN` for a threshold beyond `Int4` (every word).
-            // EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): the same table
+            // EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): the same table
             // filled in place, without the reference builder's chains (lookup/x_lut_direct.rs).
             let (lookup, contexts) = x_bp_build_ncbi_lookup(
                 &query_frames,

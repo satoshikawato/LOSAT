@@ -16,7 +16,8 @@
 //! gives back their room (`Vec::shrink_to_fit`) before it is kept. Neither changes a value: the
 //! list holds the same HSPs in the same order, and only the vector's capacity differs.
 //!
-//! Off unless `LOSAT_X_BPREDOFIT` is set. Not in the strict set. With `LOSAT_TIMING=1` each search
+//! `LOSAT_X_BPREDOFIT` is a switch of the strict set (`utils/xswitch.rs`): on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_TIMING=1` each search
 //! of a query set prints `[TIMING] x_bpredofit: lists=<n> hsps=<m>` (the redone lists kept with
 //! fitted room, and their HSPs).
 //!
@@ -36,11 +37,12 @@ use crate::core::composition_adjustment::redo_alignment::BlastCompoAlignment;
 
 // No NCBI counterpart: reads the LOSAT_X_BPREDOFIT switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPREDOFIT): off unless set to any value.
+/// EXPERIMENT (LOSAT_X_BPREDOFIT): a strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+/// and it is not set.
 pub(crate) fn x_bp_redo_fit() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BPREDOFIT").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPREDOFIT"))
 }
 
 /// The redone lists kept with fitted room since the last timing line, and their HSPs.

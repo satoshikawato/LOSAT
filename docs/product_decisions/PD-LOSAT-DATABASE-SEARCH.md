@@ -268,11 +268,14 @@ unchanged; both paths run the same per-subject search, the same traceback and th
 writers with a different subject source. The database opener, the reader's error texts and the
 title rules are those of BLASTP's `-db`.
 
-- Bases: the search reads the stored 2-bit bases, where makeblastdb (and `LOSAT makedb`) put a
-  random base for each ambiguous letter, and the alignments read the letters rebuilt from the
-  2-bit bases and the stored ambiguity codes, as NCBI's search and traceback do. With `-subject`
-  NCBI and LOSAT pick the random bases at search time instead, so `-db` and `-subject` of the
-  same sequences can differ where a word hits an ambiguous letter, in NCBI and in LOSAT alike.
+- Bases: the search reads the stored 2-bit bases, and the alignments read the letters rebuilt
+  from the 2-bit bases and the stored ambiguity codes, as NCBI's search and traceback do.
+  makeblastdb (and `LOSAT makedb`) draw the 2-bit base of each ambiguous letter from `CRandom`
+  seeded with the sequence length, as `-subject` draws it at search time (writedb_convert.cpp,
+  blast_objmgr_tools.cpp), so `-db` and `-subject` of the same FASTA search the same bases, in
+  NCBI and in LOSAT alike, except where the FASTA has hyphens (makeblastdb stores them as `N`,
+  `-subject` drops them), with `-subject_loc` (the bases are drawn over the range), or for a
+  database written otherwise.
 - Statistics: the number of sequences and the total length of the database, kept in 64 bits as
   NCBI keeps them (the 2^31 - 1 limit of `-subject`, NCBI's `int` there, does not apply). BLASTN
   has no shortest-subject cutoff (BLASTP's 10 does not apply). `-dbsize N` (NCBI's `Int8`), for
@@ -315,11 +318,13 @@ every `-num_threads` (P1, P1.1). The `-subject` path is unchanged; both paths ru
 search, the same traceback and composition-based redo, and the same report writers. The database
 opener, the reader's error texts and the title rules are those of BLASTP's and BLASTN's `-db`.
 
-- Bases: the preliminary stage translates the stored 2-bit bases (makeblastdb's random base for
-  each ambiguous letter), and the alignments, the composition-based redo and the reports read
-  the letters with the stored ambiguity codes, as NCBI's search and traceback do. With
-  `-subject` NCBI and LOSAT pick the random bases at search time instead, so `-db` and `-subject`
-  of the same sequences can differ where a word hits a codon with an ambiguous letter.
+- Bases: the preliminary stage translates the stored 2-bit bases, and the alignments, the
+  composition-based redo and the reports read the letters with the stored ambiguity codes, as
+  NCBI's search and traceback do. makeblastdb (and `LOSAT makedb`) draw the 2-bit base of each
+  ambiguous letter from `CRandom` seeded with the sequence length, as `-subject` draws it at
+  search time, so the bases of `-db` and `-subject` differ only where the FASTA has hyphens
+  (stored as `N`, dropped by `-subject`), with `-subject_loc`, or for a database written
+  otherwise.
 - Statistics: the number of sequences and the total length of the database, in 64 bits as NCBI
   keeps them. The shortest subject length behind the hit-saving cutoff is the database's 10
   (3 residues), not the shortest sequence, so `-db` keeps the weak hits NCBI `-db` keeps.
@@ -404,7 +409,8 @@ the reader's error texts and the title rules are those of TBLASTN's `-db`.
   as NCBI's search does. makeblastdb (and `LOSAT makedb`) draw the 2-bit base of each ambiguous
   letter from `CRandom` seeded with the sequence length, as `-subject` draws it at search time
   (writedb_convert.cpp, blast_objmgr_tools.cpp), so the bases of `-db` and `-subject` differ only
-  for a database written otherwise; a frozen row searches such a database.
+  where the FASTA has hyphens (stored as `N`, dropped by `-subject`), with `-subject_loc`, or for
+  a database written otherwise; a frozen row searches such a database.
 - Statistics: the number of sequences and the total length of the database, in 64 bits as NCBI
   keeps them. TBLASTX has no shortest-length cutoff (an ungapped search: the hit-saving length is
   the average length), so `-db` and `-subject` of sequences without ambiguous letters give the

@@ -229,7 +229,10 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.changes.outputs.tests_matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    # Two full cargo test runs in debug. On Windows x64 the default run took 49 min and the
+    # reference run did not finish within the former 90 min (2026-10-17, dev with the eight blastp
+    # default switches: their integration tests take 2-6 min each there).
+    timeout-minutes: 150
     steps:
       - name: Check out without line-ending conversion
         if: runner.os == 'Windows'

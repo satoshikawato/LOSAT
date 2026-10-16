@@ -242,12 +242,22 @@ pub fn extend_hit_ungapped_exact_ncbi(
 
 // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:292-294,322-324
 // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
-// Retain NCBI's overlapping BLASTNA bit expression, including ambiguities.
-// Every starting phase has its own byte; this is not an ACGT encoding table.
+// NCBI's overlapping BLASTNA bit expression of the query letters `start..start + 4`,
+// ambiguities included, computed where it is read as NCBI does (LOSAT's memory: no array
+// of these bytes at every offset of the query).
+#[inline(always)]
+pub fn query_four_base_byte(query: &[u8], start: usize) -> u8 {
+    let q: &[u8; 4] = query[start..start + 4]
+        .try_into()
+        .expect("four query letters");
+    (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3]
+}
+
+// The byte of `query_four_base_byte` at every starting offset (the tests' reference).
+#[cfg(test)]
 pub fn build_query_four_base_bytes(query: &[u8]) -> Vec<u8> {
-    query
-        .windows(4)
-        .map(|q| (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3])
+    (0..query.len().saturating_sub(3))
+        .map(|start| query_four_base_byte(query, start))
         .collect()
 }
 
@@ -726,7 +736,6 @@ mod small_na_tests {
 /// ```
 pub fn extend_hit_ungapped_approx_ncbi(
     q_seq: &[u8],        // BLASTNA (1 byte/base)
-    q_four_base: &[u8],  // NCBI 4-base expression at every starting offset
     s_seq_packed: &[u8], // ncbi2na packed (4 bases/byte)
     q_off: usize,
     s_off: usize,
@@ -766,7 +775,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
         let s_byte = unsafe { *s_seq_packed.get_unchecked((s_idx - 1) as usize) };
         // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:294
         // Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
-        let q_byte = q_four_base[(q_idx - 4) as usize];
+        let q_byte = query_four_base_byte(q_seq, (q_idx - 4) as usize);
         sum += score_table[(q_byte ^ s_byte) as usize];
         if sum > 0 {
             new_q = q_idx - 4;
@@ -801,7 +810,7 @@ pub fn extend_hit_ungapped_approx_ncbi(
         let s_byte = unsafe { *s_seq_packed.get_unchecked(s_idx as usize) };
         // NCBI reference: c++/src/algo/blast/core/na_ungapped.c:324
         // Uint1 q_byte = (q[0] << 6) | (q[1] << 4) | (q[2] << 2) | q[3];
-        let q_byte = q_four_base[q_idx as usize];
+        let q_byte = query_four_base_byte(q_seq, q_idx as usize);
         sum += score_table[(q_byte ^ s_byte) as usize];
         if sum > 0 {
             new_q = q_idx + 3;
@@ -840,6 +849,152 @@ pub fn extend_hit_ungapped_approx_ncbi(
         s_start,
         length,
         score,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:286,292-305,336-341
+// ```c
+//     len = MIN(q_ext, s_ext) / COMPRESSION_RATIO;
+//     ...
+//     for (i = 0; i < len; s--, q -= 4, i++) {
+//         Uint1 s_byte = s[-1];
+//         Uint1 q_byte = (q[-4] << 6) | (q[-3] << 4) | (q[-2] << 2) | q[-1];
+//
+//         sum += score_table[q_byte ^ s_byte];
+//         if (sum > 0) {
+//             new_q = q - 4;
+//             score += sum;
+//             sum = 0;
+//         }
+//         if (sum < X) {
+//             break;
+//         }
+//     }
+//     ...
+//     if (score >= reduced_cutoff) {
+//         /* the current score is high enough; throw away the alignment and
+//            recompute it rigorously */
+//         s_NuclUngappedExtendExact(query, subject, matrix, q_off,
+//                                   s_off, X, ungapped_data);
+//     }
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1122-1127
+// ```c
+//     /* The value of 15 is a gap, which is a sentinel between strands in
+//     the ungapped extension algorithm */
+//     for (index1=0; index1<BLASTNA_SIZE; index1++)
+//         matrix[BLASTNA_SIZE-1][index1] = INT4_MIN / 2;
+//     for (index1=0; index1<BLASTNA_SIZE; index1++)
+//         matrix[index1][BLASTNA_SIZE-1] = INT4_MIN / 2;
+// ```
+// The approximate extension works on the concatenated query: its left loop is bounded by
+// the offset in the whole query, and the truncated `q_byte` reads the sentinel (0x0F) as
+// bases, so it runs into the previous context. The exact extension stops at the sentinel.
+#[cfg(test)]
+mod approx_context_tests {
+    use super::{
+        build_nucl_score_table, build_query_four_base_bytes, extend_hit_ungapped_approx_ncbi,
+    };
+    use crate::algorithm::blastn::alignment::build_blastna_matrix;
+
+    fn blastna(text: &str) -> Vec<u8> {
+        text.bytes()
+            .map(|letter| match letter {
+                b'A' => 0,
+                b'C' => 1,
+                b'G' => 2,
+                b'T' => 3,
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    fn packed(text: &str) -> Vec<u8> {
+        blastna(text)
+            .chunks(4)
+            .map(|chunk| {
+                (0..4).fold(0u8, |byte, index| {
+                    byte << 2 | chunk.get(index).copied().unwrap_or(0)
+                })
+            })
+            .collect()
+    }
+
+    // Two contexts and the sentinel between them (blast_encoding.c:121, kNuclSentinel = 0xF):
+    // context 0 at 0..16, the sentinel at 16, context 1 at 17..35. The seed is the first letter
+    // of context 1 and the subject offset is 2 mod 4, so the first left block holds the last
+    // letter of context 0, the sentinel and the first two letters of context 1.
+    #[test]
+    fn the_approximate_extension_crosses_the_sentinel_and_its_score_decides_the_rerun() {
+        let mut query = blastna("ACGTACGTACGTACGT");
+        query.push(15);
+        query.extend(blastna("GACCGGTTAATTTTGGGG"));
+        let context_start = 17;
+        let four_base = build_query_four_base_bytes(&query);
+        let subject = packed("GTACTTGACCGGTTAATTAA");
+        let subject_len = 20;
+        let score_table = build_nucl_score_table(2, -3);
+        let matrix = build_blastna_matrix(2, -3);
+        let (q_off, s_off, s_match_end, x_dropoff) = (context_start, 6, 14, 16);
+        let extend = |reduced_cutoff: i32| {
+            extend_hit_ungapped_approx_ncbi(
+                &query,
+                &four_base,
+                &subject,
+                q_off,
+                s_off,
+                s_match_end,
+                subject_len,
+                x_dropoff,
+                &score_table,
+                reduced_cutoff,
+                &matrix,
+            )
+        };
+
+        // Approximate score 24 below the reduced cutoff 25 (cutoff 32): the approximate result
+        // is kept and starts two letters left of context 1. Such a result is rejected, as its
+        // score is below the cutoff.
+        let kept = extend(25);
+        assert!(kept.q_start < context_start);
+        assert_eq!(
+            (kept.q_start, kept.s_start, kept.length, kept.score),
+            (15, 4, 12, 24)
+        );
+
+        // Reduced cutoff 19 (cutoff 24): the crossing block lifts the approximate score to 24,
+        // so the exact extension reruns; it stops at the sentinel and scores 24, the cutoff.
+        let rerun = extend(19);
+        assert_eq!(
+            (rerun.q_start, rerun.s_start, rerun.length, rerun.score),
+            (17, 6, 12, 24)
+        );
+
+        // The same seed on context 1 alone (not NCBI's extension): the first two letters are
+        // never scored, the approximate score is 16 < 19, no rerun, and 16 < 24 would reject
+        // the hit that NCBI saves.
+        let clamped = extend_hit_ungapped_approx_ncbi(
+            &query[context_start..],
+            &four_base[context_start..query.len() - 3],
+            &subject,
+            0,
+            s_off,
+            s_match_end,
+            subject_len,
+            x_dropoff,
+            &score_table,
+            19,
+            &matrix,
+        );
+        assert_eq!(
+            (
+                clamped.q_start,
+                clamped.s_start,
+                clamped.length,
+                clamped.score
+            ),
+            (2, 8, 8, 16)
+        );
     }
 }
 

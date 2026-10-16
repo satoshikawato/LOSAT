@@ -91,8 +91,8 @@ pub struct SubjectMetadata {
 }
 
 /// Sequence data and metadata (`R`: the query records, `InputRecord`)
-pub struct SequenceData<R = FastaRecord> {
-    pub queries: Vec<R>,
+pub struct SequenceData<'a, R = FastaRecord> {
+    pub queries: &'a [R],
     pub query_ids: Vec<String>,
     pub query_masks: Vec<Vec<MaskedInterval>>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
@@ -793,10 +793,15 @@ pub fn finalize_task_config(
 // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //        != BLAST_SEQSRC_EOF) {
 // ```
-pub fn subject_metadata_from_records<R: InputRecord>(records: &[R]) -> SubjectMetadata {
+/// `length(index)` is the number of letters of record `index` (its letters, or with
+/// `LOSAT_X_BNSTORE` its packed subject's).
+pub fn subject_metadata_from_records<R: InputRecord>(
+    records: &[R],
+    length: impl Fn(usize) -> usize,
+) -> SubjectMetadata {
     let mut subject_ids = Vec::with_capacity(records.len());
     let mut db_len_total: usize = 0;
-    for record in records {
+    for (index, record) in records.iter().enumerate() {
         // The title up to its first space: the ID of a `bio` record (whose ID has no white
         // space), "unknown" when it is empty.
         let title = record.title_bytes();
@@ -809,7 +814,7 @@ pub fn subject_metadata_from_records<R: InputRecord>(records: &[R]) -> SubjectMe
         } else {
             String::from_utf8_lossy(&title[..end]).into_owned()
         });
-        db_len_total += record.seq().len();
+        db_len_total += length(index);
     }
     SubjectMetadata {
         db_len_total,
@@ -965,7 +970,7 @@ pub fn apply_dust_masking<R: InputRecord>(
 pub fn build_lookup_tables<R: InputRecord>(
     config: &TaskConfig,
     args: &BlastnArgs,
-    queries_blastna: &[Vec<u8>],
+    queries_blastna: &[&[u8]],
     query_masks: &[Vec<MaskedInterval>],
     query_offsets: &[i32],
     subjects: &[R],
@@ -1218,12 +1223,12 @@ pub fn chunk_query_masks<R: InputRecord>(
 }
 
 /// Prepare all sequence data and configuration
-pub fn prepare_sequence_data<R>(
-    queries: Vec<R>,
+pub fn prepare_sequence_data<'a, R>(
+    queries: &'a [R],
     query_ids: Vec<String>,
     query_masks: Vec<Vec<MaskedInterval>>,
     subject_metadata: SubjectMetadata,
-) -> SequenceData<R> {
+) -> SequenceData<'a, R> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
     // ```c
     // db_length = BlastSeqSrcGetTotLen(seq_src);

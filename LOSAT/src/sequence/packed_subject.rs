@@ -257,13 +257,45 @@ impl PackedNucleotide {
             "letters out of the subject"
         );
         out.clear();
-        out.extend((from..to).map(|index| b"ACGT"[usize::from(self.code(index))]));
-        for run in self.ambiguity.iter() {
+        out.resize(to - from, 0);
+        self.codes_into(from, out);
+        for code in out.iter_mut() {
+            *code = b"ACGT"[usize::from(*code)];
+        }
+        // the runs are in order and do not overlap: the first that ends after `from` on
+        let first = self
+            .ambiguity
+            .partition_point(|run| (run.offset + run.length) as usize <= from);
+        for run in self.ambiguity[first..].iter() {
             let start = (run.offset as usize).max(from);
-            let end = (run.offset as usize + run.length as usize).min(to);
-            if start < end {
-                out[start - from..end - from].fill(NCBI4NA_TO_IUPACNA[usize::from(run.ncbi4na)]);
+            if start >= to {
+                break;
             }
+            let end = (run.offset as usize + run.length as usize).min(to);
+            out[start - from..end - from].fill(NCBI4NA_TO_IUPACNA[usize::from(run.ncbi4na)]);
+        }
+    }
+
+    /// The 2-bit codes (0 `A`, 1 `C`, 2 `G`, 3 `T`; an ambiguous base as resolved) of the bases
+    /// `[from, from + out.len())`.
+    pub fn codes_into(&self, from: usize, out: &mut [u8]) {
+        assert!(from + out.len() <= self.length, "codes out of the subject");
+        // the bases before the first whole byte, the whole bytes, the bases after them
+        let to = from + out.len();
+        let head = ((4 - from % 4) % 4).min(out.len());
+        let (head_out, rest) = out.split_at_mut(head);
+        for (slot, code) in head_out.iter_mut().enumerate() {
+            *code = self.code(from + slot);
+        }
+        let whole = from + head;
+        let mut bytes = rest.chunks_exact_mut(4);
+        for (four, &byte) in (&mut bytes).zip(&self.packed[whole / 4..]) {
+            four.copy_from_slice(&[byte >> 6, (byte >> 4) & 3, (byte >> 2) & 3, byte & 3]);
+        }
+        let tail = bytes.into_remainder();
+        let tail_from = to - tail.len();
+        for (slot, code) in tail.iter_mut().enumerate() {
+            *code = self.code(tail_from + slot);
         }
     }
 
@@ -287,6 +319,58 @@ impl PackedNucleotide {
     /// `resolve_local_subject_ncbi2na`).
     pub fn resolved_letters_into(&self, out: &mut Vec<u8>) {
         self.unpack_into(out, *b"ACGT");
+    }
+}
+
+/// The nucleotides of one subject as a reader of windows sees them: the record's letters, or its
+/// packed store, from which a window's letters are made when it is read. A reader that ignores
+/// the case of a letter (a codon's residue, a complement) reads the same bases from both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubjectNt<'a> {
+    /// The record's letters.
+    Letters(&'a [u8]),
+    /// The record's store.
+    Packed(&'a PackedNucleotide),
+}
+
+impl<'a> From<&'a [u8]> for SubjectNt<'a> {
+    fn from(letters: &'a [u8]) -> Self {
+        Self::Letters(letters)
+    }
+}
+
+impl<'a> From<&'a Vec<u8>> for SubjectNt<'a> {
+    fn from(letters: &'a Vec<u8>) -> Self {
+        Self::Letters(letters)
+    }
+}
+
+impl<'a> SubjectNt<'a> {
+    /// The number of bases.
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Letters(letters) => letters.len(),
+            Self::Packed(store) => store.len(),
+        }
+    }
+
+    /// True for a subject without bases.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The letters `[from, to)`: the record's own, or made in upper case in `buffer`.
+    pub fn fetch<'b>(&self, from: usize, to: usize, buffer: &'b mut Vec<u8>) -> &'b [u8]
+    where
+        'a: 'b,
+    {
+        match self {
+            Self::Letters(letters) => &letters[from..to],
+            Self::Packed(store) => {
+                store.letters_into(from, to, buffer);
+                buffer
+            }
+        }
     }
 }
 
@@ -385,13 +469,43 @@ mod tests {
                     .collect();
             assert_eq!(out, resolved);
             let upper = seq.to_ascii_uppercase();
-            for (from, to) in [
-                (0, seq.len()),
-                (0, seq.len() / 2),
-                (seq.len() / 3, seq.len()),
-            ] {
+            let n = seq.len();
+            // windows at every offset within a byte, of every length across a byte, and
+            // windows that start or end inside a run
+            let mut windows = vec![(0, n), (0, n / 2), (n / 3, n), (n / 2, n / 2)];
+            for from in 0..n.min(9) {
+                for to in from..n.min(from + 11) {
+                    windows.push((from, to));
+                    windows.push((n - to, n - from));
+                }
+            }
+            for run in store.ambiguity_runs().iter().take(20) {
+                let (start, end) = (run.offset as usize, (run.offset + run.length) as usize);
+                windows.push((start + 1, end.min(n)));
+                windows.push((start.saturating_sub(2), (end + 3).min(n)));
+                windows.push((start, (start + 1).min(n)));
+            }
+            let mut codes = Vec::new();
+            for (from, to) in windows {
                 store.letters_into(from, to, &mut out);
-                assert_eq!(out, &upper[from..to]);
+                assert_eq!(out, &upper[from..to], "letters [{from}, {to})");
+                let letters = SubjectNt::Letters(&seq);
+                let packed = SubjectNt::Packed(&store);
+                assert_eq!((letters.len(), packed.len()), (n, n));
+                let mut buffer = Vec::new();
+                assert_eq!(
+                    packed.fetch(from, to, &mut buffer),
+                    letters
+                        .fetch(from, to, &mut Vec::new())
+                        .to_ascii_uppercase()
+                );
+                codes.resize(to - from, 0xFF);
+                store.codes_into(from, &mut codes);
+                let as_letters: Vec<u8> = codes
+                    .iter()
+                    .map(|&code| b"ACGT"[usize::from(code)])
+                    .collect();
+                assert_eq!(as_letters, &resolved[from..to], "codes [{from}, {to})");
             }
             let lower: Vec<_> =
                 crate::algorithm::blastn::coordination::collect_lowercase_masks(&seq)

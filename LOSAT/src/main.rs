@@ -233,12 +233,14 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_slices_print_summary();
     LOSAT::algorithm::tblastn::x_subject_translate_print_summary();
     LOSAT::algorithm::tblastn::x_subject_store_print_summary();
+    LOSAT::algorithm::blastn::x_subject_store_print_summary();
     LOSAT::algorithm::blastp::x_bp_seed_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_print_summary();
     LOSAT::algorithm::blastp::x_restricted_gap_print_summary();
     LOSAT::algorithm::blastn::alignment::greedy::x_greedy_fuse_print_summary();
     LOSAT::algorithm::blastp::x_bp_prelim_compact_print_summary();
     LOSAT::algorithm::blastp::x_bp_redo_par_print_summary();
+    LOSAT::algorithm::blastp::x_bp_subj_run_print_summary();
     LOSAT::algorithm::blastx::seed::x_seed_scan::print_shadow_stats();
     LOSAT::algorithm::blastp::x_ungapped_fast::print_shadow_stats();
     LOSAT::utils::x_logclone::print_shadow_stats();

@@ -78,11 +78,11 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 56 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 57 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
 `LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE`,
-`LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS` and `LOSAT_X_LINKSLICES` joined), and their variables
-mean (`LOSAT/src/utils/xswitch.rs`):
+`LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_LINKSLICES` and `LOSAT_X_BPSUBJRUN`
+joined), and their variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -100,7 +100,8 @@ mean (`LOSAT/src/utils/xswitch.rs`):
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
   `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
-  act only with `TBNPAR`; `TBNOIDNEXT` and `TBNOIDUNITS` act only with `TBNOIDCHUNK`.
+  act only with `TBNPAR`; `TBNOIDNEXT` and `TBNOIDUNITS` act only with `TBNOIDCHUNK`; `BPSUBJRUN` acts only in the
+  parallel `-subject` loop of blastp (2 or more threads, several subjects).
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
   Only `0` means off; `00`, `false` or `off` are "any other value".
 - The variables are read once per process (once per Wasm instance), except `GREEDYSPEC`,
@@ -146,6 +147,7 @@ export LOSAT_X_NEWTONLANES8=1
 export LOSAT_X_TBNSTATE=1 LOSAT_X_TBNXLATE=1
 export LOSAT_X_TBNOIDNEXT=1 LOSAT_X_TBNOIDUNITS=1
 export LOSAT_X_LINKSLICES=1
+export LOSAT_X_BPSUBJRUN=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -235,6 +237,18 @@ the linking call links the groups of a subject's HSP list where they lie in the 
 where it cut the list into one Vec per group and copied the linked groups into a new list, so the
 list no longer exists twice. It changes where the groups are linked, not a value or an order, and
 acts only where `LOSAT_X_HSPINPLACE` does. The shadow `LOSAT_X_LINKSLICESSHADOW` stays opt-in.
+
+`LOSAT_X_BPSUBJRUN` was added after the default changed, as a switch that was off unless set, and
+joined the set on 2026-10-16. With two or more threads blastp's `-subject` loop searches the
+subjects in runs of consecutive subjects, each run with one diagonal table that is cleared once and
+one search scratch per thread, instead of a new scratch for every piece rayon splits the subjects
+into and a clearing of the table for every subject. It changes no value; a run's later subjects
+start at the diagonal offset the one-thread loop has. On the workstation (16 physical cores, medians
+of alternating pairs, every output hash equal, max RSS equal) `blastp-fast` of the human proteome
+against the yeast proteome took 0.89 of the time at 16 threads (6 pairs; 0.88 with
+`LOSAT_X_BPQBLOCK=20000`), 0.90 and 0.92 at 8 and 0.92 at 4, exact `blastp` 0.998 at 16 (8 pairs)
+and 0.995 at 8 (4 pairs). One thread and `-db` are not affected. The shadow
+`LOSAT_X_BPSUBJRUNSHADOW` stays opt-in.
 
 What runs per target:
 
@@ -454,9 +468,9 @@ Rebuilding less:
   `[TIMING] x_bpredofit: lists=<n> hsps=<m>`. Measured once (human proteome block 1, 566 proteins, 50,404
   letters, x human proteome, one thread, with `LOSAT_X_BPQBLOCK=50000` and the other memory switches; max RSS):
   121,304 -> 82,180 kB (NCBI -db 151,476 kB in the same run).
-- `LOSAT_X_BPSUBJRUN=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it; acts only where a `-subject` search gives its subjects to the pool:
-  more than one thread and more than one subject) the parallel preliminary loop searches the subjects in
+- `LOSAT_X_BPSUBJRUN=1` (BLASTP, speed; in the strict set since 2026-10-16, on by default; acts only
+  where a `-subject` search gives its subjects to the pool: more than one thread and more than one
+  subject) the parallel preliminary loop searches the subjects in
   runs of consecutive subjects instead of one by one (`blastp/blast_engine/x_subject_runs.rs`, exactness
   argument in its header). Without it each piece rayon splits the subjects into makes its own scratch
   (with its own diagonal table and offset-pair array) and every subject starts by filling the whole

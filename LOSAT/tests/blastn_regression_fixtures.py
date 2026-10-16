@@ -344,6 +344,24 @@ _CASES = [
     ("short.nohit_fmt0", f"-query {O}/short_nohit_query.fasta -subject {O}/short_subject.fasta -task blastn-short"
                          " -evalue 1e-5 -outfmt 0", ""),
     ("short.evalue0", f"{SH} -evalue 0 -outfmt 6", ""),
+    # M-32: the approximate ungapped extension (word size 11 or more) works on the concatenated
+    # query, so its left loop runs through the sentinel into the previous context
+    # (na_ungapped.c:286-305); a result kept below the reduced cutoff may start there and is
+    # always rejected, and the score of the block that crosses can decide the exact rerun
+    # (na_ungapped.c:336-341). The queries are the ends of pieces of LC738874 (qctx_*.fa, from
+    # `generate`); each hit starts at the first letter of the minus strand.
+    # A rejected result that starts two letters left of the minus strand (search_query_batch).
+    ("qctx.assert", f"-query {I}/qctx_assert_query.fa -subject tests/fasta/LC738868.fasta -task blastn -outfmt 6",
+     ""),
+    # The crossing block lifts the approximate score to the reduced cutoff; the exact rerun
+    # then reaches the cutoff and the 11-letter HSP at query 50-60 is saved.
+    ("qctx.rerun", f"-query {I}/qctx_rerun_query.fa -subject tests/fasta/LC738868.fasta -task blastn -outfmt 6", ""),
+    # The same for the 14-letter HSP at query 2071-2084.
+    ("qctx.rerun_piece8", f"-query {I}/qctx_piece8_query.fa -subject tests/fasta/LC738868.fasta -task blastn"
+                          " -outfmt 6", ""),
+    # A query longer than 8000 at four threads: the search pool's seed stage (x_pair_seed.rs).
+    ("qctx.pairpar", f"-query {I}/qctx_pairpar_query.fa -subject tests/fasta/LC738868.fasta -task blastn -outfmt 6",
+     "-num_threads 4"),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 
@@ -414,6 +432,7 @@ def command_generate(_args) -> int:
                  "lcase_island_megablast_subject.fa"):
         (INPUTS / name).write_bytes((E2C_INPUTS / name).read_bytes())
     generate_e2g_inputs(edl, sakai)
+    generate_qctx_inputs()
     return 0
 
 
@@ -476,6 +495,15 @@ def generate_e2g_inputs(edl: str, sakai: str) -> None:
         ("q3 third GGGGCCCCAAAATTTTGGGGCCCCAA", window[8000:8300]), ("q4 all N two", "N" * 100),
         ("q5 plain", window[12000:12500])])
     write_fasta(INPUTS / "warn_subject.fa", [("s Sakai window", window)])
+
+
+def generate_qctx_inputs() -> None:
+    """Inputs added for M-32 (the qctx.* cases): ends of the pieces of LC738874 that
+    LOSAT/tests/blastn_qbatchpar.rs searches (piece k starts at 8000 k, 1500 + 373 k % 2400 long)."""
+    lc738874 = genome("LC738874.fasta")
+    for name, start, end in (("qctx_assert", 82_530, 82_830), ("qctx_rerun", 82_770, 82_830),
+                             ("qctx_piece8", 64_000, 66_084), ("qctx_pairpar", 72_530, 82_830)):
+        write_fasta(INPUTS / f"{name}_query.fa", [(f"{name} LC738874 {start + 1}-{end}", lc738874[start:end])])
 
 
 def prepare_runtime_inputs() -> None:

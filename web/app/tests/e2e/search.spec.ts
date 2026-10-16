@@ -8,6 +8,7 @@ import {
   fasta,
   openFiles,
   openParameters,
+  openSearch,
   paste,
   program,
   result,
@@ -43,7 +44,7 @@ async function startSlowSearch(page: Page): Promise<void> {
 test.setTimeout(300_000);
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/');
+  await openSearch(page);
 });
 
 test('a file is summarized with its records, not put in the paste box; files can also be dropped', async ({ page }) => {
@@ -453,7 +454,7 @@ test.describe('leaving and returning', () => {
         },
       });
     });
-    await page.goto('/');
+    await openSearch(page);
     await page.getByTestId('keep-awake').check();
     await startSlowSearch(page);
     await expect(page.getByTestId('wake-lock-held')).toBeVisible();

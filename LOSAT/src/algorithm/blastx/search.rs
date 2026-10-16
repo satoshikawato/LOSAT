@@ -546,10 +546,16 @@ pub(crate) fn search_core(
     // No NCBI counterpart: decides whether candidate HSPs are copied for the containment callback;
     // it does not change any value NCBI computes.
     let x_containment = diagnostics || sink.x_wants_containment();
+    use super::x_timing::Batch as XBatch;
     for range in batch_ranges(records) {
+        // Diagnostic (LOSAT_TIMING): the clocks of the batch's stages (x_timing.rs). No NCBI
+        // counterpart.
+        let x_t_batch = super::x_timing::lap();
+        let x_t = x_t_batch;
         let queries = &records[range.clone()];
         let mut full = prepare_queries(queries, options)?;
         let mut full_params = score_block(&full);
+        super::x_timing::batch(XBatch::QuerySetup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
         // ```c++
         //
@@ -589,6 +595,7 @@ pub(crate) fn search_core(
         if subjects.is_unreadable() {
             return Err(super::subjects::UnreadableSubjects.into());
         }
+        let x_t = super::x_timing::lap();
         effective_lengths(&full, &mut full_params, options, db_length, db_count, None)?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2781-2787
         // ```c++
@@ -613,6 +620,7 @@ pub(crate) fn search_core(
         // ```
         sink.batch_start(range.start, &full, &full_params)?;
         let chunks = split_queries(queries, &full, options)?;
+        super::x_timing::batch(XBatch::Setup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
         // ```c++
         //     if (query_splitter->IsQuerySplit()) {
@@ -657,6 +665,7 @@ pub(crate) fn search_core(
         // BlastHSPStreamMerge. With LOSAT_X_BXPAR a wave of chunks is searched on the pool
         // (x_compute_chunk) and written to the sink in chunk order below. Each chunk is searched
         // exactly as before.
+        let x_t = super::x_timing::lap();
         #[cfg(feature = "parallel")]
         let chunks = if super::runtime::x_bx_parallel()
             && pool.enabled()
@@ -723,6 +732,7 @@ pub(crate) fn search_core(
         } else {
             chunks
         };
+        super::x_timing::batch(XBatch::ChunksPar, x_t);
         for chunk in chunks {
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:237-244
             // ```c++
@@ -778,6 +788,7 @@ pub(crate) fn search_core(
             //     }
             //     return retval;
             // ```
+            let x_t = super::x_timing::lap();
             let fixed_spaces = &spaces;
             let lookup = Lookup::new(batch, &params, options)?;
             let last = batch.contexts.last().expect("BLASTX contexts");
@@ -863,11 +874,13 @@ pub(crate) fn search_core(
             } else {
                 Vec::new()
             };
+            super::x_timing::batch(XBatch::Lookup, x_t);
             let mut subject_stages = Vec::new();
             for wave_index in 0..subjects.len().div_ceil(wave_size) {
                 let wave_start = wave_index * wave_size;
                 let wave: Vec<usize> =
                     (wave_start..subjects.len().min(wave_start + wave_size)).collect();
+                let x_t = super::x_timing::lap();
                 let mut scheduled = {
                     #[cfg(feature = "parallel")]
                     {
@@ -952,11 +965,14 @@ pub(crate) fn search_core(
                     }
                 }
                 .into_iter();
+                super::x_timing::batch(XBatch::ScanPar, x_t);
+                let x_t_replay = super::x_timing::lap();
                 for &oid in &wave {
                     let computed = if let Some(computed) = scheduled.next() {
                         computed?
                     } else {
-                        compute_subject(
+                        let x_t = super::x_timing::lap();
+                        let computed = compute_subject(
                             subjects,
                             batch,
                             &params,
@@ -968,7 +984,9 @@ pub(crate) fn search_core(
                             db_length,
                             oid,
                             x_containment,
-                        )?
+                        );
+                        super::x_timing::batch(XBatch::ScanInline, x_t);
+                        computed?
                     };
                     sink.subject_start(oid, batch, &params, computed.prepared_link)?;
                     for (h, contained) in &computed.containment {
@@ -1087,6 +1105,7 @@ pub(crate) fn search_core(
                     }
                     call += 1;
                 }
+                super::x_timing::batch(XBatch::Replay, x_t_replay);
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:268-271
             // ```c++
@@ -1095,7 +1114,9 @@ pub(crate) fn search_core(
             //                                 chunk_data->m_HspStream->GetPointer(),
             //                                 m_InternalData->m_HspStream->GetPointer());
             // ```
+            let x_t = super::x_timing::lap();
             sink.chunk_end(&chunk, is_split)?;
+            super::x_timing::batch(XBatch::ChunkEnd, x_t);
             if diagnostics {
                 stages.push(ChunkStage {
                     statistically_valid: true,
@@ -1118,7 +1139,11 @@ pub(crate) fn search_core(
         //             m_InternalData->m_Queries = query_data->GetSequenceBlk();
         //         }
         // ```
+        let x_t = super::x_timing::lap();
         sink.batch_end(&full, &full_params)?;
+        super::x_timing::batch(XBatch::BatchEnd, x_t);
+        super::x_timing::batch(XBatch::Sum, x_t_batch);
+        super::x_timing::batch_count();
         if diagnostics {
             result.push(BatchStage {
                 query_ordinal: range.start,

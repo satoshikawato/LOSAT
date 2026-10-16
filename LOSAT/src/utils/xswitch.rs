@@ -32,7 +32,7 @@ use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: the switches of the strict set, the variables that are on by default.
-/// The last twenty-five joined after the set became the default. `LOSAT_X_PAIRLUT` and
+/// The last twenty-eight joined after the set became the default. `LOSAT_X_PAIRLUT` and
 /// `LOSAT_X_HSPINPLACE` were added after the change as switches that are off unless set and
 /// joined the set once they were verified with it on. `LOSAT_X_SEEDBUCKET` was left out at the
 /// change: it numbered the lookup hits of a chunk scan in a `u32`, exact only up to 2^32 hits
@@ -79,13 +79,17 @@ use std::sync::OnceLock;
 /// `LOSAT_X_BPUNGAP`, `LOSAT_X_BPGAP`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`,
 /// `LOSAT_X_BPREDOFIT` and `LOSAT_X_BPQBLOCK`) joined after a 49-job full-scale run with all of
 /// them on: the outputs equal NCBI's and the max RSS is below NCBI's on every job.
+/// `LOSAT_X_BNSTREAM` (BLASTN hands each subject's HSPs to the hit lists in OID order from a
+/// bounded window while the threads search, `blastn/blast_engine/x_bnstream.rs`) was added after
+/// the change as a switch that is off unless set and joined the set once it was verified and timed
+/// with it on.
 /// `LOSAT_X_BPCLUT` (the compressed lookup table of `blastp-fast` built flat, in three passes, by
 /// the search's pool at more than one thread, `tblastx/lookup/x_clut_direct.rs`) and
 /// `LOSAT_X_BPLKPFLAT` (how that build is scheduled and where its vectors come from, which acts
 /// only where `LOSAT_X_BPCLUT` builds the table on the pool, `tblastx/lookup/x_clut_par.rs`) were
 /// added after the change as switches that are off unless set and joined the set together once
 /// they were verified and timed with them on.
-pub(crate) const STRICT_SET: [&str; 70] = [
+pub(crate) const STRICT_SET: [&str; 71] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_PURGEFAST",
@@ -154,6 +158,7 @@ pub(crate) const STRICT_SET: [&str; 70] = [
     "LOSAT_X_BPPCOMPACT",
     "LOSAT_X_BPREDOFIT",
     "LOSAT_X_BPQBLOCK",
+    "LOSAT_X_BNSTREAM",
     "LOSAT_X_BPCLUT",
     "LOSAT_X_BPLKPFLAT",
 ];

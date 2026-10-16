@@ -19,7 +19,7 @@ import type { OutputFormat } from '../../src/domain/output-format';
 import { optionKey } from '../../src/domain/verification';
 import { BUILD_HAS_ENGINE } from './support/browser';
 import { REPOSITORY } from './support/harness-server';
-import { fasta, openFiles, openParameters, paste, program, showOutput, submit, task, waitStatus } from './support/search';
+import { fasta, openFiles, openParameters, openSearch, paste, program, showOutput, submit, task, waitStatus } from './support/search';
 import { repeats } from './support/synthetic';
 
 type ProgramId = 'blastn' | 'blastp' | 'tblastn' | 'tblastx';
@@ -43,7 +43,7 @@ const TABS: Readonly<Record<Tab, string>> = {
 test.setTimeout(180_000);
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/');
+  await openSearch(page);
 });
 
 // --- inputs ----------------------------------------------------------------------------------

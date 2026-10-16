@@ -297,32 +297,7 @@ fn prepare_search_block(block: &mut SequenceBlock) -> Result<()> {
     }
     for i in 0..sequences {
         let ordinal = u64::from(block.first_ordinal()) + i as u64;
-        let with_sentinels = block.protein_with_sentinels(i);
-        let (first, last) = (with_sentinels[0], with_sentinels[with_sentinels.len() - 1]);
-        if first != NCBISTDAA_GAP || last != NCBISTDAA_GAP {
-            bail!(
-                "database sequence {ordinal} is not between two NUL bytes in its sequence file (the volume is damaged), which is not supported by LOSAT's BLASTP"
-            );
-        }
-        let residues = block.protein(i);
-        if let Some(position) = residues
-            .iter()
-            .position(|&residue| residue == NCBISTDAA_GAP)
-        {
-            bail!(
-                "database sequence {ordinal} holds a gap character ('-') at position {}; a protein database sequence with gap characters is not supported by LOSAT's BLASTP (NCBI BLAST+ never aligns the character and then counts it as a gap of the alignment)",
-                position + 1
-            );
-        }
-        if let Some(position) = residues
-            .iter()
-            .position(|&residue| usize::from(residue) >= BLASTAA_SIZE)
-        {
-            bail!(
-                "database sequence {ordinal} holds a byte that is no NCBIstdaa residue at position {}, which is not supported by LOSAT's BLASTP",
-                position + 1
-            );
-        }
+        shared::check_protein_sequence(block.protein_with_sentinels(i), ordinal, PROGRAM)?;
     }
     bail!("a database block is not well-formed, which is not supported by LOSAT's BLASTP")
 }

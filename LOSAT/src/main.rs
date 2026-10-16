@@ -234,6 +234,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastn::x_subject_translate_print_summary();
     LOSAT::algorithm::tblastn::x_subject_store_print_summary();
     LOSAT::algorithm::blastn::x_subject_store_print_summary();
+    LOSAT::algorithm::blastn::x_query_dust_par_print_summary();
     LOSAT::algorithm::blastp::x_bp_seed_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_print_summary();
     LOSAT::algorithm::blastp::x_restricted_gap_print_summary();

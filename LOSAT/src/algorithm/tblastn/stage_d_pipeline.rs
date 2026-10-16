@@ -379,6 +379,58 @@ pub(super) type XBatchReport = (
     Vec<bool>,
 );
 
+// No NCBI counterpart: reads the LOSAT_X_TBNBATCHRULE variable once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNBATCHRULE): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only together with
+/// `LOSAT_X_TBNBATCH`.
+#[cfg(feature = "parallel")]
+fn x_tbn_batch_rule() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNBATCHRULE"))
+}
+
+/// EXPERIMENT (LOSAT_X_TBNBATCHRULE): subject bases up to which `LOSAT_X_TBNBATCH` searches
+/// query batches side by side whatever the number of subjects. Side by side, the serial parts
+/// of each batch (query masking, lookup table) overlap; one after another, the pool shares each
+/// batch's subjects out. Timed on the workstation (perf-si-20261012, session 17) against
+/// `LOSAT_X_TBNBATCH=0` with batches a multiple of the threads, at 8 and 16 threads: side by
+/// side took 0.26-0.96 of the time on sets of 0.3 to 15.7 Mb (one to 5,000 subjects), 0.94-1.00
+/// on 14,000 16S records (20.2 Mb), and 1.00-1.18 on 28,036 16S records (40.6 Mb) and on the
+/// fly transcriptome (94 Mb).
+#[cfg(feature = "parallel")]
+const X_SIDE_BY_SIDE_MAX_BASES: usize = 24_000_000;
+
+// No NCBI counterpart: chooses which query batches are searched side by side, each on one
+// thread; every batch is searched as NCBI searches it and the reports keep the batch order.
+/// EXPERIMENT (LOSAT_X_TBNBATCHRULE): how many of the first `batches` query batches
+/// `LOSAT_X_TBNBATCH` searches side by side; the rest are searched one after another with the
+/// pool inside each.
+///
+/// Side by side only when the subjects hold at most `X_SIDE_BY_SIDE_MAX_BASES`, or when there
+/// are fewer than two subjects per thread: one after another, each subject is finished (merge,
+/// linking, reaping after its last unit) on one thread, so a batch of a few long subjects ends
+/// with threads idle. Three fly chromosomes (76.9 Mb) took 1.29 (16 threads) and 1.16 (8) times
+/// the time of side by side one after another; the same bases in 11 pieces 1.05 and 0.99, in 21
+/// pieces 1.04 and 0.97, in 79 pieces 0.95 and 0.95. Then the batches of the full waves, a
+/// multiple of `threads`, since a last wave of fewer batches than threads leaves threads idle
+/// until its batches end (10 batches at 8 threads on 16S took 1.53 times as long side by side
+/// as one after another; on one 0.6 Mb genome this split took 0.77 of the time of all ten side
+/// by side).
+#[cfg(feature = "parallel")]
+fn x_batches_side_by_side(
+    subject_bases: usize,
+    subjects: usize,
+    batches: usize,
+    threads: usize,
+) -> usize {
+    let many_subjects = subjects >= threads.saturating_mul(2);
+    if threads < 2 || (subject_bases > X_SIDE_BY_SIDE_MAX_BASES && many_subjects) {
+        return 0;
+    }
+    batches / threads * threads
+}
+
 /// EXPERIMENT (LOSAT_X_TBNPAR, LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the query batches
 /// `ranges` of `search` (`args.rs`) searched ahead, each with its range, in the order of
 /// `ranges`; `None` when the switches leave the batches to the reference loop.
@@ -491,11 +543,34 @@ pub(super) fn x_search_batches<'p>(
         // and the reports are returned in batch order.
         if crate::utils::xswitch::on("LOSAT_X_TBNBATCH") && pool.enabled() {
             let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
-            if let Some(side) = x_subject_side
-                .as_ref()
-                .filter(|_| fits && ranges.len() >= pool.threads())
-            {
+            // EXPERIMENT (LOSAT_X_TBNBATCHRULE): side by side only for the full waves of a small
+            // subject set (x_batches_side_by_side); without it every batch, once there is at
+            // least one per thread.
+            let side_by_side = if x_tbn_batch_rule() {
+                let bases = subjects.lengths().fold(0usize, usize::saturating_add);
+                x_batches_side_by_side(bases, subjects.count(), ranges.len(), pool.threads())
+            } else if ranges.len() >= pool.threads() {
+                ranges.len()
+            } else {
+                0
+            };
+            let side_by_side = if x_subject_side.is_some() && fits {
+                side_by_side
+            } else {
+                0
+            };
+            if crate::utils::threading::diagnostics_enabled() {
+                eprintln!(
+                    "[losat-thread-stage] program=tblastn stage=query_batches batches={} threads={} side_by_side={} one_after_another={}",
+                    ranges.len(),
+                    pool.threads(),
+                    side_by_side,
+                    ranges.len() - side_by_side
+                );
+            }
+            if let Some(side) = x_subject_side.as_ref().filter(|_| side_by_side > 0) {
                 use rayon::prelude::*;
+                let (ranges, rest) = ranges.split_at(side_by_side);
                 let x_serial = SearchPool::x_serial();
                 let x_serial = x_serial.x_with_ext(side);
                 for wave in ranges.chunks(pool.threads() * 4) {
@@ -508,6 +583,11 @@ pub(super) fn x_search_batches<'p>(
                     for (range, report) in wave.iter().zip(computed) {
                         searched.push((range.clone(), report?));
                     }
+                }
+                // EXPERIMENT (LOSAT_X_TBNBATCHRULE): the batches after the full waves, one
+                // after another with the pool inside each.
+                for range in rest {
+                    searched.push((range.clone(), search_in(range.clone(), pool)?));
                 }
                 return Ok(Some(searched));
             }
@@ -5702,5 +5782,24 @@ mod tests {
                 }
             }
         }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBNBATCHRULE): the full waves of a small subject set or of fewer than
+    // two subjects per thread; none of a large set of many subjects or of a search on one thread.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn x_side_by_side_takes_the_full_waves_of_a_small_or_few_subject_set() {
+        let small = X_SIDE_BY_SIDE_MAX_BASES;
+        assert_eq!(x_batches_side_by_side(small, 1_000, 10, 8), 8);
+        assert_eq!(x_batches_side_by_side(small, 1_000, 16, 8), 16);
+        assert_eq!(x_batches_side_by_side(small, 1_000, 4, 3), 3);
+        assert_eq!(x_batches_side_by_side(small, 1_000, 5, 8), 0);
+        assert_eq!(x_batches_side_by_side(small, 1_000, 64, 16), 64);
+        assert_eq!(x_batches_side_by_side(small, 1, 10, 1), 0);
+        assert_eq!(x_batches_side_by_side(small + 1, 32, 64, 16), 0);
+        assert_eq!(x_batches_side_by_side(usize::MAX, 1_000, 64, 16), 0);
+        assert_eq!(x_batches_side_by_side(small + 1, 31, 40, 16), 32);
+        assert_eq!(x_batches_side_by_side(small + 1, 32, 40, 16), 0);
+        assert_eq!(x_batches_side_by_side(usize::MAX, 3, 20, 8), 16);
     }
 }

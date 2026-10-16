@@ -364,7 +364,7 @@ pub(super) struct XBatch<'a> {
     pub contexts: &'a [QueryContext],
     pub query_length: i32,
     pub diag_array_size: i32,
-    pub subjects: &'a [FastaRecord],
+    pub subjects: crate::algorithm::tblastx::subjects::Subjects<'a>,
     /// A trace, debug or diagnostics switch is on (they exist only in the reference loop).
     pub debugging: bool,
     /// LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS or the parallel-chunk path is on.
@@ -393,7 +393,7 @@ pub(super) struct XGates<'a> {
     pub contexts: &'a [QueryContext],
     pub query_length: i32,
     pub diag_array_size: i32,
-    pub subjects: &'a [FastaRecord],
+    pub subjects: crate::algorithm::tblastx::subjects::Subjects<'a>,
     pub debugging: bool,
     pub chunk_switches: bool,
 }
@@ -423,8 +423,8 @@ pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
     let max_context_len = g.contexts.iter().map(|c| c.aa_len).max().unwrap_or(0);
     let longest_subject_chunk = g
         .subjects
-        .iter()
-        .map(|r| r.seq().len() / 3)
+        .lengths()
+        .map(|length| length / 3)
         .max()
         .unwrap_or(0)
         .min(tblastx_max_dbseq_len_for_run());
@@ -446,7 +446,7 @@ pub(super) struct XLutEarly<'a> {
     /// The lookup threshold (`lookup->threshold`).
     pub threshold: i32,
     pub window: i32,
-    pub subjects: &'a [FastaRecord],
+    pub subjects: crate::algorithm::tblastx::subjects::Subjects<'a>,
     /// As `XBatch::debugging`.
     pub debugging: bool,
     /// `requested_parallel` and `use_serial_scan_chunks` of the batch (RI:2130, 2139).
@@ -501,15 +501,15 @@ impl XLutBatch {
 fn early_chunk_switches(
     requested_parallel: bool,
     use_serial_scan_chunks: bool,
-    subjects: &[FastaRecord],
+    subjects: crate::algorithm::tblastx::subjects::Subjects<'_>,
 ) -> bool {
     let use_parallel_chunks = requested_parallel
         && !use_serial_scan_chunks
         && (std::env::var_os("LOSAT_TBLASTX_PARALLEL_CHUNKS").is_some()
             || (cfg!(all(target_arch = "wasm32", feature = "wasm-threads"))
-                && subjects.iter().any(|r| {
+                && subjects.lengths().any(|length| {
                     tblastx_estimated_subject_chunk_work_items(
-                        r.seq().len(),
+                        length,
                         tblastx_max_dbseq_len_for_run(),
                     ) > 1
                 })));
@@ -2387,7 +2387,7 @@ mod tests {
                     contexts: &contexts,
                     query_length,
                     diag_array_size,
-                    subjects,
+                    subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
                     debugging,
                     chunk_switches,
                 },
@@ -2414,7 +2414,7 @@ mod tests {
                 contexts: &contexts,
                 query_length,
                 diag_array_size: wide,
-                subjects: &short,
+                subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(&short),
                 debugging: false,
                 chunk_switches: false,
             };

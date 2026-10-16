@@ -1,0 +1,41 @@
+TBLASTX 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: LOSAT seqdb fixture, nucleotide, version 4
+           12 sequences; 850 total letters
+
+
+
+Query= q_nohit random 45 bases
+
+Length=45
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.318    0.134    0.401 
+
+
+Effective search space used: 2230
+
+
+  Database: LOSAT seqdb fixture, nucleotide, version 4
+    Posted date:  Oct 12, 2026  4:12 PM
+  Number of letters in database: 850
+  Number of sequences in database:  12
+
+
+
+Matrix: BLOSUM62
+Neighboring words threshold: 13
+Window for multiple hits: 40

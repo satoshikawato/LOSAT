@@ -78,12 +78,12 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 60 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
+strict set are on by default (43 then, 61 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
 `LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
 `LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE`,
 `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_LINKSLICES`, `LOSAT_X_BPSUBJRUN`,
-`LOSAT_X_TBNSTORE`, `LOSAT_X_DPNEON` and `LOSAT_X_BNSTREAM` joined), and their variables mean
-(`LOSAT/src/utils/xswitch.rs`):
+`LOSAT_X_TBNSTORE`, `LOSAT_X_DPNEON`, `LOSAT_X_TBNBATCHRULE` and `LOSAT_X_BNSTREAM` joined), and
+their variables mean (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
 | --- | --- | --- |
@@ -101,7 +101,8 @@ strict set are on by default (43 then, 60 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
   `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
-  act only with `TBNPAR`; `TBNOIDNEXT` and `TBNOIDUNITS` act only with `TBNOIDCHUNK`; `BPSUBJRUN` acts only in the
+  act only with `TBNPAR`; `TBNBATCHRULE` only with `TBNBATCH`; `TBNOIDNEXT` and `TBNOIDUNITS`
+  act only with `TBNOIDCHUNK`; `BPSUBJRUN` acts only in the
   parallel `-subject` loop of blastp (2 or more threads, several subjects); `BNSTREAM` only in
   blastn's `-subject` search at 2 or more threads.
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
@@ -117,7 +118,7 @@ strict set are on by default (43 then, 60 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 60 single variables are
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 61 single variables are
   to be removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
@@ -152,6 +153,7 @@ export LOSAT_X_LINKSLICES=1
 export LOSAT_X_BPSUBJRUN=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_DPNEON=1
+export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_BNSTREAM=1
 ```
 
@@ -273,6 +275,12 @@ joined the set on 2026-10-15. On aarch64 it lets `LOSAT_X_DPFAST` (and `LOSAT_X_
 vector X-drop kernels built over NEON, the kernel bodies x86_64 and wasm32 run. It changes no
 value and no order of computation, acts on aarch64 only (it does nothing on other targets) and
 only where `LOSAT_X_DPFAST` is on; `LOSAT_X_DPSHADOW` compares the NEON kernels whatever it says.
+
+`LOSAT_X_TBNBATCHRULE` was added after the default changed, as a switch that was off unless set,
+and joined the set on 2026-10-16. With `LOSAT_X_TBNBATCH` it chooses which tblastn query batches
+are searched side by side (the full waves of a small subject set) and which one after another
+with the pool inside each; every batch is searched as before and the reports keep the batch
+order, so no value changes. Timings are in its entry below.
 
 `LOSAT_X_BNSTREAM` was added after the default changed, as a switch that was off unless set, and
 joined the set on 2026-10-16. With two or more threads blastn hands each subject's HSPs of a
@@ -467,6 +475,26 @@ Rebuilding less:
   searched one after another instead of side by side: 1.02-1.07 of the time on the 16S set and
   1.12-1.24 on the genome (0.04-0.09 s) with one batch per thread, 0.75-0.86 with three
   batches on two threads.
+- `LOSAT_X_TBNBATCHRULE=1` tblastn, with `LOSAT_X_TBNBATCH` (speed; in the strict set since
+  2026-10-16, on by default, `=0` turns it off; `tblastn/stage_d_pipeline.rs`
+  `x_batches_side_by_side`): which query batches `TBNBATCH` searches side by side. With `=0`
+  every batch goes side by side once there is one batch per thread (`LOSAT_X_DEFAULT=0` alone
+  turns `TBNBATCH` off too, so nothing goes side by side). By default, only the batches of the
+  full waves (a multiple of the threads) go side by side and the others one after another with the pool inside each, and
+  only when the subjects hold at most 24 Mb or there are fewer than two subjects per thread
+  (otherwise every batch one after another). The report does not change (every batch is searched
+  as before, the reports keep the batch order). With `LOSAT_WASI_THREADS_DEBUG=1` a line
+  `[losat-thread-stage] program=tblastn stage=query_batches batches= threads= side_by_side=
+  one_after_another=` gives the split (printed whenever `TBNBATCH`'s block runs, with or
+  without the rule). Timed on the workstation (perf-si-20261012 session 17, node 1, one hash per
+  case; time of each arm / time of main's side by side): 16S (28,036 records, 40.6 Mb) x 10
+  batches at 8 threads 0.68 (13.2 -> 8.9 s), 5 batches at 4 threads 0.69 with
+  `LOSAT_X_TBNBATCH=0`; one 0.6 Mb genome x 10 batches at 8 threads 0.77 with the rule (8 side
+  by side, 2 after), 1.07 with `TBNBATCH=0`; three E. coli genomes (15.7 Mb) x 16 batches at 12
+  threads 0.80 with the rule; three fly chromosomes (76.9 Mb) x 16 batches at 16 threads 1.29
+  with `TBNBATCH=0` (the rule keeps them side by side), the same bases in 79 pieces 0.95.
+  Where all batches are a multiple of the threads and the set is small (0.3-15.7 Mb, one to
+  5,000 subjects) side by side took 0.26-0.96 of the time of one after another.
 - `LOSAT_X_LUTSPLIT=1` tblastn: build only the half (contexts or table) a caller uses.
 - `LOSAT_X_IDEALMEMO=1` BLOSUM62 ideal Karlin block once per process.
 - `LOSAT_X_BXSEGMEMO=1` blastx redo stage: the subject SEG once per subject instead of once per window

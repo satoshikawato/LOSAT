@@ -136,7 +136,7 @@ LOSAT tblastn \
   -outfmt 6
 ```
 
-The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its certified output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). Database searches, `tblastn-fast`, PSI-TBLASTN, and composition modes 1/3 are unsupported.
+The local TBLASTN path accepts all 27 NCBI `gc.prt` genetic-code IDs, including ID 32 under the documented product decision. Its certified output and target claims apply to the [declared fixtures and options](docs/release/v0.2.0.md). `tblastn-fast`, PSI-TBLASTN, and composition modes 1/3 are unsupported; database searches (`-db`) are described in section 6.
 
 ### 5. Writing a BLAST Database (makedb)
 ```bash
@@ -176,7 +176,7 @@ LOSAT blastn \
 |:---|:---|:---|:---|
 | `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA) |
 | `-subject <file>` | File path | *(Required unless `-db`)* | Input subject sequence file (FASTA) |
-| `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP only) |
+| `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, TBLASTX; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast` or `blastn` (for `blastn`); `blastp` (for `blastp`); `blastx` (for `blastx`); `tblastn` (for `tblastn`) |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
 | `-outfmt <int>` | Integer | `6` for tabular examples; `0` for BLASTX/TBLASTN | Output format (`6`=tabular, `7`=commented tabular, `0`=pairwise); availability varies by program |

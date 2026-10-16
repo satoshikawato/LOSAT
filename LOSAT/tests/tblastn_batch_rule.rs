@@ -14,8 +14,8 @@
 //! more threads, the subject plans shared (four or more batches) and at least one batch per
 //! thread, LOSAT searches the batches side by side, each as the one-thread search. With
 //! `LOSAT_X_TBNBATCHRULE` as well, only the batches of the full waves (a multiple of the threads)
-//! of a small subject set go side by side and the rest one after another with the pool inside
-//! each. Neither may change the report, so the tests compare it with the one-thread search and
+//! go side by side, and only for a small subject set or fewer than two subjects per thread; the rest
+//! are searched one after another with the pool inside each. Neither may change the report, so the tests compare it with the one-thread search and
 //! read the `[losat-thread-stage] ... stage=query_batches` line (`LOSAT_WASI_THREADS_DEBUG=1`)
 //! to check how many batches went side by side.
 //!
@@ -105,7 +105,7 @@ fn the_report_is_the_one_thread_report_with_and_without_the_rule() {
             Some(all),
             "default, {threads} threads"
         );
-        // With it: the full waves only (the subject is far below the bound).
+        // With it: the full waves only (one small subject).
         let (report, stderr) = tblastn(threads, &[("LOSAT_X_TBNBATCHRULE", "1")]);
         assert_eq!(report, expected, "rule, {threads} threads");
         assert_eq!(

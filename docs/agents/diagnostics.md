@@ -407,6 +407,25 @@ Rebuilding less:
   searched one after another instead of side by side: 1.02-1.07 of the time on the 16S set and
   1.12-1.24 on the genome (0.04-0.09 s) with one batch per thread, 0.75-0.86 with three
   batches on two threads.
+- `LOSAT_X_TBNBATCHRULE=1` tblastn, with `LOSAT_X_TBNBATCH` (speed; not in the strict set: off
+  unless set, to any value; `tblastn/stage_d_pipeline.rs` `x_batches_side_by_side`): which query
+  batches `TBNBATCH` searches side by side. Without it every batch goes side by side once there
+  is one batch per thread. With it, only the batches of the full waves (a multiple of the
+  threads) go side by side and the others one after another with the pool inside each, and
+  only when the subjects hold at most 24 Mb or there are fewer than two subjects per thread
+  (otherwise every batch one after another). The report does not change (every batch is searched
+  as before, the reports keep the batch order). With `LOSAT_WASI_THREADS_DEBUG=1` a line
+  `[losat-thread-stage] program=tblastn stage=query_batches batches= threads= side_by_side=
+  one_after_another=` gives the split (printed whenever `TBNBATCH`'s block runs, with or
+  without the rule). Timed on the workstation (perf-si-20261012 session 17, node 1, one hash per
+  case; time of each arm / time of main's side by side): 16S (28,036 records, 40.6 Mb) x 10
+  batches at 8 threads 0.68 (13.2 -> 8.9 s), 5 batches at 4 threads 0.69 with
+  `LOSAT_X_TBNBATCH=0`; one 0.6 Mb genome x 10 batches at 8 threads 0.77 with the rule (8 side
+  by side, 2 after), 1.07 with `TBNBATCH=0`; three E. coli genomes (15.7 Mb) x 16 batches at 12
+  threads 0.80 with the rule; three fly chromosomes (76.9 Mb) x 16 batches at 16 threads 1.29
+  with `TBNBATCH=0` (the rule keeps them side by side), the same bases in 79 pieces 0.95.
+  Where all batches are a multiple of the threads and the set is small (0.3-15.7 Mb, one to
+  5,000 subjects) side by side took 0.26-0.96 of the time of one after another.
 - `LOSAT_X_LUTSPLIT=1` tblastn: build only the half (contexts or table) a caller uses.
 - `LOSAT_X_IDEALMEMO=1` BLOSUM62 ideal Karlin block once per process.
 - `LOSAT_X_BXSEGMEMO=1` blastx redo stage: the subject SEG once per subject instead of once per window

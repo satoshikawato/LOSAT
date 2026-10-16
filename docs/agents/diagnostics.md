@@ -491,6 +491,10 @@ Rebuilding less:
   and their order do not change. The search of all queries, `-db` (no subject records; its titles are read
   per block from the database) and one-thread or many-thread searches without `LOSAT_X_BPQBLOCK` are not
   changed. Memory: the IDs and titles of the subject set, once for the search (they were made per block).
+  Measured on the workstation (16 threads, 4 alternating pairs, `LOSAT_X_BPSUBJRUN` and the other blastp
+  switches on both sides, same outputs): human x yeast blastp-fast `-subject` with `LOSAT_X_BPQBLOCK=50000`
+  (254 blocks) 7.82 -> 7.45 s (0.952), with `LOSAT_X_BPQBLOCK=20000` (633 blocks) 10.58 -> 9.81 s (0.927);
+  exact blastp of 3,000 human proteins (23 blocks) unchanged (6.09 / 6.11 s); max RSS within the runs' spread.
 - `LOSAT_X_BPSUBJMETASHADOW=1` shadow of `LOSAT_X_BPSUBJMETA` (implies it): in each block whose output takes
   the stored values, each subject's ID result and title and the result of `tabular_subject_ids` over the
   block's hit lists (the shown IDs, or the error's text) are made again as without the switch and compared

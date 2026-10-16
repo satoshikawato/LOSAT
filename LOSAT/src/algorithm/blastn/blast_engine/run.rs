@@ -68,7 +68,7 @@ use super::super::blast_extend::DiagStruct;
 use super::super::coordination::{
     build_lookup_tables, chunk_query_masks, collect_lowercase_masks, configure_task,
     finalize_task_config, prepare_sequence_data, query_masks, subject_metadata_from_records,
-    LookupTables, SubjectMetadata,
+    subject_trace_id, LookupTables, SubjectMetadata,
 };
 use super::super::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use super::super::extension::{
@@ -8292,13 +8292,6 @@ fn search_query_batch(
             .map(|id| Arc::<str>::from(id.as_str()))
             .collect::<Vec<Arc<str>>>(),
     );
-    let subject_ids_arc = Arc::new(
-        seq_data
-            .subject_ids
-            .iter()
-            .map(|id| Arc::<str>::from(id.as_str()))
-            .collect::<Vec<Arc<str>>>(),
-    );
 
     // Build per-context query sequences (plus/minus) for blastn.
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_util.c:839-847
@@ -9190,7 +9183,10 @@ fn search_query_batch(
     //    ...
     // } BlastHSPList;
     // ```
-    let subject_ids_ref = Arc::clone(&subject_ids_arc);
+    // The records whose titles name the subjects in LOSAT's debug and trace lines (none for a
+    // database: its sequences are "unknown" there).
+    let trace_subject_records: &[FastaRecord] =
+        subjects.prepared().map_or(&[], |prepared| prepared.records);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
     // ```c
     // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking)
@@ -9372,10 +9368,16 @@ fn search_query_batch(
         //    ...
         // } BlastHSPList;
         // ```
-        let s_id = subject_ids_ref
-            .get(s_idx)
-            .map(|id| id.as_ref())
-            .unwrap_or("unknown");
+        // Made only for the debug and trace lines, which alone read it.
+        let s_id_trace = if blastn_debug || blastn_trace_enabled {
+            trace_subject_records.get(s_idx).map_or_else(
+                || "unknown".to_string(),
+                |record| subject_trace_id(record.title()),
+            )
+        } else {
+            String::new()
+        };
+        let s_id = s_id_trace.as_str();
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1662
         // ```c

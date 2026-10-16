@@ -5,9 +5,9 @@ name: Platform checks
 # paths):
 #  - outputs: release binary, 49 cases (all five programs) at 1 and 4 threads in both modes; the
 #    outputs of the two modes must be byte-identical and the exit codes 0 (LOSAT/tests/platform_checks.py);
-#    on the two arm64 platforms two more modes, LOSAT_X_DPNEON=1 (the NEON X-drop kernels, off unless
-#    set) and LOSAT_X_DPNEON2=1 (the same kernels in register pairs, off unless set), must give the
-#    same outputs as well;
+#    on the two arm64 platforms two more modes, LOSAT_X_DPNEON=0 (the other switches on, the scalar
+#    X-drop instead of the NEON kernels the default runs) and LOSAT_X_DPNEON2=1 (the NEON kernels in
+#    register pairs, off unless set), must give the same outputs as well;
 #  - compare: the hashes of the platforms of the run must equal each other (no expected hash is
 #    stored; the frozen hashes are checked on Linux x64 by ci.yml);
 #  - tests: cargo test --all-features in both modes, built once per platform, on the platforms other
@@ -87,9 +87,10 @@ jobs:
           INPUT_SET: ${{ github.event.inputs.set }}
         run: |
           set -euo pipefail
-          # The platforms. `extra` adds the modes of the arm64 platforms (LOSAT_X_DPNEON and
-          # LOSAT_X_DPNEON2 are off unless set); the entries without it run the two standard modes.
-          neon='--extra-mode dpneon=LOSAT_X_DPNEON=1 --extra-mode dpneon2=LOSAT_X_DPNEON2=1'
+          # The platforms. `extra` adds the modes of the arm64 platforms (LOSAT_X_DPNEON=0: the scalar
+          # X-drop with the other switches on; LOSAT_X_DPNEON2 is off unless set); the entries
+          # without it run the two standard modes.
+          neon='--extra-mode noneon=LOSAT_X_DPNEON=0 --extra-mode dpneon2=LOSAT_X_DPNEON2=1'
           o_linux_x64='{"runner":"ubuntu-24.04","id":"linux-x64","python":"python3"}'
           o_linux_arm64='{"runner":"ubuntu-24.04-arm","id":"linux-arm64","python":"python3","extra":"'"$neon"'"}'
           o_windows_x64='{"runner":"windows-2025","id":"windows-x64","python":"python"}'

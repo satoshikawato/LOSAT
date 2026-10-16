@@ -337,6 +337,8 @@ impl Write for XBlockSink<'_> {
 pub(crate) struct XBlockSubjects {
     /// The address and count of the records encoded.
     records: (usize, usize),
+    /// EXPERIMENT (LOSAT_X_BPSUBJMETA): the records' tabular IDs and titles, made with the switch.
+    x_meta: Option<super::blast_engine::x_subject_meta::XSubjectMeta>,
     encoded: Vec<EncodedProtein>,
     x_lookup_spare: XFlatSpare,
     /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the second spare: the vectors of the next block's table,
@@ -351,6 +353,7 @@ impl XBlockSubjects {
         assert_eq!(records.len(), encoded.len());
         Self {
             records: (records.as_ptr() as usize, records.len()),
+            x_meta: super::blast_engine::x_subject_meta::XSubjectMeta::x_for_block_search(records),
             encoded,
             x_lookup_spare: XFlatSpare::default(),
             x_lookup_ahead: XFlatSpare::default(),
@@ -368,6 +371,19 @@ pub(crate) fn x_block_subjects<'p>(
     pool.x_ext::<XBlockSubjects>()
         .filter(|subjects| subjects.records == (records.as_ptr() as usize, records.len()))
         .map(|subjects| &subjects.encoded[..])
+}
+
+// No NCBI counterpart: reads back the IDs and titles attached by the block search (reuse only).
+/// EXPERIMENT (LOSAT_X_BPSUBJMETA): the subjects' tabular IDs and titles attached to `pool`
+/// (`blast_engine/x_subject_meta.rs`), when the switch made them and they are those of `records`
+/// (the same slice).
+pub(crate) fn x_block_subject_meta<'p>(
+    pool: &SearchPool<'p>,
+    records: &[FastaRecord],
+) -> Option<&'p super::blast_engine::x_subject_meta::XSubjectMeta> {
+    pool.x_ext::<XBlockSubjects>()
+        .filter(|subjects| subjects.records == (records.as_ptr() as usize, records.len()))
+        .and_then(|subjects| subjects.x_meta.as_ref())
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:2771-2803 (the contexts' Karlin

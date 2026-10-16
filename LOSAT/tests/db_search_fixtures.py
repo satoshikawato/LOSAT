@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Frozen `blastp -db`, `blastn -db`, `tblastn -db` and `blastx -db` fixtures: LOSAT against the bytes NCBI BLAST+ 2.17.0 wrote (comparison only).
+"""Frozen `blastp -db`, `blastn -db`, `tblastn -db`, `blastx -db` and `tblastx -db` fixtures: LOSAT against the bytes NCBI BLAST+ 2.17.0 wrote (comparison only).
 
 LOSAT/tests/db_search_manifest.tsv lists the rows (columns: row_id, program, kind, db, query, extra_args,
 outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers). Every row runs from LOSAT/ as
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
-(`blastp`, `blastn`, `tblastn` or `blastx`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
+(`blastp`, `blastn`, `tblastn`, `blastx` or `tblastx`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
 argument `-db ""`; `extra_args` is split like a shell line; `outfmt` is one argument, so a custom
 `7 qseqid sseqid ...` spec stays whole). The databases are under LOSAT/tests/seqdb/db and
 LOSAT/tests/db_search (README.md there says how they were built).
@@ -45,7 +45,7 @@ MANIFEST = TESTS / "db_search_manifest.tsv"
 FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
-PROGRAMS = ("blastp", "blastn", "tblastn", "blastx")
+PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx")
 NCBI_ENV = ("BLASTDB", "NCBI", "BATCH_SIZE", "CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY")
 TIMEOUT = 600
 

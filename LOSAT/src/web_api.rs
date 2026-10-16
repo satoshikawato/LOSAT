@@ -363,6 +363,9 @@ fn parse_tblastx_args(
     let mut args = tblastx::TblastxArgs {
         query,
         subject: Some(subject),
+        // A database search is not part of LOSAT Web yet (DB-7).
+        db: None,
+        dbsize: None,
         evalue: 10.0,
         threshold: 13.0,
         word_size: 3,

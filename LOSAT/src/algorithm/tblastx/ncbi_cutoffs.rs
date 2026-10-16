@@ -146,6 +146,18 @@ pub fn compute_eff_lengths_tblastx(
     db_num_seqs: i64,
     karlin_params: &KarlinParams,
 ) -> EffLengthsResult {
+    try_compute_eff_lengths_tblastx(query_len_aa, subject_len_nucl, db_num_seqs, karlin_params)
+        .expect("TBLASTX effective search space within i64")
+}
+
+/// `compute_eff_lengths_tblastx`, or `None` when the effective search space overflows NCBI's
+/// `Int8` (a `-dbsize` near the `Int8` limit), where NCBI's arithmetic overflows.
+pub fn try_compute_eff_lengths_tblastx(
+    query_len_aa: i64,
+    subject_len_nucl: i64,
+    db_num_seqs: i64,
+    karlin_params: &KarlinParams,
+) -> Option<EffLengthsResult> {
     // NCBI reference: c++/src/algo/blast/core/blast_setup.c:734-740,785-847
     // db_length = db_length/3;
     // db_num_seqs = eff_len_params->real_num_seqs;
@@ -153,10 +165,10 @@ pub fn compute_eff_lengths_tblastx(
     // Sum nucleotide lengths BEFORE translated division. Invalid contexts are
     // excluded by the caller; empty contexts retain zero search space.
     if query_len_aa <= 0 {
-        return EffLengthsResult {
+        return Some(EffLengthsResult {
             length_adjustment: 0,
             eff_searchsp: 0,
-        };
+        });
     }
     let db_length = subject_len_nucl / 3;
 
@@ -170,12 +182,12 @@ pub fn compute_eff_lengths_tblastx(
 
     // NCBI blast_setup.c:842-843: effective_search_space = effective_db_length * (query_length - length_adjustment)
     let effective_query_length = query_len_aa - length_adjustment;
-    let eff_searchsp = effective_db_length * effective_query_length;
+    let eff_searchsp = effective_db_length.checked_mul(effective_query_length)?;
 
-    EffLengthsResult {
+    Some(EffLengthsResult {
         length_adjustment,
         eff_searchsp,
-    }
+    })
 }
 
 /// Calculate effective search space for the complete local-subject database.

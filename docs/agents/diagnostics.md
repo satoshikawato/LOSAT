@@ -892,13 +892,14 @@ Scheduling (each value computed by one thread with the original function; order 
   verified= decisions= cells= identical` line on stderr at the end of the search (`cells`: skipped
   retrieves whose walk found the diagonal's cell). `LOSAT_X_PAIRPARSHADOW` and `LOSAT_X_PAIRPARDISCSHADOW`
   compare the bounds of the two tables too.
-  Measured on the workstation (alternating pairs, node 0 CPUs 16-31, `LOSAT_X_PAIRPARDISC=1` in the dc-megablast
-  runs; 1,775 or 3,492 D. melanogaster cDNAs against 3 Mb of chromosome 2L): dc-megablast one batch 2.195 ->
-  1.872 s at 1 thread (0.853, 4 pairs) and 1.429 -> 0.933 s at 16 (0.653, 4 pairs), two batches 4.514 -> 2.651
-  s at 16 (0.587, 6 pairs); blastn with the first query set 4.066 -> 4.104 s at 1 thread (1.009, 2 pairs; it
-  walks about two cells per seed, so the bound per seed and its upkeep per insert cost more than they save)
-  and 0.986 at 16 (6 pairs, scattered); peak memory unchanged. The shadow skipped 62 % of the retrieves on
-  the dc-megablast inputs and 69 % on blastn.
+  Measured on the workstation (alternating pairs, node 1 CPUs 32-47, `LOSAT_X_PAIRPARDISC=1` in the dc-megablast
+  runs; 1,775 or 3,492 D. melanogaster cDNAs against 3 Mb of chromosome 2L): dc-megablast one batch 2.237 ->
+  1.806 s at 1 thread (0.808, 4 pairs) and 2.089 -> 1.304 s at 16 (0.624, 4 pairs), two batches 4.442 -> 2.663
+  s at 16 (0.600, 2 pairs); blastn with the first query set 4.123 -> 4.136 s at 1 thread (1.003, 4 pairs;
+  instructions +0.1 %: it walks about two cells per seed, so the skips save about what the bound per seed and
+  its upkeep per insert cost) and 0.997 at 16 (2 pairs); peak memory unchanged. The shadow skipped 70 % of the
+  retrieves on the dc-megablast inputs (62 % with the prototype's bound, which also had the insert's stale
+  limit) and 69 % on blastn.
   Tests: the unit tests of `x_diag_lv.rs`, the strips tests of `x_pair_seed.rs` and `x_pair_seed_disc.rs`
   (with the bounds at 1, 2, 3 and 7 threads), and `LOSAT/tests/blastn_diag_lv.rs`.
 - `LOSAT_X_QBATCHPAR=1` (BLASTN, all tasks, `-subject` with two or more threads; not in the strict set:

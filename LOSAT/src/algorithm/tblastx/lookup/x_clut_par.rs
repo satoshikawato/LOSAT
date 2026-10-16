@@ -702,7 +702,10 @@ fn x_try_build_flat_parallel_with(
     let backbone_size = header.backbone_size;
     let largest_pv_shift = x_largest_pv_shift(backbone_size);
     if largest_pv_shift > X_MAX_STRIPE_SHIFT {
-        // A backbone past 2^21 * 2^11 cells: the serial builder.
+        // A backbone past 2^21 * 2^11 cells: the serial builder. It ignores `cuts.x_ahead` (the
+        // spare's vectors): a build ahead would allocate its table here, on the pool thread. This
+        // is unreachable for blastp-fast's compressed backbones (759,375 cells for word size 5,
+        // far below 2^32), and the table would have the same values.
         return x_try_build_flat_with_capacity(
             word_size,
             scaled_threshold,

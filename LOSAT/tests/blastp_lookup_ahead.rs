@@ -152,6 +152,9 @@ const ON: (&str, &str) = ("LOSAT_X_BPLKPAHEAD", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_BPLKPAHEADSHADOW", "1");
 /// Where the switch acts: the block search with the pool's build of the flat table.
 const ACTS: [(&str, &str); 2] = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPLKPFLAT", "1")];
+/// The composition-based redo's nested scopes (redo windows) run beside the build ahead.
+// TODO after the rebase onto main: also LOSAT_X_BPSUBJRUN (its subject runs are not on this base).
+const REDOPAR: (&str, &str) = ("LOSAT_X_BPREDOPAR", "1");
 
 /// The switch off, on and in its shadow mode give the same report, standard error (but the
 /// `[TIMING]` lines and the shadow's line) and exit code; returns the off run and the shadow run.
@@ -213,6 +216,15 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
             assert_built_ahead(&shadow.shadow("BPLKPAHEAD"), off.searches(), &what);
         }
     }
+    // One more configuration with BPREDOPAR: the build ahead beside the redo windows' nested
+    // scopes of the block's search (the hang of a waiting helper would show here).
+    let base = with(&ACTS, &[("LOSAT_X_BPQBLOCK", "1"), REDOPAR]);
+    let (off, shadow) = same_runs(&dir, "blastp-fast", &subject, 4, &base, &[]);
+    assert_built_ahead(
+        &shadow.shadow("BPLKPAHEAD"),
+        off.searches(),
+        "BPREDOPAR, threads 4",
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -237,7 +249,8 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
     );
     let subject = [OsStr::new("-db"), name.as_os_str()];
     for threads in [2, 4] {
-        let base = with(&ACTS, &[("LOSAT_X_BPQBLOCK", "1")]);
+        // With BPREDOPAR (see `REDOPAR`) in every `-db` run.
+        let base = with(&ACTS, &[("LOSAT_X_BPQBLOCK", "1"), REDOPAR]);
         let (off, shadow) = same_runs(&dir, "blastp-fast", &subject, threads, &base, &[]);
         assert!(!off.stdout.is_empty(), "the fixture pair has rows");
         let what = format!("-db, threads {threads}");

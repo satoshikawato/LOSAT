@@ -55,42 +55,62 @@
 //!   comes after the reports of the batches before, without the epilog, in both: here they were
 //!   written when the loop took them, so the error paths write only what follows them (the
 //!   batch's title and reader warnings). An error that LOSAT raises where NCBI would not stop
-//!   (LOSAT's refusals) is written without the reports of the batches before; so the switch acts
-//!   only where no such refusal can come after the first batch (`off`): scoring options with
-//!   Karlin-Altschul values and greedy gap costs that LOSAT supports (the refusals of
-//!   `search_query_batch` for scoring options without values or large greedy gap costs), no
-//!   negative `CHUNK_SIZE` (the refusal in `search_query_chunks`), search spaces that cannot
-//!   overflow (`SearchSpace`), and subjects whose report ids are all supported (a subject set's
-//!   `tabular_subject_ids`, made once here; with `-db` every definition line is read before the
-//!   search, as blastp's block search does, `database::x_titles_allow_streaming`). LOSAT's
-//!   internal invariant errors and panics are not argued; a write error of the output stops the
-//!   run where it happens (at the end without the switch).
+//!   (LOSAT's refusals) is written without the reports of the batches before; so with two or more
+//!   batches the switch acts only where no such refusal can come after the first batch (`check`):
+//!   scoring options with Karlin-Altschul values and greedy gap costs that LOSAT supports (the
+//!   refusals of `search_query_batch` for scoring options without values or large greedy gap
+//!   costs), no negative `CHUNK_SIZE` (the refusal in `search_query_chunks`), search spaces that
+//!   cannot overflow (`SearchSpace`), subjects whose report ids are all supported (a subject set's
+//!   `tabular_subject_ids`, made once here), and with `-db` stored data that the traceback and the
+//!   reports read without a refusal: every definition line (as blastp's block search does) and
+//!   the ambiguity data of every sequence, which the preliminary stage does not read
+//!   (`database::x_streaming_refusal`; one pass over the database's sequences before the search,
+//!   in the pool). With one batch (the first batch takes every query record) nothing can come
+//!   after it, so none of these checks is made and no subject value is made ahead (the one call
+//!   makes them as without the switch). LOSAT's internal invariant errors and panics are not
+//!   argued; a write error of the output stops the run where it happens (at the end without the
+//!   switch); a `-db` file that changes or fails after the preliminary stage has read it is not
+//!   argued either.
 //! - what the report path writes to standard error (the query warnings) keeps its bytes and its
 //!   place before each query's report; `-verbose` and the debug and trace output, which a batch
 //!   writes while it is searched and the reports write again, keep the reports at the end
 //!   (`Off::Debug`). `LOSAT_TIMING`'s blocks are printed when the loop takes a batch, as before,
-//!   so with the switch a block comes after the warnings of the batches before it.
+//!   so with the switch a block comes after the warnings of the batches before it (the same
+//!   lines in another order).
 //!
 //! Off (the reports after the loop, as without the switch): the switch not set; outputs other
-//! than the command line's (the hit records and the format observer of the Web adapter, whose
-//! HSP numbers count over the whole search, and file sinks, which are created when their report
-//! is written); `-verbose` and the debug output (the same list as LOSAT_X_QBATCHPAR's); and the
-//! refusals above. The command line (`-out` file or standard output) and ABI v1 are streamed.
+//! than one format of the command line's kind (the hit records and the format observer of the Web
+//! adapter, whose HSP numbers count over the whole search; file sinks, which are created when
+//! their report is written; two or more formats, which the library API allows on one stream,
+//! where the off path writes each format for all queries and the batch writes would interleave
+//! them); `-verbose` and the debug output (`x_debug_output`, the list LOSAT_X_QBATCHPAR uses); and
+//! the refusals above. The command line (`-out` file or standard output) and ABI v1 are streamed.
+//!
+//! Memory: a batch's lists, flags, masks, Karlin-Altschul blocks and search spaces are dropped
+//! after its write, and so are its queries' warnings. Kept for the whole search, as without the
+//! switch: one (empty) warnings slot per query, and with `-db` the stored title of every distinct
+//! sequence that a batch reported (`database::DatabaseTitles`, at most the database's sequences
+//! and at most the queries times the hit list size), which the next batches read instead of
+//! reading the definition line again.
 //!
 //! LOSAT_X_QBATCHPAR: the writes happen while the slots search the batches ahead (they write
 //! nothing; the batch loop alone writes), which is the point for the many-batch searches. The
 //! error paths still stop every slot before they write. A slot's panic, which ends a release
-//! build at once, then ends it after the reports of the batches taken so far.
+//! build at once, then ends it after the reports of the batches taken so far, possibly in the
+//! middle of one (what its buffered writer had flushed).
 //!
 //! The shadow (`LOSAT_X_RPTSTREAMSHADOW`, implies the switch) keeps the final lists and values of
 //! every batch as the off path does, copies every byte that the batch writes send to each format
 //! and to standard error, and at the end (and on the error paths that write the reports of the
-//! batches before) writes the reports the off path's way into memory and compares the bytes: on
-//! a difference it prints `[X_SHADOW] RPTSTREAM ... DIFFERENT` and panics; at the end of the
-//! search it prints `[X_SHADOW] RPTSTREAM batches= bytes= checks= off= identical` (batches: the
-//! batches whose reports were written by the loop; bytes: the bytes compared; checks: the
-//! comparisons; off: why the switch did not act, `none` when it did). With `LOSAT_X_STATS` and the
-//! switch, `[X_STATS] RPTSTREAM batches= queries= off=`.
+//! batches before, and on LOSAT's errors of a batch, where the off path writes none) writes the
+//! reports the off path's way into memory and compares the bytes: on a difference it prints
+//! `[X_SHADOW] RPTSTREAM ... DIFFERENT` and panics; at the end of the search it prints
+//! `[X_SHADOW] RPTSTREAM batches= bytes= checks= off= identical` (batches: the batches whose
+//! reports were written by the loop; bytes: the bytes compared; checks: the comparisons; off: why
+//! the switch did not act, `none` when it did). With `LOSAT_X_STATS` and the switch,
+//! `[X_STATS] RPTSTREAM batches= queries= off= one_batch= check_s=` (`one_batch`: 1 when the
+//! checks were skipped for a search of one batch; `check_s`: the seconds of `check`, the `-db`
+//! pass included).
 
 use std::io::{self, Write};
 use std::ops::Range;
@@ -99,14 +119,14 @@ use std::sync::{Arc, OnceLock};
 use anyhow::Result;
 
 use crate::api::local_blast::{FormatOutput, OutputSink, ReportOutputs};
-use crate::blastinput::seq_range::{Placements, QueryInput};
+use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
 use crate::config::NuclScoringSpec;
 use crate::stats::NuclValues;
 use crate::utils::dust::MaskedInterval;
 use crate::utils::threading::SearchPool;
 
 use super::{
-    blastn_trace, check_greedy_gap_costs, configure_task, database, record_title, BlastnArgs,
+    check_greedy_gap_costs, configure_task, database, record_title, x_debug_output, BlastnArgs,
     BlastnOutputFormat, QueryBatching, SubjectLetters, SubjectRanges, SubjectSource,
 };
 
@@ -131,8 +151,8 @@ fn mode() -> u8 {
 pub(super) enum Off {
     /// Neither switch is set.
     NotSet,
-    /// Hit records, a format observer or a file sink (`ReportOutputs` other than the command
-    /// line's).
+    /// Hit records, a format observer, a file sink, or two or more formats (`ReportOutputs` other
+    /// than one format of the command line's kind).
     Outputs,
     /// `-verbose`, the debug variables, the blastn trace or the thread diagnostics.
     Debug,
@@ -146,6 +166,8 @@ pub(super) enum Off {
     SubjectIds,
     /// A database whose definition lines do not all read as the reports read them.
     Titles,
+    /// A database sequence whose ambiguity data the traceback cannot decode.
+    Ambiguity,
 }
 
 impl Off {
@@ -159,6 +181,7 @@ impl Off {
             Off::SearchSpace => "search_space",
             Off::SubjectIds => "subject_ids",
             Off::Titles => "titles",
+            Off::Ambiguity => "ambiguity",
         }
     }
 }
@@ -192,6 +215,13 @@ struct Shadow {
     compared: u64,
 }
 
+/// What `check` found where the switch acts: the subject values made once (a subject set of a
+/// search of two or more batches), and whether the search is of one batch (no check made).
+struct Ready {
+    cache: Option<SubjectCache>,
+    one_batch: bool,
+}
+
 /// The streaming of one search's reports: whether it acts (`off`), what it has written, and the
 /// shadow's copies. Its drop prints the summary lines.
 pub(super) struct Stream {
@@ -200,11 +230,14 @@ pub(super) struct Stream {
     shadow: Option<Shadow>,
     batches: u64,
     queries: usize,
+    one_batch: bool,
+    check_seconds: f64,
 }
 
 impl Stream {
-    /// The streaming of a search with these outputs and subjects, `lengths` the searched queries'
-    /// lengths (`run_in_pool`).
+    /// The streaming of a search with these outputs and subjects, `query_input` and `lengths` its
+    /// query input and the searched queries' lengths, `batching` with the first batch's size
+    /// (`run_in_pool`).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn start(
         args: &BlastnArgs,
@@ -212,22 +245,28 @@ impl Stream {
         output_formats: &[BlastnOutputFormat],
         source: SubjectSource<'_>,
         subject_ranges: SubjectRanges<'_>,
+        query_input: &QueryInput,
         lengths: &[usize],
         batching: QueryBatching,
         pool: &SearchPool<'_>,
     ) -> Self {
-        let (off, cache) = match check(
+        let started = std::time::Instant::now();
+        let checked = check(
+            mode(),
             args,
             outputs,
             output_formats,
             source,
             subject_ranges,
+            query_input,
             lengths,
             batching,
             pool,
-        ) {
-            Ok(cache) => (None, cache),
-            Err(off) => (Some(off), None),
+        );
+        let check_seconds = started.elapsed().as_secs_f64();
+        let (off, cache, one_batch) = match checked {
+            Ok(Ready { cache, one_batch }) => (None, cache, one_batch),
+            Err(off) => (Some(off), None, false),
         };
         let shadow = (mode() == 2 && off.is_none()).then(|| Shadow {
             outfmts: outputs
@@ -246,6 +285,8 @@ impl Stream {
             shadow,
             batches: 0,
             queries: 0,
+            one_batch,
+            check_seconds,
         }
     }
 
@@ -397,8 +438,11 @@ impl Drop for Stream {
         let off = self.off.map_or("none", Off::name);
         if std::env::var_os("LOSAT_X_STATS").is_some() {
             eprintln!(
-                "[X_STATS] RPTSTREAM batches={} queries={} off={off}",
-                self.batches, self.queries
+                "[X_STATS] RPTSTREAM batches={} queries={} off={off} one_batch={} check_s={:.4}",
+                self.batches,
+                self.queries,
+                u8::from(self.one_batch),
+                self.check_seconds
             );
         }
         if mode() == 2 {
@@ -495,41 +539,27 @@ impl Write for WriteTee<'_> {
     }
 }
 
-/// Whether a search writes debug or trace output while its batches are searched (the list of
-/// `x_qbatch_par_off`): the reports then stay after the loop, where that output comes before
-/// them.
-fn debug_output(args: &BlastnArgs) -> bool {
-    args.verbose
-        || [
-            "BLEMIR_DEBUG",
-            "LOSAT_DEBUG_BLASTN",
-            "LOSAT_DEBUG_COORDS",
-            "LOSAT_DEBUG_COORDS_START",
-        ]
-        .iter()
-        .any(|name| std::env::var_os(name).is_some())
-        || blastn_trace::enabled()
-        || crate::utils::threading::diagnostics_enabled()
-}
-
-/// Why the switch does not act for this search, or the subject values made once for a subject
-/// set (`Stream::start`; the module doc has the reasons).
+/// Why the switch does not act for this search, or what it needs where it does (`Stream::start`;
+/// the module doc has the reasons). `mode` is `mode()` (a parameter for the unit tests).
 #[allow(clippy::too_many_arguments)]
 fn check(
+    mode: u8,
     args: &BlastnArgs,
     outputs: &ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
     source: SubjectSource<'_>,
     subject_ranges: SubjectRanges<'_>,
+    query_input: &QueryInput,
     lengths: &[usize],
     batching: QueryBatching,
     pool: &SearchPool<'_>,
-) -> std::result::Result<Option<SubjectCache>, Off> {
-    if mode() == 0 {
+) -> std::result::Result<Ready, Off> {
+    if mode == 0 {
         return Err(Off::NotSet);
     }
     if outputs.hits.is_some()
         || outputs.observer.is_some()
+        || outputs.formats.len() > 1
         || outputs
             .formats
             .iter()
@@ -537,8 +567,34 @@ fn check(
     {
         return Err(Off::Outputs);
     }
-    if debug_output(args) {
+    if x_debug_output(args) {
         return Err(Off::Debug);
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
+    // ```c++
+    //     TSeqPos size_read = 0;
+    //
+    //     while (size_read < GetBatchSize()) {
+    //
+    //         if (End())
+    //             break;
+    // ```
+    // The first batch takes every record (`next_ranged_batch` with the first batch's size, as
+    // the loop reads it): no refusal can come after it (a refusal of that batch finds nothing
+    // written; what ends the reading after the records comes in that batch or in a batch of its
+    // own, NCBI's errors, which both paths write alike), so nothing is checked and the one call
+    // makes the subject values as without the switch.
+    let (first_end, _) = next_ranged_batch(
+        &query_input.input_lengths,
+        &query_input.skipped,
+        0,
+        batching.batch_size,
+    );
+    if first_end == query_input.input_lengths.len() {
+        return Ok(Ready {
+            cache: None,
+            one_batch: true,
+        });
     }
     // The scoring of `search_query_batch` (`context_blocks`: `NuclValues::gapped` fails exactly
     // where `check_gaps` does, for every context) and its greedy gap costs: neither depends on
@@ -604,15 +660,18 @@ fn check(
                     .map(|index| subject_records.lowercase_masks(index))
                     .collect()
             });
-            Ok(Some(SubjectCache { ids, titles, masks }))
+            Ok(Ready {
+                cache: Some(SubjectCache { ids, titles, masks }),
+                one_batch: false,
+            })
         }
-        SubjectSource::Database(db) => {
-            if database::x_titles_allow_streaming(db, pool) {
-                Ok(None)
-            } else {
-                Err(Off::Titles)
-            }
-        }
+        SubjectSource::Database(db) => match database::x_streaming_refusal(db, pool) {
+            Some(off) => Err(off),
+            None => Ok(Ready {
+                cache: None,
+                one_batch: false,
+            }),
+        },
     }
 }
 
@@ -699,6 +758,198 @@ mod tests {
         };
         assert!(tee.write_all(b"x").is_err(), "a file sink is not streamed");
         assert!(!path.exists());
+    }
+
+    /// The arguments of a `blastn` command line (`extra` after `-query q -subject s`).
+    fn args(extra: &[&str]) -> BlastnArgs {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Options {
+            #[command(flatten)]
+            blastn: BlastnArgs,
+        }
+        let mut argv = vec!["test", "-query", "q", "-subject", "s"];
+        argv.extend_from_slice(extra);
+        crate::cli::try_parse_from::<Options, _, _>(argv)
+            .unwrap()
+            .blastn
+    }
+
+    fn record(
+        index: usize,
+        title: &[u8],
+        letters: usize,
+    ) -> crate::blastinput::fasta_reader::FastaRecord {
+        crate::blastinput::fasta_reader::FastaRecord {
+            local_id: format!("Subject_{}", index + 1),
+            title: title.to_vec(),
+            sequence: b"ACGTTGCA".iter().copied().cycle().take(letters).collect(),
+            warnings: Vec::new(),
+        }
+    }
+
+    /// `check` for queries of 1,000 letters each (`queries`), first batches of `batch_size`
+    /// letters, the subjects `subjects` and the outputs `outputs`.
+    fn checked(
+        mode: u8,
+        extra: &[&str],
+        subjects: &[crate::blastinput::fasta_reader::FastaRecord],
+        queries: usize,
+        batch_size: u32,
+        split: crate::algorithm::blastn::query_split::SplitSizes,
+        outputs: &mut ReportOutputs<'_>,
+    ) -> std::result::Result<Ready, Off> {
+        let args = args(extra);
+        let query_records: Vec<_> = (0..queries)
+            .map(|index| record(index, b"q", 1000))
+            .collect();
+        let query_input = QueryInput::whole(&query_records);
+        let lengths: Vec<usize> = query_records.iter().map(|q| q.sequence.len()).collect();
+        let prepared = super::super::PreparedSubjects {
+            records: subjects,
+            stores: None,
+            metadata: super::super::subject_metadata_from_records(subjects, |index| {
+                subjects[index].sequence.len()
+            }),
+            packed: Vec::new(),
+        };
+        let batching = QueryBatching {
+            fixed_batch_size: batch_size as i32,
+            batch_size,
+            split,
+        };
+        // A one-thread pool (the `-db` pass is not reached for a subject set).
+        let pool = SearchPool::x_serial();
+        check(
+            mode,
+            &args,
+            &*outputs,
+            &[BlastnOutputFormat::Tabular],
+            SubjectSource::Prepared(&prepared),
+            SubjectRanges {
+                placements: &Placements::default(),
+                records: None,
+            },
+            &query_input,
+            &lengths,
+            batching,
+            &pool,
+        )
+    }
+
+    // EXPERIMENT (LOSAT_X_RPTSTREAM): where the switch acts, and why not elsewhere: one format of
+    // the command line's kind only; with one batch no refusal is checked (and nothing is made
+    // ahead); with more, every refusal that could come after the first batch is.
+    #[test]
+    fn the_switch_acts_only_where_no_refusal_can_follow_the_first_batch() {
+        use crate::algorithm::blastn::query_split::SplitSizes;
+        let plain = SplitSizes::new(false, None, None);
+        let good = vec![
+            record(0, b"s1 a subject", 4000),
+            record(1, b"s2 another", 3000),
+        ];
+        let refused = vec![
+            record(0, b"s1 a subject", 4000),
+            record(1, b"Subject_\x81 x", 3000),
+        ];
+        let (mut one, mut two) = (Vec::<u8>::new(), Vec::<u8>::new());
+        let mut errors = Vec::<u8>::new();
+        let single =
+            |sink: &mut Vec<u8>, errors: &mut Vec<u8>| -> std::result::Result<Ready, Off> {
+                let mut outputs = ReportOutputs::single("6", OutputSink::Writer(sink), errors);
+                checked(1, &[], &good, 10, 4000, plain, &mut outputs)
+            };
+        // Not set.
+        let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors);
+        assert_eq!(
+            checked(0, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            Some(Off::NotSet)
+        );
+        drop(outputs);
+        // Hit records, an observer-like second output: two formats; a file sink.
+        let mut on_hits = |_: &[crate::report::PairwiseHit]| {};
+        let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors);
+        outputs.hits = Some(&mut on_hits);
+        assert_eq!(
+            checked(1, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            Some(Off::Outputs)
+        );
+        drop(outputs);
+        let mut errors2 = Vec::<u8>::new();
+        let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors2);
+        outputs.formats.push(FormatOutput {
+            outfmt: "7",
+            sink: OutputSink::Writer(&mut two),
+        });
+        assert_eq!(
+            checked(1, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            Some(Off::Outputs)
+        );
+        drop(outputs);
+        let path = std::path::Path::new("never-created");
+        let mut outputs = ReportOutputs::single("6", OutputSink::File(path), &mut errors);
+        assert_eq!(
+            checked(1, &[], &good, 10, 4000, plain, &mut outputs).err(),
+            Some(Off::Outputs)
+        );
+        drop(outputs);
+        // Several batches (4,000 letters of 10,000): the subject values are made once.
+        let ready = single(&mut one, &mut errors).expect("acts");
+        assert!(!ready.one_batch);
+        assert_eq!(ready.cache.as_ref().map(|cache| cache.ids.len()), Some(2));
+        // One batch (20,000 letters): no check, nothing made ahead, even with a refused id.
+        let mut outputs = ReportOutputs::single("6", OutputSink::Writer(&mut one), &mut errors);
+        let ready = checked(1, &[], &refused, 10, 20_000, plain, &mut outputs).expect("acts");
+        assert!(ready.one_batch && ready.cache.is_none());
+        // Several batches: the refusals that could come after the first batch.
+        assert_eq!(
+            checked(1, &[], &refused, 10, 4000, plain, &mut outputs).err(),
+            Some(Off::SubjectIds)
+        );
+        let scoring = [
+            "-task",
+            "blastn",
+            "-reward",
+            "2",
+            "-penalty",
+            "-3",
+            "-gapopen",
+            "1",
+            "-gapextend",
+            "1",
+        ];
+        assert_eq!(
+            checked(1, &scoring, &good, 10, 4000, plain, &mut outputs).err(),
+            Some(Off::Scoring)
+        );
+        assert_eq!(
+            checked(
+                1,
+                &["-dbsize", "9000000000000000000"],
+                &good,
+                10,
+                4000,
+                plain,
+                &mut outputs
+            )
+            .err(),
+            Some(Off::SearchSpace)
+        );
+        assert_eq!(
+            checked(
+                1,
+                &[],
+                &good,
+                10,
+                4000,
+                SplitSizes::new(false, Some(-5), Some(-10)),
+                &mut outputs
+            )
+            .err(),
+            Some(Off::ChunkSize)
+        );
+        // The shadow mode checks the same.
+        assert!(checked(2, &[], &good, 10, 4000, plain, &mut outputs).is_ok());
     }
 
     #[test]

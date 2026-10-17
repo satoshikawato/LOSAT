@@ -7110,6 +7110,7 @@ fn run_in_pool(
         &output_formats,
         source,
         subject_ranges,
+        query_input,
         &lengths,
         batching,
         parallel_pool,
@@ -7715,6 +7716,13 @@ fn run_in_pool(
                         written,
                     )
                 })?;
+                // The written queries' warnings are not read again (the error paths write those
+                // of the current batch; the shadow keeps them all).
+                if !shadow {
+                    for query_warnings in &mut warnings[start..end] {
+                        *query_warnings = Vec::new();
+                    }
+                }
             }
             input_start = input_end;
         }
@@ -7804,18 +7812,7 @@ fn x_qbatch_par_off(
     let Some(prepared) = source.prepared() else {
         return Some(Off::Database);
     };
-    let debug = args.verbose
-        || [
-            "BLEMIR_DEBUG",
-            "LOSAT_DEBUG_BLASTN",
-            "LOSAT_DEBUG_COORDS",
-            "LOSAT_DEBUG_COORDS_START",
-        ]
-        .iter()
-        .any(|name| std::env::var_os(name).is_some())
-        || blastn_trace::enabled()
-        || crate::utils::threading::diagnostics_enabled();
-    if debug {
+    if x_debug_output(args) {
         return Some(Off::Debug);
     }
     let units: usize = prepared
@@ -7827,6 +7824,26 @@ fn x_qbatch_par_off(
         return Some(Off::Subjects);
     }
     None
+}
+
+// No NCBI counterpart: LOSAT's verbose, debug and trace output (it changes no value NCBI computes).
+/// EXPERIMENT (LOSAT_X_QBATCHPAR, LOSAT_X_RPTSTREAM): whether a search writes verbose, debug or
+/// trace output while its batches are searched (`-verbose`, `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`,
+/// `LOSAT_DEBUG_COORDS[_START]`, the blastn trace, the thread diagnostics). Both switches then keep
+/// the loop as it was: the batches searched one after the other on the loop, and the reports
+/// written after the loop, where that output comes before them.
+fn x_debug_output(args: &BlastnArgs) -> bool {
+    args.verbose
+        || [
+            "BLEMIR_DEBUG",
+            "LOSAT_DEBUG_BLASTN",
+            "LOSAT_DEBUG_COORDS",
+            "LOSAT_DEBUG_COORDS_START",
+        ]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some())
+        || blastn_trace::enabled()
+        || crate::utils::threading::diagnostics_enabled()
 }
 
 // No NCBI counterpart: what LOSAT_X_QBATCHPAR's slots need to know of a batch's result

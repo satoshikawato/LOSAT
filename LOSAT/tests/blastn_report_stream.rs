@@ -347,13 +347,25 @@ fn out_files_and_qbatchpar_slots_give_the_off_bytes() {
     }
 }
 
-/// `-query_loc`, `-subject_loc` with `-lcase_masking`, and `-max_target_seqs`, `-max_hsps` and
-/// `-subject_besthit`: the off bytes.
+/// `-query_loc`, `-subject_loc` with `-lcase_masking` (a subject with lower case runs, whose
+/// masks the switch makes once from the records as read), and `-max_target_seqs`, `-max_hsps`
+/// and `-subject_besthit`: the off bytes.
 #[test]
 fn ranges_and_hit_list_options_give_the_off_bytes() {
     let dir = TempDir::new("ranges");
     let query = queries(&dir, "q.fa", b"");
-    let subject = fasta("LC738868.fasta");
+    // LC738868 with lower case letters in runs of 400 (one run in three), so that
+    // `-lcase_masking` has subject masks to show, also inside the `-subject_loc` range.
+    let mut lower = letters("LC738868.fasta");
+    for (position, letter) in lower.iter_mut().enumerate() {
+        if (position / 400) % 3 == 1 {
+            *letter = letter.to_ascii_lowercase();
+        }
+    }
+    let mut text = Vec::new();
+    record(&mut text, b"LC738868 in lower and upper case", &lower);
+    let subject = dir.path("lower.fa");
+    std::fs::write(&subject, text).unwrap();
     let cases: [(&str, &[&str]); 4] = [
         ("blastn", &["-outfmt", "0", "-query_loc", "100-1500"]),
         ("megablast", &["-outfmt", "6", "-query_loc", "100-1500"]),
@@ -502,6 +514,116 @@ fn a_database_search_gives_the_off_bytes() {
                 !off.report.is_empty() && reason == "none" && batches >= 8,
                 "{what}"
             );
+        }
+    }
+}
+
+/// `LOSAT makedb` of LC738868 and of a part of LC738874 (150,000-190,000, with three runs of `N`, so
+/// with ambiguity data) that only the queries of the last batches hit; `patch` changes the files.
+fn database(dir: &TempDir, name: &str, patch: impl FnOnce(&str)) -> String {
+    let mut part = letters("LC738874.fasta")[150_000..190_000].to_vec();
+    for at in [5_000, 17_000, 31_000] {
+        part[at..at + 30].fill(b'N');
+    }
+    let mut text = Vec::new();
+    record(&mut text, b"LC738868 first", &letters("LC738868.fasta"));
+    record(&mut text, b"LC738874part second", &part);
+    let fasta = dir.path(&format!("{name}.fna"));
+    std::fs::write(&fasta, text).unwrap();
+    let db = dir.path(name).to_str().unwrap().to_string();
+    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        .arg("makedb")
+        .arg("-in")
+        .arg(&fasta)
+        .args(["-dbtype", "nucl", "-out", &db])
+        .output()
+        .expect("run LOSAT makedb");
+    assert!(output.status.success(), "makedb");
+    patch(&db);
+    db
+}
+
+/// The same database search where the switch must act and where it must not: the second
+/// sequence's title holding a byte outside ' ' ..= '~' in its header file, or its ambiguity count
+/// raised by one in the sequence file. Both are refused when a batch reports the sequence (its
+/// title) or traces it back (its ambiguity data), which only the last batches do; without the
+/// switch the refusal comes before every report, so the switch reads both before the search and
+/// does not act (`off=titles`, `off=ambiguity`): the refusal, no row, the same bytes off / on /
+/// shadow. The intact database streams, with its ambiguity data decoded by the traceback.
+#[test]
+fn a_database_search_where_the_switch_must_not_act() {
+    let dir = TempDir::new("dbrefuse");
+    let query = queries(&dir, "q.fa", b"");
+    let run = |db: &str, threads: u32| {
+        let args = [
+            "-task",
+            "megablast",
+            "-query",
+            query.to_str().unwrap(),
+            "-db",
+            db,
+            "-outfmt",
+            "6",
+        ];
+        same_three(&format!("-db {db}"), &args, threads, &[], None)
+    };
+    let intact = database(&dir, "intact", |_| {});
+    for threads in [1, 4] {
+        let (off, (batches, _, _, reason)) = run(&intact, threads);
+        assert_eq!(off.status, Some(0));
+        let rows = String::from_utf8_lossy(&off.report).into_owned();
+        assert!(
+            rows.contains("\tgnl|BL_ORD_ID|1\t") || rows.contains("LC738874part"),
+            "{rows}"
+        );
+        assert!(batches >= 8 && reason == "none");
+    }
+    let title = database(&dir, "title", |db| {
+        let path = format!("{db}.nhr");
+        let mut header = std::fs::read(&path).unwrap();
+        let at = header
+            .windows(12)
+            .position(|window| window == b"LC738874part")
+            .expect("the second title");
+        header[at + 3] = 0xE9;
+        std::fs::write(&path, header).unwrap();
+    });
+    let ambiguity = database(&dir, "ambiguity", |db| {
+        let volume = LOSAT::seqdb::SeqDb::open(db, LOSAT::seqdb::SeqType::Nucleotide).unwrap();
+        let index = volume.volumes()[0].index();
+        let (at, next) = (
+            index.ambiguity_offsets()[1] as usize,
+            index.sequence_offsets()[2] as usize,
+        );
+        assert!(at < next, "the second sequence has ambiguity data");
+        drop(volume);
+        let path = format!("{db}.nsq");
+        let mut sequences = std::fs::read(&path).unwrap();
+        let count = u32::from_be_bytes(sequences[at..at + 4].try_into().unwrap());
+        sequences[at..at + 4].copy_from_slice(&(count + 1).to_be_bytes());
+        std::fs::write(&path, sequences).unwrap();
+    });
+    for (db, refusal, expected) in [
+        (&title, "has a stored title with a byte outside", "titles"),
+        (
+            &ambiguity,
+            "the ambiguity data are shorter than their count",
+            "ambiguity",
+        ),
+    ] {
+        for threads in [1, 4] {
+            let (off, (batches, _, checks, reason)) = run(db, threads);
+            assert_ne!(off.status, Some(0), "{db}: the refusal");
+            assert!(
+                String::from_utf8_lossy(&off.stderr).contains(refusal),
+                "{db}: {}",
+                String::from_utf8_lossy(&off.stderr)
+            );
+            assert!(
+                off.report.is_empty(),
+                "{db}: the refusal comes before every row"
+            );
+            assert_eq!((batches, checks, reason.as_str()), (0, 0, expected), "{db}");
         }
     }
 }

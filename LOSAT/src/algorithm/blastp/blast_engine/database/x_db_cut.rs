@@ -54,8 +54,8 @@
 //! blast_engine.c:1409; seqdbimpl.cpp:328-350, quoted above `SeqDb::next_block`), whatever the
 //! thread count; LOSAT's blocks are cut by bytes, because one block is one read of one file.
 //!
-//! Off unless `LOSAT_X_BPDBCUT` is set (to any value); not in the strict set. It acts for every
-//! task of BLASTP with `-db` (blastp, blastp-fast, blastp-short), the only program whose search
+//! `LOSAT_X_BPDBCUT` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set. It acts for every task of BLASTP with `-db` (blastp, blastp-fast, blastp-short), the only program whose search
 //! reaches this driver.
 //!
 //! `LOSAT_X_BPDBCUTSHADOW=1` (shadow mode, implies the switch): after each search with the cut, the
@@ -90,14 +90,14 @@ pub(super) enum XDbCut {
 
 // No NCBI counterpart: reads the LOSAT_X_BPDBCUT / LOSAT_X_BPDBCUTSHADOW switches once; it does not
 // change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPDBCUT): off unless set to any value; `LOSAT_X_BPDBCUTSHADOW` (any value)
-/// selects the shadow mode.
+/// EXPERIMENT (LOSAT_X_BPDBCUT): a strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+/// and it is not set; `LOSAT_X_BPDBCUTSHADOW` (any value) selects the shadow mode.
 pub(super) fn x_bp_db_cut() -> XDbCut {
     static MODE: OnceLock<XDbCut> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BPDBCUTSHADOW").is_some() {
             XDbCut::Shadow
-        } else if std::env::var_os("LOSAT_X_BPDBCUT").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BPDBCUT") {
             XDbCut::On
         } else {
             XDbCut::Off

@@ -38,7 +38,7 @@
 //! no slot runs while the loop writes the reports after the loop or what an error path writes:
 //! `Driver::finish` cancels and joins every slot before them, and once a slot's batch returns an
 //! error the batches planned after it are no longer started. The exception is
-//! `LOSAT_X_RPTSTREAM` (opt-in, `x_rpt_stream.rs`): there the loop writes each batch's reports
+//! `LOSAT_X_RPTSTREAM` (`x_rpt_stream.rs`, on by default): there the loop writes each batch's reports
 //! when it takes the batch, while the slots search the batches ahead (the slots themselves write
 //! nothing), so a slot's panic in a release build ends the process after the reports of the
 //! batches taken so far; its error paths still call `finish` before they write. The batches still exposed past an
@@ -72,7 +72,7 @@
 //! `LOSAT_X_QBATCHPARSHADOW` searches every batch on the loop as well, on the whole pool, while
 //! the slots run (a test mode; more than n threads are active then).
 //!
-//! Off (the loop as before): switch not set; a build without `parallel`, or wasm32; one thread;
+//! Off (the loop as before): switch off; a build without `parallel`, or wasm32; one thread;
 //! a BLAST database (`-db`); `-verbose`, `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`,
 //! `LOSAT_DEBUG_COORDS[_START]`, the blastn trace or `LOSAT_WASI_THREADS_DEBUG`; subjects of n or
 //! more work units (5 Mb subject chunks; today's subject-parallel batch already uses the pool);
@@ -87,7 +87,13 @@
 //! per extra 5 Mb dc-megablast slot). The budget for the batches in flight beyond the loop's one
 //! is `LOSAT_X_QBATCHPARMEM` MiB, or by default 96 MiB (blastn, blastn-short) or 28 MiB
 //! (megablast, dc-megablast) per thread beyond the first: 0.8 of NCBI BLAST+ 2.17.0's measured
-//! growth of max RSS per thread on the audit input. The slots come from a throughput model
+//! growth of max RSS per thread on the audit input. NCBI's max RSS grows with its threads only
+//! where its blastn splits the search by queries (`-mt_mode 0` with `-db`: a query file larger
+//! than 10,000,000 bytes, or 1,500,000 at a word size below 10, and a database shorter than
+//! 6,000,000,000 letters, or 150,000,000; `ncbi_splits_by_queries`); elsewhere its max RSS stays
+//! that of one thread, so the default budget is 0 there (no slots) and LOSAT's max RSS keeps to
+//! that of the loop (`Profile::of_search`; the subjects of `-subject` stand for the database).
+//! The slots come from a throughput model
 //! (`choose_slots`): the units of work are the planned batches of at least half the
 //! letter-weighted median planned batch's letters (`batch_units`); for
 //! `k = 1 ..= min(1 + budget / estimate, n, units)` and `m = n / k` the predicted span is
@@ -165,7 +171,8 @@ const SLOT_STACK_BYTES: usize = 8 << 20;
 /// code path and change no value NCBI computes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Switches {
-    /// `LOSAT_X_QBATCHPAR` (any value), or the shadow.
+    /// `LOSAT_X_QBATCHPAR` (a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and
+    /// it is not set), or the shadow.
     pub on: bool,
     /// `LOSAT_X_QBATCHPARSHADOW` (any value; implies the switch).
     pub shadow: bool,
@@ -190,7 +197,7 @@ impl Switches {
         };
         let shadow = std::env::var_os("LOSAT_X_QBATCHPARSHADOW").is_some();
         Switches {
-            on: shadow || std::env::var_os("LOSAT_X_QBATCHPAR").is_some(),
+            on: shadow || crate::utils::xswitch::on("LOSAT_X_QBATCHPAR"),
             shadow,
             stats: std::env::var_os("LOSAT_X_STATS").is_some(),
             mem_mib: number("LOSAT_X_QBATCHPARMEM"),
@@ -205,7 +212,7 @@ impl Switches {
 /// Why a search does not speculate, or stopped to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Off {
-    /// The switch is not set.
+    /// The switch is off (`LOSAT_X_QBATCHPAR=0`, or `LOSAT_X_DEFAULT=0` and it is not set).
     NotSet,
     /// A build without the `parallel` feature, or wasm32.
     Build,
@@ -221,7 +228,8 @@ pub(super) enum Off {
     Unstarted,
     /// Fewer than two batches, or fewer than two batch units, after the first.
     Single,
-    /// A budget of fewer than two slots.
+    /// A budget of fewer than two slots (by default, a query file that NCBI's blastn does not
+    /// split by queries: `Profile::of_search`).
     Budget,
     /// The throughput model predicts no gain: its best layout of two slots or more needs 0.97 of
     /// the loop's span or more.
@@ -458,6 +466,93 @@ impl Profile {
             },
         }
     }
+
+    /// No NCBI counterpart (scheduling only): the profile of a search of `-task` `task` with
+    /// word size `word_size`, a query file of `query_file_bytes` (`None`: standard input or no
+    /// file) and subjects of `subject_letters` letters: that of `of_task`, with no default budget
+    /// (`allowance_mib` 0, so no slots unless `LOSAT_X_QBATCHPARMEM` sets a budget) where NCBI's
+    /// blastn would not split the search by queries (`ncbi_splits_by_queries`). There NCBI's max
+    /// RSS does not grow with its threads (perf-mb defbundle, 2026-10-17: plain blastn of 1,775
+    /// cDNAs, a 5.4 MB query file, against 3 Mb: NCBI `-db` 123-136 MiB at 1-16 threads, while 5
+    /// slots at 16 threads took LOSAT from 122 to 332 MiB), so slots there would hold LOSAT above
+    /// it. The slots change no output; this chooses only whether they run.
+    pub(super) fn of_search(
+        task: &str,
+        word_size: usize,
+        query_file_bytes: Option<u64>,
+        subject_letters: u64,
+    ) -> Self {
+        let mut profile = Profile::of_task(task);
+        if !ncbi_splits_by_queries(word_size, query_file_bytes, subject_letters) {
+            profile.allowance_mib = 0;
+        }
+        profile
+    }
+}
+
+/// NCBI's cut-offs of its split by queries for blastn: the database letters below which, and
+/// the query file bytes above which, `-mt_mode 0` with more than one thread searches the queries
+/// split between the threads, by word size.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-114
+/// ```c++
+/// static void s_GetMT1Cutoffs(const int word_size, Int8 & max_db_size, Int8 & min_q_size)
+/// {
+///     const Int8 kMT1MaxDbSz_Blastn = 150000000; // bases
+///     const Int8 kMT1MinQSz_Blastn = 1500000; //bytes
+///     // Choose a bigger min quer size so we can support larger DB
+///     const Int8 kMT1MaxDbSz_Megablast = 6000000000;
+///     const Int8 kMT1MinQSz_Megablast = 10000000;
+///     if (word_size < 10) {
+///         // CompressedAa
+///         max_db_size = kMT1MaxDbSz_Blastn;
+///         min_q_size = kMT1MinQSz_Blastn;
+///     }
+///     else {
+///         max_db_size = kMT1MaxDbSz_Megablast;
+///         min_q_size = kMT1MinQSz_Megablast;
+///     }
+/// }
+/// ```
+pub(super) fn ncbi_mt1_cutoffs(word_size: usize) -> (u64, u64) {
+    if word_size < 10 {
+        (150_000_000, 1_500_000)
+    } else {
+        (6_000_000_000, 10_000_000)
+    }
+}
+
+/// Whether NCBI's blastn, with `-mt_mode 0` (its default) and more than one thread, splits the
+/// search of a query file of `query_file_bytes` against a database of `subject_letters` letters
+/// by queries (each thread then searches its own query batches, and its max RSS grows with the
+/// threads). A query that is not a file of known size (`None`: standard input) is not split.
+/// LOSAT uses it only to choose `LOSAT_X_QBATCHPAR`'s default budget (`Profile::of_search`).
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:134-153
+/// ```c++
+///     int num_threads = m_CmdLineArgs->GetNumThreads();
+///     int mt_mode = m_CmdLineArgs->GetMTMode();
+///     if (!m_CmdLineArgs->ExecuteRemotely() && (num_threads > 1) &&
+///        (mt_mode != CMTArgs::eSplitByDB)){
+/// ...
+///             s_GetMT1Cutoffs(word_size, max_db_size, min_q_size);
+///             CRef<CSeqDB> seqdb = sdb->GetSeqDb();
+///             Uint8 total_length = seqdb->GetTotalLength();
+///             if (mt_mode == CMTArgs::eSplitAuto){
+///                 if (total_length < max_db_size) {
+///                     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue()) {
+///                         CFile file( args[kArgQuery].AsString());
+///                         if (file.GetLength() > min_q_size) {
+///                             m_UsageReport.AddParam(CBlastUsageReport::eMTMode, CMTArgs::eSplitByQueries);
+///                             return x_RunMTBySplitQuery();
+/// ```
+pub(super) fn ncbi_splits_by_queries(
+    word_size: usize,
+    query_file_bytes: Option<u64>,
+    subject_letters: u64,
+) -> bool {
+    let (max_db_size, min_q_size) = ncbi_mt1_cutoffs(word_size);
+    subject_letters < max_db_size && query_file_bytes.is_some_and(|bytes| bytes > min_q_size)
 }
 
 /// The estimated memory of one batch in flight: lookup table of width `lut_width` over the two
@@ -2072,6 +2167,57 @@ mod tests {
         assert_eq!(allowance_mib("megablast"), 28);
     }
 
+    /// NCBI's split by queries (blastn_app.cpp:96-153): a query file larger than 10,000,000
+    /// bytes at a word size of 10 or more (1,500,000 below 10), against fewer database letters
+    /// than 6e9 (1.5e8); standard input is not split. Elsewhere the default budget is 0.
+    #[test]
+    fn the_default_budget_follows_ncbis_split_by_queries() {
+        assert_eq!(ncbi_mt1_cutoffs(11), (6_000_000_000, 10_000_000));
+        assert_eq!(ncbi_mt1_cutoffs(10), (6_000_000_000, 10_000_000));
+        assert_eq!(ncbi_mt1_cutoffs(9), (150_000_000, 1_500_000));
+        assert_eq!(ncbi_mt1_cutoffs(7), (150_000_000, 1_500_000));
+        // The cells of the 2026-10-17 measurements: 1,775 cDNAs (5,398,904 bytes), 3,492
+        // (10,779,147) and 31,168 (96,191,719) against 3 Mb.
+        assert!(!ncbi_splits_by_queries(11, Some(5_398_904), 3_000_000));
+        assert!(ncbi_splits_by_queries(11, Some(10_779_147), 3_000_000));
+        assert!(ncbi_splits_by_queries(11, Some(96_191_719), 3_000_000));
+        assert!(ncbi_splits_by_queries(28, Some(96_191_719), 3_000_000));
+        // The bounds are strict, as NCBI's comparisons.
+        assert!(!ncbi_splits_by_queries(11, Some(10_000_000), 0));
+        assert!(ncbi_splits_by_queries(11, Some(10_000_001), 0));
+        assert!(!ncbi_splits_by_queries(11, Some(10_000_001), 6_000_000_000));
+        assert!(ncbi_splits_by_queries(11, Some(10_000_001), 5_999_999_999));
+        assert!(!ncbi_splits_by_queries(7, Some(1_500_000), 0));
+        assert!(ncbi_splits_by_queries(7, Some(1_500_001), 149_999_999));
+        assert!(!ncbi_splits_by_queries(7, Some(1_500_001), 150_000_000));
+        assert!(!ncbi_splits_by_queries(11, None, 0));
+        for task in ["blastn", "blastn-short", "megablast", "dc-megablast"] {
+            // blastn-short's word size 7 has the smaller cut-off.
+            let (word, small_file) = if task == "blastn-short" {
+                (7, 1_000_000)
+            } else {
+                (11, 5_398_904)
+            };
+            let split = Profile::of_search(task, word, Some(96_191_719), 3_000_000);
+            assert_eq!(split, Profile::of_task(task), "{task}");
+            let small = Profile::of_search(task, word, Some(small_file), 3_000_000);
+            assert_eq!(small.allowance_mib, 0, "{task}");
+            assert_eq!(
+                Profile {
+                    allowance_mib: allowance_mib(task),
+                    ..small
+                },
+                Profile::of_task(task),
+                "{task}"
+            );
+            let stdin = Profile::of_search(task, word, None, 3_000_000);
+            assert_eq!(stdin.allowance_mib, 0, "{task}");
+        }
+        // No default budget: the slots do not start (a budget of fewer than two slots).
+        let (choice, layout) = choose_slots(16, 0, 50 * MIB, None, 5, EFFICIENCY_BLASTN);
+        assert_eq!((choice, layout), (Err(Off::Budget), None));
+    }
+
     #[test]
     fn the_efficiency_is_log2_linear_between_the_points() {
         for points in [EFFICIENCY_MEGABLAST, EFFICIENCY_BLASTN] {
@@ -2553,6 +2699,12 @@ mod tests {
             stale: Stale,
             /// The loop waits this long after each batch it takes, so the slots run ahead.
             loop_delay: Option<Duration>,
+            /// After the first batch is committed (the slots start then), the loop waits until a
+            /// slot has started a batch of another size (a corrupted prediction; at most 10 s, then
+            /// it panics), so that the next take finds that batch running and cancels it. Without
+            /// the wait a slow machine could start no such batch before the next take drops it
+            /// from the queue, and nothing would be cancelled.
+            loop_waits_for_stale: bool,
             /// The lookup width the estimates assume (8 if 0).
             lut: usize,
             /// The task profile (blastn's with a budget of 1 GiB per thread if `None`).
@@ -2605,10 +2757,14 @@ mod tests {
             let active = AtomicUsize::new(0);
             let started = Mutex::new(Vec::new());
             let panic_started = AtomicBool::new(false);
+            let stale_started = AtomicBool::new(false);
             let search = |job: &Job, pool: &SearchPool<'_>| -> Fake {
                 started.lock().unwrap().push(job.key);
                 active.fetch_add(pool.threads(), Ordering::SeqCst);
                 let stale = batch_size.is_some_and(|size| job.key.batch_size != size);
+                if stale {
+                    stale_started.store(true, Ordering::SeqCst);
+                }
                 match fakes.stale {
                     Stale::WaitsForCancel | Stale::PartialOnCancel if stale => {
                         let since = Instant::now();
@@ -2669,6 +2825,16 @@ mod tests {
                 let mut start = 0;
                 let mut results = Vec::new();
                 while start < lengths.len() {
+                    if fakes.loop_waits_for_stale && start > 0 && results.len() == 1 {
+                        let since = Instant::now();
+                        while !stale_started.load(Ordering::SeqCst) {
+                            assert!(
+                                since.elapsed() < Duration::from_secs(10),
+                                "no slot started a batch of another size within 10 s"
+                            );
+                            std::thread::yield_now();
+                        }
+                    }
                     let (end, _) = next_ranged_batch(lengths, &query_input.skipped, start, size);
                     let key = BatchKey {
                         input_start: start,
@@ -2852,6 +3018,7 @@ mod tests {
             };
             let fakes = Fakes {
                 stale: Stale::WaitsForCancel,
+                loop_waits_for_stale: true,
                 ..Fakes::default()
             };
             let cancelled_run = run(&lengths, Some(200), 4, switches, fakes);
@@ -2992,6 +3159,7 @@ mod tests {
             };
             let fakes = Fakes {
                 stale: Stale::PartialOnCancel,
+                loop_waits_for_stale: true,
                 ..Fakes::default()
             };
             let partial = run(&lengths, Some(200), 4, switches, fakes);

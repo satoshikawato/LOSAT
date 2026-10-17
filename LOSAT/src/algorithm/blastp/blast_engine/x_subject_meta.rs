@@ -41,7 +41,8 @@
 //! search's peak (about 80 B per subject: about 0.5 MiB for 6,600 subjects, 8 MiB per 100k), and are
 //! freed when the block search ends.
 //!
-//! Off unless `LOSAT_X_BPSUBJMETA` is set (to any value); not in the strict set.
+//! `LOSAT_X_BPSUBJMETA` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set.
 //!
 //! `LOSAT_X_BPSUBJMETASHADOW=1` (shadow mode, implies the switch): in each block whose output stage
 //! takes the stored IDs, the IDs and titles are made again as without the switch and compared with
@@ -82,14 +83,15 @@ pub(crate) enum XSubjMeta {
 
 // No NCBI counterpart: reads the LOSAT_X_BPSUBJMETA / LOSAT_X_BPSUBJMETASHADOW switches once; it
 // does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPSUBJMETA): off unless set to any value; `LOSAT_X_BPSUBJMETASHADOW` (any
-/// value) selects the shadow mode.
+/// EXPERIMENT (LOSAT_X_BPSUBJMETA): a strict-set switch, on unless it is `0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BPSUBJMETASHADOW` (any value) selects the shadow
+/// mode.
 pub(crate) fn x_bp_subj_meta() -> XSubjMeta {
     static MODE: OnceLock<XSubjMeta> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BPSUBJMETASHADOW").is_some() {
             XSubjMeta::Shadow
-        } else if std::env::var_os("LOSAT_X_BPSUBJMETA").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BPSUBJMETA") {
             XSubjMeta::On
         } else {
             XSubjMeta::Off

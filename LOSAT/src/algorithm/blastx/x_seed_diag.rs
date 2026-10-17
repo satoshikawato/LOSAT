@@ -35,7 +35,12 @@
 //! `[TIMING] blastx_diag: mode=<avx2|scalar|per-hit> subjects=N cells=N batched_hits=N
 //! candidates=N` (the subjects the fused loop scanned, the cells it tested in batches, their hits,
 //! and the hits passed to the closure; zeros but the subjects with `per-hit`).
+//!
+//! EXPERIMENT (LOSAT_X_BXSCANBF, `x_seed_scan.rs`): with that switch the fused loop finds the
+//! cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`'s
+//! `branch_free`, blastp's `x_scan_cells_bf`): the same cells in the same order.
 
+use super::x_seed_scan::x_bxscan_bf;
 use super::*;
 use crate::algorithm::blastp::x_seed_fused::{
     x_cell_test, x_scan_two_hit_with, XContextTable, XDiagMode,
@@ -198,8 +203,16 @@ pub(crate) fn x_word_finder_diag(
     }
     let mode = x_cell_mode();
     if x_bxdiag_mode() != 2 {
-        let (hits, counts) =
-            x_word_finder_fused(mode, batch, parameters, options, subject, table, diagonals)?;
+        let (hits, counts) = x_word_finder_fused(
+            mode,
+            x_bxscan_bf(),
+            batch,
+            parameters,
+            options,
+            subject,
+            table,
+            diagonals,
+        )?;
         x_add_counts(counts);
         return Ok(Some(hits));
     }
@@ -217,8 +230,16 @@ pub(crate) fn x_word_finder_diag(
         &mut copy,
         |_| {},
     )?;
-    let (fused, counts) =
-        x_word_finder_fused(mode, batch, parameters, options, subject, table, diagonals)?;
+    let (fused, counts) = x_word_finder_fused(
+        mode,
+        x_bxscan_bf(),
+        batch,
+        parameters,
+        options,
+        subject,
+        table,
+        diagonals,
+    )?;
     x_add_counts(counts);
     if fused != reference {
         let at = fused
@@ -267,8 +288,9 @@ fn x_add_counts(counts: [u64; 3]) {
 }
 
 /// EXPERIMENT (LOSAT_X_BXDIAG): `x_word_finder_direct`'s two-hit stage for one subject on the
-/// standard lookup table `table`, with the scan and the diagonal test fused (cell test `mode`);
-/// also returns the cells tested in batches, their hits and the candidates.
+/// standard lookup table `table`, with the scan and the diagonal test fused (cell test `mode`;
+/// the branch-free scan with `branch_free`, LOSAT_X_BXSCANBF); also returns the cells tested in
+/// batches, their hits and the candidates.
 /// `subject` starts at the first residue and keeps the sentinel after the last one.
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
 // ```c
@@ -287,8 +309,10 @@ fn x_add_counts(counts: [u64; 3]) {
 //         hits = scansub(lookup_wrap, subject,
 //                                   offset_pairs, array_size, scan_range);
 // ```
+#[allow(clippy::too_many_arguments)]
 fn x_word_finder_fused(
     mode: XDiagMode,
+    branch_free: bool,
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -308,6 +332,7 @@ fn x_word_finder_fused(
     let counts = x_with_context_table(batch, |contexts| {
         x_scan_two_hit_with(
             mode,
+            branch_free,
             table,
             subject,
             length,
@@ -427,14 +452,18 @@ mod tests {
     use super::*;
     use crate::algorithm::blastx::{input::parse_fasta, parameters, query_setup::prepare_queries};
 
-    /// The cell tests this machine can run.
-    fn modes() -> Vec<XDiagMode> {
+    /// The cell tests this machine can run, each with the presence-test scan and with the
+    /// branch-free one (LOSAT_X_BXSCANBF).
+    fn modes() -> Vec<(XDiagMode, bool)> {
         let mut modes = vec![XDiagMode::PerHit, XDiagMode::Scalar];
         let auto = x_cell_test("");
         if auto != XDiagMode::PerHit {
             modes.push(auto);
         }
         modes
+            .into_iter()
+            .flat_map(|mode| [(mode, false), (mode, true)])
+            .collect()
     }
 
     /// A search of `query` (nucleotide FASTA) with `-window_size window` (default options
@@ -512,9 +541,10 @@ mod tests {
             .collect()
     }
 
-    /// Runs every subject through the reference and through the fused loop (cell test `mode`),
-    /// each on its own table starting from `start(table)`, and compares the hit lists and the
-    /// tables after each subject; returns the hits and the counts of the fused loop.
+    /// Runs every subject through the reference and through the fused loop (cell test `mode`;
+    /// the branch-free scan with `branch_free`), each on its own table starting from
+    /// `start(table)`, and compares the hit lists and the tables after each subject; returns the
+    /// hits and the counts of the fused loop.
     fn compare(
         (batch, params, options, lookup): &(
             PreparedQueryBatch,
@@ -523,7 +553,7 @@ mod tests {
             Lookup,
         ),
         subjects: &[Vec<u8>],
-        mode: XDiagMode,
+        (mode, branch_free): (XDiagMode, bool),
         start: impl Fn(&mut Diagonals),
     ) -> (usize, [u64; 3]) {
         let Lookup::Standard(table) = lookup else {
@@ -546,12 +576,21 @@ mod tests {
                 |_| {},
             )
             .unwrap();
-            let (actual, c) =
-                x_word_finder_fused(mode, batch, params, options, subject, table, &mut fused)
-                    .unwrap();
-            assert_eq!(actual, expected, "{mode:?} subject {i}");
-            assert_eq!(fused.offset, reference.offset, "{mode:?} subject {i}");
-            assert!(fused.entries == reference.entries, "{mode:?} subject {i}");
+            let (actual, c) = x_word_finder_fused(
+                mode,
+                branch_free,
+                batch,
+                params,
+                options,
+                subject,
+                table,
+                &mut fused,
+            )
+            .unwrap();
+            let run = format!("{mode:?} branch_free={branch_free} subject {i}");
+            assert_eq!(actual, expected, "{run}");
+            assert_eq!(fused.offset, reference.offset, "{run}");
+            assert!(fused.entries == reference.entries, "{run}");
             hits += actual.len();
             for (total, n) in counts.iter_mut().zip(c) {
                 *total += n;
@@ -701,7 +740,7 @@ mod tests {
             for mode in modes() {
                 let (hits, counts) = compare(&s, subjects, mode, |_| {});
                 assert!(hits > 0, "window={window} {mode:?}: no hit");
-                if mode == XDiagMode::PerHit {
+                if mode.0 == XDiagMode::PerHit {
                     assert_eq!(counts, [0, 0, 0]);
                 } else {
                     assert!(counts[0] > 0 && counts[2] > 0, "{mode:?} {counts:?}");

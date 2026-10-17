@@ -1,20 +1,24 @@
 //! The private counters and presence-vector words of `LOSAT_X_PAIRPAR`'s megablast table fill
 //! (`LOSAT_X_MBLUTPAD`, `src/algorithm/blastn/x_mb_lookup_par.rs`) on whole searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). It chooses between
-//! two LOSAT code paths with the same tables: the pool fill counting into the shared
-//! `helper_array` / `pv_array`, or into private copies added in at the end. So the property under
-//! test is that the report does not depend on it, and that the padded fill really runs where the
-//! switch says: with `LOSAT_TIMING`, `[TIMING] x_mb_lookup_build` counts `padded=` builds equal to
-//! its `parallel=` builds (more than 0) at 4 threads with the switch, 0 without it and 0 at one
-//! thread (no pool); with `LOSAT_X_PAIRPARSHADOW`, the shadow builds the second table of its
-//! comparison with the padded fill and says so (`[X_SHADOW] MBLUTPAD tables=` more than 0). That
-//! the bytes equal NCBI's is the business of the blastn fixtures.
+//! The switch is in the strict set and on by default (since 2026-10-17): `LOSAT_X_MBLUTPAD=0` or
+//! `LOSAT_X_DEFAULT=0` turns it off. It chooses between two LOSAT code paths with the same tables:
+//! the pool fill counting into the shared `helper_array` / `pv_array`, or into private copies added
+//! in at the end. So the property under test is that the report does not depend on it, and that
+//! the padded fill really runs where the switch says: with `LOSAT_TIMING`, `[TIMING]
+//! x_mb_lookup_build` counts `padded=` builds equal to its `parallel=` builds (more than 0) at 4
+//! threads by default and with the switch set, 0 with it off (`=0`, or `LOSAT_X_DEFAULT=0`) and 0
+//! at one thread (no pool); with `LOSAT_X_PAIRPARSHADOW`, the shadow builds the second table of
+//! its comparison with the padded fill and says so (`[X_SHADOW] MBLUTPAD tables=` more than 0),
+//! and says nothing with the switch off. That the bytes equal NCBI's is the business of the blastn
+//! fixtures.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const SWITCH: (&str, &str) = ("LOSAT_X_MBLUTPAD", "1");
+const OFF: (&str, &str) = ("LOSAT_X_MBLUTPAD", "0");
+const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_PAIRPARSHADOW", "1");
 
@@ -85,40 +89,50 @@ fn field(stderr: &str, prefix: &str, name: &str) -> u64 {
 
 const BUILD: &str = "[TIMING] x_mb_lookup_build: ";
 
-/// For one search: the same report without the switch, with it, with it and `LOSAT_TIMING`, with
-/// it and the shadow, and with it at one thread; the padded fill counted where it ran.
+/// For one search: the same report with the switch off, by default, with it set, with
+/// `LOSAT_X_DEFAULT=0`, with `LOSAT_TIMING`, with the shadow, and at one thread; the padded fill
+/// counted where it ran.
 fn check(task: &str, query: &str, subject: &str) {
-    let (reference, stderr) = blastn(task, query, subject, 4, &[]);
+    let (reference, stderr) = blastn(task, query, subject, 4, &[OFF]);
     assert!(!reference.is_empty(), "{task}: no hits");
     assert_eq!(stderr, "", "{task}");
-    let (report, stderr) = blastn(task, query, subject, 4, &[SWITCH]);
-    assert!(
-        report == reference,
-        "{task}: the report differs with the switch"
-    );
-    assert_eq!(stderr, "", "{task}: the switch writes nothing");
+    for switches in [&[][..], &[SWITCH], &[DEFAULT_OFF]] {
+        let (report, stderr) = blastn(task, query, subject, 4, switches);
+        assert!(
+            report == reference,
+            "{task} {switches:?}: the report differs"
+        );
+        assert_eq!(stderr, "", "{task} {switches:?}: the switch writes nothing");
+    }
 
-    let (report, stderr) = blastn(task, query, subject, 4, &[TIMING]);
+    let (report, stderr) = blastn(task, query, subject, 4, &[OFF, TIMING]);
     assert!(report == reference, "{task}");
     let parallel = field(&stderr, BUILD, "parallel=");
     assert!(parallel > 0, "{task}: no table on the pool:\n{stderr}");
     assert_eq!(field(&stderr, BUILD, "padded="), 0, "{task}: {stderr}");
-
-    let (report, stderr) = blastn(task, query, subject, 4, &[SWITCH, TIMING]);
+    // `LOSAT_X_DEFAULT=0` also turns `LOSAT_X_PAIRPAR` off, so no table is filled on the pool.
+    let (report, stderr) = blastn(task, query, subject, 4, &[DEFAULT_OFF, TIMING]);
     assert!(report == reference, "{task}");
-    assert_eq!(field(&stderr, BUILD, "parallel="), parallel, "{task}");
-    assert_eq!(
-        field(&stderr, BUILD, "padded="),
-        parallel,
-        "{task}: every table on the pool padded:\n{stderr}"
-    );
+    assert_eq!(field(&stderr, BUILD, "parallel="), 0, "{task}: {stderr}");
+    assert_eq!(field(&stderr, BUILD, "padded="), 0, "{task}: {stderr}");
 
-    let (report, stderr) = blastn(task, query, subject, 1, &[SWITCH, TIMING]);
+    for switches in [&[TIMING][..], &[SWITCH, TIMING]] {
+        let (report, stderr) = blastn(task, query, subject, 4, switches);
+        assert!(report == reference, "{task} {switches:?}");
+        assert_eq!(field(&stderr, BUILD, "parallel="), parallel, "{task}");
+        assert_eq!(
+            field(&stderr, BUILD, "padded="),
+            parallel,
+            "{task} {switches:?}: every table on the pool padded:\n{stderr}"
+        );
+    }
+
+    let (report, stderr) = blastn(task, query, subject, 1, &[TIMING]);
     assert!(report == reference, "{task} at one thread");
     assert_eq!(field(&stderr, BUILD, "parallel="), 0, "{task}: {stderr}");
     assert_eq!(field(&stderr, BUILD, "padded="), 0, "{task}: {stderr}");
 
-    let (report, stderr) = blastn(task, query, subject, 4, &[SWITCH, SHADOW]);
+    let (report, stderr) = blastn(task, query, subject, 4, &[SHADOW]);
     assert!(report == reference, "{task} with the shadow");
     let line = stderr
         .lines()
@@ -133,7 +147,7 @@ fn check(task: &str, query: &str, subject: &str) {
         field(&stderr, "[X_SHADOW] MBLUTPAD ", "cells=") > 0,
         "{line}"
     );
-    let (_, stderr) = blastn(task, query, subject, 4, &[SHADOW]);
+    let (_, stderr) = blastn(task, query, subject, 4, &[OFF, SHADOW]);
     assert!(
         !stderr.contains("[X_SHADOW] MBLUTPAD"),
         "{task}: the line needs the switch:\n{stderr}"

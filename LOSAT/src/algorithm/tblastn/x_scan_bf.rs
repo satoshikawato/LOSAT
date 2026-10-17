@@ -20,14 +20,19 @@
 //! `X_SCAN_BF_SLACK` entries after `array_size`; the entries past the returned count are not
 //! part of the result.
 //!
-//! The switch is read once, off unless set (not in the strict set). tblastx, blastp and blastx
-//! keep the scan of `tblastx/blast_aascan.rs`.
+//! The switch is read once. It is in the strict set (`utils/xswitch.rs`): on unless
+//! `LOSAT_X_TBNSCANBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_X_STATS` set,
+//! `main` prints `[X_STATS] TBNSCANBF units_bf= calls_bf= units_ref= calls_ref=` at exit (the scan
+//! units of the unit path scanned by this loop and by NCBI's, and the scan calls they took; a call
+//! more than the unit's ranges is a stop and resume), when the search scanned any. tblastx, blastp
+//! and blastx keep the scan of `tblastx/blast_aascan.rs`.
 
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 use crate::algorithm::tblastx::lookup::{
     BlastAaLookupTable, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK,
 };
 use std::mem::MaybeUninit;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): subject words looked at before their hits are copied.
 const X_BLOCK: usize = 256;
@@ -36,11 +41,48 @@ const X_BLOCK: usize = 256;
 /// hits are written as `AA_HITS_PER_CELL` pairs, also when the array is full).
 pub(super) const X_SCAN_BF_SLACK: usize = AA_HITS_PER_CELL;
 
-// No NCBI counterpart: reads LOSAT_X_TBNSCANBF once; off unless set.
-/// EXPERIMENT (LOSAT_X_TBNSCANBF): whether tblastn scans with `x_scan_one_range_bf`.
+// No NCBI counterpart: reads LOSAT_X_TBNSCANBF once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNSCANBF): whether tblastn scans with `x_scan_one_range_bf`; a switch
+/// of the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
 pub(super) fn x_tbn_scan_bf() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNSCANBF").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSCANBF"))
+}
+
+// No NCBI counterpart: LOSAT_X_STATS counters that tell which scan ran; they do not change any
+// value NCBI computes.
+/// Scan units of the unit path and their scan calls, by `x_scan_one_range_bf` (`[0]`) and by
+/// NCBI's loop (`[1]`).
+static UNITS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+static CALLS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+
+/// EXPERIMENT (LOSAT_X_TBNSCANBF): whether the `[X_STATS] TBNSCANBF` counters are kept
+/// (`LOSAT_X_STATS` set).
+pub(super) fn x_stats() -> bool {
+    static STATS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *STATS.get_or_init(|| std::env::var_os("LOSAT_X_STATS").is_some())
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSCANBF): counts one scan unit and its `calls` for the
+/// `[X_STATS] TBNSCANBF` line.
+pub(super) fn x_count_unit(bf: bool, calls: u64) {
+    let side = usize::from(!bf);
+    UNITS[side].fetch_add(1, Ordering::Relaxed);
+    CALLS[side].fetch_add(calls, Ordering::Relaxed);
+}
+
+/// The `[X_STATS] TBNSCANBF` line (printed by `main` at exit) with `LOSAT_X_STATS`, when a
+/// search scanned units of the unit path.
+// No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
+pub fn print_summary() {
+    let units = UNITS.each_ref().map(|units| units.load(Ordering::Relaxed));
+    let calls = CALLS.each_ref().map(|calls| calls.load(Ordering::Relaxed));
+    if x_stats() && units[0] + units[1] > 0 {
+        eprintln!(
+            "[X_STATS] TBNSCANBF units_bf={} calls_bf={} units_ref={} calls_ref={}",
+            units[0], calls[0], units[1], calls[1]
+        );
+    }
 }
 
 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127

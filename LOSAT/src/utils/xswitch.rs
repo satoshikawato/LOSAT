@@ -184,6 +184,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNOWNPOOLS",
     "LOSAT_X_TBNPAR",
     "LOSAT_X_TBNQSIDE",
+    "LOSAT_X_TBNSCANBF",
     "LOSAT_X_TBNSSIDE",
     "LOSAT_X_TBNSTATE",
     "LOSAT_X_TBNSTORE",

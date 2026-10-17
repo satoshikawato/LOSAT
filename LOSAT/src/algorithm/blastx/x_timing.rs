@@ -51,6 +51,8 @@
 //!   heaps to the batch's results (hit lists, culling, sorting, the copy of the batch).
 //!   `matches` counts the matches, `reused` those whose redo was made ahead and `serial` those
 //!   redone in the loop.
+//! - `[TIMING] blastx_diag: mode=.. subjects=N cells=N batched_hits=N candidates=N`: with
+//!   `LOSAT_X_BXDIAG`, the fused seed loop's cell test and counts (`seed/x_seed_diag.rs`).
 
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -290,5 +292,6 @@ pub(crate) fn write(out: &mut dyn Write, threads: usize) -> io::Result<()> {
             n(e(End::Serial)),
         )?;
     }
+    super::seed::x_seed_diag::x_write_timing(out)?;
     Ok(())
 }

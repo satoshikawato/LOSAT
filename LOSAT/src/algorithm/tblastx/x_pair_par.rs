@@ -134,6 +134,7 @@ use std::sync::OnceLock;
 static BATCHES: AtomicU64 = AtomicU64::new(0);
 static FALLBACK_GATE: AtomicU64 = AtomicU64::new(0);
 static FALLBACK_GUARD: AtomicU64 = AtomicU64::new(0);
+static FALLBACK_COST: AtomicU64 = AtomicU64::new(0);
 static SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static UNITS: AtomicU64 = AtomicU64::new(0);
 static INIT_HSPS: AtomicU64 = AtomicU64::new(0);
@@ -220,6 +221,20 @@ pub(super) fn lut_mode() -> u8 {
     })
 }
 
+// No NCBI counterpart: a LOSAT variable that chooses, per batch, between two LOSAT paths with the
+// same result (the unit path and the reference frame loop, module doc items 1-4); NCBI has one path.
+/// LOSAT_X_PAIRPARGATE: off unless set, to any value (not in the strict set). It acts only where the
+/// unit path runs alone (`mode` 1) and LOSAT_X_PAIRLUTSHADOW is not set: the two shadows exist to
+/// compare the unit path with the reference on every batch the guard lets through.
+pub(super) fn cost_gate() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var_os("LOSAT_X_PAIRPARGATE").is_some()
+            && mode() == 1
+            && std::env::var_os("LOSAT_X_PAIRLUTSHADOW").is_none()
+    })
+}
+
 // No NCBI counterpart: chooses how LOSAT holds a unit's saved init HSPs between the units and the
 // merge (as NCBI's own record, `XUnitHsp`, or as today's `InitHSP`); it does not change any value
 // NCBI computes. Read once per process, as the other modes of this file.
@@ -279,13 +294,14 @@ pub fn print_summary() {
     }
     if std::env::var_os("LOSAT_X_STATS").is_some() {
         eprintln!(
-            "[X_STATS] PAIRPAR batches={} subjects={} units={} init_hsps={} fallback_gate={} fallback_guard={}",
+            "[X_STATS] PAIRPAR batches={} subjects={} units={} init_hsps={} fallback_gate={} fallback_guard={} fallback_cost={}",
             load(&BATCHES),
             load(&SUBJECTS),
             load(&UNITS),
             load(&INIT_HSPS),
             load(&FALLBACK_GATE),
-            load(&FALLBACK_GUARD)
+            load(&FALLBACK_GUARD),
+            load(&FALLBACK_COST)
         );
     }
     if timing() {
@@ -396,6 +412,21 @@ pub(super) fn last_hit_fits(
 /// No NCBI counterpart: room left below 2^29 in `last_hit_fits`.
 const X_LAST_HIT_MARGIN: i64 = 1 << 16;
 
+/// No NCBI counterpart: LOSAT_X_PAIRPARGATE keeps the unit path for a batch whose reference
+/// diagonal table has at least this many cells (4 bytes each, 1 MiB; a query batch of more than
+/// about 65 kb). Measured at one thread (session 13, DESIGN_s13_unitgate.md): from 2^18 cells the
+/// small per-group tables of the units make them faster than the reference loop (x0.74-0.99); with
+/// 2^17 cells and fewer the units' scan of every subject frame once per group makes them slower
+/// (x1.03-1.72).
+const X_GATE_DIAG_CELLS: i32 = 1 << 18;
+
+/// No NCBI counterpart: LOSAT_X_PAIRPARGATE acts only for a lookup threshold of at least TBLASTX's
+/// default (13), where it was measured. A lower threshold puts more words in every query position:
+/// more hits share each scan position (the units' extra scans weigh less) and the full table grows
+/// faster than the group tables (`-threshold +inf`, which NCBI converts to INT_MIN, every word: 14.2
+/// GB for the reference loop, 3.3 GB for the units, 5.9 GB for NCBI on the option-sweep inputs).
+const X_GATE_MIN_THRESHOLD: i32 = 13;
+
 /// The per-batch inputs of `XPairPar::prepare`.
 pub(super) struct XBatch<'a> {
     pub lookup: &'a BlastAaLookupTable,
@@ -410,6 +441,10 @@ pub(super) struct XBatch<'a> {
     /// LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW: the groups built at the lookup build site
     /// (`lut_build`), or None.
     pub lut: Option<XLutBatch>,
+    /// The threads of the batch's search pool (`SearchPool::threads`), as the build site reads them.
+    pub threads: usize,
+    /// The lookup threshold, as the build site reads it (`XLutEarly::threshold`).
+    pub threshold: i32,
 }
 
 /// What the unit path does with a batch (`decide`).
@@ -421,6 +456,9 @@ pub(super) enum XDecision {
     Gate,
     /// The exactness guard fails: the reference loop ("fallback: guard").
     Guard,
+    /// LOSAT_X_PAIRPARGATE: the units would be slower than the reference loop, which runs
+    /// ("fallback: cost"; `units_gain`).
+    Cost,
     /// The units run (alone, or with the reference loop in shadow mode).
     Units,
 }
@@ -434,6 +472,12 @@ pub(super) struct XGates<'a> {
     pub subjects: crate::algorithm::tblastx::subjects::Subjects<'a>,
     pub debugging: bool,
     pub chunk_switches: bool,
+    /// The threads of the batch's search pool (`SearchPool::threads`).
+    pub threads: usize,
+    /// `cost_gate()`: LOSAT_X_PAIRPARGATE acts.
+    pub cost_gate: bool,
+    /// The lookup threshold (`lookup->threshold`, `ncbi_int4_from_double` of `-threshold`).
+    pub threshold: i32,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
@@ -475,7 +519,34 @@ pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
     {
         return XDecision::Guard;
     }
+    if m == 1 && g.cost_gate && !units_gain(g) {
+        return XDecision::Cost;
+    }
     XDecision::Units
+}
+
+// No NCBI counterpart: a choice between two LOSAT paths with the same result (module doc items
+// 1-4), from the batch's sizes and the thread count only.
+/// LOSAT_X_PAIRPARGATE: whether the unit path is expected to be faster than the reference loop for
+/// a batch. Either the lookup threshold is below `X_GATE_MIN_THRESHOLD` (not measured; the units
+/// stay), or the reference's diagonal table is large (`X_GATE_DIAG_CELLS`), or the search has
+/// several threads and one subject holds more than one and a half thread's share of the bases
+/// (`2 * longest * threads > 3 * total`): the reference loop searches a subject on one thread, the
+/// units split it over the pool, at up to about 1.5 times the work on short queries.
+fn units_gain(g: &XGates<'_>) -> bool {
+    if g.threshold < X_GATE_MIN_THRESHOLD || g.diag_array_size >= X_GATE_DIAG_CELLS {
+        return true;
+    }
+    if g.threads <= 1 {
+        return false;
+    }
+    let (longest, total) = g
+        .subjects
+        .lengths()
+        .fold((0u128, 0u128), |(longest, total), length| {
+            (longest.max(length as u128), total + length as u128)
+        });
+    2 * longest * g.threads as u128 > 3 * total
 }
 
 /// The inputs of `lut_build`: what the lookup build site of the batch has (RI:2311).
@@ -628,6 +699,9 @@ fn lut_direct(e: &XLutEarly<'_>, shadow: bool) -> Option<XLutBatch> {
             e.use_serial_scan_chunks,
             e.subjects,
         ),
+        threads: e.pool.threads(),
+        cost_gate: cost_gate(),
+        threshold: e.threshold,
     };
     if decide(mode(), &gates) != XDecision::Units {
         return None;
@@ -1099,6 +1173,9 @@ impl XPairPar {
                 subjects: b.subjects,
                 debugging: b.debugging,
                 chunk_switches: b.chunk_switches,
+                threads: b.threads,
+                cost_gate: cost_gate(),
+                threshold: b.threshold,
             },
         );
         if decision != XDecision::Off {
@@ -1110,6 +1187,9 @@ impl XPairPar {
             }
             XDecision::Guard => {
                 FALLBACK_GUARD.fetch_add(1, AtomicOrdering::Relaxed);
+            }
+            XDecision::Cost => {
+                FALLBACK_COST.fetch_add(1, AtomicOrdering::Relaxed);
             }
             XDecision::Off | XDecision::Units => {}
         }
@@ -2831,6 +2911,9 @@ mod tests {
                     subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
                     debugging,
                     chunk_switches,
+                    threads: 1,
+                    cost_gate: false,
+                    threshold: 13,
                 },
             )
         };
@@ -2858,9 +2941,114 @@ mod tests {
                 subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(&short),
                 debugging: false,
                 chunk_switches: false,
+                threads: 1,
+                cost_gate: false,
+                threshold: 13,
             };
             assert_eq!(decide(m, &gates), XDecision::Guard);
         }
+    }
+
+    // No NCBI counterpart: LOSAT_X_PAIRPARGATE chooses between two LOSAT paths with the same result.
+    // The cost gate comes after the gates and the guard, acts only in mode 1, keeps the units below
+    // the default threshold, for a reference table of 2^18 cells or more, and at several threads
+    // for a subject that holds more than one and a half thread's share of the bases.
+    #[test]
+    fn the_cost_gate_keeps_the_units_where_they_gain() {
+        let mut rng = Rng(7);
+        let alphabet = aa("ACDEKW");
+        let window = 40;
+        let (_, contexts) = lookup_for(&[frame(1, &random_residues(&mut rng, 216, &alphabet))]);
+        let query_length = query_length_of(&contexts);
+        let diag_array_size = diag_array_size_for(query_length, window);
+        assert_eq!(diag_array_size, 256);
+        let one = [FastaRecord::new("", b"s", &[b'A'; 120])];
+        // 120 of 200 bases in one subject: 2 * 120 * t > 3 * 200 from t = 3.
+        let mixed = [
+            FastaRecord::new("", b"s", &[b'A'; 120]),
+            FastaRecord::new("", b"t", &[b'A'; 40]),
+            FastaRecord::new("", b"u", &[b'A'; 40]),
+        ];
+        let none: [FastaRecord; 0] = [];
+        let long = [
+            FastaRecord::new("", b"s", &[b'A'; 30]),
+            FastaRecord::new("", b"l", &[b'A'; 123]),
+        ];
+        let decision_at = |threshold: i32,
+                           m: u8,
+                           diag_array_size: i32,
+                           subjects: &[FastaRecord],
+                           debugging: bool,
+                           threads: usize,
+                           cost_gate: bool| {
+            decide(
+                m,
+                &XGates {
+                    contexts: &contexts,
+                    query_length,
+                    diag_array_size,
+                    subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
+                    debugging,
+                    chunk_switches: false,
+                    threads,
+                    cost_gate,
+                    threshold,
+                },
+            )
+        };
+        let decision = |m: u8,
+                        diag_array_size: i32,
+                        subjects: &[FastaRecord],
+                        debugging: bool,
+                        threads: usize,
+                        cost_gate: bool| {
+            decision_at(
+                13,
+                m,
+                diag_array_size,
+                subjects,
+                debugging,
+                threads,
+                cost_gate,
+            )
+        };
+        // Without the gate (or in shadow mode) nothing changes.
+        for t in [1, 2, 8] {
+            assert_eq!(decision(1, 256, &one, false, t, false), XDecision::Units);
+            assert_eq!(decision(2, 256, &one, false, t, true), XDecision::Units);
+        }
+        // One thread: the table size alone.
+        assert_eq!(decision(1, 256, &one, false, 1, true), XDecision::Cost);
+        assert_eq!(decision(1, 1 << 17, &one, false, 1, true), XDecision::Cost);
+        assert_eq!(decision(1, 1 << 18, &one, false, 1, true), XDecision::Units);
+        assert_eq!(decision(1, 256, &none, false, 1, true), XDecision::Cost);
+        // Several threads: one subject is all of the bases.
+        assert_eq!(decision(1, 256, &one, false, 2, true), XDecision::Units);
+        assert_eq!(decision(1, 256, &none, false, 2, true), XDecision::Cost);
+        assert_eq!(decision(1, 256, &mixed, false, 2, true), XDecision::Cost);
+        assert_eq!(decision(1, 256, &mixed, false, 3, true), XDecision::Units);
+        assert_eq!(decision(1, 256, &mixed, false, 8, true), XDecision::Units);
+        assert_eq!(
+            decision(1, 1 << 18, &mixed, false, 2, true),
+            XDecision::Units
+        );
+        // Below the default threshold (and INT_MIN, `-threshold +inf`) the units stay.
+        assert_eq!(
+            decision_at(12, 1, 256, &one, false, 1, true),
+            XDecision::Units
+        );
+        assert_eq!(
+            decision_at(i32::MIN, 1, 256, &one, false, 1, true),
+            XDecision::Units
+        );
+        assert_eq!(
+            decision_at(14, 1, 256, &one, false, 1, true),
+            XDecision::Cost
+        );
+        // The gates and the guard come first.
+        assert_eq!(decision(1, 256, &one, true, 1, true), XDecision::Gate);
+        assert_eq!(decision(1, 256, &long, false, 1, true), XDecision::Guard);
+        assert_eq!(decision(0, 256, &one, false, 1, true), XDecision::Off);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/lookup_wrap.c:264-266

@@ -1,0 +1,756 @@
+//! EXPERIMENT (LOSAT_X_BXDIAG / LOSAT_X_BXDIAGSHADOW): the BLASTX two-hit seed stage with the
+//! subject scan and the diagonal test in one loop, and the hits of one lookup cell tested in AVX2
+//! batches of eight.
+//!
+//! The reference (`word_finder_plain`, and LOSAT_X_BXSCAN's `x_word_finder_direct`) has the
+//! scanner copy every word hit into the offset-pair buffer and then reads the buffer back for the
+//! two-hit test (NCBI's `s_BlastAaScanSubject` and `s_BlastAaWordFinder_TwoHit`). With the switch,
+//! blastp's fused scan (`blastp::x_seed_fused::x_scan_two_hit_with`: LOSAT_X_BPSEED's loop with
+//! LOSAT_X_BPDIAG's cell test) reads the hits of each lookup cell in place, in the same order, and
+//! applies the outcomes of the test that touch only the hit's diagonal entry; a hit that passes the
+//! test goes to the closure of [`x_word_finder_fused`], which runs the rest of the reference's
+//! statements unchanged (the context check, the two-hit extension, the save, the entry's update).
+//!
+//! Why the outcome is the reference's: blastx's diagonal entries are NCBI's `DiagStruct`, as
+//! blastp's are, the test is blastp's statement for statement (aa_ungapped.c:513-552), and the
+//! argument of `x_seed_fused`'s module header holds as it stands: a hit reads and writes only the
+//! entry of its diagonal `(q - s) & mask`, the closure writes only that entry and the hit list, and
+//! the hits are visited in the reference's order (subject offset ascending, a cell's hits in their
+//! stored order). The query offsets of one cell are distinct and the table is at least the six-frame
+//! query's length plus the window (`Diagonals::new`), so the hits of one subject offset fall on
+//! distinct entries, which the batches of eight rest on. The values are those of the bit-field and
+//! of the wrapping i32 arithmetic, in both loops. The closure takes a candidate's context from
+//! blastp's `XContextTable` (made once per query batch and thread), which gives the index of the
+//! reference's binary search.
+//!
+//! Where it acts: the two-hit stage (`-window_size` above 0) with the standard lookup table
+//! (`-word_size 3`, the default), when nothing traces the seeds and the diagonal order is the
+//! reference's (LOSAT_X_SEEDBUCKET mode 0); elsewhere the reference runs. Off unless
+//! `LOSAT_X_BXDIAG` is set (any value; not in the strict set). The cell test is the AVX2 batch on
+//! an x86-64 CPU with AVX2 and the per-hit loop elsewhere, as LOSAT_X_BPDIAG chooses;
+//! `LOSAT_X_BXDIAG=per-hit` and `LOSAT_X_BXDIAG=scalar` force the per-hit loop or the scalar batch
+//! (diagnostics; the tests use them). `LOSAT_X_BXDIAGSHADOW` (any value) also runs the reference on
+//! a copy of the diagonal table for every subject and stops (panics) if the hit lists or the tables
+//! differ, and prints a summary at exit. With `LOSAT_TIMING=1` a run prints
+//! `[TIMING] blastx_diag: mode=<avx2|scalar|per-hit> subjects=N cells=N batched_hits=N
+//! candidates=N` (the subjects the fused loop scanned, the cells it tested in batches, their hits,
+//! and the hits passed to the closure; zeros but the subjects with `per-hit`).
+//!
+//! EXPERIMENT (LOSAT_X_BXSCANBF, `x_seed_scan.rs`): with that switch the fused loop finds the
+//! cells with hits by tblastn's branch-free candidate loop (`x_scan_two_hit_with`'s
+//! `branch_free`, blastp's `x_scan_cells_bf`): the same cells in the same order.
+
+use super::x_seed_scan::x_bxscan_bf;
+use super::*;
+use crate::algorithm::blastp::x_seed_fused::{
+    x_cell_test, x_scan_two_hit_with, XContextTable, XDiagMode,
+};
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::OnceLock;
+
+thread_local! {
+    /// EXPERIMENT (LOSAT_X_BXDIAG): the context table of the query batch this thread searches,
+    /// with the frame bases and the span it was made for (see [`x_with_context_table`]).
+    static X_CONTEXTS: RefCell<Option<(Vec<i32>, usize, XContextTable)>> =
+        const { RefCell::new(None) };
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:211-232
+// ```c
+// Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
+// {
+//     Int4 m=0, b=0, e=0, size=0;
+//
+//     size = A->last_context+1;
+//     ...
+//     while (b < e - 1) {
+//         m = (b + e) / 2;
+//         if (A->contexts[m].query_offset > n)
+//             e = m;
+//         else
+//             b = m;
+//     }
+//     return b;
+// }
+// ```
+/// EXPERIMENT (LOSAT_X_BXDIAG): runs `f` with blastp's context table (`XContextTable`: a coarse
+/// table and a short walk over the frame bases) for `batch`, made once per query batch and
+/// thread. It gives the index the reference's binary search gives, the last context whose offset
+/// is at most the query offset (`XContextTable::get`). The table is reused only while the batch's
+/// frame bases and span are the ones it was made for (compared on every call), so a new batch
+/// gets a new table even if its contexts lie at the same address.
+fn x_with_context_table<R>(batch: &PreparedQueryBatch, f: impl FnOnce(&XContextTable) -> R) -> R {
+    let span = batch.contexts.last().map_or(0, |c| c.offset + c.length);
+    X_CONTEXTS.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        let fits = cell.as_ref().is_some_and(|(bases, s, _)| {
+            *s == span
+                && bases.len() == batch.contexts.len()
+                && bases
+                    .iter()
+                    .zip(&batch.contexts)
+                    .all(|(&b, c)| b == c.offset as i32)
+        });
+        if !fits {
+            let bases: Vec<i32> = batch.contexts.iter().map(|c| c.offset as i32).collect();
+            let table = XContextTable::new(&bases, span);
+            *cell = Some((bases, span, table));
+        }
+        f(&cell.as_ref().expect("made above").2)
+    })
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BXDIAG switches once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BXDIAG): 0 = off, 1 = the fused loop, 2 = shadow
+/// (`LOSAT_X_BXDIAGSHADOW`: the fused loop and the reference on a copy of the table, compared).
+pub(crate) fn x_bxdiag_mode() -> u8 {
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if std::env::var_os("LOSAT_X_BXDIAGSHADOW").is_some() {
+            2
+        } else if std::env::var_os("LOSAT_X_BXDIAG").is_some() {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+// No NCBI counterpart: chooses LOSAT's code path once; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXDIAG): the cell test of the fused loop (the switch's value names one).
+fn x_cell_mode() -> XDiagMode {
+    static MODE: OnceLock<XDiagMode> = OnceLock::new();
+    *MODE.get_or_init(|| x_cell_test(std::env::var("LOSAT_X_BXDIAG").unwrap_or_default().as_str()))
+}
+
+// No NCBI counterpart: counters of the timing line and of the shadow summary.
+static X_SUBJECTS: AtomicU64 = AtomicU64::new(0);
+static X_CELLS: AtomicU64 = AtomicU64::new(0);
+static X_HITS: AtomicU64 = AtomicU64::new(0);
+static X_CANDIDATES: AtomicU64 = AtomicU64::new(0);
+static X_SHADOW_SUBJECTS: AtomicU64 = AtomicU64::new(0);
+static X_SHADOW_SHORT: AtomicU64 = AtomicU64::new(0);
+
+// No NCBI counterpart: a LOSAT timing line.
+/// EXPERIMENT (LOSAT_X_BXDIAG): with the switch on, the `[TIMING] blastx_diag` line of the run.
+pub(crate) fn x_write_timing(out: &mut dyn std::io::Write) -> std::io::Result<()> {
+    if x_bxdiag_mode() != 0 {
+        writeln!(
+            out,
+            "[TIMING] blastx_diag: mode={} subjects={} cells={} batched_hits={} candidates={}",
+            x_cell_mode().name(),
+            X_SUBJECTS.load(Relaxed),
+            X_CELLS.load(Relaxed),
+            X_HITS.load(Relaxed),
+            X_CANDIDATES.load(Relaxed),
+        )?;
+    }
+    Ok(())
+}
+
+// No NCBI counterpart: prints the shadow-mode counters; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXDIAGSHADOW): one line at exit with what the shadow mode compared.
+pub(crate) fn x_print_shadow_summary() {
+    if x_bxdiag_mode() == 2 {
+        eprintln!(
+            "[X_SHADOW] BXDIAG subjects_compared={} (hit lists identical; diagonal tables identical, not compared for {} subjects shorter than a word less one letter)",
+            X_SHADOW_SUBJECTS.load(Relaxed),
+            X_SHADOW_SHORT.load(Relaxed)
+        );
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BXDIAG): the fused loop for one subject where the switch acts (module
+/// header), `None` elsewhere (the one-hit stage, the compressed lookup table). With the shadow
+/// switch the reference runs on a copy of the table and both results are compared.
+///
+/// A subject shorter than a word less one letter (one residue with word size 3) has one scan
+/// position whose word runs past the sentinel: the reference reads that byte unchecked and the
+/// fused scan reads it as a sentinel (`x_seed_fused::x_scan_cells`). With one scan position no
+/// hit is extended, and the entry such a hit leaves lies a window and the subject's length behind
+/// the next subject's offsets, where every later hit reads it as no previous hit; so the hit lists
+/// are compared and the tables, which may differ in that entry, are not (as LOSAT_X_BPSEEDSHADOW
+/// does for blastp).
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
+// ```c
+//             diag_coord = (query_offset - subject_offset) & diag_mask;
+// ...
+//                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
+// ...
+//                 if (score >= cutoffs->cutoff_score)
+//                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+// ...
+//                 if (right_extend) {
+//                     diag_array[diag_coord].flag = 1;
+//                     diag_array[diag_coord].last_hit =
+//                         s_last_off - (wordsize - 1) + diag_offset;
+// ```
+pub(crate) fn x_word_finder_diag(
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &Lookup,
+    diagonals: &mut Diagonals,
+) -> Result<Option<Vec<InitHsp>>> {
+    let Lookup::Standard(table) = lookup else {
+        return Ok(None);
+    };
+    if options.window_size <= 0 {
+        return Ok(None);
+    }
+    let mode = x_cell_mode();
+    if x_bxdiag_mode() != 2 {
+        let (hits, counts) = x_word_finder_fused(
+            mode,
+            x_bxscan_bf(),
+            batch,
+            parameters,
+            options,
+            subject,
+            table,
+            diagonals,
+        )?;
+        x_add_counts(counts);
+        return Ok(Some(hits));
+    }
+    let mut copy = Diagonals {
+        entries: diagonals.entries.clone(),
+        offset: diagonals.offset,
+        window: diagonals.window,
+    };
+    let reference = word_finder_plain(
+        batch,
+        parameters,
+        options,
+        subject,
+        lookup,
+        &mut copy,
+        |_| {},
+    )?;
+    let (fused, counts) = x_word_finder_fused(
+        mode,
+        x_bxscan_bf(),
+        batch,
+        parameters,
+        options,
+        subject,
+        table,
+        diagonals,
+    )?;
+    x_add_counts(counts);
+    if fused != reference {
+        let at = fused
+            .iter()
+            .zip(&reference)
+            .position(|(a, b)| a != b)
+            .unwrap_or(fused.len().min(reference.len()));
+        panic!(
+            "LOSAT_X_BXDIAGSHADOW: hit lists differ at {at} (fused {} / reference {}): fused {:?} reference {:?}",
+            fused.len(),
+            reference.len(),
+            fused.get(at),
+            reference.get(at)
+        );
+    }
+    assert_eq!(
+        copy.offset, diagonals.offset,
+        "LOSAT_X_BXDIAGSHADOW: diagonal offset differs"
+    );
+    if subject.len() < table.word_length as usize {
+        X_SHADOW_SHORT.fetch_add(1, Relaxed);
+    } else if let Some(at) = copy
+        .entries
+        .iter()
+        .zip(&diagonals.entries)
+        .position(|(a, b)| a != b)
+    {
+        panic!(
+            "LOSAT_X_BXDIAGSHADOW: diagonal entry {at} differs: fused {:#x} reference {:#x}",
+            diagonals.entries[at].raw_bits(),
+            copy.entries[at].raw_bits()
+        );
+    }
+    X_SHADOW_SUBJECTS.fetch_add(1, Relaxed);
+    Ok(Some(fused))
+}
+
+// No NCBI counterpart: adds one subject's counts to the timing line's totals.
+fn x_add_counts(counts: [u64; 3]) {
+    X_SUBJECTS.fetch_add(1, Relaxed);
+    if counts[0] != 0 {
+        X_CELLS.fetch_add(counts[0], Relaxed);
+        X_HITS.fetch_add(counts[1], Relaxed);
+        X_CANDIDATES.fetch_add(counts[2], Relaxed);
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BXDIAG): `x_word_finder_direct`'s two-hit stage for one subject on the
+/// standard lookup table `table`, with the scan and the diagonal test fused (cell test `mode`;
+/// the branch-free scan with `branch_free`, LOSAT_X_BXSCANBF); also returns the cells tested in
+/// batches, their hits and the candidates.
+/// `subject` starts at the first residue and keeps the sentinel after the last one.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
+// ```c
+//         wordsize = lookup->word_length;
+//     }
+//
+//     scan_range[0] = 0;
+//     scan_range[1] = subject->seq_ranges[0].left;
+//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
+//
+//     if (scan_range[2] < scan_range[1])
+//         scan_range[2] = scan_range[1];
+//
+//     while (scan_range[1] <= scan_range[2]) {
+//         /* scan the subject sequence for hits */
+//         hits = scansub(lookup_wrap, subject,
+//                                   offset_pairs, array_size, scan_range);
+// ```
+#[allow(clippy::too_many_arguments)]
+fn x_word_finder_fused(
+    mode: XDiagMode,
+    branch_free: bool,
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    table: &BlastAaLookupTable,
+    diagonals: &mut Diagonals,
+) -> Result<(Vec<InitHsp>, [u64; 3])> {
+    let query = &batch.sequence_start[1..];
+    let word = options.word_size;
+    let offset = diagonals.offset;
+    let mask = diagonals.entries.len() as i32 - 1;
+    // Lookup::scan's set-up, with length = subject.len() - 1 as word_finder_plain passes it; the
+    // fused scan runs from 0 to max(length - word length, 0), the reference's range with a
+    // two-hit window.
+    let length = subject.len().saturating_sub(1);
+    let mut hits = Vec::new();
+    let counts = x_with_context_table(batch, |contexts| {
+        x_scan_two_hit_with(
+            mode,
+            branch_free,
+            table,
+            subject,
+            length,
+            &mut diagonals.entries,
+            mask,
+            offset,
+            options.window_size,
+            word,
+            |q, s, previous, diff, entry| {
+                // From here to the end of the closure: the statements of x_word_finder_direct after
+                // the diagonal tests (`previous` = last_hit - diag_offset, `diff` = s - previous).
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560
+                // ```c
+                //                 curr_context = BSearchContextInfo(query_offset, query_info);
+                // ```
+                // The table's index is the binary search's (x_with_context_table); an offset outside
+                // the table (none from the lookup) takes the binary search.
+                let context = contexts.get(q).unwrap_or_else(|| {
+                    batch
+                        .contexts
+                        .partition_point(|c| c.offset as i32 <= q)
+                        .saturating_sub(1)
+                });
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
+                // ```c
+                //                 if (query_offset - diff <
+                //                     query_info->contexts[curr_context].query_offset) {
+                //
+                //                     /* there was no last hit for this diagnol; start a new hit */
+                //                     diag_array[diag_coord].last_hit =
+                //                         subject_offset + diag_offset;
+                //                     continue;
+                //                 }
+                // ```
+                if q - diff < batch.contexts[context].offset as i32 {
+                    entry.set_last_hit(s.wrapping_add(offset));
+                    return;
+                }
+                let p = &parameters[context];
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
+                // ```c
+                //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
+                //                                               last_hit + wordsize,
+                //                                               subject_offset, query_offset,
+                //                                               cutoffs->x_dropoff,
+                //                                               &hsp_q, &hsp_s,
+                //                                               &hsp_len, use_pssm,
+                //                                               wordsize, &right_extend,
+                // ```
+                let Some(result) = extend_two_hit_blosum62(
+                    query,
+                    subject,
+                    (previous + word) as usize,
+                    s as usize,
+                    q as usize,
+                    p.word_xdrop,
+                    word as usize,
+                ) else {
+                    return;
+                };
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-606
+                // ```c
+                //                 if (score >= cutoffs->cutoff_score)
+                //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                //                                      query_offset, subject_offset, hsp_len,
+                //                                      score);
+                //
+                //                 /* If an extension to the right happened, reset the last hit
+                //                    so that future hits to this diagonal must start over. */
+                //
+                //                 if (right_extend) {
+                //                     diag_array[diag_coord].flag = 1;
+                //                     diag_array[diag_coord].last_hit =
+                //                         s_last_off - (wordsize - 1) + diag_offset;
+                //                 }
+                //                 /* Otherwise, make the present hit into the previous hit for
+                //                    this diagonal */
+                //                 else {
+                //                     diag_array[diag_coord].last_hit =
+                //                         subject_offset + diag_offset;
+                //                 }
+                // ```
+                let u = result.ungapped_data;
+                if u.score >= p.word_cutoff {
+                    hits.push(InitHsp {
+                        q_seed: q,
+                        s_seed: s,
+                        q_start: u.q_start,
+                        s_start: u.s_start,
+                        length: u.length,
+                        score: u.score,
+                    });
+                }
+                if result.right_extend {
+                    entry.set_flag(1);
+                    entry.set_last_hit((result.s_last_off - (word - 1)).wrapping_add(offset));
+                } else {
+                    entry.set_last_hit(s.wrapping_add(offset));
+                }
+            },
+        )
+    });
+    // The rest of word_finder_plain, unchanged.
+    diagonals.finish_subject(length)?;
+    hits.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then(a.s_start.cmp(&b.s_start))
+            .then(b.length.cmp(&a.length))
+            .then(a.q_start.cmp(&b.q_start))
+    });
+    Ok((hits, counts))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::algorithm::blastx::{input::parse_fasta, parameters, query_setup::prepare_queries};
+
+    /// The cell tests this machine can run, each with the presence-test scan and with the
+    /// branch-free one (LOSAT_X_BXSCANBF).
+    fn modes() -> Vec<(XDiagMode, bool)> {
+        let mut modes = vec![XDiagMode::PerHit, XDiagMode::Scalar];
+        let auto = x_cell_test("");
+        if auto != XDiagMode::PerHit {
+            modes.push(auto);
+        }
+        modes
+            .into_iter()
+            .flat_map(|mode| [(mode, false), (mode, true)])
+            .collect()
+    }
+
+    /// A search of `query` (nucleotide FASTA) with `-window_size window` (default options
+    /// otherwise), its statistics set for subjects of `subject_length` residues.
+    fn search(
+        query: &[u8],
+        window: i32,
+        subject_length: usize,
+    ) -> (
+        PreparedQueryBatch,
+        Vec<ContextParameters>,
+        ResolvedOptions,
+        Lookup,
+    ) {
+        let q = parse_fasta(query, false, false).unwrap();
+        let window = window.to_string();
+        let args = [
+            "losat",
+            "blastx",
+            "-query",
+            "query",
+            "-subject",
+            "subject",
+            "-window_size",
+            &window,
+        ];
+        let crate::cli::Commands::Blastx(args) =
+            crate::cli::try_parse_from::<crate::cli::Cli, _, _>(args)
+                .unwrap()
+                .command
+        else {
+            unreachable!()
+        };
+        let options = args.resolve().unwrap();
+        let batch = prepare_queries(&q, &options).unwrap();
+        let mut params = parameters::score_block(&batch);
+        parameters::effective_lengths(
+            &batch,
+            &mut params,
+            &options,
+            subject_length as i64,
+            1,
+            None,
+        )
+        .unwrap();
+        let lookup = Lookup::new(&batch, &params, &options).unwrap();
+        parameters::subject_parameters(
+            &batch,
+            &mut params,
+            &options,
+            subject_length as i64,
+            1,
+            subject_length,
+            None,
+        )
+        .unwrap();
+        (batch, params, options, lookup)
+    }
+
+    /// The subject records of a protein FASTA, encoded with the sentinel after the last residue.
+    fn subjects(fasta: &[u8]) -> Vec<Vec<u8>> {
+        parse_fasta(fasta, true, false)
+            .unwrap()
+            .iter()
+            .map(|record| {
+                let mut subject = record
+                    .sequence
+                    .iter()
+                    .copied()
+                    .map(crate::utils::matrix::aa_char_to_ncbistdaa)
+                    .collect::<Vec<_>>();
+                subject.push(0);
+                subject
+            })
+            .collect()
+    }
+
+    /// Runs every subject through the reference and through the fused loop (cell test `mode`;
+    /// the branch-free scan with `branch_free`), each on its own table starting from
+    /// `start(table)`, and compares the hit lists and the tables after each subject; returns the
+    /// hits and the counts of the fused loop.
+    fn compare(
+        (batch, params, options, lookup): &(
+            PreparedQueryBatch,
+            Vec<ContextParameters>,
+            ResolvedOptions,
+            Lookup,
+        ),
+        subjects: &[Vec<u8>],
+        (mode, branch_free): (XDiagMode, bool),
+        start: impl Fn(&mut Diagonals),
+    ) -> (usize, [u64; 3]) {
+        let Lookup::Standard(table) = lookup else {
+            panic!("the standard lookup table")
+        };
+        let length = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
+        let mut reference = Diagonals::new(length, options.window_size).unwrap();
+        let mut fused = Diagonals::new(length, options.window_size).unwrap();
+        start(&mut reference);
+        start(&mut fused);
+        let (mut hits, mut counts) = (0, [0u64; 3]);
+        for (i, subject) in subjects.iter().enumerate() {
+            let expected = word_finder_plain(
+                batch,
+                params,
+                options,
+                subject,
+                lookup,
+                &mut reference,
+                |_| {},
+            )
+            .unwrap();
+            let (actual, c) = x_word_finder_fused(
+                mode,
+                branch_free,
+                batch,
+                params,
+                options,
+                subject,
+                table,
+                &mut fused,
+            )
+            .unwrap();
+            let run = format!("{mode:?} branch_free={branch_free} subject {i}");
+            assert_eq!(actual, expected, "{run}");
+            assert_eq!(fused.offset, reference.offset, "{run}");
+            assert!(fused.entries == reference.entries, "{run}");
+            hits += actual.len();
+            for (total, n) in counts.iter_mut().zip(c) {
+                *total += n;
+            }
+        }
+        (hits, counts)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:167-174
+    // ```c++
+    //     if (ewp->diag_table) {
+    //         if (ewp->diag_table->offset >= INT4_MAX / 4) {
+    //             ewp->diag_table->offset = ewp->diag_table->window;
+    //             s_BlastDiagClear(ewp->diag_table);
+    //         } else {
+    //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
+    //         }
+    //     } else if (ewp->hash_table) {
+    // ```
+    // The session F fixture (the frozen NCBI INIT rows of tests/blastx_f_diagonal) at its two-hit
+    // windows, from a fresh table, a table near INT4_MAX / 4, a reset one and one whose offset is
+    // just below 2^30 (the 31-bit `last_hit` wraps): the fused loop gives the reference's hits and
+    // table with every cell test.
+    #[test]
+    fn the_fused_loop_matches_the_reference_on_the_session_f_fixture() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/blastx_f_diagonal");
+        let query = std::fs::read(dir.join("query.fna")).unwrap();
+        let subject = subjects(&std::fs::read(dir.join("subject.faa")).unwrap());
+        let length = subject[0].len() - 1;
+        for window in [1, 39, 40, 41] {
+            let s = search(&query, window, length);
+            let flagged = |last_hit: i32| {
+                let mut entry = DiagStruct::default();
+                entry.set_last_hit(last_hit);
+                entry.set_flag(1);
+                entry
+            };
+            for mode in modes() {
+                let repeated = [subject[0].clone(), subject[0].clone(), subject[0].clone()];
+                compare(&s, &repeated, mode, |_| {});
+                compare(&s, &repeated, mode, |d| {
+                    d.offset = 536_870_910;
+                    d.entries.fill(flagged(123));
+                });
+                compare(&s, &repeated, mode, |d| {
+                    d.offset = 536_870_911;
+                    d.entries.fill(flagged(536_870_900));
+                    d.finish_subject(83).unwrap();
+                });
+                compare(&s, &repeated, mode, |d| {
+                    d.offset = (1 << 30) - 64;
+                    d.entries.fill(DiagStruct::clear(window));
+                });
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:211-232
+    // ```c
+    // Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
+    // {
+    //     Int4 m=0, b=0, e=0, size=0;
+    //
+    //     size = A->last_context+1;
+    //     ...
+    //     while (b < e - 1) {
+    //         m = (b + e) / 2;
+    //         if (A->contexts[m].query_offset > n)
+    //             e = m;
+    //         else
+    //             b = m;
+    //     }
+    //     return b;
+    // }
+    // ```
+    // The context table of a batch gives the binary search's index at every query offset, and a
+    // second batch (other queries) gets its own table.
+    #[test]
+    fn the_context_table_gives_the_binary_search_index_for_every_offset() {
+        let fasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
+        let genome = parse_fasta(
+            &std::fs::read(fasta.join("AP027131.fasta")).unwrap(),
+            false,
+            false,
+        )
+        .unwrap();
+        let letters = &genome[0].sequence;
+        for pieces in [[1_500, 2_200, 900, 3_100], [4_000, 333, 2_500, 1_200]] {
+            let mut query = Vec::new();
+            for (i, &n) in pieces.iter().enumerate() {
+                query.extend_from_slice(format!(">p{i}\n").as_bytes());
+                query.extend_from_slice(&letters[i * 50_000..i * 50_000 + n]);
+                query.push(b'\n');
+            }
+            let (batch, ..) = search(&query, 40, 500);
+            let span = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
+            assert!(batch.contexts.len() >= 24);
+            x_with_context_table(&batch, |table| {
+                for q in 0..span as i32 {
+                    let expected = batch
+                        .contexts
+                        .partition_point(|c| c.offset as i32 <= q)
+                        .saturating_sub(1);
+                    assert_eq!(table.get(q), Some(expected), "q={q}");
+                }
+                assert_eq!(table.get(span as i32), None);
+            });
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
+    // ```c
+    //             diag_coord = (query_offset - subject_offset) & diag_mask;
+    //             /* If the reset bit is set, an extension just happened. */
+    //             if (diag_array[diag_coord].flag) {
+    //                 /* If we've already extended past this hit, skip it. */
+    //                 if ((Int4) (subject_offset + diag_offset) <
+    //                     diag_array[diag_coord].last_hit) {
+    //                     continue;
+    //                 }
+    // ```
+    // 6 kb of the AP027131 genome against the first 60 of its proteins, one table for all of
+    // them: many lookup cells with eight hits or more (so the batches run, not only the scalar
+    // rest of a cell), extensions with and without a right extension, and the entries a subject
+    // leaves for the next. Windows 40 (the default) and 400, and a run starting just below 2^30.
+    #[test]
+    fn the_fused_loop_matches_the_reference_on_many_cells_and_subjects() {
+        let fasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
+        let genome = parse_fasta(
+            &std::fs::read(fasta.join("AP027131.fasta")).unwrap(),
+            false,
+            false,
+        )
+        .unwrap();
+        let piece = String::from_utf8(genome[0].sequence[200_000..206_000].to_vec()).unwrap();
+        let query = format!(">piece\n{piece}\n").into_bytes();
+        let all = subjects(&std::fs::read(fasta.join("AP027131.faa")).unwrap());
+        let subjects = &all[..60];
+        let mean = subjects.iter().map(|s| s.len() - 1).sum::<usize>() / subjects.len();
+        for window in [40, 400] {
+            let s = search(&query, window, mean);
+            // The lookup has cells of a full batch (eight hits) and more.
+            let Lookup::Standard(table) = &s.3 else {
+                panic!("the standard lookup table")
+            };
+            assert!(table.backbone.iter().any(|cell| cell.num_used >= 16));
+            for mode in modes() {
+                let (hits, counts) = compare(&s, subjects, mode, |_| {});
+                assert!(hits > 0, "window={window} {mode:?}: no hit");
+                if mode.0 == XDiagMode::PerHit {
+                    assert_eq!(counts, [0, 0, 0]);
+                } else {
+                    assert!(counts[0] > 0 && counts[2] > 0, "{mode:?} {counts:?}");
+                    assert!(counts[1] > counts[0], "{mode:?} {counts:?}");
+                }
+                compare(&s, subjects, mode, |d| {
+                    d.offset = (1 << 30) - 3_000;
+                    d.entries.fill(DiagStruct::clear(window));
+                });
+            }
+        }
+    }
+}

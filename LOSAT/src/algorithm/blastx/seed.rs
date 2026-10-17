@@ -24,6 +24,22 @@ use anyhow::{ensure, Result};
 #[path = "x_seed_scan.rs"]
 pub mod x_seed_scan;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-511
+// ```c
+//     while (scan_range[1] <= scan_range[2]) {
+//         /* scan the subject sequence for hits */
+//         hits = scansub(lookup_wrap, subject,
+//                                   offset_pairs, array_size, scan_range);
+//
+//         totalhits += hits;
+//         /* for each hit, */
+//         for (i = 0; i < hits; ++i) {
+// ```
+// EXPERIMENT (LOSAT_X_BXDIAG): the two-hit seed loop with the scan and the diagonal test fused
+// (a child module, so that it uses the diagonal table's fields).
+#[path = "x_seed_diag.rs"]
+pub mod x_seed_diag;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65
 // ```c++
 //         Int4 diag_array_length;

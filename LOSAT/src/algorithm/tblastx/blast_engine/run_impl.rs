@@ -5115,7 +5115,7 @@ fn search_query_batch(
                             .map_init(
                                 || {
                                     (
-                                        vec![OffsetPair::default(); offset_array_size as usize],
+                                        vec![OffsetPair::default(); offset_pairs_len],
                                         vec![DiagStruct::default(); diag_array_size as usize],
                                     )
                                 },

@@ -1838,7 +1838,34 @@ Scheduling (each value computed by one thread with the original function; order 
   NCBI `-db` 102.86 / 103.61 s beside on 66.55 / 64.99 s (2 rounds). The context table came after these
   rounds: against the same loop with the binary search, 63.75-64.43 s against 64.84-65.27 s (x0.977-0.994,
   cycles x0.98-0.99; 4 rounds). The shadow compared 1,214,400 subject scans with `-db` and with `-subject`
-  (6 threads): identical.
+  (6 threads): identical. At 16 and 8 threads (same input, node 1 physical CPUs 32-47, 5 rounds rotated, with
+  `LOSAT_X_BXFLOW=1`): 4.28 s against 5.80 s without it and NCBI's 7.06 s at 16 threads (0.61 of NCBI), 8.25 s
+  against 11.33 s and 13.19 s at 8 threads (0.63). Where a lookup cell has few hits it is slower than the
+  default loop: a 300-nt cDNA piece against the first UniRef50 volume (1.5 hits per cell) took 41.3-42.3 s
+  against 35.6-36.4 s (one thread, 4 rounds; instructions 282 G against 185 G); one 2.1-kb cDNA (4.6 hits per
+  cell) 132.0-132.2 s against 140.4-140.7 s.
+- `LOSAT_X_BXSCANBF=1` (BLASTX, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it; acts where the standard lookup table is scanned by `LOSAT_X_BXSCAN`'s
+  direct loop or `LOSAT_X_BXDIAG`'s fused loop; the compressed table and the reference word finder keep their
+  scans) the subject words with lookup hits found without a branch per word, by tblastn's loop of
+  `LOSAT_X_TBNSCANBF` (`tblastn/x_scan_bf.rs`): the direct loop calls `x_scan_one_range_bf` (NCBI's pairs,
+  stop and resume, and `scan_range` values, as for tblastn), and the fused loop lists the positions of 256 words
+  with `x_block_candidates` and passes the listed cells to the cell test in position order
+  (`blastp/x_seed_fused.rs` `x_scan_cells_bf`; blastp's own loop keeps the presence test). Tests: the fused
+  scan's cell calls against the presence-test loop (word sizes 2-4, subjects across the block edges, letters
+  1-27), blastp's batched-scan test, and the blastx direct and fused tests with and without the switch. The
+  shadow switches check it (`LOSAT_X_BXSCANSHADOW=1` with it compares the direct loop, `LOSAT_X_BXDIAGSHADOW=1`
+  the fused loop, against `word_finder_plain`): 1,214,400 subject scans (800 fly cDNAs x yeast) and 2,178,834
+  (a 300-nt piece x the first UniRef50 volume), identical. Measured 2026-10-17 on the workstation (node 1, one
+  pinned core per arm with its HT sibling idle, the two arms of a pair at once, swapped every round; `-db`,
+  `-evalue 1e-5`, one thread; every output the same bytes in both arms, and NCBI BLAST+ 2.17.0's where timed
+  beside), time with the switch / without, the share of subject words with hits in brackets: a 300-nt fly cDNA
+  piece x UniRef50 2026_03 volume 00 (2,178,834 sequences, 3.0 G residues) [34 %] default loop 21.73-22.01 s /
+  35.63-36.41 s (x0.60-0.61; branch misses 1.84 G -> 0.46 G, cycles 108.9 G -> 64.3 G; 4 rounds), with BXDIAG
+  29.00-29.44 / 41.34-42.25 (x0.70), NCBI `-db` 32.20 / 32.53 s beside 21.77 / 22.12 s (0.68); one 2.1-kb cDNA x
+  the same volume [84 %] 125.64 / 126.05 against 140.41 / 140.72 (x0.89-0.90), with BXDIAG 125.6 / 126.2 against
+  132.0 / 132.2 (x0.95), NCBI 145.69 / 146.47 beside 125.45 / 125.52 (0.86); 800 fly cDNAs x yeast proteome [98 %]
+  87.70-87.90 / 87.95-88.31 (x0.997), with BXDIAG 63.87-64.42 / 63.93-64.88 (x0.99-1.00).
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (distinct composition-adjustment inputs),

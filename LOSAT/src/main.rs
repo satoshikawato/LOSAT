@@ -11,6 +11,9 @@ use LOSAT::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
 use LOSAT::cli::{Cli, Commands};
 
 fn main() -> Result<()> {
+    // Diagnostic (LOSAT_TIMING): the clock of `since_start` (utils/xtiming.rs). No NCBI
+    // counterpart; it reads the clock only with LOSAT_TIMING.
+    LOSAT::utils::xtiming::start();
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3719-3725
     // ```c++
     // bool CDir::SetCwd(const string& dir)
@@ -255,5 +258,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastx::seed::x_seed_scan::print_shadow_stats();
     LOSAT::algorithm::blastp::x_ungapped_fast::print_shadow_stats();
     LOSAT::utils::x_logclone::print_shadow_stats();
+    // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).
+    LOSAT::utils::xtiming::print();
     Ok(())
 }

@@ -1605,10 +1605,13 @@ impl XPairPar {
         }
 
         let offset_array_size: i32 = OFFSET_ARRAY_SIZE + sub.longest_chain.max(0);
-        if scratch.offset_pairs.len() < offset_array_size as usize {
+        // EXPERIMENT (LOSAT_X_TBXSCANBF): with the switch, X_SCAN_BF_SLACK entries more.
+        let offset_pairs_len =
+            crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
+        if scratch.offset_pairs.len() < offset_pairs_len {
             scratch
                 .offset_pairs
-                .resize(offset_array_size as usize, OffsetPair::default());
+                .resize(offset_pairs_len, OffsetPair::default());
         }
         // Unit cell of hit (q, s): q - s - lo, lo = q_min - (s_len - 1) (u32 wrapping), so the
         // cells run from 0 to (q_max - q_min) + (s_len - 1).
@@ -1653,7 +1656,8 @@ impl XPairPar {
             while scan_range[1] <= scan_range[2] {
                 let prev_scan_left = scan_range[1];
                 // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-                let hits = s_blast_aa_scan_subject(
+                // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
+                let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
                     sub,
                     subject,
                     &seq_ranges,

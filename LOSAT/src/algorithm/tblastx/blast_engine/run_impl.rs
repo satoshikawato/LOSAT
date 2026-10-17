@@ -2880,6 +2880,10 @@ fn search_query_batch(
     // Reference: ncbi-blast/c++/include/algo/blast/core/lookup_wrap.h + lookup_wrap.c
     const OFFSET_ARRAY_SIZE: i32 = 4096;
     let offset_array_size: i32 = OFFSET_ARRAY_SIZE + lookup.longest_chain.max(0);
+    // EXPERIMENT (LOSAT_X_TBXSCANBF): with the switch, the offset arrays have X_SCAN_BF_SLACK
+    // entries after `offset_array_size`.
+    let offset_pairs_len =
+        crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
 
     // EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW), dispatch point 1 (per batch): the
     // gates and the exactness guard, then one lookup table per query context (each backbone chain
@@ -3732,7 +3736,8 @@ fn search_query_batch(
                         } else {
                             None
                         };
-                        let hits = s_blast_aa_scan_subject(
+                        // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
+                        let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
                             lookup_ref,
                             subject,
                             &seq_ranges,
@@ -4736,7 +4741,8 @@ fn search_query_batch(
                         } else {
                             None
                         };
-                        let hits = s_blast_aa_scan_subject(
+                        // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
+                        let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
                             lookup_ref,
                             subject,
                             &seq_ranges,
@@ -5998,7 +6004,7 @@ fn search_query_batch(
                         // ```
                         tx: None,
                         hits: Vec::new(),
-                        offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                        offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                         diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-63
                         // ```c
@@ -6034,7 +6040,7 @@ fn search_query_batch(
                 // ```
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
-                offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                 diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
@@ -6063,7 +6069,7 @@ fn search_query_batch(
                     // The state of one thread's iterations of this loop (as below).
                     tx: tx_opt.clone(),
                     hits: Vec::new(),
-                    offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                    offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                     diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                     // NCBI: diag_table->offset = window_size;
                     // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
@@ -6086,7 +6092,7 @@ fn search_query_batch(
                     // ```
                     tx: tx_opt.clone(),
                     hits: Vec::new(),
-                    offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                    offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                     diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                     // NCBI: diag_table->offset = window_size;
                     // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
@@ -6108,7 +6114,7 @@ fn search_query_batch(
                 // ```
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
-                offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                 diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
@@ -6135,7 +6141,7 @@ fn search_query_batch(
                 // ```
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
-                offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                 diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63

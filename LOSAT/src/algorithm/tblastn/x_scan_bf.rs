@@ -20,8 +20,9 @@
 //! `X_SCAN_BF_SLACK` entries after `array_size`; the entries past the returned count are not
 //! part of the result.
 //!
-//! The switch is read once, off unless set (not in the strict set). tblastx, blastp and blastx
-//! keep the scan of `tblastx/blast_aascan.rs`.
+//! The switch is read once, off unless set (not in the strict set). TBLASTX scans each subject
+//! range with this loop under its own switch (`tblastx/x_scan_bf.rs`, LOSAT_X_TBXSCANBF); blastp
+//! and blastx keep the scan of `tblastx/blast_aascan.rs`.
 
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 use crate::algorithm::tblastx::lookup::{
@@ -34,7 +35,7 @@ const X_BLOCK: usize = 256;
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): offset-array entries needed after `array_size` (a cell's
 /// hits are written as `AA_HITS_PER_CELL` pairs, also when the array is full).
-pub(super) const X_SCAN_BF_SLACK: usize = AA_HITS_PER_CELL;
+pub(crate) const X_SCAN_BF_SLACK: usize = AA_HITS_PER_CELL;
 
 // No NCBI counterpart: reads LOSAT_X_TBNSCANBF once; off unless set.
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): whether tblastn scans with `x_scan_one_range_bf`.
@@ -68,7 +69,7 @@ pub(super) fn x_tbn_scan_bf() -> bool {
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): `s_blast_aa_scan_subject_one_range` with the presence test
 /// made branch-free (see the module text). Same arguments, same result, same `s_range`;
 /// `offset_pairs` must hold `array_size + X_SCAN_BF_SLACK` entries.
-pub(super) fn x_scan_one_range_bf(
+pub(crate) fn x_scan_one_range_bf(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     offset_pairs: &mut [BlastOffsetPair],

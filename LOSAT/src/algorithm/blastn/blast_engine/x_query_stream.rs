@@ -1,7 +1,8 @@
-//! EXPERIMENT (LOSAT_X_QSTREAM, shadow LOSAT_X_QSTREAMSHADOW): blastn reads the records of each
-//! query batch from the query file when the batch loop of `run_in_pool` takes the batch (or a
-//! LOSAT_X_QBATCHPAR slot searches it ahead of the loop), as NCBI reads its query batches one at a
-//! time, instead of holding the records of the whole query file for the whole search.
+//! LOSAT_X_QSTREAM (on by default, strict set; shadow LOSAT_X_QSTREAMSHADOW): blastn reads the
+//! records of each query batch from the query file when the batch loop of `run_in_pool` takes the
+//! batch (or a LOSAT_X_QBATCHPAR slot searches it ahead of the loop), as NCBI reads its query
+//! batches one at a time, instead of holding the records of the whole query file for the whole
+//! search. `LOSAT_X_QSTREAM=0` or `LOSAT_X_DEFAULT=0` reads them all before the search, as before.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
 //! ```c++
@@ -35,13 +36,13 @@
 //! twice:
 //! - the first reading is today's reading, on the same source and at the same place (after
 //!   `IsIStreamEmpty`, before the search's checks and the outfmt 0 prolog): every record is read
-//!   with the same reader and dropped at once; its length is kept (`read_queries_map`), and so is
-//!   how the reading ended, with the reader's error and warnings as `read_queries` returns them.
-//!   The query input (`QueryInput`: the placements, input positions and skipped records of
-//!   `-query_loc`, the range length) and the searched lengths are made from the lengths alone
-//!   (`query_input_of`, what `cut_queries` and `QueryInput::whole` make of the records). So
-//!   everything that comes before the search, and every refusal, warning and error that comes
-//!   before the first output today, comes from the same values at the same place;
+//!   with the same reader, by the loop of `read_queries` (`scan`), and dropped at once; its length
+//!   is kept, and so is how the reading ended, with the reader's error and warnings as
+//!   `read_queries` returns them. The query input (`QueryInput`: the placements, input positions
+//!   and skipped records of `-query_loc`, the range length) and the searched lengths are made from
+//!   the lengths alone (`query_input_of`, what `cut_queries` and `QueryInput::whole` make of the
+//!   records). So everything that comes before the search, and every refusal, warning and error
+//!   that comes before the first output today, comes from the same values at the same place;
 //! - the second reading is a new source over a second handle of the same open file (`try_clone`),
 //!   at the position where the first started, read forward only as far as the batches need: the
 //!   loop takes its batch's records when it reaches the batch (`Queries::batch`), and a slot copies
@@ -68,19 +69,21 @@
 //! records.
 //!
 //! Where the switch does not act (`Off`; the records are read before the search as without it):
-//! standard input (`-query -`, also with `-subject -`), a query that is not a regular file (a
-//! named pipe, a character device such as `/dev/stdin`, a socket: `metadata().is_file()`, which
-//! follows symbolic links), and a file whose position or second handle cannot be had (`Io`, for
-//! example `try_clone` on WASI). LOSAT reads no compressed query file. `run_local` (the Web
-//! adapter and ABI v1) gets its records from its caller.
+//! where the reports are written after the loop (LOSAT_X_RPTSTREAM off: every record is then
+//! read by a writer after the search, so the records would all be held anyway and the second
+//! reading would only cost time), standard input (`-query -`, also with `-subject -`), a query
+//! that is not a regular file (a named pipe, a character device such as `/dev/stdin`, a socket:
+//! `metadata().is_file()`, which follows symbolic links), and a file whose position or second
+//! handle cannot be had (`Io`, for example `try_clone` on WASI). LOSAT reads no compressed query
+//! file. `run_local` (the Web adapter and ABI v1) gets its records from its caller.
 //!
 //! What is kept for every query (`query_input_of`): the length of each input record, whether it is
 //! skipped, the input position and placement of each searched query and its searched length
 //! (about 33 bytes per record without `-query_loc`). The records of every batch are kept as well
-//! (cloned when the loop takes them) where a writer reads them after their batch: the reports
-//! written after the loop (LOSAT_X_RPTSTREAM off or not acting, or its shadow, which writes the
-//! off path's reports to compare) and the error paths that write the reports of the batches
-//! before; with LOSAT_X_RPTSTREAM acting without its shadow they are not kept.
+//! (cloned when the loop takes them) where a writer reads them after their batch: LOSAT_X_RPTSTREAM
+//! on but not acting for the search (one of its refusals, `x_rpt_stream::check`), or its shadow
+//! (which writes the off path's reports to compare); there the memory is that of the records read
+//! before the search. With LOSAT_X_RPTSTREAM acting without its shadow they are not kept.
 //!
 //! The shadow (`LOSAT_X_QSTREAMSHADOW`, implies the switch) also reads the whole file the old way
 //! (a third source at the same position: `IsIStreamEmpty`, then `read_queries`) and compares: the
@@ -101,7 +104,7 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::Range;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -110,23 +113,24 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 
 use crate::blastinput::fasta_reader::{
-    read_queries, read_queries_map, FastaInputSource, FastaRecord, QueryEnd, QueryRecords,
-    ReadError, ReaderConfig,
+    read_queries, FastaInputSource, FastaRecord, ParseErrorCode, QueryEnd, QueryRecords, ReadError,
+    ReaderConfig,
 };
 use crate::blastinput::seq_range::{
     cut_queries, record_interval, Placements, QueryInput, RecordInterval, RecordPlacement,
     SequenceRange,
 };
 
-// No NCBI counterpart: reads the switches once (any value turns them on; the shadow implies the
-// switch; neither is in the strict set). They choose when LOSAT reads the same records.
+// No NCBI counterpart: reads the switches once. LOSAT_X_QSTREAM is in the strict set (on unless
+// `LOSAT_X_QSTREAM=0` or `LOSAT_X_DEFAULT=0`); the shadow is set to any value and implies the
+// switch. They choose when LOSAT reads the same records.
 /// 0 = off, 1 = LOSAT_X_QSTREAM, 2 = LOSAT_X_QSTREAMSHADOW.
 fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_QSTREAMSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_QSTREAM").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_QSTREAM") {
             1
         } else {
             0
@@ -137,8 +141,10 @@ fn mode() -> u8 {
 /// Why the records of a search are read before the search (`Opening::new`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Off {
-    /// Neither switch is set.
+    /// The switch is off (`LOSAT_X_QSTREAM=0`, `LOSAT_X_DEFAULT=0`).
     NotSet,
+    /// The reports are written after the loop (LOSAT_X_RPTSTREAM off), which reads every record.
+    Reports,
     /// `-query -` (standard input), which cannot be read twice.
     StandardInput,
     /// A query that is not a regular file (a named pipe, a device, a socket).
@@ -151,6 +157,7 @@ impl Off {
     fn name(self) -> &'static str {
         match self {
             Off::NotSet => "not_set",
+            Off::Reports => "reports",
             Off::StandardInput => "standard_input",
             Off::NotAFile => "not_a_file",
             Off::Io => "io",
@@ -168,13 +175,25 @@ pub(super) struct Opening {
 
 impl Opening {
     /// `path` is `-query` and `file` the file `run` opened for it, before its reader is made;
-    /// `shared_standard_input` is `-query -` with `-subject -`.
-    pub(super) fn new(path: &Path, file: &File, shared_standard_input: bool) -> Opening {
-        Opening::with_mode(mode(), path, file, shared_standard_input)
+    /// `shared_standard_input` is `-query -` with `-subject -`; `reports_streamed` is whether
+    /// LOSAT_X_RPTSTREAM is on (`x_rpt_stream::switch_on`).
+    pub(super) fn new(
+        path: &Path,
+        file: &File,
+        shared_standard_input: bool,
+        reports_streamed: bool,
+    ) -> Opening {
+        Opening::with_mode(mode(), path, file, shared_standard_input, reports_streamed)
     }
 
     /// `new` with the switches' value `mode` (`mode()`; the unit tests set it).
-    fn with_mode(mode: u8, path: &Path, file: &File, shared_standard_input: bool) -> Opening {
+    fn with_mode(
+        mode: u8,
+        path: &Path,
+        file: &File,
+        shared_standard_input: bool,
+        reports_streamed: bool,
+    ) -> Opening {
         let off = |off| Opening {
             mode,
             off: Some(off),
@@ -182,6 +201,9 @@ impl Opening {
         };
         if mode == 0 {
             return off(Off::NotSet);
+        }
+        if !reports_streamed {
+            return off(Off::Reports);
         }
         if path.as_os_str() == "-" || shared_standard_input {
             return off(Off::StandardInput);
@@ -208,6 +230,47 @@ impl Opening {
     /// Whether the records are read batch by batch (`Store::read`).
     pub(super) fn acts(&self) -> bool {
         self.again.is_some()
+    }
+}
+
+/// The first reading: the loop of `read_queries` (`GetNextSeqBatch` until `End()`), each record's
+/// length kept and the record dropped, and how the reading ended (with the warnings of the record
+/// whose reading failed, as `read_queries` keeps them).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:140-152
+/// ```c++
+///     while (size_read < GetBatchSize()) {
+///
+///         if (End())
+///             break;
+///
+///         CRef<CBlastSearchQuery> q;
+///         try { q.Reset(m_Source->GetNextSequence(scope)); }
+///         catch (const CObjReaderParseException& e) {
+///             if (e.GetErrCode() == CObjReaderParseException::eEOF) {
+///                 break;
+///             }
+///             throw;
+///         }
+/// ```
+fn scan<R: Read>(source: &mut FastaInputSource<R>) -> (Vec<usize>, QueryEnd) {
+    let mut lengths = Vec::new();
+    loop {
+        if source.end() {
+            return (lengths, QueryEnd::Input);
+        }
+        let mut warnings = Vec::new();
+        match source.next_sequence(&mut |message: &[u8]| {
+            warnings.extend_from_slice(message);
+            Ok(())
+        }) {
+            Ok(record) => lengths.push(record.sequence.len()),
+            Err(ReadError::Parse {
+                code: ParseErrorCode::Eof,
+                ..
+            }) => return (lengths, QueryEnd::EofError),
+            Err(error) => return (lengths, QueryEnd::Error { error, warnings }),
+        }
     }
 }
 
@@ -281,7 +344,7 @@ impl Store {
             .again
             .expect("LOSAT_X_QSTREAM reads a file it can read again");
         let started = Instant::now();
-        let (input_lengths, end) = read_queries_map(source, |record| record.sequence.len());
+        let (input_lengths, end) = scan(source);
         let scan = started.elapsed();
         let (query_input, lengths) = query_input_of(input_lengths, range);
         let reopen = |handle: &File| -> Result<File> {
@@ -953,7 +1016,7 @@ mod tests {
     /// with the switches' value `mode`, and how the first reading ended.
     fn store(mode: u8, path: &Path, range: Option<&SequenceRange>) -> (Store, QueryEnd) {
         let file = File::open(path).expect("open the test file");
-        let opening = Opening::with_mode(mode, path, &file, false);
+        let opening = Opening::with_mode(mode, path, &file, false, true);
         assert!(opening.acts());
         let mut source = FastaInputSource::from_file(file, config());
         assert!(!source.stream_is_empty());
@@ -1194,31 +1257,52 @@ mod tests {
         assert!(error.contains("changed while LOSAT read it"), "{error}");
     }
 
-    /// Where the switch does not act: off, standard input, a directory (not a regular file).
+    /// Where the switch does not act: off, the reports after the loop, standard input, a directory
+    /// (not a regular file).
     #[test]
     fn inputs_that_cannot_be_read_again() {
         let file = TempFile::new("off", b">a\nACGT\n");
         let handle = File::open(&file.0).unwrap();
         assert_eq!(
-            Opening::with_mode(0, &file.0, &handle, false).off,
+            Opening::with_mode(0, &file.0, &handle, false, true).off,
             Some(Off::NotSet)
         );
         assert_eq!(
-            Opening::with_mode(1, Path::new("-"), &handle, false).off,
+            Opening::with_mode(1, &file.0, &handle, false, false).off,
+            Some(Off::Reports)
+        );
+        assert_eq!(
+            Opening::with_mode(1, Path::new("-"), &handle, false, true).off,
             Some(Off::StandardInput)
         );
         assert_eq!(
-            Opening::with_mode(1, &file.0, &handle, true).off,
+            Opening::with_mode(1, &file.0, &handle, true, true).off,
             Some(Off::StandardInput)
         );
-        assert!(Opening::with_mode(1, &file.0, &handle, false).acts());
+        assert!(Opening::with_mode(1, &file.0, &handle, false, true).acts());
+        assert!(Opening::with_mode(2, &file.0, &handle, false, true).acts());
         #[cfg(unix)]
         {
             let dir = File::open(std::env::temp_dir()).unwrap();
             assert_eq!(
-                Opening::with_mode(1, &std::env::temp_dir(), &dir, false).off,
+                Opening::with_mode(1, &std::env::temp_dir(), &dir, false, true).off,
                 Some(Off::NotAFile)
             );
+        }
+    }
+
+    /// The first reading's lengths and end are those of `read_queries`.
+    #[test]
+    fn the_first_reading_is_that_of_read_queries() {
+        for seed in 1..=40u64 {
+            let file = TempFile::new("scan", &text(seed));
+            let old = old(&file.0);
+            let mut source = FastaInputSource::from_file(File::open(&file.0).unwrap(), config());
+            assert!(!source.stream_is_empty());
+            let (lengths, end) = scan(&mut source);
+            let old_lengths: Vec<usize> = old.records.iter().map(|r| r.seq().len()).collect();
+            assert_eq!(lengths, old_lengths, "seed {seed}");
+            assert_eq!(end_text(&end), end_text(&old.end), "seed {seed}");
         }
     }
 }

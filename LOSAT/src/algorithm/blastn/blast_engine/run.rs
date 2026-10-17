@@ -6119,9 +6119,15 @@ fn search_cli(
     // batch is read.
     let shared_standard_input =
         args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-";
-    // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file can be read a second time (a second
-    // handle on it, at the position its reader starts from).
-    let x_opening = x_query_stream::Opening::new(&args.query, &query_file, shared_standard_input);
+    // LOSAT_X_QSTREAM: whether the query file is read a second time, batch by batch (a second
+    // handle on it, at the position its reader starts from), where the reports may be written
+    // batch by batch (LOSAT_X_RPTSTREAM).
+    let x_opening = x_query_stream::Opening::new(
+        &args.query,
+        &query_file,
+        shared_standard_input,
+        x_rpt_stream::switch_on(),
+    );
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders);
     let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);
     if !shared_standard_input && query_source.stream_is_empty() {

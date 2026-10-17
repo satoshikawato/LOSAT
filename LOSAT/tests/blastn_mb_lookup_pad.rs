@@ -12,6 +12,10 @@
 //! its comparison with the padded fill and says so (`[X_SHADOW] MBLUTPAD tables=` more than 0),
 //! and says nothing with the switch off. That the bytes equal NCBI's is the business of the blastn
 //! fixtures.
+//!
+//! The read-once fill (`LOSAT_X_MBLUTONCE`, also on by default, `x_mb_lookup_once.rs`) takes the
+//! table before this fill does, so every search here runs with `LOSAT_X_MBLUTONCE=0`
+//! (`tests/blastn_mb_lookup_once.rs` tests that fill).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -21,6 +25,7 @@ const OFF: (&str, &str) = ("LOSAT_X_MBLUTPAD", "0");
 const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_PAIRPARSHADOW", "1");
+const ONCE_OFF: (&str, &str) = ("LOSAT_X_MBLUTONCE", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -28,8 +33,8 @@ fn fasta(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// One search, `-outfmt 6` on standard output, with the given variables as its only `LOSAT_*`
-/// variables. `LOSAT_BLASTX_WORKER_LOG` stays, or is set to a file of this test when the
+/// One search, `-outfmt 6` on standard output, with `LOSAT_X_MBLUTONCE=0` and the given variables
+/// as its only `LOSAT_*` variables. `LOSAT_BLASTX_WORKER_LOG` stays, or is set to a file of this test when the
 /// environment has none: a binary built with the `blastx-worker-probe` feature (`cargo test
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one thread,
 /// and it selects nothing. Returns the report and the standard error.
@@ -64,6 +69,7 @@ fn blastn(
         .arg(fasta(subject))
         .args(["-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
+        .env(ONCE_OFF.0, ONCE_OFF.1)
         .envs(switches.iter().copied())
         .output()
         .expect("run LOSAT");

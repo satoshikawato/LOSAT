@@ -65,15 +65,21 @@
 //!
 //! The shadow also encodes and computes the blocks serially and compares them: the encodings
 //! byte for byte, the blocks field by field with the bits of every float. On a difference it
-//! prints `[X_SHADOW] QPREPPAR ... DIFFERENT` and panics; otherwise `main` prints
-//! `[X_SHADOW] QPREPPAR batches= queries= contexts= diffs=0 identical` at exit (`batches=` and
-//! `queries=` count the encodings made on a pool, `contexts=` the contexts whose blocks were made on
-//! a pool; `diffs=` counts the differences found, also in a batch that a LOSAT_X_QBATCHPAR slot
+//! prints `[X_SHADOW] QPREPPAR ... DIFFERENT` and panics with a message that names what differs
+//! (the first differing byte of the buffer, or the context and the field of the block); otherwise
+//! `main` prints
+//! `[X_SHADOW] QPREPPAR batches= queries= contexts= fallbacks= diffs=0 identical` at exit
+//! (`batches=` and `queries=` count the encodings made on a pool, `contexts=` the contexts whose
+//! blocks were made on a pool; `fallbacks=` counts the batches with two or more queries on a pool
+//! whose spans were not in query order and disjoint, which the serial function encoded: they are
+//! not counted in `batches=`/`queries=` and not compared, the layout of `search_query_batch` never
+//! causes one; `diffs=` counts the differences found, also in a batch that a LOSAT_X_QBATCHPAR slot
 //! made and the loop discarded; the line ends in `identical` only when it is 0, else in
-//! `DIFFERENT`). With `LOSAT_X_STATS`, `main` prints `[X_STATS] QPREPPAR encode_s= karlin_s=`, the
-//! summed wall times of the two steps over every batch (so with LOSAT_X_QBATCHPAR they include the
-//! slots' batches, which run concurrently, and those the loop discards; with the shadow they
-//! include the serial reference pass), with or without the switch.
+//! `DIFFERENT`). With `LOSAT_X_STATS`, `main` prints
+//! `[X_STATS] QPREPPAR encode_s= karlin_s= fallbacks=`, the summed wall times of the two steps over
+//! every batch (so with LOSAT_X_QBATCHPAR they include the slots' batches, which run concurrently,
+//! and those the loop discards; with the shadow they include the serial reference pass) and the
+//! fallbacks (counted whenever the switch is on), with or without the switch.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -114,6 +120,7 @@ fn mode() -> u8 {
 static BATCHES: AtomicU64 = AtomicU64::new(0);
 static QUERIES: AtomicU64 = AtomicU64::new(0);
 static CONTEXTS: AtomicU64 = AtomicU64::new(0);
+static FALLBACKS: AtomicU64 = AtomicU64::new(0);
 static DIFFS: AtomicU64 = AtomicU64::new(0);
 static ENCODE_NANOS: AtomicU64 = AtomicU64::new(0);
 static KARLIN_NANOS: AtomicU64 = AtomicU64::new(0);
@@ -146,17 +153,21 @@ fn serial_blocks(contexts: &[&[u8]], spec: &NuclScoringSpec) -> Vec<Option<Karli
 }
 
 /// The range of a context of `length` letters at `offset` in the buffer with its first sentinel
-/// (`None` for a context that is empty or does not end inside the block, which stays sentinels:
-/// the `place` of `build_query_blastna_buffer`).
+/// (`None` for a context that is empty or does not end inside the block, which stays sentinels).
+// Copy of the `place` closure in `build_query_blastna_buffer` (run.rs): the serial function stays
+// untouched with the switch off, so a change of its rule must be made here too; the random
+// pool-vs-serial tests and the shadow compare the two.
 fn place(offset: i32, length: usize, query_concat_length: usize) -> Option<std::ops::Range<usize>> {
     let start = offset.max(0) as usize;
     let end = start.saturating_add(length);
     (start < end && end <= query_concat_length).then(|| start + 1..end + 1)
 }
 
-/// The parallel buffer; the same bytes as `serial_buffer`. Only called when `on_pool`. `probe` is
-/// called once per query, on the thread that encodes it; production passes `|| {}`, which the
-/// compiler removes (a unit test passes a closure that looks at the thread).
+/// The parallel buffer; the same bytes as `serial_buffer`. Only called when `on_pool`. The flag is
+/// `true` when the queries were encoded on the pool and `false` when the spans were not in query
+/// order and disjoint and the serial function made the buffer (a fallback). `probe` is called once
+/// per query, on the thread that encodes it; production passes `|| {}`, which the compiler removes
+/// (a unit test passes a closure that looks at the thread).
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -167,7 +178,7 @@ fn parallel_buffer<P: Fn() + Sync>(
     query_concat_length: usize,
     pool: &SearchPool<'_>,
     probe: &P,
-) -> Vec<u8> {
+) -> (Vec<u8>, bool) {
     debug_assert_eq!(2 * query_letters.len(), context_offsets.len());
     // (first byte, end, query) of the span of each query with a placed context, in query order.
     let mut spans: Vec<(usize, usize, usize)> = Vec::with_capacity(query_letters.len());
@@ -188,7 +199,10 @@ fn parallel_buffer<P: Fn() + Sync>(
     // The spans of different queries must not overlap and must follow the query order (the serial
     // function writes in query order, so overlapping contexts would make its bytes depend on it).
     if !spans.windows(2).all(|w| w[0].1 <= w[1].0) {
-        return serial_buffer(query_letters, context_offsets, query_concat_length);
+        return (
+            serial_buffer(query_letters, context_offsets, query_concat_length),
+            false,
+        );
     }
     let mut with_sentinels = vec![super::NUCL_SENTINEL; query_concat_length + 2];
     let mut parts: Vec<(&mut [u8], usize, usize)> = Vec::with_capacity(spans.len());
@@ -206,8 +220,9 @@ fn parallel_buffer<P: Fn() + Sync>(
             probe();
             let letters = query_letters[*q];
             let offsets = &context_offsets[2 * *q..2 * *q + 2];
-            // The same two calls as the serial function, into the same bytes (`range` is
-            // relative to the buffer, `a` is the buffer index of the part's first byte).
+            // The same two calls as `build_query_blastna_buffer` (run.rs), in its order, into the
+            // same bytes (`range` is relative to the buffer, `a` is the buffer index of the part's
+            // first byte). A copy: a change of the serial calls must be made here too.
             if let Some(range) = place(offsets[0], letters.len(), query_concat_length) {
                 encode_iupac_to_blastna_into(letters, &mut part[range.start - *a..range.end - *a]);
             }
@@ -219,7 +234,7 @@ fn parallel_buffer<P: Fn() + Sync>(
             }
         });
     });
-    with_sentinels
+    (with_sentinels, true)
 }
 
 #[cfg(not(all(
@@ -232,8 +247,11 @@ fn parallel_buffer<P: Fn() + Sync>(
     query_concat_length: usize,
     _pool: &SearchPool<'_>,
     _probe: &P,
-) -> Vec<u8> {
-    serial_buffer(query_letters, context_offsets, query_concat_length)
+) -> (Vec<u8>, bool) {
+    (
+        serial_buffer(query_letters, context_offsets, query_concat_length),
+        false,
+    )
 }
 
 /// The parallel blocks; the same blocks as `serial_blocks`. Only called when `on_pool`. `probe` is
@@ -254,7 +272,8 @@ fn parallel_blocks<P: Fn() + Sync>(
             .par_iter()
             .map(|context| {
                 probe();
-                // The body of `context_ungapped_blocks`.
+                // A copy of the body of `context_ungapped_blocks` (scoring.rs): a change of the
+                // serial function must be made here too.
                 if context.is_empty() {
                     None
                 } else {
@@ -294,6 +313,117 @@ fn same_bits(a: &Option<KarlinParams>, b: &Option<KarlinParams>) -> bool {
     }
 }
 
+/// What differs between the buffer made on the pool and the serial one, or `None` when they are
+/// equal (length and every byte).
+fn first_buffer_diff(fast: &[u8], slow: &[u8]) -> Option<String> {
+    if fast.len() != slow.len() {
+        return Some(format!(
+            "query buffer: lengths {} / {}",
+            fast.len(),
+            slow.len()
+        ));
+    }
+    fast.iter()
+        .zip(slow)
+        .position(|(fast, slow)| fast != slow)
+        .map(|i| {
+            format!(
+                "query buffer: first differing byte at index {i} ({} / {})",
+                fast[i], slow[i]
+            )
+        })
+}
+
+/// The name of the first field in which two blocks differ bit for bit ("none" when `same_bits`).
+fn block_field_diff(fast: &Option<KarlinParams>, slow: &Option<KarlinParams>) -> &'static str {
+    match (fast, slow) {
+        (Some(a), Some(b)) => [
+            ("lambda", a.lambda, b.lambda),
+            ("k", a.k, b.k),
+            ("h", a.h, b.h),
+            ("alpha", a.alpha, b.alpha),
+            ("beta", a.beta, b.beta),
+        ]
+        .into_iter()
+        .find(|(_, x, y)| x.to_bits() != y.to_bits())
+        .map_or("none", |(name, _, _)| name),
+        (Some(_), None) => "Some / None",
+        (None, Some(_)) => "None / Some",
+        (None, None) => "none",
+    }
+}
+
+/// What differs between the blocks made on the pool and the serial ones, or `None` when they are
+/// equal (count and every block, field by field with the bits of the floats).
+fn first_block_diff(
+    fast: &[Option<KarlinParams>],
+    slow: &[Option<KarlinParams>],
+) -> Option<String> {
+    if fast.len() != slow.len() {
+        return Some(format!(
+            "Karlin blocks: counts {} / {}",
+            fast.len(),
+            slow.len()
+        ));
+    }
+    fast.iter()
+        .zip(slow)
+        .position(|(fast, slow)| !same_bits(fast, slow))
+        .map(|i| {
+            format!(
+                "Karlin blocks: context {i}, field {} ({:?} / {:?})",
+                block_field_diff(&fast[i], &slow[i]),
+                fast[i],
+                slow[i]
+            )
+        })
+}
+
+// Test-only hooks for the shadow's tests: the next buffer / block set made on the pool on this
+// thread is perturbed once, after it is made and before the shadow compares it. Not compiled
+// outside tests.
+#[cfg(test)]
+thread_local! {
+    /// The index of the byte of the next pool buffer to change.
+    static TAMPER_BUFFER: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// The field (0 = lambda .. 4 = beta) of the first block of the next pool block set to change.
+    static TAMPER_FIELD: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn tamper_buffer(buffer: &mut [u8]) {
+    if let Some(index) = TAMPER_BUFFER.with(|cell| cell.take()) {
+        buffer[index] ^= 1;
+    }
+}
+
+#[cfg(not(test))]
+#[inline(always)]
+fn tamper_buffer(_buffer: &mut [u8]) {}
+
+#[cfg(test)]
+fn tamper_blocks(blocks: &mut [Option<KarlinParams>]) {
+    if let Some(field) = TAMPER_FIELD.with(|cell| cell.take()) {
+        let block = blocks
+            .iter_mut()
+            .flatten()
+            .next()
+            .expect("a block to change");
+        let slot = match field {
+            0 => &mut block.lambda,
+            1 => &mut block.k,
+            2 => &mut block.h,
+            3 => &mut block.alpha,
+            _ => &mut block.beta,
+        };
+        *slot = f64::from_bits(slot.to_bits() ^ 1);
+    }
+}
+
+#[cfg(not(test))]
+#[inline(always)]
+fn tamper_blocks(_blocks: &mut [Option<KarlinParams>]) {}
+
 /// The query buffer as the switch `mode` makes it (0 = off, 1 = on, 2 = on and compared with the
 /// serial buffer). Separate from the environment so that tests choose the mode.
 pub(super) fn buffer_with_mode(
@@ -325,34 +455,35 @@ fn buffer_with_probe<P: Fn() + Sync>(
     if mode == 0 || !on_pool(pool, query_letters.len()) {
         return serial_buffer(query_letters, context_offsets, query_concat_length);
     }
-    let buffer = parallel_buffer(
+    let (mut buffer, on_the_pool) = parallel_buffer(
         query_letters,
         context_offsets,
         query_concat_length,
         pool,
         probe,
     );
+    if !on_the_pool {
+        // The serial function made it (spans not in query order and disjoint): not an encoding on
+        // a pool, nothing to compare.
+        FALLBACKS.fetch_add(1, Ordering::Relaxed);
+        return buffer;
+    }
+    tamper_buffer(&mut buffer);
     if mode == 2 {
         let reference = serial_buffer(query_letters, context_offsets, query_concat_length);
         BATCHES.fetch_add(1, Ordering::Relaxed);
         QUERIES.fetch_add(query_letters.len() as u64, Ordering::Relaxed);
-        if buffer != reference {
+        if let Some(what) = first_buffer_diff(&buffer, &reference) {
             DIFFS.fetch_add(1, Ordering::Relaxed);
-            let first = buffer
-                .iter()
-                .zip(&reference)
-                .position(|(fast, slow)| fast != slow);
             eprintln!(
-                "[X_SHADOW] QPREPPAR batches={} queries={} contexts={} diffs={} DIFFERENT (query buffer: lengths {} / {}, first byte {:?})",
+                "[X_SHADOW] QPREPPAR batches={} queries={} contexts={} fallbacks={} diffs={} DIFFERENT ({what})",
                 BATCHES.load(Ordering::Relaxed),
                 QUERIES.load(Ordering::Relaxed),
                 CONTEXTS.load(Ordering::Relaxed),
+                FALLBACKS.load(Ordering::Relaxed),
                 DIFFS.load(Ordering::Relaxed),
-                buffer.len(),
-                reference.len(),
-                first
             );
-            panic!("LOSAT_X_QPREPPARSHADOW: the query buffer made on the pool differs from the serial one");
+            panic!("LOSAT_X_QPREPPARSHADOW: the query buffer made on the pool differs from the serial one ({what})");
         }
     }
     buffer
@@ -379,29 +510,22 @@ fn blocks_with_probe<P: Fn() + Sync>(
     if mode == 0 || !on_pool(pool, contexts.len()) {
         return serial_blocks(contexts, spec);
     }
-    let blocks = parallel_blocks(contexts, spec, pool, probe);
+    let mut blocks = parallel_blocks(contexts, spec, pool, probe);
+    tamper_blocks(&mut blocks);
     if mode == 2 {
         let reference = serial_blocks(contexts, spec);
         CONTEXTS.fetch_add(contexts.len() as u64, Ordering::Relaxed);
-        let first = (blocks.len() != reference.len()).then_some(0).or_else(|| {
-            blocks
-                .iter()
-                .zip(&reference)
-                .position(|(fast, slow)| !same_bits(fast, slow))
-        });
-        if let Some(first) = first {
+        if let Some(what) = first_block_diff(&blocks, &reference) {
             DIFFS.fetch_add(1, Ordering::Relaxed);
             eprintln!(
-                "[X_SHADOW] QPREPPAR batches={} queries={} contexts={} diffs={} DIFFERENT (context {}: {:?} / {:?})",
+                "[X_SHADOW] QPREPPAR batches={} queries={} contexts={} fallbacks={} diffs={} DIFFERENT ({what})",
                 BATCHES.load(Ordering::Relaxed),
                 QUERIES.load(Ordering::Relaxed),
                 CONTEXTS.load(Ordering::Relaxed),
+                FALLBACKS.load(Ordering::Relaxed),
                 DIFFS.load(Ordering::Relaxed),
-                first,
-                blocks.get(first),
-                reference.get(first)
             );
-            panic!("LOSAT_X_QPREPPARSHADOW: the Karlin blocks made on the pool differ from the serial ones");
+            panic!("LOSAT_X_QPREPPARSHADOW: the Karlin blocks made on the pool differ from the serial ones ({what})");
         }
     }
     blocks
@@ -452,18 +576,20 @@ pub(super) fn ungapped_blocks(
 pub fn print_summary() {
     if timing_on() && CALLS.load(Ordering::Relaxed) > 0 {
         eprintln!(
-            "[X_STATS] QPREPPAR encode_s={:.3} karlin_s={:.3}",
+            "[X_STATS] QPREPPAR encode_s={:.3} karlin_s={:.3} fallbacks={}",
             ENCODE_NANOS.load(Ordering::Relaxed) as f64 / 1e9,
-            KARLIN_NANOS.load(Ordering::Relaxed) as f64 / 1e9
+            KARLIN_NANOS.load(Ordering::Relaxed) as f64 / 1e9,
+            FALLBACKS.load(Ordering::Relaxed)
         );
     }
     if mode() == 2 {
         let diffs = DIFFS.load(Ordering::Relaxed);
         eprintln!(
-            "[X_SHADOW] QPREPPAR batches={} queries={} contexts={} diffs={diffs} {}",
+            "[X_SHADOW] QPREPPAR batches={} queries={} contexts={} fallbacks={} diffs={diffs} {}",
             BATCHES.load(Ordering::Relaxed),
             QUERIES.load(Ordering::Relaxed),
             CONTEXTS.load(Ordering::Relaxed),
+            FALLBACKS.load(Ordering::Relaxed),
             if diffs == 0 { "identical" } else { "DIFFERENT" }
         );
     }
@@ -513,11 +639,45 @@ mod tests {
         seq
     }
 
-    /// A batch of `count` random queries in the layout of `search_query_batch` (plus context then
-    /// minus context of each query, one after the other; an empty query has contexts at the
-    /// running offset): the letters, the context offsets and the length of the block. `gap`
-    /// letters of sentinels follow each query when it is not 0, to test spans that do not touch.
-    fn batch(rng: &mut Rng, count: usize, gap: usize) -> (Vec<Vec<u8>>, Vec<i32>, usize) {
+    /// The context offsets and the length of the block that `search_query_batch` gives to
+    /// `queries`: `context_room` for each context (its letters and one sentinel, nothing for an
+    /// empty query), plus context then minus context of each query, and the
+    /// `query_concat_length` formula of run.rs (the last context's offset and length plus 2, or
+    /// plus 1 when it is empty, less the two end sentinels).
+    fn production_layout(queries: &[Vec<u8>]) -> (Vec<i32>, usize) {
+        let room = |length: usize| if length == 0 { 0 } else { length + 1 };
+        let mut offsets = Vec::new();
+        let mut at = 0usize;
+        let mut last = (0usize, 0usize);
+        for query in queries {
+            let plus = at;
+            let minus = plus + room(query.len());
+            offsets.push(plus as i32);
+            offsets.push(minus as i32);
+            at = minus + room(query.len());
+            last = (minus, query.len());
+        }
+        let total = if queries.is_empty() {
+            0
+        } else {
+            (last.0 + last.1 + if last.1 == 0 { 1 } else { 2 }).saturating_sub(2)
+        };
+        (offsets, total)
+    }
+
+    /// A batch of `count` random queries in the production layout (`production_layout`): the
+    /// letters, the context offsets and the length of the block.
+    fn batch(rng: &mut Rng, count: usize) -> (Vec<Vec<u8>>, Vec<i32>, usize) {
+        let queries: Vec<Vec<u8>> = (0..count).map(|_| sequence(rng)).collect();
+        let (offsets, total) = production_layout(&queries);
+        (queries, offsets, total)
+    }
+
+    /// A batch in a COMPACT layout, which is NOT the production one: the minus context follows
+    /// the plus context with no sentinel between them, and the next query follows at once (`gap`
+    /// is 0) or after `gap` sentinels. It tests spans that touch each other, which the production
+    /// layout (a sentinel after every context) never has.
+    fn compact_batch(rng: &mut Rng, count: usize, gap: usize) -> (Vec<Vec<u8>>, Vec<i32>, usize) {
         let queries: Vec<Vec<u8>> = (0..count).map(|_| sequence(rng)).collect();
         let mut offsets = Vec::new();
         let mut at = 0usize;
@@ -527,6 +687,36 @@ mod tests {
             at += 2 * query.len() + gap;
         }
         (queries, offsets, at)
+    }
+
+    /// The contexts (slices of the block without its end sentinels) of a batch, in context order
+    /// (an empty query gives two empty slices).
+    fn contexts_of<'a>(block: &'a [u8], queries: &[Vec<u8>], offsets: &[i32]) -> Vec<&'a [u8]> {
+        queries
+            .iter()
+            .zip(offsets.chunks_exact(2))
+            .flat_map(|(query, pair)| {
+                pair.iter().map(move |&offset| {
+                    if query.is_empty() {
+                        &[][..]
+                    } else {
+                        &block[offset as usize..offset as usize + query.len()]
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// The text of the panic that `work` raises (the test fails when it does not panic).
+    fn panic_text<R>(work: impl FnOnce() -> R) -> String {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) {
+            Ok(_) => panic!("expected a panic"),
+            Err(payload) => payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|text| text.to_string()))
+                .unwrap_or_default(),
+        }
     }
 
     fn spec() -> NuclScoringSpec {
@@ -576,20 +766,42 @@ mod tests {
     }
 
     /// Pool == serial for the buffer at 1, 2, 3 and 7 threads on random batches (N, IUPAC, lower
-    /// case, empty queries, one query, none), also with sentinel gaps between the queries' spans.
+    /// case, empty queries, one query, none) in the production layout, which never takes the
+    /// fallback, and in the compact layouts (spans that touch, or with sentinel gaps).
     #[cfg(feature = "parallel")]
     #[test]
     fn pool_buffer_equals_serial_buffer() {
         let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
         for threads in [1usize, 2, 3, 7] {
             with_search_pool(threads, "blastn", |pool| {
-                for (count, gap) in [(0, 0), (1, 0), (2, 0), (40, 0), (40, 3), (90, 0)] {
-                    let (queries, offsets, total) = batch(&mut rng, count, gap);
+                for (count, gap) in [
+                    (0, None),
+                    (1, None),
+                    (2, None),
+                    (40, None),
+                    (90, None),
+                    (0, Some(0)),
+                    (1, Some(0)),
+                    (2, Some(0)),
+                    (40, Some(0)),
+                    (40, Some(3)),
+                    (90, Some(0)),
+                ] {
+                    let (queries, offsets, total) = match gap {
+                        None => batch(&mut rng, count),
+                        Some(gap) => compact_batch(&mut rng, count, gap),
+                    };
                     let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
                     let want = serial_buffer(&letters, &offsets, total);
                     for mode in [1u8, 2] {
                         let got = buffer_with_mode(&letters, &offsets, total, pool, mode);
-                        assert_eq!(got, want, "threads {threads} count {count} gap {gap}");
+                        assert_eq!(got, want, "threads {threads} count {count} gap {gap:?}");
+                    }
+                    if gap.is_none() && count > 1 && pool.threads() > 1 {
+                        let (got, on_the_pool) =
+                            parallel_buffer(&letters, &offsets, total, pool, &|| {});
+                        assert!(on_the_pool, "the production layout took the fallback");
+                        assert_eq!(got, want);
                     }
                 }
                 Ok(())
@@ -605,7 +817,7 @@ mod tests {
     fn irregular_layouts_equal_serial_buffer() {
         let mut rng = Rng(0x1234_5678_9abc_def1);
         with_search_pool(3, "blastn", |pool| {
-            let (queries, offsets, total) = batch(&mut rng, 30, 0);
+            let (queries, offsets, total) = batch(&mut rng, 30);
             let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
             for mutate in 0..4 {
                 let mut offsets = offsets.clone();
@@ -622,6 +834,11 @@ mod tests {
                 let want = serial_buffer(&letters, &offsets, total);
                 let got = buffer_with_mode(&letters, &offsets, total, pool, 2);
                 assert_eq!(got, want, "mutation {mutate}");
+                // Out of order or overlapping spans are the fallback (the serial function
+                // made the buffer, nothing was encoded on the pool).
+                let (got, on_the_pool) = parallel_buffer(&letters, &offsets, total, pool, &|| {});
+                assert_eq!(got, want, "mutation {mutate}");
+                assert_eq!(on_the_pool, mutate < 2, "mutation {mutate}");
             }
             Ok(())
         })
@@ -634,21 +851,10 @@ mod tests {
     #[test]
     fn pool_blocks_equal_serial_blocks() {
         let mut rng = Rng(0xdead_beef_cafe_f00d);
-        let (queries, offsets, total) = batch(&mut rng, 70, 0);
+        let (queries, offsets, total) = batch(&mut rng, 70);
         let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
         let buffer = serial_buffer(&letters, &offsets, total);
-        let block = &buffer[1..total + 1];
-        let mut contexts: Vec<&[u8]> = Vec::new();
-        for (query, pair) in queries.iter().zip(offsets.chunks_exact(2)) {
-            for &offset in pair {
-                let start = offset as usize;
-                contexts.push(if query.is_empty() {
-                    &[][..]
-                } else {
-                    &block[start..start + query.len()]
-                });
-            }
-        }
+        let contexts = contexts_of(&buffer[1..total + 1], &queries, &offsets);
         let mut compared = 0;
         for (reward, penalty) in [(1, -2), (2, -3), (1, -3), (4, -5)] {
             let spec = NuclScoringSpec {
@@ -715,20 +921,10 @@ mod tests {
         use std::time::{Duration, Instant};
 
         let mut rng = Rng(0x0bad_cafe_1234_5678);
-        let (queries, offsets, total) = batch(&mut rng, 30, 0);
+        let (queries, offsets, total) = batch(&mut rng, 30);
         let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
         let want_buffer = serial_buffer(&letters, &offsets, total);
-        let block = &want_buffer[1..total + 1];
-        let contexts: Vec<&[u8]> = queries
-            .iter()
-            .zip(offsets.chunks_exact(2))
-            .flat_map(|(query, pair)| {
-                pair.iter().map(move |&offset| {
-                    let start = offset as usize;
-                    &block[start..start + query.len()]
-                })
-            })
-            .collect();
+        let contexts = contexts_of(&want_buffer[1..total + 1], &queries, &offsets);
         let spec = spec();
         let want_blocks = serial_blocks(&contexts, &spec);
 
@@ -828,6 +1024,311 @@ mod tests {
             let got = blocks_with_probe(&contexts, &spec, pool, 1, &probe);
             assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));
             assert_eq!(calls.load(Ordering::SeqCst), 0);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// A random query of 0 to `max` letters: often empty, one letter or very short, with bytes of
+    /// every value, IUPAC letters and lower case (the reviewer's generator, for the production
+    /// layout tests).
+    fn varied_sequence(rng: &mut Rng, max: usize) -> Vec<u8> {
+        let len = match rng.below(7) {
+            0 => 0,
+            1 => 1,
+            2 => rng.below(4) as usize,
+            _ => rng.below(max as u64 + 1) as usize,
+        };
+        (0..len)
+            .map(|_| match rng.below(10) {
+                0 => rng.below(256) as u8,
+                1 => b"NnRYKMSWBDHVrykmswbdhvUu-*"[rng.below(26) as usize],
+                2 => b"acgt"[rng.below(4) as usize],
+                _ => b"ACGT"[rng.below(4) as usize],
+            })
+            .collect()
+    }
+
+    /// The production layout (offsets of `search_query_batch`, empty queries first or last,
+    /// bytes 0..=255) on pools of 2, 3, 5 and 16 threads, in modes 1 and 2, with two score pairs:
+    /// the buffer byte for byte, the blocks bit for bit, and never the fallback.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn production_layout_buffers_and_blocks() {
+        let mut rng = Rng(0x5151_7e57_0dd5_eed5);
+        let mut cases = 0;
+        for threads in [2usize, 3, 5, 16] {
+            with_search_pool(threads, "blastn", |pool| {
+                for (count, max) in [
+                    (2usize, 50usize),
+                    (3, 5),
+                    (7, 3000),
+                    (64, 400),
+                    (300, 60),
+                    (2_000, 30),
+                ] {
+                    for _ in 0..2 {
+                        let mut queries: Vec<Vec<u8>> =
+                            (0..count).map(|_| varied_sequence(&mut rng, max)).collect();
+                        if rng.below(3) == 0 {
+                            queries.push(Vec::new());
+                        }
+                        if rng.below(3) == 0 {
+                            queries.insert(0, Vec::new());
+                        }
+                        if queries.iter().all(|query| query.is_empty()) {
+                            queries.push(b"ACGT".to_vec());
+                        }
+                        let (offsets, total) = production_layout(&queries);
+                        let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+                        let want = serial_buffer(&letters, &offsets, total);
+                        let (got, on_the_pool) =
+                            parallel_buffer(&letters, &offsets, total, pool, &|| {});
+                        assert!(on_the_pool, "the production layout took the fallback");
+                        assert_eq!(got, want, "threads {threads} count {count}");
+                        for mode in [1u8, 2] {
+                            let got = buffer_with_mode(&letters, &offsets, total, pool, mode);
+                            assert_eq!(got, want, "threads {threads} count {count} mode {mode}");
+                        }
+                        let contexts = contexts_of(&want[1..total + 1], &queries, &offsets);
+                        for (reward, penalty) in [(1, -2), (2, -3)] {
+                            let spec = NuclScoringSpec {
+                                reward,
+                                penalty,
+                                gap_open: 0,
+                                gap_extend: 0,
+                            };
+                            let want = serial_blocks(&contexts, &spec);
+                            for mode in [1u8, 2] {
+                                let got = blocks_with_mode(&contexts, &spec, pool, mode);
+                                assert_eq!(got.len(), want.len());
+                                assert!(
+                                    got.iter().zip(&want).all(|(a, b)| same_bits(a, b)),
+                                    "threads {threads} count {count} r {reward} p {penalty}"
+                                );
+                            }
+                        }
+                        cases += 1;
+                    }
+                }
+                Ok(())
+            })
+            .unwrap();
+        }
+        assert!(cases >= 40, "{cases}");
+    }
+
+    /// Called from a plain thread that is not a worker of the pool it is given: the work must still
+    /// run on that pool (this is what `SearchPool::install` adds), never on rayon's global pool.
+    /// Without `install` in the two parallel steps the probe sees a thread outside the pool, and
+    /// this test fails.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn caller_outside_the_pool_still_runs_on_it() {
+        use std::sync::atomic::AtomicUsize;
+        let mut rng = Rng(0x7777_1234_abcd_0001);
+        let queries: Vec<Vec<u8>> = (0..64).map(|_| varied_sequence(&mut rng, 500)).collect();
+        let (offsets, total) = production_layout(&queries);
+        let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        let want = serial_buffer(&letters, &offsets, total);
+        let contexts = contexts_of(&want[1..total + 1], &queries, &offsets);
+        let spec = spec();
+        with_search_pool(3, "blastn", |pool| {
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        assert!(rayon::current_thread_index().is_none());
+                        let wrong = AtomicUsize::new(0);
+                        let probe = || {
+                            if rayon::current_num_threads() != 3
+                                || rayon::current_thread_index().is_none()
+                            {
+                                wrong.fetch_add(1, Ordering::SeqCst);
+                            }
+                        };
+                        let got = buffer_with_probe(&letters, &offsets, total, pool, 1, &probe);
+                        assert_eq!(got, want);
+                        let got = blocks_with_probe(&contexts, &spec, pool, 1, &probe);
+                        assert_eq!(got.len(), contexts.len());
+                        assert_eq!(
+                            wrong.load(Ordering::SeqCst),
+                            0,
+                            "work ran off the search pool"
+                        );
+                    })
+                    .join()
+                    .unwrap();
+            });
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// A LOSAT_X_QBATCHPAR-like slot: a plain thread with a private pool of 2 while the outer pool
+    /// of 4 exists, and the steps called from inside a parallel loop of the outer pool (nested).
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn slot_pool_and_nested_calls() {
+        use rayon::prelude::*;
+        use std::sync::atomic::AtomicUsize;
+        let mut rng = Rng(0x0123_4567_89ab_cdef);
+        let queries: Vec<Vec<u8>> = (0..200).map(|_| varied_sequence(&mut rng, 800)).collect();
+        let (offsets, total) = production_layout(&queries);
+        let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        let want = serial_buffer(&letters, &offsets, total);
+        let contexts = contexts_of(&want[1..total + 1], &queries, &offsets);
+        let spec = spec();
+        let want_blocks = serial_blocks(&contexts, &spec);
+        with_search_pool(4, "blastn", |outer| {
+            std::thread::scope(|scope| {
+                let slot_thread = scope.spawn(|| {
+                    with_search_pool(2, "blastn", |slot| {
+                        let wrong = AtomicUsize::new(0);
+                        let probe = || {
+                            if rayon::current_num_threads() != 2 {
+                                wrong.fetch_add(1, Ordering::SeqCst);
+                            }
+                        };
+                        let got = buffer_with_probe(&letters, &offsets, total, slot, 2, &probe);
+                        assert_eq!(got, want);
+                        let got = blocks_with_probe(&contexts, &spec, slot, 2, &probe);
+                        assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));
+                        assert_eq!(wrong.load(Ordering::SeqCst), 0);
+                        Ok(())
+                    })
+                    .unwrap()
+                });
+                outer.install(|| {
+                    (0..6).into_par_iter().for_each(|_| {
+                        let got = buffer_with_mode(&letters, &offsets, total, outer, 2);
+                        assert_eq!(got, want);
+                        let got = blocks_with_mode(&contexts, &spec, outer, 2);
+                        assert!(got.iter().zip(&want_blocks).all(|(a, b)| same_bits(a, b)));
+                    })
+                });
+                slot_thread.join().unwrap();
+            });
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// The comparison functions the shadow uses see a length mismatch, one changed byte, and in
+    /// the blocks a count mismatch, `None` against `Some` and a change in each of the five fields.
+    #[test]
+    fn diff_functions_name_what_differs() {
+        assert_eq!(first_buffer_diff(&[1, 2, 3], &[1, 2, 3]), None);
+        assert!(first_buffer_diff(&[1, 2, 3], &[1, 2])
+            .unwrap()
+            .contains("lengths 3 / 2"));
+        let text = first_buffer_diff(&[1, 2, 3], &[1, 7, 3]).unwrap();
+        assert!(text.contains("index 1 (2 / 7)"), "{text}");
+
+        let base = KarlinParams {
+            lambda: 0.625,
+            k: 0.41,
+            h: 0.78,
+            alpha: 1.5,
+            beta: -2.0,
+        };
+        assert_eq!(
+            first_block_diff(&[Some(base), None], &[Some(base), None]),
+            None
+        );
+        assert!(first_block_diff(&[None], &[None, None])
+            .unwrap()
+            .contains("counts 1 / 2"));
+        let text = first_block_diff(&[None, Some(base)], &[None, None]).unwrap();
+        assert!(
+            text.contains("context 1") && text.contains("Some / None"),
+            "{text}"
+        );
+        let text = first_block_diff(&[None], &[Some(base)]).unwrap();
+        assert!(text.contains("None / Some"), "{text}");
+        let variants = [
+            (
+                "lambda",
+                KarlinParams {
+                    lambda: 0.626,
+                    ..base
+                },
+            ),
+            ("k", KarlinParams { k: 0.42, ..base }),
+            ("h", KarlinParams { h: 0.79, ..base }),
+            ("alpha", KarlinParams { alpha: 1.6, ..base }),
+            ("beta", KarlinParams { beta: -2.1, ..base }),
+        ];
+        for (name, variant) in variants {
+            let text = first_block_diff(&[None, Some(variant)], &[None, Some(base)]).unwrap();
+            assert!(
+                text.contains("context 1") && text.contains(&format!("field {name} ")),
+                "{text}"
+            );
+        }
+    }
+
+    /// The shadow panics, naming the first differing byte, when the buffer made on the pool
+    /// differs from the serial one (the test hook changes one encoded byte of the pool's buffer);
+    /// without the hook the same call is silent, and with the switch only (mode 1) nothing is
+    /// compared.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn shadow_panics_on_a_changed_buffer_byte() {
+        let mut rng = Rng(0x0bad_0001_0002_0003);
+        let (queries, offsets, total) = batch(&mut rng, 40);
+        let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        let want = serial_buffer(&letters, &offsets, total);
+        with_search_pool(3, "blastn", |pool| {
+            assert_eq!(buffer_with_mode(&letters, &offsets, total, pool, 2), want);
+            for index in [0, total / 2, total + 1] {
+                TAMPER_BUFFER.with(|cell| cell.set(Some(index)));
+                let text = panic_text(|| buffer_with_mode(&letters, &offsets, total, pool, 2));
+                assert!(
+                    text.contains("LOSAT_X_QPREPPARSHADOW")
+                        && text.contains("query buffer")
+                        && text.contains(&format!("first differing byte at index {index} (")),
+                    "{text}"
+                );
+            }
+            // Mode 1 compares nothing: the changed byte goes through.
+            TAMPER_BUFFER.with(|cell| cell.set(Some(total / 2)));
+            let got = buffer_with_mode(&letters, &offsets, total, pool, 1);
+            assert_ne!(got, want);
+            assert_eq!(buffer_with_mode(&letters, &offsets, total, pool, 2), want);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// The shadow panics, naming the context and the field, when one field of a block made on the
+    /// pool differs by one bit from the serial one (the test hook changes it), for each of the five
+    /// fields.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn shadow_panics_on_a_changed_karlin_field() {
+        let mut rng = Rng(0x0bad_0004_0005_0006);
+        let (queries, offsets, total) = batch(&mut rng, 40);
+        let letters: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        let buffer = serial_buffer(&letters, &offsets, total);
+        let contexts = contexts_of(&buffer[1..total + 1], &queries, &offsets);
+        let spec = spec();
+        let want = serial_blocks(&contexts, &spec);
+        let first = want.iter().position(Option::is_some).expect("a block");
+        with_search_pool(3, "blastn", |pool| {
+            let got = blocks_with_mode(&contexts, &spec, pool, 2);
+            assert!(got.iter().zip(&want).all(|(a, b)| same_bits(a, b)));
+            for (field, name) in ["lambda", "k", "h", "alpha", "beta"]
+                .into_iter()
+                .enumerate()
+            {
+                TAMPER_FIELD.with(|cell| cell.set(Some(field)));
+                let text = panic_text(|| blocks_with_mode(&contexts, &spec, pool, 2));
+                assert!(
+                    text.contains("LOSAT_X_QPREPPARSHADOW")
+                        && text.contains(&format!("context {first}, field {name} (")),
+                    "{text}"
+                );
+            }
             Ok(())
         })
         .unwrap();

@@ -151,7 +151,8 @@ fn blastn(
     (output.stdout, stderr)
 }
 
-/// The numbers of `[X_SHADOW] QPREPPAR batches=B queries=Q contexts=C diffs=0 identical` in `stderr`.
+/// The numbers of `[X_SHADOW] QPREPPAR batches=B queries=Q contexts=C fallbacks=0 diffs=0 identical`
+/// in `stderr` (the layout of `search_query_batch` never takes the fallback).
 fn shadow_counts(stderr: &str) -> (u64, u64, u64) {
     let line = stderr
         .lines()
@@ -164,6 +165,7 @@ fn shadow_counts(stderr: &str) -> (u64, u64, u64) {
             .and_then(|value| value.parse().ok())
             .unwrap_or_else(|| panic!("no {name} in: {line}"))
     };
+    assert_eq!(field("fallbacks="), 0, "{line}");
     assert_eq!(stderr.lines().count(), 1, "{stderr}");
     (field("batches="), field("queries="), field("contexts="))
 }
@@ -264,6 +266,12 @@ fn dc_megablast_batch_prepared_on_the_pool() {
     check_task("dc-megablast", &[]);
 }
 
+// blastn-short (word size 7, the short-query scores); `check_task` asserts that it finds hits.
+#[test]
+fn blastn_short_batch_prepared_on_the_pool() {
+    check_task("blastn-short", &[]);
+}
+
 // Lower-case masking and another DUST window and level do not touch the encoding or the blocks.
 #[test]
 fn lowercase_masking_and_dust_parameters() {
@@ -271,9 +279,10 @@ fn lowercase_masking_and_dust_parameters() {
 }
 
 // `-dust no` and other scores (other ungapped Karlin blocks): the same bytes with the switch and
-// the shadow.
+// the shadow. (There is no single-strand case: LOSAT BLASTN rejects `-strand`, cli.rs, so both
+// contexts of every query always exist.)
 #[test]
-fn dust_no_and_single_strand() {
+fn dust_no_and_other_scores() {
     let queries = Queries::new();
     for args in [
         &["-task", "megablast", "-dust", "no"][..],
@@ -316,8 +325,8 @@ fn dust_no_and_single_strand() {
     }
 }
 
-// With LOSAT_X_STATS the two steps print their summed wall times at exit, with or without the
-// switch, when a batch was prepared.
+// With LOSAT_X_STATS the two steps print their summed wall times and the number of fallbacks at
+// exit (`encode_s= karlin_s= fallbacks=0`), with or without the switch, when a batch was prepared.
 #[test]
 fn stats_line_is_printed() {
     let queries = Queries::new();
@@ -341,6 +350,7 @@ fn stats_line_is_printed() {
                     .unwrap_or_else(|| panic!("{line}"))
             })
             .collect();
-        assert_eq!(numbers.len(), 2, "{line}");
+        assert_eq!(numbers.len(), 3, "{line}");
+        assert_eq!(numbers[2], 0.0, "{line}");
     }
 }

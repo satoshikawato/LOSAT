@@ -1409,12 +1409,16 @@ Scheduling (each value computed by one thread with the original function; order 
   with one thread, a slot of one thread, a build without the `parallel` feature, WebAssembly without `wasm-threads`, or
   the switch off, today's serial code runs. Shadow: `LOSAT_X_QPREPPARSHADOW=1` (implies the switch) also computes both
   serially and compares the buffers byte for byte and the blocks field by field with the bits of every float; a
-  difference prints `[X_SHADOW] QPREPPAR batches= queries= contexts= diffs= DIFFERENT` and panics; at the end of a run
-  `main` prints `[X_SHADOW] QPREPPAR batches= queries= contexts= diffs=0 identical` (`batches` and `queries`: encodings
-  made on a pool and compared; `contexts`: blocks made on a pool and compared; all 0 without a pool of two threads). With
-  `LOSAT_X_STATS` (any switch state) `main` prints `[X_STATS] QPREPPAR encode_s=<s> karlin_s=<s>`, the summed wall times
-  of the two steps over every batch (with `LOSAT_X_QBATCHPAR` they include the slots' batches, which run concurrently,
-  and those the loop discards; with the shadow, the serial reference pass).
+  difference prints `[X_SHADOW] QPREPPAR batches= queries= contexts= fallbacks= diffs= DIFFERENT (<what>)` and panics with
+  a message that names the first differing byte of the buffer, or the context and the field of the block; at the end of a
+  run `main` prints `[X_SHADOW] QPREPPAR batches= queries= contexts= fallbacks= diffs=0 identical` (`batches` and
+  `queries`: encodings made on a pool and compared; `contexts`: blocks made on a pool and compared; `fallbacks`: batches of
+  two or more queries on a pool whose spans were not in query order and disjoint, which the serial function encoded; they
+  are in neither `batches` nor `queries` and are not compared; always 0 in the layout of `search_query_batch`; all 0
+  without a pool of two threads). With `LOSAT_X_STATS` (any switch state) `main` prints
+  `[X_STATS] QPREPPAR encode_s=<s> karlin_s=<s> fallbacks=<n>`, the summed wall times of the two steps over every batch
+  (with `LOSAT_X_QBATCHPAR` they include the slots' batches, which run concurrently, and those the loop discards; with the
+  shadow, the serial reference pass) and the fallbacks (counted when the switch is on).
   Measured on the workstation (2x Xeon Gold 6338, powersave, node 1 CPUs 32-47 with the siblings idle, `numactl
   --membind`; `-outfmt 6`, subject 3 Mb of D. melanogaster 2L; both arms run the same binary with `LOSAT_X_PAIRPARDISC`,
   `LOSAT_X_QBATCHPAR`, `LOSAT_X_DIAGLV`, `LOSAT_X_PAIRPARFOLD`, `LOSAT_X_QDUSTPAR` and `LOSAT_X_DISCLUTPAR`, the off arm
@@ -1427,10 +1431,15 @@ Scheduling (each value computed by one thread with the original function; order 
   (n16) and 0.53 -> 0.155 (n4). Cycles:u within 4 % (the cycles move with the GHz, 1.9-3.1); max RSS 99 / 99, 103 / 104, 109 /
   111, 194 / 195, 238 / 236, 507 / 510 MiB (off / on, in the order above). Every output equals the sha256 of the
   run without the switch. Tests: the unit tests of `x_query_prep_par.rs` (pool == serial at 1, 2, 3 and 7 threads on random
-  queries with N, IUPAC letters, lower case, empty queries, batches of none / one / two, sentinel gaps between spans, and
-  layouts the parallel path refuses; blocks bit for bit; a probe called once per item shows that both steps run on at
-  least two workers of a 3-thread pool, and on none with the switch off, one thread or one item) and
-  `LOSAT/tests/blastn_query_prep_par.rs` (off / on / shadow equal at 1 and 4 threads for the three tasks, `-dust no`, other
+  queries with N, IUPAC letters, lower case, empty queries, batches of none / one / two, in the production layout of
+  `search_query_batch` (which never takes the fallback; also with bytes 0..=255 on pools of 2, 3, 5 and 16 threads), in
+  compact layouts with touching spans or sentinel gaps, and in layouts the parallel path refuses (the fallback); blocks bit
+  for bit; a probe called once per item shows that both steps run on at least two workers of a 3-thread pool, and on none
+  with the switch off, one thread or one item; a caller that is not a pool worker still runs on the given pool (fails
+  without `SearchPool::install`); a `LOSAT_X_QBATCHPAR`-like slot pool and nested calls; the shadow panics, naming the
+  byte or the context and field, when a test hook changes one byte of the pool's buffer or one field of its blocks, and
+  the comparison functions name each difference) and
+  `LOSAT/tests/blastn_query_prep_par.rs` (off / on / shadow equal at 1 and 4 threads for the four tasks, `-dust no`, other
   scores, `-lcase_masking`, `LOSAT_X_QBATCHPAR` slots of two threads, split query chunks, the `[X_STATS]` line).
 - `LOSAT_X_DIAGLV=1` (not in the strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT` says)
   blastn, every task, `-subject` and `-db`, with the diagonal hash (query block over 8000 letters): the

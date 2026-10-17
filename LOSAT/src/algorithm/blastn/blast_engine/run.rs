@@ -4379,6 +4379,8 @@ fn build_query_blastna_buffer(
     for (letters, offsets) in query_letters.iter().zip(context_offsets.chunks_exact(2)) {
         let length = letters.len();
         // A context that is empty or does not end inside the block stays sentinels.
+        // (Twin: `place` and the two encoder calls below are copied in x_query_prep_par.rs
+        // (LOSAT_X_QPREPPAR); change them there too.)
         let place = |offset: i32| -> Option<std::ops::Range<usize>> {
             let start = offset.max(0) as usize;
             let end = start.saturating_add(length);

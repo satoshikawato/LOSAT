@@ -224,13 +224,14 @@ pub(super) fn lut_mode() -> u8 {
 
 // No NCBI counterpart: a LOSAT variable that chooses, per batch, between two LOSAT paths with the
 // same result (the unit path and the reference frame loop, module doc items 1-4); NCBI has one path.
-/// LOSAT_X_PAIRPARGATE: off unless set, to any value (not in the strict set). It acts only where the
-/// unit path runs alone (`mode` 1) and LOSAT_X_PAIRLUTSHADOW is not set: the two shadows exist to
-/// compare the unit path with the reference on every batch the guard lets through.
+/// LOSAT_X_PAIRPARGATE: a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is
+/// not set; `utils/xswitch.rs`). It acts only where the unit path runs alone (`mode` 1) and
+/// LOSAT_X_PAIRLUTSHADOW is not set: the two shadows exist to compare the unit path with the
+/// reference on every batch the guard lets through.
 pub(super) fn cost_gate() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
-        std::env::var_os("LOSAT_X_PAIRPARGATE").is_some()
+        crate::utils::xswitch::on("LOSAT_X_PAIRPARGATE")
             && mode() == 1
             && std::env::var_os("LOSAT_X_PAIRLUTSHADOW").is_none()
     })

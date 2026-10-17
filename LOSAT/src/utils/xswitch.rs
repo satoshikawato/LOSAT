@@ -112,6 +112,11 @@ use std::sync::OnceLock;
 /// searched at the same time, each on a pool of its own, `tblastn/stage_d_pipeline.rs`) was added
 /// after the change as a switch that is off unless set and joined the set once it was verified
 /// and timed with it on.
+/// `LOSAT_X_PAIRPARGATE` (TBLASTX's unit path only for the query batches where it is expected to
+/// be faster than the reference frame loop, `tblastx/x_pair_par.rs`) and `LOSAT_X_TBXLUT` (the
+/// reference loop's full lookup table filled in place from per-cell counts,
+/// `tblastx/lookup/x_lut_direct.rs`) were added after the change as switches that are off unless
+/// set and joined the set together once they were verified and timed with them on and off.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
     "LOSAT_X_BNSTREAM",
@@ -172,6 +177,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_NEWTONLANES8",
     "LOSAT_X_PAIRLUT",
     "LOSAT_X_PAIRPAR",
+    "LOSAT_X_PAIRPARGATE",
     "LOSAT_X_PURGEFAST",
     "LOSAT_X_SEEDBUCKET",
     "LOSAT_X_SEEDCOMPACT",
@@ -196,6 +202,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNXLATE",
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXFRAMES",
+    "LOSAT_X_TBXLUT",
     "LOSAT_X_TBXNEXT",
 ];
 

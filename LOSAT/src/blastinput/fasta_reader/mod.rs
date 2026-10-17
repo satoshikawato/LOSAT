@@ -729,35 +729,34 @@ pub enum QueryEnd {
 /// The `catch (const exception&)` skips a query whose Seq-id was not found or whose
 /// range does not fit (`seq_range.rs`); LOSAT rejects Seq-id lines.
 pub fn read_queries<R: Read>(source: &mut FastaInputSource<R>) -> QueryRecords {
+    let (records, end) = read_queries_map(source, |record| record);
+    QueryRecords { records, end }
+}
+
+/// `read_queries`, with each record given to `keep` as soon as it has been read; the results
+/// are kept in record order. A caller that keeps less than the record (BLASTN's
+/// `LOSAT_X_QSTREAM`, which keeps each record's length and reads the records again batch by
+/// batch) never holds the records of the whole input at once.
+pub fn read_queries_map<R: Read, T>(
+    source: &mut FastaInputSource<R>,
+    mut keep: impl FnMut(FastaRecord) -> T,
+) -> (Vec<T>, QueryEnd) {
     let mut records = Vec::new();
     loop {
         if source.end() {
-            return QueryRecords {
-                records,
-                end: QueryEnd::Input,
-            };
+            return (records, QueryEnd::Input);
         }
         let mut warnings = Vec::new();
         match source.next_sequence(&mut |message: &[u8]| {
             warnings.extend_from_slice(message);
             Ok(())
         }) {
-            Ok(record) => records.push(record),
+            Ok(record) => records.push(keep(record)),
             Err(ReadError::Parse {
                 code: ParseErrorCode::Eof,
                 ..
-            }) => {
-                return QueryRecords {
-                    records,
-                    end: QueryEnd::EofError,
-                }
-            }
-            Err(error) => {
-                return QueryRecords {
-                    records,
-                    end: QueryEnd::Error { error, warnings },
-                }
-            }
+            }) => return (records, QueryEnd::EofError),
+            Err(error) => return (records, QueryEnd::Error { error, warnings }),
         }
     }
 }

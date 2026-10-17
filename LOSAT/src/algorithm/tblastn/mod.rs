@@ -5,6 +5,8 @@ mod args;
 //     status = s_BlastSearchEngineOneContext(...);
 // }
 mod search_seed;
+// EXPERIMENT (LOSAT_X_TBNSCANBF): the lookup scan without a branch on the presence vector.
+pub(crate) mod x_scan_bf;
 // NCBI c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
 // translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);

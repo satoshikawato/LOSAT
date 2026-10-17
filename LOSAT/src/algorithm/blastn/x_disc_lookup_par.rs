@@ -83,21 +83,35 @@
 //! - B (update): owner `o` takes the buckets `(0, o)`, `(1, o)`, ..., `(P-1, o)`: every word of the
 //!   chunk whose cell lies in its blocks, in reading order (the spans follow each other). For each
 //!   it makes the loop's update of the cell (the presence bit when the cell is empty, else the
-//!   counter; then the cell takes `index`) and keeps the cell's previous head in the entry. The
-//!   chunks are done in order, so each cell of `hashtable` (and of `hashtable2`) receives the same
-//!   words in the same order as in the loop: the same final head, the same counters, and each
-//!   word's kept head is the value the loop writes to `next_pos[index]`. Both templates set bits
-//!   in the same `pv_array`, but a presence-vector word lies in the block of the cells whose bits
-//!   it holds, whichever template sets them (same `hashsize`, same plan), so it has one writer; a
-//!   bit is only ever set, never cleared or read during the fill, so the order of the two
-//!   templates' sets does not matter.
+//!   counter, in owner `o`'s private copy of the counters; then the cell takes `index`) and keeps
+//!   the cell's previous head in the entry. The chunks are done in order, so each cell of
+//!   `hashtable` (and of `hashtable2`) receives the same words in the same order as in the loop:
+//!   the same final head, the same increments of the same counters, and each word's kept head is
+//!   the value the loop writes to `next_pos[index]`. Both templates set bits in the same
+//!   `pv_array`, but a presence-vector word lies in the block of the cells whose bits it holds,
+//!   whichever template sets them (same `hashsize`, same plan), so it has one writer; a bit is
+//!   only ever set, never cleared or read during the fill, so the order of the two templates' sets
+//!   does not matter.
 //! - C (link): reader `a` writes `next_pos[index]` (and `next_pos2[index]`) of the words it read
 //!   from their kept heads. Each index is written once; a span's words have a contiguous run of
 //!   query offsets, so the readers write disjoint parts of `next_pos`.
 //!
-//! `longest_chain` is computed afterwards from the same counters by the original code
-//! (`lookup::disc_longest_chain`). Jobs write disjoint elements, so the number of workers changes
-//! the running time only. No floating-point operation is involved.
+//! After the last chunk the calling thread adds each owner's private counters into `helper_array`
+//! (and `helper_array2`) (`OwnerCounters::flush`), and `longest_chain` is computed afterwards from
+//! them by the original code (`lookup::disc_longest_chain`). Jobs write disjoint elements, so the
+//! number of workers changes the running time only. No floating-point operation is involved.
+//!
+//! Why the counters are the loop's. Counter `h` of `helper_array` counts the cells
+//! `h * 2048 .. (h + 1) * 2048`, which lie in one block (`2^block_shift` is a multiple of 2048), so
+//! one owner `o` makes all its increments: one wrapping `+ 1` for each word of the template whose
+//! cell lies there and is not empty when the word comes, in phase B, into its private copy, which
+//! starts at 0 and which no other job touches. Those are the loop's words in the loop's order of
+//! each cell (above), so after the last chunk the copy holds their number `n` modulo 2^32 and the
+//! flush makes the counter `v.wrapping_add(n)`: the loop's `v + 1 + ... + 1` modulo 2^32 from the
+//! same start `v` (0 in every build: the arrays are allocated zeroed, as NCBI's `calloc`). No job
+//! reads or writes `helper_array` or `helper_array2` (the jobs' `SharedTables` holds neither), the
+//! flush runs after the last join, and their only readers are after the fill
+//! (`build_disc_mb_lookup`: `disc_longest_chain` and the shadow; the arrays are dropped there).
 //!
 //! Why three phases (scheduling only): in a first version every worker read every word and applied
 //! those of its cells, writing `next_pos[index]` itself; each worker then paid the whole read
@@ -106,6 +120,28 @@
 //! most writes): at 4 threads that build was no faster than the loop (ws, `logs/disclutpar_report.md`).
 //! Here each position is read once, each owner reads only its own words, and `next_pos` is
 //! written by spans; phase B prefetches the cells 16 entries ahead on x86_64.
+//!
+//! Why padded bucket headers and private counters (scheduling only). In the version of #252 the
+//! jobs' summed time was 3.8 times (4 threads) and 4.9 times (16) the loop's fill, and the cause
+//! was false sharing (workstation, perf counters inside the fill; `logs/disclutcause_report.md` of
+//! perf-mb-20261014): (1) in phase B the 4-byte counters of `helper_array`, one per block of 2048
+//! cells with the blocks dealt round robin, put the counters of 16 owners (P = 16) or 4 (P = 4)
+//! on each 64-byte line, and every word on a non-empty cell wrote one; (2) in phase A the 24-byte
+//! `Vec` headers of the buckets, a row of P per reader, shared lines with the neighbouring
+//! readers' rows, and every push stores the length. That gave, per fill of 1,775 cDNAs, 3.2-4.5
+//! million HITM loads (loads served by a line another core had modified) and as many RFOs
+//! (stores that had to take a line from another core), 6.4-9.0 million of each for 3,492 cDNAs,
+//! against at most a few thousand in the loop. The jobs' summed time (3.8 and 4.9 times the
+//! loop's) is stall time, not work: the instructions were 1.46-1.6 times the loop's. Now each
+//! bucket is a `Bucket` on a 64-byte line of its own (layout only: the same pushes into the same
+//! buckets in the same order), and each owner counts into its own copy of the counters on lines
+//! of their own (`OwnerCounters`), added into `helper_array` once after the last chunk. So the
+//! counter lines and the bucket-header lines are no longer shared. The presence-vector words of
+//! two neighbouring blocks still share a line (eight words, 32 bytes, per block at the
+//! workstation's `pv_array_bts` 8); that kept 1.1-2.4 million HITM loads and was measured to
+//! cost nothing (the report's `pvlate` test), so they were left alone. Measured as the probe of
+//! that report: the fill 0.205 -> 0.088 s at 4 threads and 0.0835 -> 0.047 s at 16 on 1,775
+//! cDNAs, and faster than the loop at 2 threads too, so the switch needs no thread threshold.
 //!
 //! Bucket memory. The buckets hold one entry of 8 bytes per word of the current chunk and
 //! template, and a bucket's capacity is the power of two above its largest fill. On words that
@@ -117,7 +153,13 @@
 //! (24 MiB plus 544 bytes per bucket) whatever the input. Measured on blocks of one chunk, each a
 //! different unmasked repeat of period 1 to 4 (each chunk's words on the cells of one or two
 //! owners, which change from chunk to chunk): 16, 15 and 12 MiB per template at P = 4, 16 and 64,
-//! where buckets that kept their room reserved 16, 32 and 48 MiB (up to 2 x P x 4 MiB).
+//! where buckets that kept their room reserved 16, 32 and 48 MiB (up to 2 x P x 4 MiB). The
+//! bucket headers take 64 bytes each, `64 * P^2` bytes per template (16 KiB at P = 16).
+//!
+//! Counter memory. The owners' private counters take, per template, one u32 per counter of the
+//! table per owner, each owner's copy on whole cache lines: `P * hashsize / 512` bytes, that is
+//! P x 8 KiB at word size 11 and P x 32 KiB at word size 12 (128 KiB and 512 KiB at P = 16; at
+//! most 255 x 32 KiB = 8 MiB), freed at the end of the fill.
 //!
 //! The pool. The switch acts only where a LOSAT search pool of two threads or more is current
 //! (`x_mb_lookup_par::pool_threads`: the calling thread is a rayon worker, and its pool has two
@@ -369,14 +411,16 @@ pub fn print_summary() {
     }
 }
 
-/// The tables of one template, shared by the workers.
+/// The tables of one template, shared by the workers (not its counters: phase B counts into the
+/// owners' private copies, `OwnerCounters`).
 #[derive(Clone, Copy)]
 struct SharedTemplate {
     hashtable: Shared<u32>,
     next_pos: Shared<u32>,
-    helper_array: Shared<u32>,
 }
 
+/// The tables the jobs write, shared by the workers; `helper_array` and `helper_array2` are not
+/// among them (only `OwnerCounters::flush` writes those, after the last join).
 #[derive(Clone, Copy)]
 struct SharedTables {
     first: SharedTemplate,
@@ -386,20 +430,25 @@ struct SharedTables {
 }
 
 impl SharedTables {
-    fn new(t: DiscTables<'_>) -> Self {
+    fn new(
+        hashtable: &mut [u32],
+        next_pos: &mut [u32],
+        hashtable2: &mut [u32],
+        next_pos2: &mut [u32],
+        pv_array: &mut [PvArrayType],
+        pv_array_bts: usize,
+    ) -> Self {
         Self {
             first: SharedTemplate {
-                hashtable: Shared::new(t.hashtable),
-                next_pos: Shared::new(t.next_pos),
-                helper_array: Shared::new(t.helper_array),
+                hashtable: Shared::new(hashtable),
+                next_pos: Shared::new(next_pos),
             },
             second: SharedTemplate {
-                hashtable: Shared::new(t.hashtable2),
-                next_pos: Shared::new(t.next_pos2),
-                helper_array: Shared::new(t.helper_array2),
+                hashtable: Shared::new(hashtable2),
+                next_pos: Shared::new(next_pos2),
             },
-            pv_array: Shared::new(t.pv_array),
-            pv_array_bts: t.pv_array_bts,
+            pv_array: Shared::new(pv_array),
+            pv_array_bts,
         }
     }
 
@@ -426,10 +475,12 @@ impl SharedTables {
     // The update of one word for one template (`second`), as in `fill_disc_mb_tables` (same
     // statements; the counters wrap as there), except that the value `next_pos[index]` gets (the
     // cell's previous head) is returned, for phase C to write; the presence bit is set in the
-    // presence-vector word this worker owns.
-    /// SAFETY: the worker owns the block of `ecode` (of the template's tables and of `pv_array`).
+    // presence-vector word this worker owns; and the counter is incremented in `counters`, this
+    // worker's private copy of the template's counters (`OwnerCounters::of`, same index).
+    /// SAFETY: the worker owns the block of `ecode` (of the template's tables and of `pv_array`),
+    /// and `counters` is its own copy.
     #[inline(always)]
-    unsafe fn update(self, second: bool, ecode: usize, index: u32) -> u32 {
+    unsafe fn update(self, second: bool, counters: Shared<u32>, ecode: usize, index: u32) -> u32 {
         let t = if second { self.second } else { self.first };
         unsafe {
             let head = t.hashtable.get(ecode);
@@ -448,10 +499,111 @@ impl SharedTables {
                 }
             } else {
                 let h = ecode >> K_COMPRESSION_FACTOR_SHIFT;
-                t.helper_array.set(h, t.helper_array.get(h).wrapping_add(1));
+                counters.set(h, counters.get(h).wrapping_add(1));
             }
             t.hashtable.set(ecode, index);
             head
+        }
+    }
+}
+
+/// No NCBI counterpart (scheduling only): 16 counters on a 64-byte cache line of their own.
+#[repr(C, align(64))]
+#[derive(Clone, Copy)]
+struct CounterLine([u32; 16]);
+
+/// The counters of a `CounterLine`.
+const LINE_COUNTERS: usize = 16;
+
+/// No NCBI counterpart (scheduling only): the owners' private copies of one template's counters
+/// (`helper_array` or `helper_array2`, `len` counters each): owner `o`'s copy is the `len`
+/// counters from counter `o * stride`, `stride` a whole number of lines, so no two owners' copies
+/// share a cache line. In phase B owner `o` increments only the counters of its own blocks in its
+/// copy (`SharedTables::update`); `flush` adds them into the template's counters after the last
+/// chunk. `P * stride * 4` bytes (see "Counter memory" above).
+struct OwnerCounters {
+    lines: Vec<CounterLine>,
+    stride: usize,
+    len: usize,
+}
+
+/// No NCBI counterpart (scheduling only): `OwnerCounters` shared by the jobs of phase B, each of
+/// which uses only its own copy (`of`).
+#[derive(Clone, Copy)]
+struct SharedCounters {
+    all: Shared<u32>,
+    stride: usize,
+    len: usize,
+}
+
+impl OwnerCounters {
+    /// Zeroed copies of `len` counters for `parts` owners.
+    fn new(len: usize, parts: usize) -> Self {
+        let stride = len.div_ceil(LINE_COUNTERS) * LINE_COUNTERS;
+        Self {
+            lines: vec![CounterLine([0; LINE_COUNTERS]); parts * stride / LINE_COUNTERS],
+            stride,
+            len,
+        }
+    }
+
+    fn shared(&mut self) -> SharedCounters {
+        SharedCounters {
+            all: Shared {
+                ptr: self.lines.as_mut_ptr().cast::<u32>(),
+                len: self.lines.len() * LINE_COUNTERS,
+            },
+            stride: self.stride,
+            len: self.len,
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:781-783
+    // ```c
+    //          else {
+    //             helper_array[ecode1/kCompressionFactor]++;
+    //          }
+    // ```
+    /// After the last chunk (no job running): `helper[h] = helper[h].wrapping_add(n)`, `n` the
+    /// count of counter `h` in the copy of the owner of its block (`owner[h >> counter_shift]`,
+    /// `counter_shift = block_shift - 11`). Every increment of counter `h` was made in that copy
+    /// (the module's "Why the counters are the loop's"), and the other copies hold 0 there.
+    ///
+    /// Serially on the calling thread: 2,048 (word size 11) or 8,192 (12) additions per template;
+    /// a job per owner would cost a pool round (spawns and wake-ups) for that, and its owners
+    /// would again write neighbouring counters of `helper`.
+    fn flush(&self, helper: &mut [u32], owner: &[u8], counter_shift: usize) {
+        debug_assert_eq!(helper.len(), self.len);
+        for (h, counter) in helper.iter_mut().enumerate() {
+            let i = owner[h >> counter_shift] as usize * self.stride + h;
+            *counter = counter.wrapping_add(self.lines[i / LINE_COUNTERS].0[i % LINE_COUNTERS]);
+        }
+    }
+
+    /// Tests only: how many owners' copies hold a non-zero counter (before the flush). A fill that
+    /// counted into one shared copy would give 1 here whatever the number of owners.
+    #[cfg(test)]
+    fn owners_with_counts(&self, parts: usize) -> usize {
+        (0..parts)
+            .filter(|&o| {
+                (0..self.len).any(|h| {
+                    let i = o * self.stride + h;
+                    self.lines[i / LINE_COUNTERS].0[i % LINE_COUNTERS] != 0
+                })
+            })
+            .count()
+    }
+}
+
+impl SharedCounters {
+    /// Owner `o`'s copy, indexed as the template's counters.
+    #[inline(always)]
+    fn of(self, o: usize) -> Shared<u32> {
+        debug_assert!(self.all.len == 0 || (o + 1) * self.stride <= self.all.len);
+        Shared {
+            // In bounds of the copies (`o < parts`); nothing is dereferenced here.
+            ptr: self.all.ptr.wrapping_add(o * self.stride),
+            len: self.len,
         }
     }
 }
@@ -465,6 +617,13 @@ struct Entry {
     value: u32,
 }
 
+/// No NCBI counterpart (scheduling only): one bucket's list on a 64-byte cache line of its own, so
+/// that the pushes of one reader (each stores the `Vec`'s length) never write a line that holds
+/// another reader's bucket header (layout only).
+#[repr(align(64))]
+#[derive(Default)]
+struct Bucket(Vec<Entry>);
+
 /// No NCBI counterpart (scheduling only): the buckets of one template, `parts x parts` lists of
 /// words: bucket `(a, o)` holds the words that reader `a` read whose cell lies in owner `o`'s
 /// blocks, in reading order. Shared by the jobs of a phase, each of which uses only its own
@@ -472,7 +631,7 @@ struct Entry {
 /// job `a` the row `(a, *)`; the phases are separated by joins.
 #[derive(Clone, Copy)]
 struct SharedBuckets {
-    ptr: *mut Vec<Entry>,
+    ptr: *mut Bucket,
     parts: usize,
     len: usize,
 }
@@ -484,7 +643,7 @@ unsafe impl Send for SharedBuckets {}
 unsafe impl Sync for SharedBuckets {}
 
 impl SharedBuckets {
-    fn new(buckets: &mut [Vec<Entry>], parts: usize) -> Self {
+    fn new(buckets: &mut [Bucket], parts: usize) -> Self {
         debug_assert!(buckets.is_empty() || buckets.len() == parts * parts);
         Self {
             ptr: buckets.as_mut_ptr(),
@@ -498,7 +657,7 @@ impl SharedBuckets {
     /// SAFETY: no job is running (between two phases).
     unsafe fn capacity(self) -> usize {
         (0..self.len)
-            .map(|i| unsafe { (*self.ptr.add(i)).capacity() })
+            .map(|i| unsafe { (*self.ptr.add(i)).0.capacity() })
             .sum()
     }
 
@@ -508,7 +667,7 @@ impl SharedBuckets {
     #[inline(always)]
     unsafe fn at<'b>(self, a: usize, o: usize) -> &'b mut Vec<Entry> {
         debug_assert!(a < self.parts && o < self.parts);
-        unsafe { &mut *self.ptr.add(a * self.parts + o) }
+        unsafe { &mut (*self.ptr.add(a * self.parts + o)).0 }
     }
 }
 
@@ -564,6 +723,8 @@ struct Fill<'a, 'w> {
     tables: SharedTables,
     first: SharedBuckets,
     second: SharedBuckets,
+    /// The owners' private counters of the first and the second template.
+    counters: [SharedCounters; 2],
 }
 
 impl Fill<'_, '_> {
@@ -668,18 +829,22 @@ impl Fill<'_, '_> {
     }
 
     /// Phase B, owner `o`: the updates of the words of its cells, reader by reader (so in reading
-    /// order), first template then second; each entry keeps the cell's previous head.
+    /// order), first template then second, counting into its own copies of the counters; each
+    /// entry keeps the cell's previous head.
     ///
-    /// SAFETY: no other job of the phase uses the buckets `(*, o)` or the cells of `o`'s blocks.
+    /// SAFETY: no other job of the phase uses the buckets `(*, o)`, the cells of `o`'s blocks or
+    /// `o`'s copies of the counters.
     unsafe fn update(&self, o: usize) {
+        let counters = self.counters[0].of(o);
         for a in 0..self.parts {
-            // SAFETY: column `o` and the cells of `o`'s blocks are this job's.
-            unsafe { update_all(self.tables, false, self.first.at(a, o)) };
+            // SAFETY: column `o`, the cells of `o`'s blocks and `o`'s counters are this job's.
+            unsafe { update_all(self.tables, false, counters, self.first.at(a, o)) };
         }
         if self.words.two_templates {
+            let counters = self.counters[1].of(o);
             for a in 0..self.parts {
                 // SAFETY: as above.
-                unsafe { update_all(self.tables, true, self.second.at(a, o)) };
+                unsafe { update_all(self.tables, true, counters, self.second.at(a, o)) };
             }
         }
     }
@@ -714,11 +879,12 @@ impl Fill<'_, '_> {
 #[cfg(target_arch = "x86_64")]
 const X_AHEAD: usize = 16;
 
-/// The updates of the entries of one bucket, in order; each entry's `value` becomes the cell's
-/// previous head.
-/// SAFETY: the cells of the entries lie in blocks of the calling job.
+/// The updates of the entries of one bucket, in order, counting into `counters`; each entry's
+/// `value` becomes the cell's previous head.
+/// SAFETY: the cells of the entries lie in blocks of the calling job, and `counters` is its own
+/// copy of the template's counters.
 #[inline]
-unsafe fn update_all(t: SharedTables, second: bool, entries: &mut [Entry]) {
+unsafe fn update_all(t: SharedTables, second: bool, counters: Shared<u32>, entries: &mut [Entry]) {
     #[cfg(target_arch = "x86_64")]
     let cells = if second {
         t.second.hashtable
@@ -738,8 +904,8 @@ unsafe fn update_all(t: SharedTables, second: bool, entries: &mut [Entry]) {
             }
         }
         let e = entries[j];
-        // SAFETY: the cell is in the caller's blocks.
-        entries[j].value = unsafe { t.update(second, e.value as usize, e.index) };
+        // SAFETY: the cell is in the caller's blocks; `counters` is the caller's.
+        entries[j].value = unsafe { t.update(second, counters, e.value as usize, e.index) };
     }
 }
 
@@ -873,11 +1039,15 @@ pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, 
 
 /// No NCBI counterpart (scheduling only): what one fill did, for LOSAT_TIMING and the tests: its
 /// chunks and the largest summed capacity of the buckets of both templates after a phase A (the
-/// most they reserve: phases B and C add nothing), in entries; 0 when not measured.
+/// most they reserve: phases B and C add nothing), in entries; 0 when not measured. In tests also
+/// `counter_owners`, the number of owners' private copies of the counters (of both templates) that
+/// hold a non-zero counter before the flush; 0 otherwise.
 #[derive(Clone, Copy, Debug, Default)]
 struct FillStats {
     chunks: usize,
     peak_entries: usize,
+    #[cfg(test)]
+    counter_owners: usize,
 }
 
 /// `fill` with the chunk size and a `probe` that each phase-B job calls first, on its thread.
@@ -889,22 +1059,44 @@ fn fill_with<P: Fn(u8) + Sync>(
     chunk: usize,
     probe: &P,
 ) -> FillStats {
-    let table_size = tables.hashtable.len();
-    debug_assert!(!words.two_templates || tables.hashtable2.len() == table_size);
-    let (block_shift, owner) = plan(table_size, tables.pv_array_bts, parts);
+    let DiscTables {
+        hashtable,
+        next_pos,
+        helper_array,
+        hashtable2,
+        next_pos2,
+        helper_array2,
+        pv_array,
+        pv_array_bts,
+    } = tables;
+    let table_size = hashtable.len();
+    debug_assert!(!words.two_templates || hashtable2.len() == table_size);
+    let (block_shift, owner) = plan(table_size, pv_array_bts, parts);
     debug_assert!(
-        block_shift >= K_COMPRESSION_FACTOR_SHIFT && block_shift >= tables.pv_array_bts,
+        block_shift >= K_COMPRESSION_FACTOR_SHIFT && block_shift >= pv_array_bts,
         "a block must own whole counters and presence-vector words"
     );
     let parts = parts.clamp(1, 255);
     let chunk = chunk.max(1);
     let (segments, total) = segments(words);
-    let mut first: Vec<Vec<Entry>> = (0..parts * parts).map(|_| Vec::new()).collect();
-    let mut second: Vec<Vec<Entry>> = if words.two_templates {
-        (0..parts * parts).map(|_| Vec::new()).collect()
+    let mut first: Vec<Bucket> = (0..parts * parts).map(|_| Bucket::default()).collect();
+    let mut second: Vec<Bucket> = if words.two_templates {
+        (0..parts * parts).map(|_| Bucket::default()).collect()
     } else {
         Vec::new()
     };
+    // The owners' private counters (empty for the second template of one).
+    let mut counters = [
+        OwnerCounters::new(helper_array.len(), parts),
+        OwnerCounters::new(
+            if words.two_templates {
+                helper_array2.len()
+            } else {
+                0
+            },
+            parts,
+        ),
+    ];
     let fill = Fill {
         words,
         segments: &segments,
@@ -912,9 +1104,17 @@ fn fill_with<P: Fn(u8) + Sync>(
         block_shift,
         parts,
         keep: bucket_keep(chunk, parts),
-        tables: SharedTables::new(tables),
+        tables: SharedTables::new(
+            hashtable,
+            next_pos,
+            hashtable2,
+            next_pos2,
+            pv_array,
+            pv_array_bts,
+        ),
         first: SharedBuckets::new(&mut first, parts),
         second: SharedBuckets::new(&mut second, parts),
+        counters: [counters[0].shared(), counters[1].shared()],
     };
     // LOSAT_TIMING's split covers the pool fills only (not the shadow's partitioned build).
     let mut clock = (in_pool && timing_on()).then(|| JobClock::new(parts));
@@ -948,6 +1148,21 @@ fn fill_with<P: Fn(u8) + Sync>(
         run_phase(&mut clock, 2, parts, in_pool, |a| unsafe { fill.link(a) });
         stats.chunks += 1;
         start = end;
+    }
+    #[cfg(test)]
+    {
+        stats.counter_owners = counters[0].owners_with_counts(parts)
+            + if words.two_templates {
+                counters[1].owners_with_counts(parts)
+            } else {
+                0
+            };
+    }
+    // After the last join: the owners' counts into the template's counters.
+    let counter_shift = block_shift - K_COMPRESSION_FACTOR_SHIFT;
+    counters[0].flush(helper_array, &owner, counter_shift);
+    if words.two_templates {
+        counters[1].flush(helper_array2, &owner, counter_shift);
     }
     if clock.is_some() {
         POOL_CHUNKS.fetch_add(stats.chunks as u64, Ordering::Relaxed);
@@ -1213,6 +1428,18 @@ mod tests {
         combo: (usize, DiscWordType, usize),
         how: How,
     ) -> (Built, FillStats) {
+        build_from(case, combo, how, None)
+    }
+
+    /// `build_stats`, with the counters set to `start(h)` (counter `h` of `helper_array`) and
+    /// `start(len + h)` (of `helper_array2`) before the fill when `start` is given; else zero, as
+    /// `build_disc_mb_lookup` allocates them.
+    fn build_from(
+        case: &Case,
+        combo: (usize, DiscWordType, usize),
+        how: How,
+        start: Option<&dyn Fn(usize) -> u32>,
+    ) -> (Built, FillStats) {
         let (word_size, word_type, template_length) = combo;
         let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
         let hashsize = 1usize << (2 * word_size);
@@ -1250,6 +1477,15 @@ mod tests {
             pv_array: vec![0; pv_size],
             longest_chain: 0,
         };
+        if let Some(start) = start {
+            let len = b.helper_array.len();
+            for (h, c) in b.helper_array.iter_mut().enumerate() {
+                *c = start(h);
+            }
+            for (h, c) in b.helper_array2.iter_mut().enumerate() {
+                *c = start(len + h);
+            }
+        }
         let words = DiscWords {
             queries_blastna: &query_refs,
             query_offsets: &case.offsets,
@@ -1998,6 +2234,188 @@ mod tests {
                             stats.peak_entries
                         );
                     }
+                }
+            }
+        }
+    }
+
+    /// One query of 60,000 letters: random letters with ten runs of 600 letters, each a repeat of
+    /// period 1 to 5 (unmasked), so a few cells get hundreds of words (counters far above zero)
+    /// and most blocks get no repeated cell (counters that stay where they start).
+    fn counter_case() -> Case {
+        let mut rng = Lcg(0xC0DE_0C01);
+        let mut seq: Vec<u8> = (0..60_000).map(|_| rng.below(4) as u8).collect();
+        for run in 0..10usize {
+            let period = 1 + run % 5;
+            let motif: Vec<u8> = (0..period).map(|_| rng.below(4) as u8).collect();
+            let at = 3_000 + run * 5_600;
+            for (i, letter) in seq[at..at + 600].iter_mut().enumerate() {
+                *letter = motif[i % period];
+            }
+        }
+        Case {
+            queries: vec![seq],
+            offsets: vec![0],
+            masks: Vec::new(),
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:781-783,799-801
+    // ```c
+    //          else {
+    //             helper_array[ecode1/kCompressionFactor]++;
+    //          }
+    // ...
+    //          else {
+    //             helper_array2[ecode2/kCompressionFactor]++;
+    //          }
+    // ```
+    // The owners' private counters, added into the counters after the last chunk, give the loop's
+    // `helper_array` and `helper_array2` on search pools of 2, 3, 5 and 16 threads (the default
+    // chunk and chunks of 1,000 positions, one and two templates, word sizes 11 and 12), also
+    // when the counters start where the loop's increments wrap them past u32::MAX (start values
+    // u32::MAX, u32::MAX - 6 .. u32::MAX - 0, 0 and others): the case has blocks whose counters
+    // wrap, blocks whose counters stay zero, and blocks no increment reaches in every class.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn private_counters_give_the_loops_counters() {
+        let case = counter_case();
+        let start = |h: usize| -> u32 {
+            match h % 4 {
+                0 => u32::MAX - (h % 7) as u32,
+                1 => 0,
+                2 => u32::MAX,
+                _ => (h as u32).wrapping_mul(2_654_435_761),
+            }
+        };
+        let combos = [
+            (11usize, DiscWordType::Coding, 18usize),
+            (11, DiscWordType::TwoTemplates, 21),
+            (12, DiscWordType::TwoTemplates, 16),
+            (12, DiscWordType::Optimal, 18),
+        ];
+        // The loop's tables from these starts, and the classes of blocks they have.
+        let references: Vec<Built> = combos
+            .iter()
+            .map(|&combo| {
+                let reference = build_from(&case, combo, How::Serial, Some(&start)).0;
+                let approx = case.queries[0].len();
+                let (_, bts) = compute_mb_pv_params(1 << (2 * combo.0), approx, false, combo.0);
+                let (block_shift, _) = plan(1 << (2 * combo.0), bts, 2);
+                let per_block = 1usize << (block_shift - K_COMPRESSION_FACTOR_SHIFT);
+                let arrays: Vec<&[u32]> = if combo.1 == DiscWordType::TwoTemplates {
+                    vec![&reference.helper_array, &reference.helper_array2]
+                } else {
+                    vec![&reference.helper_array]
+                };
+                for (t, got) in arrays.into_iter().enumerate() {
+                    let base = t * reference.helper_array.len();
+                    let (mut wrapped, mut zero, mut untouched_high) = (0, 0, 0);
+                    for (b, block) in got.chunks(per_block).enumerate() {
+                        let starts: Vec<u32> =
+                            (0..block.len()).map(|i| start(base + b * per_block + i)).collect();
+                        if block.iter().zip(&starts).any(|(&v, &s)| v < s) {
+                            wrapped += 1;
+                        }
+                        if block.iter().zip(&starts).all(|(&v, &s)| v == s) {
+                            if starts.iter().all(|&s| s == 0) {
+                                zero += 1;
+                            } else if starts.iter().any(|&s| s >= u32::MAX - 6) {
+                                untouched_high += 1;
+                            }
+                        }
+                    }
+                    assert!(
+                        wrapped > 0 && zero > 0 && untouched_high > 0,
+                        "{combo:?} template {t}: blocks wrapped {wrapped}, zero {zero}, untouched near the wrap {untouched_high}"
+                    );
+                }
+                reference
+            })
+            .collect();
+        for threads in [2usize, 3, 5, 16] {
+            crate::utils::threading::with_search_pool(threads, "blastn", |_pool| {
+                assert_eq!(parts_for(true), Some(threads));
+                for (&combo, reference) in combos.iter().zip(&references) {
+                    let got = build_from(&case, combo, How::Parts(threads, true), Some(&start)).0;
+                    assert!(got == *reference, "threads {threads} {combo:?}");
+                    let (got, stats) = build_from(
+                        &case,
+                        combo,
+                        How::Chunked(threads, 1000, true),
+                        Some(&start),
+                    );
+                    assert!(
+                        got == *reference,
+                        "threads {threads} {combo:?} chunks of 1,000"
+                    );
+                    // The owners count into copies of their own (not all into one shared copy,
+                    // which is just as exact but brings back the false sharing): the case has
+                    // repeats in several blocks, so at least two owners (of each template) have
+                    // counts before the flush.
+                    let templates = 1 + usize::from(combo.1 == DiscWordType::TwoTemplates);
+                    assert!(
+                        stats.counter_owners >= 2 * templates,
+                        "threads {threads} {combo:?}: owners with counts {} (templates {templates})",
+                        stats.counter_owners
+                    );
+                }
+                Ok(())
+            })
+            .unwrap();
+        }
+        // From zero, as `build_disc_mb_lookup` allocates them: the loop's counters, not all zero.
+        for &combo in &combos {
+            let reference = build(&case, combo, How::Serial);
+            assert!(reference.helper_array.iter().any(|&c| c > 100), "{combo:?}");
+            for parts in [2usize, 3, 5, 16] {
+                assert!(build(&case, combo, How::Parts(parts, false)) == reference);
+            }
+        }
+    }
+
+    // The bucket headers and the owners' copies of the counters lie on 64-byte lines of their own:
+    // a `Bucket` is one line (size and alignment 64), so the P x P headers of the grid are 64
+    // bytes apart on line boundaries; a `CounterLine` is one line, and each owner's copy starts on
+    // a line boundary and spans whole lines (also for a number of counters that is no multiple of
+    // 16).
+    #[test]
+    fn bucket_headers_and_counter_copies_have_lines_of_their_own() {
+        assert_eq!(std::mem::align_of::<Bucket>(), 64);
+        assert_eq!(std::mem::size_of::<Bucket>(), 64);
+        assert_eq!(std::mem::align_of::<CounterLine>(), 64);
+        assert_eq!(std::mem::size_of::<CounterLine>(), 64);
+        for parts in [1usize, 2, 3, 4, 16] {
+            let grid: Vec<Bucket> = (0..parts * parts).map(|_| Bucket::default()).collect();
+            for (i, bucket) in grid.iter().enumerate() {
+                let at = bucket as *const Bucket as usize;
+                assert_eq!(at % 64, 0, "parts {parts} bucket {i}");
+                assert_eq!(
+                    at - grid.as_ptr() as usize,
+                    64 * i,
+                    "parts {parts} bucket {i}"
+                );
+            }
+            for len in [2048usize, 8192, 100, 1] {
+                let mut counters = OwnerCounters::new(len, parts);
+                let shared = counters.shared();
+                assert_eq!(shared.stride % 16, 0);
+                assert!(shared.stride >= len && shared.stride < len + 16);
+                for o in 0..parts {
+                    let copy = shared.of(o);
+                    assert_eq!(
+                        copy.ptr as usize % 64,
+                        0,
+                        "parts {parts} len {len} owner {o}"
+                    );
+                    assert_eq!(copy.len, len);
+                    assert!(
+                        copy.ptr as usize + 4 * shared.stride
+                            <= shared.all.ptr as usize + 4 * shared.all.len
+                    );
                 }
             }
         }

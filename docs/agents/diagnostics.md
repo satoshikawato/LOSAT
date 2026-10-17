@@ -1374,8 +1374,9 @@ Scheduling (each value computed by one thread with the original function; order 
   `[X_PAIRPARSHADOW]` summary line on stderr at the end). With `LOSAT_TIMING` a
   `[TIMING] x_pairpar_seed` line gives the strips, seeds and the owner's fold, scan and wait time.
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
-  `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; not in the strict set: off unless set
-  to any value, whatever `LOSAT_X_DEFAULT` says) the discontiguous megablast lookup tables
+  `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
+  default ON: `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0` turn it off; evidence below, "Default ON") the
+  discontiguous megablast lookup tables
   (`lookup.rs` `build_disc_mb_lookup`, NCBI `s_FillDiscMBTable`: `hashtable`, `next_pos` and the counters
   of the longest chain, and with two templates `hashtable2`, `next_pos2` and their counters, both
   templates sharing one presence vector) are filled by the threads of the search pool
@@ -1416,11 +1417,14 @@ Scheduling (each value computed by one thread with the original function; order 
   fill and longest chain, not the shadow's second build; with `LOSAT_X_QBATCHPAR` it includes the
   slots' concurrent builds) and how many were filled on a pool. A second line, `[TIMING]
   disc_lookup_split: alloc= loop= pool_fill= chain= chunks= read_wall= read_max= read_sum= read_late=
-  update_... link_... buckets_peak=`, splits the same builds: the allocation, the fill by the original
-  loop, the fill on the pool and the longest chain (seconds, summed); for the pool fills (not the
-  shadow's) their chunks and, per phase (read = A, update = B, link = C) summed over the chunks, the
-  calling worker's wall time, the longest job, the jobs' summed time and the latest job start; and the
-  most the buckets of one fill reserved. The jobs' times are taken only with `LOSAT_TIMING`. Measured with #252's fill (before
+  update_... link_... buckets_peak= x_prefault_wall= x_prefault_max= x_prefault_sum= x_prefault_late=
+  x_prefault_rounds= x_prefault_touches=`, splits the same builds: the allocation, the fill by the
+  original loop, the fill on the pool (its prefault rounds included) and the longest chain (seconds,
+  summed); for the pool fills (not the shadow's) their chunks and, per phase (read = A, update = B,
+  link = C) summed over the chunks, the calling worker's wall time, the longest job, the jobs' summed
+  time and the latest job start; the most the buckets of one fill reserved; and the same four times of
+  the prefault rounds (below), their number and the zeros they wrote (one per page). The jobs' times
+  are taken only with `LOSAT_TIMING`. Measured with #252's fill (before
   the false-sharing fix below) on the workstation (2x Xeon
   Gold 6338, powersave, 16 idle physical cores of one node with the siblings idle, `numactl --membind`;
   `-outfmt 6`, subject 3 Mb of D. melanogaster 2L, `LOSAT_X_PAIRPARDISC=1`; off runs carry an unread
@@ -1489,7 +1493,46 @@ Scheduling (each value computed by one thread with the original function; order 
   2.203 / 2.200 / 2.070, 2.190 / 2.112 / 2.044, 2.190 / 2.062 / 2.027 s; (b) 3.037 / 3.130 / 2.925,
   4.030 / 4.045 / 3.854, 4.244 / 4.173 / 4.044, 4.486 / 4.393 / 4.309 s: fix / #252 0.92-0.98, fix / off
   0.93-0.96, about the fills' differences. Max RSS medians of the arms at most 2.5 MiB above the loop's
-  and within 1 MiB of #252's (88-109 MiB). Tests: the unit tests of
+  and within 1 MiB of #252's (88-109 MiB).
+  The prefault round (2026-10-17, perf-mb-20261014 `logs/disclutfault_report.md`): phase B reads a
+  cell (and a presence-vector word) before it writes it, so on a page the process had not touched the
+  kernel mapped its zero page and then copied it at the write: two faults, and a TLB shootdown to the
+  other CPUs of the search (on the workstation one thread touching 4,096 fresh pages took 8,193 faults
+  and 13-18 ms reading first, 4,063 faults and 7 ms writing first). Now, between phases A and B of a
+  chunk, the readers having marked the pages of their words' cells and presence-vector words, one job
+  per page (the owner of the block of the page's middle element) writes 0 to the page's middle
+  element if the page was not touched yet; the marks and the round run only while a page of the
+  table is untouched (on the cDNA inputs, in a table's first chunk), and the readers run a copy of the
+  loop without the marking code in the other chunks. The writes store 0 over the 0 the element was
+  allocated with, only on pages the fill writes anyway, so the tables and the pages mapped (max RSS)
+  do not change; `next_pos` (written without a read) is not touched, which measured faster (1,775
+  cDNAs, fill over #263's: 0.79 at 16 threads and 0.91 at 4 with the cells alone, 0.89 and 1.01 with
+  `next_pos` as well). The unit tests check, for every partitioned build, that each zero went over
+  0 and that the pages touched are exactly the pages the fill wrote, array by array.
+  Default ON (2026-10-17, Owner rule of 21:50: speed-ups land in the strict set in their PR). On the
+  workstation (node 1, 16 idle physical cores with the siblings idle, `numactl --membind 1`; the rest of
+  the dsw `cand` env, `LOSAT_X_PAIRPARDISC`, `QBATCHPAR`, `DIAGLV`, `PAIRPARFOLD` and `QDUSTPAR`, in
+  every arm; off = the head with `LOSAT_X_DISCLUTPAR=0`, dev = 7a5a7f87 with the switch (#263's fill),
+  head = 1a05a8a2 by default; rotated rounds after a warm-up, 4 at 2 and 4 threads, 3 at 8 and 16, 2
+  at 1; every output had its sha256) the fill took, off / dev / head: (a) 1,775 cDNAs 0.140 / 0.089
+  / 0.080 s at 2 threads, 0.170 / 0.081 / 0.071 at 4, 0.205 / 0.066 / 0.055 at 8, 0.204 / 0.051 /
+  0.043 at 16; (b) 3,492 cDNAs 0.264 / 0.151 / 0.149, 0.287 / 0.168 / 0.152, 0.354 / 0.149 / 0.142,
+  0.375 / 0.091 / 0.080; 31,168 cDNAs (37 batches, summed over them) 2.19 / 1.21 / 1.24 s at 4 threads
+  and 2.72 / 1.13 / 1.11 at 16; 3 cDNAs (5 kB) 0.011 / 0.010 / 0.004 at 4 and 0.011 / 0.008 / 0.003
+  at 16. The search took head / off 0.90-0.93 (2 threads), 0.89 / 0.93 (4), 0.76 / 0.86 (8), 0.68 /
+  0.69 (16) for (a) / (b), 0.95 and 0.85-0.88 for 31,168 cDNAs at 4 and 16 threads, 0.86-0.90 and
+  0.87 for 3 cDNAs, and 1.00 at 1 thread, where the loop runs either way (head / off 1.001 and
+  1.005); against dev 0.96-0.99 at 8 and 16 threads and 0.97-1.06 at 2 and 4 (inside the rounds'
+  spread, 0.99-1.12). So the switch wins wherever it runs and needs no
+  thread or size rule. The prefault cut the TLB shootdowns received by the search's CPUs from 108,000
+  / 110,000 / 301,000 to 100 / 1,000 / 5,300 per run at 16 threads ((a) / (b) / 31,168 cDNAs), the
+  minor faults by 7,400-33,000 and the system time by 0.15-0.23 s. Max RSS of head within the run's
+  spread of dev's and off's (-7.6 to +6.6 MiB at 31,168 cDNAs, at most 3.1 MiB elsewhere) and below
+  NCBI BLAST+ 2.17.0 `-db` of an earlier window (31,168 cDNAs 305 against 437 MiB at 4 threads and 497
+  against 700 at 16; (b) 176 against 199 at 4). At 31,168 cDNAs and 4 threads the fill of 1a05a8a2 was
+  1.02 of dev's: its reader loop with the mark tests took 7-11 % longer in phase A in every cell, also
+  where nothing was marked; cd9977bc runs a copy without the marking code there (its workstation run
+  is pending, the workstation being unreachable). Tests: the unit tests of
   `x_disc_lookup_par.rs` (partitioned and pool fills equal the original loop for every template type,
   length and word size, one and two templates, 1-20 parts, chunks of 1 to 5,000 positions and random
   layouts of queries and masks, pools of 1, 2, 3, 5, 8 and 16 threads, a 2.6 M-position query in the

@@ -17,6 +17,13 @@ use crate::utils::dust::MaskedInterval;
 #[path = "x_mb_lookup_par.rs"]
 pub(crate) mod x_mb_lookup_par;
 
+/// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): the
+/// `[X_SHADOW] MBLUTPAD` line (LOSAT_X_MBLUTPAD with LOSAT_X_PAIRPARSHADOW) and, with LOSAT_TIMING,
+/// the `[TIMING] x_mb_lookup_*` lines of the megablast table builds.
+pub fn x_mb_lookup_print_summary() {
+    x_mb_lookup_par::print_summary();
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804
 // ```c
 //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
@@ -1683,6 +1690,8 @@ fn build_mb_lookup(
     ascending_cells: bool,
 ) -> MbLookupTable {
     debug_assert_eq!(queries_blastna.len(), query_offsets.len());
+    // No NCBI counterpart: the start of the `[TIMING] x_mb_lookup_build` interval (LOSAT_TIMING).
+    let mut x_clock = x_mb_lookup_par::BuildClock::start();
 
     let table_size = 1usize << (2 * lut_word_length);
     let (pv_size, pv_array_bts) = compute_mb_pv_params(
@@ -1757,8 +1766,11 @@ fn build_mb_lookup(
     // Dispatch point of LOSAT_X_PAIRPAR (first arm): `x_mb_lookup_par::fill` applies the same
     // update to the same words, each cell's words in the same order, on the pool threads (each
     // thread owns whole blocks of cells); see x_mb_lookup_par.rs.
-    if let Some(x_parts) = x_mb_lookup_par::parts(db_word_counts.is_none() && !debug_mode) {
-        x_mb_lookup_par::fill(
+    x_clock.fill();
+    let x_on_pool = x_mb_lookup_par::parts(db_word_counts.is_none() && !debug_mode);
+    let mut x_padded = false;
+    if let Some(x_parts) = x_on_pool {
+        x_padded = x_mb_lookup_par::fill(
             x_parts,
             &x_mb_lookup_par::Words {
                 queries_blastna,
@@ -1897,11 +1909,14 @@ fn build_mb_lookup(
             hashtable[bucket as usize] = q_off_1;
         }
     }
+    x_clock.chain();
 
     let mut longest_chain = 2usize;
     for &value in &helper_array {
         longest_chain = longest_chain.max(value as usize);
     }
+    // No NCBI counterpart: the end of the `[TIMING] x_mb_lookup_build` interval.
+    x_clock.record(x_on_pool.is_some(), x_padded);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1104-1106
     // ```c
     //    longest_chain = 2;

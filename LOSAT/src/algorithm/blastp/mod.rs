@@ -46,7 +46,7 @@ mod x_redo_par;
 // ```
 mod kappa;
 // EXPERIMENT (LOSAT_X_BPSEED): the subject scan and the two-hit test in one loop.
-mod x_seed_fused;
+pub(crate) mod x_seed_fused;
 // EXPERIMENT (LOSAT_X_BPSEED): the same loop for the compressed lookup table of blastp-fast.
 mod x_seed_fused_compressed;
 // EXPERIMENT (LOSAT_X_BPSEED with LOSAT_X_BPCLUT): the same loop on the flat compressed table.

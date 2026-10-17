@@ -67,6 +67,7 @@ pub(crate) static X_SHADOW_SUBJECTS: std::sync::atomic::AtomicU64 =
 // No NCBI counterpart: prints the shadow-mode counters; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
     use std::sync::atomic::Ordering;
+    super::x_seed_diag::x_print_shadow_summary();
     if let Some(tables) = crate::algorithm::tblastx::lookup::x_bxlut_shadow_tables() {
         eprintln!("[X_SHADOW] BXLUT tables_compared={tables} (lookup tables identical)");
     }
@@ -114,6 +115,26 @@ pub(crate) fn x_word_finder_scan(
     lookup: &Lookup,
     diagonals: &mut Diagonals,
 ) -> Result<Vec<InitHsp>> {
+    // EXPERIMENT (LOSAT_X_BXDIAG): the fused loop where it acts (x_seed_diag.rs); where it does
+    // not, the loop LOSAT_X_BXSCAN chooses (the reference word finder when BXSCAN is off).
+    if super::x_seed_diag::x_bxdiag_mode() != 0 {
+        if let Some(hits) = super::x_seed_diag::x_word_finder_diag(
+            batch, parameters, options, subject, lookup, diagonals,
+        )? {
+            return Ok(hits);
+        }
+        if x_bxscan_mode() == 0 {
+            return word_finder(
+                batch,
+                parameters,
+                options,
+                subject,
+                lookup,
+                diagonals,
+                |_| {},
+            );
+        }
+    }
     if x_bxscan_mode() == 2 {
         let mut copy = Diagonals {
             entries: diagonals.entries.clone(),
@@ -248,7 +269,7 @@ fn x_word_finder_direct(
                 } else {
                     (q - s) & mask
                 } as usize;
-                let (last, flag) = &mut diagonals.entries[index];
+                let entry = &mut diagonals.entries[index];
                 let (u, end, extended) = if options.window_size == 0 {
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:777-781
                     // ```c
@@ -258,7 +279,7 @@ fn x_word_finder_direct(
                     //             /* do an extension, but only if we have not already extended this
                     //                far */
                     // ```
-                    if s - (*last - diagonals.offset) < 0 {
+                    if s.wrapping_sub(entry.last_hit().wrapping_sub(diagonals.offset)) < 0 {
                         continue;
                     }
                     context = if lazy_context {
@@ -322,18 +343,18 @@ fn x_word_finder_direct(
                     //                     continue;
                     //                 }
                     // ```
-                    if *flag {
-                        if s + diagonals.offset < *last {
+                    if entry.flag() != 0 {
+                        if s.wrapping_add(diagonals.offset) < entry.last_hit() {
                             continue;
                         }
-                        *last = s + diagonals.offset;
-                        *flag = false;
+                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
+                        entry.set_flag(0);
                         continue;
                     }
-                    let previous = *last - diagonals.offset;
-                    let diff = s - previous;
+                    let previous = entry.last_hit().wrapping_sub(diagonals.offset);
+                    let diff = s.wrapping_sub(previous);
                     if diff >= options.window_size {
-                        *last = s + diagonals.offset;
+                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
                         continue;
                     }
                     if diff < word {
@@ -357,7 +378,7 @@ fn x_word_finder_direct(
                     //                 }
                     // ```
                     if q - diff < batch.contexts[context].offset as i32 {
-                        *last = s + diagonals.offset;
+                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
                         continue;
                     }
                     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
@@ -417,12 +438,12 @@ fn x_word_finder_direct(
                     });
                 }
                 if options.window_size == 0 {
-                    *last = end - (word - 1) + diagonals.offset;
+                    entry.set_last_hit((end - (word - 1)).wrapping_add(diagonals.offset));
                 } else if extended {
-                    *flag = true;
-                    *last = end - (word - 1) + diagonals.offset;
+                    entry.set_flag(1);
+                    entry.set_last_hit((end - (word - 1)).wrapping_add(diagonals.offset));
                 } else {
-                    *last = s + diagonals.offset;
+                    entry.set_last_hit(s.wrapping_add(diagonals.offset));
                 }
             }
         }
@@ -458,6 +479,14 @@ mod tests {
     // The frozen pinned-NCBI INIT rows of the session F fixture (one-hit and two-hit windows,
     // fresh, retained and reset diagonal tables): the direct loop gives the NCBI hits and the
     // same diagonal table as the reference loop.
+    /// An entry with `last_hit` and the flag set.
+    fn entry(last_hit: i32) -> DiagStruct {
+        let mut entry = DiagStruct::default();
+        entry.set_last_hit(last_hit);
+        entry.set_flag(1);
+        entry
+    }
+
     #[test]
     fn direct_scan_loop_matches_ncbi_hits_and_reference_diagonal_table() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/blastx_f_diagonal");
@@ -544,11 +573,11 @@ mod tests {
                 for d in [&mut direct, &mut reference] {
                     if state == 2 {
                         d.offset = 536_870_910;
-                        d.entries.fill((123, true));
+                        d.entries.fill(entry(123));
                     }
                     if state == 3 {
                         d.offset = 536_870_911;
-                        d.entries.fill((536_870_900, true));
+                        d.entries.fill(entry(536_870_900));
                         d.finish_subject(83).unwrap();
                     }
                 }
@@ -570,6 +599,46 @@ mod tests {
                 assert!(
                     direct.offset == reference.offset && direct.entries == reference.entries,
                     "window={window} state={state}"
+                );
+            }
+            // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
+            // ```c
+            // typedef struct DiagStruct {
+            //    signed int last_hit   : 31; /**< Offset of the last hit */
+            //    unsigned int flag      : 1 ; /**< Reset the next extension? */
+            // } DiagStruct;
+            // ```
+            // An offset just below 2^30 (NCBI reaches such offsets at a -window_size near 2^29,
+            // from the second subject on): the stores past 2^30 wrap in the 31-bit field, and both
+            // loops read the wrapped values back alike. tests/blastx_diag_bitfield.rs compares the
+            // rows with NCBI 2.17.0 at such a window. (The offset is past INT4_MAX / 4, so the
+            // tables are cleared at the end of the subject.)
+            for d in [&mut direct, &mut reference] {
+                d.offset = (1 << 30) - 64;
+                d.entries.fill(DiagStruct::clear(window));
+            }
+            let hits =
+                x_word_finder_direct(&batch, &params, &options, &subject, &lookup, &mut direct)
+                    .unwrap();
+            let plain = word_finder_plain(
+                &batch,
+                &params,
+                &options,
+                &subject,
+                &lookup,
+                &mut reference,
+                |_| {},
+            )
+            .unwrap();
+            assert_eq!(hits, plain, "window={window} wrapped");
+            assert!(
+                direct.offset == reference.offset && direct.entries == reference.entries,
+                "window={window} wrapped"
+            );
+            if !initial.is_empty() {
+                assert_ne!(
+                    hits, initial,
+                    "window={window}: the wrapped stores change the seeds"
                 );
             }
         }

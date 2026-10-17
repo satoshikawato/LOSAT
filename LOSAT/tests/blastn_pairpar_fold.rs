@@ -161,14 +161,9 @@ fn check(dir: &Path, task: &str, extra: &[(&str, &str)], shadow: (&str, &str), p
             "{at}: the report differs with {shadow:?}"
         );
         // (`LOSAT_X_PAIRPARSHADOW` also names the shadow of TBLASTX's own `PAIRPAR`, whose
-        // line says it compared nothing, and, with `LOSAT_X_MBLUTPAD` on by default, compares the
-        // padded megablast table fill: `[X_SHADOW] MBLUTPAD`)
-        let (chunks, fold, merges, partitions) = shadow_fields(
-            &stderr,
-            prefix,
-            &["[X_SHADOW] PAIRPAR ", "[X_SHADOW] MBLUTPAD "],
-            &at,
-        );
+        // line says it compared nothing)
+        let (chunks, fold, merges, partitions) =
+            shadow_fields(&stderr, prefix, &["[X_SHADOW] PAIRPAR "], &at);
         assert!(chunks > 0, "{at}: no chunk compared:\n{stderr}");
         assert_eq!(fold, "part", "{at}");
         assert_eq!(

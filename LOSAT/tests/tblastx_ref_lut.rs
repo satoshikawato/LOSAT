@@ -1,4 +1,5 @@
-//! `LOSAT_X_TBXLUT` (off unless set; not in the strict set) on whole runs of the binary: the full
+//! `LOSAT_X_TBXLUT` (in the strict set: on unless `=0`, or `LOSAT_X_DEFAULT=0` and it is not set)
+//! on whole runs of the binary: the full
 //! lookup table of a TBLASTX query batch, the table of the reference frame loop, filled in place
 //! from per-cell counts (`x_tbx_build_ncbi_lookup` in `src/algorithm/tblastx/lookup/backbone.rs`,
 //! `x_build_direct` in `x_lut_direct.rs`) instead of being copied out of one chain per cell.
@@ -11,11 +12,12 @@
 //!             sfree(lookup->thin_backbone[i]);
 //! ```
 //! The table must be the same, so the report must be: the tests run the reference frame loop
-//! (`LOSAT_X_PAIRPAR=0`) and compare the report with the switch, and with its shadow
+//! (`LOSAT_X_PAIRPAR=0`) and compare the report with the switch (the default), and with its shadow
 //! (`LOSAT_X_TBXLUTSHADOW`, which builds both tables and compares them field by field), against
-//! the report without, at the default threshold (13), at 11 and at `+inf` (NCBI's INT_MIN: every
-//! word enters every cell it can), at one and four threads; and on the default path, where the
-//! unit path builds its own tables and the switch acts only on a batch the guard sends back.
+//! the report with `LOSAT_X_TBXLUT=0`, at the default threshold (13), at 11 and at `+inf` (NCBI's
+//! INT_MIN: every word enters every cell it can), at one and four threads; and on the default path,
+//! where the unit path builds its own tables and the switch acts only on a batch the guard or
+//! `LOSAT_X_PAIRPARGATE` sends back.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -110,7 +112,7 @@ fn tblastx(
 }
 
 const REFERENCE: (&str, &str) = ("LOSAT_X_PAIRPAR", "0");
-const SWITCH: (&str, &str) = ("LOSAT_X_TBXLUT", "1");
+const SWITCH_OFF: (&str, &str) = ("LOSAT_X_TBXLUT", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBXLUTSHADOW", "1");
 
 /// The number in the shadow's exit line.
@@ -148,12 +150,18 @@ fn the_reference_loop_reports_the_same_with_the_table_filled_in_place() {
     );
     for threshold in [None, Some("11")] {
         for threads in [1, 4] {
-            let (base, _) = tblastx(&query, &subject, threshold, threads, &[REFERENCE]);
+            let (base, _) = tblastx(
+                &query,
+                &subject,
+                threshold,
+                threads,
+                &[REFERENCE, SWITCH_OFF],
+            );
             assert!(
                 !base.is_empty(),
                 "threshold {threshold:?}: no hits to compare"
             );
-            let (with, _) = tblastx(&query, &subject, threshold, threads, &[REFERENCE, SWITCH]);
+            let (with, _) = tblastx(&query, &subject, threshold, threads, &[REFERENCE]);
             assert_eq!(
                 base, with,
                 "LOSAT_X_TBXLUT, threshold {threshold:?}, threads {threads}"
@@ -180,8 +188,8 @@ fn every_word_threshold_gives_the_same_report() {
         "s.fna",
         &[("mela", &letters("MelaMJNV.fasta")[..3_000])],
     );
-    let (base, _) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE]);
-    let (with, _) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE, SWITCH]);
+    let (base, _) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE, SWITCH_OFF]);
+    let (with, _) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE]);
     assert_eq!(base, with, "LOSAT_X_TBXLUT at -threshold +inf");
     let (shadow, stderr) = tblastx(&query, &subject, Some("+inf"), 1, &[REFERENCE, SHADOW]);
     assert_eq!(base, shadow, "shadow at -threshold +inf");
@@ -189,8 +197,9 @@ fn every_word_threshold_gives_the_same_report() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// The default path (the unit path of the strict set builds its own tables): the switch changes
-/// nothing there either.
+/// The default path (the unit path of the strict set builds its own tables; at one thread the gate
+/// sends this short query's batch to the reference loop, where the switch acts): the report is the
+/// one of `LOSAT_X_TBXLUT=0`.
 #[test]
 fn the_default_path_reports_the_same_with_the_switch() {
     let dir = temp_dir("default");
@@ -201,8 +210,8 @@ fn the_default_path_reports_the_same_with_the_switch() {
         &[("mela", &letters("MelaMJNV.fasta")[..40_000])],
     );
     for threads in [1, 4] {
-        let (base, _) = tblastx(&query, &subject, None, threads, &[]);
-        let (with, _) = tblastx(&query, &subject, None, threads, &[SWITCH]);
+        let (base, _) = tblastx(&query, &subject, None, threads, &[SWITCH_OFF]);
+        let (with, _) = tblastx(&query, &subject, None, threads, &[]);
         assert_eq!(base, with, "default path, threads {threads}");
     }
     std::fs::remove_dir_all(&dir).ok();

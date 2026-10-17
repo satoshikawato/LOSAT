@@ -582,16 +582,16 @@ pub(super) fn x_bp_build_lookup(
 /// EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): 0 = off (`build_ncbi_lookup`, the chain
 /// builder), 1 = TBLASTX's full table built in place by [`x_build_direct`], 2 = shadow (both
 /// builders, compared).
-// No NCBI counterpart: chooses between two LOSAT code paths with the same result. Not in the
-// strict set: off unless set, to any value, and `LOSAT_X_DEFAULT` does not touch it; the shadow
-// variable is read first.
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result. A strict-set
+// switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; `utils/xswitch.rs`); the
+// shadow variable is read first.
 pub(super) fn x_tbxlut_mode() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_TBXLUTSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_TBXLUT").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_TBXLUT") {
             1
         } else {
             0

@@ -53,8 +53,10 @@ const THREADS: [u32; 2] = [1, 4];
 /// `LOSAT_X_DEFAULT` of the test's own environment is dropped as well: every test states the
 /// default it runs with. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name
-/// as soon as a search has more than one thread, and it selects nothing. Returns the report
-/// and the standard error.
+/// as soon as a search has more than one thread, and it selects nothing. `LOSAT_X_PAIRPARGATE=0`
+/// comes first (a test's own variables may set it again): the fixture query is short, so the
+/// gate, in the strict set, would send its batch to the reference frame loop, and these tests are
+/// about the unit path. Returns the report and the standard error.
 fn tblastx(subject: &Path, threads: u32, switches: &[(&str, &str)]) -> (Vec<u8>, String) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
     for (name, _) in std::env::vars_os() {
@@ -62,6 +64,7 @@ fn tblastx(subject: &Path, threads: u32, switches: &[(&str, &str)]) -> (Vec<u8>,
             command.env_remove(name);
         }
     }
+    command.env("LOSAT_X_PAIRPARGATE", "0");
     let output = command
         .arg("tblastx")
         .arg("-query")
@@ -149,8 +152,8 @@ impl Drop for TempFasta {
 // word_params = BlastInitialWordParametersFree(word_params);
 // s_BlastCoreAuxStructFree(aux_struct);
 // ```
-// The default search of the fixture pair (no variable for any switch) runs on the unit path
-// with the switch on: one batch, its unit path released when the units of the only subject have
+// The default search of the fixture pair (no variable for any switch but
+// `LOSAT_X_PAIRPARGATE=0`) runs on the unit path with the switch on: one batch, its unit path released when the units of the only subject have
 // run, its lookup table (a stub) by the only seed stage, and no worker ever holds a diagonal
 // table. The report is NCBI's.
 #[test]

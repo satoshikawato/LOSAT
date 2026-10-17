@@ -538,6 +538,43 @@ mod tests {
         }
     }
 
+    /// `same_bits` compares every field by its bits: a block that differs in one field, in the sign
+    /// of a zero, or between `None` and `Some` is different, and a NaN equals itself.
+    #[test]
+    fn same_bits_sees_every_field() {
+        let base = KarlinParams {
+            lambda: 0.625,
+            k: 0.41,
+            h: 0.78,
+            alpha: 1.5,
+            beta: -2.0,
+        };
+        assert!(same_bits(&None, &None));
+        assert!(!same_bits(&None, &Some(base)));
+        assert!(same_bits(&Some(base), &Some(base)));
+        let variants = [
+            KarlinParams {
+                lambda: 0.626,
+                ..base
+            },
+            KarlinParams { k: 0.42, ..base },
+            KarlinParams { h: 0.79, ..base },
+            KarlinParams { alpha: 1.6, ..base },
+            KarlinParams { beta: -2.1, ..base },
+        ];
+        for variant in variants {
+            assert!(!same_bits(&Some(base), &Some(variant)), "{variant:?}");
+        }
+        let zero = KarlinParams { beta: 0.0, ..base };
+        let negative_zero = KarlinParams { beta: -0.0, ..base };
+        assert!(!same_bits(&Some(zero), &Some(negative_zero)));
+        let nan = KarlinParams {
+            k: f64::NAN,
+            ..base
+        };
+        assert!(same_bits(&Some(nan), &Some(nan)));
+    }
+
     /// Pool == serial for the buffer at 1, 2, 3 and 7 threads on random batches (N, IUPAC, lower
     /// case, empty queries, one query, none), also with sentinel gaps between the queries' spans.
     #[cfg(feature = "parallel")]

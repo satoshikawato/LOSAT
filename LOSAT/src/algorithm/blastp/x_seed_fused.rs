@@ -59,7 +59,8 @@
 //! to a list whose length advances by the presence bit, without a branch on it, and the listed
 //! cells then go to the cell test in position order. The cells, their order and their hit lists
 //! are the presence-test loop's, so every outcome above is unchanged. blastp's own loop
-//! (`x_scan_two_hit`) keeps the presence test.
+//! (`x_scan_two_hit`) takes the same cells under its own switch, LOSAT_X_BPSCANBF (off unless set,
+//! not in the strict set; [`x_bp_scan_bf`]).
 
 use crate::algorithm::tblastn::x_scan_bf::{x_block_candidates, X_BLOCK};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
@@ -117,6 +118,16 @@ pub(crate) fn x_bp_diag() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDIAG"))
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPSCANBF switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPSCANBF): blastp's fused loop finds the cells with [`x_scan_cells_bf`]
+/// (module header). Off unless set, to any value (not in the strict set).
+pub(crate) fn x_bp_scan_bf() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BPSCANBF").is_some())
 }
 
 /// How the fused loop tests the hits of one lookup cell.
@@ -492,16 +503,30 @@ pub(crate) fn x_scan_two_hit<F>(
         word_size,
         prefetch: x_prefetch_distance(),
     };
-    x_scan_two_hit_in(
-        x_diag_mode(),
-        lookup,
-        subject,
-        subject_length,
-        &mut XDiagTable::new(diag_array, diag_mask),
-        test,
-        &mut candidate,
-    )
-    .add_to_totals();
+    let table = &mut XDiagTable::new(diag_array, diag_mask);
+    // EXPERIMENT (LOSAT_X_BPSCANBF): the same cells found without a branch on the presence bit.
+    let counts = if x_bp_scan_bf() {
+        x_scan_two_hit_in_with::<true, F>(
+            x_diag_mode(),
+            lookup,
+            subject,
+            subject_length,
+            table,
+            test,
+            &mut candidate,
+        )
+    } else {
+        x_scan_two_hit_in(
+            x_diag_mode(),
+            lookup,
+            subject,
+            subject_length,
+            table,
+            test,
+            &mut candidate,
+        )
+    };
+    counts.add_to_totals();
 }
 
 /// EXPERIMENT (LOSAT_X_BXDIAG): [`x_scan_two_hit`] with the cell test `mode` (blastx's choice,

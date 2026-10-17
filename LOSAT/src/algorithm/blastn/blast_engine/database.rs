@@ -662,6 +662,48 @@ impl ReportedSubjects {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-312
+// ```c++
+//                 ITERATE(CSearchResultSet, result, *results) {
+//                     formatter.PrintOneResultSet(**result, query_batch);
+//                 }
+// ```
+/// EXPERIMENT (LOSAT_X_RPTSTREAM): whether every definition line of the database reads as the
+/// reports read those of the reported sequences (`read_title`: NCBI's reader, one definition
+/// line), holds no byte outside ' ' ..= '~' (`check_reported_title`) and gives a tabular subject
+/// id (`ReportedSubjects::tabular_subject_ids`). Then no batch after the first can meet one of
+/// LOSAT's refusals of a title, which come before any of the search's reports without the
+/// switch, so each batch's reports can be written when the loop takes it (`x_rpt_stream`; the
+/// test of blastp's block search, `blastp::blast_engine::database::x_titles_allow_blocks`). Read
+/// in `pool` over the ordinal ids; a reader error is `false` (the reports then stay after the
+/// loop, and the batch that reads the title fails where NCBI's does).
+pub(super) fn x_titles_allow_streaming(database: &BlastnDatabase, pool: &SearchPool<'_>) -> bool {
+    let db = &database.db;
+    let allowed = |ordinal: u32| -> bool {
+        match shared::read_title(db, ordinal, 0, PROGRAM) {
+            Ok(stored) => {
+                !stored.replaced_bytes
+                    && shared::tabular_subject_id(&stored.title, ordinal, false, PROGRAM).is_ok()
+            }
+            Err(_) => false,
+        }
+    };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() {
+        return pool.install(|| {
+            (0..db.num_seqs())
+                .into_par_iter()
+                .with_min_len(4096)
+                .all(allowed)
+        });
+    }
+    let _ = pool;
+    (0..db.num_seqs()).all(allowed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

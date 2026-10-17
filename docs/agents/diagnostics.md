@@ -1592,13 +1592,13 @@ Scheduling (each value computed by one thread with the original function; order 
   threads: 0.392 -> 0.406 s (1.033, 3 rounds) and in 8 more rounds of another window (1.8 GHz) 0.534 / 0.534
   s (0.998, 0.958..1.096), 103-104 MiB either way. What is left of the 1-thread memory is mostly the query
   file (about 94 MiB of records, held for the whole run). Shrinking a batch's lists to their length (the
-  prototype `LOSAT_X_HELDSHRINK` of `tmp/split3`) adds nothing with the switch on: 157 MiB at 1 thread either
-  way, 777 / 782 MiB at 16 threads (medians of 3, spread 767-792). Tests: the unit tests of `x_rpt_stream.rs` (a batch's part of the query
+  prototype `LOSAT_X_HELDSHRINK` of `tmp/split3`) adds nothing with the switch on: 157.8 / 157.5 MiB at 1
+  thread, 777.6 / 782.3 MiB at 16 threads (medians of 3, spread 767-793). Tests: the unit tests of `x_rpt_stream.rs` (a batch's part of the query
   input, the shadow's tees) and `database.rs`
   (`streaming_is_allowed_only_when_every_title_reads_and_is_reported`), and
   `LOSAT/tests/blastn_report_stream.rs` (off / on / shadow equal in exit status, report or `-out` file, and
   standard error, with `BATCH_SIZE` 4,000: the three tasks x outfmt 0, 6, 7 x 1 and 4 threads; `-out`
-  files and `LOSAT_X_QBATCHPAR` slots; `-query_loc`, `-subject_loc -lcase_masking`, `-max_target_seqs
+  files and `LOSAT_X_QBATCHPAR` slots (two, `LOSAT_X_QBATCHPARSLOTS=2`); `-query_loc`, `-subject_loc -lcase_masking`, `-max_target_seqs
   -max_hsps -subject_besthit`; a reader error and a batch of queries without letters after earlier
   batches; `-db`; and the `subject_ids`, `search_space`, `scoring`, `chunk_size` and `debug` cases).
 - `LOSAT_X_TBNPAR=1` tblastn: preliminary stage per (frame, chunk) and redo per match in

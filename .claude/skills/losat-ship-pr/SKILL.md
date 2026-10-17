@@ -35,6 +35,16 @@ contains.
 4. Open the PR as a draft (`--draft`) while its content may still change: marking it ready turns
    on auto-merge into `dev`.
 
+## A switch that joins the strict set
+
+- Put its name in sorted order into `STRICT_SET` (`LOSAT/src/utils/xswitch.rs`) and its `export`
+  line in sorted order into the block in `docs/agents/diagnostics.md` ("Performance switches"; the
+  unit test `the_documented_block_lists_the_strict_set` compares them).
+- Say since when and on what evidence in the switch's own entry in `diagnostics.md` and in its own
+  CHANGELOG line. Write no count of the set, and add nothing at the end of a shared list or
+  paragraph. Then two such PRs touch different lines, and one merging does not make the other
+  `DIRTY` (the `dev` ruleset does not require an up-to-date branch).
+
 ## Watch CI
 
 - `ci.yml` (`rust`, `fast output regressions`) runs on every PR; `web.yml` runs when `web/**`,

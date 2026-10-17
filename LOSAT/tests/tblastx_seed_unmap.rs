@@ -2,14 +2,16 @@
 //! `src/algorithm/tblastx/x_pair_par.rs`, the section above `X_MAPPED_BYTES`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_SEEDUNMAP`
-//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts on Linux with glibc only, at two or
-//! more threads (the search pool; at one thread nothing is retained), on the units of
-//! `LOSAT_X_PAIRPAR` whose diagonal table has at least 128 KiB of cells and whose subject chunk is
-//! at least a quarter of the table: their split's diagonal table and record vector, and a unit's
-//! copy of its records of at least 128 KiB, get a capacity glibc always maps. It changes
-//! capacities, never a value. Every test compares the report with the report of the same search
-//! with `LOSAT_X_SEEDUNMAP=0` and reads the `[X_STATS] SEEDUNMAP` line, which is printed only while
-//! the switch is on, to check where blocks were given the mapped capacity and where none was.
+//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts on Linux with glibc only, where
+//! transparent huge pages do not round mapped blocks up (THP "madvise" or "never", or disabled for
+//! the process), at two or more threads (the search pool; at one thread nothing is retained), on
+//! the units of `LOSAT_X_PAIRPAR` whose query-group span and subject chunk both have at least
+//! 65,536 letters: their split's diagonal table and record vector, and a unit's copy of its records
+//! of at least 128 KiB, get a capacity glibc always maps. It changes capacities, never a value.
+//! Every test compares the report with the report of the same search with `LOSAT_X_SEEDUNMAP=0`
+//! and reads the `[X_STATS] SEEDUNMAP` line, which is printed only while the switch is on: its
+//! `active` field says whether the switch acts in that process (it is 0 on a machine whose THP
+//! setting is "always"), and the counters say where blocks were given the mapped capacity.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
 //! ```c
@@ -19,10 +21,10 @@
 //! NCBI allocates one diagonal table per search thread; the switch chooses only the capacity of
 //! LOSAT's per-split tables and lists, so the property under test is that the report does not
 //! depend on it. That reports equal NCBI's is the business of the fixture comparisons, which run
-//! on the default paths. The inputs are pieces of two fixture genomes (MjeNMV, MelaMJNV): 1,500
-//! bases against 100,000 (contexts of 500 letters against subject frames of 33,333: tables of about
-//! 33,800 cells, the chunk almost all of each; the rule holds), and the reverse (the same width,
-//! a chunk of 500 letters: less than a quarter, so the arenas keep the blocks).
+//! on the default paths. The inputs are pieces of two fixture genomes (MelaMJNV, PemoMJNVA): 210,000
+//! bases against 210,000 (contexts and subject frames of about 70,000 letters: the rule holds), and
+//! 3,000 bases against 210,000 and the reverse (one side of about 1,000 letters: the arenas keep
+//! the blocks).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -37,8 +39,11 @@ const SWITCH: (&str, &str) = ("LOSAT_X_SEEDUNMAP", "1");
 const SWITCH_OFF: (&str, &str) = ("LOSAT_X_SEEDUNMAP", "0");
 const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
-const THREADS: [u32; 2] = [1, 4];
 const GLIBC: bool = cfg!(all(target_os = "linux", target_env = "gnu"));
+/// The bases of a long piece: frames of about 70,000 letters, above the rule's 65,536.
+const LONG: usize = 210_000;
+/// The bases of a short piece.
+const SHORT: usize = 3_000;
 
 /// The binary with the given variables as its only `LOSAT_*` variables that choose a code path.
 /// `LOSAT_X_DEFAULT` of the test's own environment is dropped as well: every test states the
@@ -75,8 +80,8 @@ fn record(defline: &str, letters: &str) -> String {
     text
 }
 
-/// The query and subject files of one test: the first `query_bases` of MjeNMV and the first
-/// `subject_bases` of MelaMJNV, in a directory of the test's own.
+/// The query and subject files of one test: the first `query_bases` of MelaMJNV and the first
+/// `subject_bases` of PemoMJNVA, in a directory of the test's own.
 struct Inputs {
     dir: PathBuf,
     query: PathBuf,
@@ -94,14 +99,17 @@ impl Inputs {
         let subject = dir.join("s.fna");
         std::fs::write(
             &query,
-            record("mje MjeNMV piece", &letters("MjeNMV.fasta")[..query_bases]),
+            record(
+                "mela MelaMJNV piece",
+                &letters("MelaMJNV.fasta")[..query_bases],
+            ),
         )
         .unwrap();
         std::fs::write(
             &subject,
             record(
-                "mela MelaMJNV piece",
-                &letters("MelaMJNV.fasta")[..subject_bases],
+                "pemo PemoMJNVA piece",
+                &letters("PemoMJNVA.fasta")[..subject_bases],
             ),
         )
         .unwrap();
@@ -152,9 +160,9 @@ impl Drop for Inputs {
     }
 }
 
-/// Contexts of 500 letters against subject frames of 33,333: the rule holds for every unit.
+/// Both sides long: the rule holds for every unit.
 fn rule_holds(test: &str) -> Inputs {
-    Inputs::new(test, 1_500, 100_000)
+    Inputs::new(test, LONG, LONG)
 }
 
 fn line<'a>(stderr: &'a str, prefix: &str) -> Option<&'a str> {
@@ -180,13 +188,19 @@ fn units(stderr: &str) -> u64 {
     fields(stderr, "[X_STATS] PAIRPAR ", ["units"])[0]
 }
 
-/// The three counters of `[X_STATS] SEEDUNMAP`: diag, records, copies.
-fn unmap(stderr: &str) -> [u64; 3] {
-    fields(
+/// Whether the switch acts in the process (`active`), and the three counters of
+/// `[X_STATS] SEEDUNMAP`: diag, records, copies. `active` is 0 or 1, and 0 off Linux with glibc.
+fn unmap(stderr: &str) -> (bool, [u64; 3]) {
+    let [active, diag, records, copies] = fields(
         stderr,
         "[X_STATS] SEEDUNMAP ",
-        ["diag", "records", "copies"],
-    )
+        ["active", "diag", "records", "copies"],
+    );
+    assert!(active <= 1, "{stderr}");
+    if !GLIBC {
+        assert_eq!(active, 0, "{stderr}");
+    }
+    (active == 1, [diag, records, copies])
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
@@ -194,49 +208,55 @@ fn unmap(stderr: &str) -> [u64; 3] {
 //         diag_table->hit_level_array = (DiagStruct *)
 //             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
 // ```
-// Where the rule holds, with no variable for the switch (it is on by default), at one and four
-// threads: the report is that of `LOSAT_X_SEEDUNMAP=0`; at four threads on Linux with glibc
-// diagonal tables and record vectors got the mapped capacity (the units save too few records here
-// for a copy of 128 KiB, which the unit tests and the larger searches of the entry in
-// diagnostics.md reach), elsewhere and at one thread (the serial path keeps today's capacities)
-// none. `LOSAT_X_DEFAULT=0` turns it off (no line, the same report), and `LOSAT_X_DEFAULT=0` with
-// `LOSAT_X_PAIRPAR=1` and the switch set maps the tables of the unit path at four threads (the
-// record vector of `LOSAT_X_SEEDCOMPACT`, which is then off, does not exist).
+// Where the rule holds, with no variable for the switch (it is on by default): the report is that
+// of `LOSAT_X_SEEDUNMAP=0` at one and four threads; at one thread (the serial path keeps today's
+// capacities) the counters are 0; at four threads, where the switch acts (`active=1`), diagonal
+// tables and record vectors got the mapped capacity, and where it does not, none. The units save
+// too few records here for a copy of 128 KiB, which the unit tests and the larger searches of the
+// entry in diagnostics.md reach. `LOSAT_X_DEFAULT=0` turns the switch off (no line, the same
+// report), and `LOSAT_X_DEFAULT=0` with `LOSAT_X_PAIRPAR=1` and the switch set maps the tables of
+// the unit path at four threads where it acts (the record vector of `LOSAT_X_SEEDCOMPACT`, which
+// is then off, does not exist).
 #[test]
 fn where_the_rule_holds_the_blocks_are_mapped_and_the_report_is_the_same() {
     let inputs = rule_holds("holds");
-    for threads in THREADS {
-        let what = format!("threads {threads}");
-        let expected = inputs.report_without_the_switch(threads);
-        let (report, stderr) = inputs.tblastx(threads, &[STATS]);
-        assert_eq!(report, expected, "{what}");
-        assert!(units(&stderr) > 0, "{what}:\n{stderr}");
-        let [diag, records, copies] = unmap(&stderr);
-        if GLIBC && threads > 1 {
-            assert!(diag > 0 && records > 0, "{what}:\n{stderr}");
-        } else {
-            assert_eq!([diag, records, copies], [0, 0, 0], "{what}:\n{stderr}");
-        }
 
-        let what = format!("LOSAT_X_DEFAULT=0 threads {threads}");
-        let (report, stderr) = inputs.tblastx(threads, &[STATS, PREVIOUS]);
-        assert_eq!(report, expected, "{what}");
-        assert_eq!(
-            line(&stderr, "[X_STATS] SEEDUNMAP "),
-            None,
-            "{what}:\n{stderr}"
-        );
+    let expected = inputs.report_without_the_switch(1);
+    let (report, stderr) = inputs.tblastx(1, &[STATS]);
+    assert_eq!(report, expected, "threads 1");
+    assert!(units(&stderr) > 0, "threads 1:\n{stderr}");
+    assert_eq!(unmap(&stderr).1, [0, 0, 0], "threads 1:\n{stderr}");
 
-        let what = format!("previous paths with the unit path and the switch, threads {threads}");
-        let (report, stderr) = inputs.tblastx(
-            threads,
-            &[STATS, PREVIOUS, ("LOSAT_X_PAIRPAR", "1"), SWITCH],
-        );
-        assert_eq!(report, expected, "{what}");
-        let [diag, records, copies] = unmap(&stderr);
-        assert_eq!(diag > 0, GLIBC && threads > 1, "{what}:\n{stderr}");
-        assert_eq!([records, copies], [0, 0], "{what}:\n{stderr}");
+    let threads = 4;
+    let expected = inputs.report_without_the_switch(threads);
+    let (report, stderr) = inputs.tblastx(threads, &[STATS]);
+    assert_eq!(report, expected, "threads 4");
+    assert!(units(&stderr) > 0, "threads 4:\n{stderr}");
+    let (active, [diag, records, copies]) = unmap(&stderr);
+    if active {
+        assert!(diag > 0 && records > 0, "threads 4:\n{stderr}");
+    } else {
+        assert_eq!([diag, records, copies], [0, 0, 0], "threads 4:\n{stderr}");
     }
+
+    let what = "LOSAT_X_DEFAULT=0, threads 4";
+    let (report, stderr) = inputs.tblastx(threads, &[STATS, PREVIOUS]);
+    assert_eq!(report, expected, "{what}");
+    assert_eq!(
+        line(&stderr, "[X_STATS] SEEDUNMAP "),
+        None,
+        "{what}:\n{stderr}"
+    );
+
+    let what = "previous paths with the unit path and the switch, threads 4";
+    let (report, stderr) = inputs.tblastx(
+        threads,
+        &[STATS, PREVIOUS, ("LOSAT_X_PAIRPAR", "1"), SWITCH],
+    );
+    assert_eq!(report, expected, "{what}");
+    let (active, [diag, records, copies]) = unmap(&stderr);
+    assert_eq!(diag > 0, active, "{what}:\n{stderr}");
+    assert_eq!([records, copies], [0, 0], "{what}:\n{stderr}");
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
@@ -245,7 +265,7 @@ fn where_the_rule_holds_the_blocks_are_mapped_and_the_report_is_the_same() {
 //             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
 // ```
 // With `LOSAT_X_SEEDCOMPACT=0` the units keep today's lists: only the diagonal tables are given
-// the mapped capacity, and the report is the same.
+// the mapped capacity (where the switch acts), and the report is the same.
 #[test]
 fn without_the_compact_lists_only_the_tables_are_mapped() {
     let inputs = rule_holds("nocompact");
@@ -253,8 +273,8 @@ fn without_the_compact_lists_only_the_tables_are_mapped() {
     let expected = inputs.report_without_the_switch(threads);
     let (report, stderr) = inputs.tblastx(threads, &[STATS, ("LOSAT_X_SEEDCOMPACT", "0")]);
     assert_eq!(report, expected);
-    let [diag, records, copies] = unmap(&stderr);
-    assert_eq!(diag > 0, GLIBC, "{stderr}");
+    let (active, [diag, records, copies]) = unmap(&stderr);
+    assert_eq!(diag > 0, active, "{stderr}");
     assert_eq!([records, copies], [0, 0], "{stderr}");
 }
 
@@ -264,25 +284,25 @@ fn without_the_compact_lists_only_the_tables_are_mapped() {
 //     hits = scansub(lookup_wrap, subject,
 //                               offset_pairs, array_size, scan_range);
 // ```
-// A short subject against a long query (subject frames of 500 letters, contexts of 33,333: tables
-// of the same size as above, but the chunk is less than a quarter of them), and the search of the
-// test above with `LOSAT_X_PAIRPAR=0` (no unit runs): the line is printed (the switch is on) with
-// zero counters, and the report is that of `LOSAT_X_SEEDUNMAP=0`.
+// A short query against a long subject (query-group spans of about 1,000 letters, chunks of about
+// 70,000) and the reverse, at four threads, and a search with `LOSAT_X_PAIRPAR=0` (no unit runs):
+// the line is printed (the switch is on) with zero counters, and the report is that of
+// `LOSAT_X_SEEDUNMAP=0`.
 #[test]
 fn where_the_rule_does_not_hold_nothing_is_mapped() {
-    let short_subject = Inputs::new("short", 100_000, 1_500);
-    for threads in THREADS {
-        let what = format!("short subject, threads {threads}");
-        let expected = short_subject.report_without_the_switch(threads);
-        let (report, stderr) = short_subject.tblastx(threads, &[STATS]);
+    let threads = 4;
+    for (test, query_bases, subject_bases) in [("shortq", SHORT, LONG), ("shorts", LONG, SHORT)] {
+        let inputs = Inputs::new(test, query_bases, subject_bases);
+        let what = format!("{query_bases} bases against {subject_bases}");
+        let expected = inputs.report_without_the_switch(threads);
+        let (report, stderr) = inputs.tblastx(threads, &[STATS]);
         assert_eq!(report, expected, "{what}");
         assert!(units(&stderr) > 0, "{what}:\n{stderr}");
-        assert_eq!(unmap(&stderr), [0, 0, 0], "{what}:\n{stderr}");
+        assert_eq!(unmap(&stderr).1, [0, 0, 0], "{what}:\n{stderr}");
     }
-    let inputs = rule_holds("nounits");
-    let threads = 4;
+    let inputs = Inputs::new("nounits", SHORT, LONG);
     let expected = inputs.report_without_the_switch(threads);
     let (report, stderr) = inputs.tblastx(threads, &[STATS, ("LOSAT_X_PAIRPAR", "0")]);
     assert_eq!(report, expected, "LOSAT_X_PAIRPAR=0");
-    assert_eq!(unmap(&stderr), [0, 0, 0], "LOSAT_X_PAIRPAR=0:\n{stderr}");
+    assert_eq!(unmap(&stderr).1, [0, 0, 0], "LOSAT_X_PAIRPAR=0:\n{stderr}");
 }

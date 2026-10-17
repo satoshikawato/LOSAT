@@ -25,9 +25,11 @@
 //!
 //! Where it acts: the two-hit stage (`-window_size` above 0) with the standard lookup table
 //! (`-word_size 3`, the default), when nothing traces the seeds and the diagonal order is the
-//! reference's (LOSAT_X_SEEDBUCKET mode 0); elsewhere the reference runs. Off unless
-//! `LOSAT_X_BXDIAG` is set (any value; not in the strict set). The cell test is the AVX2 batch on
-//! an x86-64 CPU with AVX2 and the per-hit loop elsewhere, as LOSAT_X_BPDIAG chooses;
+//! reference's (LOSAT_X_SEEDBUCKET mode 0); elsewhere the reference runs. `LOSAT_X_BXDIAG` is a
+//! switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. When it
+//! is not set (or empty) it acts only where the cell test is the AVX2 batch (an x86-64 CPU with
+//! AVX2), the cell test it was timed with; set to a value, it runs on any CPU. The cell test is the
+//! AVX2 batch on an x86-64 CPU with AVX2 and the per-hit loop elsewhere, as LOSAT_X_BPDIAG chooses;
 //! `LOSAT_X_BXDIAG=per-hit` and `LOSAT_X_BXDIAG=scalar` force the per-hit loop or the scalar batch
 //! (diagnostics; the tests use them). `LOSAT_X_BXDIAGSHADOW` (any value) also runs the reference on
 //! a copy of the diagonal table for every subject and stops (panics) if the hit lists or the tables
@@ -119,17 +121,30 @@ fn x_with_context_table<R>(batch: &PreparedQueryBatch, f: impl FnOnce(&XContextT
 // computes.
 /// EXPERIMENT (LOSAT_X_BXDIAG): 0 = off, 1 = the fused loop, 2 = shadow
 /// (`LOSAT_X_BXDIAGSHADOW`: the fused loop and the reference on a copy of the table, compared).
+/// A switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; on
+/// by default (not set, or empty) only with the AVX2 batch ([`x_cell_mode`]).
 pub(crate) fn x_bxdiag_mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
+        let named = std::env::var("LOSAT_X_BXDIAG").is_ok_and(|v| !v.trim().is_empty());
         if std::env::var_os("LOSAT_X_BXDIAGSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_BXDIAG").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BXDIAG") && (named || x_avx2_batches()) {
             1
         } else {
             0
         }
     })
+}
+
+// No NCBI counterpart: chooses LOSAT's code path; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXDIAG): whether the cell test is the AVX2 batch, where the default acts.
+fn x_avx2_batches() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    if matches!(x_cell_mode(), XDiagMode::Avx2) {
+        return true;
+    }
+    false
 }
 
 // No NCBI counterpart: chooses LOSAT's code path once; it does not change any value NCBI computes.

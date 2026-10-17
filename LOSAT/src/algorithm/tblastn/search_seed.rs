@@ -1053,6 +1053,8 @@ pub(super) fn x_scan_unit(
         pairs.resize(pairs_len, BlastOffsetPair::default());
     }
     let pair_capacity = plan.pair_capacity as i32;
+    // EXPERIMENT (LOSAT_X_TBNSCANBF): the scan calls of the unit, for LOSAT_X_STATS.
+    let mut x_calls = 0u64;
     for (range_index, &(left, right)) in ranges.iter().enumerate() {
         // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:496-501
         // scan_range[1] = subject->seq_ranges[0].left;
@@ -1083,7 +1085,11 @@ pub(super) fn x_scan_unit(
                 )
             };
             on_pairs(&pairs[..hits as usize]);
+            x_calls += 1;
         }
+    }
+    if super::x_scan_bf::x_stats() {
+        super::x_scan_bf::x_count_unit(scan_bf, x_calls);
     }
 }
 

@@ -470,9 +470,24 @@ pub(crate) fn check_protein_sequence(
         );
     }
     let residues = &with_sentinels[1..with_sentinels.len() - 1];
-    if residues.iter().all(|&residue| {
-        residue != NCBISTDAA_GAP && usize::from(residue) < crate::utils::matrix::BLASTAA_SIZE
-    }) {
+    // Every residue must be a byte other than the gap and below BLASTAA_SIZE: with the gap byte
+    // 0 (asserted below), the residues 1..BLASTAA_SIZE, the bytes whose `residue - 1` (wrapping,
+    // so the gap becomes 255) is below BLASTAA_SIZE - 1. The largest such difference, taken over
+    // all bytes without an early exit, is a loop the compiler vectorizes; the early exit of
+    // `all` made it a loop over single bytes (LOSAT-only cost; NCBI checks nothing here).
+    const _: () = assert!(
+        NCBISTDAA_GAP == 0
+            && crate::utils::matrix::BLASTAA_SIZE > 1
+            && crate::utils::matrix::BLASTAA_SIZE <= 256
+    );
+    const FIRST: u8 = NCBISTDAA_GAP + 1;
+    const LETTERS: usize = crate::utils::matrix::BLASTAA_SIZE - FIRST as usize;
+    let largest = residues
+        .iter()
+        .map(|&residue| residue.wrapping_sub(FIRST))
+        .max()
+        .unwrap_or(0);
+    if usize::from(largest) < LETTERS {
         return Ok(());
     }
     if let Some(position) = residues
@@ -587,4 +602,96 @@ pub(crate) fn read_protein_stores(db: &SeqDb, program: &str) -> Result<StoredPro
         starts,
         total_length: db.total_length(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::matrix::BLASTAA_SIZE;
+
+    /// The residues between the two sentinel bytes.
+    fn stored(residues: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![NCBISTDAA_GAP];
+        bytes.extend_from_slice(residues);
+        bytes.push(NCBISTDAA_GAP);
+        bytes
+    }
+
+    fn check(residues: &[u8]) -> std::result::Result<(), String> {
+        check_protein_sequence(&stored(residues), 7, "blastx").map_err(|e| e.to_string())
+    }
+
+    /// The check before the single pass (an `all` over the residues).
+    fn accepted_before(residues: &[u8]) -> bool {
+        residues
+            .iter()
+            .all(|&residue| residue != NCBISTDAA_GAP && usize::from(residue) < BLASTAA_SIZE)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:1559-1593 (quoted at
+    // `check_protein_sequence`): the gap byte and bytes past the matrix are what the check
+    // refuses. Not a port of an NCBI unit case.
+    #[test]
+    fn the_check_accepts_the_letters_and_names_the_first_bad_byte() {
+        let first = NCBISTDAA_GAP + 1;
+        let last = (BLASTAA_SIZE - 1) as u8;
+        assert_eq!(check(&[]), Ok(()));
+        assert_eq!(check(&[first]), Ok(()));
+        assert_eq!(check(&[last]), Ok(()));
+        let letters: Vec<u8> = (0..1_000).map(|i| [first, last][i % 2]).collect();
+        assert_eq!(check(&letters), Ok(()));
+        // (byte, words of the refusal, the character after its position)
+        for (bad, says, after) in [
+            (NCBISTDAA_GAP, "gap character", ';'),
+            (BLASTAA_SIZE as u8, "no NCBIstdaa residue", ','),
+            (255, "no NCBIstdaa residue", ','),
+        ] {
+            for length in [1, 2, 31, 32, 33, 100, 1_000] {
+                for at in [0, length / 2, length - 1] {
+                    let mut residues = letters[..length].to_vec();
+                    residues[at] = bad;
+                    let error = check(&residues).unwrap_err();
+                    assert!(
+                        error.contains(says)
+                            && error.contains(&format!("position {}{after}", at + 1)),
+                        "byte {bad} at {at} of {length}: {error}"
+                    );
+                }
+            }
+        }
+        // A gap before a byte past the matrix is reported as the gap, as before.
+        let mut residues = letters[..10].to_vec();
+        residues[7] = NCBISTDAA_GAP;
+        residues[3] = 200;
+        assert!(check(&residues).unwrap_err().contains("gap character"));
+        // The sentinels.
+        assert!(check_protein_sequence(&[1, first, 0], 7, "blastx").is_err());
+        assert!(check_protein_sequence(&[0, first, 1], 7, "blastx").is_err());
+    }
+
+    // Random residues around the letters' bounds: the single pass accepts exactly what the
+    // `all` accepted.
+    #[test]
+    fn the_check_accepts_what_the_check_before_it_accepted() {
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for case in 0..2_000 {
+            let length = (next() % 200) as usize;
+            let mut residues: Vec<u8> = (0..length).map(|_| 1 + (next() % 27) as u8).collect();
+            if case % 2 == 0 && length > 0 {
+                let at = (next() as usize) % length;
+                residues[at] = [0, 27, 28, 29, 254, 255][(next() % 6) as usize];
+            }
+            assert_eq!(
+                check(&residues).is_ok(),
+                accepted_before(&residues),
+                "{residues:?}"
+            );
+        }
+    }
 }

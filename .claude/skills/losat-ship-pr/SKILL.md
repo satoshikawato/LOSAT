@@ -45,8 +45,11 @@ twice per improvement).
   `losat-gates`) and timings on the conditions the work measures, switch on and off in the same
   run. The body says it lands on by default and gives that evidence.
 - A loss on a measured condition (time, or max RSS above NCBI or the previous default where the
-  work holds RSS): the rule that turns it on only where it wins goes into the same PR, or the work
-  ends as a recorded no-go. Do not merge a speed-up opt-in for later.
+  work holds RSS): the rule that turns it on only where it wins goes into the same PR when one is
+  known. Without such a rule the speed-up still lands, opt-in (not in the strict set), with the
+  conditions where it wins and loses in its diagnostics entry; its default is decided later,
+  bundled with the work's next default PR (Owner, 2026-10-17: a speed-up that cannot be on by
+  default is still adopted). A no-go is for a change that wins nowhere or is inexact.
 - `LOSAT_X_<NAME>=0` turns it off and `LOSAT_X_DEFAULT=0` returns to the previous default. Shadow
   and diagnostic switches stay opt-in.
 - Put its name in sorted order into `STRICT_SET` (`LOSAT/src/utils/xswitch.rs`) and its `export`

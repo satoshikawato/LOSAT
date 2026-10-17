@@ -2677,9 +2677,11 @@ fn search_query_batch(
     // True when `lookup` is the stub: the reference frame loop must then run zero times
     // (asserted at dispatch point 2).
     let x_pair_lut_is_stub = x_pair_lut_stub.is_some();
+    // Dispatch point (LOSAT_X_TBXLUT, off unless set): the full table of the batch from the chain
+    // builder (`build_ncbi_lookup`) or filled in place from per-cell counts; the same table.
     let (lookup, contexts) = match x_pair_lut_stub {
         Some(stub) => stub,
-        None => build_ncbi_lookup(
+        None => crate::algorithm::tblastx::lookup::x_tbx_build_ncbi_lookup(
             &query_frames,
             crate::core::blast_util::ncbi_int4_from_double(args.threshold),
             &ungapped_params_for_xdrop, // Used for x_dropoff calculation only

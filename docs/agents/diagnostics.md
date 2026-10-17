@@ -165,6 +165,7 @@ export LOSAT_X_BPPCOMPACT=1
 export LOSAT_X_BPPFREE=1
 export LOSAT_X_BPQBLOCK=50000
 export LOSAT_X_BPREDOFIT=1
+export LOSAT_X_BPSCANBF=1
 export LOSAT_X_BPSEED=1
 export LOSAT_X_BPSUBJRUN=1
 export LOSAT_X_BPUNGAP=1
@@ -1094,6 +1095,30 @@ Rebuilding less:
   job 0.925-0.965, median 0.936) and the instructions 0.985; on one core in alternated pairs Blast0_6 0.920
   (`blastp_scan_ungapped` 45.0 -> 40.2 s), human block 1 0.950 and C. elegans block 5 0.963 (its gapped
   stages are over half of the job), with 13-18 % fewer branch mispredicts.
+- `LOSAT_X_BPSCANBF=1` (BLASTP, speed; in the strict set since 2026-10-17, on by default; `=0` turns it
+  off; acts in the fused loop, `LOSAT_X_BPSEED`, on the standard lookup table; the compressed table keeps
+  its scan) blastp's fused loop finds the lookup cells with hits by the
+  branch-free cell mode of `LOSAT_X_BXSCANBF` (`blastp/x_seed_fused.rs` `x_scan_cells_bf`: the positions of
+  256 words listed with tblastn's `x_block_candidates`, the list advanced by the presence bit, and the listed
+  cells passed to the cell test in position order), in every cell-test mode (`LOSAT_X_BPDIAG`'s AVX2 batch
+  with or without `LOSAT_X_BPDEFER`, its scalar batch, the per-hit test). The cells, their order and their
+  hit lists are the presence-test loop's (the tests of `LOSAT_X_BXSCANBF`), so the report does not change.
+  The switch's instance (`x_scan_two_hit_bf`) is out of line and calls the cell test through a closure of
+  its own type: with the default instance's closure type the cell test had two callers, the compiler no
+  longer inlined it into the default loop, and the default instance ran 1.9-6 % more instructions. With
+  this form the default instance runs the instructions of the build without the switch (within 0.011 %).
+  Timed 2026-10-17 on the workstation (perf-si-20261012 session SCANBF-1, node 1, one binary without and
+  with the switch and the build without it, in turn; one output hash per case, NCBI BLAST+ 2.17.0's
+  included where run): one 357-residue human protein against UniRef50 2026_03 volume 00 (`-db`, 2,178,834
+  sequences, 3.0 G residues, `-evalue 1e-5`) 0.75 at one thread (69.70 -> 52.42 s; NCBI 71.67 s) and 0.76
+  at 8 (9.19 -> 6.94 s; NCBI 9.76 s), branch misses 2.64 G -> 1.44 G, cycles 220 G -> 165-171 G; a
+  42-residue protein against the same volume 0.64 at one thread (21.03 -> 13.40 s, cycles 65.2 G -> 41.0
+  G; NCBI 11.17 s). With many query proteins the presence bit is set at most words and the branch is
+  predicted: 567 human proteins x the human proteome (an OrthoFinder job's first block, `-subject`,
+  `-evalue 0.001`) 1.00 at one thread, every 10th Arabidopsis protein (2,763) x the yeast proteome 1.00,
+  10 proteins x volume 00 at 8 threads 0.995. In the strict set from its first pull request (no measured
+  case slower; Owner decision of 2026-10-17 that the branch-free scans join the set once each shows no
+  loss, and plan v4's rule that a switch that wins everywhere joins in the pull request that adds it).
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; in the
   strict set since 2026-10-14; `=0` turns it off) the word loop and the
   X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte

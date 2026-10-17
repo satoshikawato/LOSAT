@@ -97,6 +97,9 @@ use std::sync::OnceLock;
 /// they were verified and timed with it on.
 /// `LOSAT_X_BPDIAG` (the two-hit diagonal test of a lookup cell eight hits at a time,
 /// `blastp/x_seed_fused.rs`) joined after a second run of the same jobs with it on as well.
+/// `LOSAT_X_SEEDCOMPACT` (TBLASTX's unit path keeps the saved init HSPs of a unit as 28-byte
+/// records copied out at their exact length, `tblastx/x_pair_par.rs`) was added after the change as
+/// a switch that is off unless set and joined the set once it was verified and timed with it on.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
     "LOSAT_X_BNSTREAM",
@@ -152,6 +155,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_PAIRPAR",
     "LOSAT_X_PURGEFAST",
     "LOSAT_X_SEEDBUCKET",
+    "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDRELEASE",
     "LOSAT_X_SEGFAST",
     "LOSAT_X_SEGMEMO",

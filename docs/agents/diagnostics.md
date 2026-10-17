@@ -203,6 +203,7 @@ export LOSAT_X_PAIRLUT=1
 export LOSAT_X_PAIRPAR=1
 export LOSAT_X_PURGEFAST=1
 export LOSAT_X_SEEDBUCKET=1
+export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDRELEASE=1
 export LOSAT_X_SEGFAST=1
 export LOSAT_X_SEGMEMO=1
@@ -393,6 +394,16 @@ difference), the max RSS below NCBI's on every job, and the sum of the job times
 (0.597 with the eight; NCBI's times from an earlier run of the same jobs). It changes no value and
 no order of computation; without AVX2 it keeps the per-hit loop. Its diagnostic
 `LOSAT_X_BPDIAG_SIMD=0` (the scalar batch) stays outside the set.
+
+`LOSAT_X_SEEDCOMPACT` was added after the default changed, as a switch that was off unless set, and
+joined the set on 2026-10-17. A unit of TBLASTX's parallel seed stage keeps its saved ungapped hits
+as 28-byte records, the shape NCBI BLAST+ keeps them in, copied out at their exact length, and the
+merge makes each chunk's list at its exact length and moves the first one into the frame's list
+instead of copying it. It changes no value and no order. On the workstation (8 rounds, every report
+equal to NCBI BLAST+ 2.17.0) max RSS went from 109 to 87 MiB at one thread and from 157 to 148 MiB at
+8 threads on the 0.66 Mb by 0.61 Mb pair (AP027131 x AP027133, genetic code 4), and from 130 to 121
+MiB and from 215 to 209 MiB on a genome against itself (NZ_CP006932); the whole search took
+x0.97-0.99 of the time.
 
 What runs per target:
 
@@ -1210,9 +1221,9 @@ Rebuilding less:
   alive, a subject that arrives after a release stops the run, and an assertion that runs with and without
   the switch stops a frame loop that would run without the worker's table
   (`LOSAT/tests/tblastx_seed_release.rs` reads the counters).
-- `LOSAT_X_SEEDCOMPACT=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it) the seed stage of the unit path of `LOSAT_X_PAIRPAR` and its merge
-  hold fewer and exactly sized lists (`tblastx/x_pair_par.rs`, exactness argument in the section above
+- `LOSAT_X_SEEDCOMPACT=1` (TBLASTX, memory; in the strict set since 2026-10-17, on by default) the seed
+  stage of the unit path of `LOSAT_X_PAIRPAR` and its merge hold fewer and exactly sized lists
+  (`tblastx/x_pair_par.rs`, exactness argument in the section above
   `XUnitHsp`). Without it each unit keeps its saved init HSPs as `InitHSP`s (72 bytes on 64-bit targets) in a
   list grown by doubling, the lists of all units of a subject live until its merge, and the merge converts
   each chunk's list into a list grown by doubling and copies the first chunk's list into the empty frame

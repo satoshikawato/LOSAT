@@ -1391,7 +1391,9 @@ Scheduling (each value computed by one thread with the original function; order 
   the counters on cache lines of its own, which the calling thread adds into the counters after the
   last chunk (the same wrapping increments of each counter by its one owner, and nothing reads the
   counters before the longest chain); and `longest_chain` is computed afterwards by the original code.
-  Each bucket's header sits on a 64-byte line of its own. The buckets hold one
+  Each bucket's header sits on a 64-byte line of its own (so the counter lines and the header lines
+  are not shared between threads; the presence-vector words of two neighbouring blocks still share a
+  line, which costs nothing measurable). The buckets hold one
   8-byte entry per word of the current chunk and template; before each chunk a bucket gives back the
   room it grew above four times its share of a chunk, so the buckets of one template reserve at most
   24 MiB plus 608 bytes x threads^2 (544 of entries and the 64-byte header) whatever the input; the
@@ -1438,22 +1440,34 @@ Scheduling (each value computed by one thread with the original function; order 
   jobs 0.011 / 0.057 / 0.005 s, summed 0.159 / 0.853 / 0.061 s. So the joins cost little: the latest
   job start is 0.0024-0.0033 s per phase summed over the 21 chunks, and the walls exceed the longest
   jobs by 0.011 s (4 threads) and 0.013 s (16 threads) in all, about 0.2 ms per join. The time is in
-  the jobs' own work, whose sum is 3.8 times (4 threads) and 4.9 times (16 threads) the loop's whole
-  fill; phase B (the owners' updates) alone sums to 2.4 and 3.9 times the loop, with balanced jobs
+  the jobs' own run time (mostly stalls, as the cause below shows), whose sum is 3.8 times (4
+  threads) and 4.9 times (16 threads) the loop's whole fill; phase B (the owners' updates) alone sums to 2.4 and 3.9 times the loop, with balanced jobs
   (longest / mean 1.04 and 1.08); at 4 threads phase A is also costly (the longest reader 1.29 times
   the mean). The runs with the switch also have more system time (0.22 against 0.15 s at 4 threads,
-  0.90 against 0.60 s at 16). Fewer joins would save at most the 0.01 s above. The cause was false
+  0.90 against 0.60 s at 16). Fewer joins would save at most the 0.01 s above. Fix round
+  1's bucket bound costs nothing measurable: (a) at 16 threads, 4 rounds old (24c714fd) / new
+  (b1e3df69) / off, all slow phase: walls 2.056 / 2.055 / 2.174 s (new/old 1.000, 0.999-1.001; new/off
+  0.945), max RSS 91.3-95.3 / 91.3-94.3 / 88.9-92.9 MiB; (b) at 16 threads one round in a common phase
+  4.419 / 4.419 s (the other mixed the phases). Every output equals the sha256 of the run without the
+  switch.
+  The cause was false
   sharing (perf-mb-20261014 `logs/disclutcause_report.md`: hardware counters inside the fill and
   per-thread `getrusage` per phase, on probes of a scratch branch): in phase B the 4-byte counters of
   `helper_array`, one per block of 2048 cells with the blocks dealt round robin, put 16 owners (16
   threads) or 4 (4 threads) on each 64-byte line, and every word on a non-empty cell wrote one; in
   phase A the 24-byte bucket headers of neighbouring readers shared lines, and every push stores the
-  length. That gave 3.3-4.5 million cache-line transfers between cores (HITM loads / RFOs) per fill of
-  (a), against thousands in the loop, about 80 % of them in phase B; the work per word was the loop's
-  (all jobs on one thread: 0.215 s against the loop's 0.213 s, the same cycles), remote memory was no
-  cause and the first-touch page faults (the loop's count, dearer with many threads at once) a
-  secondary one (pre-faulting the tables is a separate, smaller follow-up).
-  The fix (padded bucket headers, private counters, added once after the last chunk): on the
+  length. That gave 3.2-4.5 million HITM loads (loads served by a line another core had modified)
+  and as many RFOs (stores that had to take a line from another core) per fill of (a), 6.4-9.0
+  million of each for (b), against at most a few thousand in the loop, about 80 % of them in phase B.
+  The 3.8 and 4.9 times are the jobs' summed time, mostly stalls, not work: the instructions were
+  1.46-1.6 times the loop's, and with all jobs on one thread the fill took 0.215 s against the
+  loop's 0.213 s with the same cycles. Remote memory was no cause and the first-touch page faults
+  (the loop's count, dearer with many threads at once) a secondary one (pre-faulting the tables is a
+  separate, smaller follow-up).
+  The fix (padded bucket headers, private counters, added once after the last chunk; the counter
+  lines and the bucket-header lines are no longer shared, while the presence-vector words of two
+  neighbouring blocks still share a line, which the cause report measured to cost nothing: 1.1-2.4
+  million HITM loads left, no time): on the
   workstation (node 1 CPUs 32-47 with the siblings idle, `numactl --membind 1`, `LOSAT_X_PAIRPARDISC=1`;
   off = the fixed binary without the switch, #252 = dev 0b7335ce with it, fix = c33d2e2a with it; per
   input and thread count a warm-up, then rounds of the three in rotated order, 4 at 4 and 16 threads, 2
@@ -1462,19 +1476,19 @@ Scheduling (each value computed by one thread with the original function; order 
   (b) 6c12337933ef66fe) the fill took, off / #252 / fix, (a) 0.141 / 0.196 / 0.090 s at 2 threads,
   0.171 / 0.197 / 0.083 s at 4, 0.203 / 0.127 / 0.060 s at 8, 0.201 / 0.082 / 0.049 s at 16; (b)
   0.259 / 0.366 / 0.155, 0.368 / 0.375 / 0.151, 0.374 / 0.231 / 0.100, 0.310 / 0.154 / 0.083 s (fix /
-  #252 0.40-0.59, fix / off 0.24-0.64). So the switch now beats the loop from 2 threads on, and it needs
-  no thread threshold. The machine's one-thread speed flips between runs (powersave; walls of one
-  configuration 1.4 or 2.2 s for (a)), so walls are compared within one speed mode (runs within 10 %
-  of the group's slowest, or fastest at 2 threads): (a) at 2 / 4 / 8 / 16 threads 1.446 / 1.508 / 1.386,
+  #252 0.40-0.59, fix / off 0.24-0.64; medians over all runs). The machine's one-thread speed flips
+  between runs (powersave; walls of one configuration 1.4 or 2.2 s for (a)), and the loop's fill
+  follows it while the pool fills hardly do: (a) at 4 threads, off 0.139 s in the fast mode and 0.204 s in
+  the slow one, fix 0.083 and 0.085 s; (b) at 16 threads, off 0.249 and 0.373 s, fix 0.083 s (slow).
+  Within one speed mode (`logs/disclutfix_ws_table.md`) fix / off is 0.22-0.64 and fix / #252
+  0.39-0.59 for every input and thread count, so the switch beats the loop from 2 threads on in every
+  mode, and it needs no thread threshold. Walls are compared within one speed mode as well (runs
+  within 10 % of the group's slowest; at 2 threads, where (a) has a fast and a slow mode, the fast
+  one, and for (b) all runs): (a) at 2 / 4 / 8 / 16 threads 1.446 / 1.508 / 1.386,
   2.203 / 2.200 / 2.070, 2.190 / 2.112 / 2.044, 2.190 / 2.062 / 2.027 s; (b) 3.037 / 3.130 / 2.925,
   4.030 / 4.045 / 3.854, 4.244 / 4.173 / 4.044, 4.486 / 4.393 / 4.309 s: fix / #252 0.92-0.98, fix / off
   0.93-0.96, about the fills' differences. Max RSS medians of the arms at most 2.5 MiB above the loop's
-  and within 1 MiB of #252's (88-109 MiB). Fix round
-  1's bucket bound costs nothing measurable: (a) at 16 threads, 4 rounds old (24c714fd) / new
-  (b1e3df69) / off, all slow phase: walls 2.056 / 2.055 / 2.174 s (new/old 1.000, 0.999-1.001; new/off
-  0.945), max RSS 91.3-95.3 / 91.3-94.3 / 88.9-92.9 MiB; (b) at 16 threads one round in a common phase
-  4.419 / 4.419 s (the other mixed the phases). Every output equals the sha256 of the run without the
-  switch. Tests: the unit tests of
+  and within 1 MiB of #252's (88-109 MiB). Tests: the unit tests of
   `x_disc_lookup_par.rs` (partitioned and pool fills equal the original loop for every template type,
   length and word size, one and two templates, 1-20 parts, chunks of 1 to 5,000 positions and random
   layouts of queries and masks, pools of 1, 2, 3, 5, 8 and 16 threads, a 2.6 M-position query in the
@@ -1482,7 +1496,9 @@ Scheduling (each value computed by one thread with the original function; order 
   run on at least two workers of a 3-thread pool; the shadow names a change in any one array or the
   longest chain; the buckets' bound; the private counters give the loop's counters on pools of 2, 3, 5
   and 16 threads also from start values that the increments wrap past u32::MAX, with blocks whose
-  counters wrap and blocks whose counters stay zero; the bucket headers and the counter copies are
+  counters wrap and blocks whose counters stay zero, and at least two owners' private copies hold
+  counts before the flush (a fill that counted into one shared copy would be just as exact but bring
+  the false sharing back); the bucket headers and the counter copies are
   whole 64-byte lines) and `LOSAT/tests/blastn_disc_lookup_par.rs`
   (off / on / shadow equal at 1 and 4 threads, `-subject` and `-db`, one and two templates, with
   `LOSAT_X_PAIRPARDISC`, `LOSAT_X_QBATCHPAR` slots and split query chunks, megablast with and without a
@@ -1548,6 +1564,60 @@ Scheduling (each value computed by one thread with the original function; order 
   at least two workers of a 3-thread pool, and by none with the switch off, one thread or one query) and
   `LOSAT/tests/blastn_query_dust_par.rs` (off / on / shadow equal at 1 and 4 threads for the three tasks, with
   `-dust 10 32 2 -lcase_masking`, `-dust no`, `LOSAT_X_QBATCHPAR` slots of two threads, and split query chunks).
+- `LOSAT_X_QPREPPAR=1` (BLASTN, all tasks; not in the strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT`
+  says) the BLASTNA encoding of a query batch and the ungapped Karlin blocks of its contexts are made on the search pool
+  instead of one query / context after the other (`blastn/blast_engine/x_query_prep_par.rs`, called from
+  `search_query_batch`, so for every query batch, in the loop or in a `LOSAT_X_QBATCHPAR` slot; `-db` searches too).
+  NCBI encodes the queries of a batch into one buffer and computes each context's block in turn
+  (`blast_setup_cxx.cpp:500-603`, `blast_stat.c:2754-2784`); both run before the lookup table is built, with no other
+  thread working (about 0.03 s per 5 Mb batch; 5 % of a batch at 4 threads, 11-14 % at 8-16). With the switch on and a
+  `SearchPool` of two or more threads current, both are ordered parallel maps run with `SearchPool::install`, so on the
+  pool of the search that calls them (the whole search pool, or the private pool of a `LOSAT_X_QBATCHPAR` slot of two or
+  more threads), never on rayon's global pool. Encoding: the buffer is cut with `split_at_mut` into the span of each
+  query (first context start to last context end; the spans must be in query order and disjoint, else the serial function
+  runs) and each query writes its own span with the two calls of the serial function, plus context then minus context.
+  Blocks: `par_iter().map().collect()` over the contexts (rayon splits them into ranges; the blocks are per context, the
+  jobs are not). Exact because the encoding of a query is a function of its letters, its two context offsets and the block
+  length (constant tables, and the reverse-complement table, a `OnceLock` that every caller fills with the same 256
+  bytes), and the block of a context is a function of its bytes and the reward and penalty (locals only; the one global of
+  `compute_karlin_params_ungapped` is the `LOSAT_X_KARLINFAST` flag, read once); there is no cache, memo table, counter
+  or random generator, results are collected in order, and no floating-point operation changes order (the sums are inside
+  one context). It acts only with a pool of two or more threads and two or more queries (encoding) or contexts (blocks);
+  with one thread, a slot of one thread, a build without the `parallel` feature, WebAssembly without `wasm-threads`, or
+  the switch off, today's serial code runs. Shadow: `LOSAT_X_QPREPPARSHADOW=1` (implies the switch) also computes both
+  serially and compares the buffers byte for byte and the blocks field by field with the bits of every float; a
+  difference prints `[X_SHADOW] QPREPPAR batches= queries= contexts= fallbacks= diffs= DIFFERENT (<what>)` and panics with
+  a message that names the first differing byte of the buffer, or the context and the field of the block; at the end of a
+  run `main` prints `[X_SHADOW] QPREPPAR batches= queries= contexts= fallbacks= diffs=0 identical` (`batches` and
+  `queries`: encodings made on a pool and compared; `contexts`: blocks made on a pool and compared; `fallbacks`: batches of
+  two or more queries on a pool whose spans were not in query order and disjoint, which the serial function encoded; they
+  are in neither `batches` nor `queries` and are not compared; always 0 in the layout of `search_query_batch`; all 0
+  without a pool of two threads). With `LOSAT_X_STATS` (any switch state) `main` prints
+  `[X_STATS] QPREPPAR encode_s=<s> karlin_s=<s> fallbacks=<n>`, the summed wall times of the two steps over every batch
+  (with `LOSAT_X_QBATCHPAR` they include the slots' batches, which run concurrently, and those the loop discards; with the
+  shadow, the serial reference pass) and the fallbacks (counted when the switch is on).
+  Measured on the workstation (2x Xeon Gold 6338, powersave, node 1 CPUs 32-47 with the siblings idle, `numactl
+  --membind`; `-outfmt 6`, subject 3 Mb of D. melanogaster 2L; both arms run the same binary with `LOSAT_X_PAIRPARDISC`,
+  `LOSAT_X_QBATCHPAR`, `LOSAT_X_DIAGLV`, `LOSAT_X_PAIRPARFOLD`, `LOSAT_X_QDUSTPAR` and `LOSAT_X_DISCLUTPAR`, the off arm
+  carries an unread `XOSAT_X_QPREPPAR=1` of the switch's length; alternating pairs, the order rotated per round, a
+  discarded warm-up run before each pair; at most 1 other CPU busy at start and end of every run), dc-megablast, medians,
+  on/off wall (per-round ratio median, range): (a) 1,775 cDNAs (5.0 Mb) 4 threads 0.653 -> 0.629 s (0.966, 3 rounds), 16
+  threads 0.498 -> 0.475 (0.941, 4 rounds); (b) 3,492 cDNAs 4 threads 1.243 -> 1.208 (0.963), 16 threads 0.643 -> 0.596
+  (0.922); Ad 31,168 cDNAs (37 batches) 4 threads 10.24 -> 9.73 (0.949), 16 threads 3.43 -> 3.34 (0.974). The two steps
+  (`encode_s` + `karlin_s`, one stats run per arm): (a) 16 threads 0.034 -> 0.008 s, (b) 0.100 -> 0.020, Ad 0.55 -> 0.17
+  (n16) and 0.53 -> 0.155 (n4). Cycles:u within 4 % (the cycles move with the GHz, 1.9-3.1); max RSS 99 / 99, 103 / 104, 109 /
+  111, 194 / 195, 238 / 236, 507 / 510 MiB (off / on, in the order above). Every output equals the sha256 of the
+  run without the switch. Tests: the unit tests of `x_query_prep_par.rs` (pool == serial at 1, 2, 3 and 7 threads on random
+  queries with N, IUPAC letters, lower case, empty queries, batches of none / one / two, in the production layout of
+  `search_query_batch` (which never takes the fallback; also with bytes 0..=255 on pools of 2, 3, 5 and 16 threads), in
+  compact layouts with touching spans or sentinel gaps, and in layouts the parallel path refuses (the fallback); blocks bit
+  for bit; a probe called once per item shows that both steps run on at least two workers of a 3-thread pool, and on none
+  with the switch off, one thread or one item; a caller that is not a pool worker still runs on the given pool (fails
+  without `SearchPool::install`); a `LOSAT_X_QBATCHPAR`-like slot pool and nested calls; the shadow panics, naming the
+  byte or the context and field, when a test hook changes one byte of the pool's buffer or one field of its blocks, and
+  the comparison functions name each difference) and
+  `LOSAT/tests/blastn_query_prep_par.rs` (off / on / shadow equal at 1 and 4 threads for the four tasks, `-dust no`, other
+  scores, `-lcase_masking`, `LOSAT_X_QBATCHPAR` slots of two threads, split query chunks, the `[X_STATS]` line).
 - `LOSAT_X_DIAGLV=1` (not in the strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT` says)
   blastn, every task, `-subject` and `-db`, with the diagonal hash (query block over 8000 letters): the
   table keeps per bucket an upper bound of the levels of its cells (the largest level an insert wrote since
@@ -1668,23 +1738,45 @@ Scheduling (each value computed by one thread with the original function; order 
   loop takes the batch (discarded batches print none). Off (the loop as before) with `-db`, one thread,
   `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`, `LOSAT_DEBUG_COORDS[_START]`, the blastn trace or
   `LOSAT_WASI_THREADS_DEBUG`, subjects of at least as many 5 Mb work units as threads, fewer than two
-  batches after the first, or a budget of fewer than two slots; not in WebAssembly or without the
-  `parallel` feature. Slots: one batch in flight is estimated at `4^w x 4` bytes of lookup table plus 21
-  bytes per query letter plus 220 bytes per predicted extension (`w` the batch's lookup width; calibrated
-  to 50 MiB per 1 Mb blastn batch and 116 MiB per 5 Mb dc-megablast batch), the budget of the batches
-  beyond the loop's one is `LOSAT_X_QBATCHPARMEM` MiB, by default 96 MiB (blastn, blastn-short) or 28 MiB
-  (megablast, dc-megablast) per thread beyond the first (0.8 of NCBI BLAST+ 2.17.0's max-RSS growth per
-  thread on the audit input; provisional; dc-megablast's 5 Mb batches then need six threads or more),
-  `k = min(1 + budget / estimate, n, units of work left)` lowered to the fewest slots that need as many
-  rounds, and `m = n / k`; `LOSAT_X_QBATCHPARSLOTS=k` sets `k` (tuning). Without `LOSAT_X_STATS` the switch
-  writes nothing of its own; with it, one line on stderr at the end of the search: `[X_STATS] QBATCHPAR
-  batches= precomputed= loop= mispredicted= discarded= cancelled= panicked= waste_bound= k= m= idle=
-  budget_mib= estimate_mib= peak_mib= off=` (`precomputed`: batches taken from a slot; `discarded`:
-  finished or cancelled batches dropped (a search whose flag was set when it returned counts as cancelled,
-  whatever it returned); `panicked`: slot batches that panicked, kept or dropped; `waste_bound`: the
-  discards that stop the speculation, at the end; `idle`:
-  threads no slot uses; `peak_mib`: the most memory admitted at once; `off`: why it did not, or stopped
-  to, speculate). Shadow: `LOSAT_X_QBATCHPARSHADOW=1` (implies the switch) searches every batch the loop
+  batches or batch units after the first, a budget of fewer than two slots, or slots the model below does
+  not predict at least 3 % faster than the loop (`off=model`); not in WebAssembly or without the
+  `parallel` feature. Memory: one batch in flight is estimated at `4^w x 4` bytes of lookup table plus
+  `8 + q` bytes per query letter plus 220 bytes per predicted extension (`w` the batch's lookup width; `q`
+  = 13 for blastn and blastn-short, 5 for megablast and dc-megablast; calibrated to 50 MiB per 1 Mb blastn
+  batch and to the 65-81 MiB measured per extra 5 Mb dc-megablast slot, perf-mb split3), the budget of the
+  batches beyond the loop's one is `LOSAT_X_QBATCHPARMEM` MiB, by default 96 MiB (blastn, blastn-short) or
+  28 MiB (megablast, dc-megablast) per thread beyond the first (0.8 of NCBI BLAST+ 2.17.0's max-RSS growth
+  per thread on the audit input; provisional; a 5 Mb dc-megablast batch is estimated at about 79 MiB, so the
+  budget allows a second slot from four threads; a 5 Mb megablast batch at about 135 MiB, with its 12-letter
+  lookup table of 64 MiB, so from six threads). Slots (`choose_slots`, a throughput model): the units of
+  work are the planned batches of at least half the letters of the letter-weighted median planned batch
+  (the batch at which the batches sorted by size reach half of all letters; the mixer's 100-letter batches
+  between 5 Mb ones, or a short last batch, are none, and one oversized batch, a long record, counts as one
+  unit and does not move the reference); for `k = 1 ..= min(1 + budget / estimate, n, units)` and `m = n / k` the
+  predicted span is `rounds(k) x (1 + 0.05 (min(k, 5) - 1)) / (m x E(m))`, with `ceil(units / k)` rounds
+  while `units <= 2k`, else `units / k` plus half a round when `k` does not divide `units`, and E(m) the
+  measured efficiency of one batch on `m` threads (speedup / m; megablast and dc-megablast 1, 0.89, 0.81,
+  0.51, 0.49 at 1, 2, 4, 8, 16 threads, blastn and blastn-short 1, 0.85, 0.71, 0.50, 0.29; log2-linear
+  between; measured up to 16 threads per batch, on one machine with the SMT siblings idle (workstation,
+  perf-mb split3 window 1, 2026-10-17); beyond 16 the speedup `m x E(m)` is kept at 16's, so the model does
+  not assume the loop keeps scaling on 32-128 threads; on machines whose thread count includes SMT
+  siblings, E(m) for large m is lower still); `k = 1` is the loop on the
+  whole pool, and slots start only when the best `k >= 2` predicts less than 0.97 of its span. The
+  choices are sensitive near that gate: one E(m) point 20 % off turns the 4-thread dc-megablast cells of
+  split3 (predicted 0.956) off, and all E(m >= 2) 7 % lower turns blastn's 1 Mb x 5 batches at 8 threads
+  from 2 x 4 to 5 x 1 (perf-mb `scripts/qbprule_model.py sens`). `LOSAT_X_QBATCHPARSLOTS=k` sets `k`
+  (tuning). Without `LOSAT_X_STATS` the switch writes nothing of its own; with it, one line on stderr at
+  the end of the search: `[X_STATS] QBATCHPAR batches= precomputed= loop= mispredicted= discarded=
+  cancelled= panicked= waste_bound= k= m= idle= units= rule_k= rule_m= predicted= budget_mib= estimate_mib=
+  peak_mib= off=` (`precomputed`: batches taken from a slot; `discarded`: finished or cancelled batches
+  dropped (a search whose flag was set when it returned counts as cancelled, whatever it returned);
+  `panicked`: slot batches that panicked, kept or dropped; `waste_bound`: the discards that stop the
+  speculation, at the end; `idle`: threads no slot uses; `units`: the batch units after the first batch;
+  `rule_k`, `rule_m`: the layout the model judged, its best of two slots or more or the one
+  `LOSAT_X_QBATCHPARSLOTS` sets, 0 when the model did not run; `predicted`: that layout's predicted span
+  over the loop's, printed to three decimals, the value the gate compares (slots below 0.970), `-` when the model
+  did not run; `units` is 0 when no batch follows the first; `peak_mib`: the most memory admitted at once; `off`: why
+  it did not, or stopped to, speculate). Shadow: `LOSAT_X_QBATCHPARSHADOW=1` (implies the switch) searches every batch the loop
   takes from a slot on the loop as well (on the whole pool while the slots run, so more than `n` threads
   are active) and compares every field (each query's hit list with every HSP field and edit script
   through its `Debug` text, the extensions, the masks, the Karlin-Altschul blocks, the search spaces, or
@@ -1693,7 +1785,8 @@ Scheduling (each value computed by one thread with the original function; order 
   mispredicted= wasted=`. `LOSAT_X_QBATCHPARMISS=N` (test
   only) corrupts every N-th prediction. A slot's panic is kept and resumed only if the loop takes its
   batch; the release profile aborts on a panic, so there a panic in a batch a slot searches ends the
-  process (no slot runs while output is written, which the writers check with debug assertions). Past an
+  process (no slot runs while output is written, which the writers check with debug assertions; the batch
+  writes of `LOSAT_X_RPTSTREAM` are the exception, see there). Past an
   error at batch j, the slots may have searched up to the plan's window (2k - 1 batches) before it is
   known; once it is known, at most k - 1 still run and are cancelled when the loop meets j. With debug assertions, a check after the slots are
   joined fails if a slot started rayon's global pool. The counters and `LOSAT_TIMING` end-of-run lines of

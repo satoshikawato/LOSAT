@@ -611,10 +611,6 @@ pub(super) fn x_subject_plan(
     }
 }
 
-/// Bases whose codes `x_packed_frames` unpacks at a time: a multiple of three, so that every
-/// block starts a codon of frame 1.
-const X_PACKED_BLOCK: usize = 3 << 14;
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1058,1063-1064
 // ```c
 //    Uint4 buffer_length =2*(nucl_length+1)+2;
@@ -662,16 +658,26 @@ fn x_frame_capacity(length: usize) -> usize {
 //                   nucl_length, nucl_seq, frame, translation_buffer+offset);
 // ```
 // NCBI translates the six frames from the packed subject, holding nothing but the frames.
-// `x_generate_frames` on the ncbi2na values of the store, with the values unpacked one block
-// at a time instead of for the whole subject: the codon that starts at base `p` is residue
-// `p / 3` of frame `p % 3 + 1`, and, read on the minus strand, residue `q / 3` of frame
-// `-(q % 3 + 1)` where `q = length - 3 - p` (the codons of `seq[..length - i]` counted from its
-// end). Each frame is filled at those places, so every residue is the one `x_generate_frames`
+// `x_generate_frames` on the ncbi2na values of the store, read from the packed bytes: the codon
+// that starts at base `p` is residue `p / 3` of frame `p % 3 + 1`, and, read on the minus strand,
+// residue `q / 3` of frame `-(q % 3 + 1)` where `q = length - 3 - p` (the codons of
+// `seq[..length - i]` counted from its end). So the codons of one phase (`p % 3`) fill one plus
+// frame forward and one minus frame backward, and every residue is the one `x_generate_frames`
 // puts there.
 /// EXPERIMENT (LOSAT_X_TBNSTORE): `x_generate_frames` of a packed subject's codes.
 fn x_packed_frames(
     store: &crate::sequence::packed_subject::PackedNucleotide,
     tables: &XCodonTables,
+) -> Vec<QueryFrame> {
+    x_packed_frames_with(store, tables, x_xlate_simd())
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSTORE / LOSAT_X_TBNXLATESIMD): [`x_packed_frames`], with the vector
+/// loop when `simd` (and the CPU has it).
+fn x_packed_frames_with(
+    store: &crate::sequence::packed_subject::PackedNucleotide,
+    tables: &XCodonTables,
+    simd: bool,
 ) -> Vec<QueryFrame> {
     let seq_len = store.len();
     let frame_count = (0..3).filter(|&i| i + 3 <= seq_len).count();
@@ -685,46 +691,12 @@ fn x_packed_frames(
     };
     let mut forward: Vec<Vec<u8>> = (0..frame_count).map(empty_frame).collect();
     let mut reverse: Vec<Vec<u8>> = (0..frame_count).map(empty_frame).collect();
-    let mut codes = vec![0u8; X_PACKED_BLOCK + 2];
-    let mut indices = vec![0u8; X_PACKED_BLOCK];
-    let mut start = 0;
-    // the codons that start in [start, end), with the two bases after the last one
-    while start + 3 <= seq_len {
-        let end = (start + X_PACKED_BLOCK).min(seq_len - 2);
-        let codes = &mut codes[..end - start + 2];
-        store.codes_into(start, codes);
-        // `x_codon_index` of the codon at every base of the block, in one pass over the codes
-        let indices = &mut indices[..end - start];
-        for (((index, &b0), &b1), &b2) in indices
-            .iter_mut()
-            .zip(codes.iter())
-            .zip(&codes[1..])
-            .zip(&codes[2..])
-        {
-            *index = ((b0 << 4) | (b1 << 2) | b2) & 63;
-        }
-        for phase in 0..3 {
-            let first = start + phase;
-            if first >= end {
-                break;
-            }
-            // the codons at `first`, `first + 3`, ... below `end`: residues `first / 3` on of
-            // the plus frame, and residues `minus / 3` down of the minus frame
-            let count = (end - first).div_ceil(3);
-            let minus = seq_len - 3 - first;
-            let top = 1 + minus / 3;
-            let plus_frame = &mut forward[phase][1 + first / 3..][..count];
-            let minus_frame = &mut reverse[minus % 3][top + 1 - count..=top];
-            for ((plus, minus), &index) in plus_frame
-                .iter_mut()
-                .zip(minus_frame.iter_mut().rev())
-                .zip(indices[phase..].iter().step_by(3))
-            {
-                *plus = tables.forward[(index & 63) as usize];
-                *minus = tables.reverse[(index & 63) as usize];
-            }
-        }
-        start = end;
+    for (phase, plus) in forward.iter_mut().enumerate() {
+        // the codons at `phase`, `phase + 3`, ...: residues 1.. of plus frame `phase + 1` and,
+        // from the last one down, of minus frame `-(r + 1)`, which has as many
+        let codons = (seq_len - phase) / 3;
+        let minus = &mut reverse[(seq_len - phase) % 3];
+        x_phase_residues(store.packed(), phase, codons, tables, plus, minus, simd);
     }
     let frame = |frame: i8, aa_seq: Vec<u8>| QueryFrame {
         frame,
@@ -738,6 +710,226 @@ fn x_packed_frames(
     frames.extend((1..).zip(forward).map(|(i, aa_seq)| frame(i, aa_seq)));
     frames.extend((1..).zip(reverse).map(|(i, aa_seq)| frame(-i, aa_seq)));
     frames
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:544-547,553-559
+// ```c
+//          case 0:
+//             codon = (byte_value >> 2);
+//             *prot_seq = translation[codon];
+//             prot_seq++;
+//             /* do state = 3 now, break is NOT missing. */
+//          case 3:
+//             codon = ((byte_value & 3) << 4);
+//             nt_seq++;
+//             byte_value = *nt_seq;
+//             codon += (byte_value >> 4);
+// ```
+// The six bits of the codon at base `p`, from the packed bytes (4 bases per byte from the high
+// bits): bits `2 * (p % 4)` on of byte `p / 4`, running into the next byte when `p % 4 >= 2`
+// (which then holds base `p + 2`).
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the codon-table index of the codon at base `p`
+/// (`p + 3 <= length`).
+#[inline(always)]
+fn x_packed_codon(packed: &[u8], p: usize) -> usize {
+    let at = p >> 2;
+    let pair = (u16::from(packed[at]) << 8) | u16::from(packed.get(at + 1).copied().unwrap_or(0));
+    usize::from((pair >> (10 - 2 * (p & 3))) & 63)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596
+// ```c
+//          while (nt_seq < (nt_seq_end-10)) {
+//             byte_value1 = *(++nt_seq);
+//             byte_value2 = *(++nt_seq);
+//             byte_value3 = *(++nt_seq);
+//             /* case 0: */
+//             codon = (byte_value >> 2);
+//             *prot_seq = translation[codon];
+//             prot_seq++;
+// ```
+// NCBI's fast loop reads three bytes for four codons. Here one phase's codons `j..j + 8` are
+// the 48 bits after bit `2 * phase` of the eight bytes from byte `6 * j / 8` (24 bases per six
+// bytes), read as one big-endian word; the vector loop (`x_phase_residues_avx2`) does 32 at a
+// time first, the codons after the last whole group come one at a time.
+/// EXPERIMENT (LOSAT_X_TBNSTORE): the residues of the `codons` codons at bases `phase`,
+/// `phase + 3`, ...: codon `j` at `plus[1 + j]` (forward table) and `minus[codons - j]` (reverse
+/// table).
+fn x_phase_residues(
+    packed: &[u8],
+    phase: usize,
+    codons: usize,
+    tables: &XCodonTables,
+    plus: &mut [u8],
+    minus: &mut [u8],
+    simd: bool,
+) {
+    assert!(phase < 3 && plus.len() == codons + 2 && minus.len() == codons + 2);
+    #[allow(unused_mut)]
+    let mut done = 0;
+    #[cfg(target_arch = "x86_64")]
+    if simd && x_avx2_available() {
+        // SAFETY: the CPU has AVX2; the bounds are checked inside.
+        done = unsafe { x_phase_residues_avx2(packed, phase, codons, tables, plus, minus) };
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = simd;
+    done = match phase {
+        0 => x_phase_words::<0>(packed, codons, tables, plus, minus, done),
+        1 => x_phase_words::<1>(packed, codons, tables, plus, minus, done),
+        _ => x_phase_words::<2>(packed, codons, tables, plus, minus, done),
+    };
+    for j in done..codons {
+        let codon = x_packed_codon(packed, phase + 3 * j);
+        plus[1 + j] = tables.forward[codon];
+        minus[codons - j] = tables.reverse[codon];
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSTORE): [`x_phase_residues`] by groups of eight codons from codon
+/// `from` (a multiple of 8) while the group's eight bytes are in `packed`; returns the codons done.
+#[inline(always)]
+fn x_phase_words<const PHASE: usize>(
+    packed: &[u8],
+    codons: usize,
+    tables: &XCodonTables,
+    plus: &mut [u8],
+    minus: &mut [u8],
+    from: usize,
+) -> usize {
+    let mut j = from;
+    while j + 8 <= codons && j / 8 * 6 + 8 <= packed.len() {
+        let at = j / 8 * 6;
+        let word = u64::from_be_bytes(packed[at..at + 8].try_into().unwrap());
+        let plus8: &mut [u8; 8] = (&mut plus[1 + j..9 + j]).try_into().unwrap();
+        let minus8: &mut [u8; 8] = (&mut minus[codons - j - 7..=codons - j])
+            .try_into()
+            .unwrap();
+        for i in 0..8 {
+            let codon = ((word >> (58 - 2 * PHASE - 6 * i)) & 63) as usize;
+            plus8[i] = tables.forward[codon];
+            minus8[7 - i] = tables.reverse[codon];
+        }
+        j += 8;
+    }
+    j
+}
+
+// No NCBI counterpart: reads LOSAT_X_TBNXLATESIMD once; off unless set. It does not change any
+// value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNXLATESIMD): whether a packed subject's frames are read with the
+/// vector loop (AVX2 on x86_64; elsewhere the variable changes nothing).
+fn x_xlate_simd() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNXLATESIMD").is_some())
+}
+
+// No NCBI counterpart: whether the CPU has AVX2; it does not change any value NCBI computes.
+#[cfg(target_arch = "x86_64")]
+fn x_avx2_available() -> bool {
+    std::arch::is_x86_feature_detected!("avx2")
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (see
+// `x_phase_words`)
+// The same residues, 32 codons at a time: the 24 bytes after bit `2 * phase` (made from two
+// loads one byte apart), each three bytes spread to four bytes and split into four six-bit
+// codons (bits 18-23, 12-17, 6-11, 0-5 of the three bytes: the shuffle puts the bytes in two
+// 16-bit halves and two multiplications move each field to its byte), and each table of 64
+// residues read as four tables of 16 (`vpshufb`) chosen by bits 4 and 5 of the index. The minus
+// residues are stored in reverse order. Same reads, same tables as the scalar loop.
+/// EXPERIMENT (LOSAT_X_TBNXLATESIMD): [`x_phase_residues`] for the groups of 32 codons whose
+/// bytes can be read with 29 bytes from the group's first; returns the codons done (a multiple
+/// of 32).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn x_phase_residues_avx2(
+    packed: &[u8],
+    phase: usize,
+    codons: usize,
+    tables: &XCodonTables,
+    plus: &mut [u8],
+    minus: &mut [u8],
+) -> usize {
+    use std::arch::x86_64::*;
+    let table = |values: &[u8; 64], k: usize| {
+        // SAFETY: 16 bytes of the 64.
+        _mm256_broadcastsi128_si256(unsafe { _mm_loadu_si128(values.as_ptr().add(16 * k).cast()) })
+    };
+    let forward = [0, 1, 2, 3].map(|k| table(&tables.forward, k));
+    let reverse = [0, 1, 2, 3].map(|k| table(&tables.reverse, k));
+    let spread = _mm256_setr_epi8(
+        1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10, 9, 11, 10, 1, 0, 2, 1, 4, 3, 5, 4, 7, 6, 8, 7, 10,
+        9, 11, 10,
+    );
+    let backward = _mm256_setr_epi8(
+        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6,
+        5, 4, 3, 2, 1, 0,
+    );
+    let left = _mm_cvtsi32_si128(2 * phase as i32);
+    let right = _mm_cvtsi32_si128(8 - 2 * phase as i32);
+    let keep_left = _mm256_set1_epi8((0xFFu8 << (2 * phase)) as i8);
+    let keep_right = _mm256_set1_epi8(((1u16 << (2 * phase)) - 1) as u8 as i8);
+    let look = |values: &[__m256i; 4], index: __m256i, bit4: __m256i, bit5: __m256i| {
+        let low = _mm256_blendv_epi8(
+            _mm256_shuffle_epi8(values[0], index),
+            _mm256_shuffle_epi8(values[1], index),
+            bit4,
+        );
+        let high = _mm256_blendv_epi8(
+            _mm256_shuffle_epi8(values[2], index),
+            _mm256_shuffle_epi8(values[3], index),
+            bit4,
+        );
+        _mm256_blendv_epi8(low, high, bit5)
+    };
+    let mut j = 0;
+    while j + 32 <= codons && 3 * j / 4 + 29 <= packed.len() {
+        // SAFETY: bytes `3 * j / 4 ..+ 29` are in `packed` (checked above).
+        let at = unsafe { packed.as_ptr().add(3 * j / 4) };
+        let (bytes, next) = unsafe {
+            (
+                _mm256_loadu2_m128i(at.add(12).cast(), at.cast()),
+                _mm256_loadu2_m128i(at.add(13).cast(), at.add(1).cast()),
+            )
+        };
+        // byte k of each half: bits 2 * phase .. 2 * phase + 8 of bytes k, k + 1
+        let shifted = _mm256_or_si256(
+            _mm256_and_si256(_mm256_sll_epi16(bytes, left), keep_left),
+            _mm256_and_si256(_mm256_srl_epi16(next, right), keep_right),
+        );
+        let spread = _mm256_shuffle_epi8(shifted, spread);
+        let index = _mm256_or_si256(
+            _mm256_mulhi_epu16(
+                _mm256_and_si256(spread, _mm256_set1_epi32(0x0FC0_FC00)),
+                _mm256_set1_epi32(0x0400_0040),
+            ),
+            _mm256_mullo_epi16(
+                _mm256_and_si256(spread, _mm256_set1_epi32(0x003F_03F0)),
+                _mm256_set1_epi32(0x0100_0010),
+            ),
+        );
+        // bits 4 and 5 of each index in the byte's top bit (a 16-bit shift: the bit that
+        // crosses into the next byte lands below its top bit)
+        let bit4 = _mm256_slli_epi16(index, 3);
+        let bit5 = _mm256_slli_epi16(index, 2);
+        let plus_residues = look(&forward, index, bit4, bit5);
+        let minus_residues = _mm256_permute4x64_epi64(
+            _mm256_shuffle_epi8(look(&reverse, index, bit4, bit5), backward),
+            0x4E,
+        );
+        // SAFETY: `plus[1 + j..1 + j + 32]` and `minus[codons - j - 31..=codons - j]` lie in the
+        // frames (`j + 32 <= codons`, length `codons + 2`).
+        unsafe {
+            _mm256_storeu_si256(plus.as_mut_ptr().add(1 + j).cast(), plus_residues);
+            _mm256_storeu_si256(
+                minus.as_mut_ptr().add(codons - j - 31).cast(),
+                minus_residues,
+            );
+        }
+        j += 32;
+    }
+    j
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775
@@ -1287,7 +1479,7 @@ mod tests {
         for (which, alphabet) in alphabets.iter().enumerate() {
             let around_blocks = [1, 2, 3]
                 .into_iter()
-                .flat_map(|blocks| (0..7).map(move |extra| blocks * X_PACKED_BLOCK + extra - 3));
+                .flat_map(|blocks| (0..7).map(move |extra| blocks * (3 << 14) + extra - 3));
             let lengths = (0..=40)
                 .chain([99, 100, 101, 1_000, 4_999])
                 .chain(around_blocks);
@@ -1371,6 +1563,61 @@ mod tests {
         let masked = scan(&store, true).unwrap().unwrap();
         let masked = Arc::try_unwrap(masked.subject).ok().expect("one owner");
         assert_eq!(x_plan_difference(&Ok(masked), &Ok(unmasked.subject)), None);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:584-596 (the three
+    // bytes of four codons; see `x_phase_words`)
+    // The frames read from the packed bytes, by the word loop alone and with the vector loop
+    // first, are those of `x_generate_frames` on the store's codes: every length from 0 to 400
+    // bases (every phase of the last bytes, groups of 8 and 32 codons and the codons after
+    // them) and some long ones, for three genetic codes, and the vector loop takes the groups
+    // where the CPU has it.
+    #[test]
+    fn x_packed_frames_read_from_the_bytes_are_the_frames_of_the_codes() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        let mut vector_codons = 0usize;
+        let lengths = (0..=400).chain([1_000, 4_999, 49_151, 49_153, 100_003]);
+        for length in lengths {
+            let subject = letters(b"ACGTACGTN", length, length as u64 + 7);
+            let store = PackedNucleotide::from_subject_letters(&subject).expect("letters");
+            let mut codes = vec![0u8; length];
+            store.codes_into(0, &mut codes);
+            for db_gencode in [1, 4, 11] {
+                let tables = x_codon_tables(db_gencode).unwrap();
+                let expected = x_generate_frames(&codes, tables);
+                for simd in [false, true] {
+                    let frames = x_packed_frames_with(&store, tables, simd);
+                    assert_eq!(frames.len(), expected.len(), "{length} bases, simd {simd}");
+                    for (frame, reference) in frames.iter().zip(&expected) {
+                        assert_eq!(
+                            (frame.frame, frame.aa_len, frame.orig_len, &frame.aa_seq),
+                            (
+                                reference.frame,
+                                reference.aa_len,
+                                reference.orig_len,
+                                &reference.aa_seq
+                            ),
+                            "{length} bases, genetic code {db_gencode}, simd {simd}"
+                        );
+                    }
+                }
+            }
+            #[cfg(target_arch = "x86_64")]
+            if x_avx2_available() && length >= 3 {
+                let tables = x_codon_tables(1).unwrap();
+                let codons = length / 3;
+                let mut plus = vec![0u8; codons + 2];
+                let mut minus = vec![0u8; codons + 2];
+                // SAFETY: the CPU has AVX2.
+                vector_codons += unsafe {
+                    x_phase_residues_avx2(store.packed(), 0, codons, tables, &mut plus, &mut minus)
+                };
+            }
+        }
+        #[cfg(target_arch = "x86_64")]
+        if x_avx2_available() {
+            assert!(vector_codons > 30_000, "{vector_codons}");
+        }
     }
 
     // No NCBI counterpart: the shadow mode stops the search when the plan of a packed subject

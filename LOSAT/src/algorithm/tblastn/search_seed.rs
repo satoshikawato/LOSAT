@@ -1016,8 +1016,16 @@ pub(super) fn x_scan_unit(
 ) {
     let (frame_index, chunk, ranges) = &plan.subject.units[unit];
     let frame = &plan.subject.frames[*frame_index];
-    if pairs.len() < plan.pair_capacity {
-        pairs.resize(plan.pair_capacity, BlastOffsetPair::default());
+    // EXPERIMENT (LOSAT_X_TBNSCANBF): the branch-free scan writes up to X_SCAN_BF_SLACK entries
+    // after the capacity.
+    let scan_bf = super::x_scan_bf::x_tbn_scan_bf();
+    let pairs_len = if scan_bf {
+        plan.pair_capacity + super::x_scan_bf::X_SCAN_BF_SLACK
+    } else {
+        plan.pair_capacity
+    };
+    if pairs.len() < pairs_len {
+        pairs.resize(pairs_len, BlastOffsetPair::default());
     }
     let pair_capacity = plan.pair_capacity as i32;
     for (range_index, &(left, right)) in ranges.iter().enumerate() {
@@ -1032,13 +1040,23 @@ pub(super) fn x_scan_unit(
         }
         let mut scan_range = [0, left, end];
         while scan_range[1] <= scan_range[2] {
-            let hits = s_blast_aa_scan_subject_one_range(
-                &plan.lookup,
-                &frame.aa_seq[1 + chunk.offset..],
-                pairs,
-                pair_capacity,
-                &mut scan_range,
-            );
+            let hits = if scan_bf {
+                super::x_scan_bf::x_scan_one_range_bf(
+                    &plan.lookup,
+                    &frame.aa_seq[1 + chunk.offset..],
+                    pairs,
+                    pair_capacity,
+                    &mut scan_range,
+                )
+            } else {
+                s_blast_aa_scan_subject_one_range(
+                    &plan.lookup,
+                    &frame.aa_seq[1 + chunk.offset..],
+                    pairs,
+                    pair_capacity,
+                    &mut scan_range,
+                )
+            };
             on_pairs(&pairs[..hits as usize]);
         }
     }

@@ -1,17 +1,19 @@
 //! blastp's two-hit test in batches with `LOSAT_X_BPDIAG` (`src/algorithm/blastp/x_seed_fused.rs`)
 //! on whole searches.
 //!
-//! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
-//! set, and it acts in the fused seed loop of `LOSAT_X_BPSEED`. With it on, the hits of one lookup
-//! cell are tested in batches of eight in AVX2 registers where the CPU has AVX2; without it the
-//! per-hit loop runs, and `LOSAT_X_BPDIAG_SIMD=0` forces the scalar batch. These tests compare the
-//! reports with the reference loop (`LOSAT_X_DEFAULT=0`: `LOSAT_X_BPSEED` is in the strict set, on
-//! by default) and the per-hit fused loop at one and four threads, on a
+//! The switch is in the strict set (`src/utils/xswitch.rs`) since 2026-10-15: on unless
+//! `LOSAT_X_BPDIAG=0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts in the fused seed loop of
+//! `LOSAT_X_BPSEED` (also in the set). With it on, the hits of one lookup cell are tested in
+//! batches of eight in AVX2 registers where the CPU has AVX2; without AVX2 the per-hit loop runs,
+//! and `LOSAT_X_BPDIAG_SIMD=0` forces the scalar batch. These tests compare the reports with the
+//! reference loop (`LOSAT_X_DEFAULT=0`) and the per-hit fused loop at one and four threads, on a
 //! generated pair (long lookup cells from repeats, related proteins for two-hit extensions) and on
 //! the fixture pair, run the shadow of `LOSAT_X_BPSEEDSHADOW` (the batched loop against the
 //! reference for every subject), and check from the
 //! `[TIMING] x_bpdiag: mode=<m> cells=<n> batched_hits=<h> candidates=<k>` lines which path ran and
-//! that cells were tested in batches, not only that the report is equal.
+//! that cells were tested in batches, not only that the report is equal. Each search states the
+//! default it runs with: no variable (the default), `=0`, and `LOSAT_X_DEFAULT=0` with the
+//! variables set (the run they gave before the switch joined the set).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-552
 //! ```c
@@ -210,81 +212,108 @@ fn batched_cells_give_the_reports_of_the_per_hit_loop() {
         (query, subject),
         (fixture("MeenMJNV.faa"), fixture("MejoMJNV.faa")),
     ];
+    // The fused per-hit loop: the switch off in the default, and the run of `LOSAT_X_BPSEED`
+    // alone before either joined the set.
+    let per_hit: [&[(&str, &str)]; 2] = [
+        &[("LOSAT_X_BPDIAG", "0")],
+        &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_X_BPSEED", "1")],
+    ];
+    // The batches, with the `LOSAT_X_BPDIAG_SIMD` value each runs with: the default (the CPU's
+    // path, the AVX2 batch or the per-hit loop without AVX2) and its scalar batch, and the run the
+    // switch gave before it joined the set.
+    let batched: [(&[(&str, &str)], &str); 4] = [
+        (&[], "1"),
+        (&[("LOSAT_X_BPDIAG_SIMD", "0")], "0"),
+        (
+            &[
+                ("LOSAT_X_DEFAULT", "0"),
+                ("LOSAT_X_BPSEED", "1"),
+                ("LOSAT_X_BPDIAG", "1"),
+            ],
+            "1",
+        ),
+        (
+            &[
+                ("LOSAT_X_DEFAULT", "0"),
+                ("LOSAT_X_BPSEED", "1"),
+                ("LOSAT_X_BPDIAG", "1"),
+                ("LOSAT_X_BPDIAG_SIMD", "0"),
+            ],
+            "0",
+        ),
+    ];
     for (query, subject) in &pairs {
         for threads in [1, 4] {
             let (reference, reference_counts, _) =
                 blastp(query, subject, threads, REFERENCE, &["-outfmt", "6"]);
             assert!(!reference.is_empty(), "the pair has a report");
-            assert!(reference_counts.is_empty(), "no line without the switch");
-            let (fused, fused_counts, _) = blastp(
-                query,
-                subject,
-                threads,
-                &[("LOSAT_X_BPSEED", "1")],
-                &["-outfmt", "6"],
-            );
-            assert!(
-                fused == reference,
-                "threads {threads}: the fused loop differs"
-            );
-            assert!(fused_counts.is_empty(), "no line without LOSAT_X_BPDIAG");
-            // The CPU's path (the AVX2 batch, or the per-hit loop without AVX2) and the scalar
-            // batch.
-            for simd in ["1", "0"] {
-                let (rows, counts, _) = blastp(
-                    query,
-                    subject,
-                    threads,
-                    &[
-                        ("LOSAT_X_BPSEED", "1"),
-                        ("LOSAT_X_BPDIAG", "1"),
-                        ("LOSAT_X_BPDIAG_SIMD", simd),
-                    ],
-                    &["-outfmt", "6"],
+            assert!(reference_counts.is_empty(), "no line with the switch off");
+            for vars in per_hit {
+                let (fused, fused_counts, _) =
+                    blastp(query, subject, threads, vars, &["-outfmt", "6"]);
+                assert!(
+                    fused == reference,
+                    "{vars:?} threads {threads}: the fused loop differs"
                 );
-                let what = format!("{} threads {threads} simd {simd}", query.display());
+                assert!(
+                    fused_counts.is_empty(),
+                    "{vars:?}: no line with the switch off"
+                );
+            }
+            for (vars, simd) in batched {
+                let (rows, counts, _) = blastp(query, subject, threads, vars, &["-outfmt", "6"]);
+                let what = format!("{} threads {threads} {vars:?}", query.display());
                 assert!(rows == reference, "{what}: rows differ");
                 check_counts(&counts, simd, &what);
             }
+            // The switch on without the fused loop: the reference loop, nothing tested in batches.
+            let (rows, counts, _) = blastp(
+                query,
+                subject,
+                threads,
+                &[("LOSAT_X_BPSEED", "0")],
+                &["-outfmt", "6"],
+            );
+            assert!(
+                rows == reference,
+                "LOSAT_X_BPSEED=0 threads {threads}: rows differ"
+            );
+            assert!(
+                counts.len() == 1 && counts[0].cells == 0 && counts[0].hits == 0,
+                "LOSAT_X_BPSEED=0 threads {threads}: {counts:?}"
+            );
         }
     }
-    // The pairwise report too, on the fixture pair.
+    // The pairwise report too, on the fixture pair: the default against the reference.
     let (query, subject) = &pairs[1];
     let (reference, _, _) = blastp(query, subject, 1, REFERENCE, &["-outfmt", "0"]);
-    let (report, _, _) = blastp(
-        query,
-        subject,
-        1,
-        &[("LOSAT_X_BPSEED", "1"), ("LOSAT_X_BPDIAG", "1")],
-        &["-outfmt", "0"],
-    );
+    let (report, counts, _) = blastp(query, subject, 1, &[], &["-outfmt", "0"]);
     assert!(report == reference, "outfmt 0: the report differs");
+    check_counts(&counts, "1", "outfmt 0");
 }
 
 #[test]
 fn the_shadow_compares_the_batched_loop_with_the_reference() {
     let (query, subject) = generated_pair("shadow");
     let (reference, _, _) = blastp(&query, &subject, 1, REFERENCE, &["-outfmt", "6"]);
-    for simd in ["1", "0"] {
-        let (rows, counts, stderr) = blastp(
-            &query,
-            &subject,
-            1,
-            &[
-                ("LOSAT_X_BPSEEDSHADOW", "1"),
-                ("LOSAT_X_BPDIAG", "1"),
-                ("LOSAT_X_BPDIAG_SIMD", simd),
-            ],
-            &["-outfmt", "6"],
-        );
-        assert!(rows == reference, "simd {simd}: rows differ");
-        assert!(
-            stderr
-                .lines()
-                .any(|line| line.starts_with("[X_SHADOW] BPSEED subjects=")
-                    && line.contains(" identical")),
-            "simd {simd}: no shadow line: {stderr}"
-        );
-        check_counts(&counts, simd, &format!("shadow simd {simd}"));
+    // The shadow with the switch by default, and as it ran before the switch joined the set.
+    let defaults: [&[(&str, &str)]; 2] =
+        [&[], &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_X_BPDIAG", "1")]];
+    for default in defaults {
+        for simd in ["1", "0"] {
+            let mut vars = default.to_vec();
+            vars.extend([("LOSAT_X_BPSEEDSHADOW", "1"), ("LOSAT_X_BPDIAG_SIMD", simd)]);
+            let what = format!("shadow {vars:?}");
+            let (rows, counts, stderr) = blastp(&query, &subject, 1, &vars, &["-outfmt", "6"]);
+            assert!(rows == reference, "{what}: rows differ");
+            assert!(
+                stderr
+                    .lines()
+                    .any(|line| line.starts_with("[X_SHADOW] BPSEED subjects=")
+                        && line.contains(" identical")),
+                "{what}: no shadow line: {stderr}"
+            );
+            check_counts(&counts, simd, &what);
+        }
     }
 }

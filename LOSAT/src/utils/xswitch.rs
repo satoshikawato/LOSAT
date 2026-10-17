@@ -32,7 +32,7 @@ use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
 /// No NCBI counterpart: the switches of the strict set, the variables that are on by default.
-/// The last twenty-seven joined after the set became the default. `LOSAT_X_PAIRLUT` and
+/// The last thirty joined after the set became the default. `LOSAT_X_PAIRLUT` and
 /// `LOSAT_X_HSPINPLACE` were added after the change as switches that are off unless set and
 /// joined the set once they were verified with it on. `LOSAT_X_SEEDBUCKET` was left out at the
 /// change: it numbered the lookup hits of a chunk scan in a `u32`, exact only up to 2^32 hits
@@ -88,11 +88,13 @@ use std::sync::OnceLock;
 /// made when they are read and freed when they are no longer read, `tblastx/subjects.rs`) were
 /// added after the change as switches that are off unless set and joined the set together once
 /// they were verified and timed with it on.
+/// `LOSAT_X_BPDIAG` (the two-hit diagonal test of a lookup cell eight hits at a time,
+/// `blastp/x_seed_fused.rs`) joined after a second run of the same jobs with it on as well.
 /// `LOSAT_X_TBNOWNPOOLS` (the query batches `LOSAT_X_TBNBATCHRULE` leaves one after another
 /// searched at the same time, each on a pool of its own, `tblastn/stage_d_pipeline.rs`) was added
 /// after the change as a switch that is off unless set and joined the set once it was verified
 /// and timed with it on.
-pub(crate) const STRICT_SET: [&str; 72] = [
+pub(crate) const STRICT_SET: [&str; 73] = [
     "LOSAT_X_DPFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_PURGEFAST",
@@ -164,6 +166,7 @@ pub(crate) const STRICT_SET: [&str; 72] = [
     "LOSAT_X_BNSTREAM",
     "LOSAT_X_TBXNEXT",
     "LOSAT_X_TBXFRAMES",
+    "LOSAT_X_BPDIAG",
     "LOSAT_X_TBNOWNPOOLS",
 ];
 

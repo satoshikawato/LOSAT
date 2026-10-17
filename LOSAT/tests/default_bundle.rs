@@ -1,9 +1,9 @@
 //! The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle): blastp's
 //! `LOSAT_X_BPREDOPAR`, `LOSAT_X_BPREDOLPT`, `LOSAT_X_BPDBCUT`, `LOSAT_X_BPSUBJMETA` and
 //! `LOSAT_X_BPLKPAHEAD`, and blastn's `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARFOLD`,
-//! `LOSAT_X_QDUSTPAR`, `LOSAT_X_DIAGLV`, `LOSAT_X_QBATCHPAR`, `LOSAT_X_QPREPPAR`,
-//! `LOSAT_X_RPTSTREAM` and `LOSAT_X_BNSTORE`. Each has its own test file, whose searches run with
-//! the others off (the default before). Here the searches run with the default (no variable) and
+//! `LOSAT_X_QDUSTPAR`, `LOSAT_X_DIAGLV`, `LOSAT_X_QBATCHPAR`, `LOSAT_X_QPREPPAR` and
+//! `LOSAT_X_RPTSTREAM`. Each has its own test file, whose searches run with the others off (the
+//! default before). Here the searches run with the default (no variable) and
 //! give the report of the default before (`LOSAT_X_DEFAULT=0`), of each switch off (`=0`) and of
 //! all of them off, with the same standard error. And the default runs them: the
 //! `[TIMING] x_bpredopar:` line of BPREDOPAR, with BPREDOLPT's `lpt_windows=`, comes without a
@@ -26,7 +26,6 @@ const BLASTP: &[&str] = &[
 
 /// The blastn switches of the bundle.
 const BLASTN: &[&str] = &[
-    "LOSAT_X_BNSTORE",
     "LOSAT_X_DIAGLV",
     "LOSAT_X_PAIRPARDISC",
     "LOSAT_X_PAIRPARFOLD",

@@ -114,7 +114,6 @@ use std::sync::OnceLock;
 /// and timed with it on.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
-    "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
     "LOSAT_X_BPCLUT",
     "LOSAT_X_BPDBCUT",

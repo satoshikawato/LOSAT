@@ -57,7 +57,7 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
   that takes the reference body (`LOSAT_X_HSPINPLACE=0`, `LOSAT_X_DEFAULT=0`,
   `LOSAT_DIAGNOSTICS`, `LOSAT_DEBUG_CUTOFFS`) is not timed there: `calls=0`;
   `tblastx/x_link_timing.rs`). The clock is not read without the variable.
-  BLASTX prints four kinds of lines at the end of a run (`blastx/x_timing.rs`):
+  BLASTX prints six kinds of lines at the end of a run (`blastx/x_timing.rs`):
   `[TIMING] blastx_run: startup .. prolog .. read_stores .. loop .. epilog .. total .. (search .. render .. titles .. input ..)`
   (wall times of the thread that runs the program; inside `loop`, the time it waits for searches, writes reports (of
   which `titles` reads the reported sequences' titles with `-db`), and the rest, `input`);
@@ -65,6 +65,15 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
   (with `LOSAT_X_BXBATCH`: the waves of query batches searched side by side, the searches' own times added over the
   threads, `idle = wall x threads - busy`, and the batches searched one at a time with the whole pool: the end of the
   input, or a long query);
+  `[TIMING] blastx_subject_waves: waves=N tasks=N wall .. busy .. longest .. latest_start .. last_end .. threads=N idle ..`
+  (the parallel subject waves of a query chunk, the `scan_par` stage: a task is the subjects one worker searches in a
+  wave; `busy` adds the tasks' times, `longest` each wave's longest task, `latest_start` / `last_end` each wave's
+  latest task start / end after the wave began: `longest` near `wall` with `busy` well below `wall x threads` is uneven
+  work);
+  `[TIMING] blastx_subject_flow: loops=N tasks=N ahead=N taken=N wall ..` (`LOSAT_X_BXSUBJFLOW`, below: the
+  subject loops run as a flow, their tasks, those searched ahead of the loop (by a helper, or by the loop's thread while
+  it waited for a helper's task) and those of them the loop took (it searched the others itself at their turn), and
+  the wall time, which is the batch line's `scan_par`, the hand-over to the sink included);
   `[TIMING] blastx_batch_side:` / `blastx_batch_alone: batches=N query_setup .. setup .. chunks_par .. lookup .. scan_par .. scan_inline .. replay .. chunk_end .. batch_end .. sum ..`
   (the stages of a query batch in the order they run; `side` = batches searched on one thread beside others, times
   added over the threads; `alone` = a batch searched by itself, with the pool if there is one, wall times; `replay`
@@ -182,6 +191,7 @@ export LOSAT_X_BXPOOL=1
 export LOSAT_X_BXSCAN=1
 export LOSAT_X_BXSCANBF=1
 export LOSAT_X_BXSEGMEMO=1
+export LOSAT_X_BXSUBJFLOW=1
 export LOSAT_X_CODONFAST=1
 export LOSAT_X_COMPFAST=1
 export LOSAT_X_CTXFAST=1
@@ -2517,6 +2527,28 @@ Scheduling (each value computed by one thread with the original function; order 
   against 9.59-9.75 s with `LOSAT_X_BXFLOW=0` (0.82-0.84; NCBI 13.09-14.24 s), 50 cDNAs 0.430-0.435 s against
   0.586-0.592 s (0.73-0.74; NCBI 1.09-1.10 s), 5 cDNAs (one batch) 0.086-0.089 s against 0.088-0.092 s (1.00); max
   RSS 69.6-71.8 MB against 66.9-67.2 MB on 800 cDNAs (NCBI 124-128 MB), 43-44 MB against 42-43 MB on 50.
+- `LOSAT_X_BXSUBJFLOW=1` or `=k` (BLASTX, speed; in the strict set since 2026-10-17, in the pull request that added
+  it: on unless `=0` or `LOSAT_X_DEFAULT=0`; `k` from 2 to 65,536 subjects per task, otherwise 64; acts on the subject
+  loop of a query batch searched as one chunk, `-db` and `-subject` alike, at two or more threads when there are more
+  than `k` subjects, no diagnostic stage traces the subjects and `-window_size` plus twice the longest subject is at
+  most 2^28; the chunks of a longer query are searched side by side on the pool, one chunk per thread,
+  `LOSAT_X_BXPAR`): the subjects are searched as a flow of tasks of `k`
+  consecutive subjects instead of waves of `threads x LOSAT_X_BXCHUNK` (`blastx/x_subject_flow.rs`, exactness argument
+  in its header). The other threads of the pool search tasks up to `4 x threads` ahead (`utils::xahead`, each helper
+  on its own diagonal table) and the loop's thread takes the tasks in order, or searches one itself when no helper has
+  started it, and hands the subjects to the sink in subject order with the waves' calls; a wave waits for its slowest
+  worker and then for the hand-over on one thread. Above the 2^28 bound (a diagonal table of 1 GiB or more) the waves
+  run: there an offset could pass 2^30, where the bit-field wrap of the entries makes a table's history matter.
+  Shadow: `LOSAT_X_BXSUBJFLOWSHADOW=1` searches every task again on the loop's own table and stops at a difference
+  of the subject results or of the first refused subject; at exit `[X_SHADOW] BXSUBJFLOW tasks_compared=N (subject
+  results identical)` (`tests/blastx_subject_flow.rs`). Measured 2026-10-17 on the workstation (16 / 8 physical cores
+  of one node with their HT siblings idle; DB-6's BX-t10: the first 10 zebrafish transcripts of the DB-5 q100 set,
+  10.9 kb, against Swiss-Prot `-db`, one query batch; a warm-up then 3 rounds, the order reversed in round 2; every
+  output the same bytes as NCBI BLAST+ 2.17.0 `-db -num_threads 1`): at 16 threads 5.23-5.30 s with `=0` (the waves),
+  2.30-2.33 s with `k = 64` (2.36-2.45 s with 16, 2.44-2.51 s with 4), NCBI `-db` 2.53-2.63 s; at 8 threads
+  7.09-7.14 s, 3.887-3.896 s and 4.116-4.122 s; max RSS unchanged (226 MB, NCBI 289-297 MB). The waves' own lines
+  (`LOSAT_TIMING`) at 16 threads: 563 waves, 4.27 s, of which the waves' longest tasks 4.00 s against a mean of
+  2.02 s (with 1,024 subjects per task still 3.34 against 2.03 s: the work clusters in oid ranges).
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

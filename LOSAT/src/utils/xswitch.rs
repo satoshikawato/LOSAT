@@ -112,6 +112,10 @@ use std::sync::OnceLock;
 /// searched at the same time, each on a pool of its own, `tblastn/stage_d_pipeline.rs`) was added
 /// after the change as a switch that is off unless set and joined the set once it was verified
 /// and timed with it on.
+/// `LOSAT_X_BXSUBJFLOW` (BLASTX's subject loop of a query chunk as a flow of tasks of 64 subjects
+/// searched ahead by the pool's other threads, `blastx/x_subject_flow.rs`) joined the set in the
+/// pull request that added it (Owner 2026-10-17: speed-ups land default ON), after it was
+/// verified and timed with it on and off.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
     "LOSAT_X_BNSTREAM",
@@ -141,6 +145,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXSCAN",
     "LOSAT_X_BXSCANBF",
     "LOSAT_X_BXSEGMEMO",
+    "LOSAT_X_BXSUBJFLOW",
     "LOSAT_X_CODONFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_CTXFAST",

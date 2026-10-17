@@ -1499,21 +1499,39 @@ Scheduling (each value computed by one thread with the original function; order 
   kernel mapped its zero page and then copied it at the write: two faults, and a TLB shootdown to the
   other CPUs of the search (on the workstation one thread touching 4,096 fresh pages took 8,193 faults
   and 13-18 ms reading first, 4,063 faults and 7 ms writing first). Now, between phases A and B of a
-  chunk, the readers having marked the pages of their words' cells and presence-vector words, one job
-  per page (the owner of the block of the page's middle element) writes 0 to the page's middle
-  element if the page was not touched yet; the marks and the round run only while a page of the
-  table is untouched (on the cDNA inputs, in a table's first chunk), and the readers run a copy of the
-  loop without the marking code in the other chunks. The writes store 0 over the 0 the element was
-  allocated with, only on pages the fill writes anyway, so the tables and the pages mapped (max RSS)
-  do not change; `next_pos` (written without a read) is not touched, which measured faster (1,775
-  cDNAs, fill over #263's: 0.79 at 16 threads and 0.91 at 4 with the cells alone, 0.89 and 1.01 with
-  `next_pos` as well). The unit tests check, for every partitioned build, that each zero went over
-  0 and that the pages touched are exactly the pages the fill wrote, array by array.
+  table's first chunk, the readers having marked the pages of their words' cells and presence-vector
+  words, one job per page (the owner of the block of the page's middle element) writes 0 to the
+  page's middle element, for the pages of the whole 2 MiB regions (512 pages by address) that lie
+  within the table and that the chunk writes in full; the later chunks run without marks or round
+  (and the readers then run a copy of the loop without the marking code). It runs only when the first
+  chunk has at least 8 positions per page of the table (`PREFAULT_RULE`). The writes store 0 over the
+  0 the element was allocated with (nothing has been written before the first chunk's update), only
+  on pages the fill writes anyway, so the tables and reports do not change, and neither does max RSS,
+  with 4 KiB pages or with transparent huge pages: a huge page the round maps holds only pages the
+  fill writes. That is the reason for whole regions: a first version touched every page the chunk
+  wrote, and on a host with THP `enabled=always` (this WSL machine, with free 2 MiB blocks; the
+  workstation runs `madvise`) its first writes mapped whole 2 MiB pages where the fill's first reads
+  map the huge zero page and then only the 4 KiB pages written: dc-megablast of 1,000 letters at 4
+  threads took 23 MiB against 17 MiB for the fill without the round at word size 11 and 134 against
+  18 MiB at word size 12 with two templates, and 2.8 MiB more remained at word size 12 even with 160
+  positions per page (some pages of every region stay unwritten on real sequence), so no size
+  threshold alone bounded it. With whole regions, max RSS on that host equalled #263's fill (and the
+  loop's, apart from the buckets) at every size measured, 1 kb to 1.3 Mb, word sizes 11 and 12
+  (perf-mb `logs/disclutfault_rss_*.md`). On those test genomes no region was written in full, so the
+  round touched nothing there; on the workstation's cDNA batches the first version touched every page
+  of the tables, so whole regions should keep its gains there (to be measured again: the
+  workstation is unreachable). `next_pos` (written without a read) is not touched, which measured
+  faster (1,775 cDNAs, fill over #263's: 0.79 at 16 threads and 0.91 at 4 with the cells alone, 0.89
+  and 1.01 with `next_pos` as well). The timing evidence is Linux only: the saving rests on Linux's
+  shared zero page and copy-on-write; on other systems the round is exact and maps no extra memory,
+  but its gain is unmeasured. The unit tests check, for every partitioned build, that each zero went
+  over 0, that there was one round at most, and that the pages touched are exactly the first chunk's
+  pages of the accepted regions, array by array.
   Default ON (2026-10-17, Owner rule of 21:50: speed-ups land in the strict set in their PR). On the
   workstation (node 1, 16 idle physical cores with the siblings idle, `numactl --membind 1`; the rest of
   the dsw `cand` env, `LOSAT_X_PAIRPARDISC`, `QBATCHPAR`, `DIAGLV`, `PAIRPARFOLD` and `QDUSTPAR`, in
   every arm; off = the head with `LOSAT_X_DISCLUTPAR=0`, dev = 7a5a7f87 with the switch (#263's fill),
-  head = 1a05a8a2 by default; rotated rounds after a warm-up, 4 at 2 and 4 threads, 3 at 8 and 16, 2
+  head = 1a05a8a2 by default, the first version of the round; rotated rounds after a warm-up, 4 at 2 and 4 threads, 3 at 8 and 16, 2
   at 1; every output had its sha256) the fill took, off / dev / head: (a) 1,775 cDNAs 0.140 / 0.089
   / 0.080 s at 2 threads, 0.170 / 0.081 / 0.071 at 4, 0.205 / 0.066 / 0.055 at 8, 0.204 / 0.051 /
   0.043 at 16; (b) 3,492 cDNAs 0.264 / 0.151 / 0.149, 0.287 / 0.168 / 0.152, 0.354 / 0.149 / 0.142,
@@ -1530,9 +1548,11 @@ Scheduling (each value computed by one thread with the original function; order 
   spread of dev's and off's (-7.6 to +6.6 MiB at 31,168 cDNAs, at most 3.1 MiB elsewhere) and below
   NCBI BLAST+ 2.17.0 `-db` of an earlier window (31,168 cDNAs 305 against 437 MiB at 4 threads and 497
   against 700 at 16; (b) 176 against 199 at 4). At 31,168 cDNAs and 4 threads the fill of 1a05a8a2 was
-  1.02 of dev's: its reader loop with the mark tests took 7-11 % longer in phase A in every cell, also
-  where nothing was marked; cd9977bc runs a copy without the marking code there (its workstation run
-  is pending, the workstation being unreachable). Tests: the unit tests of
+  1.02 of dev's, its open loss: its reader loop with the mark tests took 7-11 % longer in phase A in
+  every cell, also where nothing was marked; the current code runs the marking loop only in a
+  table's first chunk and a copy without the marking code elsewhere, meant to address it, but it is
+  unmeasured (the workstation is unreachable). Default ON for the switch itself rests on its margin
+  over the loop (the previous default), which no version of the round changes much. Tests: the unit tests of
   `x_disc_lookup_par.rs` (partitioned and pool fills equal the original loop for every template type,
   length and word size, one and two templates, 1-20 parts, chunks of 1 to 5,000 positions and random
   layouts of queries and masks, pools of 1, 2, 3, 5, 8 and 16 threads, a 2.6 M-position query in the

@@ -516,6 +516,14 @@ fn ranges_masks_and_hit_list_options_give_the_off_bytes() {
                 let (off, shadow) = same_three(&what, &args, threads, reports, None);
                 assert_eq!(off.status, Some(0), "{what}");
                 assert!(!off.report.is_empty(), "{what}");
+                // The reader's warning of the record with digits (cut with `-query_loc`: the
+                // warning is the whole record's, written with its batch).
+                assert!(
+                    String::from_utf8_lossy(&off.stderr)
+                        .contains("FASTA-Reader: Ignoring invalid residues"),
+                    "{what}: {}",
+                    String::from_utf8_lossy(&off.stderr)
+                );
                 read_as_the_reports_need(&what, reports, &shadow);
             }
         }

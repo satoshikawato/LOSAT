@@ -1165,4 +1165,55 @@ mod tests {
         drop(database);
         std::fs::remove_dir_all(&dir).unwrap();
     }
+
+    // EXPERIMENT (LOSAT_X_RPTSTREAM): each batch's reports are written when the loop takes it
+    // only when every definition line of the database reads and none is refused
+    // (`x_titles_allow_streaming`), at one thread and in a pool. (A path in the system's
+    // temporary directory: Unix spelling.)
+    #[cfg(unix)]
+    #[test]
+    fn streaming_is_allowed_only_when_every_title_reads_and_is_reported() {
+        let allowed = |database: &BlastnDatabase| -> [bool; 2] {
+            [1, 4].map(|threads| {
+                crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
+                    Ok(x_titles_allow_streaming(database, pool))
+                })
+                .unwrap()
+            })
+        };
+        assert_eq!(allowed(&open("nucl_v4")), [true, true]);
+        assert_eq!(allowed(&open("nucl_mv")), [true, true]);
+        let dir = temp_dir("streamtitles");
+        // A header file that cannot be read (the fifth volume's): the batch that reads one of
+        // its titles fails where NCBI's does, after the reports of the batches before.
+        for entry in
+            std::fs::read_dir(fixture("nucl_mv.nal").trim_end_matches("nucl_mv.nal")).unwrap()
+        {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            if name.starts_with("nucl_mv.") && name != "nucl_mv.04.nhr" {
+                std::fs::copy(&path, dir.join(&name)).unwrap();
+            }
+        }
+        let missing =
+            BlastnDatabase::open(dir.join("nucl_mv").to_str().unwrap(), &Default::default())
+                .unwrap();
+        assert_eq!(allowed(&missing), [false, false]);
+        // A stored title with a byte outside ' ' ..= '~' (LOSAT's refusal when it is reported).
+        for ext in ["nin", "nsq"] {
+            std::fs::copy(fixture("nucl_v4") + "." + ext, dir.join(format!("b.{ext}"))).unwrap();
+        }
+        let mut header = std::fs::read(fixture("nucl_v4") + ".nhr").unwrap();
+        let at = header
+            .windows(13)
+            .position(|window| window == b"n02 length 41")
+            .expect("the title of n02");
+        header[at + 5] = 0xE9;
+        std::fs::write(dir.join("b.nhr"), header).unwrap();
+        let bad =
+            BlastnDatabase::open(dir.join("b").to_str().unwrap(), &Default::default()).unwrap();
+        assert_eq!(allowed(&bad), [false, false]);
+        drop((missing, bad));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

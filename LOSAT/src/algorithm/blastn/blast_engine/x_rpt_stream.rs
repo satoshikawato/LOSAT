@@ -615,3 +615,97 @@ fn check(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blastinput::seq_range::RecordPlacement;
+
+    // EXPERIMENT (LOSAT_X_RPTSTREAM): a batch's part of the query input numbers its queries from
+    // 0, as the batch's lists do; without `-query_loc` it has no placements either.
+    #[test]
+    fn a_batch_input_is_the_batch_part_numbered_from_zero() {
+        let placements = (0..5)
+            .map(|index| RecordPlacement {
+                offset: 10 * index,
+                length: 100 + index,
+            })
+            .collect();
+        let input = QueryInput {
+            placements: Placements(placements),
+            ordinals: vec![0, 1, 3, 4, 6],
+            input_lengths: vec![100; 7],
+            skipped: vec![false, false, true, false, false, true, false],
+            range_length: Some(50),
+        };
+        let batch = batch_input(&input, 2..4);
+        assert!(batch.placements.ranged());
+        assert_eq!(
+            (batch.placements.offset(0), batch.placements.length(1, 7)),
+            (20, 103)
+        );
+        assert_eq!(batch.placements.0.len(), 2);
+        assert_eq!(batch.ordinals, [3, 4]);
+        assert_eq!(batch.range_length, Some(50));
+        let whole = QueryInput {
+            placements: Placements::default(),
+            ordinals: vec![0, 1, 2],
+            input_lengths: vec![10; 3],
+            skipped: vec![false; 3],
+            range_length: None,
+        };
+        let batch = batch_input(&whole, 1..3);
+        assert!(!batch.placements.ranged());
+        assert_eq!(batch.placements.offset(1), 0);
+        assert_eq!(batch.ordinals, [1, 2]);
+    }
+
+    // EXPERIMENT (LOSAT_X_RPTSTREAMSHADOW): the shadow's tees send every byte on and copy it.
+    #[test]
+    fn the_tees_send_and_copy_every_byte() {
+        let mut target: Vec<u8> = Vec::new();
+        let mut copy = Vec::new();
+        {
+            let mut sink = OutputSink::Writer(&mut target);
+            let mut tee = SinkTee {
+                sink: &mut sink,
+                copy: &mut copy,
+            };
+            tee.write_all(b"row 1\n").unwrap();
+            write!(tee, "row {}\n", 2).unwrap();
+            tee.flush().unwrap();
+        }
+        assert_eq!(target, b"row 1\nrow 2\n");
+        assert_eq!(copy, target);
+        let mut errors: Vec<u8> = Vec::new();
+        let mut copy = Vec::new();
+        {
+            let mut tee = WriteTee {
+                inner: &mut errors,
+                copy: &mut copy,
+            };
+            tee.write_all(b"Warning: one\n").unwrap();
+        }
+        assert_eq!(
+            (errors.as_slice(), copy.as_slice()),
+            (&b"Warning: one\n"[..], &b"Warning: one\n"[..])
+        );
+        let path = std::path::Path::new("never-created");
+        let mut sink = OutputSink::File(path);
+        let mut copy = Vec::new();
+        let mut tee = SinkTee {
+            sink: &mut sink,
+            copy: &mut copy,
+        };
+        assert!(tee.write_all(b"x").is_err(), "a file sink is not streamed");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn the_first_difference_is_the_first_unequal_byte_or_the_shorter_length() {
+        assert_eq!(first_difference(b"abc", b"abc"), None);
+        assert_eq!(first_difference(b"abc", b"abd"), Some(2));
+        assert_eq!(first_difference(b"ab", b"abc"), Some(2));
+        assert_eq!(first_difference(b"", b"a"), Some(0));
+    }
+}

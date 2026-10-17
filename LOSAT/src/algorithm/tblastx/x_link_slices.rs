@@ -609,15 +609,15 @@ mod tests {
             q0 + rng.below(25) as usize
         };
         let mut hit = mock_hit(q0, q0 + len, s0, s0 + len, 38 + rng.below(40) as i32);
-        hit.ctx_idx = rng.below(6 * queries as u64) as usize;
-        hit.q_idx = (hit.ctx_idx / 6) as u32;
-        hit.q_frame = FRAMES[hit.ctx_idx % 6];
+        hit.ctx_idx = u32::try_from(rng.below(6 * queries as u64)).unwrap();
+        hit.q_idx = (hit.ctx_idx as usize / 6) as u32;
+        hit.q_frame = FRAMES[hit.ctx_idx as usize % 6];
         hit.s_frame = FRAMES[rng.below(6) as usize];
-        hit.s_f_idx = rng.below(6) as usize;
+        hit.s_f_idx = u8::try_from(rng.below(6)).unwrap();
         hit.q_orig_len = 300_000;
         hit.s_orig_len = 300_000;
-        hit.hsp_list_order = index;
-        hit.link_id = index;
+        hit.hsp_list_order = u32::try_from(index).unwrap();
+        hit.link_id = u32::try_from(index).unwrap();
         hit.e_value = f64::from_bits(0x3ff0_0000_0000_0000 + index as u64);
         hit
     }
@@ -645,7 +645,7 @@ mod tests {
     /// `num = 1` set as the call does, then sorted by `s_RevCompareHSPsTbx`.
     fn sorted(mut hits: Vec<UngappedHit>) -> Vec<UngappedHit> {
         for (link_id, hit) in hits.iter_mut().enumerate() {
-            hit.link_id = link_id;
+            hit.link_id = u32::try_from(link_id).unwrap();
             hit.chain_next_link_id = None;
             hit.num = 1;
         }

@@ -318,17 +318,19 @@ pub fn get_ungapped_hsp_list_into(
         // query.end = ungapped_data->length + ungapped_data->q_start
         //
         // In LOSAT, q_start_relative is context-relative coordinate (0-based).
-        let qs = usize::try_from(q_start_relative)
+        // No NCBI counterpart: the record holds these `i32` (NCBI `Int4`) offsets in `u32`
+        // (`UngappedHit`'s field widths); a non-negative `i32` always fits.
+        let qs = u32::try_from(q_start_relative)
             .expect("NCBI BLAST requires non-negative ungapped query start");
-        let qe = usize::try_from(q_end_relative)
+        let qe = u32::try_from(q_end_relative)
             .expect("NCBI BLAST requires non-negative ungapped query end");
-        let ss = usize::try_from(init_hsp.s_start)
+        let ss = u32::try_from(init_hsp.s_start)
             .expect("NCBI BLAST requires non-negative ungapped subject start");
-        let se = usize::try_from(init_hsp.s_end)
+        let se = u32::try_from(init_hsp.s_end)
             .expect("NCBI BLAST requires non-negative ungapped subject end");
-        let q_seed = usize::try_from(q_seed_relative)
+        let q_seed = u32::try_from(q_seed_relative)
             .expect("NCBI BLAST requires non-negative ungapped query seed");
-        let s_seed = usize::try_from(init_hsp.s_seed)
+        let s_seed = u32::try_from(init_hsp.s_seed)
             .expect("NCBI BLAST requires non-negative ungapped subject seed");
 
         // Offsets are already 0-based in query/subject->sequence buffers.
@@ -338,12 +340,16 @@ pub fn get_ungapped_hsp_list_into(
 
         // Create UngappedHit with context-relative coordinates (before reevaluation)
         // NCBI: Blast_HSPInit creates HSP with original extension score
-        let hsp_list_order = ungapped_hits.len();
+        let hsp_list_order = u32::try_from(ungapped_hits.len())
+            .expect("hsp_list_order: an HSP list position fits u32 (NCBI's hspcnt is Int4)");
         let uh = UngappedHit {
             q_idx: init_hsp.q_idx,
             s_idx: init_hsp.s_idx,
-            ctx_idx: init_hsp.ctx_idx,
-            s_f_idx: init_hsp.s_f_idx,
+            ctx_idx: u32::try_from(init_hsp.ctx_idx).expect(
+                "ctx_idx: a query context index fits u32 (NCBI's BlastHSP context is Int4)",
+            ),
+            s_f_idx: u8::try_from(init_hsp.s_f_idx)
+                .expect("s_f_idx: a subject frame index (0..5) fits u8"),
             q_frame: init_hsp.q_frame,
             s_frame: init_hsp.s_frame,
             q_aa_start: qs_l,
@@ -358,8 +364,10 @@ pub fn get_ungapped_hsp_list_into(
             // ```
             q_seed_off: q_seed,
             s_seed_off: s_seed,
-            q_orig_len: init_hsp.q_orig_len,
-            s_orig_len: init_hsp.s_orig_len,
+            q_orig_len: u32::try_from(init_hsp.q_orig_len)
+                .expect("q_orig_len: a query length fits u32 (NCBI's sequence length is Int4)"),
+            s_orig_len: u32::try_from(init_hsp.s_orig_len)
+                .expect("s_orig_len: a subject length fits u32 (NCBI's sequence length is Int4)"),
             raw_score: init_hsp.score, // Original extension score (before reevaluation)
             e_value: f64::INFINITY,
             num_ident: 0, // Will be computed during reevaluation
@@ -585,7 +593,7 @@ mod tests {
             // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
             //       ScoreCompareHSPs);
             // ```
-            hsp_list_order,
+            hsp_list_order: u32::try_from(hsp_list_order).expect("hsp_list_order fits u32"),
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
@@ -634,9 +642,9 @@ mod tests {
             .map(|hit| {
                 (
                     hit.raw_score,
-                    hit.s_aa_start,
-                    hit.q_aa_end.saturating_sub(hit.q_aa_start),
-                    hit.q_aa_start,
+                    hit.s_aa_start as usize,
+                    (hit.q_aa_end as usize).saturating_sub(hit.q_aa_start as usize),
+                    hit.q_aa_start as usize,
                 )
             })
             .collect();
@@ -753,7 +761,7 @@ mod tests {
 
         let ordered: Vec<(i32, usize)> = hits
             .iter()
-            .map(|hit| (hit.raw_score, hit.hsp_list_order))
+            .map(|hit| (hit.raw_score, hit.hsp_list_order as usize))
             .collect();
         assert_eq!(ordered, vec![(100, 2), (100, 1), (90, 0)]);
     }

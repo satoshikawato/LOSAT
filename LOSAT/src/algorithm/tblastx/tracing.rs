@@ -80,8 +80,18 @@ pub fn trace_ungapped_hit_if_match(stage: &str, h: &UngappedHit) {
         return;
     };
 
-    let (q_start, q_end) = convert_coords(h.q_aa_start, h.q_aa_end, h.q_frame, h.q_orig_len);
-    let (s_start, s_end) = convert_coords(h.s_aa_start, h.s_aa_end, h.s_frame, h.s_orig_len);
+    let (q_start, q_end) = convert_coords(
+        h.q_aa_start as usize,
+        h.q_aa_end as usize,
+        h.q_frame,
+        h.q_orig_len as usize,
+    );
+    let (s_start, s_end) = convert_coords(
+        h.s_aa_start as usize,
+        h.s_aa_end as usize,
+        h.s_frame,
+        h.s_orig_len as usize,
+    );
 
     if trace_match_target(target, q_start, q_end, s_start, s_end) {
         eprintln!(

@@ -23,7 +23,7 @@ pub(crate) use super::scan::OffsetPair as BlastOffsetPair;
 /// NCBI s_DetermineScanningOffsets - advance scan range across subject seq_ranges.
 /// Reference: ncbi-blast/c++/src/algo/blast/core/masksubj.inl:43-58
 #[inline(always)]
-fn determine_scanning_offsets(
+pub(super) fn determine_scanning_offsets(
     seq_ranges: &[(i32, i32)],
     word_length: i32,
     lut_word_length: i32,

@@ -203,8 +203,6 @@ export LOSAT_X_LUTARENA=1
 export LOSAT_X_LUTSPLIT=1
 export LOSAT_X_MBBATCH=64
 export LOSAT_X_MBDELAY=1
-export LOSAT_X_MBLUTONCE=1
-export LOSAT_X_MBLUTPAD=1
 export LOSAT_X_NEWTONEXACT=1
 export LOSAT_X_NEWTONLANES=1
 export LOSAT_X_NEWTONLANES8=1
@@ -1375,10 +1373,8 @@ Scheduling (each value computed by one thread with the original function; order 
   `[X_PAIRPARSHADOW]` summary line on stderr at the end). With `LOSAT_TIMING` a
   `[TIMING] x_pairpar_seed` line gives the strips, seeds and the owner's fold, scan and wait time.
 - `LOSAT_X_MBLUTPAD=1` (BLASTN megablast and blastn wherever `LOSAT_X_PAIRPAR` fills the contiguous megablast lookup
-  table on a pool of two threads or more: `-subject` and `-db`, not with `-limit_lookup` or `BLEMIR_DEBUG`; in the
-  strict set since 2026-10-17, on by default from the pull request that added it, `=0` or `LOSAT_X_DEFAULT=0` turns it
-  off; evidence: the gates of that pull request with the switch on, off and `LOSAT_X_DEFAULT=0`, and the paired
-  workstation runs below) the counters of the longest chain
+  table on a pool of two threads or more: `-subject` and `-db`, not with `-limit_lookup` or `BLEMIR_DEBUG`; not in the
+  strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT` says) the counters of the longest chain
   (`helper_array`, one per 2048 cells) and the presence vector (`pv_array`) of that fill are counted and set by each
   thread in private copies, a whole number of 64-byte lines per thread in one buffer of the calling thread (each thread
   zeroes its own lines first), and each thread adds its own blocks' counters (`saturating_add`) and ORs its own blocks'
@@ -1410,7 +1406,7 @@ Scheduling (each value computed by one thread with the original function; order 
   buffer has the fill's size and is freed at the end of the fill (their allocators return large blocks themselves). Shadow: `LOSAT_X_PAIRPARSHADOW=1` with the switch makes the
   second build of its comparison with the padded fill (every element of the four arrays and the longest chain compared;
   a difference panics) and `main` prints `[X_SHADOW] MBLUTPAD tables=<compared> cells=<elements> diffs=0 identical` at
-  exit when it compared at least one padded table. With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] x_mb_lookup_build: <s>s (builds=<n>
+  exit. With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] x_mb_lookup_build: <s>s (builds=<n>
   parallel=<n> padded=<n>)` when a megablast table was built (the summed wall time of the builds, not the shadow's
   second build; with `LOSAT_X_QBATCHPAR` the slots' concurrent builds too; `parallel=` counts the builds filled on a
   pool, `padded=` those of them the padded fill made) and `[TIMING] x_mb_lookup_split: alloc=
@@ -1440,9 +1436,10 @@ Scheduling (each value computed by one thread with the original function; order 
   fill 0.70-0.82 of the original.
 - `LOSAT_X_MBLUTONCE=1` (BLASTN megablast and blastn wherever `LOSAT_X_PAIRPAR` fills the contiguous megablast lookup
   table on a pool of two threads or more: `-subject` and `-db`, not with `-limit_lookup`, `BLEMIR_DEBUG` or
-  `LOSAT_X_PAIRPARSHADOW`; in the strict set since 2026-10-17, on by default from the pull request that added it, `=0`
-  or `LOSAT_X_DEFAULT=0` turns it off; evidence: the gates of that pull request with the switch on, off and
-  `LOSAT_X_DEFAULT=0`; workstation timing PENDING, the workstation was unreachable when the change was made) each query
+  `LOSAT_X_PAIRPARSHADOW`; not in the strict set: off unless set to any value, and `LOSAT_X_DEFAULT=0` turns
+  `LOSAT_X_PAIRPAR` off and with it this fill; win / loss conditions PENDING: the workstation was unreachable when the
+  change was made, so its paired timings and max RSS, which decide the default, are not measured yet; the private
+  copies of `LOSAT_X_MBLUTPAD` that it always uses raised max RSS there by 3-7 MiB at 16 threads) each query
   position of that fill is read once (`blastn/x_mb_lookup_once.rs`, the first dispatch of `x_mb_lookup_par::fill`):
   the positions the loop reads form one stream cut into chunks of 2^19 positions, each chunk cut into one span per
   thread; per chunk each thread reads the words of its span with the loop's statements (entering a range up to
@@ -1465,7 +1462,8 @@ Scheduling (each value computed by one thread with the original function; order 
   without it, or without `parallel`, the loop runs. Shadow: `LOSAT_X_PAIRPARSHADOW=1` with the switch makes the second
   build of its comparison with the read-once fill (every element of the four arrays and the longest chain compared; a
   difference panics) and `main` prints `[X_SHADOW] MBLUTONCE tables=<compared> cells=<elements> diffs=0 identical` at
-  exit when it compared one (then no `[X_SHADOW] MBLUTPAD` line). With `LOSAT_TIMING` `[TIMING] x_mb_lookup_build`
+  exit (with `LOSAT_X_MBLUTPAD` set too, the read-once fill makes that build and the `[X_SHADOW] MBLUTPAD` line says
+  `tables=0`). With `LOSAT_TIMING` `[TIMING] x_mb_lookup_build`
   counts `once=<n>` (the builds the read-once fill made; `padded=` counts only those of `LOSAT_X_MBLUTPAD`'s fill), and
   `[TIMING] x_mb_lookup_once: fills= chunks= read_wall= read_max= read_sum= read_late= update_... last_... arena=`
   gives, per phase summed over the chunks of the search's fills (not the shadow's), the calling worker's wall time,

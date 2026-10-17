@@ -1,11 +1,13 @@
-//! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set, on by default since 2026-10-17:
-//! `LOSAT_X_MBLUTONCE=0` or `LOSAT_X_DEFAULT=0` turns it off): `LOSAT_X_PAIRPAR`'s pool fill of the
-//! megablast lookup table of `build_mb_lookup` (`x_mb_lookup_par.rs`) with each query position
-//! read once. In the fill of `x_mb_lookup_par` every worker reads every word of the query and
-//! applies those of its own cells, so each worker pays the whole read (0.65 s of each worker's time
-//! at 16 threads for megablast of 31,168 D. melanogaster cDNAs on the workstation). Here the words
-//! are read by spans and handed to the owners of their cells, as LOSAT_X_DISCLUTPAR does for the
-//! discontiguous tables (`x_disc_lookup_par.rs`).
+//! EXPERIMENT (LOSAT_X_MBLUTONCE; off unless set to any value, not in the strict set: its default
+//! waits for the workstation's paired timings and max RSS, as LOSAT_X_MBLUTPAD's private copies,
+//! which it always uses, raised max RSS there; `LOSAT_X_DEFAULT=0` turns `LOSAT_X_PAIRPAR` off and
+//! with it this fill): `LOSAT_X_PAIRPAR`'s pool fill of the megablast lookup table of
+//! `build_mb_lookup` (`x_mb_lookup_par.rs`) with each query position read once. In the fill of
+//! `x_mb_lookup_par` every worker reads every word of the query and applies those of its own
+//! cells, so each worker pays the whole read (0.65 s of each worker's time at 16 threads for
+//! megablast of 31,168 D. melanogaster cDNAs on the workstation). Here the words are read by spans
+//! and handed to the owners of their cells, as LOSAT_X_DISCLUTPAR does for the discontiguous
+//! tables (`x_disc_lookup_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1033,1043-1045,1081-1091
 //! ```c

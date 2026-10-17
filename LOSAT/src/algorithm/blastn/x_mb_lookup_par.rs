@@ -47,9 +47,8 @@
 //! touches the same cells and links of the same words, so each worker applies it to its own
 //! words.
 //!
-//! EXPERIMENT (LOSAT_X_MBLUTPAD; in the strict set, on by default since 2026-10-17:
-//! `LOSAT_X_MBLUTPAD=0` or `LOSAT_X_DEFAULT=0` turns it off): private counters and presence-vector
-//! words. The blocks are dealt round robin, so one 64-byte line of
+//! EXPERIMENT (LOSAT_X_MBLUTPAD; off unless set, not in the strict set): private counters and
+//! presence-vector words. The blocks are dealt round robin, so one 64-byte line of
 //! `helper_array` (16 counters, one per 2048-cell block when `pv_array_bts <= 11`, as for every
 //! table of `lut_word_length` 12 or less) holds the counters of up to 16 different workers, and a
 //! line of `pv_array` holds the presence-vector words of `16 >> (11 - pv_array_bts)` blocks when
@@ -112,11 +111,10 @@
 //! wasm32) the buffer has the fill's size and is freed at the end of the fill: those allocators
 //! return large blocks themselves, and there is no threshold to keep low.
 //!
-//! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set, on by default since 2026-10-17:
-//! `LOSAT_X_MBLUTONCE=0` or `LOSAT_X_DEFAULT=0` turns it off): `fill` hands the table to the
-//! read-once fill of `x_mb_lookup_once.rs` (its first dispatch), in which each query position is
-//! read by one worker and each word handed to the owner of its cell, instead of every worker
-//! reading every word as above. That fill always counts into the private copies of this module
+//! EXPERIMENT (LOSAT_X_MBLUTONCE; off unless set to any value, not in the strict set): `fill`
+//! hands the table to the read-once fill of `x_mb_lookup_once.rs` (its first dispatch), in which
+//! each query position is read by one worker and each word handed to the owner of its cell,
+//! instead of every worker reading every word as above. That fill always counts into the private copies of this module
 //! (`Copies`, `Unready::zeroed`, `flush_private`), so `LOSAT_X_MBLUTPAD` only matters with it off.
 
 use super::{build_unmasked_ranges, MaskedInterval, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
@@ -136,16 +134,16 @@ use std::sync::OnceLock;
 pub(super) const K_COMPRESSION_FACTOR_SHIFT: usize = 11;
 
 /// No NCBI counterpart: reads the switches once; they do not change any value NCBI computes.
-/// (LOSAT_X_PAIRPAR, LOSAT_X_MBLUTPAD and LOSAT_X_MBLUTONCE, all in the strict set; the shadow
-/// LOSAT_X_PAIRPARSHADOW, on when set to any value)
+/// (LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARSHADOW, LOSAT_X_MBLUTPAD, LOSAT_X_MBLUTONCE; the last two are
+/// off unless set to any value and not in the strict set)
 fn switches() -> (bool, bool, bool, bool) {
     static SWITCHES: OnceLock<(bool, bool, bool, bool)> = OnceLock::new();
     *SWITCHES.get_or_init(|| {
         (
             crate::utils::xswitch::on("LOSAT_X_PAIRPAR"),
             std::env::var_os("LOSAT_X_PAIRPARSHADOW").is_some(),
-            crate::utils::xswitch::on("LOSAT_X_MBLUTPAD"),
-            crate::utils::xswitch::on("LOSAT_X_MBLUTONCE"),
+            std::env::var_os("LOSAT_X_MBLUTPAD").is_some(),
+            std::env::var_os("LOSAT_X_MBLUTONCE").is_some(),
         )
     })
 }
@@ -238,11 +236,11 @@ static SHADOW_ONCE_TABLES: AtomicU64 = AtomicU64::new(0);
 static SHADOW_ONCE_CELLS: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart: printed by `main` at exit. With LOSAT_X_MBLUTPAD and LOSAT_X_PAIRPARSHADOW,
-/// when the shadow compared at least one padded table, `[X_SHADOW] MBLUTPAD tables=<compared>
-/// cells=<elements compared> diffs=0 identical` (a difference panics in `shadow_check`, so the line
-/// only ever says 0; the other programs' runs with the shadow print nothing); the same with
+/// `[X_SHADOW] MBLUTPAD tables=<compared> cells=<elements compared> diffs=0 identical` (a
+/// difference panics in `shadow_check`, so the line only ever says 0); the same with
 /// LOSAT_X_MBLUTONCE for the tables whose second build was the read-once fill, `[X_SHADOW]
-/// MBLUTONCE tables= cells= diffs=0 identical`. With LOSAT_TIMING, when at
+/// MBLUTONCE tables= cells= diffs=0 identical` (with both switches the read-once fill makes the
+/// second build, and the MBLUTPAD line says `tables=0`). With LOSAT_TIMING, when at
 /// least one megablast table was built, the `[TIMING] x_mb_lookup_build` and `[TIMING]
 /// x_mb_lookup_split` lines (`x_`: end-of-run counters of an experiment, as `[TIMING]
 /// x_pairpar_seed`), and `[TIMING] x_mb_lookup_once` when the read-once fill built one
@@ -250,14 +248,14 @@ static SHADOW_ONCE_CELLS: AtomicU64 = AtomicU64::new(0);
 pub(super) fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     let (_, shadow, pad, once) = switches();
-    if shadow && pad && load(&SHADOW_PADDED_TABLES) > 0 {
+    if shadow && pad {
         eprintln!(
             "[X_SHADOW] MBLUTPAD tables={} cells={} diffs=0 identical",
             load(&SHADOW_PADDED_TABLES),
             load(&SHADOW_PADDED_CELLS)
         );
     }
-    if shadow && once && load(&SHADOW_ONCE_TABLES) > 0 {
+    if shadow && once {
         eprintln!(
             "[X_SHADOW] MBLUTONCE tables={} cells={} diffs=0 identical",
             load(&SHADOW_ONCE_TABLES),

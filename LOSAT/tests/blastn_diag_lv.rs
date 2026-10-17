@@ -220,19 +220,8 @@ fn the_strips_shadows_compare_the_tables_with_the_level_bounds() {
         assert!(report == expected, "{task}: the report differs");
         let at = format!("{task} with {strips_shadow:?}");
         // (`LOSAT_X_PAIRPARSHADOW` also names the shadow of TBLASTX's own `PAIRPAR`, whose
-        // line says it compared nothing, and, with `LOSAT_X_MBLUTONCE` on by default, compares the
-        // read-once megablast table fill: `[X_SHADOW] MBLUTONCE`; `[X_SHADOW] MBLUTPAD` when that
-        // is off and `LOSAT_X_MBLUTPAD` on)
-        let (_, skipped) = shadow_counts(
-            &stderr,
-            &[
-                prefix,
-                "[X_SHADOW] PAIRPAR ",
-                "[X_SHADOW] MBLUTPAD ",
-                "[X_SHADOW] MBLUTONCE ",
-            ],
-            &at,
-        );
+        // line says it compared nothing)
+        let (_, skipped) = shadow_counts(&stderr, &[prefix, "[X_SHADOW] PAIRPAR "], &at);
         assert!(skipped > 0, "{at}: {stderr}");
         let line = stderr
             .lines()

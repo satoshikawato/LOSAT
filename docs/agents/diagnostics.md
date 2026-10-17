@@ -2216,7 +2216,20 @@ Scheduling (each value computed by one thread with the original function; order 
   tables are not compared for a subject shorter than a word less one letter, whose one scan position the
   reference reads past the sentinel); at exit `[X_SHADOW] BXDIAG subjects_compared=N ...`. With
   `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2|scalar|per-hit> subjects= cells= batched_hits=
-  candidates=`. Measured 2026-10-17 on the workstation (node 1, one pinned core per arm with its HT sibling
+  candidates= min_hits_per_cell= tables_fused= tables_other= hits_per_cell=LEAST-MOST`. A query batch whose
+  lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 500,
+  `0` fuses every batch) is scanned by `LOSAT_X_BXSCAN`'s direct loop instead, which is faster there; the
+  choice is made once per thread and table and changes only the speed (the timing line counts the choices and
+  gives the least and most hits per cell, in hundredths). Where the two loops break even (one thread, `-db`
+  UniRef50 2026_03 volume 00, both with `LOSAT_X_BXSCANBF=1`, every batch fused against the direct loop, 2
+  rounds each; pieces of one 2.1-kb fly cDNA): hits per used cell 1.76 (300 nt) x1.20 the direct loop's
+  time, 2.34 (600 nt; 41.48-41.66 s against 34.49-34.74 s) x1.20, 3.56 (1,000 nt; 68.62-68.86 / 63.55-64.06)
+  x1.08, 4.91 (1,500 nt; 90.08-90.69 / 90.53-90.54) x1.00, 6.77 (2.1 kb) x0.94; 800 cDNAs x yeast (4.52-68.09
+  per batch) x0.72. With the rule (dev 7a5a7f87 and the rule, `LOSAT_X_BXDIAG=1` against the direct loop, both
+  with `LOSAT_X_BXSCANBF=1`, 2 rounds): 300-nt case 21.28 / 21.42 s against 21.20 / 21.68 s (no batch fused;
+  x1.20 before the rule), 2.1-kb cDNA 115.83 / 116.79 s against 124.72 / 125.10 s (x0.93), 800 cDNAs x yeast
+  62.59 / 62.65 s against 87.55 / 88.18 s (x0.71; 185 of the 186 tables fused at 2 threads, the other one had
+  4.52 hits per cell). Measured 2026-10-17 on the workstation (node 1, one pinned core per arm with its HT sibling
   idle, the two arms of a pair at once on two cores, swapped every round; 800 fly 2L cDNAs x yeast proteome
   `-db`, `-evalue 1e-5`, one thread; every output the same bytes as NCBI BLAST+ 2.17.0): off 87.21-87.42 s,
   on 64.83-65.41 s (x0.742-0.750; user-space cycles x0.743-0.750, instructions 723 -> 493 G; 4 rounds);

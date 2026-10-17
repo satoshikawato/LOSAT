@@ -4,11 +4,13 @@
 //!
 //! The switch is off unless set to any value (it is not in the strict set); its value `per-hit`
 //! or `scalar` forces a cell test, and `LOSAT_X_BXDIAGSHADOW` runs the reference beside it for
-//! every subject and stops at a difference. So the properties under test are that the report,
-//! standard error without the diagnostic lines and the exit status equal those of the search
-//! without the switch, with every cell test, with `-subject` and `-db`, outfmt 6 and 7, one and
-//! three threads and a two-hit window other than the default; that the shadow compared subjects;
-//! and that the timing line names the cell test that ran. That the bytes equal NCBI's is the
+//! every subject and stops at a difference. `LOSAT_X_BXDIAGMIN` sends the query batches with few
+//! hits per lookup cell to the other loop (`0`: none). So the properties under test are that the
+//! report, standard error without the diagnostic lines and the exit status equal those of the
+//! search without the switch, with every cell test, with `-subject` and `-db`, outfmt 6 and 7,
+//! one and three threads and a two-hit window other than the default, and with every batch, some
+//! or none fused; that the shadow compared subjects; that the timing line names the cell test that
+//! ran; and that it counts the batches each loop took. That the bytes equal NCBI's is the
 //! business of the BLASTX fixtures.
 //!
 //! The queries are 12 pieces of AP027131 of 1,500 to 3,900 letters each; the subjects are the
@@ -212,9 +214,20 @@ fn the_fused_seed_loop_gives_the_reports_of_the_reference() {
             reference.stdout.split(|&b| b == b'\n').count() > 50,
             "{args:?}: too few rows"
         );
-        for value in ["1", "per-hit", "scalar"] {
-            let run = blastx(&args, &[("LOSAT_X_BXDIAG", value)]);
-            let what = format!("{args:?} LOSAT_X_BXDIAG={value}");
+        // LOSAT_X_BXDIAGMIN=0 makes every batch take the fused loop; the built-in value and one
+        // above every table's hits per cell (no batch fused) give the same report.
+        for (value, min) in [
+            ("1", "0"),
+            ("per-hit", "0"),
+            ("scalar", "0"),
+            ("1", ""),
+            ("1", "1000000"),
+        ] {
+            let run = blastx(
+                &args,
+                &[("LOSAT_X_BXDIAG", value), ("LOSAT_X_BXDIAGMIN", min)],
+            );
+            let what = format!("{args:?} LOSAT_X_BXDIAG={value} LOSAT_X_BXDIAGMIN={min}");
             assert_eq!(run.code, reference.code, "{what}: {}", run.stderr);
             assert!(run.stdout == reference.stdout, "{what}: report differs");
             assert_eq!(run.messages(), reference.messages(), "{what}");
@@ -276,4 +289,55 @@ fn the_shadow_compares_every_subject_and_the_timing_line_names_the_cell_test() {
             assert!(!line.contains(" cells=0 "), "{line}");
         }
     }
+}
+
+/// The number after `name=` in a timing line.
+fn field(line: &str, name: &str) -> u64 {
+    line.split_whitespace()
+        .find_map(|f| f.strip_prefix(name)?.strip_prefix('='))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| panic!("no {name}= in {line}"))
+}
+
+#[test]
+fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
+    let inputs = Inputs::new();
+    let args = searches(&inputs).remove(0);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let reference = blastx(&args, &[]);
+    let timing = |min: &str| {
+        let run = blastx(
+            &args,
+            &[
+                ("LOSAT_X_BXDIAG", "1"),
+                ("LOSAT_X_BXDIAGMIN", min),
+                ("LOSAT_TIMING", "1"),
+            ],
+        );
+        assert_eq!(run.code, Some(0), "{min}: {}", run.stderr);
+        assert!(run.stdout == reference.stdout, "{min}: report differs");
+        run.stderr
+            .lines()
+            .find(|line| line.starts_with("[TIMING] blastx_diag: "))
+            .unwrap_or_else(|| panic!("{min}: no timing line: {}", run.stderr))
+            .to_string()
+    };
+    // Every table fused: the fused loop scanned every subject.
+    let all = timing("0");
+    assert_eq!(field(&all, "min_hits_per_cell"), 0, "{all}");
+    assert!(field(&all, "tables_fused") > 0, "{all}");
+    assert_eq!(field(&all, "tables_other"), 0, "{all}");
+    assert!(field(&all, "subjects") >= 150, "{all}");
+    let range = all
+        .split_whitespace()
+        .find_map(|f| f.strip_prefix("hits_per_cell="))
+        .unwrap();
+    let (least, most) = range.split_once('-').unwrap();
+    let (least, most): (u64, u64) = (least.parse().unwrap(), most.parse().unwrap());
+    assert!(0 < least && least <= most, "{all}");
+    // A minimum above every table's: no subject went through the fused loop.
+    let none = timing(&(most + 1).to_string());
+    assert_eq!(field(&none, "tables_fused"), 0, "{none}");
+    assert!(field(&none, "tables_other") > 0, "{none}");
+    assert_eq!(field(&none, "subjects"), 0, "{none}");
 }

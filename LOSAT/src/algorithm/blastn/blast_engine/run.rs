@@ -7831,6 +7831,7 @@ fn run_in_pool(
             // dropped (the batch is committed: the slots now search batches after it).
             if keep {
                 kept.extend_from_slice(batch_records.searched());
+                queries.note_kept(batch_records.searched().len());
             }
             drop(batch_records);
             queries.done(input_end);

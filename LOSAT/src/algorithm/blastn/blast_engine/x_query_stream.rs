@@ -65,8 +65,12 @@
 //! lines. The first reading's `IsIStreamEmpty` leaves no state but the position (it seeks back and
 //! drops its buffered bytes), which the second source starts at. It reads only the records the
 //! first reading read without an error, so it never meets the error or the `eEOF`. Each record's
-//! length is compared with the first reading's; a difference (the file changed between the two
-//! readings) ends the search with LOSAT's error. The batches are cut from the first reading's
+//! length is compared with the first reading's: a record whose length changed, a file that ends
+//! early or a reader error (the file changed between the two readings) ends the search with
+//! LOSAT's error, and every later reading of the search returns it (`State::failed`, also after a
+//! slot's reading failed for a batch the loop never takes); a change that keeps every record's
+//! length is read as the new content (as NCBI, which reads per batch, would read it). The batches
+//! are cut from the first reading's
 //! lengths by the same code as before (`next_ranged_batch`), so they have the same boundaries, the
 //! same records in the same order, the same cut letters (`FastaRecord::cut` at the placement of
 //! `query_input_of`), the same lower case letters (the `-lcase_masking` masks), the same local ids
@@ -99,13 +103,16 @@
 //! with the old records (`FastaRecord` as a whole: local id, title, letters with their case, and
 //! the reader's warnings). A difference prints `[X_SHADOW] QSTREAM batches= records= DIFFERENT
 //! (...)` and panics; at the end of the search `[X_SHADOW] QSTREAM batches= records= slots=
-//! off= identical` (batches: the loop's batches compared; records: the records compared, the
+//! off= identical` (`DIFFERENT` instead if a difference was found, also one whose panic on a slot's
+//! thread was dropped with a batch the loop never took; batches: the loop's batches compared;
+//! records: the records compared, the
 //! loop's input records and every slot's records; slots: the slots' requests; off: why the switch
 //! did not act, `none` when it did). With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM
-//! records= read= batches= slots= slot_copies= slot_records= stale= scan_s= read_s= peak_window=
-//! off=` (records: the input records; read: the records read again; slots: the slots' requests,
-//! slot_copies of them answered with a copy of slot_records records, the others with a shared
-//! chunk; stale: slot requests for records the loop had passed, answered with QBATCHPAR's
+//! records= read= batches= slots= slot_copies= slot_records= kept= stale= scan_s= read_s=
+//! peak_window= off=` (records: the input records; read: the records read again; slots: the
+//! slots' requests, slot_copies of them answered with a copy of slot_records records, the others
+//! with a shared chunk; kept: the searched records the loop kept for a writer after their batch,
+//! 0 where LOSAT_X_RPTSTREAM writes each batch's reports; stale: slot requests for records the loop had passed, answered with QBATCHPAR's
 //! `Cancelled`; scan_s: the first reading; read_s: the second, summed over the threads that read;
 //! peak_window: the most records read ahead of the loop at once).
 //! Both lines are printed for searches of the command line only.
@@ -312,6 +319,9 @@ struct State {
     chunks: VecDeque<(usize, Arc<Vec<FastaRecord>>)>,
     /// The loop's batch: its first input record and its input records (up to `base`).
     current: Option<(usize, Arc<Vec<FastaRecord>>)>,
+    /// The error of a failed reading: every later reading of the search returns it (the records
+    /// of the failed reading are lost, and the reader is past the record that failed).
+    failed: Option<String>,
     stats: Stats,
 }
 
@@ -322,10 +332,15 @@ struct Stats {
     slot_copies: u64,
     slot_records: u64,
     stale: u64,
+    /// The searched records the loop kept for a writer after their batch (`Queries::note_kept`).
+    kept: u64,
     read: Duration,
     peak_window: usize,
     shadow_batches: u64,
     shadow_records: u64,
+    /// The shadow found a difference (its panic, on a slot's thread, may be dropped with a batch
+    /// the loop never takes).
+    differed: bool,
 }
 
 impl Store {
@@ -424,6 +439,7 @@ impl Store {
                     base: 0,
                     chunks: VecDeque::new(),
                     current: None,
+                    failed: None,
                     stats: Stats::default(),
                 }),
                 old,
@@ -472,11 +488,12 @@ impl Drop for Store {
         let (read, stats) = stats;
         if std::env::var_os("LOSAT_X_STATS").is_some() {
             eprintln!(
-                "[X_STATS] QSTREAM records={records} read={read} batches={} slots={} slot_copies={} slot_records={} stale={} scan_s={:.4} read_s={:.4} peak_window={} off={off}",
+                "[X_STATS] QSTREAM records={records} read={read} batches={} slots={} slot_copies={} slot_records={} kept={} stale={} scan_s={:.4} read_s={:.4} peak_window={} off={off}",
                 stats.batches,
                 stats.slots,
                 stats.slot_copies,
                 stats.slot_records,
+                stats.kept,
                 stats.stale,
                 scan.as_secs_f64(),
                 stats.read.as_secs_f64(),
@@ -485,8 +502,15 @@ impl Drop for Store {
         }
         if self.mode == 2 {
             eprintln!(
-                "[X_SHADOW] QSTREAM batches={} records={} slots={} off={off} identical",
-                stats.shadow_batches, stats.shadow_records, stats.slots
+                "[X_SHADOW] QSTREAM batches={} records={} slots={} off={off} {}",
+                stats.shadow_batches,
+                stats.shadow_records,
+                stats.slots,
+                if stats.differed {
+                    "DIFFERENT"
+                } else {
+                    "identical"
+                }
             );
         }
     }
@@ -532,6 +556,7 @@ impl Acting {
             })
         };
         if let Some(difference) = difference {
+            state.stats.differed = true;
             eprintln!(
                 "[X_SHADOW] QSTREAM batches={} records={} DIFFERENT ({what}: {difference})",
                 state.stats.shadow_batches, state.stats.shadow_records
@@ -546,6 +571,9 @@ impl State {
     /// Reads the input records up to `end` into one new chunk (`input_lengths`: the first
     /// reading's lengths).
     fn read_to(&mut self, end: usize, input_lengths: &[usize]) -> Result<()> {
+        if let Some(failed) = &self.failed {
+            return Err(anyhow::anyhow!("{failed}"));
+        }
         if self.next >= end {
             return Ok(());
         }
@@ -602,41 +630,54 @@ impl State {
             taken.push(self.chunks.pop_front().expect("a chunk").1);
         }
         self.base = input.end;
-        if taken.len() == 1 {
-            return Ok(taken.pop().expect("a chunk"));
-        }
-        let mut records = Vec::with_capacity(input.len());
-        for chunk in taken {
-            match Arc::try_unwrap(chunk) {
-                Ok(owned) => records.extend(owned),
-                Err(shared) => records.extend_from_slice(&shared),
+        let records = if taken.len() == 1 {
+            taken.pop().expect("a chunk")
+        } else {
+            let mut records = Vec::with_capacity(input.len());
+            for chunk in taken {
+                match Arc::try_unwrap(chunk) {
+                    Ok(owned) => records.extend(owned),
+                    Err(shared) => records.extend_from_slice(&shared),
+                }
             }
-        }
-        Ok(Arc::new(records))
+            Arc::new(records)
+        };
+        anyhow::ensure!(
+            records.len() == input.len(),
+            "LOSAT_X_QSTREAM: the batch of the input records {input:?} holds {} records",
+            records.len()
+        );
+        Ok(records)
     }
 
     /// The next input record, read as the first reading read it (`End()`, then
-    /// `GetNextSequence`), with the length the first reading found.
+    /// `GetNextSequence`), with the length the first reading found. A record of another length (or
+    /// a file that ends before it, or a reader error) fails this reading and every later one
+    /// (`failed`).
     fn read_one(&mut self, input_lengths: &[usize]) -> Result<FastaRecord> {
+        if let Some(failed) = &self.failed {
+            return Err(anyhow::anyhow!("{failed}"));
+        }
         let index = self.next;
-        let changed = |what: String| {
-            anyhow::anyhow!(
-                "LOSAT_X_QSTREAM: the query file changed while LOSAT read it (record {}: {what})",
-                index + 1
-            )
+        let what = if self.source.end() {
+            "the file ends before it".to_string()
+        } else {
+            match self.source.next_sequence(&mut |_| Ok(())) {
+                Ok(record) if record.sequence.len() == input_lengths[index] => return Ok(record),
+                Ok(record) => format!(
+                    "{} letters where the first reading read {}",
+                    record.sequence.len(),
+                    input_lengths[index]
+                ),
+                Err(error) => format!("{error}"),
+            }
         };
-        if self.source.end() {
-            return Err(changed("the file ends before it".to_string()));
-        }
-        match self.source.next_sequence(&mut |_| Ok(())) {
-            Ok(record) if record.sequence.len() == input_lengths[index] => Ok(record),
-            Ok(record) => Err(changed(format!(
-                "{} letters where the first reading read {}",
-                record.sequence.len(),
-                input_lengths[index]
-            ))),
-            Err(error) => Err(changed(format!("{error}"))),
-        }
+        let message = format!(
+            "LOSAT_X_QSTREAM: the query file changed while LOSAT read it (record {}: {what})",
+            index + 1
+        );
+        self.failed = Some(message.clone());
+        Err(anyhow::anyhow!(message))
     }
 
     /// Input record `ordinal`, read and not yet dropped (in the loop's batch or a chunk).
@@ -832,6 +873,14 @@ impl<'a> Queries<'a> {
                     cut,
                 })
             }
+        }
+    }
+
+    /// The loop keeps `count` searched records of its batch for a writer after the batch (the
+    /// `kept=` count of the `[X_STATS]` line).
+    pub(super) fn note_kept(&self, count: usize) {
+        if let Queries::Streamed(store) = self {
+            store.acting().lock().stats.kept += count as u64;
         }
     }
 
@@ -1392,7 +1441,7 @@ mod tests {
         }
     }
 
-    /// A file that changes between the two readings ends the search with LOSAT's error.
+    /// A record whose length changed between the two readings ends the search with LOSAT's error.
     #[test]
     fn a_file_changed_between_the_readings_is_an_error() {
         let file = TempFile::new("changed", b">a\nACGTACGT\n>b\nACGT\n");
@@ -1404,6 +1453,70 @@ mod tests {
             .expect("an error")
             .to_string();
         assert!(error.contains("changed while LOSAT read it"), "{error}");
+    }
+
+    /// A read error in a slot (a record whose length changed) fails every later reading: the
+    /// loop's next batch is LOSAT's error, not a batch with records missing (the slot's records
+    /// before the failed one are lost, and the reader is past it).
+    #[test]
+    fn a_read_error_in_a_slot_fails_the_loops_next_batch() {
+        let mut bytes = Vec::new();
+        for index in 0..6 {
+            bytes.extend_from_slice(format!(">r{index}\nACGT\n").as_bytes());
+        }
+        let file = TempFile::new("slot_error", &bytes);
+        let (store, _) = store(1, &file.0, None);
+        let mut changed = Vec::new();
+        for index in 0..6 {
+            let letters = if index == 3 { "ACG" } else { "ACGT" };
+            changed.extend_from_slice(format!(">r{index}\n{letters}\n").as_bytes());
+        }
+        std::fs::write(&file.0, changed).unwrap();
+        let queries = Queries::Streamed(&store);
+        let first = queries.batch(0..1, 0..1).unwrap();
+        assert_eq!(first.input().len(), 1);
+        drop(first);
+        queries.done(1);
+        let slot = queries
+            .slot_records(2..5)
+            .err()
+            .expect("the slot's error")
+            .to_string();
+        assert!(slot.contains("record 4: 3 letters"), "{slot}");
+        let error = queries
+            .batch(1..4, 1..4)
+            .err()
+            .expect("the loop's error")
+            .to_string();
+        assert_eq!(error, slot);
+    }
+
+    /// The loop's batch is released when the loop is done with it: no chunk of the window and no
+    /// `current` holds it, and its records are freed with the loop's last handle.
+    #[test]
+    fn done_releases_the_loops_batch() {
+        let mut bytes = Vec::new();
+        for index in 0..6 {
+            bytes.extend_from_slice(format!(">r{index}\nACGTACGT\n").as_bytes());
+        }
+        let file = TempFile::new("release", &bytes);
+        let (store, _) = store(1, &file.0, None);
+        let queries = Queries::Streamed(&store);
+        let batch = queries.batch(0..3, 0..3).unwrap();
+        let held = match &batch {
+            BatchRecords::Read { input, .. } => Arc::clone(input),
+            BatchRecords::Borrowed { .. } => panic!("records read again"),
+        };
+        // The batch's handle, `current` and this one.
+        assert_eq!(Arc::strong_count(&held), 3);
+        drop(batch);
+        queries.done(3);
+        {
+            let state = store.acting().lock();
+            assert!(state.current.is_none());
+            assert!(state.chunks.iter().all(|(start, _)| *start >= 3));
+        }
+        assert_eq!(Arc::strong_count(&held), 1);
     }
 
     /// Where the switch does not act: off, the reports after the loop, standard input, a directory

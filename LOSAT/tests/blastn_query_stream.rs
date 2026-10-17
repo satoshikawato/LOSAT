@@ -837,3 +837,39 @@ fn the_switch_is_off_unless_set() {
     assert_eq!(line(&off), None);
     assert_eq!((off.status, &off.report), (on.status, &on.report));
 }
+
+/// The records of the batches are kept only where a writer reads them after their batch: none
+/// with LOSAT_X_RPTSTREAM acting (each batch's records are dropped after its reports), every
+/// searched record with its shadow (which writes the reports after the loop to compare).
+#[test]
+fn the_records_are_kept_only_for_a_writer_after_the_loop() {
+    let dir = TempDir::new("kept");
+    let query = queries(&dir, "q.fa", b"");
+    let subject = fasta("LC738868.fasta");
+    let args = [
+        "-task",
+        "megablast",
+        "-query",
+        query.to_str().unwrap(),
+        "-subject",
+        subject.to_str().unwrap(),
+        "-outfmt",
+        "6",
+    ];
+    let kept = |switches: &[(&str, &str)]| -> String {
+        let run = blastn(&args, 4, switches, None);
+        let stderr = String::from_utf8_lossy(&run.stderr).into_owned();
+        stderr
+            .lines()
+            .find(|line| line.starts_with("[X_STATS] QSTREAM "))
+            .and_then(|line| {
+                line.split_whitespace()
+                    .find_map(|word| word.strip_prefix("kept="))
+            })
+            .unwrap_or_else(|| panic!("{switches:?}: {stderr}"))
+            .to_string()
+    };
+    assert_eq!(kept(&[SWITCH, RPTSTREAM, STATS]), "0");
+    assert_eq!(kept(&[SWITCH, RPTSTREAM, STATS, QBATCHPAR, TWO_SLOTS]), "0");
+    assert_eq!(kept(&[SWITCH, RPTSTREAMSHADOW, STATS]), "19");
+}

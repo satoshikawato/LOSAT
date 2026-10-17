@@ -145,6 +145,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_COMPFAST",
     "LOSAT_X_CTXFAST",
     "LOSAT_X_DEKKER",
+    "LOSAT_X_DISCLUTPAR",
     "LOSAT_X_DPAVX2",
     "LOSAT_X_DPFAST",
     "LOSAT_X_DPNEON",

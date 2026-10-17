@@ -34,14 +34,19 @@ fn args(query: &TempFasta, subject: &TempFasta) -> BlastnArgs {
     }
 }
 
-fn search(query: &TempFasta, subject: &TempFasta, batch_size: Option<&str>) -> Run {
+fn search(
+    query: &TempFasta,
+    subject: &TempFasta,
+    formats: &[&str],
+    batch_size: Option<&str>,
+) -> Run {
     match batch_size {
         Some(size) => std::env::set_var("BATCH_SIZE", size),
         None => std::env::remove_var("BATCH_SIZE"),
     }
     let queries = reader_records(&query.0, ReaderConfig::query("BLASTN", false, true));
     let subjects = reader_records(&subject.0, ReaderConfig::subject("BLASTN", false, true));
-    run_formats(&["0", "6", "7"], true, |outputs| {
+    run_formats(formats, true, |outputs| {
         run_local_blastn(args(query, subject), &queries, &subjects, outputs)
     })
 }
@@ -74,26 +79,36 @@ fn hit_records_and_an_observer_keep_the_reports_after_the_loop() {
     let query = TempFasta::new("rptstream_api_query.fna", &records);
     let subject_letters = fixture_sequence("LC738868.fasta");
     let subject = TempFasta::new("rptstream_api_subject.fna", &[("s1", &subject_letters)]);
-    // One batch (the whole input in the first batch), then batches of 4,000 letters.
-    let whole = search(&query, &subject, None);
-    let batched = search(&query, &subject, Some("4000"));
-    std::env::remove_var("BATCH_SIZE");
-    assert!(!whole.hits.is_empty() && whole.ranges.iter().all(|r| !r.is_empty()));
-    assert_eq!(batched.outputs, whole.outputs, "formats");
-    assert_eq!(batched.diagnostics, whole.diagnostics, "warnings");
-    assert_eq!(
-        format!("{:?}", batched.hits),
-        format!("{:?}", whole.hits),
-        "hit records"
-    );
-    assert_eq!(batched.ranges, whole.ranges, "observer ranges");
-    assert_eq!(
-        batched.subjects, whole.subjects,
-        "observer subject headings"
-    );
-    // The HSP numbers run over the whole search once in every format.
-    for ranges in &batched.ranges {
-        let indices: Vec<usize> = ranges.iter().map(|range| range.0).collect();
-        assert_eq!(indices, (0..batched.hits.len()).collect::<Vec<_>>());
+    // One batch (the whole input in the first batch), then batches of 4,000 letters; one format
+    // (the hit records and the observer alone keep the switch off) and three.
+    for formats in [&["6"][..], &["0"], &["0", "6", "7"]] {
+        let whole = search(&query, &subject, formats, None);
+        let batched = search(&query, &subject, formats, Some("4000"));
+        std::env::remove_var("BATCH_SIZE");
+        assert!(!whole.hits.is_empty() && whole.ranges.iter().all(|r| !r.is_empty()));
+        assert_eq!(batched.outputs, whole.outputs, "{formats:?}: formats");
+        assert_eq!(
+            batched.diagnostics, whole.diagnostics,
+            "{formats:?}: warnings"
+        );
+        assert_eq!(
+            format!("{:?}", batched.hits),
+            format!("{:?}", whole.hits),
+            "{formats:?}: hit records"
+        );
+        assert_eq!(batched.ranges, whole.ranges, "{formats:?}: observer ranges");
+        assert_eq!(
+            batched.subjects, whole.subjects,
+            "{formats:?}: observer subject headings"
+        );
+        // The HSP numbers run over the whole search once in every format.
+        for ranges in &batched.ranges {
+            let indices: Vec<usize> = ranges.iter().map(|range| range.0).collect();
+            assert_eq!(
+                indices,
+                (0..batched.hits.len()).collect::<Vec<_>>(),
+                "{formats:?}"
+            );
+        }
     }
 }

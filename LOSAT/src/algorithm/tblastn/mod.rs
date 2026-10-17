@@ -62,3 +62,6 @@ pub use x_subject_translate::print_summary as x_subject_translate_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_subject_store::print_summary as x_subject_store_print_summary;
+// EXPERIMENT (LOSAT_X_TBNLINKWIN): the summary line `main` prints at exit. No NCBI counterpart: it
+// prints counters and changes no value NCBI computes.
+pub use stage_d_linking::x_link_window_print_summary;

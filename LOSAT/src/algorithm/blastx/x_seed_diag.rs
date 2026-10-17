@@ -19,7 +19,9 @@
 //! stored order). The query offsets of one cell are distinct and the table is at least the six-frame
 //! query's length plus the window (`Diagonals::new`), so the hits of one subject offset fall on
 //! distinct entries, which the batches of eight rest on. The values are those of the bit-field and
-//! of the wrapping i32 arithmetic, in both loops.
+//! of the wrapping i32 arithmetic, in both loops. The closure takes a candidate's context from
+//! blastp's `XContextTable` (made once per query batch and thread), which gives the index of the
+//! reference's binary search.
 //!
 //! Where it acts: the two-hit stage (`-window_size` above 0) with the standard lookup table
 //! (`-word_size 3`, the default), when nothing traces the seeds and the diagonal order is the
@@ -35,9 +37,64 @@
 //! and the hits passed to the closure; zeros but the subjects with `per-hit`).
 
 use super::*;
-use crate::algorithm::blastp::x_seed_fused::{x_cell_test, x_scan_two_hit_with, XDiagMode};
+use crate::algorithm::blastp::x_seed_fused::{
+    x_cell_test, x_scan_two_hit_with, XContextTable, XDiagMode,
+};
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::OnceLock;
+
+thread_local! {
+    /// EXPERIMENT (LOSAT_X_BXDIAG): the context table of the query batch this thread searches,
+    /// with the frame bases and the span it was made for (see [`x_with_context_table`]).
+    static X_CONTEXTS: RefCell<Option<(Vec<i32>, usize, XContextTable)>> =
+        const { RefCell::new(None) };
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:211-232
+// ```c
+// Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
+// {
+//     Int4 m=0, b=0, e=0, size=0;
+//
+//     size = A->last_context+1;
+//     ...
+//     while (b < e - 1) {
+//         m = (b + e) / 2;
+//         if (A->contexts[m].query_offset > n)
+//             e = m;
+//         else
+//             b = m;
+//     }
+//     return b;
+// }
+// ```
+/// EXPERIMENT (LOSAT_X_BXDIAG): runs `f` with blastp's context table (`XContextTable`: a coarse
+/// table and a short walk over the frame bases) for `batch`, made once per query batch and
+/// thread. It gives the index the reference's binary search gives, the last context whose offset
+/// is at most the query offset (`XContextTable::get`). The table is reused only while the batch's
+/// frame bases and span are the ones it was made for (compared on every call), so a new batch
+/// gets a new table even if its contexts lie at the same address.
+fn x_with_context_table<R>(batch: &PreparedQueryBatch, f: impl FnOnce(&XContextTable) -> R) -> R {
+    let span = batch.contexts.last().map_or(0, |c| c.offset + c.length);
+    X_CONTEXTS.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        let fits = cell.as_ref().is_some_and(|(bases, s, _)| {
+            *s == span
+                && bases.len() == batch.contexts.len()
+                && bases
+                    .iter()
+                    .zip(&batch.contexts)
+                    .all(|(&b, c)| b == c.offset as i32)
+        });
+        if !fits {
+            let bases: Vec<i32> = batch.contexts.iter().map(|c| c.offset as i32).collect();
+            let table = XContextTable::new(&bases, span);
+            *cell = Some((bases, span, table));
+        }
+        f(&cell.as_ref().expect("made above").2)
+    })
+}
 
 // No NCBI counterpart: reads the LOSAT_X_BXDIAG switches once; it does not change any value NCBI
 // computes.
@@ -248,105 +305,111 @@ fn x_word_finder_fused(
     // two-hit window.
     let length = subject.len().saturating_sub(1);
     let mut hits = Vec::new();
-    let counts = x_scan_two_hit_with(
-        mode,
-        table,
-        subject,
-        length,
-        &mut diagonals.entries,
-        mask,
-        offset,
-        options.window_size,
-        word,
-        |q, s, previous, diff, entry| {
-            // From here to the end of the closure: the statements of x_word_finder_direct after
-            // the diagonal tests (`previous` = last_hit - diag_offset, `diff` = s - previous).
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560
-            // ```c
-            //                 curr_context = BSearchContextInfo(query_offset, query_info);
-            // ```
-            let context = batch
-                .contexts
-                .partition_point(|c| c.offset as i32 <= q)
-                .saturating_sub(1);
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
-            // ```c
-            //                 if (query_offset - diff <
-            //                     query_info->contexts[curr_context].query_offset) {
-            //
-            //                     /* there was no last hit for this diagnol; start a new hit */
-            //                     diag_array[diag_coord].last_hit =
-            //                         subject_offset + diag_offset;
-            //                     continue;
-            //                 }
-            // ```
-            if q - diff < batch.contexts[context].offset as i32 {
-                entry.set_last_hit(s.wrapping_add(offset));
-                return;
-            }
-            let p = &parameters[context];
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
-            // ```c
-            //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
-            //                                               last_hit + wordsize,
-            //                                               subject_offset, query_offset,
-            //                                               cutoffs->x_dropoff,
-            //                                               &hsp_q, &hsp_s,
-            //                                               &hsp_len, use_pssm,
-            //                                               wordsize, &right_extend,
-            // ```
-            let Some(result) = extend_two_hit_blosum62(
-                query,
-                subject,
-                (previous + word) as usize,
-                s as usize,
-                q as usize,
-                p.word_xdrop,
-                word as usize,
-            ) else {
-                return;
-            };
-            // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-606
-            // ```c
-            //                 if (score >= cutoffs->cutoff_score)
-            //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
-            //                                      query_offset, subject_offset, hsp_len,
-            //                                      score);
-            //
-            //                 /* If an extension to the right happened, reset the last hit
-            //                    so that future hits to this diagonal must start over. */
-            //
-            //                 if (right_extend) {
-            //                     diag_array[diag_coord].flag = 1;
-            //                     diag_array[diag_coord].last_hit =
-            //                         s_last_off - (wordsize - 1) + diag_offset;
-            //                 }
-            //                 /* Otherwise, make the present hit into the previous hit for
-            //                    this diagonal */
-            //                 else {
-            //                     diag_array[diag_coord].last_hit =
-            //                         subject_offset + diag_offset;
-            //                 }
-            // ```
-            let u = result.ungapped_data;
-            if u.score >= p.word_cutoff {
-                hits.push(InitHsp {
-                    q_seed: q,
-                    s_seed: s,
-                    q_start: u.q_start,
-                    s_start: u.s_start,
-                    length: u.length,
-                    score: u.score,
+    let counts = x_with_context_table(batch, |contexts| {
+        x_scan_two_hit_with(
+            mode,
+            table,
+            subject,
+            length,
+            &mut diagonals.entries,
+            mask,
+            offset,
+            options.window_size,
+            word,
+            |q, s, previous, diff, entry| {
+                // From here to the end of the closure: the statements of x_word_finder_direct after
+                // the diagonal tests (`previous` = last_hit - diag_offset, `diff` = s - previous).
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560
+                // ```c
+                //                 curr_context = BSearchContextInfo(query_offset, query_info);
+                // ```
+                // The table's index is the binary search's (x_with_context_table); an offset outside
+                // the table (none from the lookup) takes the binary search.
+                let context = contexts.get(q).unwrap_or_else(|| {
+                    batch
+                        .contexts
+                        .partition_point(|c| c.offset as i32 <= q)
+                        .saturating_sub(1)
                 });
-            }
-            if result.right_extend {
-                entry.set_flag(1);
-                entry.set_last_hit((result.s_last_off - (word - 1)).wrapping_add(offset));
-            } else {
-                entry.set_last_hit(s.wrapping_add(offset));
-            }
-        },
-    );
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:566-573
+                // ```c
+                //                 if (query_offset - diff <
+                //                     query_info->contexts[curr_context].query_offset) {
+                //
+                //                     /* there was no last hit for this diagnol; start a new hit */
+                //                     diag_array[diag_coord].last_hit =
+                //                         subject_offset + diag_offset;
+                //                     continue;
+                //                 }
+                // ```
+                if q - diff < batch.contexts[context].offset as i32 {
+                    entry.set_last_hit(s.wrapping_add(offset));
+                    return;
+                }
+                let p = &parameters[context];
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:576-582
+                // ```c
+                //                 score = s_BlastAaExtendTwoHit(matrix, subject, query,
+                //                                               last_hit + wordsize,
+                //                                               subject_offset, query_offset,
+                //                                               cutoffs->x_dropoff,
+                //                                               &hsp_q, &hsp_s,
+                //                                               &hsp_len, use_pssm,
+                //                                               wordsize, &right_extend,
+                // ```
+                let Some(result) = extend_two_hit_blosum62(
+                    query,
+                    subject,
+                    (previous + word) as usize,
+                    s as usize,
+                    q as usize,
+                    p.word_xdrop,
+                    word as usize,
+                ) else {
+                    return;
+                };
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:588-606
+                // ```c
+                //                 if (score >= cutoffs->cutoff_score)
+                //                     BlastSaveInitHsp(ungapped_hsps, hsp_q, hsp_s,
+                //                                      query_offset, subject_offset, hsp_len,
+                //                                      score);
+                //
+                //                 /* If an extension to the right happened, reset the last hit
+                //                    so that future hits to this diagonal must start over. */
+                //
+                //                 if (right_extend) {
+                //                     diag_array[diag_coord].flag = 1;
+                //                     diag_array[diag_coord].last_hit =
+                //                         s_last_off - (wordsize - 1) + diag_offset;
+                //                 }
+                //                 /* Otherwise, make the present hit into the previous hit for
+                //                    this diagonal */
+                //                 else {
+                //                     diag_array[diag_coord].last_hit =
+                //                         subject_offset + diag_offset;
+                //                 }
+                // ```
+                let u = result.ungapped_data;
+                if u.score >= p.word_cutoff {
+                    hits.push(InitHsp {
+                        q_seed: q,
+                        s_seed: s,
+                        q_start: u.q_start,
+                        s_start: u.s_start,
+                        length: u.length,
+                        score: u.score,
+                    });
+                }
+                if result.right_extend {
+                    entry.set_flag(1);
+                    entry.set_last_hit((result.s_last_off - (word - 1)).wrapping_add(offset));
+                } else {
+                    entry.set_last_hit(s.wrapping_add(offset));
+                }
+            },
+        )
+    });
     // The rest of word_finder_plain, unchanged.
     diagonals.finish_subject(length)?;
     hits.sort_by(|a, b| {
@@ -543,6 +606,59 @@ mod tests {
                     d.entries.fill(DiagStruct::clear(window));
                 });
             }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:211-232
+    // ```c
+    // Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
+    // {
+    //     Int4 m=0, b=0, e=0, size=0;
+    //
+    //     size = A->last_context+1;
+    //     ...
+    //     while (b < e - 1) {
+    //         m = (b + e) / 2;
+    //         if (A->contexts[m].query_offset > n)
+    //             e = m;
+    //         else
+    //             b = m;
+    //     }
+    //     return b;
+    // }
+    // ```
+    // The context table of a batch gives the binary search's index at every query offset, and a
+    // second batch (other queries) gets its own table.
+    #[test]
+    fn the_context_table_gives_the_binary_search_index_for_every_offset() {
+        let fasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
+        let genome = parse_fasta(
+            &std::fs::read(fasta.join("AP027131.fasta")).unwrap(),
+            false,
+            false,
+        )
+        .unwrap();
+        let letters = &genome[0].sequence;
+        for pieces in [[1_500, 2_200, 900, 3_100], [4_000, 333, 2_500, 1_200]] {
+            let mut query = Vec::new();
+            for (i, &n) in pieces.iter().enumerate() {
+                query.extend_from_slice(format!(">p{i}\n").as_bytes());
+                query.extend_from_slice(&letters[i * 50_000..i * 50_000 + n]);
+                query.push(b'\n');
+            }
+            let (batch, ..) = search(&query, 40, 500);
+            let span = batch.contexts.last().map(|c| c.offset + c.length).unwrap();
+            assert!(batch.contexts.len() >= 24);
+            x_with_context_table(&batch, |table| {
+                for q in 0..span as i32 {
+                    let expected = batch
+                        .contexts
+                        .partition_point(|c| c.offset as i32 <= q)
+                        .saturating_sub(1);
+                    assert_eq!(table.get(q), Some(expected), "q={q}");
+                }
+                assert_eq!(table.get(span as i32), None);
+            });
         }
     }
 

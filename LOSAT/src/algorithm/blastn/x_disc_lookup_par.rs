@@ -128,12 +128,19 @@
 //! cells with the blocks dealt round robin, put the counters of 16 owners (P = 16) or 4 (P = 4)
 //! on each 64-byte line, and every word on a non-empty cell wrote one; (2) in phase A the 24-byte
 //! `Vec` headers of the buckets, a row of P per reader, shared lines with the neighbouring
-//! readers' rows, and every push stores the length. Together 3.3-4.5 million cache-line transfers
-//! between cores (HITM) per fill, against thousands in the loop. Now each bucket is a `Bucket` on
-//! a 64-byte line of its own (layout only: the same pushes into the same buckets in the same
-//! order), and each owner counts into its own copy of the counters on lines of their own
-//! (`OwnerCounters`), added into `helper_array` once after the last chunk. Measured as the probe
-//! of that report: the fill 0.205 -> 0.088 s at 4 threads and 0.0835 -> 0.047 s at 16 on 1,775
+//! readers' rows, and every push stores the length. That gave, per fill of 1,775 cDNAs, 3.2-4.5
+//! million HITM loads (loads served by a line another core had modified) and as many RFOs
+//! (stores that had to take a line from another core), 6.4-9.0 million of each for 3,492 cDNAs,
+//! against at most a few thousand in the loop. The jobs' summed time (3.8 and 4.9 times the
+//! loop's) is stall time, not work: the instructions were 1.46-1.6 times the loop's. Now each
+//! bucket is a `Bucket` on a 64-byte line of its own (layout only: the same pushes into the same
+//! buckets in the same order), and each owner counts into its own copy of the counters on lines
+//! of their own (`OwnerCounters`), added into `helper_array` once after the last chunk. So the
+//! counter lines and the bucket-header lines are no longer shared. The presence-vector words of
+//! two neighbouring blocks still share a line (eight words, 32 bytes, per block at the
+//! workstation's `pv_array_bts` 8); that kept 1.1-2.4 million HITM loads and was measured to
+//! cost nothing (the report's `pvlate` test), so they were left alone. Measured as the probe of
+//! that report: the fill 0.205 -> 0.088 s at 4 threads and 0.0835 -> 0.047 s at 16 on 1,775
 //! cDNAs, and faster than the loop at 2 threads too, so the switch needs no thread threshold.
 //!
 //! Bucket memory. The buckets hold one entry of 8 bytes per word of the current chunk and
@@ -571,6 +578,20 @@ impl OwnerCounters {
             let i = owner[h >> counter_shift] as usize * self.stride + h;
             *counter = counter.wrapping_add(self.lines[i / LINE_COUNTERS].0[i % LINE_COUNTERS]);
         }
+    }
+
+    /// Tests only: how many owners' copies hold a non-zero counter (before the flush). A fill that
+    /// counted into one shared copy would give 1 here whatever the number of owners.
+    #[cfg(test)]
+    fn owners_with_counts(&self, parts: usize) -> usize {
+        (0..parts)
+            .filter(|&o| {
+                (0..self.len).any(|h| {
+                    let i = o * self.stride + h;
+                    self.lines[i / LINE_COUNTERS].0[i % LINE_COUNTERS] != 0
+                })
+            })
+            .count()
     }
 }
 
@@ -1018,11 +1039,15 @@ pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, 
 
 /// No NCBI counterpart (scheduling only): what one fill did, for LOSAT_TIMING and the tests: its
 /// chunks and the largest summed capacity of the buckets of both templates after a phase A (the
-/// most they reserve: phases B and C add nothing), in entries; 0 when not measured.
+/// most they reserve: phases B and C add nothing), in entries; 0 when not measured. In tests also
+/// `counter_owners`, the number of owners' private copies of the counters (of both templates) that
+/// hold a non-zero counter before the flush; 0 otherwise.
 #[derive(Clone, Copy, Debug, Default)]
 struct FillStats {
     chunks: usize,
     peak_entries: usize,
+    #[cfg(test)]
+    counter_owners: usize,
 }
 
 /// `fill` with the chunk size and a `probe` that each phase-B job calls first, on its thread.
@@ -1123,6 +1148,15 @@ fn fill_with<P: Fn(u8) + Sync>(
         run_phase(&mut clock, 2, parts, in_pool, |a| unsafe { fill.link(a) });
         stats.chunks += 1;
         start = end;
+    }
+    #[cfg(test)]
+    {
+        stats.counter_owners = counters[0].owners_with_counts(parts)
+            + if words.two_templates {
+                counters[1].owners_with_counts(parts)
+            } else {
+                0
+            };
     }
     // After the last join: the owners' counts into the template's counters.
     let counter_shift = block_shift - K_COMPRESSION_FACTOR_SHIFT;
@@ -2308,16 +2342,25 @@ mod tests {
                 for (&combo, reference) in combos.iter().zip(&references) {
                     let got = build_from(&case, combo, How::Parts(threads, true), Some(&start)).0;
                     assert!(got == *reference, "threads {threads} {combo:?}");
-                    let got = build_from(
+                    let (got, stats) = build_from(
                         &case,
                         combo,
                         How::Chunked(threads, 1000, true),
                         Some(&start),
-                    )
-                    .0;
+                    );
                     assert!(
                         got == *reference,
                         "threads {threads} {combo:?} chunks of 1,000"
+                    );
+                    // The owners count into copies of their own (not all into one shared copy,
+                    // which is just as exact but brings back the false sharing): the case has
+                    // repeats in several blocks, so at least two owners (of each template) have
+                    // counts before the flush.
+                    let templates = 1 + usize::from(combo.1 == DiscWordType::TwoTemplates);
+                    assert!(
+                        stats.counter_owners >= 2 * templates,
+                        "threads {threads} {combo:?}: owners with counts {} (templates {templates})",
+                        stats.counter_owners
                     );
                 }
                 Ok(())

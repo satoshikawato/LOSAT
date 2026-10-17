@@ -1,16 +1,17 @@
 //! blastp-fast's lookup build with `LOSAT_X_BPLKPFLAT` (`src/algorithm/tblastx/lookup/x_clut_par.rs`,
 //! `src/algorithm/blastp/x_query_blocks.rs`) on whole searches.
 //!
-//! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
-//! set, and it acts only where the search's pool builds the flat compressed table of
-//! `LOSAT_X_BPCLUT`, with more than one thread. With it on, the build's two passes run with one latch
+//! The switch is in the strict set (`src/utils/xswitch.rs`) with `LOSAT_X_BPCLUT`: it is on by default,
+//! `LOSAT_X_BPLKPFLAT=0` turns it off, and `LOSAT_X_DEFAULT=0` leaves it off unless it is set. It acts
+//! only where the search's pool builds the flat compressed table of `LOSAT_X_BPCLUT` (on by default as
+//! well, `LOSAT_X_BPCLUT=0` turns it off), with more than one thread. With it on, the build's two passes run with one latch
 //! each, a block search's table takes the vectors of the previous block's table, and with
 //! `LOSAT_X_BPQBLOCK` the contexts' Karlin blocks are tasks of the build. These tests compare the
-//! reports with the switch off and on, with `-subject` and `-db`, and run its shadow mode
+//! reports with the switch off (`LOSAT_X_BPLKPFLAT=0`) and on, with `-subject` and `-db`, and run its shadow mode
 //! (`LOSAT_X_BPLKPFLATSHADOW`), whose line at exit shows that the path ran (tables compared, builds
 //! on the vectors of an earlier table, contexts computed by the tasks); a difference stops the run.
-//! Every run states `LOSAT_X_BPQBLOCK` and `LOSAT_X_BPCLUT` itself, so that the tests do not depend
-//! on the defaults of the strict set.
+//! Every run but the default-set test states `LOSAT_X_BPQBLOCK` and `LOSAT_X_BPCLUT` itself, so that
+//! the tests do not depend on the defaults of the strict set.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:1352-1354
 //! ```c
@@ -153,6 +154,7 @@ fn with<'a>(base: &[(&'a str, &'a str)], extra: &[(&'a str, &'a str)]) -> Vec<(&
 }
 
 const ON: (&str, &str) = ("LOSAT_X_BPLKPFLAT", "1");
+const OFF: (&str, &str) = ("LOSAT_X_BPLKPFLAT", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_BPLKPFLATSHADOW", "1");
 
 /// The switch off, on and in its shadow mode give the same report; returns the shadow's counters.
@@ -162,7 +164,7 @@ fn same_reports(
     base: &[(&str, &str)],
     outfmt: &str,
 ) -> HashMap<String, u64> {
-    let off = blastp_fast(subject, threads, base, outfmt);
+    let off = blastp_fast(subject, threads, &with(base, &[OFF]), outfmt);
     assert!(!off.stdout.is_empty(), "the fixture pair has rows");
     let on = blastp_fast(subject, threads, &with(base, &[ON]), outfmt);
     assert!(
@@ -237,9 +239,7 @@ fn the_switch_does_not_act_without_the_pools_build() {
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     for (threads, clut) in [(1, true), (4, false)] {
         let mut base = vec![("LOSAT_X_BPQBLOCK", "1")];
-        if clut {
-            base.push(("LOSAT_X_BPCLUT", "1"));
-        }
+        base.push(("LOSAT_X_BPCLUT", if clut { "1" } else { "0" }));
         let counts = same_reports(&subject, threads, &base, "6");
         assert!(
             counts.values().all(|&count| count == 0),
@@ -256,7 +256,7 @@ fn the_clut_shadow_compares_the_switchs_builds() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let base = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPQBLOCK", "1")];
-    let off = blastp_fast(&subject, 4, &base, "6");
+    let off = blastp_fast(&subject, 4, &with(&base, &[OFF]), "6");
     for extra in [
         &[("LOSAT_X_BPCLUTSHADOW", "1"), ON][..],
         &[("LOSAT_X_BPCLUTSHADOW", "1"), SHADOW][..],
@@ -298,6 +298,7 @@ fn query_chunks_of_split_batches_take_no_spare() {
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     let base = [
         ("LOSAT_X_BPCLUT", "1"),
+        ("LOSAT_X_BPLKPFLAT", "0"),
         ("LOSAT_X_BPQBLOCK", "1"),
         ("CHUNK_SIZE", "1000"),
         ("OVERLAP_CHUNK_SIZE", "100"),
@@ -364,4 +365,49 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
         "{counts:?}"
     );
     std::fs::remove_dir_all(db.parent().unwrap()).ok();
+}
+
+// Both switches are on by default: the report with no variable, with either `=0`, with both `=0`,
+// with `LOSAT_X_DEFAULT=0` (both off unless set) and with `LOSAT_X_DEFAULT=0` and both set is one
+// report, in blocks of one batch at 4 threads. The shadow of `LOSAT_X_BPLKPFLAT` acts only where the
+// pool builds the flat table of `LOSAT_X_BPCLUT` and the switch is on, so with no other variable it
+// compares tables exactly when both are on by default, and nothing under `LOSAT_X_DEFAULT=0`.
+#[test]
+fn the_default_the_switches_off_and_the_global_off_give_one_report() {
+    let subject = subject_file();
+    let subject = [OsStr::new("-subject"), subject.as_os_str()];
+    let block = ("LOSAT_X_BPQBLOCK", "1");
+    let global_off = ("LOSAT_X_DEFAULT", "0");
+    let default = blastp_fast(&subject, 4, &[block], "6");
+    assert!(!default.stdout.is_empty(), "the fixture pair has rows");
+    for vars in [
+        vec![block, ("LOSAT_X_BPCLUT", "0")],
+        vec![block, OFF],
+        vec![block, ("LOSAT_X_BPCLUT", "0"), OFF],
+        vec![block, global_off],
+        vec![block, global_off, ("LOSAT_X_BPCLUT", "1"), ON],
+    ] {
+        let run = blastp_fast(&subject, 4, &vars, "6");
+        assert!(
+            run.stdout == default.stdout,
+            "{vars:?}: the report differs from the default's"
+        );
+    }
+    let shadow = blastp_fast(&subject, 4, &[block, SHADOW], "6");
+    assert!(shadow.stdout == default.stdout, "the shadow's report");
+    let counts = shadow.shadow("BPLKPFLAT");
+    assert!(
+        counts["tables_compared"] > 1,
+        "no variable but the shadow: the default builds the flat table on the pool: {counts:?}"
+    );
+    let off = blastp_fast(&subject, 4, &[block, global_off, SHADOW], "6");
+    assert!(
+        off.stdout == default.stdout,
+        "the shadow's report, global off"
+    );
+    let counts = off.shadow("BPLKPFLAT");
+    assert!(
+        counts.values().all(|&count| count == 0),
+        "LOSAT_X_DEFAULT=0 builds no flat table: {counts:?}"
+    );
 }

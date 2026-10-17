@@ -49,14 +49,41 @@
 //! of a cell's last batch of fewer than eight hits and as the cell-by-cell version the tests
 //! compare with; `LOSAT_X_BPDIAG_SIMD=0` forces it (diagnostic, used by the tests; not in the
 //! strict set). With `LOSAT_TIMING=1` each search of a query set prints
-//! `[TIMING] x_bpdiag: mode=<avx2|scalar|per-hit> cells=<n> batched_hits=<m> candidates=<k>` (the
-//! path that ran, the cells tested in batches, their hits, and the hits passed to the closure;
-//! zeros with `per-hit`).
+//! `[TIMING] x_bpdiag: mode=<avx2|avx2-defer|scalar|per-hit> cells=<n> batched_hits=<m>
+//! candidates=<k>` (the path that ran, the cells tested in batches, their hits, and the hits passed
+//! to the closure; zeros with `per-hit`).
+//!
+//! EXPERIMENT (LOSAT_X_BPDEFER): with the AVX2 batches on, a batch's candidates are not called at
+//! the end of the batch: their query offsets are packed into a buffer (the candidate lanes moved to
+//! the front of the register by a permutation from a table of the 256 lane masks, the register
+//! stored, the buffer's length advanced by the number of candidates), and the closure is called for
+//! the buffer in order after the cell's last batch of eight. The batch loop then has no branch on
+//! the candidates (on the workstation 60 % of the cell test's mispredicts were the per-batch "no
+//! candidate" branch, 2026-10-16). Why the outcome is the per-batch calls': the hits of one cell lie
+//! on distinct entries and a call writes only its candidate's entry (above), so the batches after a
+//! candidate neither read nor write what its call reads or writes, and the calls keep their order
+//! (the batches' order, then the lanes'); a candidate's entry still holds the value its test read.
+//! A cell's last batch of fewer than eight hits is the scalar batch, called after the buffer.
+//! `LOSAT_X_BPDEFER` is a switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+//! and it is not set. It acts only where the AVX2 batch runs (`LOSAT_X_BPDIAG` with AVX2, not
+//! with `LOSAT_X_BPDIAG_SIMD=0`). `LOSAT_X_BPSEEDSHADOW` compares it with the reference like the
+//! other modes.
+//!
+//! EXPERIMENT (LOSAT_X_BXSCANBF, blastx's switch): `x_scan_two_hit_with(.., branch_free: true, ..)`
+//! finds the cells with hits by the candidate loop of LOSAT_X_TBNSCANBF
+//! (`tblastn/x_scan_bf.rs`, `x_block_candidates`): the positions of a block of words are written
+//! to a list whose length advances by the presence bit, without a branch on it, and the listed
+//! cells then go to the cell test in position order. The cells, their order and their hit lists
+//! are the presence-test loop's, so every outcome above is unchanged. blastp's own loop
+//! (`x_scan_two_hit`) keeps the presence test.
 
+use crate::algorithm::tblastn::x_scan_bf::{x_block_candidates, X_BLOCK};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::{
     BlastAaLookupTable, AA_HITS_PER_CELL, PV_ARRAY_BTS, PV_ARRAY_MASK,
 };
+use crate::utils::matrix::BLASTAA_SIZE;
+use std::mem::MaybeUninit;
 
 // No NCBI counterpart: reads the LOSAT_X_BPSEED switch once; it does not change any value NCBI
 // computes.
@@ -108,6 +135,16 @@ pub(crate) fn x_bp_diag() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDIAG"))
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BPDEFER switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPDEFER): a strict-set switch, on unless it is `0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set. It acts on the AVX2 batches only.
+pub(crate) fn x_bp_defer() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDEFER"))
+}
+
 /// How the fused loop tests the hits of one lookup cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum XDiagMode {
@@ -116,10 +153,14 @@ pub(crate) enum XDiagMode {
     /// LOSAT_X_BPDIAG with LOSAT_X_BPDIAG_SIMD=0 (diagnostic): batches of [`X_DIAG_LANES`] hits in
     /// scalar code ([`x_test_batch_scalar`]).
     Scalar,
-    /// LOSAT_X_BPDIAG with AVX2: batches of eight hits in AVX2 registers
+    /// LOSAT_X_BPDIAG with AVX2 and LOSAT_X_BPDEFER off: batches of eight hits in AVX2 registers
     /// ([`x_test_batch_avx2`]); a cell's last batch of fewer than eight hits is a scalar batch.
     #[cfg(target_arch = "x86_64")]
     Avx2,
+    /// LOSAT_X_BPDIAG with AVX2 and LOSAT_X_BPDEFER: the AVX2 batches with the candidates of a
+    /// cell's batches of eight called after its last one ([`x_cell_avx2_defer`]).
+    #[cfg(target_arch = "x86_64")]
+    Avx2Defer,
 }
 
 impl XDiagMode {
@@ -130,6 +171,8 @@ impl XDiagMode {
             XDiagMode::Scalar => "scalar",
             #[cfg(target_arch = "x86_64")]
             XDiagMode::Avx2 => "avx2",
+            #[cfg(target_arch = "x86_64")]
+            XDiagMode::Avx2Defer => "avx2-defer",
         }
     }
 }
@@ -141,8 +184,8 @@ fn x_avx2_available() -> bool {
 }
 
 // No NCBI counterpart: chooses LOSAT's code path once (LOSAT_X_BPDIAG; the AVX2 batch where the
-// CPU has AVX2, otherwise the per-hit loop; LOSAT_X_BPDIAG_SIMD=0 forces the scalar batch); it does
-// not change any value NCBI computes.
+// CPU has AVX2, with LOSAT_X_BPDEFER the deferred calls, otherwise the per-hit loop;
+// LOSAT_X_BPDIAG_SIMD=0 forces the scalar batch); it does not change any value NCBI computes.
 fn x_diag_mode() -> XDiagMode {
     use std::sync::OnceLock;
     static MODE: OnceLock<XDiagMode> = OnceLock::new();
@@ -155,7 +198,11 @@ fn x_diag_mode() -> XDiagMode {
         }
         #[cfg(target_arch = "x86_64")]
         if x_avx2_available() {
-            return XDiagMode::Avx2;
+            return if x_bp_defer() {
+                XDiagMode::Avx2Defer
+            } else {
+                XDiagMode::Avx2
+            };
         }
         // Without AVX2 the scalar batch would be slower than the per-hit loop (module header).
         XDiagMode::PerHit
@@ -496,11 +543,13 @@ pub(crate) fn x_scan_two_hit<F>(
 /// EXPERIMENT (LOSAT_X_BXDIAG): [`x_scan_two_hit`] with the cell test `mode` (blastx's choice,
 /// [`x_cell_test`], not LOSAT_X_BPDIAG's); returns the cells tested in batches, their hits and the
 /// hits passed to `candidate` (zeros for [`XDiagMode::PerHit`]). Nothing is added to the totals of
-/// the `[TIMING] x_bpdiag` line.
+/// the `[TIMING] x_bpdiag` line. EXPERIMENT (LOSAT_X_BXSCANBF): `branch_free` finds the cells with
+/// [`x_scan_cells_bf`] (module header).
 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-512 (quoted at `x_scan_two_hit`)
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn x_scan_two_hit_with<F>(
     mode: XDiagMode,
+    branch_free: bool,
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     subject_length: usize,
@@ -520,15 +569,30 @@ where
         word_size,
         prefetch: x_prefetch_distance(),
     };
-    let counts = x_scan_two_hit_in(
-        mode,
-        lookup,
-        subject,
-        subject_length,
-        &mut XDiagTable::new(diag_array, diag_mask),
-        test,
-        &mut candidate,
-    );
+    let table = &mut XDiagTable::new(diag_array, diag_mask);
+    // A constant per instantiation, so that each scan loop has one call of the cell test and the
+    // compiler inlines it, as in blastp's loop.
+    let counts = if branch_free {
+        x_scan_two_hit_in_with::<true, F>(
+            mode,
+            lookup,
+            subject,
+            subject_length,
+            table,
+            test,
+            &mut candidate,
+        )
+    } else {
+        x_scan_two_hit_in_with::<false, F>(
+            mode,
+            lookup,
+            subject,
+            subject_length,
+            table,
+            test,
+            &mut candidate,
+        )
+    };
     [counts.cells, counts.hits, counts.candidates]
 }
 
@@ -546,21 +610,66 @@ fn x_scan_two_hit_in<F>(
 where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
+    x_scan_two_hit_in_with::<false, F>(
+        mode,
+        lookup,
+        subject,
+        subject_length,
+        table,
+        test,
+        candidate,
+    )
+}
+
+/// [`x_scan_two_hit_in`], with the cells found by [`x_scan_cells_bf`] when `BRANCH_FREE`
+/// (EXPERIMENT, LOSAT_X_BXSCANBF).
+fn x_scan_two_hit_in_with<const BRANCH_FREE: bool, F>(
+    mode: XDiagMode,
+    lookup: &BlastAaLookupTable,
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> XDiagCounts
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
     let mut counts = XDiagCounts::default();
     match mode {
-        XDiagMode::PerHit => x_scan_cells(lookup, subject, subject_length, |s, hits| {
-            x_cell_per_hit(hits, s, table, test, candidate)
-        }),
-        XDiagMode::Scalar => x_scan_cells(lookup, subject, subject_length, |s, hits| {
-            let candidates = x_cell_scalar(hits, s, table, test, candidate);
-            counts.add_cell(hits.len(), candidates);
-        }),
+        XDiagMode::PerHit => {
+            x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
+                x_cell_per_hit(hits, s, table, test, candidate)
+            })
+        }
+        XDiagMode::Scalar => {
+            x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
+                let candidates = x_cell_scalar(hits, s, table, test, candidate);
+                counts.add_cell(hits.len(), candidates);
+            })
+        }
         #[cfg(target_arch = "x86_64")]
         XDiagMode::Avx2 => {
             assert!(x_avx2_available(), "the AVX2 batch needs AVX2");
             // SAFETY: the CPU has AVX2 (asserted above).
             unsafe {
-                x_scan_cells_avx2(
+                x_scan_cells_avx2::<BRANCH_FREE, F>(
+                    lookup,
+                    subject,
+                    subject_length,
+                    table,
+                    test,
+                    candidate,
+                    &mut counts,
+                )
+            }
+        }
+        #[cfg(target_arch = "x86_64")]
+        XDiagMode::Avx2Defer => {
+            assert!(x_avx2_available(), "the deferred AVX2 batch needs AVX2");
+            // SAFETY: the CPU has AVX2 (asserted above).
+            unsafe {
+                x_scan_cells_avx2_defer::<BRANCH_FREE, F>(
                     lookup,
                     subject,
                     subject_length,
@@ -582,7 +691,7 @@ where
 /// The CPU must have AVX2.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn x_scan_cells_avx2<F>(
+unsafe fn x_scan_cells_avx2<const BRANCH_FREE: bool, F>(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     subject_length: usize,
@@ -593,11 +702,60 @@ unsafe fn x_scan_cells_avx2<F>(
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    x_scan_cells(lookup, subject, subject_length, |s, hits| {
+    x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
         // SAFETY: the CPU has AVX2 (this function's contract).
         let candidates = unsafe { x_cell_avx2(hits, s, table, test, candidate) };
         counts.add_cell(hits.len(), candidates);
     });
+}
+
+thread_local! {
+    /// EXPERIMENT (LOSAT_X_BPDEFER): the candidate buffer of a thread's scans, kept between them.
+    static X_DEFER_BUFFER: std::cell::Cell<Vec<i32>> = const { std::cell::Cell::new(Vec::new()) };
+}
+
+/// [`x_scan_cells_avx2`] with [`x_cell_avx2_defer`] (LOSAT_X_BPDEFER).
+///
+/// # Safety
+/// The CPU must have AVX2.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, F>(
+    lookup: &BlastAaLookupTable,
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XDiagCounts,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let mut buffer = X_DEFER_BUFFER.take();
+    x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
+        // SAFETY: the CPU has AVX2 (this function's contract).
+        let candidates = unsafe { x_cell_avx2_defer(hits, s, table, test, candidate, &mut buffer) };
+        counts.add_cell(hits.len(), candidates);
+    });
+    X_DEFER_BUFFER.set(buffer);
+}
+
+/// EXPERIMENT (LOSAT_X_BXSCANBF): [`x_scan_cells`], or [`x_scan_cells_bf`] when `BRANCH_FREE` (the
+/// same calls). One loop per instantiation, so `on_cell` has one call site and is inlined.
+#[inline(always)]
+fn x_scan_cells_with<const BRANCH_FREE: bool, C>(
+    lookup: &BlastAaLookupTable,
+    subject: &[u8],
+    subject_length: usize,
+    on_cell: C,
+) where
+    C: FnMut(i32, &[i32]),
+{
+    if BRANCH_FREE {
+        x_scan_cells_bf(lookup, subject, subject_length, on_cell);
+    } else {
+        x_scan_cells(lookup, subject, subject_length, on_cell);
+    }
 }
 
 /// The subject scan of [`x_scan_two_hit`]: `on_cell(subject_offset, hits)` for every scan position
@@ -671,6 +829,85 @@ fn x_scan_cells<C>(
             &overflow[cursor..cursor + numhits]
         };
         on_cell(s, hits);
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BXSCANBF): [`x_scan_cells`] with the cells that have hits found without a
+/// branch on the presence bit: for each block of [`X_BLOCK`] positions [`x_block_candidates`] lists
+/// `position << 32 | index`, the list's length advanced by the bit, and the listed cells then go to
+/// `on_cell` in position order. The positions, indices and presence bits are those of
+/// [`x_scan_cells`]'s loop (the same rolling index over the same bytes), so the calls are the same.
+// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`)
+#[inline(always)]
+fn x_scan_cells_bf<C>(
+    lookup: &BlastAaLookupTable,
+    subject: &[u8],
+    subject_length: usize,
+    mut on_cell: C,
+) where
+    C: FnMut(i32, &[i32]),
+{
+    let word_length = lookup.word_length as usize;
+    let charsize = lookup.charsize as usize;
+    let mask = lookup.mask as usize;
+    i32::try_from(subject_length).expect("subject length must fit Int4");
+    // The bytes x_scan_cells reads: positions 0..=s_last, s_last = max(subject_length -
+    // word_length, 0), each with its word. A subject shorter than a word has one position whose
+    // word runs past the subject, and x_scan_cells reads the missing bytes as 0: here they come
+    // from a zero-padded copy.
+    let mut padded = [0u8; 8];
+    let (bytes, s_last) = if subject_length >= word_length {
+        (&subject[..subject_length], subject_length - word_length)
+    } else {
+        assert!(word_length <= padded.len(), "word size {word_length}");
+        let n = subject.len().min(word_length);
+        padded[..n].copy_from_slice(&subject[..n]);
+        (&padded[..word_length], 0)
+    };
+    // The backbone has NCBI's `backbone_size` cells (the index of a word of letters below
+    // BLASTAA_SIZE, plus one) and the presence vector a bit for each, so the unchecked presence
+    // reads of `x_block_candidates` stay inside it when every byte read is below BLASTAA_SIZE
+    // (x_scan_cells would panic on an index past the vector instead).
+    let largest = bytes.iter().copied().max().unwrap_or(0);
+    assert!(
+        usize::from(largest) < BLASTAA_SIZE
+            && lookup.pv.len() << PV_ARRAY_BTS >= lookup.backbone.len(),
+        "letter {largest} outside the lookup table's alphabet"
+    );
+    let backbone = &lookup.backbone;
+    let overflow = &lookup.overflow;
+
+    let mut index = 0usize;
+    for &byte in &bytes[..word_length - 1] {
+        index = (index << charsize) | byte as usize;
+    }
+    let mut cand = [MaybeUninit::<u64>::uninit(); X_BLOCK];
+    let mut block_first = 0usize;
+    while block_first <= s_last {
+        let block_last = s_last.min(block_first + X_BLOCK - 1);
+        // Reads bytes[block_last + word_length - 1] at most, the last byte of `bytes`.
+        let n = x_block_candidates(
+            bytes,
+            lookup.pv.as_ptr(),
+            (word_length, charsize, mask),
+            (block_first, block_last),
+            &mut index,
+            &mut cand,
+        );
+        for c in &cand[..n] {
+            // SAFETY: the first `n` candidates were written by `x_block_candidates`.
+            let c = unsafe { c.assume_init() };
+            let cell = &backbone[(c & 0xffff_ffff) as usize];
+            let numhits = cell.num_used as usize;
+            let hits: &[i32] = if numhits <= AA_HITS_PER_CELL {
+                &cell.entries[..numhits]
+            } else {
+                let cursor = cell.entries[0] as usize;
+                &overflow[cursor..cursor + numhits]
+            };
+            on_cell((c >> 32) as i32, hits);
+        }
+        block_first = block_last + 1;
     }
 }
 
@@ -840,6 +1077,25 @@ unsafe fn x_test_batch_avx2<F>(
 where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
+    let (_, lanes) = x_batch_avx2(hits, s, table, test);
+    x_call_candidates(lanes, hits, s, table, test, candidate);
+    lanes.count_ones()
+}
+
+/// The test of [`x_test_batch_avx2`] without the calls: stores the batch's entries and returns the
+/// hits' register and the candidate lanes (bit `i` = hit `i`).
+///
+/// # Safety
+/// The CPU must have AVX2.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_batch_avx2(
+    hits: &[i32],
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+) -> (std::arch::x86_64::__m256i, u32) {
     use std::arch::x86_64::*;
     assert!(hits.len() == X_DIAG_LANES);
     let subject_plus_offset = s.wrapping_add(test.diag_offset);
@@ -888,8 +1144,88 @@ where
     }
     debug_assert!(x_batch_coords_distinct(&lane_coords.map(|c| c as usize)));
     let lanes = _mm256_movemask_ps(_mm256_castsi256_ps(candidates)) as u32;
-    x_call_candidates(lanes, hits, s, table, test, candidate);
-    lanes.count_ones()
+    (query, lanes)
+}
+
+/// EXPERIMENT (LOSAT_X_BPDEFER): for each mask of eight lanes, the set lanes in order, then zeros:
+/// the permutation that moves a batch's candidates to the front of its register.
+const X_PACK_LANES: [[u8; X_DIAG_LANES]; 256] = {
+    let mut table = [[0u8; X_DIAG_LANES]; 256];
+    let mut mask = 0;
+    while mask < 256 {
+        let mut n = 0;
+        let mut lane = 0;
+        while lane < X_DIAG_LANES {
+            if mask >> lane & 1 != 0 {
+                table[mask][n] = lane as u8;
+                n += 1;
+            }
+            lane += 1;
+        }
+        mask += 1;
+    }
+    table
+};
+
+/// EXPERIMENT (LOSAT_X_BPDEFER): [`x_cell_avx2`] with the calls of the batches of eight after the
+/// last of them (module header): each batch packs its candidates' query offsets into `buffer`, then
+/// the closure is called for the buffer in order, as [`x_call_candidates`] calls it, and the last
+/// batch of fewer than eight hits is a scalar batch. Returns the number of candidates.
+///
+/// # Safety
+/// The CPU must have AVX2.
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`): a hit
+// that passes the test reaches the context check with `last_hit` and `diff`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_cell_avx2_defer<F>(
+    hits: &[i32],
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    buffer: &mut Vec<i32>,
+) -> u32
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    use std::arch::x86_64::*;
+    let mut batches = hits.chunks_exact(X_DIAG_LANES);
+    // Room for a full register past the last candidate (each batch stores eight lanes).
+    buffer.clear();
+    buffer.reserve(hits.len() + X_DIAG_LANES);
+    let out = buffer.as_mut_ptr();
+    let mut packed = 0usize;
+    for batch in &mut batches {
+        let (query, lanes) = x_batch_avx2(batch, s, table, test);
+        let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
+            X_PACK_LANES[lanes as usize].as_ptr().cast(),
+        ));
+        // packed <= the hits of the batches before this one, so the eight stores stay inside
+        // the reserved capacity.
+        _mm256_storeu_si256(
+            out.add(packed).cast(),
+            _mm256_permutevar8x32_epi32(query, order),
+        );
+        packed += lanes.count_ones() as usize;
+    }
+    // The first `packed` values were stored above.
+    buffer.set_len(packed);
+    for &query_offset in buffer.iter() {
+        let entry = table.entry(query_offset, s);
+        // The batch stored a candidate's old value back, and no later batch of the cell touches
+        // its entry, so this is the entry the test read.
+        let last_hit = entry.last_hit().wrapping_sub(test.diag_offset);
+        let diff = s.wrapping_sub(last_hit);
+        candidate(query_offset, s, last_hit, diff, entry);
+    }
+    let mut candidates = packed as u32;
+    let rest = batches.remainder();
+    if !rest.is_empty() {
+        candidates += x_test_batch_scalar(rest, s, table, test, candidate);
+    }
+    candidates
 }
 
 /// EXPERIMENT (LOSAT_X_BPDIAG): the cell's hits in batches of eight by [`x_test_batch_avx2`], the
@@ -1073,6 +1409,7 @@ mod tests {
         #[cfg(target_arch = "x86_64")]
         if x_avx2_available() {
             modes.push(XDiagMode::Avx2);
+            modes.push(XDiagMode::Avx2Defer);
         } else {
             eprintln!("no AVX2 on this CPU: the AVX2 batch is not compared");
         }
@@ -1102,6 +1439,8 @@ mod tests {
     ) -> Vec<Call> {
         let mut calls = Vec::new();
         let mut counted = 0u32;
+        #[cfg(target_arch = "x86_64")]
+        let mut buffer = Vec::new();
         let mut table = XDiagTable::new(entries, mask);
         let mut candidate = |q: i32, s: i32, last_hit: i32, diff: i32, entry: &mut DiagStruct| {
             calls.push((q, s, last_hit, diff, entry.raw_bits()));
@@ -1118,6 +1457,14 @@ mod tests {
                     assert!(x_avx2_available());
                     // SAFETY: the CPU has AVX2 (asserted above).
                     counted += unsafe { x_cell_avx2(hits, *s, &mut table, test, &mut candidate) };
+                }
+                #[cfg(target_arch = "x86_64")]
+                XDiagMode::Avx2Defer => {
+                    assert!(x_avx2_available());
+                    // SAFETY: the CPU has AVX2 (asserted above).
+                    counted += unsafe {
+                        x_cell_avx2_defer(hits, *s, &mut table, test, &mut candidate, &mut buffer)
+                    };
                 }
             }
         }
@@ -1362,7 +1709,11 @@ mod tests {
         for start in [window, (1 << 30) - 2_000, i32::MAX - 3_000] {
             for prefetch in [16, 0, 5] {
                 let mut results = Vec::new();
-                for mode in cell_modes() {
+                // EXPERIMENT (LOSAT_X_BXSCANBF): every cell test also with the branch-free scan.
+                let runs = cell_modes()
+                    .into_iter()
+                    .flat_map(|mode| [(mode, false), (mode, true)]);
+                for (mode, branch_free) in runs {
                     let mut entries = vec![DiagStruct::clear(window); size];
                     let mut log: Vec<(usize, Call)> = Vec::new();
                     let mut diag_offset: i32 = start;
@@ -1381,15 +1732,28 @@ mod tests {
                                 log.push((k, (q, s, last_hit, diff, entry.raw_bits())));
                                 extend(q, s, entry, diag_offset);
                             };
-                        let c = x_scan_two_hit_in(
-                            mode,
-                            &lookup,
-                            &buffer,
-                            subject.len(),
-                            &mut XDiagTable::new(&mut entries, mask),
-                            test,
-                            &mut candidate,
-                        );
+                        let table = &mut XDiagTable::new(&mut entries, mask);
+                        let c = if branch_free {
+                            x_scan_two_hit_in_with::<true, _>(
+                                mode,
+                                &lookup,
+                                &buffer,
+                                subject.len(),
+                                table,
+                                test,
+                                &mut candidate,
+                            )
+                        } else {
+                            x_scan_two_hit_in(
+                                mode,
+                                &lookup,
+                                &buffer,
+                                subject.len(),
+                                table,
+                                test,
+                                &mut candidate,
+                            )
+                        };
                         counts = (
                             counts.0 + c.cells,
                             counts.1 + c.hits,
@@ -1404,7 +1768,7 @@ mod tests {
                         assert_eq!(counts.2 as usize, log.len(), "{mode:?}: candidates");
                     }
                     let bits: Vec<u32> = entries.iter().map(|e| e.raw_bits()).collect();
-                    results.push((mode, log, bits));
+                    results.push(((mode, branch_free), log, bits));
                 }
                 let (_, reference_log, reference_bits) = &results[0];
                 for (mode, log, bits) in &results[1..] {
@@ -1421,6 +1785,80 @@ mod tests {
             }
         }
         assert!(calls > 100, "the subjects must give candidates: {calls}");
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`)
+    // EXPERIMENT (LOSAT_X_BXSCANBF): the branch-free scan calls `on_cell` with the positions and
+    // hit lists of the presence-test loop, on subjects across the block boundaries, with the
+    // letters of translated frames (X, stop; all of 1-27) and with the word sizes 2-4 (the general
+    // loop).
+    #[test]
+    fn the_branch_free_scan_finds_the_cells_of_the_presence_test() {
+        use crate::algorithm::tblastx::lookup::build_ncbi_lookup_for_profile;
+        use crate::algorithm::tblastx::translation::QueryFrame;
+        use crate::config::ScoringMatrix;
+        use crate::stats::lookup_protein_params_ungapped;
+
+        let mut seed = 0x5ca7_u64;
+        let mut letters = |n: usize, top: u64| -> Vec<u8> {
+            (0..n)
+                .map(|_| 1 + (u64::from(next(&mut seed)) % top) as u8)
+                .collect()
+        };
+        let mut compared = 0usize;
+        for (case, word_length) in [3, 3, 2, 4, 3].into_iter().enumerate() {
+            let frames: Vec<Vec<QueryFrame>> = (0..1 + 3 * case)
+                .map(|i| {
+                    let seq = letters(60 + 70 * i, 22);
+                    let mut aa_seq = vec![0u8];
+                    aa_seq.extend_from_slice(&seq);
+                    aa_seq.push(0);
+                    vec![QueryFrame {
+                        frame: 1,
+                        aa_seq,
+                        aa_seq_nomask: None,
+                        aa_len: seq.len(),
+                        orig_len: seq.len(),
+                        seg_masks: Vec::new(),
+                    }]
+                })
+                .collect();
+            let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+            let (lookup, _) = build_ncbi_lookup_for_profile(
+                &frames,
+                [11, 13][case % 2],
+                &params,
+                false,
+                ScoringMatrix::Blosum62,
+                word_length,
+            );
+            for length in [0, 1, 2, 3, 4, 255, 256, 257, 258, 511, 512, 513, 2_000] {
+                let mut subject = letters(length, 27);
+                subject.push(0);
+                let mut want: Vec<(i32, Vec<i32>)> = Vec::new();
+                let mut got: Vec<(i32, Vec<i32>)> = Vec::new();
+                x_scan_cells(&lookup, &subject, length, |s, hits| {
+                    want.push((s, hits.to_vec()))
+                });
+                x_scan_cells_with::<true, _>(&lookup, &subject, length, |s, hits| {
+                    got.push((s, hits.to_vec()))
+                });
+                assert_eq!(got, want, "case {case} length {length}");
+                compared += want.len();
+            }
+        }
+        assert!(compared > 1_000, "{compared} cells compared");
+    }
+
+    #[test]
+    fn the_pack_table_lists_the_set_lanes_in_order() {
+        for (mask, order) in X_PACK_LANES.iter().enumerate() {
+            let lanes: Vec<u8> = (0..X_DIAG_LANES as u8)
+                .filter(|&lane| mask >> lane & 1 != 0)
+                .collect();
+            assert_eq!(&order[..lanes.len()], &lanes[..], "mask {mask:#x}");
+            assert!(order[lanes.len()..].iter().all(|&lane| lane == 0));
+        }
     }
 
     #[test]

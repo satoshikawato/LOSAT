@@ -25,6 +25,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const SWITCH: (&str, &str) = ("LOSAT_X_RPTSTREAM", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_RPTSTREAMSHADOW", "1");
 const QBATCHPAR: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
+/// Two slots whatever QBATCHPAR's own choice of the layout (its tuning variable), so that slots run.
+const TWO_SLOTS: (&str, &str) = ("LOSAT_X_QBATCHPARSLOTS", "2");
 const TASKS: [&str; 3] = ["megablast", "blastn", "dc-megablast"];
 
 fn fasta(name: &str) -> PathBuf {
@@ -286,7 +288,8 @@ fn every_task_format_and_thread_count_gives_the_off_bytes() {
 }
 
 /// `-out` files, and LOSAT_X_QBATCHPAR's slots (which search the batches ahead while the loop
-/// writes): the off bytes; the slots did search batches.
+/// writes; two slots of two threads, `LOSAT_X_QBATCHPARSLOTS=2`, whatever layout QBATCHPAR's own
+/// rule would choose for this input): the off bytes; the slots did search batches.
 #[test]
 fn out_files_and_qbatchpar_slots_give_the_off_bytes() {
     let dir = TempDir::new("slots");
@@ -312,13 +315,19 @@ fn out_files_and_qbatchpar_slots_give_the_off_bytes() {
                 "{what}"
             );
             let what = format!("{task} outfmt {outfmt} QBATCHPAR");
-            let (off, (batches, _, _, reason)) = same_three(&what, &args, 4, &[QBATCHPAR], None);
+            let (off, (batches, _, _, reason)) =
+                same_three(&what, &args, 4, &[QBATCHPAR, TWO_SLOTS], None);
             assert!(
                 !off.report.is_empty() && reason == "none" && batches >= 8,
                 "{what}"
             );
             // The slots searched batches ahead of the loop.
-            let stats = blastn(&args, 4, &[QBATCHPAR, SWITCH, ("LOSAT_X_STATS", "1")], None);
+            let stats = blastn(
+                &args,
+                4,
+                &[QBATCHPAR, TWO_SLOTS, SWITCH, ("LOSAT_X_STATS", "1")],
+                None,
+            );
             let stderr = String::from_utf8_lossy(&stats.stderr);
             let precomputed: u64 = stderr
                 .lines()

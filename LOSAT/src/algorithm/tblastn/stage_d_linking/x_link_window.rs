@@ -25,8 +25,10 @@
 //! link, E-value and number is NCBI's.
 //!
 //! `LOSAT_X_TBNLINKWIN` is in the strict set (`utils/xswitch.rs`): on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_X_TBNLINKWINSHADOW` set as well (any value), each head's whole window is tested too and the search
-//! stops (panic) if an admissible candidate is not among the chosen ones. With `LOSAT_X_STATS`
+//! `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_X_TBNLINKWINSHADOW` set as well (any
+//! value), the whole window of each head whose candidates were chosen is tested too (a head that
+//! takes its whole window needs no check), and the search stops (panic) if an admissible
+//! candidate is not among the chosen ones. With `LOSAT_X_STATS`
 //! set, `main` prints `[X_STATS] TBNLINKWIN heads= window= chosen= shadow_heads=` at exit (the
 //! heads, the candidates of their query-offset windows, the candidates tested), when a list was
 //! linked with the switch. blastx keeps its own linking (`blastx/linking.rs`).

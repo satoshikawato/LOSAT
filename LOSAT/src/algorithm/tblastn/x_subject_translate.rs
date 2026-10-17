@@ -706,12 +706,19 @@ fn x_packed_frames_with(
     };
     let mut forward: Vec<Vec<u8>> = (0..frame_count).map(empty_frame).collect();
     let mut reverse: Vec<Vec<u8>> = (0..frame_count).map(empty_frame).collect();
+    // codons read by the vector loop, and in all (for `[X_STATS] TBNXLATESIMD`)
+    let (mut vector, mut all) = (0, 0);
     for (phase, plus) in forward.iter_mut().enumerate() {
         // the codons at `phase`, `phase + 3`, ...: residues 1.. of plus frame `phase + 1` and,
         // from the last one down, of minus frame `-(r + 1)`, which has as many
         let codons = (seq_len - phase) / 3;
         let minus = &mut reverse[(seq_len - phase) % 3];
-        x_phase_residues(store.packed(), phase, codons, tables, plus, minus, simd);
+        vector += x_phase_residues(store.packed(), phase, codons, tables, plus, minus, simd);
+        all += codons;
+    }
+    if all > 0 && std::env::var_os("LOSAT_X_STATS").is_some() {
+        PACKED_CODONS[0].fetch_add(vector as u64, Ordering::Relaxed);
+        PACKED_CODONS[1].fetch_add((all - vector) as u64, Ordering::Relaxed);
     }
     let frame = |frame: i8, aa_seq: Vec<u8>| QueryFrame {
         frame,
@@ -727,7 +734,7 @@ fn x_packed_frames_with(
     frames
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:544-547,553-559
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:544-553
 // ```c
 //          case 0:
 //             codon = (byte_value >> 2);
@@ -769,7 +776,7 @@ fn x_packed_codon(packed: &[u8], p: usize) -> usize {
 // time first, the codons after the last whole group come one at a time.
 /// EXPERIMENT (LOSAT_X_TBNSTORE): the residues of the `codons` codons at bases `phase`,
 /// `phase + 3`, ...: codon `j` at `plus[1 + j]` (forward table) and `minus[codons - j]` (reverse
-/// table).
+/// table). Returns the codons the vector loop read.
 fn x_phase_residues(
     packed: &[u8],
     phase: usize,
@@ -778,7 +785,7 @@ fn x_phase_residues(
     plus: &mut [u8],
     minus: &mut [u8],
     simd: bool,
-) {
+) -> usize {
     assert!(phase < 3 && plus.len() == codons + 2 && minus.len() == codons + 2);
     let mut done = 0;
     #[cfg(target_arch = "x86_64")]
@@ -788,7 +795,6 @@ fn x_phase_residues(
     }
     #[cfg(not(target_arch = "x86_64"))]
     let _ = simd;
-    PACKED_CODONS[0].fetch_add(done as u64, Ordering::Relaxed);
     let vector = done;
     done = match phase {
         0 => x_phase_words::<0>(packed, codons, tables, plus, minus, done),
@@ -800,7 +806,7 @@ fn x_phase_residues(
         plus[1 + j] = tables.forward[codon];
         minus[codons - j] = tables.reverse[codon];
     }
-    PACKED_CODONS[1].fetch_add((codons - vector) as u64, Ordering::Relaxed);
+    vector
 }
 
 /// EXPERIMENT (LOSAT_X_TBNSTORE): [`x_phase_residues`] by groups of eight codons from codon

@@ -147,6 +147,21 @@ mod x_pair_seed;
 #[path = "x_bnstream.rs"]
 mod x_bnstream;
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-318
+// ```c++
+//                 ITERATE(CSearchResultSet, result, *results) {
+//                     formatter.PrintOneResultSet(**result, query_batch);
+//                 }
+//     ...
+//         BLAST_PROF_START( APP.POST );
+//         formatter.PrintEpilog(opt);
+// ```
+// EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of each query batch written when the batch loop of
+// `run_in_pool` takes the batch, and the epilogs after the loop (a child module, so that it reads
+// the private types of this file).
+#[path = "x_rpt_stream.rs"]
+mod x_rpt_stream;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
 // ```c++
 //     if (args.Exist(kArgDb) && args[kArgDb]) {
@@ -176,21 +191,6 @@ mod database;
 // this file).
 #[path = "x_qbatch_par.rs"]
 mod x_qbatch_par;
-
-// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-318
-// ```c++
-//                 ITERATE(CSearchResultSet, result, *results) {
-//                     formatter.PrintOneResultSet(**result, query_batch);
-//                 }
-//     ...
-//         BLAST_PROF_START( APP.POST );
-//         formatter.PrintEpilog(opt);
-// ```
-// EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of each query batch written when the batch loop of
-// `run_in_pool` takes the batch, and the epilogs after the loop (a child module, so that it reads
-// the private types of this file).
-#[path = "x_rpt_stream.rs"]
-mod x_rpt_stream;
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
 // ```c

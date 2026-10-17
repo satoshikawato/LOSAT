@@ -1297,13 +1297,24 @@ Scheduling (each value computed by one thread with the original function; order 
   `hashtable` and `next_pos` are the loop's. Memory: per thread `ceil(hashsize / 32768)` + `ceil(pv_size / 16)` lines
   of 64 bytes (160 or 96 KiB at `lut_word_length` 12, 136 or 72 KiB at 11, by `pv_array_bts`), all written, so a fill
   of P threads holds P times that: at `lut_word_length` 12 2.5 / 1.5 MiB at 16 threads, 20 / 12 MiB at 128 and 40 / 24
-  MiB at 255 (the parts are at most 255), at 11 2.1 / 1.1, 17 / 9 and 34 / 18 MiB. The buffer is kept for the next
-  fill and never freed (one per fill that runs at the same time as others, which only `LOSAT_X_QBATCHPAR`'s slots do;
-  their threads add up to the search's): freeing it after each fill made glibc raise its mmap threshold to its size,
+  MiB at 255 (the parts are at most 255), at 11 2.1 / 1.1, 17 / 9 and 34 / 18 MiB. On Linux with glibc the buffer is
+  kept for the next fill and never freed: freeing it after each fill made glibc raise its mmap threshold to its size,
   after which the search's other allocations of up to that size stayed in malloc's arenas (megablast of 31,168 cDNAs
   at 64 threads: max RSS 263-305 MiB with the switch against 221-225 without; with the threshold fixed by
-  `MALLOC_MMAP_THRESHOLD_=131072` 228-232; with the kept buffer 223-228 against 222-226). The lock of the kept buffers
-  is only tried (`try_lock`), never waited for: a fill that finds it taken uses a buffer of its own. Shadow: `LOSAT_X_PAIRPARSHADOW=1` with the switch makes the
+  `MALLOC_MMAP_THRESHOLD_=131072` 228-232; with the kept buffer 223-228 against 222-226). Each buffer is made with a
+  capacity of at least 32 MiB + 4 KiB, above glibc's largest dynamic threshold (the rule of `LOSAT_X_TBNSTORE`'s
+  frames), so glibc maps it, freeing one never moves the threshold, and only the lines the fills wrote are resident; a
+  kept buffer too small for a fill (only above 32 MiB of copies, 205 threads or more at 160 KiB) is freed and a new one
+  made, never grown (std reallocates a 64-byte-aligned block by allocating, copying and freeing, which moved the
+  threshold in review round 1's code whenever a table needed more lines per thread than the earlier ones). What a
+  search keeps, for n threads and s the largest per-thread size of its tables: resident, at most n x s from the fills
+  on the whole pool plus, with `LOSAT_X_QBATCHPAR`, m x s for each slot of m threads that filled a table while another
+  fill ran (the slots' threads add up to n, so below 2 n x s in all), and a fill that finds the lock taken can add one
+  more kept buffer; address space, 32 MiB + 4 KiB per kept buffer (n x s when that is larger). At 64 threads and 160
+  KiB that is 10 MiB resident in one mapping of 32 MiB + 4 KiB, and with four slots of 16 threads 17.5 MiB resident in
+  four. The lock of the kept buffers is only tried (`try_lock`), never waited for: a fill that finds it taken uses a
+  new buffer, which it keeps only if the lock is free at its end. On other targets (macOS, Windows, musl, wasm32) the
+  buffer has the fill's size and is freed at the end of the fill (their allocators return large blocks themselves). Shadow: `LOSAT_X_PAIRPARSHADOW=1` with the switch makes the
   second build of its comparison with the padded fill (every element of the four arrays and the longest chain compared;
   a difference panics) and `main` prints `[X_SHADOW] MBLUTPAD tables=<compared> cells=<elements> diffs=0 identical` at
   exit. With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] x_mb_lookup_build: <s>s (builds=<n>

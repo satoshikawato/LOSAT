@@ -126,7 +126,7 @@ fn timing_on() -> bool {
     *ON.get_or_init(|| std::env::var_os("LOSAT_TIMING").is_some())
 }
 
-// No NCBI counterpart (LOSAT_TIMING only): the `[TIMING] mb_lookup_*` counters of every megablast
+// No NCBI counterpart (LOSAT_TIMING only): the `[TIMING] x_mb_lookup_*` counters of every megablast
 // table build of the process (not the shadow's second build).
 static BUILD_NANOS: AtomicU64 = AtomicU64::new(0);
 static ALLOC_NANOS: AtomicU64 = AtomicU64::new(0);
@@ -203,8 +203,9 @@ static SHADOW_PADDED_CELLS: AtomicU64 = AtomicU64::new(0);
 /// No NCBI counterpart: printed by `main` at exit. With LOSAT_X_MBLUTPAD and LOSAT_X_PAIRPARSHADOW,
 /// `[X_SHADOW] MBLUTPAD tables=<compared> cells=<elements compared> diffs=0 identical` (a
 /// difference panics in `shadow_check`, so the line only ever says 0). With LOSAT_TIMING, when at
-/// least one megablast table was built, the `[TIMING] mb_lookup_build` and `[TIMING]
-/// mb_lookup_split` lines. They print counters and change no value NCBI computes.
+/// least one megablast table was built, the `[TIMING] x_mb_lookup_build` and `[TIMING]
+/// x_mb_lookup_split` lines (`x_`: end-of-run counters of an experiment, as `[TIMING]
+/// x_pairpar_seed`). They print counters and change no value NCBI computes.
 pub(super) fn print_summary() {
     let load = |c: &AtomicU64| c.load(Ordering::Relaxed);
     let (_, shadow, pad) = switches();
@@ -220,14 +221,14 @@ pub(super) fn print_summary() {
     }
     let s = |c: &AtomicU64| load(c) as f64 / 1e9;
     eprintln!(
-        "[TIMING] mb_lookup_build: {:.3}s (builds={} parallel={} padded={})",
+        "[TIMING] x_mb_lookup_build: {:.3}s (builds={} parallel={} padded={})",
         s(&BUILD_NANOS),
         load(&BUILDS),
         load(&BUILDS_ON_POOL),
         load(&BUILDS_PADDED)
     );
     eprintln!(
-        "[TIMING] mb_lookup_split: alloc={:.4}s loop={:.4}s pool_fill={:.4}s chain={:.4}s",
+        "[TIMING] x_mb_lookup_split: alloc={:.4}s loop={:.4}s pool_fill={:.4}s chain={:.4}s",
         s(&ALLOC_NANOS),
         s(&LOOP_NANOS),
         s(&POOL_FILL_NANOS),
@@ -1101,7 +1102,7 @@ mod tests {
         assert_eq!(a.helper_array, b.helper_array, "{what}: helper_array");
     }
 
-    // A query with long unmasked repeats (many words per cell, so counters grow) and random letters.
+    // A query with long unmasked repeats (many words per cell, so counters grow) and random bases.
     fn repeat_case(rng: &mut Lcg, len: usize) -> Vec<u8> {
         (0..len)
             .map(|i| {

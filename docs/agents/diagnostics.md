@@ -1910,6 +1910,86 @@ Scheduling (each value computed by one thread with the original function; order 
   (`titles`, `ambiguity`: the refusal, no row); and the `subject_ids`, `search_space`, `scoring`,
   `chunk_size` and `debug` cases) and `LOSAT/tests/blastn_report_stream_api.rs` (`run_local` with hit
   records and an observer, one and three formats: the formats, hits and observer ranges of one batch).
+- `LOSAT_X_QSTREAM=1` (BLASTN, all tasks, `-subject` and `-db`, memory; not in the strict set: off
+  unless set to any value, whatever `LOSAT_X_DEFAULT` says; it acts only with `LOSAT_X_RPTSTREAM`)
+  reads the query file twice instead of holding all its records for the whole search. Where the
+  records were read until now (after `Query is Empty!`, before the search's checks and the outfmt 0
+  prolog), a first reading with the same reader, by the loop of `read_queries`, keeps only each
+  record's length and how the reading ended (its error and warnings): the batch planner and size
+  mixer, `LOSAT_X_QBATCHPAR`'s plan and rule, `LOSAT_X_RPTSTREAM`'s checks and `-query_loc`'s query
+  input (placements, skipped records, searched lengths, made from the lengths as `cut_queries`
+  makes them) read only these, so every refusal, warning and error that comes before the first
+  output comes from the same values at the same place. Then a second handle on the same open file
+  (`try_clone`, at the position the first reading started from) reads the records forward as the
+  batch loop takes its batches, as NCBI reads its query batches one at a time
+  (blastn_app.cpp:277-279, blast_input.cpp:134-171); a `LOSAT_X_QBATCHPAR` slot gets the records of
+  the batch it searches as a chunk shared with the window (read into a chunk of its own; a request
+  that is not exactly one chunk, a mispredicted batch or `-query_loc`'s cut records, gets a copy),
+  and the loop takes that chunk as it is. A batch's records are dropped after its reports
+  (`LOSAT_X_RPTSTREAM`). Exactness (`blastn/blast_engine/x_query_stream.rs` header): the reader is a
+  function of the bytes and its configuration; the second reading starts at the same byte with the
+  same calls per record (`End()`, then `GetNextSequence`), so it reads the same records with the
+  same local ids, titles, letters (lower case too) and warnings, and never reaches the error or
+  `eEOF` that ended the first; each record's length is checked against the first reading's (a record
+  whose length changed, a file that ends early or a reader error ends the search with LOSAT's error,
+  and every later reading of the search returns it; a change that keeps every record's length is
+  read as the new content, as NCBI, reading per batch, would read it); the batches are cut
+  from the same lengths by the same code. Off (`off=`; the records are read before the search, as
+  without the switch): `reports` (`LOSAT_X_RPTSTREAM` not set: the reports after the loop read every
+  record), `standard_input` (`-query -`), `not_a_file` (a named pipe, a device such as
+  `/dev/stdin`: `metadata().is_file()`), `io` (no position or second handle, e.g. `try_clone` on
+  WASI); `run_local` (the Web adapter, ABI v1) gets its records from its caller. Where
+  `LOSAT_X_RPTSTREAM` is set but keeps the reports after the loop for a search (its `off=` reasons)
+  or runs its shadow, the records of every batch are kept for them (the memory of the records read
+  before the search). Shadow: `LOSAT_X_QSTREAMSHADOW=1` (implies the switch) also reads the whole
+  file the old way (`IsIStreamEmpty`, `read_queries`) and compares the first reading's lengths, end
+  and query input, then every batch the loop takes and every slot's records (`FastaRecord`: local
+  id, title, letters with their case, the reader's warnings); a difference prints `[X_SHADOW]
+  QSTREAM batches= records= DIFFERENT (...)` and panics; at the end of a command-line search
+  `[X_SHADOW] QSTREAM batches= records= slots= off= identical` (`DIFFERENT` if a difference was found,
+  also one whose panic on a slot's thread was dropped with a batch the loop never took). With
+  `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM records= read= batches= slots= slot_copies=
+  slot_records= kept= stale= scan_s= read_s= peak_window= off=` (slots: the slots' requests,
+  slot_copies of them copied; kept: the searched records kept for a writer after their batch, 0 where
+  `LOSAT_X_RPTSTREAM` writes each batch's reports; stale: requests
+  for records the loop had passed, answered with QBATCHPAR's `Cancelled`; scan_s / read_s: the first
+  and the second reading; peak_window: the most records read ahead of the loop at once). Measured on
+  the workstation (2x Xeon Gold 6338, powersave, node 1, 16 cores with the siblings idle,
+  `numactl --membind`; D. melanogaster cDNAs against 3 Mb of chromosome 2L with `-subject`,
+  `-outfmt 6 -out FILE`; every arm with `LOSAT_X_PAIRPARDISC`, `QBATCHPAR`, `DIAGLV`, `PAIRPARFOLD`,
+  `QDUSTPAR`, `DISCLUTPAR` and `RPTSTREAM`, on vs off in the same window, one binary, the arms
+  alternating with the order rotated per round and a warm-up before each 16-thread cell; every
+  output has its expected sha256; on/off = median of the per-round ratios; window 4 of
+  `perf-mb-20261014/logs/qstream_report.md`). Where it wins, max RSS: 31,168 cDNAs (96 MB) with
+  blastn, 1 thread 158 -> 62 MiB (0.39; NCBI BLAST+ 2.17.0 `-db` 126 MiB in another window), 4
+  threads 289 -> 209 (0.72), 16 threads 837 -> 755 (0.91); the same with dc-megablast, 1 thread 180
+  -> 90 (0.50; NCBI 150), 16 threads 488 -> 413 (0.85); 13,193 cDNAs (40 MB), 1 thread 99 -> 61
+  (0.61); wall on these 0.991-1.025 (one round each at 1 thread: 1.011, 1.025 and 1.014, and
+  0.979 and 1.004 for the 96 MB file at 1 thread in another window; 0.991 at 4 threads, 2 rounds) and
+  0.996-0.998 (16 threads, 3 rounds). Where it loses: at 16 threads on query files of 5-40 MB the slots read most of the file
+  ahead anyway (`peak_window` 71-93 % of the records), so max RSS stays within -1.5..+0.4 %, and the
+  first reading's extra parse comes before the search: 1,775 cDNAs (5.4 MB) 0.554 -> 0.565 s (1.018,
+  8 rounds; 1.021 in another window; the same code without the switch's effect 1.001 / 0.995),
+  5,000 cDNAs (15 MB) 1.026 and 40 MB 1.035 (noisy, flagged runs), 3,492 cDNAs (11 MB) 1.007. No
+  rule found that separates the two (8 threads and files of 40-96 MB were not measured), so the
+  switch stays opt-in (Owner's default-ON rule of 2026-10-17 with its correction of 23:0x): a
+  reading of the second pass during the first batch (to take the parse off the slots' start) is the
+  known next step. Tests: the unit tests of `x_query_stream.rs` (the first reading equals
+  `read_queries` on 40 seeded texts with LF / CR LF / mixed line ends, lines longer than the line
+  reader's window, 1.1 MiB records, digits, comments and an error at the end; the second reading
+  equals the first in batches of every size, with slots' requests and stale ones, with and without
+  `-query_loc`; shared chunks; the query input from the lengths equals `cut_queries`'s; a file
+  changed between the readings, and a slot's failed reading that fails the loop's next batch;
+  `done` releases the loop's batch; the inputs that are read once) and
+  `LOSAT/tests/blastn_query_stream.rs`
+  (off / on / shadow equal in exit status, report or `-out` file and standard error, `BATCH_SIZE`
+  4,000: the three tasks x outfmt 0, 6, 7 x 1 and 4 threads x `LOSAT_X_RPTSTREAM` off and on;
+  `-out`, `LOSAT_X_QBATCHPAR` slots, `LOSAT_X_RPTSTREAMSHADOW`; `-query_loc`, `-subject_loc
+  -lcase_masking`, `-max_target_seqs -max_hsps -subject_besthit`; a reader error late in the file
+  and in the first record, a batch of queries without letters, a batch of skipped records, LOSAT's
+  refusals; standard input and `/dev/stdin`; `-db`; the switch off unless set; `kept=0` with
+  `LOSAT_X_RPTSTREAM` acting, with and without slots, and every searched record kept with its
+  shadow).
 - `LOSAT_X_TBNPAR=1` tblastn: preliminary stage per (frame, chunk) and redo per match in
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
 - `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE` and its kept translations, so four or more query

@@ -1748,6 +1748,35 @@ Scheduling (each value computed by one thread with the original function; order 
   every subject, the subject's combined ungapped HSP list compared field by field (the first
   difference stops the run with subject, frame, index and both values); one `[X_SHADOW] PAIRPAR`
   summary line at exit (subjects, units, HSPs compared, fallbacks).
+- `LOSAT_X_PAIRPARGATE=1` (TBLASTX, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it; acts only while `LOSAT_X_PAIRPAR` is on without its shadow
+  and without `LOSAT_X_PAIRLUTSHADOW`) a query batch that the gates and the guard of
+  `LOSAT_X_PAIRPAR` let through takes the unit path only where it is expected to be faster than the
+  reference frame loop (`units_gain` in `tblastx/x_pair_par.rs`): the reference's diagonal table has
+  2^18 cells or more (query length plus window above 131,072 letters, a translated query batch of
+  more than about 65 kb), or the search has two or more threads and one subject holds more than one
+  and a half thread's share of the bases (`2 * longest * threads > 3 * total`), or the lookup
+  threshold is below TBLASTX's default of 13 (not measured; a lower threshold puts more words in
+  every position, and the full table grows faster than the group tables: with `-threshold +inf`,
+  which NCBI converts to INT_MIN, every word, the option-sweep inputs took 14.2 GB in the reference
+  loop, 3.3 GB in the units and 5.9 GB in NCBI). Otherwise the batch
+  runs the reference loop with the full lookup table, as for the guard (`LOSAT_X_STATS=1` counts it
+  as `fallback_cost` at the end of the `[X_STATS] PAIRPAR` line). A unit scans its subject frame
+  with one group's table, so each frame is scanned once per group (up to 6 times), and every unit
+  makes its own diagonal table and lists: on short queries this costs more than the small tables
+  save. Both paths give the reference's list (the exactness argument of `LOSAT_X_PAIRPAR`), so
+  the report does not change; `LOSAT/tests/tblastx_unit_gate.rs` compares reports and reads the
+  counters. Measured on the workstation (alternating pairs, every report equal across arms;
+  `LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES` on in both arms): 10 fruit fly transcripts (two query
+  batches of 10.8 and 7.9 kb) against the zebrafish cDNA database (57,775 sequences) 61.3 -> 46.6 s
+  at one thread (NCBI BLAST+ 2.17.0 `-db` 45.1 s), 15.75 -> 11.87 s at 4 (NCBI 11.70), 8.01 -> 6.00 s
+  at 8 (NCBI 6.05), 4.07 -> 3.08 s at 16 (NCBI 3.22), max RSS unchanged (45 MiB); the first 40 kb of
+  MelaMJNV against 3,000 zebrafish cDNAs 4.14 -> 3.51 s at one thread. Unchanged (the units kept):
+  queries of 80 kb and more (MelaMJNV x PemoMJNVA, AP027131 x AP027133, where the units take
+  0.74-0.90 of the reference's time and half its memory), and a 5 kb query against one 294 kb
+  genome at 4 and 8 threads. Before the gate, the units' time over the reference's at one thread was
+  1.48-1.72 for 5 kb queries, 1.19-1.41 for 20 kb, 1.03-1.18 for 40 kb and 0.90-0.99 for 80 kb (one
+  294 kb subject / 3,000 cDNAs).
 - `LOSAT_X_PAIRLUT=1` (in the strict set; acts while `LOSAT_X_PAIRPAR` is on, not with its
   shadow) TBLASTX:
   the lookup tables of the unit path, one per context group, built directly from the query instead

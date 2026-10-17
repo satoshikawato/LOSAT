@@ -55,10 +55,11 @@
 //! `pv_array_bts` is 7 to 10 (the `lut_word_length` 11 and 12 tables; up to 8 workers at 10). At
 //! smaller tables (`pv_array_bts` 5 or 6, `lut_word_length` 8 to 10) a block's words span several
 //! lines and only the lines at block boundaries are shared. Both arrays are only 16-byte aligned
-//! (`vec!`), so a block's words may also straddle a line. Every word that finds its cell non-empty increments a counter
-//! and every word that finds it empty sets a presence bit: each is a read and a write of a line
-//! that other cores write at the same time (false sharing). Measured on the workstation (16
-//! threads, megablast of 31,168 D. melanogaster cDNAs against 3 Mb, 37 tables), inside the fills:
+//! (`vec!`), so a block's words may also straddle a line. Every word that finds its cell
+//! non-empty increments a counter and every word that finds it empty sets a presence bit: each is
+//! a read and a write of a line that other cores write at the same time (false sharing). Measured
+//! on the workstation (16 threads, megablast of 31,168 D. melanogaster cDNAs against 3 Mb, 37
+//! tables), inside the fills:
 //! 115 M demand reads found their line modified in another core (`ocr.demand_data_rd.l3_hit.
 //! snoop_hitm`), against 0.07 M for the serial loop and 0.13 M when one thread ran every worker's
 //! part one after another; with the private copies 0.8 M. The stores of `next_pos` still take
@@ -90,14 +91,15 @@
 //! only. Memory: two private copies per worker, `ceil(hashsize / 2048 / 16)` and
 //! `ceil(pv_size / 16)` lines of 64 bytes: 32 KiB + 128 KiB (`pv_array_bts` 9) or 32 + 64 KiB (10)
 //! per worker for a `lut_word_length` 12 table, 8 + 128 KiB (7) or 8 + 64 KiB (8) at 11. All
-//! workers' copies are one allocation that the calling thread makes, without zeroing, before the
-//! fill and frees after it (`Copies`; with each worker allocating its own copies, glibc's
-//! per-thread arenas kept 8-19 MiB more at the end of a search); each worker zeroes its own lines
-//! at the start of its part, so it first touches them, and every line is written. So during a
-//! fill P workers hold P times that, all resident: at `lut_word_length` 12, 2.5 / 1.5 MiB at 16
+//! workers' copies are one buffer of the calling thread (`Copies`; with each worker allocating its
+//! own copies, glibc's per-thread arenas kept 8-19 MiB more at the end of a search), not zeroed by
+//! it: each worker zeroes its own lines at the start of its part, and every line is written. So a
+//! fill of P workers holds P times that, all resident: at `lut_word_length` 12, 2.5 / 1.5 MiB at 16
 //! threads, 20 / 12 MiB at 128 and 40 / 24 MiB at 255 (the parts are at most 255); at 11, 2.1 /
-//! 1.1, 17 / 9 and 34 / 18 MiB. After the fill the allocation goes back to the system when glibc
-//! made it with mmap, otherwise it stays in the calling thread's arena for the next fill.
+//! 1.1, 17 / 9 and 34 / 18 MiB. The buffer is kept for the next fill and never freed
+//! (`SPARE_LINES`: freeing it raised glibc's mmap threshold and with it the search's max RSS), so
+//! the process keeps one such buffer per fill that ran at the same time as others (one, unless
+//! `LOSAT_X_QBATCHPAR`'s slots fill tables at once; their threads add up to the search's).
 
 use super::{build_unmasked_ranges, MaskedInterval, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -360,12 +362,41 @@ struct Line([u32; 16]);
 const _: () = assert!(std::mem::size_of::<Line>() == 64 && std::mem::align_of::<Line>() == 64);
 const _: () = assert!(std::mem::size_of::<PvArrayType>() == std::mem::size_of::<u32>());
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the private copies of all workers in one allocation
-/// made by the calling thread without zeroing it (one allocation per fill, so the workers' own
-/// malloc arenas take nothing), `stride` lines per worker: first the copy of `helper_array`
-/// (`counter_lines`), then that of `pv_array`. Each worker's lines start on a line boundary and
-/// are a whole number of lines, so no two workers' copies share a line; each worker zeroes its
-/// own lines (`Unready::zeroed`). Empty, and no allocation, when the switch is off.
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the line buffers of finished fills, kept for the next
+/// fills and never freed. glibc raises its mmap threshold to the size of an mmapped block when the
+/// block is freed, after which the search's other allocations of up to that size stay in malloc's
+/// arenas: on the workstation (megablast of 31,168 cDNAs at 64 threads, 6 MiB of copies per fill)
+/// freeing the buffer after each fill gave max RSS 263-305 MiB against 221-225 without the switch,
+/// and 228-232 with the threshold fixed (`MALLOC_MMAP_THRESHOLD_`). A fill takes a kept buffer
+/// (growing it with `reserve_exact`, which glibc does with `mremap` for an mmapped block) and
+/// gives it back at its end, so there are at most as many buffers as fills ever ran at once (more than one
+/// only in `LOSAT_X_QBATCHPAR`'s slots, whose threads add up to the search's). The lock is only
+/// ever tried, never waited for (`try_lock`; no wait on the browser's main thread): a fill that
+/// finds it taken uses a buffer of its own, which it keeps only if the lock is free at its end.
+static SPARE_LINES: std::sync::Mutex<Vec<Vec<Line>>> = std::sync::Mutex::new(Vec::new());
+
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): an empty buffer with room for `n` lines, kept from an
+/// earlier fill when the lock is free (the largest; see `SPARE_LINES`), else a new one.
+fn take_lines(n: usize) -> Vec<Line> {
+    let mut lines = SPARE_LINES
+        .try_lock()
+        .ok()
+        .and_then(|mut spare| {
+            let largest = (0..spare.len()).max_by_key(|&i| spare[i].capacity())?;
+            Some(spare.swap_remove(largest))
+        })
+        .unwrap_or_default();
+    lines.clear();
+    lines.reserve_exact(n);
+    lines
+}
+
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the private copies of all workers in one buffer of the
+/// calling thread, not zeroed by it (one buffer per fill, kept from fill to fill: `SPARE_LINES`; so
+/// the workers' own malloc arenas take nothing), `stride` lines per worker: first the copy of
+/// `helper_array` (`counter_lines`), then that of `pv_array`. Each worker's lines start on a line
+/// boundary and are a whole number of lines, so no two workers' copies share a line; each worker
+/// zeroes its own lines (`Unready::zeroed`). Empty, and no buffer, when the switch is off.
 struct Copies {
     lines: Vec<Line>,
     counter_lines: usize,
@@ -381,8 +412,9 @@ impl Copies {
             (0, 0)
         };
         let stride = counter_lines + pv_lines;
+        let n = stride * parts;
         Self {
-            lines: Vec::with_capacity(stride * parts),
+            lines: if n == 0 { Vec::new() } else { take_lines(n) },
             counter_lines,
             stride,
             parts,
@@ -402,6 +434,17 @@ impl Copies {
                 counter_lines,
             }
         })
+    }
+}
+
+impl Drop for Copies {
+    /// Gives the buffer back for the next fill when the lock is free (`SPARE_LINES`).
+    fn drop(&mut self) {
+        if self.lines.capacity() > 0 {
+            if let Ok(mut spare) = SPARE_LINES.try_lock() {
+                spare.push(std::mem::take(&mut self.lines));
+            }
+        }
     }
 }
 

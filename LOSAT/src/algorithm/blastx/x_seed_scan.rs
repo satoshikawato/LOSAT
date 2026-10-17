@@ -37,8 +37,19 @@
 //! and the diagonal statements below are those of `word_finder_plain`. The caller uses this
 //! path only when nothing traces the seeds (not in the diagnostic stages) and with the
 //! reference diagonal order (LOSAT_X_SEEDBUCKET mode 0).
+//!
+//! EXPERIMENT (LOSAT_X_BXSCANBF): with this switch (any value; off unless set, not in the strict
+//! set) the scan of the standard lookup table is tblastn's branch-free scan
+//! (`tblastn/x_scan_bf.rs`, `x_scan_one_range_bf`, LOSAT_X_TBNSCANBF's loop): the presence bits of
+//! a block of words advance a candidate list instead of a branch, and the listed words' hits are
+//! copied in position order with NCBI's stop and resume when the offset array is full. Its pairs
+//! and `scan_range` values are those of `s_blast_aa_scan_subject_one_range`, so the loop above
+//! reads the same pairs; it writes up to `X_SCAN_BF_SLACK` pairs past `array_size`, which the
+//! per-thread buffer then holds and nothing reads. With LOSAT_X_BXDIAG the fused loop takes the
+//! same candidate loop (`x_seed_diag.rs`). The compressed lookup table keeps its scan.
 
 use super::*;
+use crate::algorithm::tblastn::x_scan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use std::cell::RefCell;
 
 /// EXPERIMENT (LOSAT_X_BXSCAN): 0 = off, 1 = direct scan loop, 2 = shadow
@@ -55,6 +66,16 @@ pub(crate) fn x_bxscan_mode() -> u8 {
             0
         }
     })
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BXSCANBF switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BXSCANBF): whether the seed scans (BXSCAN's loop and BXDIAG's fused loop)
+/// find the words with hits by the branch-free candidate loop (module header). Off unless set.
+pub(crate) fn x_bxscan_bf() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXSCANBF").is_some())
 }
 
 /// EXPERIMENT (LOSAT_X_BXSCANSHADOW): subjects compared so far.
@@ -150,7 +171,15 @@ pub(crate) fn x_word_finder_scan(
             &mut copy,
             |_| {},
         )?;
-        let direct = x_word_finder_direct(batch, parameters, options, subject, lookup, diagonals)?;
+        let direct = x_word_finder_direct(
+            batch,
+            parameters,
+            options,
+            subject,
+            lookup,
+            diagonals,
+            x_bxscan_bf(),
+        )?;
         assert!(
             copy.offset == diagonals.offset && copy.entries == diagonals.entries,
             "LOSAT_X_BXSCANSHADOW: diagonal table differs"
@@ -164,7 +193,15 @@ pub(crate) fn x_word_finder_scan(
         X_SHADOW_SUBJECTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         return Ok(direct);
     }
-    x_word_finder_direct(batch, parameters, options, subject, lookup, diagonals)
+    x_word_finder_direct(
+        batch,
+        parameters,
+        options,
+        subject,
+        lookup,
+        diagonals,
+        x_bxscan_bf(),
+    )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
@@ -189,7 +226,8 @@ pub(crate) fn x_word_finder_scan(
 //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
 // ```
 // `Lookup::scan` (its range set-up and loop) and `word_finder_plain` (the statements per pair)
-// in one function; the pairs are read from the scanner's buffer.
+// in one function; the pairs are read from the scanner's buffer. EXPERIMENT (LOSAT_X_BXSCANBF):
+// `branch_free` scans the standard table with `x_scan_one_range_bf` (module header).
 fn x_word_finder_direct(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
@@ -197,6 +235,7 @@ fn x_word_finder_direct(
     subject: &[u8],
     lookup: &Lookup,
     diagonals: &mut Diagonals,
+    branch_free: bool,
 ) -> Result<Vec<InitHsp>> {
     let query = &batch.sequence_start[1..];
     let word = options.word_size;
@@ -220,15 +259,21 @@ fn x_word_finder_direct(
         range[2] = range[1];
     }
     let capacity = lookup.capacity();
+    // EXPERIMENT (LOSAT_X_BXSCANBF): room for the pairs the branch-free scan writes past
+    // `array_size` (never read).
+    let room = capacity + if branch_free { X_SCAN_BF_SLACK } else { 0 };
     X_PAIRS.with(|buffer| {
         let mut buffer = buffer.borrow_mut();
-        if buffer.len() < capacity {
-            buffer.resize(capacity, OffsetPair::default());
+        if buffer.len() < room {
+            buffer.resize(room, OffsetPair::default());
         }
-        let pairs = &mut buffer[..capacity];
+        let pairs = &mut buffer[..room];
         let array_size = capacity as i32;
         while range[1] <= range[2] {
             let n = match lookup {
+                Lookup::Standard(l) if branch_free => {
+                    x_scan_one_range_bf(l, subject, pairs, array_size, &mut range)
+                }
                 Lookup::Standard(l) => {
                     s_blast_aa_scan_subject_one_range(l, subject, pairs, array_size, &mut range)
                 }
@@ -569,8 +614,11 @@ mod tests {
                 .collect::<Vec<_>>();
             let mut direct = Diagonals::new(length, window).unwrap();
             let mut reference = Diagonals::new(length, window).unwrap();
+            // EXPERIMENT (LOSAT_X_BXSCANBF): the direct loop with the branch-free scan, on its own
+            // table, compared alike.
+            let mut branch_free = Diagonals::new(length, window).unwrap();
             for state in 0..4 {
-                for d in [&mut direct, &mut reference] {
+                for d in [&mut direct, &mut reference, &mut branch_free] {
                     if state == 2 {
                         d.offset = 536_870_910;
                         d.entries.fill(entry(123));
@@ -581,9 +629,26 @@ mod tests {
                         d.finish_subject(83).unwrap();
                     }
                 }
-                let hits =
-                    x_word_finder_direct(&batch, &params, &options, &subject, &lookup, &mut direct)
-                        .unwrap();
+                let hits = x_word_finder_direct(
+                    &batch,
+                    &params,
+                    &options,
+                    &subject,
+                    &lookup,
+                    &mut direct,
+                    false,
+                )
+                .unwrap();
+                let hits_bf = x_word_finder_direct(
+                    &batch,
+                    &params,
+                    &options,
+                    &subject,
+                    &lookup,
+                    &mut branch_free,
+                    true,
+                )
+                .unwrap();
                 let plain = word_finder_plain(
                     &batch,
                     &params,
@@ -596,10 +661,13 @@ mod tests {
                 .unwrap();
                 assert_eq!(hits, initial, "window={window} state={state}");
                 assert_eq!(hits, plain, "window={window} state={state}");
-                assert!(
-                    direct.offset == reference.offset && direct.entries == reference.entries,
-                    "window={window} state={state}"
-                );
+                assert_eq!(hits_bf, plain, "window={window} state={state} branch-free");
+                for d in [&direct, &branch_free] {
+                    assert!(
+                        d.offset == reference.offset && d.entries == reference.entries,
+                        "window={window} state={state}"
+                    );
+                }
             }
             // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
             // ```c
@@ -613,13 +681,30 @@ mod tests {
             // loops read the wrapped values back alike. tests/blastx_diag_bitfield.rs compares the
             // rows with NCBI 2.17.0 at such a window. (The offset is past INT4_MAX / 4, so the
             // tables are cleared at the end of the subject.)
-            for d in [&mut direct, &mut reference] {
+            for d in [&mut direct, &mut reference, &mut branch_free] {
                 d.offset = (1 << 30) - 64;
                 d.entries.fill(DiagStruct::clear(window));
             }
-            let hits =
-                x_word_finder_direct(&batch, &params, &options, &subject, &lookup, &mut direct)
-                    .unwrap();
+            let hits = x_word_finder_direct(
+                &batch,
+                &params,
+                &options,
+                &subject,
+                &lookup,
+                &mut direct,
+                false,
+            )
+            .unwrap();
+            let hits_bf = x_word_finder_direct(
+                &batch,
+                &params,
+                &options,
+                &subject,
+                &lookup,
+                &mut branch_free,
+                true,
+            )
+            .unwrap();
             let plain = word_finder_plain(
                 &batch,
                 &params,
@@ -631,10 +716,13 @@ mod tests {
             )
             .unwrap();
             assert_eq!(hits, plain, "window={window} wrapped");
-            assert!(
-                direct.offset == reference.offset && direct.entries == reference.entries,
-                "window={window} wrapped"
-            );
+            assert_eq!(hits_bf, plain, "window={window} wrapped branch-free");
+            for d in [&direct, &branch_free] {
+                assert!(
+                    d.offset == reference.offset && d.entries == reference.entries,
+                    "window={window} wrapped"
+                );
+            }
             if !initial.is_empty() {
                 assert_ne!(
                     hits, initial,

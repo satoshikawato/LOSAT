@@ -364,6 +364,8 @@ pub(crate) fn context_ungapped_blocks<'a>(
     contexts: impl Iterator<Item = &'a [u8]>,
     spec: &NuclScoringSpec,
 ) -> Vec<Option<KarlinParams>> {
+    // Twin: the closure body below is copied in `parallel_blocks` of
+    // blast_engine/x_query_prep_par.rs (LOSAT_X_QPREPPAR); change it there too.
     contexts
         .map(|context| {
             if context.is_empty() {

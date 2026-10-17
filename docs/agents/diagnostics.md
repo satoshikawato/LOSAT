@@ -2055,7 +2055,10 @@ Scheduling (each value computed by one thread with the original function; order 
   time with the switch / without): zebrafish genome x one protein 0.60 at one thread (24.8 -> 14.8
   s, NCBI 31.3 s); human genome x one protein 0.87 at one thread (32.3 -> 28.0 s, NCBI 44.9 s) and
   at 8 threads (5.10 -> 4.46 s); fly genome x one batch at 8 threads 0.76 (4.04 -> 3.06 s); E. coli
-  MG1655 x 16 batches at 8 threads 0.95. TIMING_LW_DOC
+  MG1655 x 16 batches at 8 threads 0.95. Again in session 22 (node 0, the default with all three
+  tblastn switches of 2026-10-17 against `=0` in rotating rounds, 3-8 rounds, one hash per case):
+  zebrafish 0.58 (23.2 -> 13.5 s), human 0.82 at one thread and 0.84 at 8 threads, fly 0.81, MG1655
+  0.98.
 - `LOSAT_X_TBNXLATESIMD=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule
   of that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns
   it off; `tblastn/x_subject_translate.rs`): a packed subject's six frames (`TBNSTORE`, every `-db`
@@ -2075,7 +2078,11 @@ Scheduling (each value computed by one thread with the original function; order 
   of each loop (`tests/tblastn_xlate_simd.rs`). perf stat on the workstation (one thread, a
   411-residue protein x the human genome `-db`, `TBNSCANBF` and `TBNLINKWIN` on, the same output):
   cycles 75.6 G before -> 72.0 G with the word loop -> 66.0 G with the vector loop (instructions 271
-  -> 245 -> 219 G); zebrafish genome x one protein 41.8 -> 39.9 -> 37.4 G. TIMING_SIMD_DOC
+  -> 245 -> 219 G); zebrafish genome x one protein 41.8 -> 39.9 -> 37.4 G. Timed in session 22
+  (node 0, the default against `=0` in rotating rounds, 3-8 rounds, one hash per case; time on /
+  off): human genome x one protein 0.88 at one thread (27.9 -> 24.5 s; NCBI BLAST+ 2.17.0 `-db` 47.1
+  s) and 0.94 at 8 threads; zebrafish genome x one protein 0.99; fly genome x one batch and MG1655 x
+  16 batches at 8 threads 0.99-1.00.
 - `LOSAT_X_TBXSCANBF=1` TBLASTX (speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
   (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/run_impl.rs`) walk the subject

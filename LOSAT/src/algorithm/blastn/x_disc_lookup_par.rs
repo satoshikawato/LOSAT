@@ -1045,10 +1045,13 @@ impl Fill<'_, '_> {
     /// grew in an earlier chunk (`empty`). For the prefault round (`Fill::prefault`), for each
     /// array `k` with `mark[k]` (`HASHTABLE` + template, `PV_ARRAY`), it also marks in its own bits
     /// (`Faults::marks`) the page of each word's cell and of the cell's presence-vector word (one
-    /// that the update writes: `array_idx < pv_array.len()`), after clearing them.
+    /// that the update writes: `array_idx < pv_array.len()`), after clearing them. `MARK` is
+    /// whether any `mark[k]` is set: the chunks without marks (after a table's first chunk, as a
+    /// rule) run a copy of the loop without the marking code (on the workstation the loop with the
+    /// tests in it but no marks to make took 7-11 % longer in phase A).
     ///
     /// SAFETY: no other job of the phase uses the buckets `(a, *)` or reader `a`'s marks.
-    unsafe fn read(&self, a: usize, s0: usize, s1: usize, mark: [bool; 3]) {
+    unsafe fn read<const MARK: bool>(&self, a: usize, s0: usize, s1: usize, mark: [bool; 3]) {
         let words = self.words;
         let two_templates = words.two_templates;
         let template_length = words.template_length;
@@ -1062,13 +1065,14 @@ impl Fill<'_, '_> {
             }
         }
         let faults = self.faults;
+        debug_assert_eq!(MARK, mark.contains(&true));
         for (k, &on) in mark.iter().enumerate() {
-            if on {
+            if MARK && on {
                 // SAFETY: reader `a`'s marks are this job's.
                 unsafe { faults.marks[k].clear(a) };
             }
         }
-        let [mark1, mark2, mark_pv] = mark;
+        let [mark1, mark2, mark_pv] = mark.map(|on| MARK && on);
         let [cells1, cells2, pv] = faults.offsets;
         let (pv_len, bts) = (faults.lens[PV_ARRAY], self.tables.pv_array_bts);
         if s0 >= s1 {
@@ -1572,7 +1576,11 @@ fn fill_with<P: Fn(u8) + Sync>(
         // `Fill::link`); `run_jobs` returns after every job of the phase has returned.
         run_phase(&mut clock, 0, parts, in_pool, |a| {
             let (s0, s1) = span(a);
-            unsafe { fill.read(a, s0, s1, mark) }
+            if mark.contains(&true) {
+                unsafe { fill.read::<true>(a, s0, s1, mark) }
+            } else {
+                unsafe { fill.read::<false>(a, s0, s1, mark) }
+            }
         });
         if measure {
             // SAFETY: between two phases.

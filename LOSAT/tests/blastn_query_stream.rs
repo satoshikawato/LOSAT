@@ -488,6 +488,12 @@ fn ranges_masks_and_hit_list_options_give_the_off_bytes() {
                 read_batch_by_batch(&what, &shadow);
             }
         }
+        // LOSAT_X_QBATCHPAR's slots copy the records of the batches they search, cut to the range.
+        let what = format!("{task} {extra:?} QBATCHPAR");
+        let (off, shadow) = same_three(&what, &args, 4, &[QBATCHPAR, TWO_SLOTS, RPTSTREAM], None);
+        assert_eq!(off.status, Some(0), "{what}");
+        read_batch_by_batch(&what, &shadow);
+        assert!(shadow.slot_copies > 0, "{what}: {shadow:?}");
     }
 }
 

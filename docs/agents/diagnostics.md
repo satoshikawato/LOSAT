@@ -1404,6 +1404,92 @@ Scheduling (each value computed by one thread with the original function; order 
   chunk, the hit list and the whole diagonal hash compared with the original code; one
   `[X_PAIRPARSHADOW]` summary line on stderr at the end). With `LOSAT_TIMING` a
   `[TIMING] x_pairpar_seed` line gives the strips, seeds and the owner's fold, scan and wait time.
+- `LOSAT_X_MBLUTPAD=1` (BLASTN megablast and blastn wherever `LOSAT_X_PAIRPAR` fills the contiguous megablast lookup
+  table on a pool of two threads or more: `-subject` and `-db`, not with `-limit_lookup` or `BLEMIR_DEBUG`; not in the
+  strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT` says) the counters of the longest chain
+  (`helper_array`, one per 2048 cells) and the presence vector (`pv_array`) of that fill are counted and set by each
+  thread in private copies, a whole number of 64-byte lines per thread in one buffer of the calling thread (each thread
+  zeroes its own lines first), and each thread adds its own blocks' counters (`saturating_add`) and ORs its own blocks'
+  presence-vector words into the tables at the end of its part (`blastn/x_mb_lookup_par.rs`). The blocks of
+  `LOSAT_X_PAIRPAR`'s plan are dealt round robin, so a line of `helper_array` held the counters of up to 16 threads and
+  a line of `pv_array` the words of up to 8 (`pv_array_bts` 10; at `lut_word_length` 8 to 10 a block's words span
+  several lines and only the boundary lines are shared): false sharing. A counter or presence-vector word lies inside one block, so
+  only its owner ever changes it, from 0, with the loop's increments and bits; those values, `longest_chain`,
+  `hashtable` and `next_pos` are the loop's. Memory: per thread `ceil(hashsize / 32768)` + `ceil(pv_size / 16)` lines
+  of 64 bytes (160 or 96 KiB at `lut_word_length` 12, 136 or 72 KiB at 11, by `pv_array_bts`), all written, so a fill
+  of P threads holds P times that: at `lut_word_length` 12 2.5 / 1.5 MiB at 16 threads, 20 / 12 MiB at 128 and 40 / 24
+  MiB at 255 (the parts are at most 255), at 11 2.1 / 1.1, 17 / 9 and 34 / 18 MiB. On Linux with glibc the buffer is
+  kept for the next fill and never freed: freeing it after each fill made glibc raise its mmap threshold to its size,
+  after which the search's other allocations of up to that size stayed in malloc's arenas (megablast of 31,168 cDNAs
+  at 64 threads: max RSS 263-305 MiB with the switch against 221-225 without; with the threshold fixed by
+  `MALLOC_MMAP_THRESHOLD_=131072` 228-232; with the kept buffer 223-228 against 222-226). Each buffer is made with a
+  capacity of at least 32 MiB + 4 KiB, above glibc's largest dynamic threshold (the rule of `LOSAT_X_TBNSTORE`'s
+  frames), so glibc maps it, freeing one never moves the threshold, and only the lines the fills wrote are resident; a
+  kept buffer too small for a fill (only above 32 MiB of copies, 205 threads or more at 160 KiB) is freed and a new one
+  made, never grown (std reallocates a 64-byte-aligned block by allocating, copying and freeing, which moved the
+  threshold in review round 1's code whenever a table needed more lines per thread than the earlier ones). What a
+  search keeps, for n threads and s the largest per-thread size of its tables: resident, at most n x s from the fills
+  on the whole pool plus, with `LOSAT_X_QBATCHPAR`, m x s for each slot of m threads that filled a table while another
+  fill ran (the slots' threads add up to n, so below 2 n x s in all), and a fill that finds the lock taken can add one
+  more kept buffer; address space, 32 MiB + 4 KiB per kept buffer (n x s when that is larger). At 64 threads and 160
+  KiB that is 10 MiB resident in one mapping of 32 MiB + 4 KiB, and with four slots of 16 threads 17.5 MiB resident in
+  four. The lock of the kept buffers is only tried (`try_lock`), never waited for: a fill that finds it taken uses a
+  new buffer, which it keeps only if the lock is free at its end. On other targets (macOS, Windows, musl, wasm32) the
+  buffer has the fill's size and is freed at the end of the fill (their allocators return large blocks themselves).
+  Shadow: `LOSAT_X_PAIRPARSHADOW=1` with the switch makes the
+  second build of its comparison with the padded fill (every element of the four arrays and the longest chain compared;
+  a difference panics) and `main` prints `[X_SHADOW] MBLUTPAD tables=<compared> cells=<elements> diffs=0 identical` at
+  exit. With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] x_mb_lookup_build: <s>s (builds=<n>
+  parallel=<n> padded=<n>)` when a megablast table was built (the summed wall time of the builds, not the shadow's
+  second build; with `LOSAT_X_QBATCHPAR` the slots' concurrent builds too; `parallel=` counts the builds filled on a
+  pool, `padded=` those of them the padded fill made) and `[TIMING] x_mb_lookup_split: alloc=
+  loop= pool_fill= chain=` (the allocation, the fill by the loop or on the pool with the re-threading of
+  `ascending_cells`, and the longest chain; seconds, summed). Measured on the workstation (2x Xeon Gold 6338, powersave,
+  16 physical cores of node 1 with their siblings idle, `numactl --membind 1`; `-outfmt 6` against 3 Mb of
+  D. melanogaster 2L; off runs carry an unread `LOSAT_X_PADMBLUTPAD=1`; a warm-up run, then 4 rounds of off/on wall runs
+  and 2 of `LOSAT_TIMING` runs per cell, the order alternating; fill = `pool_fill`, ratios per round): megablast of
+  31,168 cDNAs (96 Mb, 37 tables) fill 1.493 -> 1.294 s at 16 threads (0.867), 1.656 -> 1.346 s at 8 (0.813), 2.263 ->
+  1.882 s at 4 (0.832), 3.029 -> 2.849 s at 2 (0.941), search on/off 0.962 / 0.938 / 0.933 / 0.969, cycles:u 0.81 /
+  0.78 / 0.84 / 0.95; megablast of 1,775 cDNAs (3 tables) fill 0.095 -> 0.080 / 0.120 -> 0.107 / 0.159 -> 0.150 /
+  0.182 -> 0.170 s at 16 / 8 / 4 / 2 threads (its sub-second searches spread 0.8-1.3 per round); blastn of 1,775 cDNAs
+  (6 tables) fill 0.102 -> 0.092 / 0.105 -> 0.093 / 0.131 -> 0.117 / 0.164 -> 0.159 s, searches 0.99-1.00 at 2-8
+  threads; blastn of 31,168 cDNAs (91 tables) fill 1.556 -> 1.346 s at 16 and 1.950 -> 1.718 s at 4, under 1 % of its
+  32-34 s search. Max RSS within the spread (243 / 243 MiB for the first input at 16 threads; 563 / 571 and 541 / 529
+  MiB for the last at 16 and 4). After review round 1 (kept buffer, threads zeroing their own lines; 32 physical cores
+  of node 1 and their siblings, 4 rounds): megablast of 31,168 cDNAs at 16 threads fill 1.502 -> 1.337 s (0.890), max
+  RSS 242-249 / 243-252 MiB; at 64 threads (32 cores and their siblings) fill 1.687 -> 1.600 s (0.948), cycles:u 0.95,
+  max RSS 222-226 / 223-228 MiB. Inside the fills of the first input at 16 threads, demand reads that found their line
+  modified in another core (`ocr.demand_data_rd.l3_hit.snoop_hitm`) fell from 115 M to 0.8 M (the serial loop: 0.07 M);
+  the stores of `next_pos` (each thread writes the query offsets of its own words, which interleave with the other
+  threads') still take about 32 M lines from other cores, but writing `next_pos` afterwards by spans cost more than it
+  saved. A first version in which each thread allocated its own copies kept 8-19 MiB more max RSS (glibc's per-thread
+  arenas). Not done here, measured with probes (perf-mb `logs/mblutfs_report.md`): a pool round before the fill that
+  touches each page of the fresh `next_pos` and `hashtable` once (by span and by block owner) removes the fill's
+  contended first-touch faults (its system time 5.1 -> 0.03 s summed at 16 threads) and, with this switch, made that
+  fill 0.70-0.82 of the original.
+  Review round 2 (2026-10-17/18; the same code with the switch read as a strict-set member, on against `=0`; 16
+  physical cores of node 1 with their siblings, a warm-up and 4 wall and 2 `LOSAT_TIMING` rounds per cell, rotated, 4
+  and 1 for blastn of 31,168 cDNAs; other busy CPUs of the node 5-44, median 18), fill on/off and max RSS off / on
+  medians (MiB; NCBI 2.17.0 at one thread in brackets): megablast of 31,168 cDNAs fill 0.914 / 0.860 / 0.845 / 0.921
+  at 16 / 8 / 4 / 2 threads, search 0.908 / 0.959 / 0.941 / 0.963, max RSS 244.4 / 247.6, 248.6 / 247.5, 249.8 / 248.0
+  and 250.9 / 250.7 [359.5]; megablast of 1,775 cDNAs fill 0.855 / 0.917 / 0.948 / 0.924, max RSS 125.0 / 132.1
+  (ranges 122.5-127.5 / 130.6-132.6), 127.6 / 129.4, 131.1 / 131.1 and 131.6 / 131.9 [198.7]; blastn of 1,775 cDNAs
+  fill 0.827 / 0.826 / 0.879 / 0.941, searches 0.99-1.00 at 2-8 threads (0.78-1.28 per round at 16, its run-to-run
+  spread), max RSS within the spread [143.5]; blastn of 31,168 cDNAs fill 0.923 / 0.908 / 0.952 at 16 / 4 / 2 threads,
+  cycles:u 0.99-1.00, max RSS 574.3 / 575.3, 535.6 / 530.8 and 520.1 / 510.9 [630.2]; megablast of E. coli MG1655,
+  Sakai and EDL933 (15.7 Mb in a record of 100 kb and then records of 250 kb, so that the second table needs more
+  lines per thread than the first) at 16 threads against LC738868 127.6 / 131.3 [184.5] and against the first 1 Mb of
+  EDL933 142.9 / 148.9 [189.2]. Every output had its expected sha256. So the switch wins in time wherever it was
+  measured, and costs max RSS above the run without it where the search's peak includes the kept buffer, up to n x the
+  per-thread size of the copies (1.5-2.5 MiB at 16 threads): in an untimed rerun +2.0, +2.5, +3.6 and +0.6 MiB
+  (medians of 6, the 1,775 cDNAs, the two E. coli inputs and the 31,168 cDNAs at 16 threads) and +8.5 MiB for the
+  31,168 cDNAs at 64 threads; never above NCBI's. It stays off by default (not in the strict set) until that is
+  resolved. A buffer freed at the end of each fill instead (safe on glibc with the 32 MiB + 4 KiB capacity) measured
+  +2.3, +1.0, -2.8, -0.5 and +6.6 MiB on the same cells; its timing is not measured yet. Against review round 1's kept
+  buffer, which grew with `reserve_exact` (with that code the 31,168 cDNAs grow it twice, 72 -> 96 -> 136 KiB per
+  thread, and the 100 kb / 250 kb input once, 136 -> 160 KiB at its second table), max RSS at 16 threads +1.2, -1.3
+  and +1.1 MiB (the 31,168 cDNAs and the two E. coli inputs) and fill 0.912, 0.924 and 1.209 per round (the last a
+  fill of 0.3 s).
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; not in the strict set: off unless set
   to any value, whatever `LOSAT_X_DEFAULT` says) the discontiguous megablast lookup tables

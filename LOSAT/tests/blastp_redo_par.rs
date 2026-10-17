@@ -107,6 +107,9 @@ struct Run {
     redo_par: Vec<RedoPar>,
     freed_lists: usize,
     stderr: String,
+    /// With `LOSAT_X_BPREDOLPT`: the windows computed with it (`lpt_windows=` of the
+    /// `[TIMING] x_bpredopar:` lines, summed); `None` when no line has the field.
+    lpt_windows: Option<usize>,
 }
 
 /// One blastp run of `query` against the fixture subjects (two related nimavirus proteomes) with
@@ -161,11 +164,21 @@ fn blastp(query: &Path, threads: u32, vars: &[(&str, &str)], args: &[&str]) -> R
         .filter_map(|line| line.strip_prefix("[TIMING] x_bppfree: freed_lists="))
         .map(|count| count.trim().parse::<usize>().expect("a count"))
         .sum();
+    let lpt_windows = stderr
+        .lines()
+        .filter(|line| line.starts_with("[TIMING] x_bpredopar: "))
+        .filter_map(|line| {
+            line.split(' ')
+                .find_map(|field| field.strip_prefix("lpt_windows="))
+                .map(|count| count.parse::<usize>().expect("a count"))
+        })
+        .reduce(|sum, count| sum + count);
     Run {
         stdout: output.stdout,
         redo_par,
         freed_lists,
         stderr,
+        lpt_windows,
     }
 }
 
@@ -206,6 +219,31 @@ fn same_rows_at_every_thread_count(query: &Path, vars: &[(&str, &str)], args: &[
                 on.stderr
             );
         }
+        let with_lpt: Vec<(&str, &str)> = with_switch.iter().copied().chain([LPT]).collect();
+        let lpt = blastp(query, threads, &with_lpt, args);
+        assert!(
+            lpt.stdout == reference.stdout,
+            "{vars:?} {args:?} threads {threads}: the report differs with the jobs largest first"
+        );
+        assert_lpt_ran(
+            &lpt,
+            threads > 1,
+            &format!("{vars:?} {args:?} threads {threads}"),
+        );
+    }
+}
+
+/// `LOSAT_X_BPREDOLPT` computed windows in the run (at more than one thread), or the redo path
+/// did not run (one thread).
+fn assert_lpt_ran(run: &Run, threads: bool, what: &str) {
+    if threads {
+        assert!(
+            run.lpt_windows.is_some_and(|windows| windows > 0),
+            "{what}: no window computed with the jobs largest first: {}",
+            run.stderr
+        );
+    } else {
+        assert!(run.redo_par.is_empty(), "{what}: one thread");
     }
 }
 
@@ -249,12 +287,16 @@ fn early_termination_ends_the_matches_it_ends_in_the_one_thread_redo() {
             "6",
         ];
         let reference = blastp(&query, 1, &[], &args);
-        for threads in [2, 4] {
-            let on = blastp(&query, threads, &[SWITCH], &args);
+        for (threads, lpt) in [(2, false), (4, false), (2, true), (4, true)] {
+            let vars = if lpt { vec![SWITCH, LPT] } else { vec![SWITCH] };
+            let on = blastp(&query, threads, &vars, &args);
             assert!(
                 on.stdout == reference.stdout,
-                "-max_target_seqs {max_target_seqs} threads {threads}: the report differs"
+                "-max_target_seqs {max_target_seqs} threads {threads} {vars:?}: the report differs"
             );
+            if lpt {
+                assert_lpt_ran(&on, true, &format!("-max_target_seqs {max_target_seqs}"));
+            }
             let ended = RedoPar::sum(&on.redo_par).ended;
             assert!(
                 !on.redo_par.is_empty(),
@@ -293,6 +335,17 @@ fn released_lists_the_per_worker_seg_cache_and_pairwise_reports_are_unchanged() 
             "{vars:?} {args:?}: the report differs with the switch"
         );
         assert!(!on.redo_par.is_empty(), "{vars:?} {args:?}: the path ran");
+        let with_lpt: Vec<(&str, &str)> = with_switch.iter().copied().chain([LPT]).collect();
+        let lpt = blastp(&query, 4, &with_lpt, &args);
+        assert!(
+            lpt.stdout == reference.stdout,
+            "{vars:?} {args:?}: the report differs with the jobs largest first"
+        );
+        assert_eq!(
+            lpt.freed_lists, reference.freed_lists,
+            "{vars:?}: lists freed"
+        );
+        assert_lpt_ran(&lpt, true, &format!("{vars:?} {args:?}"));
     }
 }
 
@@ -315,9 +368,10 @@ fn small_windows_split_queries_and_leave_out_the_matches_the_test_ended() {
         .copied()
         .chain([SWITCH, SMALL_WINDOWS])
         .collect();
+    let with_lpt: Vec<(&str, &str)> = vars.iter().copied().chain([LPT]).collect();
     let mut ended = Vec::new();
-    for threads in [2, 8] {
-        let on = blastp(&query, threads, &vars, &SMALL_WINDOW_ARGS);
+    for (threads, vars) in [(2, &vars), (8, &vars), (2, &with_lpt), (8, &with_lpt)] {
+        let on = blastp(&query, threads, vars, &SMALL_WINDOW_ARGS);
         assert!(
             on.stdout == reference.stdout,
             "threads {threads}: the report differs"
@@ -337,9 +391,15 @@ fn small_windows_split_queries_and_leave_out_the_matches_the_test_ended() {
             "threads {threads}: {counts:?}"
         );
         assert_eq!(counts.ended, counts.skipped + counts.wasted, "{counts:?}");
+        if vars.contains(&LPT) {
+            assert_lpt_ran(&on, true, &format!("small windows, threads {threads}"));
+        }
         ended.push(counts.ended);
     }
-    assert_eq!(ended[0], ended[1], "the matches ended at 2 and 8 threads");
+    assert!(
+        ended.iter().all(|&count| count == ended[0]),
+        "the matches ended at 2 and 8 threads, with and without the jobs largest first: {ended:?}"
+    );
 }
 
 /// The counts of the shadow mode's line at exit.
@@ -436,4 +496,65 @@ fn the_shadow_mode_compares_with_ended_matches_released_lists_and_small_windows(
         "{counts:?}"
     );
     assert_eq!(shadow.freed_lists, reference.freed_lists, "lists freed");
+}
+
+/// `LOSAT_X_BPREDOLPT`: each window's jobs in one `rayon::scope` of one task per thread, taken
+/// one at a time, largest first (`src/algorithm/blastp/x_redo_par.rs`, `x_compute_window_lpt`).
+/// It acts only where `LOSAT_X_BPREDOPAR` (or its shadow mode) runs. The tests above run it beside
+/// the switch; the test below runs it in the shadow mode.
+const LPT: (&str, &str) = ("LOSAT_X_BPREDOLPT", "1");
+
+/// The shadow mode checks the windows computed with `LOSAT_X_BPREDOLPT` (every match the replay
+/// redoes against the one-thread computation, every hit list against the one-thread loop's), and
+/// its line ends with `lpt=1`: one search or blocks of queries, and small windows that end inside
+/// queries with matches ended before their window and at their replay and released lists.
+#[test]
+fn the_shadow_mode_checks_the_windows_computed_largest_first() {
+    let query = fixture("MeenMJNV.faa");
+    let args = ["-evalue", "0.001", "-outfmt", "6"];
+    let shadow_lpt = [("LOSAT_X_BPREDOPARSHADOW", "1"), LPT];
+    for (vars, args, small) in [
+        (vec![], &args[..], false),
+        (vec![("LOSAT_X_BPQBLOCK", "1")], &args[..], false),
+        (RELEASE.to_vec(), &SMALL_WINDOW_ARGS[..], true),
+    ] {
+        let reference = blastp(&query, 1, &vars, args);
+        let mut with_shadow: Vec<(&str, &str)> = vars.iter().copied().chain(shadow_lpt).collect();
+        if small {
+            with_shadow.push(SMALL_WINDOWS);
+        }
+        let shadow = blastp(&query, 4, &with_shadow, args);
+        assert!(
+            shadow.stdout == reference.stdout,
+            "{with_shadow:?}: the report differs in the shadow mode"
+        );
+        let [searches, queries, matches, lists, diffs] = shadow_counts(&shadow.stderr);
+        assert!(
+            searches > 0 && queries > 0 && matches > 0 && lists > 0 && diffs == 0,
+            "{with_shadow:?}: {}",
+            shadow.stderr
+        );
+        assert!(
+            shadow
+                .stderr
+                .lines()
+                .any(|line| line.starts_with("[X_SHADOW] BPREDOPAR ") && line.ends_with(" lpt=1")),
+            "{with_shadow:?}: the shadow line says lpt=1: {}",
+            shadow.stderr
+        );
+        assert_lpt_ran(&shadow, true, &format!("{with_shadow:?}"));
+        let counts = RedoPar::sum(&shadow.redo_par);
+        assert_eq!(
+            counts.matches - counts.ended,
+            matches as usize,
+            "{with_shadow:?}: every match the replay redoes is compared: {counts:?}"
+        );
+        if small {
+            assert!(
+                counts.split > 0 && counts.skipped > 0,
+                "the shadow's path: {counts:?}"
+            );
+            assert_eq!(shadow.freed_lists, reference.freed_lists, "lists freed");
+        }
+    }
 }

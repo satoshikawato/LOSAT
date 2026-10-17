@@ -36,6 +36,12 @@ const BATCHES: usize = 4;
 /// the caller's value is kept, or a file of the tests is named. Returns the report and the
 /// standard error.
 fn tblastn(threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
+    let query = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/PemoMJNVA.faa");
+    tblastn_query(&query, threads, variables)
+}
+
+/// `tblastn` with another query file.
+fn tblastn_query(query: &Path, threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
     const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
     let fasta = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
     let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
@@ -53,7 +59,7 @@ fn tblastn(threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
     let output = command
         .arg("tblastn")
         .arg("-query")
-        .arg(fasta.join("PemoMJNVA.faa"))
+        .arg(query)
         .arg("-subject")
         .arg(fasta.join("MelaMJNV.fasta"))
         .args(["-outfmt", "6", "-num_threads", &threads.to_string()])
@@ -131,4 +137,102 @@ fn the_rule_does_nothing_without_the_side_by_side_switch() {
         assert_eq!(report, expected, "{variables:?}");
         assert_eq!(side_by_side(&stderr), None, "{variables:?}");
     }
+}
+
+/// The `batches` and `own_pools` fields of the one `query_batches` line, and the number of
+/// `[losat-thread-pool]` lines (one per search pool started).
+fn own_pools(stderr: &str) -> (usize, usize, usize) {
+    let line = stderr
+        .lines()
+        .find(|line| line.starts_with("[losat-thread-stage] program=tblastn stage=query_batches "))
+        .unwrap_or_else(|| panic!("no query_batches line:\n{stderr}"));
+    let field = |name: &str| -> usize {
+        line.split_whitespace()
+            .find_map(|field| field.strip_prefix(name))
+            .unwrap_or_else(|| panic!("no {name} in {line}"))
+            .parse()
+            .expect("number")
+    };
+    let pools = stderr
+        .lines()
+        .filter(|line| line.starts_with("[losat-thread-pool] program=tblastn "))
+        .count();
+    (field("batches="), field("own_pools="), pools)
+}
+
+// EXPERIMENT (LOSAT_X_TBNOWNPOOLS, opt-in): the batches the rule leaves one after another (two or
+// more, fewer than the threads, one small subject here) are searched at the same time, each on a
+// pool of its own with its share of the threads. NCBI reference (598d8ae6):
+// c++/src/app/blast/tblastn_app.cpp:275-289 (above): each batch is still searched as NCBI
+// searches it and the reports keep the batch order, so every arm must give the one-thread
+// report.
+#[test]
+fn own_pools_keep_the_one_thread_report() {
+    let (expected, _) = tblastn(1, &[]);
+    for threads in [2, 3, 5, 8, 16] {
+        let (report, stderr) = tblastn(threads, &[("LOSAT_X_TBNOWNPOOLS", "1")]);
+        assert_eq!(report, expected, "own pools, {threads} threads");
+        let full = BATCHES / threads * threads;
+        let left = BATCHES - full;
+        let own = if (2..threads).contains(&left) {
+            left
+        } else {
+            0
+        };
+        assert_eq!(
+            own_pools(&stderr),
+            (BATCHES, own, 1 + own),
+            "own pools, {threads} threads"
+        );
+        // Without the switch no batch goes to a pool of its own.
+        let (_, stderr) = tblastn(threads, &[]);
+        assert_eq!(
+            own_pools(&stderr),
+            (BATCHES, 0, 1),
+            "default, {threads} threads"
+        );
+    }
+    // The rule decides which batches are left: without it, no pools of their own.
+    let (report, stderr) = tblastn(
+        8,
+        &[("LOSAT_X_TBNOWNPOOLS", "1"), ("LOSAT_X_TBNBATCHRULE", "0")],
+    );
+    assert_eq!(report, expected, "own pools without the rule");
+    assert_eq!(
+        own_pools(&stderr),
+        (BATCHES, 0, 1),
+        "own pools without the rule"
+    );
+}
+
+// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): two query batches (fewer than four, so the subject plans are
+// not shared and no batch goes side by side) on pools of their own at four threads.
+#[test]
+fn own_pools_without_shared_subject_plans_keep_the_one_thread_report() {
+    let fasta = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta");
+    let text = std::fs::read_to_string(fasta.join("PemoMJNVA.faa")).expect("query");
+    // The records up to 25,000 residues: two batches of NCBI's reader (20,000 residues each).
+    let mut kept = String::new();
+    let mut residues = 0;
+    for record in text.split_inclusive('>').filter(|r| *r != ">") {
+        let record = format!(">{}", record.trim_end_matches('>'));
+        residues += record
+            .lines()
+            .skip(1)
+            .map(|line| line.trim().len())
+            .sum::<usize>();
+        kept.push_str(&record);
+        if residues > 25_000 {
+            break;
+        }
+    }
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("tblastn_batch_rule");
+    std::fs::create_dir_all(&dir).expect("work directory");
+    let query = dir.join("two_batches.faa");
+    std::fs::write(&query, kept).expect("query file");
+    let (expected, _) = tblastn_query(&query, 1, &[]);
+    assert!(!expected.is_empty(), "the search must report hits");
+    let (report, stderr) = tblastn_query(&query, 4, &[("LOSAT_X_TBNOWNPOOLS", "1")]);
+    assert_eq!(report, expected, "own pools, two batches");
+    assert_eq!(own_pools(&stderr), (2, 2, 3), "own pools, two batches");
 }

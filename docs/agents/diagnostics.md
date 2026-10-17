@@ -1685,6 +1685,27 @@ Scheduling (each value computed by one thread with the original function; order 
   (cycles 96.9 G -> 93.4 G), the same CPU time on the many-protein ones. An AVX2 form of the loop
   (`vpgatherdd` of the presence words) cut instructions by a third but was 2-7 % slower (IPC 3.6 ->
   2.3) and is not used.
+- `LOSAT_X_TBNLINKWIN=1` tblastn (speed; not in the strict set: off unless set, to any value;
+  `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list
+  (`stage_d_linking.rs` `link_preliminary_hsps`, NCBI's `s_BlastUnevenGapLinkHSPs`) tests only the
+  candidates of a head set that can be admissible. NCBI tests every HSP in the head's query-offset
+  window; with a short query that is nearly the whole list (a 411-residue protein x the human genome:
+  85,908 HSPs, 159 million admissibility tests, 13 links). An admissible merged set has increasing
+  subject starts, each at most `longest_intron` after the end before it, so a set whose subject
+  range lies more than `longest_intron` from the head set's cannot be admissible. The HSPs alone in
+  their set are looked up by context, frame sign and subject start, the HSPs of linked sets are always
+  kept, and the candidates are tested in NCBI's order with NCBI's tests, so every link, number and
+  E-value is NCBI's (unit test `x_chosen_candidates_give_the_links_of_the_whole_window` against the
+  whole window on random lists). Shadow: `LOSAT_X_TBNLINKWINSHADOW=1` (with the switch) tests each
+  head's whole window as well and stops (panic) if an admissible candidate was not chosen. With
+  `LOSAT_X_STATS=1` a line `[X_STATS] TBNLINKWIN heads= window= chosen= shadow_heads=` gives the
+  heads, the candidates of their windows and the candidates tested. blastx keeps its own linking.
+  Timed on the workstation (perf-si-20261012 session 21, node 1, NCBI BLAST+ 2.17.0 `-db` and LOSAT
+  with `LOSAT_X_TBNSCANBF` without and with the switch in turn, three rounds, one hash per case;
+  time with the switch / without): zebrafish genome x one protein 0.60 at one thread (24.8 -> 14.8
+  s, NCBI 31.3 s); human genome x one protein 0.87 at one thread (32.3 -> 28.0 s, NCBI 44.9 s) and
+  at 8 threads (5.10 -> 4.46 s); fly genome x one batch at 8 threads 0.76 (4.04 -> 3.06 s); E. coli
+  MG1655 x 16 batches at 8 threads 0.95.
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject` without `-subject_loc`: each subject record's letters are
   packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
   database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of

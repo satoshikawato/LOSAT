@@ -15,8 +15,16 @@
 //! slots), dc-megablast's `LOSAT_X_PAIRPARDISC` inside a slot's pool, and the shadow
 //! (`LOSAT_X_QBATCHPARSHADOW`), which also compares every batch taken from a slot with the loop's
 //! own search of it. With `LOSAT_X_STATS` the summary line (`[X_STATS] QBATCHPAR ...`) shows that
-//! the slots' path ran (`precomputed=` batches taken from a slot), or why it did not. That the
-//! bytes equal NCBI's is the business of the BLASTN fixtures.
+//! the slots' path ran (`precomputed=` batches taken from a slot), or why it did not, and which
+//! layout the slot model judged (`units=`, `rule_k=`, `rule_m=`, `predicted=`). That the bytes
+//! equal NCBI's is the business of the BLASTN fixtures.
+//!
+//! The slot model (`choose_slots`) keeps the loop on many of the small megablast and
+//! dc-megablast inputs here at four threads, and where it chooses slots for them it does so by a
+//! few percent (predicted 0.93-0.96 of the loop's span against its 0.97 gate, depending on the
+//! parity of the batch count), so the tests whose property needs the slots' path on those inputs
+//! set two slots (`SLOTS2`) or four; the `-task blastn` tests and
+//! `the_rule_chooses_the_slots_on_whole_runs` run on the model's own choice.
 //!
 //! The queries are 32 pieces of LC738874 and the subject LC738868 (one subject, so its 5 Mb work
 //! units are fewer than the threads). `-task blastn` runs on pieces of LC738884 with one query
@@ -33,6 +41,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const SWITCH: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_QBATCHPARSHADOW", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
+/// Two slots (`LOSAT_X_QBATCHPARSLOTS`, tuning), whatever the slot model would choose.
+const SLOTS2: (&str, &str) = ("LOSAT_X_QBATCHPARSLOTS", "2");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -261,7 +271,12 @@ fn every_outfmt_and_batch_size_gives_the_reports_without_the_switch() {
                 ];
                 let env: Vec<(&str, &str)> =
                     batch.map(|size| ("BATCH_SIZE", size)).into_iter().collect();
-                let run = same_as_without(&args, &env, &[SWITCH]);
+                let switches: &[(&str, &str)] = if batch == Some("1") {
+                    &[SWITCH, SLOTS2]
+                } else {
+                    &[SWITCH]
+                };
+                let run = same_as_without(&args, &env, switches);
                 if batch == Some("1") {
                     assert_eq!(run.stat("batches"), 32, "{task} {outfmt}");
                     assert!(
@@ -301,7 +316,7 @@ fn the_mixers_tiny_and_full_batches_are_taken_from_the_slots() {
     let run = same_as_without(&args, &env, &[SWITCH, ("LOSAT_X_QBATCHPARSLOTS", "2")]);
     assert!(run.stat("batches") >= 6, "{}", run.stderr);
     assert!(run.stat("precomputed") > 0, "{}", run.stderr);
-    let run = same_as_without(&args, &env, &[SHADOW]);
+    let run = same_as_without(&args, &env, &[SHADOW, SLOTS2]);
     let shadow = run.summary("[X_SHADOW] QBATCHPAR");
     assert_ne!(shadow["compared"], "0", "{}", run.stderr);
     assert_eq!(shadow["diffs"], "0");
@@ -332,7 +347,7 @@ fn one_target_sequence_gives_the_reports_without_the_switch() {
                 "-num_threads",
                 "4",
             ];
-            let run = same_as_without(&args, &[("BATCH_SIZE", "3000")], &[SWITCH]);
+            let run = same_as_without(&args, &[("BATCH_SIZE", "3000")], &[SWITCH, SLOTS2]);
             assert!(
                 run.stat("precomputed") > 0,
                 "{task} {outfmt}: {}",
@@ -377,7 +392,7 @@ fn errors_as_without_the_switch(query: &TempFasta, subject: &str, extra: &[&str]
                     ("LOSAT_X_QBATCHPARSLOTS", "2"),
                     ("LOSAT_X_QBATCHPARMISS", "2"),
                 ],
-                vec![SHADOW],
+                vec![SHADOW, SLOTS2],
             ] {
                 let mut with = env.to_vec();
                 with.extend_from_slice(&switches);
@@ -454,7 +469,7 @@ fn an_error_inside_a_batch_with_slots_past_it_comes_as_without_the_switch() {
         "-num_threads",
         "4",
     ];
-    let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SWITCH]);
+    let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SWITCH, SLOTS2]);
     assert_eq!(run.stat("precomputed"), 1, "{}", run.stderr);
     assert_eq!(run.stat("batches"), 1, "{}", run.stderr);
 }
@@ -495,7 +510,7 @@ fn mispredicted_batches_are_discarded() {
         let run = same_as_without(
             &args,
             &[("BATCH_SIZE", "1")],
-            &[SHADOW, ("LOSAT_X_QBATCHPARMISS", every)],
+            &[SHADOW, SLOTS2, ("LOSAT_X_QBATCHPARMISS", every)],
         );
         let shadow = run.summary("[X_SHADOW] QBATCHPAR");
         assert_eq!(shadow["diffs"], "0");
@@ -520,7 +535,7 @@ fn the_shadow_compares_every_batch_taken_from_a_slot() {
             "-num_threads",
             "4",
         ];
-        let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SHADOW]);
+        let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SHADOW, SLOTS2]);
         let shadow = run.summary("[X_SHADOW] QBATCHPAR");
         assert_eq!(shadow["diffs"], "0");
         assert_eq!(shadow["compared"], run.stat("precomputed").to_string());
@@ -619,7 +634,7 @@ fn timing_blocks_come_in_batch_order() {
         reference.stderr
     );
     for switches in [
-        vec![SWITCH],
+        vec![SWITCH, ("LOSAT_X_QBATCHPARSLOTS", "4")],
         vec![
             SWITCH,
             ("LOSAT_X_QBATCHPARSLOTS", "2"),
@@ -670,7 +685,7 @@ fn the_switch_writes_nothing_of_its_own() {
             "{}",
             reference.stderr
         );
-        let run = blastn(&args, &[env[0], SWITCH]);
+        let run = blastn(&args, &[env[0], SWITCH, SLOTS2]);
         assert_eq!(run.code, reference.code);
         assert!(run.stdout == reference.stdout, "{threads}");
         assert_eq!(run.stderr, reference.stderr, "{threads}");
@@ -694,9 +709,9 @@ fn warnings_of_later_batches_come_as_without_the_switch() {
             "-num_threads",
             "4",
         ];
-        let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SWITCH]);
+        let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SWITCH, SLOTS2]);
         assert!(run.stat("precomputed") > 0, "{}", run.stderr);
-        let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SHADOW]);
+        let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SHADOW, SLOTS2]);
         assert_eq!(run.summary("[X_SHADOW] QBATCHPAR")["diffs"], "0");
     }
 }
@@ -778,6 +793,89 @@ fn blastn_task_with_several_queries_per_batch_gives_the_reports_without_the_swit
     }
 }
 
+// The slot model on whole runs (no `LOSAT_X_QBATCHPARSLOTS`), at four threads: `-task blastn`
+// with batches of 10,000 letters (eight batches, six units after the first: 2 x 2 predicted at
+// 0.88 of the loop) takes the slots; megablast with one query per batch (25 units: the best,
+// 2 x 2, predicted at 0.99) and dc-megablast's mixer with one 50 kb query among the 2-4 kb ones
+// (`CHUNK_SIZE=21000`: one unit after the first batch) keep the loop. The reports are those
+// without the switch either way, and the summary line states the units, the layout judged and
+// its prediction.
+#[test]
+fn the_rule_chooses_the_slots_on_whole_runs() {
+    let subject = fixture("LC738868.fasta");
+    let subject = subject.to_str().expect("UTF-8 path");
+    let blastn_queries = TempFasta::new("q", &pieces("LC738884.fasta"));
+    let warned = queries_with_warnings();
+    let mut records = queries();
+    let long = genome("LC738874.fasta")[100_000..150_000].to_vec();
+    records.insert(10, ("long 50 kb".to_string(), long));
+    let with_long = TempFasta::new("q", &records);
+    // (task, query, variables, expected off, units, judged layout)
+    let cases = [
+        (
+            "blastn",
+            &blastn_queries,
+            vec![("BATCH_SIZE", "10000")],
+            "none",
+            6,
+            Some((2, 2)),
+        ),
+        (
+            "megablast",
+            &warned,
+            vec![("BATCH_SIZE", "1")],
+            "model",
+            25,
+            Some((2, 2)),
+        ),
+        (
+            "dc-megablast",
+            &with_long,
+            vec![("CHUNK_SIZE", "21000")],
+            "single",
+            1,
+            None,
+        ),
+    ];
+    for (task, query, env, off, units, layout) in cases {
+        let args = [
+            "-task",
+            task,
+            "-query",
+            path(query),
+            "-subject",
+            subject,
+            "-outfmt",
+            "6",
+            "-num_threads",
+            "4",
+        ];
+        let run = same_as_without(&args, &env, &[SWITCH]);
+        let fields = run.summary("[X_STATS] QBATCHPAR");
+        let what = format!("{task}: {}", run.stderr);
+        assert_eq!(fields["off"], off, "{what}");
+        assert_eq!(run.stat("units"), units, "{what}");
+        let judged = (run.stat("rule_k") as usize, run.stat("rule_m") as usize);
+        match layout {
+            None => {
+                assert_eq!(judged, (0, 0), "{what}");
+                assert_eq!(fields["predicted"], "-", "{what}");
+            }
+            Some(layout) => {
+                assert_eq!(judged, layout, "{what}");
+                let predicted: f64 = fields["predicted"].parse().expect("a ratio");
+                assert_eq!(predicted < 0.97, off == "none", "{what}");
+            }
+        }
+        if off == "none" {
+            assert_eq!((run.stat("k"), run.stat("m")), (2, 2), "{what}");
+            assert_eq!(run.stat("precomputed"), run.stat("batches") - 1, "{what}");
+        } else {
+            assert_eq!((run.stat("k"), run.stat("precomputed")), (0, 0), "{what}");
+        }
+    }
+}
+
 // A batch that NCBI splits into query chunks, searched in a slot: a 50,000-letter record in the
 // middle of the input with `CHUNK_SIZE=21000` (a batch of more than 41,800 letters is split).
 // With `BATCH_SIZE=1` the record is a batch of its own; with the mixer (dc-megablast, whose
@@ -805,9 +903,9 @@ fn a_batch_split_into_query_chunks_in_a_slot() {
         ];
         let mut env = vec![("CHUNK_SIZE", "21000")];
         env.extend(batch.map(|size| ("BATCH_SIZE", size)));
-        let run = same_as_without(&args, &env, &[SWITCH]);
+        let run = same_as_without(&args, &env, &[SWITCH, SLOTS2]);
         assert!(run.stat("precomputed") > 0, "{task}: {}", run.stderr);
-        let run = same_as_without(&args, &env, &[SHADOW]);
+        let run = same_as_without(&args, &env, &[SHADOW, SLOTS2]);
         assert_eq!(run.summary("[X_SHADOW] QBATCHPAR")["diffs"], "0");
     }
 }
@@ -844,14 +942,14 @@ fn skipped_records_and_an_out_file_give_the_reports_without_the_switch() {
         assert_eq!(reference.code, Some(0), "{}", reference.stderr);
         let expected = std::fs::read(&out).expect("read -out");
         assert!(!expected.is_empty());
-        let run = blastn(&args, &[env[0], SWITCH]);
+        let run = blastn(&args, &[env[0], SWITCH, SLOTS2]);
         assert_eq!(run.code, reference.code);
         assert_eq!(run.stderr, reference.stderr);
         assert!(
             std::fs::read(&out).expect("read -out") == expected,
             "{outfmt}: -out"
         );
-        let run = blastn(&args, &[env[0], SWITCH, STATS]);
+        let run = blastn(&args, &[env[0], SWITCH, SLOTS2, STATS]);
         assert!(run.stat("precomputed") > 0, "{}", run.stderr);
         assert!(
             std::fs::read(&out).expect("read -out") == expected,

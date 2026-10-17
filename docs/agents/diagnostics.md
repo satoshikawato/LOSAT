@@ -1532,7 +1532,8 @@ Scheduling (each value computed by one thread with the original function; order 
   mispredicted= wasted=`. `LOSAT_X_QBATCHPARMISS=N` (test
   only) corrupts every N-th prediction. A slot's panic is kept and resumed only if the loop takes its
   batch; the release profile aborts on a panic, so there a panic in a batch a slot searches ends the
-  process (no slot runs while output is written, which the writers check with debug assertions). Past an
+  process (no slot runs while output is written, which the writers check with debug assertions; the batch
+  writes of `LOSAT_X_RPTSTREAM` are the exception, see there). Past an
   error at batch j, the slots may have searched up to the plan's window (2k - 1 batches) before it is
   known; once it is known, at most k - 1 still run and are cancelled when the loop meets j. With debug assertions, a check after the slots are
   joined fails if a slot started rayon's global pool. The counters and `LOSAT_TIMING` end-of-run lines of
@@ -1540,6 +1541,66 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_DPCAPTURE` files count the work of the slots' threads too, discarded batches included, so
   they differ from a run without the switch. Tests: the unit tests of `x_qbatch_par.rs` and
   `LOSAT/tests/blastn_qbatchpar.rs`.
+- `LOSAT_X_RPTSTREAM=1` (BLASTN, all tasks, `-subject` and `-db`, memory and speed; not in the strict set:
+  off unless set to any value, whatever `LOSAT_X_DEFAULT` says) the batch loop of `run_in_pool` writes the
+  reports of each query batch right after it has taken the batch (in batch order, also when
+  `LOSAT_X_QBATCHPAR` slots finish out of order: the loop's in-order take is unchanged), finished its lists
+  (`-db`) and given its gie to the mixer, and drops its final hit lists; after the loop it writes the
+  epilogs (NCBI prints each batch's result sets in its batch loop and `PrintEpilog` after it,
+  blastn_app.cpp:277-318). Without the switch the loop keeps the final lists of every batch and writes all
+  reports once after the loop (`blastn/blast_engine/x_rpt_stream.rs`, exactness argument in its header).
+  The same report code runs per batch (`write_reports`, with the batch's queries, lists numbered from 0, its
+  per-query values and its part of the `-query_loc` placements); what is not per query is the outfmt 0
+  prolog (before the search, as before), the outfmt 0 epilog (fixed inputs) and outfmt 7's last line, which
+  counts the queries of every batch (NCBI's `m_QueriesFormatted`; `write_output_blastn_hitlists_to_writer`
+  takes the count). A subject set's tabular ids, outfmt 0 titles and `-lcase_masking` masks are made once.
+  NCBI's errors of a later batch (reader errors, an `eEOF` batch, a batch of queries without letters,
+  `ErrorAfterInvalidBatches`, a header file that cannot be read) come after the reports of the batches
+  before in both paths. LOSAT's own refusals come before every report without the switch, so the switch
+  acts only where none can come after the first batch; otherwise the reports stay after the loop, and
+  `off=` names why: `outputs` (hit records, a format observer or a file sink: the Web adapter; the command
+  line and ABI v1 are streamed), `debug` (`-verbose`, `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`,
+  `LOSAT_DEBUG_COORDS[_START]`, the blastn trace, `LOSAT_WASI_THREADS_DEBUG`), `scoring` (no
+  Karlin-Altschul values, or greedy gap costs LOSAT refuses), `chunk_size` (a negative `CHUNK_SIZE`),
+  `search_space` (`(db + n (2 q + 1)) (2 q + 1)` above 2^63 - 1, q the longest query: the overflow refusal
+  of the effective search space), `subject_ids` (a subject whose tabular id LOSAT refuses), `titles` (with
+  `-db`, a definition line that does not read as the reports read it, holds a byte outside ' ' ..= '~' or
+  gives no tabular id: every title is read before the search, in the pool, as blastp's block search does).
+  With `LOSAT_TIMING` the `[TIMING]` blocks are printed when the loop takes a batch, as before, so with the
+  switch a block comes after the query warnings of the batches before it. With `LOSAT_X_QBATCHPAR` the
+  batch writes run while the slots search the batches ahead (the slots write nothing; the error paths
+  still stop every slot before they write), so a slot's panic, which ends a release build at once, ends
+  it after the reports of the batches taken so far. Shadow: `LOSAT_X_RPTSTREAMSHADOW=1` (implies the
+  switch) keeps the off path's lists and values, copies every byte that the batch writes send to each
+  format and to standard error, and at the end of the search (and on the error paths that write the
+  reports of the batches before, and on LOSAT's errors of a batch, where the off path writes none) writes
+  the reports the off path's way into memory and compares: a difference prints `[X_SHADOW] RPTSTREAM
+  batches= checks= DIFFERENT (...)` and panics; at the end of the search `[X_SHADOW] RPTSTREAM batches=
+  bytes= checks= off= identical` (batches written by the loop, bytes compared, comparisons, why the switch
+  did not act or `none`). With `LOSAT_X_STATS` and the switch, `[X_STATS] RPTSTREAM batches= queries=
+  off=`. Measured on the workstation (2x Xeon Gold 6338, powersave, node 1 CPUs 32-47 with the
+  siblings idle, `numactl --membind`; D. melanogaster cDNAs against 3 Mb of chromosome 2L, `-subject`,
+  `-outfmt 6 -out FILE`; both arms with `LOSAT_X_PAIRPARDISC`, `QBATCHPAR`, `DIAGLV`, `PAIRPARFOLD`,
+  `QDUSTPAR` and `DISCLUTPAR`, one binary, the arms alternating with the order rotated per round and a warm-up
+  run before each 16-thread cell; every output has its expected sha256), on/off as the median of the
+  per-round ratios: 31,168 cDNAs with blastn (91 batches, 1,020,023 rows): 1 thread 71.3 -> 71.7 s (1.006,
+  one run each), max RSS 502 -> 157 MiB (NCBI BLAST+ 2.17.0 `-db` 126 MiB, in another window); 4 threads
+  20.54 -> 20.00 s (0.974, 2 rounds), 638 -> 295 MiB; 16 threads 7.37 -> 6.13 s (0.831, 3 rounds: the serial
+  write of all reports after the loop now runs while the slots search), 1,076 -> 775 MiB. The same queries
+  with dc-megablast (37 batches), 16 threads: 3.48 -> 3.47 s (0.992), 503 -> 489 MiB; 1,775 cDNAs with blastn
+  (6 batches), 16 threads: 0.568 -> 0.543 s (0.963), 329 / 330 MiB; with dc-megablast (3 batches), 16
+  threads: 0.392 -> 0.406 s (1.033, 3 rounds) and in 8 more rounds of another window (1.8 GHz) 0.534 / 0.534
+  s (0.998, 0.958..1.096), 103-104 MiB either way. What is left of the 1-thread memory is mostly the query
+  file (about 94 MiB of records, held for the whole run). Shrinking a batch's lists to their length (the
+  prototype `LOSAT_X_HELDSHRINK` of `tmp/split3`) adds nothing with the switch on: 157 MiB at 1 thread either
+  way, 777 / 782 MiB at 16 threads (medians of 3, spread 767-792). Tests: the unit tests of `x_rpt_stream.rs` (a batch's part of the query
+  input, the shadow's tees) and `database.rs`
+  (`streaming_is_allowed_only_when_every_title_reads_and_is_reported`), and
+  `LOSAT/tests/blastn_report_stream.rs` (off / on / shadow equal in exit status, report or `-out` file, and
+  standard error, with `BATCH_SIZE` 4,000: the three tasks x outfmt 0, 6, 7 x 1 and 4 threads; `-out`
+  files and `LOSAT_X_QBATCHPAR` slots; `-query_loc`, `-subject_loc -lcase_masking`, `-max_target_seqs
+  -max_hsps -subject_besthit`; a reader error and a batch of queries without letters after earlier
+  batches; `-db`; and the `subject_ids`, `search_space`, `scoring`, `chunk_size` and `debug` cases).
 - `LOSAT_X_TBNPAR=1` tblastn: preliminary stage per (frame, chunk) and redo per match in
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
 - `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE` and its kept translations, so four or more query

@@ -93,14 +93,8 @@ Each switch of the strict set gives the reference result by construction (the sa
 results, or the same floating-point operations in the same order, or only a change of order,
 placement or reuse), so none of them changes the output. Until main 62102f7a every switch was
 off unless its variable was set. Since `perf/strict-default` (2026-10-12) the switches of the
-strict set are on by default (43 then, 72 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPINPLACE`,
-`LOSAT_X_SEEDBUCKET`, `LOSAT_X_TBNOIDCHUNK`, `LOSAT_X_SEEDRELEASE`, `LOSAT_X_GREEDYFUSE`,
-`LOSAT_X_LINKSORT`, `LOSAT_X_NEWTONLANES8`, `LOSAT_X_TBNSTATE`, `LOSAT_X_TBNXLATE`,
-`LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_LINKSLICES`, `LOSAT_X_BPSUBJRUN`,
-`LOSAT_X_TBNSTORE`, `LOSAT_X_DPNEON`, `LOSAT_X_TBNBATCHRULE` and the eight blastp switches
-`LOSAT_X_BPSEED`, `LOSAT_X_BPUNGAP`, `LOSAT_X_BPGAP`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPFREE`,
-`LOSAT_X_BPPCOMPACT`, `LOSAT_X_BPREDOFIT` and `LOSAT_X_BPQBLOCK`, `LOSAT_X_BNSTREAM`,
-`LOSAT_X_TBXNEXT` and `LOSAT_X_TBXFRAMES`, and `LOSAT_X_BPDIAG` joined), and their variables mean
+strict set are on by default (43 at first; the block below lists the set as it is now), and
+their variables mean
 (`LOSAT/src/utils/xswitch.rs`):
 
 | `LOSAT_X_<NAME>` | `LOSAT_X_DEFAULT` | the switch is |
@@ -141,47 +135,92 @@ strict set are on by default (43 then, 72 since `LOSAT_X_PAIRLUT`, `LOSAT_X_HSPI
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The 72 single variables are
-  to be removed once the default has run on every CI environment and through a few releases;
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The single variables are to be
+  removed once the default has run on every CI environment and through a few releases;
   `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
   the set.
 
 The strict set (the variables that are on; `STRICT_SET` in `xswitch.rs`), written as the
-environment that turned it on before the change. The three numbers are the built-in values:
+environment that turned it on before the change, one variable per line in the order of
+`STRICT_SET` (by name; a unit test in `xswitch.rs` compares the two). The four numbers are the
+built-in values. A switch that joins the set adds its line here, in order, and says since when
+and on what evidence in its own entry below; it adds no paragraph after this block and no
+count of the set anywhere, so that two pull requests that each add a switch do not conflict:
 
 ```bash
-export LOSAT_X_DPFAST=1 LOSAT_X_COMPFAST=1 LOSAT_X_PURGEFAST=1 LOSAT_X_ITREEFAST=1 LOSAT_X_CTXFAST=1
-export LOSAT_X_GREEDYFAST=1 LOSAT_X_GREEDYSPEC=1 LOSAT_X_AHEAD=16 LOSAT_X_ENVCACHE=1
-export LOSAT_X_DUSTFAST=1 LOSAT_X_DUSTRING=1 LOSAT_X_MBDELAY=1 LOSAT_X_MBBATCH=64
-export LOSAT_X_SEGFAST=1 LOSAT_X_SEGMEMO=1 LOSAT_X_SEGSHARE=1 LOSAT_X_KARLINFAST=1 LOSAT_X_IDEALMEMO=1
-export LOSAT_X_ERFMEMO=1 LOSAT_X_DEKKER=1 LOSAT_X_LUTARENA=1 LOSAT_X_LUTSPLIT=1
-export LOSAT_X_TBNPAR=1 LOSAT_X_TBNEVENTS=1 LOSAT_X_TBNQSIDE=1 LOSAT_X_TBNSSIDE=1 LOSAT_X_TBNBATCH=1
-export LOSAT_X_BXPAR=1 LOSAT_X_BXLAZYCTX=1 LOSAT_X_BXLEAN=1 LOSAT_X_BXPOOL=1 LOSAT_X_BXCHUNK=64 LOSAT_X_BXBATCH=1
-export LOSAT_X_CODONFAST=1
-export LOSAT_X_NEWTONEXACT=1
-export LOSAT_X_DPAVX2=1 LOSAT_X_DPW128=1
-export LOSAT_X_BXLUT=1 LOSAT_X_BXSCAN=1 LOSAT_X_BXSEGMEMO=1
-export LOSAT_X_PAIRPAR=1 LOSAT_X_NEWTONLANES=1 LOSAT_X_GREEDYPRELIM=1
-export LOSAT_X_PAIRLUT=1 LOSAT_X_HSPINPLACE=1
-export LOSAT_X_SEEDBUCKET=1
-export LOSAT_X_TBNOIDCHUNK=1
-export LOSAT_X_SEEDRELEASE=1
-export LOSAT_X_GREEDYFUSE=1
-export LOSAT_X_LINKSORT=1
-export LOSAT_X_NEWTONLANES8=1
-export LOSAT_X_TBNSTATE=1 LOSAT_X_TBNXLATE=1
-export LOSAT_X_TBNOIDNEXT=1 LOSAT_X_TBNOIDUNITS=1
-export LOSAT_X_LINKSLICES=1
-export LOSAT_X_BPSUBJRUN=1
-export LOSAT_X_TBNSTORE=1
-export LOSAT_X_DPNEON=1
-export LOSAT_X_TBNBATCHRULE=1
-export LOSAT_X_BPSEED=1 LOSAT_X_BPUNGAP=1 LOSAT_X_BPGAP=1 LOSAT_X_BPLUT=1
-export LOSAT_X_BPPFREE=1 LOSAT_X_BPPCOMPACT=1 LOSAT_X_BPREDOFIT=1 LOSAT_X_BPQBLOCK=50000
+export LOSAT_X_AHEAD=16
 export LOSAT_X_BNSTREAM=1
-export LOSAT_X_TBXNEXT=1 LOSAT_X_TBXFRAMES=1
 export LOSAT_X_BPDIAG=1
+export LOSAT_X_BPGAP=1
+export LOSAT_X_BPLUT=1
+export LOSAT_X_BPPCOMPACT=1
+export LOSAT_X_BPPFREE=1
+export LOSAT_X_BPQBLOCK=50000
+export LOSAT_X_BPREDOFIT=1
+export LOSAT_X_BPSEED=1
+export LOSAT_X_BPSUBJRUN=1
+export LOSAT_X_BPUNGAP=1
+export LOSAT_X_BXBATCH=1
+export LOSAT_X_BXCHUNK=64
+export LOSAT_X_BXLAZYCTX=1
+export LOSAT_X_BXLEAN=1
+export LOSAT_X_BXLUT=1
+export LOSAT_X_BXPAR=1
+export LOSAT_X_BXPOOL=1
+export LOSAT_X_BXSCAN=1
+export LOSAT_X_BXSEGMEMO=1
+export LOSAT_X_CODONFAST=1
+export LOSAT_X_COMPFAST=1
+export LOSAT_X_CTXFAST=1
+export LOSAT_X_DEKKER=1
+export LOSAT_X_DPAVX2=1
+export LOSAT_X_DPFAST=1
+export LOSAT_X_DPNEON=1
+export LOSAT_X_DPW128=1
+export LOSAT_X_DUSTFAST=1
+export LOSAT_X_DUSTRING=1
+export LOSAT_X_ENVCACHE=1
+export LOSAT_X_ERFMEMO=1
+export LOSAT_X_GREEDYFAST=1
+export LOSAT_X_GREEDYFUSE=1
+export LOSAT_X_GREEDYPRELIM=1
+export LOSAT_X_GREEDYSPEC=1
+export LOSAT_X_HSPINPLACE=1
+export LOSAT_X_IDEALMEMO=1
+export LOSAT_X_ITREEFAST=1
+export LOSAT_X_KARLINFAST=1
+export LOSAT_X_LINKSLICES=1
+export LOSAT_X_LINKSORT=1
+export LOSAT_X_LUTARENA=1
+export LOSAT_X_LUTSPLIT=1
+export LOSAT_X_MBBATCH=64
+export LOSAT_X_MBDELAY=1
+export LOSAT_X_NEWTONEXACT=1
+export LOSAT_X_NEWTONLANES=1
+export LOSAT_X_NEWTONLANES8=1
+export LOSAT_X_PAIRLUT=1
+export LOSAT_X_PAIRPAR=1
+export LOSAT_X_PURGEFAST=1
+export LOSAT_X_SEEDBUCKET=1
+export LOSAT_X_SEEDRELEASE=1
+export LOSAT_X_SEGFAST=1
+export LOSAT_X_SEGMEMO=1
+export LOSAT_X_SEGSHARE=1
+export LOSAT_X_TBNBATCH=1
+export LOSAT_X_TBNBATCHRULE=1
+export LOSAT_X_TBNEVENTS=1
+export LOSAT_X_TBNOIDCHUNK=1
+export LOSAT_X_TBNOIDNEXT=1
+export LOSAT_X_TBNOIDUNITS=1
+export LOSAT_X_TBNPAR=1
+export LOSAT_X_TBNQSIDE=1
+export LOSAT_X_TBNSSIDE=1
+export LOSAT_X_TBNSTATE=1
+export LOSAT_X_TBNSTORE=1
+export LOSAT_X_TBNXLATE=1
+export LOSAT_X_TBXFRAMES=1
+export LOSAT_X_TBXNEXT=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,

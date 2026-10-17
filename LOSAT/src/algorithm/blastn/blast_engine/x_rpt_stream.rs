@@ -146,6 +146,13 @@ fn mode() -> u8 {
     })
 }
 
+/// Whether the switch (or its shadow) is set: the reports may be written batch by batch, so a
+/// batch's query records need not outlive the batch (LOSAT_X_QSTREAM reads them per batch only
+/// then, `x_query_stream`).
+pub(super) fn switch_on() -> bool {
+    mode() != 0
+}
+
 /// Why the reports of a search are written after its batch loop (`Stream::start`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Off {

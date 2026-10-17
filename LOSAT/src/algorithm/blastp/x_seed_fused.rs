@@ -566,8 +566,10 @@ pub(crate) fn x_scan_two_hit<F>(
 }
 
 /// EXPERIMENT (LOSAT_X_BPSCANBF): [`x_scan_two_hit_in`] with the cells found by [`x_scan_cells_bf`].
-/// Out of line, so that the default instance in [`x_scan_two_hit`] is compiled as without the
-/// switch (with both instances inline, the default one took 0.84-1.01 of its time before).
+/// Out of line, and with a closure of its own type, so that the default instance in
+/// [`x_scan_two_hit`] and the cell tests it calls are compiled as without the switch: with the
+/// same closure type the cell test had two callers, and the default instance ran 2-6 % more
+/// instructions.
 #[inline(never)]
 fn x_scan_two_hit_bf<F>(
     mode: XDiagMode,
@@ -581,15 +583,10 @@ fn x_scan_two_hit_bf<F>(
 where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    x_scan_two_hit_in_with::<true, F>(
-        mode,
-        lookup,
-        subject,
-        subject_length,
-        table,
-        test,
-        candidate,
-    )
+    let mut own = |query_offset, subject_offset, last_hit, diff, entry: &mut DiagStruct| {
+        candidate(query_offset, subject_offset, last_hit, diff, entry)
+    };
+    x_scan_two_hit_in_with::<true, _>(mode, lookup, subject, subject_length, table, test, &mut own)
 }
 
 /// EXPERIMENT (LOSAT_X_BXDIAG): [`x_scan_two_hit`] with the cell test `mode` (blastx's choice,

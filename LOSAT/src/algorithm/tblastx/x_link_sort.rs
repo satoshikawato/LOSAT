@@ -584,11 +584,11 @@ mod tests {
                 let s_len = 4 + rng.below(3) as usize;
                 let score = 38 + rng.below(span.min(40)) as i32;
                 let mut hit = mock_hit(q0, q0 + q_len, s0, s0 + s_len, score);
-                hit.ctx_idx = rng.below(12) as usize;
-                hit.q_idx = (hit.ctx_idx / 6) as u32;
-                hit.q_frame = FRAMES[hit.ctx_idx % 6];
+                hit.ctx_idx = u32::try_from(rng.below(12)).unwrap();
+                hit.q_idx = (hit.ctx_idx as usize / 6) as u32;
+                hit.q_frame = FRAMES[hit.ctx_idx as usize % 6];
                 hit.s_frame = FRAMES[rng.below(6) as usize];
-                hit.hsp_list_order = index;
+                hit.hsp_list_order = u32::try_from(index).unwrap();
                 hit
             })
             .collect()

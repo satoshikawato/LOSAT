@@ -37,6 +37,12 @@
 //! searches a subject without that switch translates it itself and reads neither variable.
 //! `LOSAT_X_TBNXLATESHADOW` makes both translations for every such plan and stops the search
 //! if a frame, a unit or an error differs.
+//!
+//! A packed subject (`LOSAT_X_TBNSTORE`, every `-db` sequence) is translated from its packed
+//! bytes (`x_packed_frames`), 32 codons of a phase at a time with AVX2 (`LOSAT_X_TBNXLATESIMD`,
+//! in the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; elsewhere
+//! eight at a time from one word). With `LOSAT_X_STATS` set, `main` prints `[X_STATS]
+//! TBNXLATESIMD codons_vector= codons_scalar=` at exit, when a packed subject was translated.
 
 use super::search_seed::{translated_chunk_scan_ranges, XSubjectPlan};
 use crate::algorithm::tblastx::constants::SENTINEL_BYTE;
@@ -88,6 +94,9 @@ static TABLE_PLANS: AtomicU64 = AtomicU64::new(0);
 static SHADOW_PLANS: AtomicU64 = AtomicU64::new(0);
 static SHADOW_RESIDUES: AtomicU64 = AtomicU64::new(0);
 static SHADOW_ERRORS: AtomicU64 = AtomicU64::new(0);
+/// The codons of packed subjects read by the vector loop (`[0]`) and by the word loop or one at
+/// a time (`[1]`).
+static PACKED_CODONS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
 /// The summary lines (printed by `main` at exit): the shadow summary, and with LOSAT_X_STATS
 /// the number of subject plans made from the tables.
@@ -111,6 +120,12 @@ pub fn print_summary() {
             "[X_STATS] TBNXLATE table_plans={}",
             TABLE_PLANS.load(Ordering::Relaxed)
         );
+        let [vector, scalar] = PACKED_CODONS
+            .each_ref()
+            .map(|codons| codons.load(Ordering::Relaxed));
+        if vector + scalar > 0 {
+            eprintln!("[X_STATS] TBNXLATESIMD codons_vector={vector} codons_scalar={scalar}");
+        }
     }
 }
 
@@ -765,7 +780,6 @@ fn x_phase_residues(
     simd: bool,
 ) {
     assert!(phase < 3 && plus.len() == codons + 2 && minus.len() == codons + 2);
-    #[allow(unused_mut)]
     let mut done = 0;
     #[cfg(target_arch = "x86_64")]
     if simd && x_avx2_available() {
@@ -774,6 +788,8 @@ fn x_phase_residues(
     }
     #[cfg(not(target_arch = "x86_64"))]
     let _ = simd;
+    PACKED_CODONS[0].fetch_add(done as u64, Ordering::Relaxed);
+    let vector = done;
     done = match phase {
         0 => x_phase_words::<0>(packed, codons, tables, plus, minus, done),
         1 => x_phase_words::<1>(packed, codons, tables, plus, minus, done),
@@ -784,6 +800,7 @@ fn x_phase_residues(
         plus[1 + j] = tables.forward[codon];
         minus[codons - j] = tables.reverse[codon];
     }
+    PACKED_CODONS[1].fetch_add((codons - vector) as u64, Ordering::Relaxed);
 }
 
 /// EXPERIMENT (LOSAT_X_TBNSTORE): [`x_phase_residues`] by groups of eight codons from codon
@@ -815,13 +832,14 @@ fn x_phase_words<const PHASE: usize>(
     j
 }
 
-// No NCBI counterpart: reads LOSAT_X_TBNXLATESIMD once; off unless set. It does not change any
-// value NCBI computes.
+// No NCBI counterpart: reads LOSAT_X_TBNXLATESIMD once; it does not change any value NCBI
+// computes.
 /// EXPERIMENT (LOSAT_X_TBNXLATESIMD): whether a packed subject's frames are read with the
-/// vector loop (AVX2 on x86_64; elsewhere the variable changes nothing).
+/// vector loop (AVX2 on x86_64; elsewhere the variable changes nothing); a switch of the strict
+/// set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
 fn x_xlate_simd() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNXLATESIMD").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNXLATESIMD"))
 }
 
 // No NCBI counterpart: whether the CPU has AVX2; it does not change any value NCBI computes.

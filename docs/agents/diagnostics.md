@@ -114,7 +114,7 @@ their variables mean
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
   `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
   act only with `TBNPAR`; `TBNBATCHRULE` only with `TBNBATCH`; `TBNOWNPOOLS` only with `TBNBATCH`
-  and `TBNBATCHRULE`, natively; `TBNSCANBF` only with `TBNPAR`; `TBNOIDNEXT` and `TBNOIDUNITS` act
+  and `TBNBATCHRULE`, natively; `TBNSCANBF` only with `TBNPAR`; `TBNXLATESIMD` only with `TBNPAR` on a packed subject (`TBNSTORE`, `-db`) and with AVX2; `TBNOIDNEXT` and `TBNOIDUNITS` act
   only with `TBNOIDCHUNK`; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPSEED` acts on the two-hit seed stage only; `BPDIAG` acts only
   in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
@@ -218,6 +218,7 @@ export LOSAT_X_SEGSHARE=1
 export LOSAT_X_TBNBATCH=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNEVENTS=1
+export LOSAT_X_TBNLINKWIN=1
 export LOSAT_X_TBNOIDCHUNK=1
 export LOSAT_X_TBNOIDNEXT=1
 export LOSAT_X_TBNOIDUNITS=1
@@ -229,6 +230,7 @@ export LOSAT_X_TBNSSIDE=1
 export LOSAT_X_TBNSTATE=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNXLATE=1
+export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXFRAMES=1
 export LOSAT_X_TBXNEXT=1
 ```
@@ -2028,18 +2030,21 @@ Scheduling (each value computed by one thread with the original function; order 
   (`x_candidates_w3c5`, #273: cycles -6.0 % on the human and zebrafish genomes x one protein). An
   AVX2 form of the loop (`vpgatherdd` of the presence words) cut instructions by a third but was 2-7
   % slower (IPC 3.6 -> 2.3) and is not used.
-- `LOSAT_X_TBNLINKWIN=1` tblastn (speed; not in the strict set: off unless set, to any value;
-  `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list
+- `LOSAT_X_TBNLINKWIN=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule of
+  that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns it
+  off; `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list
   (`stage_d_linking.rs` `link_preliminary_hsps`, NCBI's `s_BlastUnevenGapLinkHSPs`) tests only the
   candidates of a head set that can be admissible. NCBI tests every HSP in the head's query-offset
-  window; with a short query that is nearly the whole list (a 411-residue protein x the human genome:
-  85,908 HSPs, 159 million admissibility tests, 13 links). An admissible merged set has increasing
-  subject starts, each at most `longest_intron` after the end before it, so a set whose subject
-  range lies more than `longest_intron` from the head set's cannot be admissible. The HSPs alone in
-  their set are looked up by context, frame sign and subject start, the HSPs of linked sets are always
-  kept, and the candidates are tested in NCBI's order with NCBI's tests, so every link, number and
-  E-value is NCBI's (unit test `x_chosen_candidates_give_the_links_of_the_whole_window` against the
-  whole window on random lists). Shadow: `LOSAT_X_TBNLINKWINSHADOW=1` (with the switch) tests each
+  window; with a short query that is nearly the whole list (a 411-residue protein x the human
+  genome: 85,908 HSPs, 159 million admissibility tests, 13 links). An admissible merged set has
+  increasing subject starts, each at most `longest_intron` after the end before it, so a set whose
+  subject range lies more than `longest_intron` from the head set's cannot be admissible. The HSPs
+  alone in their set are looked up by context, frame sign and subject start, the HSPs of linked sets
+  are always kept (their ranks sorted, so a head takes those in its window by two binary searches),
+  and the candidates are tested in NCBI's order with NCBI's tests; a window with no more HSPs than
+  the subject starts looked up is tested whole, as NCBI does, so every link, number and E-value is
+  NCBI's (unit test `x_chosen_candidates_give_the_links_of_the_whole_window` against the whole
+  window on random lists). Shadow: `LOSAT_X_TBNLINKWINSHADOW=1` (opt-in, with the switch) tests each
   head's whole window as well and stops (panic) if an admissible candidate was not chosen. With
   `LOSAT_X_STATS=1` a line `[X_STATS] TBNLINKWIN heads= window= chosen= shadow_heads=` gives the
   heads, the candidates of their windows and the candidates tested. blastx keeps its own linking.
@@ -2048,7 +2053,27 @@ Scheduling (each value computed by one thread with the original function; order 
   time with the switch / without): zebrafish genome x one protein 0.60 at one thread (24.8 -> 14.8
   s, NCBI 31.3 s); human genome x one protein 0.87 at one thread (32.3 -> 28.0 s, NCBI 44.9 s) and
   at 8 threads (5.10 -> 4.46 s); fly genome x one batch at 8 threads 0.76 (4.04 -> 3.06 s); E. coli
-  MG1655 x 16 batches at 8 threads 0.95.
+  MG1655 x 16 batches at 8 threads 0.95. TIMING_LW_DOC
+- `LOSAT_X_TBNXLATESIMD=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule
+  of that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns
+  it off; `tblastn/x_subject_translate.rs`): a packed subject's six frames (`TBNSTORE`, every `-db`
+  sequence; in the unit path, `TBNPAR`) are read 32 codons of a phase at a time with AVX2: the 24
+  bytes after bit 2 x phase (two loads one byte apart), every three bytes split into four six-bit
+  codons (a byte shuffle and two multiplications, as base64 encoders split bytes), each 64-residue
+  codon table of `TBNXLATE` read as four `vpshufb` tables chosen by bits 4 and 5 of the codon, and
+  the minus residues stored in reverse order. Without AVX2, and with `=0`, the codons come eight at
+  a time from one big-endian word of eight packed bytes (`x_phase_words`; NCBI's
+  `BLAST_TranslateCompressedSequence` reads three bytes per four codons, `blast_util.c:584-596`);
+  that loop replaced, with no switch, the unpacking of the codes into a buffer and the codon indices
+  made from it in a second pass. Both give the frames of `x_generate_frames` on the store's codes
+  (unit test `x_packed_frames_read_from_the_bytes_are_the_frames_of_the_codes`, every length from 0
+  to 400 bases and five long ones, three genetic codes); `LOSAT_X_TBNXLATESHADOW=1` compared 6.2 G
+  residues of the human genome with the reference translation, none different. With
+  `LOSAT_X_STATS=1` a line `[X_STATS] TBNXLATESIMD codons_vector= codons_scalar=` counts the codons
+  of each loop (`tests/tblastn_xlate_simd.rs`). perf stat on the workstation (one thread, a
+  411-residue protein x the human genome `-db`, `TBNSCANBF` and `TBNLINKWIN` on, the same output):
+  cycles 75.6 G before -> 72.0 G with the word loop -> 66.0 G with the vector loop (instructions 271
+  -> 245 -> 219 G); zebrafish genome x one protein 41.8 -> 39.9 -> 37.4 G. TIMING_SIMD_DOC
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject` without `-subject_loc`: each subject record's letters are
   packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
   database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of
@@ -2058,8 +2083,9 @@ Scheduling (each value computed by one thread with the original function; order 
   up to 1,024 records or 4 MiB of letters, handed over one at a time), so the packing does not add
   to the read; the records and their stores are those of the one-thread read, in the same order. The unit path of the preliminary
   stage (`TBNPAR`, on by default) translates a subject's six frames straight from its packed bases
-  (`x_packed_plan` in `tblastn/x_subject_translate.rs`: the codon tables of `TBNXLATE`, the 2-bit
-  codes unpacked 49,152 bases at a time, each frame filled at its residues' places), as NCBI's
+  (`x_packed_plan` in `tblastn/x_subject_translate.rs`: the codon tables of `TBNXLATE`, the codons
+  read from the packed bytes, each phase filling one plus frame forward and one minus frame
+  backward; see `TBNXLATESIMD`), as NCBI's
   `BLAST_GetAllTranslations` translates the compressed subject, so a thread holds the frames of
   the subject in hand and no letters, resolved bases or reverse complement; this is the
   translation whatever `TBNXLATE` says, and `LOSAT_X_TBNXLATESHADOW=1` also makes the reference

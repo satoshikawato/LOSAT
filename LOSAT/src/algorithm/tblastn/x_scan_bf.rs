@@ -110,12 +110,11 @@ pub(super) fn x_scan_one_range_bf(
     let mut block_first = s_first;
     while block_first <= s_last {
         let block_last = s_last.min(block_first + X_BLOCK - 1);
-        // tblastn's table (word size 3, 5-bit letters) with the shifts as constants.
-        let n = if word_length == 3 && charsize == 5 {
-            x_candidates::<3, 5>(
+        // tblastn's table (word size 3, 5-bit letters) with the shifts and the mask as constants.
+        let n = if word_length == 3 && charsize == 5 && mask == X_MASK_W3C5 {
+            x_candidates_w3c5(
                 subject,
                 pv,
-                (word_length, charsize, mask),
                 (block_first, block_last),
                 &mut index,
                 &mut cand,
@@ -171,6 +170,48 @@ pub(super) fn x_scan_one_range_bf(
     // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:125-127
     s_range[1] = (s_last + 1) as i32;
     totalhits
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSCANBF): the mask of a table of word size 3 and 5-bit letters.
+const X_MASK_W3C5: usize = (1 << 15) - 1;
+
+/// EXPERIMENT (LOSAT_X_TBNSCANBF): `x_candidates::<3, 5>` for the mask `X_MASK_W3C5`, as a
+/// counted loop over the new letters with the candidate's position kept shifted: the same
+/// rolling index (`ComputeTableIndexIncremental`), presence test and candidates.
+#[inline(always)]
+fn x_candidates_w3c5(
+    subject: &[u8],
+    pv: *const u32,
+    block: (usize, usize),
+    index: &mut usize,
+    cand: &mut [MaybeUninit<u64>; X_BLOCK],
+) -> usize {
+    let words = block.1 - block.0 + 1;
+    // SAFETY: the new letter of the word at `s` is `subject[s + 2]`, read for `s <= s_last`
+    // as NCBI's loop reads it.
+    let letters = unsafe { subject.as_ptr().add(block.0 + 2) };
+    let out = cand.as_mut_ptr().cast::<u64>();
+    let mut ix = *index;
+    let mut n = 0usize;
+    let mut position = (block.0 as u64) << 32;
+    for k in 0..words {
+        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:121-127
+        // ```c
+        // return ((index << charsize) | word[wordsize - 1]) & mask;
+        // ```
+        // SAFETY: as above.
+        let new_char = unsafe { *letters.add(k) } as usize;
+        ix = ((ix << 5) | new_char) & X_MASK_W3C5;
+        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
+        // SAFETY: `ix` is masked to the backbone space the presence vector covers.
+        let bit = (unsafe { *pv.add(ix >> PV_ARRAY_BTS) } >> (ix & PV_ARRAY_MASK)) & 1;
+        // SAFETY: `n <= k < X_BLOCK`.
+        unsafe { out.add(n).write(position | ix as u64) };
+        n += bit as usize;
+        position += 1 << 32;
+    }
+    *index = ix;
+    n
 }
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): writes the candidates of the words `block.0 ..= block.1`

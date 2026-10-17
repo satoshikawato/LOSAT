@@ -1,6 +1,7 @@
 //! EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k], off unless set; not in the strict set): the subject loop
-//! of a query chunk as a flow of tasks of `k` consecutive subjects (16 when the variable is `1`
-//! or not a number from 2 to 65,536), searched ahead by the other threads of the pool and handed
+//! of a query chunk as a flow of tasks of `k` consecutive subjects (64, as `LOSAT_X_BXCHUNK`, when
+//! the variable is `1` or not a number from 2 to 65,536), searched ahead by the other threads of
+//! the pool and handed
 //! to the sink in subject order by the thread that runs the loop. Shadow:
 //! `LOSAT_X_BXSUBJFLOWSHADOW`.
 //!
@@ -61,7 +62,7 @@ pub(super) fn subjects_per_task() -> Option<usize> {
         Some(
             text.and_then(|t| t.parse::<usize>().ok())
                 .filter(|k| (2..=65_536).contains(k))
-                .unwrap_or(16),
+                .unwrap_or(64),
         )
     })
 }

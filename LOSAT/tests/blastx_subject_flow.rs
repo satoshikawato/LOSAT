@@ -6,8 +6,8 @@
 //! to the sink after its slowest worker; with the switch the other threads search tasks of `k`
 //! consecutive subjects ahead and the loop's thread hands them to the sink in subject order. So
 //! the property under test is that the report does not depend on it: standard output equals that
-//! of the same search without the switch, for two, three and four threads, several `k` (one that
-//! divides the subject count and two that do not), outfmt 0, 6 and 7, a database (`-db`) and a
+//! of the same search without the switch, for two, three and four threads, several `k` (64, the
+//! default, and 2, 7 and 16), outfmt 0, 6 and 7, a database (`-db`) and a
 //! FASTA subject set (`-subject`), and an ungapped search (whose subjects carry link cutoffs).
 //! The shadow (`LOSAT_X_BXSUBJFLOWSHADOW`) searches every task again on another table and must
 //! find the same subjects. `LOSAT_TIMING` shows that the flow ran (and the waves did not). The
@@ -136,7 +136,7 @@ fn the_report_does_not_depend_on_the_subject_flow() {
                 "{args:?}: too few hits to test"
             );
             for threads in [2, 3, 4] {
-                for k in ["1", "2", "7", "64"] {
+                for k in ["1", "2", "7", "16"] {
                     let (report, _) = blastx(&query, &args, threads, &[("LOSAT_X_BXSUBJFLOW", k)]);
                     assert!(
                         report == reference,
@@ -194,7 +194,7 @@ fn the_flow_takes_the_subject_loop() {
     let (reference, stderr) = blastx(&query, &args, 2, &[("LOSAT_TIMING", "1")]);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
     assert!(timing(&stderr, "blastx_subject_waves", "waves") > 0);
-    // The 1,711 subjects as 107 tasks of 16, and no wave.
+    // The 1,711 subjects as 27 tasks of 64, and no wave.
     let (report, stderr) = blastx(
         &query,
         &args,
@@ -203,7 +203,7 @@ fn the_flow_takes_the_subject_loop() {
     );
     assert!(report == reference);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 1);
-    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 107);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 27);
     assert_eq!(timing(&stderr, "blastx_subject_waves", "waves"), 0);
     // One thread: no pool, so the subject loop of the waves runs (on this thread).
     let (report, stderr) = blastx(

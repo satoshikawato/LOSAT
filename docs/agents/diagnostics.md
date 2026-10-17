@@ -1258,11 +1258,16 @@ Scheduling (each value computed by one thread with the original function; order 
   plan of `LOSAT_X_PAIRPAR`'s megablast table); (B) each owner applies the loop's update to the words of
   its cells span by span, so each cell gets its words in the original order, and keeps each word's
   previous head; (C) each thread writes `next_pos` (and `next_pos2`) of the words of its span from the
-  kept heads. Each presence-vector word and counter is written by one owner (a presence bit is only
-  ever set), and `longest_chain` is computed afterwards by the original code. The buckets hold one
+  kept heads. Each presence-vector word is written by one owner (a presence bit is only ever set);
+  each owner counts the chains of its cells (the counters of the longest chain) in a private copy of
+  the counters on cache lines of its own, which the calling thread adds into the counters after the
+  last chunk (the same wrapping increments of each counter by its one owner, and nothing reads the
+  counters before the longest chain); and `longest_chain` is computed afterwards by the original code.
+  Each bucket's header sits on a 64-byte line of its own. The buckets hold one
   8-byte entry per word of the current chunk and template; before each chunk a bucket gives back the
   room it grew above four times its share of a chunk, so the buckets of one template reserve at most
-  24 MiB plus 544 bytes x threads^2 whatever the input. Measured (unit test, chunks of 524,288
+  24 MiB plus 608 bytes x threads^2 (544 of entries and the 64-byte header) whatever the input; the
+  private counters take threads x 8 KiB per template at word size 11 (threads x 32 KiB at 12). Measured (unit test, chunks of 524,288
   positions): 8 MiB per template on random letters at 4, 16 and 64 threads; 16 / 15 / 12 MiB on
   blocks of unmasked short repeats (each chunk's words on the cells of one or two owners, changing
   from chunk to chunk), where buckets that kept their room reserved 16 / 32 / 48 MiB (up to 2 x
@@ -1284,7 +1289,8 @@ Scheduling (each value computed by one thread with the original function; order 
   loop, the fill on the pool and the longest chain (seconds, summed); for the pool fills (not the
   shadow's) their chunks and, per phase (read = A, update = B, link = C) summed over the chunks, the
   calling worker's wall time, the longest job, the jobs' summed time and the latest job start; and the
-  most the buckets of one fill reserved. The jobs' times are taken only with `LOSAT_TIMING`. Measured on the workstation (2x Xeon
+  most the buckets of one fill reserved. The jobs' times are taken only with `LOSAT_TIMING`. Measured with #252's fill (before
+  the false-sharing fix below) on the workstation (2x Xeon
   Gold 6338, powersave, 16 idle physical cores of one node with the siblings idle, `numactl --membind`;
   `-outfmt 6`, subject 3 Mb of D. melanogaster 2L, `LOSAT_X_PAIRPARDISC=1`; off runs carry an unread
   `LOSAT_X_PADDISCLUTPAR=1`; build times from `LOSAT_TIMING` runs, walls from runs without it),
@@ -1308,10 +1314,34 @@ Scheduling (each value computed by one thread with the original function; order 
   fill; phase B (the owners' updates) alone sums to 2.4 and 3.9 times the loop, with balanced jobs
   (longest / mean 1.04 and 1.08); at 4 threads phase A is also costly (the longest reader 1.29 times
   the mean). The runs with the switch also have more system time (0.22 against 0.15 s at 4 threads,
-  0.90 against 0.60 s at 16). What makes a word's work dearer in the phases is not measured;
-  candidates are the first touch of the fresh tables by many threads (transparent huge pages are
-  `madvise` there, so 4 KiB page faults) and cache lines of the buckets moving between cores (written
-  in A, read and rewritten in B, read in C). Fewer joins would save at most the 0.01 s above. Fix round
+  0.90 against 0.60 s at 16). Fewer joins would save at most the 0.01 s above. The cause was false
+  sharing (perf-mb-20261014 `logs/disclutcause_report.md`: hardware counters inside the fill and
+  per-thread `getrusage` per phase, on probes of a scratch branch): in phase B the 4-byte counters of
+  `helper_array`, one per block of 2048 cells with the blocks dealt round robin, put 16 owners (16
+  threads) or 4 (4 threads) on each 64-byte line, and every word on a non-empty cell wrote one; in
+  phase A the 24-byte bucket headers of neighbouring readers shared lines, and every push stores the
+  length. That gave 3.3-4.5 million cache-line transfers between cores (HITM loads / RFOs) per fill of
+  (a), against thousands in the loop, about 80 % of them in phase B; the work per word was the loop's
+  (all jobs on one thread: 0.215 s against the loop's 0.213 s, the same cycles), remote memory was no
+  cause and the first-touch page faults (the loop's count, dearer with many threads at once) a
+  secondary one (pre-faulting the tables is a separate, smaller follow-up).
+  The fix (padded bucket headers, private counters, added once after the last chunk): on the
+  workstation (node 1 CPUs 32-47 with the siblings idle, `numactl --membind 1`, `LOSAT_X_PAIRPARDISC=1`;
+  off = the fixed binary without the switch, #252 = dev 0b7335ce with it, fix = c33d2e2a with it; per
+  input and thread count a warm-up, then rounds of the three in rotated order, 4 at 4 and 16 threads, 2
+  at 2 and 8 for the fill and 6 for the wall; fill = the split line's `loop` or `pool_fill` of
+  `LOSAT_TIMING` runs, wall from runs without it; every output has its sha256, (a) 749453559dfae63b,
+  (b) 6c12337933ef66fe) the fill took, off / #252 / fix, (a) 0.141 / 0.196 / 0.090 s at 2 threads,
+  0.171 / 0.197 / 0.083 s at 4, 0.203 / 0.127 / 0.060 s at 8, 0.201 / 0.082 / 0.049 s at 16; (b)
+  0.259 / 0.366 / 0.155, 0.368 / 0.375 / 0.151, 0.374 / 0.231 / 0.100, 0.310 / 0.154 / 0.083 s (fix /
+  #252 0.40-0.59, fix / off 0.24-0.64). So the switch now beats the loop from 2 threads on, and it needs
+  no thread threshold. The machine's one-thread speed flips between runs (powersave; walls of one
+  configuration 1.4 or 2.2 s for (a)), so walls are compared within one speed mode (runs within 10 %
+  of the group's slowest, or fastest at 2 threads): (a) at 2 / 4 / 8 / 16 threads 1.446 / 1.508 / 1.386,
+  2.203 / 2.200 / 2.070, 2.190 / 2.112 / 2.044, 2.190 / 2.062 / 2.027 s; (b) 3.037 / 3.130 / 2.925,
+  4.030 / 4.045 / 3.854, 4.244 / 4.173 / 4.044, 4.486 / 4.393 / 4.309 s: fix / #252 0.92-0.98, fix / off
+  0.93-0.96, about the fills' differences. Max RSS medians of the arms at most 2.5 MiB above the loop's
+  and within 1 MiB of #252's (88-109 MiB). Fix round
   1's bucket bound costs nothing measurable: (a) at 16 threads, 4 rounds old (24c714fd) / new
   (b1e3df69) / off, all slow phase: walls 2.056 / 2.055 / 2.174 s (new/old 1.000, 0.999-1.001; new/off
   0.945), max RSS 91.3-95.3 / 91.3-94.3 / 88.9-92.9 MiB; (b) at 16 threads one round in a common phase
@@ -1322,7 +1352,10 @@ Scheduling (each value computed by one thread with the original function; order 
   layouts of queries and masks, pools of 1, 2, 3, 5, 8 and 16 threads, a 2.6 M-position query in the
   default chunks on pools; the template indices read only the last `template_length` bases; the owners
   run on at least two workers of a 3-thread pool; the shadow names a change in any one array or the
-  longest chain; the buckets' bound) and `LOSAT/tests/blastn_disc_lookup_par.rs`
+  longest chain; the buckets' bound; the private counters give the loop's counters on pools of 2, 3, 5
+  and 16 threads also from start values that the increments wrap past u32::MAX, with blocks whose
+  counters wrap and blocks whose counters stay zero; the bucket headers and the counter copies are
+  whole 64-byte lines) and `LOSAT/tests/blastn_disc_lookup_par.rs`
   (off / on / shadow equal at 1 and 4 threads, `-subject` and `-db`, one and two templates, with
   `LOSAT_X_PAIRPARDISC`, `LOSAT_X_QBATCHPAR` slots and split query chunks, megablast with and without a
   template, the timing and split lines, and AP027131 against NZ_CP006932 with one and two templates,

@@ -165,6 +165,7 @@ export LOSAT_X_BPPCOMPACT=1
 export LOSAT_X_BPPFREE=1
 export LOSAT_X_BPQBLOCK=50000
 export LOSAT_X_BPREDOFIT=1
+export LOSAT_X_BPSCANBF=1
 export LOSAT_X_BPSEED=1
 export LOSAT_X_BPSUBJRUN=1
 export LOSAT_X_BPUNGAP=1
@@ -1091,9 +1092,9 @@ Rebuilding less:
   job 0.925-0.965, median 0.936) and the instructions 0.985; on one core in alternated pairs Blast0_6 0.920
   (`blastp_scan_ungapped` 45.0 -> 40.2 s), human block 1 0.950 and C. elegans block 5 0.963 (its gapped
   stages are over half of the job), with 13-18 % fewer branch mispredicts.
-- `LOSAT_X_BPSCANBF=1` (BLASTP, speed; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it; acts in the fused loop, `LOSAT_X_BPSEED`, on the standard lookup
-  table; the compressed table keeps its scan) blastp's fused loop finds the lookup cells with hits by the
+- `LOSAT_X_BPSCANBF=1` (BLASTP, speed; in the strict set since 2026-10-17, on by default; `=0` turns it
+  off; acts in the fused loop, `LOSAT_X_BPSEED`, on the standard lookup table; the compressed table keeps
+  its scan) blastp's fused loop finds the lookup cells with hits by the
   branch-free cell mode of `LOSAT_X_BXSCANBF` (`blastp/x_seed_fused.rs` `x_scan_cells_bf`: the positions of
   256 words listed with tblastn's `x_block_candidates`, the list advanced by the presence bit, and the listed
   cells passed to the cell test in position order), in every cell-test mode (`LOSAT_X_BPDIAG`'s AVX2 batch
@@ -1112,7 +1113,9 @@ Rebuilding less:
   G; NCBI 11.17 s). With many query proteins the presence bit is set at most words and the branch is
   predicted: 567 human proteins x the human proteome (an OrthoFinder job's first block, `-subject`,
   `-evalue 0.001`) 1.00 at one thread, every 10th Arabidopsis protein (2,763) x the yeast proteome 1.00,
-  10 proteins x volume 00 at 8 threads 0.995.
+  10 proteins x volume 00 at 8 threads 0.995. In the strict set from its first pull request (no measured
+  case slower; Owner decision of 2026-10-17 that the branch-free scans join the set once each shows no
+  loss, and plan v4's rule that a switch that wins everywhere joins in the pull request that adds it).
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; in the
   strict set since 2026-10-14; `=0` turns it off) the word loop and the
   X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte

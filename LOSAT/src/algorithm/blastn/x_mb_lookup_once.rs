@@ -55,27 +55,28 @@
 //! C of one chunk and A of the next run in the same job (reader `a` links its region, then reads
 //! the next chunk into it), so a chunk takes two `rayon::scope`s; the last scope links the last
 //! chunk and has job `o` add owner `o`'s copies into `helper_array` and `pv_array` for its own
-//! blocks (`x_mb_lookup_par::flush_private`). `longest_chain` is then computed by the original code.
+//! blocks (`x_mb_lookup_par::flush_private`). `longest_chain` is then computed by the original
+//! code.
 //!
 //! Why the tables are the loop's. The words of a span are the loop's words ending there, with the
-//! loop's cell and offset: the k-mer of a position depends only on the last `lut_word_length`
-//! bases (the mask), and a word is taken iff its last `lut_word_length` positions lie in the range
-//! and are unambiguous; a reader that starts `lut_word_length - 1` positions before its span (or
-//! at the range's start) sees those positions, so its `valid_bases` reaches `lut_word_length` at the
-//! same positions of the span as the loop's. Each word is read by the one reader whose span holds
-//! its last position. A block holds whole counters and whole presence-vector words (`2^block_shift`
-//! is a multiple of 2048 and of `2^pv_array_bts`), so owner `o` is the only job that touches the
-//! cells of its blocks, their counters and their presence-vector words. B takes the chunks in
-//! order, the readers in order (their spans follow each other in the stream) and each sub-range in
-//! reading order, and the copy into the sorted region is stable, so every cell receives the loop's
-//! words in the loop's order. That fixes the cell's final head, each word's head before its update
-//! (exactly the value the loop writes to `next_pos[q_off_1]`, which C writes once per word: the
-//! offsets are unique), and the increments of each counter and the bits of each presence-vector
-//! word, which the copies hold starting from 0; the flush gives `min(s + n, u32::MAX)` and
-//! `s | bits` from the start values `s`, the loop's saturating increments and ORed bits (0 in every
-//! build; `x_mb_lookup_par`'s "Why the counters and presence bits are the loop's"). So
-//! `hashtable`, `next_pos`, `pv_array` and `helper_array`, and with them `longest_chain`, equal the
-//! loop's. Each job of a phase touches only its own elements (the table above in the design note
+//! loop's cell and offset: the k-mer of a position depends only on the last `lut_word_length` bases
+//! (the mask), and a word is taken iff its last `lut_word_length` positions lie in the range and
+//! are unambiguous; a reader that starts `lut_word_length - 1` positions before its span (or at the
+//! range's start) sees those positions, so its `valid_bases` reaches `lut_word_length` at the same
+//! positions of the span as the loop's. Each word is read by the one reader whose span holds its
+//! last position. A block holds whole counters and whole presence-vector words (`2^block_shift` is
+//! a multiple of 2048 and of `2^pv_array_bts`), so owner `o` is the only job that touches the cells
+//! of its blocks, their counters and their presence-vector words. B takes the chunks in order, the
+//! readers in order (their spans follow each other in the stream) and each sub-range in reading
+//! order, and the copy into the sorted region is stable, so every cell receives the loop's words in
+//! the loop's order. That fixes the cell's final head, each word's head before its update (exactly
+//! the value the loop writes to `next_pos[q_off_1]`, which C writes once per word: the offsets are
+//! unique), and the increments of each counter and the bits of each presence-vector word, which the
+//! copies hold starting from 0; the flush gives `min(s + n, u32::MAX)` and `s | bits` from the
+//! start values `s`, the loop's saturating increments and ORed bits (0 in every build;
+//! `x_mb_lookup_par`'s "Why the counters and presence bits are the loop's"). So `hashtable`,
+//! `next_pos`, `pv_array` and `helper_array`, and with them `longest_chain`, equal the loop's. Each
+//! job of a phase touches only its own elements (the table above in the design note
 //! `DESIGN_mbreadonce.md`: cells and copies by owner, `next_pos` and the regions by reader, the
 //! kept heads of sub-range `(a, o)` by owner `o`); the phases are separated by the joins of
 //! `rayon::scope`, and no job takes a lock, spins, sleeps or waits. No floating-point operation is
@@ -95,13 +96,24 @@
 //! sorted, 8-byte entries), with `c` the smaller of `CHUNK_POSITIONS` and the positions the loop
 //! reads, and P rows of `ceil((P + 1) / 16)` lines (the sub-range bounds), each region and row on
 //! lines of its own: at most `16 x (c + 8 P)` bytes of regions, 8.0 MiB at 16 and at 64 threads and
-//! 8.3 MiB with the rows at 255 for a query of 2^19 positions or more; it does not grow. On Linux with glibc its capacity is at least 32 MiB + 4 KiB
-//! (`x_mb_lookup_par::lines_capacity`, the rule of `x_frame_capacity` in
-//! `tblastn/x_subject_translate.rs`), so glibc maps it and unmaps it when it is freed at the end of
-//! the fill without moving its mmap threshold, and only the touched 8 MiB are resident; elsewhere
-//! (and on wasm32, whose linear memory never shrinks) it has its exact size. The private copies
-//! are those of LOSAT_X_MBLUTPAD (`x_mb_lookup_par::Copies`, kept from fill to fill on glibc). The
-//! per-range list of the loop's re-threading of `ascending_cells` (8 bytes a word) is not needed.
+//! 8.3 MiB with the rows at 255 for a query of 2^19 positions or more, whatever P is; it does not
+//! grow. That is per fill, not per process: fills that run at the same time each hold their own
+//! arena, and with LOSAT_X_QBATCHPAR each slot of `m >= 2` threads that fills a table while others
+//! do holds about 8 MiB whatever `m` is, so k such slots hold about k x 8 MiB at once (8 slots of 8
+//! threads at 64 threads: 64 MiB), which `x_qbatch_par::batch_estimate_bytes` does not count. (A
+//! chunk that scales with P, such as `min(2^19, P << 15)` positions, about P x 0.5 MiB of arena, is
+//! the candidate if the workstation's max RSS shows that cost; not measured yet.) On Linux with
+//! glibc its capacity is at least 32 MiB + 4 KiB (`x_mb_lookup_par::lines_capacity`, the rule of
+//! `x_frame_capacity` in `tblastn/x_subject_translate.rs`), so glibc maps it and unmaps it when it
+//! is freed at the end of the fill without moving its mmap threshold, and only the touched part is
+//! resident; elsewhere (and on wasm32, whose linear memory never shrinks) it has its exact size and
+//! is freed at the end of the fill. The ranges of the stream (`segments`) are a `Vec` of the
+//! calling thread with one `Segment` (48 bytes on 64-bit targets) per unmasked range read (0.1-0.3
+//! MB for the megablast tables of 31,168 cDNAs; a query masked into tens of thousands of ranges
+//! takes more), freed at the end of the fill. The private copies are those of LOSAT_X_MBLUTPAD
+//! (`x_mb_lookup_par::Copies`, kept from fill to fill on glibc), one set per worker of each fill.
+//! The per-range list of the loop's re-threading of `ascending_cells` (8 bytes a word) is not
+//! needed.
 //!
 //! The pool. As LOSAT_X_PAIRPAR's fill (`x_mb_lookup_par::parts`): a LOSAT search pool of two
 //! threads or more (a LOSAT_X_QBATCHPAR slot of `m >= 2` threads fills on its own pool with P = m),
@@ -110,13 +122,14 @@
 //! on the search pool, which this module never builds (memory losat-wasm-threads-main-only).
 //!
 //! Shadow and timing: with `LOSAT_X_PAIRPARSHADOW` the second build of `x_mb_lookup_par`'s shadow
-//! is this fill (`[X_SHADOW] MBLUTONCE tables= cells= diffs=0 identical` at exit); with LOSAT_TIMING
+//! is this fill (`[X_SHADOW] MBLUTONCE tables= cells= diffs=0 identical` at exit); with
+//! LOSAT_TIMING `[TIMING] x_mb_lookup_build` counts `once=<n>` (the builds this fill made) and
 //! `[TIMING] x_mb_lookup_once: fills= chunks= read_wall= read_max= read_sum= read_late= update_...
-//! last_... arena=`, per phase summed over the chunks of the search's fills (not the shadow's): the
-//! calling worker's wall time from before the phase's first job to the return of its last, the
-//! longest job, the jobs' summed time and the latest start of a job; `read` is the scope of A (with
-//! C of the chunk before), `update` that of B and `last` the scope that links the last chunk and
-//! flushes the copies; `arena` the largest arena of one fill (MiB).
+//! last_... arena=` gives, per phase summed over the chunks of the search's fills (not the
+//! shadow's): the calling worker's wall time from before the phase's first job to the return of its
+//! last, the longest job, the jobs' summed time and the latest start of a job; `read` is the scope
+//! of A (with C of the chunk before), `update` that of B and `last` the scope that links the last
+//! chunk and flushes the copies; `arena` the largest arena of one fill (MiB).
 
 use super::x_mb_lookup_par::{
     flush_private, lines_capacity, plan, timing_on, Copies, Line, Private, Shared, SharedTables,
@@ -127,7 +140,8 @@ use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// No NCBI counterpart (scheduling only): the stream positions per chunk (each chunk is read,
-/// updated and linked before the next; the arena holds the words of one chunk), as LOSAT_X_DISCLUTPAR.
+/// updated and linked before the next; the arena holds the words of one chunk), as
+/// LOSAT_X_DISCLUTPAR.
 const CHUNK_POSITIONS: usize = 1 << 19;
 
 /// No NCBI counterpart (scheduling only): how far ahead phase B prefetches the cells of a
@@ -213,8 +227,13 @@ struct Segment<'a> {
 /// ```
 /// The ranges the loop of `build_mb_lookup` reads, in its order (the same `build_unmasked_ranges`
 /// per query; the queries shorter than `lut_word_length` and the ranges shorter than `word_length`
-/// skipped as there), and the number of positions it reads.
+/// skipped as there), and the number of positions it reads. In debug builds it checks the premise
+/// of phase C that each query offset belongs to one word (`distinct_query_offsets`).
 fn segments<'a>(words: &Words<'a>) -> (Vec<Segment<'a>>, usize) {
+    debug_assert!(
+        distinct_query_offsets(words),
+        "the query intervals [offset, offset + length) of a megablast table overlap"
+    );
     let mut segments = Vec::new();
     let mut stream = 0usize;
     for (q_idx, seq) in words.queries_blastna.iter().enumerate() {
@@ -244,6 +263,25 @@ fn segments<'a>(words: &Words<'a>) -> (Vec<Segment<'a>>, usize) {
         }
     }
     (segments, stream)
+}
+
+/// No NCBI counterpart (debug builds only): whether the intervals `[offset, offset + length)` of
+/// the queries that the loop reads (those of `lut_word_length` letters or more) are disjoint. The
+/// words of a query have the 1-based offsets
+/// `offset + 1 ..= offset + length - lut_word_length + 1`, inside that interval, so disjoint
+/// intervals give every word its own offset and every `next_pos` element one writer in phase C.
+/// The callers place the queries one after another with a separator (`offset + length + 1`),
+/// which is disjoint.
+fn distinct_query_offsets(words: &Words<'_>) -> bool {
+    let mut spans: Vec<(usize, usize)> = words
+        .queries_blastna
+        .iter()
+        .zip(words.query_offsets)
+        .filter(|(seq, _)| seq.len() >= words.lut_word_length)
+        .map(|(seq, &offset)| (offset.max(0) as usize, seq.len()))
+        .collect();
+    spans.sort_unstable();
+    spans.windows(2).all(|w| w[0].0 + w[0].1 <= w[1].0)
 }
 
 /// No NCBI counterpart (scheduling only): a word in the arena: its 1-based query offset `index`
@@ -409,11 +447,12 @@ impl Fill<'_, '_, '_> {
     ///             continue;
     /// ```
     /// Phase A, reader `a`: the words that end at the stream positions `[s0, s1)`, read with the
-    /// statements of `build_mb_lookup`'s loop (the same resets, k-mer and offsets), into its scratch
-    /// region in reading order, then copied stably into its sorted region grouped by the owner of
-    /// the cell; its row gets the start of each owner's sub-range and the number of words. A range
-    /// is entered up to `lut_word_length - 1` positions before `s0` (not before its start), so that
-    /// the k-mer and `valid_bases >= lut_word_length` at the positions from `s0` on are the loop's.
+    /// statements of `build_mb_lookup`'s loop (the same resets, k-mer and offsets), into its
+    /// scratch region in reading order, then copied stably into its sorted region grouped by the
+    /// owner of the cell; its row gets the start of each owner's sub-range and the number of words.
+    /// A range is entered up to `lut_word_length - 1` positions before `s0` (not before its start),
+    /// so that the k-mer and `valid_bases >= lut_word_length` at the positions from `s0` on are the
+    /// loop's.
     ///
     /// SAFETY: no other job of the phase uses reader `a`'s region or row.
     unsafe fn read(&self, a: usize, s0: usize, s1: usize) {
@@ -538,8 +577,8 @@ impl Fill<'_, '_, '_> {
     /// After the last phase B, owner `o`: its copies added into `helper_array` and ORed into
     /// `pv_array` for its own blocks (`x_mb_lookup_par::flush_private`).
     ///
-    /// SAFETY: no other job of the phase uses `o`'s copies or the counters and presence-vector words
-    /// of `o`'s blocks.
+    /// SAFETY: no other job of the phase uses `o`'s copies or the counters and presence-vector
+    /// words of `o`'s blocks.
     unsafe fn flush(&self, o: usize) {
         // SAFETY: slot `o` is this job's.
         let slot = unsafe { self.copies.at(o) };
@@ -1168,8 +1207,49 @@ mod tests {
             lut: 12,
             ascending: true,
         });
+        // Queries of exactly `lut_word_length` letters (one word each, with `word_length` equal to
+        // it) and one letter shorter (no word), at `lut_word_length` 8 and 12, both orders; with
+        // other queries around them so the word's offset is not the first.
+        let first_exact = cases.len();
+        for (lut, asc, seed) in [
+            (8usize, false, 5u64),
+            (12, true, 6),
+            (12, false, 7),
+            (8, true, 8),
+        ] {
+            cases.push(Case {
+                queries: vec![
+                    acgt(lut, seed),
+                    acgt(lut - 1, seed + 10),
+                    acgt(lut, seed + 20),
+                ],
+                offsets: vec![0, lut as i32 + 1, 2 * lut as i32 + 1],
+                masks: vec![Vec::new(), Vec::new(), Vec::new()],
+                word_length: lut,
+                lut,
+                ascending: asc,
+            });
+        }
         for (i, c) in cases.iter().enumerate() {
             let (reference, bts, chain) = c.reference(30_000);
+            if i >= first_exact {
+                // The two queries of `lut_word_length` letters have one word each (offsets 1 and
+                // `2 lut + 2`), the one between them none.
+                let mut heads: Vec<u32> = reference
+                    .hashtable
+                    .iter()
+                    .chain(&reference.next_pos)
+                    .copied()
+                    .filter(|&v| v != 0)
+                    .collect();
+                heads.sort_unstable();
+                let lut = c.lut as u32;
+                assert_eq!(heads.len(), 2, "edge {i}: {heads:?}");
+                assert!(
+                    heads.contains(&1) && heads.contains(&(2 * lut + 2)),
+                    "edge {i}: {heads:?}"
+                );
+            }
             for parts in [1usize, 2, 3, 5, 8] {
                 for chunk in [1usize, 2, 7, 64, CHUNK_POSITIONS] {
                     let (b, _) = c.once0(&reference, bts, parts, false, chunk);

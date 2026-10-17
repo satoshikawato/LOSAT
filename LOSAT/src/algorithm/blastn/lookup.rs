@@ -28,8 +28,8 @@ pub(crate) mod x_mb_lookup_par;
 mod x_mb_lookup_once;
 
 /// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): the
-/// `[X_SHADOW] MBLUTPAD` and `[X_SHADOW] MBLUTONCE` lines (LOSAT_X_MBLUTPAD or LOSAT_X_MBLUTONCE with
-/// LOSAT_X_PAIRPARSHADOW) and, with LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the
+/// `[X_SHADOW] MBLUTPAD` and `[X_SHADOW] MBLUTONCE` lines (LOSAT_X_MBLUTPAD or LOSAT_X_MBLUTONCE
+/// with LOSAT_X_PAIRPARSHADOW) and, with LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the
 /// megablast table builds.
 pub fn x_mb_lookup_print_summary() {
     x_mb_lookup_par::print_summary();

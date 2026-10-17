@@ -114,8 +114,9 @@
 //! EXPERIMENT (LOSAT_X_MBLUTONCE; off unless set to any value, not in the strict set): `fill`
 //! hands the table to the read-once fill of `x_mb_lookup_once.rs` (its first dispatch), in which
 //! each query position is read by one worker and each word handed to the owner of its cell,
-//! instead of every worker reading every word as above. That fill always counts into the private copies of this module
-//! (`Copies`, `Unready::zeroed`, `flush_private`), so `LOSAT_X_MBLUTPAD` only matters with it off.
+//! instead of every worker reading every word as above. That fill always counts into the private
+//! copies of this module (`Copies`, `Unready::zeroed`, `flush_private`), so `LOSAT_X_MBLUTPAD`
+//! only matters with it off.
 
 use super::{build_unmasked_ranges, MaskedInterval, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
 use std::sync::atomic::{AtomicU64, Ordering};

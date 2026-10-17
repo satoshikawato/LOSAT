@@ -45,10 +45,14 @@
 //!   that comes before the first output today, comes from the same values at the same place;
 //! - the second reading is a new source over a second handle of the same open file (`try_clone`),
 //!   at the position where the first started, read forward only as far as the batches need: the
-//!   loop takes its batch's records when it reaches the batch (`Queries::batch`), and a slot copies
+//!   loop takes its batch's records when it reaches the batch (`Queries::batch`), and a slot gets
 //!   those of the batch it searches ahead (`Queries::slot_records`). The records read but not yet
-//!   taken by the loop wait in a window; the loop's batch is held until the batch is done (a slot
-//!   may still copy from it), then dropped.
+//!   taken by the loop wait in a window of chunks, each a run of consecutive records read at once
+//!   (`read_to`): a slot's records are read into a chunk of their own (the records before them
+//!   into another), which the slot shares with the window and the loop takes as it is when it
+//!   reaches that batch, so a record is held once; a request that is not exactly one chunk (a
+//!   mispredicted batch, `-query_loc`'s cut records) gets a copy. The loop's batch is held until
+//!   the batch is done (a slot may still read from it), then dropped.
 //!
 //! Why the records are the same: the reader is a function of the bytes it reads and of its
 //! configuration (the same `ReaderConfig`; the local-ID counter starts at 1 in a new reader and
@@ -92,14 +96,16 @@
 //! every batch the loop takes (its input records and its searched records) and every slot's copy
 //! with the old records (`FastaRecord` as a whole: local id, title, letters with their case, and
 //! the reader's warnings). A difference prints `[X_SHADOW] QSTREAM batches= records= DIFFERENT
-//! (...)` and panics; at the end of the search `[X_SHADOW] QSTREAM batches= records= slot_copies=
+//! (...)` and panics; at the end of the search `[X_SHADOW] QSTREAM batches= records= slots=
 //! off= identical` (batches: the loop's batches compared; records: the records compared, the
-//! loop's input records and every slot's copies; off: why the switch did not act, `none` when it
-//! did). With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM records= read= batches=
-//! slot_copies= slot_records= stale= scan_s= read_s= peak_window= off=` (records: the input
-//! records; read: the records read again; stale: slot requests for records the loop had passed,
-//! answered with QBATCHPAR's `Cancelled`; scan_s: the first reading; read_s: the second, summed
-//! over the threads that read; peak_window: the most records read ahead of the loop at once).
+//! loop's input records and every slot's records; slots: the slots' requests; off: why the switch
+//! did not act, `none` when it did). With `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM
+//! records= read= batches= slots= slot_copies= slot_records= stale= scan_s= read_s= peak_window=
+//! off=` (records: the input records; read: the records read again; slots: the slots' requests,
+//! slot_copies of them answered with a copy of slot_records records, the others with a shared
+//! chunk; stale: slot requests for records the loop had passed, answered with QBATCHPAR's
+//! `Cancelled`; scan_s: the first reading; read_s: the second, summed over the threads that read;
+//! peak_window: the most records read ahead of the loop at once).
 //! Both lines are printed for searches of the command line only.
 
 use std::collections::VecDeque;
@@ -299,9 +305,10 @@ struct State {
     source: FastaInputSource<File>,
     /// The input records read again.
     next: usize,
-    /// The input records `base..next`, read and not taken by the loop.
+    /// The input records `base..next`, read and not taken by the loop, in chunks of consecutive
+    /// records (first input record, records), which the slots that search them share.
     base: usize,
-    window: VecDeque<FastaRecord>,
+    chunks: VecDeque<(usize, Arc<Vec<FastaRecord>>)>,
     /// The loop's batch: its first input record and its input records (up to `base`).
     current: Option<(usize, Arc<Vec<FastaRecord>>)>,
     stats: Stats,
@@ -310,6 +317,7 @@ struct State {
 #[derive(Default)]
 struct Stats {
     batches: u64,
+    slots: u64,
     slot_copies: u64,
     slot_records: u64,
     stale: u64,
@@ -413,7 +421,7 @@ impl Store {
                     source,
                     next: 0,
                     base: 0,
-                    window: VecDeque::new(),
+                    chunks: VecDeque::new(),
                     current: None,
                     stats: Stats::default(),
                 }),
@@ -463,8 +471,9 @@ impl Drop for Store {
         let (read, stats) = stats;
         if std::env::var_os("LOSAT_X_STATS").is_some() {
             eprintln!(
-                "[X_STATS] QSTREAM records={records} read={read} batches={} slot_copies={} slot_records={} stale={} scan_s={:.4} read_s={:.4} peak_window={} off={off}",
+                "[X_STATS] QSTREAM records={records} read={read} batches={} slots={} slot_copies={} slot_records={} stale={} scan_s={:.4} read_s={:.4} peak_window={} off={off}",
                 stats.batches,
+                stats.slots,
                 stats.slot_copies,
                 stats.slot_records,
                 stats.stale,
@@ -475,8 +484,8 @@ impl Drop for Store {
         }
         if self.mode == 2 {
             eprintln!(
-                "[X_SHADOW] QSTREAM batches={} records={} slot_copies={} off={off} identical",
-                stats.shadow_batches, stats.shadow_records, stats.slot_copies
+                "[X_SHADOW] QSTREAM batches={} records={} slots={} off={off} identical",
+                stats.shadow_batches, stats.shadow_records, stats.slots
             );
         }
     }
@@ -533,21 +542,76 @@ impl Acting {
 }
 
 impl State {
-    /// Reads the input records up to `end` into the window (`input_lengths`: the first reading's
-    /// lengths).
+    /// Reads the input records up to `end` into one new chunk (`input_lengths`: the first
+    /// reading's lengths).
     fn read_to(&mut self, end: usize, input_lengths: &[usize]) -> Result<()> {
         if self.next >= end {
             return Ok(());
         }
         let started = Instant::now();
+        let first = self.next;
+        let mut records = Vec::with_capacity(end - first);
         while self.next < end {
-            let record = self.read_one(input_lengths)?;
-            self.window.push_back(record);
+            records.push(self.read_one(input_lengths)?);
             self.next += 1;
         }
+        self.chunks.push_back((first, Arc::new(records)));
         self.stats.read += started.elapsed();
-        self.stats.peak_window = self.stats.peak_window.max(self.window.len());
+        self.stats.peak_window = self.stats.peak_window.max(self.next - self.base);
         Ok(())
+    }
+
+    /// A chunk boundary at input record `at` (`base <= at <= next`): the chunk across it is cut in
+    /// two, its records moved (copied while a slot still shares the chunk).
+    fn split(&mut self, at: usize) {
+        let Some(position) = self
+            .chunks
+            .iter()
+            .position(|(start, records)| *start < at && at < start + records.len())
+        else {
+            return;
+        };
+        let (start, records) = self.chunks.remove(position).expect("the chunk");
+        let (front, back) = match Arc::try_unwrap(records) {
+            Ok(mut owned) => {
+                let back = owned.split_off(at - start);
+                (owned, back)
+            }
+            Err(shared) => (shared[..at - start].to_vec(), shared[at - start..].to_vec()),
+        };
+        self.chunks.insert(position, (at, Arc::new(back)));
+        self.chunks.insert(position, (start, Arc::new(front)));
+    }
+
+    /// The loop's batch of the input records `input` (`base == input.start`), taken out of the
+    /// chunks: one chunk as it is, or the records of several (moved, copied while shared).
+    fn take(
+        &mut self,
+        input: Range<usize>,
+        input_lengths: &[usize],
+    ) -> Result<Arc<Vec<FastaRecord>>> {
+        self.read_to(input.end, input_lengths)?;
+        self.split(input.end);
+        let mut taken = Vec::new();
+        while self
+            .chunks
+            .front()
+            .is_some_and(|(start, _)| *start < input.end)
+        {
+            taken.push(self.chunks.pop_front().expect("a chunk").1);
+        }
+        self.base = input.end;
+        if taken.len() == 1 {
+            return Ok(taken.pop().expect("a chunk"));
+        }
+        let mut records = Vec::with_capacity(input.len());
+        for chunk in taken {
+            match Arc::try_unwrap(chunk) {
+                Ok(owned) => records.extend(owned),
+                Err(shared) => records.extend_from_slice(&shared),
+            }
+        }
+        Ok(Arc::new(records))
     }
 
     /// The next input record, read as the first reading read it (`End()`, then
@@ -574,10 +638,12 @@ impl State {
         }
     }
 
-    /// Input record `ordinal`, read and not yet dropped (in the loop's batch or the window).
+    /// Input record `ordinal`, read and not yet dropped (in the loop's batch or a chunk).
     fn record(&self, ordinal: usize) -> &FastaRecord {
         if ordinal >= self.base {
-            &self.window[ordinal - self.base]
+            let at = self.chunks.partition_point(|(start, _)| *start <= ordinal) - 1;
+            let (start, records) = &self.chunks[at];
+            &records[ordinal - start]
         } else {
             let (start, records) = self
                 .current
@@ -598,6 +664,26 @@ pub(super) enum Queries<'a> {
         searched: &'a [FastaRecord],
     },
     Streamed(&'a Store),
+}
+
+/// The records a LOSAT_X_QBATCHPAR slot searches: those read before the search, a chunk of the
+/// records read again (shared with the window and the loop), or a copy.
+pub(super) enum SlotRecords<'a> {
+    Borrowed(&'a [FastaRecord]),
+    Shared(Arc<Vec<FastaRecord>>),
+    Owned(Vec<FastaRecord>),
+}
+
+impl std::ops::Deref for SlotRecords<'_> {
+    type Target = [FastaRecord];
+
+    fn deref(&self) -> &[FastaRecord] {
+        match self {
+            SlotRecords::Borrowed(records) => records,
+            SlotRecords::Shared(records) => records,
+            SlotRecords::Owned(records) => records,
+        }
+    }
 }
 
 /// The records of one batch of the loop: its input records (skipped ones included) and its
@@ -668,7 +754,7 @@ impl<'a> Queries<'a> {
                 let input_lengths = &acting.query_input.input_lengths;
                 let mut state = acting.lock();
                 while state.next < input_lengths.len() {
-                    debug_assert!(state.window.is_empty() && state.current.is_none());
+                    debug_assert!(state.chunks.is_empty() && state.current.is_none());
                     let record = state.read_one(input_lengths)?;
                     if let Some((old, _)) = &acting.old {
                         let index = state.next;
@@ -711,10 +797,7 @@ impl<'a> Queries<'a> {
                     "LOSAT_X_QSTREAM: the batch of the input records {input:?} after those up to {}",
                     state.base
                 );
-                state.read_to(input.end, &acting.query_input.input_lengths)?;
-                let records: Vec<FastaRecord> = state.window.drain(..input.len()).collect();
-                state.base = input.end;
-                let records = Arc::new(records);
+                let records = state.take(input.clone(), &acting.query_input.input_lengths)?;
                 state.current = Some((input.start, Arc::clone(&records)));
                 state.stats.batches += 1;
                 let cut = acting.ranged.then(|| {
@@ -768,23 +851,23 @@ impl<'a> Queries<'a> {
     }
 
     /// The searched records `searched` for a LOSAT_X_QBATCHPAR slot: borrowed from the records
-    /// read before the search, or a copy of those read again. `None` when the loop has passed
-    /// their first input record (the loop never takes a batch it has passed, so the slot's search
-    /// of it is cancelled).
-    pub(super) fn slot_records(
-        &self,
-        searched: Range<usize>,
-    ) -> Result<Option<std::borrow::Cow<'a, [FastaRecord]>>> {
+    /// read before the search; read again, the chunk that holds exactly them (shared, without
+    /// `-query_loc`: the records gap before them are read into a chunk of their own, so the slots
+    /// of consecutive batches each get one), or a copy. `None` when the loop has passed their first
+    /// input record (the loop never takes a batch it has passed, so the slot's search of it is
+    /// cancelled).
+    pub(super) fn slot_records(&self, searched: Range<usize>) -> Result<Option<SlotRecords<'a>>> {
         let store = match *self {
             Queries::Records {
                 searched: records, ..
-            } => return Ok(Some(std::borrow::Cow::Borrowed(&records[searched]))),
+            } => return Ok(Some(SlotRecords::Borrowed(&records[searched]))),
             Queries::Streamed(store) => store,
         };
         if searched.is_empty() {
-            return Ok(Some(std::borrow::Cow::Owned(Vec::new())));
+            return Ok(Some(SlotRecords::Owned(Vec::new())));
         }
         let acting = store.acting();
+        let input_lengths = &acting.query_input.input_lengths;
         let first = acting.query_input.ordinal(searched.start);
         let last = acting.query_input.ordinal(searched.end - 1) + 1;
         let mut state = acting.lock();
@@ -796,23 +879,44 @@ impl<'a> Queries<'a> {
             state.stats.stale += 1;
             return Ok(None);
         }
-        state.read_to(last, &acting.query_input.input_lengths)?;
-        let copy: Vec<FastaRecord> = searched
-            .clone()
-            .map(|index| acting.searched(state.record(acting.query_input.ordinal(index)), index))
-            .collect();
-        state.stats.slot_copies += 1;
-        state.stats.slot_records += copy.len() as u64;
+        state.read_to(first, input_lengths)?;
+        state.read_to(last, input_lengths)?;
+        state.stats.slots += 1;
+        let shared = if acting.ranged || first < state.base {
+            None
+        } else {
+            state.split(first);
+            state.split(last);
+            state
+                .chunks
+                .iter()
+                .find(|(start, records)| *start == first && start + records.len() == last)
+                .map(|(_, records)| Arc::clone(records))
+        };
+        let records = match shared {
+            Some(records) => SlotRecords::Shared(records),
+            None => {
+                let copy: Vec<FastaRecord> = searched
+                    .clone()
+                    .map(|index| {
+                        acting.searched(state.record(acting.query_input.ordinal(index)), index)
+                    })
+                    .collect();
+                state.stats.slot_copies += 1;
+                state.stats.slot_records += copy.len() as u64;
+                SlotRecords::Owned(copy)
+            }
+        };
         if let Some((old, old_searched)) = &acting.old {
             let old_searched = old_searched.as_deref().unwrap_or(old);
             acting.compare(
                 &mut state,
                 "the records of a batch searched by a slot",
-                &copy,
+                &records,
                 &old_searched[searched],
             );
         }
-        Ok(Some(std::borrow::Cow::Owned(copy)))
+        Ok(Some(records))
     }
 
     /// The searched records of the batches before searched query `start`, for a writer that
@@ -1161,7 +1265,7 @@ mod tests {
             let end = (start + sizes[turn % sizes.len()]).min(count);
             turn += 1;
             let searched = input.searched_in(start..end);
-            // A slot copies records ahead of the loop (read into the window first).
+            // A slot gets records ahead of the loop (read into the window first).
             let ahead = input.searched_in(end..(end + 3).min(count));
             let copy = queries.slot_records(ahead.clone()).unwrap().unwrap();
             assert_eq!(&*copy, &searched_old[ahead.clone()], "{path:?}");
@@ -1218,6 +1322,50 @@ mod tests {
             warned >= 10 && failed >= 5 && long >= 5,
             "{warned} {failed} {long}"
         );
+    }
+
+    /// The slots of consecutive batches, asked out of order, each get one chunk of their own,
+    /// shared and not copied; the loop takes the very chunk a slot searched; a request across
+    /// chunks gets a copy; every record equals the first reading's.
+    #[test]
+    fn slots_share_the_chunks_the_loop_takes() {
+        let mut bytes = Vec::new();
+        for index in 0..12 {
+            bytes.extend_from_slice(format!(">r{index} title\nACGTTGCA{index}\nGGCC\n").as_bytes());
+        }
+        let file = TempFile::new("chunks", &bytes);
+        let old = old(&file.0);
+        let (store, _) = store(1, &file.0, None);
+        let queries = Queries::Streamed(&store);
+        let shared = |records: &SlotRecords<'_>| match records {
+            SlotRecords::Shared(chunk) => Arc::clone(chunk),
+            _ => panic!("a shared chunk"),
+        };
+        let late = queries.slot_records(6..9).unwrap().unwrap();
+        let middle = queries.slot_records(3..6).unwrap().unwrap();
+        assert_eq!(&*late, &old.records[6..9]);
+        assert_eq!(&*middle, &old.records[3..6]);
+        let (late, middle) = (shared(&late), shared(&middle));
+        let first = queries.batch(0..3, 0..3).unwrap();
+        assert_eq!(first.input(), &old.records[0..3]);
+        drop(first);
+        queries.done(3);
+        let second = queries.batch(3..6, 3..6).unwrap();
+        match &second {
+            BatchRecords::Read { input, .. } => assert!(Arc::ptr_eq(input, &middle)),
+            BatchRecords::Borrowed { .. } => panic!("records read again"),
+        }
+        drop(second);
+        queries.done(6);
+        // Across the chunk a slot still shares (6..9) and the next records: a copy.
+        let across = queries.slot_records(7..10).unwrap().unwrap();
+        assert!(matches!(across, SlotRecords::Owned(_)));
+        assert_eq!(&*across, &old.records[7..10]);
+        drop(late);
+        let third = queries.batch(6..12, 6..12).unwrap();
+        assert_eq!(third.input(), &old.records[6..12]);
+        let state = store.acting().lock();
+        assert_eq!((state.stats.slots, state.stats.slot_copies), (3, 1));
     }
 
     /// The warnings of every record read again (a search that reads its batches and searches

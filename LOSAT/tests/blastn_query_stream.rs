@@ -13,7 +13,7 @@
 //! old way and compares the records of every batch and every slot's copy) give the same exit
 //! status, standard output (or `-out` file) and standard error (the shadow's line taken out), and
 //! the shadow line shows that the batches were read again (with LOSAT_X_RPTSTREAM). The same
-//! holds with LOSAT_X_QBATCHPAR slots copying the records of the batches they search ahead, with
+//! holds with LOSAT_X_QBATCHPAR slots reading the records of the batches they search ahead, with
 //! `-query_loc` (skipped records and queries without data), `-subject_loc` and `-lcase_masking`,
 //! with `-max_target_seqs`, `-max_hsps` and `-subject_besthit`, with the reader's warnings and
 //! errors (late in the file, and in the first record, before any output), a batch of queries
@@ -224,12 +224,12 @@ fn blastn(args: &[&str], threads: u32, switches: &[(&str, &str)], out: Option<&P
     blastn_with_input(args, threads, switches, out, None)
 }
 
-/// The shadow's numbers: `[X_SHADOW] QSTREAM batches=B records=R slot_copies=S off=O identical`.
+/// The shadow's numbers: `[X_SHADOW] QSTREAM batches=B records=R slots=S off=O identical`.
 #[derive(Debug)]
 struct Shadow {
     batches: u64,
     records: u64,
-    slot_copies: u64,
+    slots: u64,
     off: String,
 }
 
@@ -253,7 +253,7 @@ fn take_shadow_line(run: &mut Run) -> Shadow {
     let shadow = Shadow {
         batches: field("batches=").parse().unwrap(),
         records: field("records=").parse().unwrap(),
-        slot_copies: field("slot_copies=").parse().unwrap(),
+        slots: field("slots=").parse().unwrap(),
         off: field("off="),
     };
     run.stderr = text
@@ -359,7 +359,7 @@ fn every_task_format_thread_count_and_report_mode_gives_the_off_bytes() {
                         "{what}: {stderr}"
                     );
                     read_as_the_reports_need(&what, reports, &shadow);
-                    assert_eq!(shadow.slot_copies, 0, "{what}");
+                    assert_eq!(shadow.slots, 0, "{what}");
                 }
             }
         }
@@ -408,11 +408,7 @@ fn out_files_qbatchpar_slots_and_the_report_shadow_give_the_off_bytes() {
                 let (off, shadow) = same_three(&what, &args, 4, &extra, None);
                 assert!(!off.report.is_empty(), "{what}");
                 read_as_the_reports_need(&what, reports, &shadow);
-                assert_eq!(
-                    shadow.slot_copies > 0,
-                    !reports.is_empty(),
-                    "{what}: {shadow:?}"
-                );
+                assert_eq!(shadow.slots > 0, !reports.is_empty(), "{what}: {shadow:?}");
                 // The slots searched batches ahead of the loop, with copies of records read again
                 // (with LOSAT_X_RPTSTREAM).
                 extra.push(STATS);
@@ -441,7 +437,7 @@ fn out_files_qbatchpar_slots_and_the_report_shadow_give_the_off_bytes() {
                     );
                 } else {
                     assert!(
-                        number("[X_STATS] QSTREAM ", "slot_copies=") > 0
+                        number("[X_STATS] QSTREAM ", "slots=") > 0
                             && number("[X_STATS] QSTREAM ", "read=")
                                 == number("[X_STATS] QSTREAM ", "records="),
                         "{what}: {stderr}"
@@ -532,7 +528,7 @@ fn ranges_masks_and_hit_list_options_give_the_off_bytes() {
         let (off, shadow) = same_three(&what, &args, 4, &[QBATCHPAR, TWO_SLOTS, RPTSTREAM], None);
         assert_eq!(off.status, Some(0), "{what}");
         read_batch_by_batch(&what, &shadow);
-        assert!(shadow.slot_copies > 0, "{what}: {shadow:?}");
+        assert!(shadow.slots > 0, "{what}: {shadow:?}");
     }
 }
 

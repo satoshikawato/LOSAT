@@ -7156,8 +7156,9 @@ fn run_in_pool(
     };
     let qbp_batching = batching;
     let qbp_search = |job: &x_qbatch_par::Job, pool: &crate::utils::threading::SearchPool<'_>| {
-        // EXPERIMENT (LOSAT_X_QSTREAM): a copy of the batch's records read again; none for a batch
-        // the loop has passed, which the loop never takes (cancelled).
+        // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records read again (a chunk shared with the
+        // window, or a copy); none for a batch the loop has passed, which the loop never takes
+        // (cancelled).
         let records = match queries.slot_records(job.searched.clone()) {
             Ok(Some(records)) => records,
             Ok(None) => return Err(x_qbatch_par::Cancelled.into()),

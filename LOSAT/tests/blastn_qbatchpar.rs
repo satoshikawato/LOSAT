@@ -24,7 +24,8 @@
 //! few percent (predicted 0.93-0.96 of the loop's span against its 0.97 gate, depending on the
 //! parity of the batch count), so the tests whose property needs the slots' path on those inputs
 //! set two slots (`SLOTS2`) or four; the `-task blastn` tests and
-//! `the_rule_chooses_the_slots_on_whole_runs` run on the model's own choice.
+//! `the_rule_chooses_the_slots_on_whole_runs` (which also runs megablast and dc-megablast where
+//! the model itself starts slots, at eight threads) run on the model's own choice.
 //!
 //! The queries are 32 pieces of LC738874 and the subject LC738868 (one subject, so its 5 Mb work
 //! units are fewer than the threads). `-task blastn` runs on pieces of LC738884 with one query
@@ -535,11 +536,18 @@ fn the_shadow_compares_every_batch_taken_from_a_slot() {
             "-num_threads",
             "4",
         ];
-        let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SHADOW, SLOTS2]);
-        let shadow = run.summary("[X_SHADOW] QBATCHPAR");
-        assert_eq!(shadow["diffs"], "0");
-        assert_eq!(shadow["compared"], run.stat("precomputed").to_string());
-        assert_eq!(shadow["compared"], "31", "{}", run.stderr);
+        // Two slots of two threads, and four of one thread (a plain thread with a one-thread
+        // pool: PAIRPARDISC and DISCLUTPAR take their serial branch there).
+        for slots in [SLOTS2, ("LOSAT_X_QBATCHPARSLOTS", "4")] {
+            let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SHADOW, slots]);
+            let shadow = run.summary("[X_SHADOW] QBATCHPAR");
+            let what = format!("{task} {slots:?}: {}", run.stderr);
+            assert_eq!(shadow["diffs"], "0", "{what}");
+            assert_eq!(shadow["compared"], run.stat("precomputed").to_string());
+            assert_eq!(shadow["compared"], "31", "{what}");
+            let k: u64 = slots.1.parse().expect("a slot count");
+            assert_eq!((run.stat("k"), run.stat("m")), (k, 4 / k), "{what}");
+        }
     }
 }
 
@@ -793,51 +801,74 @@ fn blastn_task_with_several_queries_per_batch_gives_the_reports_without_the_swit
     }
 }
 
-// The slot model on whole runs (no `LOSAT_X_QBATCHPARSLOTS`), at four threads: `-task blastn`
-// with batches of 10,000 letters (eight batches, six units after the first: 2 x 2 predicted at
-// 0.88 of the loop) takes the slots; megablast with one query per batch (25 units: the best,
-// 2 x 2, predicted at 0.99) and dc-megablast's mixer with one 50 kb query among the 2-4 kb ones
-// (`CHUNK_SIZE=21000`: one unit after the first batch) keep the loop. The reports are those
-// without the switch either way, and the summary line states the units, the layout judged and
-// its prediction.
+// The slot model on whole runs (no `LOSAT_X_QBATCHPARSLOTS`). It takes slots for `-task blastn`
+// with batches of 10,000 letters at four threads (eight batches, six units after the first:
+// 2 x 2 predicted at 0.88 of the loop) and for megablast and dc-megablast with one query per
+// batch at eight threads (31 units: 2 x 4 predicted at 0.68); it keeps the loop for megablast
+// with batches of 20,000 letters at four threads (three units: the best, 3 x 1, predicted at
+// 1.19) and for dc-megablast's mixer with one 50 kb query among the 2-4 kb ones
+// (`CHUNK_SIZE=21000`: one unit after the first batch). The reports are those without the
+// switch either way (and the shadow's, where slots run), and the summary line states the
+// units, the layout judged and its prediction.
 #[test]
 fn the_rule_chooses_the_slots_on_whole_runs() {
     let subject = fixture("LC738868.fasta");
     let subject = subject.to_str().expect("UTF-8 path");
     let blastn_queries = TempFasta::new("q", &pieces("LC738884.fasta"));
-    let warned = queries_with_warnings();
+    let plain = TempFasta::new("q", &queries());
     let mut records = queries();
     let long = genome("LC738874.fasta")[100_000..150_000].to_vec();
     records.insert(10, ("long 50 kb".to_string(), long));
     let with_long = TempFasta::new("q", &records);
-    // (task, query, variables, expected off, units, judged layout)
+    // (task, query, variables, threads, expected off, units, judged layout)
     let cases = [
         (
             "blastn",
             &blastn_queries,
             vec![("BATCH_SIZE", "10000")],
+            "4",
             "none",
             6,
             Some((2, 2)),
         ),
         (
             "megablast",
-            &warned,
+            &plain,
             vec![("BATCH_SIZE", "1")],
+            "8",
+            "none",
+            31,
+            Some((2, 4)),
+        ),
+        (
+            "dc-megablast",
+            &plain,
+            vec![("BATCH_SIZE", "1")],
+            "8",
+            "none",
+            31,
+            Some((2, 4)),
+        ),
+        (
+            "megablast",
+            &plain,
+            vec![("BATCH_SIZE", "20000")],
+            "4",
             "model",
-            25,
-            Some((2, 2)),
+            3,
+            Some((3, 1)),
         ),
         (
             "dc-megablast",
             &with_long,
             vec![("CHUNK_SIZE", "21000")],
+            "4",
             "single",
             1,
             None,
         ),
     ];
-    for (task, query, env, off, units, layout) in cases {
+    for (task, query, env, threads, off, units, layout) in cases {
         let args = [
             "-task",
             task,
@@ -848,11 +879,11 @@ fn the_rule_chooses_the_slots_on_whole_runs() {
             "-outfmt",
             "6",
             "-num_threads",
-            "4",
+            threads,
         ];
         let run = same_as_without(&args, &env, &[SWITCH]);
         let fields = run.summary("[X_STATS] QBATCHPAR");
-        let what = format!("{task}: {}", run.stderr);
+        let what = format!("{task} {env:?} {threads} threads: {}", run.stderr);
         assert_eq!(fields["off"], off, "{what}");
         assert_eq!(run.stat("units"), units, "{what}");
         let judged = (run.stat("rule_k") as usize, run.stat("rule_m") as usize);
@@ -868,8 +899,22 @@ fn the_rule_chooses_the_slots_on_whole_runs() {
             }
         }
         if off == "none" {
-            assert_eq!((run.stat("k"), run.stat("m")), (2, 2), "{what}");
+            let (k, m) = layout.expect("a layout");
+            assert_eq!(
+                (run.stat("k") as usize, run.stat("m") as usize),
+                (k, m),
+                "{what}"
+            );
             assert_eq!(run.stat("precomputed"), run.stat("batches") - 1, "{what}");
+            // The shadow on the model's own layout: every batch from a slot compared.
+            let run = same_as_without(&args, &env, &[SHADOW]);
+            let shadow = run.summary("[X_SHADOW] QBATCHPAR");
+            assert_eq!(shadow["diffs"], "0", "{what}");
+            assert_eq!(
+                shadow["compared"],
+                (run.stat("batches") - 1).to_string(),
+                "{what}"
+            );
         } else {
             assert_eq!((run.stat("k"), run.stat("precomputed")), (0, 0), "{what}");
         }

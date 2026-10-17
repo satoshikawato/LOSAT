@@ -35,9 +35,13 @@
 //! a slot's panic is kept and resumed only if the loop takes that batch (its message is printed
 //! then, not when it happens). That needs unwinding: the release profile has `panic = "abort"`,
 //! so there a panic in a batch a slot searches ends the process with its message. To bound that,
-//! no slot runs while the loop writes output: `Driver::finish` cancels and joins every slot before
-//! the reports and before each error path writes anything, and once a slot's batch returns an
-//! error the batches planned after it are no longer started. The batches still exposed past an
+//! no slot runs while the loop writes the reports after the loop or what an error path writes:
+//! `Driver::finish` cancels and joins every slot before them, and once a slot's batch returns an
+//! error the batches planned after it are no longer started. The exception is
+//! `LOSAT_X_RPTSTREAM` (opt-in, `x_rpt_stream.rs`): there the loop writes each batch's reports
+//! when it takes the batch, while the slots search the batches ahead (the slots themselves write
+//! nothing), so a slot's panic in a release build ends the process after the reports of the
+//! batches taken so far; its error paths still call `finish` before they write. The batches still exposed past an
 //! error at batch j: before the error is known, the slots may have searched up to the plan's
 //! window (2k - 1 batches) past j; once it is known, at most k - 1 still run, and they are
 //! cancelled when the loop meets j. Slot panics are counted (`panicked=`), and in the shadow
@@ -84,12 +88,14 @@
 //! is `LOSAT_X_QBATCHPARMEM` MiB, or by default 96 MiB (blastn, blastn-short) or 28 MiB
 //! (megablast, dc-megablast) per thread beyond the first: 0.8 of NCBI BLAST+ 2.17.0's measured
 //! growth of max RSS per thread on the audit input. The slots come from a throughput model
-//! (`choose_slots`): the units of work are the planned batches of at least half the largest
-//! planned batch's letters (`batch_units`); for `k = 1 ..= min(1 + budget / estimate, n, units)`
-//! and `m = n / k` the predicted span is rounds(k) x contention(k) / (m x E(m)), with E(m) the
-//! measured efficiency of one batch on m threads (`Profile`, `predicted_span`); `k = 1` is the
-//! loop on the whole pool. Slots start only when the best `k >= 2` predicts less than 0.97 of the
-//! loop's span. `LOSAT_X_QBATCHPARSLOTS=k` (tuning) sets k directly.
+//! (`choose_slots`): the units of work are the planned batches of at least half the
+//! letter-weighted median planned batch's letters (`batch_units`); for
+//! `k = 1 ..= min(1 + budget / estimate, n, units)` and `m = n / k` the predicted span is
+//! rounds(k) x contention(k) / (m x E(m)), with E(m) the measured efficiency of one batch on m
+//! threads, measured up to 16 and with the speedup kept flat beyond (`Profile`,
+//! `predicted_span`); `k = 1` is the loop on the whole pool. Slots start only when the best
+//! `k >= 2` predicts less than 0.97 of the loop's span. `LOSAT_X_QBATCHPARSLOTS=k` (tuning) sets k
+//! directly.
 //!
 //! Diagnostics: with the switch and `LOSAT_X_STATS` set, one line on standard error at the end of
 //! the search, `[X_STATS] QBATCHPAR batches= precomputed= loop= mispredicted= discarded=
@@ -97,10 +103,11 @@
 //! estimate_mib= peak_mib= off=` (precomputed: batches taken from a slot; loop: batches the loop
 //! searched itself; discarded: finished or cancelled batches dropped, `cancelled` of them
 //! cancelled; waste_bound: the discards that stop the speculation, at the end; idle: threads no
-//! slot uses; units: the batch units after the first batch; rule_k, rule_m: the model's best
-//! layout of two slots or more, or the layout `LOSAT_X_QBATCHPARSLOTS` sets, 0 when the model did
-//! not run; predicted: that layout's predicted span over the loop's, `-` when the model did not
-//! run; peak_mib: the most memory admitted at once; off: why the search did not, or stopped to,
+//! slot uses; units: the batch units after the first batch, 0 when no batch follows it; rule_k,
+//! rule_m: the model's best layout of two slots or more, or the layout `LOSAT_X_QBATCHPARSLOTS`
+//! sets, 0 when the model did not run; predicted: that layout's predicted span over the loop's,
+//! printed to three decimals, the value the 0.97 gate compares (`slots_pay`), `-` when the model
+//! did not run; peak_mib: the most memory admitted at once; off: why the search did not, or stopped to,
 //! speculate, `none` if it never stopped).
 //! Without `LOSAT_X_STATS` the switch writes nothing of its own. With the shadow,
 //! `[X_SHADOW] QBATCHPAR batches= compared= diffs= panicked= mispredicted= wasted=`; the first difference
@@ -471,17 +478,30 @@ pub(super) fn batch_estimate_bytes(
 // No NCBI counterpart (scheduling only): the parameters of the slot model, all in one place.
 //
 // E(m) = the speedup of one batch on m threads over one thread, divided by m, as (m, E) points,
-// log2-linear between them and flat beyond the last. Measured on the workstation (perf-mb
-// split3 window 1, 2026-10-17 10:45-10:58: 2x Xeon Gold 6338, node 1 CPUs 32-47 with the HT
-// siblings idle, D. melanogaster cDNAs against 3 Mb of chromosome 2L with `-subject`, every
-// search with LOSAT_X_PAIRPARDISC, DIAGLV, PAIRPARFOLD, QDUSTPAR and DISCLUTPAR): the batch times
-// of `logs/split3_report.md` section 1c at 1 to 16 threads per batch, dc-megablast 5 Mb batches
-// (inputs (a), (b) and Ad: 1,775, 3,492 and 31,168 cDNAs) and blastn 1 Mb batches (inputs (c)
-// and Ab: 1,775 and 31,168 cDNAs).
+// log2-linear between them. Measured up to 16 threads per batch, on one machine with the SMT
+// siblings idle: the workstation (perf-mb split3 window 1, 2026-10-17 10:45-10:58: 2x Xeon Gold
+// 6338, node 1 CPUs 32-47, D. melanogaster cDNAs against 3 Mb of chromosome 2L with `-subject`,
+// every search with LOSAT_X_PAIRPARDISC, DIAGLV, PAIRPARFOLD, QDUSTPAR and DISCLUTPAR), from the
+// batch times of `logs/split3_report.md` section 1c, dc-megablast 5 Mb batches (inputs (a), (b)
+// and Ad: 1,775, 3,492 and 31,168 cDNAs) and blastn 1 Mb batches (inputs (c) and Ab: 1,775 and
+// 31,168 cDNAs). Per point (reconstructed from that table; batch time at 1 thread: dc 1.812 s,
+// Ad alone, blastn 0.804 s, (c) alone): dc E(2) from Ad 4 threads in 2 slots (beside one other
+// slot), E(4) from Ad 4 threads in the loop (alone), E(8) from (b) 16 threads in 2 slots (beside
+// one other slot), E(16) from the loop at 16 threads (alone); blastn E(2) from (c) 4 threads in 2
+// slots (beside one), E(4) and E(16) from (c) in the loop at 4 and 16 threads (alone), E(8)
+// between (c) 8 threads in the loop and 16 threads in 2 slots. So the points measured beside a
+// slot already hold some contention, which the contention term then counts again for those m.
+// Beyond the last point the speedup is kept flat (E(m) = E(16) x 16 / m): nothing was measured
+// there, and blastn's speedup grew only 1.16-fold from 8 to 16 threads, so the model must not
+// assume that the loop keeps scaling on 32-128 threads (slots are exact and stay within the
+// budget, so erring towards slots costs memory, not output). On machines whose `-num_threads`
+// counts SMT siblings, E(m) for large m is lower still.
 //
 // Contention: a batch runs `CONTENTION_PER_SLOT` slower per further slot beside it, up to
 // `CONTENTION_SLOTS` slots (the same window: with 4 dc-megablast slots the seed stage, 58-66 % of
-// a batch, took 25-34 % longer than alone, 18 % more from 2 to 8 slots).
+// a batch, took 25-34 % longer than alone, 18 % more from 2 to 8 slots). It was measured on
+// dc-megablast; blastn's is larger (a 1 Mb batch in 5 slots of 3 threads took 0.51-0.53 s at
+// (c) 16 threads, against the model's 0.42), which changes no measured cell's choice.
 //
 // The model picked the measured best layout of every cell of that report's section 3 (window
 // 2: (a) 4 / 16 threads off, (b) 4: 2 x 2, (b) 16: off, (c) 4: off, (c) 8: 2 x 4, (c) 16: 5 x 3,
@@ -505,20 +525,55 @@ const CONTENTION_SLOTS: usize = 5;
 /// Slots start only when the model predicts their span below this share of the loop's.
 const MODEL_GAIN: f64 = 0.97;
 
+/// A predicted ratio in thousandths, as the summary line prints it (`predicted=`).
+fn milli(ratio: f64) -> u64 {
+    (ratio * 1000.0).round() as u64
+}
+
+/// Whether a layout of this predicted span over the loop's is worth its slots: its ratio as the
+/// summary line prints it, in thousandths, strictly below `MODEL_GAIN` (so the printed value
+/// decides: `predicted=0.970` keeps the loop, `0.969` takes the slots).
+fn slots_pay(ratio: f64) -> bool {
+    milli(ratio) < milli(MODEL_GAIN)
+}
+
+/// The reference batch of planned batches of `letters` each: the letter-weighted median, the
+/// batch at which the letters of the batches sorted by size reach half of all letters (0 for
+/// none). One oversized batch (a long record, which never spans batches) does not move it, as
+/// the largest batch would.
+fn reference_letters(letters: &[u64]) -> u64 {
+    let mut sorted = letters.to_vec();
+    sorted.sort_unstable();
+    let total: u64 = sorted
+        .iter()
+        .fold(0u64, |sum, &batch| sum.saturating_add(batch));
+    let mut sum = 0u64;
+    for batch in sorted {
+        sum = sum.saturating_add(batch);
+        if sum.saturating_mul(2) >= total {
+            return batch;
+        }
+    }
+    0
+}
+
 /// The batch units of planned batches of `letters` each: the batches of at least half the
-/// largest's letters. A tiny batch of the mixer's alternation (100 letters beside 5 Mb ones) or
-/// a short last batch is no unit of work.
+/// reference batch's letters (`reference_letters`), each one unit, oversized ones too. A tiny
+/// batch of the mixer's alternation (100 letters beside 5 Mb ones) or a short last batch is no
+/// unit of work.
 pub(super) fn batch_units(letters: &[u64]) -> usize {
-    let largest = letters.iter().copied().max().unwrap_or(0);
+    let reference = reference_letters(letters);
     letters
         .iter()
-        .filter(|&&batch| batch.saturating_mul(2) >= largest)
+        .filter(|&&batch| batch.saturating_mul(2) >= reference)
         .count()
 }
 
-/// E(m) of `points` (`EFFICIENCY_*`): log2-linear between the points, flat beyond the last.
+/// E(m) of `points` (`EFFICIENCY_*`): log2-linear between the points; beyond the last point the
+/// speedup `m x E(m)` stays at the last point's (see the parameters above).
 fn efficiency(points: &[(usize, f64)], m: usize) -> f64 {
-    let x = (m.max(1) as f64).log2();
+    let m = m.max(1);
+    let x = (m as f64).log2();
     for pair in points.windows(2) {
         let ((m0, e0), (m1, e1)) = (pair[0], pair[1]);
         let (x0, x1) = ((m0 as f64).log2(), (m1 as f64).log2());
@@ -526,13 +581,18 @@ fn efficiency(points: &[(usize, f64)], m: usize) -> f64 {
             return e0 + (e1 - e0) * (x - x0) / (x1 - x0);
         }
     }
-    points.last().map_or(1.0, |&(_, e)| e)
+    points
+        .last()
+        .map_or(1.0, |&(last, e)| e * last as f64 / m as f64)
 }
 
 /// The predicted span of `units` equal batches on `k` slots of `m = threads / k` threads, in
 /// one batch's one-thread time: rounds x contention / (m x E(m)), with `ceil(units / k)` rounds
 /// while `units <= 2k`, else `units / k` plus half a round when `k` does not divide `units`, and a
-/// contention of `1 + CONTENTION_PER_SLOT x (min(k, CONTENTION_SLOTS) - 1)`.
+/// contention of `1 + CONTENTION_PER_SLOT x (min(k, CONTENTION_SLOTS) - 1)`. The half round is a
+/// tail allowance (the prototype's), not a count of rounds: it makes the span non-monotone in
+/// the units (8 units on 3 slots predict 3.17 rounds, 9 predict 3), so the choice can depend on
+/// the parity of the batch count; it changes no measured cell's choice.
 pub(super) fn predicted_span(
     efficiency_points: &[(usize, f64)],
     threads: usize,
@@ -568,8 +628,9 @@ pub(super) struct Layout {
 /// model did not run: too small a budget, or fewer than two units).
 ///
 /// `k` runs over `1 ..= min(1 + budget / estimate, threads, units)` and `m = threads / k`; the
-/// least `predicted_span` of `k >= 2` (the fewest slots on a tie) is taken when it is below
-/// `MODEL_GAIN` of `k = 1`'s, else the search does not speculate (`Off::Model`).
+/// least `predicted_span` of `k >= 2` (the fewest slots on a tie) is taken when its ratio to
+/// `k = 1`'s pays (`slots_pay`: below 0.970 in thousandths), else the search does not speculate
+/// (`Off::Model`).
 ///
 /// Exactness: this chooses only `k` and `m`. Which batches a slot searches, and that the loop
 /// takes a slot's result only under the key it computed itself, do not depend on them (module
@@ -610,7 +671,7 @@ pub(super) fn choose_slots(
             best = candidate;
         }
     }
-    if best.ratio < MODEL_GAIN {
+    if slots_pay(best.ratio) {
         (Ok((best.k, best.m)), Some(best))
     } else {
         (Err(Off::Model), Some(best))
@@ -783,7 +844,7 @@ pub(super) struct Stats {
     pub k: usize,
     pub m: usize,
     pub idle: usize,
-    /// The batch units after the first batch (`batch_units`).
+    /// The batch units after the first batch (`batch_units`; 0 when no batch follows it).
     pub units: usize,
     /// The layout the slot model judged (`choose_slots`), 0 when it did not run.
     pub rule_k: usize,
@@ -1176,9 +1237,10 @@ where
         self.flush();
     }
 
-    /// The end of the speculation before the loop writes output (the reports, or what an
-    /// error writes): nothing more starts, running batches are cancelled, and every slot's
-    /// thread is joined. Also run when the driver is dropped.
+    /// The end of the speculation before the loop writes output (the reports after the loop, or
+    /// what an error writes; `LOSAT_X_RPTSTREAM`'s per-batch reports are written while the slots
+    /// run): nothing more starts, running batches are cancelled, and every slot's thread is
+    /// joined. Also run when the driver is dropped.
     pub(super) fn finish(&mut self) {
         if self.finished {
             return;
@@ -1235,12 +1297,13 @@ where
             usize::MAX,
             false,
         );
+        let letters: Vec<u64> = full.iter().map(|planned| planned.letters).collect();
+        let units = batch_units(&letters);
+        self.stats.units = units;
         if full.len() < 2 {
             self.set_off(Off::Single);
             return;
         }
-        let letters: Vec<u64> = full.iter().map(|planned| planned.letters).collect();
-        let units = batch_units(&letters);
         let estimate = full
             .iter()
             .map(|planned| self.estimate(planned))
@@ -1252,7 +1315,6 @@ where
             .unwrap_or(self.profile.allowance_mib * (self.threads as u64).saturating_sub(1));
         self.stats.budget_mib = budget_mib;
         self.stats.estimate_mib = estimate.div_ceil(MIB);
-        self.stats.units = units;
         let (choice, layout) = choose_slots(
             self.threads,
             budget_mib.saturating_mul(MIB),
@@ -1264,7 +1326,7 @@ where
         if let Some(layout) = layout {
             self.stats.rule_k = layout.k;
             self.stats.rule_m = layout.m;
-            self.stats.predicted_milli = Some((layout.ratio * 1000.0).round() as u64);
+            self.stats.predicted_milli = Some(milli(layout.ratio));
         }
         let (k, m) = match choice {
             Ok(slots) => slots,
@@ -1638,9 +1700,11 @@ thread_local! {
     static UNJOINED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// The writers of `run_in_pool` (the reports, and what a failed batch writes) run only after
-/// `Driver::finish` has joined every slot of the search, so that no speculative batch runs
-/// while output is written. With debug assertions this checks it, on the loop's thread.
+/// The writers of `run_in_pool` (the reports after the loop, and what a failed batch writes) run
+/// only after `Driver::finish` has joined every slot of the search, so that no speculative batch
+/// runs while they write (`LOSAT_X_RPTSTREAM`'s per-batch report writes, made while the slots
+/// search ahead, do not call this check). With debug assertions this checks it, on the loop's
+/// thread.
 pub(super) fn debug_assert_slots_joined() {
     debug_assert_eq!(
         UNJOINED.with(std::cell::Cell::get),
@@ -2018,15 +2082,20 @@ mod tests {
             let (e2, e4) = (points[1].1, points[2].1);
             let three = e2 + (e4 - e2) * (3f64.log2() - 1.0);
             assert!((efficiency(points, 3) - three).abs() < 1e-12);
-            // Flat beyond the last point, and 0 threads count as 1.
-            assert_eq!(efficiency(points, 64), points[4].1);
+            // Beyond the last point the speedup stays that of 16 threads, and 0 threads count as
+            // 1.
+            for m in [17, 24, 32, 64, 128] {
+                let speedup = m as f64 * efficiency(points, m);
+                assert!((speedup - 16.0 * points[4].1).abs() < 1e-9, "{m}");
+            }
             assert_eq!(efficiency(points, 0), 1.0);
         }
     }
 
     #[test]
-    fn units_are_the_batches_of_at_least_half_the_largest() {
+    fn units_are_the_batches_of_at_least_half_the_median_batch() {
         assert_eq!(batch_units(&[]), 0);
+        assert_eq!(reference_letters(&[]), 0);
         assert_eq!(batch_units(&[100]), 1);
         assert_eq!(batch_units(&[597, 5_001_442]), 1);
         assert_eq!(batch_units(&[597, 5_001_442, 152, 4_999_591]), 2);
@@ -2034,6 +2103,23 @@ mod tests {
         assert_eq!(batch_units(&[1_000, 500, 499]), 2);
         // All tiny batches are all units.
         assert_eq!(batch_units(&[100; 40]), 40);
+        // The reference is the letter-weighted median: the batch at which the sorted batches
+        // reach half of all letters.
+        assert_eq!(reference_letters(&[1, 2, 3, 4]), 3);
+        assert_eq!(reference_letters(&[10, 1, 1, 1]), 10);
+        // One long record (an oversized batch) moves neither the reference nor the other
+        // batches' units, and counts as one unit itself.
+        let mut outlier = SPLIT3_AB.to_vec();
+        outlier.push(3_000_000);
+        assert_eq!(batch_units(SPLIT3_AB), 89);
+        assert_eq!(batch_units(&outlier), 90);
+        let mut contigs = vec![5_000_000u64; 10];
+        contigs.push(11_000_000);
+        assert_eq!(batch_units(&contigs), 11);
+        // The split3 inputs keep their units (as against the largest batch).
+        for (planned, units) in [(SPLIT3_A, 1), (SPLIT3_B, 2), (SPLIT3_C, 5), (SPLIT3_AD, 18)] {
+            assert_eq!(batch_units(planned), units, "{planned:?}");
+        }
     }
 
     /// The planned batches after the first of the perf-mb split3 inputs (window 2, from the
@@ -2151,7 +2237,7 @@ mod tests {
                 None => assert!(ratio.is_nan(), "{cell}"),
                 Some(layout) => {
                     assert!((layout.ratio - ratio).abs() < 1e-4, "{cell}: {layout:?}");
-                    assert_eq!(layout.ratio < MODEL_GAIN, choice.is_ok(), "{cell}");
+                    assert_eq!(slots_pay(layout.ratio), choice.is_ok(), "{cell}");
                 }
             }
         }
@@ -2166,6 +2252,86 @@ mod tests {
                 "{task}"
             );
         }
+    }
+
+    // More threads than were measured (E(m) up to 16 threads per batch, the speedup kept flat
+    // beyond): the cells keep slots. With E flat instead, (b) at 24-64 threads, (c) at 64 / 128
+    // and Ad at 128 would keep the loop (review S1), where the earlier rule ran slots ((b) 2 x 12
+    // / 2 x 16 / 2 x 32 / 2 x 64, (c) 5 x 4 / 5 x 6 / 5 x 12 / 5 x 25, Ad 18 x 7 at 128).
+    #[test]
+    fn cells_beyond_sixteen_threads() {
+        // (input, task, planned, threads, expected choice, predicted ratio)
+        let cells: [(&str, &str, &[u64], usize, (usize, usize), f64); 12] = [
+            ("b", "dc-megablast", SPLIT3_B, 24, (2, 12), 0.6883),
+            ("b", "dc-megablast", SPLIT3_B, 32, (2, 16), 0.5250),
+            ("b", "dc-megablast", SPLIT3_B, 64, (2, 32), 0.5250),
+            ("b", "dc-megablast", SPLIT3_B, 128, (2, 64), 0.5250),
+            ("c", "blastn", SPLIT3_C, 24, (5, 4), 0.3921),
+            ("c", "blastn", SPLIT3_C, 32, (5, 6), 0.3161),
+            ("c", "blastn", SPLIT3_C, 64, (5, 12), 0.2461),
+            ("c", "blastn", SPLIT3_C, 128, (5, 25), 0.2400),
+            ("Ad", "dc-megablast", SPLIT3_AD, 24, (6, 4), 0.4840),
+            ("Ad", "dc-megablast", SPLIT3_AD, 32, (9, 3), 0.4132),
+            ("Ad", "dc-megablast", SPLIT3_AD, 64, (18, 3), 0.2066),
+            ("Ad", "dc-megablast", SPLIT3_AD, 128, (18, 7), 0.1315),
+        ];
+        for (input, task, planned, threads, expected, ratio) in cells {
+            let (choice, layout, _) = split3_choice(task, planned, threads);
+            let cell = format!("({input}) {threads} threads");
+            assert_eq!(choice, Ok(expected), "{cell}: {layout:?}");
+            let layout = layout.expect("a judged layout");
+            assert!((layout.ratio - ratio).abs() < 1e-4, "{cell}: {layout:?}");
+        }
+    }
+
+    // One long record among normal batches (review S2): Ab's 89 blastn batches of ~1 Mb with one
+    // 3 Mb record keep slots (the largest batch's estimate, 121 MiB, caps k by the budget), and
+    // ten 5 Mb dc-megablast batches with one 11 Mb contig too; against the largest batch both had
+    // one unit and kept the loop.
+    #[test]
+    fn one_long_record_keeps_the_slots() {
+        let mut outlier = SPLIT3_AB.to_vec();
+        outlier.push(3_000_000);
+        for (threads, expected, ratio) in [
+            (4, (2, 2), 0.8771),
+            (8, (4, 2), 0.6915),
+            (16, (8, 2), 0.4276),
+        ] {
+            let (choice, layout, units) = split3_choice("blastn", &outlier, threads);
+            assert_eq!((choice, units), (Ok(expected), 90), "{threads}: {layout:?}");
+            let layout = layout.expect("a judged layout");
+            assert!((layout.ratio - ratio).abs() < 1e-4, "{threads}: {layout:?}");
+        }
+        let mut contigs = vec![5_000_000u64; 10];
+        contigs.push(11_000_000);
+        let (choice, layout, units) = split3_choice("dc-megablast", &contigs, 16);
+        assert_eq!((choice, units), (Ok((3, 5)), 11), "{layout:?}");
+        assert!((layout.expect("a layout").ratio - 0.9158).abs() < 1e-4);
+    }
+
+    // The gate is strict, and a tie between layouts goes to the fewest slots (less memory in
+    // flight). With an efficiency table that makes every m >= 2 slow, 18 units at 16 threads
+    // predict the same span (2 rounds x 1.2) for 9 to 16 one-thread slots: 9 are taken.
+    #[test]
+    fn the_gate_is_strict_and_ties_take_the_fewest_slots() {
+        assert!(!slots_pay(MODEL_GAIN));
+        assert!(!slots_pay(0.9696));
+        assert!(slots_pay(0.9694));
+        assert_eq!(
+            (milli(0.9694), milli(0.9696), milli(1.0088)),
+            (969, 970, 1009)
+        );
+        let slow: &[(usize, f64)] = &[(1, 1.0), (2, 0.1), (16, 0.1)];
+        for k in 10..=16 {
+            assert_eq!(
+                predicted_span(slow, 16, k, 18),
+                predicted_span(slow, 16, 9, 18),
+                "{k}"
+            );
+        }
+        let tiny = batch_estimate_bytes(8, 100, 10, QUERY_BYTES_PER_LETTER);
+        let (choice, layout) = choose_slots(16, 4096 * MIB, tiny, None, 18, slow);
+        assert_eq!(choice, Ok((9, 1)), "{layout:?}");
     }
 
     #[test]
@@ -2379,7 +2545,8 @@ mod tests {
             fail: Option<usize>,
             /// The batch of this input start panics.
             panic: Option<usize>,
-            /// The failing batch waits until a slot has started the panicking one.
+            /// The failing batch waits until a slot has started the panicking one (at most 10 s;
+            /// then it panics, so a run without slots fails instead of spinning).
             fail_waits_for_panic: bool,
             /// A batch of another size than `BATCH_SIZE` (a corrupted prediction) waits for its
             /// cancellation (at most 10 s), or returns at once.
@@ -2464,7 +2631,12 @@ mod tests {
                     panic!("fake batch panic at {}", job.key.input_start);
                 }
                 if fakes.fail == Some(job.key.input_start) && fakes.fail_waits_for_panic {
+                    let since = Instant::now();
                     while !panic_started.load(Ordering::SeqCst) {
+                        assert!(
+                            since.elapsed() < Duration::from_secs(10),
+                            "no slot started the panicking batch within 10 s"
+                        );
                         std::thread::yield_now();
                     }
                 }
@@ -2744,13 +2916,18 @@ mod tests {
         #[test]
         fn an_error_ends_the_loop_and_drops_batches_past_it() {
             let lengths = vec![100; 40];
+            // Four slots set: the batch past the error must be started by a slot.
+            let switches = Switches {
+                slots: Some(4),
+                ..on()
+            };
             let fakes = Fakes {
                 fail: Some(10),
                 panic: Some(12),
                 fail_waits_for_panic: true,
                 ..Fakes::default()
             };
-            let failed = run(&lengths, Some(100), 4, on(), fakes);
+            let failed = run(&lengths, Some(100), 4, switches, fakes);
             assert_eq!(failed.results.len(), 11);
             assert_eq!(failed.results[10], Err("error at 10".to_string()));
             assert!(failed.summary.discarded >= 1, "{}", failed.line);
@@ -2862,6 +3039,7 @@ mod tests {
             let lengths = vec![100; 40];
             let switches = Switches {
                 shadow: true,
+                slots: Some(4),
                 ..on()
             };
             let fakes = Fakes {

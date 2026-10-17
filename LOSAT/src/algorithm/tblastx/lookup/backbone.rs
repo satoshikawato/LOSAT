@@ -26,6 +26,9 @@ pub(crate) use x_lut_direct::x_shadow_tables as x_bxlut_shadow_tables;
 // EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): BLASTP's table built in place
 // by the same builder (x_lut_direct.rs); the shadow counter for the exit summary.
 pub(crate) use x_lut_direct::x_bplut_shadow_tables;
+// EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): TBLASTX's full table built in place
+// (x_lut_direct.rs); no NCBI counterpart for the re-export itself.
+pub(crate) use x_lut_direct::x_tbxlut_shadow_tables;
 // EXPERIMENT (LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW): the direct builder of the TBLASTX unit
 // path's group tables (x_pair_lut.rs, a child module of x_lut_direct.rs), used by
 // tblastx/x_pair_par.rs.
@@ -1463,6 +1466,28 @@ pub(crate) fn x_bp_build_ncbi_lookup(
         karlin_params,
         check_ideal,
     )
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:356-360
+// ```c
+// for (j=0; j <lookup->thin_backbone[i][1]; j++)
+//     dest[j] = lookup->thin_backbone[i][j + 2];
+// /* done with this chain- free it */
+// sfree(lookup->thin_backbone[i]);
+// lookup->thin_backbone[i] = NULL;
+// ```
+/// EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): [`build_ncbi_lookup`] for the full table
+/// of a TBLASTX query batch. With the switch the table is filled in place from the per-cell counts,
+/// in the same append order as the reference builder and BlastAaLookupFinalize (x_lut_direct.rs),
+/// so no chain is held: NCBI frees each chain as it copies it (above), the reference builder here
+/// holds all of them, and the arena's blocks, until the table is complete.
+pub(crate) fn x_tbx_build_ncbi_lookup(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    karlin_params: &crate::stats::KarlinParams,
+    check_ideal: bool,
+) -> (BlastAaLookupTable, Vec<QueryContext>) {
+    x_lut_direct::x_tbx_build_lookup(queries, threshold, karlin_params, check_ideal)
 }
 
 // NCBI c++/src/algo/blast/core/blast_aalookup.c:227-245,438-465:

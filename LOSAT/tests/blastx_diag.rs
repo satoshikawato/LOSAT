@@ -2,12 +2,13 @@
 //! one lookup cell tested in batches of eight (`LOSAT_X_BXDIAG`, `seed/x_seed_diag.rs`), on whole
 //! searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set); its value `per-hit`
-//! or `scalar` forces a cell test, and `LOSAT_X_BXDIAGSHADOW` runs the reference beside it for
+//! The switch is in the strict set (on unless `LOSAT_X_BXDIAG=0`; not set, it acts only with the
+//! AVX2 cell test), and the reference runs here set it to `0`; its value `per-hit` or `scalar`
+//! forces a cell test, and `LOSAT_X_BXDIAGSHADOW` runs the reference beside it for
 //! every subject and stops at a difference. `LOSAT_X_BXDIAGMIN` sends the query batches with few
 //! hits per lookup cell to the other loop (`0`: none). So the properties under test are that the
 //! report, standard error without the diagnostic lines and the exit status equal those of the
-//! search without the switch, with every cell test, with `-subject` and `-db`, outfmt 6 and 7,
+//! search with the switch off, with the default and every cell test, with `-subject` and `-db`, outfmt 6 and 7,
 //! one and three threads and a two-hit window other than the default, and with every batch, some
 //! or none fused; that the shadow compared subjects; that the timing line names the cell test that
 //! ran; and that it counts the batches each loop took. That the bytes equal NCBI's is the
@@ -20,6 +21,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// The switch off: the reference seed loop (the switch is in the strict set).
+const OFF: (&str, &str) = ("LOSAT_X_BXDIAG", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -208,15 +212,18 @@ fn the_fused_seed_loop_gives_the_reports_of_the_reference() {
     let inputs = Inputs::new();
     for args in searches(&inputs) {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let reference = blastx(&args, &[]);
+        let reference = blastx(&args, &[OFF]);
         assert_eq!(reference.code, Some(0), "{args:?}: {}", reference.stderr);
         assert!(
             reference.stdout.split(|&b| b == b'\n').count() > 50,
             "{args:?}: too few rows"
         );
         // LOSAT_X_BXDIAGMIN=0 makes every batch take the fused loop; the built-in value and one
-        // above every table's hits per cell (no batch fused) give the same report.
+        // above every table's hits per cell (no batch fused) give the same report. An empty value
+        // is the default (the switch on, with the AVX2 cell test only).
         for (value, min) in [
+            ("", ""),
+            ("", "0"),
             ("1", "0"),
             ("per-hit", "0"),
             ("scalar", "0"),
@@ -240,7 +247,7 @@ fn the_shadow_compares_every_subject_and_the_timing_line_names_the_cell_test() {
     let inputs = Inputs::new();
     let args = searches(&inputs).remove(0);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let reference = blastx(&args, &[]);
+    let reference = blastx(&args, &[OFF]);
     for value in ["1", "per-hit", "scalar"] {
         let run = blastx(
             &args,
@@ -304,7 +311,7 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
     let inputs = Inputs::new();
     let args = searches(&inputs).remove(0);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let reference = blastx(&args, &[]);
+    let reference = blastx(&args, &[OFF]);
     let timing = |min: &str| {
         let run = blastx(
             &args,
@@ -340,4 +347,24 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
     assert_eq!(field(&none, "tables_fused"), 0, "{none}");
     assert!(field(&none, "tables_other") > 0, "{none}");
     assert_eq!(field(&none, "subjects"), 0, "{none}");
+    // The default (the switch not set) acts only with the AVX2 cell test.
+    let run = blastx(&args, &[("LOSAT_X_BXDIAGMIN", "0"), ("LOSAT_TIMING", "1")]);
+    assert_eq!(run.code, Some(0), "default: {}", run.stderr);
+    assert!(run.stdout == reference.stdout, "default: report differs");
+    let line = run
+        .stderr
+        .lines()
+        .find(|line| line.starts_with("[TIMING] blastx_diag: "));
+    #[cfg(target_arch = "x86_64")]
+    let avx2 = std::arch::is_x86_feature_detected!("avx2");
+    #[cfg(not(target_arch = "x86_64"))]
+    let avx2 = false;
+    match line {
+        Some(line) => {
+            assert!(avx2, "default without AVX2: {line}");
+            assert!(line.contains("mode=avx2 "), "{line}");
+            assert!(field(line, "subjects") >= 150, "{line}");
+        }
+        None => assert!(!avx2, "default with AVX2: no timing line: {}", run.stderr),
+    }
 }

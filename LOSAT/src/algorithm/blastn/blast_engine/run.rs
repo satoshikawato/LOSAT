@@ -177,6 +177,21 @@ mod database;
 #[path = "x_qbatch_par.rs"]
 mod x_qbatch_par;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603 (the query buffer
+// of a batch) and c++/src/algo/blast/core/blast_stat.c:2754-2784 (the ungapped Karlin block of
+// each context).
+// EXPERIMENT (LOSAT_X_QPREPPAR): both steps of `search_query_batch` as ordered parallel maps on
+// the batch's search pool (a child module, so that it reads the private serial function and the
+// sentinel of this file).
+#[path = "x_query_prep_par.rs"]
+mod x_query_prep_par;
+
+/// EXPERIMENT (LOSAT_X_QPREPPARSHADOW): the summary line `main` prints at exit. No NCBI
+/// counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_query_prep_par_print_summary() {
+    x_query_prep_par::print_summary();
+}
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
 // ```c
 // #define NCBIMATH_LN2 0.69314718055994530941723212145818
@@ -8463,8 +8478,15 @@ fn search_query_batch(
     // The buffer is the one BLASTNA copy of the query contexts; the searched block is the
     // buffer without its first and last sentinel, and a context is a slice of it.
     let query_letters: Vec<&[u8]> = seq_data.queries.iter().map(|r| r.seq()).collect();
-    let encoded_query_buffer =
-        build_query_blastna_buffer(&query_letters, &query_context_offsets, query_concat_length);
+    // EXPERIMENT (LOSAT_X_QPREPPAR): with the switch on and a search pool of two or more threads
+    // the queries are encoded by the pool, each into its own part of the buffer; the buffer is
+    // the same (`x_query_prep_par.rs`).
+    let encoded_query_buffer = x_query_prep_par::query_buffer(
+        &query_letters,
+        &query_context_offsets,
+        query_concat_length,
+        parallel_pool,
+    );
     let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
     let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];
     let encoded_queries_blastna: Vec<&[u8]> = query_contexts
@@ -8515,8 +8537,11 @@ fn search_query_batch(
         gap_open: config.gap_open,
         gap_extend: config.gap_extend,
     };
+    // EXPERIMENT (LOSAT_X_QPREPPAR): with the switch on and a search pool of two or more threads
+    // the contexts' blocks are computed by the pool, in context order; the blocks are the same
+    // (`x_query_prep_par.rs`).
     let context_ungapped =
-        context_ungapped_blocks(encoded_queries_blastna.iter().copied(), &scoring_spec);
+        x_query_prep_par::ungapped_blocks(&encoded_queries_blastna, &scoring_spec, parallel_pool);
     let (approx_table_entries, max_q_off) =
         compute_lookup_query_stats(&query_contexts, &query_context_masks);
     let max_query_length = max_q_off.saturating_add(1).max(1);

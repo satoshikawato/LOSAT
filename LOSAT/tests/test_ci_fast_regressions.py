@@ -115,7 +115,13 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(fast.select_programs(["LOSAT/src/core/blast_util.rs"]), everything)
         self.assertEqual(fast.select_programs(["LOSAT/Cargo.lock"]), everything)
         self.assertEqual(fast.select_programs([".github/workflows/ci.yml"]), everything)
-        self.assertEqual(fast.select_programs(["LOSAT/src/algorithm/tblastn/args.rs"]), {"tblastn"})
+        # A program's file selects the programs whose code imports its directory, directly or through
+        # another program, not every program: blastn imports no other program, so a tblastn file does
+        # not select it.
+        tblastn = fast.select_programs(["LOSAT/src/algorithm/tblastn/args.rs"])
+        self.assertEqual(tblastn, fast.program_dependents()["tblastn"])
+        self.assertIn("tblastn", tblastn)
+        self.assertNotIn("blastn", tblastn)
         blastn = fast.select_programs(["LOSAT/src/algorithm/blastn/hsp.rs"])
         self.assertIn("blastn", blastn)
         # TBLASTX uses BLASTN's hit list (blastn/hsp.rs HitList) and blank-input check.

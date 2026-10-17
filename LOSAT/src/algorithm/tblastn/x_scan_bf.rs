@@ -24,9 +24,11 @@
 //! `LOSAT_X_TBNSCANBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_X_STATS` set,
 //! `main` prints `[X_STATS] TBNSCANBF units_bf= calls_bf= units_ref= calls_ref=` at exit (the scan
 //! units of the unit path scanned by this loop and by NCBI's, and the scan calls they took; a call
-//! more than the unit's ranges is a stop and resume), when the search scanned any. tblastx and
-//! blastp keep the scan of `tblastx/blast_aascan.rs`; blastx calls this scan and the candidate loop
-//! (`x_block_candidates`) under its own switch, LOSAT_X_BXSCANBF (`blastx/x_seed_scan.rs`).
+//! more than the unit's ranges is a stop and resume), when the search scanned any. blastp keeps the
+//! scan of `tblastx/blast_aascan.rs`; blastx calls this scan and the candidate loop
+//! (`x_block_candidates`) under its own switch, LOSAT_X_BXSCANBF (`blastx/x_seed_scan.rs`); TBLASTX
+//! scans each subject range with this loop under its own switch, LOSAT_X_TBXSCANBF
+//! (`tblastx/x_scan_bf.rs`).
 
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 use crate::algorithm::tblastx::lookup::{

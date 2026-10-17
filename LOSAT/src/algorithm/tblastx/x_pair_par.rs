@@ -746,6 +746,7 @@ fn lut_direct_groups(
     let starts = group_starts(q.contexts());
     let locations = q.x_group_locations(&starts)?;
     let to_group = |g: XPairLutGroup| XGroup {
+        scan_bf: crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&g.table),
         lookup: g.table,
         q_min: g.q_min,
         q_max: g.q_max,
@@ -860,6 +861,8 @@ struct XGroup {
     lookup: BlastAaLookupTable,
     q_min: u32,
     q_max: u32,
+    /// EXPERIMENT (LOSAT_X_TBXSCANBF): `x_scan_bf_for(&lookup)`, decided once per table.
+    scan_bf: bool,
 }
 
 /// One unit: subject frame `f`, its chunk number `k`, context group `g`.
@@ -1606,10 +1609,13 @@ impl XPairPar {
         }
 
         let offset_array_size: i32 = OFFSET_ARRAY_SIZE + sub.longest_chain.max(0);
-        if scratch.offset_pairs.len() < offset_array_size as usize {
+        // EXPERIMENT (LOSAT_X_TBXSCANBF): with the switch, X_SCAN_BF_SLACK entries more.
+        let offset_pairs_len =
+            crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
+        if scratch.offset_pairs.len() < offset_pairs_len {
             scratch
                 .offset_pairs
-                .resize(offset_array_size as usize, OffsetPair::default());
+                .resize(offset_pairs_len, OffsetPair::default());
         }
         // Unit cell of hit (q, s): q - s - lo, lo = q_min - (s_len - 1) (u32 wrapping), so the
         // cells run from 0 to (q_max - q_min) + (s_len - 1).
@@ -1654,7 +1660,9 @@ impl XPairPar {
             while scan_range[1] <= scan_range[2] {
                 let prev_scan_left = scan_range[1];
                 // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-                let hits = s_blast_aa_scan_subject(
+                // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
+                let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+                    group.scan_bf,
                     sub,
                     subject,
                     &seq_ranges,
@@ -2015,10 +2023,8 @@ fn build_groups(lookup: &BlastAaLookupTable, contexts: &[QueryContext]) -> Vec<X
     }
     builds
         .into_iter()
-        .map(|b| XGroup {
-            q_min: if b.longest_chain > 0 { b.q_min } else { 0 },
-            q_max: b.q_max,
-            lookup: BlastAaLookupTable {
+        .map(|b| {
+            let lookup = BlastAaLookupTable {
                 backbone: b.backbone,
                 overflow: b.overflow,
                 pv: b.pv,
@@ -2032,7 +2038,13 @@ fn build_groups(lookup: &BlastAaLookupTable, contexts: &[QueryContext]) -> Vec<X
                 longest_chain: b.longest_chain,
                 threshold: lookup.threshold,
                 row_max: lookup.row_max.clone(),
-            },
+            };
+            XGroup {
+                q_min: if b.longest_chain > 0 { b.q_min } else { 0 },
+                q_max: b.q_max,
+                scan_bf: crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup),
+                lookup,
+            }
         })
         .collect()
 }

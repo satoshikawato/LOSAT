@@ -20,9 +20,10 @@
 //! `X_SCAN_BF_SLACK` entries after `array_size`; the entries past the returned count are not
 //! part of the result.
 //!
-//! The switch is read once, off unless set (not in the strict set). tblastx and blastp keep the
-//! scan of `tblastx/blast_aascan.rs`; blastx calls this scan and the candidate loop
-//! (`x_block_candidates`) under its own switch, LOSAT_X_BXSCANBF (`blastx/x_seed_scan.rs`).
+//! The switch is read once, off unless set (not in the strict set). blastp keeps the scan of
+//! `tblastx/blast_aascan.rs`; blastx calls this scan and the candidate loop (`x_block_candidates`)
+//! under its own switch, LOSAT_X_BXSCANBF (`blastx/x_seed_scan.rs`); TBLASTX scans each subject
+//! range with this loop under its own switch, LOSAT_X_TBXSCANBF (`tblastx/x_scan_bf.rs`).
 
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 use crate::algorithm::tblastx::lookup::{

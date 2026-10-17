@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_DIAGLV, shadow LOSAT_X_DIAGLVSHADOW; off unless set to any value, not in
-//! the strict set): a seed's retrieve of its own diagonal from the diagonal hash skips its
+//! EXPERIMENT (LOSAT_X_DIAGLV, a strict-set switch since 2026-10-17; shadow
+//! LOSAT_X_DIAGLVSHADOW, off unless set to any value): a seed's retrieve of its own diagonal from the diagonal hash skips its
 //! read-only chain walk when every cell of the diagonal's bucket has a level below the smallest
 //! level that could change a decision of the seed. The table keeps, per bucket, an upper bound
 //! of the levels of its cells (`DiagHashTable::max_level`, 512 values).
@@ -166,15 +166,16 @@ enum Mode {
     Shadow,
 }
 
-/// No NCBI counterpart: reads LOSAT_X_DIAGLVSHADOW and LOSAT_X_DIAGLV once (off unless set to
-/// any value; not in the strict set); the shadow implies the switch. They do not change any
+/// No NCBI counterpart: reads LOSAT_X_DIAGLVSHADOW (off unless set to any value) and LOSAT_X_DIAGLV
+/// (a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) once; the
+/// shadow implies the switch. They do not change any
 /// value NCBI computes.
 fn mode() -> Mode {
     static MODE: OnceLock<Mode> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_DIAGLVSHADOW").is_some() {
             Mode::Shadow
-        } else if std::env::var_os("LOSAT_X_DIAGLV").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_DIAGLV") {
             Mode::On
         } else {
             Mode::Off

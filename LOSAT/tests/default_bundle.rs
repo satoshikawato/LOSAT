@@ -1,0 +1,284 @@
+//! The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle): blastp's
+//! `LOSAT_X_BPREDOPAR`, `LOSAT_X_BPREDOLPT`, `LOSAT_X_BPDBCUT`, `LOSAT_X_BPSUBJMETA` and
+//! `LOSAT_X_BPLKPAHEAD`, and blastn's `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARFOLD`,
+//! `LOSAT_X_QDUSTPAR`, `LOSAT_X_DIAGLV`, `LOSAT_X_QBATCHPAR`, `LOSAT_X_QPREPPAR`,
+//! `LOSAT_X_RPTSTREAM` and `LOSAT_X_BNSTORE`. Each has its own test file, whose searches run with
+//! the others off (the default before). Here the searches run with the default (no variable) and
+//! give the report of the default before (`LOSAT_X_DEFAULT=0`), of each switch off (`=0`) and of
+//! all of them off, with the same standard error. And the default runs them: the
+//! `[TIMING] x_bpredopar:` line of BPREDOPAR, with BPREDOLPT's `lpt_windows=`, comes without a
+//! variable and not with `LOSAT_X_BPREDOPAR=0`; QBATCHPAR's `[X_STATS]` line comes without a
+//! variable, and its off reason for these small query files is the budget, which is 0 by default
+//! for a query file that NCBI's blastn would not split by queries (`x_qbatch_par.rs`,
+//! `Profile::of_search`), and `LOSAT_X_QBATCHPARMEM` still sets one.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// The blastp switches of the bundle.
+const BLASTP: &[&str] = &[
+    "LOSAT_X_BPDBCUT",
+    "LOSAT_X_BPLKPAHEAD",
+    "LOSAT_X_BPREDOLPT",
+    "LOSAT_X_BPREDOPAR",
+    "LOSAT_X_BPSUBJMETA",
+];
+
+/// The blastn switches of the bundle.
+const BLASTN: &[&str] = &[
+    "LOSAT_X_BNSTORE",
+    "LOSAT_X_DIAGLV",
+    "LOSAT_X_PAIRPARDISC",
+    "LOSAT_X_PAIRPARFOLD",
+    "LOSAT_X_QBATCHPAR",
+    "LOSAT_X_QDUSTPAR",
+    "LOSAT_X_QPREPPAR",
+    "LOSAT_X_RPTSTREAM",
+];
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fasta")
+        .join(name)
+}
+
+/// A directory of this test file (`label`: one per test).
+fn work_dir(label: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("default_bundle")
+        .join(label);
+    std::fs::create_dir_all(&dir).expect("work directory");
+    dir
+}
+
+/// One LOSAT run with `args` and `vars` as its only variables that choose a code path or NCBI's
+/// batches (`BATCH_SIZE` too). `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
+/// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
+/// soon as a search has more than one thread, and it selects nothing. Must exit with 0; returns
+/// the report and standard error.
+fn losat(args: &[&str], vars: &[(&str, &str)]) -> (Vec<u8>, String) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    for (name, _) in std::env::vars_os() {
+        let text = name.to_string_lossy();
+        if (text.starts_with("LOSAT_") && text != "LOSAT_BLASTX_WORKER_LOG")
+            || matches!(
+                text.as_ref(),
+                "BATCH_SIZE" | "CHUNK_SIZE" | "OVERLAP_CHUNK_SIZE" | "RAYON_NUM_THREADS"
+            )
+        {
+            command.env_remove(name);
+        }
+    }
+    if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
+        command.env(
+            "LOSAT_BLASTX_WORKER_LOG",
+            std::env::temp_dir().join("losat-default-bundle-worker.log"),
+        );
+    }
+    let output = command
+        .args(args)
+        .envs(vars.iter().copied())
+        .output()
+        .expect("run LOSAT");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(output.status.success(), "{args:?} {vars:?}: {stderr}");
+    (output.stdout, stderr)
+}
+
+/// The search `args` (with `base` set in every run) gives one report and one standard error with
+/// no variable, with `LOSAT_X_DEFAULT=0`, with each switch of `switches` at `0`, and with all of
+/// them at `0`; returns the report.
+fn one_report(args: &[&str], base: &[(&str, &str)], switches: &[&'static str]) -> Vec<u8> {
+    let with = |extra: Vec<(&'static str, &'static str)>| -> Vec<(&str, &str)> {
+        base.iter().copied().chain(extra).collect()
+    };
+    let (report, stderr) = losat(args, base);
+    assert!(!report.is_empty(), "{args:?}: the search has hits");
+    let mut arms = vec![with(vec![("LOSAT_X_DEFAULT", "0")])];
+    for &name in switches {
+        arms.push(with(vec![(name, "0")]));
+    }
+    arms.push(with(
+        BLASTP
+            .iter()
+            .chain(BLASTN)
+            .map(|&name| (name, "0"))
+            .collect(),
+    ));
+    for vars in &arms {
+        let (other, other_stderr) = losat(args, vars);
+        assert!(
+            other == report,
+            "{args:?}: the report differs with {vars:?}"
+        );
+        assert_eq!(
+            other_stderr, stderr,
+            "{args:?}: standard error with {vars:?}"
+        );
+    }
+    report
+}
+
+/// A protein database of the subject proteome, made with `LOSAT makedb`; returns its name.
+fn protein_database(label: &str) -> PathBuf {
+    let name = work_dir(label).join("MejoMJNV");
+    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        .arg("makedb")
+        .arg("-in")
+        .arg(fixture("MejoMJNV.faa"))
+        .args(["-dbtype", "prot"])
+        .arg("-out")
+        .arg(&name)
+        .output()
+        .expect("run LOSAT makedb");
+    assert!(
+        output.status.success(),
+        "makedb: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    name
+}
+
+/// Twelve pieces of LC738874 (1.5-3.7 kb) as queries, in a file of this test.
+fn pieces(label: &str) -> PathBuf {
+    let text = std::fs::read_to_string(fixture("LC738874.fasta")).expect("fixture");
+    let genome: String = text.lines().filter(|line| !line.starts_with('>')).collect();
+    let mut fasta = String::new();
+    for i in 0..12usize {
+        let start = i * 13_000;
+        fasta.push_str(&format!(
+            ">piece{i}\n{}\n",
+            &genome[start..start + 1_500 + 200 * i]
+        ));
+    }
+    let file = work_dir(label).join("pieces.fna");
+    std::fs::write(&file, fasta).expect("query file");
+    file
+}
+
+/// blastp-fast with `-subject` in blocks (two blocks of the default `LOSAT_X_BPQBLOCK` for the
+/// 77,448 letters of the query proteome) and exact blastp with `-db` at four threads.
+#[test]
+fn blastp_gives_one_report_with_the_switches_on_and_off() {
+    let query = fixture("MeenMJNV.faa");
+    let subject = fixture("MejoMJNV.faa");
+    let (query, subject) = (query.to_str().unwrap(), subject.to_str().unwrap());
+    let fast = [
+        "blastp",
+        "-task",
+        "blastp-fast",
+        "-query",
+        query,
+        "-subject",
+        subject,
+        "-outfmt",
+        "6",
+        "-evalue",
+        "1e-3",
+        "-num_threads",
+        "4",
+    ];
+    one_report(&fast, &[], BLASTP);
+    let db = protein_database("blastp");
+    let db = db.to_str().unwrap();
+    let exact = [
+        "blastp",
+        "-query",
+        query,
+        "-db",
+        db,
+        "-outfmt",
+        "6",
+        "-evalue",
+        "1e-3",
+        "-num_threads",
+        "4",
+    ];
+    one_report(&exact, &[], BLASTP);
+    // The default runs BPREDOPAR's path (and BPREDOLPT's windows); its switch at 0 does not.
+    let timing = [("LOSAT_TIMING", "1")];
+    let (_, stderr) = losat(&fast, &timing);
+    let lines: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with("[TIMING] x_bpredopar: "))
+        .collect();
+    assert!(
+        !lines.is_empty(),
+        "no x_bpredopar line by default: {stderr}"
+    );
+    assert!(
+        lines.iter().all(|line| line.contains(" lpt_windows=")),
+        "{lines:?}"
+    );
+    let (_, stderr) = losat(&fast, &[("LOSAT_TIMING", "1"), ("LOSAT_X_BPREDOPAR", "0")]);
+    assert!(!stderr.contains("[TIMING] x_bpredopar: "), "{stderr}");
+}
+
+/// dc-megablast and blastn with `-subject`, several query batches (`BATCH_SIZE=4000`), at four
+/// threads.
+#[test]
+fn blastn_gives_one_report_with_the_switches_on_and_off() {
+    let query = pieces("blastn");
+    let subject = fixture("LC738868.fasta");
+    let (query, subject) = (query.to_str().unwrap(), subject.to_str().unwrap());
+    let batches = [("BATCH_SIZE", "4000")];
+    for task in ["dc-megablast", "blastn", "megablast"] {
+        let args = [
+            "blastn",
+            "-task",
+            task,
+            "-query",
+            query,
+            "-subject",
+            subject,
+            "-outfmt",
+            "6",
+            "-num_threads",
+            "4",
+        ];
+        one_report(&args, &batches, BLASTN);
+    }
+    // QBATCHPAR runs by default; these query files get no default budget, and the variable
+    // still sets one.
+    let args = [
+        "blastn",
+        "-task",
+        "dc-megablast",
+        "-query",
+        query,
+        "-subject",
+        subject,
+        "-outfmt",
+        "6",
+        "-num_threads",
+        "4",
+    ];
+    let stats = |vars: &[(&str, &str)]| -> String {
+        let (_, stderr) = losat(&args, vars);
+        stderr
+            .lines()
+            .find(|line| line.starts_with("[X_STATS] QBATCHPAR "))
+            .unwrap_or_else(|| panic!("no QBATCHPAR line with {vars:?}: {stderr}"))
+            .to_string()
+    };
+    let line = stats(&[("BATCH_SIZE", "4000"), ("LOSAT_X_STATS", "1")]);
+    assert!(
+        line.contains(" budget_mib=0 ") && line.ends_with(" off=budget"),
+        "{line}"
+    );
+    let line = stats(&[
+        ("BATCH_SIZE", "4000"),
+        ("LOSAT_X_STATS", "1"),
+        ("LOSAT_X_QBATCHPARMEM", "84"),
+    ]);
+    assert!(line.contains(" budget_mib=84 "), "{line}");
+    let (_, stderr) = losat(
+        &args,
+        &[
+            ("BATCH_SIZE", "4000"),
+            ("LOSAT_X_STATS", "1"),
+            ("LOSAT_X_QBATCHPAR", "0"),
+        ],
+    );
+    assert!(!stderr.contains("[X_STATS] QBATCHPAR "), "{stderr}");
+}

@@ -74,7 +74,8 @@
 //! (`XFlatArgs::x_ahead`). A build whose `hits` would not fit gives no values and the block builds
 //! its table itself, on its own thread. Untouched capacity is not resident.
 //!
-//! Off unless `LOSAT_X_BPLKPAHEAD` is set (to any value); not in the strict set.
+//! `LOSAT_X_BPLKPAHEAD` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set.
 //!
 //! `LOSAT_X_BPLKPAHEADSHADOW=1` (shadow mode, implies the switch): each block that takes values built
 //! ahead also builds them inline as without the switch (on the block spare's vectors, which it gives
@@ -137,14 +138,15 @@ pub(crate) enum XLkpAhead {
 
 // No NCBI counterpart: reads the LOSAT_X_BPLKPAHEAD / LOSAT_X_BPLKPAHEADSHADOW switches once; it does
 // not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): off unless set to any value; `LOSAT_X_BPLKPAHEADSHADOW` (any
-/// value) selects the shadow mode, which implies the switch.
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): a strict-set switch, on unless it is `0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BPLKPAHEADSHADOW` (any value) selects the shadow
+/// mode, which implies the switch.
 pub(crate) fn x_bp_lkp_ahead() -> XLkpAhead {
     static MODE: OnceLock<XLkpAhead> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BPLKPAHEADSHADOW").is_some() {
             XLkpAhead::Shadow
-        } else if std::env::var_os("LOSAT_X_BPLKPAHEAD").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BPLKPAHEAD") {
             XLkpAhead::On
         } else {
             XLkpAhead::Off

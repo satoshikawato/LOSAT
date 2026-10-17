@@ -39,6 +39,25 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
+/// `0`, the default before, unless the search sets it: every search here runs as it was written,
+/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
+    ("LOSAT_X_BNSTORE", "0"),
+    ("LOSAT_X_BPDBCUT", "0"),
+    ("LOSAT_X_BPLKPAHEAD", "0"),
+    ("LOSAT_X_BPREDOLPT", "0"),
+    ("LOSAT_X_BPREDOPAR", "0"),
+    ("LOSAT_X_BPSUBJMETA", "0"),
+    ("LOSAT_X_DIAGLV", "0"),
+    ("LOSAT_X_PAIRPARDISC", "0"),
+    ("LOSAT_X_PAIRPARFOLD", "0"),
+    ("LOSAT_X_QBATCHPAR", "0"),
+    ("LOSAT_X_QDUSTPAR", "0"),
+    ("LOSAT_X_QPREPPAR", "0"),
+    ("LOSAT_X_RPTSTREAM", "0"),
+];
+
 const SWITCH: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_QBATCHPARSHADOW", "1");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
@@ -169,8 +188,31 @@ impl Run {
     }
 }
 
+/// `LOSAT_X_QBATCHPARMEM` as the slot model's default budget was before 2026-10-17 for the task
+/// and the thread count of `args`: 96 MiB (blastn, blastn-short) or 28 MiB (megablast,
+/// dc-megablast) per thread beyond the first. Since then a query file that NCBI's blastn would not
+/// split by queries (all the files here) gets no default budget (`x_qbatch_par.rs`,
+/// `Profile::of_search`); these tests check the slots, so their runs keep the earlier budget,
+/// unless a test sets the variable itself (`env` comes after it).
+fn earlier_budget(args: &[&str]) -> String {
+    let value = |flag: &str| {
+        args.iter()
+            .position(|arg| *arg == flag)
+            .and_then(|index| args.get(index + 1))
+            .copied()
+    };
+    let threads: u64 = value("-num_threads")
+        .and_then(|threads| threads.parse().ok())
+        .unwrap_or(1);
+    let per_thread = match value("-task").unwrap_or("megablast") {
+        "megablast" | "dc-megablast" => 28,
+        _ => 96,
+    };
+    (per_thread * threads.saturating_sub(1)).to_string()
+}
+
 /// One `LOSAT blastn` run with `args`, with `env` as its only variables that choose a code path
-/// or NCBI's batches. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
+/// or NCBI's batches (and the earlier default budget, `earlier_budget`). `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
 /// soon as a search has more than one thread, and it selects nothing.
 fn blastn(args: &[&str], env: &[(&str, &str)]) -> Run {
@@ -189,6 +231,8 @@ fn blastn(args: &[&str], env: &[(&str, &str)]) -> Run {
     let output = command
         .arg("blastn")
         .args(args)
+        .envs(PREVIOUS_DEFAULT.iter().copied())
+        .env("LOSAT_X_QBATCHPARMEM", earlier_budget(args))
         .envs(env.iter().copied())
         .output()
         .expect("run LOSAT");

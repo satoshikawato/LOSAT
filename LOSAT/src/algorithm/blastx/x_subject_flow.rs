@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k], off unless set; not in the strict set): the subject loop
+//! EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0` or `LOSAT_X_DEFAULT=0`): the subject loop
 //! of a query chunk as a flow of tasks of `k` consecutive subjects (64, as `LOSAT_X_BXCHUNK`, when
 //! the variable is `1` or not a number from 2 to 65,536), searched ahead by the other threads of
 //! the pool and handed
@@ -53,18 +53,7 @@ type Task = (
 /// EXPERIMENT (LOSAT_X_BXSUBJFLOW[=k]): subjects per task; `None` when the switch is off.
 pub(super) fn subjects_per_task() -> Option<usize> {
     static K: OnceLock<Option<usize>> = OnceLock::new();
-    *K.get_or_init(|| {
-        let raw = std::env::var_os("LOSAT_X_BXSUBJFLOW")?;
-        let text = raw.to_str().map(str::trim);
-        if text == Some("0") {
-            return None;
-        }
-        Some(
-            text.and_then(|t| t.parse::<usize>().ok())
-                .filter(|k| (2..=65_536).contains(k))
-                .unwrap_or(64),
-        )
-    })
+    *K.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXSUBJFLOW", 2..=65_536, 64))
 }
 
 /// No NCBI counterpart: reads the shadow switch; it does not change any value NCBI computes.

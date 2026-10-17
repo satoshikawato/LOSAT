@@ -1,12 +1,12 @@
 //! BLASTX's subject loop searched as a flow of tasks (`LOSAT_X_BXSUBJFLOW`,
 //! `src/algorithm/blastx/x_subject_flow.rs`) on whole searches.
 //!
-//! The switch is off unless set (it is not in the strict set). With two or more threads the
-//! default path searches a query chunk's subjects in waves of `threads x 64` and hands each wave
-//! to the sink after its slowest worker; with the switch the other threads search tasks of `k`
-//! consecutive subjects ahead and the loop's thread hands them to the sink in subject order. So
-//! the property under test is that the report does not depend on it: standard output equals that
-//! of the same search without the switch, for two, three and four threads, several `k` (64, the
+//! The switch is in the strict set (on unless `=0` or `LOSAT_X_DEFAULT=0`). With `=0` and two or
+//! more threads a query chunk's subjects are searched in waves of `threads x 64` and each wave is
+//! handed to the sink after its slowest worker; with the switch the other threads search tasks of
+//! `k` consecutive subjects ahead and the loop's thread hands them to the sink in subject order.
+//! So the property under test is that the report does not depend on it: standard output equals
+//! that of the same search with `=0`, for two, three and four threads, several `k` (64, the
 //! default, and 2, 7 and 16), outfmt 0, 6 and 7, a database (`-db`) and a
 //! FASTA subject set (`-subject`), and an ungapped search (whose subjects carry link cutoffs).
 //! The shadow (`LOSAT_X_BXSUBJFLOWSHADOW`) searches every task again on another table and must
@@ -130,7 +130,7 @@ fn the_report_does_not_depend_on_the_subject_flow() {
     ] {
         for &outfmt in outfmts {
             let args = [subjects[0], subjects[1], "-outfmt", outfmt];
-            let (reference, _) = blastx(&query, &args, 3, &[]);
+            let (reference, _) = blastx(&query, &args, 3, &[("LOSAT_X_BXSUBJFLOW", "0")]);
             assert!(
                 reference.iter().filter(|&&b| b == b'\n').count() > 20,
                 "{args:?}: too few hits to test"
@@ -160,7 +160,7 @@ fn an_ungapped_search_and_the_shadow_give_the_same_report() {
     for extra in [&[][..], &["-ungapped", "-comp_based_stats", "0"][..]] {
         let mut args = vec!["-db", db.as_str(), "-outfmt", "6"];
         args.extend_from_slice(extra);
-        let (reference, _) = blastx(&query, &args, 4, &[]);
+        let (reference, _) = blastx(&query, &args, 4, &[("LOSAT_X_BXSUBJFLOW", "0")]);
         let (report, stderr) = blastx(
             &query,
             &args,
@@ -191,27 +191,27 @@ fn the_flow_takes_the_subject_loop() {
     std::fs::create_dir_all(&dir).unwrap();
     let (query, _, db) = inputs(&dir);
     let args = ["-db", db.as_str(), "-outfmt", "6"];
-    let (reference, stderr) = blastx(&query, &args, 2, &[("LOSAT_TIMING", "1")]);
+    let off = [("LOSAT_X_BXSUBJFLOW", "0"), ("LOSAT_TIMING", "1")];
+    let (reference, stderr) = blastx(&query, &args, 2, &off);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
     assert!(timing(&stderr, "blastx_subject_waves", "waves") > 0);
-    // The 1,711 subjects as 27 tasks of 64, and no wave.
-    let (report, stderr) = blastx(
-        &query,
-        &args,
-        2,
-        &[("LOSAT_X_BXSUBJFLOW", "1"), ("LOSAT_TIMING", "1")],
-    );
+    // The default: the 1,711 subjects as 27 tasks of 64, and no wave.
+    let (report, stderr) = blastx(&query, &args, 2, &[("LOSAT_TIMING", "1")]);
     assert!(report == reference);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 1);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 27);
     assert_eq!(timing(&stderr, "blastx_subject_waves", "waves"), 0);
-    // One thread: no pool, so the subject loop of the waves runs (on this thread).
+    // LOSAT_X_DEFAULT=0 returns to the waves.
     let (report, stderr) = blastx(
         &query,
         &args,
-        1,
-        &[("LOSAT_X_BXSUBJFLOW", "1"), ("LOSAT_TIMING", "1")],
+        2,
+        &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_TIMING", "1")],
     );
+    assert!(report == reference);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
+    // One thread: no pool, so the subject loop of the waves runs (on this thread).
+    let (report, stderr) = blastx(&query, &args, 1, &[("LOSAT_TIMING", "1")]);
     assert!(report == reference);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 0);
     std::fs::remove_dir_all(&dir).unwrap();

@@ -70,7 +70,7 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
   wave; `busy` adds the tasks' times, `longest` each wave's longest task, `latest_start` / `last_end` each wave's
   latest task start / end after the wave began: `longest` near `wall` with `busy` well below `wall x threads` is uneven
   work);
-  `[TIMING] blastx_subject_flow: loops=N tasks=N ahead=N taken=N wall ..` (with `LOSAT_X_BXSUBJFLOW`, below: the
+  `[TIMING] blastx_subject_flow: loops=N tasks=N ahead=N taken=N wall ..` (`LOSAT_X_BXSUBJFLOW`, below: the
   subject loops run as a flow, their tasks, those searched ahead by the helpers and taken by the loop, and the wall
   time, which is the batch line's `scan_par`, the hand-over to the sink included);
   `[TIMING] blastx_batch_side:` / `blastx_batch_alone: batches=N query_setup .. setup .. chunks_par .. lookup .. scan_par .. scan_inline .. replay .. chunk_end .. batch_end .. sum ..`
@@ -185,6 +185,7 @@ export LOSAT_X_BXPAR=1
 export LOSAT_X_BXPOOL=1
 export LOSAT_X_BXSCAN=1
 export LOSAT_X_BXSEGMEMO=1
+export LOSAT_X_BXSUBJFLOW=1
 export LOSAT_X_CODONFAST=1
 export LOSAT_X_COMPFAST=1
 export LOSAT_X_CTXFAST=1
@@ -2183,8 +2184,8 @@ Scheduling (each value computed by one thread with the original function; order 
   three rounds): 800 fly 2L cDNAs at 16 threads 0.71-0.84 of the waves' time (and 0.87-0.95 of NCBI
   BLAST+ 2.17.0 `-db`), at 8 threads 0.84-0.87; 50 cDNAs (9 batches) at 16 threads 0.56-0.58, at 8
   threads 0.76; 5 cDNAs (one batch) 1.00.
-- `LOSAT_X_BXSUBJFLOW=1` or `=k` (BLASTX, speed; not in the strict set: off unless set, and `LOSAT_X_DEFAULT`
-  does not touch it; `0` is off; `k` from 2 to 65,536 subjects per task, otherwise 64; acts on a query chunk's
+- `LOSAT_X_BXSUBJFLOW=1` or `=k` (BLASTX, speed; in the strict set since 2026-10-17, in the pull request that added
+  it: on unless `=0` or `LOSAT_X_DEFAULT=0`; `k` from 2 to 65,536 subjects per task, otherwise 64; acts on a query chunk's
   subject loop, `-db` and `-subject` alike, at two or more threads when no diagnostic stage traces the subjects and
   `-window_size` plus twice the longest subject is at most 2^28): the subjects are searched as a flow of tasks of `k`
   consecutive subjects instead of waves of `threads x LOSAT_X_BXCHUNK` (`blastx/x_subject_flow.rs`, exactness argument
@@ -2198,7 +2199,7 @@ Scheduling (each value computed by one thread with the original function; order 
   results identical)` (`tests/blastx_subject_flow.rs`). Measured 2026-10-17 on the workstation (16 / 8 physical cores
   of one node with their HT siblings idle; DB-6's BX-t10: the first 10 zebrafish transcripts of the DB-5 q100 set,
   10.9 kb, against Swiss-Prot `-db`, one query batch; a warm-up then 3 rounds, the order reversed in round 2; every
-  output the same bytes as NCBI BLAST+ 2.17.0 `-db -num_threads 1`): at 16 threads 5.23-5.30 s without the switch,
+  output the same bytes as NCBI BLAST+ 2.17.0 `-db -num_threads 1`): at 16 threads 5.23-5.30 s with `=0` (the waves),
   2.30-2.33 s with `k = 64` (2.36-2.45 s with 16, 2.44-2.51 s with 4), NCBI `-db` 2.53-2.63 s; at 8 threads
   7.09-7.14 s, 3.887-3.896 s and 4.116-4.122 s; max RSS unchanged (226 MB, NCBI 289-297 MB). The waves' own lines
   (`LOSAT_TIMING`) at 16 threads: 563 waves, 4.27 s, of which the waves' longest tasks 4.00 s against a mean of

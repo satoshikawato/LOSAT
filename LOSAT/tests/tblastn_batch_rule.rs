@@ -1,5 +1,6 @@
 //! Which TBLASTN query batches are searched side by side (`LOSAT_X_TBNBATCH` and
-//! `LOSAT_X_TBNBATCHRULE`, both in the strict set; `src/algorithm/tblastn/stage_d_pipeline.rs`).
+//! `LOSAT_X_TBNBATCHRULE`) and which at the same time on pools of their own
+//! (`LOSAT_X_TBNOWNPOOLS`), all in the strict set; `src/algorithm/tblastn/stage_d_pipeline.rs`.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
 //! ```c++
@@ -16,8 +17,10 @@
 //! `LOSAT_X_TBNBATCHRULE` as well (the default), only the batches of the full waves (a multiple of
 //! the threads) go side by side, and only for a small subject set or fewer than two subjects per
 //! thread; the rest are searched one after another with the pool inside each. With
-//! `LOSAT_X_TBNBATCHRULE=0` every batch goes side by side once there is one per thread. None of
-//! these may change the report, so the tests compare it with the one-thread search and read the
+//! `LOSAT_X_TBNBATCHRULE=0` every batch goes side by side once there is one per thread. With
+//! `LOSAT_X_TBNOWNPOOLS` as well (the default), the batches the rule leaves one after another go
+//! at the same time, each on a pool of its own; `LOSAT_X_TBNOWNPOOLS=0` keeps them one after
+//! another. None of these may change the report, so the tests compare it with the one-thread search and read the
 //! `[losat-thread-stage] ... stage=query_batches` line (`LOSAT_WASI_THREADS_DEBUG=1`) to check how
 //! many batches went side by side.
 //!
@@ -160,7 +163,7 @@ fn own_pools(stderr: &str) -> (usize, usize, usize) {
     (field("batches="), field("own_pools="), pools)
 }
 
-// EXPERIMENT (LOSAT_X_TBNOWNPOOLS, opt-in): the batches the rule leaves one after another (two or
+// EXPERIMENT (LOSAT_X_TBNOWNPOOLS, in the strict set): the batches the rule leaves one after another (two or
 // more, fewer than the threads, one small subject here) are searched at the same time, each on a
 // pool of its own with its share of the threads. NCBI reference (598d8ae6):
 // c++/src/app/blast/tblastn_app.cpp:275-289 (above): each batch is still searched as NCBI
@@ -170,7 +173,7 @@ fn own_pools(stderr: &str) -> (usize, usize, usize) {
 fn own_pools_keep_the_one_thread_report() {
     let (expected, _) = tblastn(1, &[]);
     for threads in [2, 3, 5, 8, 16] {
-        let (report, stderr) = tblastn(threads, &[("LOSAT_X_TBNOWNPOOLS", "1")]);
+        let (report, stderr) = tblastn(threads, &[]);
         assert_eq!(report, expected, "own pools, {threads} threads");
         let full = BATCHES / threads * threads;
         let left = BATCHES - full;
@@ -184,19 +187,17 @@ fn own_pools_keep_the_one_thread_report() {
             (BATCHES, own, 1 + own),
             "own pools, {threads} threads"
         );
-        // Without the switch no batch goes to a pool of its own.
-        let (_, stderr) = tblastn(threads, &[]);
+        // With `LOSAT_X_TBNOWNPOOLS=0` no batch goes to a pool of its own.
+        let (report, stderr) = tblastn(threads, &[("LOSAT_X_TBNOWNPOOLS", "0")]);
+        assert_eq!(report, expected, "own pools off, {threads} threads");
         assert_eq!(
             own_pools(&stderr),
             (BATCHES, 0, 1),
-            "default, {threads} threads"
+            "own pools off, {threads} threads"
         );
     }
     // The rule decides which batches are left: without it, no pools of their own.
-    let (report, stderr) = tblastn(
-        8,
-        &[("LOSAT_X_TBNOWNPOOLS", "1"), ("LOSAT_X_TBNBATCHRULE", "0")],
-    );
+    let (report, stderr) = tblastn(8, &[("LOSAT_X_TBNBATCHRULE", "0")]);
     assert_eq!(report, expected, "own pools without the rule");
     assert_eq!(
         own_pools(&stderr),
@@ -232,7 +233,7 @@ fn own_pools_without_shared_subject_plans_keep_the_one_thread_report() {
     std::fs::write(&query, kept).expect("query file");
     let (expected, _) = tblastn_query(&query, 1, &[]);
     assert!(!expected.is_empty(), "the search must report hits");
-    let (report, stderr) = tblastn_query(&query, 4, &[("LOSAT_X_TBNOWNPOOLS", "1")]);
+    let (report, stderr) = tblastn_query(&query, 4, &[]);
     assert_eq!(report, expected, "own pools, two batches");
     assert_eq!(own_pools(&stderr), (2, 2, 3), "own pools, two batches");
 }

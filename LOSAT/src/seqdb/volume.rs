@@ -264,6 +264,50 @@ impl Volume {
             &with_extension(&self.base, self.index.seqtype, "hr"),
         )
     }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2364-2384
+    // ```c++
+    //     int length = int(end_offset - start_offset);
+    //
+    //     if (length) {
+    //         int total = length / 4;
+    //         ...
+    //         ambchars.resize(total);
+    //
+    //         for(int i = 0; i<total; i++) {
+    //             ambchars[i] = SeqDB_GetStdOrd((const int *)(& buffer[i]));
+    //         }
+    // ```
+    /// Whether the ambiguity data of nucleotide `oid` (volume-relative;
+    /// `ordinal` its database ordinal id, for the message) decode as
+    /// `SequenceBlock::ambiguity_runs` decodes them: the same error, read
+    /// without the sequence's letters (only the bytes between its ambiguity
+    /// offset and the next sequence; nothing when it has none). A protein
+    /// volume has no ambiguity data.
+    pub fn check_ambiguity(&self, oid: u32, ordinal: u32) -> Result<(), SeqDbError> {
+        self.check_range(oid, oid.saturating_add(1))?;
+        if self.index.seqtype != SeqType::Nucleotide {
+            return Ok(());
+        }
+        let amb_start = self.index.ambiguity_offsets()[oid as usize];
+        let next = self.index.sequence_offsets()[oid as usize + 1];
+        if u64::from(amb_start) >= u64::from(next) {
+            return Ok(());
+        }
+        let file = self.seq_file()?;
+        let block = SequenceBlock {
+            seqtype: SeqType::Nucleotide,
+            first_ordinal: ordinal,
+            path: file.path().to_path_buf(),
+            data: file.read_range(u64::from(amb_start), u64::from(next))?,
+            data_start: u64::from(amb_start),
+            // The block holds the ambiguity data only: its letters' range is
+            // empty, and nothing but `ambiguity_runs` reads it.
+            seq_offsets: vec![amb_start, next],
+            amb_offsets: vec![amb_start],
+        };
+        block.ambiguity_runs(0).map(|_| ())
+    }
 }
 
 /// A contiguous range of sequences of one volume, held in memory.

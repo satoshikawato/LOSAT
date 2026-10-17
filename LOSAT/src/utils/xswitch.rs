@@ -97,11 +97,29 @@ use std::sync::OnceLock;
 /// they were verified and timed with it on.
 /// `LOSAT_X_BPDIAG` (the two-hit diagonal test of a lookup cell eight hits at a time,
 /// `blastp/x_seed_fused.rs`) joined after a second run of the same jobs with it on as well.
+/// `LOSAT_X_SEEDCOMPACT` (TBLASTX's unit path keeps the saved init HSPs of a unit as 28-byte
+/// records copied out at their exact length, `tblastx/x_pair_par.rs`) was added after the change as
+/// a switch that is off unless set and joined the set once it was verified and timed with it on.
+/// `LOSAT_X_BPCLUT` (the compressed lookup table of `blastp-fast` built flat, in three passes, by
+/// the search's pool at more than one thread, `tblastx/lookup/x_clut_direct.rs`) and
+/// `LOSAT_X_BPLKPFLAT` (how that build is scheduled and where its vectors come from, which acts
+/// only where `LOSAT_X_BPCLUT` builds the table on the pool, `tblastx/lookup/x_clut_par.rs`) were
+/// added after the change as switches that are off unless set and joined the set together once
+/// they were verified and timed with them on.
+/// `LOSAT_X_BPDEFER` (the candidates of a lookup cell's AVX2 batches called after its last batch
+/// of eight, `blastp/x_seed_fused.rs`) joined after a third run of the same jobs with it on as well.
+/// `LOSAT_X_TBNOWNPOOLS` (the query batches `LOSAT_X_TBNBATCHRULE` leaves one after another
+/// searched at the same time, each on a pool of its own, `tblastn/stage_d_pipeline.rs`) was added
+/// after the change as a switch that is off unless set and joined the set once it was verified
+/// and timed with it on.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
     "LOSAT_X_BNSTREAM",
+    "LOSAT_X_BPCLUT",
+    "LOSAT_X_BPDEFER",
     "LOSAT_X_BPDIAG",
     "LOSAT_X_BPGAP",
+    "LOSAT_X_BPLKPFLAT",
     "LOSAT_X_BPLUT",
     "LOSAT_X_BPPCOMPACT",
     "LOSAT_X_BPPFREE",
@@ -152,6 +170,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_PAIRPAR",
     "LOSAT_X_PURGEFAST",
     "LOSAT_X_SEEDBUCKET",
+    "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDRELEASE",
     "LOSAT_X_SEGFAST",
     "LOSAT_X_SEGMEMO",
@@ -162,6 +181,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNOIDCHUNK",
     "LOSAT_X_TBNOIDNEXT",
     "LOSAT_X_TBNOIDUNITS",
+    "LOSAT_X_TBNOWNPOOLS",
     "LOSAT_X_TBNPAR",
     "LOSAT_X_TBNQSIDE",
     "LOSAT_X_TBNSSIDE",

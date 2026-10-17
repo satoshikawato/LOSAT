@@ -1302,7 +1302,9 @@ Scheduling (each value computed by one thread with the original function; order 
   the counters on cache lines of its own, which the calling thread adds into the counters after the
   last chunk (the same wrapping increments of each counter by its one owner, and nothing reads the
   counters before the longest chain); and `longest_chain` is computed afterwards by the original code.
-  Each bucket's header sits on a 64-byte line of its own. The buckets hold one
+  Each bucket's header sits on a 64-byte line of its own (so the counter lines and the header lines
+  are not shared between threads; the presence-vector words of two neighbouring blocks still share a
+  line, which costs nothing measurable). The buckets hold one
   8-byte entry per word of the current chunk and template; before each chunk a bucket gives back the
   room it grew above four times its share of a chunk, so the buckets of one template reserve at most
   24 MiB plus 608 bytes x threads^2 (544 of entries and the 64-byte header) whatever the input; the
@@ -1349,22 +1351,34 @@ Scheduling (each value computed by one thread with the original function; order 
   jobs 0.011 / 0.057 / 0.005 s, summed 0.159 / 0.853 / 0.061 s. So the joins cost little: the latest
   job start is 0.0024-0.0033 s per phase summed over the 21 chunks, and the walls exceed the longest
   jobs by 0.011 s (4 threads) and 0.013 s (16 threads) in all, about 0.2 ms per join. The time is in
-  the jobs' own work, whose sum is 3.8 times (4 threads) and 4.9 times (16 threads) the loop's whole
-  fill; phase B (the owners' updates) alone sums to 2.4 and 3.9 times the loop, with balanced jobs
+  the jobs' own run time (mostly stalls, as the cause below shows), whose sum is 3.8 times (4
+  threads) and 4.9 times (16 threads) the loop's whole fill; phase B (the owners' updates) alone sums to 2.4 and 3.9 times the loop, with balanced jobs
   (longest / mean 1.04 and 1.08); at 4 threads phase A is also costly (the longest reader 1.29 times
   the mean). The runs with the switch also have more system time (0.22 against 0.15 s at 4 threads,
-  0.90 against 0.60 s at 16). Fewer joins would save at most the 0.01 s above. The cause was false
+  0.90 against 0.60 s at 16). Fewer joins would save at most the 0.01 s above. Fix round
+  1's bucket bound costs nothing measurable: (a) at 16 threads, 4 rounds old (24c714fd) / new
+  (b1e3df69) / off, all slow phase: walls 2.056 / 2.055 / 2.174 s (new/old 1.000, 0.999-1.001; new/off
+  0.945), max RSS 91.3-95.3 / 91.3-94.3 / 88.9-92.9 MiB; (b) at 16 threads one round in a common phase
+  4.419 / 4.419 s (the other mixed the phases). Every output equals the sha256 of the run without the
+  switch.
+  The cause was false
   sharing (perf-mb-20261014 `logs/disclutcause_report.md`: hardware counters inside the fill and
   per-thread `getrusage` per phase, on probes of a scratch branch): in phase B the 4-byte counters of
   `helper_array`, one per block of 2048 cells with the blocks dealt round robin, put 16 owners (16
   threads) or 4 (4 threads) on each 64-byte line, and every word on a non-empty cell wrote one; in
   phase A the 24-byte bucket headers of neighbouring readers shared lines, and every push stores the
-  length. That gave 3.3-4.5 million cache-line transfers between cores (HITM loads / RFOs) per fill of
-  (a), against thousands in the loop, about 80 % of them in phase B; the work per word was the loop's
-  (all jobs on one thread: 0.215 s against the loop's 0.213 s, the same cycles), remote memory was no
-  cause and the first-touch page faults (the loop's count, dearer with many threads at once) a
-  secondary one (pre-faulting the tables is a separate, smaller follow-up).
-  The fix (padded bucket headers, private counters, added once after the last chunk): on the
+  length. That gave 3.2-4.5 million HITM loads (loads served by a line another core had modified)
+  and as many RFOs (stores that had to take a line from another core) per fill of (a), 6.4-9.0
+  million of each for (b), against at most a few thousand in the loop, about 80 % of them in phase B.
+  The 3.8 and 4.9 times are the jobs' summed time, mostly stalls, not work: the instructions were
+  1.46-1.6 times the loop's, and with all jobs on one thread the fill took 0.215 s against the
+  loop's 0.213 s with the same cycles. Remote memory was no cause and the first-touch page faults
+  (the loop's count, dearer with many threads at once) a secondary one (pre-faulting the tables is a
+  separate, smaller follow-up).
+  The fix (padded bucket headers, private counters, added once after the last chunk; the counter
+  lines and the bucket-header lines are no longer shared, while the presence-vector words of two
+  neighbouring blocks still share a line, which the cause report measured to cost nothing: 1.1-2.4
+  million HITM loads left, no time): on the
   workstation (node 1 CPUs 32-47 with the siblings idle, `numactl --membind 1`, `LOSAT_X_PAIRPARDISC=1`;
   off = the fixed binary without the switch, #252 = dev 0b7335ce with it, fix = c33d2e2a with it; per
   input and thread count a warm-up, then rounds of the three in rotated order, 4 at 4 and 16 threads, 2
@@ -1373,19 +1387,19 @@ Scheduling (each value computed by one thread with the original function; order 
   (b) 6c12337933ef66fe) the fill took, off / #252 / fix, (a) 0.141 / 0.196 / 0.090 s at 2 threads,
   0.171 / 0.197 / 0.083 s at 4, 0.203 / 0.127 / 0.060 s at 8, 0.201 / 0.082 / 0.049 s at 16; (b)
   0.259 / 0.366 / 0.155, 0.368 / 0.375 / 0.151, 0.374 / 0.231 / 0.100, 0.310 / 0.154 / 0.083 s (fix /
-  #252 0.40-0.59, fix / off 0.24-0.64). So the switch now beats the loop from 2 threads on, and it needs
-  no thread threshold. The machine's one-thread speed flips between runs (powersave; walls of one
-  configuration 1.4 or 2.2 s for (a)), so walls are compared within one speed mode (runs within 10 %
-  of the group's slowest, or fastest at 2 threads): (a) at 2 / 4 / 8 / 16 threads 1.446 / 1.508 / 1.386,
+  #252 0.40-0.59, fix / off 0.24-0.64; medians over all runs). The machine's one-thread speed flips
+  between runs (powersave; walls of one configuration 1.4 or 2.2 s for (a)), and the loop's fill
+  follows it while the pool fills hardly do: (a) at 4 threads, off 0.139 s in the fast mode and 0.204 s in
+  the slow one, fix 0.083 and 0.085 s; (b) at 16 threads, off 0.249 and 0.373 s, fix 0.083 s (slow).
+  Within one speed mode (`logs/disclutfix_ws_table.md`) fix / off is 0.22-0.64 and fix / #252
+  0.39-0.59 for every input and thread count, so the switch beats the loop from 2 threads on in every
+  mode, and it needs no thread threshold. Walls are compared within one speed mode as well (runs
+  within 10 % of the group's slowest; at 2 threads, where (a) has a fast and a slow mode, the fast
+  one, and for (b) all runs): (a) at 2 / 4 / 8 / 16 threads 1.446 / 1.508 / 1.386,
   2.203 / 2.200 / 2.070, 2.190 / 2.112 / 2.044, 2.190 / 2.062 / 2.027 s; (b) 3.037 / 3.130 / 2.925,
   4.030 / 4.045 / 3.854, 4.244 / 4.173 / 4.044, 4.486 / 4.393 / 4.309 s: fix / #252 0.92-0.98, fix / off
   0.93-0.96, about the fills' differences. Max RSS medians of the arms at most 2.5 MiB above the loop's
-  and within 1 MiB of #252's (88-109 MiB). Fix round
-  1's bucket bound costs nothing measurable: (a) at 16 threads, 4 rounds old (24c714fd) / new
-  (b1e3df69) / off, all slow phase: walls 2.056 / 2.055 / 2.174 s (new/old 1.000, 0.999-1.001; new/off
-  0.945), max RSS 91.3-95.3 / 91.3-94.3 / 88.9-92.9 MiB; (b) at 16 threads one round in a common phase
-  4.419 / 4.419 s (the other mixed the phases). Every output equals the sha256 of the run without the
-  switch. Tests: the unit tests of
+  and within 1 MiB of #252's (88-109 MiB). Tests: the unit tests of
   `x_disc_lookup_par.rs` (partitioned and pool fills equal the original loop for every template type,
   length and word size, one and two templates, 1-20 parts, chunks of 1 to 5,000 positions and random
   layouts of queries and masks, pools of 1, 2, 3, 5, 8 and 16 threads, a 2.6 M-position query in the
@@ -1393,7 +1407,9 @@ Scheduling (each value computed by one thread with the original function; order 
   run on at least two workers of a 3-thread pool; the shadow names a change in any one array or the
   longest chain; the buckets' bound; the private counters give the loop's counters on pools of 2, 3, 5
   and 16 threads also from start values that the increments wrap past u32::MAX, with blocks whose
-  counters wrap and blocks whose counters stay zero; the bucket headers and the counter copies are
+  counters wrap and blocks whose counters stay zero, and at least two owners' private copies hold
+  counts before the flush (a fill that counted into one shared copy would be just as exact but bring
+  the false sharing back); the bucket headers and the counter copies are
   whole 64-byte lines) and `LOSAT/tests/blastn_disc_lookup_par.rs`
   (off / on / shadow equal at 1 and 4 threads, `-subject` and `-db`, one and two templates, with
   `LOSAT_X_PAIRPARDISC`, `LOSAT_X_QBATCHPAR` slots and split query chunks, megablast with and without a

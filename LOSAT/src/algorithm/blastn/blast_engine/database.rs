@@ -662,6 +662,68 @@ impl ReportedSubjects {
     }
 }
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-312
+// ```c++
+//                 ITERATE(CSearchResultSet, result, *results) {
+//                     formatter.PrintOneResultSet(**result, query_batch);
+//                 }
+// ```
+/// EXPERIMENT (LOSAT_X_RPTSTREAM): which of LOSAT's refusals of the database's stored data could
+/// come in a batch after the first, where it comes before any of the search's reports without
+/// the switch (`x_rpt_stream`; the same test as blastp's block search,
+/// `blastp::blast_engine::database::x_titles_allow_blocks`), or `None`:
+/// - `Off::Titles`: a definition line that does not read as the reports read those of the
+///   reported sequences (`read_title`: NCBI's reader, one definition line), holds a byte outside
+///   ' ' ..= '~' (`check_reported_title`) or gives no tabular subject id
+///   (`ReportedSubjects::tabular_subject_ids`);
+/// - `Off::Ambiguity`: a sequence whose ambiguity data the traceback cannot decode
+///   (`traceback_listed` and `reported_subjects` read them with
+///   `SequenceBlock::nucleotide_blastna`, first for the batch whose lists name the sequence; the
+///   preliminary stage reads the 2-bit letters only).
+/// Every ordinal id is read in `pool` (the titles, then the ambiguity data of the sequences that
+/// have any; `SeqDb::check_ambiguity` reads only those bytes); a reader error is a refusal too
+/// (the reports then stay after the loop, and the batch that meets the error fails where it does
+/// without the switch).
+pub(super) fn x_streaming_refusal(
+    database: &BlastnDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> Option<super::x_rpt_stream::Off> {
+    let db = &database.db;
+    let title = |ordinal: u32| -> bool {
+        match shared::read_title(db, ordinal, 0, PROGRAM) {
+            Ok(stored) => {
+                !stored.replaced_bytes
+                    && shared::tabular_subject_id(&stored.title, ordinal, false, PROGRAM).is_ok()
+            }
+            Err(_) => false,
+        }
+    };
+    let ambiguity = |ordinal: u32| -> bool { db.check_ambiguity(ordinal).is_ok() };
+    let all = |allowed: &(dyn Fn(u32) -> bool + Sync)| -> bool {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if pool.enabled() {
+            return pool.install(|| {
+                (0..db.num_seqs())
+                    .into_par_iter()
+                    .with_min_len(4096)
+                    .all(allowed)
+            });
+        }
+        let _ = pool;
+        (0..db.num_seqs()).all(allowed)
+    };
+    if !all(&title) {
+        return Some(super::x_rpt_stream::Off::Titles);
+    }
+    if !all(&ambiguity) {
+        return Some(super::x_rpt_stream::Off::Ambiguity);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1121,6 +1183,112 @@ mod tests {
         );
         assert!(format!("{error:#}").ends_with("not supported by LOSAT's BLASTN"));
         drop(database);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // EXPERIMENT (LOSAT_X_RPTSTREAM): each batch's reports are written when the loop takes it
+    // only when every definition line of the database reads and none is refused, and the
+    // ambiguity data of every sequence decode (`x_streaming_refusal`), at one thread and in a
+    // pool. (A path in the system's temporary directory: Unix spelling.)
+    #[cfg(unix)]
+    #[test]
+    fn streaming_needs_every_title_and_every_ambiguity_record_to_read() {
+        use super::super::x_rpt_stream::Off;
+        let refusal = |database: &BlastnDatabase| -> [Option<Off>; 2] {
+            [1, 4].map(|threads| {
+                crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
+                    Ok(x_streaming_refusal(database, pool))
+                })
+                .unwrap()
+            })
+        };
+        assert_eq!(refusal(&open("nucl_v4")), [None, None]);
+        assert_eq!(refusal(&open("nucl_mv")), [None, None]);
+        let dir = temp_dir("streamtitles");
+        // A header file that cannot be read (the fifth volume's): the batch that reads one of
+        // its titles fails where NCBI's does, after the reports of the batches before.
+        for entry in
+            std::fs::read_dir(fixture("nucl_mv.nal").trim_end_matches("nucl_mv.nal")).unwrap()
+        {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_str().unwrap().to_string();
+            if name.starts_with("nucl_mv.") && name != "nucl_mv.04.nhr" {
+                std::fs::copy(&path, dir.join(&name)).unwrap();
+            }
+        }
+        let missing =
+            BlastnDatabase::open(dir.join("nucl_mv").to_str().unwrap(), &Default::default())
+                .unwrap();
+        assert_eq!(refusal(&missing), [Some(Off::Titles); 2]);
+        // A stored title with a byte outside ' ' ..= '~' (LOSAT's refusal when it is reported).
+        for ext in ["nin", "nsq"] {
+            std::fs::copy(fixture("nucl_v4") + "." + ext, dir.join(format!("b.{ext}"))).unwrap();
+        }
+        let mut header = std::fs::read(fixture("nucl_v4") + ".nhr").unwrap();
+        let at = header
+            .windows(13)
+            .position(|window| window == b"n02 length 41")
+            .expect("the title of n02");
+        header[at + 5] = 0xE9;
+        std::fs::write(dir.join("b.nhr"), header).unwrap();
+        let bad =
+            BlastnDatabase::open(dir.join("b").to_str().unwrap(), &Default::default()).unwrap();
+        assert_eq!(refusal(&bad), [Some(Off::Titles); 2]);
+        // The ambiguity count of each sequence with ambiguity data raised by one entry (the
+        // old format of n05 and the new format of n06): the traceback's decoding refuses it.
+        let clean = open("nucl_v4");
+        let volume = &clean.db.volumes()[0];
+        let (seq_offsets, amb_offsets) = (
+            volume.index().sequence_offsets().to_vec(),
+            volume.index().ambiguity_offsets().to_vec(),
+        );
+        drop(clean);
+        for (ordinal, tag) in [(4u32, "c"), (5, "d")] {
+            let at = amb_offsets[ordinal as usize] as usize;
+            assert!(
+                at < seq_offsets[ordinal as usize + 1] as usize,
+                "n0{}",
+                ordinal + 1
+            );
+            for ext in ["nin", "nhr"] {
+                std::fs::copy(
+                    fixture("nucl_v4") + "." + ext,
+                    dir.join(format!("{tag}.{ext}")),
+                )
+                .unwrap();
+            }
+            let mut sequences = std::fs::read(fixture("nucl_v4") + ".nsq").unwrap();
+            let count = u32::from_be_bytes(sequences[at..at + 4].try_into().unwrap());
+            sequences[at..at + 4].copy_from_slice(&(count + 1).to_be_bytes());
+            std::fs::write(dir.join(format!("{tag}.nsq")), sequences).unwrap();
+            let corrupt =
+                BlastnDatabase::open(dir.join(tag).to_str().unwrap(), &Default::default()).unwrap();
+            let error = corrupt
+                .db
+                .check_ambiguity(ordinal)
+                .expect_err("the raised count");
+            assert!(
+                error
+                    .to_string()
+                    .contains("the ambiguity data are shorter than their count"),
+                "{error}"
+            );
+            // The traceback's read of the same sequence fails with the same error.
+            let block = corrupt.db.read_sequence(ordinal).unwrap();
+            assert_eq!(
+                block.nucleotide_blastna(0).unwrap_err().to_string(),
+                error.to_string()
+            );
+            assert_eq!(
+                refusal(&corrupt),
+                [Some(Off::Ambiguity); 2],
+                "n0{}",
+                ordinal + 1
+            );
+        }
+        // A sequence without ambiguity data reads nothing more (n01).
+        open("nucl_v4").db.check_ambiguity(0).unwrap();
+        drop((missing, bad));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

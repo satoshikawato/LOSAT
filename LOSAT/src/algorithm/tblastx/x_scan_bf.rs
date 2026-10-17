@@ -21,19 +21,19 @@
 //! 2 and 5 kb (presence density 0.16-0.29 of the cells), 0.81 at 10 kb (0.37), 0.91 at 20 kb
 //! (0.44), 0.98 at 40 kb (0.49), 1.000 at 80 kb (0.51), 1.004-1.007 from 160 kb (0.53).
 //!
-//! The switch is read once, off unless set (not in the strict set). It acts on the scans of the
-//! unit path (`x_pair_par.rs`, `LOSAT_X_PAIRPAR`) and of the reference frame loop
+//! The switch is read once; it is in the strict set (`utils/xswitch.rs`: on by default, `=0` or
+//! `LOSAT_X_DEFAULT=0` turns it off). It acts on the scans of the unit path (`x_pair_par.rs`, `LOSAT_X_PAIRPAR`) and of the reference frame loop
 //! (`blast_engine/run_impl.rs`).
 
 use super::blast_aascan::{determine_scanning_offsets, s_blast_aa_scan_subject, BlastOffsetPair};
 use super::lookup::BlastAaLookupTable;
 use crate::algorithm::tblastn::x_scan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 
-// No NCBI counterpart: reads LOSAT_X_TBXSCANBF once; off unless set.
+// No NCBI counterpart: reads LOSAT_X_TBXSCANBF once (a switch of the strict set).
 /// EXPERIMENT (LOSAT_X_TBXSCANBF): whether TBLASTX scans with `x_scan_subject_bf`.
 pub(crate) fn x_tbx_scan_bf() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBXSCANBF").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXSCANBF"))
 }
 
 // No NCBI counterpart: the length of LOSAT's offset array (NCBI allocates `array_size` entries,

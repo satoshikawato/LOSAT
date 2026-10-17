@@ -1372,14 +1372,13 @@ Rebuilding less:
   `[X_STATS] SEEDUNMAP active= diag= records= copies=` (`active` 1 where the switch acts in the process: Linux
   with glibc and the THP condition; then the blocks given the mapped capacity at the three places, all 0 at one
   thread, where no unit path runs, where the rule never holds, and where the switch does not act).
-  `LOSAT/tests/tblastx_seed_unmap.rs` reads the line. On the workstation, where the switch acts (8 rounds
-  alternating with `LOSAT_X_SEEDUNMAP=0`, every report the frozen one; measured with the earlier rule, which maps
-  these three searches as the two-side rule does, and before the switch was limited to the pool path, which
-  leaves 8 threads unchanged), the max RSS at 8 threads went from 128 to 117 MiB on AP027131 x AP027133, from
-  175 to 161 MiB on NZ_CP006932 against itself and from 42 to 41 MiB on MelaMJNV x PemoMJNVA (lower in 6 to 8 of
-  the 8 rounds); MelaMJNV against AP027133 in six pieces (44 -> 41 MiB there) and the 200 queries now keep the
-  arena, and AP027131 against 200 contigs (84 / 83 MiB) did not change. Nothing changes at one thread. The time
-  stayed within the noise of that run.
+  `LOSAT/tests/tblastx_seed_unmap.rs` reads the line. On the workstation (THP "[madvise]", so the switch acts;
+  8 rounds alternating with `LOSAT_X_SEEDUNMAP=0`, one warm-up per block, every report the frozen one or the
+  case's first run), the max RSS at 8 threads went from 128 to 118 MiB on AP027131 x AP027133, from 176 to 163 MiB
+  on NZ_CP006932 against itself and from 41 to 37 MiB on MelaMJNV x PemoMJNVA (lower in 8 of 8 rounds each), with
+  the time x1.006, x1.000 and x1.001 (median of the per-round ratios); MelaMJNV against AP027133 in six pieces
+  (44 MiB), the 200 queries (46 MiB) and AP027131 against 200 contigs (84 MiB) keep the arena and did not change;
+  nothing changed at one thread.
 
 - `LOSAT_X_TBXFRAMES=1` (TBLASTX, memory; in the strict set since 2026-10-17, on by default) a
   subject's frames are made when they are read and only as long

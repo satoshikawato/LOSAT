@@ -75,7 +75,8 @@
 //! to a list whose length advances by the presence bit, without a branch on it, and the listed
 //! cells then go to the cell test in position order. The cells, their order and their hit lists
 //! are the presence-test loop's, so every outcome above is unchanged. blastp's own loop
-//! (`x_scan_two_hit`) keeps the presence test.
+//! (`x_scan_two_hit`) takes the same cells under its own switch, LOSAT_X_BPSCANBF (a switch of the
+//! strict set; [`x_bp_scan_bf`]).
 
 use crate::algorithm::tblastn::x_scan_bf::{x_block_candidates, X_BLOCK};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
@@ -143,6 +144,17 @@ pub(crate) fn x_bp_defer() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPDEFER"))
+}
+
+// No NCBI counterpart: reads the LOSAT_X_BPSCANBF switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BPSCANBF): blastp's fused loop finds the cells with [`x_scan_cells_bf`]
+/// (module header). A strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is
+/// not set.
+pub(crate) fn x_bp_scan_bf() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPSCANBF"))
 }
 
 /// How the fused loop tests the hits of one lookup cell.
@@ -528,16 +540,54 @@ pub(crate) fn x_scan_two_hit<F>(
         word_size,
         prefetch: x_prefetch_distance(),
     };
-    x_scan_two_hit_in(
-        x_diag_mode(),
-        lookup,
-        subject,
-        subject_length,
-        &mut XDiagTable::new(diag_array, diag_mask),
-        test,
-        &mut candidate,
-    )
-    .add_to_totals();
+    let table = &mut XDiagTable::new(diag_array, diag_mask);
+    // EXPERIMENT (LOSAT_X_BPSCANBF): the same cells found without a branch on the presence bit.
+    let counts = if x_bp_scan_bf() {
+        x_scan_two_hit_bf(
+            x_diag_mode(),
+            lookup,
+            subject,
+            subject_length,
+            table,
+            test,
+            &mut candidate,
+        )
+    } else {
+        x_scan_two_hit_in(
+            x_diag_mode(),
+            lookup,
+            subject,
+            subject_length,
+            table,
+            test,
+            &mut candidate,
+        )
+    };
+    counts.add_to_totals();
+}
+
+/// EXPERIMENT (LOSAT_X_BPSCANBF): [`x_scan_two_hit_in`] with the cells found by [`x_scan_cells_bf`].
+/// Out of line, and with a closure of its own type, so that the default instance in
+/// [`x_scan_two_hit`] and the cell tests it calls are compiled as without the switch: with the
+/// same closure type the cell test had two callers, and the default instance ran 2-6 % more
+/// instructions.
+#[inline(never)]
+fn x_scan_two_hit_bf<F>(
+    mode: XDiagMode,
+    lookup: &BlastAaLookupTable,
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> XDiagCounts
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let mut own = |query_offset, subject_offset, last_hit, diff, entry: &mut DiagStruct| {
+        candidate(query_offset, subject_offset, last_hit, diff, entry)
+    };
+    x_scan_two_hit_in_with::<true, _>(mode, lookup, subject, subject_length, table, test, &mut own)
 }
 
 /// EXPERIMENT (LOSAT_X_BXDIAG): [`x_scan_two_hit`] with the cell test `mode` (blastx's choice,

@@ -7079,7 +7079,7 @@ fn run_in_pool(
             scope,
             qbp_input,
             parallel_pool.threads(),
-            x_qbatch_par::allowance_mib(&args.task),
+            x_qbatch_par::Profile::of_task(&args.task),
             Box::new(|letters: u64, max_len: usize| {
                 let mut config = configure_task(&args);
                 let discontig_template = config.mb_template_length > 0;

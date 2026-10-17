@@ -38,7 +38,26 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
 - `LOSAT_DEBUG_COORDS_START=<int>` narrow selected BLASTN coordinate diagnostics.
 - `LOSAT_DEBUG_SCAN_SOFF=<int>` tblastx scan debug center subject offset.
 - `LOSAT_DEBUG_SCAN_WINDOW=<int>` tblastx scan debug window size.
-- `LOSAT_TIMING=1` timing breakdown. TBLASTX prints, per query batch, after its other lines:
+- `LOSAT_TIMING=1` timing breakdown. Every search program prints one line last, after its own lines
+  (`utils/xtiming.rs`):
+  `[TIMING] common: since_start .. outside_search .. read_fasta .. encode .. translate .. seg .. build_lookup .. search .. output .. (search_sum ..)`.
+  `since_start` is the wall time from the entry of `main` to the line; `search` is the wall time during
+  which at least one of the program's search intervals ran (batches searched side by side count once),
+  `search_sum` adds those intervals up, and `outside_search = since_start - search` is the run's fixed cost.
+  The other fields add up the intervals the program's driver marks (on several threads at once their wall
+  times add up): reading the FASTA query and subject files, encoding, translating the query (BLASTX,
+  TBLASTX), the query's SEG (DUST for BLASTN), building the lookup tables, writing the reports. Work done
+  inside the search on its threads (per-subject translation, the lookup tables of BLASTX's parallel chunks and
+  of TBLASTN's subject side) is in `search`; BLASTX's `read_fasta` is the `input` of its `blastx_run` line
+  (`loop - search - render`), and BLASTN's streamed reports (`LOSAT_X_RPTSTREAM`) are in `search` too.
+  A field a program does not have stays 0.
+  TBLASTX also prints `[TIMING] x_unit: unit_sum .. seed .. extend .. (units=N hits=N extends=N seed_ns_per_hit .. extend_ns_per_call .. clock_overhead .. table_kib_mean .. table_kib_max ..)`
+  after `x_pairpar`: the time of the default unit path's units (`unit_sum`, added over the threads that ran
+  them) split into the seed stage (table reset, scan, two-hit test, saving init HSPs) and the two-hit
+  extensions, with two reads of the time-stamp counter around each extension (x86-64; `Instant` elsewhere)
+  whose measured cost is taken out of both parts (`clock_overhead`); an estimate
+  (`tblastx/x_unit_probe.rs`). Without the variable the units run without the probe.
+  TBLASTX prints, per query batch, after its other lines:
   `[TIMING] x_search: setup .. subjects .. collect ..` (three wall times that add up to
   `search_total`: before the first subject, the subject loop, after it) and
   `[TIMING] x_subject: enter .. translate .. prepare .. units .. units_release .. merge .. frame_loop .. seed_release .. link1 .. reap .. reevaluate .. link2 .. convert .. emit .. end .. sum .. (subjects=N)`
@@ -53,7 +72,8 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
   `x_hsp_inplace::link_in_place`, in the order they run; one clock per call, so the steps add up
   to `sum`. `kernels` is the wall time of the per-group linking, `kernel_sum` the per-group
   times added over the threads that ran them, `kernel_max` the longest group, which `kernels`
-  cannot go below; `largest_group` is the number of HSPs in the largest group. A linking call
+  cannot go below; `largest_group` is the number of HSPs in the largest group; with several subjects
+  `largest_group` and `kernel_max` are the largest over the calls, the other values sums. A linking call
   that takes the reference body (`LOSAT_X_HSPINPLACE=0`, `LOSAT_X_DEFAULT=0`,
   `LOSAT_DIAGNOSTICS`, `LOSAT_DEBUG_CUTOFFS`) is not timed there: `calls=0`;
   `tblastx/x_link_timing.rs`). The clock is not read without the variable.
@@ -73,6 +93,17 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
   (inside the end of a batch: the composition-based redo made ahead on the pool, the redo done in the in-order loop,
   and the hit lists after it).
 - `LOSAT_DIAGNOSTICS=1` general diagnostics counters.
+- `LOSAT_X_STATS=1` with TBLASTX's default unit path: `[X_STATS] TBXSEED` lines at exit
+  (`tblastx/x_unit_probe.rs`; with `LOSAT_TIMING` too, these take the place of the `x_unit` split). Per cell
+  of a unit's diagonal table (one diagonal of the concatenated query): the outcomes of the two-hit test
+  (`masked flag_reset too_far overlap context_boundary extended saved`, summing to `hits`); the hits per
+  cell over the whole unit and over each `scansub` batch (`hbar` = hits / cells hit, histograms 1 / 2 / 3 /
+  4-7 / 8+ by cells and by hits); the isolated hits (no other hit on the cell less than the window before
+  or after); the runs of consecutive `masked` and of consecutive `too_far` outcomes on a cell (lengths 1 /
+  2 / 3 / 4-7 / 8-15 / 16-63 / 64+); the extensions' cells (word, left, right; counted by repeating each
+  extension, `extension/two_hit.rs::x_two_hit_cells`) and `rescan` = cells / distinct subject positions
+  per cell (positions past the furthest one an earlier extension of the cell reached). The statistics
+  repeat every extension, so the run is slower; reports do not change.
 - `LOSAT_STARTUP_TRACE=1` startup trace.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
 - `LOSAT_WASI_PRESPAWN=auto|N` (Node threaded runner, opt-in) boot N thread

@@ -1285,6 +1285,7 @@ mod tests {
     ) -> Vec<Call> {
         let mut calls = Vec::new();
         let mut counted = 0u32;
+        #[cfg(target_arch = "x86_64")]
         let mut buffer = Vec::new();
         let mut table = XDiagTable::new(entries, mask);
         let mut candidate = |q: i32, s: i32, last_hit: i32, diff: i32, entry: &mut DiagStruct| {

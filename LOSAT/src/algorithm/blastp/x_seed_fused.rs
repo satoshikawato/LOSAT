@@ -542,7 +542,7 @@ pub(crate) fn x_scan_two_hit<F>(
     let table = &mut XDiagTable::new(diag_array, diag_mask);
     // EXPERIMENT (LOSAT_X_BPSCANBF): the same cells found without a branch on the presence bit.
     let counts = if x_bp_scan_bf() {
-        x_scan_two_hit_in_with::<true, F>(
+        x_scan_two_hit_bf(
             x_diag_mode(),
             lookup,
             subject,
@@ -563,6 +563,33 @@ pub(crate) fn x_scan_two_hit<F>(
         )
     };
     counts.add_to_totals();
+}
+
+/// EXPERIMENT (LOSAT_X_BPSCANBF): [`x_scan_two_hit_in`] with the cells found by [`x_scan_cells_bf`].
+/// Out of line, so that the default instance in [`x_scan_two_hit`] is compiled as without the
+/// switch (with both instances inline, the default one took 0.84-1.01 of its time before).
+#[inline(never)]
+fn x_scan_two_hit_bf<F>(
+    mode: XDiagMode,
+    lookup: &BlastAaLookupTable,
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> XDiagCounts
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    x_scan_two_hit_in_with::<true, F>(
+        mode,
+        lookup,
+        subject,
+        subject_length,
+        table,
+        test,
+        candidate,
+    )
 }
 
 /// EXPERIMENT (LOSAT_X_BXDIAG): [`x_scan_two_hit`] with the cell test `mode` (blastx's choice,

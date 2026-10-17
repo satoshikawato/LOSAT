@@ -528,7 +528,7 @@ pub(super) fn ncbi_mt1_cutoffs(word_size: usize) -> (u64, u64) {
 /// threads). A query that is not a file of known size (`None`: standard input) is not split.
 /// LOSAT uses it only to choose `LOSAT_X_QBATCHPAR`'s default budget (`Profile::of_search`).
 ///
-/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:135-156
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:134-153
 /// ```c++
 ///     int num_threads = m_CmdLineArgs->GetNumThreads();
 ///     int mt_mode = m_CmdLineArgs->GetMTMode();
@@ -2167,7 +2167,7 @@ mod tests {
         assert_eq!(allowance_mib("megablast"), 28);
     }
 
-    /// NCBI's split by queries (blastn_app.cpp:96-156): a query file larger than 10,000,000
+    /// NCBI's split by queries (blastn_app.cpp:96-153): a query file larger than 10,000,000
     /// bytes at a word size of 10 or more (1,500,000 below 10), against fewer database letters
     /// than 6e9 (1.5e8); standard input is not split. Elsewhere the default budget is 0.
     #[test]

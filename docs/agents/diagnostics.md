@@ -1329,35 +1329,39 @@ Rebuilding less:
   132.2 -> 123.9 and 226.3 -> 215.1 (at eight threads the peak is then the first linking call). The medians
   of `units`, `merge` (`[TIMING] x_pairpar`) and `search_total` moved within the run-to-run spread of that
   machine; the probe build measured the same memory on the workstation (-22.6, -7.5, -8.1 and -9.4 MiB).
-- `LOSAT_X_SEEDUNMAP=1` (TBLASTX, memory; Linux with glibc only; in the strict set since 2026-10-17, on by
-  default from the change that added it, under the Owner's rule of 2026-10-17 that a speed-up or memory
-  reduction lands on by default) three blocks of the unit path of `LOSAT_X_PAIRPAR` get a capacity that glibc
-  always maps, so that they are returned to the system when they are dropped (`tblastx/x_pair_par.rs`, the
-  section above `X_MAPPED_BYTES`): the unit diagonal table and the record vector of `LOSAT_X_SEEDCOMPACT` that
-  each rayon split of a subject's units keeps, and the copy of a unit's records that lives until the subject's
-  merge. glibc raises its mmap threshold to the size of each mapped block that is freed (up to 32 MiB; SEG's
-  buffer and the pair lookup's group tables are such blocks) and its trim threshold to twice that, so without
-  the switch these blocks come from the worker threads' arenas, which keep their freed tops through the
-  linking call, where the search peaks (10-14 % of the max RSS at 8 threads; nothing at one thread). With it,
-  for a unit whose table has at least 128 KiB of cells (glibc's default mmap threshold) and whose subject chunk
-  is at least a quarter of the table's width (`x_unit_mapped`), the split's table and record vector are
+- `LOSAT_X_SEEDUNMAP=1` (TBLASTX, memory; Linux with glibc only, at two or more threads; in the strict set
+  since 2026-10-17, on by default from the change that added it, under the Owner's rule of 2026-10-17 that a
+  speed-up or memory reduction lands on by default) three blocks of the unit path of `LOSAT_X_PAIRPAR` on the
+  search pool get a capacity that glibc always maps, so that they are returned to the system when they are
+  dropped (`tblastx/x_pair_par.rs`, the section above `X_MAPPED_BYTES`): the unit diagonal table and the record
+  vector of `LOSAT_X_SEEDCOMPACT` that each rayon split of a subject's units keeps, and the copy of a unit's
+  records that lives until the subject's merge. glibc raises its mmap threshold to the size of each mapped block
+  that is freed (up to 32 MiB; SEG's buffer and the pair lookup's group tables are such blocks) and its trim
+  threshold to twice that, so without the switch these blocks come from the worker threads' arenas, which keep
+  their freed tops through the linking call, where the search peaks (10-14 % of the max RSS at 8 threads). With
+  it, for a unit whose table has at least 128 KiB of cells (glibc's default mmap threshold) and whose subject
+  chunk is at least a quarter of the table's width (`x_unit_mapped`), the split's table and record vector are
   replaced by empty ones with a capacity of 32 MiB and 4 KiB (above glibc's largest dynamic threshold) unless
   they have that much room, and a copy of at least 128 KiB gets that capacity; the pages beyond their length
   are never touched and are not resident. The share rule keeps the arena for many short subjects against a long
   query, where the table is mostly the query's span and a mapped table's new pages at every split cost more
-  than the chunk's short scan (200 contigs of about 3 kb against AP027131, 8 threads: x1.07 of the time with
-  every table mapped). No value, order or sort changes: the table is still cleared and resized to the unit's
-  width, the record vector is still cleared for every unit and filled by the same pushes, and the copy holds
-  the records in their order; the merge reads the lengths and the elements of the copies, never their
-  capacity. With `LOSAT_X_SEEDCOMPACT=0` only the table acts; with the switch off, and off Linux with glibc,
-  every capacity is as before. There is no shadow variable: only capacities change, so there is no second
-  result to compare. `LOSAT_X_STATS=1` prints, whenever the switch is on,
-  `[X_STATS] SEEDUNMAP diag= records= copies=` (the blocks given the mapped capacity at the three places; all
-  0 where no unit path runs, where the rule never holds, and off Linux with glibc).
-  `LOSAT/tests/tblastx_seed_unmap.rs` reads the counters. A probe of the same three blocks without the share
-  rule (workstation, 6 rounds) took the max RSS at 8 threads from 128 to 119 MiB on AP027131 x AP027133
-  (genetic code 4) and from 177 to 162 MiB on NZ_CP006932 against itself, with the time unchanged there and
-  at one thread.
+  than the chunk's short scan (AP027131 against 200 contigs of about 3 kb, 8 threads: x1.07 of the time with
+  every table mapped). At one thread the units run on the calling thread, whose blocks come from glibc's main
+  arena, which glibc trims, so nothing is retained there and mapping only costs (AP027131 x AP027133: 77 -> 78
+  MiB and 2,800 more page faults when mapped); that serial path keeps today's capacities. No value, order or
+  sort changes: the table is still cleared and resized to the unit's width, the record vector is still cleared
+  for every unit and filled by the same pushes, and the copy holds the records in their order; the merge reads
+  the lengths and the elements of the copies, never their capacity. With `LOSAT_X_SEEDCOMPACT=0` only the table
+  acts; with the switch off, at one thread, and off Linux with glibc, every capacity is as before. There is no
+  shadow variable: only capacities change, so there is no second result to compare. `LOSAT_X_STATS=1` prints,
+  whenever the switch is on, `[X_STATS] SEEDUNMAP diag= records= copies=` (the blocks given the mapped capacity
+  at the three places; all 0 at one thread, where no unit path runs, where the rule never holds, and off Linux
+  with glibc). `LOSAT/tests/tblastx_seed_unmap.rs` reads the counters. On the workstation (8 rounds alternating
+  with `LOSAT_X_SEEDUNMAP=0`, every report the frozen one; measured before the switch was limited to the pool
+  path, which leaves 8 threads unchanged) the max RSS at 8 threads went from 128 to 117 MiB on AP027131 x
+  AP027133 (genetic code 4), from 175 to 161 MiB on NZ_CP006932 against itself and from 44 to 41 MiB on
+  MelaMJNV against AP027133 in six pieces (lower in 6 to 8 of the 8 rounds), and stayed at 84 / 83 MiB on
+  AP027131 against 200 contigs; nothing changes at one thread. The time stayed within the noise of that run.
 
 - `LOSAT_X_TBXFRAMES=1` (TBLASTX, memory; in the strict set since 2026-10-17, on by default) a
   subject's frames are made when they are read and only as long

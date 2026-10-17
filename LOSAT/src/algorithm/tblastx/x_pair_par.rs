@@ -122,12 +122,13 @@
 //! compares the result with the reference loop's.
 //!
 //! `LOSAT_X_SEEDUNMAP` (in the strict set: on unless `LOSAT_X_SEEDUNMAP` is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; it acts on Linux with glibc only): where a unit's diagonal
-//! table is large and its subject chunk is at least a quarter of the table (`x_unit_mapped`), the
-//! unit diagonal table and the record vector of a thread's split and the unit's copy of its records
-//! get a capacity that glibc always maps, so they are returned to the system when dropped instead
-//! of staying in the worker threads' arenas through the linking call. Only capacities change; the
-//! section above `X_MAPPED_BYTES` gives the reason and why no value changes.
+//! `LOSAT_X_DEFAULT=0` and it is not set; it acts on Linux with glibc only, and only on the search
+//! pool, at two or more threads): where a unit's diagonal table is large and its subject chunk is
+//! at least a quarter of the table (`x_unit_mapped`), the unit diagonal table and the record vector
+//! of a thread's split and the unit's copy of its records get a capacity that glibc always maps, so
+//! they are returned to the system when dropped instead of staying in the worker threads' arenas
+//! through the linking call. Only capacities change; the section above `X_MAPPED_BYTES` gives the
+//! reason, why the serial path keeps today's capacities and why no value changes.
 
 use super::*;
 use crate::algorithm::tblastx::blast_gapalign::get_ungapped_hsp_list_into;
@@ -916,12 +917,14 @@ struct XScratch {
     /// LOSAT_X_SEEDCOMPACT: the records of the unit that runs (`run_unit_compact`), cleared at
     /// the start of every unit and kept across units; empty while the switch is off.
     records: Vec<XUnitHsp>,
-    /// LOSAT_X_SEEDUNMAP as read when the scratch was made (`x_unit_mapped`).
+    /// LOSAT_X_SEEDUNMAP as read when the scratch was made (`x_unit_mapped`); always false for the
+    /// serial path of `run_units`.
     unmap: bool,
 }
 
 impl XScratch {
-    /// An empty scratch; `unmap` is LOSAT_X_SEEDUNMAP (`seed_unmap`, or a test's choice).
+    /// An empty scratch; `unmap` is LOSAT_X_SEEDUNMAP on the search pool (`seed_unmap`), false on
+    /// the serial path, or a test's choice.
     fn new(unmap: bool) -> Self {
         Self {
             offset_pairs: Vec::new(),
@@ -971,6 +974,12 @@ impl XScratch {
 // threads: x1.07 of the time with every table mapped) the table is mostly the query's span and the
 // scan of the chunk is short, so the rule maps only a unit whose subject chunk is at least
 // 1 / `X_MAPPED_SUBJECT_SHARE` of its table (and whose table is at least `X_MAPPED_MIN` bytes).
+// At one thread `run_units` takes its serial path on the calling thread, whose blocks come from
+// glibc's main arena, which glibc trims: nothing is retained there (AP027131 x AP027133 at one
+// thread: 78 MiB of max RSS with and without MALLOC_ARENA_MAX or a fixed threshold), and mapping
+// only costs (77 -> 78 MiB and 2,800 more page faults with the blocks mapped). So only the
+// scratches of the search pool (`pool.enabled()`, two or more threads) carry the switch; the
+// serial scratch keeps today's capacities.
 //
 // Why no value changes: (1) `scan_unit` still clears the table and resizes it to the unit's width,
 // writing every cell it reads, and reads no capacity; (2) the record vector is still cleared at the
@@ -1618,8 +1627,9 @@ impl XPairPar {
     // Scheduling only: the units run on the search pool (an indexed map, results in unit order),
     // or in order on the calling thread when the search has one thread. `unit_fn` is
     // `Self::run_unit` (today's lists) or `Self::run_unit_compact` (LOSAT_X_SEEDCOMPACT), a
-    // function item, so this function is compiled once for each. Every scratch carries
-    // LOSAT_X_SEEDUNMAP as read here (`XScratch::unmap`).
+    // function item, so this function is compiled once for each. The scratches of the pool carry
+    // LOSAT_X_SEEDUNMAP as read here (`XScratch::unmap`); the serial scratch never maps (section
+    // above `X_MAPPED_BYTES`: at one thread nothing is retained, mapping only costs).
     fn run_units<T: Send>(
         &self,
         units: &[XUnit],
@@ -1627,12 +1637,12 @@ impl XPairPar {
         pool: &crate::utils::threading::SearchPool<'_>,
         unit_fn: impl Fn(&Self, &XUnit, &XSubject<'_>, &mut XScratch) -> T + Sync,
     ) -> Vec<T> {
-        let unmap = seed_unmap();
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         if pool.enabled() {
+            let unmap = seed_unmap();
             return pool.install(|| {
                 units
                     .par_iter()
@@ -1644,7 +1654,7 @@ impl XPairPar {
             });
         }
         let _ = pool;
-        let mut scratch = XScratch::new(unmap);
+        let mut scratch = XScratch::new(false);
         units
             .iter()
             .map(|unit| unit_fn(self, unit, inp, &mut scratch))
@@ -2426,7 +2436,7 @@ mod tests {
     /// The unit path's sorted init-HSP list of every frame (one chunk per frame here).
     fn unit_lists(pp: &XPairPar, inp: &XSubject<'_>) -> Vec<Vec<InitHSP>> {
         let mut out = Vec::new();
-        let mut scratch = XScratch::new(seed_unmap());
+        let mut scratch = XScratch::new(false);
         for (f, s_frame) in inp.s_frames_preliminary.iter().enumerate() {
             let chunk = SubjectChunk {
                 offset: 0,
@@ -3888,8 +3898,9 @@ mod tests {
     // ```c
     //     aux_struct->init_hitlist = BLAST_InitHitListNew();
     // ```
-    // On search pools of 1, 2 and 8 threads (one scratch per rayon job, with the switch of this
-    // process): the records of units where the rule holds are those of a scratch without it.
+    // On search pools of 1, 2 and 8 threads (at one thread the serial scratch, which never maps;
+    // at 2 and 8 one scratch per rayon job, with the switch of this process): the records of units
+    // where the rule holds are those of a scratch without it.
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     #[test]
     fn seed_unmap_units_on_search_pools_are_todays() {

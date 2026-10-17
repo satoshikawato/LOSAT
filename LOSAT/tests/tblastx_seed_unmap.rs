@@ -2,10 +2,11 @@
 //! `src/algorithm/tblastx/x_pair_par.rs`, the section above `X_MAPPED_BYTES`) on whole searches.
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_SEEDUNMAP`
-//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts on Linux with glibc only, on the units
-//! of `LOSAT_X_PAIRPAR` whose diagonal table has at least 128 KiB of cells and whose subject chunk
-//! is at least a quarter of the table: their split's diagonal table and record vector, and a
-//! unit's copy of its records of at least 128 KiB, get a capacity glibc always maps. It changes
+//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts on Linux with glibc only, at two or
+//! more threads (the search pool; at one thread nothing is retained), on the units of
+//! `LOSAT_X_PAIRPAR` whose diagonal table has at least 128 KiB of cells and whose subject chunk is
+//! at least a quarter of the table: their split's diagonal table and record vector, and a unit's
+//! copy of its records of at least 128 KiB, get a capacity glibc always maps. It changes
 //! capacities, never a value. Every test compares the report with the report of the same search
 //! with `LOSAT_X_SEEDUNMAP=0` and reads the `[X_STATS] SEEDUNMAP` line, which is printed only while
 //! the switch is on, to check where blocks were given the mapped capacity and where none was.
@@ -194,12 +195,13 @@ fn unmap(stderr: &str) -> [u64; 3] {
 //             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
 // ```
 // Where the rule holds, with no variable for the switch (it is on by default), at one and four
-// threads: the report is that of `LOSAT_X_SEEDUNMAP=0`; on Linux with glibc diagonal tables and
-// record vectors got the mapped capacity (the units save too few records here for a copy of
-// 128 KiB, which the unit tests and the larger searches of the entry in diagnostics.md reach),
-// elsewhere none. `LOSAT_X_DEFAULT=0` turns it off (no line, the same report), and
-// `LOSAT_X_DEFAULT=0` with `LOSAT_X_PAIRPAR=1` and the switch set maps the tables of the unit path
-// (the record vector of `LOSAT_X_SEEDCOMPACT`, which is then off, does not exist).
+// threads: the report is that of `LOSAT_X_SEEDUNMAP=0`; at four threads on Linux with glibc
+// diagonal tables and record vectors got the mapped capacity (the units save too few records here
+// for a copy of 128 KiB, which the unit tests and the larger searches of the entry in
+// diagnostics.md reach), elsewhere and at one thread (the serial path keeps today's capacities)
+// none. `LOSAT_X_DEFAULT=0` turns it off (no line, the same report), and `LOSAT_X_DEFAULT=0` with
+// `LOSAT_X_PAIRPAR=1` and the switch set maps the tables of the unit path at four threads (the
+// record vector of `LOSAT_X_SEEDCOMPACT`, which is then off, does not exist).
 #[test]
 fn where_the_rule_holds_the_blocks_are_mapped_and_the_report_is_the_same() {
     let inputs = rule_holds("holds");
@@ -210,7 +212,7 @@ fn where_the_rule_holds_the_blocks_are_mapped_and_the_report_is_the_same() {
         assert_eq!(report, expected, "{what}");
         assert!(units(&stderr) > 0, "{what}:\n{stderr}");
         let [diag, records, copies] = unmap(&stderr);
-        if GLIBC {
+        if GLIBC && threads > 1 {
             assert!(diag > 0 && records > 0, "{what}:\n{stderr}");
         } else {
             assert_eq!([diag, records, copies], [0, 0, 0], "{what}:\n{stderr}");
@@ -232,7 +234,7 @@ fn where_the_rule_holds_the_blocks_are_mapped_and_the_report_is_the_same() {
         );
         assert_eq!(report, expected, "{what}");
         let [diag, records, copies] = unmap(&stderr);
-        assert_eq!(diag > 0, GLIBC, "{what}:\n{stderr}");
+        assert_eq!(diag > 0, GLIBC && threads > 1, "{what}:\n{stderr}");
         assert_eq!([records, copies], [0, 0], "{what}:\n{stderr}");
     }
 }

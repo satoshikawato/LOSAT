@@ -499,22 +499,22 @@ fn merge_two_tblastx_chunk_hsps(hsp1: &mut UngappedHit, hsp2: &UngappedHit) -> b
     }
 
     if contained_in_hsp(
-        hsp1.q_aa_start,
-        hsp1.q_aa_end,
-        hsp2.q_aa_start,
-        hsp1.s_aa_start,
-        hsp1.s_aa_end,
-        hsp2.s_aa_start,
+        hsp1.q_aa_start as usize,
+        hsp1.q_aa_end as usize,
+        hsp2.q_aa_start as usize,
+        hsp1.s_aa_start as usize,
+        hsp1.s_aa_end as usize,
+        hsp2.s_aa_start as usize,
     ) || contained_in_hsp(
-        hsp1.q_aa_start,
-        hsp1.q_aa_end,
-        hsp2.q_aa_end,
-        hsp1.s_aa_start,
-        hsp1.s_aa_end,
-        hsp2.s_aa_end,
+        hsp1.q_aa_start as usize,
+        hsp1.q_aa_end as usize,
+        hsp2.q_aa_end as usize,
+        hsp1.s_aa_start as usize,
+        hsp1.s_aa_end as usize,
+        hsp2.s_aa_end as usize,
     ) {
-        let len1 = hsp1.q_aa_end.saturating_sub(hsp1.q_aa_start) as f64;
-        let len2 = hsp2.q_aa_end.saturating_sub(hsp2.q_aa_start) as f64;
+        let len1 = (hsp1.q_aa_end as usize).saturating_sub(hsp1.q_aa_start as usize) as f64;
+        let len2 = (hsp2.q_aa_end as usize).saturating_sub(hsp2.q_aa_start as usize) as f64;
         let score_density = (hsp1.raw_score as f64 + hsp2.raw_score as f64) / (len1 + len2);
 
         hsp1.q_aa_start = hsp1.q_aa_start.min(hsp2.q_aa_start);
@@ -528,7 +528,7 @@ fn merge_two_tblastx_chunk_hsps(hsp1: &mut UngappedHit, hsp2: &UngappedHit) -> b
             hsp1.raw_score = hsp2.raw_score;
         }
 
-        let new_len = hsp1.q_aa_end.saturating_sub(hsp1.q_aa_start) as f64;
+        let new_len = (hsp1.q_aa_end as usize).saturating_sub(hsp1.q_aa_start as usize) as f64;
         hsp1.raw_score = hsp1.raw_score.max((score_density * new_len) as i32);
         return true;
     }
@@ -566,14 +566,14 @@ fn merge_tblastx_subject_chunk_hits(
 
     let mut combined_overlap = Vec::new();
     for (idx, hsp) in combined.iter().enumerate() {
-        if hsp.s_aa_end > split_offset {
+        if hsp.s_aa_end as usize > split_offset {
             combined_overlap.push(idx);
         }
     }
 
     let mut incoming_overlap = Vec::new();
     for (idx, hsp) in incoming.iter().enumerate() {
-        if hsp.s_aa_start < split_offset.saturating_add(chunk_overlap_size) {
+        if (hsp.s_aa_start as usize) < split_offset.saturating_add(chunk_overlap_size) {
             incoming_overlap.push(idx);
         }
     }
@@ -631,9 +631,12 @@ fn adjust_tblastx_chunk_subject_offsets(hits: &mut [UngappedHit], offset: usize)
         return;
     }
     for hit in hits {
-        hit.s_aa_start += offset;
-        hit.s_aa_end += offset;
-        hit.s_seed_off += offset;
+        hit.s_aa_start = u32::try_from(hit.s_aa_start as usize + offset)
+            .expect("s_aa_start: a subject offset fits u32 (NCBI's BlastSeg offset is Int4)");
+        hit.s_aa_end = u32::try_from(hit.s_aa_end as usize + offset)
+            .expect("s_aa_end: a subject offset fits u32 (NCBI's BlastSeg end is Int4)");
+        hit.s_seed_off = u32::try_from(hit.s_seed_off as usize + offset)
+            .expect("s_seed_off: a subject offset fits u32 (NCBI's gapped_start is Int4)");
     }
 }
 
@@ -5632,13 +5635,13 @@ fn search_query_batch(
                     output_snapshot_hits.push(h.clone());
                 }
 
-                let ctx = &contexts_ref[h.ctx_idx];
-                let s_score_frame = &s_frames[h.s_f_idx];
-                let s_frame = &s_frames_report[h.s_f_idx];
+                let ctx = &contexts_ref[h.ctx_idx as usize];
+                let s_score_frame = &s_frames[usize::from(h.s_f_idx)];
+                let s_frame = &s_frames_report[usize::from(h.s_f_idx)];
 
-                let len = h.q_aa_end.saturating_sub(h.q_aa_start);
-                let q0 = h.q_aa_start;
-                let s0 = h.s_aa_start;
+                let len = (h.q_aa_end as usize).saturating_sub(h.q_aa_start as usize);
+                let q0 = h.q_aa_start as usize;
+                let s0 = h.s_aa_start as usize;
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2708-2720
                 // ```c
@@ -5650,7 +5653,7 @@ fn search_query_batch(
                 // using the unmasked query and reporting subject buffers, then stores
                 // the identity count on the HSP. Reuse it here instead of rescanning
                 // every final hit.
-                let matches = h.num_ident;
+                let matches = h.num_ident as usize;
                 let mismatch = len.saturating_sub(matches);
                 let identity = if len > 0 {
                     (matches as f64 / len as f64) * 100.0
@@ -5665,12 +5668,20 @@ fn search_query_batch(
                 //    (hsp->score*kbp[hsp->context]->Lambda - kbp[hsp->context]->logK) /
                 //    NCBIMATH_LN2;
                 // ```
-                let bit_params = &contexts_ref[h.ctx_idx].karlin_params;
+                let bit_params = &contexts_ref[h.ctx_idx as usize].karlin_params;
                 let bit = calc_bit_score(h.raw_score, bit_params);
-                let (q_start, q_end) =
-                    convert_coords(h.q_aa_start, h.q_aa_end, ctx.frame, ctx.orig_len);
-                let (s_start, s_end) =
-                    convert_coords(h.s_aa_start, h.s_aa_end, s_frame.frame, s_len);
+                let (q_start, q_end) = convert_coords(
+                    h.q_aa_start as usize,
+                    h.q_aa_end as usize,
+                    ctx.frame,
+                    ctx.orig_len,
+                );
+                let (s_start, s_end) = convert_coords(
+                    h.s_aa_start as usize,
+                    h.s_aa_end as usize,
+                    s_frame.frame,
+                    s_len,
+                );
 
                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1379-1404
                 // ```c
@@ -5823,10 +5834,10 @@ fn search_query_batch(
                     // TBLASTX ScoreCompareHSPs uses the context/frame-relative
                     // BlastSeg offsets stored in Blast_HSPInit, not formatted
                     // nucleotide coordinates or LOSAT's concatenated frame bases.
-                    sort_query_offset: h.q_aa_start,
-                    sort_query_end: h.q_aa_end,
-                    sort_subject_offset: h.s_aa_start,
-                    sort_subject_end: h.s_aa_end,
+                    sort_query_offset: h.q_aa_start as usize,
+                    sort_query_end: h.q_aa_end as usize,
+                    sort_subject_offset: h.s_aa_start as usize,
+                    sort_subject_end: h.s_aa_end as usize,
                     has_sort_offsets: true,
                     gap_info: None,
                     num_positives: matches,
@@ -6324,16 +6335,16 @@ mod tests {
         UngappedHit {
             q_idx: 0,
             s_idx: 0,
-            ctx_idx,
+            ctx_idx: u32::try_from(ctx_idx).unwrap(),
             s_f_idx: 0,
             q_frame: 1,
             s_frame: 1,
-            q_aa_start: q_start,
-            q_aa_end: q_end,
-            s_aa_start: s_start,
-            s_aa_end: s_end,
-            q_seed_off: q_start,
-            s_seed_off: s_start,
+            q_aa_start: u32::try_from(q_start).unwrap(),
+            q_aa_end: u32::try_from(q_end).unwrap(),
+            s_aa_start: u32::try_from(s_start).unwrap(),
+            s_aa_end: u32::try_from(s_end).unwrap(),
+            q_seed_off: u32::try_from(q_start).unwrap(),
+            s_seed_off: u32::try_from(s_start).unwrap(),
             q_orig_len: 900,
             s_orig_len: 900,
             raw_score: score,

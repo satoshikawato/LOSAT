@@ -231,8 +231,18 @@ fn trace_match_target(
 
 #[inline(always)]
 fn trace_hit_matches_target(target: TraceHspTarget, h: &UngappedHit) -> bool {
-    let (q_start, q_end) = convert_coords(h.q_aa_start, h.q_aa_end, h.q_frame, h.q_orig_len);
-    let (s_start, s_end) = convert_coords(h.s_aa_start, h.s_aa_end, h.s_frame, h.s_orig_len);
+    let (q_start, q_end) = convert_coords(
+        h.q_aa_start as usize,
+        h.q_aa_end as usize,
+        h.q_frame,
+        h.q_orig_len as usize,
+    );
+    let (s_start, s_end) = convert_coords(
+        h.s_aa_start as usize,
+        h.s_aa_end as usize,
+        h.s_frame,
+        h.s_orig_len as usize,
+    );
     trace_match_target(target, q_start, q_end, s_start, s_end)
 }
 
@@ -702,7 +712,8 @@ pub fn apply_sum_stats_even_gap_linking_with_parallel(
     //         hsp_list->hsp_array[index]->num = 1;
     // ```
     for (link_id, hit) in hits.iter_mut().enumerate() {
-        hit.link_id = link_id;
+        hit.link_id = u32::try_from(link_id)
+            .expect("link_id: a position in the linking list fits u32 (NCBI's hspcnt is Int4)");
         hit.chain_next_link_id = None;
         hit.num = 1;
     }
@@ -1059,11 +1070,15 @@ fn replay_ncbi_output_list(mut sorted_hits: Vec<&mut UngappedHit>) -> Vec<Ungapp
         return sorted_hits.into_iter().map(|hit| hit.clone()).collect();
     }
 
-    let max_link_id = sorted_hits.iter().map(|h| h.link_id).max().unwrap_or(0);
+    let max_link_id = sorted_hits
+        .iter()
+        .map(|h| h.link_id as usize)
+        .max()
+        .unwrap_or(0);
     let mut id_to_index = vec![SENTINEL_IDX; max_link_id + 1];
     for (index, hit) in sorted_hits.iter().enumerate() {
-        if hit.link_id < id_to_index.len() {
-            id_to_index[hit.link_id] = index;
+        if (hit.link_id as usize) < id_to_index.len() {
+            id_to_index[hit.link_id as usize] = index;
         }
     }
 
@@ -1101,6 +1116,7 @@ fn replay_ncbi_output_list(mut sorted_hits: Vec<&mut UngappedHit>) -> Vec<Ungapp
             let Some(next_id) = sorted_hits[current].chain_next_link_id else {
                 break;
             };
+            let next_id = next_id as usize;
             if next_id >= id_to_index.len() {
                 break;
             }
@@ -1531,7 +1547,7 @@ fn link_hsp_group_ncbi(
     // NCBI uses the first HSP in this frame/strand group to select the query context
     // used for effective length/search-space in sum-statistics.
     // Reference: link_hsps.c:559-562
-    let query_context = group_hits[0].ctx_idx;
+    let query_context = group_hits[0].ctx_idx as usize;
     let query_len_aa = query_contexts[query_context].aa_len as i64;
     let subject_len_aa = (subject_len_nucl / 3).max(1);
 
@@ -1650,7 +1666,7 @@ fn link_hsp_group_ncbi(
         let qt = TRIM_SIZE.min(q_len_quarter);
         let st = TRIM_SIZE.min(s_len_quarter);
         let score = hit.raw_score;
-        let ctx_idx = hit.ctx_idx;
+        let ctx_idx = hit.ctx_idx as usize;
         // NCBI line 750-752: kbp[H->hsp->context]->Lambda, kbp[H->hsp->context]->logK
         let ctx_lambda = query_contexts[ctx_idx].karlin_params.lambda;
         let ctx_log_k = log_k_by_ctx[ctx_idx];
@@ -1699,10 +1715,18 @@ fn link_hsp_group_ncbi(
     if debug_chaining {
         if let Some(i) = target_hsp_idx {
             let hit = &group_hits[i];
-            let (q_start, q_end) =
-                convert_coords(hit.q_aa_start, hit.q_aa_end, hit.q_frame, hit.q_orig_len);
-            let (s_start, s_end) =
-                convert_coords(hit.s_aa_start, hit.s_aa_end, hit.s_frame, hit.s_orig_len);
+            let (q_start, q_end) = convert_coords(
+                hit.q_aa_start as usize,
+                hit.q_aa_end as usize,
+                hit.q_frame,
+                hit.q_orig_len as usize,
+            );
+            let (s_start, s_end) = convert_coords(
+                hit.s_aa_start as usize,
+                hit.s_aa_end as usize,
+                hit.s_frame,
+                hit.s_orig_len as usize,
+            );
             let link = &pool_hsp_links[i];
             eprintln!(
                 "[TRACE_LINKING] target_in_group idx={} raw_score={} q_frame={} s_frame={} q={}-{} s={}-{} q_aa={}-{} s_aa={}-{} q_trim={}..{} s_trim={}..{} cutoff_small={} cutoff_big={}",
@@ -2651,16 +2675,16 @@ fn link_hsp_group_ncbi(
             };
             let head = &group_hits[best_i];
             let (head_q_start, head_q_end) = convert_coords(
-                head.q_aa_start,
-                head.q_aa_end,
+                head.q_aa_start as usize,
+                head.q_aa_end as usize,
                 head.q_frame,
-                head.q_orig_len,
+                head.q_orig_len as usize,
             );
             let (head_s_start, head_s_end) = convert_coords(
-                head.s_aa_start,
-                head.s_aa_end,
+                head.s_aa_start as usize,
+                head.s_aa_end as usize,
                 head.s_frame,
-                head.s_orig_len,
+                head.s_orig_len as usize,
             );
             eprintln!(
                 "[TRACE_LINK_SELECTION] context={} subject_sign={} round={} remaining_before={} used_current_max={} path_changed_in={} selected={} evalue={:.6e} chain_len={} linked_set={} target_in_chain={} prob_small={:.6e} prob_large={:.6e} head_idx={} head_raw={} head_q={}-{} head_s={}-{} head_q_frame={} head_s_frame={} best_small={} best_large={}",
@@ -2709,10 +2733,18 @@ fn link_hsp_group_ncbi(
             );
             for &idx in &chain_members {
                 let hit = &group_hits[idx];
-                let (q_start, q_end) =
-                    convert_coords(hit.q_aa_start, hit.q_aa_end, hit.q_frame, hit.q_orig_len);
-                let (s_start, s_end) =
-                    convert_coords(hit.s_aa_start, hit.s_aa_end, hit.s_frame, hit.s_orig_len);
+                let (q_start, q_end) = convert_coords(
+                    hit.q_aa_start as usize,
+                    hit.q_aa_end as usize,
+                    hit.q_frame,
+                    hit.q_orig_len as usize,
+                );
+                let (s_start, s_end) = convert_coords(
+                    hit.s_aa_start as usize,
+                    hit.s_aa_end as usize,
+                    hit.s_frame,
+                    hit.s_orig_len as usize,
+                );
                 let mark = if chain_target_hsp_idx == Some(idx) {
                     "*"
                 } else {
@@ -2786,10 +2818,18 @@ fn link_hsp_group_ncbi(
             );
             for &idx in &chain_members {
                 let hit = &group_hits[idx];
-                let (q_start, q_end) =
-                    convert_coords(hit.q_aa_start, hit.q_aa_end, hit.q_frame, hit.q_orig_len);
-                let (s_start, s_end) =
-                    convert_coords(hit.s_aa_start, hit.s_aa_end, hit.s_frame, hit.s_orig_len);
+                let (q_start, q_end) = convert_coords(
+                    hit.q_aa_start as usize,
+                    hit.q_aa_end as usize,
+                    hit.q_frame,
+                    hit.q_orig_len as usize,
+                );
+                let (s_start, s_end) = convert_coords(
+                    hit.s_aa_start as usize,
+                    hit.s_aa_end as usize,
+                    hit.s_frame,
+                    hit.s_orig_len as usize,
+                );
                 let next = pool_hsp_links[idx].link[ordering];
                 let next_str = if next == SENTINEL_IDX {
                     "END".to_string()
@@ -3145,12 +3185,12 @@ mod tests {
             s_f_idx: 0,
             q_frame: 1,
             s_frame: 1,
-            q_aa_start,
-            q_aa_end,
-            s_aa_start,
-            s_aa_end,
-            q_seed_off: q_aa_start,
-            s_seed_off: s_aa_start,
+            q_aa_start: u32::try_from(q_aa_start).unwrap(),
+            q_aa_end: u32::try_from(q_aa_end).unwrap(),
+            s_aa_start: u32::try_from(s_aa_start).unwrap(),
+            s_aa_end: u32::try_from(s_aa_end).unwrap(),
+            q_seed_off: u32::try_from(q_aa_start).unwrap(),
+            s_seed_off: u32::try_from(s_aa_start).unwrap(),
             q_orig_len: 1000,
             s_orig_len: 1000,
             raw_score: id, // Use raw_score as ID for verification
@@ -3161,7 +3201,7 @@ mod tests {
             // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
             //       ScoreCompareHSPs);
             // ```
-            hsp_list_order: id as usize,
+            hsp_list_order: u32::try_from(id).unwrap(),
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
@@ -3188,7 +3228,7 @@ mod tests {
             let mut hit = mock_hit(0, 10, 0, 10, 1);
             hit.q_idx = 1;
             hit.q_frame = frame;
-            hit.ctx_idx = 2 + offset;
+            hit.ctx_idx = u32::try_from(2 + offset).unwrap();
             assert_eq!(
                 translated_context_group(&hit),
                 if frame > 0 { 2 } else { 3 },
@@ -3231,7 +3271,7 @@ mod tests {
         single.start_of_chain = true;
 
         let replayed = replay_ncbi_output_list(vec![&mut member, &mut head, &mut single]);
-        let replayed_ids: Vec<usize> = replayed.iter().map(|hit| hit.link_id).collect();
+        let replayed_ids: Vec<usize> = replayed.iter().map(|hit| hit.link_id as usize).collect();
         assert_eq!(replayed_ids, vec![1, 0, 2]);
     }
 
@@ -3267,7 +3307,10 @@ mod tests {
         single.num = 1;
 
         let replayed = replay_ncbi_output_list(vec![&mut member, &mut head, &mut single]);
-        let nums: Vec<(usize, i32)> = replayed.iter().map(|hit| (hit.link_id, hit.num)).collect();
+        let nums: Vec<(usize, i32)> = replayed
+            .iter()
+            .map(|hit| (hit.link_id as usize, hit.num))
+            .collect();
         // The chain (head, member) has 2 HSPs; an HSP without a link keeps 1.
         assert_eq!(nums, vec![(1, 2), (0, 2), (2, 1)]);
     }
@@ -3289,7 +3332,7 @@ mod tests {
 
         sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
 
-        let ordered: Vec<usize> = hits.iter().map(|hit| hit.hsp_list_order).collect();
+        let ordered: Vec<usize> = hits.iter().map(|hit| hit.hsp_list_order as usize).collect();
         assert_eq!(ordered, vec![2, 1]);
     }
 
@@ -3471,9 +3514,9 @@ mod tests {
                     (i / 3 % 5) * 30 + 15,
                     i as i32,
                 );
-                hit.ctx_idx = i / 24;
+                hit.ctx_idx = u32::try_from(i / 24).unwrap();
                 hit.s_frame = if i / 12 % 2 == 0 { -1 } else { 1 };
-                hit.link_id = i;
+                hit.link_id = u32::try_from(i).unwrap();
                 hit.e_value = f64::from_bits(0x3ff0000000000000 + i as u64);
                 hit
             })
@@ -3482,7 +3525,7 @@ mod tests {
         let mut expected = hits.clone();
         let mut addresses = vec![std::ptr::null(); hits.len()];
         for hit in &hits {
-            addresses[hit.link_id] = hit as *const UngappedHit;
+            addresses[hit.link_id as usize] = hit as *const UngappedHit;
         }
         let mut references: Vec<_> = hits.iter_mut().collect();
         let comparators: [fn(&UngappedHit, &UngappedHit) -> Ordering; 2] =
@@ -3491,7 +3534,10 @@ mod tests {
             sort_ungapped_hits_by_index_replay(&mut expected, compare);
             sort_linked_hsp_references(&mut references, compare);
             for (actual, original) in references.iter().zip(&expected) {
-                assert_eq!(&**actual as *const UngappedHit, addresses[actual.link_id]);
+                assert_eq!(
+                    &**actual as *const UngappedHit,
+                    addresses[actual.link_id as usize]
+                );
                 assert_eq!(format!("{:?}", **actual), format!("{original:?}"));
                 assert_eq!(actual.e_value.to_bits(), original.e_value.to_bits());
             }
@@ -3570,13 +3616,13 @@ mod tests {
                     position + 20,
                     40 + (index % 4) as i32,
                 );
-                hit.ctx_idx = index / 8;
-                hit.q_idx = (hit.ctx_idx / 6) as u32;
-                hit.q_frame = contexts[hit.ctx_idx].frame;
+                hit.ctx_idx = u32::try_from(index / 8).unwrap();
+                hit.q_idx = (hit.ctx_idx as usize / 6) as u32;
+                hit.q_frame = contexts[hit.ctx_idx as usize].frame;
                 hit.s_frame = if index / 4 % 2 == 0 { -1 } else { 1 };
                 hit.q_orig_len = 6000;
                 hit.s_orig_len = 6000;
-                hit.hsp_list_order = index;
+                hit.hsp_list_order = u32::try_from(index).unwrap();
                 hit
             })
             .collect();
@@ -3768,7 +3814,7 @@ mod tests {
             .enumerate()
             .map(|(index, &(q0, q1, s0, s1, score))| {
                 let mut hit = mock_hit(q0, q1, s0, s1, score);
-                hit.hsp_list_order = index;
+                hit.hsp_list_order = u32::try_from(index).unwrap();
                 hit.q_orig_len = 300_000;
                 hit.s_orig_len = 300_000;
                 hit
@@ -3798,7 +3844,7 @@ mod tests {
         let (params, contexts, log_k) = fast_test_contexts();
         sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
         for (link_id, hit) in hits.iter_mut().enumerate() {
-            hit.link_id = link_id;
+            hit.link_id = u32::try_from(link_id).unwrap();
             hit.chain_next_link_id = None;
             hit.num = 1;
         }
@@ -3854,7 +3900,7 @@ mod tests {
     /// The HSP of a fixed test, found by its query and subject start.
     fn linked_hit(hits: &[UngappedHit], q_aa_start: usize, s_aa_start: usize) -> &UngappedHit {
         hits.iter()
-            .find(|h| h.q_aa_start == q_aa_start && h.s_aa_start == s_aa_start)
+            .find(|h| h.q_aa_start as usize == q_aa_start && h.s_aa_start as usize == s_aa_start)
             .expect("HSP of the fixed test")
     }
 
@@ -4142,12 +4188,12 @@ mod tests {
                         rng.below(40) as i32
                     };
                 let mut hit = mock_hit(q0, q0 + len, s0, s0 + len, score.max(1));
-                hit.ctx_idx = rng.below(3) as usize;
-                hit.q_frame = contexts[hit.ctx_idx].frame;
+                hit.ctx_idx = u32::try_from(rng.below(3)).unwrap();
+                hit.q_frame = contexts[hit.ctx_idx as usize].frame;
                 hit.s_frame = 1 + rng.below(3) as i8;
                 hit.q_orig_len = 300_000;
                 hit.s_orig_len = 300_000;
-                hit.hsp_list_order = index;
+                hit.hsp_list_order = u32::try_from(index).unwrap();
                 if index > 0 && rng.below(12) == 0 {
                     // the coordinates of an earlier HSP, in another frame
                     let other = rng.below(index as u64) as usize;
@@ -4332,17 +4378,17 @@ mod tests {
                 };
                 let score = (lo + rng.below((hi - lo + 1) as u64) as i64) as i32;
                 let mut hit = mock_hit(q, q + len, s, s + len, score);
-                hit.ctx_idx = rng.below(3) as usize;
-                hit.q_frame = contexts[hit.ctx_idx].frame;
+                hit.ctx_idx = u32::try_from(rng.below(3)).unwrap();
+                hit.q_frame = contexts[hit.ctx_idx as usize].frame;
                 hit.s_frame = 1 + rng.below(3) as i8;
                 hit.q_orig_len = 300_000;
                 hit.s_orig_len = 300_000;
-                hit.hsp_list_order = index;
+                hit.hsp_list_order = u32::try_from(index).unwrap();
                 hits.push(hit);
             }
             sort_hsps_by_ncbi_link_order(&mut hits, rev_compare_hsps_tbx);
             for (link_id, hit) in hits.iter_mut().enumerate() {
-                hit.link_id = link_id;
+                hit.link_id = u32::try_from(link_id).unwrap();
                 hit.chain_next_link_id = None;
                 hit.num = 1;
             }

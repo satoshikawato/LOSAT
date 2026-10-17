@@ -72,27 +72,27 @@ mod tests {
         UngappedHit {
             q_idx: marker as u32,
             s_idx: (marker + 10) as u32,
-            ctx_idx: marker + 20,
-            s_f_idx: marker + 30,
+            ctx_idx: u32::try_from(marker + 20).unwrap(),
+            s_f_idx: u8::try_from(marker + 30).unwrap(),
             q_frame: if marker.is_multiple_of(2) { -1 } else { 1 },
             s_frame: if marker.is_multiple_of(2) { -2 } else { 2 },
-            q_aa_start: marker + 40,
-            q_aa_end: marker + 50,
-            s_aa_start: marker + 60,
-            s_aa_end: marker + 70,
-            q_seed_off: marker + 80,
-            s_seed_off: marker + 90,
-            q_orig_len: marker + 100,
-            s_orig_len: marker + 110,
+            q_aa_start: u32::try_from(marker + 40).unwrap(),
+            q_aa_end: u32::try_from(marker + 50).unwrap(),
+            s_aa_start: u32::try_from(marker + 60).unwrap(),
+            s_aa_end: u32::try_from(marker + 70).unwrap(),
+            q_seed_off: u32::try_from(marker + 80).unwrap(),
+            s_seed_off: u32::try_from(marker + 90).unwrap(),
+            q_orig_len: u32::try_from(marker + 100).unwrap(),
+            s_orig_len: u32::try_from(marker + 110).unwrap(),
             raw_score,
             e_value: marker as f64 / 10.0,
-            num_ident: marker + 120,
-            hsp_list_order: marker + 130,
+            num_ident: u32::try_from(marker + 120).unwrap(),
+            hsp_list_order: u32::try_from(marker + 130).unwrap(),
             ordering_method: (marker % 2) as u8,
             linked_set: marker.is_multiple_of(2),
             start_of_chain: !marker.is_multiple_of(2),
-            link_id: marker + 140,
-            chain_next_link_id: Some(marker + 150),
+            link_id: u32::try_from(marker + 140).unwrap(),
+            chain_next_link_id: Some(u32::try_from(marker + 150).unwrap()),
             hsp_link_num: 0,
             num: 0,
         }
@@ -113,7 +113,10 @@ mod tests {
 
         sort_ungapped_hits_by_index_replay(&mut hits, |a, b| b.raw_score.cmp(&a.raw_score));
 
-        let order: Vec<usize> = hits.iter().map(|value| value.hsp_list_order).collect();
+        let order: Vec<usize> = hits
+            .iter()
+            .map(|value| value.hsp_list_order as usize)
+            .collect();
         assert_eq!(order, vec![132, 131, 130, 133]);
     }
 

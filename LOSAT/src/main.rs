@@ -234,8 +234,10 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_slices_print_summary();
     LOSAT::algorithm::tblastn::x_subject_translate_print_summary();
     LOSAT::algorithm::tblastn::x_subject_store_print_summary();
+    LOSAT::algorithm::tblastn::x_link_window_print_summary();
     LOSAT::algorithm::blastn::x_subject_store_print_summary();
     LOSAT::algorithm::blastn::x_query_dust_par_print_summary();
+    LOSAT::algorithm::blastn::blast_engine::x_query_prep_par_print_summary();
     LOSAT::algorithm::blastp::x_bp_seed_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();

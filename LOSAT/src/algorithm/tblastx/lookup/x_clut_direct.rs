@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW, off unless set): the compressed lookup table of
+//! EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW; BPCLUT is a strict-set switch): the compressed lookup table of
 //! blastp-fast (`CompressedAaLookupTable`) built flat, in three passes (count, layout, fill): each
 //! cell's hits lie in one contiguous slice, already in the order NCBI's compressed scan copies them,
 //! and the scans read a cell as that slice.
@@ -150,12 +150,13 @@
 //! With more than one thread the search's pool builds the same table (`x_clut_par.rs`, exactness
 //! argument in its header); at one thread the builder above runs.
 //!
-//! Off unless `LOSAT_X_BPCLUT` is set (any value); `LOSAT_X_BPCLUTSHADOW` builds both tables, compares
+//! A strict-set switch (`utils/xswitch.rs`): on unless `LOSAT_X_BPCLUT=0`, or `LOSAT_X_DEFAULT=0` and it
+//! is not set. `LOSAT_X_BPCLUTSHADOW` (not in the set) builds both tables, compares
 //! them (every cell's sequence, the PV array, the header) and the refusal, and searches with the
 //! reference's table; with more than one thread it also builds the pool's table and compares it with
-//! the flat one, slot for slot. Not in the strict set.
+//! the flat one, slot for slot.
 //!
-//! `LOSAT_X_BPLKPFLAT` (off unless set; not in the strict set) changes only how the pool's build is
+//! `LOSAT_X_BPLKPFLAT` (also a strict-set switch, and it acts only where the flat table is built) changes only how the pool's build is
 //! scheduled and where its vectors come from (`x_clut_par.rs`, exactness argument in its header): one
 //! latch per pass, the table's `starts` and `hits` taken from the previous table of a block search
 //! (`XFlatSpare`), and tasks of another computation (the contexts' Karlin blocks of
@@ -181,15 +182,17 @@ use std::sync::{Mutex, PoisonError};
 mod x_clut_par;
 
 // No NCBI counterpart: reads the switches once; it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW, off unless set): 0 = off (the reference
-/// builder), 1 = the flat table, 2 = shadow (both builders, compared; the reference's table used).
+/// EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW): `LOSAT_X_BPCLUT` is a strict-set switch (on
+/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set); `LOSAT_X_BPCLUTSHADOW` (any value, not
+/// part of the set) selects the shadow mode. 0 = off (the reference builder), 1 = the flat table,
+/// 2 = shadow (both builders, compared; the reference's table used).
 pub(crate) fn x_bpclut_mode() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BPCLUTSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_BPCLUT").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BPCLUT") {
             1
         } else {
             0
@@ -230,15 +233,16 @@ pub(crate) enum XLkpFlat {
 
 // No NCBI counterpart: reads the LOSAT_X_BPLKPFLAT / LOSAT_X_BPLKPFLATSHADOW switches once; it does
 // not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPLKPFLAT): off unless set to any value; `LOSAT_X_BPLKPFLATSHADOW` (any
-/// value) selects the shadow mode, which implies the switch.
+/// EXPERIMENT (LOSAT_X_BPLKPFLAT): a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+/// and it is not set); `LOSAT_X_BPLKPFLATSHADOW` (any value, not part of the set) selects the shadow
+/// mode, which implies the switch.
 pub(crate) fn x_bplkpflat_mode() -> XLkpFlat {
     use std::sync::OnceLock;
     static MODE: OnceLock<XLkpFlat> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BPLKPFLATSHADOW").is_some() {
             XLkpFlat::Shadow
-        } else if std::env::var_os("LOSAT_X_BPLKPFLAT").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BPLKPFLAT") {
             XLkpFlat::On
         } else {
             XLkpFlat::Off

@@ -274,7 +274,7 @@ pub struct BlastnHsp {
     pub num_positives: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:153-166
 // ```c
 // typedef struct BlastHSPList {
@@ -333,7 +333,7 @@ impl HitListEntry for BlastnHspList {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:168-180
 // ```c
 // typedef struct BlastHitList {
@@ -1133,7 +1133,9 @@ impl<L: HitListEntry> HitList<L> {
     }
 }
 
-/// Write BLASTN hit lists to an existing writer.
+/// Write BLASTN hit lists to an existing writer. `epilog` is `Some(n)` when NCBI's epilog
+/// (`PrintEpilog`) follows these reports, `n` being the number of queries that the search's
+/// reports formatted (outfmt 7's last line); `None` without it (an error in a later query batch).
 ///
 /// NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
 /// ```c
@@ -1157,7 +1159,7 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     query_titles: &[Arc<[u8]>],
     subject_title: &str,
     unsearched: &[bool],
-    epilog: bool,
+    epilog: Option<usize>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
 ) -> io::Result<()> {
@@ -1288,12 +1290,24 @@ pub fn write_output_blastn_hitlists_to_writer<W: Write>(
     }
 
     // `PrintEpilog` writes the last line; an error in a later query batch skips it.
-    if output_format == BlastnOutputFormat::TabularWithComments && epilog {
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1429-1430
+    // ```c
+    //     // Used with tabular output to print number of searches formatted at end.
+    //     m_QueriesFormatted++;
+    // ```
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:2233-2235
+    // ```c
+    //     if (m_FormatType == CFormattingArgs::eTabularWithComments) {
+    //         CBlastTabularInfo tabinfo(m_Outfile, m_CustomOutputFormatSpec);
+    //         tabinfo.PrintNumProcessed(m_QueriesFormatted);
+    // ```
+    // The count is that of every query the search's reports formatted (`epilog`).
+    if let (BlastnOutputFormat::TabularWithComments, Some(num_queries)) = (output_format, epilog) {
         // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1324
         // ```c
         // m_Ostream << "# BLAST processed " << num_queries << " queries\n";
         // ```
-        writeln!(writer, "# BLAST processed {} queries", hit_lists.len())?;
+        writeln!(writer, "# BLAST processed {} queries", num_queries)?;
     }
 
     Ok(())
@@ -1620,7 +1634,7 @@ mod tests {
             &query_titles,
             "User specified sequence set (Input: subject.fasta)",
             &[],
-            true,
+            Some(1),
             None,
             None,
         )
@@ -1641,7 +1655,7 @@ mod tests {
             &query_titles,
             "User specified sequence set (Input: subject.fasta)",
             &[true],
-            false,
+            None,
             None,
             None,
         )

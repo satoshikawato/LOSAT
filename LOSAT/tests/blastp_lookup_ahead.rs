@@ -4,7 +4,8 @@
 //!
 //! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
 //! set, and it acts only in the block search of `LOSAT_X_BPQBLOCK` where `LOSAT_X_BPLKPFLAT` acts on
-//! the flat table of `LOSAT_X_BPCLUT` (blastp-fast, more than one thread). These tests compare the
+//! the flat table of `LOSAT_X_BPCLUT` (blastp-fast, more than one thread; both are in the strict set,
+//! so "off" for either is `=0`). These tests compare the
 //! reports, standard error and exit codes with the switch off, on and in its shadow mode
 //! (`LOSAT_X_BPLKPAHEADSHADOW`, which builds every block's values again inline and compares them),
 //! with `-subject` and `-db`, and read the shadow's line at exit: `blocks` (blocks searched where the
@@ -285,8 +286,8 @@ fn one_block_and_the_search_of_all_queries_build_nothing_ahead() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// Where `LOSAT_X_BPLKPFLAT` does not act on the pool's flat table (one thread, the switch or
-// `LOSAT_X_BPCLUT` off, `LOSAT_X_BPCLUTSHADOW`, whose search uses the reference builder's table) and
+// Where `LOSAT_X_BPLKPFLAT` does not act on the pool's flat table (one thread, the switch =0 or
+// `LOSAT_X_BPCLUT=0`, `LOSAT_X_BPCLUTSHADOW`, whose search uses the reference builder's table) and
 // for exact blastp (no compressed table), the switch changes nothing and its shadow counts nothing.
 #[test]
 fn the_switch_does_not_act_without_the_pools_flat_table() {
@@ -296,11 +297,14 @@ fn the_switch_does_not_act_without_the_pools_flat_table() {
     let block = ("LOSAT_X_BPQBLOCK", "1");
     let clut = ("LOSAT_X_BPCLUT", "1");
     let flat = ("LOSAT_X_BPLKPFLAT", "1");
+    // Both are in the strict set (on by default): "off" is `=0`.
+    let clut_off = ("LOSAT_X_BPCLUT", "0");
+    let flat_off = ("LOSAT_X_BPLKPFLAT", "0");
     let clut_shadow = ("LOSAT_X_BPCLUTSHADOW", "1");
     for (task, threads, base) in [
         ("blastp-fast", 1, vec![block, clut, flat]),
-        ("blastp-fast", 4, vec![block, clut]),
-        ("blastp-fast", 4, vec![block, flat]),
+        ("blastp-fast", 4, vec![block, clut, flat_off]),
+        ("blastp-fast", 4, vec![block, clut_off, flat]),
         ("blastp-fast", 4, vec![block, clut_shadow, flat]),
         ("blastp", 4, vec![block, clut, flat]),
     ] {

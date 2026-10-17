@@ -24,8 +24,9 @@
 //! `LOSAT_X_TBNSCANBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_X_STATS` set,
 //! `main` prints `[X_STATS] TBNSCANBF units_bf= calls_bf= units_ref= calls_ref=` at exit (the scan
 //! units of the unit path scanned by this loop and by NCBI's, and the scan calls they took; a call
-//! more than the unit's ranges is a stop and resume), when the search scanned any. tblastx, blastp
-//! and blastx keep the scan of `tblastx/blast_aascan.rs`.
+//! more than the unit's ranges is a stop and resume), when the search scanned any. tblastx and
+//! blastp keep the scan of `tblastx/blast_aascan.rs`; blastx calls this scan and the candidate loop
+//! (`x_block_candidates`) under its own switch, LOSAT_X_BXSCANBF (`blastx/x_seed_scan.rs`).
 
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 use crate::algorithm::tblastx::lookup::{
@@ -35,11 +36,11 @@ use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): subject words looked at before their hits are copied.
-const X_BLOCK: usize = 256;
+pub(crate) const X_BLOCK: usize = 256;
 
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): offset-array entries needed after `array_size` (a cell's
 /// hits are written as `AA_HITS_PER_CELL` pairs, also when the array is full).
-pub(super) const X_SCAN_BF_SLACK: usize = AA_HITS_PER_CELL;
+pub(crate) const X_SCAN_BF_SLACK: usize = AA_HITS_PER_CELL;
 
 // No NCBI counterpart: reads LOSAT_X_TBNSCANBF once; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): whether tblastn scans with `x_scan_one_range_bf`; a switch
@@ -110,7 +111,7 @@ pub fn print_summary() {
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): `s_blast_aa_scan_subject_one_range` with the presence test
 /// made branch-free (see the module text). Same arguments, same result, same `s_range`;
 /// `offset_pairs` must hold `array_size + X_SCAN_BF_SLACK` entries.
-pub(super) fn x_scan_one_range_bf(
+pub(crate) fn x_scan_one_range_bf(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     offset_pairs: &mut [BlastOffsetPair],
@@ -152,26 +153,14 @@ pub(super) fn x_scan_one_range_bf(
     let mut block_first = s_first;
     while block_first <= s_last {
         let block_last = s_last.min(block_first + X_BLOCK - 1);
-        // tblastn's table (word size 3, 5-bit letters) with the shifts as constants.
-        let n = if word_length == 3 && charsize == 5 {
-            x_candidates::<3, 5>(
-                subject,
-                pv,
-                (word_length, charsize, mask),
-                (block_first, block_last),
-                &mut index,
-                &mut cand,
-            )
-        } else {
-            x_candidates::<0, 0>(
-                subject,
-                pv,
-                (word_length, charsize, mask),
-                (block_first, block_last),
-                &mut index,
-                &mut cand,
-            )
-        };
+        let n = x_block_candidates(
+            subject,
+            pv,
+            (word_length, charsize, mask),
+            (block_first, block_last),
+            &mut index,
+            &mut cand,
+        );
         for c in &cand[..n] {
             // SAFETY: the first `n` candidates were written above.
             let c = unsafe { c.assume_init() };
@@ -215,11 +204,77 @@ pub(super) fn x_scan_one_range_bf(
     totalhits
 }
 
+/// EXPERIMENT (LOSAT_X_TBNSCANBF): the mask of a table of word size 3 and 5-bit letters.
+const X_MASK_W3C5: usize = (1 << 15) - 1;
+
+/// EXPERIMENT (LOSAT_X_TBNSCANBF): `x_candidates::<3, 5>` for the mask `X_MASK_W3C5`, as a
+/// counted loop over the new letters with the candidate's position kept shifted: the same
+/// rolling index (`ComputeTableIndexIncremental`), presence test and candidates.
+#[inline(always)]
+fn x_candidates_w3c5(
+    subject: &[u8],
+    pv: *const u32,
+    block: (usize, usize),
+    index: &mut usize,
+    cand: &mut [MaybeUninit<u64>; X_BLOCK],
+) -> usize {
+    let words = block.1 - block.0 + 1;
+    // SAFETY: the new letter of the word at `s` is `subject[s + 2]`, read for `s <= s_last`
+    // as NCBI's loop reads it.
+    let letters = unsafe { subject.as_ptr().add(block.0 + 2) };
+    let out = cand.as_mut_ptr().cast::<u64>();
+    let mut ix = *index;
+    let mut n = 0usize;
+    let mut position = (block.0 as u64) << 32;
+    for k in 0..words {
+        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:121-127
+        // ```c
+        // return ((index << charsize) | word[wordsize - 1]) & mask;
+        // ```
+        // SAFETY: as above.
+        let new_char = unsafe { *letters.add(k) } as usize;
+        ix = ((ix << 5) | new_char) & X_MASK_W3C5;
+        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
+        // SAFETY: `ix` is masked to the backbone space the presence vector covers.
+        let bit = (unsafe { *pv.add(ix >> PV_ARRAY_BTS) } >> (ix & PV_ARRAY_MASK)) & 1;
+        // SAFETY: `n <= k < X_BLOCK`.
+        unsafe { out.add(n).write(position | ix as u64) };
+        n += bit as usize;
+        position += 1 << 32;
+    }
+    *index = ix;
+    n
+}
+
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): writes the candidates of the words `block.0 ..= block.1`
 /// (`position << 32 | index`, the list's length advanced by the presence bit) and returns how
 /// many; `index` is the rolling index of the word before `block.0` and becomes that of
-/// `block.1`. `WORD` and `CHARSIZE` are the table's word size and letter width when known at
-/// compile time, 0 to read them from `table` (word size, letter width, mask).
+/// `block.1`. `table` = (word size, letter width, mask); `pv` is the table's presence vector.
+/// The words read are those of NCBI's loop over the same positions (`subject[s + word size - 1]`
+/// for every `s` of the block), which the caller's subject must hold.
+#[inline(always)]
+pub(crate) fn x_block_candidates(
+    subject: &[u8],
+    pv: *const u32,
+    table: (usize, usize, usize),
+    block: (usize, usize),
+    index: &mut usize,
+    cand: &mut [MaybeUninit<u64>; X_BLOCK],
+) -> usize {
+    // tblastn's and blastx's table (word size 3, 5-bit letters) with the shifts and the mask as
+    // constants.
+    if table.0 == 3 && table.1 == 5 && table.2 == X_MASK_W3C5 {
+        x_candidates_w3c5(subject, pv, block, index, cand)
+    } else if table.0 == 3 && table.1 == 5 {
+        x_candidates::<3, 5>(subject, pv, table, block, index, cand)
+    } else {
+        x_candidates::<0, 0>(subject, pv, table, block, index, cand)
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSCANBF): [`x_block_candidates`] for one table shape. `WORD` and
+/// `CHARSIZE` are the table's word size and letter width when known at compile time, 0 to read
+/// them from `table` (word size, letter width, mask).
 #[inline(always)]
 fn x_candidates<const WORD: usize, const CHARSIZE: usize>(
     subject: &[u8],

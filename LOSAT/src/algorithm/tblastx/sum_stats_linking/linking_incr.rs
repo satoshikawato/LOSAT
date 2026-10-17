@@ -974,7 +974,7 @@ fn link_group<'g, K: LinkKey>(
     // subject_length = MAX(subject_length - length_adjustment, 1);
     // ```
     // Query and subject lengths and the length adjustment, as in link_hsp_group_ncbi.
-    let query_context = group_hits[0].ctx_idx;
+    let query_context = group_hits[0].ctx_idx as usize;
     let query_len_aa = query_contexts[query_context].aa_len as i64;
     let subject_len_aa = (subject_len_nucl / 3).max(1);
     let length_adjustment = length_adj_per_context[query_context];
@@ -1016,8 +1016,8 @@ fn link_group<'g, K: LinkKey>(
         so.push(s_off + st);
         qe.push(q_end - qt);
         se.push(s_end - st);
-        sl.push((hit.raw_score as f64) * query_contexts[hit.ctx_idx].karlin_params.lambda);
-        lk.push(log_k_by_ctx[hit.ctx_idx]);
+        sl.push((hit.raw_score as f64) * query_contexts[hit.ctx_idx as usize].karlin_params.lambda);
+        lk.push(log_k_by_ctx[hit.ctx_idx as usize]);
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:750-757,764-766

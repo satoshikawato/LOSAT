@@ -2,12 +2,12 @@
 //! (`LOSAT_X_SEEDCOMPACT`, `src/algorithm/tblastx/x_pair_par.rs`, the section above `XUnitHsp`)
 //! on whole searches.
 //!
-//! The switch is not in the strict set (`src/utils/xswitch.rs`): it is on when its variable is
-//! set, to any value, and `LOSAT_X_DEFAULT` does not touch it. With it on, the units of
+//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_SEEDCOMPACT`
+//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it on, the units of
 //! `LOSAT_X_PAIRPAR` keep their saved init HSPs as 28-byte records, copied out of a per-thread
 //! vector at their exact length; the merge expands them into the same init lists, converts each
 //! chunk's list into a list of its exact length and moves the first chunk's list into the empty
-//! frame list. Every test reads the `[X_STATS] SEEDCOMPACT` line, which is printed whenever the
+//! frame list. Every test reads the `[X_STATS] SEEDCOMPACT` line, which is printed only while the
 //! switch is on, to check that the compact lists were made (or, where no unit path runs, that
 //! none was), not only that the report is equal.
 //!
@@ -24,9 +24,10 @@
 //! record and the context index, and the switch changes how LOSAT holds the lists, not a value.
 //! For the fixture pair the expected output
 //! (`tests/fixtures/tblastx_link_fast/short_hsp.ncbi_2.17.0.fmt6.out`) was produced by NCBI
-//! BLAST+ 2.17.0. The database search is compared with the same LOSAT search without the switch:
-//! the property under test is that the report does not depend on it; that `-db` reports equal
-//! NCBI's is the business of the database fixtures, which run without it.
+//! BLAST+ 2.17.0. The database search is compared with the same LOSAT search with the switch off
+//! (`LOSAT_X_SEEDCOMPACT=0`): the property under test is that the report does not depend on it;
+//! that `-db` reports equal NCBI's is the business of the database fixtures, which run on the
+//! default paths.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -44,6 +45,8 @@ fn fasta(name: &str) -> PathBuf {
 }
 
 const SWITCH: (&str, &str) = ("LOSAT_X_SEEDCOMPACT", "1");
+const SWITCH_OFF: (&str, &str) = ("LOSAT_X_SEEDCOMPACT", "0");
+const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const THREADS: [u32; 2] = [1, 4];
 
@@ -168,24 +171,48 @@ fn assert_compact_ran(stderr: &str, subjects: u64, what: &str) {
 //
 //     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
 // ```
-// With the switch the fixture pair runs on the compact lists at one and four threads (one subject,
-// all its units and init HSPs as records) and the report is NCBI's. Without the variable the
-// switch is off: no SEEDCOMPACT line, the same report.
+// With no variable for the switch (it is on by default) the fixture pair runs on the compact lists
+// at one and four threads (one subject, all its units and init HSPs as records) and the report is
+// NCBI's.
 #[test]
 fn the_switch_keeps_compact_lists_and_gives_ncbis_report() {
     let expected = ncbi_report();
     for threads in THREADS {
         let what = format!("threads {threads}");
-        let (report, stderr) = pair(threads, &[STATS, SWITCH]);
+        let (report, stderr) = pair(threads, &[STATS]);
         assert_eq!(report, expected, "{what}");
         assert_compact_ran(&stderr, 1, &what);
-        let (report, stderr) = pair(threads, &[STATS]);
-        assert_eq!(report, expected, "{what} without the switch");
-        assert_eq!(
-            line(&stderr, "[X_STATS] SEEDCOMPACT "),
-            None,
-            "{what}:\n{stderr}"
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:367-372
+// ```c
+//     BLAST_SaveInitialHit(ungapped_hsps, q_off, s_off, ungapped_data);
+// ```
+// `LOSAT_X_SEEDCOMPACT=0` and `LOSAT_X_DEFAULT=0` turn the switch off: no SEEDCOMPACT line, the
+// same report. `LOSAT_X_DEFAULT=0` with `LOSAT_X_PAIRPAR=1` and `LOSAT_X_SEEDCOMPACT=1` is the run
+// the variable gave before the switch joined the set: the compact lists are made.
+#[test]
+fn the_switch_follows_its_variable_and_the_global_one() {
+    let expected = ncbi_report();
+    for threads in THREADS {
+        for off in [SWITCH_OFF, PREVIOUS] {
+            let what = format!("{off:?} threads {threads}");
+            let (report, stderr) = pair(threads, &[STATS, off]);
+            assert_eq!(report, expected, "{what}");
+            assert_eq!(
+                line(&stderr, "[X_STATS] SEEDCOMPACT "),
+                None,
+                "{what}:\n{stderr}"
+            );
+        }
+        let what = format!("previous paths with the switch set, threads {threads}");
+        let (report, stderr) = pair(
+            threads,
+            &[STATS, PREVIOUS, ("LOSAT_X_PAIRPAR", "1"), SWITCH],
         );
+        assert_eq!(report, expected, "{what}");
+        assert_compact_ran(&stderr, 1, &what);
     }
 }
 
@@ -208,7 +235,7 @@ fn the_switch_with_the_shadow_and_the_neighbouring_switches() {
     ] {
         for threads in THREADS {
             let what = format!("{other:?} threads {threads}");
-            let (report, stderr) = pair(threads, &[STATS, SWITCH, other]);
+            let (report, stderr) = pair(threads, &[STATS, other]);
             assert_eq!(report, expected, "{what}");
             assert_compact_ran(&stderr, 1, &what);
             if other.0 == "LOSAT_X_PAIRPARSHADOW" {
@@ -230,16 +257,21 @@ fn the_switch_with_the_shadow_and_the_neighbouring_switches() {
 //     hits = scansub(lookup_wrap, subject,
 //                               offset_pairs, array_size, scan_range);
 // ```
-// `LOSAT_X_PAIRPAR=0`, and `LOSAT_X_DEFAULT=0` (which does not touch this switch), leave the
-// search to the reference frame loop: no unit runs, so no compact list is made. The line is still
-// printed (the switch is on) with zero counters, and the report is NCBI's.
+// `LOSAT_X_PAIRPAR=0` (the switch is on by default), and `LOSAT_X_DEFAULT=0` with the switch set,
+// leave the search to the reference frame loop: no unit runs, so no compact list is made. The
+// line is still printed (the switch is on) with zero counters, and the report is NCBI's.
 #[test]
 fn without_the_unit_path_no_compact_list_is_made() {
     let expected = ncbi_report();
-    for no_units in [("LOSAT_X_PAIRPAR", "0"), ("LOSAT_X_DEFAULT", "0")] {
+    for (no_units, switches) in [
+        (("LOSAT_X_PAIRPAR", "0"), &[STATS][..]),
+        (PREVIOUS, &[STATS, SWITCH][..]),
+    ] {
         for threads in THREADS {
             let what = format!("{no_units:?} threads {threads}");
-            let (report, stderr) = pair(threads, &[STATS, SWITCH, no_units]);
+            let mut switches = switches.to_vec();
+            switches.push(no_units);
+            let (report, stderr) = pair(threads, &switches);
             assert_eq!(report, expected, "{what}");
             assert_eq!(compact(&stderr), [0, 0, 0, 0], "{what}:\n{stderr}");
         }
@@ -274,8 +306,8 @@ fn record(defline: &str, letters: &str) -> String {
 // ```
 // A database search (the inputs of tests/tblastx_db_search.rs: the first 6 kb of MjeNMV against
 // a database of MelaMJNV and PemoMJNVA made by `LOSAT makedb`) at one and four threads: with the
-// switch both subjects run on the compact lists, and the report is the report of the same search
-// without the switch.
+// switch (on by default) both subjects run on the compact lists, and the report is the report of
+// the same search with `LOSAT_X_SEEDCOMPACT=0`.
 #[test]
 fn a_database_search_gives_the_report_of_the_search_without_the_switch() {
     let dir = std::env::temp_dir().join(format!(
@@ -314,14 +346,14 @@ fn a_database_search_gives_the_report_of_the_search_without_the_switch() {
     );
     for threads in THREADS {
         let what = format!("-db threads {threads}");
-        let (expected, off_stderr) = tblastx(&query, &["-db", &db], threads, &[STATS]);
+        let (expected, off_stderr) = tblastx(&query, &["-db", &db], threads, &[STATS, SWITCH_OFF]);
         assert!(!expected.is_empty(), "{what}: no hits");
         assert_eq!(
             line(&off_stderr, "[X_STATS] SEEDCOMPACT "),
             None,
             "{what}:\n{off_stderr}"
         );
-        let (report, stderr) = tblastx(&query, &["-db", &db], threads, &[STATS, SWITCH]);
+        let (report, stderr) = tblastx(&query, &["-db", &db], threads, &[STATS]);
         assert_eq!(report, expected, "{what}");
         assert_compact_ran(&stderr, 2, &what);
     }

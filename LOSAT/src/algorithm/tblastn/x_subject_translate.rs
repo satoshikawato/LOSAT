@@ -686,28 +686,42 @@ fn x_packed_frames(
     let mut forward: Vec<Vec<u8>> = (0..frame_count).map(empty_frame).collect();
     let mut reverse: Vec<Vec<u8>> = (0..frame_count).map(empty_frame).collect();
     let mut codes = vec![0u8; X_PACKED_BLOCK + 2];
+    let mut indices = vec![0u8; X_PACKED_BLOCK];
     let mut start = 0;
     // the codons that start in [start, end), with the two bases after the last one
     while start + 3 <= seq_len {
         let end = (start + X_PACKED_BLOCK).min(seq_len - 2);
         let codes = &mut codes[..end - start + 2];
         store.codes_into(start, codes);
+        // `x_codon_index` of the codon at every base of the block, in one pass over the codes
+        let indices = &mut indices[..end - start];
+        for (((index, &b0), &b1), &b2) in indices
+            .iter_mut()
+            .zip(codes.iter())
+            .zip(&codes[1..])
+            .zip(&codes[2..])
+        {
+            *index = ((b0 << 4) | (b1 << 2) | b2) & 63;
+        }
         for phase in 0..3 {
             let first = start + phase;
             if first >= end {
                 break;
             }
+            // the codons at `first`, `first + 3`, ... below `end`: residues `first / 3` on of
+            // the plus frame, and residues `minus / 3` down of the minus frame
+            let count = (end - first).div_ceil(3);
             let minus = seq_len - 3 - first;
-            let (plus_frame, minus_frame) = (&mut forward[phase], &mut reverse[minus % 3]);
-            let mut minus_residue = 1 + minus / 3;
-            for (residue, codon) in plus_frame[1 + first / 3..]
+            let top = 1 + minus / 3;
+            let plus_frame = &mut forward[phase][1 + first / 3..][..count];
+            let minus_frame = &mut reverse[minus % 3][top + 1 - count..=top];
+            for ((plus, minus), &index) in plus_frame
                 .iter_mut()
-                .zip(codes[phase..].chunks_exact(3))
+                .zip(minus_frame.iter_mut().rev())
+                .zip(indices[phase..].iter().step_by(3))
             {
-                let index = x_codon_index(codon);
-                *residue = tables.forward[index];
-                minus_frame[minus_residue] = tables.reverse[index];
-                minus_residue -= 1;
+                *plus = tables.forward[(index & 63) as usize];
+                *minus = tables.reverse[(index & 63) as usize];
             }
         }
         start = end;

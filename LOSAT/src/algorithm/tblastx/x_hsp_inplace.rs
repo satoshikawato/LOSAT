@@ -93,7 +93,7 @@
 //! ```
 //! NCBI sorts arrays of pointers in place, runs its frame groups as sublists of the one sorted
 //! array and writes the final order back into the same `hsp_array`: it never holds a second copy
-//! of the HSPs. LOSAT's reference path owns complete `UngappedHit` records (152 bytes) and copies
+//! of the HSPs. LOSAT's reference path owns complete `UngappedHit` records (88 bytes) and copies
 //! the whole list at each of these steps (`hits.to_vec()` in every sort, groups grown by `push`
 //! while the sorted list is drained, a result grown by `extend`, a cloned replay). This path keeps
 //! one list.
@@ -573,7 +573,7 @@ fn groups_off_the_end(mut hits: Vec<UngappedHit>) -> Vec<Vec<UngappedHit>> {
 // ```
 // The scratch of the literal port `link_hsp_group_ncbi`, sized as in the reference when that port
 // can run. The incremental kernel does not use it, so it then starts empty (module doc, item 3):
-// the reference's capacity is 152 bytes per HSP of the whole list for every linking thread.
+// the reference's capacity is 88 bytes per HSP of the whole list for every linking thread.
 // LOSAT_X_LINKSLICES (tblastx/x_link_slices.rs) makes its scratch with this function as well.
 pub(super) fn buffer_pools(
     initial_lh_size: usize,
@@ -797,12 +797,16 @@ fn replay_in_place_counted(
     }
     lap.lap(LinkStage::FinalSorts);
 
-    let max_link_id = results.iter().map(|h| h.link_id).max().unwrap_or(0);
+    let max_link_id = results
+        .iter()
+        .map(|h| h.link_id as usize)
+        .max()
+        .unwrap_or(0);
     let mut id_to_index = vec![SENTINEL_IDX; max_link_id + 1];
     for (index, &position) in order.iter().enumerate() {
         let hit = &results[position];
-        if hit.link_id < id_to_index.len() {
-            id_to_index[hit.link_id] = index;
+        if (hit.link_id as usize) < id_to_index.len() {
+            id_to_index[hit.link_id as usize] = index;
         }
     }
 
@@ -827,6 +831,7 @@ fn replay_in_place_counted(
             let Some(next_id) = results[order[current]].chain_next_link_id else {
                 break;
             };
+            let next_id = next_id as usize;
             if next_id >= id_to_index.len() {
                 break;
             }
@@ -926,7 +931,8 @@ fn link_in_place(
     //         hsp_list->hsp_array[index]->num = 1;
     // ```
     for (link_id, hit) in hits.iter_mut().enumerate() {
-        hit.link_id = link_id;
+        hit.link_id = u32::try_from(link_id)
+            .expect("link_id: a position in the linking list fits u32 (NCBI's hspcnt is Int4)");
         hit.chain_next_link_id = None;
         hit.num = 1;
     }
@@ -1415,15 +1421,15 @@ mod tests {
             q0 + rng.below(25) as usize
         };
         let mut hit = mock_hit(q0, q0 + len, s0, s0 + len, 38 + rng.below(40) as i32);
-        hit.ctx_idx = rng.below(6 * queries as u64) as usize;
-        hit.q_idx = (hit.ctx_idx / 6) as u32;
-        hit.q_frame = FRAMES[hit.ctx_idx % 6];
+        hit.ctx_idx = u32::try_from(rng.below(6 * queries as u64)).unwrap();
+        hit.q_idx = (hit.ctx_idx as usize / 6) as u32;
+        hit.q_frame = FRAMES[hit.ctx_idx as usize % 6];
         hit.s_frame = FRAMES[rng.below(6) as usize];
-        hit.s_f_idx = rng.below(6) as usize;
+        hit.s_f_idx = u8::try_from(rng.below(6)).unwrap();
         hit.q_orig_len = 300_000;
         hit.s_orig_len = 300_000;
-        hit.hsp_list_order = index;
-        hit.link_id = index;
+        hit.hsp_list_order = u32::try_from(index).unwrap();
+        hit.link_id = u32::try_from(index).unwrap();
         hit.e_value = f64::from_bits(0x3ff0_0000_0000_0000 + index as u64);
         hit
     }
@@ -1667,7 +1673,7 @@ mod tests {
         let mut hits = random_hits(rng, n, 40, 2);
         let ids = rng.shuffled(n);
         for (hit, &id) in hits.iter_mut().zip(&ids) {
-            hit.link_id = id;
+            hit.link_id = u32::try_from(id).unwrap();
             hit.num = 1;
             hit.start_of_chain = rng.below(2) == 0;
         }
@@ -1763,8 +1769,8 @@ mod tests {
                 .map(|index| {
                     let at = 10 + 30 * index;
                     let mut hit = mock_hit(at, at + 20, at, at + 20, 50 + index as i32);
-                    hit.link_id = index;
-                    hit.hsp_list_order = index;
+                    hit.link_id = u32::try_from(index).unwrap();
+                    hit.hsp_list_order = u32::try_from(index).unwrap();
                     hit.num = 1;
                     hit.start_of_chain = true;
                     hit
@@ -1774,7 +1780,7 @@ mod tests {
         fn head(hit: &mut UngappedHit, next: usize, count: i16) {
             hit.linked_set = true;
             hit.start_of_chain = true;
-            hit.chain_next_link_id = Some(next);
+            hit.chain_next_link_id = Some(u32::try_from(next).unwrap());
             hit.hsp_link_num = count;
         }
         fn member(hit: &mut UngappedHit) {

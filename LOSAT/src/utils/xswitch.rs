@@ -106,10 +106,13 @@ use std::sync::OnceLock;
 /// only where `LOSAT_X_BPCLUT` builds the table on the pool, `tblastx/lookup/x_clut_par.rs`) were
 /// added after the change as switches that are off unless set and joined the set together once
 /// they were verified and timed with them on.
+/// `LOSAT_X_BPDEFER` (the candidates of a lookup cell's AVX2 batches called after its last batch
+/// of eight, `blastp/x_seed_fused.rs`) joined after a third run of the same jobs with it on as well.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
     "LOSAT_X_BNSTREAM",
     "LOSAT_X_BPCLUT",
+    "LOSAT_X_BPDEFER",
     "LOSAT_X_BPDIAG",
     "LOSAT_X_BPGAP",
     "LOSAT_X_BPLKPFLAT",

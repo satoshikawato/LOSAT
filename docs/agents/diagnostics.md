@@ -116,7 +116,8 @@ their variables mean
   act only with `TBNPAR`; `TBNBATCHRULE` only with `TBNBATCH`; `TBNOIDNEXT` and `TBNOIDUNITS` act
   only with `TBNOIDCHUNK`; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPSEED` acts on the two-hit seed stage only; `BPDIAG` acts only
-  in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPGAP` runs the
+  in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
+  in `BPDIAG`'s AVX2 batch; `BPGAP` runs the
   vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPLUT` declines in
   diagnostics mode; `BPQBLOCK` takes the block path only for one `-outfmt 6` report with more than
   one block (see its entry); `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
@@ -154,6 +155,7 @@ count of the set anywhere, so that two pull requests that each add a switch do n
 export LOSAT_X_AHEAD=16
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BPCLUT=1
+export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
 export LOSAT_X_BPGAP=1
 export LOSAT_X_BPLKPFLAT=1
@@ -423,6 +425,14 @@ against the yeast proteome with `-subject` took 0.784 of the time at 16 threads 
 `LOSAT_X_BPSUBJRUN` also on (0.741 with `LOSAT_X_BPQBLOCK=20000`), and `LOSAT_X_BPLKPFLAT` alone,
 with `LOSAT_X_BPCLUT` on in both arms, 0.893 (0.858) at 16 threads and 0.938 (0.928) at 8; exact
 `blastp` builds no compressed table and is not affected.
+
+`LOSAT_X_BPDEFER` (the candidates of a lookup cell's AVX2 batches called after the cell's last batch
+of eight) was added after `LOSAT_X_BPDIAG`, off unless set, and joined the set on 2026-10-17 after a
+third run of the 49 jobs with all ten on: every output equal to the run with the nine, the max RSS
+below NCBI's on every job (at most 0.923 of it), and the sum of the job times 0.407 of NCBI's (0.457
+with the nine; NCBI's times from the same earlier run). On the same jobs, both arms in one run, its
+summed CPU cycles were 0.938 of the run without it. It changes no value and keeps the order of the
+calls; it acts only where `LOSAT_X_BPDIAG`'s AVX2 batch runs.
 
 What runs per target:
 
@@ -1043,13 +1053,32 @@ Rebuilding less:
   mitigation on) the gather was slower than eight scalar loads; locally both were equal. The batches prefetch
   nothing (`LOSAT_X_BPSEED_PREFETCH` is the per-hit loop's). Shadow: `LOSAT_X_BPSEEDSHADOW=1` with
   `LOSAT_X_BPDIAG=1` compares the batched loop with the reference for every subject. With `LOSAT_TIMING=1`
-  each search of a query set prints `[TIMING] x_bpdiag: mode=<avx2|scalar|per-hit> cells=<n> batched_hits=<m>
-  candidates=<k>` (the path that ran, cells tested in batches, their hits, the hits passed on; zeros with
+  each search of a query set prints `[TIMING] x_bpdiag: mode=<avx2|avx2-defer|scalar|per-hit> cells=<n>
+  batched_hits=<m> candidates=<k>` (the path that ran, cells tested in batches, their hits, the hits passed on; zeros with
   `per-hit`). Measured 2026-10-14 on the workstation (one pinned core, alternating, the other 8 exact switches
   and `LOSAT_X_BPQBLOCK=50000`, x human proteome by `-subject`, rows identical in every arm; `blastp_scan_ungapped`
   (wall) in s): human block 1 per-hit 11.59 (20.61), gather 10.17 (18.90), scalar loads 9.13 (17.86), scalar
   batch 12.56 (21.53); C. elegans block 5 per-hit 32.68 (70.68), gather 28.55 (66.16), scalar loads 26.45
   (64.62).
+- `LOSAT_X_BPDEFER=1` (BLASTP, speed; in the strict set since 2026-10-17; `=0` turns it off; acts only
+  where `LOSAT_X_BPDIAG`'s AVX2 batch runs, not with `LOSAT_X_BPDIAG_SIMD=0` or
+  without AVX2) the candidates of a lookup cell's batches of eight are called after the cell's last batch of
+  eight instead of at the end of each batch (`blastp/x_seed_fused.rs`, exactness argument in its header): each
+  batch moves its candidates' query offsets to the front of its register (a permutation from a table of the 256
+  lane masks), stores the register into a buffer and advances the buffer by the number of candidates, so the
+  batch loop has no branch on the candidates; then the closure is called for the buffer in order, and the
+  cell's last batch of fewer than eight hits is the scalar batch as before. Exact because the hits of one cell
+  lie on distinct entries and a call reads and writes only its candidate's entry and the HSP list, so the later
+  batches of the cell touch nothing a call reads or writes, and the calls keep their order. With
+  `LOSAT_TIMING=1` the `x_bpdiag` line names `mode=avx2-defer`, with the counts of the AVX2 batch. Shadow:
+  `LOSAT_X_BPSEEDSHADOW=1` with `LOSAT_X_BPDIAG=1 LOSAT_X_BPDEFER=1` compares it with the reference for every
+  subject. Measured 2026-10-16 on the workstation (perf stat, user-space cycles; the other nine blastp switches
+  and `LOSAT_X_BPQBLOCK=50000` in both arms, x the subject proteome by `-subject`, one thread, outputs identical
+  in every arm): on stage7's 49 OrthoFinder jobs (every 10th query protein of each species x the whole subject
+  proteome, 28 jobs side by side, both arms in one run) the summed cycles were 0.938 of the run without it (per
+  job 0.925-0.965, median 0.936) and the instructions 0.985; on one core in alternated pairs Blast0_6 0.920
+  (`blastp_scan_ungapped` 45.0 -> 40.2 s), human block 1 0.950 and C. elegans block 5 0.963 (its gapped
+  stages are over half of the job), with 13-18 % fewer branch mispredicts.
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; in the
   strict set since 2026-10-14; `=0` turns it off) the word loop and the
   X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte

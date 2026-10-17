@@ -1646,16 +1646,25 @@ fn fill_with<P: Fn(u8) + Sync>(
         },
         pv_array.len(),
     ];
-    let mut marks = [0, 1, 2].map(|k| PageBits::new(pages_of(offsets[k], lens[k]), parts));
     let mut jobs: Vec<FaultJob> = (0..parts).map(|_| FaultJob::default()).collect();
     // The prefault round runs in the first chunk only, and only when that chunk has at least
-    // `rule.min_words_per_page` positions per page of the cells (`PrefaultRule`).
+    // `rule.min_words_per_page` positions per page of the cells (`PrefaultRule`); without it
+    // the marks, the pages to touch and the touchers' lists are empty.
     let first_chunk = total.min(chunk.max(1));
     let round_on = first_chunk > 0
         && first_chunk
             >= rule
                 .min_words_per_page
                 .saturating_mul(pages_of(offsets[0], lens[0]));
+    let round_pages = |k: usize| {
+        if round_on {
+            pages_of(offsets[k], lens[k])
+        } else {
+            0
+        }
+    };
+    let mut marks = [0, 1, 2].map(|k| PageBits::new(round_pages(k), parts));
+    let mut touch = [0, 1, 2].map(|k| PageBits::new(round_pages(k), 1));
     if round_on {
         page_touchers(&mut jobs, &owner, block_shift, pv_array_bts, offsets, lens);
     }
@@ -1664,16 +1673,6 @@ fn fill_with<P: Fn(u8) + Sync>(
         hashtable2.as_ptr() as usize,
         pv_array.as_ptr() as usize,
     ];
-    let mut touch = [0, 1, 2].map(|k| {
-        PageBits::new(
-            if round_on {
-                pages_of(offsets[k], lens[k])
-            } else {
-                0
-            },
-            1,
-        )
-    });
     let faults = Faults {
         offsets,
         lens,

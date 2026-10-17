@@ -10,6 +10,10 @@ use crate::stats::spouge::{blast_spouge_stoe, BlastGumbelBlk};
 use crate::stats::sum_statistics::{gap_decay_divisor, uneven_gap_sum_e};
 use crate::stats::tables::KarlinParams;
 
+// EXPERIMENT (LOSAT_X_TBNLINKWIN): the candidates of a head chosen by subject position.
+mod x_link_window;
+pub use x_link_window::print_summary as x_link_window_print_summary;
+
 // NCBI c++/include/algo/blast/core/blast_hits.h:126-143;
 // c++/src/algo/blast/core/link_hsps.c:1765-1810:
 // hsp->num = 1; Blast_HSPListGetEvalues(...); s_BlastUnevenGapLinkHSPs(...);
@@ -365,6 +369,9 @@ pub(super) fn link_preliminary_hsps(
                 .then(work[a].value.hsp.s_start.cmp(&work[b].value.hsp.s_start))
         });
         let end_index = query_end_prefix_index(&work, &offset_order);
+        // EXPERIMENT (LOSAT_X_TBNLINKWIN): the lookup by subject position.
+        let mut x_window = x_link_window::x_tbn_link_window()
+            .then(|| x_link_window::XLinkWindow::new(&work, &offset_order, link));
         let mut head = None;
         let mut index = 0;
         while index < score_order.len() {
@@ -403,7 +410,13 @@ pub(super) fn link_preliminary_hsps(
             let mut best_evalue = work[current].value.evalue;
             let mut best = None;
             let mut best_sum_score = 0.0;
-            for &candidate in &offset_order[left..right] {
+            // EXPERIMENT (LOSAT_X_TBNLINKWIN): the candidates of the window that can be
+            // admissible, in the same order.
+            let candidates = match x_window.as_mut() {
+                Some(window) => window.candidates(&work, &offset_order, current, left, right, link),
+                None => &offset_order[left..right],
+            };
+            for &candidate in candidates {
                 if work[candidate]
                     .prev
                     .is_some_and(|prev| work[prev].value.hsp.q_end >= left_offset)
@@ -428,13 +441,12 @@ pub(super) fn link_preliminary_hsps(
                 }
             }
             if let Some(candidate) = best {
-                head = Some(combine_sets(
-                    &mut work,
-                    current,
-                    candidate,
-                    best_sum_score,
-                    best_evalue,
-                ));
+                let combined =
+                    combine_sets(&mut work, current, candidate, best_sum_score, best_evalue);
+                if let Some(window) = x_window.as_mut() {
+                    window.linked(&work, combined);
+                }
+                head = Some(combined);
             } else {
                 head = None;
                 index += 1;

@@ -1459,6 +1459,60 @@ Scheduling (each value computed by one thread with the original function; order 
   at least two workers of a 3-thread pool, and by none with the switch off, one thread or one query) and
   `LOSAT/tests/blastn_query_dust_par.rs` (off / on / shadow equal at 1 and 4 threads for the three tasks, with
   `-dust 10 32 2 -lcase_masking`, `-dust no`, `LOSAT_X_QBATCHPAR` slots of two threads, and split query chunks).
+- `LOSAT_X_QPREPPAR=1` (BLASTN, all tasks; not in the strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT`
+  says) the BLASTNA encoding of a query batch and the ungapped Karlin blocks of its contexts are made on the search pool
+  instead of one query / context after the other (`blastn/blast_engine/x_query_prep_par.rs`, called from
+  `search_query_batch`, so for every query batch, in the loop or in a `LOSAT_X_QBATCHPAR` slot; `-db` searches too).
+  NCBI encodes the queries of a batch into one buffer and computes each context's block in turn
+  (`blast_setup_cxx.cpp:500-603`, `blast_stat.c:2754-2784`); both run before the lookup table is built, with no other
+  thread working (about 0.03 s per 5 Mb batch; 5 % of a batch at 4 threads, 11-14 % at 8-16). With the switch on and a
+  `SearchPool` of two or more threads current, both are ordered parallel maps run with `SearchPool::install`, so on the
+  pool of the search that calls them (the whole search pool, or the private pool of a `LOSAT_X_QBATCHPAR` slot of two or
+  more threads), never on rayon's global pool. Encoding: the buffer is cut with `split_at_mut` into the span of each
+  query (first context start to last context end; the spans must be in query order and disjoint, else the serial function
+  runs) and each query writes its own span with the two calls of the serial function, plus context then minus context.
+  Blocks: `par_iter().map().collect()` over the contexts (rayon splits them into ranges; the blocks are per context, the
+  jobs are not). Exact because the encoding of a query is a function of its letters, its two context offsets and the block
+  length (constant tables, and the reverse-complement table, a `OnceLock` that every caller fills with the same 256
+  bytes), and the block of a context is a function of its bytes and the reward and penalty (locals only; the one global of
+  `compute_karlin_params_ungapped` is the `LOSAT_X_KARLINFAST` flag, read once); there is no cache, memo table, counter
+  or random generator, results are collected in order, and no floating-point operation changes order (the sums are inside
+  one context). It acts only with a pool of two or more threads and two or more queries (encoding) or contexts (blocks);
+  with one thread, a slot of one thread, a build without the `parallel` feature, WebAssembly without `wasm-threads`, or
+  the switch off, today's serial code runs. Shadow: `LOSAT_X_QPREPPARSHADOW=1` (implies the switch) also computes both
+  serially and compares the buffers byte for byte and the blocks field by field with the bits of every float; a
+  difference prints `[X_SHADOW] QPREPPAR batches= queries= contexts= fallbacks= diffs= DIFFERENT (<what>)` and panics with
+  a message that names the first differing byte of the buffer, or the context and the field of the block; at the end of a
+  run `main` prints `[X_SHADOW] QPREPPAR batches= queries= contexts= fallbacks= diffs=0 identical` (`batches` and
+  `queries`: encodings made on a pool and compared; `contexts`: blocks made on a pool and compared; `fallbacks`: batches of
+  two or more queries on a pool whose spans were not in query order and disjoint, which the serial function encoded; they
+  are in neither `batches` nor `queries` and are not compared; always 0 in the layout of `search_query_batch`; all 0
+  without a pool of two threads). With `LOSAT_X_STATS` (any switch state) `main` prints
+  `[X_STATS] QPREPPAR encode_s=<s> karlin_s=<s> fallbacks=<n>`, the summed wall times of the two steps over every batch
+  (with `LOSAT_X_QBATCHPAR` they include the slots' batches, which run concurrently, and those the loop discards; with the
+  shadow, the serial reference pass) and the fallbacks (counted when the switch is on).
+  Measured on the workstation (2x Xeon Gold 6338, powersave, node 1 CPUs 32-47 with the siblings idle, `numactl
+  --membind`; `-outfmt 6`, subject 3 Mb of D. melanogaster 2L; both arms run the same binary with `LOSAT_X_PAIRPARDISC`,
+  `LOSAT_X_QBATCHPAR`, `LOSAT_X_DIAGLV`, `LOSAT_X_PAIRPARFOLD`, `LOSAT_X_QDUSTPAR` and `LOSAT_X_DISCLUTPAR`, the off arm
+  carries an unread `XOSAT_X_QPREPPAR=1` of the switch's length; alternating pairs, the order rotated per round, a
+  discarded warm-up run before each pair; at most 1 other CPU busy at start and end of every run), dc-megablast, medians,
+  on/off wall (per-round ratio median, range): (a) 1,775 cDNAs (5.0 Mb) 4 threads 0.653 -> 0.629 s (0.966, 3 rounds), 16
+  threads 0.498 -> 0.475 (0.941, 4 rounds); (b) 3,492 cDNAs 4 threads 1.243 -> 1.208 (0.963), 16 threads 0.643 -> 0.596
+  (0.922); Ad 31,168 cDNAs (37 batches) 4 threads 10.24 -> 9.73 (0.949), 16 threads 3.43 -> 3.34 (0.974). The two steps
+  (`encode_s` + `karlin_s`, one stats run per arm): (a) 16 threads 0.034 -> 0.008 s, (b) 0.100 -> 0.020, Ad 0.55 -> 0.17
+  (n16) and 0.53 -> 0.155 (n4). Cycles:u within 4 % (the cycles move with the GHz, 1.9-3.1); max RSS 99 / 99, 103 / 104, 109 /
+  111, 194 / 195, 238 / 236, 507 / 510 MiB (off / on, in the order above). Every output equals the sha256 of the
+  run without the switch. Tests: the unit tests of `x_query_prep_par.rs` (pool == serial at 1, 2, 3 and 7 threads on random
+  queries with N, IUPAC letters, lower case, empty queries, batches of none / one / two, in the production layout of
+  `search_query_batch` (which never takes the fallback; also with bytes 0..=255 on pools of 2, 3, 5 and 16 threads), in
+  compact layouts with touching spans or sentinel gaps, and in layouts the parallel path refuses (the fallback); blocks bit
+  for bit; a probe called once per item shows that both steps run on at least two workers of a 3-thread pool, and on none
+  with the switch off, one thread or one item; a caller that is not a pool worker still runs on the given pool (fails
+  without `SearchPool::install`); a `LOSAT_X_QBATCHPAR`-like slot pool and nested calls; the shadow panics, naming the
+  byte or the context and field, when a test hook changes one byte of the pool's buffer or one field of its blocks, and
+  the comparison functions name each difference) and
+  `LOSAT/tests/blastn_query_prep_par.rs` (off / on / shadow equal at 1 and 4 threads for the four tasks, `-dust no`, other
+  scores, `-lcase_masking`, `LOSAT_X_QBATCHPAR` slots of two threads, split query chunks, the `[X_STATS]` line).
 - `LOSAT_X_DIAGLV=1` (not in the strict set: off unless set to any value, whatever `LOSAT_X_DEFAULT` says)
   blastn, every task, `-subject` and `-db`, with the diagonal hash (query block over 8000 letters): the
   table keeps per bucket an upper bound of the levels of its cells (the largest level an insert wrote since

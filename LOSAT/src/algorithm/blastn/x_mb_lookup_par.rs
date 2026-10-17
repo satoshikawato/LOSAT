@@ -94,12 +94,22 @@
 //! workers' copies are one buffer of the calling thread (`Copies`; with each worker allocating its
 //! own copies, glibc's per-thread arenas kept 8-19 MiB more at the end of a search), not zeroed by
 //! it: each worker zeroes its own lines at the start of its part, and every line is written. So a
-//! fill of P workers holds P times that, all resident: at `lut_word_length` 12, 2.5 / 1.5 MiB at 16
+//! fill of P workers writes P times that, all resident: at `lut_word_length` 12, 2.5 / 1.5 MiB at 16
 //! threads, 20 / 12 MiB at 128 and 40 / 24 MiB at 255 (the parts are at most 255); at 11, 2.1 /
-//! 1.1, 17 / 9 and 34 / 18 MiB. The buffer is kept for the next fill and never freed
-//! (`SPARE_LINES`: freeing it raised glibc's mmap threshold and with it the search's max RSS), so
-//! the process keeps one such buffer per fill that ran at the same time as others (one, unless
-//! `LOSAT_X_QBATCHPAR`'s slots fill tables at once; their threads add up to the search's).
+//! 1.1, 17 / 9 and 34 / 18 MiB. On Linux with glibc the buffer is kept for the next fill and never
+//! freed (`SPARE_LINES`: freeing it raised glibc's mmap threshold and with it the search's max RSS),
+//! with a capacity of at least 32 MiB + 4 KiB (`lines_capacity`), so that glibc maps it and a buffer
+//! that is freed after all (one too small for a fill, or one whose fill found the lock taken at its
+//! end) never moves the threshold; the lines no fill wrote are never touched and not resident. What
+//! the process keeps, for `n` threads and `s` the largest per-worker size of its tables: resident,
+//! at most `n x s` from the fills on the whole pool plus, with `LOSAT_X_QBATCHPAR`, `m x s` for each
+//! slot of `m` threads that filled a table while another fill ran (the slots' threads add up to
+//! `n`, so below `2 n x s` in all), and a fill that finds the lock taken can add one more kept
+//! buffer; address space, 32 MiB + 4 KiB per kept buffer (`n x s` when that is larger: 255 threads
+//! at 160 KiB). At 64 threads and 160 KiB that is 10 MiB resident in one mapping of 32 MiB + 4 KiB,
+//! and with four slots of 16 threads 17.5 MiB resident in four. Elsewhere (macOS, Windows, musl,
+//! wasm32) the buffer has the fill's size and is freed at the end of the fill: those allocators
+//! return large blocks themselves, and there is no threshold to keep low.
 
 use super::{build_unmasked_ranges, MaskedInterval, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -362,50 +372,99 @@ struct Line([u32; 16]);
 const _: () = assert!(std::mem::size_of::<Line>() == 64 && std::mem::align_of::<Line>() == 64);
 const _: () = assert!(std::mem::size_of::<PvArrayType>() == std::mem::size_of::<u32>());
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the line buffers of finished fills, kept for the next
-/// fills and never freed. glibc raises its mmap threshold to the size of an mmapped block when the
-/// block is freed, after which the search's other allocations of up to that size stay in malloc's
-/// arenas: on the workstation (megablast of 31,168 cDNAs at 64 threads, 6 MiB of copies per fill)
-/// freeing the buffer after each fill gave max RSS 263-305 MiB against 221-225 without the switch,
-/// and 228-232 with the threshold fixed (`MALLOC_MMAP_THRESHOLD_`). A fill takes a kept buffer
-/// (growing it with `reserve_exact`, which glibc does with `mremap` for an mmapped block) and
-/// gives it back at its end, so there are at most as many buffers as fills ever ran at once (more than one
-/// only in `LOSAT_X_QBATCHPAR`'s slots, whose threads add up to the search's). The lock is only
-/// ever tried, never waited for (`try_lock`; no wait on the browser's main thread): a fill that
-/// finds it taken uses a buffer of its own, which it keeps only if the lock is free at its end.
-static SPARE_LINES: std::sync::Mutex<Vec<Vec<Line>>> = std::sync::Mutex::new(Vec::new());
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): Linux with glibc, where the buffers of the copies are
+/// kept from fill to fill (`SPARE_LINES`) and given at least 32 MiB + 4 KiB (`lines_capacity`).
+const GLIBC: bool = cfg!(all(target_os = "linux", target_env = "gnu"));
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): an empty buffer with room for `n` lines, kept from an
-/// earlier fill when the lock is free (the largest; see `SPARE_LINES`), else a new one.
-fn take_lines(n: usize) -> Vec<Line> {
-    let mut lines = SPARE_LINES
-        .try_lock()
-        .ok()
-        .and_then(|mut spare| {
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): a list of kept buffers (`SPARE_LINES`; the tests use
+/// lists of their own).
+type SpareLines = std::sync::Mutex<Vec<Vec<Line>>>;
+
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the line buffers of finished fills, kept for the next
+/// fills and never freed, on Linux with glibc only (`GLIBC`). glibc raises its mmap threshold to the
+/// size of a mapped block of up to 32 MiB when the block is freed, after which the search's other
+/// allocations of up to that size stay in malloc's arenas: on the workstation (megablast of 31,168
+/// cDNAs at 64 threads, 6 MiB of copies per fill) freeing the buffer after each fill gave max RSS
+/// 263-305 MiB against 221-225 without the switch, and 228-232 with the threshold fixed
+/// (`MALLOC_MMAP_THRESHOLD_`). A fill takes the largest kept buffer when it is large enough and
+/// gives it back at its end. A kept buffer is never grown: `Line` is aligned to 64 bytes, more than
+/// malloc's 16, so std's `realloc` of it allocates a new block, copies the old one on the calling
+/// thread and frees it (`realloc_fallback`; glibc's `mremap` is never reached), which is the
+/// threshold effect again. A buffer too small for a fill is freed and a new one made instead, and
+/// every buffer is made with at least 32 MiB + 4 KiB (`lines_capacity`), above glibc's largest
+/// dynamic threshold: freeing it never moves the threshold, and a fill needs a larger buffer only
+/// above 32 MiB of copies (205 workers or more at 160 KiB each). The lock is only ever tried, never
+/// waited for (`try_lock`: no fill waits for another's bookkeeping): a fill that finds it taken
+/// uses a new buffer, which it keeps only if the lock is free at its end, so each such fill can add
+/// one kept buffer. Elsewhere nothing is kept: macOS, Windows and musl return large blocks to the
+/// system when they are freed, and wasm32's dlmalloc has no such threshold, so a kept buffer would
+/// only hold memory (in the Web engine for the life of a reactor reused across searches).
+static SPARE_LINES: SpareLines = std::sync::Mutex::new(Vec::new());
+
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the capacity, in lines, of a new buffer for `n` lines. On
+/// Linux with glibc at least glibc's largest dynamic mmap threshold (`DEFAULT_MMAP_THRESHOLD_MAX`, 32
+/// MiB on 64-bit) and one page more, the rule of `x_frame_capacity` in
+/// `tblastn/x_subject_translate.rs` (LOSAT_X_TBNSTORE): glibc maps such a block and unmaps it when it
+/// is freed without moving its threshold, and the pages beyond the lines the fills write are never
+/// touched, so not resident. Elsewhere `n`.
+fn lines_capacity(n: usize) -> usize {
+    if GLIBC {
+        n.max(((32 << 20) + 4096) / std::mem::size_of::<Line>())
+    } else {
+        n
+    }
+}
+
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): an empty buffer with room for `n` lines. On Linux with
+/// glibc the largest buffer kept in `spare` when its lock is free and the buffer is large enough;
+/// one too small is freed here, never grown (`SPARE_LINES`). Otherwise a new buffer of
+/// `lines_capacity(n)` lines.
+fn take_lines(spare: &SpareLines, n: usize) -> Vec<Line> {
+    if GLIBC {
+        let kept = spare.try_lock().ok().and_then(|mut spare| {
             let largest = (0..spare.len()).max_by_key(|&i| spare[i].capacity())?;
             Some(spare.swap_remove(largest))
-        })
-        .unwrap_or_default();
-    lines.clear();
-    lines.reserve_exact(n);
-    lines
+        });
+        if let Some(mut lines) = kept {
+            if lines.capacity() >= n {
+                lines.clear();
+                return lines;
+            }
+            // Too small: freed (after the lock is released), not grown.
+            drop(lines);
+        }
+    }
+    Vec::with_capacity(lines_capacity(n))
 }
 
 /// No NCBI counterpart (LOSAT_X_MBLUTPAD): the private copies of all workers in one buffer of the
-/// calling thread, not zeroed by it (one buffer per fill, kept from fill to fill: `SPARE_LINES`; so
-/// the workers' own malloc arenas take nothing), `stride` lines per worker: first the copy of
-/// `helper_array` (`counter_lines`), then that of `pv_array`. Each worker's lines start on a line
-/// boundary and are a whole number of lines, so no two workers' copies share a line; each worker
-/// zeroes its own lines (`Unready::zeroed`). Empty, and no buffer, when the switch is off.
+/// calling thread, not zeroed by it (one buffer per fill, on Linux with glibc kept from fill to fill:
+/// `SPARE_LINES`; so the workers' own malloc arenas take nothing), `stride` lines per worker: first
+/// the copy of `helper_array` (`counter_lines`), then that of `pv_array`. Each worker's lines start
+/// on a line boundary and are a whole number of lines, so no two workers' copies share a line; each
+/// worker zeroes its own lines (`Unready::zeroed`). Empty, and no buffer, when the switch is off.
+/// `spare`: where the buffer comes from and goes back to (`SPARE_LINES`).
 struct Copies {
     lines: Vec<Line>,
     counter_lines: usize,
     stride: usize,
     parts: usize,
+    spare: &'static SpareLines,
 }
 
 impl Copies {
     fn new(pad: bool, parts: usize, helper_len: usize, pv_len: usize) -> Self {
+        Self::with_spare(&SPARE_LINES, pad, parts, helper_len, pv_len)
+    }
+
+    /// `new` with the kept buffers of `spare` (the tests use lists of their own).
+    fn with_spare(
+        spare: &'static SpareLines,
+        pad: bool,
+        parts: usize,
+        helper_len: usize,
+        pv_len: usize,
+    ) -> Self {
         let (counter_lines, pv_lines) = if pad {
             (helper_len.div_ceil(16), pv_len.div_ceil(16))
         } else {
@@ -414,10 +473,15 @@ impl Copies {
         let stride = counter_lines + pv_lines;
         let n = stride * parts;
         Self {
-            lines: if n == 0 { Vec::new() } else { take_lines(n) },
+            lines: if n == 0 {
+                Vec::new()
+            } else {
+                take_lines(spare, n)
+            },
             counter_lines,
             stride,
             parts,
+            spare,
         }
     }
 
@@ -438,10 +502,11 @@ impl Copies {
 }
 
 impl Drop for Copies {
-    /// Gives the buffer back for the next fill when the lock is free (`SPARE_LINES`).
+    /// On Linux with glibc gives the buffer back for the next fill when the lock is free
+    /// (`SPARE_LINES`); otherwise the buffer is freed with `lines`.
     fn drop(&mut self) {
-        if self.lines.capacity() > 0 {
-            if let Ok(mut spare) = SPARE_LINES.try_lock() {
+        if GLIBC && self.lines.capacity() > 0 {
+            if let Ok(mut spare) = self.spare.try_lock() {
                 spare.push(std::mem::take(&mut self.lines));
             }
         }
@@ -1536,6 +1601,89 @@ mod tests {
                 .count(),
             16
         );
+    }
+
+    // LOSAT_X_MBLUTPAD's kept buffers, on a list of this test's own (the module's other tests run at
+    // the same time on `SPARE_LINES`). On Linux with glibc a fill takes the largest kept buffer when
+    // it is large enough; one too small is freed and the fill gets a new buffer of
+    // `lines_capacity(n)` lines (32 MiB + 4 KiB or more), not the old one grown (std's aligned
+    // realloc frees the old block, which moves glibc's mmap threshold); `Drop` gives the buffer back,
+    // and frees it without waiting when the lock is taken. Elsewhere nothing is kept.
+    #[test]
+    fn kept_buffers_are_taken_largest_first_never_grown_and_given_back() {
+        static SPARE: SpareLines = std::sync::Mutex::new(Vec::new());
+        let kept = || -> Vec<(usize, usize)> {
+            SPARE
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|l| (l.as_ptr() as usize, l.capacity()))
+                .collect()
+        };
+        let at = |c: &Copies| (c.lines.as_ptr() as usize, c.lines.capacity());
+        // 4 parts of 2 + 16 lines.
+        let (parts, helper_len, pv_len) = (4usize, 32usize, 256usize);
+        let n = parts * (helper_len / 16 + pv_len / 16);
+        let mapped = ((32 << 20) + 4096) / 64;
+        assert_eq!(lines_capacity(n), if GLIBC { mapped } else { n });
+        assert_eq!(lines_capacity(mapped + 7), mapped + 7);
+
+        // The first fill makes a new buffer of `lines_capacity(n)` lines.
+        let copies = Copies::with_spare(&SPARE, true, parts, helper_len, pv_len);
+        let first = at(&copies);
+        assert!(first.1 >= lines_capacity(n));
+        drop(copies);
+        if !GLIBC {
+            // Nothing is kept, and a buffer in the list is not taken.
+            assert!(kept().is_empty(), "kept off glibc");
+            SPARE.lock().unwrap().push(Vec::with_capacity(4 * n));
+            let before = kept();
+            drop(Copies::with_spare(&SPARE, true, parts, helper_len, pv_len));
+            assert_eq!(kept(), before, "taken or kept off glibc");
+            SPARE.lock().unwrap().clear();
+            return;
+        }
+        assert_eq!(kept(), [first], "Drop gives the buffer back");
+        // The next fill takes it, and gives it back.
+        let copies = Copies::with_spare(&SPARE, true, parts, helper_len, pv_len);
+        assert_eq!(at(&copies), first);
+        assert!(kept().is_empty());
+        drop(copies);
+        assert_eq!(kept(), [first]);
+        // With a smaller buffer kept too, the fill takes the largest.
+        SPARE.lock().unwrap().push(Vec::with_capacity(n));
+        let copies = Copies::with_spare(&SPARE, true, parts, helper_len, pv_len);
+        assert_eq!(at(&copies), first, "not the largest kept buffer");
+        let small = kept();
+        assert_eq!(small.len(), 1);
+        assert!(small[0].1 >= n && small[0].1 < first.1);
+        // The lock taken at the end of a fill: the buffer is freed, not kept, and nothing waits.
+        {
+            let _taken = SPARE.lock().unwrap();
+            drop(copies);
+        }
+        assert_eq!(kept(), small, "kept although the lock was taken");
+        // A fill larger than the only kept buffer: that one is freed, and the fill gets a new
+        // buffer of `lines_capacity` lines, not the old one grown to its size.
+        let copies = Copies::with_spare(&SPARE, true, 2 * parts, helper_len, pv_len);
+        assert!(
+            copies.lines.capacity() >= lines_capacity(2 * n),
+            "grown to {} lines instead of a new buffer of {}",
+            copies.lines.capacity(),
+            lines_capacity(2 * n)
+        );
+        assert!(kept().is_empty(), "the buffer too small is kept");
+        drop(copies);
+        assert_eq!(kept().len(), 1);
+        // More than 32 MiB of copies (205 parts of 160 KiB, not touched here): the kept buffer is
+        // too small, and the fill gets a new one of its own size.
+        let copies = Copies::with_spare(&SPARE, true, 205, 8192, 32768);
+        assert_eq!(copies.stride, 2560);
+        assert!(copies.lines.capacity() >= 205 * 2560);
+        assert!(kept().is_empty());
+        drop(copies);
+        assert_eq!(kept().len(), 1);
+        SPARE.lock().unwrap().clear();
     }
 
     // The padded update writes the private copies only: a regression to the shared arrays (just

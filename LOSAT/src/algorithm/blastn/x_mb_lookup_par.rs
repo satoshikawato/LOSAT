@@ -51,8 +51,11 @@
 //! presence-vector words. The blocks are dealt round robin, so one 64-byte line of
 //! `helper_array` (16 counters, one per 2048-cell block when `pv_array_bts <= 11`, as for every
 //! table of `lut_word_length` 12 or less) holds the counters of up to 16 different workers, and a
-//! line of `pv_array` holds the presence-vector words of `16 >> (11 - pv_array_bts)` blocks (up to
-//! 8 workers at `pv_array_bts` 10). Every word that finds its cell non-empty increments a counter
+//! line of `pv_array` holds the presence-vector words of `16 >> (11 - pv_array_bts)` blocks when
+//! `pv_array_bts` is 7 to 10 (the `lut_word_length` 11 and 12 tables; up to 8 workers at 10). At
+//! smaller tables (`pv_array_bts` 5 or 6, `lut_word_length` 8 to 10) a block's words span several
+//! lines and only the lines at block boundaries are shared. Both arrays are only 16-byte aligned
+//! (`vec!`), so a block's words may also straddle a line. Every word that finds its cell non-empty increments a counter
 //! and every word that finds it empty sets a presence bit: each is a read and a write of a line
 //! that other cores write at the same time (false sharing). Measured on the workstation (16
 //! threads, megablast of 31,168 D. melanogaster cDNAs against 3 Mb, 37 tables), inside the fills:
@@ -85,10 +88,16 @@
 //! update of `hashtable` and `next_pos` is the original statement for statement. So every element
 //! of the four arrays, and `longest_chain`, is the loop's; the switch changes the running time
 //! only. Memory: two private copies per worker, `ceil(hashsize / 2048 / 16)` and
-//! `ceil(pv_size / 16)` lines of 64 bytes (at most 32 KiB + 128 KiB per worker for a
-//! `lut_word_length` 12 table, 8 KiB + 128 KiB at 11), in one zeroed allocation that the calling
-//! thread makes before the fill and frees after it (`Copies`; with each worker allocating its own
-//! copies, glibc's per-thread arenas kept 8-19 MiB more at the end of a search).
+//! `ceil(pv_size / 16)` lines of 64 bytes: 32 KiB + 128 KiB (`pv_array_bts` 9) or 32 + 64 KiB (10)
+//! per worker for a `lut_word_length` 12 table, 8 + 128 KiB (7) or 8 + 64 KiB (8) at 11. All
+//! workers' copies are one allocation that the calling thread makes, without zeroing, before the
+//! fill and frees after it (`Copies`; with each worker allocating its own copies, glibc's
+//! per-thread arenas kept 8-19 MiB more at the end of a search); each worker zeroes its own lines
+//! at the start of its part, so it first touches them, and every line is written. So during a
+//! fill P workers hold P times that, all resident: at `lut_word_length` 12, 2.5 / 1.5 MiB at 16
+//! threads, 20 / 12 MiB at 128 and 40 / 24 MiB at 255 (the parts are at most 255); at 11, 2.1 /
+//! 1.1, 17 / 9 and 34 / 18 MiB. After the fill the allocation goes back to the system when glibc
+//! made it with mmap, otherwise it stays in the calling thread's arena for the next fill.
 
 use super::{build_unmasked_ranges, MaskedInterval, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -171,7 +180,7 @@ impl BuildClock {
     }
 
     /// The end of the build: adds its intervals to the `[TIMING]` counters.
-    pub(super) fn record(self, on_pool: bool) {
+    pub(super) fn record(self, on_pool: bool, padded: bool) {
         let (Some(start), Some(fill), Some(chain)) = (self.start, self.fill, self.chain) else {
             return;
         };
@@ -191,7 +200,7 @@ impl BuildClock {
         CHAIN_NANOS.fetch_add(ns(chain, end), r);
         BUILDS.fetch_add(1, r);
         BUILDS_ON_POOL.fetch_add(u64::from(on_pool), r);
-        BUILDS_PADDED.fetch_add(u64::from(on_pool && switches().2), r);
+        BUILDS_PADDED.fetch_add(u64::from(padded), r);
     }
 }
 
@@ -351,35 +360,17 @@ struct Line([u32; 16]);
 const _: () = assert!(std::mem::size_of::<Line>() == 64 && std::mem::align_of::<Line>() == 64);
 const _: () = assert!(std::mem::size_of::<PvArrayType>() == std::mem::size_of::<u32>());
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): `n` zeroed lines in one allocation (all-zero bytes are
-/// a valid `Line`); a fresh allocation of this size comes from zero pages, so a line's page is
-/// first touched by the worker that writes it.
-fn zeroed_lines(n: usize) -> Vec<Line> {
-    if n == 0 {
-        return Vec::new();
-    }
-    let layout = std::alloc::Layout::array::<Line>(n).expect("private copies fit in memory");
-    // SAFETY: the layout has a non-zero size; zeroed memory is a valid `[Line]`; the vector owns
-    // the allocation with this layout (`Layout::array::<Line>(n)`, as `Vec<Line>` frees it).
-    unsafe {
-        let ptr = std::alloc::alloc_zeroed(layout) as *mut Line;
-        if ptr.is_null() {
-            std::alloc::handle_alloc_error(layout);
-        }
-        Vec::from_raw_parts(ptr, n, n)
-    }
-}
-
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the private copies of all workers in one zeroed
-/// allocation made by the calling thread (one allocation per fill, so the workers' own malloc
-/// arenas take nothing), `stride` lines per worker: first the copy of `helper_array`
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the private copies of all workers in one allocation
+/// made by the calling thread without zeroing it (one allocation per fill, so the workers' own
+/// malloc arenas take nothing), `stride` lines per worker: first the copy of `helper_array`
 /// (`counter_lines`), then that of `pv_array`. Each worker's lines start on a line boundary and
-/// are a whole number of lines, so no two workers' copies share a line. Empty when the switch is
-/// off.
+/// are a whole number of lines, so no two workers' copies share a line; each worker zeroes its
+/// own lines (`Unready::zeroed`). Empty, and no allocation, when the switch is off.
 struct Copies {
     lines: Vec<Line>,
     counter_lines: usize,
     stride: usize,
+    parts: usize,
 }
 
 impl Copies {
@@ -391,26 +382,50 @@ impl Copies {
         };
         let stride = counter_lines + pv_lines;
         Self {
-            lines: zeroed_lines(stride * parts),
+            lines: Vec::with_capacity(stride * parts),
             counter_lines,
             stride,
+            parts,
         }
     }
 
-    /// The workers' copies, in part order (each `stride` lines; empty slices when the switch is
-    /// off).
-    fn parts(&mut self, parts: usize) -> impl Iterator<Item = Private<'_>> {
-        let (stride, counter_lines) = (self.stride, self.counter_lines);
-        let mut rest: &mut [Line] = &mut self.lines;
+    /// The workers' copies, not yet zeroed, in part order (each `stride` lines; empty slices when
+    /// the switch is off).
+    fn parts(&mut self) -> impl Iterator<Item = Unready<'_>> {
+        let (stride, counter_lines, parts) = (self.stride, self.counter_lines, self.parts);
+        let mut rest = &mut self.lines.spare_capacity_mut()[..stride * parts];
         (0..parts).map(move |_| {
             let (mine, tail) = std::mem::take(&mut rest).split_at_mut(stride);
             rest = tail;
-            let (counters, pv) = mine.split_at_mut(counter_lines);
-            Private {
-                counters: Lines { lines: counters },
-                pv: Lines { lines: pv },
+            Unready {
+                lines: mine,
+                counter_lines,
             }
         })
+    }
+}
+
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): one worker's copies before it zeroes them.
+struct Unready<'a> {
+    lines: &'a mut [std::mem::MaybeUninit<Line>],
+    counter_lines: usize,
+}
+
+impl<'a> Unready<'a> {
+    /// Zeroes every line (on the calling thread, the worker's) and gives the two copies.
+    fn zeroed(self) -> Private<'a> {
+        for line in self.lines.iter_mut() {
+            line.write(Line([0; 16]));
+        }
+        // SAFETY: every element was written just above, and `MaybeUninit<Line>` has the layout of
+        // `Line`; the slice keeps its lifetime and length.
+        let lines: &'a mut [Line] =
+            unsafe { &mut *(self.lines as *mut [std::mem::MaybeUninit<Line>] as *mut [Line]) };
+        let (counters, pv) = lines.split_at_mut(self.counter_lines);
+        Private {
+            counters: Lines { lines: counters },
+            pv: Lines { lines: pv },
+        }
     }
 }
 
@@ -437,6 +452,26 @@ impl Lines<'_> {
 struct Private<'a> {
     counters: Lines<'a>,
     pv: Lines<'a>,
+}
+
+#[cfg(test)]
+impl Private<'_> {
+    /// Whether either copy holds a non-zero element (the tests' check that the padded path ran).
+    fn has_values(&self) -> bool {
+        let any = |l: &Lines<'_>| l.lines.iter().any(|line| line.0.iter().any(|&v| v != 0));
+        any(&self.counters) || any(&self.pv)
+    }
+}
+
+/// No NCBI counterpart (scheduling only): what one fill did. `padded`: the fill used the private
+/// copies (LOSAT_X_MBLUTPAD), for `[TIMING] x_mb_lookup_build`'s `padded=` and the shadow's
+/// counters. In tests also `parts_with_values`, the number of parts whose private copies held a
+/// non-zero element before their flush.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct FillStats {
+    pub(super) padded: bool,
+    #[cfg(test)]
+    parts_with_values: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -521,16 +556,19 @@ impl SharedTables {
 /// ```
 /// One worker: the word loop of `build_mb_lookup` (same reading order, same resets), applying
 /// the update only to the words whose cell block `owner` gives to `part`. With `PAD`
-/// (LOSAT_X_MBLUTPAD) the counters and presence bits go to private copies, which the worker adds
-/// into `helper_array` and `pv_array` for its own blocks at the end (module documentation).
+/// (LOSAT_X_MBLUTPAD) the counters and presence bits go to private copies, which the worker zeroes
+/// first and adds into `helper_array` and `pv_array` for its own blocks at the end (module
+/// documentation). Returns, in tests, whether the copies held a value before that flush (false
+/// otherwise).
 fn fill_part<const PAD: bool>(
     part: u8,
     owner: &[u8],
     block_shift: usize,
     words: &Words<'_>,
     t: SharedTables,
-    mut x: Private<'_>,
-) {
+    x: Unready<'_>,
+) -> bool {
+    let mut x = x.zeroed();
     let lut_word_length = words.lut_word_length;
     let mut own_words: Vec<(u32, u32)> = Vec::new();
     #[cfg(target_arch = "x86_64")]
@@ -641,9 +679,14 @@ fn fill_part<const PAD: bool>(
             }
         }
     }
+    #[cfg(test)]
+    let held = PAD && x.has_values();
+    #[cfg(not(test))]
+    let held = false;
     if PAD {
         flush_private(part, owner, block_shift, t, &x);
     }
+    held
 }
 
 /// No NCBI counterpart (LOSAT_X_MBLUTPAD): adds the counters and ORs the presence-vector words
@@ -700,23 +743,35 @@ pub(super) fn plan(table_size: usize, pv_array_bts: usize, parts: usize) -> (usi
 /// ```
 /// Fills the tables as the word loop of `build_mb_lookup` does, with `parts` workers on the
 /// search pool (or one after another, `in_pool == false`, for the shadow without a pool).
-pub(super) fn fill(parts: usize, words: &Words<'_>, tables: Tables<'_>, in_pool: bool) {
-    fill_mode(switches().2, parts, words, tables, in_pool);
+/// Returns whether the fill used the private copies of LOSAT_X_MBLUTPAD.
+pub(super) fn fill(parts: usize, words: &Words<'_>, tables: Tables<'_>, in_pool: bool) -> bool {
+    fill_mode(switches().2, parts, words, tables, in_pool).padded
 }
 
 /// No NCBI counterpart: `fill` with LOSAT_X_MBLUTPAD given as `pad` (the tests take both).
-fn fill_mode(pad: bool, parts: usize, words: &Words<'_>, tables: Tables<'_>, in_pool: bool) {
+fn fill_mode(
+    pad: bool,
+    parts: usize,
+    words: &Words<'_>,
+    tables: Tables<'_>,
+    in_pool: bool,
+) -> FillStats {
     // Dispatch point of LOSAT_X_MBLUTPAD: private counters and presence-vector words (module
     // documentation); off, the original fill.
     if pad {
-        fill_with::<true>(parts, words, tables, in_pool);
+        fill_with::<true>(parts, words, tables, in_pool)
     } else {
-        fill_with::<false>(parts, words, tables, in_pool);
+        fill_with::<false>(parts, words, tables, in_pool)
     }
 }
 
 /// No NCBI counterpart: `fill` with the private copies of LOSAT_X_MBLUTPAD (`PAD`) or without.
-fn fill_with<const PAD: bool>(parts: usize, words: &Words<'_>, tables: Tables<'_>, in_pool: bool) {
+fn fill_with<const PAD: bool>(
+    parts: usize,
+    words: &Words<'_>,
+    tables: Tables<'_>,
+    in_pool: bool,
+) -> FillStats {
     let table_size = tables.hashtable.len();
     let (block_shift, owner) = plan(table_size, tables.pv_array_bts, parts);
     let parts = parts.clamp(1, 255);
@@ -729,26 +784,70 @@ fn fill_with<const PAD: bool>(parts: usize, words: &Words<'_>, tables: Tables<'_
     };
     let owner = owner.as_slice();
     let mut copies = Copies::new(PAD, parts, shared.helper_array.len, shared.pv_array.len);
-    let mut copies = copies.parts(parts);
+    let mut copies = copies.parts();
+    #[cfg(test)]
+    let held = std::sync::atomic::AtomicUsize::new(0);
+    let note = |had: bool| {
+        #[cfg(test)]
+        held.fetch_add(usize::from(had), Ordering::Relaxed);
+        #[cfg(not(test))]
+        let _ = had;
+    };
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
-    if in_pool {
+    let ran = in_pool && {
         let first = copies.next().expect("one part at least");
+        let note = &note;
         rayon::scope(|scope| {
-            for (part, x) in (1..parts).zip(copies) {
+            for (part, x) in (1..parts).zip(copies.by_ref()) {
                 scope.spawn(move |_| {
-                    fill_part::<PAD>(part as u8, owner, block_shift, words, shared, x)
+                    note(fill_part::<PAD>(
+                        part as u8,
+                        owner,
+                        block_shift,
+                        words,
+                        shared,
+                        x,
+                    ))
                 });
             }
-            fill_part::<PAD>(0, owner, block_shift, words, shared, first);
+            note(fill_part::<PAD>(
+                0,
+                owner,
+                block_shift,
+                words,
+                shared,
+                first,
+            ));
         });
-        return;
+        true
+    };
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let ran = {
+        let _ = in_pool;
+        false
+    };
+    if !ran {
+        for (part, x) in (0..parts).zip(copies) {
+            note(fill_part::<PAD>(
+                part as u8,
+                owner,
+                block_shift,
+                words,
+                shared,
+                x,
+            ));
+        }
     }
-    let _ = in_pool;
-    for (part, x) in (0..parts).zip(copies) {
-        fill_part::<PAD>(part as u8, owner, block_shift, words, shared, x);
+    FillStats {
+        padded: PAD,
+        #[cfg(test)]
+        parts_with_values: held.into_inner(),
     }
 }
 
@@ -807,7 +906,7 @@ fn shadow_check_mode(
         Some(threads) => (threads, true),
         None => (4, false),
     };
-    fill_mode(
+    let x_stats = fill_mode(
         pad,
         parts,
         words,
@@ -844,7 +943,7 @@ fn shadow_check_mode(
     SHADOW_TABLES.fetch_add(1, Ordering::Relaxed);
     let cells = (hashtable.len() + next_pos.len() + pv_array.len() + helper_array.len()) as u64;
     SHADOW_CELLS.fetch_add(cells, Ordering::Relaxed);
-    if pad {
+    if x_stats.padded {
         SHADOW_PADDED_TABLES.fetch_add(1, Ordering::Relaxed);
         SHADOW_PADDED_CELLS.fetch_add(cells, Ordering::Relaxed);
     }
@@ -1060,6 +1159,7 @@ mod tests {
         next_pos: Vec<u32>,
         pv_array: Vec<PvArrayType>,
         helper_array: Vec<u32>,
+        stats: FillStats,
     }
 
     fn build_with(
@@ -1077,9 +1177,10 @@ mod tests {
             next_pos: vec![0u32; next_len],
             pv_array: pv0.to_vec(),
             helper_array: helper0.to_vec(),
+            stats: FillStats::default(),
         };
         assert_eq!(b.pv_array.len(), pv_len);
-        fill_mode(
+        b.stats = fill_mode(
             pad,
             parts,
             words,
@@ -1206,6 +1307,18 @@ mod tests {
                     &unpadded,
                     &format!("case {case} pool {threads} off"),
                 );
+                // The padded fill ran and its copies took the counts and bits: in the repeat
+                // cases (the last three) at least two parts held values before their flush; the
+                // unpadded fill has no copies.
+                assert!(padded.stats.padded && !unpadded.stats.padded, "case {case}");
+                assert_eq!(unpadded.stats.parts_with_values, 0, "case {case}");
+                if case >= 8 && threads >= 3 {
+                    assert!(
+                        padded.stats.parts_with_values >= 2,
+                        "case {case} pool {threads}: {:?}",
+                        padded.stats
+                    );
+                }
                 let serial = build_with(true, threads, false, &words, shape, &helper0, &pv0);
                 assert_same(
                     &loop_built,
@@ -1339,11 +1452,14 @@ mod tests {
             (16, 8192, 16384),
         ] {
             let mut copies = Copies::new(true, parts, helper_len, pv_len);
-            assert_eq!(copies.lines.as_ptr() as usize % 64, 0);
             let stride = helper_len.div_ceil(16) + pv_len.div_ceil(16);
+            assert!(copies.lines.capacity() >= stride * parts);
             let base = copies.lines.as_ptr() as usize;
+            assert_eq!(base % 64, 0);
             let mut seen = 0;
-            for (p, mut x) in copies.parts(parts).enumerate() {
+            let mut ends = Vec::new();
+            for (p, x) in copies.parts().enumerate() {
+                let mut x = x.zeroed();
                 let c0 = x.counters.lines.as_ptr() as usize;
                 let v0 = x.pv.lines.as_ptr() as usize;
                 assert_eq!(c0, base + p * stride * 64, "parts {parts} part {p}");
@@ -1356,30 +1472,193 @@ mod tests {
                 assert_eq!(x.pv.lines.len(), pv_len.div_ceil(16));
                 assert!((0..helper_len).all(|i| x.counters.get(i) == 0));
                 assert!((0..pv_len).all(|i| x.pv.get(i) == 0));
+                assert!(!x.has_values());
                 *x.counters.slot(helper_len - 1) = 1;
                 *x.pv.slot(pv_len - 1) = 1;
+                assert!(x.has_values());
+                ends.push((c0, v0 + x.pv.lines.len() * 64));
                 seen += 1;
             }
             assert_eq!(seen, parts);
-            assert_eq!(copies.lines.len(), stride * parts);
-            assert_eq!(
-                copies
-                    .lines
-                    .iter()
-                    .map(|l| l.0.iter().sum::<u32>())
-                    .sum::<u32>(),
-                2 * parts as u32,
-                "each part wrote its own two elements"
-            );
+            for pair in ends.windows(2) {
+                assert!(pair[0].1 <= pair[1].0, "parts {parts}: copies overlap");
+            }
         }
         let mut off = Copies::new(false, 16, 8192, 32768);
         assert_eq!(off.lines.capacity(), 0);
         assert_eq!(
-            off.parts(16)
+            off.parts()
+                .map(Unready::zeroed)
                 .filter(|x| x.counters.lines.is_empty() && x.pv.lines.is_empty())
                 .count(),
             16
         );
+    }
+
+    // The padded update writes the private copies only: a regression to the shared arrays (just
+    // as exact, but the false sharing the switch removes) is caught here.
+    #[test]
+    fn padded_apply_writes_private_copies_only() {
+        let lut = 8usize;
+        let table = 1usize << (2 * lut);
+        let (pv_len, bts) = super::super::compute_mb_pv_params(table, 30_000, false, lut);
+        let helper_len = table.div_ceil(2048).max(1);
+        let mut hashtable = vec![0u32; table];
+        let mut next_pos = vec![0u32; 10];
+        let mut pv = vec![0 as PvArrayType; pv_len];
+        let mut helper = vec![0u32; helper_len];
+        let t = SharedTables {
+            hashtable: Shared::new(&mut hashtable),
+            next_pos: Shared::new(&mut next_pos),
+            pv_array: Shared::new(&mut pv),
+            pv_array_bts: bts,
+            helper_array: Shared::new(&mut helper),
+        };
+        let mut copies = Copies::new(true, 1, helper_len, pv_len);
+        let mut x = copies.parts().next().unwrap().zeroed();
+        let bucket = 4097usize;
+        // SAFETY: one worker owns every cell and word here.
+        unsafe {
+            t.apply::<true>(bucket, 1, &mut x);
+            t.apply::<true>(bucket, 2, &mut x);
+            t.apply::<true>(bucket, 3, &mut x);
+        }
+        assert_eq!(x.counters.get(bucket >> 11), 2);
+        assert_ne!(x.pv.get(bucket >> bts), 0);
+        drop(x);
+        assert!(helper.iter().all(|&v| v == 0), "shared counters written");
+        assert!(pv.iter().all(|&v| v == 0), "shared presence words written");
+        assert_eq!(hashtable[bucket], 3);
+        assert_eq!(&next_pos[1..4], &[0, 1, 2]);
+    }
+
+    // Many parts: off the pool 64 / 254 / 255 / 256 / 300 parts (the last two clamp to 255), on a
+    // 64-thread pool 64 and 255 parts (more parts than threads, and at lut 8 more parts than
+    // blocks); lut 8 / 11 / 12; the padded fill equals the loop.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn padded_fill_with_many_parts_gives_the_loops_tables() {
+        let mut rng = Lcg(0x00C0_FFEE);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(64)
+            .build()
+            .unwrap();
+        for (lut, asc, approx) in [
+            (8usize, true, 30_000usize),
+            (11, false, 1_000_000),
+            (12, true, 400_000),
+        ] {
+            let q = repeat_case(&mut rng, 25_000);
+            let queries = vec![q];
+            let refs: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+            let offsets = vec![0i32];
+            let masks = vec![Vec::new()];
+            let reference =
+                build_two_stage_lookup(&refs, &offsets, lut + 4, lut, &masks, None, 0, approx, asc);
+            let mb = &reference.mb_lookup;
+            let shape = (
+                mb.hashtable.len(),
+                mb.next_pos.len(),
+                mb.pv_array.len(),
+                mb.pv_array_bts,
+            );
+            let words = Words {
+                queries_blastna: &refs,
+                query_offsets: &offsets,
+                query_masks: &masks,
+                word_length: lut + 4,
+                lut_word_length: lut,
+                kmer_mask: (1u64 << (2 * lut)) - 1,
+                ascending_cells: asc,
+            };
+            let helper0 = vec![0u32; (mb.hashtable.len() >> 11).max(1)];
+            let pv0 = vec![0 as PvArrayType; mb.pv_array.len()];
+            let loop_built = build_with(false, 1, false, &words, shape, &helper0, &pv0);
+            assert_eq!(loop_built.hashtable, mb.hashtable);
+            assert_eq!(loop_built.next_pos, mb.next_pos);
+            assert_eq!(loop_built.pv_array, mb.pv_array);
+            for parts in [64usize, 254, 255, 256, 300] {
+                let b = build_with(true, parts, false, &words, shape, &helper0, &pv0);
+                assert_same(&loop_built, &b, &format!("lut {lut} parts {parts}"));
+            }
+            for parts in [64usize, 255] {
+                let b =
+                    pool.install(|| build_with(true, parts, true, &words, shape, &helper0, &pv0));
+                assert_same(&loop_built, &b, &format!("lut {lut} pool 64 parts {parts}"));
+            }
+        }
+    }
+
+    // Every counter and presence-vector word is flushed by exactly one part, its block's owner,
+    // for every reachable table shape (lut 4..12; `approx_table_entries` below, between and above
+    // the cutoffs that halve the presence vector; with and without the database filter) and
+    // P = 1..=17, 31, 64, 127, 128, 254, 255, 256 and 300 (the last two clamp): each part's
+    // copies hold `part + 1` everywhere, so after all flushes a counter
+    // holds its owner + 1 (the flush adds to 0) and a word its owner + 1 (one OR). A double flush,
+    // a missed one or a wrong owner fails. Also: no presence-vector word spans two blocks, and
+    // the copies are `P x (ceil(hashsize / 32768) + ceil(pv_size / 16))` lines, at most 160 KiB per
+    // part (the module documentation's memory sentence).
+    #[test]
+    fn every_counter_and_word_is_flushed_once_by_its_owner() {
+        let mut shapes = 0;
+        for lut in 4usize..=12 {
+            let mut worst = 0usize;
+            for approx in [1_000usize, 20_000, 1_000_000] {
+                for db in [false, true] {
+                    let table = 1usize << (2 * lut);
+                    let (pv_len, bts) = super::super::compute_mb_pv_params(table, approx, db, lut);
+                    let helper_len = table.div_ceil(2048).max(1);
+                    let per_part = table.div_ceil(32768) + pv_len.div_ceil(16);
+                    worst = worst.max(per_part * 64);
+                    for parts_in in (1usize..=17).chain([31, 64, 127, 128, 254, 255, 256, 300]) {
+                        let (block_shift, owner) = plan(table, bts, parts_in);
+                        let parts = parts_in.clamp(1, 255);
+                        assert!(block_shift >= bts && block_shift >= 11);
+                        let mut helper = vec![0u32; helper_len];
+                        let mut pv = vec![0 as PvArrayType; pv_len];
+                        let mut hashtable = vec![0u32; 0];
+                        let mut next_pos = vec![0u32; 0];
+                        let t = SharedTables {
+                            hashtable: Shared::new(&mut hashtable),
+                            next_pos: Shared::new(&mut next_pos),
+                            pv_array: Shared::new(&mut pv),
+                            pv_array_bts: bts,
+                            helper_array: Shared::new(&mut helper),
+                        };
+                        let mut copies = Copies::new(true, parts, helper_len, pv_len);
+                        assert!(copies.lines.capacity() >= parts * per_part, "lut {lut}");
+                        assert_eq!(copies.stride, per_part, "lut {lut}");
+                        for (p, x) in copies.parts().enumerate() {
+                            let x = x.zeroed();
+                            for line in x.counters.lines.iter_mut().chain(x.pv.lines.iter_mut()) {
+                                line.0 = [p as u32 + 1; 16];
+                            }
+                            flush_private(p as u8, &owner, block_shift, t, &x);
+                        }
+                        let what = format!("lut {lut} approx {approx} db {db} P {parts_in}");
+                        for (h, &value) in helper.iter().enumerate() {
+                            let block = (h << 11) >> block_shift;
+                            let o = owner[block.min(owner.len() - 1)] as u32;
+                            assert_eq!(value, o + 1, "{what} counter {h}");
+                        }
+                        for (w, &value) in pv.iter().enumerate() {
+                            let block = (w << bts) >> block_shift;
+                            let o = owner[block.min(owner.len() - 1)] as u32;
+                            assert_eq!(value, o + 1, "{what} word {w}");
+                            assert_eq!(block, (((w + 1) << bts) - 1) >> block_shift, "{what}");
+                        }
+                        shapes += 1;
+                    }
+                }
+            }
+            if lut >= 11 {
+                assert!(worst <= 160 * 1024, "lut {lut}: {worst} bytes per part");
+            }
+        }
+        assert!(shapes > 1000, "{shapes}");
     }
 
     // The shadow (`LOSAT_X_PAIRPARSHADOW`) with the padded second build: equal tables pass, and a
@@ -1457,6 +1736,7 @@ mod tests {
                 next_pos: b.next_pos.clone(),
                 pv_array: b.pv_array.clone(),
                 helper_array: b.helper_array.clone(),
+                stats: b.stats,
             };
             let mut c_chain = chain;
             match which {

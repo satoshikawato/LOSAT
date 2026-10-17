@@ -1768,8 +1768,9 @@ fn build_mb_lookup(
     // thread owns whole blocks of cells); see x_mb_lookup_par.rs.
     x_clock.fill();
     let x_on_pool = x_mb_lookup_par::parts(db_word_counts.is_none() && !debug_mode);
+    let mut x_padded = false;
     if let Some(x_parts) = x_on_pool {
-        x_mb_lookup_par::fill(
+        x_padded = x_mb_lookup_par::fill(
             x_parts,
             &x_mb_lookup_par::Words {
                 queries_blastna,
@@ -1915,7 +1916,7 @@ fn build_mb_lookup(
         longest_chain = longest_chain.max(value as usize);
     }
     // No NCBI counterpart: the end of the `[TIMING] x_mb_lookup_build` interval.
-    x_clock.record(x_on_pool.is_some());
+    x_clock.record(x_on_pool.is_some(), x_padded);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1104-1106
     // ```c
     //    longest_chain = 2;

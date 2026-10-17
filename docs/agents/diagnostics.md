@@ -2044,6 +2044,31 @@ Scheduling (each value computed by one thread with the original function; order 
   s, NCBI 31.3 s); human genome x one protein 0.87 at one thread (32.3 -> 28.0 s, NCBI 44.9 s) and
   at 8 threads (5.10 -> 4.46 s); fly genome x one batch at 8 threads 0.76 (4.04 -> 3.06 s); E. coli
   MG1655 x 16 batches at 8 threads 0.95.
+- `LOSAT_X_TBXSCANBF=1` TBLASTX (speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
+  (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/run_impl.rs`) walk the subject
+  ranges as NCBI's `s_BlastAaScanSubject` (`blast_aascan.c:48-131`) does and scan each range with
+  the branch-free loop of `LOSAT_X_TBNSCANBF` (`tblastn/x_scan_bf.rs` `x_scan_one_range_bf`), passing
+  on the room the earlier ranges of the call left, so every call returns NCBI's pairs and scan range
+  (test `x_scan_subject_bf_equals_ncbi_scan_on_random_subjects` against `s_blast_aa_scan_subject`:
+  TBLASTX tables, subjects of one or many ranges, offset arrays down to the longest chain). The
+  offset arrays get three entries more while the variable is set. Only a table whose presence bits
+  are set in fewer than half of its backbone cells is scanned this way (`x_scan_bf_for`, decided once
+  per unit group and once per reference batch): the table of a translated query of more than about
+  60 kb holds every word of the 25 common letters, its bit is set at nearly every subject word, the
+  branch is predicted, and the list only adds work (0.4-0.8 % slower on those tables). Timed on the
+  workstation (perf-si-20261012 session SCANBF-1, node 1, one binary, without and with the variable
+  in turn, one output hash per case; time with / without): the first L kb of MelaMJNV against
+  PemoMJNVA at one thread 0.72-0.73 at 2 and 5 kb (presence density 0.16-0.29), 0.81 at 10 kb
+  (0.37), 0.91 at 20 kb (0.44), 0.98 at 40 kb (0.49); from 80 kb (0.51; MelaMJNV x PemoMJNVA,
+  AP027131 x AP027133) NCBI's loop runs in both and the time is the same (0.999-1.004; before the
+  density rule 1.004-1.007); 3 fruit fly transcripts (2.0 kb) against the fruit fly genome database
+  0.84 at one thread (9.74 -> 8.22 s, NCBI BLAST+ 2.17.0 `-db` 9.56 s; branch misses 531 M -> 361 M,
+  cycles 30.3 G -> 25.6 G) and 0.87 at 8 (2.29 -> 2.00 s, NCBI 2.48 s); 10 fruit fly transcripts
+  (18.8 kb) against the zebrafish cDNA database 0.85 at one thread (59.95 -> 50.81 s) and at 8
+  (7.83 -> 6.68 s, NCBI 5.88 s). With `LOSAT_X_PAIRPARGATE` these 10 transcripts run in the
+  reference frame loop, which scans each subject frame once with the batch's table: 0.99 (47.33 ->
+  46.91 s).
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject` without `-subject_loc`: each subject record's letters are
   packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
   database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of

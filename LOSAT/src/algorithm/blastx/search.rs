@@ -499,6 +499,12 @@ fn x_bx_chunk() -> Option<usize> {
     *K.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXCHUNK", 1..=usize::MAX, 64))
 }
 
+// EXPERIMENT (LOSAT_X_BXSUBJFLOW): the subject loop as a flow of tasks (a child module, so that
+// it uses compute_subject and SubjectComputation).
+#[cfg(feature = "parallel")]
+#[path = "x_subject_flow.rs"]
+pub(crate) mod x_subject_flow;
+
 pub(crate) fn search_core(
     records: &[FastaRecord],
     subjects: Subjects<'_>,
@@ -876,7 +882,44 @@ pub(crate) fn search_core(
             };
             super::x_timing::batch(XBatch::Lookup, x_t);
             let mut subject_stages = Vec::new();
-            for wave_index in 0..subjects.len().div_ceil(wave_size) {
+            // Dispatch point (LOSAT_X_BXSUBJFLOW[=k], off unless set): the subjects as a flow of
+            // tasks of k consecutive subjects, handed to the sink in subject order by this thread
+            // (x_subject_flow.rs); the waves below then have nothing left to do.
+            #[cfg(feature = "parallel")]
+            let x_flowed =
+                if let Some(x_k) = x_subject_flow::chosen(pool, diagnostics, options, subjects) {
+                    let x_t = super::x_timing::lap();
+                    let helper_tables = std::mem::take(&mut worker_diagonals)
+                        .into_iter()
+                        .take(pool.threads() - 1)
+                        .collect();
+                    call += x_subject_flow::run(
+                        x_k,
+                        subjects,
+                        batch,
+                        &params,
+                        options,
+                        &lookup,
+                        &mut diagonals,
+                        helper_tables,
+                        xdrop,
+                        db_length,
+                        x_containment,
+                        sink,
+                    )?;
+                    super::x_timing::batch(XBatch::ScanPar, x_t);
+                    true
+                } else {
+                    false
+                };
+            #[cfg(not(feature = "parallel"))]
+            let x_flowed = false;
+            let x_waves = if x_flowed {
+                0
+            } else {
+                subjects.len().div_ceil(wave_size)
+            };
+            for wave_index in 0..x_waves {
                 let wave_start = wave_index * wave_size;
                 let wave: Vec<usize> =
                     (wave_start..subjects.len().min(wave_start + wave_size)).collect();

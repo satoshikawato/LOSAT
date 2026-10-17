@@ -37,6 +37,11 @@
 //!   wave's latest task end, both after the wave began; `idle = wall x threads - busy`. A wave
 //!   ends with its last task: `longest` near `wall` with `busy` well below `wall x threads` is
 //!   uneven work, `latest_start` the time workers take to begin, `wall - last_end` the join.
+//! - `[TIMING] blastx_subject_flow: loops=N tasks=N ahead=N taken=N wall ..s`: with
+//!   `LOSAT_X_BXSUBJFLOW` (instead of the waves), the subject loops run as a flow, their tasks,
+//!   the tasks the helpers searched ahead and those of them the loop took (the loop searched the
+//!   others itself), and the loops' wall time, the hand-over to the sink included (it is also the
+//!   `scan_par` of the batch line, whose `replay` is then 0).
 //! - `[TIMING] blastx_batch_<mode>: batches=N query_setup .. setup .. chunks_par .. lookup ..
 //!   scan_par .. scan_inline .. replay .. chunk_end .. batch_end .. sum ..`: the stages of
 //!   `search::search_core`, per query batch, in the order they run. Mode `side` is a batch
@@ -122,8 +127,13 @@ pub(crate) enum Run {
     SubjectLongest,
     SubjectLatestStart,
     SubjectLastEnd,
+    FlowLoops,
+    FlowTasks,
+    FlowAhead,
+    FlowTaken,
+    FlowWall,
 }
-const RUN_LEN: usize = Run::SubjectLastEnd as usize + 1;
+const RUN_LEN: usize = Run::FlowWall as usize + 1;
 
 // No NCBI counterpart: names of the stages of `search_core`.
 /// The stages of one query batch in `search::search_core`, in the order they run.
@@ -255,6 +265,22 @@ impl SubjectWave {
     }
 }
 
+// No NCBI counterpart: adds one subject flow (`x_subject_flow::run`) to the run's counters.
+pub(crate) fn subject_flow(start: Option<Instant>, tasks: u64, (ahead, taken): (u64, u64)) {
+    if start.is_none() {
+        return;
+    }
+    for (stage, value) in [
+        (Run::FlowLoops, 1),
+        (Run::FlowTasks, tasks),
+        (Run::FlowAhead, ahead),
+        (Run::FlowTaken, taken),
+        (Run::FlowWall, since(start)),
+    ] {
+        RUN[stage as usize].fetch_add(value, Ordering::Relaxed);
+    }
+}
+
 // No NCBI counterpart: adds the time since `start` to a stage of this thread's batch mode.
 #[inline]
 pub(crate) fn batch(stage: Batch, start: Option<Instant>) {
@@ -355,6 +381,15 @@ pub(crate) fn write(out: &mut dyn Write, threads: usize) -> io::Result<()> {
         s(r(Run::SubjectLastEnd)),
         threads,
         (wall * threads as f64 - busy).max(0.0),
+    )?;
+    writeln!(
+        out,
+        "[TIMING] blastx_subject_flow: loops={} tasks={} ahead={} taken={} wall {:.3}s",
+        n(r(Run::FlowLoops)),
+        n(r(Run::FlowTasks)),
+        n(r(Run::FlowAhead)),
+        n(r(Run::FlowTaken)),
+        s(r(Run::FlowWall)),
     )?;
     for (m, name) in [(0, "side"), (1, "alone")] {
         let b = |stage: Batch| &BATCH[m][stage as usize];

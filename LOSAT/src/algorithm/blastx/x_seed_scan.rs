@@ -89,6 +89,7 @@ pub(crate) static X_SHADOW_SUBJECTS: std::sync::atomic::AtomicU64 =
 pub fn print_shadow_stats() {
     use std::sync::atomic::Ordering;
     super::x_seed_diag::x_print_shadow_summary();
+    super::super::search::x_subject_flow::x_print_shadow_summary();
     if let Some(tables) = crate::algorithm::tblastx::lookup::x_bxlut_shadow_tables() {
         eprintln!("[X_SHADOW] BXLUT tables_compared={tables} (lookup tables identical)");
     }

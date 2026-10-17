@@ -118,6 +118,34 @@ fn one_report(args: &[&str], base: &[(&str, &str)], switches: &[&'static str]) -
     report
 }
 
+/// The numbers of the first line of `stderr` that starts with `prefix` (`name=value` fields whose
+/// value is a whole number).
+fn counts(stderr: &str, prefix: &str) -> std::collections::HashMap<String, u64> {
+    let line = stderr
+        .lines()
+        .find(|line| line.starts_with(prefix))
+        .unwrap_or_else(|| panic!("no {prefix} line: {stderr}"));
+    line.split_whitespace()
+        .filter_map(|word| word.split_once('='))
+        .filter_map(|(name, value)| Some((name.to_string(), value.parse().ok()?)))
+        .collect()
+}
+
+/// The search `args` (with `base`) runs each shadow of `shadows` with a nonzero count `field`
+/// on its line `prefix`: the switch's path acts on this input, so the equalities above compare
+/// it (a later change of scope or input would otherwise make them vacuous).
+fn acts(args: &[&str], base: &[(&str, &str)], shadows: &[(&str, &str, &str)]) {
+    for &(shadow, prefix, field) in shadows {
+        let vars: Vec<(&str, &str)> = base.iter().copied().chain([(shadow, "1")]).collect();
+        let (_, stderr) = losat(args, &vars);
+        let value = counts(&stderr, prefix).get(field).copied();
+        assert!(
+            value.is_some_and(|value| value > 0),
+            "{args:?} {shadow}: {field} = {value:?}: {stderr}"
+        );
+    }
+}
+
 /// A protein database of the subject proteome, made with `LOSAT makedb`; returns its name.
 fn protein_database(label: &str) -> PathBuf {
     let name = work_dir(label).join("MejoMJNV");
@@ -194,6 +222,25 @@ fn blastp_gives_one_report_with_the_switches_on_and_off() {
         "4",
     ];
     one_report(&exact, &[], BLASTP);
+    acts(
+        &fast,
+        &[],
+        &[
+            (
+                "LOSAT_X_BPLKPAHEADSHADOW",
+                "[X_SHADOW] BPLKPAHEAD",
+                "prebuilt",
+            ),
+            (
+                "LOSAT_X_BPSUBJMETASHADOW",
+                "[X_SHADOW] BPSUBJMETA",
+                "subjects_compared",
+            ),
+        ],
+    );
+    let (_, stderr) = losat(&exact, &[("LOSAT_X_BPDBCUTSHADOW", "1")]);
+    let cut = counts(&stderr, "[X_SHADOW] BPDBCUT");
+    assert!(cut["blocks"] > cut["blocks_ref"], "{stderr}");
     // The default runs BPREDOPAR's path (and BPREDOLPT's windows); its switch at 0 does not.
     let timing = [("LOSAT_TIMING", "1")];
     let (_, stderr) = losat(&fast, &timing);
@@ -236,6 +283,55 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
             "4",
         ];
         one_report(&args, &batches, BLASTN);
+        // The default runs the strips stages: PAIRPARDISC's for dc-megablast, PAIRPAR's
+        // (megablast, blastn) otherwise, each fold split by PAIRPARFOLD (partitions), and
+        // RPTSTREAM writes batch by batch; their switches at 0 do not.
+        let stage = if task == "dc-megablast" {
+            "[TIMING] x_pairpardisc_seed:"
+        } else {
+            "[TIMING] x_pairpar_seed:"
+        };
+        let observed = [
+            ("BATCH_SIZE", "4000"),
+            ("LOSAT_TIMING", "1"),
+            ("LOSAT_X_STATS", "1"),
+        ];
+        let (_, stderr) = losat(&args, &observed);
+        let seeds = counts(&stderr, stage);
+        assert!(
+            seeds["chunks"] > 0 && seeds["partitions"] > 0,
+            "{task}: {stderr}"
+        );
+        let streamed = counts(&stderr, "[X_STATS] RPTSTREAM");
+        assert!(streamed["batches"] > 1, "{task}: {stderr}");
+        assert!(
+            stderr
+                .lines()
+                .any(|line| line.starts_with("[X_STATS] RPTSTREAM ") && line.contains(" off=none")),
+            "{task}: {stderr}"
+        );
+        let folded_off = [
+            ("BATCH_SIZE", "4000"),
+            ("LOSAT_TIMING", "1"),
+            ("LOSAT_X_PAIRPARFOLD", "0"),
+        ];
+        let (_, stderr) = losat(&args, &folded_off);
+        let unfolded = counts(&stderr, stage);
+        assert_eq!(
+            unfolded.get("partitions").copied().unwrap_or(0),
+            0,
+            "{task}: {stderr}"
+        );
+        // DIAGLV, QDUSTPAR and QPREPPAR act on this input (their shadows compare something).
+        acts(
+            &args,
+            &batches,
+            &[
+                ("LOSAT_X_DIAGLVSHADOW", "[X_SHADOW] DIAGLV", "skipped"),
+                ("LOSAT_X_QDUSTPARSHADOW", "[X_SHADOW] QDUSTPAR", "batches"),
+                ("LOSAT_X_QPREPPARSHADOW", "[X_SHADOW] QPREPPAR", "batches"),
+            ],
+        );
     }
     // QBATCHPAR runs by default; these query files get no default budget, and the variable
     // still sets one.
@@ -280,4 +376,21 @@ fn blastn_gives_one_report_with_the_switches_on_and_off() {
         ],
     );
     assert!(!stderr.contains("[X_STATS] QBATCHPAR "), "{stderr}");
+    // With a budget and two slots forced, the slots search batches ahead of the loop, and the
+    // report is that of the default before (every switch of the bundle at 0).
+    let slots = [
+        ("BATCH_SIZE", "4000"),
+        ("LOSAT_X_STATS", "1"),
+        ("LOSAT_X_QBATCHPARMEM", "4096"),
+        ("LOSAT_X_QBATCHPARSLOTS", "2"),
+    ];
+    let (report, stderr) = losat(&args, &slots);
+    let speculated = counts(&stderr, "[X_STATS] QBATCHPAR ");
+    assert_eq!((speculated["k"], speculated["m"]), (2, 2), "{stderr}");
+    let before: Vec<(&str, &str)> = [("BATCH_SIZE", "4000")]
+        .into_iter()
+        .chain(BLASTP.iter().chain(BLASTN).map(|&name| (name, "0")))
+        .collect();
+    let (expected, _) = losat(&args, &before);
+    assert!(report == expected, "the report differs with two slots");
 }

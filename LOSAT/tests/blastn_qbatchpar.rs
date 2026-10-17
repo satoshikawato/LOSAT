@@ -1156,6 +1156,23 @@ fn the_loop_keeps_the_batches_where_the_path_is_off() {
     ];
     let run = same_as_without(&args, &[("BATCH_SIZE", "1")], &[SWITCH]);
     assert_eq!(run.summary("[X_STATS] QBATCHPAR")["off"], "subjects");
+    // With LOSAT_X_BNSTORE the records keep no letters (the packed subjects hold them): the work
+    // units are counted from the stored letters, so the subjects still keep the loop (before
+    // 2026-10-17 the records' empty letters counted 0 units here).
+    let stored = [("BATCH_SIZE", "1"), ("LOSAT_X_BNSTORE", "1")];
+    let run = same_as_without(&args, &stored, &[SWITCH]);
+    assert_eq!(
+        run.summary("[X_STATS] QBATCHPAR")["off"],
+        "subjects",
+        "{}",
+        run.stderr
+    );
+    assert_eq!(
+        run.summary("[X_STATS] BNSTORE")["subjects"],
+        "4",
+        "{}",
+        run.stderr
+    );
 }
 
 // Debug output (written while a batch is searched) and a BLAST database (`-db`, made here by

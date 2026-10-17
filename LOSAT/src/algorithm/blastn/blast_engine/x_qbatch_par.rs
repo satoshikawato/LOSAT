@@ -2699,6 +2699,12 @@ mod tests {
             stale: Stale,
             /// The loop waits this long after each batch it takes, so the slots run ahead.
             loop_delay: Option<Duration>,
+            /// After the first batch is committed (the slots start then), the loop waits until a
+            /// slot has started a batch of another size (a corrupted prediction; at most 10 s, then
+            /// it panics), so that the next take finds that batch running and cancels it. Without
+            /// the wait a slow machine could start no such batch before the next take drops it
+            /// from the queue, and nothing would be cancelled.
+            loop_waits_for_stale: bool,
             /// The lookup width the estimates assume (8 if 0).
             lut: usize,
             /// The task profile (blastn's with a budget of 1 GiB per thread if `None`).
@@ -2751,10 +2757,14 @@ mod tests {
             let active = AtomicUsize::new(0);
             let started = Mutex::new(Vec::new());
             let panic_started = AtomicBool::new(false);
+            let stale_started = AtomicBool::new(false);
             let search = |job: &Job, pool: &SearchPool<'_>| -> Fake {
                 started.lock().unwrap().push(job.key);
                 active.fetch_add(pool.threads(), Ordering::SeqCst);
                 let stale = batch_size.is_some_and(|size| job.key.batch_size != size);
+                if stale {
+                    stale_started.store(true, Ordering::SeqCst);
+                }
                 match fakes.stale {
                     Stale::WaitsForCancel | Stale::PartialOnCancel if stale => {
                         let since = Instant::now();
@@ -2815,6 +2825,16 @@ mod tests {
                 let mut start = 0;
                 let mut results = Vec::new();
                 while start < lengths.len() {
+                    if fakes.loop_waits_for_stale && start > 0 && results.len() == 1 {
+                        let since = Instant::now();
+                        while !stale_started.load(Ordering::SeqCst) {
+                            assert!(
+                                since.elapsed() < Duration::from_secs(10),
+                                "no slot started a batch of another size within 10 s"
+                            );
+                            std::thread::yield_now();
+                        }
+                    }
                     let (end, _) = next_ranged_batch(lengths, &query_input.skipped, start, size);
                     let key = BatchKey {
                         input_start: start,
@@ -2998,6 +3018,7 @@ mod tests {
             };
             let fakes = Fakes {
                 stale: Stale::WaitsForCancel,
+                loop_waits_for_stale: true,
                 ..Fakes::default()
             };
             let cancelled_run = run(&lengths, Some(200), 4, switches, fakes);
@@ -3138,6 +3159,7 @@ mod tests {
             };
             let fakes = Fakes {
                 stale: Stale::PartialOnCancel,
+                loop_waits_for_stale: true,
                 ..Fakes::default()
             };
             let partial = run(&lengths, Some(200), 4, switches, fakes);

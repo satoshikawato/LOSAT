@@ -86,7 +86,9 @@
 //! of the four arrays, and `longest_chain`, is the loop's; the switch changes the running time
 //! only. Memory: two private copies per worker, `ceil(hashsize / 2048 / 16)` and
 //! `ceil(pv_size / 16)` lines of 64 bytes (at most 32 KiB + 128 KiB per worker for a
-//! `lut_word_length` 12 table, 8 KiB + 128 KiB at 11), freed when the worker's part ends.
+//! `lut_word_length` 12 table, 8 KiB + 128 KiB at 11), in one zeroed allocation that the calling
+//! thread makes before the fill and frees after it (`Copies`; with each worker allocating its own
+//! copies, glibc's per-thread arenas kept 8-19 MiB more at the end of a search).
 
 use super::{build_unmasked_ranges, MaskedInterval, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -348,22 +350,76 @@ struct Line([u32; 16]);
 const _: () = assert!(std::mem::size_of::<Line>() == 64 && std::mem::align_of::<Line>() == 64);
 const _: () = assert!(std::mem::size_of::<PvArrayType>() == std::mem::size_of::<u32>());
 
-/// No NCBI counterpart (LOSAT_X_MBLUTPAD): a worker's private copy of `helper_array` or
-/// `pv_array`, zeroed, a whole number of lines starting on a line boundary, so no two workers'
-/// copies share a line.
-struct Lines {
-    lines: Vec<Line>,
-    len: usize,
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): `n` zeroed lines in one allocation (all-zero bytes are
+/// a valid `Line`); a fresh allocation of this size comes from zero pages, so a line's page is
+/// first touched by the worker that writes it.
+fn zeroed_lines(n: usize) -> Vec<Line> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let layout = std::alloc::Layout::array::<Line>(n).expect("private copies fit in memory");
+    // SAFETY: the layout has a non-zero size; zeroed memory is a valid `[Line]`; the vector owns
+    // the allocation with this layout (`Layout::array::<Line>(n)`, as `Vec<Line>` frees it).
+    unsafe {
+        let ptr = std::alloc::alloc_zeroed(layout) as *mut Line;
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        Vec::from_raw_parts(ptr, n, n)
+    }
 }
 
-impl Lines {
-    fn zeroed(len: usize) -> Self {
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): the private copies of all workers in one zeroed
+/// allocation made by the calling thread (one allocation per fill, so the workers' own malloc
+/// arenas take nothing), `stride` lines per worker: first the copy of `helper_array`
+/// (`counter_lines`), then that of `pv_array`. Each worker's lines start on a line boundary and
+/// are a whole number of lines, so no two workers' copies share a line. Empty when the switch is
+/// off.
+struct Copies {
+    lines: Vec<Line>,
+    counter_lines: usize,
+    stride: usize,
+}
+
+impl Copies {
+    fn new(pad: bool, parts: usize, helper_len: usize, pv_len: usize) -> Self {
+        let (counter_lines, pv_lines) = if pad {
+            (helper_len.div_ceil(16), pv_len.div_ceil(16))
+        } else {
+            (0, 0)
+        };
+        let stride = counter_lines + pv_lines;
         Self {
-            lines: vec![Line([0; 16]); len.div_ceil(16)],
-            len,
+            lines: zeroed_lines(stride * parts),
+            counter_lines,
+            stride,
         }
     }
 
+    /// The workers' copies, in part order (each `stride` lines; empty slices when the switch is
+    /// off).
+    fn parts(&mut self, parts: usize) -> impl Iterator<Item = Private<'_>> {
+        let (stride, counter_lines) = (self.stride, self.counter_lines);
+        let mut rest: &mut [Line] = &mut self.lines;
+        (0..parts).map(move |_| {
+            let (mine, tail) = std::mem::take(&mut rest).split_at_mut(stride);
+            rest = tail;
+            let (counters, pv) = mine.split_at_mut(counter_lines);
+            Private {
+                counters: Lines { lines: counters },
+                pv: Lines { lines: pv },
+            }
+        })
+    }
+}
+
+/// No NCBI counterpart (LOSAT_X_MBLUTPAD): a worker's private copy of `helper_array` or
+/// `pv_array` (element `i` in line `i / 16`).
+struct Lines<'a> {
+    lines: &'a mut [Line],
+}
+
+impl Lines<'_> {
     #[inline(always)]
     fn get(&self, i: usize) -> u32 {
         self.lines[i >> 4].0[i & 15]
@@ -377,9 +433,9 @@ impl Lines {
 
 /// No NCBI counterpart (LOSAT_X_MBLUTPAD): the private copies of one worker (empty when the
 /// switch is off).
-struct Private {
-    counters: Lines,
-    pv: Lines,
+struct Private<'a> {
+    counters: Lines<'a>,
+    pv: Lines<'a>,
 }
 
 #[derive(Clone, Copy)]
@@ -409,7 +465,7 @@ impl SharedTables {
     // (module documentation); without it this is the original update.
     /// SAFETY: the worker owns the block of `bucket` and the word at `q_off_1`.
     #[inline(always)]
-    unsafe fn apply<const PAD: bool>(self, bucket: usize, q_off_1: u32, x: &mut Private) {
+    unsafe fn apply<const PAD: bool>(self, bucket: usize, q_off_1: u32, x: &mut Private<'_>) {
         unsafe {
             let head = self.hashtable.get(bucket);
             if head == 0 {
@@ -472,13 +528,10 @@ fn fill_part<const PAD: bool>(
     block_shift: usize,
     words: &Words<'_>,
     t: SharedTables,
+    mut x: Private<'_>,
 ) {
     let lut_word_length = words.lut_word_length;
     let mut own_words: Vec<(u32, u32)> = Vec::new();
-    let mut x = Private {
-        counters: Lines::zeroed(if PAD { t.helper_array.len } else { 0 }),
-        pv: Lines::zeroed(if PAD { t.pv_array.len } else { 0 }),
-    };
     #[cfg(target_arch = "x86_64")]
     const X_DELAY: usize = 16;
     #[cfg(target_arch = "x86_64")]
@@ -596,7 +649,7 @@ fn fill_part<const PAD: bool>(
 /// of `part`'s own blocks from its private copies into `helper_array` and `pv_array` (module
 /// documentation: these elements are written by no other worker, and their copies hold exactly
 /// the loop's increments and bits).
-fn flush_private(part: u8, owner: &[u8], block_shift: usize, t: SharedTables, x: &Private) {
+fn flush_private(part: u8, owner: &[u8], block_shift: usize, t: SharedTables, x: &Private<'_>) {
     for (block, &o) in owner.iter().enumerate() {
         if o != part {
             continue;
@@ -674,24 +727,27 @@ fn fill_with<const PAD: bool>(parts: usize, words: &Words<'_>, tables: Tables<'_
         helper_array: Shared::new(tables.helper_array),
     };
     let owner = owner.as_slice();
+    let mut copies = Copies::new(PAD, parts, shared.helper_array.len, shared.pv_array.len);
+    let mut copies = copies.parts(parts);
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     if in_pool {
+        let first = copies.next().expect("one part at least");
         rayon::scope(|scope| {
-            for part in 1..parts {
+            for (part, x) in (1..parts).zip(copies) {
                 scope.spawn(move |_| {
-                    fill_part::<PAD>(part as u8, owner, block_shift, words, shared)
+                    fill_part::<PAD>(part as u8, owner, block_shift, words, shared, x)
                 });
             }
-            fill_part::<PAD>(0, owner, block_shift, words, shared);
+            fill_part::<PAD>(0, owner, block_shift, words, shared, first);
         });
         return;
     }
     let _ = in_pool;
-    for part in 0..parts {
-        fill_part::<PAD>(part as u8, owner, block_shift, words, shared);
+    for (part, x) in (0..parts).zip(copies) {
+        fill_part::<PAD>(part as u8, owner, block_shift, words, shared, x);
     }
 }
 
@@ -1266,27 +1322,63 @@ mod tests {
         }
     }
 
-    // LOSAT_X_MBLUTPAD: a private copy is a whole number of 64-byte lines starting on a line
-    // boundary, so two workers' copies never share a line.
+    // LOSAT_X_MBLUTPAD: each worker's copies are a whole number of 64-byte lines starting on a line
+    // boundary, the workers' copies are disjoint and in part order, zeroed, and the switch off
+    // allocates nothing.
     #[test]
     fn private_copies_have_lines_of_their_own() {
         assert_eq!(std::mem::size_of::<Line>(), 64);
         assert_eq!(std::mem::align_of::<Line>(), 64);
-        for len in [1usize, 15, 16, 17, 2048, 8192, 16384, 32768] {
-            let a = Lines::zeroed(len);
-            let b = Lines::zeroed(len);
-            for c in [&a, &b] {
-                assert_eq!(c.lines.as_ptr() as usize % 64, 0, "len {len}");
-                assert_eq!(c.lines.len(), len.div_ceil(16), "len {len}");
-                assert!((0..len).all(|i| c.get(i) == 0));
+        for (parts, helper_len, pv_len) in [
+            (1usize, 1usize, 1usize),
+            (2, 2048, 16384),
+            (3, 8192, 32768),
+            (5, 15, 17),
+            (16, 2048, 32768),
+            (16, 8192, 16384),
+        ] {
+            let mut copies = Copies::new(true, parts, helper_len, pv_len);
+            assert_eq!(copies.lines.as_ptr() as usize % 64, 0);
+            let stride = helper_len.div_ceil(16) + pv_len.div_ceil(16);
+            let base = copies.lines.as_ptr() as usize;
+            let mut seen = 0;
+            for (p, mut x) in copies.parts(parts).enumerate() {
+                let c0 = x.counters.lines.as_ptr() as usize;
+                let v0 = x.pv.lines.as_ptr() as usize;
+                assert_eq!(c0, base + p * stride * 64, "parts {parts} part {p}");
+                assert_eq!(
+                    v0,
+                    c0 + helper_len.div_ceil(16) * 64,
+                    "parts {parts} part {p}"
+                );
+                assert_eq!(x.counters.lines.len(), helper_len.div_ceil(16));
+                assert_eq!(x.pv.lines.len(), pv_len.div_ceil(16));
+                assert!((0..helper_len).all(|i| x.counters.get(i) == 0));
+                assert!((0..pv_len).all(|i| x.pv.get(i) == 0));
+                *x.counters.slot(helper_len - 1) = 1;
+                *x.pv.slot(pv_len - 1) = 1;
+                seen += 1;
             }
-            let (pa, pb) = (a.lines.as_ptr() as usize, b.lines.as_ptr() as usize);
-            let bytes = a.lines.len() * 64;
-            assert!(
-                pa + bytes <= pb || pb + bytes <= pa,
-                "len {len}: copies overlap a line"
+            assert_eq!(seen, parts);
+            assert_eq!(copies.lines.len(), stride * parts);
+            assert_eq!(
+                copies
+                    .lines
+                    .iter()
+                    .map(|l| l.0.iter().sum::<u32>())
+                    .sum::<u32>(),
+                2 * parts as u32,
+                "each part wrote its own two elements"
             );
         }
+        let mut off = Copies::new(false, 16, 8192, 32768);
+        assert_eq!(off.lines.capacity(), 0);
+        assert_eq!(
+            off.parts(16)
+                .filter(|x| x.counters.lines.is_empty() && x.pv.lines.is_empty())
+                .count(),
+            16
+        );
     }
 
     // The shadow (`LOSAT_X_PAIRPARSHADOW`) with the padded second build: equal tables pass, and a

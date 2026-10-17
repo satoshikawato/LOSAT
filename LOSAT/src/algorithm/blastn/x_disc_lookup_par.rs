@@ -82,9 +82,9 @@
 //!   the loop's. It appends `(index, ecode1)` to bucket `(a, owner of ecode1's block)` and
 //!   `(index, ecode2)` to the second template's bucket `(a, owner of ecode2's block)`, in reading
 //!   order.
-//! - P (prefault, see "The prefault round" below; only while a page of the cells or of the
-//!   presence vector is not touched yet): the jobs write 0 to one element of each page of those
-//!   arrays that B of this chunk writes and no job has touched yet.
+//! - P (prefault, see "The prefault round" below; in the first chunk only, when it is large
+//!   enough): the jobs write 0 to one element of each page of the cells and of the presence
+//!   vector that B of the first chunk writes.
 //! - B (update): owner `o` takes the buckets `(0, o)`, `(1, o)`, ..., `(P-1, o)`: every word of the
 //!   chunk whose cell lies in its blocks, in reading order (the spans follow each other). For each
 //!   it makes the loop's update of the cell (the presence bit when the cell is empty, else the
@@ -166,27 +166,32 @@
 //! P x 8 KiB at word size 11 and P x 32 KiB at word size 12 (128 KiB and 512 KiB at P = 16; at
 //! most 255 x 32 KiB = 8 MiB), freed at the end of the fill.
 //!
-//! The prefault round (phase P, scheduling only). Between phases A and B of a chunk a fourth set
-//! of P jobs writes 0 to one element of each page of `hashtable`, `hashtable2` and `pv_array`
-//! that phase B of the chunk writes and that was not touched before (`Fill::prefault`, which
-//! gives the argument): each page has one toucher, the owner of the block of its middle element
-//! (`page_touchers`), which touches it once a reader has marked it in phase A (while an array has
-//! a page not touched, the readers mark the page of every word's cell and presence-vector word,
-//! in bits of their own per array). Each write stores 0 over the 0 the element was allocated
-//! with, and only on a page the fill writes anyway, so the tables and the pages the fill maps
-//! (its max RSS) are what they are without it. On the cDNA inputs measured every page was touched
-//! in a table's first chunk, after which the round and the marks stop; a page that no word reaches
-//! (on a table's first or last page few cells may lie) keeps them going in later chunks, which
-//! stays exact and costs the readers a mark per word. Why: phase B reads a cell before writing it,
-//! so on a page the process has not touched yet the kernel first maps its shared zero page and
-//! then, at the write, a page of the process's own (two faults, and a copy-on-write that flushes
-//! the page from the TLBs of the other CPUs of the search); written first, the page takes one
-//! fault and no flush (on the workstation, 1,775 cDNAs at 16 threads: 118,000 TLB shootdowns
-//! received by the search's CPUs without the round, 900 with it). `next_pos` is written without
-//! a read and is not touched (touching it cost more than it saved). Memory: the readers' marks
-//! take, per reader, one bit per page of the cells of each template and of the presence vector,
-//! on whole cache lines (576 bytes per template at word size 11, 2,112 at 12; 9 KiB and 33 KiB at
-//! P = 16), and the touchers' lists 4 bytes per page; freed at the end of the fill.
+//! The prefault round (phase P, scheduling only). Between phases A and B of the first chunk, when
+//! that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per page of the cells, a fourth
+//! set of P jobs writes 0 to one element of each page that phase B of that chunk writes, in the
+//! whole 2 MiB regions of `hashtable` and `hashtable2` that it writes in full (`Fill::prefault`,
+//! which gives the argument; `select_pages`; the presence vector, at most 128 KiB, holds no whole
+//! region): each page has one toucher, the owner of the block of its middle element
+//! (`page_touchers`); the readers mark in phase A the page of every word's cell and
+//! presence-vector word, in bits of their own per array. The round runs once, before the first
+//! phase B, so each write stores 0 over the 0 the element was allocated with; the later chunks
+//! run without marks or round. At 4 KiB pages it touches only pages the fill writes; with
+//! transparent huge pages (`enabled=always`) a first write can map a whole 2 MiB page where the
+//! loop's first read maps the huge zero page, so the round touches only whole 2 MiB regions of
+//! the array that the first chunk writes in full (`select_pages`, `PREFAULT_RULE`): a huge page
+//! it maps holds only pages the fill writes anyway. Why: phase B reads a
+//! cell before writing it, so on a page the process has not touched yet the kernel first maps its
+//! shared zero page and then, at the write, a page of the process's own (two faults, and a
+//! copy-on-write that flushes the page from the TLBs of the other CPUs of the search); written
+//! first, the page takes one fault and no flush (on the workstation, Linux, 1,775 cDNAs at 16
+//! threads: 108,000 TLB shootdowns received by the search's CPUs without the round, 100 with the
+//! round of 1a05a8a2, which touched every marked page; the timing evidence is Linux only, the
+//! saving rests on Linux's zero page and copy-on-write).
+//! `next_pos` is written without a read and is not touched (touching it cost more than it saved).
+//! Memory: the readers' marks take, per reader, one bit per page of the cells of each template and
+//! of the presence vector, on whole cache lines (576 bytes per template at word size 11, 2,112 at
+//! 12; 9 KiB and 33 KiB at P = 16), and the touchers' lists 4 bytes per page; freed at the end of
+//! the fill.
 //!
 //! The pool. The switch acts only where a LOSAT search pool of two threads or more is current
 //! (`x_mb_lookup_par::pool_threads`: the calling thread is a rayon worker, and its pool has two
@@ -244,6 +249,8 @@ use super::{
     DiscWords, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK,
 };
 use crate::algorithm::blastn::disc_lookup::compute_discontiguous_index;
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -720,7 +727,8 @@ impl SharedBuckets {
 
 /// No NCBI counterpart (scheduling only): the page size the prefault round assumes, 4 KiB (the
 /// smallest page of the targets; where pages are larger, some get more than one touch, which writes
-/// the same 0).
+/// the same 0). The argument that the round maps no page the fill does not write holds at this
+/// granularity; for 2 MiB transparent huge pages see `Fill::prefault` and the size rule.
 const PAGE_BYTES: usize = 4096;
 
 /// log2 of the 4-byte elements of a page (every array the round touches holds 4-byte elements).
@@ -744,7 +752,7 @@ fn pages_of(offset: usize, len: usize) -> usize {
     }
 }
 
-/// The arrays whose pages the prefault round touches (`FaultJob::untouched`, `Faults::marks`, and
+/// The arrays whose pages the prefault round touches (`FaultJob::pages`, `Faults::marks`, and
 /// the tests' log of touches): `HASHTABLE` + template and `PV_ARRAY`.
 const HASHTABLE: usize = 0;
 const PV_ARRAY: usize = 2;
@@ -813,6 +821,16 @@ impl SharedBits {
         unsafe { *self.ptr.add(r * self.stride + (page >> 6)) |= 1u64 << (page & 63) };
     }
 
+    /// Reader `r`'s bits of pages `64 * w .. 64 * w + 64`.
+    ///
+    /// SAFETY: no job writes the bits; `w < stride`.
+    #[inline(always)]
+    unsafe fn word(self, r: usize, w: usize) -> u64 {
+        debug_assert!(w < self.stride);
+        // SAFETY: as above.
+        unsafe { *self.ptr.add(r * self.stride + w) }
+    }
+
     /// Whether reader `r`'s bit of page `page` is set.
     ///
     /// SAFETY: no job writes the bits (the prefault round); `page < 64 * stride`.
@@ -842,13 +860,13 @@ type TouchLog = Vec<Touch>;
 type TouchLog = ();
 
 /// No NCBI counterpart (scheduling only): what toucher `j` of a fill keeps for the prefault round,
-/// on lines of its own (it writes them in the round; the calling thread reads them between
-/// phases): its pages of `hashtable`, `hashtable2` and `pv_array` (`page_touchers`) that are not
-/// touched yet (`untouched`), and the number of zeros it wrote.
+/// on lines of its own (it writes them in the round; the calling thread reads them after it): its
+/// pages of `hashtable`, `hashtable2` and `pv_array` (`page_touchers`) and the number of zeros it
+/// wrote.
 #[repr(C, align(64))]
 #[derive(Default)]
 struct FaultJob {
-    untouched: [Vec<u32>; 3],
+    pages: [Vec<u32>; 3],
     touches: usize,
     log: TouchLog,
 }
@@ -879,12 +897,15 @@ impl SharedJobs {
 
 /// No NCBI counterpart (scheduling only): the prefault's state of one fill: the page offsets
 /// (`page_offset`) and lengths of `hashtable`, `hashtable2` (empty for one template) and
-/// `pv_array`, the readers' marks of their pages (`PageBits`), and the jobs' `FaultJob`s.
+/// `pv_array`, the readers' marks of their pages (`PageBits`), the pages chosen to be touched
+/// (`select_pages`), and the jobs' `FaultJob`s.
 #[derive(Clone, Copy)]
 struct Faults {
     offsets: [usize; 3],
     lens: [usize; 3],
     marks: [SharedBits; 3],
+    /// The pages to touch (one row each; `select_pages`), read only in the round.
+    touch: [SharedBits; 3],
     jobs: SharedJobs,
 }
 
@@ -900,7 +921,7 @@ fn middle(offset: usize, len: usize, page: usize) -> usize {
 /// No NCBI counterpart (scheduling only): gives each page of `hashtable`, `hashtable2` and
 /// `pv_array` (`Faults::offsets`, `lens`) one toucher, the owner of the block (`plan`) that holds
 /// its middle element (for `pv_array`, the block of the cells of that presence-vector word), in
-/// that job's `FaultJob::untouched`, in rising order.
+/// that job's `FaultJob::pages`, in rising order.
 fn page_touchers(
     jobs: &mut [FaultJob],
     owner: &[u8],
@@ -917,8 +938,10 @@ fn page_touchers(
         };
         for page in 0..pages_of(offsets[array], lens[array]) {
             let m = middle(offsets[array], lens[array], page);
-            let j = owner[(m >> shift).min(owner.len() - 1)] as usize;
-            jobs[j].untouched[array].push(page as u32);
+            // `m < len`, and the blocks cover the table (`len >> shift <= owner.len()`).
+            debug_assert!((m >> shift) < owner.len());
+            let j = owner[m >> shift] as usize;
+            jobs[j].pages[array].push(page as u32);
         }
     }
 }
@@ -1009,6 +1032,9 @@ struct Fill<'a, 'w> {
     counters: [SharedCounters; 2],
     /// The prefault round's state (`Fill::prefault`).
     faults: Faults,
+    /// Tests only: how many reader jobs ran `read::<false>` (without the marking code).
+    #[cfg(test)]
+    unmarked_reads: AtomicUsize,
 }
 
 impl Fill<'_, '_> {
@@ -1046,9 +1072,10 @@ impl Fill<'_, '_> {
     /// array `k` with `mark[k]` (`HASHTABLE` + template, `PV_ARRAY`), it also marks in its own bits
     /// (`Faults::marks`) the page of each word's cell and of the cell's presence-vector word (one
     /// that the update writes: `array_idx < pv_array.len()`), after clearing them. `MARK` is
-    /// whether any `mark[k]` is set: the chunks without marks (after a table's first chunk, as a
-    /// rule) run a copy of the loop without the marking code (on the workstation the loop with the
-    /// tests in it but no marks to make took 7-11 % longer in phase A).
+    /// whether any `mark[k]` is set: the chunks without marks (every chunk but the first, and the
+    /// first too when the round does not run) run a copy of the loop without the marking code (on
+    /// the workstation the loop with the tests in it but no marks to make took 7-11 % longer in
+    /// phase A).
     ///
     /// SAFETY: no other job of the phase uses the buckets `(a, *)` or reader `a`'s marks.
     unsafe fn read<const MARK: bool>(&self, a: usize, s0: usize, s1: usize, mark: [bool; 3]) {
@@ -1066,6 +1093,10 @@ impl Fill<'_, '_> {
         }
         let faults = self.faults;
         debug_assert_eq!(MARK, mark.contains(&true));
+        #[cfg(test)]
+        if !MARK {
+            self.unmarked_reads.fetch_add(1, Ordering::Relaxed);
+        }
         for (k, &on) in mark.iter().enumerate() {
             if MARK && on {
                 // SAFETY: reader `a`'s marks are this job's.
@@ -1157,42 +1188,51 @@ impl Fill<'_, '_> {
     //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
     //          mb_lt->hashtable[ecode1] = index;
     // ```
-    /// Phase P (the prefault round, between A and B), toucher `j`: writes 0 to one element of each
-    /// page of `hashtable`, `hashtable2` or `pv_array` that phase B of this chunk writes and that
-    /// is not touched yet (of this job's share), so that phase B finds the pages mapped. It
-    /// changes no value, so phase B, and the tables, are what they are without it (no NCBI
-    /// counterpart; scheduling only).
+    /// Phase P (the prefault round, between phases A and B of the first chunk only, and only when
+    /// that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per page of the cells,
+    /// `fill_with`), toucher `j`: writes 0 to one element of each page chosen by `select_pages`
+    /// (pages of `hashtable` or `hashtable2` that phase B of the first chunk writes, in whole
+    /// 2 MiB regions of the array that it writes in full) of this job's share, so that phase B
+    /// finds the page mapped. It changes no value, so phase B, and the tables, are what they are
+    /// without it (no NCBI counterpart; scheduling only).
     ///
     /// Each page of the three arrays has one toucher, the owner of the block that holds its middle
-    /// element (`page_touchers`). Toucher `j` takes each of its pages not touched yet
-    /// (`FaultJob::untouched`) that a reader marked in phase A of this chunk, writes 0 to the
-    /// page's middle element (in a block of `j`), and counts the page as touched. While a page of
-    /// an array is untouched, the readers mark (`Fill::read`) the page of every word's cell and
-    /// of the cell's presence-vector word, and the round runs in every such chunk; phase B writes
-    /// only those cells and words. So the fill writes a page of these arrays only after its
-    /// toucher has touched it, in the round of the same chunk or of an earlier one: a page not
-    /// touched yet holds the zeros it was allocated with, and no other job uses its elements in
-    /// this round. A marked page is one the fill writes: phase B writes the cell of every word,
-    /// and the presence-vector word of a cell when the cell's first word comes (in this chunk or
-    /// an earlier one). Once every page of an array is touched, the readers stop marking it, and
-    /// the round runs no more.
+    /// element (`page_touchers`). In phase A of the first chunk the readers mark (`Fill::read`) the
+    /// page of every word's cell and of the cell's presence-vector word; `select_pages` keeps the
+    /// marked pages of the regions it accepts; toucher `j` writes 0 to the middle element (in a
+    /// block of `j`) of each of its pages so chosen. The round
+    /// runs before the first phase B, when no element of the three arrays has been written yet:
+    /// each still holds the 0 it was allocated with, and no other job uses it during the round.
+    /// So the round writes 0 over 0. A marked page is one the first chunk's phase B writes: it
+    /// writes the cell of every word, and the presence-vector word of a cell when the cell's first
+    /// word comes (here, the cell is empty before the first chunk). The later chunks run without
+    /// marks (`read::<false>`) and without the round; their first writes to other pages are the
+    /// loop's (a read, then the write). This needs the three arrays zeroed at the start of the
+    /// fill, as their callers allocate them (NCBI's `calloc`: `build_disc_mb_lookup`, the shadow).
     ///
-    /// So the round writes 0 over 0, and only on pages the fill writes: the tables, and the
-    /// pages the fill maps (its max RSS), are what they are without it. This needs the three
-    /// arrays zeroed at the start of the fill, as their callers allocate them (NCBI's `calloc`:
-    /// `build_disc_mb_lookup`, the shadow).
+    /// Pages and max RSS: at the granularity of 4 KiB pages the round touches only pages the fill
+    /// writes, so the 4 KiB pages it maps are pages the fill maps anyway. Under transparent huge
+    /// pages (`enabled=always`, or `madvise` with glibc's `glibc.malloc.hugetlb=1`) a first write
+    /// can map a whole 2 MiB page where the loop's first read maps the shared huge zero page and
+    /// its writes then map only their 4 KiB pages: touching every marked page raised max RSS up
+    /// to the whole table for small queries on the WSL machine (`PREFAULT_RULE`). So
+    /// `select_pages` keeps only whole regions of 512 pages that lie within the array and that
+    /// the first chunk writes in full: a huge page mapped by the round then holds only pages the
+    /// fill writes anyway, at either page size. (The region's first page may hold another
+    /// allocation's bytes before the array; the region is then not within the array's pages and
+    /// is not touched.)
     ///
     /// Why. Phase B reads a cell (and a presence-vector word) before it writes it. On a page the
     /// process has not touched, the read maps the kernel's shared zero page and the write then
     /// replaces it with a page of its own: a second fault, and a copy-on-write that flushes the
     /// page's entry from the TLBs of the other CPUs running the search. Written first, the page
-    /// takes one fault and no flush. On the workstation one thread touching 4,096 fresh pages took
-    /// 8,193 faults and 13-18 ms reading first, 4,063 faults and 7 ms writing first; in the pool
-    /// fill of 1,775 cDNAs at 16 threads the CPUs of the search received 118,000 TLB shootdowns
-    /// without the round and 900 with it. `next_pos` is not touched: phase C writes it without
-    /// reading, so its faults take no zero page and no flush, and touching its pages in the round
-    /// cost more than it saved (fill 0.89 of the fill without any round at 16 threads, against
-    /// 0.79 with the cells alone; 1.01 against 0.91 at 4 threads).
+    /// takes one fault and no flush. On the workstation (Linux 6.8, THP `madvise`) one thread
+    /// touching 4,096 fresh pages took 8,193 faults and 13-18 ms reading first, 4,063 faults and
+    /// 7 ms writing first; in the pool fill of 1,775 cDNAs at 16 threads the CPUs of the search
+    /// received 108,000 TLB shootdowns without the round and 100 with it. `next_pos` is not
+    /// touched: phase C writes it without reading, so its faults take no zero page and no flush,
+    /// and touching its pages in the round cost more than it saved (fill 0.89 of the fill without
+    /// any round at 16 threads, against 0.79 with the cells alone; 1.01 against 0.91 at 4).
     ///
     /// SAFETY: no other job of the phase uses `FaultJob` `j`; the readers' marks are only read;
     /// the elements written are as above.
@@ -1200,32 +1240,27 @@ impl Fill<'_, '_> {
         let faults = self.faults;
         // SAFETY: `FaultJob` `j` is this job's.
         let FaultJob {
-            untouched,
+            pages,
             touches,
             log,
         } = unsafe { faults.jobs.at(j) };
         let tables = self.tables;
-        for (k, pages) in untouched.iter_mut().enumerate() {
-            if pages.is_empty() {
-                continue;
-            }
+        for (k, pages) in pages.iter().enumerate() {
             let array = match k {
                 HASHTABLE => tables.first.hashtable,
                 PV_ARRAY => tables.pv_array,
                 _ => tables.second.hashtable,
             };
-            let (offset, len, marks) = (faults.offsets[k], faults.lens[k], faults.marks[k]);
-            pages.retain(|&page| {
+            let (offset, len, chosen) = (faults.offsets[k], faults.lens[k], faults.touch[k]);
+            for &page in pages {
                 let page = page as usize;
-                // SAFETY: the marks are only read in this round; `page` is in the array.
-                if !(0..self.parts).any(|r| unsafe { marks.marked(r, page) }) {
-                    return true;
+                // SAFETY: the bits are only read in this round; `page` is in the array.
+                if unsafe { chosen.marked(0, page) } {
+                    // SAFETY: an element of a page of toucher `j`, before the first phase B.
+                    unsafe { touch(array, middle(offset, len, page), k, log) };
+                    *touches += 1;
                 }
-                // SAFETY: an element of an untouched page of toucher `j` (above).
-                unsafe { touch(array, middle(offset, len, page), k, log) };
-                *touches += 1;
-                false
-            });
+            }
         }
     }
 
@@ -1435,7 +1470,88 @@ fn run_phase<F: Fn(usize) + Sync>(
 /// Fills the tables as the word loop of `fill_disc_mb_tables` does, with `parts` workers on the
 /// search pool (or one after another, `in_pool == false`, for the shadow without a pool).
 pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, in_pool: bool) {
-    fill_with(parts, words, tables, in_pool, CHUNK_POSITIONS, &|_| {});
+    fill_with(
+        parts,
+        words,
+        tables,
+        in_pool,
+        CHUNK_POSITIONS,
+        PREFAULT_RULE,
+        &|_| {},
+    );
+}
+
+/// No NCBI counterpart (scheduling only): when the prefault round runs and which pages it touches
+/// (`Fill::prefault`): only when the first chunk has at least `min_words_per_page` positions per
+/// page of the cells of one template (a cost gate: below it the readers' marks rarely complete a
+/// region), and only the marked pages of the regions of `2^region_shift` pages (by address) whose
+/// pages in the array the first chunk all writes (`select_pages`).
+#[derive(Clone, Copy, Debug)]
+struct PrefaultRule {
+    min_words_per_page: usize,
+    region_shift: u32,
+}
+
+/// No NCBI counterpart (scheduling only): the rule of `fill`. Regions of 512 pages, the 2 MiB of a
+/// transparent huge page on x86_64 and aarch64 with 4 KiB pages, so that where a first write maps
+/// a whole huge page, every page of it is a page of the array that the fill writes anyway. On the
+/// WSL machine (THP `always`, free 2 MiB blocks) touching every marked page instead raised max
+/// RSS above #263's fill by up to the whole table for small queries (1,000 letters: 23 against 17
+/// MiB at word size 11, 134 against 18 MiB at 12 with two templates) and still by 2.8 MiB at word
+/// size 12 with 160 positions per page; with these regions max RSS was #263's at every size
+/// measured. And at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per page of the cells in the
+/// first chunk: below 8 no region was complete in any case measured (the round touched nothing),
+/// and the marks and the round's own allocations are skipped there.
+const PREFAULT_RULE: PrefaultRule = PrefaultRule {
+    min_words_per_page: PREFAULT_MIN_WORDS_PER_PAGE,
+    region_shift: 9,
+};
+
+/// See `PrefaultRule::min_words_per_page` and `PREFAULT_RULE`.
+const PREFAULT_MIN_WORDS_PER_PAGE: usize = 8;
+
+/// No NCBI counterpart (scheduling only): after phase A of the first chunk, between two phases
+/// (no job running), sets in `faults.touch[k]` the pages the round touches: for each array, the
+/// pages of the regions of `2^region_shift` pages (by address: the page number of an address,
+/// shifted) that lie within the array's pages and are all marked by some reader. `bases[k]` is
+/// the address of the array's element 0. So where a first write maps a whole region (a 2 MiB
+/// transparent huge page), every page of it is a page of the array that the first chunk writes;
+/// the presence vector (128 KiB at most) holds no whole region and is not touched.
+///
+/// SAFETY: no job is running; the bits are the fill's.
+unsafe fn select_pages(faults: &Faults, parts: usize, bases: [usize; 3], region_shift: u32) {
+    for k in [HASHTABLE, HASHTABLE + 1, PV_ARRAY] {
+        let pages = pages_of(faults.offsets[k], faults.lens[k]);
+        if pages == 0 {
+            continue;
+        }
+        let words = pages.div_ceil(64);
+        let mut all = vec![0u64; words];
+        for r in 0..parts {
+            for (w, word) in all.iter_mut().enumerate() {
+                // SAFETY: no job is running; `w < stride`.
+                *word |= unsafe { faults.marks[k].word(r, w) };
+            }
+        }
+        let marked = |p: usize| all[p >> 6] & (1u64 << (p & 63)) != 0;
+        let base = bases[k] / PAGE_BYTES;
+        let mut p0 = 0;
+        while p0 < pages {
+            let region = (base + p0) >> region_shift;
+            let p1 = (((region + 1) << region_shift) - base).min(pages);
+            // A region qualifies when all its pages are pages of the array (none beyond its first
+            // or last page, which may be another allocation's) and all are marked.
+            let inside =
+                region << region_shift >= base && (region + 1) << region_shift <= base + pages;
+            if inside && (p0..p1).all(marked) {
+                for p in p0..p1 {
+                    // SAFETY: no job is running; row 0 of the fill's own bits.
+                    unsafe { faults.touch[k].mark(0, p) };
+                }
+            }
+            p0 = p1;
+        }
+    }
 }
 
 /// No NCBI counterpart (scheduling only): what one fill did, for LOSAT_TIMING and the tests: its
@@ -1443,8 +1559,10 @@ pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, 
 /// most they reserve: phases B and C add nothing), in entries; 0 when not measured. In tests also
 /// `counter_owners`, the number of owners' private copies of the counters (of both templates) that
 /// hold a non-zero counter before the flush; 0 otherwise.
-/// Also the prefault rounds run and the zeros they wrote (`touches`), and in tests every one of
-/// those writes (`touch_log`).
+/// Also the prefault rounds run (0 or 1) and the zeros they wrote (`touches`); in tests every one
+/// of those writes (`touch_log`), the pages of `hashtable`, `hashtable2` and `pv_array` that the
+/// first chunk wrote (`first_pages`) and the reader jobs that ran without the marking code
+/// (`unmarked_reads`).
 #[derive(Clone, Debug, Default)]
 struct FillStats {
     chunks: usize,
@@ -1455,15 +1573,23 @@ struct FillStats {
     counter_owners: usize,
     #[cfg(test)]
     touch_log: Vec<Touch>,
+    #[cfg(test)]
+    first_pages: [std::collections::BTreeSet<usize>; 3],
+    #[cfg(test)]
+    unmarked_reads: usize,
+    #[cfg(test)]
+    region_shift: u32,
 }
 
 /// `fill` with the chunk size and a `probe` that each phase-B job calls first, on its thread.
+#[allow(clippy::too_many_arguments)]
 fn fill_with<P: Fn(u8) + Sync>(
     parts: usize,
     words: &DiscWords<'_>,
     tables: DiscTables<'_>,
     in_pool: bool,
     chunk: usize,
+    rule: PrefaultRule,
     probe: &P,
 ) -> FillStats {
     let DiscTables {
@@ -1522,11 +1648,37 @@ fn fill_with<P: Fn(u8) + Sync>(
     ];
     let mut marks = [0, 1, 2].map(|k| PageBits::new(pages_of(offsets[k], lens[k]), parts));
     let mut jobs: Vec<FaultJob> = (0..parts).map(|_| FaultJob::default()).collect();
-    page_touchers(&mut jobs, &owner, block_shift, pv_array_bts, offsets, lens);
+    // The prefault round runs in the first chunk only, and only when that chunk has at least
+    // `rule.min_words_per_page` positions per page of the cells (`PrefaultRule`).
+    let first_chunk = total.min(chunk.max(1));
+    let round_on = first_chunk > 0
+        && first_chunk
+            >= rule
+                .min_words_per_page
+                .saturating_mul(pages_of(offsets[0], lens[0]));
+    if round_on {
+        page_touchers(&mut jobs, &owner, block_shift, pv_array_bts, offsets, lens);
+    }
+    let bases = [
+        hashtable.as_ptr() as usize,
+        hashtable2.as_ptr() as usize,
+        pv_array.as_ptr() as usize,
+    ];
+    let mut touch = [0, 1, 2].map(|k| {
+        PageBits::new(
+            if round_on {
+                pages_of(offsets[k], lens[k])
+            } else {
+                0
+            },
+            1,
+        )
+    });
     let faults = Faults {
         offsets,
         lens,
         marks: [marks[0].shared(), marks[1].shared(), marks[2].shared()],
+        touch: [touch[0].shared(), touch[1].shared(), touch[2].shared()],
         jobs: SharedJobs {
             ptr: jobs.as_mut_ptr(),
             len: jobs.len(),
@@ -1551,11 +1703,17 @@ fn fill_with<P: Fn(u8) + Sync>(
         second: SharedBuckets::new(&mut second, parts),
         counters: [counters[0].shared(), counters[1].shared()],
         faults,
+        #[cfg(test)]
+        unmarked_reads: AtomicUsize::new(0),
     };
     // LOSAT_TIMING's split covers the pool fills only (not the shadow's partitioned build).
     let mut clock = (in_pool && timing_on()).then(|| JobClock::new(parts));
     let measure = clock.is_some() || cfg!(test);
     let mut stats = FillStats::default();
+    #[cfg(test)]
+    {
+        stats.region_shift = rule.region_shift;
+    }
     let mut start = 0usize;
     while start < total {
         let end = total.min(start.saturating_add(chunk));
@@ -1565,12 +1723,9 @@ fn fill_with<P: Fn(u8) + Sync>(
                 start + (end - start) * (a + 1) / parts,
             )
         };
-        // The arrays with a page not touched yet: the readers mark their pages in this chunk,
-        // and the prefault round runs (`Fill::prefault`).
-        // SAFETY: between two phases.
-        let mark = [0, 1, 2].map(|k| {
-            (0..parts).any(|j| unsafe { !fill.faults.jobs.at(j).untouched[k].is_empty() })
-        });
+        // In the first chunk (with `round_on`) the readers mark the pages of the arrays that have
+        // any, and the prefault round runs (`Fill::prefault`); later chunks run neither.
+        let mark = [0, 1, 2].map(|k| round_on && stats.chunks == 0 && lens[k] > 0);
         // SAFETY (all four phases): job `i` of a phase uses only its own buckets, cells, marks
         // and `FaultJob` (see `SharedBuckets`, `Fill::read`, `Fill::prefault`, `Fill::update`,
         // `Fill::link`); `run_jobs` returns after every job of the phase has returned.
@@ -1587,9 +1742,12 @@ fn fill_with<P: Fn(u8) + Sync>(
             let reserved = unsafe { fill.first.capacity() + fill.second.capacity() };
             stats.peak_entries = stats.peak_entries.max(reserved);
         }
-        // The prefault round, in every chunk with marks (`Fill::prefault`).
+        // The prefault round, before the first phase B (`Fill::prefault`), on the pages of the
+        // complete regions (`select_pages`).
         let round = mark.contains(&true);
         if round {
+            // SAFETY: between two phases.
+            unsafe { select_pages(&fill.faults, parts, bases, rule.region_shift) };
             run_phase(&mut clock, PREFAULT_PHASE, parts, in_pool, |j| unsafe {
                 fill.prefault(j)
             });
@@ -1600,8 +1758,21 @@ fn fill_with<P: Fn(u8) + Sync>(
             unsafe { fill.update(o) }
         });
         run_phase(&mut clock, 2, parts, in_pool, |a| unsafe { fill.link(a) });
+        // Tests: the pages of the three arrays the first chunk wrote (every written value is
+        // other than 0), which the round must have touched.
+        #[cfg(test)]
+        if stats.chunks == 0 {
+            let t = fill.tables;
+            // SAFETY: between two phases; the arrays outlive the fill.
+            stats.first_pages = [t.first.hashtable, t.second.hashtable, t.pv_array]
+                .map(|a| nonzero_pages(unsafe { std::slice::from_raw_parts(a.ptr, a.len) }));
+        }
         stats.chunks += 1;
         start = end;
+    }
+    #[cfg(test)]
+    {
+        stats.unmarked_reads = fill.unmarked_reads.load(Ordering::Relaxed);
     }
     #[cfg(test)]
     {
@@ -1633,6 +1804,25 @@ fn fill_with<P: Fn(u8) + Sync>(
         PREFAULT_TOUCHES.fetch_add(stats.touches as u64, Ordering::Relaxed);
     }
     stats
+}
+
+/// Tests only (`FillStats::first_pages`, `check_prefault`): the pages of `v` that hold an element
+/// other than 0 (a fast test per page: most pages are all zero or all written).
+#[cfg(test)]
+fn nonzero_pages(v: &[u32]) -> std::collections::BTreeSet<usize> {
+    static ZEROS: [u32; 1024] = [0; 1024];
+    let base = v.as_ptr() as usize;
+    let mut pages = std::collections::BTreeSet::new();
+    let mut i = 0;
+    while i < v.len() {
+        let page = (base + 4 * i) / PAGE_BYTES;
+        let end = (((page + 1) * PAGE_BYTES - base) / 4).min(v.len());
+        if v[i..end] != ZEROS[..end - i] {
+            pages.insert(page);
+        }
+        i = end;
+    }
+    pages
 }
 
 /// No NCBI counterpart (scheduling only): the parts of the shadow's partitioned build when no
@@ -1859,6 +2049,13 @@ mod tests {
         v
     }
 
+    /// The prefault rule of the tests' partitioned builds: a round whatever the first chunk's size,
+    /// and regions of one page (every marked page is touched).
+    const EVERY_PAGE: PrefaultRule = PrefaultRule {
+        min_words_per_page: 0,
+        region_shift: 0,
+    };
+
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct Built {
         hashtable: Vec<u32>,
@@ -1873,6 +2070,9 @@ mod tests {
 
     enum How {
         Serial,
+        /// `fill_with` off the pool with that many parts, positions per chunk and prefault rule
+        /// (the other partitioned variants use `EVERY_PAGE`).
+        Rule(usize, usize, PrefaultRule),
         /// `fill` (the default chunk size), on the pool when `true`.
         Parts(usize, bool),
         /// `fill_with` with that many parts and positions per chunk, on the pool when `true`.
@@ -1972,12 +2172,23 @@ mod tests {
                 fill_disc_mb_tables(&words, tables);
                 FillStats::default()
             }
-            // `fill` is `fill_with` in the default chunks without a probe.
-            How::Parts(parts, in_pool) => {
-                fill_with(parts, &words, tables, in_pool, CHUNK_POSITIONS, &|_| {})
-            }
+            // `fill` is `fill_with` in the default chunks without a probe; here the prefault round
+            // runs whatever the first chunk's size and touches every marked page (`EVERY_PAGE`),
+            // so that every partitioned build checks it (`fill`'s rule has tests of its own).
+            How::Parts(parts, in_pool) => fill_with(
+                parts,
+                &words,
+                tables,
+                in_pool,
+                CHUNK_POSITIONS,
+                EVERY_PAGE,
+                &|_| {},
+            ),
             How::Chunked(parts, chunk, in_pool) => {
-                fill_with(parts, &words, tables, in_pool, chunk, &|_| {})
+                fill_with(parts, &words, tables, in_pool, chunk, EVERY_PAGE, &|_| {})
+            }
+            How::Rule(parts, chunk, rule) => {
+                fill_with(parts, &words, tables, false, chunk, rule, &|_| {})
             }
         };
         if !matches!(how, How::Serial) {
@@ -1987,42 +2198,21 @@ mod tests {
         (b, stats)
     }
 
-    /// The pages of `v` that hold an element other than 0 (a fast test per page: most pages are
-    /// all zero or all written).
-    fn nonzero_pages(v: &[u32]) -> BTreeSet<usize> {
-        static ZEROS: [u32; 1024] = [0; 1024];
-        let base = v.as_ptr() as usize;
-        let mut pages = BTreeSet::new();
-        let mut i = 0;
-        while i < v.len() {
-            let page = (base + 4 * i) / PAGE_BYTES;
-            let end = (((page + 1) * PAGE_BYTES - base) / 4).min(v.len());
-            if v[i..end] != ZEROS[..end - i] {
-                pages.insert(page);
-            }
-            i = end;
-        }
-        pages
-    }
-
-    /// The pages the fill wrote, per array of the prefault's numbering (`HASHTABLE` + template,
-    /// `PV_ARRAY`), read from the filled tables: the pages with an element other than 0 (the fill
-    /// writes a word's index, at least 1, to its cell, and sets bits in presence-vector words).
-    fn written_pages(b: &Built) -> [BTreeSet<usize>; 3] {
-        [
-            nonzero_pages(&b.hashtable),
-            nonzero_pages(&b.hashtable2),
-            nonzero_pages(&b.pv_array),
-        ]
-    }
-
-    /// The prefault round of a partitioned fill of `b` (the arrays it filled in place), from its
-    /// log of writes (`FillStats::touch_log`): each wrote 0 over 0, and the pages it wrote to are,
-    /// array by array, exactly the pages the fill wrote (`written_pages`): none that the fill
-    /// does not write (so it maps no page the fill would not map), and every one it writes.
-    /// Returns the pages touched per array.
+    /// The prefault round of a partitioned fill of `b` (the arrays it filled in place):
+    /// `check_prefault_arrays` on `hashtable`, `hashtable2` and `pv_array`.
     fn check_prefault(b: &Built, stats: &FillStats) -> [BTreeSet<usize>; 3] {
-        let arrays: [&[u32]; 3] = [&b.hashtable, &b.hashtable2, &b.pv_array];
+        check_prefault_arrays([&b.hashtable, &b.hashtable2, &b.pv_array], stats)
+    }
+
+    /// The prefault round of a fill of `arrays` (`hashtable`, `hashtable2`, `pv_array`, as filled
+    /// in place), from its log of writes (`FillStats::touch_log`): each wrote 0 over 0; there was
+    /// at most one round; and the pages it wrote to are, array by array, exactly the pages the
+    /// first chunk wrote (`FillStats::first_pages`) in the regions of `2^region_shift` pages that lie
+    /// within the array's pages and that the first chunk wrote in full, when the round ran, none
+    /// otherwise. So it maps no page (and no region) the fill does not write, and misses none it
+    /// should touch; and those pages hold a value after the fill. Returns the pages touched per
+    /// array.
+    fn check_prefault_arrays(arrays: [&[u32]; 3], stats: &FillStats) -> [BTreeSet<usize>; 3] {
         let mut touched: [BTreeSet<usize>; 3] = Default::default();
         for t in &stats.touch_log {
             assert!(
@@ -2038,16 +2228,41 @@ mod tests {
             touched[t.array].insert((v.as_ptr() as usize + 4 * t.index) / PAGE_BYTES);
         }
         assert_eq!(stats.touches, stats.touch_log.len());
-        let written = written_pages(b);
+        assert!(
+            stats.prefault_rounds <= 1,
+            "{} rounds",
+            stats.prefault_rounds
+        );
         for k in 0..3 {
+            // The first chunk's pages in the regions (`2^region_shift` pages by address) that lie
+            // within the array's pages and that the first chunk wrote in full.
+            let first = if stats.prefault_rounds == 1 && !arrays[k].is_empty() {
+                let (a0, a1) = (
+                    arrays[k].as_ptr() as usize / PAGE_BYTES,
+                    (arrays[k].as_ptr() as usize + 4 * arrays[k].len() - 1) / PAGE_BYTES,
+                );
+                let shift = stats.region_shift;
+                stats.first_pages[k]
+                    .iter()
+                    .copied()
+                    .filter(|&p| {
+                        let region = p >> shift;
+                        let (lo, hi) = (region << shift, ((region + 1) << shift) - 1);
+                        lo >= a0 && hi <= a1 && (lo..=hi).all(|q| stats.first_pages[k].contains(&q))
+                    })
+                    .collect()
+            } else {
+                BTreeSet::new()
+            };
             assert!(
-                touched[k] == written[k],
-                "array {k}: touched {} pages, the fill wrote {}; touched but not written {:?}, written but not touched {:?}",
+                touched[k] == first,
+                "array {k}: touched {} pages, the first chunk wrote {}; touched but not written {:?}, written but not touched {:?}",
                 touched[k].len(),
-                written[k].len(),
-                touched[k].difference(&written[k]).take(5).collect::<Vec<_>>(),
-                written[k].difference(&touched[k]).take(5).collect::<Vec<_>>()
+                first.len(),
+                touched[k].difference(&first).take(5).collect::<Vec<_>>(),
+                first.difference(&touched[k]).take(5).collect::<Vec<_>>()
             );
+            assert!(touched[k].is_subset(&nonzero_pages(arrays[k])), "array {k}");
         }
         touched
     }
@@ -2329,6 +2544,7 @@ mod tests {
                 },
                 true,
                 CHUNK_POSITIONS,
+                EVERY_PAGE,
                 &probe,
             );
             got.longest_chain = disc_longest_chain(&got.helper_array, &got.helper_array2, true);
@@ -2912,16 +3128,17 @@ mod tests {
     //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
     //          mb_lt->hashtable[ecode1] = index;
     // ```
-    // The prefault round (`Fill::prefault`) on search pools of 2, 5 and 16 threads and off a pool
-    // in 1, 3 and 64 parts, word sizes 11 and 12, one and two templates: a query of 400 letters
-    // (chunks of 97 positions and the default chunk) and one of 1.2 million letters (the default
-    // chunk, and chunks of 5,000 on the pool of 5). The tables are the loop's, and
-    // `check_prefault` (which every partitioned build of these tests runs) finds 0 written over 0
-    // and the pages touched equal to the pages the fill wrote, array by array (`next_pos` is never
-    // touched). The short query leaves most pages of the cells untouched by both; with the long
-    // one every page of the cells is written but perhaps the end pages (with the allocator's
-    // 16-byte offset the last page holds 4 cells), and each page touched is touched exactly once
-    // (one toucher per page); the rounds run in the chunks where a page was still untouched.
+    // The prefault round (`Fill::prefault`, here without the size rule) on search pools of 2, 5
+    // and 16 threads and off a pool in 1, 3 and 64 parts, word sizes 11 and 12, one and two
+    // templates: a query of 400 letters (chunks of 97 positions and the default chunk) and one of
+    // 1.2 million letters (the default chunk, and chunks of 5,000 on the pool of 5). The tables are
+    // the loop's, and `check_prefault` (which every partitioned build of these tests runs) finds 0
+    // written over 0, one round, and the pages touched equal to the pages the first chunk wrote,
+    // array by array (`next_pos` is never touched). The short query leaves most pages of the cells
+    // untouched by both; with the long one in the default chunks every page of the cells is
+    // written but perhaps the end pages (with the allocator's 16-byte offset the last page holds 4
+    // cells), and each page touched is touched exactly once (one toucher per page). Every reader
+    // job of the later chunks ran without the marking code (`read::<false>`).
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -2953,14 +3170,12 @@ mod tests {
             pages_of(page_offset(v.as_ptr()), v.len())
         };
         let check = |case: &Case, combo, how: How, reference: &Built, long: bool| {
-            let what = format!(
-                "{combo:?} {:?}",
-                match how {
-                    How::Serial => (0, 0, false),
-                    How::Parts(p, in_pool) => (p, CHUNK_POSITIONS, in_pool),
-                    How::Chunked(p, c, in_pool) => (p, c, in_pool),
-                }
-            );
+            let (parts, chunk) = match how {
+                How::Parts(p, _) => (p, CHUNK_POSITIONS),
+                How::Chunked(p, c, _) => (p, c),
+                _ => unreachable!(),
+            };
+            let what = format!("{combo:?} parts {parts} chunk {chunk}");
             let (got, stats) = build_stats(case, combo, how);
             assert!(got == *reference, "{what}: tables differ");
             let touched = check_prefault(&got, &stats);
@@ -2969,7 +3184,9 @@ mod tests {
                 let pages = cell_pages(&got, t);
                 if long {
                     let n = touched[HASHTABLE + t].len();
-                    assert!(n + 2 >= pages, "{what} template {t}: {n} of {pages} pages");
+                    if chunk == CHUNK_POSITIONS {
+                        assert!(n + 2 >= pages, "{what} template {t}: {n} of {pages} pages");
+                    }
                     let writes = stats.touch_log.iter().filter(|w| w.array == HASHTABLE + t);
                     assert_eq!(writes.count(), n, "{what} template {t}: one touch per page");
                 } else {
@@ -2981,10 +3198,9 @@ mod tests {
                 }
             }
             assert!(!touched[PV_ARRAY].is_empty(), "{what}");
-            assert!(
-                stats.prefault_rounds >= 1 && stats.prefault_rounds <= stats.chunks,
-                "{what}"
-            );
+            assert_eq!(stats.prefault_rounds, 1, "{what}");
+            assert!(stats.chunks > 1 || !long, "{what}");
+            assert_eq!(stats.unmarked_reads, (stats.chunks - 1) * parts, "{what}");
         };
         for &combo in &combos {
             let small_reference = build(&small, combo, How::Serial);
@@ -3061,7 +3277,7 @@ mod tests {
                             let pages = pages_of(offsets[k], lens[k]);
                             let mut seen = vec![0u8; pages];
                             for (j, job) in jobs.iter().enumerate() {
-                                let list = &job.untouched[k];
+                                let list = &job.pages[k];
                                 assert!(list.windows(2).all(|w| w[0] < w[1]));
                                 for &page in list {
                                     seen[page as usize] += 1;
@@ -3077,6 +3293,191 @@ mod tests {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // `fill`'s size rule (`PREFAULT_MIN_WORDS_PER_PAGE`): the round runs only when the first chunk
+    // has at least `k` positions per page of the cells. Word size 11 (4,096 or 4,097 pages), one
+    // and two templates, 3 parts: a query of `k * 4,097 + 100` letters gets one round, one of
+    // `k * 4,096 - 100` none, and so does the longer query in chunks of `k * 4,096 - 100`; with no
+    // round nothing is touched and every reader job runs without the marking code. The tables
+    // are the loop's either way.
+    #[test]
+    fn the_round_runs_only_when_the_first_chunk_is_dense() {
+        let k = PREFAULT_MIN_WORDS_PER_PAGE;
+        assert!(k >= 1);
+        let mut rng = Lcg(0xFA17_0002);
+        let letters = |n: usize, rng: &mut Lcg| -> Case {
+            Case {
+                queries: vec![(0..n).map(|_| rng.below(4) as u8).collect()],
+                offsets: vec![0],
+                masks: Vec::new(),
+            }
+        };
+        let dense = letters(k * 4097 + 100, &mut rng);
+        let sparse = letters(k * 4096 - 100, &mut rng);
+        for combo in [
+            (11usize, DiscWordType::Coding, 18usize),
+            (11, DiscWordType::TwoTemplates, 16),
+        ] {
+            for (case, chunk, rounds) in [
+                (&dense, CHUNK_POSITIONS, 1usize),
+                (&sparse, CHUNK_POSITIONS, 0),
+                (&dense, k * 4096 - 100, 0),
+            ] {
+                let reference = build(case, combo, How::Serial);
+                let rule = PrefaultRule {
+                    min_words_per_page: k,
+                    region_shift: 0,
+                };
+                let (got, stats) = build_stats(case, combo, How::Rule(3, chunk, rule));
+                let what = format!("{combo:?} chunk {chunk}");
+                assert!(got == reference, "{what}: tables differ");
+                assert_eq!(stats.prefault_rounds, rounds, "{what}");
+                if rounds == 0 {
+                    assert_eq!(stats.touches, 0, "{what}");
+                    assert_eq!(stats.unmarked_reads, stats.chunks * 3, "{what}");
+                }
+            }
+        }
+    }
+
+    // `fill`'s regions (`PREFAULT_RULE.region_shift`, 512 pages = 2 MiB) and smaller ones: the round
+    // touches the first chunk's pages only in the regions that lie within the array's pages and
+    // that the first chunk wrote in full (`check_prefault`, run by `build_from`, compares the
+    // exact set). 300,000 random letters write every page of a word size 11 table, so all of its
+    // whole regions are touched (whole multiples of 512 pages; the presence vector, 128 KiB,
+    // holds none); 400 letters complete no region, so nothing is touched; with regions of 8
+    // pages, 5,000 letters (word size 11, one template) and 40,000 (12, two templates) complete
+    // some regions and not others. The tables are the loop's.
+    #[test]
+    fn the_round_touches_whole_regions_only() {
+        let mut rng = Lcg(0xFA17_0004);
+        let letters = |n: usize, rng: &mut Lcg| -> Case {
+            Case {
+                queries: vec![(0..n).map(|_| rng.below(4) as u8).collect()],
+                offsets: vec![0],
+                masks: Vec::new(),
+            }
+        };
+        let (big, small, medium) = (
+            letters(300_000, &mut rng),
+            letters(400, &mut rng),
+            letters(5_000, &mut rng),
+        );
+        let rule = |shift: u32| PrefaultRule {
+            min_words_per_page: 0,
+            region_shift: shift,
+        };
+        let coding = (11usize, DiscWordType::Coding, 18usize);
+        let shift = PREFAULT_RULE.region_shift;
+        let (got, stats) = build_stats(&big, coding, How::Rule(3, CHUNK_POSITIONS, rule(shift)));
+        assert!(got == build(&big, coding, How::Serial));
+        let pages = pages_of(page_offset(got.hashtable.as_ptr()), got.hashtable.len());
+        let touched = check_prefault(&got, &stats);
+        let cells = touched[HASHTABLE].len();
+        assert!(
+            cells + 2 * 512 >= pages && cells % 512 == 0 && cells > 0,
+            "{cells} of {pages}"
+        );
+        assert!(touched[PV_ARRAY].is_empty());
+        let (got, stats) = build_stats(&small, coding, How::Rule(3, CHUNK_POSITIONS, rule(shift)));
+        assert!(got == build(&small, coding, How::Serial));
+        assert_eq!(stats.prefault_rounds, 1);
+        assert_eq!(stats.touches, 0);
+        let medium12 = letters(40_000, &mut rng);
+        for (combo, medium) in [
+            (coding, &medium),
+            ((12, DiscWordType::TwoTemplates, 21), &medium12),
+        ] {
+            let reference = build(medium, combo, How::Serial);
+            let (got, stats) = build_stats(medium, combo, How::Rule(3, CHUNK_POSITIONS, rule(3)));
+            assert!(got == reference, "{combo:?}");
+            let touched = check_prefault(&got, &stats)[HASHTABLE].len();
+            let first = stats.first_pages[HASHTABLE].len();
+            assert!(
+                touched > 0 && touched < first,
+                "{combo:?}: touched {touched} of the first chunk's {first} pages"
+            );
+        }
+    }
+
+    // The round at other page offsets of the arrays than the allocator's: `hashtable`,
+    // `hashtable2` and `pv_array` as slices of page-aligned buffers starting 0, 4 and 1,023
+    // elements into a page (one and two templates, word size 11, 3 parts, a query of 30,000
+    // letters in chunks of 7,000): the tables are the loop's, and `check_prefault_arrays` finds 0
+    // over 0, one round and exactly the first chunk's pages.
+    #[test]
+    fn the_round_at_any_page_offset() {
+        let mut rng = Lcg(0xFA17_0003);
+        let case = Case {
+            queries: vec![(0..30_000).map(|_| rng.below(4) as u8).collect()],
+            offsets: vec![0],
+            masks: Vec::new(),
+        };
+        let query_refs: Vec<&[u8]> = case.queries.iter().map(Vec::as_slice).collect();
+        /// A zeroed buffer with room for `len` elements from `offset` elements after a page start;
+        /// returns it and that start.
+        fn aligned(len: usize, offset: usize) -> (Vec<u32>, usize) {
+            let v = vec![0u32; len + offset + 1024];
+            let skip = (PAGE_BYTES - v.as_ptr() as usize % PAGE_BYTES) % PAGE_BYTES / 4;
+            (v, skip + offset)
+        }
+        for combo in [
+            (11usize, DiscWordType::Coding, 18usize),
+            (11, DiscWordType::TwoTemplates, 21),
+        ] {
+            let reference = build(&case, combo, How::Serial);
+            let two = combo.1 == DiscWordType::TwoTemplates;
+            let (_, bts) = compute_mb_pv_params(1 << 22, 30_000, false, 11);
+            for offset in [0usize, 4, 1023] {
+                let mut got = reference.clone();
+                let (mut cells, c0) = aligned(got.hashtable.len(), offset);
+                let (mut cells2, c2) = aligned(got.hashtable2.len(), (offset + 7) % 1024);
+                let (mut pv, p0) = aligned(got.pv_array.len(), (offset + 512) % 1024);
+                got.next_pos.fill(0);
+                got.helper_array.fill(0);
+                got.next_pos2.fill(0);
+                got.helper_array2.fill(0);
+                let (n1, n2, np) = (
+                    got.hashtable.len(),
+                    got.hashtable2.len(),
+                    got.pv_array.len(),
+                );
+                let stats = fill_with(
+                    3,
+                    &words_of(&case, &query_refs, combo),
+                    DiscTables {
+                        hashtable: &mut cells[c0..c0 + n1],
+                        next_pos: &mut got.next_pos,
+                        helper_array: &mut got.helper_array,
+                        hashtable2: &mut cells2[c2..c2 + n2],
+                        next_pos2: &mut got.next_pos2,
+                        helper_array2: &mut got.helper_array2,
+                        pv_array: &mut pv[p0..p0 + np],
+                        pv_array_bts: bts,
+                    },
+                    false,
+                    7_000,
+                    EVERY_PAGE,
+                    &|_| {},
+                );
+                let what = format!("{combo:?} offset {offset}");
+                assert_eq!(page_offset(cells[c0..].as_ptr()), offset, "{what}");
+                assert_eq!(&cells[c0..c0 + n1], &reference.hashtable[..], "{what}");
+                assert_eq!(&cells2[c2..c2 + n2], &reference.hashtable2[..], "{what}");
+                assert_eq!(&pv[p0..p0 + np], &reference.pv_array[..], "{what}");
+                assert_eq!(got.next_pos, reference.next_pos, "{what}");
+                assert_eq!(got.next_pos2, reference.next_pos2, "{what}");
+                got.longest_chain = disc_longest_chain(&got.helper_array, &got.helper_array2, two);
+                assert_eq!(got.helper_array, reference.helper_array, "{what}");
+                assert_eq!(got.longest_chain, reference.longest_chain, "{what}");
+                assert_eq!(stats.prefault_rounds, 1, "{what}");
+                check_prefault_arrays(
+                    [&cells[c0..c0 + n1], &cells2[c2..c2 + n2], &pv[p0..p0 + np]],
+                    &stats,
+                );
             }
         }
     }

@@ -436,7 +436,8 @@ fn megablast_with_and_without_a_template() {
 // With LOSAT_TIMING the builds print their summed wall time at exit, with or without the switch,
 // and how many were built on a pool: all of them with the switch at 4 threads (by default and set
 // to 1), none with it off (`=0`, or `LOSAT_X_DEFAULT=0`) or at 1 thread; and the split line: the
-// chunks and phases of the pool fills (and its prefault rounds), or the time of the original loop.
+// chunks and phases of the pool fills (and its prefault rounds, at most one per fill), or the time
+// of the original loop.
 #[test]
 fn timing_line_is_printed() {
     let queries = queries();
@@ -481,11 +482,15 @@ fn timing_line_is_printed() {
         assert_eq!(nonzero("pool_fill="), on_pool, "{stderr}");
         assert_eq!(nonzero("read_wall="), on_pool, "{stderr}");
         assert_eq!(nonzero("loop="), !on_pool, "{stderr}");
-        // The prefault rounds: at least one per pool fill, and a zero written per page touched.
+        // The prefault rounds: at most one per pool fill, none off the pool; they touch whole
+        // 2 MiB regions of the cells only (512 pages each, one zero per page).
         let rounds: u64 = split_field(&stderr, "x_prefault_rounds=").parse().unwrap();
         let touches: u64 = split_field(&stderr, "x_prefault_touches=").parse().unwrap();
-        assert_eq!(rounds >= builds && touches > 0, on_pool, "{stderr}");
-        assert_eq!(rounds == 0 && touches == 0, !on_pool, "{stderr}");
+        assert!(rounds <= builds, "{stderr}");
+        assert_eq!(touches % 512, 0, "{stderr}");
+        if !on_pool {
+            assert_eq!((rounds, touches), (0, 0), "{stderr}");
+        }
     }
     // Megablast builds no discontiguous table: no line.
     let (_, stderr) = blastn(

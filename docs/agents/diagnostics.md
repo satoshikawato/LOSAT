@@ -176,6 +176,7 @@ export LOSAT_X_BXLUT=1
 export LOSAT_X_BXPAR=1
 export LOSAT_X_BXPOOL=1
 export LOSAT_X_BXSCAN=1
+export LOSAT_X_BXSCANBF=1
 export LOSAT_X_BXSEGMEMO=1
 export LOSAT_X_CODONFAST=1
 export LOSAT_X_COMPFAST=1
@@ -2216,8 +2217,9 @@ Scheduling (each value computed by one thread with the original function; order 
   default loop: a 300-nt cDNA piece against the first UniRef50 volume (1.5 hits per cell) took 38.08-38.25 s
   against 35.76-36.00 s (one thread, 3 rounds, the build with LOSAT_X_BXSCANBF's const parameter; instructions
   250 G against 185 G); one 2.1-kb cDNA (4.6 hits per cell) 123.9-125.4 s against 140.4-140.7 s.
-- `LOSAT_X_BXSCANBF=1` (BLASTX, speed; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it; acts where the standard lookup table is scanned by `LOSAT_X_BXSCAN`'s
+- `LOSAT_X_BXSCANBF=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's decision of that day
+  (perf-si-20261012 DECISIONS 175) on the timings below: on by default, `=0` turns it off, and with
+  `LOSAT_X_DEFAULT=0` it is off unless set; acts where the standard lookup table is scanned by `LOSAT_X_BXSCAN`'s
   direct loop or `LOSAT_X_BXDIAG`'s fused loop; the compressed table and the reference word finder keep their
   scans) the subject words with lookup hits found without a branch per word, by tblastn's loop of
   `LOSAT_X_TBNSCANBF` (`tblastn/x_scan_bf.rs`): the direct loop calls `x_scan_one_range_bf` (NCBI's pairs,
@@ -2242,7 +2244,13 @@ Scheduling (each value computed by one thread with the original function; order 
   run-time flag, blastx's instance had two scan loops calling the cell test, which the compiler then kept as a
   function called per cell (BXDIAG 41.3-42.3 s on the 300-nt case). The timings above are of the const form;
   BXDIAG without this switch then takes 0.96 of the time before this change on the 300-nt case (37.70-38.10 s
-  against 39.20-40.01 s) and 0.99 on 800 cDNAs (63.04 / 63.05 s against 63.45 / 63.72 s).
+  against 39.20-40.01 s) and 0.99 on 800 cDNAs (63.04 / 63.05 s against 63.45 / 63.72 s). Timed again for the
+  default set on the same day (dev 7a5a7f87, whose candidate loop has tblastn's constant shifts of #273; one build,
+  the default against `LOSAT_X_BXSCANBF=0`, the pairs as above): 300-nt case 21.34-21.36 s against 35.46-35.54 s
+  (x0.60, 3 rounds; it reports no hit at `-evalue 1e-5`, and at the default `-evalue` both give the same rows),
+  NCBI `-db` 32.01 / 32.34 s beside 21.10 / 21.21 s (0.66); one 2.1-kb cDNA 125.24 / 129.20 s against 140.98 /
+  144.30 s (x0.89), NCBI 146.17 / 145.90 s beside 124.73 / 124.64 s (0.85); 800 cDNAs x yeast 87.18 / 87.26 s against
+  87.76 / 88.12 s (x0.99-1.00).
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (distinct composition-adjustment inputs),

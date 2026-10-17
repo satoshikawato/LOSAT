@@ -25,7 +25,9 @@
 //! `kernel_sum` adds the times of the per-group calls on whatever threads ran them and
 //! `kernel_max` is the longest of them, the least `kernels` can be with any number of threads.
 //! `hsps` is the length of the list, `groups` the number of groups and `largest_group` the number
-//! of HSPs in the largest one. With several subjects every value is a sum over the calls.
+//! of HSPs in the largest one. With several subjects every value is a sum over the calls, except
+//! `largest_group` and `kernel_max`, which are the largest over the calls (a sum of maxima over
+//! the subjects is no bound on any one call).
 //!
 //! A linking call that takes the reference body instead (`LOSAT_X_HSPINPLACE=0`,
 //! `LOSAT_X_DEFAULT=0`, `LOSAT_DIAGNOSTICS`, `LOSAT_DEBUG_CUTOFFS`) is not timed here: its line
@@ -285,7 +287,7 @@ impl LinkLap {
             counters.groups.fetch_add(groups, AtomicOrdering::Relaxed);
             counters
                 .largest_group
-                .fetch_add(largest, AtomicOrdering::Relaxed);
+                .fetch_max(largest, AtomicOrdering::Relaxed);
         }
     }
 
@@ -309,7 +311,7 @@ impl LinkLap {
                 kernels.sum_ns.load(AtomicOrdering::Relaxed),
                 AtomicOrdering::Relaxed,
             );
-            counters.kernel_max_ns.fetch_add(
+            counters.kernel_max_ns.fetch_max(
                 kernels.max_ns.load(AtomicOrdering::Relaxed),
                 AtomicOrdering::Relaxed,
             );
@@ -399,6 +401,40 @@ mod tests {
         for (index, (call, _)) in CALLS.iter().enumerate() {
             assert_eq!(*call as usize, index);
         }
+    }
+
+    // No NCBI counterpart (a timer). Over several calls of a batch the sizes and per-group sums
+    // add up, while `largest_group` and `kernel_max` keep the largest of the calls.
+    #[test]
+    fn the_largest_group_and_kernel_are_the_largest_over_the_calls() {
+        let timer = XLinkTimer::new(true);
+        for (sizes, kernel_max) in [([4usize, 6], 7u64), ([2usize, 3], 9), ([5usize, 1], 2)] {
+            timer.arm(LinkCall::First);
+            {
+                let lap = LinkLap::start();
+                lap.sizes(sizes.iter().sum(), sizes.into_iter());
+                let kernels = KernelTimes {
+                    enabled: true,
+                    sum_ns: AtomicU64::new(kernel_max + 1),
+                    max_ns: AtomicU64::new(kernel_max),
+                };
+                lap.add_kernels(&kernels);
+            }
+            timer.disarm();
+        }
+        let first = counters(&timer, LinkCall::First);
+        assert_eq!(
+            (
+                load(&first.hsps),
+                load(&first.groups),
+                load(&first.largest_group)
+            ),
+            (21, 6, 6)
+        );
+        assert_eq!(
+            (load(&first.kernel_sum_ns), load(&first.kernel_max_ns)),
+            (21, 9)
+        );
     }
 
     // No NCBI counterpart (a timer). Off: `arm` sets no flag, so the call's clock measures

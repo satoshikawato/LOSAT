@@ -502,3 +502,130 @@ pub fn extend_hit_two_hit(
         s_last_off,
     )
 }
+
+// No NCBI counterpart (LOSAT_X_STATS): the cells one call of `extend_hit_two_hit` scores, for
+// the statistics of the unit path (tblastx/x_unit_probe.rs). It repeats the call's scalar loops
+// (the same sums and the same stops, aa_ungapped.c:846-866 and 886-921) and counts their steps;
+// the search never calls it. The test below checks that it returns what the call returns.
+/// What one call of `extend_hit_two_hit` scored, and its result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct XTwoHitCells {
+    /// Cells of the left extension (from the word's best end towards the first hit).
+    pub(crate) left: usize,
+    /// Cells of the right extension; 0 when it did not run.
+    pub(crate) right: usize,
+    /// First subject position scored (the word's cells included).
+    pub(crate) s_lo: usize,
+    /// One past the last subject position scored.
+    pub(crate) s_hi: usize,
+    /// The seven values `extend_hit_two_hit` returns for the same arguments.
+    pub(crate) result: (usize, usize, usize, usize, i32, bool, usize),
+}
+
+/// The cells of `extend_hit_two_hit(q_seq, s_seq, s_left_off, s_right_off, q_right_off, x_drop, false)`.
+pub(crate) fn x_two_hit_cells(
+    q_seq: &[u8],
+    s_seq: &[u8],
+    s_left_off: usize,
+    s_right_off: usize,
+    q_right_off: usize,
+    x_drop: i32,
+) -> XTwoHitCells {
+    let k_size = 3;
+    let (mut score, mut seed_score, mut right_d) = (0i32, 0i32, 0usize);
+    for i in 0..k_size {
+        score += get_score(q_seq[q_right_off + i], s_seq[s_right_off + i]);
+        if score > seed_score {
+            seed_score = score;
+            right_d = i + 1;
+        }
+    }
+    let (q_r, s_r) = (q_right_off + right_d, s_right_off + right_d);
+
+    let max_left = q_r.min(s_r);
+    let (mut score, mut left_score, mut left_disp, mut left) = (0i32, 0i32, 0usize, 0usize);
+    while left < max_left {
+        score += get_score(q_seq[q_r - 1 - left], s_seq[s_r - 1 - left]);
+        left += 1;
+        if score > left_score {
+            left_score = score;
+            left_disp = left;
+        }
+        if (left_score - score) >= x_drop {
+            break;
+        }
+    }
+
+    let reached_first_hit = left_disp >= s_r.saturating_sub(s_left_off);
+    let (mut right, mut right_disp, mut right_score, mut s_last_off) = (0usize, 0usize, 0i32, s_r);
+    if reached_first_hit {
+        let (mut score, mut max_score, mut j) = (left_score, left_score, 0usize);
+        while q_r + j < q_seq.len() && s_r + j < s_seq.len() {
+            score += get_score(q_seq[q_r + j], s_seq[s_r + j]);
+            right += 1;
+            if score > max_score {
+                max_score = score;
+                right_disp = j + 1;
+            }
+            if score <= 0 || (max_score - score) >= x_drop {
+                break;
+            }
+            j += 1;
+        }
+        right_score = max_score;
+        s_last_off = s_r + j;
+    }
+
+    XTwoHitCells {
+        left,
+        right,
+        s_lo: s_right_off.min(s_r - left),
+        s_hi: (s_right_off + k_size).max(s_r + right),
+        result: (
+            q_r - left_disp,
+            q_r + right_disp,
+            s_r - left_disp,
+            s_r + right_disp,
+            left_score.max(right_score),
+            reached_first_hit,
+            s_last_off,
+        ),
+    }
+}
+
+#[cfg(test)]
+mod x_cells_tests {
+    use super::*;
+
+    // No NCBI counterpart (a statistics helper). The counting copy returns what the extension
+    // returns, on random NCBIstdaa sequences, offsets and X-drops.
+    #[test]
+    fn the_counting_copy_returns_what_the_extension_returns() {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n
+        };
+        for _ in 0..20_000 {
+            let q_len = 4 + next(120) as usize;
+            let s_len = 4 + next(120) as usize;
+            // Mostly a few residues, so that runs of positive scores are common.
+            let alphabet = 1 + next(24);
+            let q: Vec<u8> = (0..q_len).map(|_| 1 + next(alphabet) as u8).collect();
+            let s: Vec<u8> = (0..s_len).map(|_| 1 + next(alphabet) as u8).collect();
+            let q_right = next((q_len - 3) as u64 + 1) as usize;
+            let s_right = next((s_len - 3) as u64 + 1) as usize;
+            let s_left = s_right.saturating_sub(next(50) as usize);
+            let x_drop = 1 + next(40) as i32;
+            let cells = x_two_hit_cells(&q, &s, s_left, s_right, q_right, x_drop);
+            let result = extend_hit_two_hit(&q, &s, s_left, s_right, q_right, x_drop, false);
+            assert_eq!(cells.result, result);
+            if !result.5 {
+                assert_eq!(cells.right, 0);
+            }
+            assert!(cells.s_lo <= s_right && cells.s_hi >= s_right + 3 && cells.s_hi <= s_len);
+        }
+    }
+}

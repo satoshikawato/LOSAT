@@ -108,6 +108,10 @@ use std::sync::OnceLock;
 /// they were verified and timed with them on.
 /// `LOSAT_X_BPDEFER` (the candidates of a lookup cell's AVX2 batches called after its last batch
 /// of eight, `blastp/x_seed_fused.rs`) joined after a third run of the same jobs with it on as well.
+/// `LOSAT_X_TBNOWNPOOLS` (the query batches `LOSAT_X_TBNBATCHRULE` leaves one after another
+/// searched at the same time, each on a pool of its own, `tblastn/stage_d_pipeline.rs`) was added
+/// after the change as a switch that is off unless set and joined the set once it was verified
+/// and timed with it on.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
     "LOSAT_X_BNSTREAM",
@@ -177,6 +181,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNOIDCHUNK",
     "LOSAT_X_TBNOIDNEXT",
     "LOSAT_X_TBNOIDUNITS",
+    "LOSAT_X_TBNOWNPOOLS",
     "LOSAT_X_TBNPAR",
     "LOSAT_X_TBNQSIDE",
     "LOSAT_X_TBNSSIDE",

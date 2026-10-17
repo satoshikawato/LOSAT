@@ -1,8 +1,10 @@
-//! LOSAT_X_QSTREAM (on by default, strict set; shadow LOSAT_X_QSTREAMSHADOW): blastn reads the
-//! records of each query batch from the query file when the batch loop of `run_in_pool` takes the
-//! batch (or a LOSAT_X_QBATCHPAR slot searches it ahead of the loop), as NCBI reads its query
-//! batches one at a time, instead of holding the records of the whole query file for the whole
-//! search. `LOSAT_X_QSTREAM=0` or `LOSAT_X_DEFAULT=0` reads them all before the search, as before.
+//! EXPERIMENT (LOSAT_X_QSTREAM, shadow LOSAT_X_QSTREAMSHADOW; off unless set, not in the strict
+//! set): blastn reads the records of each query batch from the query file when the batch loop of
+//! `run_in_pool` takes the batch (or a LOSAT_X_QBATCHPAR slot searches it ahead of the loop), as
+//! NCBI reads its query batches one at a time, instead of holding the records of the whole query
+//! file for the whole search. It saves memory (the records of the batches not in flight) and costs
+//! one more parse of the query file; where it wins and where it loses on the workstation is in its
+//! entry of `docs/agents/diagnostics.md`.
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
 //! ```c++
@@ -127,16 +129,15 @@ use crate::blastinput::seq_range::{
     SequenceRange,
 };
 
-// No NCBI counterpart: reads the switches once. LOSAT_X_QSTREAM is in the strict set (on unless
-// `LOSAT_X_QSTREAM=0` or `LOSAT_X_DEFAULT=0`); the shadow is set to any value and implies the
-// switch. They choose when LOSAT reads the same records.
+// No NCBI counterpart: reads the switches once (any value turns them on; the shadow implies the
+// switch; neither is in the strict set). They choose when LOSAT reads the same records.
 /// 0 = off, 1 = LOSAT_X_QSTREAM, 2 = LOSAT_X_QSTREAMSHADOW.
 fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_QSTREAMSHADOW").is_some() {
             2
-        } else if crate::utils::xswitch::on("LOSAT_X_QSTREAM") {
+        } else if std::env::var_os("LOSAT_X_QSTREAM").is_some() {
             1
         } else {
             0
@@ -147,7 +148,7 @@ fn mode() -> u8 {
 /// Why the records of a search are read before the search (`Opening::new`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Off {
-    /// The switch is off (`LOSAT_X_QSTREAM=0`, `LOSAT_X_DEFAULT=0`).
+    /// Neither switch is set.
     NotSet,
     /// The reports are written after the loop (LOSAT_X_RPTSTREAM off), which reads every record.
     Reports,

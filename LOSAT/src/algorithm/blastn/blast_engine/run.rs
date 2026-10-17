@@ -6119,9 +6119,9 @@ fn search_cli(
     // batch is read.
     let shared_standard_input =
         args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-";
-    // LOSAT_X_QSTREAM: whether the query file is read a second time, batch by batch (a second
-    // handle on it, at the position its reader starts from), where the reports may be written
-    // batch by batch (LOSAT_X_RPTSTREAM).
+    // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file is read a second time, batch by batch
+    // (a second handle on it, at the position its reader starts from), where the reports may be
+    // written batch by batch (LOSAT_X_RPTSTREAM).
     let x_opening = x_query_stream::Opening::new(
         &args.query,
         &query_file,

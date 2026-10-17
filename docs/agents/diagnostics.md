@@ -1752,6 +1752,26 @@ Scheduling (each value computed by one thread with the original function; order 
   three rounds): 800 fly 2L cDNAs at 16 threads 0.71-0.84 of the waves' time (and 0.87-0.95 of NCBI
   BLAST+ 2.17.0 `-db`), at 8 threads 0.84-0.87; 50 cDNAs (9 batches) at 16 threads 0.56-0.58, at 8
   threads 0.76; 5 cDNAs (one batch) 1.00.
+- `LOSAT_X_BXDIAG=1` (BLASTX, speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it; acts in the two-hit stage with the standard lookup table,
+  `-word_size 3`, when no diagnostic stage traces the seeds and the diagonal order is the reference's)
+  the subject scan and the two-hit diagonal test in one loop, with the hits of one lookup cell tested in
+  batches of eight (`blastx/x_seed_diag.rs`, exactness argument in its header): blastx calls blastp's
+  fused scan of `LOSAT_X_BPSEED` with the cell test of `LOSAT_X_BPDIAG` (the AVX2 batch on an x86-64 CPU
+  with AVX2, the per-hit loop elsewhere), and the hits that pass the test go to the reference's context
+  check, extension, save and entry update unchanged. It rests on blastx's entries being NCBI's
+  `DiagStruct`, as blastp's are. `LOSAT_X_BXDIAG=per-hit` and `LOSAT_X_BXDIAG=scalar` force a cell test
+  (diagnostics; the tests use them). Shadow: `LOSAT_X_BXDIAGSHADOW=1` also runs the reference on a copy of
+  the diagonal table for every subject and stops at a difference of the hit lists or the tables (the
+  tables are not compared for a subject shorter than a word less one letter, whose one scan position the
+  reference reads past the sentinel); at exit `[X_SHADOW] BXDIAG subjects_compared=N ...`. With
+  `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2|scalar|per-hit> subjects= cells= batched_hits=
+  candidates=`. Measured 2026-10-17 on the workstation (node 1, one pinned core per arm with its HT sibling
+  idle, the two arms of a pair at once on two cores, swapped every round; 800 fly 2L cDNAs x yeast proteome
+  `-db`, `-evalue 1e-5`, one thread; every output the same bytes as NCBI BLAST+ 2.17.0): off 87.21-87.42 s,
+  on 64.83-65.41 s (x0.742-0.750; user-space cycles x0.743-0.750, instructions 723 -> 493 G; 4 rounds);
+  NCBI `-db` 102.86 / 103.61 s beside on 66.55 / 64.99 s (2 rounds). The shadow compared 1,214,400
+  subject scans with `-db` and with `-subject` (6 threads): identical.
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (distinct composition-adjustment inputs),

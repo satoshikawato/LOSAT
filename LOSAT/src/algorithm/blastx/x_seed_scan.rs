@@ -67,6 +67,7 @@ pub(crate) static X_SHADOW_SUBJECTS: std::sync::atomic::AtomicU64 =
 // No NCBI counterpart: prints the shadow-mode counters; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
     use std::sync::atomic::Ordering;
+    super::x_seed_diag::x_print_shadow_summary();
     if let Some(tables) = crate::algorithm::tblastx::lookup::x_bxlut_shadow_tables() {
         eprintln!("[X_SHADOW] BXLUT tables_compared={tables} (lookup tables identical)");
     }
@@ -114,6 +115,26 @@ pub(crate) fn x_word_finder_scan(
     lookup: &Lookup,
     diagonals: &mut Diagonals,
 ) -> Result<Vec<InitHsp>> {
+    // EXPERIMENT (LOSAT_X_BXDIAG): the fused loop where it acts (x_seed_diag.rs); where it does
+    // not, the loop LOSAT_X_BXSCAN chooses (the reference word finder when BXSCAN is off).
+    if super::x_seed_diag::x_bxdiag_mode() != 0 {
+        if let Some(hits) = super::x_seed_diag::x_word_finder_diag(
+            batch, parameters, options, subject, lookup, diagonals,
+        )? {
+            return Ok(hits);
+        }
+        if x_bxscan_mode() == 0 {
+            return word_finder(
+                batch,
+                parameters,
+                options,
+                subject,
+                lookup,
+                diagonals,
+                |_| {},
+            );
+        }
+    }
     if x_bxscan_mode() == 2 {
         let mut copy = Diagonals {
             entries: diagonals.entries.clone(),

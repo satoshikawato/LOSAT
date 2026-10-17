@@ -121,14 +121,14 @@ their variables mean
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
   `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
   act only with `TBNPAR`; `TBNBATCHRULE` only with `TBNBATCH`; `TBNOWNPOOLS` only with `TBNBATCH`
-  and `TBNBATCHRULE`; `TBNOIDNEXT` and `TBNOIDUNITS` act only with `TBNOIDCHUNK`; `BPSUBJRUN` acts
-  only in the parallel `-subject` loop of blastp (2 or more threads, several subjects); `BPSEED`
-  acts on the two-hit seed stage only; `BPDIAG` acts only in `BPSEED`'s fused loop and batches only
-  with AVX2 (else the per-hit loop); `BPGAP` runs the vector alignment only with AVX2, BMI1 and
-  LZCNT (else the reference function); `BPLUT` declines in diagnostics mode; `BPQBLOCK` takes the
-  block path only for one `-outfmt 6` report with more than one block (see its entry); `BNSTREAM`
-  only in blastn's `-subject` search at 2 or more threads; `TBXNEXT` only in TBLASTX's parallel
-  subject loop (2 or more threads, several subjects, native builds).
+  and `TBNBATCHRULE`, natively; `TBNOIDNEXT` and `TBNOIDUNITS` act only with `TBNOIDCHUNK`;
+  `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or more threads, several
+  subjects); `BPSEED` acts on the two-hit seed stage only; `BPDIAG` acts only in `BPSEED`'s fused
+  loop and batches only with AVX2 (else the per-hit loop); `BPGAP` runs the vector alignment only
+  with AVX2, BMI1 and LZCNT (else the reference function); `BPLUT` declines in diagnostics mode;
+  `BPQBLOCK` takes the block path only for one `-outfmt 6` report with more than one block (see its
+  entry); `BNSTREAM` only in blastn's `-subject` search at 2 or more threads; `TBXNEXT` only in
+  TBLASTX's parallel subject loop (2 or more threads, several subjects, native builds).
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
   Only `0` means off; `00`, `false` or `off` are "any other value".
 - The variables are read once per process (once per Wasm instance), except `GREEDYSPEC`,
@@ -558,7 +558,9 @@ Rebuilding less:
   as before, the reports keep the batch order). With `LOSAT_WASI_THREADS_DEBUG=1` a line
   `[losat-thread-stage] program=tblastn stage=query_batches batches= threads= side_by_side=
   one_after_another= own_pools=` gives the split (printed whenever `TBNBATCH`'s block runs, with
-  or without the rule; `own_pools` is 0 with `LOSAT_X_TBNOWNPOOLS=0`, without the rule, and where its conditions below are not met). Timed on the workstation (perf-si-20261012 session 17, node 1, one hash per
+  or without the rule; `own_pools` is 0 with `LOSAT_X_TBNOWNPOOLS=0`, without the rule, in
+  WebAssembly, and where its conditions below are not met). Timed on the workstation
+  (perf-si-20261012 session 17, node 1, one hash per
   case; time of each arm / time of main's side by side): 16S (28,036 records, 40.6 Mb) x 10
   batches at 8 threads 0.68 (13.2 -> 8.9 s), 5 batches at 4 threads 0.69 with
   `LOSAT_X_TBNBATCH=0`; one 0.6 Mb genome x 10 batches at 8 threads 0.77 with the rule (8 side
@@ -574,21 +576,23 @@ Rebuilding less:
   at the same time instead, each on a search pool of its own with its share of the threads
   (`threads / k`, the first `threads % k` one more), after the shared pool has ended. Only with
   fewer than two subjects per thread, and for two to `threads - 1` batches when the subjects
-  hold at most 24 Mb (a pool may then have one thread), otherwise two to `threads / 2`. The
-  report does not change (every batch is the same search, the reports keep the batch order;
-  `tests/tblastn_batch_rule.rs`); the `query_batches` line above gives `own_pools=`, and one
-  `[losat-thread-pool]` line is printed per pool. Timed on the workstation (perf-si-20261012
-  session 19, node 0, one hash per case, outputs equal; time with the switch / main's default):
-  one 4.7 Mb genome (E. coli MG1655) x 16 batches at 32 threads 0.20 (`-subject`, 3.86 -> 0.79 s)
-  and 0.19 (`-db`), x 10 batches at 32 threads 0.24, x 5 batches at 32 / 16 / 8 threads 0.27 /
-  0.45 / 0.97, x 2 batches at 8 threads 0.89; one 0.6 Mb genome x 16 batches at 32 threads 0.15,
-  x 5 batches at 16 / 8 threads 0.45 / 0.61; three fly chromosomes (76.9 Mb) x 16 batches at 32
-  threads 0.81, x 5 batches at 16 threads 0.89. Left out by the conditions, as measured with all
-  of them on pools of their own: three fly chromosomes x 5 batches at 8 threads 1.44 (two pools
-  of one thread), 5,000 16S records (7.7 Mb) x 5 batches at 8 / 16 threads 1.38 / 1.09, 28,036
-  16S records x 5 batches at 8 / 16 threads 1.67 / 0.98, the fly transcriptome x 5 batches at
-  16 threads 1.16. With `=0`, 16 batches on the 4.7 Mb genome at 32 threads took 1.60
-  (`-subject`) and 2.86 (`-db`) times NCBI BLAST+ 2.17.0 `-db` at 32 threads (1.59 s).
+  hold at most 24 Mb (a pool may then have one thread), otherwise two to `threads / 2`. Native
+  builds only: in WebAssembly only the main thread can start threads, and each pool is built on
+  a thread of its own, so the batches stay one after another there. The report does not change
+  (every batch is the same search, the reports keep the batch order; `tests/tblastn_batch_rule.rs`);
+  the `query_batches` line above gives `own_pools=`, and one `[losat-thread-pool]` line is printed
+  per pool. Timed on the workstation (perf-si-20261012 session 19, node 0, one hash per case,
+  outputs equal; time with the switch / main's default): one 4.7 Mb genome (E. coli MG1655) x 16
+  batches at 32 threads 0.20 (`-subject`, 3.86 -> 0.79 s) and 0.19 (`-db`), x 10 batches at 32
+  threads 0.24, x 5 batches at 32 / 16 / 8 threads 0.27 / 0.45 / 0.97, x 2 batches at 8 threads
+  0.89; one 0.6 Mb genome x 16 batches at 32 threads 0.15, x 5 batches at 16 / 8 threads 0.45 /
+  0.61; three fly chromosomes (76.9 Mb) x 16 batches at 32 threads 0.81, x 5 batches at 16 threads
+  0.89. Left out by the conditions, as measured with all of them on pools of their own: three fly
+  chromosomes x 5 batches at 8 threads 1.44 (two pools of one thread), 5,000 16S records (7.7 Mb) x
+  5 batches at 8 / 16 threads 1.38 / 1.09, 28,036 16S records x 5 batches at 8 / 16 threads 1.67 /
+  0.98, the fly transcriptome x 5 batches at 16 threads 1.16. With `=0`, 16 batches on the 4.7 Mb
+  genome at 32 threads took 1.60 (`-subject`) and 2.86 (`-db`) times NCBI BLAST+ 2.17.0 `-db` at 32
+  threads (1.59 s).
 - `LOSAT_X_LUTSPLIT=1` tblastn: build only the half (contexts or table) a caller uses.
 - `LOSAT_X_IDEALMEMO=1` BLOSUM62 ideal Karlin block once per process.
 - `LOSAT_X_BXSEGMEMO=1` blastx redo stage: the subject SEG once per subject instead of once per window

@@ -1647,7 +1647,12 @@ Scheduling (each value computed by one thread with the original function; order 
   (45.6 -> 33.2 s, NCBI 44.9 s) and 0.77 at 8 threads (6.79 -> 5.21 s, NCBI 7.35 s); zebrafish
   genome x one protein at one thread 0.79 (31.3 -> 24.6 s, NCBI 31.3 s). With many query proteins
   the bit is set at most words and the branch is predicted: 0.98-0.99 (fly genome x one batch at
-  1 / 8 threads, E. coli MG1655 x 16 batches at 8, 16S x one batch at 8).
+  1 / 8 threads, E. coli MG1655 x 16 batches at 8, 16S x one batch at 8). For tblastn's table (word
+  size 3, 5-bit letters) the candidate loop has its shifts as constants (`x_candidates::<3, 5>`;
+  other tables take the general loop): a further 0.97 of the time on the one-protein cases
+  (cycles 96.9 G -> 93.4 G), the same CPU time on the many-protein ones. An AVX2 form of the loop
+  (`vpgatherdd` of the presence words) cut instructions by a third but was 2-7 % slower (IPC 3.6 ->
+  2.3) and is not used.
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject` without `-subject_loc`: each subject record's letters are
   packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
   database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of

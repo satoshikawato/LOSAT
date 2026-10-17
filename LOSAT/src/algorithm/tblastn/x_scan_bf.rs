@@ -110,25 +110,26 @@ pub(super) fn x_scan_one_range_bf(
     let mut block_first = s_first;
     while block_first <= s_last {
         let block_last = s_last.min(block_first + X_BLOCK - 1);
-        let mut n = 0usize;
-        for s in block_first..=block_last {
-            // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:121-127
-            // ```c
-            // return ((index << charsize) | word[wordsize - 1]) & mask;
-            // ```
-            // SAFETY: `s <= s_last`, the positions NCBI's loop reads.
-            let new_char = unsafe { *subject.get_unchecked(s + word_length - 1) } as usize;
-            index = ((index << charsize) | new_char) & mask;
-            // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
-            // SAFETY: `index` is masked to the backbone space the presence vector covers.
-            let bit = (unsafe { *pv.add(index >> PV_ARRAY_BTS) } >> (index & PV_ARRAY_MASK)) & 1;
-            // SAFETY: `n <= s - block_first < X_BLOCK`.
-            unsafe {
-                cand.get_unchecked_mut(n)
-                    .write(((s as u64) << 32) | index as u64);
-            }
-            n += bit as usize;
-        }
+        // tblastn's table (word size 3, 5-bit letters) with the shifts as constants.
+        let n = if word_length == 3 && charsize == 5 {
+            x_candidates::<3, 5>(
+                subject,
+                pv,
+                (word_length, charsize, mask),
+                (block_first, block_last),
+                &mut index,
+                &mut cand,
+            )
+        } else {
+            x_candidates::<0, 0>(
+                subject,
+                pv,
+                (word_length, charsize, mask),
+                (block_first, block_last),
+                &mut index,
+                &mut cand,
+            )
+        };
         for c in &cand[..n] {
             // SAFETY: the first `n` candidates were written above.
             let c = unsafe { c.assume_init() };
@@ -170,6 +171,47 @@ pub(super) fn x_scan_one_range_bf(
     // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:125-127
     s_range[1] = (s_last + 1) as i32;
     totalhits
+}
+
+/// EXPERIMENT (LOSAT_X_TBNSCANBF): writes the candidates of the words `block.0 ..= block.1`
+/// (`position << 32 | index`, the list's length advanced by the presence bit) and returns how
+/// many; `index` is the rolling index of the word before `block.0` and becomes that of
+/// `block.1`. `WORD` and `CHARSIZE` are the table's word size and letter width when known at
+/// compile time, 0 to read them from `table` (word size, letter width, mask).
+#[inline(always)]
+fn x_candidates<const WORD: usize, const CHARSIZE: usize>(
+    subject: &[u8],
+    pv: *const u32,
+    table: (usize, usize, usize),
+    block: (usize, usize),
+    index: &mut usize,
+    cand: &mut [MaybeUninit<u64>; X_BLOCK],
+) -> usize {
+    let word_length = if WORD != 0 { WORD } else { table.0 };
+    let charsize = if CHARSIZE != 0 { CHARSIZE } else { table.1 };
+    let mask = table.2;
+    let mut ix = *index;
+    let mut n = 0usize;
+    for s in block.0..=block.1 {
+        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:121-127
+        // ```c
+        // return ((index << charsize) | word[wordsize - 1]) & mask;
+        // ```
+        // SAFETY: `s <= s_last`, the positions NCBI's loop reads.
+        let new_char = unsafe { *subject.get_unchecked(s + word_length - 1) } as usize;
+        ix = ((ix << charsize) | new_char) & mask;
+        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
+        // SAFETY: `ix` is masked to the backbone space the presence vector covers.
+        let bit = (unsafe { *pv.add(ix >> PV_ARRAY_BTS) } >> (ix & PV_ARRAY_MASK)) & 1;
+        // SAFETY: `n <= s - block.0 < X_BLOCK`.
+        unsafe {
+            cand.get_unchecked_mut(n)
+                .write(((s as u64) << 32) | ix as u64);
+        }
+        n += bit as usize;
+    }
+    *index = ix;
+    n
 }
 
 #[cfg(test)]
@@ -271,7 +313,9 @@ mod tests {
                 })
                 .collect();
             let threshold = [11, 13, 15][case % 3];
-            let lookup = lookup_for(&queries, threshold, 3);
+            // Word size 3 takes the loop with constant shifts, 2 and 4 the general one.
+            let word_length = [3, 3, 3, 3, 2, 4][case % 6];
+            let lookup = lookup_for(&queries, threshold, word_length);
             let longest = lookup.longest_chain.max(1) as usize;
             // A translated frame in ncbistdaa: residues 1..=25 (X = 21, stop = 25 included),
             // sentinel 0 after the last one.

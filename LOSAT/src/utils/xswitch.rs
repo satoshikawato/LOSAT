@@ -100,11 +100,19 @@ use std::sync::OnceLock;
 /// `LOSAT_X_SEEDCOMPACT` (TBLASTX's unit path keeps the saved init HSPs of a unit as 28-byte
 /// records copied out at their exact length, `tblastx/x_pair_par.rs`) was added after the change as
 /// a switch that is off unless set and joined the set once it was verified and timed with it on.
+/// `LOSAT_X_BPCLUT` (the compressed lookup table of `blastp-fast` built flat, in three passes, by
+/// the search's pool at more than one thread, `tblastx/lookup/x_clut_direct.rs`) and
+/// `LOSAT_X_BPLKPFLAT` (how that build is scheduled and where its vectors come from, which acts
+/// only where `LOSAT_X_BPCLUT` builds the table on the pool, `tblastx/lookup/x_clut_par.rs`) were
+/// added after the change as switches that are off unless set and joined the set together once
+/// they were verified and timed with them on.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
     "LOSAT_X_BNSTREAM",
+    "LOSAT_X_BPCLUT",
     "LOSAT_X_BPDIAG",
     "LOSAT_X_BPGAP",
+    "LOSAT_X_BPLKPFLAT",
     "LOSAT_X_BPLUT",
     "LOSAT_X_BPPCOMPACT",
     "LOSAT_X_BPPFREE",

@@ -6675,7 +6675,7 @@ fn blastp_compressed_lookup(
         &locations,
         query_chunk,
     )?;
-    // EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW, off unless set): the same table built
+    // EXPERIMENT (LOSAT_X_BPCLUT / LOSAT_X_BPCLUTSHADOW; BPCLUT is a strict-set switch): the same table built
     // flat, each cell's hits in one slice in NCBI's scan order, with the same refusal
     // (lookup/x_clut_direct.rs), by the search's pool when it has more than one thread
     // (lookup/x_clut_par.rs); without the switches `try_build_blosum62_compressed_lookup`.

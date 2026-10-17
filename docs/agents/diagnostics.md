@@ -176,6 +176,7 @@ export LOSAT_X_BXLUT=1
 export LOSAT_X_BXPAR=1
 export LOSAT_X_BXPOOL=1
 export LOSAT_X_BXSCAN=1
+export LOSAT_X_BXSCANBF=1
 export LOSAT_X_BXSEGMEMO=1
 export LOSAT_X_CODONFAST=1
 export LOSAT_X_COMPFAST=1
@@ -2074,6 +2075,31 @@ Scheduling (each value computed by one thread with the original function; order 
   s, NCBI 31.3 s); human genome x one protein 0.87 at one thread (32.3 -> 28.0 s, NCBI 44.9 s) and
   at 8 threads (5.10 -> 4.46 s); fly genome x one batch at 8 threads 0.76 (4.04 -> 3.06 s); E. coli
   MG1655 x 16 batches at 8 threads 0.95.
+- `LOSAT_X_TBXSCANBF=1` TBLASTX (speed; not in the strict set: off unless set, to any value, and
+  `LOSAT_X_DEFAULT` does not touch it; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
+  (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/run_impl.rs`) walk the subject
+  ranges as NCBI's `s_BlastAaScanSubject` (`blast_aascan.c:48-131`) does and scan each range with
+  the branch-free loop of `LOSAT_X_TBNSCANBF` (`tblastn/x_scan_bf.rs` `x_scan_one_range_bf`), passing
+  on the room the earlier ranges of the call left, so every call returns NCBI's pairs and scan range
+  (test `x_scan_subject_bf_equals_ncbi_scan_on_random_subjects` against `s_blast_aa_scan_subject`:
+  TBLASTX tables, subjects of one or many ranges, offset arrays down to the longest chain). The
+  offset arrays get three entries more while the variable is set. Only a table whose presence bits
+  are set in fewer than half of its backbone cells is scanned this way (`x_scan_bf_for`, decided once
+  per unit group and once per reference batch): the table of a translated query of more than about
+  60 kb holds every word of the 25 common letters, its bit is set at nearly every subject word, the
+  branch is predicted, and the list only adds work (0.4-0.8 % slower on those tables). Timed on the
+  workstation (perf-si-20261012 session SCANBF-1, node 1, one binary, without and with the variable
+  in turn, one output hash per case; time with / without): the first L kb of MelaMJNV against
+  PemoMJNVA at one thread 0.72-0.73 at 2 and 5 kb (presence density 0.16-0.29), 0.81 at 10 kb
+  (0.37), 0.91 at 20 kb (0.44), 0.98 at 40 kb (0.49); from 80 kb (0.51; MelaMJNV x PemoMJNVA,
+  AP027131 x AP027133) NCBI's loop runs in both and the time is the same (0.999-1.004; before the
+  density rule 1.004-1.007); 3 fruit fly transcripts (2.0 kb) against the fruit fly genome database
+  0.84 at one thread (9.74 -> 8.22 s, NCBI BLAST+ 2.17.0 `-db` 9.56 s; branch misses 531 M -> 361 M,
+  cycles 30.3 G -> 25.6 G) and 0.87 at 8 (2.29 -> 2.00 s, NCBI 2.48 s); 10 fruit fly transcripts
+  (18.8 kb) against the zebrafish cDNA database 0.85 at one thread (59.95 -> 50.81 s) and at 8
+  (7.83 -> 6.68 s, NCBI 5.88 s). With `LOSAT_X_PAIRPARGATE` these 10 transcripts run in the
+  reference frame loop, which scans each subject frame once with the batch's table: 0.99 (47.33 ->
+  46.91 s).
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject` without `-subject_loc`: each subject record's letters are
   packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
   database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of
@@ -2220,7 +2246,20 @@ Scheduling (each value computed by one thread with the original function; order 
   tables are not compared for a subject shorter than a word less one letter, whose one scan position the
   reference reads past the sentinel); at exit `[X_SHADOW] BXDIAG subjects_compared=N ...`. With
   `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2|scalar|per-hit> subjects= cells= batched_hits=
-  candidates=`. Measured 2026-10-17 on the workstation (node 1, one pinned core per arm with its HT sibling
+  candidates= min_hits_per_cell= tables_fused= tables_other= hits_per_cell=LEAST-MOST`. A query batch whose
+  lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 500,
+  `0` fuses every batch) is scanned by `LOSAT_X_BXSCAN`'s direct loop instead, which is faster there; the
+  choice is made once per thread and table and changes only the speed (the timing line counts the choices and
+  gives the least and most hits per cell, in hundredths). Where the two loops break even (one thread, `-db`
+  UniRef50 2026_03 volume 00, both with `LOSAT_X_BXSCANBF=1`, every batch fused against the direct loop, 2
+  rounds each; pieces of one 2.1-kb fly cDNA): hits per used cell 1.76 (300 nt) x1.20 the direct loop's
+  time, 2.34 (600 nt; 41.48-41.66 s against 34.49-34.74 s) x1.20, 3.56 (1,000 nt; 68.62-68.86 / 63.55-64.06)
+  x1.08, 4.91 (1,500 nt; 90.08-90.69 / 90.53-90.54) x1.00, 6.77 (2.1 kb) x0.94; 800 cDNAs x yeast (4.52-68.09
+  per batch) x0.72. With the rule (dev 7a5a7f87 and the rule, `LOSAT_X_BXDIAG=1` against the direct loop, both
+  with `LOSAT_X_BXSCANBF=1`, 2 rounds): 300-nt case 21.28 / 21.42 s against 21.20 / 21.68 s (no batch fused;
+  x1.20 before the rule), 2.1-kb cDNA 115.83 / 116.79 s against 124.72 / 125.10 s (x0.93), 800 cDNAs x yeast
+  62.59 / 62.65 s against 87.55 / 88.18 s (x0.71; 185 of the 186 tables fused at 2 threads, the other one had
+  4.52 hits per cell). Measured 2026-10-17 on the workstation (node 1, one pinned core per arm with its HT sibling
   idle, the two arms of a pair at once on two cores, swapped every round; 800 fly 2L cDNAs x yeast proteome
   `-db`, `-evalue 1e-5`, one thread; every output the same bytes as NCBI BLAST+ 2.17.0): off 87.21-87.42 s,
   on 64.83-65.41 s (x0.742-0.750; user-space cycles x0.743-0.750, instructions 723 -> 493 G; 4 rounds);
@@ -2233,8 +2272,9 @@ Scheduling (each value computed by one thread with the original function; order 
   default loop: a 300-nt cDNA piece against the first UniRef50 volume (1.5 hits per cell) took 38.08-38.25 s
   against 35.76-36.00 s (one thread, 3 rounds, the build with LOSAT_X_BXSCANBF's const parameter; instructions
   250 G against 185 G); one 2.1-kb cDNA (4.6 hits per cell) 123.9-125.4 s against 140.4-140.7 s.
-- `LOSAT_X_BXSCANBF=1` (BLASTX, speed; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it; acts where the standard lookup table is scanned by `LOSAT_X_BXSCAN`'s
+- `LOSAT_X_BXSCANBF=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's decision of that day
+  (perf-si-20261012 DECISIONS 175) on the timings below: on by default, `=0` turns it off, and with
+  `LOSAT_X_DEFAULT=0` it is off unless set; acts where the standard lookup table is scanned by `LOSAT_X_BXSCAN`'s
   direct loop or `LOSAT_X_BXDIAG`'s fused loop; the compressed table and the reference word finder keep their
   scans) the subject words with lookup hits found without a branch per word, by tblastn's loop of
   `LOSAT_X_TBNSCANBF` (`tblastn/x_scan_bf.rs`): the direct loop calls `x_scan_one_range_bf` (NCBI's pairs,
@@ -2259,7 +2299,13 @@ Scheduling (each value computed by one thread with the original function; order 
   run-time flag, blastx's instance had two scan loops calling the cell test, which the compiler then kept as a
   function called per cell (BXDIAG 41.3-42.3 s on the 300-nt case). The timings above are of the const form;
   BXDIAG without this switch then takes 0.96 of the time before this change on the 300-nt case (37.70-38.10 s
-  against 39.20-40.01 s) and 0.99 on 800 cDNAs (63.04 / 63.05 s against 63.45 / 63.72 s).
+  against 39.20-40.01 s) and 0.99 on 800 cDNAs (63.04 / 63.05 s against 63.45 / 63.72 s). Timed again for the
+  default set on the same day (dev 7a5a7f87, whose candidate loop has tblastn's constant shifts of #273; one build,
+  the default against `LOSAT_X_BXSCANBF=0`, the pairs as above): 300-nt case 21.34-21.36 s against 35.46-35.54 s
+  (x0.60, 3 rounds; it reports no hit at `-evalue 1e-5`, and at the default `-evalue` both give the same rows),
+  NCBI `-db` 32.01 / 32.34 s beside 21.10 / 21.21 s (0.66); one 2.1-kb cDNA 125.24 / 129.20 s against 140.98 /
+  144.30 s (x0.89), NCBI 146.17 / 145.90 s beside 124.73 / 124.64 s (0.85); 800 cDNAs x yeast 87.18 / 87.26 s against
+  87.76 / 88.12 s (x0.99-1.00).
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (distinct composition-adjustment inputs),

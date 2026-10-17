@@ -236,6 +236,9 @@ pub fn prepare_queries(
     crate::blastinput::value_parsers::genetic_code(&options.query_gencode.to_string())
         .map_err(anyhow::Error::msg)?;
     let code = GeneticCode::try_from_id(options.query_gencode).map_err(anyhow::Error::msg)?;
+    // Diagnostic (LOSAT_TIMING): the contexts' layout and the six-frame translation for the
+    // common line (utils/xtiming.rs). No NCBI counterpart.
+    let t_translate = crate::utils::xtiming::clock();
     let (mut contexts, mut max_length, mut min_length) = (Vec::new(), 0, usize::MAX);
     let mut offset = 0;
     for (q, record) in records.iter().enumerate() {
@@ -294,6 +297,7 @@ pub fn prepare_queries(
             }
         }
     }
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Translate, t_translate);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup.hpp:192-197
     // ```c++
     //     TSeqPos size() const {
@@ -389,6 +393,9 @@ pub fn prepare_queries(
         {
             use rayon::prelude::*;
             let buffer = &buffer;
+            // Diagnostic (LOSAT_TIMING): the parallel SEG's wall time for the common line
+            // (utils/xtiming.rs). No NCBI counterpart.
+            let t_seg = crate::utils::xtiming::clock();
             seg_ready = contexts
                 .par_iter()
                 .map(|context| {
@@ -403,6 +410,7 @@ pub fn prepare_queries(
                     })
                 })
                 .collect();
+            crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
         }
     }
     for (context_index, context) in contexts.iter_mut().enumerate() {
@@ -429,6 +437,9 @@ pub fn prepare_queries(
             if let Some(ready) = seg_ready.get_mut(context_index).and_then(Option::take) {
                 masks.extend(ready);
             } else {
+                // Diagnostic (LOSAT_TIMING): this context's SEG for the common line
+                // (utils/xtiming.rs). No NCBI counterpart.
+                let t_seg = crate::utils::xtiming::clock();
                 masks.extend(
                     masker
                         .mask_sequence(
@@ -437,6 +448,7 @@ pub fn prepare_queries(
                         .into_iter()
                         .map(|r| (r.start as i32, r.end as i32 - 1)),
                 );
+                crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
             }
         }
         context.masks = combine_masks(masks);

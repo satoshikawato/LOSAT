@@ -826,6 +826,9 @@ fn read_subject_set(
         subject_file,
         ReaderConfig::subject("TBLASTX", false, settings.data_loaders),
     );
+    // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
+    // counterpart.
+    let t_read_fasta = crate::utils::xtiming::clock();
     let read_subject_records = {
         let mut stderr = std::io::stderr();
         read_subjects(
@@ -834,6 +837,7 @@ fn read_subject_set(
             &mut |message: &[u8]| std::io::Write::write_all(&mut stderr, message),
         )?
     };
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(subject_source);
     let (subjects, subject_placements) =
         match cut_subjects(&read_subject_records, subject_range.as_ref())? {
@@ -1092,7 +1096,11 @@ fn search_cli(
     // (`run_in_pool`). What ends the reading (the end of the input, an `eEOF`, a reader
     // error or LOSAT's rejection of a Seq-id line) comes in the batch that NCBI reads it in,
     // after the reports of the batches before (`run_in_pool`).
+    // Diagnostic (LOSAT_TIMING): the query FASTA for the common line (utils/xtiming.rs). No NCBI
+    // counterpart.
+    let t_read_fasta = crate::utils::xtiming::clock();
     let QueryRecords { records, end } = read_queries(&mut query_source);
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
@@ -2290,6 +2298,9 @@ impl BatchReports<'_> {
         warnings: &[Vec<u8>],
         epilog: bool,
     ) -> Result<()> {
+        // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); written
+        // after the batches are searched. No NCBI counterpart.
+        let t_output = crate::utils::xtiming::clock();
         let reported = done.searched.len();
         let queries = &self.query_runs.records[..reported];
         let mut hits = report_order(self.args, queries, done.hits);
@@ -2324,7 +2335,7 @@ impl BatchReports<'_> {
                 )
             }
         };
-        write_tblastx_outputs(
+        let written = write_tblastx_outputs(
             hits,
             outputs,
             &TblastxReportRun {
@@ -2341,7 +2352,9 @@ impl BatchReports<'_> {
                 epilog,
                 v1_titles: self.v1_titles,
             },
-        )
+        );
+        crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
+        written
     }
 
     /// Writes what NCBI has written when a query batch fails, before its error: the reports
@@ -2549,14 +2562,21 @@ fn search_query_batch(
     //    frame_offsets[context+1] = offset;
     // }
     // ```
+    // Diagnostic (LOSAT_TIMING): the queries' six-frame translation for the common line
+    // (utils/xtiming.rs). No NCBI counterpart.
+    let t_translate = crate::utils::xtiming::clock();
     let mut query_frames: Vec<Vec<QueryFrame>> = queries_raw
         .iter()
         .map(|r| generate_frames(r.seq(), &query_code))
         .collect();
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Translate, t_translate);
 
     // NCBI blast_args.cpp:404-406: opt.SetSegFilteringWindow(...);
     // opt.SetSegFilteringLocut(...); opt.SetSegFilteringHicut(...);
     if let Some(params) = args.seg_spec()?.params() {
+        // Diagnostic (LOSAT_TIMING): the queries' SEG for the common line (utils/xtiming.rs). No
+        // NCBI counterpart.
+        let t_seg = crate::utils::xtiming::clock();
         let seg = SegMasker::new(params.window, params.locut, params.hicut);
         for frames in &mut query_frames {
             for frame in frames {
@@ -2593,6 +2613,7 @@ fn search_query_batch(
                 }
             }
         }
+        crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     }
 
     t_read_queries = t_phase_read_queries.elapsed();
@@ -2666,6 +2687,9 @@ fn search_query_batch(
         ),
     };
     t_build_lookup = t_phase_build_lookup.elapsed();
+    // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs). No
+    // NCBI counterpart.
+    crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
 
     // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
     // Compute per-context x_dropoff using kbp[context]->Lambda.
@@ -6270,6 +6294,9 @@ fn search_query_batch(
 
     if timing_enabled {
         let t_search = t_search_start.elapsed();
+        // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs).
+        // No NCBI counterpart.
+        crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::Search, t_search);
         let scan_s = scan_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
         let scan_n = scan_calls.load(AtomicOrdering::Relaxed);
         let ungapped_s = ungapped_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;

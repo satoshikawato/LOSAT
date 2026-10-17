@@ -1,7 +1,9 @@
 //! Internal TBLASTN protein lookup and translated-subject seed stage.
 //! The public search remains unsupported; this is a bounded Stage C diagnostic.
 
-use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
+use crate::algorithm::blastp::encoding::{
+    encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
+};
 use crate::algorithm::tblastx::blast_aascan::{s_blast_aa_scan_subject_one_range, BlastOffsetPair};
 use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, build_ncbi_lookup_for_profile};
 use crate::algorithm::tblastx::translation::{generate_frames, QueryFrame};
@@ -28,7 +30,30 @@ pub(super) fn encode_tblastn_lookup_query(
     seg: Option<&SegParams>,
     mask_lowercase: bool,
 ) -> QueryFrame {
-    let mut frame = encode_protein_query_frame_with_seg(query, seg);
+    encode_tblastn_lookup_query_with(query, seg, mask_lowercase, false)
+}
+
+/// `encode_tblastn_lookup_query`; with LOSAT_TIMING the encoding and the SEG go to the common
+/// line (utils/xtiming.rs). For the driver's query preparation on the calling thread only.
+pub(super) fn encode_tblastn_lookup_query_timed(
+    query: &[u8],
+    seg: Option<&SegParams>,
+    mask_lowercase: bool,
+) -> QueryFrame {
+    encode_tblastn_lookup_query_with(query, seg, mask_lowercase, true)
+}
+
+fn encode_tblastn_lookup_query_with(
+    query: &[u8],
+    seg: Option<&SegParams>,
+    mask_lowercase: bool,
+    timed: bool,
+) -> QueryFrame {
+    let mut frame = if timed {
+        encode_protein_query_frame_with_seg_timed(query, seg)
+    } else {
+        encode_protein_query_frame_with_seg(query, seg)
+    };
     if !mask_lowercase {
         return frame;
     }

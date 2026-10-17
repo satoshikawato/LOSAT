@@ -163,6 +163,48 @@ pub(crate) fn x_scan_one_range_bf(
     totalhits
 }
 
+/// EXPERIMENT (LOSAT_X_TBNSCANBF): the mask of a table of word size 3 and 5-bit letters.
+const X_MASK_W3C5: usize = (1 << 15) - 1;
+
+/// EXPERIMENT (LOSAT_X_TBNSCANBF): `x_candidates::<3, 5>` for the mask `X_MASK_W3C5`, as a
+/// counted loop over the new letters with the candidate's position kept shifted: the same
+/// rolling index (`ComputeTableIndexIncremental`), presence test and candidates.
+#[inline(always)]
+fn x_candidates_w3c5(
+    subject: &[u8],
+    pv: *const u32,
+    block: (usize, usize),
+    index: &mut usize,
+    cand: &mut [MaybeUninit<u64>; X_BLOCK],
+) -> usize {
+    let words = block.1 - block.0 + 1;
+    // SAFETY: the new letter of the word at `s` is `subject[s + 2]`, read for `s <= s_last`
+    // as NCBI's loop reads it.
+    let letters = unsafe { subject.as_ptr().add(block.0 + 2) };
+    let out = cand.as_mut_ptr().cast::<u64>();
+    let mut ix = *index;
+    let mut n = 0usize;
+    let mut position = (block.0 as u64) << 32;
+    for k in 0..words {
+        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:121-127
+        // ```c
+        // return ((index << charsize) | word[wordsize - 1]) & mask;
+        // ```
+        // SAFETY: as above.
+        let new_char = unsafe { *letters.add(k) } as usize;
+        ix = ((ix << 5) | new_char) & X_MASK_W3C5;
+        // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:55-57 (PV_TEST)
+        // SAFETY: `ix` is masked to the backbone space the presence vector covers.
+        let bit = (unsafe { *pv.add(ix >> PV_ARRAY_BTS) } >> (ix & PV_ARRAY_MASK)) & 1;
+        // SAFETY: `n <= k < X_BLOCK`.
+        unsafe { out.add(n).write(position | ix as u64) };
+        n += bit as usize;
+        position += 1 << 32;
+    }
+    *index = ix;
+    n
+}
+
 /// EXPERIMENT (LOSAT_X_TBNSCANBF): writes the candidates of the words `block.0 ..= block.1`
 /// (`position << 32 | index`, the list's length advanced by the presence bit) and returns how
 /// many; `index` is the rolling index of the word before `block.0` and becomes that of
@@ -178,8 +220,11 @@ pub(crate) fn x_block_candidates(
     index: &mut usize,
     cand: &mut [MaybeUninit<u64>; X_BLOCK],
 ) -> usize {
-    // tblastn's and blastx's table (word size 3, 5-bit letters) with the shifts as constants.
-    if table.0 == 3 && table.1 == 5 {
+    // tblastn's and blastx's table (word size 3, 5-bit letters) with the shifts and the mask as
+    // constants.
+    if table.0 == 3 && table.1 == 5 && table.2 == X_MASK_W3C5 {
+        x_candidates_w3c5(subject, pv, block, index, cand)
+    } else if table.0 == 3 && table.1 == 5 {
         x_candidates::<3, 5>(subject, pv, table, block, index, cand)
     } else {
         x_candidates::<0, 0>(subject, pv, table, block, index, cand)

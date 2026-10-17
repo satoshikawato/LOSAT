@@ -1765,6 +1765,21 @@ impl XPairPar {
                 let offset_pairs_ptr = scratch.offset_pairs.as_ptr();
                 // [C] for (i = 0; i < hits; ++i)
                 for i in 0..hits as usize {
+                    // EXPERIMENT (v4 P0-6, build-time, no switch): prefetch the cell of the hit 16
+                    // ahead. A prefetch has no architectural effect.
+                    #[cfg(target_arch = "x86_64")]
+                    if i + 16 < hits as usize {
+                        // SAFETY: i + 16 < hits <= offset_pairs.len(); the cell index is below
+                        // width as for every hit (comment below); a prefetch never faults.
+                        unsafe {
+                            let ahead = &*offset_pairs_ptr.add(i + 16);
+                            let cell =
+                                ahead.q_off.wrapping_sub(ahead.s_off).wrapping_sub(lo) as usize;
+                            core::arch::x86_64::_mm_prefetch::<{ core::arch::x86_64::_MM_HINT_T0 }>(
+                                diag_ptr.add(cell) as *const i8,
+                            );
+                        }
+                    }
                     // SAFETY: i < hits <= offset_array_size <= offset_pairs.len().
                     let pair = unsafe { &*offset_pairs_ptr.add(i) };
                     let query_offset = pair.q_off;

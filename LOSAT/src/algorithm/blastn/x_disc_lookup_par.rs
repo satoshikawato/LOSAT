@@ -1,7 +1,9 @@
-//! EXPERIMENT (LOSAT_X_DISCLUTPAR, shadow LOSAT_X_DISCLUTPARSHADOW): the discontiguous megablast
-//! tables of `build_disc_mb_lookup` (`s_FillDiscMBTable`) filled by the threads of the search
-//! pool, each thread owning a fixed set of table cells of both templates' tables. The plan of the
-//! cells and the pool test are those of LOSAT_X_PAIRPAR's megablast table (`x_mb_lookup_par.rs`).
+//! EXPERIMENT (LOSAT_X_DISCLUTPAR, in the strict set: default ON since 2026-10-17, off with
+//! `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0`; shadow LOSAT_X_DISCLUTPARSHADOW): the
+//! discontiguous megablast tables of `build_disc_mb_lookup` (`s_FillDiscMBTable`) filled by the
+//! threads of the search pool, each thread owning a fixed set of table cells of both templates'
+//! tables. The plan of the cells and the pool test are those of LOSAT_X_PAIRPAR's megablast table
+//! (`x_mb_lookup_par.rs`).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:754-767,775-786,788-804
 //! ```c
@@ -69,7 +71,7 @@
 //!
 //! The words are read in the loop's order: the stream of all positions of all unmasked ranges of
 //! all queries (`segments`), cut into chunks of `CHUNK_POSITIONS` positions, each chunk done in
-//! three phases, each a set of P jobs that returns when all have returned:
+//! three phases and a prefault round, each a set of P jobs that returns when all have returned:
 //! - A (read): the chunk's positions are cut into P spans in stream order; reader `a` reads the
 //!   words that end in its span with the loop's own statements (the same ambiguity resets per
 //!   range, `accum` and `index`), entering a range up to `template_length - 1` positions before
@@ -80,6 +82,9 @@
 //!   the loop's. It appends `(index, ecode1)` to bucket `(a, owner of ecode1's block)` and
 //!   `(index, ecode2)` to the second template's bucket `(a, owner of ecode2's block)`, in reading
 //!   order.
+//! - P (prefault, see "The prefault round" below; only while a page of the cells or of the
+//!   presence vector is not touched yet): the jobs write 0 to one element of each page of those
+//!   arrays that B of this chunk writes and no job has touched yet.
 //! - B (update): owner `o` takes the buckets `(0, o)`, `(1, o)`, ..., `(P-1, o)`: every word of the
 //!   chunk whose cell lies in its blocks, in reading order (the spans follow each other). For each
 //!   it makes the loop's update of the cell (the presence bit when the cell is empty, else the
@@ -161,6 +166,28 @@
 //! P x 8 KiB at word size 11 and P x 32 KiB at word size 12 (128 KiB and 512 KiB at P = 16; at
 //! most 255 x 32 KiB = 8 MiB), freed at the end of the fill.
 //!
+//! The prefault round (phase P, scheduling only). Between phases A and B of a chunk a fourth set
+//! of P jobs writes 0 to one element of each page of `hashtable`, `hashtable2` and `pv_array`
+//! that phase B of the chunk writes and that was not touched before (`Fill::prefault`, which
+//! gives the argument): each page has one toucher, the owner of the block of its middle element
+//! (`page_touchers`), which touches it once a reader has marked it in phase A (while an array has
+//! a page not touched, the readers mark the page of every word's cell and presence-vector word,
+//! in bits of their own per array). Each write stores 0 over the 0 the element was allocated
+//! with, and only on a page the fill writes anyway, so the tables and the pages the fill maps
+//! (its max RSS) are what they are without it. On the cDNA inputs measured every page was touched
+//! in a table's first chunk, after which the round and the marks stop; a page that no word reaches
+//! (on a table's first or last page few cells may lie) keeps them going in later chunks, which
+//! stays exact and costs the readers a mark per word. Why: phase B reads a cell before writing it,
+//! so on a page the process has not touched yet the kernel first maps its shared zero page and
+//! then, at the write, a page of the process's own (two faults, and a copy-on-write that flushes
+//! the page from the TLBs of the other CPUs of the search); written first, the page takes one
+//! fault and no flush (on the workstation, 1,775 cDNAs at 16 threads: 118,000 TLB shootdowns
+//! received by the search's CPUs without the round, 900 with it). `next_pos` is written without
+//! a read and is not touched (touching it cost more than it saved). Memory: the readers' marks
+//! take, per reader, one bit per page of the cells of each template and of the presence vector,
+//! on whole cache lines (576 bytes per template at word size 11, 2,112 at 12; 9 KiB and 33 KiB at
+//! P = 16), and the touchers' lists 4 bytes per page; freed at the end of the fill.
+//!
 //! The pool. The switch acts only where a LOSAT search pool of two threads or more is current
 //! (`x_mb_lookup_par::pool_threads`: the calling thread is a rayon worker, and its pool has two
 //! threads or more). `build_disc_mb_lookup` is called by `coordination::build_lookup_tables`,
@@ -199,14 +226,17 @@
 //! the wall times of every build of the process (allocation, fill and longest chain, not the
 //! shadow's second build); with LOSAT_X_QBATCHPAR it includes the slots' builds, which run
 //! concurrently. A second line, `[TIMING] disc_lookup_split: alloc= loop= pool_fill= chain=
-//! chunks= read_wall= read_max= read_sum= read_late= update_... link_... buckets_peak=`, splits
-//! the same builds: the allocation of the tables, the fill by the original loop, the fill on the
-//! pool and the longest chain (seconds, summed); then, for the pool fills only (not the shadow's
-//! partitioned build), their chunks, and per phase (read = A, update = B, link = C), summed over
-//! the chunks: the calling worker's wall time from before the phase's first job to the return of
-//! its last (`wall`), the longest job (`max`), the jobs' summed running time (`sum`) and the
-//! latest start of a job after the phase began (`late`); and the most the buckets of one fill
-//! reserved (both templates). The jobs' start and end are taken only with LOSAT_TIMING.
+//! chunks= read_wall= read_max= read_sum= read_late= update_... link_... buckets_peak=
+//! x_prefault_wall= x_prefault_max= x_prefault_sum= x_prefault_late= x_prefault_rounds=
+//! x_prefault_touches=`, splits the same builds: the allocation of the tables, the fill by the
+//! original loop, the fill on the pool (the prefault rounds included) and the longest chain
+//! (seconds, summed); then, for the pool fills only (not the shadow's partitioned build), their
+//! chunks, and per phase (read = A, update = B, link = C), summed over the chunks: the calling
+//! worker's wall time from before the phase's first job to the return of its last (`wall`), the
+//! longest job (`max`), the jobs' summed running time (`sum`) and the latest start of a job after
+//! the phase began (`late`); the most the buckets of one fill reserved (both templates); and the
+//! same four times of the prefault rounds (phase P), the number of rounds and the zeros they
+//! wrote (one per page touched). The jobs' start and end are taken only with LOSAT_TIMING.
 
 use super::x_mb_lookup_par::{plan, pool_threads, Shared, K_COMPRESSION_FACTOR_SHIFT};
 use super::{
@@ -217,15 +247,16 @@ use crate::algorithm::blastn::disc_lookup::compute_discontiguous_index;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-/// No NCBI counterpart: reads the switches once (LOSAT_X_DISCLUTPAR, LOSAT_X_DISCLUTPARSHADOW;
-/// off unless set to any value, not in the strict set; the shadow implies the switch). They
-/// choose between two LOSAT code paths with the same result and change no value NCBI computes.
+/// No NCBI counterpart: reads the switches once (LOSAT_X_DISCLUTPAR, in the strict set: on
+/// unless `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0`; LOSAT_X_DISCLUTPARSHADOW, off unless set
+/// to any value, implies the switch). They choose between two LOSAT code paths with the same
+/// result and change no value NCBI computes.
 fn switches() -> (bool, bool) {
     static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();
     *SWITCHES.get_or_init(|| {
         let shadow = std::env::var_os("LOSAT_X_DISCLUTPARSHADOW").is_some();
         (
-            shadow || std::env::var_os("LOSAT_X_DISCLUTPAR").is_some(),
+            shadow || crate::utils::xswitch::on("LOSAT_X_DISCLUTPAR"),
             shadow,
         )
     })
@@ -294,12 +325,18 @@ impl PhaseTimes {
     }
 }
 
-// No NCBI counterpart (LOSAT_TIMING only): the phases' split, the chunks of the pool fills and the
-// largest bucket memory of one pool fill (bytes reserved after a phase A, both templates).
-static PHASE_TIMES: [PhaseTimes; 3] = [const { PhaseTimes::new() }; 3];
+// No NCBI counterpart (LOSAT_TIMING only): the phases' split (read, update, link, and the
+// prefault round, `PREFAULT_PHASE`), the chunks of the pool fills, the largest bucket memory of one
+// pool fill (bytes reserved after a phase A, both templates), and the prefault rounds and their
+// page touches (the zeros written, `Fill::prefault`).
+static PHASE_TIMES: [PhaseTimes; 4] = [const { PhaseTimes::new() }; 4];
 const PHASE_NAMES: [&str; 3] = ["read", "update", "link"];
+/// The index of the prefault round in `PHASE_TIMES` (printed with an `x_prefault_` prefix).
+const PREFAULT_PHASE: usize = 3;
 static POOL_CHUNKS: AtomicU64 = AtomicU64::new(0);
 static BUCKET_PEAK_BYTES: AtomicU64 = AtomicU64::new(0);
+static PREFAULT_ROUNDS: AtomicU64 = AtomicU64::new(0);
+static PREFAULT_TOUCHES: AtomicU64 = AtomicU64::new(0);
 
 /// No NCBI counterpart: LOSAT_TIMING is set (read once).
 fn timing_on() -> bool {
@@ -395,6 +432,16 @@ pub fn print_summary() {
         split.push_str(&format!(
             " buckets_peak={:.1}MiB",
             load(&BUCKET_PEAK_BYTES) as f64 / 1048576.0
+        ));
+        let t = &PHASE_TIMES[PREFAULT_PHASE];
+        split.push_str(&format!(
+            " x_prefault_wall={:.4}s x_prefault_max={:.4}s x_prefault_sum={:.4}s x_prefault_late={:.4}s x_prefault_rounds={} x_prefault_touches={}",
+            s(&t.wall),
+            s(&t.max),
+            s(&t.sum),
+            s(&t.late),
+            load(&PREFAULT_ROUNDS),
+            load(&PREFAULT_TOUCHES)
         ));
         eprintln!("{split}");
     }
@@ -671,6 +718,241 @@ impl SharedBuckets {
     }
 }
 
+/// No NCBI counterpart (scheduling only): the page size the prefault round assumes, 4 KiB (the
+/// smallest page of the targets; where pages are larger, some get more than one touch, which writes
+/// the same 0).
+const PAGE_BYTES: usize = 4096;
+
+/// log2 of the 4-byte elements of a page (every array the round touches holds 4-byte elements).
+const PAGE_ELEMS_SHIFT: usize = 10;
+
+const _: () = assert!(PAGE_BYTES == 4 << PAGE_ELEMS_SHIFT);
+const _: () = assert!(std::mem::size_of::<PvArrayType>() == 4);
+
+/// The element offset of `ptr` (4-byte elements) in its page: element `i` of an array that starts
+/// there lies on the array's page `(offset + i) >> PAGE_ELEMS_SHIFT` (its first page is 0).
+fn page_offset<T>(ptr: *const T) -> usize {
+    (ptr as usize % PAGE_BYTES) / 4
+}
+
+/// The pages of an array of `len` 4-byte elements from page offset `offset`.
+fn pages_of(offset: usize, len: usize) -> usize {
+    if len == 0 {
+        0
+    } else {
+        ((offset + len - 1) >> PAGE_ELEMS_SHIFT) + 1
+    }
+}
+
+/// The arrays whose pages the prefault round touches (`FaultJob::untouched`, `Faults::marks`, and
+/// the tests' log of touches): `HASHTABLE` + template and `PV_ARRAY`.
+const HASHTABLE: usize = 0;
+const PV_ARRAY: usize = 2;
+
+/// No NCBI counterpart (scheduling only): 512 page bits on a 64-byte line of their own.
+#[repr(C, align(64))]
+#[derive(Clone, Copy)]
+struct BitLine([u64; 8]);
+
+/// No NCBI counterpart (scheduling only): one bit per page of one array for each reader: reader
+/// `r`'s bits are the `stride` words from word `r * stride`, a whole number of lines, so no two
+/// readers' bits share a line. A set bit: in phase A of the current chunk, the reader read a word
+/// whose cell (or the cell's presence-vector word) lies on that page.
+struct PageBits {
+    lines: Vec<BitLine>,
+    stride: usize,
+}
+
+impl PageBits {
+    fn new(pages: usize, parts: usize) -> Self {
+        let stride = pages.div_ceil(64).div_ceil(8) * 8;
+        Self {
+            lines: vec![BitLine([0; 8]); parts * stride / 8],
+            stride,
+        }
+    }
+
+    fn shared(&mut self) -> SharedBits {
+        SharedBits {
+            ptr: self.lines.as_mut_ptr().cast::<u64>(),
+            stride: self.stride,
+        }
+    }
+}
+
+/// No NCBI counterpart (scheduling only): `PageBits` shared by the jobs: in phase A each reader
+/// writes only its own bits; in the prefault round the jobs only read them.
+#[derive(Clone, Copy)]
+struct SharedBits {
+    ptr: *mut u64,
+    stride: usize,
+}
+
+// SAFETY: in phase A each job writes only its own reader's bits, in the prefault round they are
+// only read, the phases are separated by joins, and the bits outlive the phases.
+unsafe impl Send for SharedBits {}
+// SAFETY: as above.
+unsafe impl Sync for SharedBits {}
+
+impl SharedBits {
+    /// Clears reader `r`'s bits.
+    ///
+    /// SAFETY: phase A, job `r`.
+    unsafe fn clear(self, r: usize) {
+        // SAFETY: reader `r`'s bits (above).
+        unsafe { std::ptr::write_bytes(self.ptr.add(r * self.stride), 0, self.stride) };
+    }
+
+    /// Sets reader `r`'s bit of page `page`.
+    ///
+    /// SAFETY: phase A, job `r`; `page < 64 * stride`.
+    #[inline(always)]
+    unsafe fn mark(self, r: usize, page: usize) {
+        debug_assert!(page < 64 * self.stride);
+        // SAFETY: in reader `r`'s bits (above).
+        unsafe { *self.ptr.add(r * self.stride + (page >> 6)) |= 1u64 << (page & 63) };
+    }
+
+    /// Whether reader `r`'s bit of page `page` is set.
+    ///
+    /// SAFETY: no job writes the bits (the prefault round); `page < 64 * stride`.
+    #[inline(always)]
+    unsafe fn marked(self, r: usize, page: usize) -> bool {
+        debug_assert!(page < 64 * self.stride);
+        // SAFETY: as above.
+        unsafe { *self.ptr.add(r * self.stride + (page >> 6)) & (1u64 << (page & 63)) != 0 }
+    }
+}
+
+/// Tests only: one write of the prefault round: the array (`HASHTABLE` + template or `PV_ARRAY`),
+/// the element, and its value before and after the write.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+struct Touch {
+    array: usize,
+    index: usize,
+    before: u32,
+    after: u32,
+}
+
+/// The log of the prefault round's writes: in tests a list of `Touch`es, else nothing.
+#[cfg(test)]
+type TouchLog = Vec<Touch>;
+#[cfg(not(test))]
+type TouchLog = ();
+
+/// No NCBI counterpart (scheduling only): what toucher `j` of a fill keeps for the prefault round,
+/// on lines of its own (it writes them in the round; the calling thread reads them between
+/// phases): its pages of `hashtable`, `hashtable2` and `pv_array` (`page_touchers`) that are not
+/// touched yet (`untouched`), and the number of zeros it wrote.
+#[repr(C, align(64))]
+#[derive(Default)]
+struct FaultJob {
+    untouched: [Vec<u32>; 3],
+    touches: usize,
+    log: TouchLog,
+}
+
+/// No NCBI counterpart (scheduling only): the `FaultJob`s of a fill shared by the jobs, each of
+/// which uses only its own; the calling thread reads them between two phases.
+#[derive(Clone, Copy)]
+struct SharedJobs {
+    ptr: *mut FaultJob,
+    len: usize,
+}
+
+// SAFETY: each job of a phase uses only its own `FaultJob`, the phases are separated by joins,
+// and the `FaultJob`s outlive the phases.
+unsafe impl Send for SharedJobs {}
+// SAFETY: as above.
+unsafe impl Sync for SharedJobs {}
+
+impl SharedJobs {
+    /// SAFETY: no other job uses `FaultJob` `j` during the borrow, which ends with the phase.
+    #[allow(clippy::mut_from_ref)]
+    #[inline(always)]
+    unsafe fn at<'b>(self, j: usize) -> &'b mut FaultJob {
+        debug_assert!(j < self.len);
+        unsafe { &mut *self.ptr.add(j) }
+    }
+}
+
+/// No NCBI counterpart (scheduling only): the prefault's state of one fill: the page offsets
+/// (`page_offset`) and lengths of `hashtable`, `hashtable2` (empty for one template) and
+/// `pv_array`, the readers' marks of their pages (`PageBits`), and the jobs' `FaultJob`s.
+#[derive(Clone, Copy)]
+struct Faults {
+    offsets: [usize; 3],
+    lens: [usize; 3],
+    marks: [SharedBits; 3],
+    jobs: SharedJobs,
+}
+
+/// No NCBI counterpart (scheduling only): the middle element of page `page` of an array of `len`
+/// 4-byte elements from page offset `offset` (`page < pages_of(offset, len)`).
+fn middle(offset: usize, len: usize, page: usize) -> usize {
+    let lo = (page << PAGE_ELEMS_SHIFT).saturating_sub(offset);
+    let hi = (((page + 1) << PAGE_ELEMS_SHIFT) - offset).min(len);
+    debug_assert!(lo < hi);
+    (lo + hi - 1) / 2
+}
+
+/// No NCBI counterpart (scheduling only): gives each page of `hashtable`, `hashtable2` and
+/// `pv_array` (`Faults::offsets`, `lens`) one toucher, the owner of the block (`plan`) that holds
+/// its middle element (for `pv_array`, the block of the cells of that presence-vector word), in
+/// that job's `FaultJob::untouched`, in rising order.
+fn page_touchers(
+    jobs: &mut [FaultJob],
+    owner: &[u8],
+    block_shift: usize,
+    pv_array_bts: usize,
+    offsets: [usize; 3],
+    lens: [usize; 3],
+) {
+    for array in [HASHTABLE, HASHTABLE + 1, PV_ARRAY] {
+        let shift = if array == PV_ARRAY {
+            block_shift - pv_array_bts
+        } else {
+            block_shift
+        };
+        for page in 0..pages_of(offsets[array], lens[array]) {
+            let m = middle(offsets[array], lens[array], page);
+            let j = owner[(m >> shift).min(owner.len() - 1)] as usize;
+            jobs[j].untouched[array].push(page as u32);
+        }
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:717-718
+// ```c
+//       mb_lt->hashtable2 = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
+// ```
+/// No NCBI counterpart (scheduling only): writes 0 to element `i` of `t`, which holds 0 (the
+/// caller's argument): a page touch that leaves the value as it is. A volatile write, so that it
+/// is made even though it stores the value the element has. In tests it records the write with
+/// the element's value before and after it (`Touch`).
+///
+/// SAFETY: `i < t.len`, and no other job reads or writes element `i` during the phase.
+#[inline(always)]
+unsafe fn touch(t: Shared<u32>, i: usize, array: usize, log: &mut TouchLog) {
+    debug_assert!(i < t.len);
+    #[cfg(test)]
+    // SAFETY: as the caller's.
+    let before = unsafe { t.get(i) };
+    // SAFETY: as the caller's.
+    unsafe { std::ptr::write_volatile(t.ptr.add(i), 0) };
+    #[cfg(test)]
+    log.push(Touch {
+        array,
+        index: i,
+        before,
+        // SAFETY: as the caller's.
+        after: unsafe { t.get(i) },
+    });
+    #[cfg(not(test))]
+    let _ = (array, log);
+}
+
 /// No NCBI counterpart (scheduling only): one unmasked range of one query (a location of
 /// `s_FillDiscMBTable`) and the offset of its first position in the stream of all positions the
 /// word loop reads, in reading order.
@@ -725,6 +1007,8 @@ struct Fill<'a, 'w> {
     second: SharedBuckets,
     /// The owners' private counters of the first and the second template.
     counters: [SharedCounters; 2],
+    /// The prefault round's state (`Fill::prefault`).
+    faults: Faults,
 }
 
 impl Fill<'_, '_> {
@@ -758,10 +1042,13 @@ impl Fill<'_, '_> {
     /// positions from `s0` on are those of the loop.
     ///
     /// The job first empties its buckets, giving back the room above `keep` entries that a bucket
-    /// grew in an earlier chunk (`empty`).
+    /// grew in an earlier chunk (`empty`). For the prefault round (`Fill::prefault`), for each
+    /// array `k` with `mark[k]` (`HASHTABLE` + template, `PV_ARRAY`), it also marks in its own bits
+    /// (`Faults::marks`) the page of each word's cell and of the cell's presence-vector word (one
+    /// that the update writes: `array_idx < pv_array.len()`), after clearing them.
     ///
-    /// SAFETY: no other job of the phase uses the buckets `(a, *)`.
-    unsafe fn read(&self, a: usize, s0: usize, s1: usize) {
+    /// SAFETY: no other job of the phase uses the buckets `(a, *)` or reader `a`'s marks.
+    unsafe fn read(&self, a: usize, s0: usize, s1: usize, mark: [bool; 3]) {
         let words = self.words;
         let two_templates = words.two_templates;
         let template_length = words.template_length;
@@ -774,6 +1061,16 @@ impl Fill<'_, '_> {
                 }
             }
         }
+        let faults = self.faults;
+        for (k, &on) in mark.iter().enumerate() {
+            if on {
+                // SAFETY: reader `a`'s marks are this job's.
+                unsafe { faults.marks[k].clear(a) };
+            }
+        }
+        let [mark1, mark2, mark_pv] = mark;
+        let [cells1, cells2, pv] = faults.offsets;
+        let (pv_len, bts) = (faults.lens[PV_ARRAY], self.tables.pv_array_bts);
         if s0 >= s1 {
             return;
         }
@@ -811,6 +1108,16 @@ impl Fill<'_, '_> {
                         value: ecode1,
                     })
                 };
+                // SAFETY (the marks): reader `a`'s bits; the pages are in the arrays.
+                if mark1 {
+                    unsafe {
+                        faults.marks[0].mark(a, (cells1 + ecode1 as usize) >> PAGE_ELEMS_SHIFT)
+                    };
+                }
+                if mark_pv && ((ecode1 as usize) >> bts) < pv_len {
+                    let page = (pv + ((ecode1 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
+                    unsafe { faults.marks[PV_ARRAY].mark(a, page) };
+                }
                 if !two_templates {
                     continue;
                 }
@@ -823,8 +1130,98 @@ impl Fill<'_, '_> {
                         value: ecode2,
                     })
                 };
+                if mark2 {
+                    unsafe {
+                        faults.marks[1].mark(a, (cells2 + ecode2 as usize) >> PAGE_ELEMS_SHIFT)
+                    };
+                }
+                if mark_pv && ((ecode2 as usize) >> bts) < pv_len {
+                    let page = (pv + ((ecode2 as usize) >> bts)) >> PAGE_ELEMS_SHIFT;
+                    unsafe { faults.marks[PV_ARRAY].mark(a, page) };
+                }
             }
             g += 1;
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:776-786
+    // ```c
+    //          if (mb_lt->hashtable[ecode1] == 0) {
+    //             PV_SET(pv_array, ecode1, pv_array_bts);
+    //          }
+    // ...
+    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
+    //          mb_lt->hashtable[ecode1] = index;
+    // ```
+    /// Phase P (the prefault round, between A and B), toucher `j`: writes 0 to one element of each
+    /// page of `hashtable`, `hashtable2` or `pv_array` that phase B of this chunk writes and that
+    /// is not touched yet (of this job's share), so that phase B finds the pages mapped. It
+    /// changes no value, so phase B, and the tables, are what they are without it (no NCBI
+    /// counterpart; scheduling only).
+    ///
+    /// Each page of the three arrays has one toucher, the owner of the block that holds its middle
+    /// element (`page_touchers`). Toucher `j` takes each of its pages not touched yet
+    /// (`FaultJob::untouched`) that a reader marked in phase A of this chunk, writes 0 to the
+    /// page's middle element (in a block of `j`), and counts the page as touched. While a page of
+    /// an array is untouched, the readers mark (`Fill::read`) the page of every word's cell and
+    /// of the cell's presence-vector word, and the round runs in every such chunk; phase B writes
+    /// only those cells and words. So the fill writes a page of these arrays only after its
+    /// toucher has touched it, in the round of the same chunk or of an earlier one: a page not
+    /// touched yet holds the zeros it was allocated with, and no other job uses its elements in
+    /// this round. A marked page is one the fill writes: phase B writes the cell of every word,
+    /// and the presence-vector word of a cell when the cell's first word comes (in this chunk or
+    /// an earlier one). Once every page of an array is touched, the readers stop marking it, and
+    /// the round runs no more.
+    ///
+    /// So the round writes 0 over 0, and only on pages the fill writes: the tables, and the
+    /// pages the fill maps (its max RSS), are what they are without it. This needs the three
+    /// arrays zeroed at the start of the fill, as their callers allocate them (NCBI's `calloc`:
+    /// `build_disc_mb_lookup`, the shadow).
+    ///
+    /// Why. Phase B reads a cell (and a presence-vector word) before it writes it. On a page the
+    /// process has not touched, the read maps the kernel's shared zero page and the write then
+    /// replaces it with a page of its own: a second fault, and a copy-on-write that flushes the
+    /// page's entry from the TLBs of the other CPUs running the search. Written first, the page
+    /// takes one fault and no flush. On the workstation one thread touching 4,096 fresh pages took
+    /// 8,193 faults and 13-18 ms reading first, 4,063 faults and 7 ms writing first; in the pool
+    /// fill of 1,775 cDNAs at 16 threads the CPUs of the search received 118,000 TLB shootdowns
+    /// without the round and 900 with it. `next_pos` is not touched: phase C writes it without
+    /// reading, so its faults take no zero page and no flush, and touching its pages in the round
+    /// cost more than it saved (fill 0.89 of the fill without any round at 16 threads, against
+    /// 0.79 with the cells alone; 1.01 against 0.91 at 4 threads).
+    ///
+    /// SAFETY: no other job of the phase uses `FaultJob` `j`; the readers' marks are only read;
+    /// the elements written are as above.
+    unsafe fn prefault(&self, j: usize) {
+        let faults = self.faults;
+        // SAFETY: `FaultJob` `j` is this job's.
+        let FaultJob {
+            untouched,
+            touches,
+            log,
+        } = unsafe { faults.jobs.at(j) };
+        let tables = self.tables;
+        for (k, pages) in untouched.iter_mut().enumerate() {
+            if pages.is_empty() {
+                continue;
+            }
+            let array = match k {
+                HASHTABLE => tables.first.hashtable,
+                PV_ARRAY => tables.pv_array,
+                _ => tables.second.hashtable,
+            };
+            let (offset, len, marks) = (faults.offsets[k], faults.lens[k], faults.marks[k]);
+            pages.retain(|&page| {
+                let page = page as usize;
+                // SAFETY: the marks are only read in this round; `page` is in the array.
+                if !(0..self.parts).any(|r| unsafe { marks.marked(r, page) }) {
+                    return true;
+                }
+                // SAFETY: an element of an untouched page of toucher `j` (above).
+                unsafe { touch(array, middle(offset, len, page), k, log) };
+                *touches += 1;
+                false
+            });
         }
     }
 
@@ -1042,12 +1439,18 @@ pub(super) fn fill(parts: usize, words: &DiscWords<'_>, tables: DiscTables<'_>, 
 /// most they reserve: phases B and C add nothing), in entries; 0 when not measured. In tests also
 /// `counter_owners`, the number of owners' private copies of the counters (of both templates) that
 /// hold a non-zero counter before the flush; 0 otherwise.
-#[derive(Clone, Copy, Debug, Default)]
+/// Also the prefault rounds run and the zeros they wrote (`touches`), and in tests every one of
+/// those writes (`touch_log`).
+#[derive(Clone, Debug, Default)]
 struct FillStats {
     chunks: usize,
     peak_entries: usize,
+    prefault_rounds: usize,
+    touches: usize,
     #[cfg(test)]
     counter_owners: usize,
+    #[cfg(test)]
+    touch_log: Vec<Touch>,
 }
 
 /// `fill` with the chunk size and a `probe` that each phase-B job calls first, on its thread.
@@ -1097,6 +1500,34 @@ fn fill_with<P: Fn(u8) + Sync>(
             parts,
         ),
     ];
+    // The prefault's state (`Faults`): the arrays' page offsets and lengths (no `hashtable2` for
+    // one template), the readers' marks, and each job's `FaultJob` with its pages to touch.
+    let offsets = [
+        page_offset(hashtable.as_ptr()),
+        page_offset(hashtable2.as_ptr()),
+        page_offset(pv_array.as_ptr()),
+    ];
+    let lens = [
+        hashtable.len(),
+        if words.two_templates {
+            hashtable2.len()
+        } else {
+            0
+        },
+        pv_array.len(),
+    ];
+    let mut marks = [0, 1, 2].map(|k| PageBits::new(pages_of(offsets[k], lens[k]), parts));
+    let mut jobs: Vec<FaultJob> = (0..parts).map(|_| FaultJob::default()).collect();
+    page_touchers(&mut jobs, &owner, block_shift, pv_array_bts, offsets, lens);
+    let faults = Faults {
+        offsets,
+        lens,
+        marks: [marks[0].shared(), marks[1].shared(), marks[2].shared()],
+        jobs: SharedJobs {
+            ptr: jobs.as_mut_ptr(),
+            len: jobs.len(),
+        },
+    };
     let fill = Fill {
         words,
         segments: &segments,
@@ -1115,6 +1546,7 @@ fn fill_with<P: Fn(u8) + Sync>(
         first: SharedBuckets::new(&mut first, parts),
         second: SharedBuckets::new(&mut second, parts),
         counters: [counters[0].shared(), counters[1].shared()],
+        faults,
     };
     // LOSAT_TIMING's split covers the pool fills only (not the shadow's partitioned build).
     let mut clock = (in_pool && timing_on()).then(|| JobClock::new(parts));
@@ -1129,17 +1561,31 @@ fn fill_with<P: Fn(u8) + Sync>(
                 start + (end - start) * (a + 1) / parts,
             )
         };
-        // SAFETY (all three phases): job `i` of a phase uses only its own buckets and cells (see
-        // `SharedBuckets`, `Fill::read`, `Fill::update`, `Fill::link`); `run_jobs` returns after
-        // every job of the phase has returned.
+        // The arrays with a page not touched yet: the readers mark their pages in this chunk,
+        // and the prefault round runs (`Fill::prefault`).
+        // SAFETY: between two phases.
+        let mark = [0, 1, 2].map(|k| {
+            (0..parts).any(|j| unsafe { !fill.faults.jobs.at(j).untouched[k].is_empty() })
+        });
+        // SAFETY (all four phases): job `i` of a phase uses only its own buckets, cells, marks
+        // and `FaultJob` (see `SharedBuckets`, `Fill::read`, `Fill::prefault`, `Fill::update`,
+        // `Fill::link`); `run_jobs` returns after every job of the phase has returned.
         run_phase(&mut clock, 0, parts, in_pool, |a| {
             let (s0, s1) = span(a);
-            unsafe { fill.read(a, s0, s1) }
+            unsafe { fill.read(a, s0, s1, mark) }
         });
         if measure {
             // SAFETY: between two phases.
             let reserved = unsafe { fill.first.capacity() + fill.second.capacity() };
             stats.peak_entries = stats.peak_entries.max(reserved);
+        }
+        // The prefault round, in every chunk with marks (`Fill::prefault`).
+        let round = mark.contains(&true);
+        if round {
+            run_phase(&mut clock, PREFAULT_PHASE, parts, in_pool, |j| unsafe {
+                fill.prefault(j)
+            });
+            stats.prefault_rounds += 1;
         }
         run_phase(&mut clock, 1, parts, in_pool, |o| {
             probe(o as u8);
@@ -1164,12 +1610,19 @@ fn fill_with<P: Fn(u8) + Sync>(
     if words.two_templates {
         counters[1].flush(helper_array2, &owner, counter_shift);
     }
+    stats.touches = jobs.iter().map(|job| job.touches).sum();
+    #[cfg(test)]
+    {
+        stats.touch_log = jobs.iter_mut().flat_map(|job| job.log.drain(..)).collect();
+    }
     if clock.is_some() {
         POOL_CHUNKS.fetch_add(stats.chunks as u64, Ordering::Relaxed);
         BUCKET_PEAK_BYTES.fetch_max(
             (stats.peak_entries * std::mem::size_of::<Entry>()) as u64,
             Ordering::Relaxed,
         );
+        PREFAULT_ROUNDS.fetch_add(stats.prefault_rounds as u64, Ordering::Relaxed);
+        PREFAULT_TOUCHES.fetch_add(stats.touches as u64, Ordering::Relaxed);
     }
     stats
 }
@@ -1288,6 +1741,7 @@ mod tests {
     use super::*;
     use crate::algorithm::blastn::disc_lookup::{get_disc_template_type, DiscWordType};
     use crate::utils::dust::MaskedInterval;
+    use std::collections::BTreeSet;
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804
     // ```c
@@ -1510,16 +1964,84 @@ mod tests {
                 fill_disc_mb_tables(&words, tables);
                 FillStats::default()
             }
+            // `fill` is `fill_with` in the default chunks without a probe.
             How::Parts(parts, in_pool) => {
-                fill(parts, &words, tables, in_pool);
-                FillStats::default()
+                fill_with(parts, &words, tables, in_pool, CHUNK_POSITIONS, &|_| {})
             }
             How::Chunked(parts, chunk, in_pool) => {
                 fill_with(parts, &words, tables, in_pool, chunk, &|_| {})
             }
         };
+        if !matches!(how, How::Serial) {
+            check_prefault(&b, &stats);
+        }
         b.longest_chain = disc_longest_chain(&b.helper_array, &b.helper_array2, two_templates);
         (b, stats)
+    }
+
+    /// The pages of `v` that hold an element other than 0 (a fast test per page: most pages are
+    /// all zero or all written).
+    fn nonzero_pages(v: &[u32]) -> BTreeSet<usize> {
+        static ZEROS: [u32; 1024] = [0; 1024];
+        let base = v.as_ptr() as usize;
+        let mut pages = BTreeSet::new();
+        let mut i = 0;
+        while i < v.len() {
+            let page = (base + 4 * i) / PAGE_BYTES;
+            let end = (((page + 1) * PAGE_BYTES - base) / 4).min(v.len());
+            if v[i..end] != ZEROS[..end - i] {
+                pages.insert(page);
+            }
+            i = end;
+        }
+        pages
+    }
+
+    /// The pages the fill wrote, per array of the prefault's numbering (`HASHTABLE` + template,
+    /// `PV_ARRAY`), read from the filled tables: the pages with an element other than 0 (the fill
+    /// writes a word's index, at least 1, to its cell, and sets bits in presence-vector words).
+    fn written_pages(b: &Built) -> [BTreeSet<usize>; 3] {
+        [
+            nonzero_pages(&b.hashtable),
+            nonzero_pages(&b.hashtable2),
+            nonzero_pages(&b.pv_array),
+        ]
+    }
+
+    /// The prefault round of a partitioned fill of `b` (the arrays it filled in place), from its
+    /// log of writes (`FillStats::touch_log`): each wrote 0 over 0, and the pages it wrote to are,
+    /// array by array, exactly the pages the fill wrote (`written_pages`): none that the fill
+    /// does not write (so it maps no page the fill would not map), and every one it writes.
+    /// Returns the pages touched per array.
+    fn check_prefault(b: &Built, stats: &FillStats) -> [BTreeSet<usize>; 3] {
+        let arrays: [&[u32]; 3] = [&b.hashtable, &b.hashtable2, &b.pv_array];
+        let mut touched: [BTreeSet<usize>; 3] = Default::default();
+        for t in &stats.touch_log {
+            assert!(
+                t.before == 0 && t.after == 0,
+                "the prefault wrote {} over {} at element {} of array {}",
+                t.after,
+                t.before,
+                t.index,
+                t.array
+            );
+            let v = arrays[t.array];
+            assert!(t.index < v.len(), "{t:?}");
+            touched[t.array].insert((v.as_ptr() as usize + 4 * t.index) / PAGE_BYTES);
+        }
+        assert_eq!(stats.touches, stats.touch_log.len());
+        let written = written_pages(b);
+        for k in 0..3 {
+            assert!(
+                touched[k] == written[k],
+                "array {k}: touched {} pages, the fill wrote {}; touched but not written {:?}, written but not touched {:?}",
+                touched[k].len(),
+                written[k].len(),
+                touched[k].difference(&written[k]).take(5).collect::<Vec<_>>(),
+                written[k].difference(&touched[k]).take(5).collect::<Vec<_>>()
+            );
+        }
+        touched
     }
 
     /// The serial tables have work in them: chains (counters above zero), and for two templates
@@ -2377,6 +2899,180 @@ mod tests {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786
+    // ```c
+    //          mb_lt->next_pos[index] = mb_lt->hashtable[ecode1];
+    //          mb_lt->hashtable[ecode1] = index;
+    // ```
+    // The prefault round (`Fill::prefault`) on search pools of 2, 5 and 16 threads and off a pool
+    // in 1, 3 and 64 parts, word sizes 11 and 12, one and two templates: a query of 400 letters
+    // (chunks of 97 positions and the default chunk) and one of 1.2 million letters (the default
+    // chunk, and chunks of 5,000 on the pool of 5). The tables are the loop's, and
+    // `check_prefault` (which every partitioned build of these tests runs) finds 0 written over 0
+    // and the pages touched equal to the pages the fill wrote, array by array (`next_pos` is never
+    // touched). The short query leaves most pages of the cells untouched by both; with the long
+    // one every page of the cells is written but perhaps the end pages (with the allocator's
+    // 16-byte offset the last page holds 4 cells), and each page touched is touched exactly once
+    // (one toucher per page); the rounds run in the chunks where a page was still untouched.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn prefault_touches_the_pages_the_fill_writes() {
+        let mut rng = Lcg(0xFA17_0001);
+        let small = Case {
+            queries: vec![(0..400).map(|_| rng.below(4) as u8).collect()],
+            offsets: vec![0],
+            masks: Vec::new(),
+        };
+        let long = Case {
+            queries: vec![(0..1_200_000)
+                .map(|i| if i % 7919 < 2 { 14 } else { rng.below(4) as u8 })
+                .collect()],
+            offsets: vec![0],
+            masks: vec![vec![MaskedInterval {
+                start: 600_000,
+                end: 610_000,
+            }]],
+        };
+        let combos = [
+            (11usize, DiscWordType::Coding, 18usize),
+            (12, DiscWordType::TwoTemplates, 21),
+        ];
+        let cell_pages = |b: &Built, k: usize| {
+            let v = if k == 0 { &b.hashtable } else { &b.hashtable2 };
+            pages_of(page_offset(v.as_ptr()), v.len())
+        };
+        let check = |case: &Case, combo, how: How, reference: &Built, long: bool| {
+            let what = format!(
+                "{combo:?} {:?}",
+                match how {
+                    How::Serial => (0, 0, false),
+                    How::Parts(p, in_pool) => (p, CHUNK_POSITIONS, in_pool),
+                    How::Chunked(p, c, in_pool) => (p, c, in_pool),
+                }
+            );
+            let (got, stats) = build_stats(case, combo, how);
+            assert!(got == *reference, "{what}: tables differ");
+            let touched = check_prefault(&got, &stats);
+            let templates = 1 + usize::from(combo.1 == DiscWordType::TwoTemplates);
+            for t in 0..templates {
+                let pages = cell_pages(&got, t);
+                if long {
+                    let n = touched[HASHTABLE + t].len();
+                    assert!(n + 2 >= pages, "{what} template {t}: {n} of {pages} pages");
+                    let writes = stats.touch_log.iter().filter(|w| w.array == HASHTABLE + t);
+                    assert_eq!(writes.count(), n, "{what} template {t}: one touch per page");
+                } else {
+                    let n = touched[HASHTABLE + t].len();
+                    assert!(
+                        n > 0 && n < pages / 2,
+                        "{what} template {t}: {n} of {pages} pages"
+                    );
+                }
+            }
+            assert!(!touched[PV_ARRAY].is_empty(), "{what}");
+            assert!(
+                stats.prefault_rounds >= 1 && stats.prefault_rounds <= stats.chunks,
+                "{what}"
+            );
+        };
+        for &combo in &combos {
+            let small_reference = build(&small, combo, How::Serial);
+            let long_reference = build(&long, combo, How::Serial);
+            for parts in [1usize, 3, 64] {
+                for chunk in [97usize, CHUNK_POSITIONS] {
+                    check(
+                        &small,
+                        combo,
+                        How::Chunked(parts, chunk, false),
+                        &small_reference,
+                        false,
+                    );
+                }
+            }
+            check(&long, combo, How::Parts(3, false), &long_reference, true);
+            for threads in [2usize, 5, 16] {
+                crate::utils::threading::with_search_pool(threads, "blastn", |_pool| {
+                    check(
+                        &small,
+                        combo,
+                        How::Chunked(threads, 97, true),
+                        &small_reference,
+                        false,
+                    );
+                    check(
+                        &small,
+                        combo,
+                        How::Parts(threads, true),
+                        &small_reference,
+                        false,
+                    );
+                    check(
+                        &long,
+                        combo,
+                        How::Parts(threads, true),
+                        &long_reference,
+                        true,
+                    );
+                    if threads == 5 {
+                        check(
+                            &long,
+                            combo,
+                            How::Chunked(threads, 5000, true),
+                            &long_reference,
+                            true,
+                        );
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            }
+        }
+    }
+
+    // Each page of the cells (one and two templates, word sizes 11 and 12) and of the presence
+    // vector has one toucher, the owner of the block of its middle element, for 1, 2, 3, 16, 64
+    // and 255 parts and page offsets 0, 4 and 1,023 elements; the pages come in rising order.
+    #[test]
+    fn every_page_has_one_toucher() {
+        for word_size in [11usize, 12] {
+            let table_size = 1usize << (2 * word_size);
+            for approx in [100usize, 100_000] {
+                let (pv_size, bts) = compute_mb_pv_params(table_size, approx, false, word_size);
+                for parts in [1usize, 2, 3, 16, 64, 255] {
+                    let (block_shift, owner) = plan(table_size, bts, parts);
+                    for offset in [0usize, 4, 1023] {
+                        let offsets = [offset, (offset + 7) % 1024, (offset + 512) % 1024];
+                        let lens = [table_size, table_size, pv_size];
+                        let mut jobs: Vec<FaultJob> =
+                            (0..parts).map(|_| FaultJob::default()).collect();
+                        page_touchers(&mut jobs, &owner, block_shift, bts, offsets, lens);
+                        for k in [HASHTABLE, HASHTABLE + 1, PV_ARRAY] {
+                            let pages = pages_of(offsets[k], lens[k]);
+                            let mut seen = vec![0u8; pages];
+                            for (j, job) in jobs.iter().enumerate() {
+                                let list = &job.untouched[k];
+                                assert!(list.windows(2).all(|w| w[0] < w[1]));
+                                for &page in list {
+                                    seen[page as usize] += 1;
+                                    let m = middle(offsets[k], lens[k], page as usize);
+                                    let cell = if k == PV_ARRAY { m << bts } else { m };
+                                    assert_eq!(owner[cell >> block_shift] as usize, j);
+                                }
+                            }
+                            assert!(
+                                seen.iter().all(|&n| n == 1),
+                                "word size {word_size} parts {parts} offset {offset} array {k}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // The bucket headers and the owners' copies of the counters lie on 64-byte lines of their own:
     // a `Bucket` is one line (size and alignment 64), so the P x P headers of the grid are 64
     // bytes apart on line boundaries; a `CounterLine` is one line, and each owner's copy starts on
@@ -2388,6 +3084,19 @@ mod tests {
         assert_eq!(std::mem::size_of::<Bucket>(), 64);
         assert_eq!(std::mem::align_of::<CounterLine>(), 64);
         assert_eq!(std::mem::size_of::<CounterLine>(), 64);
+        // The prefault's per-job state and the readers' page marks too.
+        assert_eq!(std::mem::align_of::<FaultJob>(), 64);
+        assert_eq!(std::mem::size_of::<FaultJob>() % 64, 0);
+        assert_eq!(std::mem::align_of::<BitLine>(), 64);
+        assert_eq!(std::mem::size_of::<BitLine>(), 64);
+        for (pages, parts) in [(1usize, 1usize), (4097, 16), (16385, 3), (33, 255)] {
+            let mut marks = PageBits::new(pages, parts);
+            let shared = marks.shared();
+            assert!(shared.stride % 8 == 0 && shared.stride * 64 >= pages);
+            for r in 0..parts {
+                assert_eq!(shared.ptr.wrapping_add(r * shared.stride) as usize % 64, 0);
+            }
+        }
         for parts in [1usize, 2, 3, 4, 16] {
             let grid: Vec<Bucket> = (0..parts * parts).map(|_| Bucket::default()).collect();
             for (i, bucket) in grid.iter().enumerate() {

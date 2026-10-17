@@ -11,6 +11,16 @@
 //! and `s_range`. The offset array must have `X_SCAN_BF_SLACK` entries after `array_size`
 //! (`x_offset_pairs_len`); the entries past the returned count are not part of the result.
 //!
+//! The branch-free loop gains where the presence bit is set at a hard-to-predict share of the
+//! subject words: on the tables of short queries. A table that holds words in half of its cells
+//! or more (a translated query of more than about 60 kb: every word of the 25 common letters is
+//! then in it) has its bit set at nearly every subject word, the branch is predicted, and the
+//! list costs more than it saves; such a table keeps NCBI's loop (`x_scan_bf_for`, decided once
+//! per table). Measured on the workstation (perf-si-20261012 session SCANBF-1, one thread, the
+//! first L kb of MelaMJNV x PemoMJNVA): time with the branch-free loop over NCBI's loop 0.73 at
+//! 2 and 5 kb (presence density 0.16-0.29 of the cells), 0.81 at 10 kb (0.37), 0.91 at 20 kb
+//! (0.44), 0.98 at 40 kb (0.49), 1.000 at 80 kb (0.51), 1.004-1.007 from 160 kb (0.53).
+//!
 //! The switch is read once, off unless set (not in the strict set). It acts on the scans of the
 //! unit path (`x_pair_par.rs`, `LOSAT_X_PAIRPAR`) and of the reference frame loop
 //! (`blast_engine/run_impl.rs`).
@@ -35,14 +45,30 @@ pub(crate) fn x_offset_pairs_len(array_size: i32) -> usize {
     array_size.max(0) as usize + slack
 }
 
+// No NCBI counterpart: chooses between two scans with the same result (module text).
+/// EXPERIMENT (LOSAT_X_TBXSCANBF): whether `lookup` is scanned by `x_scan_subject_bf`: the switch is
+/// on and fewer than half of the table's backbone cells have their presence bit set.
+pub(crate) fn x_scan_bf_for(lookup: &BlastAaLookupTable) -> bool {
+    x_tbx_scan_bf() && x_table_sparse(lookup)
+}
+
+// No NCBI counterpart (module text).
+/// EXPERIMENT (LOSAT_X_TBXSCANBF): fewer than half of the table's backbone cells have their
+/// presence bit set.
+fn x_table_sparse(lookup: &BlastAaLookupTable) -> bool {
+    let set: u64 = lookup.pv.iter().map(|word| word.count_ones() as u64).sum();
+    2 * set < lookup.backbone.len() as u64
+}
+
 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:509-511
 // ```c
 // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
 // ```
-/// EXPERIMENT (LOSAT_X_TBXSCANBF): `s_blast_aa_scan_subject`, or `x_scan_subject_bf` with the
-/// switch on (the offset array then from `x_offset_pairs_len`).
+/// EXPERIMENT (LOSAT_X_TBXSCANBF): `s_blast_aa_scan_subject`, or `x_scan_subject_bf` when
+/// `branch_free` (`x_scan_bf_for` of the table; the offset array then from `x_offset_pairs_len`).
 #[inline]
 pub(crate) fn x_scan_subject(
+    branch_free: bool,
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     seq_ranges: &[(i32, i32)],
@@ -50,7 +76,7 @@ pub(crate) fn x_scan_subject(
     array_size: i32,
     s_range: &mut [i32; 3],
 ) -> i32 {
-    if x_tbx_scan_bf() {
+    if branch_free {
         x_scan_subject_bf(
             lookup,
             subject,
@@ -261,6 +287,29 @@ mod tests {
         assert!(
             range_stops > 100,
             "{range_stops} calls ending past the first range"
+        );
+    }
+
+    // No NCBI counterpart: the choice of `x_scan_bf_for` (module text). A short query's table has
+    // its presence bit in fewer than half of the cells; with half of the cells set, NCBI's loop.
+    #[test]
+    fn x_table_sparse_counts_the_presence_bits() {
+        let mut rng = XorShift(0x0123_4567_89ab_cdef);
+        let dna: Vec<u8> = (0..2_000).map(|_| b"ACGT"[rng.below(4)]).collect();
+        let code = GeneticCode::from_id(1);
+        let karlin = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let (mut lookup, _) = build_ncbi_lookup(&[generate_frames(&dna, &code)], 13, &karlin, true);
+        assert!(x_table_sparse(&lookup));
+        let cells = lookup.backbone.len();
+        lookup.pv.fill(0);
+        for index in 0..cells / 2 {
+            lookup.pv[index >> 5] |= 1 << (index & 31);
+        }
+        assert!(!x_table_sparse(&lookup), "half of {cells} cells set");
+        lookup.pv[(cells / 2 - 1) >> 5] &= !(1 << ((cells / 2 - 1) & 31));
+        assert!(
+            x_table_sparse(&lookup),
+            "one cell fewer than half of {cells}"
         );
     }
 }

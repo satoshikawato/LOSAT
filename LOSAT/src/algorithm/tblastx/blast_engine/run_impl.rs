@@ -2884,6 +2884,9 @@ fn search_query_batch(
     // entries after `offset_array_size`.
     let offset_pairs_len =
         crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
+    // EXPERIMENT (LOSAT_X_TBXSCANBF): whether the reference frame loop scans this batch's table with
+    // the branch-free loop (decided once per table).
+    let x_scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
 
     // EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW), dispatch point 1 (per batch): the
     // gates and the exactness guard, then one lookup table per query context (each backbone chain
@@ -3738,6 +3741,7 @@ fn search_query_batch(
                         };
                         // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
                         let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+                            x_scan_bf,
                             lookup_ref,
                             subject,
                             &seq_ranges,
@@ -4743,6 +4747,7 @@ fn search_query_batch(
                         };
                         // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
                         let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+                            x_scan_bf,
                             lookup_ref,
                             subject,
                             &seq_ranges,

@@ -1898,8 +1898,10 @@ Scheduling (each value computed by one thread with the original function; order 
   function of the bytes and its configuration; the second reading starts at the same byte with the
   same calls per record (`End()`, then `GetNextSequence`), so it reads the same records with the
   same local ids, titles, letters (lower case too) and warnings, and never reaches the error or
-  `eEOF` that ended the first; each record's length is checked against the first reading's (a file
-  that changed between the two readings ends the search with LOSAT's error); the batches are cut
+  `eEOF` that ended the first; each record's length is checked against the first reading's (a record
+  whose length changed, a file that ends early or a reader error ends the search with LOSAT's error,
+  and every later reading of the search returns it; a change that keeps every record's length is
+  read as the new content, as NCBI, reading per batch, would read it); the batches are cut
   from the same lengths by the same code. Off (`off=`; the records are read before the search, as
   without the switch): `reports` (`LOSAT_X_RPTSTREAM` not set: the reports after the loop read every
   record), `standard_input` (`-query -`), `not_a_file` (a named pipe, a device such as
@@ -1912,9 +1914,12 @@ Scheduling (each value computed by one thread with the original function; order 
   and query input, then every batch the loop takes and every slot's records (`FastaRecord`: local
   id, title, letters with their case, the reader's warnings); a difference prints `[X_SHADOW]
   QSTREAM batches= records= DIFFERENT (...)` and panics; at the end of a command-line search
-  `[X_SHADOW] QSTREAM batches= records= slots= off= identical`. With `LOSAT_X_STATS` and the switch,
-  `[X_STATS] QSTREAM records= read= batches= slots= slot_copies= slot_records= stale= scan_s=
-  read_s= peak_window= off=` (slots: the slots' requests, slot_copies of them copied; stale: requests
+  `[X_SHADOW] QSTREAM batches= records= slots= off= identical` (`DIFFERENT` if a difference was found,
+  also one whose panic on a slot's thread was dropped with a batch the loop never took). With
+  `LOSAT_X_STATS` and the switch, `[X_STATS] QSTREAM records= read= batches= slots= slot_copies=
+  slot_records= kept= stale= scan_s= read_s= peak_window= off=` (slots: the slots' requests,
+  slot_copies of them copied; kept: the searched records kept for a writer after their batch, 0 where
+  `LOSAT_X_RPTSTREAM` writes each batch's reports; stale: requests
   for records the loop had passed, answered with QBATCHPAR's `Cancelled`; scan_s / read_s: the first
   and the second reading; peak_window: the most records read ahead of the loop at once). Measured on
   the workstation (2x Xeon Gold 6338, powersave, node 1, 16 cores with the siblings idle,
@@ -1927,8 +1932,9 @@ Scheduling (each value computed by one thread with the original function; order 
   blastn, 1 thread 158 -> 62 MiB (0.39; NCBI BLAST+ 2.17.0 `-db` 126 MiB in another window), 4
   threads 289 -> 209 (0.72), 16 threads 837 -> 755 (0.91); the same with dc-megablast, 1 thread 180
   -> 90 (0.50; NCBI 150), 16 threads 488 -> 413 (0.85); 13,193 cDNAs (40 MB), 1 thread 99 -> 61
-  (0.61); wall on these 0.991-1.011 (1 and 4 threads, 1-2 rounds) and 0.996-0.998 (16 threads, 3
-  rounds). Where it loses: at 16 threads on query files of 5-40 MB the slots read most of the file
+  (0.61); wall on these 0.991-1.025 (one round each at 1 thread: 1.011, 1.025 and 1.014, and
+  0.979 and 1.004 for the 96 MB file at 1 thread in another window; 0.991 at 4 threads, 2 rounds) and
+  0.996-0.998 (16 threads, 3 rounds). Where it loses: at 16 threads on query files of 5-40 MB the slots read most of the file
   ahead anyway (`peak_window` 71-93 % of the records), so max RSS stays within -1.5..+0.4 %, and the
   first reading's extra parse comes before the search: 1,775 cDNAs (5.4 MB) 0.554 -> 0.565 s (1.018,
   8 rounds; 1.021 in another window; the same code without the switch's effect 1.001 / 0.995),
@@ -1941,13 +1947,17 @@ Scheduling (each value computed by one thread with the original function; order 
   reader's window, 1.1 MiB records, digits, comments and an error at the end; the second reading
   equals the first in batches of every size, with slots' requests and stale ones, with and without
   `-query_loc`; shared chunks; the query input from the lengths equals `cut_queries`'s; a file
-  changed between the readings; the inputs that are read once) and `LOSAT/tests/blastn_query_stream.rs`
+  changed between the readings, and a slot's failed reading that fails the loop's next batch;
+  `done` releases the loop's batch; the inputs that are read once) and
+  `LOSAT/tests/blastn_query_stream.rs`
   (off / on / shadow equal in exit status, report or `-out` file and standard error, `BATCH_SIZE`
   4,000: the three tasks x outfmt 0, 6, 7 x 1 and 4 threads x `LOSAT_X_RPTSTREAM` off and on;
   `-out`, `LOSAT_X_QBATCHPAR` slots, `LOSAT_X_RPTSTREAMSHADOW`; `-query_loc`, `-subject_loc
   -lcase_masking`, `-max_target_seqs -max_hsps -subject_besthit`; a reader error late in the file
   and in the first record, a batch of queries without letters, a batch of skipped records, LOSAT's
-  refusals; standard input and `/dev/stdin`; `-db`; the switch off unless set).
+  refusals; standard input and `/dev/stdin`; `-db`; the switch off unless set; `kept=0` with
+  `LOSAT_X_RPTSTREAM` acting, with and without slots, and every searched record kept with its
+  shadow).
 - `LOSAT_X_TBNPAR=1` tblastn: preliminary stage per (frame, chunk) and redo per match in
   parallel, one pool for the search. Shadow: `LOSAT_X_TBNPARSHADOW=1`.
 - `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE` and its kept translations, so four or more query

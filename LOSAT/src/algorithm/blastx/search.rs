@@ -881,6 +881,9 @@ pub(crate) fn search_core(
                 let wave: Vec<usize> =
                     (wave_start..subjects.len().min(wave_start + wave_size)).collect();
                 let x_t = super::x_timing::lap();
+                // Diagnostic (LOSAT_TIMING): the wave's tasks (x_timing::SubjectWave). No NCBI
+                // counterpart.
+                let x_wave = super::x_timing::SubjectWave::begin();
                 let mut scheduled = {
                     #[cfg(feature = "parallel")]
                     {
@@ -906,31 +909,33 @@ pub(crate) fn search_core(
                                         .zip(worker_diagonals.par_iter_mut())
                                         .enumerate()
                                         .flat_map_iter(|(x_slot, (x_part, scratch))| {
-                                            x_part
-                                                .iter()
-                                                .enumerate()
-                                                .map(|(x_within, &oid)| {
-                                                    debug_assert_eq!(
-                                                        oid,
-                                                        wave_index * wave_size
-                                                            + x_slot * x_k
-                                                            + x_within
-                                                    );
-                                                    compute_subject(
-                                                        subjects,
-                                                        batch,
-                                                        &params,
-                                                        options,
-                                                        &lookup,
-                                                        scratch,
-                                                        xdrop,
-                                                        diagnostics,
-                                                        db_length,
-                                                        oid,
-                                                        x_containment,
-                                                    )
-                                                })
-                                                .collect::<Vec<_>>()
+                                            x_wave.task(|| {
+                                                x_part
+                                                    .iter()
+                                                    .enumerate()
+                                                    .map(|(x_within, &oid)| {
+                                                        debug_assert_eq!(
+                                                            oid,
+                                                            wave_index * wave_size
+                                                                + x_slot * x_k
+                                                                + x_within
+                                                        );
+                                                        compute_subject(
+                                                            subjects,
+                                                            batch,
+                                                            &params,
+                                                            options,
+                                                            &lookup,
+                                                            scratch,
+                                                            xdrop,
+                                                            diagnostics,
+                                                            db_length,
+                                                            oid,
+                                                            x_containment,
+                                                        )
+                                                    })
+                                                    .collect::<Vec<_>>()
+                                            })
                                         })
                                         .collect::<Vec<_>>();
                                 }
@@ -939,19 +944,21 @@ pub(crate) fn search_core(
                                     .enumerate()
                                     .map(|(within, (&oid, scratch))| {
                                         debug_assert_eq!(oid, wave_index * wave_size + within);
-                                        compute_subject(
-                                            subjects,
-                                            batch,
-                                            &params,
-                                            options,
-                                            &lookup,
-                                            scratch,
-                                            xdrop,
-                                            diagnostics,
-                                            db_length,
-                                            oid,
-                                            x_containment,
-                                        )
+                                        x_wave.task(|| {
+                                            compute_subject(
+                                                subjects,
+                                                batch,
+                                                &params,
+                                                options,
+                                                &lookup,
+                                                scratch,
+                                                xdrop,
+                                                diagnostics,
+                                                db_length,
+                                                oid,
+                                                x_containment,
+                                            )
+                                        })
                                     })
                                     .collect::<Vec<_>>()
                             })
@@ -965,6 +972,7 @@ pub(crate) fn search_core(
                     }
                 }
                 .into_iter();
+                x_wave.end();
                 super::x_timing::batch(XBatch::ScanPar, x_t);
                 let x_t_replay = super::x_timing::lap();
                 for &oid in &wave {

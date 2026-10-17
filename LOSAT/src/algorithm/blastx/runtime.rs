@@ -418,12 +418,12 @@ pub(crate) fn x_bx_batch() -> bool {
 
 // No NCBI counterpart: when the queued batches of LOSAT_X_BXBATCH are searched (as a flow instead
 // of waves); the reports, their order and the values in them are those of the waves.
-/// EXPERIMENT (LOSAT_X_BXFLOW): `LOSAT_X_BXFLOW` set (off unless set; not in the strict set; acts
-/// with LOSAT_X_BXBATCH and LOSAT_X_BXPOOL).
+/// EXPERIMENT (LOSAT_X_BXFLOW): a switch of the strict set, on unless `LOSAT_X_BXFLOW=0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set (acts with LOSAT_X_BXBATCH and LOSAT_X_BXPOOL).
 pub(crate) fn x_bx_flow() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BXFLOW").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXFLOW"))
 }
 
 thread_local! {

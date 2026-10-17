@@ -39,8 +39,9 @@
 //!   uneven work, `latest_start` the time workers take to begin, `wall - last_end` the join.
 //! - `[TIMING] blastx_subject_flow: loops=N tasks=N ahead=N taken=N wall ..s`: with
 //!   `LOSAT_X_BXSUBJFLOW` (instead of the waves), the subject loops run as a flow, their tasks,
-//!   the tasks the helpers searched ahead and those of them the loop took (the loop searched the
-//!   others itself), and the loops' wall time, the hand-over to the sink included (it is also the
+//!   the tasks searched ahead of the loop (by a helper, or by the loop's thread while it waited
+//!   for a helper's task) and those of them the loop took (it searched the others itself at their
+//!   turn), and the loops' wall time, the hand-over to the sink included (it is also the
 //!   `scan_par` of the batch line, whose `replay` is then 0).
 //! - `[TIMING] blastx_batch_<mode>: batches=N query_setup .. setup .. chunks_par .. lookup ..
 //!   scan_par .. scan_inline .. replay .. chunk_end .. batch_end .. sum ..`: the stages of

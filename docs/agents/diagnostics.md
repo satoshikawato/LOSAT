@@ -71,8 +71,9 @@ Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
   latest task start / end after the wave began: `longest` near `wall` with `busy` well below `wall x threads` is uneven
   work);
   `[TIMING] blastx_subject_flow: loops=N tasks=N ahead=N taken=N wall ..` (`LOSAT_X_BXSUBJFLOW`, below: the
-  subject loops run as a flow, their tasks, those searched ahead by the helpers and taken by the loop, and the wall
-  time, which is the batch line's `scan_par`, the hand-over to the sink included);
+  subject loops run as a flow, their tasks, those searched ahead of the loop (by a helper, or by the loop's thread while
+  it waited for a helper's task) and those of them the loop took (it searched the others itself at their turn), and
+  the wall time, which is the batch line's `scan_par`, the hand-over to the sink included);
   `[TIMING] blastx_batch_side:` / `blastx_batch_alone: batches=N query_setup .. setup .. chunks_par .. lookup .. scan_par .. scan_inline .. replay .. chunk_end .. batch_end .. sum ..`
   (the stages of a query batch in the order they run; `side` = batches searched on one thread beside others, times
   added over the threads; `alone` = a batch searched by itself, with the pool if there is one, wall times; `replay`
@@ -2185,9 +2186,11 @@ Scheduling (each value computed by one thread with the original function; order 
   BLAST+ 2.17.0 `-db`), at 8 threads 0.84-0.87; 50 cDNAs (9 batches) at 16 threads 0.56-0.58, at 8
   threads 0.76; 5 cDNAs (one batch) 1.00.
 - `LOSAT_X_BXSUBJFLOW=1` or `=k` (BLASTX, speed; in the strict set since 2026-10-17, in the pull request that added
-  it: on unless `=0` or `LOSAT_X_DEFAULT=0`; `k` from 2 to 65,536 subjects per task, otherwise 64; acts on a query chunk's
-  subject loop, `-db` and `-subject` alike, at two or more threads when no diagnostic stage traces the subjects and
-  `-window_size` plus twice the longest subject is at most 2^28): the subjects are searched as a flow of tasks of `k`
+  it: on unless `=0` or `LOSAT_X_DEFAULT=0`; `k` from 2 to 65,536 subjects per task, otherwise 64; acts on the subject
+  loop of a query batch searched as one chunk, `-db` and `-subject` alike, at two or more threads when there are more
+  than `k` subjects, no diagnostic stage traces the subjects and `-window_size` plus twice the longest subject is at
+  most 2^28; the chunks of a longer query are searched side by side on the pool, one chunk per thread,
+  `LOSAT_X_BXPAR`): the subjects are searched as a flow of tasks of `k`
   consecutive subjects instead of waves of `threads x LOSAT_X_BXCHUNK` (`blastx/x_subject_flow.rs`, exactness argument
   in its header). The other threads of the pool search tasks up to `4 x threads` ahead (`utils::xahead`, each helper
   on its own diagonal table) and the loop's thread takes the tasks in order, or searches one itself when no helper has

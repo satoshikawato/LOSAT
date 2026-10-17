@@ -189,7 +189,7 @@ fn the_flow_takes_the_subject_loop() {
         std::process::id()
     ));
     std::fs::create_dir_all(&dir).unwrap();
-    let (query, _, db) = inputs(&dir);
+    let (query, subjects, db) = inputs(&dir);
     let args = ["-db", db.as_str(), "-outfmt", "6"];
     let off = [("LOSAT_X_BXSUBJFLOW", "0"), ("LOSAT_TIMING", "1")];
     let (reference, stderr) = blastx(&query, &args, 2, &off);
@@ -201,6 +201,36 @@ fn the_flow_takes_the_subject_loop() {
     assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 1);
     assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 27);
     assert_eq!(timing(&stderr, "blastx_subject_waves", "waves"), 0);
+    // A `-subject` file takes the same loop.
+    let (subject_report, stderr) = blastx(
+        &query,
+        &["-subject", subjects.to_str().unwrap(), "-outfmt", "6"],
+        2,
+        &[("LOSAT_TIMING", "1")],
+    );
+    let (subject_reference, _) = blastx(
+        &query,
+        &["-subject", subjects.to_str().unwrap(), "-outfmt", "6"],
+        2,
+        &[("LOSAT_X_BXSUBJFLOW", "0")],
+    );
+    assert!(subject_report == subject_reference);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "loops"), 1);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 27);
+    assert_eq!(timing(&stderr, "blastx_subject_waves", "waves"), 0);
+    // The helpers search: with 856 tasks of 2 subjects at 4 threads the loop takes tasks that
+    // were searched ahead (only a helper, or the loop's thread while it waits for a helper's task,
+    // searches ahead), so the helper tables are the ones under test above.
+    let (report, stderr) = blastx(
+        &query,
+        &args,
+        4,
+        &[("LOSAT_X_BXSUBJFLOW", "2"), ("LOSAT_TIMING", "1")],
+    );
+    assert!(report == reference);
+    assert_eq!(timing(&stderr, "blastx_subject_flow", "tasks"), 856);
+    assert!(timing(&stderr, "blastx_subject_flow", "ahead") > 0);
+    assert!(timing(&stderr, "blastx_subject_flow", "taken") > 0);
     // LOSAT_X_DEFAULT=0 returns to the waves.
     let (report, stderr) = blastx(
         &query,

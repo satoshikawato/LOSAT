@@ -16,9 +16,9 @@
 //! the query chunk alone, not on the diagonal table it runs on, while no diagonal offset passes
 //! 2^30: an entry left by an earlier subject lies at least a window behind the next subject's
 //! offsets (`Diagonals::finish_subject`), as in a cleared table. `chosen` keeps the waves when
-//! `-window_size` plus twice the longest subject exceeds 2^28 (the offset is reset at
-//! INT4_MAX / 4, so it then stays below 2^29 + 2^28 < 2^30), where the bit-field wrap of NCBI's
-//! `DiagStruct` could make the table's history matter.
+//! `-window_size` plus twice the longest subject exceeds 2^28, where the bit-field wrap of NCBI's
+//! `DiagStruct` could make the table's history matter; otherwise the offset, reset at
+//! INT4_MAX / 4, stays below 2^29 + 2^28 < 2^30.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
 //! ```c

@@ -1841,9 +1841,9 @@ Scheduling (each value computed by one thread with the original function; order 
   (6 threads): identical. At 16 and 8 threads (same input, node 1 physical CPUs 32-47, 5 rounds rotated, with
   `LOSAT_X_BXFLOW=1`): 4.28 s against 5.80 s without it and NCBI's 7.06 s at 16 threads (0.61 of NCBI), 8.25 s
   against 11.33 s and 13.19 s at 8 threads (0.63). Where a lookup cell has few hits it is slower than the
-  default loop: a 300-nt cDNA piece against the first UniRef50 volume (1.5 hits per cell) took 41.3-42.3 s
-  against 35.6-36.4 s (one thread, 4 rounds; instructions 282 G against 185 G); one 2.1-kb cDNA (4.6 hits per
-  cell) 132.0-132.2 s against 140.4-140.7 s.
+  default loop: a 300-nt cDNA piece against the first UniRef50 volume (1.5 hits per cell) took 38.08-38.25 s
+  against 35.76-36.00 s (one thread, 3 rounds, the build with LOSAT_X_BXSCANBF's const parameter; instructions
+  250 G against 185 G); one 2.1-kb cDNA (4.6 hits per cell) 123.9-125.4 s against 140.4-140.7 s.
 - `LOSAT_X_BXSCANBF=1` (BLASTX, speed; not in the strict set: off unless set, to any value, and
   `LOSAT_X_DEFAULT` does not touch it; acts where the standard lookup table is scanned by `LOSAT_X_BXSCAN`'s
   direct loop or `LOSAT_X_BXDIAG`'s fused loop; the compressed table and the reference word finder keep their
@@ -1862,10 +1862,15 @@ Scheduling (each value computed by one thread with the original function; order 
   beside), time with the switch / without, the share of subject words with hits in brackets: a 300-nt fly cDNA
   piece x UniRef50 2026_03 volume 00 (2,178,834 sequences, 3.0 G residues) [34 %] default loop 21.73-22.01 s /
   35.63-36.41 s (x0.60-0.61; branch misses 1.84 G -> 0.46 G, cycles 108.9 G -> 64.3 G; 4 rounds), with BXDIAG
-  29.00-29.44 / 41.34-42.25 (x0.70), NCBI `-db` 32.20 / 32.53 s beside 21.77 / 22.12 s (0.68); one 2.1-kb cDNA x
-  the same volume [84 %] 125.64 / 126.05 against 140.41 / 140.72 (x0.89-0.90), with BXDIAG 125.6 / 126.2 against
-  132.0 / 132.2 (x0.95), NCBI 145.69 / 146.47 beside 125.45 / 125.52 (0.86); 800 fly cDNAs x yeast proteome [98 %]
-  87.70-87.90 / 87.95-88.31 (x0.997), with BXDIAG 63.87-64.42 / 63.93-64.88 (x0.99-1.00).
+  26.08-26.32 / 38.09-38.61 (x0.68), NCBI `-db` 32.20 / 32.53 s beside 21.77 / 22.12 s (0.68); one 2.1-kb cDNA x
+  the same volume [84 %] 125.64 / 126.05 against 140.41 / 140.72 (x0.89-0.90), with BXDIAG 117.68 / 118.63
+  against 123.88 / 125.37 (x0.95), NCBI 145.69 / 146.47 beside 125.45 / 125.52 (0.86); 800 fly cDNAs x yeast
+  proteome [98 %] 87.70-87.90 / 87.95-88.31 (x0.997), with BXDIAG 63.22 / 63.44 against 63.77 / 63.84 (x0.99).
+  The switch is a const parameter of the fused loop's instances (`x_scan_two_hit_in_with::<BRANCH_FREE>`): with a
+  run-time flag, blastx's instance had two scan loops calling the cell test, which the compiler then kept as a
+  function called per cell (BXDIAG 41.3-42.3 s on the 300-nt case). The timings above are of the const form;
+  BXDIAG without this switch then takes 0.96 of the time before this change on the 300-nt case (37.70-38.10 s
+  against 39.20-40.01 s) and 0.99 on 800 cDNAs (63.04 / 63.05 s against 63.45 / 63.72 s).
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (distinct composition-adjustment inputs),

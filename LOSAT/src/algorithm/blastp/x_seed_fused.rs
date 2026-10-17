@@ -494,7 +494,6 @@ pub(crate) fn x_scan_two_hit<F>(
     };
     x_scan_two_hit_in(
         x_diag_mode(),
-        false,
         lookup,
         subject,
         subject_length,
@@ -534,25 +533,62 @@ where
         word_size,
         prefetch: x_prefetch_distance(),
     };
-    let counts = x_scan_two_hit_in(
-        mode,
-        branch_free,
-        lookup,
-        subject,
-        subject_length,
-        &mut XDiagTable::new(diag_array, diag_mask),
-        test,
-        &mut candidate,
-    );
+    let table = &mut XDiagTable::new(diag_array, diag_mask);
+    // A constant per instantiation, so that each scan loop has one call of the cell test and the
+    // compiler inlines it, as in blastp's loop.
+    let counts = if branch_free {
+        x_scan_two_hit_in_with::<true, F>(
+            mode,
+            lookup,
+            subject,
+            subject_length,
+            table,
+            test,
+            &mut candidate,
+        )
+    } else {
+        x_scan_two_hit_in_with::<false, F>(
+            mode,
+            lookup,
+            subject,
+            subject_length,
+            table,
+            test,
+            &mut candidate,
+        )
+    };
     [counts.cells, counts.hits, counts.candidates]
 }
 
-/// [`x_scan_two_hit`] with the cell test of `mode` (and the cells found by [`x_scan_cells_bf`]
-/// with `branch_free`); returns the counts of LOSAT_X_BPDIAG (zero for [`XDiagMode::PerHit`]).
-#[allow(clippy::too_many_arguments)]
+/// [`x_scan_two_hit`] with the cell test of `mode`; returns the counts of LOSAT_X_BPDIAG (zero
+/// for [`XDiagMode::PerHit`]).
 fn x_scan_two_hit_in<F>(
     mode: XDiagMode,
-    branch_free: bool,
+    lookup: &BlastAaLookupTable,
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+) -> XDiagCounts
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    x_scan_two_hit_in_with::<false, F>(
+        mode,
+        lookup,
+        subject,
+        subject_length,
+        table,
+        test,
+        candidate,
+    )
+}
+
+/// [`x_scan_two_hit_in`], with the cells found by [`x_scan_cells_bf`] when `BRANCH_FREE`
+/// (EXPERIMENT, LOSAT_X_BXSCANBF).
+fn x_scan_two_hit_in_with<const BRANCH_FREE: bool, F>(
+    mode: XDiagMode,
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     subject_length: usize,
@@ -566,12 +602,12 @@ where
     let mut counts = XDiagCounts::default();
     match mode {
         XDiagMode::PerHit => {
-            x_scan_cells_with(lookup, subject, subject_length, branch_free, |s, hits| {
+            x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
                 x_cell_per_hit(hits, s, table, test, candidate)
             })
         }
         XDiagMode::Scalar => {
-            x_scan_cells_with(lookup, subject, subject_length, branch_free, |s, hits| {
+            x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
                 let candidates = x_cell_scalar(hits, s, table, test, candidate);
                 counts.add_cell(hits.len(), candidates);
             })
@@ -581,11 +617,10 @@ where
             assert!(x_avx2_available(), "the AVX2 batch needs AVX2");
             // SAFETY: the CPU has AVX2 (asserted above).
             unsafe {
-                x_scan_cells_avx2(
+                x_scan_cells_avx2::<BRANCH_FREE, F>(
                     lookup,
                     subject,
                     subject_length,
-                    branch_free,
                     table,
                     test,
                     candidate,
@@ -604,12 +639,10 @@ where
 /// The CPU must have AVX2.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-#[allow(clippy::too_many_arguments)]
-unsafe fn x_scan_cells_avx2<F>(
+unsafe fn x_scan_cells_avx2<const BRANCH_FREE: bool, F>(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     subject_length: usize,
-    branch_free: bool,
     table: &mut XDiagTable<'_>,
     test: XDiagTest,
     candidate: &mut F,
@@ -617,27 +650,26 @@ unsafe fn x_scan_cells_avx2<F>(
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
-    x_scan_cells_with(lookup, subject, subject_length, branch_free, |s, hits| {
+    x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
         // SAFETY: the CPU has AVX2 (this function's contract).
         let candidates = unsafe { x_cell_avx2(hits, s, table, test, candidate) };
         counts.add_cell(hits.len(), candidates);
     });
 }
 
-/// EXPERIMENT (LOSAT_X_BXSCANBF): [`x_scan_cells`], or with `branch_free` [`x_scan_cells_bf`] for a
-/// subject of at least a word (the same calls).
+/// EXPERIMENT (LOSAT_X_BXSCANBF): [`x_scan_cells`], or [`x_scan_cells_bf`] when `BRANCH_FREE` (the
+/// same calls). One loop per instantiation, so `on_cell` has one call site and is inlined.
 #[inline(always)]
-fn x_scan_cells_with<C>(
+fn x_scan_cells_with<const BRANCH_FREE: bool, C>(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     subject_length: usize,
-    branch_free: bool,
-    mut on_cell: C,
+    on_cell: C,
 ) where
     C: FnMut(i32, &[i32]),
 {
-    if branch_free && subject_length >= lookup.word_length as usize {
-        x_scan_cells_bf(lookup, subject, subject_length, &mut on_cell);
+    if BRANCH_FREE {
+        x_scan_cells_bf(lookup, subject, subject_length, on_cell);
     } else {
         x_scan_cells(lookup, subject, subject_length, on_cell);
     }
@@ -717,52 +749,62 @@ fn x_scan_cells<C>(
     }
 }
 
-/// EXPERIMENT (LOSAT_X_BXSCANBF): [`x_scan_cells`] for a subject of at least a word, the cells
-/// with hits found without a branch on the presence bit: for each block of [`X_BLOCK`] positions
-/// [`x_block_candidates`] lists `position << 32 | index`, the list's length advanced by the
-/// bit, and the listed cells then go to `on_cell` in position order. The positions, indices and
-/// presence bits are those of [`x_scan_cells`]'s loop (the same rolling index over the same
-/// bytes), so the calls are the same.
+/// EXPERIMENT (LOSAT_X_BXSCANBF): [`x_scan_cells`] with the cells that have hits found without a
+/// branch on the presence bit: for each block of [`X_BLOCK`] positions [`x_block_candidates`] lists
+/// `position << 32 | index`, the list's length advanced by the bit, and the listed cells then go to
+/// `on_cell` in position order. The positions, indices and presence bits are those of
+/// [`x_scan_cells`]'s loop (the same rolling index over the same bytes), so the calls are the same.
 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:60-99 (quoted at `x_scan_cells`)
 #[inline(always)]
 fn x_scan_cells_bf<C>(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     subject_length: usize,
-    on_cell: &mut C,
+    mut on_cell: C,
 ) where
     C: FnMut(i32, &[i32]),
 {
     let word_length = lookup.word_length as usize;
     let charsize = lookup.charsize as usize;
     let mask = lookup.mask as usize;
-    // Positions 0..=s_last read subject[s_last + word_length - 1] = subject[subject_length - 1]
-    // at most. The backbone has NCBI's `backbone_size` cells (the index of a word of letters
-    // below BLASTAA_SIZE, plus one) and the presence vector a bit for each, so the unchecked
-    // presence reads of `x_block_candidates` stay inside it when every letter is below
-    // BLASTAA_SIZE (the scan of `x_scan_cells` would panic on an index past the vector instead).
-    assert!(subject_length >= word_length && subject.len() >= subject_length);
     i32::try_from(subject_length).expect("subject length must fit Int4");
-    let largest = subject[..subject_length].iter().copied().max().unwrap_or(0);
+    // The bytes x_scan_cells reads: positions 0..=s_last, s_last = max(subject_length -
+    // word_length, 0), each with its word. A subject shorter than a word has one position whose
+    // word runs past the subject, and x_scan_cells reads the missing bytes as 0: here they come
+    // from a zero-padded copy.
+    let mut padded = [0u8; 8];
+    let (bytes, s_last) = if subject_length >= word_length {
+        (&subject[..subject_length], subject_length - word_length)
+    } else {
+        assert!(word_length <= padded.len(), "word size {word_length}");
+        let n = subject.len().min(word_length);
+        padded[..n].copy_from_slice(&subject[..n]);
+        (&padded[..word_length], 0)
+    };
+    // The backbone has NCBI's `backbone_size` cells (the index of a word of letters below
+    // BLASTAA_SIZE, plus one) and the presence vector a bit for each, so the unchecked presence
+    // reads of `x_block_candidates` stay inside it when every byte read is below BLASTAA_SIZE
+    // (x_scan_cells would panic on an index past the vector instead).
+    let largest = bytes.iter().copied().max().unwrap_or(0);
     assert!(
         usize::from(largest) < BLASTAA_SIZE
             && lookup.pv.len() << PV_ARRAY_BTS >= lookup.backbone.len(),
         "letter {largest} outside the lookup table's alphabet"
     );
-    let s_last = subject_length - word_length;
     let backbone = &lookup.backbone;
     let overflow = &lookup.overflow;
 
     let mut index = 0usize;
-    for &byte in &subject[..word_length - 1] {
+    for &byte in &bytes[..word_length - 1] {
         index = (index << charsize) | byte as usize;
     }
     let mut cand = [MaybeUninit::<u64>::uninit(); X_BLOCK];
     let mut block_first = 0usize;
     while block_first <= s_last {
         let block_last = s_last.min(block_first + X_BLOCK - 1);
+        // Reads bytes[block_last + word_length - 1] at most, the last byte of `bytes`.
         let n = x_block_candidates(
-            subject,
+            bytes,
             lookup.pv.as_ptr(),
             (word_length, charsize, mask),
             (block_first, block_last),
@@ -1497,16 +1539,28 @@ mod tests {
                                 log.push((k, (q, s, last_hit, diff, entry.raw_bits())));
                                 extend(q, s, entry, diag_offset);
                             };
-                        let c = x_scan_two_hit_in(
-                            mode,
-                            branch_free,
-                            &lookup,
-                            &buffer,
-                            subject.len(),
-                            &mut XDiagTable::new(&mut entries, mask),
-                            test,
-                            &mut candidate,
-                        );
+                        let table = &mut XDiagTable::new(&mut entries, mask);
+                        let c = if branch_free {
+                            x_scan_two_hit_in_with::<true, _>(
+                                mode,
+                                &lookup,
+                                &buffer,
+                                subject.len(),
+                                table,
+                                test,
+                                &mut candidate,
+                            )
+                        } else {
+                            x_scan_two_hit_in(
+                                mode,
+                                &lookup,
+                                &buffer,
+                                subject.len(),
+                                table,
+                                test,
+                                &mut candidate,
+                            )
+                        };
                         counts = (
                             counts.0 + c.cells,
                             counts.1 + c.hits,
@@ -1585,7 +1639,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 word_length,
             );
-            for length in [2, 3, 4, 255, 256, 257, 258, 511, 512, 513, 2_000] {
+            for length in [0, 1, 2, 3, 4, 255, 256, 257, 258, 511, 512, 513, 2_000] {
                 let mut subject = letters(length, 27);
                 subject.push(0);
                 let mut want: Vec<(i32, Vec<i32>)> = Vec::new();
@@ -1593,7 +1647,7 @@ mod tests {
                 x_scan_cells(&lookup, &subject, length, |s, hits| {
                     want.push((s, hits.to_vec()))
                 });
-                x_scan_cells_with(&lookup, &subject, length, true, |s, hits| {
+                x_scan_cells_with::<true, _>(&lookup, &subject, length, |s, hits| {
                     got.push((s, hits.to_vec()))
                 });
                 assert_eq!(got, want, "case {case} length {length}");

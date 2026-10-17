@@ -218,6 +218,7 @@ fn x_candidates_w3c5(
     index: &mut usize,
     cand: &mut [MaybeUninit<u64>; X_BLOCK],
 ) -> usize {
+    debug_assert!(block.0 <= block.1 && block.1 - block.0 < X_BLOCK && block.1 + 2 < subject.len());
     let words = block.1 - block.0 + 1;
     // SAFETY: the new letter of the word at `s` is `subject[s + 2]`, read for `s <= s_last`
     // as NCBI's loop reads it.

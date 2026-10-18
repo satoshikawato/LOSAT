@@ -360,6 +360,7 @@ export LOSAT_X_TBNSTATE=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNXLATE=1
 export LOSAT_X_TBNXLATESIMD=1
+export LOSAT_X_TBXEXTBATCH=256
 export LOSAT_X_TBXFRAMES=1
 export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
@@ -372,7 +373,8 @@ export LOSAT_X_TBXUNGAP=1
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
 built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64), `LOSAT_X_TBXPREFETCH` (2 to
-4,194,304, built-in 1,536: KiB of a subject's largest unit table), `LOSAT_X_BPQBLOCK` (1 or
+4,194,304, built-in 1,536: KiB of a subject's largest unit table), `LOSAT_X_TBXEXTBATCH` (2 to
+4,194,304, built-in 256: Ki letters of a subject's largest unit query-group span), `LOSAT_X_BPQBLOCK` (1 or
 more, built-in 50,000: query letters per block; a value that is not a positive number is the
 built-in value).
 
@@ -3017,11 +3019,48 @@ Scheduling (each value computed by one thread with the original function; order 
   threads x0.984, Sakai x MG1655[0:1 Mb] (code 11) 8 threads x0.988. perf stat at 1 thread: AP027131 x
   AP027133 instructions 72.2 -> 69.0 G, cycles 34.9 -> 34.1 G (about 100 instructions and 25 cycles fewer
   per extension). What is left of an extension is the latency of its first query loads and the
-  mispredicted exits of the walks (`LOSAT_X_TBXEXTLANES`, next).
+  mispredicted exits of the walks (`LOSAT_X_TBXEXTBATCH` takes the first).
 - `LOSAT_X_TBXUNGAPSHADOW=1` shadow of `LOSAT_X_TBXUNGAP` (turns the path on): every extension runs both
   ways and the seven results (offsets, score, `right_extend`, `s_last_off`) must be equal; any difference
   panics with the inputs; the reference's result is used. One line at exit:
   `[X_SHADOW] TBXUNGAP compared=`.
+- `LOSAT_X_TBXEXTBATCH=256` (TBLASTX, speed; a value switch, in the strict set from the pull request
+  that added it, 2026-10-18; x86-64 only; `=0` turns it off) the unit scan of `LOSAT_X_PAIRPAR`
+  (`tblastx/x_tbx_extbatch.rs`, exactness argument in its header) holds back the two-hit extensions of
+  the subjects where one unit's query-group span (the letters of the query frames the unit's hits fall
+  in) has at least the switch's number of Ki letters (2 to 4,194,304; built-in 256; `=2` every unit of
+  2 Ki letters or more):
+  a hit that passes the two-hit test records its extension in a batch of 16, prefetches the query and
+  subject lines the extension reads first and marks its cell (flag 1, the slot in `last_hit`); the
+  batch is resolved by `extend_hit_two_hit` when it is full and at the end of the unit, its init HSPs
+  saved in slot order, and a later hit on a marked cell resolves that one extension first. Each cell
+  goes through the states of `scan_unit` in its order and the unit's list is the same element for
+  element. The extension of a hit starts at a random position of the query group, so on a large query
+  its first loads wait on memory; the batch lets them arrive while the scan goes on. Acts where the
+  window leaves room for the marks (`window >= wordsize + 16`, the default 40). With `LOSAT_TIMING` or
+  `LOSAT_X_STATS` (their probes) the units run `scan_unit`, so timings taken with those variables do
+  not include the switch; the other subjects run `scan_unit`, whose machine code is the one before the
+  switch (`=0` and the binary before it run the same instruction counts). For one query the rule holds
+  from about 0.8 Mb; a batch of more than 6 contexts merges contexts into a group (`X_MAX_GROUPS`), so
+  smaller queries can reach it there (not measured).
+  Measured (workstation, 8 booked cores of a node without other timed runs, alternating rounds after a
+  warm-up, medians of the per-round ratios, every report identical, max RSS equal), against the binary
+  before the switch: Sakai x MG1655 (code 11, frames of 1.83 M letters) 8 threads x0.940 (112.9 ->
+  105.9 s, 4 rounds), Sakai x MG1655[0:1 Mb] x0.926 (21.48 -> 19.89 s; x0.935 against `=0`), Sakai's
+  first 0.8 Mb against it (frames of 267 k letters) x0.987; below the rule AP027131 x AP027133 and
+  MelaMJNV x PemoMJNVA run the same instructions as before (76.99 G and 9.906 G at one thread). How
+  the built-in was chosen (the path on every unit against `=0`, 8 threads): Sakai's first 0.4 / 0.8 /
+  1.6 / 3.2 Mb and all of it against MG1655[0:1 Mb] (frames of 133 k / 267 k / 533 k / 1.07 M / 1.83 M
+  letters) x1.005 / 0.985 / 0.977 / 0.956 / 0.918; MelaMJNV x PemoMJNVA (96 k letters) 1 thread
+  x1.015, AP027131 x AP027133 (67 k, code 4) 1 thread x1.004 and 8 threads x0.999: 256 Ki lies between
+  the span that lost and the first that gained. An 8 x i32 AVX2 lane kernel for the batch (the
+  walks of 8 extensions side by side) was built and measured, and lost to this scalar resolution on
+  every case (branch `exp/a5-lanes-kernel`; v4-A DESIGN_A5 §4.2).
+- `LOSAT_X_TBXEXTBATCHSHADOW=1` shadow of `LOSAT_X_TBXEXTBATCH` (on every target, whatever the size rule
+  says, where the window leaves room for the marks and no probe runs): each unit runs `scan_unit` and the
+  batched scan on fresh tables, and the saved records and every cell of the final table must be equal;
+  a difference panics with the unit. Lines at exit: `[X_SHADOW] TBXEXTBATCH units_compared=` and
+  `[X_STATS] TBXEXTBATCH units= candidates= early= batches=`.
 - `LOSAT_X_PAIRLUT=1` (in the strict set; acts while `LOSAT_X_PAIRPAR` is on, not with its
   shadow) TBLASTX:
   the lookup tables of the unit path, one per context group, built directly from the query instead

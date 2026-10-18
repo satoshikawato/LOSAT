@@ -133,7 +133,7 @@
 //!
 //! `LOSAT_X_TBXPREFETCH` (in the strict set, a value switch: on unless it is `0`, or
 //! `LOSAT_X_DEFAULT=0` and it is not set; x86-64 only): the units of a subject whose largest unit
-//! diagonal table has at least the switch's number of KiB (built-in 2,048, `X_PREFETCH_MIN_KIB`)
+//! diagonal table has at least the switch's number of KiB (built-in 1,536, `X_PREFETCH_MIN_KIB`)
 //! run the scan with a prefetch of the cell of the hit `X_PREFETCH_AHEAD` entries ahead in the
 //! batch (`scan_unit` with `PF`). A prefetch reads nothing into the program and has no
 //! architectural effect, so the cells, the hits and the init HSPs are those without it. The other
@@ -314,9 +314,10 @@ fn seed_unmap_active() -> bool {
 // CPUs, longer than a load from memory. No NCBI counterpart.
 const X_PREFETCH_AHEAD: usize = 16;
 // The built-in number of the switch: the smallest largest-unit table, in KiB, of a subject whose
-// units prefetch. 2 MiB is the L2 of one core of the i9-14900HX (the Xeon 6338: 1.25 MiB); below
-// it the hint gained nothing (A/B in docs/agents/diagnostics.md, entry `LOSAT_X_TBXPREFETCH`).
-const X_PREFETCH_MIN_KIB: usize = 2048;
+// units prefetch. Measured with the hint on every table (A/B in docs/agents/diagnostics.md, entry
+// `LOSAT_X_TBXPREFETCH`): tables of 1.65 MiB and more gained on both measured CPUs (L2 of one core
+// 1.25 MiB on the Xeon 6338, 2 MiB on the i9-14900HX), 1.18 MiB lost 0.7 %; 1.5 MiB lies between.
+const X_PREFETCH_MIN_KIB: usize = 1536;
 // The largest number the switch takes (4 GiB of table); a larger or non-numeric value gives the
 // built-in one (`xswitch::value`).
 const X_PREFETCH_MAX_KIB: usize = 1 << 22;

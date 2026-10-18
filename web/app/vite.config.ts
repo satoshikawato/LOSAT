@@ -47,7 +47,8 @@ function headersOnEveryResponse(): Plugin {
 
 export default defineConfig({
   // The engine modules (LOSAT_WEB_REACTORS); the worker bundles read the same description.
-  plugins: [vue(), losatEngine({ reactors }), losatVerification(), headersOnEveryResponse()],
+  // The headers first, so that they reach the engine modules that losatEngine serves in dev.
+  plugins: [headersOnEveryResponse(), vue(), losatEngine({ reactors }), losatVerification()],
   define: { __LOSAT_TEST_HOOKS__: 'false' },
   server: { headers: devHeaders },
   preview: { headers },

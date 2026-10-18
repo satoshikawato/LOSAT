@@ -202,7 +202,8 @@ export class SearchDraft {
 
   setThreads(threads: number | 'auto'): void {
     this.set({ threads, message: undefined });
-    this.prepareEngine();
+    // After a pause, as for typing: stepping through the choices hints only the last one.
+    this.debounce('prepare', () => this.prepareEngine());
   }
 
   // --- inputs -----------------------------------------------------------------------------

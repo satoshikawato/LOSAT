@@ -133,23 +133,34 @@ export class EngineRuntime {
 
   /**
    * Starts what a search of `threads` threads starts before it runs: the module's instance
-   * and, for the threaded module, its thread workers. A failure is thrown and changes
-   * nothing that `run` relies on: `run` loads and prepares again and handles the failure.
-   * The Engine worker calls `prepare` and `run` one after another, never together.
+   * and, for the threaded module, its thread workers. It never ends a working instance of
+   * the other module: a queued search may still use it and the subject it holds. A failure
+   * is thrown; `run` loads and prepares again and handles it as before. The Engine worker
+   * calls `prepare` and `run` one after another, never together.
    */
   async prepare(threads: number): Promise<void> {
-    if (threads > 1 && this.threadedUnavailable === undefined) {
-      const loaded = await this.load('threaded');
-      try {
-        await loaded.threads!.prepare(threads - 1);
-      } catch (error) {
-        // The search starts new thread workers rather than meeting the failed one.
-        this.dispose();
-        throw error;
-      }
+    const path: RuntimePath = threads > 1 && this.threadedUnavailable === undefined ? 'threaded' : 'serial';
+    const current = this.loaded;
+    if (current !== undefined && current.path !== path && current.instance.abi.stoppedBy === undefined) return;
+    if (path === 'serial') {
+      await this.load('serial');
       return;
     }
-    await this.load('serial');
+    let loaded: Loaded;
+    try {
+      loaded = await this.load('threaded');
+    } catch (error) {
+      // As in run: later searches of this runtime run serially, with this reason.
+      this.threadedUnavailable = `the threaded engine could not start: ${messageOf(error)}`;
+      throw error;
+    }
+    try {
+      await loaded.threads!.prepare(threads - 1);
+    } catch (error) {
+      // The search starts new thread workers rather than meeting the failed one.
+      this.dispose();
+      throw error;
+    }
   }
 
   /** Ends the instance and its thread workers. */

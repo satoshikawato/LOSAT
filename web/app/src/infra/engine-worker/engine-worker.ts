@@ -19,10 +19,24 @@ let generation = 0;
 let runtime: EngineRuntime | undefined;
 // Preparations and searches use the runtime one after another, in the order they came.
 let previous: Promise<unknown> = Promise.resolve();
+// The threads of the latest preparation that waits for its turn: newer ones replace it, and a
+// search drops it (the search prepares for itself).
+let pendingThreads: number | undefined;
 
 function inTurn(work: () => Promise<unknown>): void {
   const turn = previous.then(work);
   previous = turn.catch(() => undefined);
+}
+
+function queuePrepare(command: WorkerPrepare): void {
+  const queued = pendingThreads !== undefined;
+  pendingThreads = command.threads;
+  if (queued) return;
+  inTurn(async () => {
+    const threads = pendingThreads;
+    pendingThreads = undefined;
+    if (threads !== undefined) await prepare(threads);
+  });
 }
 
 async function moduleOf(source: ModuleSource) {
@@ -52,9 +66,9 @@ function toWorkerError(error: unknown): WorkerError {
   return { name: 'Error', message: String(error) };
 }
 
-async function prepare(command: WorkerPrepare): Promise<void> {
+async function prepare(threads: number): Promise<void> {
   try {
-    await runtime?.prepare(command.threads);
+    await runtime?.prepare(threads);
   } catch {
     // The search that follows starts the runtime again and reports what fails.
   }
@@ -99,7 +113,9 @@ function test(command: WorkerTestCommand): void {
 scope.onmessage = (event) => {
   const command = event.data;
   if (command.type === 'init') init(command);
-  else if (command.type === 'run') inTurn(() => run(command));
-  else if (command.type === 'prepare') inTurn(() => prepare(command));
+  else if (command.type === 'run') {
+    pendingThreads = undefined;
+    inTurn(() => run(command));
+  } else if (command.type === 'prepare') queuePrepare(command);
   else if (__LOSAT_TEST_HOOKS__) test(command);
 };

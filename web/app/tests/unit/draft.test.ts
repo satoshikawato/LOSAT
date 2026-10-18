@@ -338,8 +338,11 @@ describe('SearchDraft submit', () => {
     draft.setPaste('subject', '>s1\nACGTACGT\n');
     await draft.idle();
     expect(prepared.at(-1)).toEqual({ requestedThreads: 'auto', inputBytes: 9 + 13 });
+    draft.setThreads(8);
     draft.setThreads(4);
-    expect(prepared.at(-1)).toEqual({ requestedThreads: 4, inputBytes: 22 });
+    await draft.idle();
+    // Stepping through the choices hints only the last one.
+    expect(prepared.filter((hint) => hint.requestedThreads !== 'auto')).toEqual([{ requestedThreads: 4, inputBytes: 22 }]);
   });
 
   it('does not ask the engine to prepare for an argv that it refuses', async () => {
@@ -348,6 +351,7 @@ describe('SearchDraft submit', () => {
     draft.setPaste('subject', '>s1\nACGT\n');
     await draft.idle();
     draft.setThreads(2);
+    await draft.idle();
     expect(prepared).toEqual([]);
   });
 

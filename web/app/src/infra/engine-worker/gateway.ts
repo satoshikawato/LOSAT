@@ -101,8 +101,8 @@ export class WasmEngine implements EngineGateway {
       hint.inputBytes,
       this.options.hardwareConcurrency ?? navigator.hardwareConcurrency,
     );
-    this.compiled().then(
-      (modules) => {
+    this.compiled()
+      .then((modules) => {
         // A search that started meanwhile prepares for itself.
         if (this.active !== undefined) return;
         if (this.current?.renew !== undefined) this.retire();
@@ -110,10 +110,9 @@ export class WasmEngine implements EngineGateway {
         if (generation.prepared === threads) return;
         generation.prepared = threads;
         this.post(generation.worker, { type: 'prepare', generation: generation.id, threads });
-      },
-      // The next search loads the modules again and reports the failure.
-      () => undefined,
-    );
+      })
+      // The next search loads the modules (or starts the worker) again and reports the failure.
+      .catch(() => undefined);
   }
 
   cancel(runId: string): void {

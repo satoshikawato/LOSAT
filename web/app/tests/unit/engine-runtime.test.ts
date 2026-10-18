@@ -23,6 +23,7 @@ import {
   DEFAULT_RENEWAL,
   renewalReason,
 } from '../../src/infra/engine-worker/policy';
+import { EngineRuntime } from '../../src/infra/engine-worker/runtime';
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
 
 describe('chooseThreads', () => {
@@ -91,9 +92,11 @@ interface ModuleSpec {
   /** env.memory: [flags, initial, maximum?] with flag bit 0 = has maximum, bit 1 = shared. */
   readonly importedMemory?: readonly number[];
   readonly ownMemory?: readonly number[];
+  /** What every function returns (0 to 63); 0 by default. */
+  readonly returns?: number;
 }
 
-/** A module whose functions all have type () -> i32 and return 0. */
+/** A module whose functions all have type () -> i32 and return 0 (or `returns`). */
 function moduleBytes(spec: ModuleSpec): Uint8Array {
   const functionImports = spec.functionImports ?? [];
   const exports = spec.exports ?? [];
@@ -114,7 +117,7 @@ function moduleBytes(spec: ModuleSpec): Uint8Array {
       7,
       vector(exports.map((e) => (e === 'memory' ? [...name(e), 2, 0] : [...name(e), 0, ...uleb(offset + functions.indexOf(e))]))),
     ),
-    ...section(10, vector(functions.map(() => [4, 0, 0x41, 0, 0x0b]))),
+    ...section(10, vector(functions.map(() => [4, 0, 0x41, spec.returns ?? 0, 0x0b]))),
   ]);
 }
 
@@ -189,6 +192,48 @@ describe('loadReactor', () => {
   it('reports a response that is not OK', async () => {
     serve('text/plain', 404);
     await expect(loadReactor(asset)).rejects.toThrow('the engine file /engine/serial.wasm could not be loaded (HTTP 404)');
+  });
+});
+
+describe('EngineRuntime.prepare', () => {
+  // A serial module whose ABI version export returns 2, as a reactor's does.
+  function setup() {
+    const calls = { serial: 0, threads: 0 };
+    const runtime = new EngineRuntime({
+      serial: async () => {
+        calls.serial++;
+        return WebAssembly.compile(moduleBytes({ ...SERIAL, returns: 2 }) as BufferSource);
+      },
+      threads: async () => {
+        calls.threads++;
+        throw new Error('unused');
+      },
+      builds: { serial: 'serial', threads: 'threads' },
+      faultChannel: 'faults',
+    });
+    return { runtime, calls };
+  }
+
+  it('starts the serial instance for one thread, once', async () => {
+    const { runtime, calls } = setup();
+    await runtime.prepare(1);
+    await runtime.prepare(1);
+    expect(calls.serial).toBe(1);
+  });
+
+  it('keeps a working instance of the other module, which a queued search may still use', async () => {
+    const { runtime, calls } = setup();
+    await runtime.prepare(1);
+    await runtime.prepare(4);
+    expect(calls).toEqual({ serial: 1, threads: 0 });
+  });
+
+  it('records that the threaded engine cannot start, and then prepares the serial one', async () => {
+    const { runtime, calls } = setup();
+    // Node is not cross-origin isolated: the threaded instance cannot start.
+    await expect(runtime.prepare(4)).rejects.toThrow(/cross-origin isolated/);
+    await runtime.prepare(4);
+    expect(calls).toEqual({ serial: 1, threads: 0 });
   });
 });
 

@@ -156,20 +156,34 @@ fn check_stats(stderr: &str, what: &str) -> (u64, u64) {
 //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_FwdCompareHSPsTransl);
 // ```
-// The default search (no variable for the switch): the report is NCBI's, the subject's two
-// linking calls each sort their output order once, and the sorts are the same with one thread
-// and four.
+// The default search (no variable for the switch): the report is NCBI's and the subject's two
+// linking calls each sort their output order once. The counters also count the index sorts of
+// the seed stage's merge: with `LOSAT_X_TBXKMERGE=0` the unit path (four threads) makes the
+// sorts of the reference frame loop (one thread) and the counts are equal; with that switch on
+// (the default) its merge replaces some of them, so four threads make no more than one.
 #[test]
 fn the_switch_gives_ncbis_report_with_one_final_sort_per_linking_call() {
     let expected = ncbi_report();
-    let mut seen = Vec::new();
-    for threads in THREADS {
-        let (report, stderr) = tblastx(threads, &[STATS]);
-        assert_eq!(report, expected, "threads {threads}");
-        assert_eq!(shadow(&stderr), None, "threads {threads}:\n{stderr}");
-        seen.push(check_stats(&stderr, &format!("threads {threads}")));
+    for merge in [&[][..], &[("LOSAT_X_TBXKMERGE", "0")][..]] {
+        let mut seen = Vec::new();
+        for threads in THREADS {
+            let what = format!("{merge:?} threads {threads}");
+            let mut switches = vec![STATS];
+            switches.extend_from_slice(merge);
+            let (report, stderr) = tblastx(threads, &switches);
+            assert_eq!(report, expected, "{what}");
+            assert_eq!(shadow(&stderr), None, "{what}:\n{stderr}");
+            seen.push(check_stats(&stderr, &what));
+        }
+        if merge.is_empty() {
+            assert!(
+                seen[1].0 <= seen[0].0 && seen[1].1 <= seen[0].1,
+                "the merge adds no sort: {seen:?}"
+            );
+        } else {
+            assert_eq!(seen[0], seen[1], "the sorts do not depend on the threads");
+        }
     }
-    assert_eq!(seen[0], seen[1], "the sorts do not depend on the threads");
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486

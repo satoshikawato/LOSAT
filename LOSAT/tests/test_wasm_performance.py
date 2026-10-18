@@ -324,6 +324,17 @@ class ThreadEvidenceTests(unittest.TestCase):
         self.assertEqual(value["pool_threads"], 2)
         self.assertEqual(value["host_worker_counts"]["ready"], 1)
 
+    def test_pool_label_case_differs_from_stage_program(self):
+        text = self.record().replace("[losat-thread-pool] program=blastn", "[losat-thread-pool] program=BLASTX")
+        text = text.replace("[losat-thread-stage] program=blastn", "[losat-thread-stage] program=blastx")
+        self.assertIn("program=BLASTX", text)
+        self.assertEqual(perf.validate_thread_evidence(text, 2, "threaded")["pool_threads"], 2)
+
+    def test_stage_of_another_program_fails(self):
+        text = self.record().replace("[losat-thread-stage] program=blastn", "[losat-thread-stage] program=blastp")
+        with self.assertRaises(perf.GateFailure):
+            perf.validate_thread_evidence(text, 2, "threaded")
+
     def test_missing_or_contradictory_worker_events_fail(self):
         for bad in [self.record().replace('"ready"', '"missing"', 1),
                     self.record().replace('caller_participates=true', 'caller_participates=false'),

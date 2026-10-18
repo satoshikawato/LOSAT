@@ -7,6 +7,12 @@ const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
 
+// The runs of this file keep guarded bytes in a cache of their own, not in the user's cache
+// directory (the host's default); the tests of the default name its environment themselves.
+const GUARD_CACHE = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-tests-"));
+process.env.LOSAT_WASI_GUARD_CACHE = GUARD_CACHE;
+process.on("exit", () => fs.rmSync(GUARD_CACHE, { recursive: true, force: true }));
+
 // NCBI reference: c++/src/app/blast/blastn_app.cpp:172-176
 // CATCH_ALL(status)
 // return status;
@@ -104,12 +110,8 @@ function run(options) {
     assert.ok(WebAssembly.validate(bytes));
     fs.writeFileSync(fixture, bytes);
     const runner = options.threaded ? "run_losat_wasi_threads.js" : "run_losat_wasi.js";
-    const env = { ...process.env, NODE_NO_WARNINGS: "1" };
-    for (const key of Object.keys(env)) {
-      if (key.startsWith("LOSAT_WASI_") || key.startsWith("LOSAT_WASM_MEMORY_")) delete env[key];
-    }
     const result = spawnSync(process.execPath, [path.join(__dirname, runner), fixture], {
-      env, encoding: "utf8", timeout: 10000, killSignal: "SIGKILL",
+      env: hostEnv(), encoding: "utf8", timeout: 10000, killSignal: "SIGKILL",
     });
     assert.ifError(result.error);
     return result;
@@ -210,6 +212,86 @@ test("artifact preparation preserves validation and ABI rejection", () => {
   }
 });
 
+// Unset, the guard cache is in the user's cache directory; 0 turns it off; a default
+// directory that cannot be used only means that the guard is computed again.
+test("LOSAT_WASI_GUARD_CACHE is on by default in the user's cache directory, and 0 turns it off", () => {
+  const { defaultGuardCacheDir } = require("./wasi_thread_host");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-home-"));
+  try {
+    const bytes = spawner(2, { bulk: true });
+    const reference = runThreaded(bytes, [], { LOSAT_WASI_GUARD_CACHE: "0" });
+    assert.equal(reference.status, 3, reference.stderr);
+    const user = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, "xdg"), LOCALAPPDATA: path.join(home, "local") };
+    const dir = defaultGuardCacheDir(user);
+    assert.ok(dir.startsWith(home), dir);
+    for (const state of ["miss", "hit"]) {
+      const result = runThreaded(bytes, [], { ...user, LOSAT_WASI_GUARD_CACHE: undefined, LOSAT_WASI_THREADS_DEBUG: "1" });
+      assert.equal(result.status, 3, result.stderr);
+      assert.equal(result.stdout, reference.stdout);
+      assert.ok(result.stderr.includes(`guard cache ${state}: ${dir}${path.sep}guarded-`), result.stderr);
+    }
+    const off = runThreaded(bytes, [], { ...user, LOSAT_WASI_GUARD_CACHE: "0", LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(off.stdout, reference.stdout);
+    assert.doesNotMatch(off.stderr, /guard cache/);
+    // A default directory under a file cannot be created: the run computes the guard.
+    const file = path.join(home, "file");
+    fs.writeFileSync(file, "");
+    const blocked = { ...user, XDG_CACHE_HOME: file, LOCALAPPDATA: file };
+    if (process.platform === "darwin") {
+      fs.rmSync(path.join(home, "Library"), { recursive: true, force: true });
+      fs.writeFileSync(path.join(home, "Library"), "");
+    }
+    const fallback = runThreaded(bytes, [], { ...blocked, LOSAT_WASI_GUARD_CACHE: undefined, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(fallback.status, 3, fallback.stderr);
+    assert.equal(fallback.stdout, reference.stdout);
+    assert.match(fallback.stderr, /guard cache unusable/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("the default guard cache directory follows each platform's convention", () => {
+  const { defaultGuardCacheDir } = require("./wasi_thread_host");
+  const home = os.homedir();
+  assert.equal(defaultGuardCacheDir({ XDG_CACHE_HOME: "/x/cache" }, "linux"), path.join("/x/cache", "losat", "wasi-guard"));
+  assert.equal(defaultGuardCacheDir({ XDG_CACHE_HOME: "relative" }, "linux"), path.join(home, ".cache", "losat", "wasi-guard"));
+  assert.equal(defaultGuardCacheDir({}, "linux"), path.join(home, ".cache", "losat", "wasi-guard"));
+  assert.equal(defaultGuardCacheDir({ XDG_CACHE_HOME: "/x/cache" }, "darwin"), path.join(home, "Library", "Caches", "losat", "wasi-guard"));
+  assert.equal(defaultGuardCacheDir({ LOCALAPPDATA: "C:\\L" }, "win32"), path.join("C:\\L", "losat", "wasi-guard"));
+  assert.equal(defaultGuardCacheDir({}, "win32"), path.join(home, "AppData", "Local", "losat", "wasi-guard"));
+});
+
+test("the guard cache keeps the entries used last", () => {
+  const { guardSharedMemoryCached } = require("./wasi_thread_host");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-guard-keep-"));
+  const saved = process.env.LOSAT_WASI_GUARD_CACHE;
+  try {
+    process.env.LOSAT_WASI_GUARD_CACHE = directory;
+    const modules = Array.from({ length: 10 }, (_, i) => spawner(i + 1, { bulk: true }));
+    const sidecars = () => fs.readdirSync(directory).filter((file) => file.endsWith(".json"));
+    const stamp = (bytes, seconds) => {
+      const sha = require("node:crypto").createHash("sha256").update(bytes).digest("hex");
+      const file = sidecars().find((name) => name.includes(sha));
+      fs.utimesSync(path.join(directory, file), seconds, seconds);
+    };
+    modules.slice(0, 8).forEach((bytes, i) => {
+      assert.equal(guardSharedMemoryCached(bytes).cache, "miss");
+      stamp(bytes, 1000 + i);
+    });
+    // The oldest entry is used again (a hit), so the next two misses remove entries 1 and 2.
+    assert.equal(guardSharedMemoryCached(modules[0]).cache, "hit");
+    for (const bytes of modules.slice(8)) assert.equal(guardSharedMemoryCached(bytes).cache, "miss");
+    assert.equal(sidecars().length, 8);
+    assert.equal(fs.readdirSync(directory).filter((file) => file.endsWith(".wasm")).length, 8);
+    assert.equal(guardSharedMemoryCached(modules[0]).cache, "hit");
+    assert.equal(guardSharedMemoryCached(modules[1]).cache, "miss");
+  } finally {
+    if (saved === undefined) delete process.env.LOSAT_WASI_GUARD_CACHE;
+    else process.env.LOSAT_WASI_GUARD_CACHE = saved;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:156-180
 // ```c++
 //     // Create the threads ...
@@ -275,12 +357,15 @@ function spawner(spawns, { bulk = false } = {}) {
   ]);
 }
 
+// The host's environment: no LOSAT_WASI_* of the caller, this file's guard cache, then
+// `extra`, where `undefined` leaves a variable out.
 function hostEnv(extra = {}) {
   const env = { ...process.env, NODE_NO_WARNINGS: "1" };
   for (const key of Object.keys(env)) {
     if (key.startsWith("LOSAT_WASI_") || key.startsWith("LOSAT_WASM_MEMORY_")) delete env[key];
   }
-  return { ...env, ...extra };
+  const merged = { ...env, LOSAT_WASI_GUARD_CACHE: GUARD_CACHE, ...extra };
+  return Object.fromEntries(Object.entries(merged).filter(([, value]) => value !== undefined));
 }
 
 // The command runner, or with `options` a driver that passes the test-only host options

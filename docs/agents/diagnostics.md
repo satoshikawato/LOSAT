@@ -183,9 +183,11 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
 - `LOSAT_WASI_RECYCLE=0|1` (Node threaded runner, reactors; `1` when unset since
   2026-10-18) keep the thread workers between calls; a returned thread's worker
   instantiates the module again and waits for the next thread. Same output.
-- `LOSAT_WASI_GUARD_CACHE=<dir>` (Node threaded runner, opt-in) reuse the
-  shared-memory guard's output from `<dir>`, checked by SHA-256 and rebuilt
-  when it does not match.
+- `LOSAT_WASI_GUARD_CACHE=<dir>|0` (Node threaded runner; on by default since
+  2026-10-19 in `losat/wasi-guard` of the user's cache directory, `0` turns it
+  off) reuse the shared-memory guard's output, checked by SHA-256 and rebuilt
+  when it does not match; keeps the 8 entries used last. See
+  `LOSAT/tests/README.md`, "Threading contract gates".
 - `LOSAT_TBLASTX_PARALLEL_CHUNKS=1` force TBLASTX subject-chunk parallel path
   for diagnostics.
 - `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1` diagnostic-only sequential TBLASTX

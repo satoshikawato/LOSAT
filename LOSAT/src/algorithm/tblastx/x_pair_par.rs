@@ -4449,21 +4449,30 @@ mod tests {
                     let inp = case.inp();
                     let (_, units) = list_units(&case.pp, &inp, *max_dbseq_len);
                     let at = format!("threads {threads} case {case_no}");
-                    let compact =
-                        case.pp
-                            .run_units(&units, &inp, pool, XPairPar::run_unit_compact::<false>);
+                    let compact = case.pp.run_units(
+                        &units,
+                        &inp,
+                        pool,
+                        XPairPar::run_unit_compact::<false>,
+                        false,
+                    );
                     records += compact.iter().map(Vec::len).sum::<usize>();
                     assert_eq!(
-                        case.pp
-                            .run_units(&units, &inp, pool, XPairPar::run_unit_compact::<true>),
+                        case.pp.run_units(
+                            &units,
+                            &inp,
+                            pool,
+                            XPairPar::run_unit_compact::<true>,
+                            false
+                        ),
                         compact,
                         "{at}"
                     );
                     assert_eq!(
                         case.pp
-                            .run_units(&units, &inp, pool, XPairPar::run_unit::<true>),
+                            .run_units(&units, &inp, pool, XPairPar::run_unit::<true>, false),
                         case.pp
-                            .run_units(&units, &inp, pool, XPairPar::run_unit::<false>),
+                            .run_units(&units, &inp, pool, XPairPar::run_unit::<false>, false),
                         "{at}"
                     );
                 }

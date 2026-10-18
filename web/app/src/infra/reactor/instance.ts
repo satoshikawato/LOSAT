@@ -15,10 +15,39 @@ export interface ReactorInstance {
   readonly wasi: WasiContext;
 }
 
-/** Fetches a module of this build and checks its SHA-256 before anything uses it. */
-export async function fetchReactor(asset: ReactorAsset): Promise<Uint8Array> {
+export async function compileReactor(bytes: Uint8Array): Promise<CompiledReactor> {
+  const artifact = inspectReactor(bytes);
+  return { module: await WebAssembly.compile(bytes as BufferSource), artifact };
+}
+
+/**
+ * Fetches and compiles a module of this build. Where the browser can, the module compiles
+ * while it arrives (`WebAssembly.compileStreaming`) and a second reader of the same
+ * response checks the SHA-256: the module is returned only after the check, so nothing
+ * instantiates other bytes. A browser may keep the code that it compiled from a streamed
+ * response with the cached response, and a later visit then starts from that code (Chromium
+ * does once V8 hands it the module's optimized code). The engine URLs carry their digest and
+ * are served `immutable` (public/_headers), so the cached response stays valid until a build
+ * changes the module.
+ */
+export async function loadReactor(asset: ReactorAsset): Promise<CompiledReactor> {
+  const response = await fetchAsset(asset);
+  if (!streamable(response)) return compileReactor(await checkedBytes(asset, response));
+  const copy = response.clone();
+  const compiling = WebAssembly.compileStreaming(response);
+  // Reported below, after the digest check, which comes first.
+  compiling.catch(() => undefined);
+  const artifact = inspectReactor(await checkedBytes(asset, copy));
+  return { module: await compiling, artifact };
+}
+
+async function fetchAsset(asset: ReactorAsset): Promise<Response> {
   const response = await fetch(asset.url);
   if (!response.ok) throw new Error(`the engine file ${asset.url} could not be loaded (HTTP ${response.status})`);
+  return response;
+}
+
+async function checkedBytes(asset: ReactorAsset, response: Response): Promise<Uint8Array> {
   const bytes = new Uint8Array(await response.arrayBuffer());
   const digest = await sha256Hex(bytes);
   if (digest !== asset.sha256) {
@@ -27,9 +56,10 @@ export async function fetchReactor(asset: ReactorAsset): Promise<Uint8Array> {
   return bytes;
 }
 
-export async function compileReactor(bytes: Uint8Array): Promise<CompiledReactor> {
-  const artifact = inspectReactor(bytes);
-  return { module: await WebAssembly.compile(bytes as BufferSource), artifact };
+/** compileStreaming needs the Wasm media type; other responses compile from their bytes. */
+function streamable(response: Response): boolean {
+  const type = response.headers.get('Content-Type')?.split(';')[0]?.trim().toLowerCase();
+  return typeof WebAssembly.compileStreaming === 'function' && type === 'application/wasm';
 }
 
 /** Imports that are neither WASI nor the shared memory: `losat_host.emit` (ABI v2 §3). */

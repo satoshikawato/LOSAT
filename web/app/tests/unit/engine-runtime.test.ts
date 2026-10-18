@@ -4,11 +4,11 @@
 // RecordScanner contract runs against the serial reactor in Node.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { findReactors } from '../../build/reactors';
 import { ReactorAbi, stopMessage, type AbiExports } from '../../src/infra/reactor/abi';
 import { ABI_EXPORTS, inspectReactor } from '../../src/infra/reactor/artifact';
-import { instantiateSerial } from '../../src/infra/reactor/instance';
+import { instantiateSerial, loadReactor } from '../../src/infra/reactor/instance';
 import { ReactorInputChecker } from '../../src/infra/reactor/checker';
 import { toProgramDescription } from '../../src/infra/reactor/control';
 import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
@@ -150,6 +150,45 @@ describe('inspectReactor', () => {
 
   it('rejects bytes that are not a WebAssembly module', () => {
     expect(() => inspectReactor(new TextEncoder().encode('<!doctype html>'))).toThrow('the engine file is not a WebAssembly module');
+  });
+});
+
+describe('loadReactor', () => {
+  const bytes = moduleBytes(SERIAL);
+  const asset = { url: '/engine/serial.wasm', sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, artifactSha256: 'a'.repeat(64) };
+  const serve = (type: string, status = 200) =>
+    vi.stubGlobal('fetch', async () => new Response(status === 200 ? (bytes as BufferSource) : null, { status, headers: { 'Content-Type': type } }));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('compiles a Wasm response while it arrives and returns the module after the SHA-256 check', async () => {
+    serve('application/wasm');
+    const streaming = vi.spyOn(WebAssembly, 'compileStreaming');
+    const loaded = await loadReactor(asset);
+    expect(streaming).toHaveBeenCalledTimes(1);
+    expect(loaded.module).toBeInstanceOf(WebAssembly.Module);
+    expect(loaded.artifact.kind).toBe('serial-reactor');
+  });
+
+  it('refuses bytes of another SHA-256 even when they compile', async () => {
+    serve('application/wasm');
+    await expect(loadReactor({ ...asset, sha256: 'b'.repeat(64) })).rejects.toThrow(
+      `the engine file /engine/serial.wasm is not the one of this release (SHA-256 ${asset.sha256})`,
+    );
+  });
+
+  it('compiles from the bytes when the response is not served as Wasm', async () => {
+    serve('application/octet-stream');
+    const streaming = vi.spyOn(WebAssembly, 'compileStreaming');
+    expect((await loadReactor(asset)).artifact.kind).toBe('serial-reactor');
+    expect(streaming).not.toHaveBeenCalled();
+  });
+
+  it('reports a response that is not OK', async () => {
+    serve('text/plain', 404);
+    await expect(loadReactor(asset)).rejects.toThrow('the engine file /engine/serial.wasm could not be loaded (HTTP 404)');
   });
 });
 

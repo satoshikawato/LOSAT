@@ -51,6 +51,17 @@ export interface WorkerRun {
   readonly output: MessagePort;
 }
 
+/**
+ * Starts what a search of `threads` threads would start (the instance and, for more than one
+ * thread, its thread workers) before the search comes (EngineGateway.prepare). A failure is
+ * not reported: the search that follows starts them again and reports it.
+ */
+export interface WorkerPrepare {
+  readonly type: 'prepare';
+  readonly generation: number;
+  readonly threads: number;
+}
+
 /** Test builds only (`__LOSAT_TEST_HOOKS__`): drives the run output writer of the worker. */
 export type WorkerTestCommand =
   | { readonly type: 'test-open'; readonly id: number; readonly port: MessagePort }
@@ -58,7 +69,7 @@ export type WorkerTestCommand =
   | { readonly type: 'test-end'; readonly id: number; readonly writer: number }
   | { readonly type: 'test-post'; readonly id: number; readonly writer: number; readonly message: unknown };
 
-export type EngineCommand = EngineInit | WorkerRun | WorkerTestCommand;
+export type EngineCommand = EngineInit | WorkerRun | WorkerPrepare | WorkerTestCommand;
 
 export interface MemoryRecord {
   /** Linear memory of the instance before and after the search, in bytes. */

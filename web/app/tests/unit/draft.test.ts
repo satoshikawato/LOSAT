@@ -7,7 +7,7 @@ import { DataService } from '../../src/infra/data/data-service';
 import { MemoryBlockStore } from '../../src/infra/data/memory-block-store';
 import { FakeEngine } from '../../src/infra/fake/fake-engine';
 import { FakeInputChecker, FakeScanner } from '../../src/infra/fake/fake-fasta';
-import type { ValidationResult } from '../../src/ports/engine';
+import type { EnginePrepareHint, ValidationResult } from '../../src/ports/engine';
 
 function setup(
   options: {
@@ -33,12 +33,14 @@ function setup(
   };
   const fake = new FakeEngine();
   const validated: Array<readonly string[]> = [];
+  const prepared: EnginePrepareHint[] = [];
   const engine = {
     describe: fake.describe.bind(fake),
     validate: async (argv: readonly string[]): Promise<ValidationResult> => {
       validated.push(argv);
       return options.validate?.(argv) ?? { ok: true };
     },
+    prepare: (hint: EnginePrepareHint) => void prepared.push(hint),
   };
   let id = 0;
   const coordinator = new Coordinator({
@@ -59,7 +61,7 @@ function setup(
     now: () => 0,
     debounceMs: 0,
   });
-  return { draft, data, requests, validated, coordinator, checks };
+  return { draft, data, requests, validated, prepared, coordinator, checks };
 }
 
 const file = (name: string, text: string) => new File([text], name, { type: 'text/plain' });
@@ -326,6 +328,27 @@ describe('SearchDraft submit', () => {
     draft.setTitle('   ');
     await draft.submit();
     expect(requests[1]!.every((r) => !('title' in r))).toBe(true);
+  });
+
+  it('asks the engine to prepare once the argv is valid and both roles have inputs, with the size of the run', async () => {
+    const { draft, prepared } = setup();
+    draft.setPaste('query', '>q1\nACGT\n');
+    await draft.idle();
+    expect(prepared).toEqual([]);
+    draft.setPaste('subject', '>s1\nACGTACGT\n');
+    await draft.idle();
+    expect(prepared.at(-1)).toEqual({ requestedThreads: 'auto', inputBytes: 9 + 13 });
+    draft.setThreads(4);
+    expect(prepared.at(-1)).toEqual({ requestedThreads: 4, inputBytes: 22 });
+  });
+
+  it('does not ask the engine to prepare for an argv that it refuses', async () => {
+    const { draft, prepared } = setup({ validate: () => ({ ok: false, message: 'no' }) });
+    draft.setPaste('query', '>q1\nACGT\n');
+    draft.setPaste('subject', '>s1\nACGT\n');
+    await draft.idle();
+    draft.setThreads(2);
+    expect(prepared).toEqual([]);
   });
 
   it("validates the draft's argv with the engine and shows its message", async () => {

@@ -95,7 +95,7 @@ export interface DraftState {
 }
 
 export interface DraftDeps {
-  readonly engine: Pick<EngineGateway, 'describe' | 'validate'>;
+  readonly engine: Pick<EngineGateway, 'describe' | 'validate' | 'prepare'>;
   readonly data: Pick<
     DataGateway,
     'addSource' | 'indexSource' | 'reviseDataset' | 'checkInput' | 'previewSource'
@@ -202,6 +202,7 @@ export class SearchDraft {
 
   setThreads(threads: number | 'auto'): void {
     this.set({ threads, message: undefined });
+    this.prepareEngine();
   }
 
   // --- inputs -----------------------------------------------------------------------------
@@ -678,7 +679,26 @@ export class SearchDraft {
     } catch (error) {
       validation = { state: 'invalid', message: messageOf(error) };
     }
-    if (this.generations.get('validate') === generation) this.set({ validation });
+    if (this.generations.get('validate') !== generation) return;
+    this.set({ validation });
+    this.prepareEngine();
+  }
+
+  /**
+   * Tells the engine that a search like the draft's may come (EngineGateway.prepare), once
+   * its conditions are valid and both roles have indexed inputs, so that the engine can
+   * start its runtime before "Add to queue". The size is that of the largest run.
+   */
+  private prepareEngine(): void {
+    const { threads, validation } = this.state.get();
+    if (this.deps.engine.prepare === undefined || validation.state !== 'ok') return;
+    let inputBytes = 0;
+    for (const role of ROLES) {
+      const groups = this.inputGroups(role);
+      if (groups.length === 0) return;
+      inputBytes += Math.max(...groups.map((group) => group.sources.reduce((sum, source) => sum + source.size, 0)));
+    }
+    this.deps.engine.prepare({ requestedThreads: threads, inputBytes });
   }
 
   // --- helpers ----------------------------------------------------------------------------

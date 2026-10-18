@@ -5,8 +5,8 @@
 //! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it on, each unit of `LOSAT_X_PAIRPAR`
 //! sorts its own list, a chunk's init list is the k-way merge of its units' lists, the conversion
 //! sorts only the runs of HSPs equal in score and subject range, and each frame list is merged into
-//! the subject's list. `[X_STATS] TBXKMERGE` (printed only while the switch is on) counts the
-//! subjects, chunks, sorted tie runs and the two fallbacks, which must stay zero;
+//! the subject's list. `[X_STATS] TBXKMERGE` (printed while the switch or its shadow is on) counts
+//! the subjects, chunks, sorted tie runs and the two fallbacks, which must stay zero;
 //! `LOSAT_X_TBXKMERGESHADOW=1` compares every field of every HSP with the merge of the switch off.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2758-2766
@@ -275,8 +275,12 @@ fn record(defline: &str, letters: &str) -> String {
 // 4 k cells in the 8,192-cell diagonal table, more than a context's 500 residues). Every
 // subject hit of X is found in both queries with the same score and subject range; in the
 // concatenated query (the init order) query 1 comes first, in the context (the HSP order) query
-// 2's offset is 900 lower. The switch sorts those runs (`tie_runs` > 0) and the report, at 1, 2, 4,
-// 8 and 16 threads and with the shadow, is the report of the search with the switch off.
+// 2's offset is 300 residues (900 bases) lower. The switch sorts those runs (`tie_runs` > 0) and the
+// report, at 1, 2, 4, 8 and 16 threads, without the statistics (the units' scan without a probe)
+// and with the shadow, is the report of the search with the switch off. With
+// `LOSAT_TBLASTX_TEST_CHUNK_SIZE=700` (debug builds) each 2,000-residue subject frame is searched as
+// three chunks, merged by `merge_tblastx_subject_chunk_hits`: the report is that of the switch off
+// with the same chunks.
 #[test]
 fn tied_hsps_of_two_queries_give_the_report_of_the_switch_off() {
     let dir = std::env::temp_dir().join(format!("losat-tblastx-kmerge-{}", std::process::id()));
@@ -301,9 +305,28 @@ fn tied_hsps_of_two_queries_give_the_report_of_the_switch_off() {
         let tie_runs = assert_kmerge_ran(&stderr, 1, &what);
         assert!(tie_runs > 0, "{what}:\n{stderr}");
     }
+    for threads in [1, 4, 16] {
+        let (report, _) = tblastx(&query, &subject, threads, &[]);
+        assert_eq!(report, expected, "no statistics, threads {threads}");
+    }
     let (report, stderr) = tblastx(&query, &subject, 4, &[STATS, SHADOW]);
     assert_eq!(report, expected, "shadow");
     let [subjects, hsps] = shadow_counts(&stderr);
     assert!(subjects == 1 && hsps > 0, "shadow:\n{stderr}");
+    let chunks = ("LOSAT_TBLASTX_TEST_CHUNK_SIZE", "700");
+    let (chunked, _) = tblastx(&query, &subject, 1, &[chunks, SWITCH_OFF]);
+    assert!(!chunked.is_empty(), "no hits with chunks");
+    for threads in [1, 4] {
+        let what = format!("chunks, threads {threads}");
+        let (report, stderr) = tblastx(&query, &subject, threads, &[STATS, chunks]);
+        assert_eq!(report, chunked, "{what}");
+        assert_kmerge_ran(&stderr, 1, &what);
+        let [_, chunks_merged, _, _, _] = kmerge(&stderr);
+        assert!(chunks_merged >= 18, "{what}:\n{stderr}");
+    }
+    let (report, stderr) = tblastx(&query, &subject, 4, &[STATS, SHADOW, chunks]);
+    assert_eq!(report, chunked, "chunks, shadow");
+    let [subjects, hsps] = shadow_counts(&stderr);
+    assert!(subjects == 1 && hsps > 0, "chunks, shadow:\n{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 }

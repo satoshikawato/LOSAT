@@ -11,8 +11,9 @@
 //!
 //! What the switch changes (read once per process, `mode`; in the strict set):
 //! 1. Each unit sorts its own list, in its task on the pool, after its scan (`run_units`), by the
-//!    comparator of the chunk's init sort (`XRecord::cmp`); a compact list with the thread's
-//!    scratch vector as the buffer (`x_stable_sort_with`, no allocation).
+//!    comparator of the chunk's init sort (`XRecord::cmp`); a compact list with the task's scratch
+//!    vector as the buffer (`x_stable_sort_with`, no allocation; `map_init` gives each split of the
+//!    pool's work its own scratch).
 //! 2. A chunk's init list is the k-way merge of its units' sorted lists (`x_kway`) in a Vec of their
 //!    total length: the smallest head by the comparator, ties to the lower unit. No sort of the
 //!    chunk list.
@@ -24,7 +25,9 @@
 //!    ties to the combined list, instead of being appended and the whole list sorted. A frame list
 //!    that is not sorted (never expected) is sorted first.
 //! The merges of the chunks of one frame (`merge_tblastx_subject_chunk_hits`, subjects with more
-//! than 5 M residues in a frame) are unchanged.
+//! than 5 M residues in a frame) are unchanged from the second chunk on; the first chunk's list
+//! becomes the empty frame list, as `merge_subject_compact` does in both forms, which is what the
+//! empty-list branch of `merge_tblastx_subject_chunk_hits` (`combined.append`) computes.
 //!
 //! Why `combined_ungapped_hits` is the list of the switch off:
 //! a. Every sort involved is a stable sort by a lexicographic comparator over integers, so its
@@ -46,8 +49,10 @@
 //!    not rest on this argument.
 //! d. Item 4: the combined list of the switch off after frame f is stable_sort(C ++ F) where C,
 //!    the list after the frames before f, is sorted (from the empty list on) and F, the frame list,
-//!    is sorted (it leaves a sort: the conversion's, or that of `merge_tblastx_subject_chunk_hits`);
-//!    the backward merge with ties to C is the merge of (a).
+//!    is sorted (it leaves a sort: the conversion's, or that of `merge_tblastx_subject_chunk_hits`;
+//!    `adjust_tblastx_chunk_subject_offsets` between them adds one offset to the subject start and
+//!    end of every HSP, which keeps the order); the backward merge with ties to C is the merge of
+//!    (a).
 //!
 //! Memory: the units' lists of a chunk live until its merge ends (with the switch off each is
 //! dropped once it is expanded); the chunk's init list is made at its length; the frame merge holds
@@ -56,8 +61,10 @@
 //!
 //! `LOSAT_X_TBXKMERGESHADOW=1` (opt-in, whatever the switch): the units return unsorted lists; the
 //! merge copies them, runs `merge_subject_listed` on the copy and this file's merge on the lists
-//! (sorting them first), and compares every field of every HSP; the first difference stops the run.
-//! With `LOSAT_X_STATS` the counters of the items above are printed (`print_summary`).
+//! (sorting them first; a compact list both with `x_stable_sort_with` and with `slice::sort_by`,
+//! which must agree), and compares every field of every HSP; the first difference stops the run.
+//! With `LOSAT_X_STATS` the counters of the items above are printed (`print_summary`) whenever the
+//! switch or its shadow is on, with zeros where no unit path ran.
 
 use super::*;
 use crate::algorithm::tblastx::blast_gapalign::{
@@ -143,7 +150,7 @@ impl XRecord for XUnitHsp {
 pub(super) trait XUnitSort {
     /// The sort of the shadow mode and of the tests (`slice::sort_by`).
     fn x_sort(&mut self);
-    /// The sort of the unit's task, which may use the thread's scratch as its buffer.
+    /// The sort of the unit's task, which may use the task's scratch as its buffer.
     fn x_sort_in(&mut self, scratch: &mut XScratch);
 }
 
@@ -173,10 +180,10 @@ impl XUnitSort for Vec<InitHSP> {
 //           sizeof(BlastInitHSP), score_compare_match);
 // ```
 // The compact records of a unit are its list twice when its task ends: the exact copy the task
-// returns and the thread's scratch vector it was copied from (`run_unit_compact`; the scratch is
-// cleared at the start of the thread's next unit). In the task the stable sort runs between the
-// two (`x_stable_sort_with`), so it allocates nothing; `slice::sort_by` allocates a buffer of up
-// to the list's length in each of the pool's tasks at once.
+// returns and the scratch vector it was copied from (`run_unit_compact`; the scratch, one per split
+// of the pool's work, is cleared at the start of its next unit). In the task the stable sort runs
+// between the two (`x_stable_sort_with`), so it allocates nothing; `slice::sort_by` allocates a
+// buffer of up to the list's length in each of the pool's tasks at once.
 impl XUnitSort for Vec<XUnitHsp> {
     fn x_sort(&mut self) {
         self.sort_by(<XUnitHsp as XRecord>::cmp);
@@ -495,6 +502,7 @@ fn shadow(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<UngappedHit> {
         },
     };
     let reference = XPairPar::merge_subject_listed(copy, inp);
+    KM_SUBJECTS.fetch_add(1, AtomicOrdering::Relaxed);
     // This file's merge, without the counters of x_pair_par.rs (the reference counted the subject).
     let merged = match outputs {
         XUnitOutputs::Full(mut lists) => {
@@ -502,7 +510,18 @@ fn shadow(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<UngappedHit> {
             x_merge(&frame_chunks, &units, lists, inp, false)
         }
         XUnitOutputs::Compact(mut records) => {
-            records.iter_mut().for_each(XUnitSort::x_sort);
+            // the task's sort (with a buffer) against `slice::sort_by`, unit by unit
+            let mut buffer = Vec::new();
+            for (k, list) in records.iter_mut().enumerate() {
+                let mut by_std = list.clone();
+                by_std.x_sort();
+                x_stable_sort_with(list, &mut buffer, <XUnitHsp as XRecord>::cmp);
+                assert!(
+                    *list == by_std,
+                    "LOSAT_X_TBXKMERGESHADOW: subject {} unit {k}: the buffered sort differs from slice::sort_by",
+                    inp.s_idx
+                );
+            }
             x_merge(&frame_chunks, &units, records, inp, false)
         }
     };

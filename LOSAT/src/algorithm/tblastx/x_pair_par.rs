@@ -1641,11 +1641,12 @@ impl XPairPar {
     // ```c
     // Blast_InitHitListSortByScore(init_hitlist);
     // ```
-    // The seed stage of one subject, second half: per chunk in order, the concatenated unit lists
-    // through the same sort, conversion, offset adjustment and chunk merge as the reference
-    // (RI:3582-3598, 4533-4553), and per frame in s_f_idx order the append and sort of
-    // RI:4556-4581. It has no `self`: it reads the units' own lists and the subject's inputs,
-    // never a group table, so the tables may already be freed when it runs.
+    // The seed stage of one subject, second half: the list the reference builds per chunk in order
+    // (sort, conversion, offset adjustment and chunk merge, RI:3582-3598, 4533-4553) and per frame
+    // in s_f_idx order (append and sort, RI:4556-4581); `merge_subject_listed` runs those
+    // statements, LOSAT_X_TBXKMERGE (x_kmerge.rs) computes the same list without the full sorts.
+    // It has no `self`: it reads the units' own lists and the subject's inputs, never a group
+    // table, so the tables may already be freed when it runs.
     /// `combined_ungapped_hits` of one subject, from its units.
     pub(super) fn merge_subject(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<UngappedHit> {
         // EXPERIMENT (LOSAT_X_TBXKMERGE / LOSAT_X_TBXKMERGESHADOW), dispatch: the same list without
@@ -1656,8 +1657,9 @@ impl XPairPar {
         Self::merge_subject_listed(x_units, inp)
     }
 
-    /// `merge_subject` with the switch LOSAT_X_TBXKMERGE off: the units' lists in unit order,
-    /// sorted per chunk, and the frame lists appended and sorted.
+    /// `merge_subject` with the switch LOSAT_X_TBXKMERGE off: the units' lists of a chunk
+    /// concatenated in unit order and sorted, converted, merged into the frame list, and the frame
+    /// lists appended and sorted (the statements of the reference).
     fn merge_subject_listed(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<UngappedHit> {
         let XSubjectUnits {
             frame_chunks,
@@ -1736,7 +1738,7 @@ impl XPairPar {
     //    }
     // ```
     // EXPERIMENT (LOSAT_X_SEEDCOMPACT): `merge_subject` on the compact records (section above
-    // `XUnitHsp`, items 3 and a-d). The statements are those of `merge_subject` except three: a
+    // `XUnitHsp`, items 3 and a-d). The statements are those of `merge_subject_listed` except three: a
     // unit's list is appended to the chunk's init list by `x_expand_unit` instead of `extend`, the
     // conversion fills a Vec reserved at the init list's length (`get_ungapped_hsp_list_into`), and
     // a chunk list that meets an empty frame list becomes the frame list, as NCBI hands the first
@@ -2567,6 +2569,7 @@ fn x_same_hit(a: &UngappedHit, b: &UngappedHit) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::x_kmerge::XUnitSort;
     use super::*;
 
     /// A frame of amino acids (NCBISTDAA codes) with its sentinels.
@@ -3693,8 +3696,9 @@ mod tests {
 
     /// The units of `case` (chunks of at most `max_dbseq_len` letters) run on `pool` both ways:
     /// every unit's compact records have no spare room and expand to today's list of that unit,
-    /// element for element, and `merge_subject` of the compact records gives today's
-    /// `combined_ungapped_hits`, every field (the comparison of LOSAT_X_PAIRPARSHADOW).
+    /// element for element, and `merge_subject_listed` of the compact records gives today's
+    /// `combined_ungapped_hits`, every field (the comparison of LOSAT_X_PAIRPARSHADOW), as does
+    /// the merge of LOSAT_X_TBXKMERGE of either form, sorted as the units' tasks sort them.
     fn compact_check(
         case: &CompactCase,
         pool: &crate::utils::threading::SearchPool<'_>,
@@ -3739,7 +3743,18 @@ mod tests {
                 .count();
             seen.merged_frames += usize::from(chunks_with_hits >= 2);
         }
-        let today = XPairPar::merge_subject(
+        // LOSAT_X_TBXKMERGE (x_kmerge.rs): the units' lists sorted as their tasks sort them, merged
+        // by the switch's merge; both forms give today's list.
+        let mut scratch = XScratch::new(false);
+        let mut sorted_full = full.clone();
+        sorted_full
+            .iter_mut()
+            .for_each(|list| list.x_sort_in(&mut scratch));
+        let mut sorted_compact = compact.clone();
+        sorted_compact
+            .iter_mut()
+            .for_each(|records| records.x_sort_in(&mut scratch));
+        let today = XPairPar::merge_subject_listed(
             XSubjectUnits {
                 frame_chunks: frame_chunks.clone(),
                 units: units.clone(),
@@ -3747,15 +3762,29 @@ mod tests {
             },
             &inp,
         );
-        let with_switch = XPairPar::merge_subject(
+        let with_switch = XPairPar::merge_subject_listed(
             XSubjectUnits {
-                frame_chunks,
-                units,
+                frame_chunks: frame_chunks.clone(),
+                units: units.clone(),
                 outputs: XUnitOutputs::Compact(compact),
             },
             &inp,
         );
         shadow_compare(inp.s_idx, &with_switch, &today);
+        for outputs in [
+            XUnitOutputs::Full(sorted_full),
+            XUnitOutputs::Compact(sorted_compact),
+        ] {
+            let merged = x_kmerge::merge_subject(
+                XSubjectUnits {
+                    frame_chunks: frame_chunks.clone(),
+                    units: units.clone(),
+                    outputs,
+                },
+                &inp,
+            );
+            shadow_compare(inp.s_idx, &merged, &today);
+        }
         seen.hits = today.len();
         seen
     }
@@ -4142,6 +4171,20 @@ mod tests {
             let mut expanded = Vec::new();
             x_expand_unit(&copy, unit.f, &inp, &mut expanded);
             assert_eq!(expanded, list, "{at}");
+            // LOSAT_X_TBXKMERGE: the task's sort of the copy, with the scratch it was copied from as
+            // the buffer (the mapped capacity where the rule holds), is `slice::sort_by` and
+            // allocates nothing.
+            let buffer = mapped.records.capacity();
+            let mut in_task = copy.clone();
+            in_task.x_sort_in(&mut mapped);
+            let mut sorted = copy.clone();
+            sorted.x_sort();
+            assert_eq!(in_task, sorted, "{at}");
+            assert_eq!(
+                mapped.records.capacity(),
+                buffer,
+                "{at}: the sort allocated"
+            );
             today_records.push(exact);
             mapped_records.push(copy);
         }
@@ -4154,7 +4197,7 @@ mod tests {
         }
         assert!(today.diag.capacity() < x_mapped_len::<DiagStruct>(0));
         assert!(today.records.capacity() < x_mapped_len::<XUnitHsp>(0));
-        let today_hits = XPairPar::merge_subject(
+        let today_hits = XPairPar::merge_subject_listed(
             XSubjectUnits {
                 frame_chunks: frame_chunks.clone(),
                 units: units.clone(),
@@ -4162,7 +4205,7 @@ mod tests {
             },
             &inp,
         );
-        let mapped_hits = XPairPar::merge_subject(
+        let mapped_hits = XPairPar::merge_subject_listed(
             XSubjectUnits {
                 frame_chunks,
                 units,

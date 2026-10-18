@@ -163,8 +163,8 @@ Run the host regression checks with
 `"$NODE_BIN" --test test_wasi_runners.js test_wasi_shared_memory.js`
 (or substitute `node`). They exercise real Wasm commands, exit codes, worker
 exceptions, shared-memory growth, overlapping copies, and invalid ranges, and
-the two opt-in host variables `LOSAT_WASI_PRESPAWN` and `LOSAT_WASI_GUARD_CACHE`
-(see "Threading contract gates").
+the host variables `LOSAT_WASI_PRESPAWN`, `LOSAT_WASI_RECYCLE` and
+`LOSAT_WASI_GUARD_CACHE` (see "Threading contract gates").
 
 Each completed search immediately prints its measured wall time, for example
 `Finished WSSV.PajaWSV.losatp.wasm: 7.446 s`. Failed searches also
@@ -257,7 +257,9 @@ Every supported explicit N > 1 uses N total compute threads: the caller plus
 N-1 child workers. Diagnostics report pool_threads=N and caller_participates=true;
 host spawn/ready/exit counts are N-1. n1 creates no child workers; serial targets reject n2/n4. Invalid or excessive requests and
 invalid `LOSAT_WASI_THREAD_CAP` settings fail before spawning workers. Repeated
-reactor calls join all guest workers and await host exit events. Recoverable
+reactor calls join all guest workers and await the host's record of each guest
+thread's end (`exited`: the Node worker's exit, or with `LOSAT_WASI_RECYCLE` the
+worker's report that the thread returned). Recoverable
 spawn rejection returns the underlying cause and clears old result bytes;
 traps and worker failures terminate the host process and require a fresh one.
 
@@ -268,12 +270,15 @@ The detailed performance parser rejects absent or inconsistent evidence.
 `LOSAT_TBLASTX_SERIAL_SCAN_CHUNKS=1` describes sequential diagnostic chunking;
 the old `LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS` name has been removed.
 
-Two host variables of the Node threaded runner (`wasi_thread_host.js`) shorten
-its fixed startup cost. Both are off by default, and without them the runner
-behaves as before; neither changes the module, the guest or its output.
+Three host variables of the Node threaded runner (`wasi_thread_host.js`) shorten
+its fixed startup cost. None changes the module, the guest or its output.
+`LOSAT_WASI_PRESPAWN` (`auto`) and `LOSAT_WASI_RECYCLE` (`1`) are on by default
+since 2026-10-18 (`LOSAT_WASI_PRESPAWN=0` and `LOSAT_WASI_RECYCLE=0` give the
+runner of before); `LOSAT_WASI_GUARD_CACHE` is off unless set.
 
-- `LOSAT_WASI_PRESPAWN=auto|N` boots thread workers before `_start`, all at
-  once, instead of one per `thread-spawn` call while the guest waits. `auto`
+- `LOSAT_WASI_PRESPAWN=auto|N` (`auto` when unset) boots thread workers before
+  `_start`, all at once, instead of one per `thread-spawn` call while the guest
+  waits. `auto`
   takes N-1 from `-num_threads N` in the command line (0 when it is absent, not
   a number, below 2, or above the guest's limit of 255 threads); an integer from
   0 to 254 sets the count, and any other value is an error before the command
@@ -288,7 +293,22 @@ behaves as before; neither changes the module, the guest or its output.
   `standby_unused` and `standby_exited` events (`standby_rejected` when a worker
   cannot be created). The test-only startup faults act at worker boot, so with
   this variable an injected startup error ends the command as soon as a
-  prebooted worker boots, which can be before the first `thread-spawn`.
+  prebooted worker boots, which can be before the first `thread-spawn`. A
+  reactor has no `-num_threads` when it is created, so `auto` boots none there.
+- `LOSAT_WASI_RECYCLE=0|1` (`1` when unset; any other value is an error when
+  the host is created) keeps a reactor's thread workers between calls, as the
+  browser's thread host does. When a guest thread returns, its worker
+  instantiates the module again on the shared memory (a new instance for every
+  guest thread, as before) and waits for a start order; `thread-spawn` takes a
+  waiting worker, waits briefly for one that is instantiating again, and boots a
+  new worker only when every worker runs a thread (a thread of the previous pool
+  returns only after the next pool's spawns). `close()` ends the workers. The
+  guest gets the same threads in the same order. Commands are not affected:
+  their workers exit with their threads. With `LOSAT_WASI_THREADS_DEBUG=1`,
+  `spawned` of a recycled worker carries its `recycled` index, and `exited`
+  (code 0) records that the worker reported its thread's return. Measured on
+  p03 (TBLASTX, `-num_threads 8`, ABI v2 reactor, i9): the host's spawns took
+  148-205 ms of every later search without it and 1 ms with it.
 - `LOSAT_WASI_GUARD_CACHE=<dir>` stores the output of the shared-memory guard
   in `<dir>` (created if needed), keyed by the SHA-256 of the artifact and of
   `wasi_shared_memory.js`. A later run uses the stored bytes only when their

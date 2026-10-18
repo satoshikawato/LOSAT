@@ -176,9 +176,13 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   repeat every extension, so the run is slower; reports do not change.
 - `LOSAT_STARTUP_TRACE=1` startup trace.
 - `LOSAT_WASI_THREADS_DEBUG=1` threaded-WASI scheduling diagnostics.
-- `LOSAT_WASI_PRESPAWN=auto|N` (Node threaded runner, opt-in) boot N thread
-  workers (`auto`: `-num_threads` - 1) before `_start`; same output, extra
-  `standby_*` debug events. See `LOSAT/tests/README.md`, "Threading contract gates".
+- `LOSAT_WASI_PRESPAWN=auto|N` (Node threaded runner; `auto` when unset since
+  2026-10-18, `0` boots none) boot N thread workers (`auto`: `-num_threads` - 1)
+  before `_start`; same output, extra `standby_*` debug events. See
+  `LOSAT/tests/README.md`, "Threading contract gates".
+- `LOSAT_WASI_RECYCLE=0|1` (Node threaded runner, reactors; `1` when unset since
+  2026-10-18) keep the thread workers between calls; a returned thread's worker
+  instantiates the module again and waits for the next thread. Same output.
 - `LOSAT_WASI_GUARD_CACHE=<dir>` (Node threaded runner, opt-in) reuse the
   shared-memory guard's output from `<dir>`, checked by SHA-256 and rebuilt
   when it does not match.

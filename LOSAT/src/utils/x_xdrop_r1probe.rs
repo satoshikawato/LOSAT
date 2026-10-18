@@ -490,6 +490,9 @@ fn call(p: &Prob<'_>, tb: bool, sc: &mut XdropScratch) -> Option<XdropResult> {
                 (false, 8) => probe::align8_probe::<false, 7, 4>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
+                (false, 10) => probe::align8_probe::<false, 8, 0>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
                 (false, 9) => probe::align8_probe::<false, 6, 0>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
@@ -514,7 +517,7 @@ thread_local! {
     /// 0 = `align`, 1 = probe copy, 2 = probe copy without the high-water-mark branch.
     static KERN: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
     /// The band table of the problem being run (`oracle`: recorded by kernel 9, replayed by 7 / 8).
-    static TAB: std::cell::Cell<*mut Vec<(u32, u32)>> =
+    static TAB: std::cell::Cell<*mut Vec<(u32, u32, u32)>> =
         const { std::cell::Cell::new(std::ptr::null_mut()) };
 }
 
@@ -549,8 +552,9 @@ fn r1_loop() {
         Some("alu20") => 6,
         Some("oracle") => 7,
         Some("oraclelat4") => 8,
+        Some("oraclez") => 10,
         Some(k) => panic!(
-            "R1_KERN must be orig, copy, nodirty, lat4, addr4, nop30, alu20, oracle or oraclelat4, not {k}"
+            "R1_KERN must be orig, copy, nodirty, lat4, addr4, nop30, alu20, oracle, oraclelat4 or oraclez, not {k}"
         ),
     };
     assert!(kern == 0 || w8, "the probe copies are 8-bit kernels");
@@ -686,7 +690,7 @@ fn r1_loop() {
         None
     };
     // oracle: each problem's band, recorded once by kernel 9 before the checked call replays it
-    let mut tabs: Vec<Vec<(u32, u32)>> = vec![Vec::new(); list.len()];
+    let mut tabs: Vec<Vec<(u32, u32, u32)>> = vec![Vec::new(); list.len()];
     for (i, p) in list.iter().enumerate() {
         if kern >= 7 {
             TAB.with(|t| t.set(&mut tabs[i]));
@@ -760,7 +764,7 @@ fn r1_loop() {
             0.0
         },
         if spread_on { "spread" } else { "as-is" },
-        ["orig", "copy", "nodirty", "lat4", "addr4", "nop30", "alu20", "oracle", "oraclelat4"]
+        ["orig", "copy", "nodirty", "lat4", "addr4", "nop30", "alu20", "oracle", "oraclelat4", "-", "oraclez"]
             [kern as usize],
         st.line()
     );
@@ -783,7 +787,8 @@ fn r1_loop() {
 // H / E / drop chain), `addr4` (V = 3) four identity adds on the band position before the next row,
 // `nop30` (V = 4) 30 NOPs per row, `alu20` (V = 5) 20 independent adds per row; `oracle` (V = 7,
 // recorded by V = 6) takes the next row's band from a recorded run instead of this row's survivors,
-// `oraclelat4` adds lat4's latency to it.
+// `oraclelat4` adds lat4's latency to it, `oraclez` (V = 8) also clears E after the recorded last
+// survivor instead of this row's.
 // ---------------------------------------------------------------------------
 #[allow(clippy::all)]
 mod probe {
@@ -1038,7 +1043,7 @@ mod probe {
         let small_alphabet = ncols <= 16;
         let mut cells: u64 = 0;
         // V = 6 records each row's next band (first, b_size); V = 7 replays it (see the row end).
-        let tabv: *mut Vec<(u32, u32)> = if V == 6 || V == 7 {
+        let tabv: *mut Vec<(u32, u32, u32)> = if V >= 6 {
             super::TAB.with(|t| t.get())
         } else {
             core::ptr::null_mut()
@@ -1046,7 +1051,7 @@ mod probe {
         if V == 6 {
             (*tabv).clear();
         }
-        let tab: *const (u32, u32) = if V == 7 { (*tabv).as_ptr() } else { core::ptr::null() };
+        let tab: *const (u32, u32, u32) = if V >= 7 { (*tabv).as_ptr() } else { core::ptr::null() };
 
         let mut base: i32 = 0;
         let mut best_rel: i32 = 0;
@@ -1258,7 +1263,13 @@ mod probe {
             if lo_surv == usize::MAX {
                 break;
             }
-            let last = hi_surv;
+            let mut last = hi_surv;
+            if V == 8 {
+                // probe: the E clearing after the last survivor at the recorded position, so that its
+                // store addresses no longer wait for this row's survivors
+                core::arch::asm!("/* {0} */", in(reg) last, options(nomem, nostack, preserves_flags));
+                last = (*tab.add(a - 1)).2 as usize;
+            }
             let mut b = last + 1;
             while b < proc_end {
                 st(e.add(b), zero);
@@ -1278,14 +1289,14 @@ mod probe {
                 b_size += 1;
             }
             if V == 6 {
-                (*tabv).push((first as u32, b_size as u32));
+                (*tabv).push((first as u32, b_size as u32, last as u32));
             }
-            if V == 7 {
+            if V == 7 || V == 8 {
                 // probe: the next row's band from the recorded run of the same problem, so that it
                 // no longer waits for this row's survivors (which are still computed, then dropped)
                 core::arch::asm!("/* {0} {1} */", in(reg) first, in(reg) b_size,
                     options(nomem, nostack, preserves_flags));
-                let (f, bs) = *tab.add(a - 1);
+                let (f, bs, _) = *tab.add(a - 1);
                 first = f as usize;
                 b_size = bs as usize;
             }

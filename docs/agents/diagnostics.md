@@ -2957,7 +2957,8 @@ Scheduling (each value computed by one thread with the original function; order 
   that added it, 2026-10-18; x86-64 only; `=0` turns it off) the unit scan of `LOSAT_X_PAIRPAR`
   (`tblastx/x_tbx_extbatch.rs`, exactness argument in its header) holds back the two-hit extensions of
   the subjects where one unit's query-group span (the letters of the query frames the unit's hits fall
-  in) has at least the switch's number of Ki letters (2 to 4,194,304; built-in 256; `=2` every unit):
+  in) has at least the switch's number of Ki letters (2 to 4,194,304; built-in 256; `=2` every unit of
+  2 Ki letters or more):
   a hit that passes the two-hit test records its extension in a batch of 16, prefetches the query and
   subject lines the extension reads first and marks its cell (flag 1, the slot in `last_hit`); the
   batch is resolved by `extend_hit_two_hit` when it is full and at the end of the unit, its init HSPs
@@ -2965,9 +2966,12 @@ Scheduling (each value computed by one thread with the original function; order 
   goes through the states of `scan_unit` in its order and the unit's list is the same element for
   element. The extension of a hit starts at a random position of the query group, so on a large query
   its first loads wait on memory; the batch lets them arrive while the scan goes on. Acts where the
-  window leaves room for the marks (`window >= wordsize + 16`, the default 40); the probes of
-  `LOSAT_TIMING` / `LOSAT_X_STATS` run `scan_unit`; the other subjects run `scan_unit`, whose machine
-  code is the one before the switch (`=0` and the binary before it run the same instruction counts).
+  window leaves room for the marks (`window >= wordsize + 16`, the default 40). With `LOSAT_TIMING` or
+  `LOSAT_X_STATS` (their probes) the units run `scan_unit`, so timings taken with those variables do
+  not include the switch; the other subjects run `scan_unit`, whose machine code is the one before the
+  switch (`=0` and the binary before it run the same instruction counts). For one query the rule holds
+  from about 0.8 Mb; a batch of more than 6 contexts merges contexts into a group (`X_MAX_GROUPS`), so
+  smaller queries can reach it there (not measured).
   Measured (workstation, 8 booked cores of a node without other timed runs, alternating rounds,
   medians of the per-round ratios against `=0`, every report identical): Sakai x MG1655[0:1 Mb] (code
   11, frames of 1.83 M letters) 8 threads x0.918 (23.25 -> 21.33 s); the first 0.4 / 0.8 / 1.6 / 3.2 Mb
@@ -2977,11 +2981,11 @@ Scheduling (each value computed by one thread with the original function; order 
   between the spans that lost and the first that gained. An 8 x i32 AVX2 lane kernel for the batch (the
   walks of 8 extensions side by side) was built and measured, and lost to this scalar resolution on
   every case (branch `exp/a5-lanes-kernel`; v4-A DESIGN_A5 §4.2).
-- `LOSAT_X_TBXEXTBATCHSHADOW=1` shadow of `LOSAT_X_TBXEXTBATCH`: every unit (whatever the rule says) runs
-  `scan_unit` and the batched scan on fresh tables, and the saved records and every cell of the final
-  table must be equal; a difference panics with the unit. Lines at exit: `[X_SHADOW] TBXEXTBATCH
-  units_compared=` and `[X_STATS] TBXEXTBATCH units= candidates= early= batches=` (also with
-  `LOSAT_X_STATS` or `LOSAT_TIMING` while the switch is on).
+- `LOSAT_X_TBXEXTBATCHSHADOW=1` shadow of `LOSAT_X_TBXEXTBATCH` (on every target, whatever the size rule
+  says, where the window leaves room for the marks and no probe runs): each unit runs `scan_unit` and the
+  batched scan on fresh tables, and the saved records and every cell of the final table must be equal;
+  a difference panics with the unit. Lines at exit: `[X_SHADOW] TBXEXTBATCH units_compared=` and
+  `[X_STATS] TBXEXTBATCH units= candidates= early= batches=`.
 - `LOSAT_X_PAIRLUT=1` (in the strict set; acts while `LOSAT_X_PAIRPAR` is on, not with its
   shadow) TBLASTX:
   the lookup tables of the unit path, one per context group, built directly from the query instead

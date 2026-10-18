@@ -63,14 +63,15 @@
 //! elsewhere the path would only add work). The probes of LOSAT_TIMING / LOSAT_X_STATS run
 //! `scan_unit` (this path has none).
 //!
-//! `LOSAT_X_TBXEXTBATCHSHADOW=1` runs `scan_unit` and this path on every unit (each on a fresh
-//! table, whatever the rule says) and stops at the first difference of the saved records or of the
-//! final table.
+//! `LOSAT_X_TBXEXTBATCHSHADOW=1` runs `scan_unit` and this path on every unit the path could take
+//! whatever the size rule says (the window leaves room for the marks, no probe runs), each on a
+//! fresh table, and stops at the first difference of the saved records or of the final table.
 
 use super::*;
 
 // No NCBI counterpart: counters of LOSAT_X_TBXEXTBATCH (units, candidates, early resolutions,
-// batches) and of its shadow; they do not change any value NCBI computes.
+// batches; counted in shadow mode only) and of its shadow; they do not change any value NCBI
+// computes.
 static EB_UNITS: AtomicU64 = AtomicU64::new(0);
 static EB_CANDS: AtomicU64 = AtomicU64::new(0);
 static EB_EARLY: AtomicU64 = AtomicU64::new(0);
@@ -139,7 +140,7 @@ fn x_extbatch_units(min_ki: Option<usize>, mut spans: impl Iterator<Item = usize
     min_ki.is_some_and(|ki| spans.any(|span| span / 1024 >= ki))
 }
 
-/// The summary line (with LOSAT_X_STATS, LOSAT_TIMING or the shadow).
+/// The summary lines of the shadow.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub(super) fn print_summary() {
     if shadow() {
@@ -149,9 +150,9 @@ pub(super) fn print_summary() {
             EB_SHADOW_RECORDS.load(AtomicOrdering::Relaxed)
         );
     }
-    if shadow()
-        || (min_span_ki().is_some() && (std::env::var_os("LOSAT_X_STATS").is_some() || timing()))
-    {
+    // Only with the shadow: the probes of LOSAT_X_STATS / LOSAT_TIMING send the units to
+    // `scan_unit`, so with them the counters would stay at zero.
+    if shadow() {
         eprintln!(
             "[X_STATS] TBXEXTBATCH units={} candidates={} early={} batches={} min_span_ki={:?}",
             EB_UNITS.load(AtomicOrdering::Relaxed),
@@ -738,10 +739,12 @@ impl XPairPar {
             // SAFETY: the candidates' cells are cells of this unit's table.
             unsafe { flush(&mut b, scratch.diag.as_mut_ptr(), &h, init_hsps) };
         }
-        EB_UNITS.fetch_add(1, AtomicOrdering::Relaxed);
-        EB_CANDS.fetch_add(b.cands, AtomicOrdering::Relaxed);
-        EB_EARLY.fetch_add(b.early, AtomicOrdering::Relaxed);
-        EB_BATCHES.fetch_add(b.batches, AtomicOrdering::Relaxed);
+        if shadow() {
+            EB_UNITS.fetch_add(1, AtomicOrdering::Relaxed);
+            EB_CANDS.fetch_add(b.cands, AtomicOrdering::Relaxed);
+            EB_EARLY.fetch_add(b.early, AtomicOrdering::Relaxed);
+            EB_BATCHES.fetch_add(b.batches, AtomicOrdering::Relaxed);
+        }
         (b.cands, b.early)
     }
 }
@@ -862,9 +865,11 @@ mod tests {
             };
             let mut scratch = XScratch::new(false);
             for (f, s_frame) in s_frames.iter().enumerate() {
+                // Every other case scans a chunk that starts inside the frame (offset > 0).
+                let offset = if case % 2 == 1 { s_frame.aa_len / 3 } else { 0 };
                 let chunk = SubjectChunk {
-                    offset: 0,
-                    length: s_frame.aa_len,
+                    offset,
+                    length: s_frame.aa_len - offset,
                     overlap: 0,
                 };
                 for (g, group) in pp.groups.iter().enumerate() {

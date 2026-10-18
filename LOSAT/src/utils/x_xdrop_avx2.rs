@@ -2266,3 +2266,9 @@ mod tests {
         }
     }
 }
+
+// EXPERIMENT (line R, item R1; branch exp/r1-xdrop-counters, not for merging): the counting
+// harness of the 256-bit kernels (test build only).
+#[cfg(test)]
+#[path = "x_xdrop_r1probe.rs"]
+mod r1probe;

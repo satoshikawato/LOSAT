@@ -1,6 +1,8 @@
 # Changelog
 
-All notable release-facing changes and milestones are documented here.
+All notable release-facing changes and milestones are documented here. Entries of work merged since
+the last release wait in [`changelog.d/`](changelog.d/README.md), one file per pull request, until
+a release moves them under `[Unreleased]` below.
 
 ## [Unreleased]
 

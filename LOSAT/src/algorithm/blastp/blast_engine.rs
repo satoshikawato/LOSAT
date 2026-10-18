@@ -73,8 +73,8 @@ pub(super) mod x_subject_meta;
 use super::alignment::build_alignment_view_with_matrix;
 use super::args::{BlastpArgs, BlastpCompositionMode, BlastpLookupTableType, ResolvedBlastpArgs};
 use super::encoding::{
-    encode_protein_query_frame_with_seg, encode_protein_sequence, ncbistdaa_to_ascii,
-    EncodedProtein,
+    encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
+    encode_protein_sequence, ncbistdaa_to_ascii, EncodedProtein,
 };
 #[cfg(test)]
 use super::extension::{extend_one_hit, extend_two_hit};
@@ -5144,6 +5144,9 @@ fn read_cli_subjects(
         subject_file,
         ReaderConfig::subject("BLASTP", true, settings.data_loaders),
     );
+    // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
+    // counterpart.
+    let t_read_fasta = crate::utils::xtiming::clock();
     let read_subject_records = {
         let mut stderr = std::io::stderr();
         read_subjects(
@@ -5152,6 +5155,7 @@ fn read_cli_subjects(
             &mut |message: &[u8]| std::io::Write::write_all(&mut stderr, message),
         )?
     };
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(subject_source);
     let subjects = match seq_range::cut_subjects(&read_subject_records, subject_range.as_ref())? {
         Some((cut, placements)) => SubjectSet {
@@ -5287,7 +5291,11 @@ fn search_cli(
     // (`read_query_batches`). What ends the reading (the end of the input, an `eEOF`, a
     // reader error or LOSAT's rejection of a Seq-id line) comes in the batch that NCBI reads
     // it in, after the reports of the batches before.
+    // Diagnostic (LOSAT_TIMING): the query FASTA for the common line (utils/xtiming.rs). No NCBI
+    // counterpart.
+    let t_read_fasta = crate::utils::xtiming::clock();
     let QueryRecords { records, end } = read_queries(&mut query_source);
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
@@ -5788,8 +5796,12 @@ fn search(
                 }
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks
                 // (`x_query_blocks::XBlockSubjects`), on the search's pool.
+                // Diagnostic (LOSAT_TIMING): the blocks' shared subject encoding for the common
+                // line (utils/xtiming.rs). No NCBI counterpart.
+                let t_encode = crate::utils::xtiming::clock();
                 let x_subjects =
                     x_bp_encode_block_subjects(&subjects.records, args.num_threads, pool)?;
+                crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
                 let pool = &pool.x_with_ext(&x_subjects);
                 let mut sink = super::x_query_blocks::XBlockSink::new(&mut formats[0].sink);
                 // EXPERIMENT (LOSAT_X_BPLKPAHEAD): each block's search builds the next block's lookup
@@ -6615,14 +6627,25 @@ fn blastp_query_frames(
     args: &ResolvedBlastpArgs,
     query_records: &[FastaRecord],
 ) -> Vec<Vec<QueryFrame>> {
+    blastp_query_frames_marked(args, query_records, false)
+}
+
+/// `blastp_query_frames`; with `marked` and LOSAT_TIMING the encoding and the SEG go to the
+/// common line (`encode_protein_query_frame_with_seg_timed`). Only the search's own call marks.
+fn blastp_query_frames_marked(
+    args: &ResolvedBlastpArgs,
+    query_records: &[FastaRecord],
+    marked: bool,
+) -> Vec<Vec<QueryFrame>> {
     let seg_params = args.seg.params();
     query_records
         .iter()
         .map(|record| {
-            vec![encode_protein_query_frame_with_seg(
-                record.seq(),
-                seg_params.as_ref(),
-            )]
+            vec![if marked {
+                encode_protein_query_frame_with_seg_timed(record.seq(), seg_params.as_ref())
+            } else {
+                encode_protein_query_frame_with_seg(record.seq(), seg_params.as_ref())
+            }]
         })
         .collect()
 }
@@ -6814,7 +6837,10 @@ fn run_resolved_in_pool(
     let mut x_prebuilt = x_ahead.take_prebuilt(query_records);
     let query_frames: Vec<Vec<QueryFrame>> = match x_prebuilt.as_mut() {
         Some(prebuilt) => prebuilt.take_query_frames(),
-        None => blastp_query_frames(&args, query_records),
+        // Diagnostic (LOSAT_TIMING): this call's encoding and SEG go to the common line
+        // (utils/xtiming.rs); frames built ahead (LOSAT_X_BPLKPAHEAD) are not marked. No NCBI
+        // counterpart.
+        None => blastp_query_frames_marked(&args, query_records, true),
     };
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.query_encoding_ns, query_encoding_start);
@@ -6876,6 +6902,9 @@ fn run_resolved_in_pool(
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.subject_encoding_ns, subject_encoding_start);
     }
+    // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs): the
+    // subjects' encoding (and their titles). No NCBI counterpart.
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, subject_encoding_start);
 
     let lookup_start = blastp_timing_start(timing_enabled);
     let lookup_ideal_params = lookup_protein_params_ungapped(args.scoring.matrix);
@@ -7035,6 +7064,13 @@ fn run_resolved_in_pool(
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_duration(&timing.lookup_ns, lookup_start);
     }
+    // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs): the
+    // lookup table and the query contexts. No NCBI counterpart.
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, lookup_start);
+    // Diagnostic (LOSAT_TIMING): the search, from here to the end of the final traceback, for the
+    // common line (utils/xtiming.rs); a query chunk's search (`search_split_query_batches`)
+    // marks its own. No NCBI counterpart.
+    let t_search = crate::utils::xtiming::clock();
 
     // A database without sequences (makeblastdb builds none; a volume whose index holds
     // no sequence): NCBI opens it, writes the outfmt 0 prolog, reads the first query
@@ -8622,8 +8658,11 @@ fn run_resolved_in_pool(
             &[],
         );
         *chunk_lists = preliminary_hit_lists;
+        crate::utils::xtiming::add(crate::utils::xtiming::Phase::Search, t_search);
         return Ok(());
     }
+    // Diagnostic (LOSAT_TIMING): the search stops here and goes on after the chunks' searches.
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Search, t_search);
     search_split_query_batches(
         &args,
         query_records,
@@ -8642,6 +8681,7 @@ fn run_resolved_in_pool(
     // and stand for the subject set in the redo; the hit lists name them by their rank
     // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
     // definition lines are read after the redo (`ListedSubjects::read_titles`).
+    let t_search = crate::utils::xtiming::clock();
     let listed_subjects = match database {
         Some(database) => Some(database::ListedSubjects::read(
             database,
@@ -9952,6 +9992,7 @@ fn run_resolved_in_pool(
             final_traceback_start,
         );
     }
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Search, t_search);
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
     // ```c
@@ -10281,6 +10322,9 @@ fn run_resolved_in_pool(
             output_format_start,
         );
     }
+    // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs): the
+    // formatting and writing of every report, after the search. No NCBI counterpart.
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, output_format_start);
     output_result?;
     // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
     // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed.

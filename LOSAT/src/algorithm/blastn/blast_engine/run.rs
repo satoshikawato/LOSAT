@@ -4939,10 +4939,12 @@ fn blastn_timing_text(
         format_n
     );
     if let Some(t_search_start) = t_search_start {
-        timing_line!(
-            "[TIMING] search_total: {:.3}s",
-            t_search_start.elapsed().as_secs_f64()
-        );
+        let search_total = t_search_start.elapsed();
+        // Diagnostic (LOSAT_TIMING): the same interval feeds the common line (utils/xtiming.rs):
+        // one query batch's search, from after its lookup table to its end (the batches' sum
+        // over all threads). No NCBI counterpart.
+        crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::Search, search_total);
+        timing_line!("[TIMING] search_total: {:.3}s", search_total.as_secs_f64());
     }
     if let Some(t_total) = t_total {
         timing_line!("[TIMING] total: {:.3}s", t_total.elapsed().as_secs_f64());
@@ -6017,6 +6019,9 @@ fn read_cli_subjects(
     );
     // EXPERIMENT (LOSAT_X_BNSTORE): without a subject range, each record's letters are packed as
     // soon as it has been read, and the records keep none (`x_read_subject_stores`).
+    // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs); with
+    // LOSAT_X_BNSTORE the packing of each record is in this interval too. No NCBI counterpart.
+    let t_read_fasta = crate::utils::xtiming::clock();
     let (read_subjects, stores) = {
         let mut stderr = std::io::stderr();
         let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
@@ -6029,6 +6034,7 @@ fn read_cli_subjects(
             )
         }
     };
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(subject_source);
     // NCBI reads records without residues (and intervals without letters) without a message
     // and reports them when it sets up the search (`search`).
@@ -6146,6 +6152,9 @@ fn search_cli(
     // (`run_in_pool`). What ends the reading (the end of the input, an `eEOF`, a reader
     // error or LOSAT's rejection of a Seq-id line) comes in the batch that NCBI reads it in,
     // after the reports of the batches before (`run_in_pool`).
+    // Diagnostic (LOSAT_TIMING): the query FASTA for the common line (utils/xtiming.rs). No NCBI
+    // counterpart.
+    let t_read_fasta = crate::utils::xtiming::clock();
     // EXPERIMENT (LOSAT_X_QSTREAM): with the switch acting this reading keeps only each record's
     // length and how the reading ends; the batches read their records again (`x_query_stream`).
     let (records, end, x_store) = if x_opening.acts() {
@@ -6160,6 +6169,7 @@ fn search_cli(
         let QueryRecords { records, end } = read_queries(&mut query_source);
         (records, end, x_query_stream::Store::off(x_opening))
     };
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
@@ -7033,18 +7043,23 @@ fn run_in_pool(
                 queries.write_input_warnings(outputs.diagnostics)?;
                 return Ok(());
             }
+            // Diagnostic (LOSAT_TIMING): the subjects' packing for the common line
+            // (utils/xtiming.rs). No NCBI counterpart.
+            let t_encode = crate::utils::xtiming::clock();
+            // The packed subjects hold the packed letters (LOSAT_X_BNSTORE).
+            let packed = if subject_set.stores().is_some() {
+                Vec::new()
+            } else {
+                subject_records
+                    .iter()
+                    .map(|record| encode_subject_ncbi2na_packed(record.seq()))
+                    .collect()
+            };
+            crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
             prepared = PreparedSubjects {
                 records: subject_records,
                 stores: subject_set.stores(),
-                // The packed subjects hold the packed letters (LOSAT_X_BNSTORE).
-                packed: if subject_set.stores().is_some() {
-                    Vec::new()
-                } else {
-                    subject_records
-                        .iter()
-                        .map(|record| encode_subject_ncbi2na_packed(record.seq()))
-                        .collect()
-                },
+                packed,
                 metadata,
             };
             SubjectSource::Prepared(&prepared)
@@ -8293,6 +8308,38 @@ fn write_reports(
     epilog: bool,
     written: x_rpt_stream::Written<'_>,
 ) -> Result<()> {
+    // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); the time of
+    // every call adds up. With streaming (`x_rpt_stream`) the calls come between the query
+    // batches, while other batches are searched: that part is inside `search` too. No NCBI
+    // counterpart.
+    let t_output = crate::utils::xtiming::clock();
+    let result = write_reports_untimed(
+        args,
+        query_records,
+        subjects,
+        ranges,
+        outputs,
+        output_formats,
+        results,
+        epilog,
+        written,
+    );
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_reports_untimed(
+    args: &BlastnArgs,
+    query_records: &[FastaRecord],
+    subjects: ReportSubjects<'_>,
+    ranges: &ReportRanges<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    results: BatchResults<'_>,
+    epilog: bool,
+    written: x_rpt_stream::Written<'_>,
+) -> Result<()> {
     let megablast = args.task == "megablast";
     let config = configure_task(args);
     let mut hit_lists = results.hit_lists;
@@ -8713,10 +8760,14 @@ fn search_query_batch(
     //   sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
+    // Diagnostic (LOSAT_TIMING): the batch's DUST for the common line (utils/xtiming.rs); a
+    // chunk takes the batch's masks. No NCBI counterpart.
+    let t_seg = crate::utils::xtiming::clock();
     let masks = match stage {
         BatchStage::Search { .. } => query_masks(args, queries, parallel_pool),
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);
 
     // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
@@ -8888,12 +8939,16 @@ fn search_query_batch(
     // EXPERIMENT (LOSAT_X_QPREPPAR): with the switch on and a search pool of two or more threads
     // the queries are encoded by the pool, each into its own part of the buffer; the buffer is
     // the same (`x_query_prep_par.rs`).
+    // Diagnostic (LOSAT_TIMING): the batch's query encoding for the common line
+    // (utils/xtiming.rs). No NCBI counterpart.
+    let t_encode = crate::utils::xtiming::clock();
     let encoded_query_buffer = x_query_prep_par::query_buffer(
         &query_letters,
         &query_context_offsets,
         query_concat_length,
         parallel_pool,
     );
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
     let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
     let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];
     let encoded_queries_blastna: Vec<&[u8]> = query_contexts
@@ -9465,7 +9520,10 @@ fn search_query_batch(
             config.scan_step,
         )
     } else {
-        build_lookup_tables(
+        // Diagnostic (LOSAT_TIMING): the batch's lookup table for the common line
+        // (utils/xtiming.rs). No NCBI counterpart.
+        let t_build_lookup = crate::utils::xtiming::clock();
+        let tables = build_lookup_tables(
             &config,
             &args,
             &encoded_queries_blastna,
@@ -9474,7 +9532,9 @@ fn search_query_batch(
             subjects_for_lookup,
             subject_packed_cache_ref,
             approx_table_entries,
-        )
+        );
+        crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
+        tables
     };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041

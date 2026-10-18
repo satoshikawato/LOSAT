@@ -286,7 +286,24 @@ pub(crate) fn subject_flow(start: Option<Instant>, tasks: u64, (ahead, taken): (
 #[inline]
 pub(crate) fn batch(stage: Batch, start: Option<Instant>) {
     if start.is_some() {
-        BATCH[mode()][stage as usize].fetch_add(since(start), Ordering::Relaxed);
+        let ns = since(start);
+        BATCH[mode()][stage as usize].fetch_add(ns, Ordering::Relaxed);
+        // Diagnostic (LOSAT_TIMING): the same intervals feed the common line (utils/xtiming.rs),
+        // each once: the chunk lookups are `build_lookup`; the subject waves, the replay, the
+        // chunk end, the batch end and the parallel chunk path (which builds its lookups inside)
+        // are `search`. `query_setup` (translate, seg) is marked in `prepare_queries`; `setup`
+        // and `scan_inline` (inside `replay`) are not marked here. No NCBI counterpart.
+        use crate::utils::xtiming::{add_duration, Phase};
+        let d = std::time::Duration::from_nanos(ns);
+        match stage {
+            Batch::Lookup => add_duration(Phase::BuildLookup, d),
+            Batch::ChunksPar
+            | Batch::ScanPar
+            | Batch::Replay
+            | Batch::ChunkEnd
+            | Batch::BatchEnd => add_duration(Phase::Search, d),
+            _ => {}
+        }
     }
 }
 
@@ -322,6 +339,24 @@ fn s(counter: &AtomicU64) -> f64 {
 // No NCBI counterpart: a count.
 fn n(counter: &AtomicU64) -> u64 {
     counter.load(Ordering::Relaxed)
+}
+
+// No NCBI counterpart: the run's share of the common line (utils/xtiming.rs), once at the end of
+// `native::run`: the reports (`prolog`, `render`, `epilog`) are `output`; the queries' reader is
+// `read_fasta`, taken as `input` of `blastx_run` is (`loop - search - render`: it includes the
+// pool's start and end and, with LOSAT_X_BXBATCH, the queueing of batches).
+pub(crate) fn common_run() {
+    if !on() {
+        return;
+    }
+    use crate::utils::xtiming::{add_duration, Phase};
+    let r = |stage: Run| RUN[stage as usize].load(Ordering::Relaxed);
+    let input = r(Run::Loop).saturating_sub(r(Run::Search).saturating_add(r(Run::Render)));
+    add_duration(Phase::ReadFasta, std::time::Duration::from_nanos(input));
+    let output = r(Run::Prolog)
+        .saturating_add(r(Run::Render))
+        .saturating_add(r(Run::Epilog));
+    add_duration(Phase::Output, std::time::Duration::from_nanos(output));
 }
 
 /// Writes the `[TIMING]` lines of the run (nothing without `LOSAT_TIMING`).

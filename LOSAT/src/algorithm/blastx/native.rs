@@ -295,6 +295,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     } else {
         Box::new(io::stderr().lock())
     };
+    // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
+    // counterpart.
+    let x_t_read_fasta = crate::utils::xtiming::clock();
     let subjects = match subject_file {
         Some(subject_file) => parse_fasta_stream_with_warnings(
             &mut FastaStream::from_file(subject_file),
@@ -307,6 +310,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         .map_err(input_error)?,
         None => Vec::new(),
     };
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, x_t_read_fasta);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/objmgr_query_data.cpp:375-380
     // ```c++
     // CObjMgr_QueryFactory::CObjMgr_QueryFactory(CBlastQueryVector & queries)
@@ -917,6 +921,8 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     writer.flush().map_err(output_error)?;
     super::x_timing::run(XRun::Epilog, x_t);
     super::x_timing::run(XRun::Total, x_t_run);
+    // Diagnostic (LOSAT_TIMING): the run's share of the common line (x_timing.rs).
+    super::x_timing::common_run();
     super::x_timing::write(&mut *stderr, options.num_threads as usize)?;
     Ok(())
 }

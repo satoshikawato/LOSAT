@@ -130,6 +130,15 @@
 //! they are returned to the system when dropped instead of staying in the worker threads' arenas
 //! through the linking call. Only capacities change; the section above `X_MAPPED_BYTES` gives the
 //! reason, the three rules (sides, huge pages, one thread) and why no value changes.
+//!
+//! `LOSAT_X_TBXPREFETCH` (in the strict set, a value switch: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set; x86-64 only): the units of a subject whose largest unit
+//! diagonal table has at least the switch's number of KiB (built-in 1,536, `X_PREFETCH_MIN_KIB`)
+//! run the scan with a prefetch of the cell of the hit `X_PREFETCH_AHEAD` entries ahead in the
+//! batch (`scan_unit` with `PF`). A prefetch reads nothing into the program and has no
+//! architectural effect, so the cells, the hits and the init HSPs are those without it. The other
+//! subjects run the scan without the hint (`PF` false), whose machine code is the one before the
+//! switch.
 
 use super::*;
 use crate::algorithm::tblastx::blast_gapalign::get_ungapped_hsp_list_into;
@@ -303,6 +312,49 @@ fn seed_unmap_active() -> bool {
                 std::fs::read_to_string("/proc/self/status").ok().as_deref(),
             )
     })
+}
+
+// EXPERIMENT (LOSAT_X_TBXPREFETCH, module doc): the unit scan prefetches the cell of the hit this
+// many entries ahead in its `scansub` batch. 16 hits are about 16 x 4 ns of scan on the measured
+// CPUs, longer than a load from L3, where the tables that gained fit. No NCBI counterpart.
+const X_PREFETCH_AHEAD: usize = 16;
+// The built-in number of the switch: the smallest largest-unit table, in KiB, of a subject whose
+// units prefetch. Measured with the hint on every table (A/B in docs/agents/diagnostics.md, entry
+// `LOSAT_X_TBXPREFETCH`): tables of 1.65 MiB and more gained on both measured CPUs (L2 of one core
+// 1.25 MiB on the Xeon 6338, 2 MiB on the i9-14900HX), 1.18 MiB lost 0.7 %; 1.5 MiB lies between.
+const X_PREFETCH_MIN_KIB: usize = 1536;
+// The largest number the switch takes (4 GiB of table); a value outside 2..=X_PREFETCH_MAX_KIB
+// other than `0`, or a non-numeric one, gives the built-in (`xswitch::value`).
+const X_PREFETCH_MAX_KIB: usize = 1 << 22;
+
+// No NCBI counterpart: a cache hint in LOSAT's unit scan (module doc); NCBI's loop gives none, and
+// a prefetch has no architectural effect, so no value NCBI computes changes. Read once per process,
+// as the other modes of this file.
+/// LOSAT_X_TBXPREFETCH: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off (`0`,
+/// or `LOSAT_X_DEFAULT=0` and it is not set) and on targets other than x86-64; otherwise the
+/// smallest largest-unit table, in KiB, of a subject whose units prefetch (2 to 4,194,304; the
+/// built-in `X_PREFETCH_MIN_KIB` when the variable is not set or holds anything else).
+fn tbx_prefetch_min_kib() -> Option<usize> {
+    static MIN: OnceLock<Option<usize>> = OnceLock::new();
+    *MIN.get_or_init(|| {
+        if cfg!(target_arch = "x86_64") {
+            crate::utils::xswitch::value(
+                "LOSAT_X_TBXPREFETCH",
+                2..=X_PREFETCH_MAX_KIB,
+                X_PREFETCH_MIN_KIB,
+            )
+        } else {
+            None
+        }
+    })
+}
+
+// No NCBI counterpart: the rule of LOSAT_X_TBXPREFETCH for one subject (module doc), apart from
+// the switch so that a test can give it values.
+/// Whether the units whose tables have `table_bytes` prefetch at the switch's value `min_kib`: one
+/// of them has at least `min_kib` KiB.
+fn x_prefetch_units(min_kib: Option<usize>, mut table_bytes: impl Iterator<Item = usize>) -> bool {
+    min_kib.is_some_and(|kib| table_bytes.any(|bytes| bytes / 1024 >= kib))
 }
 
 // No NCBI counterpart: LOSAT_TIMING read once; it does not change any value NCBI computes.
@@ -1571,53 +1623,19 @@ impl XPairPar {
         }
 
         let t_units = timing().then(Instant::now);
-        // EXPERIMENT (LOSAT_X_SEEDCOMPACT): one read of the switch per subject chooses the form
-        // of the units' lists (section above `XUnitHsp`); the units, their order and the scan
-        // are the same in both.
-        // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): with either variable the same units run with
-        // a probe (x_unit_probe.rs); without them, the functions without probes.
-        // EXPERIMENT (LOSAT_X_TBXKMERGE): the units sort their lists (not in the shadow mode, whose
-        // merge sorts them after it has copied the unsorted lists).
-        let sort = x_kmerge::mode() == 1;
-        let outputs = match (seed_compact(), x_unit_probe::mode()) {
-            (true, 0) => XUnitOutputs::Compact(self.run_units(
-                &units,
-                inp,
-                pool,
-                Self::run_unit_compact,
-                sort,
-            )),
-            (false, 0) => {
-                XUnitOutputs::Full(self.run_units(&units, inp, pool, Self::run_unit, sort))
-            }
-            (true, 1) => XUnitOutputs::Compact(self.run_units(
-                &units,
-                inp,
-                pool,
-                Self::run_unit_compact_probed::<XTimeProbe>,
-                sort,
-            )),
-            (false, 1) => XUnitOutputs::Full(self.run_units(
-                &units,
-                inp,
-                pool,
-                Self::run_unit_probed::<XTimeProbe>,
-                sort,
-            )),
-            (true, _) => XUnitOutputs::Compact(self.run_units(
-                &units,
-                inp,
-                pool,
-                Self::run_unit_compact_probed::<XStatsProbe>,
-                sort,
-            )),
-            (false, _) => XUnitOutputs::Full(self.run_units(
-                &units,
-                inp,
-                pool,
-                Self::run_unit_probed::<XStatsProbe>,
-                sort,
-            )),
+        // EXPERIMENT (LOSAT_X_TBXPREFETCH, module doc): all units of the subject scan with the
+        // prefetch when one of their tables is large enough; the units and their order are the
+        // same either way.
+        let prefetch = x_prefetch_units(
+            tbx_prefetch_min_kib(),
+            units.iter().map(|unit| {
+                x_unit_width(&self.groups[unit.g], &unit.chunk) * std::mem::size_of::<DiagStruct>()
+            }),
+        );
+        let outputs = if prefetch {
+            self.run_subject_unit_fns::<true>(&units, inp, pool)
+        } else {
+            self.run_subject_unit_fns::<false>(&units, inp, pool)
         };
         add_ns(&NS_UNITS, t_units);
         XSubjectUnits {
@@ -1806,17 +1824,78 @@ impl XPairPar {
         combined_ungapped_hits
     }
 
+    // EXPERIMENT (LOSAT_X_SEEDCOMPACT): one read of the switch per subject chooses the form of the
+    // units' lists (section above `XUnitHsp`); the units, their order and the scan are the same in
+    // both.
+    // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): with either variable the same units run with a
+    // probe (x_unit_probe.rs); without them, the functions without probes.
+    // EXPERIMENT (LOSAT_X_TBXPREFETCH): `PF` picks the unit functions with the prefetch (module
+    // doc); each (form, probe, `PF`) is its own function item, so `run_units` and the scan are
+    // compiled once for each and the scan without the hint keeps its own code.
+    // EXPERIMENT (LOSAT_X_TBXKMERGE): the units sort their lists (not in the shadow mode, whose
+    // merge sorts them after it has copied the unsorted lists).
+    // No NCBI counterpart: dispatch only.
+    /// The units of one subject, run by the unit function of the switches' choice.
+    fn run_subject_unit_fns<const PF: bool>(
+        &self,
+        units: &[XUnit],
+        inp: &XSubject<'_>,
+        pool: &crate::utils::threading::SearchPool<'_>,
+    ) -> XUnitOutputs {
+        let sort = x_kmerge::mode() == 1;
+        match (seed_compact(), x_unit_probe::mode()) {
+            (true, 0) => XUnitOutputs::Compact(self.run_units(
+                units,
+                inp,
+                pool,
+                Self::run_unit_compact::<PF>,
+                sort,
+            )),
+            (false, 0) => {
+                XUnitOutputs::Full(self.run_units(units, inp, pool, Self::run_unit::<PF>, sort))
+            }
+            (true, 1) => XUnitOutputs::Compact(self.run_units(
+                units,
+                inp,
+                pool,
+                Self::run_unit_compact_probed::<XTimeProbe, PF>,
+                sort,
+            )),
+            (false, 1) => XUnitOutputs::Full(self.run_units(
+                units,
+                inp,
+                pool,
+                Self::run_unit_probed::<XTimeProbe, PF>,
+                sort,
+            )),
+            (true, _) => XUnitOutputs::Compact(self.run_units(
+                units,
+                inp,
+                pool,
+                Self::run_unit_compact_probed::<XStatsProbe, PF>,
+                sort,
+            )),
+            (false, _) => XUnitOutputs::Full(self.run_units(
+                units,
+                inp,
+                pool,
+                Self::run_unit_probed::<XStatsProbe, PF>,
+                sort,
+            )),
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:145-149
     // ```c
     // TBlastThreads the_threads(GetNumberOfThreads());
     // ```
     // Scheduling only: the units run on the search pool (an indexed map, results in unit order),
     // or in order on the calling thread when the search has one thread. `unit_fn` is
-    // `Self::run_unit` (today's lists) or `Self::run_unit_compact` (LOSAT_X_SEEDCOMPACT), a
-    // function item, so this function is compiled once for each. The scratches of the pool carry
-    // LOSAT_X_SEEDUNMAP as it acts in this process (`seed_unmap_active`, `XScratch::unmap`); the
-    // serial scratch never maps (section above `X_MAPPED_BYTES`, rule 3: at one thread nothing is
-    // retained, mapping only costs).
+    // `Self::run_unit` (today's lists) or `Self::run_unit_compact` (LOSAT_X_SEEDCOMPACT), each
+    // with or without LOSAT_X_TBXPREFETCH's hint (`PF`), a function item, so this function is
+    // compiled once for each. The scratches of the pool carry LOSAT_X_SEEDUNMAP as it acts in this
+    // process (`seed_unmap_active`, `XScratch::unmap`); the serial scratch never maps (section
+    // above `X_MAPPED_BYTES`, rule 3: at one thread nothing is retained, mapping only costs).
     // EXPERIMENT (LOSAT_X_TBXKMERGE, x_kmerge.rs item 1): with `sort` each unit's list is sorted
     // in the unit's own task, after its scan, by the comparator of the chunk's init sort.
     fn run_units<T: Send + x_kmerge::XUnitSort>(
@@ -1876,9 +1955,14 @@ impl XPairPar {
     // The saved init HSPs of one unit as today's list, which starts empty as NCBI's list of a
     // chunk does (`scan_unit` fills it).
     /// The saved init HSPs of one unit, in its scan order.
-    fn run_unit(&self, unit: &XUnit, inp: &XSubject<'_>, scratch: &mut XScratch) -> Vec<InitHSP> {
+    fn run_unit<const PF: bool>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+    ) -> Vec<InitHSP> {
         let mut init_hsps: Vec<InitHSP> = Vec::new();
-        self.scan_unit(unit, inp, scratch, &mut init_hsps, &mut XNoProbe);
+        self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut init_hsps, &mut XNoProbe);
         init_hsps
     }
 
@@ -1886,7 +1970,7 @@ impl XPairPar {
     // own function, so that `run_unit` keeps the scan without probes. No NCBI counterpart.
     /// `run_unit`, recording into the thread's probe `P`.
     #[inline(never)]
-    fn run_unit_probed<P: XProbeSlot>(
+    fn run_unit_probed<P: XProbeSlot, const PF: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -1894,7 +1978,7 @@ impl XPairPar {
     ) -> Vec<InitHSP> {
         let mut probe = std::mem::take(P::slot(scratch));
         let mut init_hsps: Vec<InitHSP> = Vec::new();
-        self.scan_unit(unit, inp, scratch, &mut init_hsps, &mut probe);
+        self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut init_hsps, &mut probe);
         *P::slot(scratch) = probe;
         init_hsps
     }
@@ -1945,7 +2029,7 @@ impl XPairPar {
     // are never touched).
     /// The saved init HSPs of one unit as compact records, in its scan order, at their exact length
     /// (LOSAT_X_SEEDUNMAP: a large copy has the mapped capacity instead).
-    fn run_unit_compact(
+    fn run_unit_compact<const PF: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -1954,7 +2038,7 @@ impl XPairPar {
         let mut records = std::mem::take(&mut scratch.records);
         records.clear();
         let mapped = self.x_unit_records(unit, scratch, &mut records);
-        self.scan_unit(unit, inp, scratch, &mut records, &mut XNoProbe);
+        self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut records, &mut XNoProbe);
         let exact = x_unit_copy(&records, mapped);
         scratch.records = records;
         exact
@@ -1965,7 +2049,7 @@ impl XPairPar {
     // in `run_unit_compact` (`x_unit_records`, `x_unit_copy`). No NCBI counterpart.
     /// `run_unit_compact`, recording into the thread's probe `P`.
     #[inline(never)]
-    fn run_unit_compact_probed<P: XProbeSlot>(
+    fn run_unit_compact_probed<P: XProbeSlot, const PF: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -1975,7 +2059,7 @@ impl XPairPar {
         let mut records = std::mem::take(&mut scratch.records);
         records.clear();
         let mapped = self.x_unit_records(unit, scratch, &mut records);
-        self.scan_unit(unit, inp, scratch, &mut records, &mut probe);
+        self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut records, &mut probe);
         let exact = x_unit_copy(&records, mapped);
         scratch.records = records;
         *P::slot(scratch) = probe;
@@ -1986,9 +2070,13 @@ impl XPairPar {
     // chunk, a fresh table (RI:2930-2933: `DiagStruct::default()`, diag_offset = window) indexed by
     // the raw diagonal minus the group's lowest one, without the mask (module doc, item 3). The
     // body of what was `run_unit`; the list it saves into is the caller's (`XInitSink`).
+    // EXPERIMENT (LOSAT_X_TBXPREFETCH, module doc): with `PF`, on x86-64, each hit of a batch
+    // first prefetches the cell of the hit X_PREFETCH_AHEAD entries after it; without `PF` the
+    // loop is the one before the switch.
     /// Scans one unit and saves its init HSPs, in scan order, into `init_hsps`; `probe` records
-    /// the diagnostics of LOSAT_TIMING / LOSAT_X_STATS (`XNoProbe`: nothing).
-    fn scan_unit<S: XInitSink, P: XProbe>(
+    /// the diagnostics of LOSAT_TIMING / LOSAT_X_STATS (`XNoProbe`: nothing); `PF` adds the
+    /// prefetch of LOSAT_X_TBXPREFETCH.
+    fn scan_unit<S: XInitSink, P: XProbe, const PF: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -2091,6 +2179,24 @@ impl XPairPar {
                 let offset_pairs_ptr = scratch.offset_pairs.as_ptr();
                 // [C] for (i = 0; i < hits; ++i)
                 for i in 0..hits as usize {
+                    // EXPERIMENT (LOSAT_X_TBXPREFETCH): the cell of the hit X_PREFETCH_AHEAD
+                    // entries ahead, computed as below. A prefetch never faults and has no
+                    // architectural effect.
+                    #[cfg(target_arch = "x86_64")]
+                    if PF && i + X_PREFETCH_AHEAD < hits as usize {
+                        // SAFETY: i + X_PREFETCH_AHEAD < hits <= offset_pairs.len(), an entry
+                        // `scansub` wrote in this batch. The address is only prefetched
+                        // (`wrapping_add`: no bound needed; it lies in the table as below).
+                        unsafe {
+                            let ahead = &*offset_pairs_ptr.add(i + X_PREFETCH_AHEAD);
+                            let cell =
+                                ahead.q_off.wrapping_sub(ahead.s_off).wrapping_sub(lo) as usize;
+                            core::arch::x86_64::_mm_prefetch(
+                                diag_ptr.wrapping_add(cell) as *const i8,
+                                core::arch::x86_64::_MM_HINT_T0,
+                            );
+                        }
+                    }
                     // SAFETY: i < hits <= offset_array_size <= offset_pairs.len().
                     let pair = unsafe { &*offset_pairs_ptr.add(i) };
                     let query_offset = pair.q_off;
@@ -2721,7 +2827,7 @@ mod tests {
                 for (g, group) in pp.groups.iter().enumerate() {
                     if group.lookup.longest_chain > 0 {
                         let unit = XUnit { f, k: 0, chunk, g };
-                        init_hsps.extend(pp.run_unit(&unit, inp, &mut scratch));
+                        init_hsps.extend(pp.run_unit::<false>(&unit, inp, &mut scratch));
                     }
                 }
             }
@@ -3708,10 +3814,14 @@ mod tests {
         let (frame_chunks, units) = list_units(&case.pp, &inp, max_dbseq_len);
         let full = case
             .pp
-            .run_units(&units, &inp, pool, XPairPar::run_unit, false);
-        let compact = case
-            .pp
-            .run_units(&units, &inp, pool, XPairPar::run_unit_compact, false);
+            .run_units(&units, &inp, pool, XPairPar::run_unit::<false>, false);
+        let compact = case.pp.run_units(
+            &units,
+            &inp,
+            pool,
+            XPairPar::run_unit_compact::<false>,
+            false,
+        );
         assert_eq!((full.len(), compact.len()), (units.len(), units.len()));
         let mut seen = CompactSeen {
             units: units.len(),
@@ -4004,7 +4114,7 @@ mod tests {
                             &units,
                             &inp,
                             &serial,
-                            XPairPar::run_unit,
+                            XPairPar::run_unit::<false>,
                             x_kmerge::mode() == 1
                         )
                     );
@@ -4016,7 +4126,7 @@ mod tests {
                             &units,
                             &inp,
                             &serial,
-                            XPairPar::run_unit_compact,
+                            XPairPar::run_unit_compact::<false>,
                             x_kmerge::mode() == 1
                         )
                     );
@@ -4149,8 +4259,8 @@ mod tests {
             let span = x_unit_span(&case.pp.groups[unit.g]);
             let rule = x_unit_mapped(true, span, unit.chunk.length);
             held += usize::from(rule);
-            let exact = case.pp.run_unit_compact(unit, &inp, &mut today);
-            let copy = case.pp.run_unit_compact(unit, &inp, &mut mapped);
+            let exact = case.pp.run_unit_compact::<false>(unit, &inp, &mut today);
+            let copy = case.pp.run_unit_compact::<false>(unit, &inp, &mut mapped);
             assert_eq!(copy, exact, "{at}");
             assert_eq!(
                 exact.capacity(),
@@ -4166,8 +4276,12 @@ mod tests {
             assert_eq!(copy.capacity(), capacity, "{at}");
             copies += usize::from(large);
             // Today's lists on the scratch with the mapped table, and the records expand to them.
-            let list = case.pp.run_unit(unit, &inp, &mut today);
-            assert_eq!(case.pp.run_unit(unit, &inp, &mut mapped), list, "{at}");
+            let list = case.pp.run_unit::<false>(unit, &inp, &mut today);
+            assert_eq!(
+                case.pp.run_unit::<false>(unit, &inp, &mut mapped),
+                list,
+                "{at}"
+            );
             let mut expanded = Vec::new();
             x_expand_unit(&copy, unit.f, &inp, &mut expanded);
             assert_eq!(expanded, list, "{at}");
@@ -4260,16 +4374,109 @@ mod tests {
         let mut today = XScratch::new(false);
         let expected: Vec<Vec<XUnitHsp>> = units
             .iter()
-            .map(|unit| case.pp.run_unit_compact(unit, &inp, &mut today))
+            .map(|unit| case.pp.run_unit_compact::<false>(unit, &inp, &mut today))
             .collect();
         assert!(expected.iter().all(|records| !records.is_empty()));
         for threads in [1usize, 2, 8] {
             crate::utils::threading::with_search_pool(threads, "tblastx", |pool| {
                 assert_eq!(pool.enabled(), threads > 1);
-                let got = case
-                    .pp
-                    .run_units(&units, &inp, pool, XPairPar::run_unit_compact, false);
+                let got = case.pp.run_units(
+                    &units,
+                    &inp,
+                    pool,
+                    XPairPar::run_unit_compact::<false>,
+                    false,
+                );
                 assert_eq!(got, expected, "threads {threads}");
+                Ok(())
+            })
+            .expect("search pool");
+        }
+    }
+
+    // LOSAT_X_TBXPREFETCH's rule at its boundaries: off, never; on, only where one of the tables
+    // has at least the switch's number of KiB (the built-in 1,536 and the smallest value, 2).
+    #[test]
+    fn tbx_prefetch_rule_at_its_boundaries() {
+        let built_in = X_PREFETCH_MIN_KIB * 1024;
+        assert!(!x_prefetch_units(None, [usize::MAX].into_iter()));
+        assert!(!x_prefetch_units(
+            Some(X_PREFETCH_MIN_KIB),
+            std::iter::empty()
+        ));
+        assert!(!x_prefetch_units(
+            Some(X_PREFETCH_MIN_KIB),
+            [0, built_in - 1].into_iter()
+        ));
+        assert!(x_prefetch_units(
+            Some(X_PREFETCH_MIN_KIB),
+            [0, built_in, 1].into_iter()
+        ));
+        assert!(x_prefetch_units(Some(2), [2048].into_iter()));
+        assert!(!x_prefetch_units(Some(2), [2047].into_iter()));
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:513-516
+    // ```c
+    //     for (i = 0; i < hits; ++i) {
+    //         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+    //         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+    // ```
+    // The unit functions with the prefetch of LOSAT_X_TBXPREFETCH (`PF`) on search pools of 1, 2
+    // and 8 threads, in both list forms: the random cases of the compact tests (one and several
+    // chunks per frame) and the large case of the unmap tests (batches far longer than
+    // X_PREFETCH_AHEAD) give the lists of the functions without it.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[test]
+    fn tbx_prefetch_units_are_todays() {
+        let mut rng = Rng(0x5eed_c0de_0000_0005);
+        let mut cases = vec![(unmap_case(66_000, 66_000), MAX_DBSEQ_LEN)];
+        for case_no in 0..12 {
+            let alphabet = aa(COMPACT_ALPHABETS[case_no % COMPACT_ALPHABETS.len()]);
+            cases.push(if case_no % 2 == 0 {
+                (
+                    CompactCase::random(&mut rng, &alphabet, 3, 400),
+                    MAX_DBSEQ_LEN,
+                )
+            } else {
+                (CompactCase::random(&mut rng, &alphabet, 200, 400), 160)
+            });
+        }
+        for threads in [1usize, 2, 8] {
+            crate::utils::threading::with_search_pool(threads, "tblastx", |pool| {
+                let mut records = 0usize;
+                for (case_no, (case, max_dbseq_len)) in cases.iter().enumerate() {
+                    let inp = case.inp();
+                    let (_, units) = list_units(&case.pp, &inp, *max_dbseq_len);
+                    let at = format!("threads {threads} case {case_no}");
+                    let compact = case.pp.run_units(
+                        &units,
+                        &inp,
+                        pool,
+                        XPairPar::run_unit_compact::<false>,
+                        false,
+                    );
+                    records += compact.iter().map(Vec::len).sum::<usize>();
+                    assert_eq!(
+                        case.pp.run_units(
+                            &units,
+                            &inp,
+                            pool,
+                            XPairPar::run_unit_compact::<true>,
+                            false
+                        ),
+                        compact,
+                        "{at}"
+                    );
+                    assert_eq!(
+                        case.pp
+                            .run_units(&units, &inp, pool, XPairPar::run_unit::<true>, false),
+                        case.pp
+                            .run_units(&units, &inp, pool, XPairPar::run_unit::<false>, false),
+                        "{at}"
+                    );
+                }
+                assert!(records > 500, "threads {threads}: records {records}");
                 Ok(())
             })
             .expect("search pool");

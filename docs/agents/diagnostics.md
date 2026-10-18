@@ -357,14 +357,17 @@ export LOSAT_X_TBXFRAMES=1
 export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
+export LOSAT_X_TBXPREFETCH=1536
 export LOSAT_X_TBXQFRAMES=1
 export LOSAT_X_TBXSCANBF=1
 export LOSAT_X_TBXUNGAP=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
-built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64), `LOSAT_X_BPQBLOCK` (1 or more, built-in
-50,000: query letters per block; a value that is not a positive number is the built-in value).
+built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64), `LOSAT_X_TBXPREFETCH` (2 to
+4,194,304, built-in 1,536: KiB of a subject's largest unit table), `LOSAT_X_BPQBLOCK` (1 or
+more, built-in 50,000: query letters per block; a value that is not a positive number is the
+built-in value).
 
 `LOSAT_X_SEEDBUCKET` was in the block of the round 3-4 set and was left out when the set became
 the default: it numbered the lookup hits of one chunk scan in a 32-bit counter, exact only up to
@@ -2638,6 +2641,39 @@ Scheduling (each value computed by one thread with the original function; order 
   MiB, NCBI 359 MiB). With both at 8 threads (node 0, CPUs 8-15, medians of 3 alternating pairs, reports
   identical): that search 11.48 -> 2.58 s (NCBI `-db` 2.73 s), max RSS 257 -> 316 MiB; with the genome FASTA
   as `-subject` 12.83 -> 3.14 s (410 MiB); 10 transcripts x the zebrafish cDNA database 8.51 -> 8.01 s.
+- `LOSAT_X_TBXPREFETCH=1536` (TBLASTX, speed; a value switch, in the strict set since 2026-10-18
+  from the pull request that added it, on by default; x86-64 only) the unit scan of
+  `LOSAT_X_PAIRPAR` (`scan_unit` in `tblastx/x_pair_par.rs`) prefetches, for each hit of a
+  `scansub` batch, the diagonal cell of the hit 16 entries ahead, for the subjects where one unit's
+  diagonal table (4 bytes per cell: the query group's span plus the subject chunk) has at least the
+  switch's number of KiB (2 to 4,194,304; built-in 1,536; `=0` off; `=2` every table of 2 KiB or
+  more). A prefetch has no architectural effect, so the cells, the hits and the reports are those
+  without it (`LOSAT/tests/tblastx_prefetch.rs` compares `=2` with `=0` and the default, with and
+  without the probes); the other subjects run the scan without the hint, compiled as its own
+  function item, whose machine code is the one before the switch (`objdump` comparison of the
+  release binary with origin/dev, function by function). The `seed` time and `seed_ns_per_hit` of
+  `LOSAT_TIMING`'s `x_unit` line include the hint where it acts. Measured (plan v4 P0-6; medians of
+  8 rounds alternating, one warm-up, every report identical):
+  - Workstation (Xeon 6338, L2 1.25 MiB per core; 8 booked cores of one node, other sessions'
+    TBLASTX A/B runs on the node's other cores): Sakai x MG1655 (12.9 MiB tables) at 8 threads
+    136.11 -> 116.97 s (x0.859), at one thread 776.4 -> 650.4 s (x0.838; 3 rounds, 750-881 /
+    496-660 s under that load); the first 0.6 Mb of Sakai against the first 1.0 / 2.0 / 3.2 Mb of
+    MG1655 (tables 2.1 / 3.4 / 4.8 MiB) at 8 threads x0.976 / 0.975 / 0.971 (2.37 -> 2.32, 4.36 ->
+    4.26, 7.20 -> 6.99 s), at one thread x1.000 / 0.958 / 0.962 (12.32, 24.83 -> 23.79, 38.71 ->
+    37.24 s). With the hint on every table: NZ_CP006932 against itself (1.67 MiB) x0.978 at one
+    thread and x0.998 at 8, AP027131 x AP027133 (1.65 MiB) x0.987 at one thread and x0.990 at 8,
+    AvCLPV x PsCLPV (1.18 MiB) at one thread x1.007: the built-in 1,536 KiB lies between the tables
+    that gained and the one that lost.
+  - i9-14900HX (L2 2 MiB per P-core; WSL2, threads not pinned, rounds started below load 4): with
+    the hint on every table AP027131 x AP027133 x0.970 at one thread (5.85 -> 5.67 s) and x0.983 at
+    8; Sakai's first 0.6 Mb x MG1655's first 2.0 Mb at 8 threads x0.981 (2.77 -> 2.71 s); Sakai x
+    MG1655 at 8 threads (4 rounds, other sessions raised the load to 3-17 during the runs) 142.0 ->
+    143.2 s, within the spread of the rounds (129-200 / 137-151 s; CPU time 968 -> 921 s).
+  - Again after `LOSAT_X_TBXSCANBF` joined the default set (origin/dev 9e05b829 with this change,
+    built-in 1,536 KiB, workstation, `=0` against the default): AP027131 x AP027133 (1.65 MiB, now
+    above the built-in) x0.968 at one thread (11.30 -> 10.94 s) and x0.978 at 8; Sakai x MG1655 at 8
+    threads x0.85 in the two rounds of 4 that ran without heavy load on the node (138.5 / 139.0 ->
+    119.5 / 116.4 s).
 - `LOSAT_X_TBNSTATE=1` (in the strict set since 2026-10-15) tblastn, the unit path (`TBNPAR`): the
   scan state of a subject's (frame, chunk) units (the diagonal table of the two-hit word finder, the
   offset pairs, the initial hits, the gapped alignment memory) is kept by the thread from one

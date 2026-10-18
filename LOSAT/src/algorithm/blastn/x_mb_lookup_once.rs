@@ -1,7 +1,6 @@
-//! EXPERIMENT (LOSAT_X_MBLUTONCE; off unless set to any value, not in the strict set: its default
-//! waits for the workstation's paired timings and max RSS, as LOSAT_X_MBLUTPAD's private copies,
-//! which it always uses, raised max RSS there; `LOSAT_X_DEFAULT=0` turns `LOSAT_X_PAIRPAR` off and
-//! with it this fill): `LOSAT_X_PAIRPAR`'s pool fill of the megablast lookup table of
+//! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set, which also turns `LOSAT_X_PAIRPAR` off and with it this
+//! fill): `LOSAT_X_PAIRPAR`'s pool fill of the megablast lookup table of
 //! `build_mb_lookup` (`x_mb_lookup_par.rs`) with each query position read once. In the fill of
 //! `x_mb_lookup_par` every worker reads every word of the query and applies those of its own
 //! cells, so each worker pays the whole read (0.65 s of each worker's time at 16 threads for
@@ -151,10 +150,12 @@ const CHUNK_POSITIONS: usize = 1 << 19;
 const CHUNK_POSITIONS_PER_PART: usize = 1 << 15;
 
 /// No NCBI counterpart (scheduling only): the positions per chunk of a fill of `parts` workers,
-/// `min(2^19, parts << 15)`: the arena (16 bytes a position) is about `parts x 0.5 MiB`, so the
-/// fills that run at the same time on the slots of LOSAT_X_QBATCHPAR (whose threads add up to
-/// the pool's) hold together about what one fill on the whole pool holds. The chunk size changes
-/// no element of the tables (the module documentation).
+/// `min(2^19, parts << 15)`: the arena (16 bytes a position) is about `parts x 0.5 MiB` up to 16
+/// workers, so the fills that run at the same time on the slots of LOSAT_X_QBATCHPAR (whose threads
+/// add up to the pool's, n) hold together about n x 0.5 MiB, what one fill on the whole pool holds
+/// for n <= 16 (beyond, one fill stops at 8 MiB while the slots' fills add up: 8 slots of 8 threads
+/// at 64 threads about 32 MiB). The chunk size changes no element of the tables (the module
+/// documentation).
 fn chunk_positions(parts: usize) -> usize {
     CHUNK_POSITIONS.min(parts.clamp(1, 255) * CHUNK_POSITIONS_PER_PART)
 }

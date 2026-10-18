@@ -916,7 +916,22 @@ fn fill_mode(
     // handed to the owners of their cells (`x_mb_lookup_once.rs`, which always counts into the
     // private copies of LOSAT_X_MBLUTPAD); off, the fill of this module.
     if once {
+        // R5 probe (not for merge): the same cap / prefault before the read-once fill.
+        let x_r5_t0 = x_r5_probe::on().then(std::time::Instant::now);
+        let parts = x_r5_probe::parts(parts);
+        let mut tables = tables;
+        let x_r5_shared = SharedTables {
+            hashtable: Shared::new(&mut *tables.hashtable),
+            next_pos: Shared::new(&mut *tables.next_pos),
+            pv_array: Shared::new(&mut *tables.pv_array),
+            pv_array_bts: tables.pv_array_bts,
+            helper_array: Shared::new(&mut *tables.helper_array),
+        };
+        let x_r5_pf = x_r5_probe::prefault(parts, x_r5_shared, in_pool);
         let _stats = super::x_mb_lookup_once::fill(parts, words, tables, in_pool, timed);
+        if let Some(t0) = x_r5_t0 {
+            x_r5_probe::report(false, parts, x_r5_shared, t0, x_r5_pf);
+        }
         return FillStats {
             padded: false,
             once: true,

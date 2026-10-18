@@ -295,6 +295,7 @@ export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXFRAMES=1
 export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
+export LOSAT_X_TBXUNGAP=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,

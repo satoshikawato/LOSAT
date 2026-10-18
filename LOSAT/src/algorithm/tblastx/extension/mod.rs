@@ -15,10 +15,14 @@
 mod gapped;
 mod two_hit;
 mod ungapped;
+// EXPERIMENT (LOSAT_X_TBXUNGAP): the table walks of the two-hit extension.
+mod x_two_hit_fast;
 
 // Re-export public functions
 pub use gapped::extend_gapped_protein;
 pub use two_hit::extend_hit_two_hit;
+// EXPERIMENT (LOSAT_X_TBXUNGAPSHADOW): the summary line at exit.
+pub use x_two_hit_fast::print_shadow_stats as x_tbxungap_print_shadow_stats;
 // Diagnostic (LOSAT_X_STATS): the cells of one extension (tblastx/x_unit_probe.rs).
 pub(crate) use two_hit::x_two_hit_cells;
 pub use ungapped::extend_hit_ungapped;

@@ -296,6 +296,7 @@ export LOSAT_X_DEKKER=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DPAVX2=1
+export LOSAT_X_DPEMASK=1
 export LOSAT_X_DPFAST=1
 export LOSAT_X_DPNEON=1
 export LOSAT_X_DPW128=1
@@ -608,6 +609,20 @@ Same values, faster computation:
   and band steps as the 128-bit kernels, so the same result and edit script; a call the 256-bit
   kernel does not take runs on the 128-bit kernel (`utils/x_xdrop_avx2.rs`). Covered by
   `LOSAT_X_DPSHADOW=1`; `LOSAT_X_DPNOAVX=1` turns it off as well.
+- `LOSAT_X_DPEMASK=1` (with `LOSAT_X_DPAVX2`, speed; in the strict set from the pull request that
+  added it, 2026-10-19; `=0` or `LOSAT_X_DEFAULT=0` returns to the previous kernel) the 8-bit
+  256-bit X-drop kernel (`align8`: blastp's and the translated programs' score-only DP, blastn's
+  DP) stores the E (`score_gap_col`) of a dropped cell as minus infinity and no longer clears E
+  right of the last survivor at the end of each row; it also keeps the row buffers' high-water
+  mark as a max instead of a branch. A dropped cell's E is below the X-drop threshold in both
+  forms, so no surviving cell, drop decision or traceback bit changes (the argument is at the head
+  of `utils/x_xdrop_avx2.rs`); the fuzz test against the scalar NCBI loops and the capture replay
+  run both instances. Without the clearing stores the next row's E loads are forwarded instead of
+  waiting for those stores to be written (line R, R1). On the workstation (one core, captured
+  problems, cycles per row): blastp score-only x0.88-0.93 (OrthoFinder Blast0_6, WSSV x
+  PajaWSV), blastn x0.89-0.91 (AP027202 x LC738875), blastn traceback x0.97; store-forward blocks
+  0.5-1.0 -> 0.03-0.12 per row, 7-9 fewer instructions per row. The 16-bit kernel (blastp's
+  traceback) is unchanged: the same change there measured x0.98-1.01.
 - `LOSAT_X_DPW128=1` (with `LOSAT_X_DPFAST`; strict-set candidate) the 128-bit X-drop DP kernels
   with the per-row savings of `LOSAT_X_DPAVX2` (first and last survivor kept while the row runs,
   row gap as a prefix maximum with a two-operation carry, the first lane's missing diagonal as a

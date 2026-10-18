@@ -2457,7 +2457,8 @@ mod x_capture;
 /// Bit 2 (EXPERIMENT, LOSAT_X_DPW128): try the 128-bit kernels of `x_xdrop_w128.rs` after the
 /// 256-bit ones (set only when the CPU runs the 128-bit kernels; always on wasm32 simd128 and
 /// aarch64). Bit 3 (EXPERIMENT, LOSAT_X_DPNEON2, aarch64 only): try the two-register NEON kernels
-/// of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64.
+/// of `x_xdrop_neon2.rs` first, where bit 0 stands on x86_64. Bit 4 (LOSAT_X_DPEMASK, with bit 0):
+/// the 8-bit 256-bit kernel's `EM` instances (no E clearing at the row end, see `x_xdrop_avx2.rs`).
 fn x_extra_switches() -> u8 {
     use std::sync::OnceLock;
     static ON: OnceLock<u8> = OnceLock::new();
@@ -2467,6 +2468,9 @@ fn x_extra_switches() -> u8 {
         {
             if x_avx2::switch_on() {
                 on |= 1;
+                if x_avx2::emask_on() {
+                    on |= 16;
+                }
             }
         }
         #[cfg(target_arch = "aarch64")]
@@ -2580,6 +2584,7 @@ fn x_extra_dispatch(
                     x_drop,
                     tb,
                     check_fence,
+                    on & 16 != 0,
                     sc,
                 )
             };

@@ -1001,6 +1001,12 @@ impl TwoStageLookup {
         }
     }
 
+    /// EXPERIMENT (exp/r4-scan-probes, v4-R R4): the backbone and the chains, for the probes'
+    /// prefetches and cell-level presence bits.
+    pub fn x_r4_raw(&self) -> (&[u32], &[u32]) {
+        (&self.mb_lookup.hashtable, &self.mb_lookup.next_pos)
+    }
+
     /// Visit hits for a lut_word_length k-mer.
     #[inline(always)]
     pub fn for_each_hit(&self, lut_kmer: u64, callback: impl FnMut(u32)) {

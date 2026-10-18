@@ -1451,7 +1451,7 @@ Scheduling (each value computed by one thread with the original function; order 
   second build of its comparison with the padded fill (every element of the four arrays and the longest chain compared;
   a difference panics) and `main` prints `[X_SHADOW] MBLUTPAD tables=<compared> cells=<elements> diffs=0 identical` at
   exit. With `LOSAT_TIMING` (any switch state) `main` prints `[TIMING] x_mb_lookup_build: <s>s (builds=<n>
-  parallel=<n> padded=<n>)` when a megablast table was built (the summed wall time of the builds, not the shadow's
+  parallel=<n> padded=<n> once=<n>)` when a megablast table was built (the summed wall time of the builds, not the shadow's
   second build; with `LOSAT_X_QBATCHPAR` the slots' concurrent builds too; `parallel=` counts the builds filled on a
   pool, `padded=` those of them the padded fill made) and `[TIMING] x_mb_lookup_split: alloc=
   loop= pool_fill= chain=` (the allocation, the fill by the loop or on the pool with the re-threading of
@@ -1501,6 +1501,48 @@ Scheduling (each value computed by one thread with the original function; order 
   thread, and the 100 kb / 250 kb input once, 136 -> 160 KiB at its second table), max RSS at 16 threads +1.2, -1.3
   and +1.1 MiB (the 31,168 cDNAs and the two E. coli inputs) and fill 0.912, 0.924 and 1.209 per round (the last a
   fill of 0.3 s).
+- `LOSAT_X_MBLUTONCE=1` (BLASTN megablast and blastn wherever `LOSAT_X_PAIRPAR` fills the contiguous megablast lookup
+  table on a pool of two threads or more: `-subject` and `-db`, not with `-limit_lookup`, `BLEMIR_DEBUG` or
+  `LOSAT_X_PAIRPARSHADOW`; not in the strict set: off unless set to any value, and `LOSAT_X_DEFAULT=0` turns
+  `LOSAT_X_PAIRPAR` off and with it this fill; win / loss conditions PENDING: the workstation was unreachable when the
+  change was made, so its paired timings and max RSS, which decide the default, are not measured yet; the private
+  copies of `LOSAT_X_MBLUTPAD` that it always uses raised max RSS there by up to 7 MiB at 16 threads and 8.5 MiB at
+  64, never above NCBI's) each query position of that fill is read once (`blastn/x_mb_lookup_once.rs`, the first
+  dispatch of `x_mb_lookup_par::fill`): the positions the loop reads form one stream cut into chunks of 2^19
+  positions, each chunk cut into one span per thread; per chunk each thread reads the words of its span with the
+  loop's statements (entering a range up to `lut_word_length - 1` positions early) into a region of its own, copies
+  them stably into a second region grouped by the owner of their cell (the blocks of `LOSAT_X_PAIRPAR`'s plan), each
+  owner then applies the words of its cells in reading order into the private copies of `LOSAT_X_MBLUTPAD` and keeps
+  each cell's previous head, and each reader writes `next_pos` of its words from the kept heads (in the same job as
+  its read of the next chunk; two `rayon::scope`s per chunk, a last one that links the last chunk and adds the copies
+  in). Each cell gets the loop's words in the loop's order, so `hashtable`, `next_pos`, `pv_array`, `helper_array` and
+  `longest_chain` are the loop's; for blastn (`ascending_cells`) the chunks, readers and words are taken in reverse,
+  the order of the loop's re-threading, so its per-thread word lists are no longer needed. Instead of every thread
+  reading every word (0.65 s of each thread's time at 16 threads on megablast of 31,168 cDNAs), each word is read once
+  and written to `next_pos` by the thread that read it. Memory: one arena per fill, P regions of `2 x ceil(ceil(c / P)
+  / 8)` lines of 64 bytes and P rows of `ceil((P + 1) / 16)` lines, `c` the smaller of 2^19 and the positions read: at
+  most `16 x (c + 8 P)` bytes plus the rows, 8.0 MiB at 16 and 64 threads (8.3 MiB at 255) for a query of 2^19
+  positions or more, whatever the thread count, less for smaller queries. That is per fill, not per process: fills
+  that run at the same time each hold their own arena, so with `LOSAT_X_QBATCHPAR` each slot that fills a table while
+  others do holds about 8 MiB whatever its thread count (k such slots about k x 8 MiB, 64 MiB for 8 slots of 8 threads
+  at 64 threads), and `LOSAT_X_QBATCHPAR`'s memory estimate of a batch does not count it; a chunk that scales with the
+  thread count (`min(2^19, P << 15)` positions, about P x 0.5 MiB) is the candidate if the workstation's max RSS shows
+  that cost. On Linux with glibc the arena's capacity is at least 32 MiB + 4 KiB (the rule of `LOSAT_X_TBNSTORE`'s
+  frames), so glibc maps it and unmaps it at the end of the fill without moving its mmap threshold and only the
+  written part is resident; elsewhere (wasm32 included) it has its exact size and is freed at the end of the fill. The
+  ranges of the stream are a list of one 48-byte entry per unmasked range read (0.1-0.3 MB for the megablast tables of
+  31,168 cDNAs), freed with the fill; the private copies are `LOSAT_X_MBLUTPAD`'s, one set per thread of each fill
+  (kept from fill to fill on glibc). With the `wasm-threads` feature the fill runs on the search pool (it builds no
+  pool); without it, or without `parallel`, the loop runs. Shadow: `LOSAT_X_PAIRPARSHADOW=1` with the switch makes the
+  second build of its comparison with the read-once fill (every element of the four arrays and the longest chain
+  compared; a difference panics) and `main` prints `[X_SHADOW] MBLUTONCE tables=<compared> cells=<elements> diffs=0
+  identical` at exit (with `LOSAT_X_MBLUTPAD` set too, the read-once fill makes that build and the `[X_SHADOW]
+  MBLUTPAD` line says `tables=0`). With `LOSAT_TIMING` `[TIMING] x_mb_lookup_build` counts `once=<n>` (the builds the
+  read-once fill made; `padded=` counts only those of `LOSAT_X_MBLUTPAD`'s fill), and `[TIMING] x_mb_lookup_once:
+  fills= chunks= read_wall= read_max= read_sum= read_late= update_... last_... arena=` gives, per phase summed over
+  the chunks of the search's fills (not the shadow's), the calling worker's wall time, the longest job, the jobs'
+  summed time and the latest start (`read`: the read and the links of the chunk before; `update`: the owners' updates;
+  `last`: the last links and the copies' flush) and the largest arena (MiB).
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
   default ON: `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0` turn it off; evidence below, "Default ON") the

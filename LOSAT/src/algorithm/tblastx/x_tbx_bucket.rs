@@ -87,11 +87,11 @@ fn env_usize(name: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
-/// log2 of the cells of a range (LOSAT_X_TBXBUCKET_SHIFT, 8..=16, default 12: 16 KiB of table).
-fn shift() -> u32 {
-    static V: OnceLock<u32> = OnceLock::new();
-    *V.get_or_init(|| env_usize("LOSAT_X_TBXBUCKET_SHIFT", 12).clamp(8, 16) as u32)
-}
+/// log2 of the cells of a range: 4,096 cells, 16 KiB of table. A constant, so that the record's
+/// fields are cut with immediate shifts (sweep 1, 2026-10-18: 2^11 / 2^12 / 2^13 alike).
+const SHIFT: u32 = 12;
+/// The cell's offset within its range, in a record's low word.
+const MASK: u32 = (1 << SHIFT) - 1;
 
 /// Smallest unit table, in cells, that is bucketed (LOSAT_X_TBXBUCKET_MIN_CELLS, default 0).
 fn min_cells() -> usize {
@@ -117,8 +117,9 @@ fn min_budget() -> usize {
 pub(super) struct XBucketScratch {
     /// `ranges` segments of `2^cap_shift` records each.
     recs: Vec<u64>,
-    /// Records in each segment.
-    cnt: Vec<u32>,
+    /// Per segment, the index in `recs` of its next record (segment `b` starts at
+    /// `b << cap_shift`).
+    w: Vec<u32>,
     /// `seq` of every hit of the current flush that saved an init HSP, in saving order.
     keys: Vec<u32>,
 }
@@ -127,7 +128,9 @@ pub(super) struct XBucketScratch {
 /// cannot hold a flush of at least one hit per segment.
 fn layout(width: usize, shift: u32) -> Option<(usize, u32)> {
     let ranges = width.div_ceil(1usize << shift).max(1);
-    let budget = (width.saturating_mul(density16()) / 16).max(min_budget());
+    let budget = (width.saturating_mul(density16()) / 16)
+        .max(min_budget())
+        .min(1 << 32);
     let per = budget.div_ceil(ranges).max(16).next_power_of_two();
     let seq_limit = 1usize << (32 - shift);
     let mut cap_shift = per.trailing_zeros();
@@ -153,7 +156,7 @@ pub(super) fn print_summary() {
             TB_UNITS.load(AtomicOrdering::Relaxed),
             TB_FLUSHES.load(AtomicOrdering::Relaxed),
             TB_HITS.load(AtomicOrdering::Relaxed),
-            shift(),
+            SHIFT,
             density16(),
             min_cells()
         );
@@ -171,12 +174,13 @@ pub(super) fn print_summary() {
 // The per-hit body applied to the buffered hits range by range, each range in scan order (module
 // doc, items 1-3), and the saved init HSPs put back into scan order.
 /// Processes and empties every segment, then restores the scan order of the init HSPs saved.
+/// Its own function, so that the loop that appends the hits keeps its values in registers.
 #[allow(clippy::too_many_arguments)]
-#[inline(always)]
+#[inline(never)]
 fn flush<S: XInitSink, P: XProbe>(
-    bk: &mut XBucketScratch,
-    ranges: usize,
-    shift: u32,
+    recs: &[u64],
+    w: &mut [u32],
+    keys: &mut Vec<u32>,
     cap_shift: u32,
     lo: u32,
     diag: &mut [DiagStruct],
@@ -186,21 +190,19 @@ fn flush<S: XInitSink, P: XProbe>(
 ) {
     TB_FLUSHES.fetch_add(1, AtomicOrdering::Relaxed);
     let start = init_hsps.saved_len();
-    let mask = (1u32 << shift) - 1;
     let window = h.window;
     let diag_ptr = diag.as_mut_ptr();
-    for b in 0..ranges {
-        // SAFETY: b < ranges == cnt.len().
-        let n = unsafe { *bk.cnt.get_unchecked(b) } as usize;
-        if n == 0 {
+    for (b, w_b) in w.iter_mut().enumerate() {
+        let begin = b << cap_shift;
+        let end = *w_b as usize;
+        if end == begin {
             continue;
         }
-        let base = (b << shift) as u32;
-        let seg = &bk.recs[b << cap_shift..(b << cap_shift) + n];
-        for &rec in seg {
+        let base = (b << SHIFT) as u32;
+        for &rec in &recs[begin..end] {
             let subject_offset = (rec >> 32) as u32;
             let low = rec as u32;
-            let cell = base | (low & mask);
+            let cell = base | (low & MASK);
             let query_offset = cell.wrapping_add(lo).wrapping_add(subject_offset);
             debug_assert!((cell as usize) < diag.len());
             // SAFETY: the cell was computed by `scan_unit_bucketed` from a hit of the unit, so it
@@ -216,13 +218,13 @@ fn flush<S: XInitSink, P: XProbe>(
                 probe,
             );
             if outcome == XHit::Saved {
-                bk.keys.push(low >> shift);
+                keys.push(low >> SHIFT);
             }
             probe.hit(outcome, window);
         }
-        bk.cnt[b] = 0;
+        *w_b = begin as u32;
     }
-    init_hsps.restore_flush_order(start, &mut bk.keys);
+    init_hsps.restore_flush_order(start, keys);
     probe.batch_end();
 }
 
@@ -327,8 +329,7 @@ impl XPairPar {
             return;
         }
         let width = x_unit_width(group, &chunk);
-        let shift = shift();
-        let Some((ranges, cap_shift)) = layout(width, shift) else {
+        let Some((ranges, cap_shift)) = layout(width, SHIFT) else {
             self.scan_unit(unit, inp, scratch, init_hsps, probe);
             return;
         };
@@ -352,16 +353,16 @@ impl XPairPar {
         scratch.diag.clear();
         scratch.diag.resize(width, DiagStruct::default());
 
-        let bk = &mut scratch.bucket;
+        let XBucketScratch { recs, w, keys } = &mut scratch.bucket;
+        // `ranges << cap_shift <= 2^(32 - SHIFT)` (`layout`): the record indices fit a `u32`.
         let rec_len = ranges << cap_shift;
-        if bk.recs.len() < rec_len {
-            bk.recs.resize(rec_len, 0);
+        if recs.len() < rec_len {
+            recs.resize(rec_len, 0);
         }
-        bk.cnt.clear();
-        bk.cnt.resize(ranges, 0);
-        bk.keys.clear();
-        let cap = 1u32 << cap_shift;
-        let mask = (1u32 << shift) - 1;
+        w.clear();
+        w.extend((0..ranges).map(|b| (b << cap_shift) as u32));
+        keys.clear();
+        let cap_mask = (1u32 << cap_shift) - 1;
         TB_UNITS.fetch_add(1, AtomicOrdering::Relaxed);
 
         let h = XHitCtx {
@@ -412,21 +413,33 @@ impl XPairPar {
                 }
                 probe.batch(hits as usize);
                 hits_sum += hits as u64;
-                let offset_pairs_ptr = scratch.offset_pairs.as_ptr();
-                for i in 0..hits as usize {
-                    // SAFETY: i < hits <= offset_array_size <= offset_pairs.len().
-                    let pair = unsafe { &*offset_pairs_ptr.add(i) };
+                let pairs = &scratch.offset_pairs[..hits as usize];
+                let mut recs_ptr = recs.as_mut_ptr();
+                let mut w_ptr = w.as_mut_ptr();
+                for pair in pairs {
                     let subject_offset = pair.s_off;
                     let cell = pair.q_off.wrapping_sub(subject_offset).wrapping_sub(lo);
                     debug_assert!((cell as usize) < width, "unit diagonal outside its table");
-                    let b = (cell >> shift) as usize;
-                    // SAFETY: cell < width, so b < ranges == cnt.len().
-                    let mut n = unsafe { *bk.cnt.get_unchecked(b) };
-                    if n == cap {
+                    let b = (cell >> SHIFT) as usize;
+                    let rec = (u64::from(subject_offset) << 32)
+                        | u64::from((total << SHIFT) | (cell & MASK));
+                    total += 1;
+                    // SAFETY: cell < width, so b < ranges == w.len(); w[b] is below the end of
+                    // segment b (a full segment is flushed at once, below), so below
+                    // ranges << cap_shift <= recs.len(). The pointers are taken again after
+                    // every flush, which borrows `recs` and `w` as slices.
+                    let next = unsafe {
+                        let idx = *w_ptr.add(b);
+                        *recs_ptr.add(idx as usize) = rec;
+                        *w_ptr.add(b) = idx + 1;
+                        idx + 1
+                    };
+                    if next & cap_mask == 0 {
+                        // Segment b is full.
                         flush(
-                            bk,
-                            ranges,
-                            shift,
+                            recs,
+                            w,
+                            keys,
                             cap_shift,
                             lo,
                             &mut scratch.diag,
@@ -435,24 +448,16 @@ impl XPairPar {
                             probe,
                         );
                         total = 0;
-                        n = 0;
+                        recs_ptr = recs.as_mut_ptr();
+                        w_ptr = w.as_mut_ptr();
                     }
-                    let rec = (u64::from(subject_offset) << 32)
-                        | u64::from((total << shift) | (cell & mask));
-                    // SAFETY: b < ranges and n < cap, so the index is below ranges << cap_shift
-                    // <= recs.len().
-                    unsafe {
-                        *bk.recs.get_unchecked_mut((b << cap_shift) + n as usize) = rec;
-                        *bk.cnt.get_unchecked_mut(b) = n + 1;
-                    }
-                    total += 1;
                 }
             }
         }
         flush(
-            bk,
-            ranges,
-            shift,
+            recs,
+            w,
+            keys,
             cap_shift,
             lo,
             &mut scratch.diag,

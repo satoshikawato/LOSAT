@@ -74,10 +74,14 @@ static EL_EARLY: AtomicU64 = AtomicU64::new(0);
 static EL_BATCHES: AtomicU64 = AtomicU64::new(0);
 static EL_SHADOW_UNITS: AtomicU64 = AtomicU64::new(0);
 static EL_SHADOW_RECORDS: AtomicU64 = AtomicU64::new(0);
+static EL_SHADOW_CANDS: AtomicU64 = AtomicU64::new(0);
+static EL_LANE_CANDS: AtomicU64 = AtomicU64::new(0);
+static EL_LANE_BLOCKS: AtomicU64 = AtomicU64::new(0);
+static EL_LANE_STEPS: AtomicU64 = AtomicU64::new(0);
 
 /// The most candidates a batch holds; a pending mark keeps the slot number, below this, in the
 /// cell's `last_hit` (module doc).
-pub(super) const LANES_MAX: usize = 16;
+pub(super) const LANES_MAX: usize = 32;
 /// Candidates per batch when LOSAT_X_TBXEXTLANES_BATCH is not set.
 const BATCH_DEFAULT: usize = 8;
 /// The packed cell's flag bit (`DiagStruct`: last_hit in bits 0-30, flag in bit 31).
@@ -119,6 +123,24 @@ pub(super) fn active(window: i32, wordsize: i32) -> bool {
     mode() != 0 && window as i64 >= wordsize as i64 + LANES_MAX as i64
 }
 
+/// The table of LOSAT_X_TBXUNGAP's walks when the batches run the lane kernel (`lanes`): x86-64
+/// with AVX2, the table built, and LOSAT_X_TBXEXTLANES_SCALAR not set (a prototype choice that
+/// keeps step 1, the scalar resolution, for comparison). `None`: every candidate resolves with
+/// `extend_hit_two_hit`.
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+fn lane_table() -> Option<&'static [i8; 1 << 16]> {
+    static T: OnceLock<Option<&'static [i8; 1 << 16]>> = OnceLock::new();
+    *T.get_or_init(|| {
+        #[cfg(target_arch = "x86_64")]
+        if std::env::var_os("LOSAT_X_TBXEXTLANES_SCALAR").is_none()
+            && std::arch::is_x86_feature_detected!("avx2")
+        {
+            return crate::algorithm::tblastx::extension::x_tbxungap_table();
+        }
+        None
+    })
+}
+
 /// The summary line (with LOSAT_X_STATS, LOSAT_TIMING or the shadow).
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub(super) fn print_summary() {
@@ -129,14 +151,19 @@ pub(super) fn print_summary() {
             EL_SHADOW_RECORDS.load(AtomicOrdering::Relaxed)
         );
     }
-    if mode() != 0 && (std::env::var_os("LOSAT_X_STATS").is_some() || timing()) {
+    if mode() == 2 || (mode() != 0 && (std::env::var_os("LOSAT_X_STATS").is_some() || timing())) {
         eprintln!(
-            "[X_STATS] TBXEXTLANES units={} candidates={} early={} batches={} batch={}",
+            "[X_STATS] TBXEXTLANES units={} candidates={} early={} batches={} batch={} kernel={} lane_candidates={} lane_blocks={} lane_steps={} shadow_candidates={}",
             EL_UNITS.load(AtomicOrdering::Relaxed),
             EL_CANDS.load(AtomicOrdering::Relaxed),
             EL_EARLY.load(AtomicOrdering::Relaxed),
             EL_BATCHES.load(AtomicOrdering::Relaxed),
-            batch()
+            batch(),
+            if lane_table().is_some() { "avx2" } else { "scalar" },
+            EL_LANE_CANDS.load(AtomicOrdering::Relaxed),
+            EL_LANE_BLOCKS.load(AtomicOrdering::Relaxed),
+            EL_LANE_STEPS.load(AtomicOrdering::Relaxed),
+            EL_SHADOW_CANDS.load(AtomicOrdering::Relaxed)
         );
     }
 }
@@ -178,6 +205,10 @@ struct XLaneBatch {
     cands: u64,
     early: u64,
     batches: u64,
+    /// The lane kernel's candidates, blocks and lane steps (`lanes`).
+    lane_cands: u64,
+    lane_blocks: u64,
+    lane_steps: u64,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-605 (module doc)
@@ -202,6 +233,42 @@ unsafe fn resolve(c: &mut XCand, diag_ptr: *mut DiagStruct, h: &XHitCtx<'_>) {
             c.x_drop,
             false,
         );
+    // SAFETY: the caller's bound.
+    unsafe {
+        apply(
+            c,
+            diag_ptr,
+            h,
+            (
+                hsp_q_u,
+                hsp_qe_u,
+                hsp_s_u,
+                score,
+                right_extend,
+                s_last_off_u,
+            ),
+        )
+    };
+}
+
+/// The result of `c`'s extension, (q_start, q_end, s_start, score, right_extend, s_last_off) of
+/// `extend_hit_two_hit`, into `c` and its cell, as `x_hit` writes them.
+///
+/// SAFETY: as `resolve`.
+#[inline(always)]
+unsafe fn apply(
+    c: &mut XCand,
+    diag_ptr: *mut DiagStruct,
+    h: &XHitCtx<'_>,
+    (hsp_q_u, hsp_qe_u, hsp_s_u, score, right_extend, s_last_off_u): (
+        usize,
+        usize,
+        usize,
+        i32,
+        bool,
+        usize,
+    ),
+) {
     // [C] if (right_extend) { flag = 1; last_hit = s_last_off - (wordsize - 1) + diag_offset; }
     // [C] else { last_hit = subject_offset + diag_offset; }  (flag stays 0)
     let raw = if right_extend {
@@ -261,6 +328,11 @@ unsafe fn flush<S: XInitSink>(
     init_hsps: &mut S,
 ) {
     b.batches += 1;
+    #[cfg(target_arch = "x86_64")]
+    if let Some(tab) = lane_table() {
+        // SAFETY: AVX2 is present (`lane_table`); the caller's bound.
+        unsafe { lanes::resolve_batch(b, diag_ptr, h, tab) };
+    }
     for c in &mut b.c[..b.n] {
         if !c.done {
             // SAFETY: the caller's bound.
@@ -607,6 +679,9 @@ impl XPairPar {
             cands: 0,
             early: 0,
             batches: 0,
+            lane_cands: 0,
+            lane_blocks: 0,
+            lane_steps: 0,
         };
 
         let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
@@ -684,7 +759,491 @@ impl XPairPar {
         EL_CANDS.fetch_add(b.cands, AtomicOrdering::Relaxed);
         EL_EARLY.fetch_add(b.early, AtomicOrdering::Relaxed);
         EL_BATCHES.fetch_add(b.batches, AtomicOrdering::Relaxed);
+        EL_LANE_CANDS.fetch_add(b.lane_cands, AtomicOrdering::Relaxed);
+        EL_LANE_BLOCKS.fetch_add(b.lane_blocks, AtomicOrdering::Relaxed);
+        EL_LANE_STEPS.fetch_add(b.lane_steps, AtomicOrdering::Relaxed);
         (b.cands, b.early)
+    }
+}
+
+// EXPERIMENT (LOSAT_X_TBXEXTLANES, step 2): the lane kernel of a batch (x86-64, AVX2).
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-866, 886-921 (the walks;
+// module comment of tblastx/extension/x_two_hit_fast.rs)
+// ```c
+// for (i = 0; i < n; i++) {
+//     score += matrix[q[i]][s[i]];
+//     if (score > maxscore) { maxscore = score; best_i = i; }
+//     if (score <= 0 || (maxscore - score) >= dropoff) break;
+// }
+// ```
+// Eight walks run side by side, one per 32-bit lane: the left walk of a candidate and then, if it
+// reached the first hit, its right walk, in the lane it started in. A block writes the scores of
+// the next K steps of every lane into a step-major byte buffer (one table load per lane and step,
+// `T[q << 8 | s]` of LOSAT_X_TBXUNGAP), then runs the recurrence of the walks K steps on all
+// lanes: per lane the reference's statements in its order (add, improve, stop test), on i32 as
+// the reference. A lane that stopped keeps its values (its `active` lane is cleared). At the end
+// of a block the lanes that stopped or ran out hand their walk's result on, and the lanes that
+// are free take the next candidate of the batch.
+//
+// Why the result is that of `two_hit` (x_two_hit_fast.rs), which is that of the reference.
+// * The word loop is `two_hit`'s, in scalar, at the start of a candidate.
+// * A walk reads the positions of `two_hit`'s walk, in its order, and no others: the left walk
+//   `min(q_r, s_r)` steps back, the right walk `min(q_len - q_r, s_len - s_r)` steps forward;
+//   the buffer holds the sentinel -128 after the last step of a walk.
+// * The sentinel: x_drop is 1..=127 (else the candidate is left to `extend_hit_two_hit`), and the
+//   score before a step is never above the best, so a step of -128 stops the walk without raising
+//   the best (two_hit's argument). Stopping one step after the last real step changes nothing on
+//   the left (only the best and its step are returned) and gives the right walk's stop position
+//   `n` (taken - 1 = n), the value of `two_hit`'s walk that runs out.
+// * Counters: `t` counts the steps of the walk (1-based); the best's step is `t` at its last strict
+//   improvement (0 if none): the left walk's length and the right walk's `best_len`; the right
+//   walk's stop position is the steps before the stopping one.
+#[cfg(target_arch = "x86_64")]
+mod lanes {
+    use super::*;
+    use crate::algorithm::tblastx::extension::X_TBXUNGAP_MAX_X_DROP;
+    use core::arch::x86_64::*;
+
+    /// Lanes of a 256-bit vector of i32.
+    const NL: usize = 8;
+    /// Steps of a block.
+    const K: usize = 16;
+    /// `BLAST_SCORE_MIN` in the table (x_two_hit_fast.rs), written after the end of a walk.
+    const SENTINEL: i8 = -128;
+    /// Residues of the word loop (`k_size` of two_hit.rs).
+    const WORD: usize = 3;
+
+    type Table = [i8; 1 << 16];
+
+    /// One lane's walk.
+    #[derive(Clone, Copy)]
+    struct Lane {
+        /// 0 = free, 1 = left walk, 2 = right walk.
+        phase: u8,
+        /// The candidate's slot in the batch.
+        slot: usize,
+        /// Where the next step reads: `q[-1]`, `s[-1]` (left) or `q[0]`, `s[0]` (right).
+        q: *const u8,
+        s: *const u8,
+        /// Steps left in the walk.
+        r: usize,
+        /// The end of the best word at R (`two_hit`'s `q_r`, `s_r`) and the query.
+        q_r: usize,
+        s_r: usize,
+        q_base: *const u8,
+        q_len: usize,
+        /// The left walk's best and length.
+        left_score: i32,
+        left_disp: usize,
+    }
+
+    const FREE: Lane = Lane {
+        phase: 0,
+        slot: 0,
+        q: core::ptr::null(),
+        s: core::ptr::null(),
+        r: 0,
+        q_r: 0,
+        s_r: 0,
+        q_base: core::ptr::null(),
+        q_len: 0,
+        left_score: 0,
+        left_disp: 0,
+    };
+
+    /// The i32 values of the eight lanes, as stored between blocks.
+    #[repr(C, align(32))]
+    #[derive(Clone, Copy)]
+    struct V([i32; NL]);
+
+    /// The scores of a block, step-major: step `k` of lane `l` at `k * NL + l`.
+    #[repr(C, align(32))]
+    struct Buf([i8; K * NL]);
+
+    /// The state of the eight walks.
+    struct Walks {
+        lanes: [Lane; NL],
+        score: V,
+        best: V,
+        /// `t` at the best's last strict improvement.
+        pos: V,
+        /// Steps taken in the walk.
+        t: V,
+        /// x_drop - 1.
+        xd1: V,
+        /// 1 for a right walk (its `score <= 0` stop), `i32::MIN` for a left walk (none).
+        floor: V,
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-866 (module comment
+    // above): `K` steps of the eight walks.
+    /// Runs one block; returns, per lane, the steps after which it was still going.
+    #[target_feature(enable = "avx2")]
+    unsafe fn run_block(buf: &Buf, w: &mut Walks, act: &V) -> V {
+        let ld = |v: &V| unsafe { _mm256_load_si256(v.0.as_ptr() as *const __m256i) };
+        let mut sc = ld(&w.score);
+        let mut bs = ld(&w.best);
+        let mut ps = ld(&w.pos);
+        let mut tt = ld(&w.t);
+        let xd = ld(&w.xd1);
+        let fl = ld(&w.floor);
+        let mut ac = ld(act);
+        let ones = _mm256_set1_epi32(1);
+        let mut alive = _mm256_setzero_si256();
+        for k in 0..K {
+            // SAFETY: k * NL + 8 <= K * NL bytes of `buf`.
+            let v = _mm256_cvtepi8_epi32(unsafe {
+                _mm_loadl_epi64(buf.0.as_ptr().add(k * NL) as *const __m128i)
+            });
+            tt = _mm256_add_epi32(tt, ones);
+            // [C] score += matrix[q[i]][s[i]];
+            sc = _mm256_add_epi32(sc, v);
+            // [C] if (score > maxscore) { maxscore = score; best_i = i; }
+            let gt = _mm256_and_si256(_mm256_cmpgt_epi32(sc, bs), ac);
+            bs = _mm256_blendv_epi8(bs, sc, gt);
+            ps = _mm256_blendv_epi8(ps, tt, gt);
+            // [C] if (score <= 0 || (maxscore - score) >= dropoff) break;
+            let stop = _mm256_or_si256(
+                _mm256_cmpgt_epi32(_mm256_sub_epi32(bs, sc), xd),
+                _mm256_cmpgt_epi32(fl, sc),
+            );
+            ac = _mm256_andnot_si256(stop, ac);
+            alive = _mm256_sub_epi32(alive, ac);
+        }
+        let st = |v: &mut V, x: __m256i| unsafe {
+            _mm256_store_si256(v.0.as_mut_ptr() as *mut __m256i, x)
+        };
+        st(&mut w.score, sc);
+        st(&mut w.best, bs);
+        st(&mut w.pos, ps);
+        st(&mut w.t, tt);
+        let mut out = V([0; NL]);
+        st(&mut out, alive);
+        out
+    }
+
+    /// Starts the walk of `l` at the given score (left: 0, right: the left walk's best).
+    #[inline(always)]
+    fn set_walk(w: &mut Walks, l: usize, start: i32, xd1: i32, floor: i32) {
+        w.score.0[l] = start;
+        w.best.0[l] = start;
+        w.pos.0[l] = 0;
+        w.t.0[l] = 0;
+        w.xd1.0[l] = xd1;
+        w.floor.0[l] = floor;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158
+    // `s_BlastAaExtendTwoHit` (two_hit.rs and x_two_hit_fast.rs follow it): the result of the
+    // walks, written as `extend_hit_two_hit` returns it.
+    /// The candidate of `l` is resolved: its result into the batch and the cell; the lane is free.
+    ///
+    /// SAFETY: the candidate's cell is below the length of the table `diag_ptr` points into.
+    #[inline(always)]
+    unsafe fn finish(
+        b: &mut XLaneBatch,
+        w: &mut Walks,
+        l: usize,
+        reached: bool,
+        right_best: i32,
+        right_disp: usize,
+        right_end: usize,
+        diag_ptr: *mut DiagStruct,
+        h: &XHitCtx<'_>,
+    ) {
+        let ln = w.lanes[l];
+        let (score, q_end, s_last_off) = if reached {
+            (
+                ln.left_score.max(right_best),
+                ln.q_r + right_disp,
+                ln.s_r + right_end,
+            )
+        } else {
+            (ln.left_score, ln.q_r, ln.s_r)
+        };
+        let result = (
+            ln.q_r - ln.left_disp,
+            q_end,
+            ln.s_r - ln.left_disp,
+            score,
+            reached,
+            s_last_off,
+        );
+        // SAFETY: the slot is below b.n.
+        let c = unsafe { b.c.get_unchecked_mut(ln.slot) };
+        if mode() == 2 {
+            // SAFETY: q_base points at the candidate's query of q_len residues.
+            let q = unsafe { core::slice::from_raw_parts(ln.q_base, ln.q_len) };
+            let expect = extend_hit_two_hit(
+                q,
+                h.subject,
+                c.s_left as usize,
+                c.s_right as usize,
+                c.q_raw as usize,
+                c.x_drop,
+                false,
+            );
+            let got = (
+                result.0,
+                result.1,
+                result.2,
+                result.2 + (result.1 - result.0),
+                result.3,
+                result.4,
+                result.5,
+            );
+            assert_eq!(
+                got, expect,
+                "LOSAT_X_TBXEXTLANESSHADOW: lane kernel s_left={} s_right={} q_raw={} x_drop={} q_len={} s_len={}",
+                c.s_left, c.s_right, c.q_raw, c.x_drop, ln.q_len, h.subject.len()
+            );
+            EL_SHADOW_CANDS.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+        // SAFETY: the caller's bound.
+        unsafe { apply(c, diag_ptr, h, result) };
+        w.lanes[l].phase = 0;
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1131-1146
+    // ```c
+    // left_d = s_BlastAaExtendLeft(...);
+    // if (left_d >= (s_right_off - s_left_off)) {
+    //     *right_extend = TRUE;
+    //     right_score = s_BlastAaExtendRight(...);
+    // }
+    // ```
+    /// The left walk of `l` ended with `best` at step `disp`: the right walk, or the result.
+    ///
+    /// SAFETY: as `finish`.
+    #[inline(always)]
+    unsafe fn left_done(
+        b: &mut XLaneBatch,
+        w: &mut Walks,
+        l: usize,
+        best: i32,
+        disp: usize,
+        diag_ptr: *mut DiagStruct,
+        h: &XHitCtx<'_>,
+    ) {
+        let s_left = b.c[w.lanes[l].slot].s_left as usize;
+        let ln = &mut w.lanes[l];
+        ln.left_score = best;
+        ln.left_disp = disp;
+        let reached = disp >= ln.s_r.saturating_sub(s_left);
+        if !reached {
+            // SAFETY: the caller's bound.
+            unsafe { finish(b, w, l, false, 0, 0, 0, diag_ptr, h) };
+            return;
+        }
+        let n = (ln.q_len - ln.q_r).min(h.subject.len() - ln.s_r);
+        if n == 0 {
+            // SAFETY: the caller's bound.
+            unsafe { finish(b, w, l, true, best, 0, 0, diag_ptr, h) };
+            return;
+        }
+        ln.phase = 2;
+        ln.r = n;
+        // SAFETY: q_r <= q_len and s_r <= s_len.
+        unsafe {
+            ln.q = ln.q_base.add(ln.q_r);
+            ln.s = h.subject.as_ptr().add(ln.s_r);
+        }
+        let xd1 = w.xd1.0[l];
+        set_walk(w, l, best, xd1, 1);
+    }
+
+    /// Puts the candidate in `slot` on lane `l`: the word loop of `two_hit` and the left walk.
+    /// Leaves the lane free when the candidate is resolved already, is left to
+    /// `extend_hit_two_hit` (an X-drop outside 1..=127, a word that does not fit), or ends at once.
+    ///
+    /// SAFETY: as `finish`.
+    #[inline(always)]
+    unsafe fn start(
+        b: &mut XLaneBatch,
+        w: &mut Walks,
+        l: usize,
+        slot: usize,
+        tab: &Table,
+        diag_ptr: *mut DiagStruct,
+        h: &XHitCtx<'_>,
+    ) {
+        let c = b.c[slot];
+        if c.done {
+            return;
+        }
+        // SAFETY: the context index was returned by `get_context_idx` (below num_contexts).
+        let ctx = unsafe { h.contexts.get_unchecked(c.ctx_idx as usize) };
+        let query_full = &ctx.aa_seq;
+        let q = &query_full[1..query_full.len() - 1];
+        let s = h.subject;
+        let (q_raw, s_right) = (c.q_raw as usize, c.s_right as usize);
+        if !(1..=X_TBXUNGAP_MAX_X_DROP).contains(&c.x_drop)
+            || q_raw >= q.len()
+            || q.len() - q_raw < WORD
+            || s_right >= s.len()
+            || s.len() - s_right < WORD
+        {
+            return;
+        }
+        b.lane_cands += 1;
+        // The best end of the word at R (`two_hit`).
+        let mut score = 0i32;
+        let mut seed_score = 0i32;
+        let mut right_d = 0usize;
+        for i in 0..WORD {
+            // SAFETY: the word fits in both sequences (tested above).
+            let (qc, sc) = unsafe { (*q.get_unchecked(q_raw + i), *s.get_unchecked(s_right + i)) };
+            score += tab[(qc as usize) << 8 | sc as usize] as i32;
+            if score > seed_score {
+                seed_score = score;
+                right_d = i + 1;
+            }
+        }
+        let q_r = q_raw + right_d;
+        let s_r = s_right + right_d;
+        w.lanes[l] = Lane {
+            phase: 1,
+            slot,
+            // SAFETY: q_r <= q.len() and s_r <= s.len() (the word fits).
+            q: unsafe { q.as_ptr().add(q_r) },
+            s: unsafe { s.as_ptr().add(s_r) },
+            r: q_r.min(s_r),
+            q_r,
+            s_r,
+            q_base: q.as_ptr(),
+            q_len: q.len(),
+            left_score: 0,
+            left_disp: 0,
+        };
+        set_walk(w, l, 0, c.x_drop - 1, i32::MIN);
+        if q_r.min(s_r) == 0 {
+            // SAFETY: the caller's bound.
+            unsafe { left_done(b, w, l, 0, 0, diag_ptr, h) };
+        }
+    }
+
+    /// Writes the scores of the next `K` steps of each busy lane (the sentinel after a walk's
+    /// end and in free lanes).
+    ///
+    /// SAFETY: every busy lane's walk can read its `r` steps from its pointers.
+    #[inline(always)]
+    unsafe fn fill(buf: &mut Buf, w: &Walks, tab: &Table) {
+        buf.0 = [SENTINEL; K * NL];
+        for (l, ln) in w.lanes.iter().enumerate() {
+            let m = ln.r.min(K);
+            match ln.phase {
+                1 => {
+                    for i in 0..m {
+                        // SAFETY: the walk's bound; q << 8 | s < 2^16.
+                        unsafe {
+                            let qc = *ln.q.sub(1 + i);
+                            let sc = *ln.s.sub(1 + i);
+                            *buf.0.get_unchecked_mut(i * NL + l) =
+                                *tab.get_unchecked((qc as usize) << 8 | sc as usize);
+                        }
+                    }
+                }
+                2 => {
+                    for i in 0..m {
+                        // SAFETY: as above.
+                        unsafe {
+                            let qc = *ln.q.add(i);
+                            let sc = *ln.s.add(i);
+                            *buf.0.get_unchecked_mut(i * NL + l) =
+                                *tab.get_unchecked((qc as usize) << 8 | sc as usize);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 (above)
+    /// Resolves the batch's candidates that the lanes can take; the others stay for
+    /// `extend_hit_two_hit` (`flush`).
+    ///
+    /// SAFETY: AVX2 is available; every candidate's cell is below the length of the table
+    /// `diag_ptr` points into.
+    #[target_feature(enable = "avx2")]
+    pub(super) unsafe fn resolve_batch(
+        b: &mut XLaneBatch,
+        diag_ptr: *mut DiagStruct,
+        h: &XHitCtx<'_>,
+        tab: &Table,
+    ) {
+        let n = b.n;
+        let mut next = 0usize;
+        let mut w = Walks {
+            lanes: [FREE; NL],
+            score: V([0; NL]),
+            best: V([0; NL]),
+            pos: V([0; NL]),
+            t: V([0; NL]),
+            xd1: V([0; NL]),
+            floor: V([0; NL]),
+        };
+        let mut buf = Buf([SENTINEL; K * NL]);
+        loop {
+            let mut act = V([0; NL]);
+            let mut busy = false;
+            for l in 0..NL {
+                while w.lanes[l].phase == 0 && next < n {
+                    next += 1;
+                    // SAFETY: the caller's bound.
+                    unsafe { start(b, &mut w, l, next - 1, tab, diag_ptr, h) };
+                }
+                if w.lanes[l].phase != 0 {
+                    act.0[l] = -1;
+                    busy = true;
+                }
+            }
+            if !busy {
+                break;
+            }
+            // SAFETY: the walks' bounds (`start`, `left_done`).
+            unsafe { fill(&mut buf, &w, tab) };
+            // SAFETY: AVX2 (the caller's bound).
+            let alive = unsafe { run_block(&buf, &mut w, &act) };
+            b.lane_blocks += 1;
+            for l in 0..NL {
+                let phase = w.lanes[l].phase;
+                if phase == 0 {
+                    continue;
+                }
+                let m = w.lanes[l].r.min(K);
+                b.lane_steps += m as u64;
+                {
+                    let ln = &mut w.lanes[l];
+                    ln.r -= m;
+                    // SAFETY: m steps of the walk were readable.
+                    unsafe {
+                        if phase == 1 {
+                            ln.q = ln.q.sub(m);
+                            ln.s = ln.s.sub(m);
+                        } else {
+                            ln.q = ln.q.add(m);
+                            ln.s = ln.s.add(m);
+                        }
+                    }
+                }
+                let a = alive.0[l] as usize;
+                if a < K || w.lanes[l].r == 0 {
+                    let best = w.best.0[l];
+                    let pos = w.pos.0[l] as usize;
+                    if phase == 1 {
+                        // SAFETY: the caller's bound.
+                        unsafe { left_done(b, &mut w, l, best, pos, diag_ptr, h) };
+                    } else {
+                        // The steps before the stopping one (all of them if none stopped).
+                        let end = w.t.0[l] as usize - K + a;
+                        // SAFETY: the caller's bound.
+                        unsafe { finish(b, &mut w, l, true, best, pos, end, diag_ptr, h) };
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -754,7 +1313,7 @@ mod tests {
         let mut rng = Rng(0x5eed_a5a5_0123_4567);
         let mut total_cands = 0u64;
         let mut total_early = 0u64;
-        for case in 0..12 {
+        for case in 0..16 {
             let abc = if case % 3 == 2 { &narrow } else { &alphabet };
             let q_len = 200 + rng.below(400) as usize;
             let frames: Vec<QueryFrame> = [1i8, 2, 3, -1, -2, -3]
@@ -766,10 +1325,16 @@ mod tests {
                 .flat_map(|f| f.aa_seq[1..f.aa_len + 1].to_vec())
                 .collect();
             let s_len = 300 + rng.below(500) as usize;
-            let s_frames: Vec<QueryFrame> = [1i8, 2, 3, -1, -2, -3]
-                .iter()
-                .map(|&f| frame(f, &residues(&mut rng, s_len, abc, &source)))
-                .collect();
+            // Every fourth case scans the query against itself: long walks, walks that reach the
+            // ends of both sequences.
+            let s_frames: Vec<QueryFrame> = if case % 4 == 3 {
+                frames.clone()
+            } else {
+                [1i8, 2, 3, -1, -2, -3]
+                    .iter()
+                    .map(|&f| frame(f, &residues(&mut rng, s_len, abc, &source)))
+                    .collect()
+            };
             let (lookup, contexts) = build_ncbi_lookup(&[frames.clone()], 11, &params, true);
             let cutoff_scores: Vec<i32> = (0..contexts.len())
                 .map(|i| 10 + (i as i32 % 4) * 3)
@@ -783,7 +1348,8 @@ mod tests {
                 shadow: false,
                 stub: false,
             };
-            let window = [40, 19, 64][case % 3];
+            // Windows the module takes (`active`): from its smallest, wordsize + LANES_MAX.
+            let window = [40, 3 + LANES_MAX as i32, 64][case % 3];
             let inp = XSubject {
                 s_frames_preliminary: &s_frames,
                 s_frames: &s_frames,
@@ -871,5 +1437,158 @@ mod tests {
             total_early > 10,
             "early resolutions {total_early} of {total_cands}"
         );
+    }
+
+    // No NCBI counterpart: the batch resolution (the lane kernel where AVX2 is present, and
+    // `extend_hit_two_hit` for the rest) against `extend_hit_two_hit` on every candidate, with the
+    // cell writes and the init HSPs of `x_hit`.
+    #[test]
+    fn batch_resolution_equals_extend_hit_two_hit() {
+        let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let mut rng = Rng(0x0dd_ba11_cafe_f00d);
+        let mut lane_cands = 0u64;
+        let mut cands = 0u64;
+        for round in 0..400 {
+            let q_len = 3 + rng.below(if round % 5 == 0 { 40 } else { 300 }) as usize;
+            // Codes 1..=24, a code 0 (BLAST_SCORE_MIN) now and then.
+            let pick = |rng: &mut Rng| {
+                if rng.below(97) == 0 {
+                    0u8
+                } else {
+                    1 + rng.below(24) as u8
+                }
+            };
+            let frames: Vec<QueryFrame> = [1i8, 2, 3, -1, -2, -3]
+                .iter()
+                .map(|&f| frame(f, &(0..q_len).map(|_| pick(&mut rng)).collect::<Vec<u8>>()))
+                .collect();
+            let (lookup, contexts) = build_ncbi_lookup(&[frames.clone()], 11, &params, true);
+            // The subject: pieces of the query frames with substitutions, and random residues.
+            let mut subject: Vec<u8> = Vec::new();
+            let s_len = 3 + rng.below(400) as usize;
+            while subject.len() < s_len {
+                if rng.below(2) == 0 {
+                    let f = &frames[rng.below(6) as usize].aa_seq[1..q_len + 1];
+                    let at = rng.below(q_len as u64) as usize;
+                    let take = (1 + rng.below(80) as usize).min(q_len - at);
+                    let rate = [3u64, 8, 30, 1_000_000][rng.below(4) as usize];
+                    subject.extend(f[at..at + take].iter().map(|&c| {
+                        if rng.below(rate) == 0 {
+                            pick(&mut rng)
+                        } else {
+                            c
+                        }
+                    }));
+                } else {
+                    subject.push(pick(&mut rng));
+                }
+            }
+            subject.truncate(s_len);
+            let cutoff_scores: Vec<i32> = (0..contexts.len()).map(|i| 8 + i as i32).collect();
+            let x_dropoff_per_context: Vec<i32> = (0..contexts.len()).map(|_| 0).collect();
+            let window = 40;
+            let h = XHitCtx {
+                diag_offset: window,
+                window,
+                wordsize: 3,
+                lookup: &lookup,
+                contexts: &contexts,
+                cutoff_scores: &cutoff_scores,
+                x_dropoff_per_context: &x_dropoff_per_context,
+                subject: &subject,
+                s_f_idx: 2,
+                s_frame: -1,
+                s_idx: 7,
+                s_len: 999,
+            };
+            let n = 1 + rng.below(LANES_MAX as u64) as usize;
+            let mut b = XLaneBatch {
+                c: [XCand::default(); LANES_MAX],
+                n,
+                len: LANES_MAX,
+                cands: 0,
+                early: 0,
+                batches: 0,
+                lane_cands: 0,
+                lane_blocks: 0,
+                lane_steps: 0,
+            };
+            let mut diag = vec![DiagStruct::default(); n];
+            let mut expect_cells = Vec::new();
+            let mut expect_hsps: Vec<InitHSP> = Vec::new();
+            for i in 0..n {
+                let ctx_idx = rng.below(contexts.len() as u64) as usize;
+                let ctx = &contexts[ctx_idx];
+                let q = &ctx.aa_seq[1..ctx.aa_seq.len() - 1];
+                // A word that fits (a lookup hit), as `two_hit.rs` reads it unchecked.
+                let q_raw = rng.below((q.len() - 2) as u64) as usize;
+                let s_right = rng.below((subject.len() - 2) as u64) as usize;
+                let diff = 3 + rng.below(37) as usize;
+                let s_left = (s_right + 3).saturating_sub(diff);
+                let x_drop = [1, 2, 7, 16, 30, 127, 128, 300][rng.below(8) as usize];
+                b.c[i] = XCand {
+                    query_offset: ctx.frame_base as u32 + q_raw as u32,
+                    s_right: s_right as u32,
+                    s_left: s_left as u32,
+                    q_raw: q_raw as u32,
+                    cell: i as u32,
+                    ctx_idx: ctx_idx as u32,
+                    x_drop,
+                    ..XCand::default()
+                };
+                diag[i].set_raw_bits(FLAG_BIT | i as u32);
+                let (q0, qe, s0, _se, score, right, s_last) =
+                    extend_hit_two_hit(q, &subject, s_left, s_right, q_raw, x_drop, false);
+                let mut cell = DiagStruct::default();
+                if right {
+                    cell.set_flag(1);
+                    cell.set_last_hit(s_last as i32 - 2 + window);
+                } else {
+                    cell.set_last_hit(s_right as i32 + window);
+                }
+                expect_cells.push(cell);
+                if score >= cutoff_scores[ctx_idx] {
+                    let (q0, qe, s0) = (q0 as i32, qe as i32, s0 as i32);
+                    expect_hsps.push(InitHSP {
+                        q_start_absolute: ctx.frame_base + q0,
+                        q_end_absolute: ctx.frame_base + qe,
+                        s_start: s0,
+                        s_end: s0 + (qe - q0),
+                        q_seed_absolute: ctx.frame_base + q_raw as i32,
+                        s_seed: s_right as i32,
+                        score,
+                        ctx_idx,
+                        s_f_idx: 2,
+                        q_idx: ctx.q_idx,
+                        s_idx: 7,
+                        q_frame: ctx.frame,
+                        s_frame: -1,
+                        q_orig_len: ctx.orig_len,
+                        s_orig_len: 999,
+                    });
+                }
+            }
+            // A few candidates resolved already, as a hit on their cell does.
+            for i in 0..n {
+                if rng.below(10) == 0 {
+                    // SAFETY: the cell is below n = diag.len().
+                    unsafe { resolve(&mut b.c[i], diag.as_mut_ptr(), &h) };
+                }
+            }
+            let mut got: Vec<InitHSP> = Vec::new();
+            // SAFETY: every candidate's cell is below n = diag.len().
+            unsafe { flush(&mut b, diag.as_mut_ptr(), &h, &mut got) };
+            assert_eq!(diag, expect_cells, "round {round}: cells");
+            assert_eq!(got, expect_hsps, "round {round}: init HSPs");
+            assert_eq!(b.n, 0);
+            lane_cands += b.lane_cands;
+            cands += n as u64;
+        }
+        if lane_table().is_some() {
+            assert!(
+                lane_cands * 2 > cands,
+                "the lane kernel took {lane_cands} of {cands} candidates"
+            );
+        }
     }
 }

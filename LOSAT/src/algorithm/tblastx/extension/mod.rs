@@ -25,6 +25,10 @@ pub use gapped::extend_gapped_protein;
 pub use two_hit::extend_hit_two_hit;
 // EXPERIMENT (LOSAT_X_TBXUNGAPSHADOW): the summary line at exit.
 pub use x_two_hit_fast::print_shadow_stats as x_tbxungap_print_shadow_stats;
+// EXPERIMENT (LOSAT_X_TBXEXTLANES): the table of the walks for the lane kernel.
+pub(crate) use x_two_hit_fast::{
+    lanes_table as x_tbxungap_table, LANES_MAX_X_DROP as X_TBXUNGAP_MAX_X_DROP,
+};
 // Diagnostic (LOSAT_X_STATS): the cells of one extension (tblastx/x_unit_probe.rs).
 pub(crate) use two_hit::x_two_hit_cells;
 pub use ungapped::extend_hit_ungapped;

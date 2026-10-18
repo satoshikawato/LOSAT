@@ -135,6 +135,17 @@ pub(super) fn mode() -> u8 {
     state().mode
 }
 
+/// The byte table of the walks (`T[q << 8 | s]`, module comment), whatever the switch says; `None`
+/// where it cannot be built (a score outside its range, wasm32). For LOSAT_X_TBXEXTLANES's lane
+/// kernel (tblastx/x_tbx_extlanes.rs), whose exactness rests on the same table argument.
+// No NCBI counterpart: the scores of `get_score`, stored once.
+pub(crate) fn lanes_table() -> Option<&'static [i8; TABLE_LEN]> {
+    state().table.as_deref()
+}
+
+/// The largest X-drop `lanes_table` is exact for (module comment, the sentinel argument).
+pub(crate) const LANES_MAX_X_DROP: i32 = MAX_X_DROP;
+
 static SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
 
 /// The summary line (printed by `main` at exit), only in shadow mode.

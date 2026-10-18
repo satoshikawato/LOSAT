@@ -484,6 +484,15 @@ fn call(p: &Prob<'_>, tb: bool, sc: &mut XdropScratch) -> Option<XdropResult> {
                 (false, 6) => probe::align8_probe::<false, 5, 0>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
+                (false, 7) => probe::align8_probe::<false, 7, 0>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (false, 8) => probe::align8_probe::<false, 7, 4>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (false, 9) => probe::align8_probe::<false, 6, 0>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
                 (false, _) => probe::align8_probe::<false, 1, 0>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
@@ -504,6 +513,9 @@ fn call(p: &Prob<'_>, tb: bool, sc: &mut XdropScratch) -> Option<XdropResult> {
 thread_local! {
     /// 0 = `align`, 1 = probe copy, 2 = probe copy without the high-water-mark branch.
     static KERN: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+    /// The band table of the problem being run (`oracle`: recorded by kernel 9, replayed by 7 / 8).
+    static TAB: std::cell::Cell<*mut Vec<(u32, u32)>> =
+        const { std::cell::Cell::new(std::ptr::null_mut()) };
 }
 
 #[test]
@@ -535,7 +547,11 @@ fn r1_loop() {
         Some("addr4") => 4,
         Some("nop30") => 5,
         Some("alu20") => 6,
-        Some(k) => panic!("R1_KERN must be orig, copy, nodirty, lat4, addr4, nop30 or alu20, not {k}"),
+        Some("oracle") => 7,
+        Some("oraclelat4") => 8,
+        Some(k) => panic!(
+            "R1_KERN must be orig, copy, nodirty, lat4, addr4, nop30, alu20, oracle or oraclelat4, not {k}"
+        ),
     };
     assert!(kern == 0 || w8, "the probe copies are 8-bit kernels");
     assert!(kern <= 2 || !tb, "the latency / issue probes are score-only");
@@ -669,7 +685,16 @@ fn r1_loop() {
     } else {
         None
     };
-    for p in &list {
+    // oracle: each problem's band, recorded once by kernel 9 before the checked call replays it
+    let mut tabs: Vec<Vec<(u32, u32)>> = vec![Vec::new(); list.len()];
+    for (i, p) in list.iter().enumerate() {
+        if kern >= 7 {
+            TAB.with(|t| t.set(&mut tabs[i]));
+            KERN.with(|k| k.set(9));
+            // a declined problem stops at the same row start in both passes (no table read past it)
+            let _ = call(p, tb, &mut sc);
+            KERN.with(|k| k.set(kern));
+        }
         let r = call(p, tb, &mut sc);
         let want = if synth.is_some() { synth_want.flatten() } else { p.want };
         match r {
@@ -711,7 +736,10 @@ fn r1_loop() {
     let lay = layout(&sc);
     let t0 = Instant::now();
     for _ in 0..reps {
-        for p in &list {
+        for (i, p) in list.iter().enumerate() {
+            if kern >= 7 {
+                TAB.with(|t| t.set(&mut tabs[i]));
+            }
             std::hint::black_box(call(p, tb, &mut sc));
         }
     }
@@ -732,7 +760,8 @@ fn r1_loop() {
             0.0
         },
         if spread_on { "spread" } else { "as-is" },
-        ["orig", "copy", "nodirty", "lat4", "addr4", "nop30", "alu20"][kern as usize],
+        ["orig", "copy", "nodirty", "lat4", "addr4", "nop30", "alu20", "oracle", "oraclelat4"]
+            [kern as usize],
         st.line()
     );
     eprint!("{line}");
@@ -752,7 +781,9 @@ fn r1_loop() {
 // the per-row high-water mark `sc.dirty8` taken as a max instead of a branch (V = 1); score-only
 // slope probes, same results: `lat4` (V = 2) four identity vpor on hh in every block (latency on the
 // H / E / drop chain), `addr4` (V = 3) four identity adds on the band position before the next row,
-// `nop30` (V = 4) 30 NOPs per row, `alu20` (V = 5) 20 independent adds per row.
+// `nop30` (V = 4) 30 NOPs per row, `alu20` (V = 5) 20 independent adds per row; `oracle` (V = 7,
+// recorded by V = 6) takes the next row's band from a recorded run instead of this row's survivors,
+// `oraclelat4` adds lat4's latency to it.
 // ---------------------------------------------------------------------------
 #[allow(clippy::all)]
 mod probe {
@@ -1006,7 +1037,17 @@ mod probe {
         };
         let small_alphabet = ncols <= 16;
         let mut cells: u64 = 0;
-    
+        // V = 6 records each row's next band (first, b_size); V = 7 replays it (see the row end).
+        let tabv: *mut Vec<(u32, u32)> = if V == 6 || V == 7 {
+            super::TAB.with(|t| t.get())
+        } else {
+            core::ptr::null_mut()
+        };
+        if V == 6 {
+            (*tabv).clear();
+        }
+        let tab: *const (u32, u32) = if V == 7 { (*tabv).as_ptr() } else { core::ptr::null() };
+
         let mut base: i32 = 0;
         let mut best_rel: i32 = 0;
         let mut a_off = 0usize;
@@ -1235,6 +1276,18 @@ mod probe {
             b_size = hi + 1;
             if b_size <= len2 {
                 b_size += 1;
+            }
+            if V == 6 {
+                (*tabv).push((first as u32, b_size as u32));
+            }
+            if V == 7 {
+                // probe: the next row's band from the recorded run of the same problem, so that it
+                // no longer waits for this row's survivors (which are still computed, then dropped)
+                core::arch::asm!("/* {0} {1} */", in(reg) first, in(reg) b_size,
+                    options(nomem, nostack, preserves_flags));
+                let (f, bs) = *tab.add(a - 1);
+                first = f as usize;
+                b_size = bs as usize;
             }
         }
     

@@ -359,6 +359,7 @@ export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
 export LOSAT_X_TBXQFRAMES=1
 export LOSAT_X_TBXSCANBF=1
+export LOSAT_X_TBXUNGAP=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -2905,6 +2906,27 @@ Scheduling (each value computed by one thread with the original function; order 
   sends back (the timings of `LOSAT_X_PAIRPARGATE` above) it takes x0.95-1.00 of the chain
   builder's time; max RSS 23 -> 19 MiB on 40 kb x 3,000 cDNAs, 15 -> 17 MiB on 5 kb x 3,000 cDNAs
   at 8 threads (the default before both: 21 and 19 MiB).
+- `LOSAT_X_TBXUNGAP=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-10-18; `=0` turns it off; native builds, the wasm32 build keeps its 16-residue v128 walks) the
+  two-hit ungapped extension (`extend_hit_two_hit`, NCBI `s_BlastAaExtendTwoHit`: the word loop and the
+  `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks) reads its scores from one 256 x 256 byte table
+  (`q << 8 | s`, the scores of `get_score` for every two bytes, `BLAST_SCORE_MIN` stored as -128) and runs
+  each walk in a function of its own (`tblastx/extension/x_two_hit_fast.rs`, exactness argument in its
+  header): 18 instructions a step on the left and 19 on the right, against 22 and about 30 (the reference
+  calls `get_score`, which tests both codes and multiplies for the row, and its right walk reloads its
+  bounds from the stack). Same counts, positions, statements and exit tests; an X-drop outside 1..=127 or a
+  word that does not fit runs the reference, and so does the debug output. All callers (the unit path and
+  the reference frame loops) go through it. Measured against the dev binary before it (workstation, node 1
+  without other timed runs, 8 alternating rounds, medians of the per-round ratios, reports and max RSS
+  identical): MelaMJNV x PemoMJNVA 1 thread x0.978, AP027131 x AP027133 (code 4) 1 thread x0.971 and 8
+  threads x0.984, Sakai x MG1655[0:1 Mb] (code 11) 8 threads x0.988. perf stat at 1 thread: AP027131 x
+  AP027133 instructions 72.2 -> 69.0 G, cycles 34.9 -> 34.1 G (about 100 instructions and 25 cycles fewer
+  per extension). What is left of an extension is the latency of its first query loads and the
+  mispredicted exits of the walks (`LOSAT_X_TBXEXTLANES`, next).
+- `LOSAT_X_TBXUNGAPSHADOW=1` shadow of `LOSAT_X_TBXUNGAP` (turns the path on): every extension runs both
+  ways and the seven results (offsets, score, `right_extend`, `s_last_off`) must be equal; any difference
+  panics with the inputs; the reference's result is used. One line at exit:
+  `[X_SHADOW] TBXUNGAP compared=`.
 - `LOSAT_X_PAIRLUT=1` (in the strict set; acts while `LOSAT_X_PAIRPAR` is on, not with its
   shadow) TBLASTX:
   the lookup tables of the unit path, one per context group, built directly from the query instead

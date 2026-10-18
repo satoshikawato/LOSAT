@@ -469,16 +469,28 @@ fn call(p: &Prob<'_>, tb: bool, sc: &mut XdropScratch) -> Option<XdropResult> {
         if kern != 0 {
             let m = fits_8bit(&p.scores, p.go, p.ge, p.x)?;
             return match (tb, kern) {
-                (false, 1) => probe::align8_probe::<false, 0>(
+                (false, 1) => probe::align8_probe::<false, 0, 0>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
-                (false, _) => probe::align8_probe::<false, 1>(
+                (false, 3) => probe::align8_probe::<false, 2, 4>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
-                (true, 1) => probe::align8_probe::<true, 0>(
+                (false, 4) => probe::align8_probe::<false, 3, 0>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
-                (true, _) => probe::align8_probe::<true, 1>(
+                (false, 5) => probe::align8_probe::<false, 4, 0>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (false, 6) => probe::align8_probe::<false, 5, 0>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (false, _) => probe::align8_probe::<false, 1, 0>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (true, 1) => probe::align8_probe::<true, 0, 0>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (true, _) => probe::align8_probe::<true, 1, 0>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
             };
@@ -519,9 +531,14 @@ fn r1_loop() {
         None | Some("orig") => 0u8,
         Some("copy") => 1,
         Some("nodirty") => 2,
-        Some(k) => panic!("R1_KERN must be orig, copy or nodirty, not {k}"),
+        Some("lat4") => 3,
+        Some("addr4") => 4,
+        Some("nop30") => 5,
+        Some("alu20") => 6,
+        Some(k) => panic!("R1_KERN must be orig, copy, nodirty, lat4, addr4, nop30 or alu20, not {k}"),
     };
     assert!(kern == 0 || w8, "the probe copies are 8-bit kernels");
+    assert!(kern <= 2 || !tb, "the latency / issue probes are score-only");
     KERN.with(|k| k.set(kern));
     let t_load = Instant::now();
     let probs = load_dir(std::path::Path::new(&dir)).expect("read the capture files");
@@ -715,7 +732,7 @@ fn r1_loop() {
             0.0
         },
         if spread_on { "spread" } else { "as-is" },
-        ["orig", "copy", "nodirty"][kern as usize],
+        ["orig", "copy", "nodirty", "lat4", "addr4", "nop30", "alu20"][kern as usize],
         st.line()
     );
     eprint!("{line}");
@@ -732,7 +749,10 @@ fn r1_loop() {
 
 // ---------------------------------------------------------------------------
 // Probe copies of the kernel (R1_KERN): `copy` = align8 verbatim (V = 0), `nodirty` = the same with
-// the per-row high-water mark `sc.dirty8` taken as a max instead of a branch (V = 1). Same results.
+// the per-row high-water mark `sc.dirty8` taken as a max instead of a branch (V = 1); score-only
+// slope probes, same results: `lat4` (V = 2) four identity vpor on hh in every block (latency on the
+// H / E / drop chain), `addr4` (V = 3) four identity adds on the band position before the next row,
+// `nop30` (V = 4) 30 NOPs per row, `alu20` (V = 5) 20 independent adds per row.
 // ---------------------------------------------------------------------------
 #[allow(clippy::all)]
 mod probe {
@@ -742,15 +762,148 @@ mod probe {
         SCRIPT_EXTEND_GAP_A, SCRIPT_EXTEND_GAP_B, SCRIPT_GAP_IN_A, SCRIPT_SUB, TAB,
     };
     use super::super::{
-        bcast128, block8, block8x, build_row, fill_cols, ld, ldx, lut32, lut32x, st, stx, Row,
-        RowX, C8, LANE_MASK8, LANE_MASK8X,
+        bcast128, build_row, fill_cols, last8, ld, ldx, lut32, lut32x, pmax8, pmax8x, st, stx,
+        up1_8, Row, RowX, C8, LANE_MASK8, LANE_MASK8X, W, X,
     };
     use core::arch::x86_64::*;
     #[allow(unused_imports)]
     use super::super::super::fits_8bit;
 
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    unsafe fn block8_p<const TB: bool, const LAT: u32>(
+        c: &C8,
+        rs: &mut Row,
+        hr: *const u8,
+        hw: *mut u8,
+        e: *mut u8,
+        b: usize,
+        s: W,
+        lane_mask: Option<W>,
+        hpm: W,
+    ) -> (W, W) {
+        let hp = _mm256_andnot_si256(hpm, ld(hr.add(b).sub(1)));
+        let ep = ld(e.add(b));
+        let d = _mm256_adds_epi8(hp, s);
+        let h0 = _mm256_max_epi8(d, ep);
+        let v = _mm256_subs_epu8(h0, c.goe);
+        let fi = _mm256_subs_epu8(pmax8(_mm256_adds_epu8(up1_8(v), c.ramp), c.kb15), c.ramp);
+        let f = _mm256_max_epu8(fi, _mm256_subs_epu8(rs.carry, c.ramp));
+        let mut hh = _mm256_max_epi8(h0, f);
+        if let Some(m) = lane_mask {
+            hh = _mm256_and_si256(hh, m);
+        }
+        for _ in 0..LAT {
+            // probe: one cycle of latency on the H / E / drop chain (vpor x, x, x = x)
+            core::arch::asm!("vpor {0}, {0}, {0}", inout(ymm_reg) hh, options(pure, nomem, nostack));
+        }
+        let hg = _mm256_subs_epu8(hh, c.goe);
+        let fs = _mm256_subs_epu8(f, c.ge1);
+        let out = last8(_mm256_max_epu8(_mm256_subs_epu8(fi, c.ge1), v), c.kb15);
+        rs.carry = _mm256_max_epu8(_mm256_subs_epu8(rs.carry, c.ge32), out);
+        let es = _mm256_subs_epu8(ep, c.ge1);
+        let en = _mm256_max_epi8(hg, es);
+        let gt = _mm256_cmpgt_epi8(hh, rs.bestv);
+        let thr;
+        if _mm256_movemask_epi8(gt) != 0 {
+            let pfx = _mm256_max_epu8(pmax8(up1_8(hh), c.kb15), rs.bestv);
+            thr = _mm256_subs_epu8(pfx, c.xv);
+            let rm = _mm256_movemask_epi8(_mm256_cmpgt_epi8(hh, pfx)) as u32;
+            rs.rec_b = b + (31 - rm.leading_zeros()) as usize;
+            rs.bestv = last8(_mm256_max_epu8(pfx, hh), c.kb15);
+            rs.thrv = _mm256_subs_epu8(rs.bestv, c.xv);
+            rs.slow = true;
+        } else {
+            thr = rs.thrv;
+        }
+        let drop = _mm256_cmpgt_epi8(thr, hh);
+        st(hw.add(b), _mm256_andnot_si256(drop, hh));
+        st(e.add(b), en);
+        let scr = if TB {
+            let me = _mm256_cmpgt_epi8(ep, d);
+            let mf = _mm256_cmpgt_epi8(f, h0);
+            let op = _mm256_andnot_si256(mf, _mm256_add_epi8(c.c3, _mm256_and_si256(me, c.c3)));
+            let fb = _mm256_andnot_si256(_mm256_cmpgt_epi8(hg, es), c.c40);
+            let fa = _mm256_andnot_si256(_mm256_cmpgt_epi8(hg, fs), c.c10);
+            _mm256_or_si256(op, _mm256_or_si256(fb, fa))
+        } else {
+            _mm256_setzero_si256()
+        };
+        (drop, scr)
+    }
+
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    unsafe fn block8x_p<const TB: bool, const LAT: u32>(
+        c: &C8,
+        rs: &mut RowX,
+        rec_b: &mut usize,
+        slow: &mut bool,
+        hr: *const u8,
+        hw: *mut u8,
+        e: *mut u8,
+        b: usize,
+        s: X,
+        lane_mask: Option<X>,
+        hpm: X,
+    ) -> (X, X) {
+        let goe = _mm256_castsi256_si128(c.goe);
+        let ge1 = _mm256_castsi256_si128(c.ge1);
+        let ramp = _mm256_castsi256_si128(c.ramp);
+        let xv = _mm256_castsi256_si128(c.xv);
+        let k15 = _mm256_castsi256_si128(c.kb15);
+        let hp = _mm_andnot_si128(hpm, ldx(hr.add(b).sub(1)));
+        let ep = ldx(e.add(b));
+        let d = _mm_adds_epi8(hp, s);
+        let h0 = _mm_max_epi8(d, ep);
+        let v = _mm_subs_epu8(h0, goe);
+        let fi = _mm_subs_epu8(pmax8x(_mm_adds_epu8(_mm_bslli_si128::<1>(v), ramp)), ramp);
+        let f = _mm_max_epu8(fi, _mm_subs_epu8(rs.carry, ramp));
+        let mut hh = _mm_max_epi8(h0, f);
+        if let Some(m) = lane_mask {
+            hh = _mm_and_si128(hh, m);
+        }
+        for _ in 0..LAT {
+            core::arch::asm!("vpor {0}, {0}, {0}", inout(xmm_reg) hh, options(pure, nomem, nostack));
+        }
+        let hg = _mm_subs_epu8(hh, goe);
+        let fs = _mm_subs_epu8(f, ge1);
+        let out = _mm_shuffle_epi8(_mm_max_epu8(_mm_subs_epu8(fi, ge1), v), k15);
+        rs.carry = _mm_max_epu8(_mm_subs_epu8(rs.carry, _mm256_castsi256_si128(c.ge16)), out);
+        let es = _mm_subs_epu8(ep, ge1);
+        let en = _mm_max_epi8(hg, es);
+        let gt = _mm_cmpgt_epi8(hh, rs.bestv);
+        let thr;
+        if _mm_movemask_epi8(gt) != 0 {
+            let pfx = _mm_max_epu8(pmax8x(_mm_bslli_si128::<1>(hh)), rs.bestv);
+            thr = _mm_subs_epu8(pfx, xv);
+            let rm = _mm_movemask_epi8(_mm_cmpgt_epi8(hh, pfx)) as u32;
+            *rec_b = b + (31 - rm.leading_zeros()) as usize;
+            rs.bestv = _mm_shuffle_epi8(_mm_max_epu8(pfx, hh), k15);
+            rs.thrv = _mm_subs_epu8(rs.bestv, xv);
+            *slow = true;
+        } else {
+            thr = rs.thrv;
+        }
+        let drop = _mm_cmpgt_epi8(thr, hh);
+        stx(hw.add(b), _mm_andnot_si128(drop, hh));
+        stx(e.add(b), en);
+        let scr = if TB {
+            let c3 = _mm256_castsi256_si128(c.c3);
+            let me = _mm_cmpgt_epi8(ep, d);
+            let mf = _mm_cmpgt_epi8(f, h0);
+            let op = _mm_andnot_si128(mf, _mm_add_epi8(c3, _mm_and_si128(me, c3)));
+            let fb = _mm_andnot_si128(_mm_cmpgt_epi8(hg, es), _mm256_castsi256_si128(c.c40));
+            let fa = _mm_andnot_si128(_mm_cmpgt_epi8(hg, fs), _mm256_castsi256_si128(c.c10));
+            _mm_or_si128(op, _mm_or_si128(fb, fa))
+        } else {
+            _mm_setzero_si128()
+        };
+        (drop, scr)
+    }
+
     #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-    pub(super) unsafe fn align8_probe<const TB: bool, const V: u32>(
+    pub(super) unsafe fn align8_probe<const TB: bool, const V: u32, const L: u32>(
         q: &RowSeq<'_>,
         s: &ColSeq<'_>,
         scores: &Scores<'_>,
@@ -921,6 +1074,17 @@ mod probe {
                 best_rel = 0;
             }
             let mut hpm = lane0;
+            if V == 4 {
+                // probe: 30 NOPs per row (issue slots and ROB entries, no scheduler entry or port)
+                core::arch::asm!(".rept 30", "nop", ".endr", options(nomem, nostack, preserves_flags));
+            }
+            if V == 5 {
+                // probe: 20 independent ALU uops per row (four chains of five adds)
+                let (mut d0, mut d1, mut d2, mut d3) = (0u64, 0u64, 0u64, 0u64);
+                core::arch::asm!(".rept 5", "add {0}, 1", "add {1}, 1", "add {2}, 1", "add {3}, 1", ".endr",
+                    inout(reg) d0, inout(reg) d1, inout(reg) d2, inout(reg) d3, options(pure, nomem, nostack));
+                core::hint::black_box((d0, d1, d2, d3));
+            }
     
             let row_off = sc.trace.len();
             if TB {
@@ -953,7 +1117,7 @@ mod probe {
                 } else {
                     Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
                 };
-                let (d0, r0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
+                let (d0, r0) = block8_p::<TB, L>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
                 hpm = zero;
                 if TB {
                     st(tr.add(b0 - first), r0);
@@ -995,7 +1159,7 @@ mod probe {
                 } else {
                     Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
                 };
-                let (d0, r0) = block8x::<TB>(
+                let (d0, r0) = block8x_p::<TB, L>(
                     &c,
                     &mut rx,
                     &mut rec_b,
@@ -1059,8 +1223,16 @@ mod probe {
                 st(e.add(b), zero);
                 b += 32;
             }
-            first = lo_surv;
-            b_size = last + 1;
+            let (mut lo, mut hi) = (lo_surv, last);
+            if V == 3 {
+                // probe: four cycles of latency on the band position (next row's addresses, bounds)
+                for _ in 0..4 {
+                    core::arch::asm!("add {0}, 0", "add {1}, 0", inout(reg) lo, inout(reg) hi,
+                        options(pure, nomem, nostack));
+                }
+            }
+            first = lo;
+            b_size = hi + 1;
             if b_size <= len2 {
                 b_size += 1;
             }

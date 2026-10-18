@@ -35,7 +35,7 @@
 //! * Table. `T[q << 8 | s]` is `get_score(q, s)` (`blosum62_score_ncbistdaa_direct`, defined for
 //!   every pair of bytes) for every two bytes, with `BLAST_SCORE_MIN` (-32768, the gap and
 //!   sentinel code 0 against anything) stored as -128; the table exists only if every other score
-//!   is within -127..=127. Only the rows of the codes present are touched (28 rows of 256 bytes,
+//!   is within -127..=11 (`MAX_WORD_SCORE`, the sentinel argument below). Only the rows of the codes present are touched (28 rows of 256 bytes,
 //!   and of each row the first cache line).
 //! * Sentinel. Take `1 <= x_drop <= 127` (otherwise the reference runs). The score before a step
 //!   is never above the best, so a step of -128 makes `best - score >= 128 > x_drop` as -32768
@@ -44,6 +44,10 @@
 //!   stop and only compares the sums with a best that starts at 0: a -128 is not made positive by
 //!   the two other scores (at most `MAX_WORD_SCORE` = 11 each, which the table build checks), as
 //!   -32768 is not, so every comparison has the same outcome.
+//! * Overflow. Both paths add the same i32 scores in the same order, so they agree up to an
+//!   overflow; a walk would need a best near 2^31 (some 195 M residues of positive diagonal) for a
+//!   -128 and a -32768 step to wrap differently, where the reference (and NCBI's `Int4`) overflows
+//!   too.
 //!
 //! The switch acts on every target but wasm32, whose build keeps the 16-residue v128 walks of
 //! `two_hit.rs` (not measured in the browser; line W of plan v4).
@@ -79,8 +83,8 @@ struct State {
     table: Option<Box<Table>>,
 }
 
-/// The table of the walks, `None` if a score other than `BLAST_SCORE_MIN` is outside -127..=127
-/// or a positive one above `MAX_WORD_SCORE`.
+/// The table of the walks, `None` if a score other than `BLAST_SCORE_MIN` is outside
+/// -127..=`MAX_WORD_SCORE`.
 // NCBI reference: aa_ungapped.c:846-921 `matrix[q[i]][s[i]]`; the scores are those of the function
 // the reference walks call.
 fn build_table() -> Option<Box<Table>> {
@@ -100,8 +104,9 @@ fn build_table() -> Option<Box<Table>> {
     Some(t)
 }
 
+static STATE: OnceLock<State> = OnceLock::new();
+
 fn state() -> &'static State {
-    static STATE: OnceLock<State> = OnceLock::new();
     STATE.get_or_init(|| {
         // `LOSAT_X_TBXUNGAP` is a strict-set switch; the shadow variable is read first, as "set to
         // any value". wasm32 keeps the reference walks (module comment).
@@ -135,7 +140,8 @@ static SHADOW_COMPARED: AtomicU64 = AtomicU64::new(0);
 /// The summary line (printed by `main` at exit), only in shadow mode.
 // No NCBI counterpart: prints a counter; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
-    if mode() == 2 {
+    // `STATE.get`: a run that never extended (every other program) does not build the table here.
+    if STATE.get().is_some_and(|s| s.mode == 2) {
         eprintln!(
             "[X_SHADOW] TBXUNGAP compared={} (two-hit extensions identical)",
             SHADOW_COMPARED.load(Ordering::Relaxed)
@@ -336,7 +342,8 @@ pub(super) fn shadow(
     expect
 }
 
-#[cfg(test)]
+// The fast path is off on wasm32 (the table is not built there).
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 
@@ -388,7 +395,12 @@ mod tests {
             let d = 1 + rng.below(dmax as u64) as i32;
             let qr = rng.below((q.len() - WORD + 1) as u64) as usize;
             let sr = rng.below((s.len() - WORD + 1) as u64) as usize;
-            let sl = sr.saturating_sub(rng.below(60) as usize);
+            // mostly at or before R; sometimes after it, or wrapped (`last_hit + wordsize` as usize)
+            let sl = match rng.below(16) {
+                0 => sr + 1 + rng.below(3) as usize,
+                1 => usize::MAX - rng.below(3) as usize,
+                _ => sr.saturating_sub(rng.below(60) as usize),
+            };
             check_call(q, s, sl, sr, qr, d);
         }
         calls as u64
@@ -470,9 +482,58 @@ mod tests {
         assert!(two_hit(&q, &s, 10, 20, 48, 16).is_none());
         assert!(two_hit(&q, &s, 10, 48, 20, 16).is_none());
         check_call(&q, &s, 10, 47, 47, 16);
-        // the table is built (BLOSUM62 fits it), and the gap code scores as the sentinel
+    }
+
+    // No NCBI counterpart. Every cell of the table is `get_score` of its two bytes, with
+    // BLAST_SCORE_MIN as -128.
+    #[test]
+    fn the_table_holds_get_score_for_every_two_bytes() {
         let tab = build_table().expect("BLOSUM62 fits the byte table");
-        assert_eq!(tab[0], -128);
-        assert_eq!(tab[5 << 8 | 5] as i32, get_score(5, 5));
+        for q in 0..=255u8 {
+            for s in 0..=255u8 {
+                let v = get_score(q, s);
+                let want = if v == BLAST_SCORE_MIN { -128 } else { v };
+                assert_eq!(
+                    tab[(q as usize) << 8 | s as usize] as i32,
+                    want,
+                    "q={q} s={s}"
+                );
+            }
+        }
+    }
+
+    // No NCBI counterpart. A gap or sentinel code (0) at every position of the query and of the
+    // subject in turn, around a word of W (the largest score, 11, which bounds the word-loop
+    // argument): in the word, at the first left step (R - 1), at the first right step (R), and
+    // further out; with the first hit at, before and after R, and X-drops 1, 11, 127.
+    #[test]
+    fn a_sentinel_anywhere_stops_the_walks_as_the_reference_does() {
+        const W: u8 = 20;
+        assert_eq!(get_score(W, W), MAX_WORD_SCORE);
+        let len = 48;
+        for at in 0..len {
+            for in_query in [true, false] {
+                let mut q = vec![W; len];
+                let mut s = vec![W; len];
+                if in_query {
+                    q[at] = 0;
+                } else {
+                    s[at] = 0;
+                }
+                for (qr, sr) in [
+                    (20, 20),
+                    (20, 24),
+                    (0, 0),
+                    (len - WORD, len - WORD),
+                    (3, 40),
+                ] {
+                    for sl in [sr.saturating_sub(10), sr, sr + 2, usize::MAX] {
+                        for d in [1, 11, 127] {
+                            check_call(&q, &s, sl, sr, qr, d);
+                        }
+                    }
+                }
+            }
+        }
     }
 }

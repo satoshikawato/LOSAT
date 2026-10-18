@@ -15,7 +15,9 @@
 mod gapped;
 mod two_hit;
 mod ungapped;
-// EXPERIMENT (LOSAT_X_TBXUNGAP): the table walks of the two-hit extension.
+// EXPERIMENT (LOSAT_X_TBXUNGAP): the table walks of the two-hit extension (native builds; the
+// wasm32 build keeps the reference walks and only the exit line is reached).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 mod x_two_hit_fast;
 
 // Re-export public functions

@@ -1123,18 +1123,58 @@ mod lanes {
         }
     }
 
+    /// The table indices `q << 8 | s` of 16 consecutive positions from `q` and `s`, position `i`
+    /// at index `i`: the bytes of `s` and `q` interleaved (little-endian u16, `s` low).
+    ///
+    /// SAFETY: 16 bytes are readable from each pointer.
+    #[inline(always)]
+    unsafe fn indices16(q: *const u8, s: *const u8, out: &mut [u16; K]) {
+        // SAFETY: the caller's bound; `out` holds 32 bytes.
+        unsafe {
+            let qv = _mm_loadu_si128(q as *const __m128i);
+            let sv = _mm_loadu_si128(s as *const __m128i);
+            _mm_storeu_si128(out.as_mut_ptr() as *mut __m128i, _mm_unpacklo_epi8(sv, qv));
+            _mm_storeu_si128(
+                out.as_mut_ptr().add(8) as *mut __m128i,
+                _mm_unpackhi_epi8(sv, qv),
+            );
+        }
+    }
+
     /// Writes the scores of the next `K` steps of each busy lane (the sentinel after a walk's
-    /// end and in free lanes).
+    /// end and in free lanes). A lane with `K` steps or more left takes its indices from two
+    /// 16-byte loads (`indices16`); a walk's last block reads its residues one by one.
     ///
     /// SAFETY: every busy lane's walk can read its `r` steps from its pointers.
     #[inline(always)]
     unsafe fn fill(buf: &mut Buf, w: &Walks, tab: &Table) {
         buf.0 = [SENTINEL; K * NL];
+        let mut idx = [0u16; K];
         for (l, ln) in w.lanes.iter().enumerate() {
-            let m = ln.r.min(K);
-            match ln.phase {
-                1 => {
-                    for i in 0..m {
+            match (ln.phase, ln.r >= K) {
+                (1, true) => {
+                    // SAFETY: the left walk reads the r >= K positions before its pointers; step
+                    // i reads position K - 1 - i of the 16 before them.
+                    unsafe {
+                        indices16(ln.q.sub(K), ln.s.sub(K), &mut idx);
+                        for i in 0..K {
+                            *buf.0.get_unchecked_mut(i * NL + l) =
+                                *tab.get_unchecked(idx[K - 1 - i] as usize);
+                        }
+                    }
+                }
+                (2, true) => {
+                    // SAFETY: the right walk reads the r >= K positions from its pointers.
+                    unsafe {
+                        indices16(ln.q, ln.s, &mut idx);
+                        for i in 0..K {
+                            *buf.0.get_unchecked_mut(i * NL + l) =
+                                *tab.get_unchecked(idx[i] as usize);
+                        }
+                    }
+                }
+                (1, false) => {
+                    for i in 0..ln.r {
                         // SAFETY: the walk's bound; q << 8 | s < 2^16.
                         unsafe {
                             let qc = *ln.q.sub(1 + i);
@@ -1144,8 +1184,8 @@ mod lanes {
                         }
                     }
                 }
-                2 => {
-                    for i in 0..m {
+                (2, false) => {
+                    for i in 0..ln.r {
                         // SAFETY: as above.
                         unsafe {
                             let qc = *ln.q.add(i);

@@ -1504,10 +1504,8 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_MBLUTONCE=1` (BLASTN megablast and blastn wherever `LOSAT_X_PAIRPAR` fills the contiguous megablast lookup
   table on a pool of two threads or more: `-subject` and `-db`, not with `-limit_lookup`, `BLEMIR_DEBUG` or
   `LOSAT_X_PAIRPARSHADOW`; not in the strict set: off unless set to any value, and `LOSAT_X_DEFAULT=0` turns
-  `LOSAT_X_PAIRPAR` off and with it this fill; win / loss conditions PENDING: the workstation was unreachable when the
-  change was made, so its paired timings and max RSS, which decide the default, are not measured yet; the private
-  copies of `LOSAT_X_MBLUTPAD` that it always uses raised max RSS there by up to 7 MiB at 16 threads and 8.5 MiB at
-  64, never above NCBI's) each query position of that fill is read once (`blastn/x_mb_lookup_once.rs`, the first
+  `LOSAT_X_PAIRPAR` off and with it this fill; win / loss conditions at the end of this entry, "Measured") each
+  query position of that fill is read once (`blastn/x_mb_lookup_once.rs`, the first
   dispatch of `x_mb_lookup_par::fill`): the positions the loop reads form one stream cut into chunks of 2^19
   positions, each chunk cut into one span per thread; per chunk each thread reads the words of its span with the
   loop's statements (entering a range up to `lut_word_length - 1` positions early) into a region of its own, copies
@@ -1543,6 +1541,26 @@ Scheduling (each value computed by one thread with the original function; order 
   the chunks of the search's fills (not the shadow's), the calling worker's wall time, the longest job, the jobs'
   summed time and the latest start (`read`: the read and the links of the chunk before; `update`: the owners' updates;
   `last`: the last links and the copies' flush) and the largest arena (MiB).
+  Measured 2026-10-18 on the workstation (da08ced7, the same release code; 16 physical cores of node 1 with their
+  siblings idle for 2-16 threads, 32 with their siblings for 64; a warm-up, then 3-5 rounds of wall runs and 1-2 of
+  `LOSAT_TIMING` runs per cell, arms rotated: base without the switch, the switch, `LOSAT_X_MBLUTPAD` alone, and the
+  switch with chunks of 2^18; every output had its expected sha256; perf-mb `logs/mbonce_ws_table_mbonce2_a.md` and
+  `_b.md`), switch / base: megablast of 31,168 cDNAs (37 tables) fill 0.64 / 0.54 / 0.52 / 0.39 per round at 2 / 4 /
+  16 / 64 threads (2.99 -> 1.92, 2.23 -> 1.21, 1.50 -> 0.79 and 1.71 -> 0.66 s), search 0.838 / 0.816 / 0.849 / 0.826;
+  with the slots of `LOSAT_X_QBATCHPAR` (the dsw candidate set) 0.843 at 16 threads, and 0.837 / 0.888 with 4 / 8
+  slots at 64; megablast of 1,775 cDNAs fill 0.49, search 0.882 (16 threads); blastn of 31,168 cDNAs fill 0.43, search
+  0.967; blastn of 1,775 cDNAs fill 0.59, search 1.064 (0.77-1.30 per round, the spread of its 1.9 s searches;
+  `LOSAT_X_MBLUTPAD` alone 0.988, 0.79-1.19); the three E. coli genomes against LC738868 fill 0.55, search 1.021
+  (0.84-1.04). Max RSS medians base -> switch (MiB; NCBI BLAST+ 2.17.0 at one thread in brackets): 31,168 cDNAs 250.1
+  -> 259.0, 249.2 -> 255.6, 244.5 -> 254.6 and 222.4 -> 253.2 at 2 / 4 / 16 / 64 threads [358.5], with 4 / 8 slots at
+  64 threads 580 -> 622 and 1,026 -> 1,050 (wide ranges); 1,775 cDNAs by megablast 126.5 -> 126.5 [198.7] and by
+  blastn 141.1 -> 145.3 [143.5]; blastn of 31,168 cDNAs 571.5 -> 576.0; E. coli 143.4 -> 153.3 [185.1]. The fill's
+  system time rose (31,168 cDNAs at 64 threads 22.8 -> 29.0 s summed). Chunks of 2^18 (an arena of 4 MiB): fill 0.60
+  against 0.52 at 16 threads and 0.36 against 0.39 at 64, max RSS 1-8 MiB below the switch's. So the switch wins time
+  where megablast fills large tables (search 0.82-0.89 at 2-64 threads), ties on blastn and on the E. coli input, and
+  costs max RSS: 0 to +10 MiB at 2-16 threads and +31 MiB at 64, above NCBI's for blastn of 1,775 cDNAs at 16 threads
+  (145.3 against 143.5). It stays off by default (not in the strict set); no rule that separates the RSS cost was
+  tried (the perf-mb line closed).
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
   default ON: `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0` turn it off; evidence below, "Default ON") the

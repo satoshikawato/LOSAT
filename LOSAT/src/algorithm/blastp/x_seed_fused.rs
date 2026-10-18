@@ -719,19 +719,54 @@ where
             assert!(x_avx2_available(), "the deferred AVX2 batch needs AVX2");
             // SAFETY: the CPU has AVX2 (asserted above).
             unsafe {
-                x_scan_cells_avx2_defer::<BRANCH_FREE, F>(
-                    lookup,
-                    subject,
-                    subject_length,
-                    table,
-                    test,
-                    candidate,
-                    &mut counts,
-                )
+                macro_rules! r2_call {
+                    ($p:literal) => {
+                        x_scan_cells_avx2_defer::<BRANCH_FREE, F, $p>(
+                            lookup,
+                            subject,
+                            subject_length,
+                            table,
+                            test,
+                            candidate,
+                            &mut counts,
+                        )
+                    };
+                }
+                match r2_probe() {
+                    1 => r2_call!(1),
+                    2 => r2_call!(2),
+                    3 => r2_call!(3),
+                    4 => r2_call!(4),
+                    5 => r2_call!(5),
+                    6 => r2_call!(6),
+                    7 => r2_call!(7),
+                    8 => r2_call!(8),
+                    9 => r2_call!(9),
+                    _ => r2_call!(0),
+                }
             }
         }
     }
     counts
+}
+
+/// EXPERIMENT (v4-R R2, exp/r2-cell-probes only): the probe instance of the deferred cell test,
+/// from `R2_PROBE` (read once; 0 = the default code). 1 misp1 (one unpredictable branch per cell),
+/// 2 remmask (the last batch of fewer than eight hits as a masked AVX2 batch into the buffer),
+/// 3 alu20 (20 independent ALU ops per batch), 4 lat4 (+4 cycles on each batch's chain),
+/// 5 nop30 (30 NOPs per cell), 6 celllat4 (+4 cycles on each cell's hit-list pointer),
+/// 7 misp1 + remmask, 8 pfnext (prefetch the next batch's eight entries), 9 nop5 (the batch
+/// without port-5 shuffles: lanes by aligned store and reload, entries by broadcast loads and
+/// blends).
+fn r2_probe() -> u32 {
+    use std::sync::OnceLock;
+    static P: OnceLock<u32> = OnceLock::new();
+    *P.get_or_init(|| {
+        std::env::var("R2_PROBE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
 }
 
 /// [`x_scan_cells`] with [`x_cell_avx2`], compiled for AVX2 as a whole so that the cell test is
@@ -770,7 +805,7 @@ thread_local! {
 /// The CPU must have AVX2.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, F>(
+unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, F, const P: u32>(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     subject_length: usize,
@@ -784,7 +819,8 @@ unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, F>(
     let mut buffer = X_DEFER_BUFFER.take();
     x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
         // SAFETY: the CPU has AVX2 (this function's contract).
-        let candidates = unsafe { x_cell_avx2_defer(hits, s, table, test, candidate, &mut buffer) };
+        let candidates =
+            unsafe { x_cell_avx2_defer::<F, P>(hits, s, table, test, candidate, &mut buffer) };
         counts.add_cell(hits.len(), candidates);
     });
     X_DEFER_BUFFER.set(buffer);
@@ -1229,7 +1265,7 @@ const X_PACK_LANES: [[u8; X_DIAG_LANES]; 256] = {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn x_cell_avx2_defer<F>(
+unsafe fn x_cell_avx2_defer<F, const P: u32>(
     hits: &[i32],
     s: i32,
     table: &mut XDiagTable<'_>,
@@ -1241,19 +1277,123 @@ where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     use std::arch::x86_64::*;
+    // R2 probes (exp branch): per-cell additions.
+    if P == 1 || P == 7 {
+        // One branch per cell on a hash bit of the subject offset: taken about half the time
+        // and not predictable from history. Each side is an asm block, so it stays a branch.
+        if (s as u32).wrapping_mul(0x9e37_79b1) >> 31 != 0 {
+            std::arch::asm!("nop", options(nomem, nostack, preserves_flags));
+        } else {
+            std::arch::asm!("nop", "nop", options(nomem, nostack, preserves_flags));
+        }
+    }
+    if P == 5 {
+        std::arch::asm!(
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            "nop",
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+    let hits: &[i32] = if P == 6 {
+        // +4 cycles on the chain from the cell's list pointer to its batches' loads.
+        let mut ptr = hits.as_ptr() as usize;
+        std::arch::asm!(
+            "add {p}, 0", "add {p}, 0", "add {p}, 0", "add {p}, 0",
+            p = inout(reg) ptr,
+            options(nomem, nostack)
+        );
+        std::slice::from_raw_parts(ptr as *const i32, hits.len())
+    } else {
+        hits
+    };
     let mut batches = hits.chunks_exact(X_DIAG_LANES);
     // Room for a full register past the last candidate (each batch stores eight lanes).
     buffer.clear();
     buffer.reserve(hits.len() + X_DIAG_LANES);
     let out = buffer.as_mut_ptr();
     let mut packed = 0usize;
+    let mut next = 0usize;
     for batch in &mut batches {
-        let (query, lanes) = x_batch_avx2(batch, s, table, test);
+        if P == 8 {
+            // Prefetch the entries of the next full batch (if any) before testing this one.
+            next += X_DIAG_LANES;
+            if next + X_DIAG_LANES <= hits.len() {
+                let q = _mm256_loadu_si256(hits.as_ptr().add(next).cast());
+                let c = _mm256_and_si256(
+                    _mm256_sub_epi32(q, _mm256_set1_epi32(s)),
+                    _mm256_set1_epi32(table.mask),
+                );
+                let mut lc = R2Lanes([0; X_DIAG_LANES]);
+                _mm256_store_si256(lc.0.as_mut_ptr().cast(), c);
+                for i in 0..X_DIAG_LANES {
+                    let coord = std::ptr::read_volatile(lc.0.as_ptr().add(i)) as usize;
+                    _mm_prefetch::<_MM_HINT_T0>(table.entries.as_ptr().add(coord).cast::<i8>());
+                }
+            }
+        }
+        let (query, lanes) = if P == 3 || P == 4 || P == 9 {
+            x_batch_avx2_probe::<P>(_mm256_loadu_si256(batch.as_ptr().cast()), s, table, test)
+        } else {
+            x_batch_avx2(batch, s, table, test)
+        };
         let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
             X_PACK_LANES[lanes as usize].as_ptr().cast(),
         ));
         // packed <= the hits of the batches before this one, so the eight stores stay inside
         // the reserved capacity.
+        _mm256_storeu_si256(
+            out.add(packed).cast(),
+            _mm256_permutevar8x32_epi32(query, order),
+        );
+        packed += lanes.count_ones() as usize;
+    }
+    let rest = batches.remainder();
+    let masked_rest = (P == 2 || P == 7) && !rest.is_empty();
+    if masked_rest {
+        // The last batch as eight lanes: the missing lanes repeat the first hit, whose entry they
+        // read before any store and to which they store the same new value; their candidate bits
+        // are cleared. The candidates follow the full batches' in the buffer (the call order of
+        // the default code), and their entries are not those of any other hit of the cell.
+        let n = rest.len();
+        let valid = (1u32 << n) - 1;
+        let lane_ix = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+        let in_rest = _mm256_cmpgt_epi32(_mm256_set1_epi32(n as i32), lane_ix);
+        let loaded = _mm256_maskload_epi32(rest.as_ptr(), in_rest);
+        let query = _mm256_blendv_epi8(_mm256_set1_epi32(rest[0]), loaded, in_rest);
+        let (query, lanes) = x_batch_avx2_probe::<0>(query, s, table, test);
+        let lanes = lanes & valid;
+        let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
+            X_PACK_LANES[lanes as usize].as_ptr().cast(),
+        ));
+        // packed + 8 <= hits.len() + 8 (reserved above).
         _mm256_storeu_si256(
             out.add(packed).cast(),
             _mm256_permutevar8x32_epi32(query, order),
@@ -1271,12 +1411,119 @@ where
         candidate(query_offset, s, last_hit, diff, entry);
     }
     let mut candidates = packed as u32;
-    let rest = batches.remainder();
-    if !rest.is_empty() {
+    if !masked_rest && !rest.is_empty() {
         candidates += x_test_batch_scalar(rest, s, table, test, candidate);
     }
     candidates
 }
+
+/// EXPERIMENT (v4-R R2 probes): [`x_batch_avx2`] on a register of query offsets, with P = 3 (20
+/// independent ALU ops) or P = 4 (+4 cycles on the chain from the offsets to the entry loads).
+///
+/// # Safety
+/// The CPU must have AVX2; the lanes' entries must be distinct or repeat one lane's hit.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_batch_avx2_probe<const P: u32>(
+    query: std::arch::x86_64::__m256i,
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+) -> (std::arch::x86_64::__m256i, u32) {
+    use std::arch::x86_64::*;
+    let subject_plus_offset = s.wrapping_add(test.diag_offset);
+    let written = (subject_plus_offset as u32) & X_LAST_HIT_MASK;
+    let mut coords = _mm256_and_si256(
+        _mm256_sub_epi32(query, _mm256_set1_epi32(s)),
+        _mm256_set1_epi32(table.mask),
+    );
+    if P == 4 {
+        std::arch::asm!(
+            "vpor {c}, {c}, {c}", "vpor {c}, {c}, {c}", "vpor {c}, {c}, {c}", "vpor {c}, {c}, {c}",
+            c = inout(ymm_reg) coords,
+            options(pure, nomem, nostack, preserves_flags)
+        );
+    }
+    if P == 3 {
+        std::arch::asm!(
+            "add {a}, 1", "add {b}, 1", "add {c}, 1", "add {d}, 1", "add {a}, 1",
+            "add {b}, 1", "add {c}, 1", "add {d}, 1", "add {a}, 1", "add {b}, 1",
+            "add {c}, 1", "add {d}, 1", "add {a}, 1", "add {b}, 1", "add {c}, 1",
+            "add {d}, 1", "add {a}, 1", "add {b}, 1", "add {c}, 1", "add {d}, 1",
+            a = inout(reg) 0u64 => _, b = inout(reg) 0u64 => _,
+            c = inout(reg) 0u64 => _, d = inout(reg) 0u64 => _,
+            options(nomem, nostack)
+        );
+    }
+    let mut lane_coords = [0u32; X_DIAG_LANES];
+    _mm256_storeu_si256(lane_coords.as_mut_ptr().cast(), coords);
+    let mut lc = R2Lanes([0; X_DIAG_LANES]);
+    let old = if P == 9 {
+        // Lanes by an aligned store and scalar reloads (forwarded), entries by broadcast loads
+        // (a load uop each) merged by blends (ports 0, 1, 5... any vector ALU): no extract or
+        // insert shuffles.
+        _mm256_store_si256(lc.0.as_mut_ptr().cast(), coords);
+        let e = table.entries.as_ptr().cast::<f32>();
+        let at = |i: usize| e.add(std::ptr::read_volatile(lc.0.as_ptr().add(i)) as usize);
+        let b = |i: usize| _mm256_castps_si256(_mm256_broadcast_ss(&*at(i)));
+        let mut v = b(0);
+        v = _mm256_blend_epi32::<0b0000_0010>(v, b(1));
+        v = _mm256_blend_epi32::<0b0000_0100>(v, b(2));
+        v = _mm256_blend_epi32::<0b0000_1000>(v, b(3));
+        v = _mm256_blend_epi32::<0b0001_0000>(v, b(4));
+        v = _mm256_blend_epi32::<0b0010_0000>(v, b(5));
+        v = _mm256_blend_epi32::<0b0100_0000>(v, b(6));
+        v = _mm256_blend_epi32::<0b1000_0000>(v, b(7));
+        v
+    } else {
+        let mut lane_old = [0u32; X_DIAG_LANES];
+        for (old, &coord) in lane_old.iter_mut().zip(&lane_coords) {
+            *old = table.entries.get_unchecked(coord as usize).raw_bits();
+        }
+        _mm256_loadu_si256(lane_old.as_ptr().cast())
+    };
+    let flag = _mm256_srai_epi32::<31>(old);
+    let last = _mm256_srai_epi32::<1>(_mm256_slli_epi32::<1>(old));
+    let diff = _mm256_sub_epi32(
+        _mm256_set1_epi32(s),
+        _mm256_sub_epi32(last, _mm256_set1_epi32(test.diag_offset)),
+    );
+    let sum_below_last = _mm256_cmpgt_epi32(last, _mm256_set1_epi32(subject_plus_offset));
+    let in_window = _mm256_cmpgt_epi32(_mm256_set1_epi32(test.window), diff);
+    let keep = _mm256_blendv_epi8(in_window, sum_below_last, flag);
+    let below_word = _mm256_cmpgt_epi32(_mm256_set1_epi32(test.word_size), diff);
+    let candidates = _mm256_andnot_si256(_mm256_or_si256(flag, below_word), in_window);
+    let new = _mm256_blendv_epi8(_mm256_set1_epi32(written as i32), old, keep);
+    if P == 9 {
+        let mut ln = R2Lanes([0; X_DIAG_LANES]);
+        _mm256_store_si256(ln.0.as_mut_ptr().cast(), new);
+        for i in 0..X_DIAG_LANES {
+            let coord = std::ptr::read_volatile(lc.0.as_ptr().add(i));
+            let raw = std::ptr::read_volatile(ln.0.as_ptr().add(i));
+            table
+                .entries
+                .get_unchecked_mut(coord as usize)
+                .set_raw_bits(raw);
+        }
+    } else {
+        let mut lane_new = [0u32; X_DIAG_LANES];
+        _mm256_storeu_si256(lane_new.as_mut_ptr().cast(), new);
+        for (&coord, &raw) in lane_coords.iter().zip(&lane_new) {
+            table
+                .entries
+                .get_unchecked_mut(coord as usize)
+                .set_raw_bits(raw);
+        }
+    }
+    let lanes = _mm256_movemask_ps(_mm256_castsi256_ps(candidates)) as u32;
+    (query, lanes)
+}
+
+/// EXPERIMENT (v4-R R2 probes): eight lanes on a 32-byte boundary (an aligned vector store whose
+/// four-byte reloads are forwarded).
+#[repr(C, align(32))]
+struct R2Lanes([u32; X_DIAG_LANES]);
 
 /// EXPERIMENT (LOSAT_X_BPDIAG): the cell's hits in batches of eight by [`x_test_batch_avx2`], the
 /// last batch of fewer than eight by [`x_test_batch_scalar`]; returns the number of candidates.
@@ -1451,6 +1698,23 @@ mod tests {
         entry
     }
 
+    thread_local! {
+        /// v4-R R2: the probe instance of the deferred cell test the tests run (0 = default).
+        static R2_TEST_PROBE: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
+
+    /// v4-R R2: the probes that change the code (2 remmask, 7 misp1 + remmask, 8 pfnext, 9 nop5)
+    /// make the same calls and leave the same table as the per-hit test.
+    #[test]
+    fn r2_probes_equal_the_per_hit_test() {
+        for p in [2, 7, 8, 9] {
+            R2_TEST_PROBE.set(p);
+            batched_cells_equal_the_per_hit_test_on_random_tables();
+            batched_cells_equal_the_per_hit_test_at_every_edge_of_the_test();
+        }
+        R2_TEST_PROBE.set(0);
+    }
+
     /// The modes this machine runs: the per-hit test (the reference), the scalar batch and, with
     /// AVX2, the AVX2 batch.
     fn cell_modes() -> Vec<XDiagMode> {
@@ -1512,8 +1776,50 @@ mod tests {
                 XDiagMode::Avx2Defer => {
                     assert!(x_avx2_available());
                     // SAFETY: the CPU has AVX2 (asserted above).
+                    // SAFETY: as above. R2 probes 2 and 7 change the code, not the calls.
                     counted += unsafe {
-                        x_cell_avx2_defer(hits, *s, &mut table, test, &mut candidate, &mut buffer)
+                        match R2_TEST_PROBE.get() {
+                            2 => x_cell_avx2_defer::<_, 2>(
+                                hits,
+                                *s,
+                                &mut table,
+                                test,
+                                &mut candidate,
+                                &mut buffer,
+                            ),
+                            7 => x_cell_avx2_defer::<_, 7>(
+                                hits,
+                                *s,
+                                &mut table,
+                                test,
+                                &mut candidate,
+                                &mut buffer,
+                            ),
+                            8 => x_cell_avx2_defer::<_, 8>(
+                                hits,
+                                *s,
+                                &mut table,
+                                test,
+                                &mut candidate,
+                                &mut buffer,
+                            ),
+                            9 => x_cell_avx2_defer::<_, 9>(
+                                hits,
+                                *s,
+                                &mut table,
+                                test,
+                                &mut candidate,
+                                &mut buffer,
+                            ),
+                            _ => x_cell_avx2_defer::<_, 0>(
+                                hits,
+                                *s,
+                                &mut table,
+                                test,
+                                &mut candidate,
+                                &mut buffer,
+                            ),
+                        }
                     };
                 }
             }

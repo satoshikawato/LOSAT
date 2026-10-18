@@ -157,7 +157,9 @@ thread_local! {
 /// held at once. The records keep their deflines and no letters. If a record holds a byte without
 /// an ncbi4na code (only an API caller can make one), every record keeps its letters and no store
 /// is returned: the search then reads the letters as without the switch. With `threads` above one
-/// a second thread packs each record while the reader reads the next one (`x_packed_while_read`).
+/// a second thread packs each record while the reader reads the next one (`x_packed_while_read`),
+/// except in WebAssembly, where the reader packs each record itself as at one thread: there a thread
+/// started outside the search pool is one more host worker than `-num_threads` asks for.
 pub(super) fn x_read_subject_stores<R: std::io::Read>(
     source: &mut crate::blastinput::fasta_reader::FastaInputSource<R>,
     warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
@@ -166,7 +168,7 @@ pub(super) fn x_read_subject_stores<R: std::io::Read>(
     Vec<crate::blastinput::fasta_reader::FastaRecord>,
     Option<Vec<PackedNucleotide>>,
 )> {
-    #[cfg(feature = "parallel")]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     let read = if threads > 1 {
         x_packed_while_read(source, warn)?
     } else {
@@ -174,7 +176,7 @@ pub(super) fn x_read_subject_stores<R: std::io::Read>(
             Ok(x_packed(record))
         })?
     };
-    #[cfg(not(feature = "parallel"))]
+    #[cfg(any(not(feature = "parallel"), target_arch = "wasm32"))]
     let read = {
         let _ = threads;
         crate::blastinput::fasta_reader::read_subjects_map(source, None, warn, |record| {
@@ -233,13 +235,14 @@ fn x_packed(
 // reader packs the records of the whole set before the search, on the thread that reads them, so
 // the packing adds to the time the search waits for its subjects (about 0.5 s for the 1.37 Gb
 // zebrafish genome). With two or more search threads a second thread packs the records while the
-// reader reads the next ones. The reader hands them over in batches (up to `X_PACK_BATCH`
+// reader reads the next ones (natively; a WebAssembly build packs on the reader, see
+// `x_read_subject_stores`). The reader hands them over in batches (up to `X_PACK_BATCH`
 // records or `X_PACK_BATCH_LETTERS` letters, so that a set of many short records costs few
 // hand-overs) and only when that thread takes a batch (a channel without a buffer), so at most
 // two batches' letters are held; the records come back in reading order. Packing is a function
 // of a record alone, so the records and stores are those of the reader packing them itself.
 /// EXPERIMENT (LOSAT_X_TBNSTORE): the records read and packed on two threads.
-#[cfg(feature = "parallel")]
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 fn x_packed_while_read<R: std::io::Read>(
     source: &mut crate::blastinput::fasta_reader::FastaInputSource<R>,
     warn: &mut dyn FnMut(&[u8]) -> std::io::Result<()>,
@@ -292,9 +295,9 @@ fn x_packed_while_read<R: std::io::Read>(
 
 /// EXPERIMENT (LOSAT_X_TBNSTORE): the records and the letters of one hand-over of
 /// `x_packed_while_read`.
-#[cfg(feature = "parallel")]
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 const X_PACK_BATCH: usize = 1024;
-#[cfg(feature = "parallel")]
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 const X_PACK_BATCH_LETTERS: usize = 4 << 20;
 
 // No NCBI counterpart: counters for LOSAT_X_STATS that tell whether the packed subjects were

@@ -211,6 +211,10 @@ pub(crate) struct TblastxBatch {
     /// (`CheckInternalData`, local_blast.cpp:177-208).
     pub searched: bool,
     pub queries: Vec<TblastxQueryStats>,
+    /// EXPERIMENT (LOSAT_X_TBXPIPE): the batch's `LOSAT_TIMING` block, which a search of the
+    /// batch pipe keeps here for the batch loop to print when it takes the batch; empty
+    /// otherwise (the block is printed at the end of the search). No NCBI counterpart.
+    pub x_timing: Vec<String>,
 }
 
 pub(crate) struct WorkerState {

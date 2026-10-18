@@ -85,6 +85,17 @@ pub use x_query_frames::print_summary as x_query_frames_print_summary;
     allow(dead_code)
 )]
 mod x_subject_next;
+// EXPERIMENT (LOSAT_X_TBXPIPE): the next query batch starts when the batch before has ended its
+// seed stage, while that batch still links its subjects; the batch loop takes the results in its
+// order (see tblastx/x_batch_pipe.rs). A child module of this file, as x_subject_next is.
+// No NCBI counterpart: scheduling only; NCBI searches its query batches one after the other
+// (tblastx_app.cpp:176-195), and each batch's result is the same whenever it is searched.
+#[path = "../x_batch_pipe.rs"]
+#[cfg_attr(
+    not(all(feature = "parallel", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+mod x_batch_pipe;
 use x_search_timing::XStage;
 // Diagnostic (LOSAT_TIMING): the stage times of the two linking calls, two more `[TIMING]`
 // lines after those (see tblastx/x_link_timing.rs).
@@ -1934,7 +1945,7 @@ fn run_in_pool(
     query_runs: &QueryRuns<'_>,
     reading: QueryReading,
     subjects: &RunSubjects<'_>,
-    mut stores_error: Option<anyhow::Error>,
+    stores_error: Option<anyhow::Error>,
     outputs: &mut ReportOutputs<'_>,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     batch_size: u32,
@@ -1975,6 +1986,181 @@ fn run_in_pool(
     if query_runs.input_records.is_empty() && matches!(reading, QueryReading::End) {
         return reports.write(outputs, SearchedBatches::default(), &[], true);
     }
+    // EXPERIMENT (LOSAT_X_TBXPIPE), dispatch: the batches the loop below will search, planned
+    // before it (`x_pipe_plan`), when the pipe may run (`x_pipe_wanted`); `None` keeps the loop's
+    // own searches.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    let x_plan = x_pipe_wanted(parallel_pool)
+        .then(|| x_pipe_plan(input, &reading, batch_size, query_records));
+    // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:193-195
+    // ```c
+    //                 results = lcl_blast.Run();
+    // ```
+    // The search of one batch, the queries `range`; with LOSAT_X_TBXPIPE its seed-stage end
+    // (`seed_end`) may start the next batch (tblastx/x_batch_pipe.rs).
+    let search_subjects = subjects.subjects;
+    let numbers = &subjects.numbers;
+    let search: &x_batch_pipe::XSearch<'_, TblastxBatch> = &|range, seed_end| {
+        search_query_batch(
+            &args,
+            &query_records[range],
+            search_subjects,
+            numbers,
+            parallel_pool,
+            seed_end,
+        )
+    };
+    // The loop's result of the batch of queries `start..end`: the search above, or with
+    // LOSAT_X_TBXPIPE the pipe's (`XPipe::take`).
+    let batch_loop = |take: &mut dyn FnMut(std::ops::Range<usize>) -> Result<TblastxBatch>| {
+        run_batch_loop(
+            &args,
+            query_runs,
+            reading,
+            subjects,
+            stores_error,
+            outputs,
+            batch_size,
+            &reports,
+            take,
+        )
+    };
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    if let Some(plan) = x_plan {
+        let compare: &x_batch_pipe::XCompare<'_, TblastxBatch> = &x_pipe_compare;
+        if let Some(pipe) = x_batch_pipe::XPipe::new(plan, search_subjects.count(), search, compare)
+        {
+            let result = rayon::in_place_scope(|scope| {
+                let _closer = pipe.closer();
+                batch_loop(&mut |range| pipe.take(scope, range))
+            });
+            for line in pipe.lines() {
+                eprintln!("{line}");
+            }
+            return result;
+        }
+    }
+    batch_loop(&mut |range| search(range, None))
+}
+
+// EXPERIMENT (LOSAT_X_TBXPIPE): whether the pipe may run in this search (tblastx/x_batch_pipe.rs,
+// "Off"). No NCBI counterpart.
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn x_pipe_wanted(parallel_pool: &crate::utils::threading::SearchPool<'_>) -> bool {
+    x_batch_pipe::on()
+        && x_seed_release::on()
+        && parallel_pool.enabled()
+        && parallel_pool.threads() > 1
+        && rayon::current_thread_index().is_some()
+        && !std::env::vars_os().any(|(name, _)| {
+            name.to_str()
+                .is_some_and(|name| name.starts_with("LOSAT_DEBUG"))
+        })
+        && trace_hsp_target().is_none()
+        && !diagnostics_enabled()
+        && !crate::utils::threading::diagnostics_enabled()
+        && !stage_dump::enabled()
+}
+
+// EXPERIMENT (LOSAT_X_TBXPIPE): the batches `run_batch_loop` will search unless a search fails, in
+// its order: its batch boundaries and the checks of a batch that need no search (the reader's
+// error where the reading ends, a batch without a query, a batch whose queries all lack a codon
+// with one without letters). The check of the query splitter's environment concerns the first
+// batch only, which the loop starts itself after it. No NCBI counterpart (scheduling only; the
+// statements are the loop's, see there).
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn x_pipe_plan(
+    input: &QueryInput,
+    reading: &QueryReading,
+    batch_size: u32,
+    query_records: &[FastaRecord],
+) -> Vec<std::ops::Range<usize>> {
+    let mut plan = Vec::new();
+    let reads_past_records = reading.reads_past_records();
+    let reading_fails = matches!(reading, QueryReading::Error { .. });
+    let mut reading_ended = false;
+    let mut input_start = 0;
+    while input_start < input.input_lengths.len() || (reads_past_records && !reading_ended) {
+        let (input_end, reached_size) = next_ranged_batch(
+            &input.input_lengths,
+            &input.skipped,
+            input_start,
+            batch_size,
+        );
+        let std::ops::Range { start, end } = input.searched_in(input_start..input_end);
+        if input_end == input.input_lengths.len() && !reached_size && reads_past_records {
+            reading_ended = true;
+            if reading_fails {
+                break;
+            }
+        }
+        if start == end {
+            break;
+        }
+        let batch_queries = &query_records[start..end];
+        if batch_queries.iter().any(|record| record.seq().is_empty())
+            && batch_queries
+                .iter()
+                .all(|record| record.seq().len() < CODON_LENGTH)
+        {
+            break;
+        }
+        plan.push(start..end);
+        input_start = input_end;
+    }
+    plan
+}
+
+// EXPERIMENT (LOSAT_X_TBXPIPESHADOW): two results of one batch compared: `searched`, the query
+// statistics, and the hits with every field (`Debug`), each subject's in its list order (the
+// order of the subjects' lists depends on which subject ended first, in the loop's searches as
+// well; `report::final_hit_order` orders them). No NCBI counterpart.
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn x_pipe_compare(taken: &TblastxBatch, reference: &TblastxBatch) -> Option<String> {
+    if taken.searched != reference.searched {
+        return Some(format!(
+            "searched {} / {}",
+            taken.searched, reference.searched
+        ));
+    }
+    let (queries, reference_queries) = (
+        format!("{:?}", taken.queries),
+        format!("{:?}", reference.queries),
+    );
+    if queries != reference_queries {
+        return Some(format!("query statistics {queries} / {reference_queries}"));
+    }
+    let by_subject = |hits: &[TblastxHsp]| -> Vec<String> {
+        let mut hits: Vec<&TblastxHsp> = hits.iter().collect();
+        hits.sort_by_key(|hsp| (hsp.hit.q_idx, hsp.hit.s_idx));
+        hits.iter().map(|hsp| format!("{hsp:?}")).collect()
+    };
+    let (hits, reference_hits) = (by_subject(&taken.hits), by_subject(&reference.hits));
+    if hits.len() != reference_hits.len() {
+        return Some(format!("{} hits / {}", hits.len(), reference_hits.len()));
+    }
+    hits.iter()
+        .zip(&reference_hits)
+        .position(|(hit, reference_hit)| hit != reference_hit)
+        .map(|index| format!("hit {index}: {} / {}", hits[index], reference_hits[index]))
+}
+
+/// The batch loop of `run_in_pool`: reads the batches, checks them, takes each one's search
+/// result from `take`, and writes the reports.
+#[allow(clippy::too_many_arguments)]
+fn run_batch_loop(
+    args: &TblastxArgs,
+    query_runs: &QueryRuns<'_>,
+    reading: QueryReading,
+    subjects: &RunSubjects<'_>,
+    mut stores_error: Option<anyhow::Error>,
+    outputs: &mut ReportOutputs<'_>,
+    batch_size: u32,
+    reports: &BatchReports<'_>,
+    take: &mut dyn FnMut(std::ops::Range<usize>) -> Result<TblastxBatch>,
+) -> Result<()> {
+    let query_records = query_runs.records;
+    let input = query_runs.input;
     let mut done = SearchedBatches::default();
     // The warnings written before each query's report (`QueryWarnings`).
     let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); query_records.len()];
@@ -2137,14 +2323,15 @@ fn run_in_pool(
             return Err(crate::cli::NativeError { exit: 3, message }.into());
         }
         warnings[start].extend_from_slice(&batch_warnings);
-        let batch = match search_query_batch(
-            &args,
-            batch_queries,
-            subjects.subjects,
-            &subjects.numbers,
-            parallel_pool,
-        ) {
-            Ok(batch) => batch,
+        let batch = match take(start..end) {
+            Ok(batch) => {
+                // LOSAT_TIMING: the batch's block, kept in its result by a search of the pipe
+                // (LOSAT_X_TBXPIPE), in the batch order.
+                for line in &batch.x_timing {
+                    eprintln!("{line}");
+                }
+                batch
+            }
             Err(error) if error.is::<SubjectsUnreadable>() => {
                 // The first batch with a valid context of a `-db` search whose sequences could
                 // not be read (`search`): NCBI's read error is an engine error after the
@@ -2407,6 +2594,9 @@ fn search_query_batch(
     subjects: Subjects<'_>,
     numbers: &SubjectSetNumbers,
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
+    // EXPERIMENT (LOSAT_X_TBXPIPE): the batch pipe's view of this search's seed stage, `None`
+    // without the pipe (tblastx/x_batch_pipe.rs).
+    x_seed_end: Option<&x_batch_pipe::XSeedEnd<'_>>,
 ) -> Result<TblastxBatch> {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:575-582
     // ```c
@@ -2726,6 +2916,7 @@ fn search_query_batch(
             hits: Vec::new(),
             searched: true,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
+            x_timing: Vec::new(),
         });
     }
     t_read_subjects = t_phase_read_subjects.elapsed();
@@ -3033,6 +3224,7 @@ fn search_query_batch(
             hits: Vec::new(),
             searched: false,
             queries: vec![TblastxQueryStats::default(); queries_raw.len()],
+            x_timing: Vec::new(),
         });
     }
     // `-db` whose sequences could not be read: this first batch with a valid context fails
@@ -3398,6 +3590,10 @@ fn search_query_batch(
         // No NCBI counterpart: the clock of this subject for LOSAT_TIMING. The first local of
         // the closure, so it is dropped last and its last stage includes the drops of the rest.
         let mut x_lap = x_times.subject();
+        // EXPERIMENT (LOSAT_X_TBXPIPE): this subject's part of the batch's seed-stage end, ended at
+        // dispatch point 5 below with the subject's HSPs, or with none when the closure returns
+        // before it (tblastx/x_batch_pipe.rs). Nothing without the pipe.
+        let mut x_pipe_seed = x_batch_pipe::XSeedGuard::new(x_seed_end);
         // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 2 (per subject): the seed stage of
         // this subject holds the batch's lookup table through `x_seed_stage` and the unit path
         // through `x_units_stage`. `lookup_ref` borrows from the first and `x_pair_par_ref`
@@ -5293,6 +5489,11 @@ fn search_query_batch(
         if x_seed_stage.end() {
             x_seed_release::drop_worker_table(&mut st.diag_array);
         }
+        // EXPERIMENT (LOSAT_X_TBXPIPE): the seed stage of this subject has ended with the HSP list
+        // that the linking below takes; the batch's last one may start the next batch. While a
+        // later batch may run, the two linking calls below do not use the pool (`x_link_on_pool`,
+        // tblastx/x_batch_pipe.rs item 6); the lists are the same with or without it.
+        let x_link_on_pool = use_parallel && x_pipe_seed.end(combined_ungapped_hits.len());
         x_lap.lap(XStage::SeedRelease);
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:561-584
@@ -5358,7 +5559,7 @@ fn search_query_batch(
                 &subject_frame_bases,
                 &length_adj_per_context,
                 &eff_searchsp_per_context,
-                use_parallel,
+                x_link_on_pool,
             )
         };
         x_link_timer.disarm();
@@ -5565,7 +5766,7 @@ fn search_query_batch(
                 &subject_frame_bases,
                 &length_adj_per_context,
                 &eff_searchsp_per_context,
-                use_parallel,
+                x_link_on_pool,
             );
             x_link_timer.disarm();
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:959-982
@@ -6284,6 +6485,9 @@ fn search_query_batch(
         print_diagnostics_summary(&diagnostics);
     }
 
+    // EXPERIMENT (LOSAT_X_TBXPIPE): the block's lines, printed here, or kept in the batch's result
+    // for the batch loop when the pipe runs this search (`x_seed_end`).
+    let mut x_timing: Vec<String> = Vec::new();
     if timing_enabled {
         let t_search = t_search_start.elapsed();
         // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs).
@@ -6300,51 +6504,65 @@ fn search_query_batch(
         let identity_s = identity_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
         let identity_n = identity_calls.load(AtomicOrdering::Relaxed);
 
-        eprintln!(
+        x_timing.push(format!(
             "[TIMING] read_queries: {:.3}s",
             t_read_queries.as_secs_f64()
-        );
-        eprintln!(
+        ));
+        x_timing.push(format!(
             "[TIMING] build_lookup: {:.3}s",
             t_build_lookup.as_secs_f64()
-        );
-        eprintln!(
+        ));
+        x_timing.push(format!(
             "[TIMING] read_subjects: {:.3}s",
             t_read_subjects.as_secs_f64()
-        );
-        eprintln!("[TIMING] scan_subject: {:.3}s (calls={})", scan_s, scan_n);
-        eprintln!(
+        ));
+        x_timing.push(format!(
+            "[TIMING] scan_subject: {:.3}s (calls={})",
+            scan_s, scan_n
+        ));
+        x_timing.push(format!(
             "[TIMING] ungapped_extend: {:.3}s (calls={})",
             ungapped_s, ungapped_n
-        );
-        eprintln!("[TIMING] reevaluate: {:.3}s (calls={})", reeval_s, reeval_n);
-        eprintln!(
+        ));
+        x_timing.push(format!(
+            "[TIMING] reevaluate: {:.3}s (calls={})",
+            reeval_s, reeval_n
+        ));
+        x_timing.push(format!(
             "[TIMING] sum_stats_linking: {:.3}s (calls={})",
             linking_s, linking_n
-        );
-        eprintln!(
+        ));
+        x_timing.push(format!(
             "[TIMING] identity_calc: {:.3}s (calls={})",
             identity_s, identity_n
-        );
-        eprintln!("[TIMING] search_total: {:.3}s", t_search.as_secs_f64());
-        eprintln!("[TIMING] total: {:.3}s", t_total.elapsed().as_secs_f64());
+        ));
+        x_timing.push(format!(
+            "[TIMING] search_total: {:.3}s",
+            t_search.as_secs_f64()
+        ));
+        x_timing.push(format!(
+            "[TIMING] total: {:.3}s",
+            t_total.elapsed().as_secs_f64()
+        ));
         // No NCBI counterpart: the stage lines of x_search_timing.rs, after the lines above.
         if let Some(lines) = x_times.lines(t_search_start, x_t_subjects, x_t_collect, t_search) {
-            for line in lines {
-                eprintln!("{line}");
-            }
+            x_timing.extend(lines);
         }
         // No NCBI counterpart: the linking lines of x_link_timing.rs, after the stage lines.
         if let Some(lines) = x_link_timer.lines() {
-            for line in lines {
-                eprintln!("{line}");
-            }
+            x_timing.extend(lines);
+        }
+    }
+    if x_seed_end.is_none() {
+        for line in x_timing.drain(..) {
+            eprintln!("{line}");
         }
     }
     Ok(TblastxBatch {
         hits,
         searched: true,
         queries: query_stats,
+        x_timing,
     })
 }
 

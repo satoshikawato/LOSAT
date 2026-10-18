@@ -11,7 +11,8 @@
 //!
 //! What the switch changes (read once per process, `mode`; in the strict set):
 //! 1. Each unit sorts its own list, in its task on the pool, after its scan (`run_units`), by the
-//!    comparator of the chunk's init sort (`XRecord::cmp`).
+//!    comparator of the chunk's init sort (`XRecord::cmp`); a compact list with the thread's
+//!    scratch vector as the buffer (`x_stable_sort_with`, no allocation).
 //! 2. A chunk's init list is the k-way merge of its units' sorted lists (`x_kway`) in a Vec of their
 //!    total length: the smallest head by the comparator, ties to the lower unit. No sort of the
 //!    chunk list.
@@ -140,7 +141,10 @@ impl XRecord for XUnitHsp {
 
 /// A unit's list, sorted in its task (item 1).
 pub(super) trait XUnitSort {
+    /// The sort of the shadow mode and of the tests (`slice::sort_by`).
     fn x_sort(&mut self);
+    /// The sort of the unit's task, which may use the thread's scratch as its buffer.
+    fn x_sort_in(&mut self, scratch: &mut XScratch);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310
@@ -153,9 +157,107 @@ pub(super) trait XUnitSort {
 // ```
 // The comparator of the chunk's sort on one unit's part of the chunk's list; `slice::sort_by` is
 // stable, as `sort_init_hsps_by_score_ncbi` is.
-impl<R: XRecord> XUnitSort for Vec<R> {
+impl XUnitSort for Vec<InitHSP> {
     fn x_sort(&mut self) {
-        self.sort_by(R::cmp);
+        self.sort_by(<InitHSP as XRecord>::cmp);
+    }
+
+    fn x_sort_in(&mut self, _scratch: &mut XScratch) {
+        self.x_sort();
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310
+// ```c
+//     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
+//           sizeof(BlastInitHSP), score_compare_match);
+// ```
+// The compact records of a unit are its list twice when its task ends: the exact copy the task
+// returns and the thread's scratch vector it was copied from (`run_unit_compact`; the scratch is
+// cleared at the start of the thread's next unit). In the task the stable sort runs between the
+// two (`x_stable_sort_with`), so it allocates nothing; `slice::sort_by` allocates a buffer of up
+// to the list's length in each of the pool's tasks at once.
+impl XUnitSort for Vec<XUnitHsp> {
+    fn x_sort(&mut self) {
+        self.sort_by(<XUnitHsp as XRecord>::cmp);
+    }
+
+    fn x_sort_in(&mut self, scratch: &mut XScratch) {
+        x_stable_sort_with(self, &mut scratch.records, <XUnitHsp as XRecord>::cmp);
+    }
+}
+
+/// Length of the runs `x_stable_sort_with` sorts by insertion before it merges.
+const X_SORT_RUN: usize = 16;
+
+/// A stable sort of `v` by `cmp` with `buf` as the merge buffer (its capacity is used, its contents
+/// are overwritten): runs of `X_SORT_RUN` sorted by insertion, then merged bottom-up between `v`
+/// and `buf`, taking from the left run unless the right element is smaller.
+fn x_stable_sort_with<T: Copy>(v: &mut [T], buf: &mut Vec<T>, cmp: impl Fn(&T, &T) -> Ordering) {
+    let n = v.len();
+    if n <= 1 {
+        return;
+    }
+    for run in v.chunks_mut(X_SORT_RUN) {
+        for i in 1..run.len() {
+            let x = run[i];
+            let mut j = i;
+            while j > 0 && cmp(&run[j - 1], &x) == Ordering::Greater {
+                run[j] = run[j - 1];
+                j -= 1;
+            }
+            run[j] = x;
+        }
+    }
+    if n <= X_SORT_RUN {
+        return;
+    }
+    buf.clear();
+    buf.extend_from_slice(v);
+    let mut in_v = true;
+    let mut width = X_SORT_RUN;
+    while width < n {
+        if in_v {
+            x_merge_pass(v, buf, width, &cmp);
+        } else {
+            x_merge_pass(buf, v, width, &cmp);
+        }
+        in_v = !in_v;
+        width *= 2;
+    }
+    if !in_v {
+        v.copy_from_slice(&buf[..n]);
+    }
+}
+
+/// One bottom-up pass of `x_stable_sort_with`: merges the neighbouring runs of `width` of `src`
+/// into `dst`.
+fn x_merge_pass<T: Copy>(
+    src: &[T],
+    dst: &mut [T],
+    width: usize,
+    cmp: &impl Fn(&T, &T) -> Ordering,
+) {
+    let n = src.len();
+    let mut start = 0;
+    while start < n {
+        let mid = (start + width).min(n);
+        let end = (start + 2 * width).min(n);
+        let (mut i, mut j, mut k) = (start, mid, start);
+        while i < mid && j < end {
+            if cmp(&src[j], &src[i]) == Ordering::Less {
+                dst[k] = src[j];
+                j += 1;
+            } else {
+                dst[k] = src[i];
+                i += 1;
+            }
+            k += 1;
+        }
+        dst[k..k + (mid - i)].copy_from_slice(&src[i..mid]);
+        k += mid - i;
+        dst[k..k + (end - j)].copy_from_slice(&src[j..end]);
+        start = end;
     }
 }
 
@@ -562,6 +664,35 @@ mod tests {
                 x_kway(lists, &unit)
             };
             assert_eq!(unit_free(sorted), expected, "case {case}");
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:306-310
+    // ```c
+    //     qsort(init_hitlist->init_hsp_array, init_hitlist->total,
+    //           sizeof(BlastInitHSP), score_compare_match);
+    // ```
+    // The unit's sort in its task is `slice::sort_by` (stable), record for record, at every length
+    // around the run and pass boundaries, with a buffer of any capacity and contents.
+    #[test]
+    fn the_buffered_sort_is_the_stable_sort() {
+        let mut rng = Rng(0x0bad_5eed_1234_5678);
+        for n in (0..70).chain([127, 128, 129, 255, 256, 257, 1000, 4099]) {
+            for _ in 0..4 {
+                // seed offsets tell equal records apart
+                let list: Vec<XUnitHsp> = (0..n)
+                    .map(|i| XUnitHsp {
+                        q_seed: i as i32,
+                        ..record(&mut rng)
+                    })
+                    .collect();
+                let mut expected = list.clone();
+                expected.sort_by(<XUnitHsp as XRecord>::cmp);
+                let mut sorted = list.clone();
+                let mut buf: Vec<XUnitHsp> = (0..rng.below(8)).map(|_| record(&mut rng)).collect();
+                x_stable_sort_with(&mut sorted, &mut buf, <XUnitHsp as XRecord>::cmp);
+                assert_eq!(sorted, expected, "n {n}");
+            }
         }
     }
 

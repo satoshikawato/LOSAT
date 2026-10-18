@@ -1828,7 +1828,7 @@ impl XPairPar {
         let run = |unit: &XUnit, scratch: &mut XScratch| {
             let mut list = unit_fn(self, unit, inp, scratch);
             if sort {
-                list.x_sort();
+                list.x_sort_in(scratch);
             }
             list
         };

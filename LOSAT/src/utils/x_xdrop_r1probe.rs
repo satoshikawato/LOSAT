@@ -490,6 +490,12 @@ fn call(p: &Prob<'_>, tb: bool, sc: &mut XdropScratch) -> Option<XdropResult> {
                 (false, 8) => probe::align8_probe::<false, 7, 4>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
+                (false, 11) => probe::align8_probe::<false, 0, 40>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (false, 12) => probe::align8_probe::<false, 0, 400>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
                 (false, 10) => probe::align8_probe::<false, 8, 0>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
@@ -553,8 +559,10 @@ fn r1_loop() {
         Some("oracle") => 7,
         Some("oraclelat4") => 8,
         Some("oraclez") => 10,
+        Some("elat4") => 11,
+        Some("hslat4") => 12,
         Some(k) => panic!(
-            "R1_KERN must be orig, copy, nodirty, lat4, addr4, nop30, alu20, oracle, oraclelat4 or oraclez, not {k}"
+            "R1_KERN must be orig, copy, nodirty, lat4, addr4, nop30, alu20, oracle, oraclelat4, oraclez, elat4 or hslat4, not {k}"
         ),
     };
     assert!(kern == 0 || w8, "the probe copies are 8-bit kernels");
@@ -692,7 +700,7 @@ fn r1_loop() {
     // oracle: each problem's band, recorded once by kernel 9 before the checked call replays it
     let mut tabs: Vec<Vec<(u32, u32, u32)>> = vec![Vec::new(); list.len()];
     for (i, p) in list.iter().enumerate() {
-        if kern >= 7 {
+        if matches!(kern, 7 | 8 | 10) {
             TAB.with(|t| t.set(&mut tabs[i]));
             KERN.with(|k| k.set(9));
             // a declined problem stops at the same row start in both passes (no table read past it)
@@ -741,7 +749,7 @@ fn r1_loop() {
     let t0 = Instant::now();
     for _ in 0..reps {
         for (i, p) in list.iter().enumerate() {
-            if kern >= 7 {
+            if matches!(kern, 7 | 8 | 10) {
                 TAB.with(|t| t.set(&mut tabs[i]));
             }
             std::hint::black_box(call(p, tb, &mut sc));
@@ -764,7 +772,8 @@ fn r1_loop() {
             0.0
         },
         if spread_on { "spread" } else { "as-is" },
-        ["orig", "copy", "nodirty", "lat4", "addr4", "nop30", "alu20", "oracle", "oraclelat4", "-", "oraclez"]
+        ["orig", "copy", "nodirty", "lat4", "addr4", "nop30", "alu20", "oracle", "oraclelat4", "-", "oraclez", "elat4",
+          "hslat4"]
             [kern as usize],
         st.line()
     );
@@ -788,7 +797,8 @@ fn r1_loop() {
 // `nop30` (V = 4) 30 NOPs per row, `alu20` (V = 5) 20 independent adds per row; `oracle` (V = 7,
 // recorded by V = 6) takes the next row's band from a recorded run instead of this row's survivors,
 // `oraclelat4` adds lat4's latency to it, `oraclez` (V = 8) also clears E after the recorded last
-// survivor instead of this row's.
+// survivor instead of this row's; `elat4` / `hslat4` (L = 40 / 400) put lat4's four cycles on the
+// stored E / the stored H only.
 // ---------------------------------------------------------------------------
 #[allow(clippy::all)]
 mod probe {
@@ -829,7 +839,7 @@ mod probe {
         if let Some(m) = lane_mask {
             hh = _mm256_and_si256(hh, m);
         }
-        for _ in 0..LAT {
+        for _ in 0..(if LAT < 10 { LAT } else { 0 }) {
             // probe: one cycle of latency on the H / E / drop chain (vpor x, x, x = x)
             core::arch::asm!("vpor {0}, {0}, {0}", inout(ymm_reg) hh, options(pure, nomem, nostack));
         }
@@ -853,7 +863,17 @@ mod probe {
             thr = rs.thrv;
         }
         let drop = _mm256_cmpgt_epi8(thr, hh);
-        st(hw.add(b), _mm256_andnot_si256(drop, hh));
+        let mut hs = _mm256_andnot_si256(drop, hh);
+        let mut en = en;
+        for _ in 0..(if LAT == 400 { 4 } else { 0 }) {
+            // probe: four cycles on the stored H only (the next row's H loads)
+            core::arch::asm!("vpor {0}, {0}, {0}", inout(ymm_reg) hs, options(pure, nomem, nostack));
+        }
+        for _ in 0..(if LAT == 40 { 4 } else { 0 }) {
+            // probe: four cycles on the stored E only (the next row's E loads)
+            core::arch::asm!("vpor {0}, {0}, {0}", inout(ymm_reg) en, options(pure, nomem, nostack));
+        }
+        st(hw.add(b), hs);
         st(e.add(b), en);
         let scr = if TB {
             let me = _mm256_cmpgt_epi8(ep, d);
@@ -899,7 +919,7 @@ mod probe {
         if let Some(m) = lane_mask {
             hh = _mm_and_si128(hh, m);
         }
-        for _ in 0..LAT {
+        for _ in 0..(if LAT < 10 { LAT } else { 0 }) {
             core::arch::asm!("vpor {0}, {0}, {0}", inout(xmm_reg) hh, options(pure, nomem, nostack));
         }
         let hg = _mm_subs_epu8(hh, goe);
@@ -922,7 +942,15 @@ mod probe {
             thr = rs.thrv;
         }
         let drop = _mm_cmpgt_epi8(thr, hh);
-        stx(hw.add(b), _mm_andnot_si128(drop, hh));
+        let mut hs = _mm_andnot_si128(drop, hh);
+        let mut en = en;
+        for _ in 0..(if LAT == 400 { 4 } else { 0 }) {
+            core::arch::asm!("vpor {0}, {0}, {0}", inout(xmm_reg) hs, options(pure, nomem, nostack));
+        }
+        for _ in 0..(if LAT == 40 { 4 } else { 0 }) {
+            core::arch::asm!("vpor {0}, {0}, {0}", inout(xmm_reg) en, options(pure, nomem, nostack));
+        }
+        stx(hw.add(b), hs);
         stx(e.add(b), en);
         let scr = if TB {
             let c3 = _mm256_castsi256_si128(c.c3);

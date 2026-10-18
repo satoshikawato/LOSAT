@@ -2,7 +2,9 @@
 //! LOSAT_X_QBATCHPAR slot) needs them (`LOSAT_X_QSTREAM`,
 //! `src/algorithm/blastn/blast_engine/x_query_stream.rs`), on whole searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). It chooses when LOSAT
+//! The switch is in the strict set since 2026-10-18 (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+//! and it is not set), with a rule (off where LOSAT_X_QBATCHPAR's slots may read at least half of
+//! the file ahead; not the shadow). It chooses when LOSAT
 //! reads the same records: all of them before the search, or a first reading that keeps their
 //! lengths and a second one batch by batch, which it does only where the reports may be written
 //! batch by batch (LOSAT_X_RPTSTREAM on; off, the shadow line says `off=reports`).
@@ -20,7 +22,7 @@
 //! without letters, LOSAT's refusals that come before every report (LOSAT_X_RPTSTREAM then keeps
 //! its reports after the loop, and the records of every batch are kept for them), LOSAT_X_RPTSTREAM's
 //! shadow (the same), and `-db`. Standard input and a pipe are read once (the shadow line names
-//! why), and the switch is off unless set. That those bytes equal NCBI's is the business of the
+//! why), and the switch is on by default and off by its rule. That those bytes equal NCBI's is the business of the
 //! blastn fixtures.
 
 use std::io::Write;
@@ -28,9 +30,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
-/// `0`, the default before, unless the search sets it: every search here runs as it was written,
-/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and this
+/// file's own on 2026-10-18 (perf/bn-memory-rules), each `0`, the default before, unless the
+/// search sets it: every search here runs as it was written, with the switches off that it does
+/// not name (the default runs in `default_bundle.rs` and `the_switch_is_on_by_default`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),
@@ -43,6 +46,7 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_QBATCHPAR", "0"),
     ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
+    ("LOSAT_X_QSTREAM", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
 ];
 
@@ -822,11 +826,14 @@ fn a_database_search_gives_the_off_bytes() {
     }
 }
 
-/// The switch is off unless set: with it (and LOSAT_X_RPTSTREAM) it reads the batches again (its
-/// `[X_STATS]` line with `off=none`); without it the records are read before the search (no line);
-/// the bytes are the same.
+/// The switch is on by default (an empty value): with LOSAT_X_RPTSTREAM it reads the batches
+/// again (its `[X_STATS]` line with `off=none`); with `LOSAT_X_QSTREAM=0`, or `LOSAT_X_DEFAULT=0`
+/// and no value, the records are read before the search (no line). Its rule: where the slots of
+/// LOSAT_X_QBATCHPAR may run and the file is shorter than twice what their budget holds (here
+/// a budget set by `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads), the line says
+/// `off=slots`, and the shadow still reads the batches again. The bytes are the same.
 #[test]
-fn the_switch_is_off_unless_set() {
+fn the_switch_is_on_by_default() {
     let dir = TempDir::new("default");
     let query = queries(&dir, "q.fa", b"");
     let subject = fasta("LC738868.fasta");
@@ -846,15 +853,44 @@ fn the_switch_is_off_unless_set() {
             .find(|line| line.starts_with("[X_STATS] QSTREAM "))
             .map(str::to_string)
     };
-    let on = blastn(&args, 4, &[RPTSTREAM, STATS, SWITCH], None);
+    let default = ("LOSAT_X_QSTREAM", "");
+    let on = blastn(&args, 4, &[RPTSTREAM, STATS, default], None);
     let read = line(&on).expect("the switch's line");
     assert!(
         read.contains(" off=none") && read.contains(" read=19 "),
         "{read}"
     );
-    let off = blastn(&args, 4, &[RPTSTREAM, STATS], None);
-    assert_eq!(line(&off), None);
-    assert_eq!((off.status, &off.report), (on.status, &on.report));
+    for switches in [
+        &[RPTSTREAM, STATS][..],
+        &[RPTSTREAM, STATS, default, ("LOSAT_X_DEFAULT", "0")],
+    ] {
+        let off = blastn(&args, 4, switches, None);
+        assert_eq!(line(&off), None, "{switches:?}");
+        assert_eq!((off.status, &off.report), (on.status, &on.report));
+    }
+    let slots = [
+        RPTSTREAM,
+        STATS,
+        default,
+        QBATCHPAR,
+        ("LOSAT_X_QBATCHPARMEM", "64"),
+    ];
+    let ruled = blastn(&args, 2, &slots, None);
+    let read = line(&ruled).expect("the switch's line");
+    assert!(
+        read.contains(" off=slots") && read.contains(" read=0 "),
+        "{read}"
+    );
+    assert_eq!((ruled.status, &ruled.report), (on.status, &on.report));
+    let shadowed = blastn(&args, 2, &[&slots[..], &[SHADOW]].concat(), None);
+    let read = line(&shadowed).expect("the switch's line");
+    assert!(read.contains(" off=none"), "{read}");
+    assert_eq!(shadowed.status, on.status);
+    assert!(shadowed.report == on.report);
+    // At one thread no slot runs: the rule leaves the switch on.
+    let one = blastn(&args, 1, &slots, None);
+    let read = line(&one).expect("the switch's line");
+    assert!(read.contains(" off=none"), "{read}");
 }
 
 /// The records of the batches are kept only where a writer reads them after their batch: none

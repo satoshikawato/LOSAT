@@ -11,13 +11,14 @@
 //!         return retval;
 //! ```
 //! NCBI keeps the subjects in its scope and makes each one's search forms from it. With
-//! `LOSAT_X_BNSTORE` set (to any value; the switch is not in the strict set) the reader's records
+//! `LOSAT_X_BNSTORE` on (the strict set since 2026-10-18: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set) the reader's records
 //! keep their deflines and the letters are held packed (2 bits per base, the runs of ambiguous
 //! letters, the lower-case intervals): the preliminary stage reads the packed bases, the traceback
 //! makes the blastna letters of a subject, the pairwise report the letters of each row. The switch
 //! must change nothing a user sees, so the tests compare the report and the messages with those of
-//! a run without the variable, and read the `[X_STATS] BNSTORE` line to check that the subjects
-//! were held packed.
+//! a run with `LOSAT_X_BNSTORE=0`, and read the `[X_STATS] BNSTORE` line to check that the
+//! subjects were held packed.
 //!
 //! The subjects are pieces of `tests/fasta/MelaMJNV.fasta` with what the packed form keeps apart
 //! from the bases: lower-case runs (soft masking with `-lcase_masking`, lower-case rows in the
@@ -30,10 +31,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
-/// `0`, the default before, unless the search sets it: every search here runs as it was written,
-/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and this
+/// file's own on 2026-10-18 (perf/bn-memory-rules), each `0`, the default before, unless the
+/// search sets it: every search here runs as it was written, with the switches off that it does
+/// not name (the default runs in `default_bundle.rs` and
+/// `the_subjects_are_held_packed_by_default`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
+    ("LOSAT_X_BNSTORE", "0"),
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),

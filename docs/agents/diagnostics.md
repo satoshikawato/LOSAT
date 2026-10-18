@@ -244,6 +244,7 @@ count of the set anywhere, so that two pull requests that each add a switch do n
 
 ```bash
 export LOSAT_X_AHEAD=16
+export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BPCLUT=1
 export LOSAT_X_BPDBCUT=1
@@ -305,6 +306,7 @@ export LOSAT_X_LUTARENA=1
 export LOSAT_X_LUTSPLIT=1
 export LOSAT_X_MBBATCH=64
 export LOSAT_X_MBDELAY=1
+export LOSAT_X_MBLUTONCE=1
 export LOSAT_X_NEWTONEXACT=1
 export LOSAT_X_NEWTONLANES=1
 export LOSAT_X_NEWTONLANES8=1
@@ -317,6 +319,7 @@ export LOSAT_X_PURGEFAST=1
 export LOSAT_X_QBATCHPAR=1
 export LOSAT_X_QDUSTPAR=1
 export LOSAT_X_QPREPPAR=1
+export LOSAT_X_QSTREAM=1
 export LOSAT_X_RPTSTREAM=1
 export LOSAT_X_SEEDBUCKET=1
 export LOSAT_X_SEEDCOMPACT=1

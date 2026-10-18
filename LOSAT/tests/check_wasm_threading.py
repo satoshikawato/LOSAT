@@ -123,6 +123,8 @@ def main():
     if args.native_serial: prefixes["native-serial"] = [args.native_serial.resolve()]
     cases = [("blastn", "blastn", "nuc1", "nuc1", 10), ("megablast", "blastn", "nuc1", "nuc3", 10),
              ("blastp", "blastp", "aa3", "aa3", 10)]
+    # BLASTX joins the parity and thread contract (its pool line names the program BLASTX).
+    cases += [("blastx", "blastx", "blastx-query", "aa3", 10)]
     cases += [(f"tblastx-{q}-{s}-e{e}", "tblastx", q, s, e)
               for q, s in [("nuc1", "nuc1"), ("nuc1", "nuc3"), ("nuc3", "nuc1"), ("nuc3", "nuc3"),
                            ("nuc1", "unequal"), ("nuc1", "remainder"), ("short-context", "short-subject")]
@@ -139,7 +141,7 @@ def main():
         (out / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
         reference, _ = execute(label + "/oracle", [oracle, *common, "-num_threads", "1"])
         for kind, prefix in prefixes.items():
-            for n in ([1] if kind in ["serial", "native-serial"] else [1, 2, 4, 8]):
+            for n in ([1] if kind in ["serial", "native-serial"] else [1, 2, 4, 8, 16]):
                 data, log = execute(f"{label}/{kind}-n{n}", [*prefix, program, *common, "-num_threads", str(n)], {"LOSAT_WASI_THREADS_DEBUG": "1"})
                 assert data == reference, f"raw output differs: {label}/{kind}-n{n}"
                 validate_thread_evidence(log, n, "native" if kind == "native-serial" else kind)
@@ -197,7 +199,7 @@ def main():
             oracle = str(args.oracle_dir.resolve() / program) if args.oracle_dir else program
             reference, _ = execute(f"format/{format_label}-{query}-{index}/oracle", [oracle, *common])
             for kind, prefix in prefixes.items():
-                for n in ([1] if kind in ["serial", "native-serial"] else [1, 4, 8]):
+                for n in ([1] if kind in ["serial", "native-serial"] else [1, 4, 8, 16]):
                     data, _ = execute(f"format/{format_label}-{query}-{index}/{kind}-n{n}", [*prefix, program, *common, "-num_threads", str(n)])
                     if data != reference:
                         format_failures.append(dict(program=program, task=task, format=fmt, target=kind, threads=n, oracle_sha256=digest(reference), actual_sha256=digest(data)))

@@ -112,6 +112,10 @@ use std::sync::OnceLock;
 /// searched at the same time, each on a pool of its own, `tblastn/stage_d_pipeline.rs`) was added
 /// after the change as a switch that is off unless set and joined the set once it was verified
 /// and timed with it on.
+/// `LOSAT_X_BXSUBJFLOW` (BLASTX's subject loop of a query chunk as a flow of tasks of 64 subjects
+/// searched ahead by the pool's other threads, `blastx/x_subject_flow.rs`) joined the set in the
+/// pull request that added it (Owner 2026-10-17: speed-ups land default ON), after it was
+/// verified and timed with it on and off.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
     "LOSAT_X_BNSTREAM",
@@ -125,11 +129,14 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPPFREE",
     "LOSAT_X_BPQBLOCK",
     "LOSAT_X_BPREDOFIT",
+    "LOSAT_X_BPSCANBF",
     "LOSAT_X_BPSEED",
     "LOSAT_X_BPSUBJRUN",
     "LOSAT_X_BPUNGAP",
     "LOSAT_X_BXBATCH",
     "LOSAT_X_BXCHUNK",
+    "LOSAT_X_BXDIAG",
+    "LOSAT_X_BXFLOW",
     "LOSAT_X_BXLAZYCTX",
     "LOSAT_X_BXLEAN",
     "LOSAT_X_BXLUT",
@@ -138,10 +145,12 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXSCAN",
     "LOSAT_X_BXSCANBF",
     "LOSAT_X_BXSEGMEMO",
+    "LOSAT_X_BXSUBJFLOW",
     "LOSAT_X_CODONFAST",
     "LOSAT_X_COMPFAST",
     "LOSAT_X_CTXFAST",
     "LOSAT_X_DEKKER",
+    "LOSAT_X_DISCLUTPAR",
     "LOSAT_X_DPAVX2",
     "LOSAT_X_DPFAST",
     "LOSAT_X_DPNEON",
@@ -180,16 +189,19 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNBATCH",
     "LOSAT_X_TBNBATCHRULE",
     "LOSAT_X_TBNEVENTS",
+    "LOSAT_X_TBNLINKWIN",
     "LOSAT_X_TBNOIDCHUNK",
     "LOSAT_X_TBNOIDNEXT",
     "LOSAT_X_TBNOIDUNITS",
     "LOSAT_X_TBNOWNPOOLS",
     "LOSAT_X_TBNPAR",
     "LOSAT_X_TBNQSIDE",
+    "LOSAT_X_TBNSCANBF",
     "LOSAT_X_TBNSSIDE",
     "LOSAT_X_TBNSTATE",
     "LOSAT_X_TBNSTORE",
     "LOSAT_X_TBNXLATE",
+    "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXFRAMES",
     "LOSAT_X_TBXNEXT",
 ];

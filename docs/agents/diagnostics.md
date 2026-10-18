@@ -2,6 +2,55 @@
 
 Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
 
+## Floating-point contract
+
+The reports match NCBI's bytes only while every floating-point value is computed as NCBI's C
+code computes it on the same machine. Every build keeps these rules (written down 2026-10-18,
+plan v4 D6 (c)); `LOSAT/tests/check_fp_contract.py` checks them in CI: `source` in the `rust`
+job and in the release workflow's quality job, `binary` on the release binary of the
+`fast output regressions` job and on the Linux x64 release artifact.
+
+- **No contraction.** rustc emits each `*`, `+`, `-` and `/` as its own IEEE operation, rounded
+  once, and never fuses `a * b + c` into a fused multiply-add: it sets no `contract` or fast-math
+  flag, whatever the target CPU or `#[target_feature]`. An FMA-capable target (x86-64-v3,
+  aarch64, the `avx512f` helper of `x_newton_exact.rs`) changes only how `mul_add` itself is
+  computed. Do not add fast-math LLVM options (`-C llvm-args=-fp-contract=fast`,
+  `-enable-unsafe-fp-math`, `-enable-no-nans-fp-math` and the like), the `*_fast` and
+  `*_algebraic` operations, FMA intrinsics (`_mm*_fmadd_*` and the other `_mm*_fm*` /
+  `_mm*_fnm*`, `vfmaq_*`, `vfmsq_*`), or the Wasm `relaxed-simd` feature (its `relaxed_madd`
+  fuses or not depending on the engine). The Wasm builds enable `+simd128` only.
+- **One fused multiply-add**, `f64::mul_add` in `stats/spouge.rs::x_product_error`: the exact
+  rounding error of a product in the double-double emulation of the long-double line
+  `result *= expl(-z * z) / z` of NCBI's `boost_erf.c`. The other call is its test
+  `x_dekker_product_error_matches_fused_multiply_add`. `mul_add` rounds once (IEEE 754
+  fusedMultiplyAdd) on every target, so an instruction and a library routine give the same bits.
+  In the release binary of dev 79fab14e it sits in `stats::spouge::erf_impl_ncbi`:
+  - on baseline x86-64, as calls (13 call sites, through one GOT slot) of the `fma` of Rust's
+    compiler-builtins, not glibc's. That `fma` takes `vfmadd213sd` when the CPU has FMA, the FMA4
+    form when it has only FMA4, and a software fused multiply-add otherwise; these two
+    instructions are the binary's only FMA instructions;
+  - with `-C target-cpu=x86-64-v3`, as 13 inline `vfmsub213sd`, and no other function holds an
+    FMA instruction;
+  - on aarch64, as inline `fmadd` / `fmsub` (not counted in CI yet).
+
+  A new `mul_add` needs the same argument (the fused result is the value NCBI computes) and an
+  entry in the checker's `MUL_ADD_SITES` (and, in another module, `MUL_ADD_FUNCTION_PREFIXES`).
+- **The C library's math functions.** `ln`, `exp`, `powf` and the other transcendental functions
+  call the platform's libm (glibc on Linux, Apple's libm on macOS, the UCRT on Windows, wasi-libc
+  in Wasm), as NCBI's C code does, so on one machine both get the same values. No build option
+  changes which function is called: glibc picks its variant (for example `__log_fma` on an
+  FMA-capable CPU) when it is loaded, from the CPU, not from LOSAT's target CPU. Do not
+  replace these calls by another implementation (the `libm` crate in `LOSAT/Cargo.toml` is not
+  called; the release binary holds none of its functions).
+- **Release builds.** `cargo build --release`: fat LTO, one codegen unit, `panic = "abort"`
+  (`LOSAT/Cargo.toml`) and the x86-64 loop alignment of `LOSAT/.cargo/config.toml`, for the
+  baseline CPU of the target; the AVX2 kernels are chosen at run time
+  (`is_x86_feature_detected!`). Extra flags for one build go in `CARGO_TARGET_<TRIPLE>_RUSTFLAGS`,
+  which cargo joins with the configuration's `[target.'cfg(target_arch = "x86_64")']` flags;
+  `RUSTFLAGS` replaces them.
+
+## Debug and trace variables
+
 - `LOSAT_TRACE_HSP="qstart,qend,sstart,send"` trace a specific TBLASTX HSP.
 - `LOSAT_TRACE_HSP_MASKS=1` print mask coverage for the traced TBLASTX HSP.
 - `LOSAT_TRACE_CHAIN_HSP="qstart,qend,sstart,send"` trace TBLASTX chain
@@ -296,6 +345,7 @@ export LOSAT_X_TBXFRAMES=1
 export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
 export LOSAT_X_TBXPREFETCH=1536
+export LOSAT_X_TBXQFRAMES=1
 export LOSAT_X_TBXSCANBF=1
 ```
 
@@ -1997,6 +2047,36 @@ Scheduling (each value computed by one thread with the original function; order 
   `logs/defaultset_ws_report.md` unless named); a reduction is 1 - with / without the switch, the other switches of
   the candidate set on): at 16 threads dc-megablast of 1,775 / 3,492 cDNAs against 3 Mb -26.6 / -23.2 % wall, blastn
   of 31,168 cDNAs -24.6 %, blastn of 1,775 -3.8 %; at 4 threads inside the rounds' spread; max RSS unchanged.
+- `LOSAT_X_TBXQFRAMES=1` (TBLASTX, speed; in the strict set since 2026-10-18, on by default, in the pull
+  request that added it; evidence at the end of this entry) the SEG of a query batch's frames is made on the search
+  pool, one task per frame, instead of one frame after the other before the lookup table is built
+  (`tblastx/x_query_frames.rs`, called from `search_query_batch` for every query batch, `-subject` and `-db`). NCBI
+  filters the contexts of a batch one after the other (`blast_filter.c:1280-1290`); each task reads and writes only
+  its own frame (letters, intervals, unmasked copy) and only reads the `SegMasker`, and SEG's two caches (the memo
+  of `LOSAT_X_SEGMEMO` and the histogram memo of `LOSAT_X_SEGFAST`) are `thread_local!` tables of a pure function of
+  the window's letter counts, so every frame gets the serial loop's intervals. It acts only with a pool of two or
+  more threads and two or more frames in the batch; with one thread, a build without the `parallel` feature,
+  WebAssembly without `wasm-threads`, the switch off, or `-seg no`, the serial loop runs. The translation of the
+  frames stays serial (at most a few ms per batch). BLASTX needs no such switch: its query SEG already runs on the
+  pool (`LOSAT_X_BXPAR`). Shadow: `LOSAT_X_TBXQFRAMESSHADOW=1` (implies the switch) also masks a copy of the frames
+  serially and compares every frame's letters, unmasked copy and intervals; a difference prints
+  `[X_SHADOW] TBXQFRAMES batches= frames= intervals= diffs= DIFFERENT` and panics; at the end of a run `main` prints
+  `[X_SHADOW] TBXQFRAMES batches= frames= intervals= diffs=0 identical` (the batches masked on the pool, their frames
+  and intervals; 0 when no batch had a pool). Tests: the unit tests of `x_query_frames.rs` (pool == serial at 1, 2,
+  3 and 7 threads for three SEG parameter sets, with batches of one query and none; a probe called once per frame
+  shows that the frames are masked by at least two workers of a 3-thread pool, and by none with the switch off or
+  one thread) and `LOSAT/tests/tblastx_query_frames.rs` (off / default / `LOSAT_X_DEFAULT=0` / shadow equal at 1
+  and 4 threads, with several query batches, other SEG parameters and `-seg no`). On by default since 2026-10-18
+  (perf/tbx-query-seg-par), on this evidence: the shadow over the TBLASTX fixtures at 2 and 4 threads
+  (`check_losat.py`, `ci_fast_regressions.py --programs tblastx --all-cases`) compared 2,910 frames (58,542 intervals) in 242 batches of 200 runs,
+  all identical, and every report equals the one without the switch; i9 (8 alternating off/on pairs after a
+  warm-up, load 5-9, `LOSAT_TIMING`, every report its frozen sha256), 8 threads, medians: AP027131 x AP027133 (code
+  4) SEG 0.223 -> 0.044 s, outside the search 0.381 -> 0.200 s, wall 1.864 -> 1.722 s (on/off 0.92); MelaMJNV x
+  PemoMJNVA 0.048 -> 0.009 s, 0.247 -> 0.210 s (0.86); AvCLPV x PsCLPV 0.122 -> 0.024 s, 1.130 -> 1.028 s (0.91);
+  NZ_CP006932 against itself 0.208 -> 0.042 s, 4.28 -> 4.22 s (0.96); the first 3 kb of MelaMJNV x PemoMJNVA 0.012
+  -> 0.011 s; at one thread both arms run the serial loop (SEG equal; wall ratios 0.96-1.03 within the spread of
+  the P and E cores). Max RSS at 8 threads within 2 MiB (AP027131 x AP027133 134-137 MiB, MelaMJNV x PemoMJNVA
+  46-48 MiB, 3 pairs).
 - `LOSAT_X_QPREPPAR=1` (BLASTN, all tasks; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the BLASTNA encoding of a query batch and the ungapped Karlin blocks of its contexts are made on the search pool
   instead of one query / context after the other (`blastn/blast_engine/x_query_prep_par.rs`, called from
   `search_query_batch`, so for every query batch, in the loop or in a `LOSAT_X_QBATCHPAR` slot; `-db` searches too).

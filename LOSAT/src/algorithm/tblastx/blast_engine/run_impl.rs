@@ -61,6 +61,19 @@ pub use x_seed_release::print_summary as x_seed_release_print_summary;
 // No NCBI counterpart: a timer; it computes no value NCBI computes and none the search reads.
 #[path = "../x_search_timing.rs"]
 mod x_search_timing;
+// EXPERIMENT (LOSAT_X_TBXQFRAMES): the SEG of a query batch's frames on the search pool, one task
+// per frame (see tblastx/x_query_frames.rs). A child module of this file, as x_seed_release is.
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1281
+// ```c
+//     for (context = query_info->first_context;
+//          context <= query_info->last_context; ++context) {
+// ```
+// NCBI filters the contexts one after the other; each context's filtering reads and writes only
+// that context, so where it runs is scheduling only.
+#[path = "../x_query_frames.rs"]
+mod x_query_frames;
+pub use x_query_frames::print_summary as x_query_frames_print_summary;
 // EXPERIMENT (LOSAT_X_TBXNEXT): the subjects of the parallel subject loop handed to the threads one
 // at a time, each thread taking the next subject when it is free, with one worker state per
 // thread (see tblastx/x_subject_next.rs). A child module of this file, as x_seed_release is.
@@ -2578,41 +2591,18 @@ fn search_query_batch(
         // NCBI counterpart.
         let t_seg = crate::utils::xtiming::clock();
         let seg = SegMasker::new(params.window, params.locut, params.hicut);
-        for frames in &mut query_frames {
-            for frame in frames {
-                if frame.aa_seq.len() >= 3 {
-                    for m in seg.mask_sequence(&frame.aa_seq[1..frame.aa_seq.len() - 1]) {
-                        frame.seg_masks.push((m.start, m.end));
-                    }
-
-                    // NCBI BLAST query masking semantics (SEG, etc.): keep an unmasked copy
-                    // (`sequence_nomask`), then overwrite masked residues in the working
-                    // query sequence buffer with X.
-                    //
-                    // NCBI reference (verbatim):
-                    //   const Uint1 kProtMask = 21;     /* X in NCBISTDAA */
-                    //   query_blk->sequence_start_nomask = BlastMemDup(query_blk->sequence_start, total_length);
-                    //   query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
-                    //   buffer[index] = kMaskingLetter;
-                    //
-                    // LOSAT uses NCBISTDAA encoding where X = 21.
-                    if !frame.seg_masks.is_empty() {
-                        if frame.aa_seq_nomask.is_none() {
-                            frame.aa_seq_nomask = Some(frame.aa_seq.clone());
-                        }
-                        const X_MASK_NCBISTDAA: u8 = 21; // NCBI: kProtMask = 21
-                        let raw_end_exclusive = frame.aa_seq.len().saturating_sub(1); // keep last sentinel untouched
-                        for &(s, e) in &frame.seg_masks {
-                            let raw_s = 1usize.saturating_add(s);
-                            let raw_e = 1usize.saturating_add(e).min(raw_end_exclusive);
-                            for pos in raw_s..raw_e {
-                                frame.aa_seq[pos] = X_MASK_NCBISTDAA;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_filter.c:1280-1290
+        // ```c
+        //     for (context = query_info->first_context;
+        //          context <= query_info->last_context; ++context) {
+        // ...
+        //         status = s_GetFilteringLocationsForOneContext(query_blk,
+        // ```
+        // Dispatch point (LOSAT_X_TBXQFRAMES, strict set): with two or more threads the frames
+        // are masked on the search pool, one task per frame; otherwise, and with the switch off,
+        // the frames are masked one after the other as before (tblastx/x_query_frames.rs, which
+        // holds the per-frame body `mask_frame`).
+        x_query_frames::mask(&mut query_frames, &seg, parallel_pool);
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     }
 

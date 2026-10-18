@@ -171,6 +171,16 @@ authoritative, current guidance for agent behavior in LOSAT.
   pruning, ordering, statistics, and formatting as NCBI. If a faster path cannot
   be proven byte-identical on the relevant fixtures, keep it disabled or remove
   it.
+- For performance paths, rule 8 ("Correct timing, order, and context") binds the
+  values and the order that reach the output: work may run earlier, in another
+  order or on other threads when every value and every decision the output
+  depends on is the same, as in the default unit path of TBLASTX
+  (`LOSAT_X_PAIRPAR`: units of one subject searched in parallel, results put
+  back in scan order). Owner approval 2026-10-15.
+- Rule 9's "preserving ... Big O complexity" means not making it worse: a path
+  may do less work than NCBI's, as the default incremental TBLASTX linking
+  kernel (`sum_stats_linking/linking_incr.rs`) replaces NCBI's rescans with an
+  index. Owner approval 2026-10-15.
 
 ### Benchmark target protocol
 - Treat repository benchmark figures as compute-program benchmarks, not as

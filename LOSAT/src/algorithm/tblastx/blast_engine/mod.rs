@@ -35,6 +35,9 @@ pub use run_impl::run;
 pub use run_impl::run_local;
 // EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW): the summary line `main` prints at exit.
 pub use run_impl::x_pair_par_print_summary;
+// EXPERIMENT (LOSAT_X_TBXQFRAMESSHADOW): the shadow's summary line `main` prints at exit. No NCBI
+// counterpart: it prints counters and changes no value NCBI computes.
+pub use run_impl::x_query_frames_print_summary;
 // EXPERIMENT (LOSAT_X_SEEDRELEASE): the `LOSAT_X_STATS` line `main` prints at exit. No NCBI
 // counterpart: it prints counters and changes no value NCBI computes.
 pub use run_impl::x_seed_release_print_summary;

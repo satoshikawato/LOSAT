@@ -2829,7 +2829,10 @@ Scheduling (each value computed by one thread with the original function; order 
   whole set are never held; the records keep their deflines. With two or more threads a second
   thread packs the records while the reader reads the next ones (`x_packed_while_read`: batches of
   up to 1,024 records or 4 MiB of letters, handed over one at a time), so the packing does not add
-  to the read; the records and their stores are those of the one-thread read, in the same order. The unit path of the preliminary
+  to the read; the records and their stores are those of the one-thread read, in the same order.
+  A WebAssembly build packs on the reader at every thread count (since 2026-10-18): there the
+  second thread was one host worker more than `-num_threads` asked for (`check_wasm_threading.py`
+  saw two `spawn_attempt` lines at `-num_threads 2`). The unit path of the preliminary
   stage (`TBNPAR`, on by default) translates a subject's six frames straight from its packed bases
   (`x_packed_plan` in `tblastn/x_subject_translate.rs`: the codon tables of `TBNXLATE`, the codons
   read from the packed bytes, each phase filling one plus frame forward and one minus frame

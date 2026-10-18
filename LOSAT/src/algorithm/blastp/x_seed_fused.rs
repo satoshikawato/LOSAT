@@ -746,6 +746,8 @@ where
                     12 => r2_call!(12),
                     13 => r2_call!(13),
                     14 => r2_call!(14),
+                    15 => r2_call!(15),
+                    16 => r2_call!(16),
                     _ => r2_call!(0),
                 }
             }
@@ -763,7 +765,10 @@ where
 /// without port-5 shuffles: lanes by aligned store and reload, entries by broadcast loads and
 /// blends), 11 oldlat4 (+4 cycles on the entries read), 12 newlat4 (+4 cycles on the values
 /// stored), 13 pklat4 (+4 cycles on the candidate mask: the packed count and the buffer
-/// store's address), 14 pipe (the next batch's hits loaded before this batch's stores).
+/// store's address), 14 pipe (the next batch's hits loaded before this batch's stores),
+/// 15 deferstore (the full batches' new entries written to the table after the batch loop,
+/// from a buffer at addresses known early), 16 pair (two batches per step: both batches'
+/// entries read before either batch's entries are stored).
 fn r2_probe() -> u32 {
     use std::sync::OnceLock;
     static P: OnceLock<u32> = OnceLock::new();
@@ -1343,8 +1348,20 @@ where
     let mut batches = hits.chunks_exact(X_DIAG_LANES);
     // Room for a full register past the last candidate (each batch stores eight lanes).
     buffer.clear();
-    buffer.reserve(hits.len() + X_DIAG_LANES);
+    buffer.reserve(if P == 15 {
+        3 * hits.len() + X_DIAG_LANES
+    } else {
+        hits.len() + X_DIAG_LANES
+    });
     let out = buffer.as_mut_ptr();
+    // P15: the coordinates and new entries of the full batches, eight per batch.
+    let (defer_coords, defer_values) = if P == 15 {
+        let c = out.add(hits.len() + X_DIAG_LANES);
+        (c, c.add(hits.len()))
+    } else {
+        (out, out)
+    };
+    let mut deferred = 0usize;
     let mut packed = 0usize;
     let mut next = 0usize;
     let mut pending = if P == 14 && hits.len() >= X_DIAG_LANES {
@@ -1352,6 +1369,32 @@ where
     } else {
         _mm256_setzero_si256()
     };
+    if P == 16 {
+        // Two full batches per step: the hits of one cell lie on distinct diagonals, so the
+        // second batch reads no entry the first one stores.
+        let full = hits.len() / X_DIAG_LANES;
+        let mut k = 0;
+        while k + 1 < full {
+            let q0 = _mm256_loadu_si256(hits.as_ptr().add(k * X_DIAG_LANES).cast());
+            let q1 = _mm256_loadu_si256(hits.as_ptr().add((k + 1) * X_DIAG_LANES).cast());
+            let (l0, l1) = x_batch2_avx2_probe(q0, q1, s, table, test);
+            for (query, lanes) in [(q0, l0), (q1, l1)] {
+                let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
+                    X_PACK_LANES[lanes as usize].as_ptr().cast(),
+                ));
+                _mm256_storeu_si256(
+                    out.add(packed).cast(),
+                    _mm256_permutevar8x32_epi32(query, order),
+                );
+                packed += lanes.count_ones() as usize;
+            }
+            k += 2;
+        }
+        // The batches left (at most one) go through the loop below.
+        for _ in 0..k {
+            batches.next();
+        }
+    }
     for batch in &mut batches {
         if P == 8 {
             // Prefetch the entries of the next full batch (if any) before testing this one.
@@ -1370,7 +1413,14 @@ where
                 }
             }
         }
-        let (query, lanes) = if P == 3 || P == 4 || P == 9 || P == 11 || P == 12 || P == 13 {
+        let (query, lanes) = if P == 15 {
+            let (query, lanes, coords, new) =
+                x_batch_avx2_defer_probe(_mm256_loadu_si256(batch.as_ptr().cast()), s, table, test);
+            _mm256_storeu_si256(defer_coords.add(deferred).cast(), coords);
+            _mm256_storeu_si256(defer_values.add(deferred).cast(), new);
+            deferred += X_DIAG_LANES;
+            (query, lanes)
+        } else if P == 3 || P == 4 || P == 9 || P == 11 || P == 12 || P == 13 {
             x_batch_avx2_probe::<P>(_mm256_loadu_si256(batch.as_ptr().cast()), s, table, test)
         } else if P == 14 {
             // This batch's hits were loaded by the previous iteration; load the next batch's
@@ -1397,6 +1447,17 @@ where
             _mm256_permutevar8x32_epi32(query, order),
         );
         packed += lanes.count_ones() as usize;
+    }
+    if P == 15 {
+        // The deferred stores, in batch then lane order, before the candidates are called (a
+        // candidate's entry was stored back unchanged).
+        for i in 0..deferred {
+            let coord = *defer_coords.add(i) as usize;
+            table
+                .entries
+                .get_unchecked_mut(coord)
+                .set_raw_bits(*defer_values.add(i) as u32);
+        }
     }
     let rest = batches.remainder();
     let masked_rest = (P == 2 || P == 7) && !rest.is_empty();
@@ -1563,6 +1624,130 @@ unsafe fn x_batch_avx2_probe<const P: u32>(
         );
     }
     (query, lanes)
+}
+
+/// EXPERIMENT (v4-R R2 probe 15): [`x_batch_avx2`] on a register of query offsets without the
+/// stores: returns the hits, the candidate lanes, the coordinates and the new entries.
+///
+/// # Safety
+/// The CPU must have AVX2.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_batch_avx2_defer_probe(
+    query: std::arch::x86_64::__m256i,
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+) -> (
+    std::arch::x86_64::__m256i,
+    u32,
+    std::arch::x86_64::__m256i,
+    std::arch::x86_64::__m256i,
+) {
+    use std::arch::x86_64::*;
+    let (coords, old) = x_r2_gather(query, s, table);
+    let (new, lanes) = x_r2_test(old, s, test);
+    (query, lanes, coords, new)
+}
+
+/// EXPERIMENT (v4-R R2 probe 16): two batches, both gathered before either is stored.
+///
+/// # Safety
+/// The CPU must have AVX2; the sixteen entries must be distinct.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_batch2_avx2_probe(
+    q0: std::arch::x86_64::__m256i,
+    q1: std::arch::x86_64::__m256i,
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+) -> (u32, u32) {
+    let (c0, old0) = x_r2_gather(q0, s, table);
+    let (c1, old1) = x_r2_gather(q1, s, table);
+    let (new0, l0) = x_r2_test(old0, s, test);
+    let (new1, l1) = x_r2_test(old1, s, test);
+    x_r2_scatter(c0, new0, table);
+    x_r2_scatter(c1, new1, table);
+    (l0, l1)
+}
+
+/// EXPERIMENT (v4-R R2 probes): the coordinates of a batch and its eight entries.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_r2_gather(
+    query: std::arch::x86_64::__m256i,
+    s: i32,
+    table: &XDiagTable<'_>,
+) -> (std::arch::x86_64::__m256i, std::arch::x86_64::__m256i) {
+    use std::arch::x86_64::*;
+    let coords = _mm256_and_si256(
+        _mm256_sub_epi32(query, _mm256_set1_epi32(s)),
+        _mm256_set1_epi32(table.mask),
+    );
+    let mut lane_coords = [0u32; X_DIAG_LANES];
+    _mm256_storeu_si256(lane_coords.as_mut_ptr().cast(), coords);
+    let mut lane_old = [0u32; X_DIAG_LANES];
+    for (old, &coord) in lane_old.iter_mut().zip(&lane_coords) {
+        *old = table.entries.get_unchecked(coord as usize).raw_bits();
+    }
+    (coords, _mm256_loadu_si256(lane_old.as_ptr().cast()))
+}
+
+/// EXPERIMENT (v4-R R2 probes): the test of [`x_batch_avx2`] on gathered entries: the new
+/// entries and the candidate lanes.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_r2_test(
+    old: std::arch::x86_64::__m256i,
+    s: i32,
+    test: XDiagTest,
+) -> (std::arch::x86_64::__m256i, u32) {
+    use std::arch::x86_64::*;
+    let subject_plus_offset = s.wrapping_add(test.diag_offset);
+    let written = (subject_plus_offset as u32) & X_LAST_HIT_MASK;
+    let flag = _mm256_srai_epi32::<31>(old);
+    let last = _mm256_srai_epi32::<1>(_mm256_slli_epi32::<1>(old));
+    let diff = _mm256_sub_epi32(
+        _mm256_set1_epi32(s),
+        _mm256_sub_epi32(last, _mm256_set1_epi32(test.diag_offset)),
+    );
+    let sum_below_last = _mm256_cmpgt_epi32(last, _mm256_set1_epi32(subject_plus_offset));
+    let in_window = _mm256_cmpgt_epi32(_mm256_set1_epi32(test.window), diff);
+    let keep = _mm256_blendv_epi8(in_window, sum_below_last, flag);
+    let below_word = _mm256_cmpgt_epi32(_mm256_set1_epi32(test.word_size), diff);
+    let candidates = _mm256_andnot_si256(_mm256_or_si256(flag, below_word), in_window);
+    let new = _mm256_blendv_epi8(_mm256_set1_epi32(written as i32), old, keep);
+    (
+        new,
+        _mm256_movemask_ps(_mm256_castsi256_ps(candidates)) as u32,
+    )
+}
+
+/// EXPERIMENT (v4-R R2 probes): stores a batch's new entries.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_r2_scatter(
+    coords: std::arch::x86_64::__m256i,
+    new: std::arch::x86_64::__m256i,
+    table: &mut XDiagTable<'_>,
+) {
+    use std::arch::x86_64::*;
+    let mut lane_coords = [0u32; X_DIAG_LANES];
+    _mm256_storeu_si256(lane_coords.as_mut_ptr().cast(), coords);
+    let mut lane_new = [0u32; X_DIAG_LANES];
+    _mm256_storeu_si256(lane_new.as_mut_ptr().cast(), new);
+    for (&coord, &raw) in lane_coords.iter().zip(&lane_new) {
+        table
+            .entries
+            .get_unchecked_mut(coord as usize)
+            .set_raw_bits(raw);
+    }
 }
 
 /// EXPERIMENT (v4-R R2 probes): eight lanes on a 32-byte boundary (an aligned vector store whose
@@ -1749,11 +1934,11 @@ mod tests {
     }
 
     /// v4-R R2: the probes that change the code (2 remmask, 7 misp1 + remmask, 8 pfnext, 9 nop5,
-    /// 14 pipe)
+    /// 14 pipe, 15 deferstore, 16 pair)
     /// make the same calls and leave the same table as the per-hit test.
     #[test]
     fn r2_probes_equal_the_per_hit_test() {
-        for p in [2, 7, 8, 9, 14] {
+        for p in [2, 7, 8, 9, 14, 15, 16] {
             R2_TEST_PROBE.set(p);
             batched_cells_equal_the_per_hit_test_on_random_tables();
             batched_cells_equal_the_per_hit_test_at_every_edge_of_the_test();
@@ -1858,6 +2043,22 @@ mod tests {
                                 &mut buffer,
                             ),
                             14 => x_cell_avx2_defer::<_, 14>(
+                                hits,
+                                *s,
+                                &mut table,
+                                test,
+                                &mut candidate,
+                                &mut buffer,
+                            ),
+                            15 => x_cell_avx2_defer::<_, 15>(
+                                hits,
+                                *s,
+                                &mut table,
+                                test,
+                                &mut candidate,
+                                &mut buffer,
+                            ),
+                            16 => x_cell_avx2_defer::<_, 16>(
                                 hits,
                                 *s,
                                 &mut table,

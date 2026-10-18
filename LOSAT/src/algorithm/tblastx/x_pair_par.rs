@@ -145,6 +145,11 @@ use std::sync::OnceLock;
 // counterpart.
 #[path = "x_unit_probe.rs"]
 mod x_unit_probe;
+
+// EXPERIMENT (LOSAT_X_TBXKMERGE / LOSAT_X_TBXKMERGESHADOW): the merge of a subject's unit lists
+// without the full sorts (`merge_subject`). A child module of this file, as x_unit_probe is.
+#[path = "x_kmerge.rs"]
+mod x_kmerge;
 use x_unit_probe::{XNoProbe, XProbe, XProbeSlot, XStatsProbe, XTimeProbe};
 
 // No NCBI counterpart: counters for LOSAT_X_STATS, the shadow summary and LOSAT_TIMING; they do not
@@ -317,6 +322,7 @@ fn add_ns(counter: &AtomicU64, t0: Option<Instant>) {
 /// and one LOSAT_TIMING line.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
+    x_kmerge::print_summary();
     // LOSAT_X_SEEDCOMPACT: printed whenever the switch is on, so also when the unit path does not
     // run (`LOSAT_X_PAIRPAR` off: zero counters). `bytes_saved` is what the unit outputs no longer
     // request: records x (size of `InitHSP` - size of `XUnitHsp`).
@@ -1358,12 +1364,36 @@ impl XInitSink for Vec<XUnitHsp> {
 // from `inp`.
 /// Appends the `InitHSP`s of the records of a unit of subject frame `f` to `init_hsps`.
 fn x_expand_unit(records: &[XUnitHsp], f: usize, inp: &XSubject<'_>, init_hsps: &mut Vec<InitHSP>) {
-    // `XHitCtx::s_frame` and `XHitCtx::s_idx` of the unit (`scan_unit`).
-    let s_frame = inp.s_frames_preliminary[f].frame;
-    let s_idx = inp.s_idx as u32;
-    init_hsps.extend(records.iter().map(|r| {
+    let unit = XExpand::new(f, inp);
+    init_hsps.extend(records.iter().map(|r| unit.init_hsp(r)));
+}
+
+/// The values a record of a unit of subject frame `f` is expanded with (`x_expand_unit`).
+#[derive(Clone, Copy)]
+struct XExpand<'a, 'b> {
+    f: usize,
+    /// `XHitCtx::s_frame` of the unit (`scan_unit`).
+    s_frame: i8,
+    /// `XHitCtx::s_idx` of the unit (`scan_unit`).
+    s_idx: u32,
+    inp: &'a XSubject<'b>,
+}
+
+impl<'a, 'b> XExpand<'a, 'b> {
+    fn new(f: usize, inp: &'a XSubject<'b>) -> Self {
+        Self {
+            f,
+            s_frame: inp.s_frames_preliminary[f].frame,
+            s_idx: inp.s_idx as u32,
+            inp,
+        }
+    }
+
+    /// The `InitHSP` of one record.
+    #[inline]
+    fn init_hsp(&self, r: &XUnitHsp) -> InitHSP {
         let ctx_idx = r.ctx_idx as usize;
-        let ctx = &inp.contexts[ctx_idx];
+        let ctx = &self.inp.contexts[ctx_idx];
         InitHSP {
             q_start_absolute: r.q_start,
             q_end_absolute: r.q_start + r.len,
@@ -1373,15 +1403,15 @@ fn x_expand_unit(records: &[XUnitHsp], f: usize, inp: &XSubject<'_>, init_hsps: 
             s_seed: r.s_seed,
             score: r.score,
             ctx_idx,
-            s_f_idx: f,
+            s_f_idx: self.f,
             q_idx: ctx.q_idx,
-            s_idx,
+            s_idx: self.s_idx,
             q_frame: ctx.frame,
-            s_frame,
+            s_frame: self.s_frame,
             q_orig_len: ctx.orig_len,
-            s_orig_len: inp.s_len,
+            s_orig_len: self.inp.s_len,
         }
-    }));
+    }
 }
 
 /// The unit path of one batch: the sub-lookups of its context groups.
@@ -1546,34 +1576,47 @@ impl XPairPar {
         // are the same in both.
         // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): with either variable the same units run with
         // a probe (x_unit_probe.rs); without them, the functions without probes.
+        // EXPERIMENT (LOSAT_X_TBXKMERGE): the units sort their lists (not in the shadow mode, whose
+        // merge sorts them after it has copied the unsorted lists).
+        let sort = x_kmerge::mode() == 1;
         let outputs = match (seed_compact(), x_unit_probe::mode()) {
-            (true, 0) => {
-                XUnitOutputs::Compact(self.run_units(&units, inp, pool, Self::run_unit_compact))
+            (true, 0) => XUnitOutputs::Compact(self.run_units(
+                &units,
+                inp,
+                pool,
+                Self::run_unit_compact,
+                sort,
+            )),
+            (false, 0) => {
+                XUnitOutputs::Full(self.run_units(&units, inp, pool, Self::run_unit, sort))
             }
-            (false, 0) => XUnitOutputs::Full(self.run_units(&units, inp, pool, Self::run_unit)),
             (true, 1) => XUnitOutputs::Compact(self.run_units(
                 &units,
                 inp,
                 pool,
                 Self::run_unit_compact_probed::<XTimeProbe>,
+                sort,
             )),
             (false, 1) => XUnitOutputs::Full(self.run_units(
                 &units,
                 inp,
                 pool,
                 Self::run_unit_probed::<XTimeProbe>,
+                sort,
             )),
             (true, _) => XUnitOutputs::Compact(self.run_units(
                 &units,
                 inp,
                 pool,
                 Self::run_unit_compact_probed::<XStatsProbe>,
+                sort,
             )),
             (false, _) => XUnitOutputs::Full(self.run_units(
                 &units,
                 inp,
                 pool,
                 Self::run_unit_probed::<XStatsProbe>,
+                sort,
             )),
         };
         add_ns(&NS_UNITS, t_units);
@@ -1605,6 +1648,17 @@ impl XPairPar {
     // never a group table, so the tables may already be freed when it runs.
     /// `combined_ungapped_hits` of one subject, from its units.
     pub(super) fn merge_subject(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<UngappedHit> {
+        // EXPERIMENT (LOSAT_X_TBXKMERGE / LOSAT_X_TBXKMERGESHADOW), dispatch: the same list without
+        // the full sorts (x_kmerge.rs); with the switch off the body below runs.
+        if x_kmerge::mode() != 0 {
+            return x_kmerge::merge_subject(x_units, inp);
+        }
+        Self::merge_subject_listed(x_units, inp)
+    }
+
+    /// `merge_subject` with the switch LOSAT_X_TBXKMERGE off: the units' lists in unit order,
+    /// sorted per chunk, and the frame lists appended and sorted.
+    fn merge_subject_listed(x_units: XSubjectUnits, inp: &XSubject<'_>) -> Vec<UngappedHit> {
         let XSubjectUnits {
             frame_chunks,
             units,
@@ -1761,13 +1815,23 @@ impl XPairPar {
     // LOSAT_X_SEEDUNMAP as it acts in this process (`seed_unmap_active`, `XScratch::unmap`); the
     // serial scratch never maps (section above `X_MAPPED_BYTES`, rule 3: at one thread nothing is
     // retained, mapping only costs).
-    fn run_units<T: Send>(
+    // EXPERIMENT (LOSAT_X_TBXKMERGE, x_kmerge.rs item 1): with `sort` each unit's list is sorted
+    // in the unit's own task, after its scan, by the comparator of the chunk's init sort.
+    fn run_units<T: Send + x_kmerge::XUnitSort>(
         &self,
         units: &[XUnit],
         inp: &XSubject<'_>,
         pool: &crate::utils::threading::SearchPool<'_>,
         unit_fn: impl Fn(&Self, &XUnit, &XSubject<'_>, &mut XScratch) -> T + Sync,
+        sort: bool,
     ) -> Vec<T> {
+        let run = |unit: &XUnit, scratch: &mut XScratch| {
+            let mut list = unit_fn(self, unit, inp, scratch);
+            if sort {
+                list.x_sort();
+            }
+            list
+        };
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1777,19 +1841,13 @@ impl XPairPar {
             return pool.install(|| {
                 units
                     .par_iter()
-                    .map_init(
-                        || XScratch::new(unmap),
-                        |scratch, unit| unit_fn(self, unit, inp, scratch),
-                    )
+                    .map_init(|| XScratch::new(unmap), |scratch, unit| run(unit, scratch))
                     .collect()
             });
         }
         let _ = pool;
         let mut scratch = XScratch::new(false);
-        units
-            .iter()
-            .map(|unit| unit_fn(self, unit, inp, &mut scratch))
-            .collect()
+        units.iter().map(|unit| run(unit, &mut scratch)).collect()
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:494-516
@@ -2434,64 +2492,10 @@ fn build_groups(lookup: &BlastAaLookupTable, contexts: &[QueryContext]) -> Vec<X
 // the reference loop's, every field, and stops at the first difference.
 /// Shadow check of one subject: the unit path's `combined_ungapped_hits` against the reference's.
 pub(super) fn shadow_compare(s_idx: usize, unit: &[UngappedHit], reference: &[UngappedHit]) {
-    fn same(a: &UngappedHit, b: &UngappedHit) -> bool {
-        let UngappedHit {
-            q_idx,
-            s_idx,
-            ctx_idx,
-            s_f_idx,
-            q_frame,
-            s_frame,
-            q_aa_start,
-            q_aa_end,
-            s_aa_start,
-            s_aa_end,
-            q_seed_off,
-            s_seed_off,
-            q_orig_len,
-            s_orig_len,
-            raw_score,
-            e_value,
-            num_ident,
-            hsp_list_order,
-            ordering_method,
-            linked_set,
-            start_of_chain,
-            link_id,
-            chain_next_link_id,
-            hsp_link_num,
-            num,
-        } = a;
-        *q_idx == b.q_idx
-            && *s_idx == b.s_idx
-            && *ctx_idx == b.ctx_idx
-            && *s_f_idx == b.s_f_idx
-            && *q_frame == b.q_frame
-            && *s_frame == b.s_frame
-            && *q_aa_start == b.q_aa_start
-            && *q_aa_end == b.q_aa_end
-            && *s_aa_start == b.s_aa_start
-            && *s_aa_end == b.s_aa_end
-            && *q_seed_off == b.q_seed_off
-            && *s_seed_off == b.s_seed_off
-            && *q_orig_len == b.q_orig_len
-            && *s_orig_len == b.s_orig_len
-            && *raw_score == b.raw_score
-            && e_value.to_bits() == b.e_value.to_bits()
-            && *num_ident == b.num_ident
-            && *hsp_list_order == b.hsp_list_order
-            && *ordering_method == b.ordering_method
-            && *linked_set == b.linked_set
-            && *start_of_chain == b.start_of_chain
-            && *link_id == b.link_id
-            && *chain_next_link_id == b.chain_next_link_id
-            && *hsp_link_num == b.hsp_link_num
-            && *num == b.num
-    }
     let n = unit.len().max(reference.len());
     for k in 0..n {
         match (unit.get(k), reference.get(k)) {
-            (Some(a), Some(b)) if same(a, b) => {}
+            (Some(a), Some(b)) if x_same_hit(a, b) => {}
             (a, b) => panic!(
                 "LOSAT_X_PAIRPARSHADOW: subject {s_idx} frame {:?} index {k} differs (unit {} hits, reference {} hits): unit {a:?} vs reference {b:?}",
                 a.or(b).map(|h| h.s_f_idx),
@@ -2502,6 +2506,63 @@ pub(super) fn shadow_compare(s_idx: usize, unit: &[UngappedHit], reference: &[Un
     }
     SHADOW_SUBJECTS.fetch_add(1, AtomicOrdering::Relaxed);
     SHADOW_HSPS.fetch_add(reference.len() as u64, AtomicOrdering::Relaxed);
+}
+
+/// Every field of `a` equals the one of `b` (the e-value by its bits); the comparison of the
+/// shadow modes (`shadow_compare`, LOSAT_X_TBXKMERGESHADOW).
+fn x_same_hit(a: &UngappedHit, b: &UngappedHit) -> bool {
+    let UngappedHit {
+        q_idx,
+        s_idx,
+        ctx_idx,
+        s_f_idx,
+        q_frame,
+        s_frame,
+        q_aa_start,
+        q_aa_end,
+        s_aa_start,
+        s_aa_end,
+        q_seed_off,
+        s_seed_off,
+        q_orig_len,
+        s_orig_len,
+        raw_score,
+        e_value,
+        num_ident,
+        hsp_list_order,
+        ordering_method,
+        linked_set,
+        start_of_chain,
+        link_id,
+        chain_next_link_id,
+        hsp_link_num,
+        num,
+    } = a;
+    *q_idx == b.q_idx
+        && *s_idx == b.s_idx
+        && *ctx_idx == b.ctx_idx
+        && *s_f_idx == b.s_f_idx
+        && *q_frame == b.q_frame
+        && *s_frame == b.s_frame
+        && *q_aa_start == b.q_aa_start
+        && *q_aa_end == b.q_aa_end
+        && *s_aa_start == b.s_aa_start
+        && *s_aa_end == b.s_aa_end
+        && *q_seed_off == b.q_seed_off
+        && *s_seed_off == b.s_seed_off
+        && *q_orig_len == b.q_orig_len
+        && *s_orig_len == b.s_orig_len
+        && *raw_score == b.raw_score
+        && e_value.to_bits() == b.e_value.to_bits()
+        && *num_ident == b.num_ident
+        && *hsp_list_order == b.hsp_list_order
+        && *ordering_method == b.ordering_method
+        && *linked_set == b.linked_set
+        && *start_of_chain == b.start_of_chain
+        && *link_id == b.link_id
+        && *chain_next_link_id == b.chain_next_link_id
+        && *hsp_link_num == b.hsp_link_num
+        && *num == b.num
 }
 
 #[cfg(test)]
@@ -3641,10 +3702,12 @@ mod tests {
     ) -> CompactSeen {
         let inp = case.inp();
         let (frame_chunks, units) = list_units(&case.pp, &inp, max_dbseq_len);
-        let full = case.pp.run_units(&units, &inp, pool, XPairPar::run_unit);
+        let full = case
+            .pp
+            .run_units(&units, &inp, pool, XPairPar::run_unit, false);
         let compact = case
             .pp
-            .run_units(&units, &inp, pool, XPairPar::run_unit_compact);
+            .run_units(&units, &inp, pool, XPairPar::run_unit_compact, false);
         assert_eq!((full.len(), compact.len()), (units.len(), units.len()));
         let mut seen = CompactSeen {
             units: units.len(),
@@ -3886,7 +3949,8 @@ mod tests {
     // ```
     // The listing of the tests (`list_units`) is the listing of `run_subject_units` at
     // MAX_DBSEQ_LEN, and `run_subject_units` gives the form the switch of this process selects
-    // (today's lists without LOSAT_X_SEEDCOMPACT), with the lists of `run_units`.
+    // (today's lists without LOSAT_X_SEEDCOMPACT), with the lists of `run_units` (sorted by the
+    // units where LOSAT_X_TBXKMERGE is on, x_kmerge.rs item 1).
     #[test]
     fn seed_compact_test_listing_is_run_subject_units() {
         let mut rng = Rng(0x5eed_c0de_0000_0004);
@@ -3907,14 +3971,25 @@ mod tests {
                 (false, XUnitOutputs::Full(outputs)) => {
                     assert_eq!(
                         outputs,
-                        case.pp.run_units(&units, &inp, &serial, XPairPar::run_unit)
+                        case.pp.run_units(
+                            &units,
+                            &inp,
+                            &serial,
+                            XPairPar::run_unit,
+                            x_kmerge::mode() == 1
+                        )
                     );
                 }
                 (true, XUnitOutputs::Compact(outputs)) => {
                     assert_eq!(
                         outputs,
-                        case.pp
-                            .run_units(&units, &inp, &serial, XPairPar::run_unit_compact)
+                        case.pp.run_units(
+                            &units,
+                            &inp,
+                            &serial,
+                            XPairPar::run_unit_compact,
+                            x_kmerge::mode() == 1
+                        )
                     );
                 }
                 (on, _) => panic!("run_subject_units chose the other form (switch {on})"),
@@ -4150,7 +4225,7 @@ mod tests {
                 assert_eq!(pool.enabled(), threads > 1);
                 let got = case
                     .pp
-                    .run_units(&units, &inp, pool, XPairPar::run_unit_compact);
+                    .run_units(&units, &inp, pool, XPairPar::run_unit_compact, false);
                 assert_eq!(got, expected, "threads {threads}");
                 Ok(())
             })

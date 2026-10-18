@@ -139,7 +139,7 @@ pub fn trace_init_hsp_if_match(stage: &str, init: &InitHSP, contexts: &[QueryCon
 // comparator orders HSPs that have identical context-relative coordinates in
 // different query frames by context. ScoreCompareHSPs (blast_hits.c:1330-1353)
 // cannot: it only sees context-relative offsets and ties.
-fn score_compare_init_hsps_ncbi(a: &InitHSP, b: &InitHSP) -> Ordering {
+pub(crate) fn score_compare_init_hsps_ncbi(a: &InitHSP, b: &InitHSP) -> Ordering {
     b.score
         .cmp(&a.score)
         .then_with(|| a.s_start.cmp(&b.s_start))
@@ -248,6 +248,23 @@ pub fn get_ungapped_hsp_list(
 // the final sort covers all of it.
 /// `get_ungapped_hsp_list` into `ungapped_hits`, which must be empty (its capacity is kept).
 pub fn get_ungapped_hsp_list_into(
+    init_hsps: Vec<InitHSP>,
+    contexts: &[QueryContext],
+    s_frames: &[QueryFrame],
+    ungapped_hits: Vec<UngappedHit>,
+) -> Vec<UngappedHit> {
+    let mut ungapped_hits =
+        convert_init_hsps_unsorted(init_hsps, contexts, s_frames, ungapped_hits);
+    sort_converted_hsps_by_score_ncbi(&mut ungapped_hits);
+    ungapped_hits
+}
+
+// The loop of `get_ungapped_hsp_list_into` before its final sort, a function of its own so that
+// EXPERIMENT (LOSAT_X_TBXKMERGE, x_kmerge.rs) can convert with the same statements and replace only
+// the sort; `get_ungapped_hsp_list_into` is this function followed by
+// `sort_converted_hsps_by_score_ncbi`.
+/// The HSPs of `init_hsps` in their order, pushed onto `ungapped_hits`, which must be empty.
+pub(crate) fn convert_init_hsps_unsorted(
     init_hsps: Vec<InitHSP>,
     contexts: &[QueryContext],
     s_frames: &[QueryFrame],
@@ -407,7 +424,11 @@ pub fn get_ungapped_hsp_list_into(
         trace_ungapped_hit_if_match("after_get_ungapped_hsp_list", &uh);
         ungapped_hits.push(uh);
     }
+    ungapped_hits
+}
 
+/// The final sort of `get_ungapped_hsp_list_into` (`Blast_HSPListSortByScore`).
+fn sort_converted_hsps_by_score_ncbi(ungapped_hits: &mut [UngappedHit]) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:4719-4775
     // ```c
     // Blast_HSPListSaveHSP(hsp_list, new_hsp);
@@ -431,10 +452,9 @@ pub fn get_ungapped_hsp_list_into(
     //           ScoreCompareHSPs);
     // }
     // ```
-    if !ungapped_hits_is_sorted_by_score_ncbi(&ungapped_hits) {
-        sort_ungapped_hits_by_score_ncbi(&mut ungapped_hits);
+    if !ungapped_hits_is_sorted_by_score_ncbi(ungapped_hits) {
+        sort_ungapped_hits_by_score_ncbi(ungapped_hits);
     }
-    ungapped_hits
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353

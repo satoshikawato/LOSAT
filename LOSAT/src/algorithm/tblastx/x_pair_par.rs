@@ -311,15 +311,15 @@ fn seed_unmap_active() -> bool {
 
 // EXPERIMENT (LOSAT_X_TBXPREFETCH, module doc): the unit scan prefetches the cell of the hit this
 // many entries ahead in its `scansub` batch. 16 hits are about 16 x 4 ns of scan on the measured
-// CPUs, longer than a load from memory. No NCBI counterpart.
+// CPUs, longer than a load from L3, where the tables that gained fit. No NCBI counterpart.
 const X_PREFETCH_AHEAD: usize = 16;
 // The built-in number of the switch: the smallest largest-unit table, in KiB, of a subject whose
 // units prefetch. Measured with the hint on every table (A/B in docs/agents/diagnostics.md, entry
 // `LOSAT_X_TBXPREFETCH`): tables of 1.65 MiB and more gained on both measured CPUs (L2 of one core
 // 1.25 MiB on the Xeon 6338, 2 MiB on the i9-14900HX), 1.18 MiB lost 0.7 %; 1.5 MiB lies between.
 const X_PREFETCH_MIN_KIB: usize = 1536;
-// The largest number the switch takes (4 GiB of table); a larger or non-numeric value gives the
-// built-in one (`xswitch::value`).
+// The largest number the switch takes (4 GiB of table); a value outside 2..=X_PREFETCH_MAX_KIB
+// other than `0`, or a non-numeric one, gives the built-in (`xswitch::value`).
 const X_PREFETCH_MAX_KIB: usize = 1 << 22;
 
 // No NCBI counterpart: a cache hint in LOSAT's unit scan (module doc); NCBI's loop gives none, and
@@ -349,7 +349,7 @@ fn tbx_prefetch_min_kib() -> Option<usize> {
 /// Whether the units whose tables have `table_bytes` prefetch at the switch's value `min_kib`: one
 /// of them has at least `min_kib` KiB.
 fn x_prefetch_units(min_kib: Option<usize>, mut table_bytes: impl Iterator<Item = usize>) -> bool {
-    min_kib.is_some_and(|kib| table_bytes.any(|bytes| bytes >= kib * 1024))
+    min_kib.is_some_and(|kib| table_bytes.any(|bytes| bytes / 1024 >= kib))
 }
 
 // No NCBI counterpart: LOSAT_TIMING read once; it does not change any value NCBI computes.
@@ -1593,8 +1593,8 @@ impl XPairPar {
         }
 
         let t_units = timing().then(Instant::now);
-        // EXPERIMENT (LOSAT_X_TBXPREFETCH, module doc): the subject's units scan with the
-        // prefetch where one of their tables is large enough; the units and their order are the
+        // EXPERIMENT (LOSAT_X_TBXPREFETCH, module doc): all units of the subject scan with the
+        // prefetch when one of their tables is large enough; the units and their order are the
         // same either way.
         let prefetch = x_prefetch_units(
             tbx_prefetch_min_kib(),
@@ -1789,6 +1789,7 @@ impl XPairPar {
     // EXPERIMENT (LOSAT_X_TBXPREFETCH): `PF` picks the unit functions with the prefetch (module
     // doc); each (form, probe, `PF`) is its own function item, so `run_units` and the scan are
     // compiled once for each and the scan without the hint keeps its own code.
+    // No NCBI counterpart: dispatch only.
     /// The units of one subject, run by the unit function of the switches' choice.
     fn run_subject_unit_fns<const PF: bool>(
         &self,
@@ -1841,10 +1842,9 @@ impl XPairPar {
     // or in order on the calling thread when the search has one thread. `unit_fn` is
     // `Self::run_unit` (today's lists) or `Self::run_unit_compact` (LOSAT_X_SEEDCOMPACT), each
     // with or without LOSAT_X_TBXPREFETCH's hint (`PF`), a function item, so this function is
-    // compiled once for each. The scratches of the pool carry
-    // LOSAT_X_SEEDUNMAP as it acts in this process (`seed_unmap_active`, `XScratch::unmap`); the
-    // serial scratch never maps (section above `X_MAPPED_BYTES`, rule 3: at one thread nothing is
-    // retained, mapping only costs).
+    // compiled once for each. The scratches of the pool carry LOSAT_X_SEEDUNMAP as it acts in this
+    // process (`seed_unmap_active`, `XScratch::unmap`); the serial scratch never maps (section
+    // above `X_MAPPED_BYTES`, rule 3: at one thread nothing is retained, mapping only costs).
     fn run_units<T: Send>(
         &self,
         units: &[XUnit],
@@ -2136,8 +2136,9 @@ impl XPairPar {
                             let ahead = &*offset_pairs_ptr.add(i + X_PREFETCH_AHEAD);
                             let cell =
                                 ahead.q_off.wrapping_sub(ahead.s_off).wrapping_sub(lo) as usize;
-                            core::arch::x86_64::_mm_prefetch::<{ core::arch::x86_64::_MM_HINT_T0 }>(
+                            core::arch::x86_64::_mm_prefetch(
                                 diag_ptr.wrapping_add(cell) as *const i8,
+                                core::arch::x86_64::_MM_HINT_T0,
                             );
                         }
                     }
@@ -4280,7 +4281,7 @@ mod tests {
     }
 
     // LOSAT_X_TBXPREFETCH's rule at its boundaries: off, never; on, only where one of the tables
-    // has at least the switch's number of KiB (the built-in 2,048 and the smallest value, 2).
+    // has at least the switch's number of KiB (the built-in 1,536 and the smallest value, 2).
     #[test]
     fn tbx_prefetch_rule_at_its_boundaries() {
         let built_in = X_PREFETCH_MIN_KIB * 1024;

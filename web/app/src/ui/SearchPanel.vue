@@ -23,10 +23,10 @@ const options = computed(() => state.value.description?.parameters);
 const values = computed(() => state.value.values[state.value.program]);
 const roles: readonly InputRole[] = ['query', 'subject'];
 
-/** Threads offered besides Auto: up to the logical processors (at most 16). */
+/** Threads offered besides Auto: up to the logical processors (at most 32, Auto's maximum). */
 const threadChoices = computed(() => {
   const hardware = Number.isInteger(navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 4;
-  return Array.from({ length: Math.max(1, Math.min(16, hardware)) }, (_, i) => i + 1);
+  return Array.from({ length: Math.max(1, Math.min(32, hardware)) }, (_, i) => i + 1);
 });
 
 const waiting = computed(() => props.runs.filter((run) => !isTerminal(run.status)).length);
@@ -161,7 +161,10 @@ function onThreads(event: Event): void {
             <option v-for="n in threadChoices" :key="n" :value="String(n)">{{ n }}</option>
           </select>
         </label>
-        <span class="hint">Auto runs small searches on one thread and larger ones on up to four.</span>
+        <span class="hint">
+          Auto runs small searches on one thread and larger ones on up to half the logical processors (at most 8
+          below 1 MB of input, at most 32 above).
+        </span>
       </div>
       <p v-if="readiness" class="notice" data-testid="draft-readiness">{{ readiness }}</p>
       <p class="validation" :data-state="state.validation.state" data-testid="argv-validation" aria-live="polite">

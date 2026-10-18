@@ -294,8 +294,7 @@ function createImports(wasi, memory, spawnThread, extra) {
   };
 }
 
-async function instantiateWithMemory(module, memory, args, spawnThread, provided) {
-  const wasi = createWasi(args);
+async function instantiateWithMemory(module, memory, args, spawnThread, provided, wasi = createWasi(args)) {
   const instance = await WebAssembly.instantiate(
     module,
     createImports(wasi, memory, spawnThread, hostImports(module, provided)),
@@ -587,12 +586,17 @@ if (!isMainThread) {
       const module = workerModule || await compileThreadedModule(wasmPath);
       const spawnThread = () => -1;
       const view = new Int32Array(control);
-      let waits = standby !== undefined;
+      let waits = standby !== undefined, wasi = null;
       for (;;) {
         debug(waits ? `worker instantiate ${name}` : `worker instantiate tid=${tid} start_arg=${startArg}`);
-        // A new instance on the shared memory for every guest thread, recycled worker or not.
-        const { instance, wasi } = await instantiateWithMemory(module, memory, args, spawnThread);
-        initializeWasiThreadInstance(wasi, instance);
+        // A new instance on the shared memory for every guest thread, recycled worker or not. A
+        // recycled worker keeps its one WASI context (bound once to the same shared memory): a
+        // new context per thread would hold one more open preopen descriptor for each thread.
+        const created = wasi === null;
+        const instantiated = await instantiateWithMemory(module, memory, args, spawnThread, undefined, wasi ?? undefined);
+        const { instance } = instantiated;
+        wasi = instantiated.wasi;
+        if (created) initializeWasiThreadInstance(wasi, instance);
         if (typeof instance.exports.wasi_thread_start !== "function") {
           throw new Error(`${wasmPath} does not export wasi_thread_start`);
         }

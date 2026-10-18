@@ -90,7 +90,8 @@
 //! saturated values, minus infinity plus a score) is `< thr` in both computations, so it cannot
 //! win the `max` of a surviving cell, change which cells are dropped, or change a script bit the
 //! traceback walk reads (the walk only visits surviving cells). Each lane here holds exactly the
-//! value the 128-bit kernel holds for the same cell:
+//! value the 128-bit kernel holds for the same cell, except the values below the threshold that
+//! the last item changes:
 //!
 //! - Same stored values (`score - base + bias`, 0 = minus infinity), the same `bias`, rebase
 //!   limit and acceptance tests, and lookup tables with the bytes of `build_row_table`.
@@ -110,10 +111,26 @@
 //!   the next block is below the threshold, or at the end of `B` (or the fence). A 32-lane step
 //!   is taken while more than 16 lanes of the band are left, so a row may run up to 16 lanes past
 //!   the point where the 128-bit kernel stops. Those lanes lie past the band with a row gap below
-//!   the threshold and nothing above it from the previous row, so they are dropped (H = 0, E
-//!   cleared right of the last survivor) and change nothing. The first and last survivors, hence
-//!   the band of the next row, the cell count, the best cell and the traceback rows the walk
-//!   reads are those of the 128-bit kernel. The traceback walk is the 128-bit kernels' `finish`.
+//!   the threshold and nothing above it from the previous row, so they are dropped (H = 0; E 0
+//!   from the clearing at the row end, or from the block itself in the 8-bit `EM` instances) and
+//!   change nothing. The first and last survivors, hence the band of the next row, the cell
+//!   count, the best cell and the traceback rows the walk reads are those of the 128-bit kernel.
+//!   The traceback walk is the 128-bit kernels' `finish`.
+//! - Row end of the 8-bit lanes (`LOSAT_X_DPEMASK`, the `EM` instances of `align8`; on by
+//!   default): each block stores the E of a dropped cell as 0 (minus infinity) instead of
+//!   `max(H - gap_open_extend, E - gap_extend)`, and the row no longer clears E right of its last
+//!   survivor (it also keeps the high-water mark `dirty8` as a max, the same value). A dropped
+//!   cell has `H < thr` and `E <= H`, so the E it passes down is below the threshold in both
+//!   forms. What differs downstream is gap states below the threshold, and the gap-extension
+//!   script bits that only such gap states decide; the walk reads such a bit only where it enters
+//!   a cell through a gap whose state is at least the threshold, so no surviving cell's score,
+//!   drop decision or script bit the walk reads changes (the argument above). Every lane right of
+//!   the last survivor was dropped in the row that last wrote it (a lane the next row reads but
+//!   this row did not write lies right of the band of the row after the one that wrote it), so it
+//!   holds 0 without the clearing. Without the clearing the next row's E loads no longer overlap
+//!   a store whose address the end of the row decides, which made them wait until that store was
+//!   written (line R, R1). The 16-bit lanes keep the clearing: there the store-forward blocks
+//!   were 0.1-0.2 per row and the change gained nothing.
 //!
 //! Less work per row and per call than the 128-bit kernels: wider steps, first and last
 //! survivor tracked while the row runs (no survivor bitmap), the first lane's missing diagonal
@@ -167,6 +184,12 @@ pub(super) fn switch_on() -> bool {
     crate::utils::xswitch::on("LOSAT_X_DPAVX2") && available()
 }
 
+/// No NCBI counterpart: LOSAT_X_DPEMASK on (`utils/xswitch.rs`): the `EM` instances of `align8`
+/// (E of dropped cells stored as minus infinity, no E clearing at the row end).
+pub(super) fn emask_on() -> bool {
+    crate::utils::xswitch::on("LOSAT_X_DPEMASK")
+}
+
 /// No NCBI counterpart: AVX2 and the features of the 128-bit AVX build (LOSAT_X_DPNOAVX, which
 /// turns that build off, turns these kernels off too).
 pub(super) fn available() -> bool {
@@ -180,8 +203,8 @@ pub(super) fn available() -> bool {
 /// ```
 /// Dispatch point of the 256-bit kernels: `tb == false` is the score-only recurrence
 /// (`Blast_SemiGappedAlign`, `s_BlastAlignPackedNucl`), `tb == true` is `ALIGN_EX`. The lane width
-/// is the one the 128-bit dispatch would choose (`fits_8bit`). None: not handled here; the caller
-/// runs the 128-bit dispatch.
+/// is the one the 128-bit dispatch would choose (`fits_8bit`). `em`: the `EM` instances of
+/// `align8` (LOSAT_X_DPEMASK). None: not handled here; the caller runs the 128-bit dispatch.
 ///
 /// # Safety
 /// `available()` must be true.
@@ -196,11 +219,61 @@ pub(super) unsafe fn align(
     x_drop: i32,
     tb: bool,
     check_fence: bool,
+    em: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    if em {
+        dispatch::<true>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            sc,
+        )
+    } else {
+        dispatch::<false>(
+            q,
+            s,
+            scores,
+            len1,
+            len2,
+            gap_open,
+            gap_extend,
+            x_drop,
+            tb,
+            check_fence,
+            sc,
+        )
+    }
+}
+
+/// No NCBI counterpart: `align` for one choice of `EM`.
+///
+/// # Safety
+/// `available()` must be true.
+#[inline(always)]
+unsafe fn dispatch<const EM: bool>(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    tb: bool,
+    check_fence: bool,
     sc: &mut XdropScratch,
 ) -> Option<XdropResult> {
     let m8 = fits_8bit(scores, gap_open, gap_extend, x_drop);
     match (tb, m8) {
-        (true, Some(m)) => align8::<true>(
+        (true, Some(m)) => align8::<true, EM>(
             q,
             s,
             scores,
@@ -213,7 +286,7 @@ pub(super) unsafe fn align(
             check_fence,
             sc,
         ),
-        (false, Some(m)) => align8::<false>(
+        (false, Some(m)) => align8::<false, EM>(
             q,
             s,
             scores,
@@ -1000,9 +1073,9 @@ struct C8 {
 ///                 score_array[b_index].best = score;
 /// ```
 /// One block of 32 cells on 8-bit lanes: the lane operations of the 128-bit `block8`, row gap as
-/// at the head of this file. Returns (drop mask, script).
+/// at the head of this file. `EM`: E of a dropped cell stored as 0. Returns (drop mask, script).
 #[inline(always)]
-unsafe fn block8<const TB: bool>(
+unsafe fn block8<const TB: bool, const EM: bool>(
     c: &C8,
     rs: &mut Row,
     hr: *const u8,
@@ -1045,6 +1118,12 @@ unsafe fn block8<const TB: bool>(
     }
     let drop = _mm256_cmpgt_epi8(thr, hh);
     st(hw.add(b), _mm256_andnot_si256(drop, hh));
+    // LOSAT_X_DPEMASK: the E of a dropped cell as minus infinity
+    let en = if EM {
+        _mm256_andnot_si256(drop, en)
+    } else {
+        en
+    };
     st(e.add(b), en);
     let scr = if TB {
         let me = _mm256_cmpgt_epi8(ep, d);
@@ -1076,7 +1155,7 @@ struct RowX {
 /// ```
 /// `block8` on 16 lanes (the tail of a row and the row-gap extension), with the same values.
 #[inline(always)]
-unsafe fn block8x<const TB: bool>(
+unsafe fn block8x<const TB: bool, const EM: bool>(
     c: &C8,
     rs: &mut RowX,
     rec_b: &mut usize,
@@ -1126,6 +1205,8 @@ unsafe fn block8x<const TB: bool>(
     }
     let drop = _mm_cmpgt_epi8(thr, hh);
     stx(hw.add(b), _mm_andnot_si128(drop, hh));
+    // LOSAT_X_DPEMASK: the E of a dropped cell as minus infinity
+    let en = if EM { _mm_andnot_si128(drop, en) } else { en };
     stx(e.add(b), en);
     let scr = if TB {
         let c3 = _mm256_castsi256_si128(c.c3);
@@ -1160,7 +1241,7 @@ unsafe fn block8x<const TB: bool>(
 // The whole DP on 8-bit lanes, the steps of the 128-bit `align_body8` in the same order. `max_m`
 // is the largest score of the matrix (`fits_8bit`). None for a problem the lanes do not hold.
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-unsafe fn align8<const TB: bool>(
+unsafe fn align8<const TB: bool, const EM: bool>(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,
@@ -1363,7 +1444,7 @@ unsafe fn align8<const TB: bool>(
             } else {
                 Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
             };
-            let (d0, r0) = block8::<TB>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
+            let (d0, r0) = block8::<TB, EM>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
             hpm = zero;
             if TB {
                 st(tr.add(b0 - first), r0);
@@ -1405,7 +1486,7 @@ unsafe fn align8<const TB: bool>(
             } else {
                 Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
             };
-            let (d0, r0) = block8x::<TB>(
+            let (d0, r0) = block8x::<TB, EM>(
                 &c,
                 &mut rx,
                 &mut rec_b,
@@ -1432,7 +1513,10 @@ unsafe fn align8<const TB: bool>(
             b0 += 16;
         }
         let proc_end = b0;
-        if proc_end > sc.dirty8 {
+        if EM {
+            // the high-water mark without a branch (its mispredictions were half of the row's)
+            sc.dirty8 = sc.dirty8.max(proc_end);
+        } else if proc_end > sc.dirty8 {
             sc.dirty8 = proc_end;
         }
         let wi = 1 - cur;
@@ -1461,10 +1545,13 @@ unsafe fn align8<const TB: bool>(
             break;
         }
         let last = hi_surv;
-        let mut b = last + 1;
-        while b < proc_end {
-            st(e.add(b), zero);
-            b += 32;
+        if !EM {
+            // columns right of the last survivor leave the band: E = -inf
+            let mut b = last + 1;
+            while b < proc_end {
+                st(e.add(b), zero);
+                b += 32;
+            }
         }
         first = lo_surv;
         b_size = last + 1;
@@ -1494,7 +1581,10 @@ mod tests {
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     enum Kern {
         V128,
+        /// the default instances (`EM` of the 8-bit lanes, LOSAT_X_DPEMASK)
         V256,
+        /// LOSAT_X_DPEMASK=0: the 8-bit lanes' row end of before (16-bit lanes: the same kernel)
+        V256Z,
         W128,
     }
 
@@ -1531,16 +1621,22 @@ mod tests {
                 kernel::align_avx::<false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
             (Kern::V256, true, Some(m)) => {
-                align8::<true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<true, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
             (Kern::V256, false, Some(m)) => {
-                align8::<false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+                align8::<false, true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
-            (Kern::V256, true, None) => {
+            (Kern::V256 | Kern::V256Z, true, None) => {
                 align16::<true>(q, s, scores, len1, len2, go, ge, x, cf, sc)
             }
-            (Kern::V256, false, None) => {
+            (Kern::V256 | Kern::V256Z, false, None) => {
                 align16::<false>(q, s, scores, len1, len2, go, ge, x, cf, sc)
+            }
+            (Kern::V256Z, true, Some(m)) => {
+                align8::<true, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
+            }
+            (Kern::V256Z, false, Some(m)) => {
+                align8::<false, false>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
             }
             (Kern::W128, true, Some(m)) => {
                 w128::run8::<true>(q, s, scores, m, len1, len2, go, ge, x, cf, sc)
@@ -1690,7 +1786,11 @@ mod tests {
             .and_then(|v| v.parse().ok())
             .unwrap_or(600);
         let mut rng = Rng(0xD1B5_4A32_D192_ED03);
-        let (mut sc128, mut sc256) = (XdropScratch::new(), XdropScratch::new());
+        let (mut sc128, mut sc256, mut sc256z) = (
+            XdropScratch::new(),
+            XdropScratch::new(),
+            XdropScratch::new(),
+        );
         // [width 8 / 16][tb][reverse]
         let mut handled = [[[0usize; 2]; 2]; 2];
         let (mut fences, mut ops_total, mut declined, mut wide) = (0usize, 0usize, 0usize, 0usize);
@@ -1859,6 +1959,33 @@ mod tests {
                                 &mut sc256,
                             )
                         };
+                        // on 16-bit lanes V256Z is the same `align16` call
+                        let r256z = if !wide8 {
+                            r256
+                        } else {
+                            // SAFETY: AVX2 detected above.
+                            unsafe {
+                                run(
+                                    Kern::V256Z,
+                                    m,
+                                    tb,
+                                    &rows,
+                                    &cols,
+                                    &scores,
+                                    len1,
+                                    len2,
+                                    go,
+                                    ge,
+                                    x,
+                                    tb,
+                                    &mut sc256z,
+                                )
+                            }
+                        };
+                        assert_eq!(r256, r256z, "{tag}: 256 vs 256 with the E clearing");
+                        if wide8 && r256.is_some() {
+                            assert_eq!(sc256.ops, sc256z.ops, "{tag}: 256 vs 256z ops");
+                        }
                         match (r128, r256) {
                             (Some(a), Some(b)) => {
                                 assert_eq!(a, b, "{tag}: 128 vs 256");
@@ -2025,6 +2152,34 @@ mod tests {
                 }
                 None => declined += 1,
             }
+            // SAFETY: AVX2 checked above.
+            let r256z = unsafe {
+                run(
+                    Kern::V256Z,
+                    m8,
+                    p.tb,
+                    &q,
+                    &s,
+                    &scores,
+                    args.0,
+                    args.1,
+                    args.2,
+                    args.3,
+                    args.4,
+                    p.check_fence,
+                    &mut sb,
+                )
+            };
+            assert_eq!(
+                r256z, r256,
+                "problem {i}: 256-bit with the E clearing vs without"
+            );
+            if r256z.is_some() {
+                assert_eq!(
+                    sb.ops, p.ops,
+                    "problem {i}: 256-bit (E clearing) ops vs recorded"
+                );
+            }
             // SAFETY: AVX2 checked above (the 128-bit kernels need a subset of its features).
             let rw = unsafe {
                 run(
@@ -2184,7 +2339,7 @@ mod tests {
                             let sc = match k {
                                 Kern::V128 => &mut sa,
                                 Kern::W128 => &mut sw,
-                                Kern::V256 => &mut sb,
+                                Kern::V256 | Kern::V256Z => &mut sb,
                             };
                             let total = if warm {
                                 let mut ns = 0f64;

@@ -466,9 +466,45 @@ fn call(p: &Prob<'_>, tb: bool, sc: &mut XdropScratch) -> Option<XdropResult> {
     let kern = KERN.with(|k| k.get());
     // SAFETY: `available()` is checked before any call.
     unsafe {
+        if kern != 0 && fits_8bit(&p.scores, p.go, p.ge, p.x).is_none() {
+            // 16-bit problems: the align16 copy (copy, emask, emaskld)
+            return match (tb, kern) {
+                (false, 1) => probe::align16_probe::<false, 0>(
+                    &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (false, 13) => probe::align16_probe::<false, 9>(
+                    &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (false, 14) => probe::align16_probe::<false, 10>(
+                    &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (true, 1) => probe::align16_probe::<true, 0>(
+                    &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (true, 13) => probe::align16_probe::<true, 9>(
+                    &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (true, 14) => probe::align16_probe::<true, 10>(
+                    &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                _ => panic!("kernel {kern} has no 16-bit copy"),
+            };
+        }
         if kern != 0 {
             let m = fits_8bit(&p.scores, p.go, p.ge, p.x)?;
             return match (tb, kern) {
+                (false, 13) => probe::align8_probe::<false, 9, 1000>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (false, 14) => probe::align8_probe::<false, 10, 0>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (true, 13) => probe::align8_probe::<true, 9, 1000>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (true, 14) => probe::align8_probe::<true, 10, 0>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
                 (false, 1) => probe::align8_probe::<false, 0, 0>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
@@ -561,12 +597,20 @@ fn r1_loop() {
         Some("oraclez") => 10,
         Some("elat4") => 11,
         Some("hslat4") => 12,
+        Some("emask") => 13,
+        Some("emaskld") => 14,
         Some(k) => panic!(
-            "R1_KERN must be orig, copy, nodirty, lat4, addr4, nop30, alu20, oracle, oraclelat4, oraclez, elat4 or hslat4, not {k}"
+            "R1_KERN must be orig, copy, nodirty, lat4, addr4, nop30, alu20, oracle, oraclelat4, oraclez, elat4, hslat4, emask or emaskld, not {k}"
         ),
     };
-    assert!(kern == 0 || w8, "the probe copies are 8-bit kernels");
-    assert!(kern <= 2 || !tb, "the latency / issue probes are score-only");
+    assert!(
+        kern == 0 || w8 || matches!(kern, 1 | 13 | 14),
+        "the 16-bit copy runs copy, emask and emaskld only"
+    );
+    assert!(
+        kern <= 2 || !tb || matches!(kern, 13 | 14),
+        "the latency / issue probes are score-only"
+    );
     KERN.with(|k| k.set(kern));
     let t_load = Instant::now();
     let probs = load_dir(std::path::Path::new(&dir)).expect("read the capture files");
@@ -773,7 +817,7 @@ fn r1_loop() {
         },
         if spread_on { "spread" } else { "as-is" },
         ["orig", "copy", "nodirty", "lat4", "addr4", "nop30", "alu20", "oracle", "oraclelat4", "-", "oraclez", "elat4",
-          "hslat4"]
+          "hslat4", "emask", "emaskld"]
             [kern as usize],
         st.line()
     );
@@ -808,9 +852,11 @@ mod probe {
         SCRIPT_EXTEND_GAP_A, SCRIPT_EXTEND_GAP_B, SCRIPT_GAP_IN_A, SCRIPT_SUB, TAB,
     };
     use super::super::{
-        bcast128, build_row, fill_cols, last8, ld, ldx, lut32, lut32x, pmax8, pmax8x, st, stx,
-        up1_8, Row, RowX, C8, LANE_MASK8, LANE_MASK8X, W, X,
+        bcast128, build_row, fill_cols, last16, last8, ld, ldx, lut32, lut32x, pmax16, pmax8,
+        pmax8x, st, stx, up1_16, up1_8, Row, RowX, C16, C8, KB7X2, LANE_MASK16, LANE_MASK8,
+        LANE_MASK8X, W, X,
     };
+    use super::super::super::{MAX_M, VMAX};
     use core::arch::x86_64::*;
     #[allow(unused_imports)]
     use super::super::super::fits_8bit;
@@ -827,9 +873,14 @@ mod probe {
         s: W,
         lane_mask: Option<W>,
         hpm: W,
+        emk: Option<W>,
     ) -> (W, W) {
         let hp = _mm256_andnot_si256(hpm, ld(hr.add(b).sub(1)));
-        let ep = ld(e.add(b));
+        let mut ep = ld(e.add(b));
+        if let Some(m) = emk {
+            // probe (emaskld): lanes right of the last row's last survivor read as minus infinity
+            ep = _mm256_and_si256(ep, m);
+        }
         let d = _mm256_adds_epi8(hp, s);
         let h0 = _mm256_max_epi8(d, ep);
         let v = _mm256_subs_epu8(h0, c.goe);
@@ -873,6 +924,10 @@ mod probe {
             // probe: four cycles on the stored E only (the next row's E loads)
             core::arch::asm!("vpor {0}, {0}, {0}", inout(ymm_reg) en, options(pure, nomem, nostack));
         }
+        if LAT == 1000 {
+            // probe (emask): E of a dropped cell stored as minus infinity
+            en = _mm256_andnot_si256(drop, en);
+        }
         st(hw.add(b), hs);
         st(e.add(b), en);
         let scr = if TB {
@@ -902,6 +957,7 @@ mod probe {
         s: X,
         lane_mask: Option<X>,
         hpm: X,
+        emk: Option<X>,
     ) -> (X, X) {
         let goe = _mm256_castsi256_si128(c.goe);
         let ge1 = _mm256_castsi256_si128(c.ge1);
@@ -909,7 +965,10 @@ mod probe {
         let xv = _mm256_castsi256_si128(c.xv);
         let k15 = _mm256_castsi256_si128(c.kb15);
         let hp = _mm_andnot_si128(hpm, ldx(hr.add(b).sub(1)));
-        let ep = ldx(e.add(b));
+        let mut ep = ldx(e.add(b));
+        if let Some(m) = emk {
+            ep = _mm_and_si128(ep, m);
+        }
         let d = _mm_adds_epi8(hp, s);
         let h0 = _mm_max_epi8(d, ep);
         let v = _mm_subs_epu8(h0, goe);
@@ -949,6 +1008,9 @@ mod probe {
         }
         for _ in 0..(if LAT == 40 { 4 } else { 0 }) {
             core::arch::asm!("vpor {0}, {0}, {0}", inout(xmm_reg) en, options(pure, nomem, nostack));
+        }
+        if LAT == 1000 {
+            en = _mm_andnot_si128(drop, en);
         }
         stx(hw.add(b), hs);
         stx(e.add(b), en);
@@ -1089,6 +1151,8 @@ mod probe {
         let mut fence_hit = false;
         let mut wend = [b_size, 0usize];
         let mut cur = 0usize;
+        // V = 10: one past the last row's last survivor (row 0: its written lanes)
+        let mut lastp1 = b_size;
     
         for a in 1..=len1 {
             sc.ensure(b_size + num_extra + 64);
@@ -1191,7 +1255,13 @@ mod probe {
                 } else {
                     Some(ld(LANE_MASK8.as_ptr().add(32 - (limit - b0))))
                 };
-                let (d0, r0) = block8_p::<TB, L>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm);
+                let emk = if V == 10 {
+                    let n = lastp1.saturating_sub(b0).min(32);
+                    Some(ld(LANE_MASK8.as_ptr().add(32 - n)))
+                } else {
+                    None
+                };
+                let (d0, r0) = block8_p::<TB, L>(&c, &mut rs, hr, hw, e, b0, sv, mask, hpm, emk);
                 hpm = zero;
                 if TB {
                     st(tr.add(b0 - first), r0);
@@ -1233,6 +1303,12 @@ mod probe {
                 } else {
                     Some(ldx(LANE_MASK8X.as_ptr().add(16 - (limit - b0))))
                 };
+                let emk = if V == 10 {
+                    let n = lastp1.saturating_sub(b0).min(16);
+                    Some(ldx(LANE_MASK8X.as_ptr().add(16 - n)))
+                } else {
+                    None
+                };
                 let (d0, r0) = block8x_p::<TB, L>(
                     &c,
                     &mut rx,
@@ -1245,6 +1321,7 @@ mod probe {
                     sv,
                     mask,
                     _mm256_castsi256_si128(hpm),
+                    emk,
                 );
                 hpm = zero;
                 if TB {
@@ -1298,11 +1375,14 @@ mod probe {
                 core::arch::asm!("/* {0} */", in(reg) last, options(nomem, nostack, preserves_flags));
                 last = (*tab.add(a - 1)).2 as usize;
             }
-            let mut b = last + 1;
-            while b < proc_end {
-                st(e.add(b), zero);
-                b += 32;
+            if V != 9 && V != 10 {
+                let mut b = last + 1;
+                while b < proc_end {
+                    st(e.add(b), zero);
+                    b += 32;
+                }
             }
+            lastp1 = last + 1;
             let (mut lo, mut hi) = (lo_surv, last);
             if V == 3 {
                 // probe: four cycles of latency on the band position (next row's addresses, bounds)
@@ -1330,6 +1410,440 @@ mod probe {
             }
         }
     
+        let best = base + best_rel;
+        finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
+    }
+
+    // align16 copy (R1_KERN copy / emask / emaskld on 16-bit problems)
+    #[inline(always)]
+    unsafe fn em16<const V: u32>(lastp1: usize, b: usize) -> Option<W> {
+        if V == 10 {
+            let n = lastp1.saturating_sub(b).min(16);
+            Some(ld(LANE_MASK16.as_ptr().add(16 - n)))
+        } else {
+            None
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn block16_p<const TB: bool, const EM: u32>(
+        c: &C16,
+        rs: &mut Row,
+        hr: *const i16,
+        hw: *mut i16,
+        e: *mut i16,
+        b: usize,
+        s: W,
+        lane_mask: Option<W>,
+        hpm: W,
+        emk: Option<W>,
+    ) -> (W, W) {
+        // `hpm`: lanes with no diagonal (the first lane of the band), as a 0 in the H row
+        let hp = _mm256_andnot_si256(hpm, ld(hr.add(b).sub(1)));
+        let mut ep = ld(e.add(b));
+        if let Some(m) = emk {
+            // probe (emaskld): lanes right of the last row's last survivor read as minus infinity
+            ep = _mm256_and_si256(ep, m);
+        }
+        let d = _mm256_adds_epi16(hp, s);
+        let h0 = _mm256_max_epi16(d, ep);
+        let v = _mm256_subs_epu16(h0, c.goe);
+        // row gap opened inside the block: sat(max_j (v[j] + (j+1)g) - i*g) over j < i
+        let fi = _mm256_subs_epu16(pmax16(_mm256_adds_epu16(up1_16(v), c.ramp), c.kb7), c.ramp);
+        let f = _mm256_max_epi16(fi, _mm256_subs_epu16(rs.carry, c.ramp));
+        let mut hh = _mm256_max_epi16(h0, f);
+        if let Some(m) = lane_mask {
+            hh = _mm256_and_si256(hh, m);
+        }
+        let hg = _mm256_subs_epu16(hh, c.goe);
+        let fs = _mm256_subs_epu16(f, c.ge1);
+        let out = last16(_mm256_max_epi16(_mm256_subs_epu16(fi, c.ge1), v), c.kb7);
+        rs.carry = _mm256_max_epi16(_mm256_subs_epu16(rs.carry, c.ge16), out);
+        let es = _mm256_subs_epu16(ep, c.ge1);
+        let mut en = _mm256_max_epi16(hg, es);
+        let gt = _mm256_cmpgt_epi16(hh, rs.bestv);
+        let thr;
+        if _mm256_movemask_epi8(gt) != 0 {
+            // A new best inside this block: exact running best per lane.
+            let pfx = _mm256_max_epi16(pmax16(up1_16(hh), c.kb7), rs.bestv);
+            thr = _mm256_subs_epu16(pfx, c.xv);
+            let rm = _mm256_movemask_epi8(_mm256_cmpgt_epi16(hh, pfx)) as u32;
+            rs.rec_b = b + ((31 - rm.leading_zeros()) >> 1) as usize;
+            rs.bestv = last16(_mm256_max_epi16(pfx, hh), c.kb7);
+            rs.thrv = _mm256_subs_epu16(rs.bestv, c.xv);
+            rs.slow = true;
+        } else {
+            thr = rs.thrv;
+        }
+        let drop = _mm256_cmpgt_epi16(thr, hh);
+        st(hw.add(b), _mm256_andnot_si256(drop, hh));
+        if EM == 9 {
+            // probe (emask): E of a dropped cell stored as minus infinity
+            en = _mm256_andnot_si256(drop, en);
+        }
+        st(e.add(b), en);
+        let scr = if TB {
+            let me = _mm256_cmpgt_epi16(ep, d);
+            let mf = _mm256_cmpgt_epi16(f, h0);
+            let op = _mm256_andnot_si256(mf, _mm256_add_epi16(c.c3, _mm256_and_si256(me, c.c3)));
+            let fb = _mm256_andnot_si256(_mm256_cmpgt_epi16(hg, es), c.c40);
+            let fa = _mm256_andnot_si256(_mm256_cmpgt_epi16(hg, fs), c.c10);
+            _mm256_or_si256(op, _mm256_or_si256(fb, fa))
+        } else {
+            _mm256_setzero_si256()
+        };
+        (drop, scr)
+    }
+
+    #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
+    pub(super) unsafe fn align16_probe<const TB: bool, const V: u32>(
+        q: &RowSeq<'_>,
+        s: &ColSeq<'_>,
+        scores: &Scores<'_>,
+        len1: usize,
+        len2: usize,
+        gap_open: i32,
+        gap_extend: i32,
+        x_drop: i32,
+        check_fence: bool,
+        sc: &mut XdropScratch,
+    ) -> Option<XdropResult> {
+        sc.ops.clear();
+        if len1 == 0 || len2 == 0 {
+            return Some(XdropResult {
+                a_offset: 0,
+                b_offset: 0,
+                score: 0,
+                fence_hit: false,
+                cells: 0,
+            });
+        }
+        let goe = gap_open.checked_add(gap_extend)?;
+        let mut x = x_drop;
+        if x < goe {
+            x = goe;
+        }
+        if gap_extend < 1 || gap_open < 0 {
+            return None;
+        }
+        let bias = x as i64 + goe as i64 + MAX_M as i64 + 1;
+        let limit_rebase = VMAX - bias - MAX_M as i64;
+        if limit_rebase < MAX_M as i64 || gap_extend as i64 * 8 > VMAX {
+            return None;
+        }
+        // No NCBI counterpart: the prefix-maximum form of the row gap needs v + 15 * gap_extend to
+        // fit 16 bits (v <= 32767).
+        if gap_extend > 2048 {
+            return None;
+        }
+        let bias = bias as i32;
+        let limit_rebase = limit_rebase as i32;
+        let num_extra = (x / gap_extend + 3) as usize;
+        sc.reset();
+
+        // Row 0 goes to buffer A (as in `align_body`).
+        sc.ensure(num_extra.min(len2 + 2) + 16);
+        let mut b_size = 1usize;
+        {
+            let h = sc.ha.as_mut_ptr().add(PAD);
+            let e = sc.e.as_mut_ptr().add(PAD);
+            *h = bias as i16;
+            *e = (bias - goe) as i16;
+            let mut score = -goe;
+            for i in 1..=len2 {
+                if score < -x {
+                    break;
+                }
+                *h.add(i) = (bias + score) as i16;
+                *e.add(i) = (bias + score - goe) as i16;
+                score -= gap_extend;
+                b_size = i + 1;
+            }
+            // In row 1 the scalar loop never forms the diagonal into column b_size.
+            *h.add(b_size - 1) = 0;
+        }
+        sc.dirty = b_size;
+        if TB {
+            sc.trace.resize(b_size, SCRIPT_GAP_IN_A);
+            sc.rows.push((0, 0, b_size as u32));
+        }
+
+        let mut ramp = [0i16; 16];
+        for (i, r) in ramp.iter_mut().enumerate() {
+            *r = (i as i32 * gap_extend) as i16;
+        }
+        let c = C16 {
+            goe: _mm256_set1_epi16(goe as i16),
+            ge1: _mm256_set1_epi16(gap_extend as i16),
+            ge16: _mm256_set1_epi16((16 * gap_extend) as i16),
+            ramp: ld(ramp.as_ptr()),
+            xv: _mm256_set1_epi16(x as i16),
+            kb7: ld(KB7X2.as_ptr()),
+            c3: _mm256_set1_epi16(SCRIPT_SUB as i16),
+            c10: _mm256_set1_epi16(SCRIPT_EXTEND_GAP_A as i16),
+            c40: _mm256_set1_epi16(SCRIPT_EXTEND_GAP_B as i16),
+        };
+        let zero = _mm256_setzero_si256();
+        let lane0 = _mm256_setr_epi16(-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        let k70 = _mm256_set1_epi8(0x70);
+        let k10 = _mm256_set1_epi8(0x10);
+        let static_tabs: Option<*const u8> = match scores {
+            Scores::Tables { t, .. } => Some(t.data.as_ptr()),
+            _ => None,
+        };
+        let ncols = scores.ncols();
+        let mut cells: u64 = 0;
+
+        let mut base: i32 = 0;
+        let mut best_rel: i32 = 0;
+        let mut a_off = 0usize;
+        let mut b_off = 0usize;
+        let mut first = 0usize;
+        let mut fence_hit = false;
+        // exclusive end of the lanes last written in each H buffer
+        let mut wend = [b_size, 0usize];
+        let mut cur = 0usize; // buffer holding the previous row
+        // V = 10: one past the last row's last survivor (row 0: its written lanes)
+        let mut lastp1 = b_size;
+
+        for a in 1..=len1 {
+            sc.ensure(b_size + num_extra + 64);
+            if sc.sb_filled < b_size {
+                fill_cols(s, sc, (b_size + 64).min(len2 + 1), ncols, check_fence);
+            }
+            if sc.bad_k < b_size {
+                return None;
+            }
+            let mut limit = len2 + 1;
+            let mut bend = b_size;
+            let mut fence_row = false;
+            if sc.fence_k < b_size {
+                limit = sc.fence_k;
+                bend = sc.fence_k;
+                fence_row = true;
+                if bend <= first {
+                    fence_hit = true;
+                    break;
+                }
+            }
+            let qa = q.get(a)? as usize;
+            if qa >= ncols {
+                return None;
+            }
+            cells += (b_size - first) as u64;
+            let t: *const u8 = if let Some(tabs) = static_tabs {
+                tabs.add(qa * TAB)
+            } else {
+                if sc.tab_ok & (1u32 << qa) == 0 {
+                    if !build_row(scores, qa, &mut sc.tabs[qa * TAB..(qa + 1) * TAB]) {
+                        return None;
+                    }
+                    sc.tab_ok |= 1u32 << qa;
+                }
+                sc.tabs.as_ptr().add(qa * TAB)
+            };
+            let (hr, hw) = if cur == 0 {
+                (sc.ha.as_mut_ptr().add(PAD), sc.hb.as_mut_ptr().add(PAD))
+            } else {
+                (sc.hb.as_mut_ptr().add(PAD), sc.ha.as_mut_ptr().add(PAD))
+            };
+            let e = sc.e.as_mut_ptr().add(PAD);
+            let sb = sc.sb.as_ptr().add(PAD);
+            let t0lo = bcast128(t);
+            let t1lo = bcast128(t.add(16));
+            let t0hi = bcast128(t.add(32));
+            let t1hi = bcast128(t.add(48));
+
+            if best_rel > limit_rebase {
+                let dv = _mm256_set1_epi16(best_rel as i16);
+                let mut b = first;
+                while b < b_size {
+                    st(hr.add(b), _mm256_subs_epu16(ld(hr.add(b)), dv));
+                    st(e.add(b), _mm256_subs_epu16(ld(e.add(b)), dv));
+                    b += 16;
+                }
+                base += best_rel;
+                best_rel = 0;
+            }
+            // no diagonal into the first lane of the band: lane 0 of the row's first block (`hpm`);
+            // a store of 0 into the H row would sit right under the first block's load
+            let mut hpm = lane0;
+
+            let row_off = sc.trace.len();
+            if TB {
+                sc.trace.reserve(bend - first + num_extra + 96);
+            }
+            let tr = sc.trace.as_mut_ptr().add(row_off);
+
+            let bestv0 = _mm256_set1_epi16((bias + best_rel) as i16);
+            let mut rs = Row {
+                carry: zero,
+                bestv: bestv0,
+                thrv: _mm256_subs_epu16(bestv0, c.xv),
+                rec_b: 0,
+                slow: false,
+            };
+            let mut lo_surv = usize::MAX;
+            let mut hi_surv = 0usize;
+            let mut b0 = first;
+            // Two blocks (32 lanes) while more than 16 lanes of the band are left, then single blocks
+            // for the rest of the band and the row-gap extension. The stop test runs on the grid
+            // first + 16k once the band is passed; lanes processed past the point where the 128-bit
+            // kernel stops are computed exactly and dropped (row gap below the threshold), so the
+            // result is the same.
+            while b0 + 16 < bend {
+                // scores of lanes b0..b0+32 (lane b reads column b-1)
+                let idx = _mm256_permute4x64_epi64::<0xD8>(ld(sb.add(b0)));
+                let i0 = _mm256_add_epi8(idx, k70);
+                let i1 = _mm256_sub_epi8(idx, k10);
+                let lo = lut32(t0lo, t1lo, i0, i1);
+                let hi = lut32(t0hi, t1hi, i0, i1);
+                // the first block lies inside the band (b0 + 16 < bend <= limit); the second may
+                // reach past the band and past `limit`
+                let mask1 = if b0 + 32 <= limit {
+                    None
+                } else {
+                    Some(ld(LANE_MASK16.as_ptr().add(32 - (limit - b0))))
+                };
+                let (d0, r0) = block16_p::<TB, V>(
+                    &c,
+                    &mut rs,
+                    hr,
+                    hw,
+                    e,
+                    b0,
+                    _mm256_unpacklo_epi8(lo, hi),
+                    None,
+                    hpm,
+                    em16::<V>(lastp1, b0),
+                );
+                hpm = zero;
+                let (d1, r1) = block16_p::<TB, V>(
+                    &c,
+                    &mut rs,
+                    hr,
+                    hw,
+                    e,
+                    b0 + 16,
+                    _mm256_unpackhi_epi8(lo, hi),
+                    mask1,
+                    zero,
+                    em16::<V>(lastp1, b0 + 16),
+                );
+                if TB {
+                    st(
+                        tr.add(b0 - first),
+                        _mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(r0, r1)),
+                    );
+                }
+                // 2 bits per lane
+                let live = !((_mm256_movemask_epi8(d0) as u32 as u64)
+                    | ((_mm256_movemask_epi8(d1) as u32 as u64) << 32));
+                if live != 0 {
+                    if lo_surv == usize::MAX {
+                        lo_surv = b0 + (live.trailing_zeros() as usize >> 1);
+                    }
+                    hi_surv = b0 + ((63 - live.leading_zeros() as usize) >> 1);
+                }
+                b0 += 32;
+            }
+            loop {
+                if b0 >= bend {
+                    if b0 >= limit {
+                        break;
+                    }
+                    if (_mm256_cvtsi256_si32(rs.carry) as i16) < (_mm256_cvtsi256_si32(rs.thrv) as i16)
+                    {
+                        break;
+                    }
+                }
+                let idx = _mm256_permute4x64_epi64::<0xD8>(ld(sb.add(b0)));
+                let i0 = _mm256_add_epi8(idx, k70);
+                let i1 = _mm256_sub_epi8(idx, k10);
+                let lo = lut32(t0lo, t1lo, i0, i1);
+                let hi = lut32(t0hi, t1hi, i0, i1);
+                let mask = if b0 + 16 <= limit {
+                    None
+                } else {
+                    Some(ld(LANE_MASK16.as_ptr().add(16 - (limit - b0))))
+                };
+                let (d0, r0) = block16_p::<TB, V>(
+                    &c,
+                    &mut rs,
+                    hr,
+                    hw,
+                    e,
+                    b0,
+                    _mm256_unpacklo_epi8(lo, hi),
+                    mask,
+                    hpm,
+                    em16::<V>(lastp1, b0),
+                );
+                hpm = zero;
+                if TB {
+                    stx(
+                        tr.add(b0 - first),
+                        _mm256_castsi256_si128(_mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(
+                            r0, r0,
+                        ))),
+                    );
+                }
+                let live = !(_mm256_movemask_epi8(d0) as u32);
+                if live != 0 {
+                    if lo_surv == usize::MAX {
+                        lo_surv = b0 + (live.trailing_zeros() as usize >> 1);
+                    }
+                    hi_surv = b0 + ((31 - live.leading_zeros() as usize) >> 1);
+                }
+                b0 += 16;
+            }
+            let proc_end = b0;
+            if proc_end > sc.dirty {
+                sc.dirty = proc_end;
+            }
+            // lanes this buffer held beyond what the row wrote are stale
+            let wi = 1 - cur;
+            let mut b = proc_end;
+            while b < wend[wi] {
+                st(hw.add(b), zero);
+                b += 16;
+            }
+            wend[wi] = proc_end;
+            cur = wi;
+            if rs.slow {
+                b_off = rs.rec_b;
+                a_off = a;
+                best_rel = (_mm256_cvtsi256_si32(rs.bestv) as i16 as i32) - bias;
+            }
+            if TB {
+                sc.trace.set_len(row_off + proc_end - first);
+                sc.rows
+                    .push((row_off as u32, first as u32, (proc_end - first) as u32));
+            }
+            if fence_row {
+                fence_hit = true;
+                break;
+            }
+            if lo_surv == usize::MAX {
+                break;
+            }
+            // columns right of the last survivor leave the band: E = -inf
+            let last = hi_surv;
+            if V != 9 && V != 10 {
+                let mut b = last + 1;
+                while b < proc_end {
+                    st(e.add(b), zero);
+                    b += 16;
+                }
+            }
+            lastp1 = last + 1;
+            first = lo_surv;
+            b_size = last + 1;
+            if b_size <= len2 {
+                b_size += 1;
+            }
+        }
+
         let best = base + best_rel;
         finish::<TB>(sc, a_off, b_off, best, fence_hit, cells)
     }

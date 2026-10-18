@@ -8,7 +8,8 @@ The reports match NCBI's bytes only while every floating-point value is computed
 code computes it on the same machine. Every build keeps these rules (written down 2026-10-18,
 plan v4 D6 (c)); `LOSAT/tests/check_fp_contract.py` checks them in CI: `source` in the `rust`
 job and in the release workflow's quality job, `binary` on the release binary of the
-`fast output regressions` job and on the Linux x64 release artifact.
+`fast output regressions` job, on the Linux x64 release artifact, and on the release binary of
+the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(b)).
 
 - **No contraction.** rustc emits each `*`, `+`, `-` and `/` as its own IEEE operation, rounded
   once, and never fuses `a * b + c` into a fused multiply-add: it sets no `contract` or fast-math
@@ -30,8 +31,14 @@ job and in the release workflow's quality job, `binary` on the release binary of
     form when it has only FMA4, and a software fused multiply-add otherwise; these two
     instructions are the binary's only FMA instructions;
   - with `-C target-cpu=x86-64-v3`, as 13 inline `vfmsub213sd`, and no other function holds an
-    FMA instruction;
-  - on aarch64, as inline `fmadd` / `fmsub` (not counted in CI yet).
+    FMA instruction; the same with PGO (`-Cprofile-use`, dev 0b928fff);
+  - on aarch64, as 13 inline `fnmsub` (a cross build for `aarch64-unknown-linux-musl` of dev
+    0b928fff, counted with `llvm-objdump`; that static build also holds the 7 FMA instructions
+    of musl's `log`, `log2` and `pow`, which the glibc build of the Linux arm64 cell calls in
+    the shared libm instead).
+
+  PGO and other inlining changes may move the site into a caller outside `stats::spouge`; the
+  check then fails and names the function.
 
   A new `mul_add` needs the same argument (the fused result is the value NCBI computes) and an
   entry in the checker's `MUL_ADD_SITES` (and, in another module, `MUL_ADD_FUNCTION_PREFIXES`).
@@ -47,7 +54,12 @@ job and in the release workflow's quality job, `binary` on the release binary of
   baseline CPU of the target; the AVX2 kernels are chosen at run time
   (`is_x86_feature_detected!`). Extra flags for one build go in `CARGO_TARGET_<TRIPLE>_RUSTFLAGS`,
   which cargo joins with the configuration's `[target.'cfg(target_arch = "x86_64")']` flags;
-  `RUSTFLAGS` replaces them.
+  `RUSTFLAGS` replaces them. Measured 2026-10-18 (plan v4 D6 (a)(b); ws, 11 small bench5 jobs
+  of all five programs at 1 and 8 threads, 8 rounds; every output identical): a build for
+  `x86-64-v3` takes ×1.00 of the baseline's time at 1 thread and ×1.01 at 8 (TBLASTX ×1.01 to
+  ×1.035: 2.9 % fewer instructions, 3 % more cycles), and PGO (`-Cprofile-use`, profile of 8 of
+  the jobs) ×0.98 (best ×0.93, megablast at 1 thread; a 0.06 s BLASTN job ×1.03 to ×1.07).
+  The release builds stay at the baseline CPU, without PGO.
 
 ## Debug and trace variables
 

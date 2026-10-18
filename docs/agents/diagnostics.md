@@ -263,6 +263,7 @@ export LOSAT_X_PAIRLUT=1
 export LOSAT_X_PAIRPAR=1
 export LOSAT_X_PAIRPARDISC=1
 export LOSAT_X_PAIRPARFOLD=1
+export LOSAT_X_PAIRPARGATE=1
 export LOSAT_X_PURGEFAST=1
 export LOSAT_X_QBATCHPAR=1
 export LOSAT_X_QDUSTPAR=1
@@ -292,6 +293,7 @@ export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNXLATE=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXFRAMES=1
+export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
 ```
 
@@ -2718,9 +2720,9 @@ Scheduling (each value computed by one thread with the original function; order 
   every subject, the subject's combined ungapped HSP list compared field by field (the first
   difference stops the run with subject, frame, index and both values); one `[X_SHADOW] PAIRPAR`
   summary line at exit (subjects, units, HSPs compared, fallbacks).
-- `LOSAT_X_PAIRPARGATE=1` (TBLASTX, speed; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it; acts only while `LOSAT_X_PAIRPAR` is on without its shadow
-  and without `LOSAT_X_PAIRLUTSHADOW`) a query batch that the gates and the guard of
+- `LOSAT_X_PAIRPARGATE=1` (TBLASTX, speed; in the strict set since 2026-10-18, on by default, with
+  `LOSAT_X_TBXLUT`; added off unless set in #255; acts only while `LOSAT_X_PAIRPAR` is on without
+  its shadow and without `LOSAT_X_PAIRLUTSHADOW`) a query batch that the gates and the guard of
   `LOSAT_X_PAIRPAR` let through takes the unit path only where it is expected to be faster than the
   reference frame loop (`units_gain` in `tblastx/x_pair_par.rs`): the reference's diagonal table has
   2^18 cells or more (query length plus window above 131,072 letters, a translated query batch of
@@ -2746,9 +2748,17 @@ Scheduling (each value computed by one thread with the original function; order 
   0.74-0.90 of the reference's time and half its memory), and a 5 kb query against one 294 kb
   genome at 4 and 8 threads. Before the gate, the units' time over the reference's at one thread was
   1.48-1.72 for 5 kb queries, 1.19-1.41 for 20 kb, 1.03-1.18 for 40 kb and 0.90-0.99 for 80 kb (one
-  294 kb subject / 3,000 cDNAs).
-- `LOSAT_X_TBXLUT=1` (TBLASTX, memory; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it) the full lookup table of a query batch, the table of the
+  294 kb subject / 3,000 cDNAs). Timed again for the strict set on origin/dev 7a5a7f87 + `LOSAT_X_TBXLUT`
+  (workstation, 16 cores of node 1 with their HT siblings idle, a warm-up then 2-3 rounds with the
+  order reversed in every second round; every report equal across arms, and equal to NCBI where NCBI
+  ran), the gate and `LOSAT_X_TBXLUT` both on against both off: the 10 transcripts against the
+  zebrafish cDNA database 60.48 -> 46.65 s at one thread (NCBI 45.16), 7.94 -> 6.09 s at 8 (NCBI
+  5.90), 4.43 -> 3.24 s at 16 (NCBI 3.27); 40 kb x 3,000 cDNAs 4.04 -> 3.53 s at one thread; 5 kb x
+  3,000 cDNAs 0.188 -> 0.122 s at 8; unchanged (x0.99-1.00): 3 transcripts against the fruit fly
+  genome database at 8 threads (the guard), 80 kb x 3,000 cDNAs, MelaMJNV x PemoMJNVA at 8 threads,
+  AP027131 x AP027133 (code 4) at one thread; max RSS equal or lower in every case.
+- `LOSAT_X_TBXLUT=1` (TBLASTX, memory; in the strict set since 2026-10-18, on by default, with
+  `LOSAT_X_PAIRPARGATE`; added off unless set in #262) the full lookup table of a query batch, the table of the
   reference frame loop (`LOSAT_X_PAIRPAR=0`, `LOSAT_X_DEFAULT=0`, and the batches the unit path's
   guard or `LOSAT_X_PAIRPARGATE` sends back), filled in place from per-cell counts by the builder of `LOSAT_X_BXLUT` /
   `LOSAT_X_BPLUT` (`x_tbx_build_ncbi_lookup` in `tblastx/lookup/backbone.rs`, `x_build_direct` in
@@ -2760,6 +2770,12 @@ Scheduling (each value computed by one thread with the original function; order 
   Shadow: `LOSAT_X_TBXLUTSHADOW=1` (both builders, every table compared field by field, the chain
   builder's table used; one `[X_SHADOW] TBXLUT tables_compared=` line at exit).
   `LOSAT/tests/tblastx_ref_lut.rs` compares reports with and without the switch and its shadow.
+  Measured: 3 kb of the option-sweep query against the sweep subjects at `-threshold +inf` with the
+  reference loop (`LOSAT_X_PAIRPAR=0`), one thread: max RSS 1,069 -> 475 MB, 8.20 -> 7.00 s (NCBI
+  589 MB, 9.19 s); the whole sweep input 14.2 -> 3.31 GB (NCBI 5.86 GB). On the batches the gate
+  sends back (the timings of `LOSAT_X_PAIRPARGATE` above) it takes x0.95-1.00 of the chain
+  builder's time; max RSS 23 -> 19 MiB on 40 kb x 3,000 cDNAs, 15 -> 17 MiB on 5 kb x 3,000 cDNAs
+  at 8 threads (the default before both: 21 and 19 MiB).
 - `LOSAT_X_PAIRLUT=1` (in the strict set; acts while `LOSAT_X_PAIRPAR` is on, not with its
   shadow) TBLASTX:
   the lookup tables of the unit path, one per context group, built directly from the query instead

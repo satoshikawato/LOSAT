@@ -748,6 +748,7 @@ where
                     14 => r2_call!(14),
                     15 => r2_call!(15),
                     16 => r2_call!(16),
+                    19 => r2_call!(19),
                     _ => r2_call!(0),
                 }
             }
@@ -768,7 +769,8 @@ where
 /// store's address), 14 pipe (the next batch's hits loaded before this batch's stores),
 /// 15 deferstore (the full batches' new entries written to the table after the batch loop,
 /// from a buffer at addresses known early), 16 pair (two batches per step: both batches'
-/// entries read before either batch's entries are stored).
+/// entries read before either batch's entries are stored), 19 scalaraddr (the coordinates from
+/// scalar loads of the hits, not extracted from the vector: a shorter chain to the entry loads).
 fn r2_probe() -> u32 {
     use std::sync::OnceLock;
     static P: OnceLock<u32> = OnceLock::new();
@@ -1413,7 +1415,9 @@ where
                 }
             }
         }
-        let (query, lanes) = if P == 15 {
+        let (query, lanes) = if P == 19 {
+            x_batch_avx2_scalar_addr(batch, s, table, test)
+        } else if P == 15 {
             let (query, lanes, coords, new) =
                 x_batch_avx2_defer_probe(_mm256_loadu_si256(batch.as_ptr().cast()), s, table, test);
             _mm256_storeu_si256(defer_coords.add(deferred).cast(), coords);
@@ -1750,6 +1754,37 @@ unsafe fn x_r2_scatter(
     }
 }
 
+/// EXPERIMENT (v4-R R2 probe 19): [`x_batch_avx2`] with each lane's coordinate computed from a
+/// scalar load of its hit (volatile, so that it is not vectorized and extracted again).
+///
+/// # Safety
+/// The CPU must have AVX2; `hits` has eight hits on distinct diagonals.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_batch_avx2_scalar_addr(
+    hits: &[i32],
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+) -> (std::arch::x86_64::__m256i, u32) {
+    use std::arch::x86_64::*;
+    let query = _mm256_loadu_si256(hits.as_ptr().cast());
+    let mask = table.mask;
+    let c: [usize; X_DIAG_LANES] = std::array::from_fn(|i| {
+        (std::ptr::read_volatile(hits.as_ptr().add(i)).wrapping_sub(s) & mask) as u32 as usize
+    });
+    let e = |i: usize| table.entries.get_unchecked(c[i]).raw_bits() as i32;
+    let old = _mm256_setr_epi32(e(0), e(1), e(2), e(3), e(4), e(5), e(6), e(7));
+    let (new, lanes) = x_r2_test(old, s, test);
+    let mut lane_new = [0u32; X_DIAG_LANES];
+    _mm256_storeu_si256(lane_new.as_mut_ptr().cast(), new);
+    for (&coord, &raw) in c.iter().zip(&lane_new) {
+        table.entries.get_unchecked_mut(coord).set_raw_bits(raw);
+    }
+    (query, lanes)
+}
+
 /// EXPERIMENT (v4-R R2 probes): eight lanes on a 32-byte boundary (an aligned vector store whose
 /// four-byte reloads are forwarded).
 #[repr(C, align(32))]
@@ -1934,11 +1969,11 @@ mod tests {
     }
 
     /// v4-R R2: the probes that change the code (2 remmask, 7 misp1 + remmask, 8 pfnext, 9 nop5,
-    /// 14 pipe, 15 deferstore, 16 pair)
+    /// 14 pipe, 15 deferstore, 16 pair, 19 scalaraddr)
     /// make the same calls and leave the same table as the per-hit test.
     #[test]
     fn r2_probes_equal_the_per_hit_test() {
-        for p in [2, 7, 8, 9, 14, 15, 16] {
+        for p in [2, 7, 8, 9, 14, 15, 16, 19] {
             R2_TEST_PROBE.set(p);
             batched_cells_equal_the_per_hit_test_on_random_tables();
             batched_cells_equal_the_per_hit_test_at_every_edge_of_the_test();
@@ -2059,6 +2094,14 @@ mod tests {
                                 &mut buffer,
                             ),
                             16 => x_cell_avx2_defer::<_, 16>(
+                                hits,
+                                *s,
+                                &mut table,
+                                test,
+                                &mut candidate,
+                                &mut buffer,
+                            ),
+                            19 => x_cell_avx2_defer::<_, 19>(
                                 hits,
                                 *s,
                                 &mut table,

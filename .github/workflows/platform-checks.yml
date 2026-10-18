@@ -5,6 +5,8 @@ name: Platform checks
 # paths):
 #  - outputs: release binary, 49 cases (all five programs) at 1 and 4 threads in both modes; the
 #    outputs of the two modes must be byte-identical and the exit codes 0 (LOSAT/tests/platform_checks.py);
+#    on Linux arm64 the release binary also passes the floating-point contract check
+#    (LOSAT/tests/check_fp_contract.py binary; ci.yml checks the Linux x64 binary);
 #    on the two arm64 platforms two more modes, LOSAT_X_DPNEON=0 (the other switches on, the scalar
 #    X-drop instead of the NEON kernels the default runs) and LOSAT_X_DPNEON2=1 (the NEON kernels in
 #    register pairs, off unless set), must give the same outputs as well;
@@ -187,13 +189,23 @@ jobs:
           key: outputs-${{ matrix.id }}
       - name: Build release binary
         run: cd LOSAT && cargo build --release --locked --bin LOSAT
+      # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
+      # result *= expl(-z * z) / z;
+      # LOSAT's one mul_add emulates that long-double line; no other function of the release binary
+      # may hold an FMA instruction or a call of fma (docs/agents/diagnostics.md, "Floating-point
+      # contract"). The runner's GNU objdump reads aarch64.
+      - name: Floating-point contract (release binary)
+        if: matrix.id == 'linux-arm64'
+        run: mkdir -p platform-check && python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/LOSAT --out platform-check/fp-contract.txt
       - name: Default against LOSAT_X_DEFAULT=0, 49 cases, 1 and 4 threads
         run: ${{ matrix.python }} LOSAT/tests/platform_checks.py run --losat LOSAT/target/release/LOSAT --out platform-check ${{ matrix.extra }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: platform-checks-${{ matrix.id }}
-          path: platform-check/rows.tsv
+          path: |
+            platform-check/rows.tsv
+            platform-check/fp-contract.txt
           if-no-files-found: error
           retention-days: 30
 

@@ -2541,6 +2541,11 @@ Scheduling (each value computed by one thread with the original function; order 
     8; Sakai's first 0.6 Mb x MG1655's first 2.0 Mb at 8 threads x0.981 (2.77 -> 2.71 s); Sakai x
     MG1655 at 8 threads (4 rounds, other sessions raised the load to 3-17 during the runs) 142.0 ->
     143.2 s, within the spread of the rounds (129-200 / 137-151 s; CPU time 968 -> 921 s).
+  - Again after `LOSAT_X_TBXSCANBF` joined the default set (origin/dev 9e05b829 with this change,
+    built-in 1,536 KiB, workstation, `=0` against the default): AP027131 x AP027133 (1.65 MiB, now
+    above the built-in) x0.968 at one thread (11.30 -> 10.94 s) and x0.978 at 8; Sakai x MG1655 at 8
+    threads x0.85 in the two rounds of 4 that ran without heavy load on the node (138.5 / 139.0 ->
+    119.5 / 116.4 s).
 - `LOSAT_X_TBNSTATE=1` (in the strict set since 2026-10-15) tblastn, the unit path (`TBNPAR`): the
   scan state of a subject's (frame, chunk) units (the diagonal table of the two-hit word finder, the
   offset pairs, the initial hits, the gapped alignment memory) is kept by the thread from one

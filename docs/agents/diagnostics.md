@@ -357,6 +357,7 @@ export LOSAT_X_TBXFRAMES=1
 export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
+export LOSAT_X_TBXPIPE=1
 export LOSAT_X_TBXQFRAMES=1
 export LOSAT_X_TBXSCANBF=1
 export LOSAT_X_TBXUNGAP=1
@@ -1362,6 +1363,27 @@ Rebuilding less:
   (sorting them first), and every field of every HSP must be equal; the first difference stops the run.
   One line at exit: `[X_SHADOW] TBXKMERGE subjects_compared= hsps_compared=`. `LOSAT_X_PAIRPARSHADOW=1`
   compares the subject's list with the reference frame loop's as well.
+- `LOSAT_X_TBXPIPE=1` (TBLASTX, speed; in the strict set since 2026-10-19, on by default; acts only with
+  two or more threads in a native build and two or more query batches, and not with debugging output
+  (`LOSAT_DEBUG*`, `LOSAT_TRACE_HSP`, `LOSAT_DIAGNOSTICS`, `LOSAT_WASI_THREADS_DEBUG`, the stage dumps))
+  the next query batch starts when the batch before has ended its seed stage, while that batch still
+  links its subjects (`tblastx/x_batch_pipe.rs`, exactness argument in its header). With `LOSAT_X_TBXNEXT`
+  every subject of a batch starts at once and its units fill the pool, so after a batch's last unit only
+  its subjects' chains are left (merge, both linking calls, the re-evaluation): on AP027131+AP027132+AP027133
+  x AP027133+AP027078+AP027131 (code 4, three batches) at 16 threads that was 3.6 s of 11.2 s with 13 of
+  16 threads waiting. The batch loop of `run_in_pool` is unchanged (checks, errors, writes, their order);
+  it takes each batch's result from the pipe, which searched it when the loop reached it or started it at
+  the seed-stage end of the batch before (the last subject's dispatch point 5, where
+  `LOSAT_X_SEEDRELEASE` has freed that batch's tables), on the same pool. Admission: the next batch starts
+  early only while the batches past their seed-stage end hold at most 4,194,304 HSPs
+  (`LOSAT_X_TBXPIPEHSPS=<n>` changes it, for tests); otherwise when the loop reaches it, as before. A
+  batch's `LOSAT_TIMING` block is printed when the loop takes the batch. `LOSAT_X_STATS=1` prints
+  `[X_STATS] TBXPIPE planned= taken= early= loop= waited= key_mismatch= max_held_hsps=`.
+  MEASUREMENTS-TBD
+- `LOSAT_X_TBXPIPESHADOW=1` shadow of `LOSAT_X_TBXPIPE` (needs the path on): the loop searches every batch
+  it took from the pipe again itself, on the whole pool, and compares the two results (`searched`, the
+  query statistics, and every field of every HSP, each subject's in its list order); the first difference
+  stops the run. One line at exit: `[X_SHADOW] TBXPIPE batches= compared= diffs=0`.
 - `LOSAT_X_LINKSLICES=1` (TBLASTX, memory; in the strict set since 2026-10-15) the linking call of
   the in-place HSP list path links its groups as disjoint sub-slices of the one sorted list
   (`tblastx/x_link_slices.rs`, exactness argument in its header; it acts only where

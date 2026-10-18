@@ -777,28 +777,38 @@ impl XPairPar {
 //     if (score <= 0 || (maxscore - score) >= dropoff) break;
 // }
 // ```
-// Eight walks run side by side, one per 32-bit lane: the left walk of a candidate and then, if it
-// reached the first hit, its right walk, in the lane it started in. A block writes the scores of
-// the next K steps of every lane into a step-major byte buffer (one table load per lane and step,
-// `T[q << 8 | s]` of LOSAT_X_TBXUNGAP), then runs the recurrence of the walks K steps on all
-// lanes: per lane the reference's statements in its order (add, improve, stop test), on i32 as
-// the reference. A lane that stopped keeps its values (its `active` lane is cleared). At the end
-// of a block the lanes that stopped or ran out hand their walk's result on, and the lanes that
-// are free take the next candidate of the batch.
+// Eight walks run side by side, one per 32-bit lane: the left walk of a candidate, then its
+// right walk in the same lane. A block writes the scores of the next K steps of every lane into
+// a step-major byte buffer (one table load per lane and step, `T[q << 8 | s]` of
+// LOSAT_X_TBXUNGAP), then runs the recurrence of the walks K steps on all lanes: per lane the
+// reference's statements in its order (add, improve, stop test), on i32 as the reference. A lane
+// that stopped keeps its values (its `active` lane is cleared). At the end of a block the lanes
+// whose walk stopped hand its result on (a left walk to the right walk, a right walk to the
+// candidate's result), and the free lanes take the next candidates of the batch.
+//
+// The control avoids branches on one lane's data (the walks of `two_hit` pay a misprediction at
+// each exit): the lanes that stopped are taken from a bit mask, every left walk is followed by a
+// right walk (of no steps when the left walk did not reach the first hit), and a walk with no
+// steps left, like a free lane, reads from a block of code-0 residues (`ZEROS`), whose scores are
+// the sentinel.
 //
 // Why the result is that of `two_hit` (x_two_hit_fast.rs), which is that of the reference.
-// * The word loop is `two_hit`'s, in scalar, at the start of a candidate.
-// * A walk reads the positions of `two_hit`'s walk, in its order, and no others: the left walk
-//   `min(q_r, s_r)` steps back, the right walk `min(q_len - q_r, s_len - s_r)` steps forward;
-//   the buffer holds the sentinel -128 after the last step of a walk.
+// * The word loop is `two_hit`'s, in scalar, before the walks.
+// * A walk reads the positions of `two_hit`'s walk, in its order: the left walk `min(q_r, s_r)`
+//   steps back, the right walk `min(q_len - q_r, s_len - s_r)` steps forward (none if the left walk
+//   did not reach the first hit); every step after the last one reads the sentinel -128 (the
+//   buffer's fill, or `ZEROS`: code 0 against anything is `BLAST_SCORE_MIN`).
 // * The sentinel: x_drop is 1..=127 (else the candidate is left to `extend_hit_two_hit`), and the
 //   score before a step is never above the best, so a step of -128 stops the walk without raising
 //   the best (two_hit's argument). Stopping one step after the last real step changes nothing on
 //   the left (only the best and its step are returned) and gives the right walk's stop position
-//   `n` (taken - 1 = n), the value of `two_hit`'s walk that runs out.
+//   `n` (taken - 1 = n), the value of `two_hit`'s walk that runs out. A right walk of no steps
+//   stops at its first step with its start (the left walk's best) as the best, length 0 and stop
+//   position 0, which are the values `two_hit` uses when it does not walk right: score =
+//   max(left, 0) = left, q_end = q_r, s_last_off = s_r.
 // * Counters: `t` counts the steps of the walk (1-based); the best's step is `t` at its last strict
 //   improvement (0 if none): the left walk's length and the right walk's `best_len`; the right
-//   walk's stop position is the steps before the stopping one.
+//   walk's stop position is the number of steps before the stopping one (`alive`).
 #[cfg(target_arch = "x86_64")]
 mod lanes {
     use super::*;
@@ -809,48 +819,75 @@ mod lanes {
     const NL: usize = 8;
     /// Steps of a block.
     const K: usize = 16;
-    /// `BLAST_SCORE_MIN` in the table (x_two_hit_fast.rs), written after the end of a walk.
+    /// `BLAST_SCORE_MIN` in the table (x_two_hit_fast.rs), written where a lane has no step.
     const SENTINEL: i8 = -128;
     /// Residues of the word loop (`k_size` of two_hit.rs).
     const WORD: usize = 3;
 
+    /// Code-0 residues (the sentinel against anything): where a walk with no steps left reads,
+    /// `K` bytes on either side of `ZEROS.0[K]`.
+    #[repr(C, align(32))]
+    struct Zeros([u8; 2 * K]);
+    static ZEROS: Zeros = Zeros([0; 2 * K]);
+
+    /// `pshufb` masks: the 16 bytes in order (a right walk) and reversed (a left walk, whose step
+    /// `i` reads the byte `K - 1 - i` of the 16 before its pointer).
+    #[repr(C, align(16))]
+    struct Masks([[u8; K]; 2]);
+    static MASKS: Masks = Masks([
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+    ]);
+
     type Table = [i8; 1 << 16];
 
-    /// One lane's walk.
+    /// A candidate the lanes take, after the word loop.
     #[derive(Clone, Copy)]
-    struct Lane {
-        /// 0 = free, 1 = left walk, 2 = right walk.
-        phase: u8,
-        /// The candidate's slot in the batch.
+    struct Prep {
         slot: usize,
-        /// Where the next step reads: `q[-1]`, `s[-1]` (left) or `q[0]`, `s[0]` (right).
-        q: *const u8,
-        s: *const u8,
-        /// Steps left in the walk.
-        r: usize,
-        /// The end of the best word at R (`two_hit`'s `q_r`, `s_r`) and the query.
+        /// The end of the best word at R (`two_hit`'s `q_r`, `s_r`).
         q_r: usize,
         s_r: usize,
+        /// `q_seq + q_r`, `s_seq + s_r`.
+        q_at: *const u8,
+        s_at: *const u8,
+        /// The query of its context, for the shadow.
         q_base: *const u8,
         q_len: usize,
-        /// The left walk's best and length.
-        left_score: i32,
-        left_disp: usize,
+        /// The left walk's steps, the right walk's (if it runs), `s_r - s_left` (saturating).
+        n_left: usize,
+        n_right: usize,
+        reach: usize,
+        xd1: i32,
     }
 
-    const FREE: Lane = Lane {
-        phase: 0,
+    const PREP_NONE: Prep = Prep {
         slot: 0,
-        q: core::ptr::null(),
-        s: core::ptr::null(),
-        r: 0,
         q_r: 0,
         s_r: 0,
+        q_at: core::ptr::null(),
+        s_at: core::ptr::null(),
         q_base: core::ptr::null(),
         q_len: 0,
-        left_score: 0,
-        left_disp: 0,
+        n_left: 0,
+        n_right: 0,
+        reach: 0,
+        xd1: 0,
     };
+
+    /// The scalar state of the eight lanes; lane `l` runs the prepared candidate `cur[l]`.
+    struct Lanes {
+        cur: [usize; NL],
+        /// Where the next step reads (`q[-1]`, `s[-1]` on the left, `q[0]`, `s[0]` on the right).
+        q: [*const u8; NL],
+        s: [*const u8; NL],
+        /// Steps left.
+        r: [usize; NL],
+        /// The left walk's best and length, and whether it reached the first hit.
+        left_score: [i32; NL],
+        left_disp: [usize; NL],
+        reached: [bool; NL],
+    }
 
     /// The i32 values of the eight lanes, as stored between blocks.
     #[repr(C, align(32))]
@@ -861,9 +898,8 @@ mod lanes {
     #[repr(C, align(32))]
     struct Buf([i8; K * NL]);
 
-    /// The state of the eight walks.
+    /// The vector state of the eight walks.
     struct Walks {
-        lanes: [Lane; NL],
         score: V,
         best: V,
         /// `t` at the best's last strict improvement.
@@ -874,13 +910,15 @@ mod lanes {
         xd1: V,
         /// 1 for a right walk (its `score <= 0` stop), `i32::MIN` for a left walk (none).
         floor: V,
+        /// The steps of the last block after which the lane was still going.
+        alive: V,
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:846-866 (module comment
     // above): `K` steps of the eight walks.
-    /// Runs one block; returns, per lane, the steps after which it was still going.
+    /// Runs one block on the lanes of `busy`; returns those that stopped in it.
     #[target_feature(enable = "avx2")]
-    unsafe fn run_block(buf: &Buf, w: &mut Walks, act: &V) -> V {
+    unsafe fn run_block(buf: &Buf, w: &mut Walks, busy: u32) -> u32 {
         let ld = |v: &V| unsafe { _mm256_load_si256(v.0.as_ptr() as *const __m256i) };
         let mut sc = ld(&w.score);
         let mut bs = ld(&w.best);
@@ -888,7 +926,9 @@ mod lanes {
         let mut tt = ld(&w.t);
         let xd = ld(&w.xd1);
         let fl = ld(&w.floor);
-        let mut ac = ld(act);
+        let bits = _mm256_setr_epi32(1, 2, 4, 8, 16, 32, 64, 128);
+        let act = _mm256_cmpeq_epi32(_mm256_and_si256(_mm256_set1_epi32(busy as i32), bits), bits);
+        let mut ac = act;
         let ones = _mm256_set1_epi32(1);
         let mut alive = _mm256_setzero_si256();
         for k in 0..K {
@@ -918,14 +958,86 @@ mod lanes {
         st(&mut w.best, bs);
         st(&mut w.pos, ps);
         st(&mut w.t, tt);
-        let mut out = V([0; NL]);
-        st(&mut out, alive);
-        out
+        st(&mut w.alive, alive);
+        // Busy at the start and not at the end.
+        _mm256_movemask_ps(_mm256_castsi256_ps(_mm256_andnot_si256(ac, act))) as u32
     }
 
-    /// Starts the walk of `l` at the given score (left: 0, right: the left walk's best).
+    /// Writes the scores of the next `K` steps of every lane. A lane with `K` steps or more left,
+    /// or none (it reads `ZEROS`), takes its indices `q << 8 | s` from two 16-byte loads (reversed
+    /// on the left) interleaved; a walk's last steps near the start or end of a sequence are read
+    /// one by one, after the sentinel fill.
+    ///
+    /// SAFETY: every lane can read its `r` steps from its pointers, and a lane with no steps left
+    /// points at `ZEROS.0[K]`.
+    #[target_feature(enable = "avx2")]
+    unsafe fn fill(buf: &mut Buf, ln: &Lanes, left: u32, tab: &Table) {
+        buf.0 = [SENTINEL; K * NL];
+        let mut idx = [0u16; K];
+        for l in 0..NL {
+            let back = (left >> l) & 1;
+            let (q, s, r) = (ln.q[l], ln.s[l], ln.r[l]);
+            if r >= K || r == 0 {
+                let off = K * back as usize;
+                // SAFETY: K positions before the pointers (left) or from them (right) are the
+                // walk's next steps, or `ZEROS`; the mask table has two entries.
+                unsafe {
+                    let mk = _mm_load_si128(MASKS.0.as_ptr().add(back as usize) as *const __m128i);
+                    let qv = _mm_shuffle_epi8(
+                        _mm_loadu_si128(q.wrapping_sub(off) as *const __m128i),
+                        mk,
+                    );
+                    let sv = _mm_shuffle_epi8(
+                        _mm_loadu_si128(s.wrapping_sub(off) as *const __m128i),
+                        mk,
+                    );
+                    _mm_storeu_si128(idx.as_mut_ptr() as *mut __m128i, _mm_unpacklo_epi8(sv, qv));
+                    _mm_storeu_si128(
+                        idx.as_mut_ptr().add(8) as *mut __m128i,
+                        _mm_unpackhi_epi8(sv, qv),
+                    );
+                    for (i, &x) in idx.iter().enumerate() {
+                        *buf.0.get_unchecked_mut(i * NL + l) = *tab.get_unchecked(x as usize);
+                    }
+                }
+            } else if back != 0 {
+                for i in 0..r {
+                    // SAFETY: the walk's bound; q << 8 | s < 2^16.
+                    unsafe {
+                        let x = (*q.sub(1 + i) as usize) << 8 | *s.sub(1 + i) as usize;
+                        *buf.0.get_unchecked_mut(i * NL + l) = *tab.get_unchecked(x);
+                    }
+                }
+            } else {
+                for i in 0..r {
+                    // SAFETY: as above.
+                    unsafe {
+                        let x = (*q.add(i) as usize) << 8 | *s.add(i) as usize;
+                        *buf.0.get_unchecked_mut(i * NL + l) = *tab.get_unchecked(x);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Starts a walk on lane `l`: `n` steps from `q`, `s` (no steps: `ZEROS`), from `start`.
     #[inline(always)]
-    fn set_walk(w: &mut Walks, l: usize, start: i32, xd1: i32, floor: i32) {
+    #[allow(clippy::too_many_arguments)]
+    fn set_walk(
+        ln: &mut Lanes,
+        w: &mut Walks,
+        l: usize,
+        q: *const u8,
+        s: *const u8,
+        n: usize,
+        start: i32,
+        xd1: i32,
+        floor: i32,
+    ) {
+        let zero = ZEROS.0[K..].as_ptr();
+        ln.q[l] = if n == 0 { zero } else { q };
+        ln.s[l] = if n == 0 { zero } else { s };
+        ln.r[l] = n;
         w.score.0[l] = start;
         w.best.0[l] = start;
         w.pos.0[l] = 0;
@@ -935,272 +1047,8 @@ mod lanes {
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158
-    // `s_BlastAaExtendTwoHit` (two_hit.rs and x_two_hit_fast.rs follow it): the result of the
-    // walks, written as `extend_hit_two_hit` returns it.
-    /// The candidate of `l` is resolved: its result into the batch and the cell; the lane is free.
-    ///
-    /// SAFETY: the candidate's cell is below the length of the table `diag_ptr` points into.
-    #[inline(always)]
-    unsafe fn finish(
-        b: &mut XLaneBatch,
-        w: &mut Walks,
-        l: usize,
-        reached: bool,
-        right_best: i32,
-        right_disp: usize,
-        right_end: usize,
-        diag_ptr: *mut DiagStruct,
-        h: &XHitCtx<'_>,
-    ) {
-        let ln = w.lanes[l];
-        let (score, q_end, s_last_off) = if reached {
-            (
-                ln.left_score.max(right_best),
-                ln.q_r + right_disp,
-                ln.s_r + right_end,
-            )
-        } else {
-            (ln.left_score, ln.q_r, ln.s_r)
-        };
-        let result = (
-            ln.q_r - ln.left_disp,
-            q_end,
-            ln.s_r - ln.left_disp,
-            score,
-            reached,
-            s_last_off,
-        );
-        // SAFETY: the slot is below b.n.
-        let c = unsafe { b.c.get_unchecked_mut(ln.slot) };
-        if mode() == 2 {
-            // SAFETY: q_base points at the candidate's query of q_len residues.
-            let q = unsafe { core::slice::from_raw_parts(ln.q_base, ln.q_len) };
-            let expect = extend_hit_two_hit(
-                q,
-                h.subject,
-                c.s_left as usize,
-                c.s_right as usize,
-                c.q_raw as usize,
-                c.x_drop,
-                false,
-            );
-            let got = (
-                result.0,
-                result.1,
-                result.2,
-                result.2 + (result.1 - result.0),
-                result.3,
-                result.4,
-                result.5,
-            );
-            assert_eq!(
-                got, expect,
-                "LOSAT_X_TBXEXTLANESSHADOW: lane kernel s_left={} s_right={} q_raw={} x_drop={} q_len={} s_len={}",
-                c.s_left, c.s_right, c.q_raw, c.x_drop, ln.q_len, h.subject.len()
-            );
-            EL_SHADOW_CANDS.fetch_add(1, AtomicOrdering::Relaxed);
-        }
-        // SAFETY: the caller's bound.
-        unsafe { apply(c, diag_ptr, h, result) };
-        w.lanes[l].phase = 0;
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1131-1146
-    // ```c
-    // left_d = s_BlastAaExtendLeft(...);
-    // if (left_d >= (s_right_off - s_left_off)) {
-    //     *right_extend = TRUE;
-    //     right_score = s_BlastAaExtendRight(...);
-    // }
-    // ```
-    /// The left walk of `l` ended with `best` at step `disp`: the right walk, or the result.
-    ///
-    /// SAFETY: as `finish`.
-    #[inline(always)]
-    unsafe fn left_done(
-        b: &mut XLaneBatch,
-        w: &mut Walks,
-        l: usize,
-        best: i32,
-        disp: usize,
-        diag_ptr: *mut DiagStruct,
-        h: &XHitCtx<'_>,
-    ) {
-        let s_left = b.c[w.lanes[l].slot].s_left as usize;
-        let ln = &mut w.lanes[l];
-        ln.left_score = best;
-        ln.left_disp = disp;
-        let reached = disp >= ln.s_r.saturating_sub(s_left);
-        if !reached {
-            // SAFETY: the caller's bound.
-            unsafe { finish(b, w, l, false, 0, 0, 0, diag_ptr, h) };
-            return;
-        }
-        let n = (ln.q_len - ln.q_r).min(h.subject.len() - ln.s_r);
-        if n == 0 {
-            // SAFETY: the caller's bound.
-            unsafe { finish(b, w, l, true, best, 0, 0, diag_ptr, h) };
-            return;
-        }
-        ln.phase = 2;
-        ln.r = n;
-        // SAFETY: q_r <= q_len and s_r <= s_len.
-        unsafe {
-            ln.q = ln.q_base.add(ln.q_r);
-            ln.s = h.subject.as_ptr().add(ln.s_r);
-        }
-        let xd1 = w.xd1.0[l];
-        set_walk(w, l, best, xd1, 1);
-    }
-
-    /// Puts the candidate in `slot` on lane `l`: the word loop of `two_hit` and the left walk.
-    /// Leaves the lane free when the candidate is resolved already, is left to
-    /// `extend_hit_two_hit` (an X-drop outside 1..=127, a word that does not fit), or ends at once.
-    ///
-    /// SAFETY: as `finish`.
-    #[inline(always)]
-    unsafe fn start(
-        b: &mut XLaneBatch,
-        w: &mut Walks,
-        l: usize,
-        slot: usize,
-        tab: &Table,
-        diag_ptr: *mut DiagStruct,
-        h: &XHitCtx<'_>,
-    ) {
-        let c = b.c[slot];
-        if c.done {
-            return;
-        }
-        // SAFETY: the context index was returned by `get_context_idx` (below num_contexts).
-        let ctx = unsafe { h.contexts.get_unchecked(c.ctx_idx as usize) };
-        let query_full = &ctx.aa_seq;
-        let q = &query_full[1..query_full.len() - 1];
-        let s = h.subject;
-        let (q_raw, s_right) = (c.q_raw as usize, c.s_right as usize);
-        if !(1..=X_TBXUNGAP_MAX_X_DROP).contains(&c.x_drop)
-            || q_raw >= q.len()
-            || q.len() - q_raw < WORD
-            || s_right >= s.len()
-            || s.len() - s_right < WORD
-        {
-            return;
-        }
-        b.lane_cands += 1;
-        // The best end of the word at R (`two_hit`).
-        let mut score = 0i32;
-        let mut seed_score = 0i32;
-        let mut right_d = 0usize;
-        for i in 0..WORD {
-            // SAFETY: the word fits in both sequences (tested above).
-            let (qc, sc) = unsafe { (*q.get_unchecked(q_raw + i), *s.get_unchecked(s_right + i)) };
-            score += tab[(qc as usize) << 8 | sc as usize] as i32;
-            if score > seed_score {
-                seed_score = score;
-                right_d = i + 1;
-            }
-        }
-        let q_r = q_raw + right_d;
-        let s_r = s_right + right_d;
-        w.lanes[l] = Lane {
-            phase: 1,
-            slot,
-            // SAFETY: q_r <= q.len() and s_r <= s.len() (the word fits).
-            q: unsafe { q.as_ptr().add(q_r) },
-            s: unsafe { s.as_ptr().add(s_r) },
-            r: q_r.min(s_r),
-            q_r,
-            s_r,
-            q_base: q.as_ptr(),
-            q_len: q.len(),
-            left_score: 0,
-            left_disp: 0,
-        };
-        set_walk(w, l, 0, c.x_drop - 1, i32::MIN);
-        if q_r.min(s_r) == 0 {
-            // SAFETY: the caller's bound.
-            unsafe { left_done(b, w, l, 0, 0, diag_ptr, h) };
-        }
-    }
-
-    /// The table indices `q << 8 | s` of 16 consecutive positions from `q` and `s`, position `i`
-    /// at index `i`: the bytes of `s` and `q` interleaved (little-endian u16, `s` low).
-    ///
-    /// SAFETY: 16 bytes are readable from each pointer.
-    #[inline(always)]
-    unsafe fn indices16(q: *const u8, s: *const u8, out: &mut [u16; K]) {
-        // SAFETY: the caller's bound; `out` holds 32 bytes.
-        unsafe {
-            let qv = _mm_loadu_si128(q as *const __m128i);
-            let sv = _mm_loadu_si128(s as *const __m128i);
-            _mm_storeu_si128(out.as_mut_ptr() as *mut __m128i, _mm_unpacklo_epi8(sv, qv));
-            _mm_storeu_si128(
-                out.as_mut_ptr().add(8) as *mut __m128i,
-                _mm_unpackhi_epi8(sv, qv),
-            );
-        }
-    }
-
-    /// Writes the scores of the next `K` steps of each busy lane (the sentinel after a walk's
-    /// end and in free lanes). A lane with `K` steps or more left takes its indices from two
-    /// 16-byte loads (`indices16`); a walk's last block reads its residues one by one.
-    ///
-    /// SAFETY: every busy lane's walk can read its `r` steps from its pointers.
-    #[inline(always)]
-    unsafe fn fill(buf: &mut Buf, w: &Walks, tab: &Table) {
-        buf.0 = [SENTINEL; K * NL];
-        let mut idx = [0u16; K];
-        for (l, ln) in w.lanes.iter().enumerate() {
-            match (ln.phase, ln.r >= K) {
-                (1, true) => {
-                    // SAFETY: the left walk reads the r >= K positions before its pointers; step
-                    // i reads position K - 1 - i of the 16 before them.
-                    unsafe {
-                        indices16(ln.q.sub(K), ln.s.sub(K), &mut idx);
-                        for i in 0..K {
-                            *buf.0.get_unchecked_mut(i * NL + l) =
-                                *tab.get_unchecked(idx[K - 1 - i] as usize);
-                        }
-                    }
-                }
-                (2, true) => {
-                    // SAFETY: the right walk reads the r >= K positions from its pointers.
-                    unsafe {
-                        indices16(ln.q, ln.s, &mut idx);
-                        for i in 0..K {
-                            *buf.0.get_unchecked_mut(i * NL + l) =
-                                *tab.get_unchecked(idx[i] as usize);
-                        }
-                    }
-                }
-                (1, false) => {
-                    for i in 0..ln.r {
-                        // SAFETY: the walk's bound; q << 8 | s < 2^16.
-                        unsafe {
-                            let qc = *ln.q.sub(1 + i);
-                            let sc = *ln.s.sub(1 + i);
-                            *buf.0.get_unchecked_mut(i * NL + l) =
-                                *tab.get_unchecked((qc as usize) << 8 | sc as usize);
-                        }
-                    }
-                }
-                (2, false) => {
-                    for i in 0..ln.r {
-                        // SAFETY: as above.
-                        unsafe {
-                            let qc = *ln.q.add(i);
-                            let sc = *ln.s.add(i);
-                            *buf.0.get_unchecked_mut(i * NL + l) =
-                                *tab.get_unchecked((qc as usize) << 8 | sc as usize);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:1089-1158 (above)
+    // `s_BlastAaExtendTwoHit` (two_hit.rs and x_two_hit_fast.rs follow it): the word loop, the
+    // left walk, the test that it reached the first hit, the right walk, the result.
     /// Resolves the batch's candidates that the lanes can take; the others stay for
     /// `extend_hit_two_hit` (`flush`).
     ///
@@ -1213,75 +1061,211 @@ mod lanes {
         h: &XHitCtx<'_>,
         tab: &Table,
     ) {
-        let n = b.n;
-        let mut next = 0usize;
+        let shadow = mode() == 2;
+        let s_seq = h.subject;
+        // The candidates the lanes take, in slot order, after the word loop.
+        let mut prep = [PREP_NONE; LANES_MAX];
+        let mut k = 0usize;
+        for slot in 0..b.n {
+            let c = b.c[slot];
+            // SAFETY: the context index was returned by `get_context_idx` (below num_contexts).
+            let ctx = unsafe { h.contexts.get_unchecked(c.ctx_idx as usize) };
+            let query_full = &ctx.aa_seq;
+            let q = &query_full[1..query_full.len() - 1];
+            let (q_raw, s_right) = (c.q_raw as usize, c.s_right as usize);
+            if c.done
+                || !(1..=X_TBXUNGAP_MAX_X_DROP).contains(&c.x_drop)
+                || q_raw >= q.len()
+                || q.len() - q_raw < WORD
+                || s_right >= s_seq.len()
+                || s_seq.len() - s_right < WORD
+            {
+                continue;
+            }
+            // The best end of the word at R (`two_hit`).
+            let mut score = 0i32;
+            let mut seed_score = 0i32;
+            let mut right_d = 0usize;
+            for i in 0..WORD {
+                // SAFETY: the word fits in both sequences (tested above).
+                let (qc, sc) = unsafe {
+                    (
+                        *q.get_unchecked(q_raw + i),
+                        *s_seq.get_unchecked(s_right + i),
+                    )
+                };
+                score += tab[(qc as usize) << 8 | sc as usize] as i32;
+                if score > seed_score {
+                    seed_score = score;
+                    right_d = i + 1;
+                }
+            }
+            let (q_r, s_r) = (q_raw + right_d, s_right + right_d);
+            prep[k] = Prep {
+                slot,
+                q_r,
+                s_r,
+                // SAFETY: q_r <= q.len() and s_r <= s.len() (the word fits).
+                q_at: unsafe { q.as_ptr().add(q_r) },
+                s_at: unsafe { s_seq.as_ptr().add(s_r) },
+                q_base: q.as_ptr(),
+                q_len: q.len(),
+                n_left: q_r.min(s_r),
+                n_right: (q.len() - q_r).min(s_seq.len() - s_r),
+                reach: s_r.saturating_sub(c.s_left as usize),
+                xd1: c.x_drop - 1,
+            };
+            k += 1;
+        }
+        b.lane_cands += k as u64;
+
+        let zero = ZEROS.0[K..].as_ptr();
+        let mut ln = Lanes {
+            cur: [0; NL],
+            q: [zero; NL],
+            s: [zero; NL],
+            r: [0; NL],
+            left_score: [0; NL],
+            left_disp: [0; NL],
+            reached: [false; NL],
+        };
         let mut w = Walks {
-            lanes: [FREE; NL],
             score: V([0; NL]),
             best: V([0; NL]),
             pos: V([0; NL]),
             t: V([0; NL]),
             xd1: V([0; NL]),
             floor: V([0; NL]),
+            alive: V([0; NL]),
         };
         let mut buf = Buf([SENTINEL; K * NL]);
+        // Lanes with a candidate, and those of them on its left walk.
+        let mut busy = 0u32;
+        let mut left = 0u32;
+        let mut next = 0usize;
         loop {
-            let mut act = V([0; NL]);
-            let mut busy = false;
-            for l in 0..NL {
-                while w.lanes[l].phase == 0 && next < n {
-                    next += 1;
-                    // SAFETY: the caller's bound.
-                    unsafe { start(b, &mut w, l, next - 1, tab, diag_ptr, h) };
-                }
-                if w.lanes[l].phase != 0 {
-                    act.0[l] = -1;
-                    busy = true;
-                }
+            let mut free = !busy & 0xff;
+            while free != 0 && next < k {
+                let l = free.trailing_zeros() as usize;
+                free &= free - 1;
+                let p = &prep[next];
+                ln.cur[l] = next;
+                set_walk(
+                    &mut ln,
+                    &mut w,
+                    l,
+                    p.q_at,
+                    p.s_at,
+                    p.n_left,
+                    0,
+                    p.xd1,
+                    i32::MIN,
+                );
+                busy |= 1 << l;
+                left |= 1 << l;
+                next += 1;
             }
-            if !busy {
+            if busy == 0 {
                 break;
             }
-            // SAFETY: the walks' bounds (`start`, `left_done`).
-            unsafe { fill(&mut buf, &w, tab) };
+            // SAFETY: the lanes' pointers (`set_walk`, the advance below).
+            unsafe { fill(&mut buf, &ln, left, tab) };
             // SAFETY: AVX2 (the caller's bound).
-            let alive = unsafe { run_block(&buf, &mut w, &act) };
+            let stopped = unsafe { run_block(&buf, &mut w, busy) };
             b.lane_blocks += 1;
             for l in 0..NL {
-                let phase = w.lanes[l].phase;
-                if phase == 0 {
-                    continue;
-                }
-                let m = w.lanes[l].r.min(K);
+                let r = ln.r[l];
+                let m = r.min(K);
                 b.lane_steps += m as u64;
-                {
-                    let ln = &mut w.lanes[l];
-                    ln.r -= m;
-                    // SAFETY: m steps of the walk were readable.
-                    unsafe {
-                        if phase == 1 {
-                            ln.q = ln.q.sub(m);
-                            ln.s = ln.s.sub(m);
-                        } else {
-                            ln.q = ln.q.add(m);
-                            ln.s = ln.s.add(m);
-                        }
-                    }
+                let d = if (left >> l) & 1 != 0 {
+                    m.wrapping_neg()
+                } else {
+                    m
+                };
+                ln.r[l] = r - m;
+                ln.q[l] = if r == m {
+                    zero
+                } else {
+                    ln.q[l].wrapping_add(d)
+                };
+                ln.s[l] = if r == m {
+                    zero
+                } else {
+                    ln.s[l].wrapping_add(d)
+                };
+            }
+            // Right walks that stopped: the candidate's result (module comment above).
+            let mut done = stopped & !left;
+            while done != 0 {
+                let l = done.trailing_zeros() as usize;
+                done &= done - 1;
+                let p = &prep[ln.cur[l]];
+                let right_best = w.best.0[l];
+                let right_disp = w.pos.0[l] as usize;
+                let end = w.t.0[l] as usize - K + w.alive.0[l] as usize;
+                let disp = ln.left_disp[l];
+                let result = (
+                    p.q_r - disp,
+                    p.q_r + right_disp,
+                    p.s_r - disp,
+                    ln.left_score[l].max(right_best),
+                    ln.reached[l],
+                    p.s_r + end,
+                );
+                // SAFETY: the slot is below b.n.
+                let c = unsafe { b.c.get_unchecked_mut(p.slot) };
+                if shadow {
+                    // SAFETY: q_base points at the candidate's query of q_len residues.
+                    let q = unsafe { core::slice::from_raw_parts(p.q_base, p.q_len) };
+                    let expect = extend_hit_two_hit(
+                        q,
+                        s_seq,
+                        c.s_left as usize,
+                        c.s_right as usize,
+                        c.q_raw as usize,
+                        c.x_drop,
+                        false,
+                    );
+                    let got = (
+                        result.0,
+                        result.1,
+                        result.2,
+                        result.2 + (result.1 - result.0),
+                        result.3,
+                        result.4,
+                        result.5,
+                    );
+                    assert_eq!(
+                        got, expect,
+                        "LOSAT_X_TBXEXTLANESSHADOW: lane kernel s_left={} s_right={} q_raw={} x_drop={} q_len={} s_len={}",
+                        c.s_left, c.s_right, c.q_raw, c.x_drop, p.q_len, s_seq.len()
+                    );
+                    EL_SHADOW_CANDS.fetch_add(1, AtomicOrdering::Relaxed);
                 }
-                let a = alive.0[l] as usize;
-                if a < K || w.lanes[l].r == 0 {
-                    let best = w.best.0[l];
-                    let pos = w.pos.0[l] as usize;
-                    if phase == 1 {
-                        // SAFETY: the caller's bound.
-                        unsafe { left_done(b, &mut w, l, best, pos, diag_ptr, h) };
-                    } else {
-                        // The steps before the stopping one (all of them if none stopped).
-                        let end = w.t.0[l] as usize - K + a;
-                        // SAFETY: the caller's bound.
-                        unsafe { finish(b, &mut w, l, true, best, pos, end, diag_ptr, h) };
-                    }
-                }
+                // SAFETY: the caller's bound.
+                unsafe { apply(c, diag_ptr, h, result) };
+                ln.q[l] = zero;
+                ln.s[l] = zero;
+                ln.r[l] = 0;
+                busy &= !(1 << l);
+            }
+            // Left walks that stopped: the right walk, of no steps if it did not reach.
+            // [C] if (left_d >= (s_right_off - s_left_off)) { *right_extend = TRUE; ... }
+            let mut done = stopped & left;
+            while done != 0 {
+                let l = done.trailing_zeros() as usize;
+                done &= done - 1;
+                let p = &prep[ln.cur[l]];
+                let best = w.best.0[l];
+                let disp = w.pos.0[l] as usize;
+                let reached = disp >= p.reach;
+                ln.left_score[l] = best;
+                ln.left_disp[l] = disp;
+                ln.reached[l] = reached;
+                let n = if reached { p.n_right } else { 0 };
+                let xd1 = w.xd1.0[l];
+                set_walk(&mut ln, &mut w, l, p.q_at, p.s_at, n, best, xd1, 1);
+                left &= !(1 << l);
             }
         }
     }

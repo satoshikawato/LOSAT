@@ -136,7 +136,7 @@ static WORKER_TABLES_RELEASED: AtomicU64 = AtomicU64::new(0);
 // copies. Read once per process.
 /// True while `LOSAT_X_SEEDRELEASE` is on. A strict-set switch: on unless it is `0`, or
 /// `LOSAT_X_DEFAULT=0` and it is not set.
-fn on() -> bool {
+pub(super) fn on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SEEDRELEASE"))
 }

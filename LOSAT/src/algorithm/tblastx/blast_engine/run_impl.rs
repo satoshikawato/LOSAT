@@ -2030,8 +2030,10 @@ fn run_in_pool(
         let compare: &x_batch_pipe::XCompare<'_, TblastxBatch> = &x_pipe_compare;
         if let Some(pipe) = x_batch_pipe::XPipe::new(plan, search_subjects.count(), search, compare)
         {
-            let result =
-                rayon::in_place_scope(|scope| batch_loop(&mut |range| pipe.take(scope, range)));
+            let result = rayon::in_place_scope(|scope| {
+                let _closer = pipe.closer();
+                batch_loop(&mut |range| pipe.take(scope, range))
+            });
             for line in pipe.lines() {
                 eprintln!("{line}");
             }
@@ -2046,6 +2048,7 @@ fn run_in_pool(
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 fn x_pipe_wanted(parallel_pool: &crate::utils::threading::SearchPool<'_>) -> bool {
     x_batch_pipe::on()
+        && x_seed_release::on()
         && parallel_pool.enabled()
         && parallel_pool.threads() > 1
         && rayon::current_thread_index().is_some()

@@ -1364,8 +1364,9 @@ Rebuilding less:
   One line at exit: `[X_SHADOW] TBXKMERGE subjects_compared= hsps_compared=`. `LOSAT_X_PAIRPARSHADOW=1`
   compares the subject's list with the reference frame loop's as well.
 - `LOSAT_X_TBXPIPE=1` (TBLASTX, speed; in the strict set since 2026-10-19, on by default; acts only with
-  two or more threads in a native build and two or more query batches, and not with debugging output
-  (`LOSAT_DEBUG*`, `LOSAT_TRACE_HSP`, `LOSAT_DIAGNOSTICS`, `LOSAT_WASI_THREADS_DEBUG`, the stage dumps))
+  two or more threads in a native build and two or more query batches, with `LOSAT_X_SEEDRELEASE`, and
+  not with debugging output (`LOSAT_DEBUG*`, `LOSAT_TRACE_HSP`, `LOSAT_DIAGNOSTICS`,
+  `LOSAT_WASI_THREADS_DEBUG`, the stage dumps))
   the next query batch starts when the batch before has ended its seed stage, while that batch still
   links its subjects (`tblastx/x_batch_pipe.rs`, exactness argument in its header). With `LOSAT_X_TBXNEXT`
   every subject of a batch starts at once and its units fill the pool, so after a batch's last unit only

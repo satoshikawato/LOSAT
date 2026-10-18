@@ -47,7 +47,10 @@
 //!    peak. The tables of two batches are never held at once: the next batch builds its own after
 //!    the batch before has freed its tables.
 //! 5. A search that returns an error stops the early starts. The loop then meets that batch's
-//!    error where it met it before; batches started after it are discarded unread.
+//!    error where it met it before; batches started after it are discarded unread. So does the
+//!    loop's end (its own errors, as a database's titles that cannot be read): the scope then
+//!    waits only for the batches already started. A search that panics fills its slot with the
+//!    panic, which the loop raises again when it takes the batch (release builds abort first).
 //! 6. While a later batch may run, a batch's subjects link without the pool (their two linking
 //!    calls get `allow_parallel` false, the path of one thread, which gives the same lists): a
 //!    thread waiting for its pool tasks runs whatever the pool holds, so a chain that waited for
@@ -77,7 +80,8 @@
 //! Off (the loop as before): the switch off; a build without `parallel`, or wasm32 (the loop is
 //! kept there); one thread, or a loop not on a thread of its pool; fewer than two planned
 //! batches; any debugging output of the search (`LOSAT_DEBUG*`, the HSP trace, the diagnostics,
-//! the stage dumps), whose lines would interleave.
+//! the stage dumps), whose lines would interleave; `LOSAT_X_SEEDRELEASE` off (a batch would keep
+//! its tables while the next one builds its own).
 //!
 //! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXPIPE planned= taken= early= loop= waited=
 //! key_mismatch= max_held_hsps=` at the end of the search (early: started at the batch before's
@@ -259,6 +263,18 @@ impl Drop for XSeedGuard<'_> {
     }
 }
 
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+// No NCBI counterpart: see `XPipe::closer`.
+/// Stops the early starts when dropped: when the loop returns, and when it unwinds.
+pub(super) struct XPipeCloser<'a>(&'a AtomicBool);
+
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+impl Drop for XPipeCloser<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
 /// What the pipe counts (`[X_STATS] TBXPIPE`).
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 #[derive(Default)]
@@ -289,7 +305,8 @@ pub(super) struct XPipe<'s, R> {
     search: &'s XSearch<'s, R>,
     compare: &'s XCompare<'s, R>,
     started: Vec<AtomicBool>,
-    slots: Vec<Mutex<Option<Result<R>>>>,
+    /// A batch's result, or the panic of its search (`run_early`).
+    slots: Vec<Mutex<Option<std::thread::Result<Result<R>>>>>,
     next: AtomicUsize,
     stop: AtomicBool,
     held: XHeld,
@@ -364,8 +381,13 @@ impl<'s, R: Send> XPipe<'s, R> {
         result
     }
 
+    /// No batch starts early any more (the loop has ended); dropped by the loop's scope.
+    pub(super) fn closer(&self) -> XPipeCloser<'_> {
+        XPipeCloser(&self.stop)
+    }
+
     /// The slot of batch `i`, once its search has filled it; the thread runs the pool's jobs
-    /// meanwhile.
+    /// meanwhile. A panic of that search is raised again here.
     fn wait(&self, i: usize) -> Result<R> {
         let mut waited = false;
         loop {
@@ -377,7 +399,7 @@ impl<'s, R: Send> XPipe<'s, R> {
                 if waited {
                     self.counts.waited.fetch_add(1, Ordering::Relaxed);
                 }
-                return result;
+                return result.unwrap_or_else(|panic| std::panic::resume_unwind(panic));
             }
             waited = true;
             match rayon::yield_now() {
@@ -412,7 +434,12 @@ impl<'s, R: Send> XPipe<'s, R> {
         }
         self.counts.early.fetch_add(1, Ordering::Relaxed);
         scope.spawn(move |scope| {
-            let result = self.run(scope, next);
+            // The loop waits for this slot: a panic fills it too (item 5).
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.run(scope, next)));
+            if result.is_err() {
+                self.stop.store(true, Ordering::SeqCst);
+            }
             *self.slots[next]
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
@@ -534,6 +561,7 @@ mod tests {
             .expect("two batches or more");
         let results = pool(threads).install(|| {
             rayon::in_place_scope(|scope| {
+                let _closer = pipe.closer();
                 let mut out = Vec::new();
                 for range in plan.iter().cloned() {
                     let result = pipe.take(scope, range);
@@ -633,6 +661,69 @@ mod tests {
         let last = XSeedEnd::new(1, &noop, &held, true);
         assert!(XSeedGuard::new(Some(&last)).end(1), "the plan's last batch");
         assert!(XSeedGuard::new(None).end(1), "no pipe");
+    }
+
+    #[test]
+    fn a_panic_in_an_early_batch_is_raised_on_the_loop() {
+        for threads in [1, 4] {
+            let plan = vec![0..2, 2..4, 4..6];
+            let running = AtomicUsize::new(0);
+            let most = AtomicUsize::new(0);
+            let inner = fake_search(&running, &most, 3, None);
+            let search = |range: std::ops::Range<usize>, seed_end: Option<&XSeedEnd<'_>>| {
+                let start = range.start;
+                let result = inner(range, seed_end);
+                assert!(start != 2, "batch {start} panicked");
+                result
+            };
+            let compare = same;
+            let pipe = XPipe::with_limit(plan.clone(), 3, &search, &compare, u64::MAX)
+                .expect("three batches");
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                pool(threads).install(|| {
+                    rayon::in_place_scope(|scope| {
+                        let _closer = pipe.closer();
+                        for range in plan.iter().cloned() {
+                            let _ = pipe.take(scope, range);
+                        }
+                    })
+                })
+            }));
+            let panic = caught.expect_err("the loop raises the batch's panic");
+            let message = panic.downcast_ref::<String>().cloned().unwrap_or_default();
+            assert!(
+                message.contains("batch 2 panicked"),
+                "threads {threads}: {message}"
+            );
+            assert_eq!(
+                pipe.counts.taken.load(Ordering::SeqCst),
+                2,
+                "threads {threads}"
+            );
+            // Batch 1 may have started batch 2 before it panicked.
+            assert!(
+                pipe.counts.early.load(Ordering::SeqCst) >= 1,
+                "threads {threads}"
+            );
+        }
+    }
+
+    #[test]
+    fn after_the_loop_ends_no_batch_starts_early() {
+        let plan = vec![0..2, 2..4, 4..6];
+        let running = AtomicUsize::new(0);
+        let most = AtomicUsize::new(0);
+        let search = fake_search(&running, &most, 2, None);
+        let compare = same;
+        let pipe = XPipe::with_limit(plan, 2, &search, &compare, u64::MAX).expect("three batches");
+        pool(2).install(|| {
+            rayon::in_place_scope(|scope| {
+                drop(pipe.closer());
+                pipe.seed_ended(scope, 0);
+            })
+        });
+        assert_eq!(pipe.counts.early.load(Ordering::SeqCst), 0);
+        assert!(!pipe.started[1].load(Ordering::SeqCst));
     }
 
     #[test]

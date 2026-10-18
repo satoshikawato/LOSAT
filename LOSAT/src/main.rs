@@ -229,6 +229,7 @@ fn main() -> Result<()> {
     LOSAT::core::composition_adjustment::adjust_scores::x_newtonexact_print_stats();
     LOSAT::algorithm::tblastx::x_seed_bucket::print_shadow_stats();
     LOSAT::algorithm::tblastx::blast_engine::x_pair_par_print_summary();
+    LOSAT::algorithm::tblastx::blast_engine::x_query_frames_print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_seed_release_print_summary();
     LOSAT::algorithm::tblastx::lookup::x_bplut_print_summary();
     LOSAT::algorithm::tblastx::lookup::x_tbxlut_print_summary();

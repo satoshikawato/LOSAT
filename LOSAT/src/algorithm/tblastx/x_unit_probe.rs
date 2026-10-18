@@ -372,6 +372,22 @@ struct XStatTotals {
     ext_left: u64,
     ext_right: u64,
     ext_distinct: u64,
+    /// EXPERIMENT (A5 premise): candidates started between a candidate and the next hit on its
+    /// cell (0, 1, 2-3, 4-7, 8-15, 16-31, 32+), and candidates with no later hit in the unit.
+    conf_dist: [u64; 7],
+    no_conf: u64,
+    /// Per lane count (8, 16): full batches, candidates resolved early (a hit on their cell
+    /// before the batch filled), candidates in unit-end partial batches, partial batches,
+    /// sum over full batches of the longest member's cells, sum of the full batches' cells.
+    lane_full: [u64; 2],
+    lane_early: [u64; 2],
+    lane_tail: [u64; 2],
+    lane_tail_batches: [u64; 2],
+    lane_max_cells: [u64; 2],
+    lane_sum_cells: [u64; 2],
+    /// Histogram of the cells of one extension (3 + left + right): <=8, 9-16, 17-32, 33-64,
+    /// 65-128, 129-256, 257+.
+    ext_len_hist: [u64; 7],
 }
 
 impl XStatTotals {
@@ -405,6 +421,89 @@ impl XStatTotals {
         self.ext_left += o.ext_left;
         self.ext_right += o.ext_right;
         self.ext_distinct += o.ext_distinct;
+        for k in 0..7 {
+            self.conf_dist[k] += o.conf_dist[k];
+            self.ext_len_hist[k] += o.ext_len_hist[k];
+        }
+        self.no_conf += o.no_conf;
+        for k in 0..2 {
+            self.lane_full[k] += o.lane_full[k];
+            self.lane_early[k] += o.lane_early[k];
+            self.lane_tail[k] += o.lane_tail[k];
+            self.lane_tail_batches[k] += o.lane_tail_batches[k];
+            self.lane_max_cells[k] += o.lane_max_cells[k];
+            self.lane_sum_cells[k] += o.lane_sum_cells[k];
+        }
+    }
+}
+
+/// EXPERIMENT (A5 premise): a batch of `L` pending extensions; a hit on a pending cell resolves
+/// that candidate alone (scalar), the batch runs when `L` are live, the unit's end runs the rest.
+#[derive(Default)]
+struct LaneSim {
+    lanes: usize,
+    /// Per cell: sequence number + 1 of its pending candidate in this simulation (0: none).
+    pend: Vec<u32>,
+    /// The batch: (cell, seq + 1, cells).
+    batch: Vec<(u32, u32, u32)>,
+    live: usize,
+}
+
+impl LaneSim {
+    fn begin(&mut self, lanes: usize, width: usize) {
+        self.lanes = lanes;
+        self.pend.clear();
+        self.pend.resize(width, 0);
+        self.batch.clear();
+        self.live = 0;
+    }
+    /// A hit on `cell` (before its outcome is applied): resolves a pending candidate there.
+    fn touch(&mut self, cell: usize, early: &mut u64) {
+        if self.pend[cell] != 0 {
+            self.pend[cell] = 0;
+            self.live -= 1;
+            *early += 1;
+        }
+    }
+    fn candidate(
+        &mut self,
+        cell: usize,
+        seq1: u32,
+        cells: u32,
+        full: &mut u64,
+        maxc: &mut u64,
+        sumc: &mut u64,
+    ) {
+        self.pend[cell] = seq1;
+        self.batch.push((cell as u32, seq1, cells));
+        self.live += 1;
+        if self.live == self.lanes {
+            let mut m = 0u32;
+            for &(c, q, n) in &self.batch {
+                if self.pend[c as usize] == q {
+                    m = m.max(n);
+                    *sumc += n as u64;
+                    self.pend[c as usize] = 0;
+                }
+            }
+            *maxc += m as u64;
+            *full += 1;
+            self.batch.clear();
+            self.live = 0;
+        }
+    }
+    fn end(&mut self, tail: &mut u64, tail_batches: &mut u64) {
+        if self.live > 0 {
+            *tail += self.live as u64;
+            *tail_batches += 1;
+        }
+        for &(c, q, _) in &self.batch {
+            if self.pend[c as usize] == q {
+                self.pend[c as usize] = 0;
+            }
+        }
+        self.batch.clear();
+        self.live = 0;
     }
 }
 
@@ -427,6 +526,9 @@ struct XCellStat {
     run_kind: u8,
     /// Whether the cell's last hit has a hit less than `window` before it.
     last_near: bool,
+    /// EXPERIMENT (A5 premise): unit candidate number + 1 of the cell's last candidate with no
+    /// later hit yet (0: none).
+    cand1: u32,
 }
 
 /// LOSAT_X_STATS: the per-cell state of one unit and its counters.
@@ -438,6 +540,9 @@ pub(super) struct XStatsProbe {
     cur: usize,
     cur_s: u32,
     t: XStatTotals,
+    cand: u32,
+    last_ext_cells: u32,
+    sims: [LaneSim; 2],
 }
 
 impl XStatsProbe {
@@ -459,6 +564,9 @@ impl XProbe for XStatsProbe {
         self.cells.resize(width, XCellStat::default());
         self.unit_touched.clear();
         self.batch_touched.clear();
+        self.cand = 0;
+        self.sims[0].begin(8, width);
+        self.sims[1].begin(16, width);
         self.t = XStatTotals {
             units: 1,
             table_cells: width as u64,
@@ -479,6 +587,38 @@ impl XProbe for XStatsProbe {
         let t = &mut self.t;
         t.outcomes[outcome_index(outcome)] += 1;
         let c = &mut self.cells[cell];
+        if c.cand1 != 0 {
+            let d = self.cand - c.cand1;
+            let b = match d {
+                0 => 0,
+                1 => 1,
+                2..=3 => 2,
+                4..=7 => 3,
+                8..=15 => 4,
+                16..=31 => 5,
+                _ => 6,
+            };
+            t.conf_dist[b] += 1;
+            c.cand1 = 0;
+        }
+        for k in 0..2 {
+            self.sims[k].touch(cell, &mut t.lane_early[k]);
+        }
+        if matches!(outcome, XHit::Extended | XHit::Saved) {
+            self.cand += 1;
+            c.cand1 = self.cand;
+            let n = self.last_ext_cells;
+            for k in 0..2 {
+                self.sims[k].candidate(
+                    cell,
+                    self.cand,
+                    n,
+                    &mut t.lane_full[k],
+                    &mut t.lane_max_cells[k],
+                    &mut t.lane_sum_cells[k],
+                );
+            }
+        }
         if c.unit_hits == 0 {
             self.unit_touched.push(cell as u32);
         }
@@ -537,6 +677,18 @@ impl XProbe for XStatsProbe {
         t.ext_left += cells.left as u64;
         t.ext_right += cells.right as u64;
         t.ext_cells += 3 + (cells.left + cells.right) as u64;
+        let n = 3 + (cells.left + cells.right) as u32;
+        self.last_ext_cells = n;
+        let b = match n {
+            0..=8 => 0,
+            9..=16 => 1,
+            17..=32 => 2,
+            33..=64 => 3,
+            65..=128 => 4,
+            129..=256 => 5,
+            _ => 6,
+        };
+        t.ext_len_hist[b] += 1;
         let c = &mut self.cells[self.cur];
         let (lo, hi) = (cells.s_lo as u32, cells.s_hi as u32);
         t.ext_distinct += hi.saturating_sub(lo.max(c.ext_hi)) as u64;
@@ -553,7 +705,14 @@ impl XProbe for XStatsProbe {
             if !c.last_near {
                 t.isolated += 1;
             }
+            if c.cand1 != 0 {
+                t.no_conf += 1;
+                c.cand1 = 0;
+            }
             Self::close_run(t, c);
+        }
+        for k in 0..2 {
+            self.sims[k].end(&mut t.lane_tail[k], &mut t.lane_tail_batches[k]);
         }
         let mut totals = STAT_TOTALS.lock().unwrap_or_else(|e| e.into_inner());
         totals.get_or_insert_with(XStatTotals::default).add(t);
@@ -632,6 +791,23 @@ pub(super) fn stats_lines() -> Vec<String> {
         t.ext_distinct,
         ratio(t.ext_cells, t.ext_distinct)
     ));
+    lines.push(format!(
+        "[X_STATS] TBXSEED a5 conf_dist(0,1,2-3,4-7,8-15,16-31,32+)={:?} no_conf={} ext_len(<=8,..16,..32,..64,..128,..256,257+)={:?}",
+        t.conf_dist, t.no_conf, t.ext_len_hist
+    ));
+    for (k, l) in [8, 16].iter().enumerate() {
+        lines.push(format!(
+            "[X_STATS] TBXSEED a5 lanes={l} full_batches={} in_full={} early={} tail={} tail_batches={} full_max_cells={} full_sum_cells={} util={:.3}",
+            t.lane_full[k],
+            t.lane_full[k] * *l as u64,
+            t.lane_early[k],
+            t.lane_tail[k],
+            t.lane_tail_batches[k],
+            t.lane_max_cells[k],
+            t.lane_sum_cells[k],
+            ratio(t.lane_sum_cells[k], t.lane_max_cells[k] * *l as u64)
+        ));
+    }
     lines
 }
 

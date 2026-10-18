@@ -78,7 +78,9 @@
 //! search.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
 use anyhow::Result;
 
@@ -91,6 +93,7 @@ pub(super) fn on() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXPIPE"))
 }
 
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 // No NCBI counterpart: a test mode (module header), off unless set to a value other than `0`.
 /// LOSAT_X_TBXPIPESHADOW.
 pub(super) fn shadow() -> bool {
@@ -101,10 +104,12 @@ pub(super) fn shadow() -> bool {
     })
 }
 
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 /// The HSPs the batches past their seed-stage end may hold when the next batch starts early
 /// (module header, item 4).
 const HSP_LIMIT: u64 = 1 << 22;
 
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 // No NCBI counterpart: a tuning and test override of `HSP_LIMIT` (`LOSAT_X_TBXPIPEHSPS=<n>`).
 fn hsp_limit() -> u64 {
     static LIMIT: OnceLock<u64> = OnceLock::new();
@@ -183,6 +188,7 @@ impl Drop for XSeedGuard<'_> {
 }
 
 /// What the pipe counts (`[X_STATS] TBXPIPE`).
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 #[derive(Default)]
 struct Counts {
     taken: AtomicU64,
@@ -198,10 +204,12 @@ struct Counts {
 pub(super) type XSearch<'s, R> =
     dyn Fn(std::ops::Range<usize>, Option<&XSeedEnd<'_>>) -> Result<R> + Sync + 's;
 
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 /// The shadow's comparison of two results of one batch: `None` when they are the same, else
 /// what differs.
 pub(super) type XCompare<'s, R> = dyn Fn(&R, &R) -> Option<String> + Sync + 's;
 
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 // No NCBI counterpart: see the module header.
 /// The planned batches of one search, their slots, and the admission count.
 pub(super) struct XPipe<'s, R> {
@@ -218,6 +226,7 @@ pub(super) struct XPipe<'s, R> {
     counts: Counts,
 }
 
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 impl<'s, R: Send> XPipe<'s, R> {
     /// The pipe of `plan` (the batches' query ranges, in the loop's order) over `subjects`
     /// subjects; `None` when the plan has fewer than two batches.

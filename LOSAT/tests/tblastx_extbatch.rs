@@ -3,8 +3,9 @@
 //!
 //! The switch is a value switch of the strict set (`src/utils/xswitch.rs`): on unless it is `0`, or
 //! `LOSAT_X_DEFAULT=0` and it is not set; its number is the smallest largest-unit query-group span,
-//! in Ki letters, of a subject whose units take the path (built-in 256; `2` takes every unit). It
-//! acts on x86-64 only; its shadow (`LOSAT_X_TBXEXTBATCHSHADOW`) runs on every target and every unit.
+//! in Ki letters, of a subject whose units take the path (built-in 256; `2` takes every unit of 2 Ki
+//! letters or more). It acts on x86-64 only (on other targets `=2` compares the old path with
+//! itself); its shadow (`LOSAT_X_TBXEXTBATCHSHADOW`) runs on every target, whatever the size rule.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-605
 //! ```c
@@ -17,7 +18,8 @@
 //! not depend on it. That reports equal NCBI's is the business of the fixture comparisons. The input
 //! (150,000 bases of MelaMJNV against 150,000 of PemoMJNVA) has frames of about 50,000 letters, below
 //! the built-in, so `=2` puts the path on every unit and the default leaves it off: the tests compare
-//! `=2`, the default, `LOSAT_X_DEFAULT=0` and the shadow with `=0`.
+//! `=2` (with the compact records and with today's lists), the default, `LOSAT_X_DEFAULT=0` and the
+//! shadow (which also shows that the path ran) with `=0`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -32,6 +34,8 @@ const EVERY_UNIT: (&str, &str) = ("LOSAT_X_TBXEXTBATCH", "2");
 const OFF: (&str, &str) = ("LOSAT_X_TBXEXTBATCH", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBXEXTBATCHSHADOW", "1");
 const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
+/// Today's `InitHSP` lists instead of the compact records (`run_unit_batched`).
+const FULL_LISTS: (&str, &str) = ("LOSAT_X_SEEDCOMPACT", "0");
 /// The bases of each piece: frames of about 50,000 letters, so the unit path runs.
 const BASES: usize = 150_000;
 
@@ -170,6 +174,11 @@ fn every_unit_batched_gives_the_same_report() {
         assert_eq!(default, off, "threads {threads}: default against =0");
         let (old, _) = inputs.tblastx(threads, &[DEFAULT_OFF]);
         assert_eq!(old, off, "threads {threads}: LOSAT_X_DEFAULT=0 against =0");
+        let (full, _) = inputs.tblastx(threads, &[EVERY_UNIT, FULL_LISTS]);
+        assert_eq!(
+            full, off,
+            "threads {threads}: =2 with full lists against =0"
+        );
     }
 }
 
@@ -178,15 +187,20 @@ fn the_shadow_compares_every_unit() {
     let inputs = Inputs::new("shadow");
     for threads in [1, 2] {
         let (off, _) = inputs.tblastx(threads, &[OFF]);
-        let (shadow, stderr) = inputs.tblastx(threads, &[SHADOW]);
-        assert_eq!(shadow, off, "threads {threads}: shadow against =0");
-        assert!(
-            field(&stderr, "[X_SHADOW] TBXEXTBATCH", "units_compared") > 0,
-            "threads {threads}: no unit compared: {stderr}"
-        );
-        assert!(
-            field(&stderr, "[X_STATS] TBXEXTBATCH", "candidates") > 0,
-            "threads {threads}: no candidate: {stderr}"
-        );
+        for lists in [&[SHADOW][..], &[SHADOW, FULL_LISTS][..]] {
+            let (shadow, stderr) = inputs.tblastx(threads, lists);
+            assert_eq!(
+                shadow, off,
+                "threads {threads} {lists:?}: shadow against =0"
+            );
+            assert!(
+                field(&stderr, "[X_SHADOW] TBXEXTBATCH", "units_compared") > 0,
+                "threads {threads} {lists:?}: no unit compared: {stderr}"
+            );
+            assert!(
+                field(&stderr, "[X_STATS] TBXEXTBATCH", "candidates") > 0,
+                "threads {threads} {lists:?}: no candidate: {stderr}"
+            );
+        }
     }
 }

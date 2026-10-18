@@ -6,6 +6,9 @@
 //!   (`hashtable[index]`). Same words, same order, same values.
 //! - `st2`: with `pf`, the word `D / 2` places back in the ring reads its backbone cell and
 //!   prefetches the first chain element (`next_pos[q_off]`).
+//! - `st3`: `st2`, and the word `D / 4` places back reads its first chain element and prefetches
+//!   the second.
+//! - `nopf` (control): with `pf`, the ring only, no prefetch and no read ahead.
 //! - `pv`: a cell-level presence bit vector (one bit per cell, built from `hashtable` at every
 //!   call, its cost included) drops the words of empty cells before the ring; an empty cell has
 //!   no chain, so the reference does nothing for it.
@@ -20,7 +23,8 @@ pub(super) const RING: usize = 64;
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct Probe {
     pub(super) pf: usize,
-    pub(super) st2: bool,
+    /// 0 `nopf`, 1 backbone prefetch (default with `pf`), 2 `st2`, 3 `st3`.
+    pub(super) lvl: u8,
     pub(super) pv: bool,
     pub(super) ctx: bool,
 }
@@ -35,12 +39,17 @@ impl Probe {
 pub(super) fn probe() -> Probe {
     static P: OnceLock<Probe> = OnceLock::new();
     *P.get_or_init(|| {
-        let mut p = Probe::default();
+        let mut p = Probe {
+            lvl: 1,
+            ..Probe::default()
+        };
         if let Ok(v) = std::env::var("R4_PROBE") {
             for t in v.split(',').map(str::trim) {
                 match t {
                     "" => {}
-                    "st2" => p.st2 = true,
+                    "st2" => p.lvl = p.lvl.max(2),
+                    "st3" => p.lvl = 3,
+                    "nopf" => p.lvl = 0,
                     "pv" => p.pv = true,
                     "ctx" => p.ctx = true,
                     _ if t.starts_with("pf=") => {
@@ -51,7 +60,7 @@ pub(super) fn probe() -> Probe {
                     _ => panic!("R4_PROBE: unknown item {t}"),
                 }
             }
-            assert!(!p.st2 || p.pf > 0, "R4_PROBE st2 needs pf=D");
+            assert!(p.lvl == 1 || p.pf >= 4, "R4_PROBE st2 / st3 / nopf need pf=D >= 4");
             eprintln!("[R4_PROBE] {p:?}");
         }
         p
@@ -138,19 +147,70 @@ impl CtxTab {
     }
 }
 
+/// One step of the FIFO of the scan's words: the word `w` enters the ring (with the prefetches
+/// of level `lvl`), and the word `d` places back leaves it through `emit`.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub(super) fn ring_step<T: Copy>(
+    buf: &mut [T; RING],
+    n: &mut usize,
+    d: usize,
+    lvl: u8,
+    hashtable: &[u32],
+    next_pos: &[u32],
+    cell: impl Fn(&T) -> usize,
+    w: T,
+    emit: &mut impl FnMut(T),
+) {
+    let mask = d - 1;
+    if lvl >= 1 {
+        prefetch(hashtable.as_ptr().wrapping_add(cell(&w)));
+    }
+    if lvl >= 2 && *n >= d / 2 {
+        let v = hashtable[cell(&buf[(*n - d / 2) & mask])] as usize;
+        if v != 0 {
+            prefetch(next_pos.as_ptr().wrapping_add(v));
+        }
+    }
+    if lvl >= 3 && *n >= d / 4 {
+        let v1 = hashtable[cell(&buf[(*n - d / 4) & mask])] as usize;
+        if v1 != 0 {
+            let v2 = next_pos[v1] as usize;
+            if v2 != 0 {
+                prefetch(next_pos.as_ptr().wrapping_add(v2));
+            }
+        }
+    }
+    let slot = *n & mask;
+    if *n >= d {
+        emit(buf[slot]);
+    }
+    buf[slot] = w;
+    *n += 1;
+}
+
+/// The words still in the ring, in order.
+#[inline(always)]
+pub(super) fn ring_flush<T: Copy>(buf: &[T; RING], n: usize, d: usize, emit: &mut impl FnMut(T)) {
+    for m in n.saturating_sub(d)..n {
+        emit(buf[m & (d - 1)]);
+    }
+}
+
 /// The FIFO of the blastn reference scan's words `(kmer_start, s_range, kmer)`.
-pub(super) struct BnRing<'a, const ST2: bool, const PV: bool> {
+pub(super) struct BnRing<'a, const PV: bool> {
     buf: [(usize, usize, u64); RING],
     n: usize,
     d: usize,
+    lvl: u8,
     hashtable: &'a [u32],
     next_pos: &'a [u32],
     pv: Option<&'a CellPv>,
 }
 
-impl<'a, const ST2: bool, const PV: bool> BnRing<'a, ST2, PV> {
+impl<'a, const PV: bool> BnRing<'a, PV> {
     pub(super) fn new(
-        d: usize,
+        p: Probe,
         hashtable: &'a [u32],
         next_pos: &'a [u32],
         pv: Option<&'a CellPv>,
@@ -158,7 +218,8 @@ impl<'a, const ST2: bool, const PV: bool> BnRing<'a, ST2, PV> {
         Self {
             buf: [(0, 0, 0); RING],
             n: 0,
-            d,
+            d: p.pf,
+            lvl: p.lvl,
             hashtable,
             next_pos,
             pv,
@@ -172,43 +233,35 @@ impl<'a, const ST2: bool, const PV: bool> BnRing<'a, ST2, PV> {
         emit: &mut impl FnMut(usize, usize, u64),
     ) {
         if PV {
-            // SAFETY of unwrap: PV instances are built with `Some`.
+            // PV instances are built with `Some`.
             if !self.pv.unwrap().test(w.2 as usize) {
                 return;
             }
         }
-        let d = self.d;
-        if d == 0 {
+        if self.d == 0 {
             emit(w.0, w.1, w.2);
             return;
         }
-        let mask = d - 1;
-        prefetch(self.hashtable.as_ptr().wrapping_add(w.2 as usize));
-        if ST2 && self.n >= d / 2 {
-            let mid = self.buf[(self.n - d / 2) & mask].2 as usize;
-            let v = self.hashtable[mid] as usize;
-            if v != 0 {
-                prefetch(self.next_pos.as_ptr().wrapping_add(v));
-            }
-        }
-        let slot = self.n & mask;
-        if self.n >= d {
-            let e = self.buf[slot];
-            emit(e.0, e.1, e.2);
-        }
-        self.buf[slot] = w;
-        self.n += 1;
+        ring_step(
+            &mut self.buf,
+            &mut self.n,
+            self.d,
+            self.lvl,
+            self.hashtable,
+            self.next_pos,
+            |e: &(usize, usize, u64)| e.2 as usize,
+            w,
+            &mut |e: (usize, usize, u64)| emit(e.0, e.1, e.2),
+        );
     }
 
     pub(super) fn flush(&mut self, emit: &mut impl FnMut(usize, usize, u64)) {
-        let d = self.d;
-        if d == 0 {
+        if self.d == 0 {
             return;
         }
-        for m in self.n.saturating_sub(d)..self.n {
-            let e = self.buf[m & (d - 1)];
-            emit(e.0, e.1, e.2);
-        }
+        ring_flush(&self.buf, self.n, self.d, &mut |e: (usize, usize, u64)| {
+            emit(e.0, e.1, e.2)
+        });
         self.n = 0;
     }
 }

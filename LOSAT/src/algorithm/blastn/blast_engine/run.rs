@@ -11942,9 +11942,9 @@ fn search_query_batch(
                             let (r4_ht, r4_np) = two_stage.x_r4_raw();
                             let r4_pv = r4.pv.then(|| x_r4_probe::CellPv::build(r4_ht));
                             macro_rules! r4_scan {
-                                ($st2:literal, $pv:literal) => {{
-                                    let mut ring = x_r4_probe::BnRing::<$st2, $pv>::new(
-                                        r4.pf,
+                                ($pv:literal) => {{
+                                    let mut ring = x_r4_probe::BnRing::<$pv>::new(
+                                        r4,
                                         r4_ht,
                                         r4_np,
                                         r4_pv.as_ref(),
@@ -11967,11 +11967,10 @@ fn search_query_batch(
                                     ring.flush(&mut emit);
                                 }};
                             }
-                            match (r4.st2, r4.pv) {
-                                (false, false) => r4_scan!(false, false),
-                                (true, false) => r4_scan!(true, false),
-                                (false, true) => r4_scan!(false, true),
-                                (true, true) => r4_scan!(true, true),
+                            if r4.pv {
+                                r4_scan!(true)
+                            } else {
+                                r4_scan!(false)
                             }
                         } else {
                         scan_subject_kmers_with_ranges(

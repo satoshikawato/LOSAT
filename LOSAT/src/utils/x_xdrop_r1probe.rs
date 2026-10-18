@@ -478,6 +478,12 @@ fn call(p: &Prob<'_>, tb: bool, sc: &mut XdropScratch) -> Option<XdropResult> {
                 (false, 14) => probe::align16_probe::<false, 10>(
                     &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
+                (false, 2) => probe::align16_probe::<false, 1>(
+                    &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (false, 15) => probe::align16_probe::<false, 11>(
+                    &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
                 (true, 1) => probe::align16_probe::<true, 0>(
                     &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
@@ -485,6 +491,12 @@ fn call(p: &Prob<'_>, tb: bool, sc: &mut XdropScratch) -> Option<XdropResult> {
                     &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
                 (true, 14) => probe::align16_probe::<true, 10>(
+                    &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (true, 2) => probe::align16_probe::<true, 1>(
+                    &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (true, 15) => probe::align16_probe::<true, 11>(
                     &p.q, &p.s, &p.scores, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
                 _ => panic!("kernel {kern} has no 16-bit copy"),
@@ -503,6 +515,12 @@ fn call(p: &Prob<'_>, tb: bool, sc: &mut XdropScratch) -> Option<XdropResult> {
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
                 (true, 14) => probe::align8_probe::<true, 10, 0>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (false, 15) => probe::align8_probe::<false, 11, 1000>(
+                    &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
+                ),
+                (true, 15) => probe::align8_probe::<true, 11, 1000>(
                     &p.q, &p.s, &p.scores, m, p.len1, p.len2, p.go, p.ge, p.x, p.cf, sc,
                 ),
                 (false, 1) => probe::align8_probe::<false, 0, 0>(
@@ -599,16 +617,17 @@ fn r1_loop() {
         Some("hslat4") => 12,
         Some("emask") => 13,
         Some("emaskld") => 14,
+        Some("emaskdirty") => 15,
         Some(k) => panic!(
-            "R1_KERN must be orig, copy, nodirty, lat4, addr4, nop30, alu20, oracle, oraclelat4, oraclez, elat4, hslat4, emask or emaskld, not {k}"
+            "R1_KERN must be orig, copy, nodirty, lat4, addr4, nop30, alu20, oracle, oraclelat4, oraclez, elat4, hslat4, emask, emaskld or emaskdirty, not {k}"
         ),
     };
     assert!(
-        kern == 0 || w8 || matches!(kern, 1 | 13 | 14),
-        "the 16-bit copy runs copy, emask and emaskld only"
+        kern == 0 || w8 || matches!(kern, 1 | 2 | 13 | 14 | 15),
+        "the 16-bit copy runs copy, nodirty, emask, emaskld and emaskdirty only"
     );
     assert!(
-        kern <= 2 || !tb || matches!(kern, 13 | 14),
+        kern <= 2 || !tb || matches!(kern, 13 | 14 | 15),
         "the latency / issue probes are score-only"
     );
     KERN.with(|k| k.set(kern));
@@ -817,7 +836,7 @@ fn r1_loop() {
         },
         if spread_on { "spread" } else { "as-is" },
         ["orig", "copy", "nodirty", "lat4", "addr4", "nop30", "alu20", "oracle", "oraclelat4", "-", "oraclez", "elat4",
-          "hslat4", "emask", "emaskld"]
+          "hslat4", "emask", "emaskld", "emaskdirty"]
             [kern as usize],
         st.line()
     );
@@ -1337,7 +1356,7 @@ mod probe {
                 b0 += 16;
             }
             let proc_end = b0;
-            if V == 1 {
+            if V == 1 || V == 11 {
                 // probe: the high-water mark without a branch (same value)
                 sc.dirty8 = sc.dirty8.max(proc_end);
             } else if proc_end > sc.dirty8 {
@@ -1375,7 +1394,7 @@ mod probe {
                 core::arch::asm!("/* {0} */", in(reg) last, options(nomem, nostack, preserves_flags));
                 last = (*tab.add(a - 1)).2 as usize;
             }
-            if V != 9 && V != 10 {
+            if V != 9 && V != 10 && V != 11 {
                 let mut b = last + 1;
                 while b < proc_end {
                     st(e.add(b), zero);
@@ -1477,7 +1496,7 @@ mod probe {
         }
         let drop = _mm256_cmpgt_epi16(thr, hh);
         st(hw.add(b), _mm256_andnot_si256(drop, hh));
-        if EM == 9 {
+        if EM == 9 || EM == 11 {
             // probe (emask): E of a dropped cell stored as minus infinity
             en = _mm256_andnot_si256(drop, en);
         }
@@ -1798,7 +1817,10 @@ mod probe {
                 b0 += 16;
             }
             let proc_end = b0;
-            if proc_end > sc.dirty {
+            if V == 1 || V == 11 {
+                // probe (nodirty): the high-water mark without a branch (same value)
+                sc.dirty = sc.dirty.max(proc_end);
+            } else if proc_end > sc.dirty {
                 sc.dirty = proc_end;
             }
             // lanes this buffer held beyond what the row wrote are stale
@@ -1829,7 +1851,7 @@ mod probe {
             }
             // columns right of the last survivor leave the band: E = -inf
             let last = hi_surv;
-            if V != 9 && V != 10 {
+            if V != 9 && V != 10 && V != 11 {
                 let mut b = last + 1;
                 while b < proc_end {
                     st(e.add(b), zero);

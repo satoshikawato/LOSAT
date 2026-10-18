@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_QSTREAM, shadow LOSAT_X_QSTREAMSHADOW; off unless set, not in the strict
-//! set): blastn reads the records of each query batch from the query file when the batch loop of
+//! EXPERIMENT (LOSAT_X_QSTREAM, in the strict set since 2026-10-18: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set; shadow LOSAT_X_QSTREAMSHADOW, off unless set): blastn reads the records of each query batch from the query file when the batch loop of
 //! `run_in_pool` takes the batch (or a LOSAT_X_QBATCHPAR slot searches it ahead of the loop), as
 //! NCBI reads its query batches one at a time, instead of holding the records of the whole query
 //! file for the whole search. It saves memory (the records of the batches not in flight) and costs
@@ -87,6 +87,15 @@
 //! handle cannot be had (`Io`, for example `try_clone` on WASI). LOSAT reads no compressed query
 //! file. `run_local` (the Web adapter and ABI v1) gets its records from its caller.
 //!
+//! The rule (`Slots`, `slots_hold_file`; not for the shadow): the switch does not act where the
+//! slots of LOSAT_X_QBATCHPAR would read at least half of the file ahead of the loop anyway: the
+//! slots may run (LOSAT_X_QBATCHPAR on, two threads or more, `-subject`, and a default budget,
+//! `x_qbatch_par::ncbi_splits_by_queries`) and the file is shorter than twice what their default
+//! budget holds, `SLOT_WINDOW_BYTES_PER_THREAD` bytes per thread beyond the first. There the
+//! second reading saved little memory and cost time (v4-D session 4, ws window w1, blastn
+//! against 3 Mb at 16 threads: a 40 MB query file -12 MiB at 1.012 of the time, 15 MB -1.6 MiB
+//! at 1.014; where the slots do not run or the file is longer it saved 3-77 MiB at 0.994-1.006).
+//!
 //! What is kept for every query (`query_input_of`): the length of each input record, whether it is
 //! skipped, the input position and placement of each searched query and its searched length
 //! (about 33 bytes per record without `-query_loc`). The records of every batch are kept as well
@@ -136,15 +145,16 @@ use crate::blastinput::seq_range::{
     SequenceRange,
 };
 
-// No NCBI counterpart: reads the switches once (any value turns them on; the shadow implies the
-// switch; neither is in the strict set). They choose when LOSAT reads the same records.
+// No NCBI counterpart: reads the switches once (LOSAT_X_QSTREAM is in the strict set; any value
+// turns the shadow on, and the shadow implies the switch). They choose when LOSAT reads the same
+// records.
 /// 0 = off, 1 = LOSAT_X_QSTREAM, 2 = LOSAT_X_QSTREAMSHADOW.
 fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_QSTREAMSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_QSTREAM").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_QSTREAM") {
             1
         } else {
             0
@@ -165,6 +175,9 @@ pub(super) enum Off {
     NotAFile,
     /// The file's position or a second handle on it could not be had.
     Io,
+    /// The slots of LOSAT_X_QBATCHPAR would read at least half of the file ahead anyway
+    /// (`slots_hold_file`).
+    Slots,
 }
 
 impl Off {
@@ -175,6 +188,7 @@ impl Off {
             Off::StandardInput => "standard_input",
             Off::NotAFile => "not_a_file",
             Off::Io => "io",
+            Off::Slots => "slots",
         }
     }
 }
@@ -190,14 +204,23 @@ pub(super) struct Opening {
 impl Opening {
     /// `path` is `-query` and `file` the file `run` opened for it, before its reader is made;
     /// `shared_standard_input` is `-query -` with `-subject -`; `reports_streamed` is whether
-    /// LOSAT_X_RPTSTREAM is on (`x_rpt_stream::switch_on`).
+    /// LOSAT_X_RPTSTREAM is on (`x_rpt_stream::switch_on`); `slots_hold_file` is the rule
+    /// (`slots_hold_file`).
     pub(super) fn new(
         path: &Path,
         file: &File,
         shared_standard_input: bool,
         reports_streamed: bool,
+        slots_hold_file: bool,
     ) -> Opening {
-        Opening::with_mode(mode(), path, file, shared_standard_input, reports_streamed)
+        Opening::with_mode(
+            mode(),
+            path,
+            file,
+            shared_standard_input,
+            reports_streamed,
+            slots_hold_file,
+        )
     }
 
     /// `new` with the switches' value `mode` (`mode()`; the unit tests set it).
@@ -207,6 +230,7 @@ impl Opening {
         file: &File,
         shared_standard_input: bool,
         reports_streamed: bool,
+        slots_hold_file: bool,
     ) -> Opening {
         let off = |off| Opening {
             mode,
@@ -218,6 +242,10 @@ impl Opening {
         }
         if !reports_streamed {
             return off(Off::Reports);
+        }
+        // The rule; the shadow reads the file again wherever it can (a test mode).
+        if mode == 1 && slots_hold_file {
+            return off(Off::Slots);
         }
         if path.as_os_str() == "-" || shared_standard_input {
             return off(Off::StandardInput);
@@ -245,6 +273,24 @@ impl Opening {
     pub(super) fn acts(&self) -> bool {
         self.again.is_some()
     }
+}
+
+/// No NCBI counterpart (when LOSAT reads the records only): the query bytes that the default
+/// budget of LOSAT_X_QBATCHPAR's slots holds in flight per thread beyond the first, about 2 Mb
+/// of query in both profiles (`x_qbatch_par::allowance_mib` over the per-letter memory of a batch
+/// in flight: 96 MiB at about 50 bytes a blastn letter, 28 MiB at about 15 bytes a megablast or
+/// dc-megablast letter).
+const SLOT_WINDOW_BYTES_PER_THREAD: u64 = 2_000_000;
+
+/// No NCBI counterpart (when LOSAT reads the records only): the rule of LOSAT_X_QSTREAM, whether
+/// the slots of LOSAT_X_QBATCHPAR would read at least half of a query file of `query_file_bytes`
+/// ahead of the loop anyway: they may run (`slots_may_run`: the switch on, `-subject`, and a
+/// default budget, `x_qbatch_par::ncbi_splits_by_queries`) at `threads` threads, and the file is
+/// shorter than twice the bytes their default budget holds (`SLOT_WINDOW_BYTES_PER_THREAD` per
+/// thread beyond the first).
+pub(super) fn slots_hold_file(query_file_bytes: u64, threads: usize, slots_may_run: bool) -> bool {
+    let window = SLOT_WINDOW_BYTES_PER_THREAD.saturating_mul(threads.saturating_sub(1) as u64);
+    slots_may_run && query_file_bytes < window.saturating_mul(2)
 }
 
 /// The first reading: the loop of `read_queries` (`GetNextSeqBatch` until `End()`), each record's
@@ -1170,7 +1216,7 @@ mod tests {
     /// with the switches' value `mode`, and how the first reading ended.
     fn store(mode: u8, path: &Path, range: Option<&SequenceRange>) -> (Store, QueryEnd) {
         let file = File::open(path).expect("open the test file");
-        let opening = Opening::with_mode(mode, path, &file, false, true);
+        let opening = Opening::with_mode(mode, path, &file, false, true, false);
         assert!(opening.acts());
         let mut source = FastaInputSource::from_file(file, config());
         assert!(!source.stream_is_empty());
@@ -1526,28 +1572,34 @@ mod tests {
         let file = TempFile::new("off", b">a\nACGT\n");
         let handle = File::open(&file.0).unwrap();
         assert_eq!(
-            Opening::with_mode(0, &file.0, &handle, false, true).off,
+            Opening::with_mode(0, &file.0, &handle, false, true, false).off,
             Some(Off::NotSet)
         );
         assert_eq!(
-            Opening::with_mode(1, &file.0, &handle, false, false).off,
+            Opening::with_mode(1, &file.0, &handle, false, false, false).off,
             Some(Off::Reports)
         );
         assert_eq!(
-            Opening::with_mode(1, Path::new("-"), &handle, false, true).off,
+            Opening::with_mode(1, Path::new("-"), &handle, false, true, false).off,
             Some(Off::StandardInput)
         );
         assert_eq!(
-            Opening::with_mode(1, &file.0, &handle, true, true).off,
+            Opening::with_mode(1, &file.0, &handle, true, true, false).off,
             Some(Off::StandardInput)
         );
-        assert!(Opening::with_mode(1, &file.0, &handle, false, true).acts());
-        assert!(Opening::with_mode(2, &file.0, &handle, false, true).acts());
+        assert!(Opening::with_mode(1, &file.0, &handle, false, true, false).acts());
+        assert!(Opening::with_mode(2, &file.0, &handle, false, true, false).acts());
+        // The rule turns the switch off, not the shadow.
+        assert_eq!(
+            Opening::with_mode(1, &file.0, &handle, false, true, true).off,
+            Some(Off::Slots)
+        );
+        assert!(Opening::with_mode(2, &file.0, &handle, false, true, true).acts());
         #[cfg(unix)]
         {
             let dir = File::open(std::env::temp_dir()).unwrap();
             assert_eq!(
-                Opening::with_mode(1, &std::env::temp_dir(), &dir, false, true).off,
+                Opening::with_mode(1, &std::env::temp_dir(), &dir, false, true, false).off,
                 Some(Off::NotAFile)
             );
         }
@@ -1566,5 +1618,28 @@ mod tests {
             assert_eq!(lengths, old_lengths, "seed {seed}");
             assert_eq!(end_text(&end), end_text(&old.end), "seed {seed}");
         }
+    }
+    /// The rule: off where the slots may run and the file is shorter than twice their window
+    /// (2,000,000 bytes per thread beyond the first); the cells of v4-D session 4's window w1.
+    #[test]
+    fn the_rule_follows_the_slots_window() {
+        // No slots (one thread, no default budget, -db): the switch acts at any size.
+        assert!(!slots_hold_file(1, 1, true));
+        assert!(!slots_hold_file(96_191_719, 16, false));
+        assert!(!slots_hold_file(5_398_904, 16, false));
+        // 16 threads: a window of 30 MB, off below 60 MB.
+        assert!(slots_hold_file(40_005_015, 16, true));
+        assert!(slots_hold_file(15_440_261, 16, true));
+        assert!(slots_hold_file(59_999_999, 16, true));
+        assert!(!slots_hold_file(60_000_000, 16, true));
+        assert!(!slots_hold_file(96_191_719, 16, true));
+        // 8 threads: off below 28 MB; 4 threads: below 12 MB; 2 threads: below 4 MB.
+        assert!(!slots_hold_file(40_005_015, 8, true));
+        assert!(slots_hold_file(27_999_999, 8, true));
+        assert!(!slots_hold_file(15_440_261, 4, true));
+        assert!(slots_hold_file(10_779_147, 4, true));
+        assert!(!slots_hold_file(10_779_147, 2, true));
+        assert!(!slots_hold_file(u64::MAX, usize::MAX, true));
+        assert!(slots_hold_file(0, usize::MAX, true));
     }
 }

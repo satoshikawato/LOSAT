@@ -135,8 +135,8 @@ use std::sync::OnceLock;
 pub(super) const K_COMPRESSION_FACTOR_SHIFT: usize = 11;
 
 /// No NCBI counterpart: reads the switches once; they do not change any value NCBI computes.
-/// (LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARSHADOW, LOSAT_X_MBLUTPAD, LOSAT_X_MBLUTONCE; the last two are
-/// off unless set to any value and not in the strict set)
+/// (LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARSHADOW, LOSAT_X_MBLUTPAD, LOSAT_X_MBLUTONCE; LOSAT_X_MBLUTPAD
+/// is off unless set to any value and not in the strict set, LOSAT_X_MBLUTONCE is in it)
 fn switches() -> (bool, bool, bool, bool) {
     static SWITCHES: OnceLock<(bool, bool, bool, bool)> = OnceLock::new();
     *SWITCHES.get_or_init(|| {
@@ -144,7 +144,7 @@ fn switches() -> (bool, bool, bool, bool) {
             crate::utils::xswitch::on("LOSAT_X_PAIRPAR"),
             std::env::var_os("LOSAT_X_PAIRPARSHADOW").is_some(),
             std::env::var_os("LOSAT_X_MBLUTPAD").is_some(),
-            std::env::var_os("LOSAT_X_MBLUTONCE").is_some(),
+            crate::utils::xswitch::on("LOSAT_X_MBLUTONCE"),
         )
     })
 }

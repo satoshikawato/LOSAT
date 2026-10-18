@@ -123,6 +123,7 @@ use std::sync::OnceLock;
 /// set and joined the set together once they were verified and timed with them on and off.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
+    "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
     "LOSAT_X_BPCLUT",
     "LOSAT_X_BPDBCUT",
@@ -184,6 +185,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_LUTSPLIT",
     "LOSAT_X_MBBATCH",
     "LOSAT_X_MBDELAY",
+    "LOSAT_X_MBLUTONCE",
     "LOSAT_X_NEWTONEXACT",
     "LOSAT_X_NEWTONLANES",
     "LOSAT_X_NEWTONLANES8",
@@ -196,6 +198,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_QBATCHPAR",
     "LOSAT_X_QDUSTPAR",
     "LOSAT_X_QPREPPAR",
+    "LOSAT_X_QSTREAM",
     "LOSAT_X_RPTSTREAM",
     "LOSAT_X_SEEDBUCKET",
     "LOSAT_X_SEEDCOMPACT",

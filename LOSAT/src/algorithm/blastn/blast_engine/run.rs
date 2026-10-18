@@ -6125,6 +6125,25 @@ fn search_cli(
     // batch is read.
     let shared_standard_input =
         args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-";
+    // EXPERIMENT (LOSAT_X_QSTREAM): its rule (`x_query_stream::slots_hold_file`), from the size of
+    // the query file and whether LOSAT_X_QBATCHPAR's slots may run: the switch on, `-subject`,
+    // and a budget (`x_qbatch_par::Profile::of_search`'s default, or LOSAT_X_QBATCHPARMEM).
+    let x_slots_hold_file = match (subjects.as_ref(), x_query_file_bytes(&args.query)) {
+        (Some((Subjects::Records(letters), _)), Some(bytes)) => {
+            let switches = x_qbatch_par::Switches::from_env();
+            let subject_letters = (0..letters.records().len())
+                .map(|index| letters.len(index) as u64)
+                .sum();
+            let budget = switches.mem_mib.is_some_and(|mib| mib > 0)
+                || x_qbatch_par::ncbi_splits_by_queries(
+                    super::super::coordination::determine_effective_word_size(&args),
+                    Some(bytes),
+                    subject_letters,
+                );
+            x_query_stream::slots_hold_file(bytes, args.num_threads, switches.on && budget)
+        }
+        _ => false,
+    };
     // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file is read a second time, batch by batch
     // (a second handle on it, at the position its reader starts from), where the reports may be
     // written batch by batch (LOSAT_X_RPTSTREAM).
@@ -6133,6 +6152,7 @@ fn search_cli(
         &query_file,
         shared_standard_input,
         x_rpt_stream::switch_on(),
+        x_slots_hold_file,
     );
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders);
     let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);

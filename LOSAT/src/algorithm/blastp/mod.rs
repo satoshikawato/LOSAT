@@ -14,7 +14,7 @@ pub(crate) mod encoding;
 // status = s_BlastAaWordFinder_TwoHit(subject, query, ..., matrix, ...);
 // The same protein two-hit extension primitive is used by BLASTP and TBLASTN.
 pub(crate) mod extension;
-// EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW, off unless set): the ungapped X-drop
+// EXPERIMENT (LOSAT_X_BPUNGAP / LOSAT_X_BPUNGAPSHADOW): the ungapped X-drop
 // walks of aa_ungapped.c:804-883 with a byte score table, same results (`pub` for the summary line
 // of `main`).
 pub mod x_ungapped_fast;
@@ -46,7 +46,7 @@ mod x_redo_par;
 // ```
 mod kappa;
 // EXPERIMENT (LOSAT_X_BPSEED): the subject scan and the two-hit test in one loop.
-mod x_seed_fused;
+pub(crate) mod x_seed_fused;
 // EXPERIMENT (LOSAT_X_BPSEED): the same loop for the compressed lookup table of blastp-fast.
 mod x_seed_fused_compressed;
 // EXPERIMENT (LOSAT_X_BPSEED with LOSAT_X_BPCLUT): the same loop on the flat compressed table.

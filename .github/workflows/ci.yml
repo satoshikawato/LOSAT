@@ -1,11 +1,12 @@
 name: CI
 
 # Pull requests run the fast checks (no NCBI executable); pushes run them on main
-# only. The two-hour WASI matrix and the full TBLASTX output set run in
-# nightly.yml (schedule, workflow_dispatch) and in release-readiness.yml.
+# and on the integration branch dev only. The two-hour WASI matrix and the full
+# TBLASTX output set run in nightly.yml (schedule, workflow_dispatch) and in
+# release-readiness.yml.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 concurrency:
@@ -35,6 +36,14 @@ jobs:
         run: python3 -m unittest LOSAT/tests/test_prepare_release_candidate_v010.py
       - name: Regression tooling tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_ci_fast_regressions.py'
+      # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
+      # result *= expl(-z * z) / z;
+      # LOSAT's one mul_add emulates that long-double line; nothing else may fuse or
+      # reassociate floating-point operations (docs/agents/diagnostics.md, "Floating-point contract").
+      - name: Floating-point contract (sources and cargo configuration)
+        run: python3 LOSAT/tests/check_fp_contract.py source
+      - name: Floating-point contract checker tests
+        run: python3 -m unittest discover -s LOSAT/tests -p 'test_check_fp_contract.py'
       # NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1098-1108
       # x_PrintField(*iter); m_Ostream << "\n";
       # The certification driver compares these raw bytes on Windows and macOS only
@@ -95,6 +104,11 @@ jobs:
       - name: Build release binary
         if: steps.select.outputs.programs != 'none'
         run: cd LOSAT && cargo build --release --locked --bin LOSAT
+      # FMA instructions and references to fma only where mul_add is (docs/agents/diagnostics.md,
+      # "Floating-point contract").
+      - name: Floating-point contract (release binary)
+        if: steps.select.outputs.programs != 'none'
+        run: python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/LOSAT
       # Frozen outfmt 0/7 bytes print the input paths of the runs that froze them
       # (TLOSAN Stage G); capture_outputs.py checks the bytes behind each path.
       - name: Link the frozen input paths

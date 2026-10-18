@@ -35,9 +35,13 @@
 //! a slot's panic is kept and resumed only if the loop takes that batch (its message is printed
 //! then, not when it happens). That needs unwinding: the release profile has `panic = "abort"`,
 //! so there a panic in a batch a slot searches ends the process with its message. To bound that,
-//! no slot runs while the loop writes output: `Driver::finish` cancels and joins every slot before
-//! the reports and before each error path writes anything, and once a slot's batch returns an
-//! error the batches planned after it are no longer started. The batches still exposed past an
+//! no slot runs while the loop writes the reports after the loop or what an error path writes:
+//! `Driver::finish` cancels and joins every slot before them, and once a slot's batch returns an
+//! error the batches planned after it are no longer started. The exception is
+//! `LOSAT_X_RPTSTREAM` (`x_rpt_stream.rs`, on by default): there the loop writes each batch's reports
+//! when it takes the batch, while the slots search the batches ahead (the slots themselves write
+//! nothing), so a slot's panic in a release build ends the process after the reports of the
+//! batches taken so far; its error paths still call `finish` before they write. The batches still exposed past an
 //! error at batch j: before the error is known, the slots may have searched up to the plan's
 //! window (2k - 1 batches) past j; once it is known, at most k - 1 still run, and they are
 //! cancelled when the loop meets j. Slot panics are counted (`panicked=`), and in the shadow
@@ -68,30 +72,49 @@
 //! `LOSAT_X_QBATCHPARSHADOW` searches every batch on the loop as well, on the whole pool, while
 //! the slots run (a test mode; more than n threads are active then).
 //!
-//! Off (the loop as before): switch not set; a build without `parallel`, or wasm32; one thread;
+//! Off (the loop as before): switch off; a build without `parallel`, or wasm32; one thread;
 //! a BLAST database (`-db`); `-verbose`, `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`,
 //! `LOSAT_DEBUG_COORDS[_START]`, the blastn trace or `LOSAT_WASI_THREADS_DEBUG`; subjects of n or
 //! more work units (5 Mb subject chunks; today's subject-parallel batch already uses the pool);
-//! fewer than two batches after the first; a memory budget of fewer than two slots.
+//! fewer than two batches, or fewer than two batch units, after the first; a memory budget of
+//! fewer than two slots; slots that the throughput model does not predict at least 3 % faster
+//! than the loop on the whole pool.
 //!
 //! Slots: per batch in flight `4^w x 4 + 8 x letters` bytes of lookup table (w: the batch's
-//! lookup width, two contexts per letter), 13 bytes per query letter of query-side copies, and
-//! 220 bytes per predicted initial extension for the hits (calibrated to the measured 50 MiB
-//! per 1 Mb blastn batch and 116 MiB per 5 Mb dc-megablast batch). The budget for the batches in
-//! flight beyond the loop's one is `LOSAT_X_QBATCHPARMEM` MiB, or by default 96 MiB (blastn,
-//! blastn-short) or 28 MiB (megablast, dc-megablast) per thread beyond the first: 0.8 of NCBI
-//! BLAST+ 2.17.0's measured growth of max RSS per thread on the audit input.
-//! `k = min(1 + budget / estimate, n, R)` for R batch units of work left (the planned letters
-//! over the largest planned batch), then lowered to `ceil(R / ceil(R / k))` (as many rounds,
-//! fewer batches in flight); `m = n / k`. `LOSAT_X_QBATCHPARSLOTS=k` (tuning) sets k directly.
+//! lookup width, two contexts per letter), query-side copies of 13 bytes per query letter
+//! (blastn, blastn-short) or 5 (megablast, dc-megablast), and 220 bytes per predicted initial
+//! extension for the hits (calibrated to the measured 50 MiB per 1 Mb blastn batch and 65-81 MiB
+//! per extra 5 Mb dc-megablast slot). The budget for the batches in flight beyond the loop's one
+//! is `LOSAT_X_QBATCHPARMEM` MiB, or by default 96 MiB (blastn, blastn-short) or 28 MiB
+//! (megablast, dc-megablast) per thread beyond the first: 0.8 of NCBI BLAST+ 2.17.0's measured
+//! growth of max RSS per thread on the audit input. NCBI's max RSS grows with its threads only
+//! where its blastn splits the search by queries (`-mt_mode 0` with `-db`: a query file larger
+//! than 10,000,000 bytes, or 1,500,000 at a word size below 10, and a database shorter than
+//! 6,000,000,000 letters, or 150,000,000; `ncbi_splits_by_queries`); elsewhere its max RSS stays
+//! that of one thread, so the default budget is 0 there (no slots) and LOSAT's max RSS keeps to
+//! that of the loop (`Profile::of_search`; the subjects of `-subject` stand for the database).
+//! The slots come from a throughput model
+//! (`choose_slots`): the units of work are the planned batches of at least half the
+//! letter-weighted median planned batch's letters (`batch_units`); for
+//! `k = 1 ..= min(1 + budget / estimate, n, units)` and `m = n / k` the predicted span is
+//! rounds(k) x contention(k) / (m x E(m)), with E(m) the measured efficiency of one batch on m
+//! threads, measured up to 16 and with the speedup kept flat beyond (`Profile`,
+//! `predicted_span`); `k = 1` is the loop on the whole pool. Slots start only when the best
+//! `k >= 2` predicts less than 0.97 of the loop's span. `LOSAT_X_QBATCHPARSLOTS=k` (tuning) sets k
+//! directly.
 //!
 //! Diagnostics: with the switch and `LOSAT_X_STATS` set, one line on standard error at the end of
 //! the search, `[X_STATS] QBATCHPAR batches= precomputed= loop= mispredicted= discarded=
-//! cancelled= panicked= waste_bound= k= m= idle= budget_mib= estimate_mib= peak_mib= off=` (precomputed:
-//! batches taken from a slot; loop: batches the loop searched itself; discarded: finished or
-//! cancelled batches dropped, `cancelled` of them cancelled; waste_bound: the discards that stop
-//! the speculation, at the end; idle: threads no slot uses; peak_mib: the most memory admitted
-//! at once; off: why the search did not, or stopped to, speculate, `none` if it never stopped).
+//! cancelled= panicked= waste_bound= k= m= idle= units= rule_k= rule_m= predicted= budget_mib=
+//! estimate_mib= peak_mib= off=` (precomputed: batches taken from a slot; loop: batches the loop
+//! searched itself; discarded: finished or cancelled batches dropped, `cancelled` of them
+//! cancelled; waste_bound: the discards that stop the speculation, at the end; idle: threads no
+//! slot uses; units: the batch units after the first batch, 0 when no batch follows it; rule_k,
+//! rule_m: the model's best layout of two slots or more, or the layout `LOSAT_X_QBATCHPARSLOTS`
+//! sets, 0 when the model did not run; predicted: that layout's predicted span over the loop's,
+//! printed to three decimals, the value the 0.97 gate compares (`slots_pay`), `-` when the model
+//! did not run; peak_mib: the most memory admitted at once; off: why the search did not, or stopped to,
+//! speculate, `none` if it never stopped).
 //! Without `LOSAT_X_STATS` the switch writes nothing of its own. With the shadow,
 //! `[X_SHADOW] QBATCHPAR batches= compared= diffs= panicked= mispredicted= wasted=`; the first difference
 //! prints it and panics. `LOSAT_X_QBATCHPARMISS=N` (test only) corrupts every N-th prediction so
@@ -124,9 +147,14 @@ use crate::utils::threading::SearchPool;
 
 /// Bytes in a MiB.
 pub(super) const MIB: u64 = 1 << 20;
-/// Query-side bytes per query letter of a batch in flight (the batch's copy of its records,
-/// reverse complements, contexts with and without sentinels, masks).
+/// Query-side bytes per query letter of a blastn or blastn-short batch in flight (the batch's
+/// copy of its records, reverse complements, contexts with and without sentinels, masks).
 const QUERY_BYTES_PER_LETTER: u64 = 13;
+/// The same for megablast and dc-megablast: each extra 5 Mb dc-megablast slot measured 65-81 MiB
+/// after #217's query-copy cuts (perf-mb split3, 2026-10-17: Ad 4 threads 2 slots 303 MiB against
+/// 229 in the loop, Ad 16 threads 4 slots 502 against 258, (b) 4 threads 2 slots 176 against
+/// 110), where 13 bytes per letter estimate 117 MiB and 5 estimate 79.
+const MEGABLAST_QUERY_BYTES_PER_LETTER: u64 = 5;
 /// Hit bytes per predicted successful initial extension of a batch in flight.
 const HIT_BYTES_PER_EXTENSION: u64 = 220;
 /// Mispredicted next keys within `GUARD_COMMITS` batches that stop the speculation.
@@ -143,7 +171,8 @@ const SLOT_STACK_BYTES: usize = 8 << 20;
 /// code path and change no value NCBI computes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct Switches {
-    /// `LOSAT_X_QBATCHPAR` (any value), or the shadow.
+    /// `LOSAT_X_QBATCHPAR` (a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and
+    /// it is not set), or the shadow.
     pub on: bool,
     /// `LOSAT_X_QBATCHPARSHADOW` (any value; implies the switch).
     pub shadow: bool,
@@ -168,7 +197,7 @@ impl Switches {
         };
         let shadow = std::env::var_os("LOSAT_X_QBATCHPARSHADOW").is_some();
         Switches {
-            on: shadow || std::env::var_os("LOSAT_X_QBATCHPAR").is_some(),
+            on: shadow || crate::utils::xswitch::on("LOSAT_X_QBATCHPAR"),
             shadow,
             stats: std::env::var_os("LOSAT_X_STATS").is_some(),
             mem_mib: number("LOSAT_X_QBATCHPARMEM"),
@@ -183,7 +212,7 @@ impl Switches {
 /// Why a search does not speculate, or stopped to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Off {
-    /// The switch is not set.
+    /// The switch is off (`LOSAT_X_QBATCHPAR=0`, or `LOSAT_X_DEFAULT=0` and it is not set).
     NotSet,
     /// A build without the `parallel` feature, or wasm32.
     Build,
@@ -197,10 +226,14 @@ pub(super) enum Off {
     Subjects,
     /// The search ended before its first batch was searched.
     Unstarted,
-    /// Fewer than two batches after the first.
+    /// Fewer than two batches, or fewer than two batch units, after the first.
     Single,
-    /// A budget of fewer than two slots.
+    /// A budget of fewer than two slots (by default, a query file that NCBI's blastn does not
+    /// split by queries: `Profile::of_search`).
     Budget,
+    /// The throughput model predicts no gain: its best layout of two slots or more needs 0.97 of
+    /// the loop's span or more.
+    Model,
     /// A slot's thread or pool could not be started.
     Spawn,
     /// Two mispredicted next keys within `GUARD_COMMITS` batches.
@@ -223,6 +256,7 @@ impl Off {
             Off::Unstarted => "unstarted",
             Off::Single => "single",
             Off::Budget => "budget",
+            Off::Model => "model",
             Off::Spawn => "spawn",
             Off::Guard => "guard",
             Off::Waste => "waste",
@@ -402,40 +436,341 @@ pub(super) fn allowance_mib(task: &str) -> u64 {
     }
 }
 
+/// No NCBI counterpart (scheduling only): what the slot choice knows of a task.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Profile {
+    /// The default budget per thread beyond the first, in MiB (`allowance_mib`).
+    pub allowance_mib: u64,
+    /// Query-side bytes per query letter of a batch in flight.
+    pub query_bytes_per_letter: u64,
+    /// The in-batch efficiency E(m) (`EFFICIENCY_MEGABLAST`, `EFFICIENCY_BLASTN`).
+    pub efficiency: &'static [(usize, f64)],
+}
+
+impl Profile {
+    /// The profile of `-task` `task`: megablast and dc-megablast (5 Mb batches) take the
+    /// efficiency measured on dc-megablast; blastn and blastn-short that of blastn.
+    pub(super) fn of_task(task: &str) -> Self {
+        let megablast = matches!(task, "megablast" | "dc-megablast");
+        Profile {
+            allowance_mib: allowance_mib(task),
+            query_bytes_per_letter: if megablast {
+                MEGABLAST_QUERY_BYTES_PER_LETTER
+            } else {
+                QUERY_BYTES_PER_LETTER
+            },
+            efficiency: if megablast {
+                EFFICIENCY_MEGABLAST
+            } else {
+                EFFICIENCY_BLASTN
+            },
+        }
+    }
+
+    /// No NCBI counterpart (scheduling only): the profile of a search of `-task` `task` with
+    /// word size `word_size`, a query file of `query_file_bytes` (`None`: standard input or no
+    /// file) and subjects of `subject_letters` letters: that of `of_task`, with no default budget
+    /// (`allowance_mib` 0, so no slots unless `LOSAT_X_QBATCHPARMEM` sets a budget) where NCBI's
+    /// blastn would not split the search by queries (`ncbi_splits_by_queries`). There NCBI's max
+    /// RSS does not grow with its threads (perf-mb defbundle, 2026-10-17: plain blastn of 1,775
+    /// cDNAs, a 5.4 MB query file, against 3 Mb: NCBI `-db` 123-136 MiB at 1-16 threads, while 5
+    /// slots at 16 threads took LOSAT from 122 to 332 MiB), so slots there would hold LOSAT above
+    /// it. The slots change no output; this chooses only whether they run.
+    pub(super) fn of_search(
+        task: &str,
+        word_size: usize,
+        query_file_bytes: Option<u64>,
+        subject_letters: u64,
+    ) -> Self {
+        let mut profile = Profile::of_task(task);
+        if !ncbi_splits_by_queries(word_size, query_file_bytes, subject_letters) {
+            profile.allowance_mib = 0;
+        }
+        profile
+    }
+}
+
+/// NCBI's cut-offs of its split by queries for blastn: the database letters below which, and
+/// the query file bytes above which, `-mt_mode 0` with more than one thread searches the queries
+/// split between the threads, by word size.
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:96-114
+/// ```c++
+/// static void s_GetMT1Cutoffs(const int word_size, Int8 & max_db_size, Int8 & min_q_size)
+/// {
+///     const Int8 kMT1MaxDbSz_Blastn = 150000000; // bases
+///     const Int8 kMT1MinQSz_Blastn = 1500000; //bytes
+///     // Choose a bigger min quer size so we can support larger DB
+///     const Int8 kMT1MaxDbSz_Megablast = 6000000000;
+///     const Int8 kMT1MinQSz_Megablast = 10000000;
+///     if (word_size < 10) {
+///         // CompressedAa
+///         max_db_size = kMT1MaxDbSz_Blastn;
+///         min_q_size = kMT1MinQSz_Blastn;
+///     }
+///     else {
+///         max_db_size = kMT1MaxDbSz_Megablast;
+///         min_q_size = kMT1MinQSz_Megablast;
+///     }
+/// }
+/// ```
+pub(super) fn ncbi_mt1_cutoffs(word_size: usize) -> (u64, u64) {
+    if word_size < 10 {
+        (150_000_000, 1_500_000)
+    } else {
+        (6_000_000_000, 10_000_000)
+    }
+}
+
+/// Whether NCBI's blastn, with `-mt_mode 0` (its default) and more than one thread, splits the
+/// search of a query file of `query_file_bytes` against a database of `subject_letters` letters
+/// by queries (each thread then searches its own query batches, and its max RSS grows with the
+/// threads). A query that is not a file of known size (`None`: standard input) is not split.
+/// LOSAT uses it only to choose `LOSAT_X_QBATCHPAR`'s default budget (`Profile::of_search`).
+///
+/// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:134-153
+/// ```c++
+///     int num_threads = m_CmdLineArgs->GetNumThreads();
+///     int mt_mode = m_CmdLineArgs->GetMTMode();
+///     if (!m_CmdLineArgs->ExecuteRemotely() && (num_threads > 1) &&
+///        (mt_mode != CMTArgs::eSplitByDB)){
+/// ...
+///             s_GetMT1Cutoffs(word_size, max_db_size, min_q_size);
+///             CRef<CSeqDB> seqdb = sdb->GetSeqDb();
+///             Uint8 total_length = seqdb->GetTotalLength();
+///             if (mt_mode == CMTArgs::eSplitAuto){
+///                 if (total_length < max_db_size) {
+///                     if (args.Exist(kArgQuery) && args[kArgQuery].HasValue()) {
+///                         CFile file( args[kArgQuery].AsString());
+///                         if (file.GetLength() > min_q_size) {
+///                             m_UsageReport.AddParam(CBlastUsageReport::eMTMode, CMTArgs::eSplitByQueries);
+///                             return x_RunMTBySplitQuery();
+/// ```
+pub(super) fn ncbi_splits_by_queries(
+    word_size: usize,
+    query_file_bytes: Option<u64>,
+    subject_letters: u64,
+) -> bool {
+    let (max_db_size, min_q_size) = ncbi_mt1_cutoffs(word_size);
+    subject_letters < max_db_size && query_file_bytes.is_some_and(|bytes| bytes > min_q_size)
+}
+
 /// The estimated memory of one batch in flight: lookup table of width `lut_width` over the two
-/// contexts of `letters`, the query-side copies, and the hits of `gie` initial extensions.
-pub(super) fn batch_estimate_bytes(lut_width: usize, letters: u64, gie: u64) -> u64 {
+/// contexts of `letters`, the query-side copies of `query_bytes_per_letter` per letter
+/// (`Profile`), and the hits of `gie` initial extensions.
+pub(super) fn batch_estimate_bytes(
+    lut_width: usize,
+    letters: u64,
+    gie: u64,
+    query_bytes_per_letter: u64,
+) -> u64 {
     let table = 4u64.saturating_pow(lut_width as u32).saturating_mul(4);
     table
-        .saturating_add(letters.saturating_mul(2 * 4 + QUERY_BYTES_PER_LETTER))
+        .saturating_add(letters.saturating_mul((2 * 4u64).saturating_add(query_bytes_per_letter)))
         .saturating_add(gie.saturating_mul(HIT_BYTES_PER_EXTENSION))
 }
 
-/// The slots and the threads per slot for `threads` threads, a budget of `budget_bytes` for the
-/// batches in flight beyond the loop's one, `estimate_bytes` per batch, `units` batch units of
-/// work left, and the slot count of `LOSAT_X_QBATCHPARSLOTS`.
+// No NCBI counterpart (scheduling only): the parameters of the slot model, all in one place.
+//
+// E(m) = the speedup of one batch on m threads over one thread, divided by m, as (m, E) points,
+// log2-linear between them. Measured up to 16 threads per batch, on one machine with the SMT
+// siblings idle: the workstation (perf-mb split3 window 1, 2026-10-17 10:45-10:58: 2x Xeon Gold
+// 6338, node 1 CPUs 32-47, D. melanogaster cDNAs against 3 Mb of chromosome 2L with `-subject`,
+// every search with LOSAT_X_PAIRPARDISC, DIAGLV, PAIRPARFOLD, QDUSTPAR and DISCLUTPAR), from the
+// batch times of `logs/split3_report.md` section 1c, dc-megablast 5 Mb batches (inputs (a), (b)
+// and Ad: 1,775, 3,492 and 31,168 cDNAs) and blastn 1 Mb batches (inputs (c) and Ab: 1,775 and
+// 31,168 cDNAs). Per point (reconstructed from that table; batch time at 1 thread: dc 1.812 s,
+// Ad alone, blastn 0.804 s, (c) alone): dc E(2) from Ad 4 threads in 2 slots (beside one other
+// slot), E(4) from Ad 4 threads in the loop (alone), E(8) from (b) 16 threads in 2 slots (beside
+// one other slot), E(16) from the loop at 16 threads (alone); blastn E(2) from (c) 4 threads in 2
+// slots (beside one), E(4) and E(16) from (c) in the loop at 4 and 16 threads (alone), E(8)
+// between (c) 8 threads in the loop and 16 threads in 2 slots. So the points measured beside a
+// slot already hold some contention, which the contention term then counts again for those m.
+// Beyond the last point the speedup is kept flat (E(m) = E(16) x 16 / m): nothing was measured
+// there, and blastn's speedup grew only 1.16-fold from 8 to 16 threads, so the model must not
+// assume that the loop keeps scaling on 32-128 threads (slots are exact and stay within the
+// budget, so erring towards slots costs memory, not output). On machines whose `-num_threads`
+// counts SMT siblings, E(m) for large m is lower still.
+//
+// Contention: a batch runs `CONTENTION_PER_SLOT` slower per further slot beside it, up to
+// `CONTENTION_SLOTS` slots (the same window: with 4 dc-megablast slots the seed stage, 58-66 % of
+// a batch, took 25-34 % longer than alone, 18 % more from 2 to 8 slots). It was measured on
+// dc-megablast; blastn's is larger (a 1 Mb batch in 5 slots of 3 threads took 0.51-0.53 s at
+// (c) 16 threads, against the model's 0.42), which changes no measured cell's choice.
+//
+// The model picked the measured best layout of every cell of that report's section 3 (window
+// 2: (a) 4 / 16 threads off, (b) 4: 2 x 2, (b) 16: off, (c) 4: off, (c) 8: 2 x 4, (c) 16: 5 x 3,
+// Ad 4: 2 x 2, Ad 16: 4 x 4, Ab 4: 4 x 1, Ab 16: 16 x 1; `cells_of_the_split3_report`).
+// Sensitivity (perf-mb `scripts/qbprule_model.py sens`): every E(m >= 2) times one factor in
+// 0.8 ..= 1.2 changes three choices: (c) 8 threads 2 x 4 -> 5 x 1 below 0.93, Ab 4 threads
+// 4 x 1 -> 2 x 2 above 1.06, Ab 16 threads 16 x 1 -> 8 x 2 above 1.12. One point times 0.8 or
+// 1.2 alone changes (b) and Ad at 4 threads (2 x 2 -> off with E(2) x 0.8 or E(4) x 1.2: their
+// predicted 0.956 is near the 0.97 gate), and for some points (b) 16, (c) 4 and 8, Ad 16 and
+// Ab 4 and 16; never (a) or (c) 16. A contention of 0.075 per slot turns (b) and Ad at 4 threads
+// off; one of 0 gives (b) 16 threads 2 x 8 and (c) 8 threads 5 x 1.
+
+/// E(m) points of megablast and dc-megablast (measured on dc-megablast; see above).
+const EFFICIENCY_MEGABLAST: &[(usize, f64)] =
+    &[(1, 1.0), (2, 0.89), (4, 0.81), (8, 0.51), (16, 0.49)];
+/// E(m) points of blastn and blastn-short (measured on blastn; see above).
+const EFFICIENCY_BLASTN: &[(usize, f64)] = &[(1, 1.0), (2, 0.85), (4, 0.71), (8, 0.50), (16, 0.29)];
+/// A batch's slowdown per further slot beside it, and the slots beyond which it grows no more.
+const CONTENTION_PER_SLOT: f64 = 0.05;
+const CONTENTION_SLOTS: usize = 5;
+/// Slots start only when the model predicts their span below this share of the loop's.
+const MODEL_GAIN: f64 = 0.97;
+
+/// A predicted ratio in thousandths, as the summary line prints it (`predicted=`).
+fn milli(ratio: f64) -> u64 {
+    (ratio * 1000.0).round() as u64
+}
+
+/// Whether a layout of this predicted span over the loop's is worth its slots: its ratio as the
+/// summary line prints it, in thousandths, strictly below `MODEL_GAIN` (so the printed value
+/// decides: `predicted=0.970` keeps the loop, `0.969` takes the slots).
+fn slots_pay(ratio: f64) -> bool {
+    milli(ratio) < milli(MODEL_GAIN)
+}
+
+/// The reference batch of planned batches of `letters` each: the letter-weighted median, the
+/// batch at which the letters of the batches sorted by size reach half of all letters (0 for
+/// none). One oversized batch (a long record, which never spans batches) does not move it, as
+/// the largest batch would.
+fn reference_letters(letters: &[u64]) -> u64 {
+    let mut sorted = letters.to_vec();
+    sorted.sort_unstable();
+    let total: u64 = sorted
+        .iter()
+        .fold(0u64, |sum, &batch| sum.saturating_add(batch));
+    let mut sum = 0u64;
+    for batch in sorted {
+        sum = sum.saturating_add(batch);
+        if sum.saturating_mul(2) >= total {
+            return batch;
+        }
+    }
+    0
+}
+
+/// The batch units of planned batches of `letters` each: the batches of at least half the
+/// reference batch's letters (`reference_letters`), each one unit, oversized ones too. A tiny
+/// batch of the mixer's alternation (100 letters beside 5 Mb ones) or a short last batch is no
+/// unit of work.
+pub(super) fn batch_units(letters: &[u64]) -> usize {
+    let reference = reference_letters(letters);
+    letters
+        .iter()
+        .filter(|&&batch| batch.saturating_mul(2) >= reference)
+        .count()
+}
+
+/// E(m) of `points` (`EFFICIENCY_*`): log2-linear between the points; beyond the last point the
+/// speedup `m x E(m)` stays at the last point's (see the parameters above).
+fn efficiency(points: &[(usize, f64)], m: usize) -> f64 {
+    let m = m.max(1);
+    let x = (m as f64).log2();
+    for pair in points.windows(2) {
+        let ((m0, e0), (m1, e1)) = (pair[0], pair[1]);
+        let (x0, x1) = ((m0 as f64).log2(), (m1 as f64).log2());
+        if x <= x1 {
+            return e0 + (e1 - e0) * (x - x0) / (x1 - x0);
+        }
+    }
+    points
+        .last()
+        .map_or(1.0, |&(last, e)| e * last as f64 / m as f64)
+}
+
+/// The predicted span of `units` equal batches on `k` slots of `m = threads / k` threads, in
+/// one batch's one-thread time: rounds x contention / (m x E(m)), with `ceil(units / k)` rounds
+/// while `units <= 2k`, else `units / k` plus half a round when `k` does not divide `units`, and a
+/// contention of `1 + CONTENTION_PER_SLOT x (min(k, CONTENTION_SLOTS) - 1)`. The half round is a
+/// tail allowance (the prototype's), not a count of rounds: it makes the span non-monotone in
+/// the units (8 units on 3 slots predict 3.17 rounds, 9 predict 3), so the choice can depend on
+/// the parity of the batch count; it changes no measured cell's choice.
+pub(super) fn predicted_span(
+    efficiency_points: &[(usize, f64)],
+    threads: usize,
+    k: usize,
+    units: usize,
+) -> f64 {
+    let k = k.max(1);
+    let units = units.max(1);
+    let m = (threads / k).max(1);
+    let rounds = if units <= 2 * k {
+        units.div_ceil(k) as f64
+    } else {
+        units as f64 / k as f64 + if units % k == 0 { 0.0 } else { 0.5 }
+    };
+    let contention = 1.0 + CONTENTION_PER_SLOT * (k.min(CONTENTION_SLOTS) - 1) as f64;
+    rounds * contention / (m as f64 * efficiency(efficiency_points, m))
+}
+
+/// A layout of the slot model: `k` slots of `m` threads, and its predicted span over the loop's
+/// (`k = 1` on the whole pool).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Layout {
+    pub k: usize,
+    pub m: usize,
+    pub ratio: f64,
+}
+
+/// No NCBI counterpart (scheduling only): the slots and the threads per slot for `threads`
+/// threads, a budget of `budget_bytes` for the batches in flight beyond the loop's one,
+/// `estimate_bytes` per batch, `units` batch units of work left (`batch_units`), the task's
+/// E(m) points, and the slot count of `LOSAT_X_QBATCHPARSLOTS`; with the layout the model
+/// judged: its best of two slots or more, or the one the tuning variable sets (`None` when the
+/// model did not run: too small a budget, or fewer than two units).
+///
+/// `k` runs over `1 ..= min(1 + budget / estimate, threads, units)` and `m = threads / k`; the
+/// least `predicted_span` of `k >= 2` (the fewest slots on a tie) is taken when its ratio to
+/// `k = 1`'s pays (`slots_pay`: below 0.970 in thousandths), else the search does not speculate
+/// (`Off::Model`).
+///
+/// Exactness: this chooses only `k` and `m`. Which batches a slot searches, and that the loop
+/// takes a slot's result only under the key it computed itself, do not depend on them (module
+/// header), so the output is the loop's for every layout, as with the earlier rule.
 pub(super) fn choose_slots(
     threads: usize,
     budget_bytes: u64,
     estimate_bytes: u64,
     slots: Option<usize>,
     units: usize,
-) -> Result<(usize, usize), Off> {
+    efficiency_points: &[(usize, f64)],
+) -> (Result<(usize, usize), Off>, Option<Layout>) {
+    let layout = |k: usize| Layout {
+        k,
+        m: threads / k,
+        ratio: predicted_span(efficiency_points, threads, k, units)
+            / predicted_span(efficiency_points, threads, 1, units),
+    };
     if let Some(slots) = slots {
         let k = slots.clamp(1, threads.max(1));
-        return Ok((k, threads / k));
+        return (Ok((k, threads / k)), Some(layout(k)));
     }
     let by_budget = 1 + budget_bytes / estimate_bytes.max(1);
     if by_budget < 2 {
-        return Err(Off::Budget);
+        return (Err(Off::Budget), None);
     }
-    let k = (by_budget.min(threads as u64) as usize).min(units);
-    if k < 2 {
-        return Err(Off::Single);
+    let k_max = usize::try_from(by_budget)
+        .unwrap_or(usize::MAX)
+        .min(threads)
+        .min(units);
+    if k_max < 2 {
+        return (Err(Off::Single), None);
     }
-    let rounds = units.div_ceil(k);
-    let k = units.div_ceil(rounds);
-    Ok((k, threads / k))
+    let mut best = layout(2);
+    for k in 3..=k_max {
+        let candidate = layout(k);
+        if candidate.ratio < best.ratio {
+            best = candidate;
+        }
+    }
+    if slots_pay(best.ratio) {
+        (Ok((best.k, best.m)), Some(best))
+    } else {
+        (Err(Off::Model), Some(best))
+    }
 }
 
 /// The discarded batches beyond which the speculation stops, with `k` slots after `taken`
@@ -604,6 +939,13 @@ pub(super) struct Stats {
     pub k: usize,
     pub m: usize,
     pub idle: usize,
+    /// The batch units after the first batch (`batch_units`; 0 when no batch follows it).
+    pub units: usize,
+    /// The layout the slot model judged (`choose_slots`), 0 when it did not run.
+    pub rule_k: usize,
+    pub rule_m: usize,
+    /// Its predicted span over the loop's, in thousandths (`None` when the model did not run).
+    pub predicted_milli: Option<u64>,
     pub budget_mib: u64,
     pub estimate_mib: u64,
     pub waste_bound: u64,
@@ -700,7 +1042,7 @@ impl<T> Shared<T> {
         let summary = self.summary();
         let stats = summary.stats;
         format!(
-            "[X_STATS] QBATCHPAR batches={} precomputed={} loop={} mispredicted={} discarded={} cancelled={} panicked={} waste_bound={} k={} m={} idle={} budget_mib={} estimate_mib={} peak_mib={} off={}",
+            "[X_STATS] QBATCHPAR batches={} precomputed={} loop={} mispredicted={} discarded={} cancelled={} panicked={} waste_bound={} k={} m={} idle={} units={} rule_k={} rule_m={} predicted={} budget_mib={} estimate_mib={} peak_mib={} off={}",
             stats.batches,
             stats.precomputed,
             stats.loop_searched,
@@ -712,6 +1054,16 @@ impl<T> Shared<T> {
             stats.k,
             stats.m,
             stats.idle,
+            stats.units,
+            stats.rule_k,
+            stats.rule_m,
+            stats
+                .predicted_milli
+                .map_or_else(|| "-".to_string(), |milli| format!(
+                    "{}.{:03}",
+                    milli / 1000,
+                    milli % 1000
+                )),
             stats.budget_mib,
             stats.estimate_mib,
             summary.peak_bytes.div_ceil(MIB),
@@ -768,7 +1120,7 @@ pub(super) struct Driver<'scope, 'env, T, F> {
     scope: &'scope std::thread::Scope<'scope, 'env>,
     input: PlanInput<'env>,
     threads: usize,
-    allowance_mib: u64,
+    profile: Profile,
     /// The lookup width of a batch of these letters and longest query.
     lut_width: Box<dyn Fn(u64, usize) -> usize + 'env>,
     planner: Planner,
@@ -797,7 +1149,7 @@ where
         scope: &'scope std::thread::Scope<'scope, 'env>,
         input: PlanInput<'env>,
         threads: usize,
-        allowance_mib: u64,
+        profile: Profile,
         lut_width: Box<dyn Fn(u64, usize) -> usize + 'env>,
         off: Option<Off>,
     ) -> Self {
@@ -813,7 +1165,7 @@ where
             scope,
             input,
             threads,
-            allowance_mib,
+            profile,
             lut_width,
             planner: Planner::new(switches.miss_every),
             phase,
@@ -980,9 +1332,10 @@ where
         self.flush();
     }
 
-    /// The end of the speculation before the loop writes output (the reports, or what an
-    /// error writes): nothing more starts, running batches are cancelled, and every slot's
-    /// thread is joined. Also run when the driver is dropped.
+    /// The end of the speculation before the loop writes output (the reports after the loop, or
+    /// what an error writes; `LOSAT_X_RPTSTREAM`'s per-batch reports are written while the slots
+    /// run): nothing more starts, running batches are cancelled, and every slot's thread is
+    /// joined. Also run when the driver is dropped.
     pub(super) fn finish(&mut self) {
         if self.finished {
             return;
@@ -1039,18 +1392,13 @@ where
             usize::MAX,
             false,
         );
+        let letters: Vec<u64> = full.iter().map(|planned| planned.letters).collect();
+        let units = batch_units(&letters);
+        self.stats.units = units;
         if full.len() < 2 {
             self.set_off(Off::Single);
             return;
         }
-        let total: u64 = full.iter().map(|planned| planned.letters).sum();
-        let largest = full
-            .iter()
-            .map(|planned| planned.letters)
-            .max()
-            .unwrap_or(1)
-            .max(1);
-        let units = usize::try_from(total.div_ceil(largest)).unwrap_or(usize::MAX);
         let estimate = full
             .iter()
             .map(|planned| self.estimate(planned))
@@ -1059,16 +1407,23 @@ where
         let switches = self.shared.switches;
         let budget_mib = switches
             .mem_mib
-            .unwrap_or(self.allowance_mib * (self.threads as u64).saturating_sub(1));
+            .unwrap_or(self.profile.allowance_mib * (self.threads as u64).saturating_sub(1));
         self.stats.budget_mib = budget_mib;
         self.stats.estimate_mib = estimate.div_ceil(MIB);
-        let (k, m) = match choose_slots(
+        let (choice, layout) = choose_slots(
             self.threads,
             budget_mib.saturating_mul(MIB),
             estimate,
             switches.slots,
             units,
-        ) {
+            self.profile.efficiency,
+        );
+        if let Some(layout) = layout {
+            self.stats.rule_k = layout.k;
+            self.stats.rule_m = layout.m;
+            self.stats.predicted_milli = Some(milli(layout.ratio));
+        }
+        let (k, m) = match choice {
             Ok(slots) => slots,
             Err(off) => {
                 self.set_off(off);
@@ -1095,6 +1450,7 @@ where
             (self.lut_width)(planned.letters, planned.max_len),
             planned.letters,
             planned.gie,
+            self.profile.query_bytes_per_letter,
         )
     }
 
@@ -1439,9 +1795,11 @@ thread_local! {
     static UNJOINED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// The writers of `run_in_pool` (the reports, and what a failed batch writes) run only after
-/// `Driver::finish` has joined every slot of the search, so that no speculative batch runs
-/// while output is written. With debug assertions this checks it, on the loop's thread.
+/// The writers of `run_in_pool` (the reports after the loop, and what a failed batch writes) run
+/// only after `Driver::finish` has joined every slot of the search, so that no speculative batch
+/// runs while they write (`LOSAT_X_RPTSTREAM`'s per-batch report writes, made while the slots
+/// search ahead, do not call this check). With debug assertions this checks it, on the loop's
+/// thread.
 pub(super) fn debug_assert_slots_joined() {
     debug_assert_eq!(
         UNJOINED.with(std::cell::Cell::get),
@@ -1788,40 +2146,416 @@ mod tests {
     }
 
     // The estimate is calibrated to the measured memory of one batch in flight: ~50 MiB for a
-    // 1 Mb blastn batch (lookup width 11, ~72,000 extensions) and ~116 MiB for a 5 Mb
-    // dc-megablast batch (width 11, ~1,000 extensions).
+    // 1 Mb blastn batch (lookup width 11, ~72,000 extensions) and 65-81 MiB per extra 5 Mb
+    // dc-megablast slot (width 11, ~1,000 extensions; perf-mb split3 section 3).
     #[test]
     fn the_estimate_matches_the_measured_batches() {
-        let blastn = batch_estimate_bytes(11, 999_193, 71_763) as f64 / MIB as f64;
-        let dc = batch_estimate_bytes(11, 5_001_442, 1_000) as f64 / MIB as f64;
+        let blastn = Profile::of_task("blastn").query_bytes_per_letter;
+        let dc = Profile::of_task("dc-megablast").query_bytes_per_letter;
+        let blastn = batch_estimate_bytes(11, 999_193, 71_763, blastn) as f64 / MIB as f64;
+        let dc = batch_estimate_bytes(11, 5_001_442, 1_000, dc) as f64 / MIB as f64;
         assert!((47.0..=54.0).contains(&blastn), "{blastn}");
-        assert!((110.0..=122.0).contains(&dc), "{dc}");
-    }
-
-    // Decision M-30 (4): blastn at 16 threads has 15 x 96 MiB, so k = 16 by the budget and 15
-    // after round balancing of ~86 units; dc-megablast has 15 x 28 = 420 MiB: 4 slots x 4
-    // threads.
-    #[test]
-    fn slots_follow_the_budget_and_the_rounds() {
-        let blastn = batch_estimate_bytes(11, 1_000_000, 72_000);
+        assert!((65.0..=82.0).contains(&dc), "{dc}");
         assert_eq!(
-            choose_slots(16, 15 * 96 * MIB, blastn, None, 86),
-            Ok((15, 1))
+            Profile::of_task("megablast"),
+            Profile::of_task("dc-megablast")
         );
-        let dc = batch_estimate_bytes(11, 5_000_000, 1_000);
-        assert_eq!(choose_slots(16, 15 * 28 * MIB, dc, None, 18), Ok((4, 4)));
-        // A large budget: 18 dc units take two rounds at 16 slots, so 9 slots.
-        assert_eq!(choose_slots(16, 4096 * MIB, dc, None, 18), Ok((9, 1)));
-        // The tuning variable wins, within the thread count.
-        assert_eq!(choose_slots(16, 0, dc, Some(8), 18), Ok((8, 2)));
-        assert_eq!(choose_slots(4, 0, dc, Some(8), 18), Ok((4, 1)));
-        // Too small a budget, or one unit of work left.
-        assert_eq!(choose_slots(16, 50 * MIB, dc, None, 18), Err(Off::Budget));
-        assert_eq!(choose_slots(16, 4096 * MIB, dc, None, 1), Err(Off::Single));
+        assert_eq!(Profile::of_task("blastn-short"), Profile::of_task("blastn"));
         assert_eq!(allowance_mib("blastn"), 96);
         assert_eq!(allowance_mib("blastn-short"), 96);
         assert_eq!(allowance_mib("dc-megablast"), 28);
         assert_eq!(allowance_mib("megablast"), 28);
+    }
+
+    /// NCBI's split by queries (blastn_app.cpp:96-153): a query file larger than 10,000,000
+    /// bytes at a word size of 10 or more (1,500,000 below 10), against fewer database letters
+    /// than 6e9 (1.5e8); standard input is not split. Elsewhere the default budget is 0.
+    #[test]
+    fn the_default_budget_follows_ncbis_split_by_queries() {
+        assert_eq!(ncbi_mt1_cutoffs(11), (6_000_000_000, 10_000_000));
+        assert_eq!(ncbi_mt1_cutoffs(10), (6_000_000_000, 10_000_000));
+        assert_eq!(ncbi_mt1_cutoffs(9), (150_000_000, 1_500_000));
+        assert_eq!(ncbi_mt1_cutoffs(7), (150_000_000, 1_500_000));
+        // The cells of the 2026-10-17 measurements: 1,775 cDNAs (5,398,904 bytes), 3,492
+        // (10,779,147) and 31,168 (96,191,719) against 3 Mb.
+        assert!(!ncbi_splits_by_queries(11, Some(5_398_904), 3_000_000));
+        assert!(ncbi_splits_by_queries(11, Some(10_779_147), 3_000_000));
+        assert!(ncbi_splits_by_queries(11, Some(96_191_719), 3_000_000));
+        assert!(ncbi_splits_by_queries(28, Some(96_191_719), 3_000_000));
+        // The bounds are strict, as NCBI's comparisons.
+        assert!(!ncbi_splits_by_queries(11, Some(10_000_000), 0));
+        assert!(ncbi_splits_by_queries(11, Some(10_000_001), 0));
+        assert!(!ncbi_splits_by_queries(11, Some(10_000_001), 6_000_000_000));
+        assert!(ncbi_splits_by_queries(11, Some(10_000_001), 5_999_999_999));
+        assert!(!ncbi_splits_by_queries(7, Some(1_500_000), 0));
+        assert!(ncbi_splits_by_queries(7, Some(1_500_001), 149_999_999));
+        assert!(!ncbi_splits_by_queries(7, Some(1_500_001), 150_000_000));
+        assert!(!ncbi_splits_by_queries(11, None, 0));
+        for task in ["blastn", "blastn-short", "megablast", "dc-megablast"] {
+            // blastn-short's word size 7 has the smaller cut-off.
+            let (word, small_file) = if task == "blastn-short" {
+                (7, 1_000_000)
+            } else {
+                (11, 5_398_904)
+            };
+            let split = Profile::of_search(task, word, Some(96_191_719), 3_000_000);
+            assert_eq!(split, Profile::of_task(task), "{task}");
+            let small = Profile::of_search(task, word, Some(small_file), 3_000_000);
+            assert_eq!(small.allowance_mib, 0, "{task}");
+            assert_eq!(
+                Profile {
+                    allowance_mib: allowance_mib(task),
+                    ..small
+                },
+                Profile::of_task(task),
+                "{task}"
+            );
+            let stdin = Profile::of_search(task, word, None, 3_000_000);
+            assert_eq!(stdin.allowance_mib, 0, "{task}");
+        }
+        // No default budget: the slots do not start (a budget of fewer than two slots).
+        let (choice, layout) = choose_slots(16, 0, 50 * MIB, None, 5, EFFICIENCY_BLASTN);
+        assert_eq!((choice, layout), (Err(Off::Budget), None));
+    }
+
+    #[test]
+    fn the_efficiency_is_log2_linear_between_the_points() {
+        for points in [EFFICIENCY_MEGABLAST, EFFICIENCY_BLASTN] {
+            for &(m, e) in points {
+                assert!((efficiency(points, m) - e).abs() < 1e-12, "{m}");
+            }
+            // 3 threads lie between the points of 2 and 4, log2-linear.
+            let (e2, e4) = (points[1].1, points[2].1);
+            let three = e2 + (e4 - e2) * (3f64.log2() - 1.0);
+            assert!((efficiency(points, 3) - three).abs() < 1e-12);
+            // Beyond the last point the speedup stays that of 16 threads, and 0 threads count as
+            // 1.
+            for m in [17, 24, 32, 64, 128] {
+                let speedup = m as f64 * efficiency(points, m);
+                assert!((speedup - 16.0 * points[4].1).abs() < 1e-9, "{m}");
+            }
+            assert_eq!(efficiency(points, 0), 1.0);
+        }
+    }
+
+    #[test]
+    fn units_are_the_batches_of_at_least_half_the_median_batch() {
+        assert_eq!(batch_units(&[]), 0);
+        assert_eq!(reference_letters(&[]), 0);
+        assert_eq!(batch_units(&[100]), 1);
+        assert_eq!(batch_units(&[597, 5_001_442]), 1);
+        assert_eq!(batch_units(&[597, 5_001_442, 152, 4_999_591]), 2);
+        // Exactly half counts; one letter less does not.
+        assert_eq!(batch_units(&[1_000, 500, 499]), 2);
+        // All tiny batches are all units.
+        assert_eq!(batch_units(&[100; 40]), 40);
+        // The reference is the letter-weighted median: the batch at which the sorted batches
+        // reach half of all letters.
+        assert_eq!(reference_letters(&[1, 2, 3, 4]), 3);
+        assert_eq!(reference_letters(&[10, 1, 1, 1]), 10);
+        // One long record (an oversized batch) moves neither the reference nor the other
+        // batches' units, and counts as one unit itself.
+        let mut outlier = SPLIT3_AB.to_vec();
+        outlier.push(3_000_000);
+        assert_eq!(batch_units(SPLIT3_AB), 89);
+        assert_eq!(batch_units(&outlier), 90);
+        let mut contigs = vec![5_000_000u64; 10];
+        contigs.push(11_000_000);
+        assert_eq!(batch_units(&contigs), 11);
+        // The split3 inputs keep their units (as against the largest batch).
+        for (planned, units) in [(SPLIT3_A, 1), (SPLIT3_B, 2), (SPLIT3_C, 5), (SPLIT3_AD, 18)] {
+            assert_eq!(batch_units(planned), units, "{planned:?}");
+        }
+    }
+
+    /// The planned batches after the first of the perf-mb split3 inputs (window 2, from the
+    /// profiler's `batch_entry` events; D. melanogaster cDNAs against 3 Mb of chromosome 2L).
+    /// (a): 1,775 cDNAs, dc-megablast.
+    const SPLIT3_A: &[u64] = &[597, 5_001_442];
+    /// (b): 3,492 cDNAs, dc-megablast.
+    const SPLIT3_B: &[u64] = &[597, 5_001_442, 152, 4_999_591];
+    /// (c): 1,775 cDNAs, blastn.
+    const SPLIT3_C: &[u64] = &[999_193, 1_004_184, 1_007_311, 1_000_099, 991_252];
+    /// Ad: 31,168 cDNAs, dc-megablast (the mixer alternates tiny and 5 Mb batches).
+    const SPLIT3_AD: &[u64] = &[
+        597, 5_001_442, 152, 4_999_591, 520, 5_003_054, 7_699, 5_001_159, 2_712, 5_000_068, 2_886,
+        5_001_250, 4_017, 5_002_579, 3_440, 5_002_671, 7_569, 4_999_636, 6_903, 5_006_181, 7_973,
+        4_999_035, 1_413, 5_002_970, 4_063, 5_000_666, 1_484, 5_000_251, 3_399, 5_002_564, 3_100,
+        5_000_456, 8_889, 5_003_064, 7_149, 4_179_903,
+    ];
+    /// Ab: 31,168 cDNAs, blastn (in the order the slots started them).
+    const SPLIT3_AB: &[u64] = &[
+        1_007_311, 1_004_184, 999_193, 1_000_353, 1_000_099, 1_001_407, 1_003_745, 1_003_157,
+        1_000_299, 999_894, 1_001_925, 1_001_163, 999_535, 1_006_649, 1_000_443, 999_611,
+        1_000_658, 1_001_795, 1_007_392, 999_866, 999_212, 1_001_313, 1_001_504, 999_303,
+        1_003_329, 999_017, 999_338, 999_798, 999_331, 999_279, 1_008_671, 1_003_640, 1_000_849,
+        1_002_476, 1_001_822, 1_005_414, 1_002_084, 1_000_502, 1_000_078, 1_011_910, 1_000_776,
+        1_002_900, 1_001_242, 1_003_735, 999_091, 1_000_014, 1_001_122, 1_001_639, 1_006_094,
+        1_000_240, 999_462, 1_000_646, 1_000_228, 1_002_641, 999_660, 1_005_343, 999_254, 999_243,
+        1_002_195, 999_687, 1_003_349, 1_001_580, 1_001_965, 999_853, 999_729, 999_390, 999_394,
+        1_000_589, 1_001_936, 999_675, 1_004_210, 1_006_364, 1_003_179, 1_044_868, 999_748,
+        1_007_842, 1_001_043, 1_002_396, 999_901, 1_001_106, 999_503, 999_756, 1_000_455,
+        1_000_853, 1_000_622, 1_000_009, 1_002_680, 1_000_573, 999_257, 95_919,
+    ];
+
+    /// The choice for `planned` batches of `task` at `threads` threads with the default budget
+    /// (the estimate of the largest batch: lookup width 11, ~72,000 extensions per 1 Mb blastn
+    /// batch, ~1,000 per 5 Mb dc-megablast batch).
+    fn split3_choice(
+        task: &str,
+        planned: &[u64],
+        threads: usize,
+    ) -> (Result<(usize, usize), Off>, Option<Layout>, usize) {
+        let profile = Profile::of_task(task);
+        let largest = planned.iter().copied().max().unwrap();
+        let gie = if task == "blastn" {
+            largest * 72 / 1_000
+        } else {
+            1_000
+        };
+        let estimate = batch_estimate_bytes(11, largest, gie, profile.query_bytes_per_letter);
+        let budget = profile.allowance_mib * (threads as u64 - 1) * MIB;
+        let units = batch_units(planned);
+        let (choice, layout) =
+            choose_slots(threads, budget, estimate, None, units, profile.efficiency);
+        (choice, layout, units)
+    }
+
+    // Every cell of perf-mb `logs/split3_report.md` section 3: the rule gives the layout that
+    // was measured best there (window 1 with `LOSAT_X_QBATCHPARSLOTS`, window 2 with the
+    // prototype), where the earlier rule (units = planned letters over the largest batch, k by
+    // the budget) gave (a) 16 threads 2 x 8, (c) 4 threads 3 x 1, (c) 8 threads 5 x 1, (b) and
+    // Ad 4 threads none (budget), Ab 16 threads 15 x 1.
+    #[test]
+    fn cells_of_the_split3_report() {
+        // (input, task, threads, units, expected choice, predicted ratio of the judged layout)
+        let cells: [(
+            &str,
+            &str,
+            &[u64],
+            usize,
+            usize,
+            Result<(usize, usize), Off>,
+            f64,
+        ); 11] = [
+            (
+                "a",
+                "dc-megablast",
+                SPLIT3_A,
+                4,
+                1,
+                Err(Off::Single),
+                f64::NAN,
+            ),
+            (
+                "a",
+                "dc-megablast",
+                SPLIT3_A,
+                16,
+                1,
+                Err(Off::Single),
+                f64::NAN,
+            ),
+            ("b", "dc-megablast", SPLIT3_B, 4, 2, Ok((2, 2)), 0.9556),
+            (
+                "b",
+                "dc-megablast",
+                SPLIT3_B,
+                16,
+                2,
+                Err(Off::Model),
+                1.0088,
+            ),
+            ("c", "blastn", SPLIT3_C, 4, 5, Err(Off::Model), 1.0525),
+            ("c", "blastn", SPLIT3_C, 8, 5, Ok((2, 4)), 0.8873),
+            ("c", "blastn", SPLIT3_C, 16, 5, Ok((5, 3)), 0.4833),
+            ("Ad", "dc-megablast", SPLIT3_AD, 4, 18, Ok((2, 2)), 0.9556),
+            ("Ad", "dc-megablast", SPLIT3_AD, 16, 18, Ok((4, 4)), 0.7730),
+            ("Ab", "blastn", SPLIT3_AB, 4, 89, Ok((4, 1)), 0.8348),
+            ("Ab", "blastn", SPLIT3_AB, 16, 89, Ok((16, 1)), 0.3793),
+        ];
+        for (input, task, planned, threads, units, expected, ratio) in cells {
+            let (choice, layout, got_units) = split3_choice(task, planned, threads);
+            let cell = format!("({input}) {threads} threads");
+            assert_eq!(got_units, units, "{cell}");
+            assert_eq!(choice, expected, "{cell}: {layout:?}");
+            match layout {
+                None => assert!(ratio.is_nan(), "{cell}"),
+                Some(layout) => {
+                    assert!((layout.ratio - ratio).abs() < 1e-4, "{cell}: {layout:?}");
+                    assert_eq!(slots_pay(layout.ratio), choice.is_ok(), "{cell}");
+                }
+            }
+        }
+        // (b) 16 threads: the best layout of two slots or more is 2 x 8, 1 % slower than the loop.
+        let (_, layout, _) = split3_choice("dc-megablast", SPLIT3_B, 16);
+        assert_eq!(layout.map(|layout| (layout.k, layout.m)), Some((2, 8)));
+        // At one thread the default budget (per thread beyond the first) is 0: no second batch.
+        for (task, planned) in [("blastn", SPLIT3_AB), ("dc-megablast", SPLIT3_AD)] {
+            assert_eq!(
+                split3_choice(task, planned, 1).0,
+                Err(Off::Budget),
+                "{task}"
+            );
+        }
+    }
+
+    // More threads than were measured (E(m) up to 16 threads per batch, the speedup kept flat
+    // beyond): the cells keep slots. With E flat instead, (b) at 24-64 threads, (c) at 64 / 128
+    // and Ad at 128 would keep the loop (review S1), where the earlier rule ran slots ((b) 2 x 12
+    // / 2 x 16 / 2 x 32 / 2 x 64, (c) 5 x 4 / 5 x 6 / 5 x 12 / 5 x 25, Ad 18 x 7 at 128).
+    #[test]
+    fn cells_beyond_sixteen_threads() {
+        // (input, task, planned, threads, expected choice, predicted ratio)
+        let cells: [(&str, &str, &[u64], usize, (usize, usize), f64); 12] = [
+            ("b", "dc-megablast", SPLIT3_B, 24, (2, 12), 0.6883),
+            ("b", "dc-megablast", SPLIT3_B, 32, (2, 16), 0.5250),
+            ("b", "dc-megablast", SPLIT3_B, 64, (2, 32), 0.5250),
+            ("b", "dc-megablast", SPLIT3_B, 128, (2, 64), 0.5250),
+            ("c", "blastn", SPLIT3_C, 24, (5, 4), 0.3921),
+            ("c", "blastn", SPLIT3_C, 32, (5, 6), 0.3161),
+            ("c", "blastn", SPLIT3_C, 64, (5, 12), 0.2461),
+            ("c", "blastn", SPLIT3_C, 128, (5, 25), 0.2400),
+            ("Ad", "dc-megablast", SPLIT3_AD, 24, (6, 4), 0.4840),
+            ("Ad", "dc-megablast", SPLIT3_AD, 32, (9, 3), 0.4132),
+            ("Ad", "dc-megablast", SPLIT3_AD, 64, (18, 3), 0.2066),
+            ("Ad", "dc-megablast", SPLIT3_AD, 128, (18, 7), 0.1315),
+        ];
+        for (input, task, planned, threads, expected, ratio) in cells {
+            let (choice, layout, _) = split3_choice(task, planned, threads);
+            let cell = format!("({input}) {threads} threads");
+            assert_eq!(choice, Ok(expected), "{cell}: {layout:?}");
+            let layout = layout.expect("a judged layout");
+            assert!((layout.ratio - ratio).abs() < 1e-4, "{cell}: {layout:?}");
+        }
+    }
+
+    // One long record among normal batches (review S2): Ab's 89 blastn batches of ~1 Mb with one
+    // 3 Mb record keep slots (the largest batch's estimate, 121 MiB, caps k by the budget), and
+    // ten 5 Mb dc-megablast batches with one 11 Mb contig too; against the largest batch both had
+    // one unit and kept the loop.
+    #[test]
+    fn one_long_record_keeps_the_slots() {
+        let mut outlier = SPLIT3_AB.to_vec();
+        outlier.push(3_000_000);
+        for (threads, expected, ratio) in [
+            (4, (2, 2), 0.8771),
+            (8, (4, 2), 0.6915),
+            (16, (8, 2), 0.4276),
+        ] {
+            let (choice, layout, units) = split3_choice("blastn", &outlier, threads);
+            assert_eq!((choice, units), (Ok(expected), 90), "{threads}: {layout:?}");
+            let layout = layout.expect("a judged layout");
+            assert!((layout.ratio - ratio).abs() < 1e-4, "{threads}: {layout:?}");
+        }
+        let mut contigs = vec![5_000_000u64; 10];
+        contigs.push(11_000_000);
+        let (choice, layout, units) = split3_choice("dc-megablast", &contigs, 16);
+        assert_eq!((choice, units), (Ok((3, 5)), 11), "{layout:?}");
+        assert!((layout.expect("a layout").ratio - 0.9158).abs() < 1e-4);
+    }
+
+    // The gate is strict, and a tie between layouts goes to the fewest slots (less memory in
+    // flight). With an efficiency table that makes every m >= 2 slow, 18 units at 16 threads
+    // predict the same span (2 rounds x 1.2) for 9 to 16 one-thread slots: 9 are taken.
+    #[test]
+    fn the_gate_is_strict_and_ties_take_the_fewest_slots() {
+        assert!(!slots_pay(MODEL_GAIN));
+        assert!(!slots_pay(0.9696));
+        assert!(slots_pay(0.9694));
+        assert_eq!(
+            (milli(0.9694), milli(0.9696), milli(1.0088)),
+            (969, 970, 1009)
+        );
+        let slow: &[(usize, f64)] = &[(1, 1.0), (2, 0.1), (16, 0.1)];
+        for k in 10..=16 {
+            assert_eq!(
+                predicted_span(slow, 16, k, 18),
+                predicted_span(slow, 16, 9, 18),
+                "{k}"
+            );
+        }
+        let tiny = batch_estimate_bytes(8, 100, 10, QUERY_BYTES_PER_LETTER);
+        let (choice, layout) = choose_slots(16, 4096 * MIB, tiny, None, 18, slow);
+        assert_eq!(choice, Ok((9, 1)), "{layout:?}");
+    }
+
+    #[test]
+    fn slots_follow_the_budget_the_units_and_the_tuning_variable() {
+        let mb = EFFICIENCY_MEGABLAST;
+        let dc = batch_estimate_bytes(11, 5_000_000, 1_000, MEGABLAST_QUERY_BYTES_PER_LETTER);
+        // Too small a budget (or none) for a second batch.
+        assert_eq!(
+            choose_slots(16, 50 * MIB, dc, None, 18, mb),
+            (Err(Off::Budget), None)
+        );
+        assert_eq!(
+            choose_slots(16, 0, dc, None, 18, mb),
+            (Err(Off::Budget), None)
+        );
+        // One unit of work, or none, whatever the budget.
+        assert_eq!(
+            choose_slots(16, 4096 * MIB, dc, None, 1, mb),
+            (Err(Off::Single), None)
+        );
+        assert_eq!(
+            choose_slots(16, 4096 * MIB, dc, None, 0, mb),
+            (Err(Off::Single), None)
+        );
+        // One thread.
+        assert_eq!(
+            choose_slots(1, 4096 * MIB, dc, None, 18, mb),
+            (Err(Off::Single), None)
+        );
+        // A large budget does not give more slots than the model wants: 18 dc units at 16
+        // threads stay at 4 x 4 (the earlier rule gave 9 x 1).
+        assert_eq!(choose_slots(16, 4096 * MIB, dc, None, 18, mb).0, Ok((4, 4)));
+        // The budget caps k: with 84 MiB the best is 2 x 8, which the model judges 1 % slower
+        // than the loop on 16 threads.
+        let (choice, layout) = choose_slots(16, 84 * MIB, dc, None, 18, mb);
+        assert_eq!(choice, Err(Off::Model));
+        let layout = layout.expect("a judged layout");
+        assert_eq!((layout.k, layout.m), (2, 8));
+        assert!(layout.ratio > 1.0 && layout.ratio < 1.01, "{layout:?}");
+        // All tiny batches are units of work too: 40 one-query batches at 4 threads, 4 x 1.
+        let tiny = batch_estimate_bytes(8, 100, 10, QUERY_BYTES_PER_LETTER);
+        for points in [EFFICIENCY_BLASTN, mb] {
+            assert_eq!(
+                choose_slots(4, 4096 * MIB, tiny, None, 40, points).0,
+                Ok((4, 1))
+            );
+        }
+        // The tuning variable wins, within the thread count, whatever the budget and units; the
+        // layout it sets is judged too.
+        let (choice, layout) = choose_slots(16, 0, dc, Some(8), 18, mb);
+        assert_eq!(choice, Ok((8, 2)));
+        let layout = layout.expect("a judged layout");
+        assert_eq!((layout.k, layout.m), (8, 2));
+        let loop_span = predicted_span(mb, 16, 1, 18);
+        assert!((layout.ratio - predicted_span(mb, 16, 8, 18) / loop_span).abs() < 1e-12);
+        assert_eq!(choose_slots(4, 0, dc, Some(8), 18, mb).0, Ok((4, 1)));
+        assert_eq!(choose_slots(4, 0, dc, Some(2), 1, mb).0, Ok((2, 2)));
+        assert_eq!(choose_slots(1, 0, dc, Some(2), 0, mb).0, Ok((1, 1)));
+    }
+
+    // The span model: rounds, contention and the in-batch efficiency.
+    #[test]
+    fn the_predicted_span_counts_rounds_contention_and_efficiency() {
+        let bn = EFFICIENCY_BLASTN;
+        // The loop: units / (n x E(n)).
+        assert!((predicted_span(bn, 4, 1, 5) - 5.0 / (4.0 * 0.71)).abs() < 1e-12);
+        // Up to 2k units, whole rounds: 5 units on 3 slots of one thread are 2 rounds.
+        assert!((predicted_span(bn, 3, 3, 5) - 2.0 * 1.10).abs() < 1e-12);
+        // Beyond, units / k plus half a round when k does not divide them.
+        assert!((predicted_span(bn, 4, 4, 89) - (89.0 / 4.0 + 0.5) * 1.15).abs() < 1e-12);
+        assert!((predicted_span(bn, 4, 4, 88) - 22.0 * 1.15).abs() < 1e-12);
+        // The contention stops growing at five slots.
+        assert!((predicted_span(bn, 16, 16, 16) - 1.20).abs() < 1e-12);
+        // Idle threads count: 16 threads in 5 slots of 3.
+        let e3 = efficiency(bn, 3);
+        assert!((predicted_span(bn, 16, 5, 5) - 1.20 / (3.0 * e3)).abs() < 1e-12);
+        // Degenerate arguments stay finite.
+        assert!(predicted_span(bn, 0, 0, 0).is_finite());
     }
 
     // The waste bound: a plan's window (two batches per slot) plus a quarter of the batches
@@ -1957,15 +2691,24 @@ mod tests {
             fail: Option<usize>,
             /// The batch of this input start panics.
             panic: Option<usize>,
-            /// The failing batch waits until a slot has started the panicking one.
+            /// The failing batch waits until a slot has started the panicking one (at most 10 s;
+            /// then it panics, so a run without slots fails instead of spinning).
             fail_waits_for_panic: bool,
             /// A batch of another size than `BATCH_SIZE` (a corrupted prediction) waits for its
             /// cancellation (at most 10 s), or returns at once.
             stale: Stale,
             /// The loop waits this long after each batch it takes, so the slots run ahead.
             loop_delay: Option<Duration>,
+            /// After the first batch is committed (the slots start then), the loop waits until a
+            /// slot has started a batch of another size (a corrupted prediction; at most 10 s, then
+            /// it panics), so that the next take finds that batch running and cancels it. Without
+            /// the wait a slow machine could start no such batch before the next take drops it
+            /// from the queue, and nothing would be cancelled.
+            loop_waits_for_stale: bool,
             /// The lookup width the estimates assume (8 if 0).
             lut: usize,
+            /// The task profile (blastn's with a budget of 1 GiB per thread if `None`).
+            profile: Option<Profile>,
         }
 
         /// The thread count a search reports when it saw its cancellation and returned anyway
@@ -2014,10 +2757,14 @@ mod tests {
             let active = AtomicUsize::new(0);
             let started = Mutex::new(Vec::new());
             let panic_started = AtomicBool::new(false);
+            let stale_started = AtomicBool::new(false);
             let search = |job: &Job, pool: &SearchPool<'_>| -> Fake {
                 started.lock().unwrap().push(job.key);
                 active.fetch_add(pool.threads(), Ordering::SeqCst);
                 let stale = batch_size.is_some_and(|size| job.key.batch_size != size);
+                if stale {
+                    stale_started.store(true, Ordering::SeqCst);
+                }
                 match fakes.stale {
                     Stale::WaitsForCancel | Stale::PartialOnCancel if stale => {
                         let since = Instant::now();
@@ -2040,7 +2787,12 @@ mod tests {
                     panic!("fake batch panic at {}", job.key.input_start);
                 }
                 if fakes.fail == Some(job.key.input_start) && fakes.fail_waits_for_panic {
+                    let since = Instant::now();
                     while !panic_started.load(Ordering::SeqCst) {
+                        assert!(
+                            since.elapsed() < Duration::from_secs(10),
+                            "no slot started the panicking batch within 10 s"
+                        );
                         std::thread::yield_now();
                     }
                 }
@@ -2060,7 +2812,10 @@ mod tests {
                     scope,
                     input,
                     threads,
-                    1024,
+                    fakes.profile.unwrap_or(Profile {
+                        allowance_mib: 1024,
+                        ..Profile::of_task("blastn")
+                    }),
                     Box::new(move |_, _| if fakes.lut == 0 { 8 } else { fakes.lut }),
                     None,
                 );
@@ -2070,6 +2825,16 @@ mod tests {
                 let mut start = 0;
                 let mut results = Vec::new();
                 while start < lengths.len() {
+                    if fakes.loop_waits_for_stale && start > 0 && results.len() == 1 {
+                        let since = Instant::now();
+                        while !stale_started.load(Ordering::SeqCst) {
+                            assert!(
+                                since.elapsed() < Duration::from_secs(10),
+                                "no slot started a batch of another size within 10 s"
+                            );
+                            std::thread::yield_now();
+                        }
+                    }
                     let (end, _) = next_ranged_batch(lengths, &query_input.skipped, start, size);
                     let key = BatchKey {
                         input_start: start,
@@ -2152,6 +2917,14 @@ mod tests {
             assert_eq!(stats.precomputed + stats.loop_searched, stats.batches);
             assert!(stats.precomputed >= stats.batches - 1, "{}", run4.line);
             assert_eq!((stats.k, stats.m, stats.idle), (4, 1, 0), "{}", run4.line);
+            // 13 planned batches, the last of one query (no unit): 4 x 1 is predicted at 0.82 of
+            // the loop on 4 threads.
+            assert!(
+                run4.line
+                    .contains(" units=12 rule_k=4 rule_m=1 predicted=0.81"),
+                "{}",
+                run4.line
+            );
             assert!(run4.summary.peak_busy <= 4);
             assert_eq!(run4.active_after_finish, 0);
             assert_eq!(run4.summary.panicked, 0);
@@ -2181,7 +2954,12 @@ mod tests {
         fn the_mixer_batches_are_taken_from_the_slots() {
             let lengths: Vec<usize> = (0..400).map(|index| 3_000 + (index * 17) % 1_000).collect();
             let off = off_run(&lengths, None);
-            let run4 = run(&lengths, None, 4, on(), Fakes::default());
+            // The mixer's second batch holds most of the input (one batch unit): two slots set.
+            let switches = Switches {
+                slots: Some(2),
+                ..on()
+            };
+            let run4 = run(&lengths, None, 4, switches, Fakes::default());
             assert_eq!(keys(&run4.results), keys(&off.results));
             assert_eq!(run4.summary.stats.mispredicted, 0, "{}", run4.line);
             assert!(run4.summary.stats.precomputed > 0, "{}", run4.line);
@@ -2240,6 +3018,7 @@ mod tests {
             };
             let fakes = Fakes {
                 stale: Stale::WaitsForCancel,
+                loop_waits_for_stale: true,
                 ..Fakes::default()
             };
             let cancelled_run = run(&lengths, Some(200), 4, switches, fakes);
@@ -2304,13 +3083,18 @@ mod tests {
         #[test]
         fn an_error_ends_the_loop_and_drops_batches_past_it() {
             let lengths = vec![100; 40];
+            // Four slots set: the batch past the error must be started by a slot.
+            let switches = Switches {
+                slots: Some(4),
+                ..on()
+            };
             let fakes = Fakes {
                 fail: Some(10),
                 panic: Some(12),
                 fail_waits_for_panic: true,
                 ..Fakes::default()
             };
-            let failed = run(&lengths, Some(100), 4, on(), fakes);
+            let failed = run(&lengths, Some(100), 4, switches, fakes);
             assert_eq!(failed.results.len(), 11);
             assert_eq!(failed.results[10], Err("error at 10".to_string()));
             assert!(failed.summary.discarded >= 1, "{}", failed.line);
@@ -2375,6 +3159,7 @@ mod tests {
             };
             let fakes = Fakes {
                 stale: Stale::PartialOnCancel,
+                loop_waits_for_stale: true,
                 ..Fakes::default()
             };
             let partial = run(&lengths, Some(200), 4, switches, fakes);
@@ -2406,7 +3191,7 @@ mod tests {
             let bounded = run(&lengths, Some(200), 4, switches, fakes);
             assert_eq!(keys(&bounded.results), keys(&off.results));
             assert_eq!(bounded.summary.peak_busy, 2, "{}", bounded.line);
-            let one = batch_estimate_bytes(10, 200, 20);
+            let one = batch_estimate_bytes(10, 200, 20, QUERY_BYTES_PER_LETTER);
             assert!(
                 bounded.summary.peak_bytes <= 5 * MIB + 2 * one,
                 "{}",
@@ -2422,6 +3207,7 @@ mod tests {
             let lengths = vec![100; 40];
             let switches = Switches {
                 shadow: true,
+                slots: Some(4),
                 ..on()
             };
             let fakes = Fakes {
@@ -2441,6 +3227,67 @@ mod tests {
                 "{message}"
             );
             assert!(message.contains("fake batch panic at 12"), "{message}");
+        }
+
+        // The model keeps the loop where slots would not be 3 % faster: 9 planned batches at 4
+        // threads with megablast's efficiency (the loop: 9 / (4 x 0.81) = 2.78 batch times; the
+        // best, 2 x 2: 5 x 1.05 / (2 x 0.89) = 2.95). The summary line states the units, the
+        // layout judged and its predicted ratio.
+        #[test]
+        fn the_model_keeps_the_loop_where_slots_gain_little() {
+            let lengths = vec![100; 40];
+            let off = off_run(&lengths, Some(400));
+            let fakes = Fakes {
+                profile: Some(Profile {
+                    allowance_mib: 1024,
+                    ..Profile::of_task("megablast")
+                }),
+                ..Fakes::default()
+            };
+            let kept = run(&lengths, Some(400), 4, on(), fakes);
+            let stats = kept.summary.stats;
+            assert_eq!(keys(&kept.results), keys(&off.results));
+            assert_eq!(stats.off, Some(Off::Model), "{}", kept.line);
+            assert_eq!(
+                (stats.precomputed, stats.k, stats.m),
+                (0, 0, 0),
+                "{}",
+                kept.line
+            );
+            assert!(
+                kept.started.len() == kept.results.len(),
+                "{:?}",
+                kept.started
+            );
+            assert!(
+                kept.line
+                    .contains(" units=9 rule_k=2 rule_m=2 predicted=1.062 "),
+                "{}",
+                kept.line
+            );
+            assert!(kept.line.ends_with(" off=model"), "{}", kept.line);
+        }
+
+        // Without a budget for a second batch the model does not run: no layout is judged.
+        #[test]
+        fn no_budget_judges_no_layout() {
+            let lengths = vec![100; 40];
+            let switches = Switches {
+                mem_mib: Some(0),
+                ..on()
+            };
+            let none = run(&lengths, Some(400), 4, switches, Fakes::default());
+            let stats = none.summary.stats;
+            assert_eq!(stats.off, Some(Off::Budget), "{}", none.line);
+            assert_eq!(
+                (stats.units, stats.rule_k, stats.predicted_milli),
+                (9, 0, None)
+            );
+            assert!(
+                none.line.contains(" rule_k=0 rule_m=0 predicted=- "),
+                "{}",
+                none.line
+            );
         }
 
         #[test]

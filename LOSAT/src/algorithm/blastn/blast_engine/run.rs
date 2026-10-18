@@ -147,6 +147,21 @@ mod x_pair_seed;
 #[path = "x_bnstream.rs"]
 mod x_bnstream;
 
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:310-318
+// ```c++
+//                 ITERATE(CSearchResultSet, result, *results) {
+//                     formatter.PrintOneResultSet(**result, query_batch);
+//                 }
+//     ...
+//         BLAST_PROF_START( APP.POST );
+//         formatter.PrintEpilog(opt);
+// ```
+// EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of each query batch written when the batch loop of
+// `run_in_pool` takes the batch, and the epilogs after the loop (a child module, so that it reads
+// the private types of this file).
+#[path = "x_rpt_stream.rs"]
+mod x_rpt_stream;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2472-2476
 // ```c++
 //     if (args.Exist(kArgDb) && args[kArgDb]) {
@@ -176,6 +191,34 @@ mod database;
 // this file).
 #[path = "x_qbatch_par.rs"]
 mod x_qbatch_par;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603 (the query buffer
+// of a batch) and c++/src/algo/blast/core/blast_stat.c:2754-2784 (the ungapped Karlin block of
+// each context).
+// EXPERIMENT (LOSAT_X_QPREPPAR): both steps of `search_query_batch` as ordered parallel maps on
+// the batch's search pool (a child module, so that it reads the private serial function and the
+// sentinel of this file).
+#[path = "x_query_prep_par.rs"]
+mod x_query_prep_par;
+
+// NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-279
+// ```c++
+//         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
+// 	    BLAST_PROF_START( APP.LOOP.PRE );
+//             CRef<CBlastQueryVector> query_batch(input.GetNextSeqBatch(*scope));
+// ```
+// EXPERIMENT (LOSAT_X_QSTREAM): the records of each query batch read from the query file when the
+// batch loop of `run_in_pool` (or a LOSAT_X_QBATCHPAR slot) needs them, after a first reading that
+// keeps only each record's length (a child module, so that it reads the private types of this
+// file).
+#[path = "x_query_stream.rs"]
+mod x_query_stream;
+
+/// EXPERIMENT (LOSAT_X_QPREPPARSHADOW): the summary line `main` prints at exit. No NCBI
+/// counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_query_prep_par_print_summary() {
+    x_query_prep_par::print_summary();
+}
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
 // ```c
@@ -3702,17 +3745,17 @@ fn collect_prelim_hit_lists(
     collector.hit_lists
 }
 
-/// EXPERIMENT (LOSAT_X_BNSTREAM, off unless set): with two or more threads, the subjects of a
+/// EXPERIMENT (LOSAT_X_BNSTREAM, a strict-set switch: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+/// and it is not set): with two or more threads, the subjects of a
 /// query batch are claimed by the threads in OID order and their results go to the hit lists in
 /// OID order while the threads search the next subjects (`x_bnstream::search_in_order`); a
 /// thread claims a subject only while it is fewer than `X_BNSTREAM_SUBJECTS_PER_THREAD`
 /// subjects per thread past the last one handed over, so that the HSPs of that window are held
-/// at a time instead of those of every subject. The hit lists are the same. Not in the strict
-/// set.
+/// at a time instead of those of every subject. The hit lists are the same.
 // No NCBI counterpart: reads the switch once; it does not change any value NCBI computes.
 fn x_bnstream() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BNSTREAM").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNSTREAM"))
 }
 
 /// No NCBI counterpart: the subjects per thread of the window of `LOSAT_X_BNSTREAM`.
@@ -4364,6 +4407,8 @@ fn build_query_blastna_buffer(
     for (letters, offsets) in query_letters.iter().zip(context_offsets.chunks_exact(2)) {
         let length = letters.len();
         // A context that is empty or does not end inside the block stays sentinels.
+        // (Twin: `place` and the two encoder calls below are copied in x_query_prep_par.rs
+        // (LOSAT_X_QPREPPAR); change them there too.)
         let place = |offset: i32| -> Option<std::ops::Range<usize>> {
             let start = offset.max(0) as usize;
             let end = start.saturating_add(length);
@@ -4894,10 +4939,12 @@ fn blastn_timing_text(
         format_n
     );
     if let Some(t_search_start) = t_search_start {
-        timing_line!(
-            "[TIMING] search_total: {:.3}s",
-            t_search_start.elapsed().as_secs_f64()
-        );
+        let search_total = t_search_start.elapsed();
+        // Diagnostic (LOSAT_TIMING): the same interval feeds the common line (utils/xtiming.rs):
+        // one query batch's search, from after its lookup table to its end (the batches' sum
+        // over all threads). No NCBI counterpart.
+        crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::Search, search_total);
+        timing_line!("[TIMING] search_total: {:.3}s", search_total.as_secs_f64());
     }
     if let Some(t_total) = t_total {
         timing_line!("[TIMING] total: {:.3}s", t_total.elapsed().as_secs_f64());
@@ -5023,6 +5070,13 @@ struct BlastnReportInputs<'a> {
     /// Whether the outfmt 0 report starts with the prolog, which is otherwise written
     /// before the search (`write_pairwise_prologs`).
     prolog: bool,
+    /// The queries whose reports earlier calls wrote, which outfmt 7's epilog counts too
+    /// (NCBI's `m_QueriesFormatted`): with LOSAT_X_RPTSTREAM the last call writes only the
+    /// epilogs, after the reports of every batch (`x_rpt_stream`); 0 otherwise.
+    queries_before: usize,
+    /// EXPERIMENT (LOSAT_X_RPTSTREAM): the report values of a subject set's subjects, made once
+    /// for the reports of all batches (`x_rpt_stream::SubjectCache`); `None`: made here.
+    subject_cache: Option<&'a x_rpt_stream::SubjectCache>,
 }
 
 /// The per-query and run-level data of the pairwise report.
@@ -5497,10 +5551,19 @@ fn post_process_hits_and_write(
                 Some(records) => SubjectLetters::new(records, None),
                 None => report.subjects,
             };
+            // EXPERIMENT (LOSAT_X_RPTSTREAM): the same masks, made once for every batch.
             let subject_masks = report.lcase_masking.then(|| {
-                (0..subject_records.records().len())
-                    .map(|index| subject_records.lowercase_masks(index))
-                    .collect::<Vec<_>>()
+                match report
+                    .subject_cache
+                    .and_then(|cache| cache.masks.as_deref())
+                {
+                    Some(masks) => std::borrow::Cow::Borrowed(masks),
+                    None => std::borrow::Cow::Owned(
+                        (0..subject_records.records().len())
+                            .map(|index| subject_records.lowercase_masks(index))
+                            .collect::<Vec<_>>(),
+                    ),
+                }
             });
             let mut hits = pairwise_hits(
                 &hit_lists,
@@ -5548,16 +5611,22 @@ fn post_process_hits_and_write(
     } else {
         None
     };
-    let subject_ids = if output_formats
+    // EXPERIMENT (LOSAT_X_RPTSTREAM): a subject set's ids made once for every batch; the
+    // switch acts only when no subject's id is refused (`x_rpt_stream::SubjectCache`), so
+    // they are the ids made here.
+    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> = if output_formats
         .iter()
         .any(|&format| format != BlastnOutputFormat::Pairwise)
     {
-        match report.database_subject_ids {
-            Some(ids) => ids.to_vec(),
-            None => tabular_subject_ids(&hit_lists, report.subjects.records())?,
+        match (report.database_subject_ids, report.subject_cache) {
+            (Some(ids), _) => std::borrow::Cow::Borrowed(ids),
+            (None, Some(cache)) => std::borrow::Cow::Borrowed(cache.ids.as_slice()),
+            (None, None) => {
+                std::borrow::Cow::Owned(tabular_subject_ids(&hit_lists, report.subjects.records())?)
+            }
         }
     } else {
-        Vec::new()
+        std::borrow::Cow::Owned(Vec::new())
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     // ```c++
@@ -5570,11 +5639,19 @@ fn post_process_hits_and_write(
     // ```
     // The outfmt 0 descriptions and headings are made from the subjects' title bytes
     // (`report::defline::generate_defline`), by subject index.
-    let subject_titles: Vec<Arc<[u8]>> = if output_formats.contains(&BlastnOutputFormat::Pairwise) {
-        report.subjects.records().iter().map(record_title).collect()
-    } else {
-        Vec::new()
-    };
+    // EXPERIMENT (LOSAT_X_RPTSTREAM): the same titles, made once for every batch.
+    let subject_titles: std::borrow::Cow<'_, [Arc<[u8]>]> =
+        if output_formats.contains(&BlastnOutputFormat::Pairwise) {
+            match report
+                .subject_cache
+                .and_then(|cache| cache.titles.as_deref())
+            {
+                Some(titles) => std::borrow::Cow::Borrowed(titles),
+                None => report.subjects.records().iter().map(record_title).collect(),
+            }
+        } else {
+            std::borrow::Cow::Owned(Vec::new())
+        };
     let observer = &mut outputs.observer;
     // The warnings are written once, with the first format (`QueryWarnings`).
     let mut warnings = Some(crate::report::query_warnings::QueryWarnings {
@@ -5625,7 +5702,9 @@ fn post_process_hits_and_write(
                 query_titles,
                 subject_title,
                 &unsearched,
-                report.epilog,
+                report
+                    .epilog
+                    .then_some(report.queries_before + hit_lists.len()),
                 probe.as_mut(),
                 format_warnings.as_mut(),
             )?;
@@ -5940,6 +6019,9 @@ fn read_cli_subjects(
     );
     // EXPERIMENT (LOSAT_X_BNSTORE): without a subject range, each record's letters are packed as
     // soon as it has been read, and the records keep none (`x_read_subject_stores`).
+    // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs); with
+    // LOSAT_X_BNSTORE the packing of each record is in this interval too. No NCBI counterpart.
+    let t_read_fasta = crate::utils::xtiming::clock();
     let (read_subjects, stores) = {
         let mut stderr = std::io::stderr();
         let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
@@ -5952,6 +6034,7 @@ fn read_cli_subjects(
             )
         }
     };
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(subject_source);
     // NCBI reads records without residues (and intervals without letters) without a message
     // and reports them when it sets up the search (`search`).
@@ -6042,11 +6125,17 @@ fn search_cli(
     // batch is read.
     let shared_standard_input =
         args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-";
-    let mut query_source = FastaInputSource::from_argument(
+    // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file is read a second time, batch by batch
+    // (a second handle on it, at the position its reader starts from), where the reports may be
+    // written batch by batch (LOSAT_X_RPTSTREAM).
+    let x_opening = x_query_stream::Opening::new(
         &args.query,
-        query_file,
-        ReaderConfig::query("BLASTN", false, settings.data_loaders),
+        &query_file,
+        shared_standard_input,
+        x_rpt_stream::switch_on(),
     );
+    let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders);
+    let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);
     if !shared_standard_input && query_source.stream_is_empty() {
         outputs
             .diagnostics
@@ -6063,7 +6152,24 @@ fn search_cli(
     // (`run_in_pool`). What ends the reading (the end of the input, an `eEOF`, a reader
     // error or LOSAT's rejection of a Seq-id line) comes in the batch that NCBI reads it in,
     // after the reports of the batches before (`run_in_pool`).
-    let QueryRecords { records, end } = read_queries(&mut query_source);
+    // Diagnostic (LOSAT_TIMING): the query FASTA for the common line (utils/xtiming.rs). No NCBI
+    // counterpart.
+    let t_read_fasta = crate::utils::xtiming::clock();
+    // EXPERIMENT (LOSAT_X_QSTREAM): with the switch acting this reading keeps only each record's
+    // length and how the reading ends; the batches read their records again (`x_query_stream`).
+    let (records, end, x_store) = if x_opening.acts() {
+        let (store, end) = x_query_stream::Store::read(
+            x_opening,
+            &mut query_source,
+            query_config,
+            query_range.as_ref(),
+        )?;
+        (Vec::new(), end, store)
+    } else {
+        let QueryRecords { records, end } = read_queries(&mut query_source);
+        (records, end, x_query_stream::Store::off(x_opening))
+    };
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
@@ -6085,7 +6191,11 @@ fn search_cli(
     };
     search(
         args,
-        &records,
+        if x_store.acts() {
+            SearchQueries::Streamed(&x_store)
+        } else {
+            SearchQueries::Records(&records)
+        },
         reading,
         Ranges {
             query: query_range,
@@ -6281,7 +6391,7 @@ pub fn run_local(
     process_options(&args, outputs)?;
     search(
         args,
-        query_records,
+        SearchQueries::Records(query_records),
         QueryReading::Records,
         Ranges {
             query: query_range,
@@ -6296,15 +6406,29 @@ pub fn run_local(
     )
 }
 
+/// The queries of a search: records read before it, or EXPERIMENT (LOSAT_X_QSTREAM) a query file
+/// whose batches read their records when the batch loop needs them (`x_query_stream`).
+#[derive(Clone, Copy)]
+enum SearchQueries<'a> {
+    Records(&'a [FastaRecord]),
+    Streamed(&'a x_query_stream::Store),
+}
+
 fn search(
     args: BlastnArgs,
-    query_records: &[FastaRecord],
+    queries: SearchQueries<'_>,
     reading: QueryReading,
     ranges: Ranges<'_>,
     subjects: Subjects<'_>,
     outputs: &mut ReportOutputs<'_>,
     output_formats: Vec<BlastnOutputFormat>,
 ) -> Result<()> {
+    // EXPERIMENT (LOSAT_X_QSTREAM): a streamed search has no records here (its reading is never
+    // `Records`), and its query input comes from the lengths of the first reading.
+    let query_records: &[FastaRecord] = match queries {
+        SearchQueries::Records(records) => records,
+        SearchQueries::Streamed(_) => &[],
+    };
     // NCBI reads the subjects before the queries (`run`); the records are those of NCBI's
     // reader (`fasta_reader`; `run_local`'s callers read them so). The CLI has already
     // reported an empty query file and read its queries; the records of the other callers
@@ -6367,14 +6491,29 @@ fn search(
     let ranged_queries = ranges
         .query
         .as_ref()
+        .filter(|_| matches!(queries, SearchQueries::Records(_)))
         .map(|range| cut_queries(query_records, range));
     let input_records = query_records;
-    let (query_records, query_input) = match ranged_queries {
-        Some(ranged) => (std::borrow::Cow::Owned(ranged.records), ranged.input),
-        None => (
-            std::borrow::Cow::Borrowed(query_records),
-            QueryInput::whole(query_records),
+    let (query_records, query_input) = match (ranged_queries, queries) {
+        (Some(ranged), _) => (
+            std::borrow::Cow::Owned(ranged.records),
+            std::borrow::Cow::Owned(ranged.input),
         ),
+        (None, SearchQueries::Records(_)) => (
+            std::borrow::Cow::Borrowed(query_records),
+            std::borrow::Cow::Owned(QueryInput::whole(query_records)),
+        ),
+        (None, SearchQueries::Streamed(store)) => (
+            std::borrow::Cow::Borrowed(query_records),
+            std::borrow::Cow::Borrowed(store.query_input()),
+        ),
+    };
+    let queries = match queries {
+        SearchQueries::Records(_) => x_query_stream::Queries::Records {
+            input: input_records,
+            searched: &query_records,
+        },
+        SearchQueries::Streamed(store) => x_query_stream::Queries::Streamed(store),
     };
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:129-138
     // ```c
@@ -6406,9 +6545,8 @@ fn search(
     let x_result = crate::utils::threading::with_search_pool(args.num_threads, "blastn", |pool| {
         run_in_pool(
             args,
-            input_records,
+            queries,
             reading,
-            &query_records,
             &query_input,
             subjects,
             ranges.subjects,
@@ -6880,9 +7018,8 @@ enum BatchStage<'a> {
 #[allow(clippy::too_many_arguments)]
 fn run_in_pool(
     args: BlastnArgs,
-    input_records: &[FastaRecord],
+    queries: x_query_stream::Queries<'_>,
     reading: QueryReading,
-    query_records: &[FastaRecord],
     query_input: &QueryInput,
     subjects: Subjects<'_>,
     subject_ranges: SubjectRanges<'_>,
@@ -6902,23 +7039,27 @@ fn run_in_pool(
             let metadata =
                 subject_metadata_from_records(subject_records, |index| subject_set.len(index));
             if metadata.db_num_seqs == 0 {
-                for record in input_records {
-                    outputs.diagnostics.write_all(&record.warnings)?;
-                }
+                // EXPERIMENT (LOSAT_X_QSTREAM): the records are read again for their warnings.
+                queries.write_input_warnings(outputs.diagnostics)?;
                 return Ok(());
             }
+            // Diagnostic (LOSAT_TIMING): the subjects' packing for the common line
+            // (utils/xtiming.rs). No NCBI counterpart.
+            let t_encode = crate::utils::xtiming::clock();
+            // The packed subjects hold the packed letters (LOSAT_X_BNSTORE).
+            let packed = if subject_set.stores().is_some() {
+                Vec::new()
+            } else {
+                subject_records
+                    .iter()
+                    .map(|record| encode_subject_ncbi2na_packed(record.seq()))
+                    .collect()
+            };
+            crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
             prepared = PreparedSubjects {
                 records: subject_records,
                 stores: subject_set.stores(),
-                // The packed subjects hold the packed letters (LOSAT_X_BNSTORE).
-                packed: if subject_set.stores().is_some() {
-                    Vec::new()
-                } else {
-                    subject_records
-                        .iter()
-                        .map(|record| encode_subject_ncbi2na_packed(record.seq()))
-                        .collect()
-                },
+                packed,
                 metadata,
             };
             SubjectSource::Prepared(&prepared)
@@ -6971,7 +7112,7 @@ fn run_in_pool(
     // ```
     // A reader at the end of its input reads no batch (`!input.End()`): the report of no
     // query, the prolog and the epilog (an empty pipe, or `-query -` after `-subject -`).
-    if input_records.is_empty() && matches!(reading, QueryReading::End) {
+    if queries.input_count() == 0 && matches!(reading, QueryReading::End) {
         return write_batch_reports(
             &args,
             &[],
@@ -7009,16 +7150,14 @@ fn run_in_pool(
         .into());
     }
 
-    // The lengths of the searched queries (their intervals with `-query_loc`).
-    let lengths: Vec<usize> = query_records
-        .iter()
-        .map(|record| record.seq().len())
-        .collect();
+    // The lengths of the searched queries (their intervals with `-query_loc`; with
+    // LOSAT_X_QSTREAM from the first reading's lengths).
+    let lengths: Vec<usize> = queries.searched_lengths();
     let report_ranges = ReportRanges {
         queries: query_input,
         subjects: subject_ranges,
     };
-    let query_offsets: Vec<usize> = (0..query_records.len())
+    let query_offsets: Vec<usize> = (0..lengths.len())
         .map(|index| query_input.placements.offset(index))
         .collect();
     // EXPERIMENT (LOSAT_X_QBATCHPAR): the batches may be searched ahead of this loop, in slots on
@@ -7032,9 +7171,17 @@ fn run_in_pool(
     };
     let qbp_batching = batching;
     let qbp_search = |job: &x_qbatch_par::Job, pool: &crate::utils::threading::SearchPool<'_>| {
+        // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records read again (a chunk shared with the
+        // window, or a copy); none for a batch the loop has passed, which the loop never takes
+        // (cancelled).
+        let records = match queries.slot_records(job.searched.clone()) {
+            Ok(Some(records)) => records,
+            Ok(None) => return Err(x_qbatch_par::Cancelled.into()),
+            Err(error) => return Err(error),
+        };
         search_query_batch(
             &args,
-            &query_records[job.searched.clone()],
+            &records,
             source,
             None,
             pool,
@@ -7055,6 +7202,19 @@ fn run_in_pool(
         fixed_batch_size: batching.fixed_batch_size != 0,
         split: batching.split,
     };
+    // EXPERIMENT (LOSAT_X_RPTSTREAM): whether the loop writes each batch's reports when it takes
+    // the batch (`x_rpt_stream.rs`); the summary lines come when it is dropped, at the end.
+    let mut stream = x_rpt_stream::Stream::start(
+        &args,
+        outputs,
+        &output_formats,
+        source,
+        subject_ranges,
+        query_input,
+        &lengths,
+        batching,
+        parallel_pool,
+    );
     std::thread::scope(|scope| {
         let mut qbp = x_qbatch_par::Driver::new(
             &qbp_shared,
@@ -7062,7 +7222,12 @@ fn run_in_pool(
             scope,
             qbp_input,
             parallel_pool.threads(),
-            x_qbatch_par::allowance_mib(&args.task),
+            x_qbatch_par::Profile::of_search(
+                &args.task,
+                super::super::coordination::determine_effective_word_size(&args),
+                x_query_file_bytes(&args.query),
+                x_subject_letters(source),
+            ),
             Box::new(|letters: u64, max_len: usize| {
                 let mut config = configure_task(&args);
                 let discontig_template = config.mb_template_length > 0;
@@ -7083,6 +7248,13 @@ fn run_in_pool(
         // The warnings written before each query's report (`QueryWarnings`).
         let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); lengths.len()];
         let mut query_eff_searchsp = Vec::with_capacity(2 * lengths.len());
+        // EXPERIMENT (LOSAT_X_QSTREAM): the searched records of the batches taken, kept where a
+        // writer reads them after their batch: the reports after the loop and the error paths that
+        // write the reports of the batches before (LOSAT_X_RPTSTREAM not acting), or the shadow of
+        // LOSAT_X_RPTSTREAM, which writes them the off path's way. Without the switch the records
+        // read before the search are those.
+        let keep = queries.streamed() && (!stream.acting() || stream.shadow());
+        let mut kept: Vec<FastaRecord> = Vec::new();
         // A batch is read from the input records (`input_start..input_end`); its searched
         // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
         // whole records, and a record whose range starts past its end is skipped
@@ -7122,7 +7294,17 @@ fn run_in_pool(
             // `CFastaReader` writes its messages about a batch's queries (their lines and
             // titles) when it reads them, after the report of the batch before: before the
             // report of the batch's first query (`QueryWarnings`). Skipped records are read too.
-            let batch_title_warnings: Vec<u8> = input_records[input_start..input_end]
+            // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records, read now from the query file when
+            // the switch acts (an error here is the file changed between the two readings).
+            let batch_records = match queries.batch(input_start..input_end, start..end) {
+                Ok(records) => records,
+                Err(error) => {
+                    qbp.finish();
+                    return Err(error);
+                }
+            };
+            let batch_title_warnings: Vec<u8> = batch_records
+                .input()
                 .iter()
                 .flat_map(|record| record.warnings.iter().copied())
                 .collect();
@@ -7149,27 +7331,36 @@ fn run_in_pool(
                 {
                     // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes.
                     qbp.finish();
-                    write_before_failed_batch(
-                        &args,
-                        &query_records[..start],
-                        ReportSubjects {
-                            source,
-                            shown: &shown,
-                            titles: &titles,
-                        },
-                        &report_ranges,
-                        outputs,
-                        &output_formats,
-                        BatchResults {
-                            hit_lists,
-                            warnings: &warnings[..start],
-                            lengths: &lengths[..start],
-                            unsearched,
-                            query_masks: &query_masks,
-                            context_karlin: &context_karlin,
-                            query_eff_searchsp: &query_eff_searchsp,
-                        },
-                    )?;
+                    // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
+                    // written when the loop took them (the shadow compares them).
+                    let before = |outputs: &mut ReportOutputs<'_>| {
+                        write_before_failed_batch(
+                            &args,
+                            queries.before(&kept, start),
+                            ReportSubjects {
+                                source,
+                                shown: &shown,
+                                titles: &titles,
+                            },
+                            &report_ranges,
+                            outputs,
+                            &output_formats,
+                            BatchResults {
+                                hit_lists,
+                                warnings: &warnings[..start],
+                                lengths: &lengths[..start],
+                                unsearched,
+                                query_masks: &query_masks,
+                                context_karlin: &context_karlin,
+                                query_eff_searchsp: &query_eff_searchsp,
+                            },
+                        )
+                    };
+                    if stream.acting() {
+                        stream.check("before a reader error", before);
+                    } else {
+                        before(outputs)?;
+                    }
                     outputs.diagnostics.write_all(&batch_title_warnings)?;
                     outputs.diagnostics.write_all(&error_warnings)?;
                     return Err(error.into_app_error());
@@ -7190,27 +7381,36 @@ fn run_in_pool(
             if start == end {
                 // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes.
                 qbp.finish();
-                write_before_failed_batch(
-                    &args,
-                    &query_records[..start],
-                    ReportSubjects {
-                        source,
-                        shown: &shown,
-                        titles: &titles,
-                    },
-                    &report_ranges,
-                    outputs,
-                    &output_formats,
-                    BatchResults {
-                        hit_lists,
-                        warnings: &warnings[..start],
-                        lengths: &lengths[..start],
-                        unsearched,
-                        query_masks: &query_masks,
-                        context_karlin: &context_karlin,
-                        query_eff_searchsp: &query_eff_searchsp,
-                    },
-                )?;
+                // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were written
+                // when the loop took them (the shadow compares them).
+                let before = |outputs: &mut ReportOutputs<'_>| {
+                    write_before_failed_batch(
+                        &args,
+                        queries.before(&kept, start),
+                        ReportSubjects {
+                            source,
+                            shown: &shown,
+                            titles: &titles,
+                        },
+                        &report_ranges,
+                        outputs,
+                        &output_formats,
+                        BatchResults {
+                            hit_lists,
+                            warnings: &warnings[..start],
+                            lengths: &lengths[..start],
+                            unsearched,
+                            query_masks: &query_masks,
+                            context_karlin: &context_karlin,
+                            query_eff_searchsp: &query_eff_searchsp,
+                        },
+                    )
+                };
+                if stream.acting() {
+                    stream.check("before a batch without queries", before);
+                } else {
+                    before(outputs)?;
+                }
                 outputs.diagnostics.write_all(&batch_title_warnings)?;
                 return Err(crate::cli::NativeError {
                     exit: 3,
@@ -7254,33 +7454,43 @@ fn run_in_pool(
             // queries are set up: a batch of such queries only stops NCBI with one message per
             // query (`GetMessage` puts the severity first), after the reports of the batches
             // before (`CATCH_ALL`: `BLAST engine error: `, exit 3).
-            if query_records[start..end]
+            if batch_records
+                .searched()
                 .iter()
                 .all(|record| record.seq().is_empty())
             {
                 // EXPERIMENT (LOSAT_X_QBATCHPAR): no slot runs while the loop writes.
                 qbp.finish();
-                write_before_failed_batch(
-                    &args,
-                    &query_records[..start],
-                    ReportSubjects {
-                        source,
-                        shown: &shown,
-                        titles: &titles,
-                    },
-                    &report_ranges,
-                    outputs,
-                    &output_formats,
-                    BatchResults {
-                        hit_lists,
-                        warnings: &warnings[..start],
-                        lengths: &lengths[..start],
-                        unsearched,
-                        query_masks: &query_masks,
-                        context_karlin: &context_karlin,
-                        query_eff_searchsp: &query_eff_searchsp,
-                    },
-                )?;
+                // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were written
+                // when the loop took them (the shadow compares them).
+                let before = |outputs: &mut ReportOutputs<'_>| {
+                    write_before_failed_batch(
+                        &args,
+                        queries.before(&kept, start),
+                        ReportSubjects {
+                            source,
+                            shown: &shown,
+                            titles: &titles,
+                        },
+                        &report_ranges,
+                        outputs,
+                        &output_formats,
+                        BatchResults {
+                            hit_lists,
+                            warnings: &warnings[..start],
+                            lengths: &lengths[..start],
+                            unsearched,
+                            query_masks: &query_masks,
+                            context_karlin: &context_karlin,
+                            query_eff_searchsp: &query_eff_searchsp,
+                        },
+                    )
+                };
+                if stream.acting() {
+                    stream.check("before a batch of queries without letters", before);
+                } else {
+                    before(outputs)?;
+                }
                 outputs.diagnostics.write_all(&batch_title_warnings)?;
                 let mut message = String::from("BLAST engine error: ");
                 for _ in start..end {
@@ -7306,7 +7516,7 @@ fn run_in_pool(
                 precomputed => {
                     let reference = search_query_batch(
                         &args,
-                        &query_records[start..end],
+                        batch_records.searched(),
                         source,
                         Some((&mut *outputs, &output_formats)),
                         parallel_pool,
@@ -7348,36 +7558,60 @@ fn run_in_pool(
                     // The reports of the batches before are written, then the error, which
                     // skips `PrintEpilog` (the outfmt 0 footer and outfmt 7's last line).
                     Ok(ErrorAfterInvalidBatches(error)) => {
-                        write_batch_reports(
-                            &args,
-                            &query_records[..start],
-                            ReportSubjects {
-                                source,
-                                shown: &shown,
-                                titles: &titles,
-                            },
-                            &report_ranges,
-                            outputs,
-                            &output_formats,
-                            BatchResults {
-                                hit_lists,
-                                warnings: &warnings[..start],
-                                lengths: &lengths[..start],
-                                unsearched,
-                                query_masks: &query_masks,
-                                context_karlin: &context_karlin,
-                                query_eff_searchsp: &query_eff_searchsp,
-                            },
-                            false,
-                        )?;
+                        // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
+                        // written when the loop took them (the shadow compares them).
+                        let before = |outputs: &mut ReportOutputs<'_>| {
+                            write_batch_reports(
+                                &args,
+                                queries.before(&kept, start),
+                                ReportSubjects {
+                                    source,
+                                    shown: &shown,
+                                    titles: &titles,
+                                },
+                                &report_ranges,
+                                outputs,
+                                &output_formats,
+                                BatchResults {
+                                    hit_lists,
+                                    warnings: &warnings[..start],
+                                    lengths: &lengths[..start],
+                                    unsearched,
+                                    query_masks: &query_masks,
+                                    context_karlin: &context_karlin,
+                                    query_eff_searchsp: &query_eff_searchsp,
+                                },
+                                false,
+                            )
+                        };
+                        if stream.acting() {
+                            stream.check("before an error after invalid batches", before);
+                        } else {
+                            before(outputs)?;
+                        }
                         // The failing batch was read (its title warnings) before its search.
                         outputs.diagnostics.write_all(&warnings[start])?;
                         return Err(error);
                     }
                     // The warnings of the batches read so far, in NCBI's order (the outfmt 0
                     // prolog of a Karlin-Altschul error of the first batch is written).
+                    // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were written
+                    // with their reports; the off path writes no report here, which the shadow
+                    // checks (the switch acts only where LOSAT's refusals cannot come after the
+                    // first batch, `x_rpt_stream`).
                     Err(error) => {
-                        for query_warnings in &warnings[..=start] {
+                        let written = if stream.acting() {
+                            stream.check("before an error of LOSAT's", |outputs| {
+                                for query_warnings in &warnings[..start] {
+                                    outputs.diagnostics.write_all(query_warnings)?;
+                                }
+                                Ok(())
+                            });
+                            start
+                        } else {
+                            0
+                        };
+                        for query_warnings in &warnings[written..=start] {
                             outputs.diagnostics.write_all(query_warnings)?;
                         }
                         return Err(error);
@@ -7434,34 +7668,58 @@ fn run_in_pool(
                         Ok(failure) => failure.error,
                         // LOSAT's refusal: the warnings of the batches read so far, as for the
                         // other errors of a batch (below).
+                        // EXPERIMENT (LOSAT_X_RPTSTREAM): those of the batches before were
+                        // written with their reports; the off path writes no report here, which
+                        // the shadow checks (the switch acts only where every title is read
+                        // before the search, `x_rpt_stream`).
                         Err(error) => {
-                            for query_warnings in &warnings[..=start] {
+                            let written = if stream.acting() {
+                                stream.check("before a title refusal", |outputs| {
+                                    for query_warnings in &warnings[..start] {
+                                        outputs.diagnostics.write_all(query_warnings)?;
+                                    }
+                                    Ok(())
+                                });
+                                start
+                            } else {
+                                0
+                            };
+                            for query_warnings in &warnings[written..=start] {
                                 outputs.diagnostics.write_all(query_warnings)?;
                             }
                             return Err(error);
                         }
                     };
-                    write_before_failed_batch(
-                        &args,
-                        &query_records[..start],
-                        ReportSubjects {
-                            source,
-                            shown: &shown,
-                            titles: &titles,
-                        },
-                        &report_ranges,
-                        outputs,
-                        &output_formats,
-                        BatchResults {
-                            hit_lists,
-                            warnings: &warnings[..start],
-                            lengths: &lengths[..start],
-                            unsearched,
-                            query_masks: &query_masks,
-                            context_karlin: &context_karlin,
-                            query_eff_searchsp: &query_eff_searchsp,
-                        },
-                    )?;
+                    // EXPERIMENT (LOSAT_X_RPTSTREAM): the reports of the batches before were
+                    // written when the loop took them (the shadow compares them).
+                    let before = |outputs: &mut ReportOutputs<'_>| {
+                        write_before_failed_batch(
+                            &args,
+                            queries.before(&kept, start),
+                            ReportSubjects {
+                                source,
+                                shown: &shown,
+                                titles: &titles,
+                            },
+                            &report_ranges,
+                            outputs,
+                            &output_formats,
+                            BatchResults {
+                                hit_lists,
+                                warnings: &warnings[..start],
+                                lengths: &lengths[..start],
+                                unsearched,
+                                query_masks: &query_masks,
+                                context_karlin: &context_karlin,
+                                query_eff_searchsp: &query_eff_searchsp,
+                            },
+                        )
+                    };
+                    if stream.acting() {
+                        stream.check("before a header read error", before);
+                    } else {
+                        before(outputs)?;
+                    }
                     outputs.diagnostics.write_all(&warnings[start])?;
                     return Err(error);
                 }
@@ -7496,7 +7754,7 @@ fn run_in_pool(
             // Karlin-Altschul parameters.
             for (index, karlin) in batch.context_karlin.iter().step_by(2).enumerate() {
                 if karlin.is_none() {
-                    let query = &query_records[start + index];
+                    let query = &batch_records.searched()[index];
                     let ordinal = query_input.ordinal(start + index);
                     warnings[start + index].extend(if query.seq().is_empty() {
                         query_warning("blastn", ordinal, query, &[NO_DATA_MESSAGE.to_string()])
@@ -7520,33 +7778,146 @@ fn run_in_pool(
                 (batching.fixed_batch_size == 0).then_some(&mixer),
                 batching.batch_size,
             );
+            // EXPERIMENT (LOSAT_X_RPTSTREAM): the batch's reports, written now, after the mixer
+            // has its gie, as NCBI's loop prints a batch's result sets (`x_rpt_stream.rs`). The
+            // batch's lists and values are taken back from the end of what the loop keeps (the
+            // shadow keeps a copy), numbered from 0 again, and written with the batch's part of
+            // the query ranges.
+            if stream.acting() {
+                let count = end - start;
+                let at = hit_lists.len() - count;
+                let shadow = stream.shadow();
+                fn take<T: Clone>(kept: &mut Vec<T>, at: usize, shadow: bool) -> Vec<T> {
+                    if shadow {
+                        kept[at..].to_vec()
+                    } else {
+                        kept.drain(at..).collect()
+                    }
+                }
+                let mut batch_lists = take(&mut hit_lists, at, shadow);
+                for hsp_list in batch_lists
+                    .iter_mut()
+                    .flatten()
+                    .flat_map(|list| list.hsplist_array.iter_mut())
+                {
+                    hsp_list.query_index -= first;
+                    for hsp in &mut hsp_list.hsps {
+                        hsp.q_idx -= first;
+                    }
+                }
+                let batch_unsearched = take(&mut unsearched, at, shadow);
+                let batch_masks = take(&mut query_masks, at, shadow);
+                let batch_karlin = take(&mut context_karlin, 2 * at, shadow);
+                let batch_searchsp = take(&mut query_eff_searchsp, 2 * at, shadow);
+                let batch_input = x_rpt_stream::batch_input(query_input, start..end);
+                let batch_ranges = ReportRanges {
+                    queries: &batch_input,
+                    subjects: subject_ranges,
+                };
+                stream.write(outputs, count, false, |outputs, written| {
+                    write_reports(
+                        &args,
+                        batch_records.searched(),
+                        ReportSubjects {
+                            source,
+                            shown: &shown,
+                            titles: &titles,
+                        },
+                        &batch_ranges,
+                        outputs,
+                        &output_formats,
+                        BatchResults {
+                            hit_lists: batch_lists,
+                            warnings: &warnings[start..end],
+                            lengths: &lengths[start..end],
+                            unsearched: batch_unsearched,
+                            query_masks: &batch_masks,
+                            context_karlin: &batch_karlin,
+                            query_eff_searchsp: &batch_searchsp,
+                        },
+                        false,
+                        written,
+                    )
+                })?;
+                // The written queries' warnings are not read again (the error paths write those
+                // of the current batch; the shadow keeps them all).
+                if !shadow {
+                    for query_warnings in &mut warnings[start..end] {
+                        *query_warnings = Vec::new();
+                    }
+                }
+            }
+            // EXPERIMENT (LOSAT_X_QSTREAM): the batch's records are kept for a later writer, or
+            // dropped (the batch is committed: the slots now search batches after it).
+            if keep {
+                kept.extend_from_slice(batch_records.searched());
+                queries.note_kept(batch_records.searched().len());
+            }
+            drop(batch_records);
+            queries.done(input_end);
             input_start = input_end;
         }
 
         // EXPERIMENT (LOSAT_X_QBATCHPAR): every slot has stopped before the reports are written.
         qbp.finish();
-        write_batch_reports(
-            &args,
-            query_records,
-            ReportSubjects {
-                source,
-                shown: &shown,
-                titles: &titles,
-            },
-            &report_ranges,
-            outputs,
-            &output_formats,
-            BatchResults {
-                hit_lists,
-                warnings: &warnings,
-                lengths: &lengths,
-                unsearched,
-                query_masks: &query_masks,
-                context_karlin: &context_karlin,
-                query_eff_searchsp: &query_eff_searchsp,
-            },
-            true,
-        )
+        let reports = |outputs: &mut ReportOutputs<'_>| {
+            write_batch_reports(
+                &args,
+                queries.all(&kept),
+                ReportSubjects {
+                    source,
+                    shown: &shown,
+                    titles: &titles,
+                },
+                &report_ranges,
+                outputs,
+                &output_formats,
+                BatchResults {
+                    hit_lists,
+                    warnings: &warnings,
+                    lengths: &lengths,
+                    unsearched,
+                    query_masks: &query_masks,
+                    context_karlin: &context_karlin,
+                    query_eff_searchsp: &query_eff_searchsp,
+                },
+                true,
+            )
+        };
+        if !stream.acting() {
+            return reports(outputs);
+        }
+        // EXPERIMENT (LOSAT_X_RPTSTREAM): every batch's reports are written; the epilogs remain
+        // (NCBI's `PrintEpilog` after its loop), written by the report code for no query, with
+        // the queries of every batch counted (outfmt 7's last line). The shadow then writes the
+        // reports the off path's way and compares.
+        stream.write(outputs, 0, true, |outputs, written| {
+            write_reports(
+                &args,
+                &[],
+                ReportSubjects {
+                    source,
+                    shown: &shown,
+                    titles: &titles,
+                },
+                &report_ranges,
+                outputs,
+                &output_formats,
+                BatchResults {
+                    hit_lists: Vec::new(),
+                    warnings: &[],
+                    lengths: &[],
+                    unsearched: Vec::new(),
+                    query_masks: &[],
+                    context_karlin: &[],
+                    query_eff_searchsp: &[],
+                },
+                true,
+                written,
+            )
+        })?;
+        stream.check("at the end of the search", reports);
+        Ok(())
     })
 }
 
@@ -7557,6 +7928,8 @@ fn run_in_pool(
 /// `x_qbatch_par.rs`). A database keeps the loop (each batch reads the database's blocks); so
 /// do verbose, debug and trace output, which a batch writes while it is searched, and subjects
 /// of at least as many 5 Mb work units as threads, whose batches already keep the pool busy.
+/// The subjects' lengths come from their letters (`SubjectLetters::len`), which
+/// LOSAT_X_BNSTORE holds packed while the records keep none.
 fn x_qbatch_par_off(
     args: &BlastnArgs,
     source: SubjectSource<'_>,
@@ -7572,7 +7945,53 @@ fn x_qbatch_par_off(
     let Some(prepared) = source.prepared() else {
         return Some(Off::Database);
     };
-    let debug = args.verbose
+    if x_debug_output(args) {
+        return Some(Off::Debug);
+    }
+    let letters = prepared.letters();
+    let units: usize = (0..prepared.records.len())
+        .map(|index| letters.len(index).div_ceil(MAX_DBSEQ_LEN))
+        .sum();
+    if units >= threads {
+        return Some(Off::Subjects);
+    }
+    None
+}
+
+// No NCBI counterpart (scheduling only): the size NCBI's blastn reads for its split by queries
+// (`x_qbatch_par::ncbi_splits_by_queries`); it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_QBATCHPAR): the length of the query file in bytes, as NCBI's `CFile`
+/// gives it (`stat`, through symbolic links); `None` for standard input (`-`) or a path that
+/// cannot be read.
+fn x_query_file_bytes(query: &std::path::Path) -> Option<u64> {
+    if query == std::path::Path::new("-") {
+        return None;
+    }
+    std::fs::metadata(query).ok().map(|metadata| metadata.len())
+}
+
+// No NCBI counterpart (scheduling only): it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_QBATCHPAR): the letters of the searched subjects (`-subject`), the
+/// database size in `x_qbatch_par::ncbi_splits_by_queries`; 0 for a database, where the slots
+/// do not run.
+fn x_subject_letters(source: SubjectSource<'_>) -> u64 {
+    let Some(prepared) = source.prepared() else {
+        return 0;
+    };
+    let letters = prepared.letters();
+    (0..prepared.records.len())
+        .map(|index| letters.len(index) as u64)
+        .sum()
+}
+
+// No NCBI counterpart: LOSAT's verbose, debug and trace output (it changes no value NCBI computes).
+/// EXPERIMENT (LOSAT_X_QBATCHPAR, LOSAT_X_RPTSTREAM): whether a search writes verbose, debug or
+/// trace output while its batches are searched (`-verbose`, `BLEMIR_DEBUG`, `LOSAT_DEBUG_BLASTN`,
+/// `LOSAT_DEBUG_COORDS[_START]`, the blastn trace, the thread diagnostics). Both switches then keep
+/// the loop as it was: the batches searched one after the other on the loop, and the reports
+/// written after the loop, where that output comes before them.
+fn x_debug_output(args: &BlastnArgs) -> bool {
+    args.verbose
         || [
             "BLEMIR_DEBUG",
             "LOSAT_DEBUG_BLASTN",
@@ -7582,19 +8001,7 @@ fn x_qbatch_par_off(
         .iter()
         .any(|name| std::env::var_os(name).is_some())
         || blastn_trace::enabled()
-        || crate::utils::threading::diagnostics_enabled();
-    if debug {
-        return Some(Off::Debug);
-    }
-    let units: usize = prepared
-        .records
-        .iter()
-        .map(|record| record.seq().len().div_ceil(MAX_DBSEQ_LEN))
-        .sum();
-    if units >= threads {
-        return Some(Off::Subjects);
-    }
-    None
+        || crate::utils::threading::diagnostics_enabled()
 }
 
 // No NCBI counterpart: what LOSAT_X_QBATCHPAR's slots need to know of a batch's result
@@ -7873,6 +8280,66 @@ fn write_batch_reports(
     epilog: bool,
 ) -> Result<()> {
     x_qbatch_par::debug_assert_slots_joined();
+    write_reports(
+        args,
+        query_records,
+        subjects,
+        ranges,
+        outputs,
+        output_formats,
+        results,
+        epilog,
+        x_rpt_stream::Written::default(),
+    )
+}
+
+/// `write_batch_reports` after its check, with what earlier calls wrote (`written`: nothing,
+/// except for LOSAT_X_RPTSTREAM's calls, `x_rpt_stream`, which also run while LOSAT_X_QBATCHPAR
+/// slots search the batches ahead).
+#[allow(clippy::too_many_arguments)]
+fn write_reports(
+    args: &BlastnArgs,
+    query_records: &[FastaRecord],
+    subjects: ReportSubjects<'_>,
+    ranges: &ReportRanges<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    results: BatchResults<'_>,
+    epilog: bool,
+    written: x_rpt_stream::Written<'_>,
+) -> Result<()> {
+    // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); the time of
+    // every call adds up. With streaming (`x_rpt_stream`) the calls come between the query
+    // batches, while other batches are searched: that part is inside `search` too. No NCBI
+    // counterpart.
+    let t_output = crate::utils::xtiming::clock();
+    let result = write_reports_untimed(
+        args,
+        query_records,
+        subjects,
+        ranges,
+        outputs,
+        output_formats,
+        results,
+        epilog,
+        written,
+    );
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_reports_untimed(
+    args: &BlastnArgs,
+    query_records: &[FastaRecord],
+    subjects: ReportSubjects<'_>,
+    ranges: &ReportRanges<'_>,
+    outputs: &mut ReportOutputs<'_>,
+    output_formats: &[BlastnOutputFormat],
+    results: BatchResults<'_>,
+    epilog: bool,
+    written: x_rpt_stream::Written<'_>,
+) -> Result<()> {
     let megablast = args.task == "megablast";
     let config = configure_task(args);
     let mut hit_lists = results.hit_lists;
@@ -7940,6 +8407,8 @@ fn write_batch_reports(
             .any(|(format, &output_format)| {
                 output_format == BlastnOutputFormat::Pairwise && !prolog_before_search(&format.sink)
             }),
+        queries_before: written.queries,
+        subject_cache: written.subjects,
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496
     // ```c++
@@ -8291,10 +8760,14 @@ fn search_query_batch(
     //   sequences are retieved in ncbistdaa/ncbi2na encodings respectively. */
     // seq_arg.encoding = eBlastEncodingProtein;
     // ```
+    // Diagnostic (LOSAT_TIMING): the batch's DUST for the common line (utils/xtiming.rs); a
+    // chunk takes the batch's masks. No NCBI counterpart.
+    let t_seg = crate::utils::xtiming::clock();
     let masks = match stage {
-        BatchStage::Search { .. } => query_masks(args, queries),
+        BatchStage::Search { .. } => query_masks(args, queries, parallel_pool),
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);
 
     // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
@@ -8463,8 +8936,19 @@ fn search_query_batch(
     // The buffer is the one BLASTNA copy of the query contexts; the searched block is the
     // buffer without its first and last sentinel, and a context is a slice of it.
     let query_letters: Vec<&[u8]> = seq_data.queries.iter().map(|r| r.seq()).collect();
-    let encoded_query_buffer =
-        build_query_blastna_buffer(&query_letters, &query_context_offsets, query_concat_length);
+    // EXPERIMENT (LOSAT_X_QPREPPAR): with the switch on and a search pool of two or more threads
+    // the queries are encoded by the pool, each into its own part of the buffer; the buffer is
+    // the same (`x_query_prep_par.rs`).
+    // Diagnostic (LOSAT_TIMING): the batch's query encoding for the common line
+    // (utils/xtiming.rs). No NCBI counterpart.
+    let t_encode = crate::utils::xtiming::clock();
+    let encoded_query_buffer = x_query_prep_par::query_buffer(
+        &query_letters,
+        &query_context_offsets,
+        query_concat_length,
+        parallel_pool,
+    );
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
     let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
     let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];
     let encoded_queries_blastna: Vec<&[u8]> = query_contexts
@@ -8515,8 +8999,11 @@ fn search_query_batch(
         gap_open: config.gap_open,
         gap_extend: config.gap_extend,
     };
+    // EXPERIMENT (LOSAT_X_QPREPPAR): with the switch on and a search pool of two or more threads
+    // the contexts' blocks are computed by the pool, in context order; the blocks are the same
+    // (`x_query_prep_par.rs`).
     let context_ungapped =
-        context_ungapped_blocks(encoded_queries_blastna.iter().copied(), &scoring_spec);
+        x_query_prep_par::ungapped_blocks(&encoded_queries_blastna, &scoring_spec, parallel_pool);
     let (approx_table_entries, max_q_off) =
         compute_lookup_query_stats(&query_contexts, &query_context_masks);
     let max_query_length = max_q_off.saturating_add(1).max(1);
@@ -9033,7 +9520,10 @@ fn search_query_batch(
             config.scan_step,
         )
     } else {
-        build_lookup_tables(
+        // Diagnostic (LOSAT_TIMING): the batch's lookup table for the common line
+        // (utils/xtiming.rs). No NCBI counterpart.
+        let t_build_lookup = crate::utils::xtiming::clock();
+        let tables = build_lookup_tables(
             &config,
             &args,
             &encoded_queries_blastna,
@@ -9042,7 +9532,9 @@ fn search_query_batch(
             subjects_for_lookup,
             subject_packed_cache_ref,
             approx_table_entries,
-        )
+        );
+        crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
+        tables
     };
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
@@ -15653,7 +16145,7 @@ fn search_query_chunks(
             .iter()
             .map(|part| restrict_masks(&query_masks[part.query], part, query_offsets[part.query]))
             .collect();
-        let part_masks = chunk_query_masks(args, &parts, restricted);
+        let part_masks = chunk_query_masks(args, &parts, restricted, parallel_pool);
         let batch = search_query_batch(
             args,
             &parts,

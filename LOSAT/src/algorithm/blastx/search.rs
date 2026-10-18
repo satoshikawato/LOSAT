@@ -499,6 +499,12 @@ fn x_bx_chunk() -> Option<usize> {
     *K.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BXCHUNK", 1..=usize::MAX, 64))
 }
 
+// EXPERIMENT (LOSAT_X_BXSUBJFLOW): the subject loop as a flow of tasks (a child module, so that
+// it uses compute_subject and SubjectComputation).
+#[cfg(feature = "parallel")]
+#[path = "x_subject_flow.rs"]
+pub(crate) mod x_subject_flow;
+
 pub(crate) fn search_core(
     records: &[FastaRecord],
     subjects: Subjects<'_>,
@@ -876,11 +882,52 @@ pub(crate) fn search_core(
             };
             super::x_timing::batch(XBatch::Lookup, x_t);
             let mut subject_stages = Vec::new();
-            for wave_index in 0..subjects.len().div_ceil(wave_size) {
+            // Dispatch point (LOSAT_X_BXSUBJFLOW[=k], in the strict set: on unless `=0` or
+            // `LOSAT_X_DEFAULT=0`): the subjects as a flow of
+            // tasks of k consecutive subjects, handed to the sink in subject order by this thread
+            // (x_subject_flow.rs); the waves below then have nothing left to do.
+            #[cfg(feature = "parallel")]
+            let x_flowed =
+                if let Some(x_k) = x_subject_flow::chosen(pool, diagnostics, options, subjects) {
+                    let x_t = super::x_timing::lap();
+                    let helper_tables = std::mem::take(&mut worker_diagonals)
+                        .into_iter()
+                        .take(pool.threads() - 1)
+                        .collect();
+                    call += x_subject_flow::run(
+                        x_k,
+                        subjects,
+                        batch,
+                        &params,
+                        options,
+                        &lookup,
+                        &mut diagonals,
+                        helper_tables,
+                        xdrop,
+                        db_length,
+                        x_containment,
+                        sink,
+                    )?;
+                    super::x_timing::batch(XBatch::ScanPar, x_t);
+                    true
+                } else {
+                    false
+                };
+            #[cfg(not(feature = "parallel"))]
+            let x_flowed = false;
+            let x_waves = if x_flowed {
+                0
+            } else {
+                subjects.len().div_ceil(wave_size)
+            };
+            for wave_index in 0..x_waves {
                 let wave_start = wave_index * wave_size;
                 let wave: Vec<usize> =
                     (wave_start..subjects.len().min(wave_start + wave_size)).collect();
                 let x_t = super::x_timing::lap();
+                // Diagnostic (LOSAT_TIMING): the wave's tasks (x_timing::SubjectWave). No NCBI
+                // counterpart.
+                let x_wave = super::x_timing::SubjectWave::begin();
                 let mut scheduled = {
                     #[cfg(feature = "parallel")]
                     {
@@ -906,31 +953,33 @@ pub(crate) fn search_core(
                                         .zip(worker_diagonals.par_iter_mut())
                                         .enumerate()
                                         .flat_map_iter(|(x_slot, (x_part, scratch))| {
-                                            x_part
-                                                .iter()
-                                                .enumerate()
-                                                .map(|(x_within, &oid)| {
-                                                    debug_assert_eq!(
-                                                        oid,
-                                                        wave_index * wave_size
-                                                            + x_slot * x_k
-                                                            + x_within
-                                                    );
-                                                    compute_subject(
-                                                        subjects,
-                                                        batch,
-                                                        &params,
-                                                        options,
-                                                        &lookup,
-                                                        scratch,
-                                                        xdrop,
-                                                        diagnostics,
-                                                        db_length,
-                                                        oid,
-                                                        x_containment,
-                                                    )
-                                                })
-                                                .collect::<Vec<_>>()
+                                            x_wave.task(|| {
+                                                x_part
+                                                    .iter()
+                                                    .enumerate()
+                                                    .map(|(x_within, &oid)| {
+                                                        debug_assert_eq!(
+                                                            oid,
+                                                            wave_index * wave_size
+                                                                + x_slot * x_k
+                                                                + x_within
+                                                        );
+                                                        compute_subject(
+                                                            subjects,
+                                                            batch,
+                                                            &params,
+                                                            options,
+                                                            &lookup,
+                                                            scratch,
+                                                            xdrop,
+                                                            diagnostics,
+                                                            db_length,
+                                                            oid,
+                                                            x_containment,
+                                                        )
+                                                    })
+                                                    .collect::<Vec<_>>()
+                                            })
                                         })
                                         .collect::<Vec<_>>();
                                 }
@@ -939,19 +988,21 @@ pub(crate) fn search_core(
                                     .enumerate()
                                     .map(|(within, (&oid, scratch))| {
                                         debug_assert_eq!(oid, wave_index * wave_size + within);
-                                        compute_subject(
-                                            subjects,
-                                            batch,
-                                            &params,
-                                            options,
-                                            &lookup,
-                                            scratch,
-                                            xdrop,
-                                            diagnostics,
-                                            db_length,
-                                            oid,
-                                            x_containment,
-                                        )
+                                        x_wave.task(|| {
+                                            compute_subject(
+                                                subjects,
+                                                batch,
+                                                &params,
+                                                options,
+                                                &lookup,
+                                                scratch,
+                                                xdrop,
+                                                diagnostics,
+                                                db_length,
+                                                oid,
+                                                x_containment,
+                                            )
+                                        })
                                     })
                                     .collect::<Vec<_>>()
                             })
@@ -965,6 +1016,7 @@ pub(crate) fn search_core(
                     }
                 }
                 .into_iter();
+                x_wave.end();
                 super::x_timing::batch(XBatch::ScanPar, x_t);
                 let x_t_replay = super::x_timing::lap();
                 for &oid in &wave {
@@ -1387,12 +1439,14 @@ fn compute_subject(
     //             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
     //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
     // ```
-    // Dispatch point of LOSAT_X_BXSCAN / LOSAT_X_BXSCANSHADOW: when nothing traces the seeds
-    // (not the diagnostic stages) and the diagonal order is the reference one (LOSAT_X_SEEDBUCKET
-    // mode 0), the seed loop reads the scanner's per-thread buffer in place (x_seed_scan.rs);
-    // otherwise the reference word finder below runs.
+    // Dispatch point of LOSAT_X_BXSCAN / LOSAT_X_BXSCANSHADOW and LOSAT_X_BXDIAG /
+    // LOSAT_X_BXDIAGSHADOW: when nothing traces the seeds (not the diagnostic stages) and the
+    // diagonal order is the reference one (LOSAT_X_SEEDBUCKET mode 0), the seed loop reads the
+    // scanner's per-thread buffer in place (x_seed_scan.rs), or with LOSAT_X_BXDIAG reads the
+    // lookup cells in place (x_seed_diag.rs); otherwise the reference word finder below runs.
     let initial = if !diagnostics
-        && super::seed::x_seed_scan::x_bxscan_mode() != 0
+        && (super::seed::x_seed_scan::x_bxscan_mode() != 0
+            || super::seed::x_seed_diag::x_bxdiag_mode() != 0)
         && crate::algorithm::tblastx::x_seed_bucket::blastx_mode() == 0
     {
         super::seed::x_seed_scan::x_word_finder_scan(

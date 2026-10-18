@@ -33,7 +33,9 @@ use super::stage_d_stats::{
 };
 use super::x_subject_store::SubjectLetters;
 use crate::algorithm::blastn::query_split::SplitSizes;
-use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
+use crate::algorithm::blastp::encoding::{
+    encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
+};
 use crate::algorithm::blastp::gapalign::GapAlignScratch;
 use crate::algorithm::common::protein_query_split::{
     protein_chunk_part, protein_chunk_would_be_split, split_protein_batch, ProteinQueryChunk,
@@ -433,12 +435,17 @@ fn x_batches_side_by_side(
 
 // No NCBI counterpart: reads the LOSAT_X_TBNOWNPOOLS variable once; it does not change any value
 // NCBI computes.
-/// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): off unless the variable is set (it is not in the strict set).
-/// It acts only together with `LOSAT_X_TBNBATCH` and `LOSAT_X_TBNBATCHRULE`.
+/// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only together with
+/// `LOSAT_X_TBNBATCH` and `LOSAT_X_TBNBATCHRULE`, and only natively: in WebAssembly only the
+/// main thread can start threads (the WASI thread hosts give a thread a `thread-spawn` that
+/// fails, `tests/wasi_thread_host.js` and `web/app/src/infra/reactor/instance.ts`), and each own
+/// pool is built on a thread of its own, so its threads could not start there (os error 6).
 #[cfg(feature = "parallel")]
 fn x_tbn_own_pools() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBNOWNPOOLS").is_some())
+    !cfg!(target_family = "wasm")
+        && *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNOWNPOOLS"))
 }
 
 // No NCBI counterpart: chooses which query batches are searched at the same time on pools of
@@ -849,6 +856,22 @@ fn run_local_search(
     )
 }
 
+/// Diagnostic (LOSAT_TIMING): adds the time from `start` to its drop to the common line's `search`
+/// (utils/xtiming.rs). No NCBI counterpart; it reads the clock only with LOSAT_TIMING.
+struct XSearchTimer(Option<std::time::Instant>);
+
+impl XSearchTimer {
+    fn start() -> Self {
+        Self(crate::utils::xtiming::clock())
+    }
+}
+
+impl Drop for XSearchTimer {
+    fn drop(&mut self) {
+        crate::utils::xtiming::add(crate::utils::xtiming::Phase::Search, self.0);
+    }
+}
+
 // NCBI c++/src/algo/blast/core/blast_engine.c:1411-1414,1469-1475:
 // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //        != BLAST_SEQSRC_EOF) {
@@ -976,6 +999,7 @@ fn run_local_search_with_pool(
             do_sum_stats,
         },
         None,
+        true,
     )?;
     let batch_setup = LocalBatchSetup {
         parameters: parameters.clone(),
@@ -1014,6 +1038,11 @@ fn run_local_search_with_pool(
             .map(|_| KappaResultHitList::new(profile.max_target_seqs))
             .collect();
     }
+    // Diagnostic (LOSAT_TIMING): from here to the end of the batch's search (the preliminary
+    // search of all subjects, which translates them and builds the lookup table inside, the
+    // composition redo and the traceback) is `search` of the common line (utils/xtiming.rs); a
+    // guard, as the function has many returns. No NCBI counterpart.
+    let _x_search_timer = XSearchTimer::start();
     let link = parameters.link;
     let cutoff_arrays = ContextCutoffArrays::of(&parameters);
     let search = preliminary_profile(profile, scoring, gapped, &cutoff_arrays);
@@ -1942,7 +1971,8 @@ fn split_preliminary_hitlists(
                 )
             })
             .collect();
-        let setup = query_set_setup(&parts, inputs, Some(&batch_eff_searchsp))?;
+        // A chunk's setup is inside `search` (the common line marks only the batch's own).
+        let setup = query_set_setup(&parts, inputs, Some(&batch_eff_searchsp), false)?;
         if !setup.valid_contexts.iter().any(|&valid| valid) {
             continue;
         }
@@ -2032,6 +2062,7 @@ fn query_set_setup(
     queries: &[Vec<u8>],
     inputs: QuerySetInputs<'_>,
     eff_searchsp_override: Option<&[i64]>,
+    marked: bool,
 ) -> Result<QuerySetSetup> {
     // NCBI c++/src/algo/blast/core/blast_stat.c:2778-2803;
     // c++/src/algo/blast/core/blast_setup.c:770-847:
@@ -2044,8 +2075,20 @@ fn query_set_setup(
     let working_frames: Vec<_> = queries
         .iter()
         .map(|query| {
+            // Diagnostic (LOSAT_TIMING): with `marked`, the query's encoding and SEG go to the
+            // common line (utils/xtiming.rs). No NCBI counterpart.
             let frame = if inputs.profile.soft_masking {
-                encode_protein_query_frame_with_seg(query, None)
+                if marked {
+                    encode_protein_query_frame_with_seg_timed(query, None)
+                } else {
+                    encode_protein_query_frame_with_seg(query, None)
+                }
+            } else if marked {
+                super::search_seed::encode_tblastn_lookup_query_timed(
+                    query,
+                    inputs.profile.seg,
+                    inputs.profile.mask_lowercase,
+                )
             } else {
                 super::search_seed::encode_tblastn_lookup_query(
                     query,
@@ -2073,6 +2116,14 @@ fn query_set_setup(
     // Only the contexts (their validity, from the ungapped Karlin block) are used here, not the
     // lookup table. x_lookup_contexts_for_profile returns the contexts without building the table,
     // which the search builds where it needs it (lookup_wrap.c:91-100).
+    // Diagnostic (LOSAT_TIMING): the query's lookup contexts for the common line
+    // (utils/xtiming.rs), with `marked`. The table the scan reads is built by the first subject
+    // inside the search (`x_scan_plan`), so it is part of `search`. No NCBI counterpart.
+    let t_build_lookup = if marked {
+        crate::utils::xtiming::clock()
+    } else {
+        None
+    };
     let mut contexts = match crate::algorithm::tblastx::lookup::x_lookup_contexts_for_profile(
         &working_frames,
         false,
@@ -2092,6 +2143,7 @@ fn query_set_setup(
             .1
         }
     };
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_setup_cxx.cpp:632-640
     // ```c++
     //         } catch (const CException& e) {

@@ -1,6 +1,12 @@
 //! BLASTP restricted gapped alignments (`s_RestrictedGappedAlign`) and their exact redo, with
 //! and without `LOSAT_X_BPGAP`, against NCBI BLAST+ 2.17.0.
 //!
+//! `LOSAT_X_BPGAP` is in the strict set (`src/utils/xswitch.rs`): it is on by default, unless its
+//! variable is `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. Every test states the
+//! default it runs with: the report is NCBI's with no variable, with `LOSAT_X_BPGAP=0`, with
+//! `LOSAT_X_DEFAULT=0` and with `LOSAT_X_DEFAULT=0 LOSAT_X_BPGAP=1` (the run the variable gave
+//! before it joined the set).
+//!
 //! NCBI reference (2.17.0): c++/src/algo/blast/core/blast_gapalign.c:3777-3786,3955-3957
 //! ```c
 //!           /* use approximate gapped alignment if the highest scoring ungapped
@@ -33,6 +39,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
+
+const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 
 const OUTFMT: &str = "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore score";
 
@@ -149,11 +157,12 @@ fn inputs() -> &'static (PathBuf, PathBuf) {
     })
 }
 
-/// One BLASTP run with `variable` (if any) and no other `LOSAT_*` variable except
+/// One BLASTP run with `variables` and no other `LOSAT_*` variable except
 /// `LOSAT_BLASTX_WORKER_LOG` (a build with the worker probe writes to it as soon as a pool
-/// starts, so the caller's value is kept, or a file of the tests is named). Returns the report
-/// and standard error.
-fn blastp(threads: usize, variable: Option<&str>) -> (String, String) {
+/// starts, so the caller's value is kept, or a file of the tests is named). `LOSAT_X_DEFAULT` of
+/// the test's own environment is dropped too: every test states the default it runs with.
+/// Returns the report and standard error.
+fn blastp(threads: usize, variables: &[(&str, &str)]) -> (String, String) {
     const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
     let (query, subject) = inputs();
     let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
@@ -166,9 +175,7 @@ fn blastp(threads: usize, variable: Option<&str>) -> (String, String) {
     if std::env::var_os(WORKER_LOG).is_none() {
         command.env(WORKER_LOG, query.with_file_name("worker.log"));
     }
-    if let Some(variable) = variable {
-        command.env(variable, "1");
-    }
+    command.envs(variables.iter().copied());
     let output = command
         .arg("blastp")
         .arg("-query")
@@ -204,16 +211,21 @@ fn vector_kernel_runs() -> bool {
 #[test]
 fn restricted_gapped_alignments_match_ncbi_with_and_without_the_switch() {
     for threads in [1, 4] {
-        for variable in [None, Some("LOSAT_X_BPGAP")] {
-            let (report, _) = blastp(threads, variable);
-            assert_eq!(report, NCBI_ROWS, "{threads} threads, {variable:?}");
+        for variables in [
+            &[][..],
+            &[("LOSAT_X_BPGAP", "0")][..],
+            &[DEFAULT_OFF][..],
+            &[DEFAULT_OFF, ("LOSAT_X_BPGAP", "1")][..],
+        ] {
+            let (report, _) = blastp(threads, variables);
+            assert_eq!(report, NCBI_ROWS, "{threads} threads, {variables:?}");
         }
     }
 }
 
 #[test]
 fn the_shadow_mode_compares_the_restricted_alignments() {
-    let (report, stderr) = blastp(1, Some("LOSAT_X_BPGAPSHADOW"));
+    let (report, stderr) = blastp(1, &[("LOSAT_X_BPGAPSHADOW", "1")]);
     assert_eq!(report, NCBI_ROWS);
     let line = stderr
         .lines()

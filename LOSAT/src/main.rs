@@ -11,6 +11,9 @@ use LOSAT::algorithm::{blastn, blastp, blastx, tblastn, tblastx};
 use LOSAT::cli::{Cli, Commands};
 
 fn main() -> Result<()> {
+    // Diagnostic (LOSAT_TIMING): the clock of `since_start` (utils/xtiming.rs). No NCBI
+    // counterpart; it reads the clock only with LOSAT_TIMING.
+    LOSAT::utils::xtiming::start();
     // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:3719-3725
     // ```c++
     // bool CDir::SetCwd(const string& dir)
@@ -228,18 +231,25 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastx::blast_engine::x_pair_par_print_summary();
     LOSAT::algorithm::tblastx::blast_engine::x_seed_release_print_summary();
     LOSAT::algorithm::tblastx::lookup::x_bplut_print_summary();
+    LOSAT::algorithm::tblastx::lookup::x_tbxlut_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_hsp_inplace_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_sort_print_summary();
     LOSAT::algorithm::tblastx::sum_stats_linking::x_link_slices_print_summary();
     LOSAT::algorithm::tblastn::x_subject_translate_print_summary();
     LOSAT::algorithm::tblastn::x_subject_store_print_summary();
+    LOSAT::algorithm::tblastn::x_scan_bf_print_summary();
+    LOSAT::algorithm::tblastn::x_link_window_print_summary();
     LOSAT::algorithm::blastn::x_subject_store_print_summary();
+    LOSAT::algorithm::blastn::x_query_dust_par_print_summary();
+    LOSAT::algorithm::blastn::blast_engine::x_query_prep_par_print_summary();
     LOSAT::algorithm::blastp::x_bp_seed_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();
     LOSAT::algorithm::blastp::x_bp_lkp_ahead_print_summary();
     LOSAT::algorithm::blastp::x_restricted_gap_print_summary();
     LOSAT::algorithm::blastn::alignment::greedy::x_greedy_fuse_print_summary();
+    LOSAT::algorithm::blastn::lookup::x_disc_lookup_par::print_summary();
+    LOSAT::algorithm::blastn::lookup::x_mb_lookup_print_summary();
     LOSAT::algorithm::blastp::x_bp_prelim_compact_print_summary();
     LOSAT::algorithm::blastp::x_bp_redo_par_print_summary();
     LOSAT::algorithm::blastp::x_bp_subj_run_print_summary();
@@ -248,5 +258,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastx::seed::x_seed_scan::print_shadow_stats();
     LOSAT::algorithm::blastp::x_ungapped_fast::print_shadow_stats();
     LOSAT::utils::x_logclone::print_shadow_stats();
+    // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).
+    LOSAT::utils::xtiming::print();
     Ok(())
 }

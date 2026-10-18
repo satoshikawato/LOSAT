@@ -4,7 +4,8 @@
 //!
 //! The switch is not in the strict set (`src/utils/xswitch.rs`): it is off unless its variable is
 //! set, and it acts only in the block search of `LOSAT_X_BPQBLOCK` where `LOSAT_X_BPLKPFLAT` acts on
-//! the flat table of `LOSAT_X_BPCLUT` (blastp-fast, more than one thread). These tests compare the
+//! the flat table of `LOSAT_X_BPCLUT` (blastp-fast, more than one thread; both are in the strict set,
+//! so "off" for either is `=0`). These tests compare the
 //! reports, standard error and exit codes with the switch off, on and in its shadow mode
 //! (`LOSAT_X_BPLKPAHEADSHADOW`, which builds every block's values again inline and compares them),
 //! with `-subject` and `-db`, and read the shadow's line at exit: `blocks` (blocks searched where the
@@ -25,6 +26,24 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
+/// `0`, the default before, unless the search sets it: every search here runs as it was written,
+/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
+    ("LOSAT_X_BPDBCUT", "0"),
+    ("LOSAT_X_BPLKPAHEAD", "0"),
+    ("LOSAT_X_BPREDOLPT", "0"),
+    ("LOSAT_X_BPREDOPAR", "0"),
+    ("LOSAT_X_BPSUBJMETA", "0"),
+    ("LOSAT_X_DIAGLV", "0"),
+    ("LOSAT_X_PAIRPARDISC", "0"),
+    ("LOSAT_X_PAIRPARFOLD", "0"),
+    ("LOSAT_X_QBATCHPAR", "0"),
+    ("LOSAT_X_QDUSTPAR", "0"),
+    ("LOSAT_X_QPREPPAR", "0"),
+    ("LOSAT_X_RPTSTREAM", "0"),
+];
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -133,6 +152,7 @@ fn blastp(
     let output = command
         .env("BATCH_SIZE", "3000")
         .env("LOSAT_TIMING", "1")
+        .envs(PREVIOUS_DEFAULT.iter().copied())
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");
@@ -285,8 +305,8 @@ fn one_block_and_the_search_of_all_queries_build_nothing_ahead() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-// Where `LOSAT_X_BPLKPFLAT` does not act on the pool's flat table (one thread, the switch or
-// `LOSAT_X_BPCLUT` off, `LOSAT_X_BPCLUTSHADOW`, whose search uses the reference builder's table) and
+// Where `LOSAT_X_BPLKPFLAT` does not act on the pool's flat table (one thread, the switch =0 or
+// `LOSAT_X_BPCLUT=0`, `LOSAT_X_BPCLUTSHADOW`, whose search uses the reference builder's table) and
 // for exact blastp (no compressed table), the switch changes nothing and its shadow counts nothing.
 #[test]
 fn the_switch_does_not_act_without_the_pools_flat_table() {
@@ -296,11 +316,14 @@ fn the_switch_does_not_act_without_the_pools_flat_table() {
     let block = ("LOSAT_X_BPQBLOCK", "1");
     let clut = ("LOSAT_X_BPCLUT", "1");
     let flat = ("LOSAT_X_BPLKPFLAT", "1");
+    // Both are in the strict set (on by default): "off" is `=0`.
+    let clut_off = ("LOSAT_X_BPCLUT", "0");
+    let flat_off = ("LOSAT_X_BPLKPFLAT", "0");
     let clut_shadow = ("LOSAT_X_BPCLUTSHADOW", "1");
     for (task, threads, base) in [
         ("blastp-fast", 1, vec![block, clut, flat]),
-        ("blastp-fast", 4, vec![block, clut]),
-        ("blastp-fast", 4, vec![block, flat]),
+        ("blastp-fast", 4, vec![block, clut, flat_off]),
+        ("blastp-fast", 4, vec![block, clut_off, flat]),
         ("blastp-fast", 4, vec![block, clut_shadow, flat]),
         ("blastp", 4, vec![block, clut, flat]),
     ] {

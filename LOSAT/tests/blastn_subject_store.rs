@@ -30,6 +30,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
+/// `0`, the default before, unless the search sets it: every search here runs as it was written,
+/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
+    ("LOSAT_X_BPDBCUT", "0"),
+    ("LOSAT_X_BPLKPAHEAD", "0"),
+    ("LOSAT_X_BPREDOLPT", "0"),
+    ("LOSAT_X_BPREDOPAR", "0"),
+    ("LOSAT_X_BPSUBJMETA", "0"),
+    ("LOSAT_X_DIAGLV", "0"),
+    ("LOSAT_X_PAIRPARDISC", "0"),
+    ("LOSAT_X_PAIRPARFOLD", "0"),
+    ("LOSAT_X_QBATCHPAR", "0"),
+    ("LOSAT_X_QDUSTPAR", "0"),
+    ("LOSAT_X_QPREPPAR", "0"),
+    ("LOSAT_X_RPTSTREAM", "0"),
+];
+
 const PIECE: usize = 6_000;
 
 /// The letters of the first record of a FASTA file.
@@ -169,6 +187,7 @@ fn blastn(
         .arg(subjects)
         .args(options)
         .env("LOSAT_X_STATS", "1")
+        .envs(PREVIOUS_DEFAULT.iter().copied())
         .envs(variables.iter().copied())
         .output()
         .expect("run LOSAT");
@@ -225,7 +244,8 @@ type Search<'a> = (&'a [&'a str], &'a [(&'a str, &'a str)]);
 // Every search below gives one report and the same messages (the warning of the subject without
 // letters among them) without the variable and with it: tabular, commented tabular and pairwise
 // reports, megablast, blastn and dc-megablast, `-lcase_masking`, one and three threads, and three
-// threads with the subjects searched in blocks (`LOSAT_X_BNSTREAM`). With the variable the six
+// threads with every subject searched before the hand-over (`LOSAT_X_BNSTREAM=0`; it is on by
+// default). With the variable the six
 // subjects are held packed, the traceback makes the blastna letters of each subject with hits and
 // the pairwise report the letters of each row; without it none.
 #[test]
@@ -261,7 +281,7 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
         ),
         (
             &["-outfmt", "0", "-num_threads", "3", "-task", "blastn"],
-            &[("LOSAT_X_BNSTREAM", "1")],
+            &[("LOSAT_X_BNSTREAM", "0")],
         ),
         (&["-outfmt", "6", "-num_threads", "1", "-dust", "no"], &[]),
     ];

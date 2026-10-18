@@ -519,17 +519,17 @@ pub(crate) fn x_shadow_tables() -> Option<u64> {
     (x_bxlut_mode() == 2).then(|| X_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
 }
 
-/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW, off unless set): 0 = off (`build_ncbi_lookup`),
+/// EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): 0 = off (`build_ncbi_lookup`),
 /// 1 = BLASTP's table built in place by [`x_build_direct`], 2 = shadow (both builders, compared).
-// No NCBI counterpart: chooses between two LOSAT code paths with the same result. Not in
-// `xswitch::STRICT_SET`, so not read with `xswitch::on`.
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result.
+// `LOSAT_X_BPLUT` is a strict-set switch; the shadow variable is read first, as "set to any value".
 pub(super) fn x_bplut_mode() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BPLUTSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_BPLUT").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BPLUT") {
             1
         } else {
             0
@@ -564,6 +564,78 @@ pub(crate) fn x_bplut_shadow_tables() -> Option<u64> {
 /// difference) and returns the reference's.
 pub(super) fn x_bp_build_lookup(
     mode: u8,
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    karlin_params: &KarlinParams,
+    check_ideal: bool,
+) -> (BlastAaLookupTable, Vec<QueryContext>) {
+    x_build_ncbi_lookup_counted(
+        mode,
+        &X_BPLUT_SHADOW_TABLES,
+        queries,
+        threshold,
+        karlin_params,
+        check_ideal,
+    )
+}
+
+/// EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): 0 = off (`build_ncbi_lookup`, the chain
+/// builder), 1 = TBLASTX's full table built in place by [`x_build_direct`], 2 = shadow (both
+/// builders, compared).
+// No NCBI counterpart: chooses between two LOSAT code paths with the same result. A strict-set
+// switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; `utils/xswitch.rs`); the
+// shadow variable is read first.
+pub(super) fn x_tbxlut_mode() -> u8 {
+    use std::sync::OnceLock;
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if std::env::var_os("LOSAT_X_TBXLUTSHADOW").is_some() {
+            2
+        } else if crate::utils::xswitch::on("LOSAT_X_TBXLUT") {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+/// EXPERIMENT (LOSAT_X_TBXLUTSHADOW): TBLASTX full tables compared so far.
+static X_TBXLUT_SHADOW_TABLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// EXPERIMENT (LOSAT_X_TBXLUTSHADOW): `Some(tables compared)` in shadow mode, for the exit summary.
+// No NCBI counterpart: reads a counter.
+pub(crate) fn x_tbxlut_shadow_tables() -> Option<u64> {
+    (x_tbxlut_mode() == 2)
+        .then(|| X_TBXLUT_SHADOW_TABLES.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): `build_ncbi_lookup` for the full table of
+/// a TBLASTX query batch (the table of the reference frame loop), with TBLASTX's mode and shadow
+/// counter; the same builder as BLASTP's [`x_bp_build_lookup`].
+pub(super) fn x_tbx_build_lookup(
+    queries: &[Vec<QueryFrame>],
+    threshold: i32,
+    karlin_params: &KarlinParams,
+    check_ideal: bool,
+) -> (BlastAaLookupTable, Vec<QueryContext>) {
+    x_build_ncbi_lookup_counted(
+        x_tbxlut_mode(),
+        &X_TBXLUT_SHADOW_TABLES,
+        queries,
+        threshold,
+        karlin_params,
+        check_ideal,
+    )
+}
+
+/// The body of [`x_bp_build_lookup`] and [`x_tbx_build_lookup`]: mode 0 calls
+/// `build_ncbi_lookup`; mode 1 prepares the query as `build_ncbi_lookup_for_profile(..,
+/// Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`], falling back
+/// to the reference builder where that declines; mode 2 builds both, compares them field by field
+/// (panics on a difference), counts the table in `shadow_tables` and returns the reference's.
+fn x_build_ncbi_lookup_counted(
+    mode: u8,
+    shadow_tables: &std::sync::atomic::AtomicU64,
     queries: &[Vec<QueryFrame>],
     threshold: i32,
     karlin_params: &KarlinParams,
@@ -604,7 +676,7 @@ pub(super) fn x_bp_build_lookup(
     let reference = build_lookup_from_prepared(prepared, threshold, matrix, LOOKUP_WORD_LENGTH);
     if let Ok(direct) = x_build_direct(copy, threshold, matrix, LOOKUP_WORD_LENGTH) {
         x_assert_same_table(&direct, &reference.0);
-        X_BPLUT_SHADOW_TABLES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        shadow_tables.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
     reference
 }

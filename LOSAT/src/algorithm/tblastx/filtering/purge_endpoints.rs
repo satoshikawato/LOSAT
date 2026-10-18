@@ -189,16 +189,16 @@ mod tests {
         UngappedHit {
             q_idx: 0,
             s_idx: 0,
-            ctx_idx,
+            ctx_idx: u32::try_from(ctx_idx).unwrap(),
             s_f_idx: 0,
             q_frame: 1,
             s_frame,
-            q_aa_start: q_start,
-            q_aa_end: q_end,
-            s_aa_start: s_start,
-            s_aa_end: s_end,
-            q_seed_off: q_start,
-            s_seed_off: s_start,
+            q_aa_start: u32::try_from(q_start).unwrap(),
+            q_aa_end: u32::try_from(q_end).unwrap(),
+            s_aa_start: u32::try_from(s_start).unwrap(),
+            s_aa_end: u32::try_from(s_end).unwrap(),
+            q_seed_off: u32::try_from(q_start).unwrap(),
+            s_seed_off: u32::try_from(s_start).unwrap(),
             q_orig_len: 1000,
             s_orig_len: 1000,
             raw_score,
@@ -261,10 +261,10 @@ mod tests {
         let surviving_indices = [4, 0, 6];
         for &orig_idx in &surviving_indices {
             let found = hits.iter().any(|h| {
-                h.q_aa_start == q_offsets[orig_idx]
-                    && h.q_aa_end == q_ends[orig_idx]
-                    && h.s_aa_start == s_offsets[orig_idx]
-                    && h.s_aa_end == s_ends[orig_idx]
+                h.q_aa_start as usize == q_offsets[orig_idx]
+                    && h.q_aa_end as usize == q_ends[orig_idx]
+                    && h.s_aa_start as usize == s_offsets[orig_idx]
+                    && h.s_aa_end as usize == s_ends[orig_idx]
                     && h.raw_score == scores[orig_idx] as i32
             });
             assert!(

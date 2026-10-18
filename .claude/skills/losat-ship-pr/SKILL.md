@@ -10,39 +10,74 @@ contains.
 
 ## Branches
 
-- LOSAT Web campaign: the engine branch `feature/losat-web-gui` goes to `main` when an
+`dev` is the integration branch (Owner, 2026-10-17, as in gbdraw). Work pull requests target
+`dev`, run the fast checks and merge there; `dev` goes to `main` in one pull request.
+
+- Work: a branch from `origin/dev` (`fix/`, `feature/`, `perf/`, `docs/`, `audit/`, `ci/`) with a
+  PR to `dev`.
+- LOSAT Web campaign: the engine branch `feature/losat-web-gui` goes to `dev` when an
   instruction asks for "`main` への PR"; the app branch `feature/losat-web-gui-app` is merged
-  into `feature/losat-web-gui` at the end of each app session (README rule 1), not into `main`.
-- Other work: a branch from `origin/main` (`fix/`, `feature/`, `docs/`, `audit/`, `ci/`) with a PR
-  to `main`.
+  into `feature/losat-web-gui` at the end of each app session (README rule 1), not into `dev`.
+- Promotion: when the Owner asks, a branch `promote/<date>` at the `dev` commit to promote and
+  one PR from it to `main`. It contains no change of its own (not `dev` itself as the head: each
+  merge into `dev` would restart its Platform checks); they run on it once for the batch, and
+  auto-merge merges it when they pass.
 
 ## Before opening
 
 1. Run the full tier of skill `losat-gates` for what the branch touches, and record it in the gate
    record.
 2. Check staged and committed sizes: no file over about 1 MB without the Owner's consent (skill
-   `losat-worktree`); `git diff --stat origin/main...HEAD | tail -1` for the size of the PR.
+   `losat-worktree`); `git diff --stat origin/dev...HEAD | tail -1` for the size of the PR.
 3. Write the body to a file in `$TASK_DIR`: what changed and why, the stages and DW decisions it
    covers, the gate record paths and results, the evidence hashes, the residuals, and
-   Owner-delegated choices. Then `gh pr create --base main --head <branch> --body-file <file>`.
-4. Open the PR as a draft (`--draft`) while its content may still change: a draft runs the fast
-   checks only, and the platform jobs run once, when it is marked ready for review.
+   Owner-delegated choices. Then `gh pr create --base dev --head <branch> --body-file <file>`.
+4. Open the PR as a draft (`--draft`) while its content may still change: marking it ready turns
+   on auto-merge into `dev`.
+
+## A switch that joins the strict set
+
+A new speed-up joins the strict set in the PR that implements it (Owner, 2026-10-17): it is on by
+default from its first merge, with no opt-in PR followed by a second default-set PR (that ran CI
+twice per improvement).
+
+- Before the PR: the gates of the default path (output identical to NCBI, full tier of skill
+  `losat-gates`) and timings on the conditions the work measures, switch on and off in the same
+  run. The body says it lands on by default and gives that evidence.
+- A loss on a measured condition (time, or max RSS above NCBI or the previous default where the
+  work holds RSS): the rule that turns it on only where it wins goes into the same PR when one is
+  known. Without such a rule the speed-up still lands, opt-in (not in the strict set), with the
+  conditions where it wins and loses in its diagnostics entry; its default is decided later,
+  bundled with the work's next default PR (Owner, 2026-10-17: a speed-up that cannot be on by
+  default is still adopted). A no-go is for a change that wins nowhere or is inexact.
+- `LOSAT_X_<NAME>=0` turns it off and `LOSAT_X_DEFAULT=0` returns to the previous default. Shadow
+  and diagnostic switches stay opt-in.
+- Put its name in sorted order into `STRICT_SET` (`LOSAT/src/utils/xswitch.rs`) and its `export`
+  line in sorted order into the block in `docs/agents/diagnostics.md` ("Performance switches"; the
+  unit test `the_documented_block_lists_the_strict_set` compares them).
+- Say since when and on what evidence in the switch's own entry in `diagnostics.md` and in its own
+  CHANGELOG line. Write no count of the set, and add nothing at the end of a shared list or
+  paragraph. Then two such PRs touch different lines, and one merging does not make the other
+  `DIRTY` (the `dev` ruleset does not require an up-to-date branch).
 
 ## Watch CI
 
 - `ci.yml` (`rust`, `fast output regressions`) runs on every PR; `web.yml` runs when `web/**`,
-  `LOSAT/src/**`, `LOSAT/Cargo.*`, or the WASI test files changed. Expect 5-20 minutes.
-  `platform-checks.yml` (`platform checks result`) runs its platform jobs when `LOSAT/src/**`,
-  `LOSAT/Cargo.*`, `LOSAT/build.rs` or its own files changed and the PR is not a draft: outputs on
-  Linux x64, Linux arm64, Windows x64 and macOS arm64 and `cargo test` on Linux arm64 and Windows.
-  Expect 1-2 hours, most of it the one macOS job waiting for a runner (GitHub runs five macOS
-  jobs at a time for the whole account; the full five-platform set runs on `main` and weekly).
-- Do not push to a ready PR unless it is `DIRTY` (merge conflict) or a check failed. A push cancels
-  its Platform checks run and queues it again behind every other PR (2026-10-16: eight cancelled
-  runs cost 41 hours of queue). The `main` ruleset does not require an up-to-date branch, so do
-  not merge `origin/main` into a PR that has no conflict.
-- Keep one ready PR per program (blastn, blastp, blastx, tblastn, tblastx) at a time. The next one
-  stays a draft, and merges `origin/main` once, after the previous one merged.
+  `LOSAT/src/**`, `LOSAT/Cargo.*`, or the WASI test files changed. Expect 5-20 minutes. A PR into
+  `dev` needs these (`rust`, `fast output regressions`, `web result`) and merges by auto-merge.
+- `platform-checks.yml` (`platform checks result`) runs its platform jobs only on a PR into
+  `main` (the promotion PR), when `LOSAT/src/**`, `LOSAT/Cargo.*`, `LOSAT/build.rs` or its own
+  files changed and the PR is not a draft: outputs on Linux x64, Linux arm64, Windows x64 and
+  macOS arm64 and `cargo test` on Linux arm64 and Windows. Expect 1-2 hours, most of it the one
+  macOS job waiting for a runner (GitHub runs five macOS jobs at a time for the whole account; the
+  full five-platform set runs on `main` and weekly). On a PR into `dev` it passes without jobs.
+- A PR into `dev` that another merge made `DIRTY` merges `origin/dev`, runs its gates again and
+  pushes (no force); its checks take minutes, so several PRs of one program may be ready at once.
+  Do not merge `origin/dev` into a PR that has no conflict.
+- The promotion PR: do not push to it unless it is `DIRTY` or a check failed. A push cancels its
+  Platform checks run and queues it again behind every other PR (2026-10-16: eight cancelled runs
+  cost 41 hours of queue). Fix a failure through a work PR into `dev`, then merge `origin/dev`
+  into the promotion branch once.
 - Run one watcher per session, not one per agent:
   `python3 .claude/skills/losat-ship-pr/scripts/watch_prs.py --prs <n>` under Monitor or in the
   background, and act on its event lines (merged, closed, conflict, failed, cancelled, green).
@@ -56,8 +91,11 @@ contains.
 
 ## Merge
 
-- Merge only when the session instruction says the session merges, with CI green:
-  `gh pr merge <n> --merge --match-head-commit <full sha>`.
+- A PR into `dev` merges by auto-merge when its checks pass (`auto-merge.yml` turns it on when the
+  PR is opened as ready or marked ready). A session merges by hand only when its instruction says
+  so, with CI green: `gh pr merge <n> --merge --match-head-commit <full sha>`.
+- The promotion PR (`promote/<date>` to `main`) is opened only on the Owner's request; it merges
+  by auto-merge unless the Owner turns that off.
 - A PR that changes agent instructions, skills, settings, product decisions (`docs/product_decisions/`),
   or `AGENTS.md` waits for the Owner's merge.
 

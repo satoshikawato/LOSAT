@@ -61,6 +61,17 @@ pub use x_seed_release::print_summary as x_seed_release_print_summary;
 // No NCBI counterpart: a timer; it computes no value NCBI computes and none the search reads.
 #[path = "../x_search_timing.rs"]
 mod x_search_timing;
+// EXPERIMENT (LOSAT_X_TBXNEXT): the subjects of the parallel subject loop handed to the threads one
+// at a time, each thread taking the next subject when it is free, with one worker state per
+// thread (see tblastx/x_subject_next.rs). A child module of this file, as x_seed_release is.
+// No NCBI counterpart: scheduling only; NCBI's threads take the next subjects from the database
+// when they are free (blast_engine.c:1411-1413), which is what the module does.
+#[path = "../x_subject_next.rs"]
+#[cfg_attr(
+    not(all(feature = "parallel", not(target_arch = "wasm32"))),
+    allow(dead_code)
+)]
+mod x_subject_next;
 use x_search_timing::XStage;
 // Diagnostic (LOSAT_TIMING): the stage times of the two linking calls, two more `[TIMING]`
 // lines after those (see tblastx/x_link_timing.rs).
@@ -488,22 +499,22 @@ fn merge_two_tblastx_chunk_hsps(hsp1: &mut UngappedHit, hsp2: &UngappedHit) -> b
     }
 
     if contained_in_hsp(
-        hsp1.q_aa_start,
-        hsp1.q_aa_end,
-        hsp2.q_aa_start,
-        hsp1.s_aa_start,
-        hsp1.s_aa_end,
-        hsp2.s_aa_start,
+        hsp1.q_aa_start as usize,
+        hsp1.q_aa_end as usize,
+        hsp2.q_aa_start as usize,
+        hsp1.s_aa_start as usize,
+        hsp1.s_aa_end as usize,
+        hsp2.s_aa_start as usize,
     ) || contained_in_hsp(
-        hsp1.q_aa_start,
-        hsp1.q_aa_end,
-        hsp2.q_aa_end,
-        hsp1.s_aa_start,
-        hsp1.s_aa_end,
-        hsp2.s_aa_end,
+        hsp1.q_aa_start as usize,
+        hsp1.q_aa_end as usize,
+        hsp2.q_aa_end as usize,
+        hsp1.s_aa_start as usize,
+        hsp1.s_aa_end as usize,
+        hsp2.s_aa_end as usize,
     ) {
-        let len1 = hsp1.q_aa_end.saturating_sub(hsp1.q_aa_start) as f64;
-        let len2 = hsp2.q_aa_end.saturating_sub(hsp2.q_aa_start) as f64;
+        let len1 = (hsp1.q_aa_end as usize).saturating_sub(hsp1.q_aa_start as usize) as f64;
+        let len2 = (hsp2.q_aa_end as usize).saturating_sub(hsp2.q_aa_start as usize) as f64;
         let score_density = (hsp1.raw_score as f64 + hsp2.raw_score as f64) / (len1 + len2);
 
         hsp1.q_aa_start = hsp1.q_aa_start.min(hsp2.q_aa_start);
@@ -517,7 +528,7 @@ fn merge_two_tblastx_chunk_hsps(hsp1: &mut UngappedHit, hsp2: &UngappedHit) -> b
             hsp1.raw_score = hsp2.raw_score;
         }
 
-        let new_len = hsp1.q_aa_end.saturating_sub(hsp1.q_aa_start) as f64;
+        let new_len = (hsp1.q_aa_end as usize).saturating_sub(hsp1.q_aa_start as usize) as f64;
         hsp1.raw_score = hsp1.raw_score.max((score_density * new_len) as i32);
         return true;
     }
@@ -555,14 +566,14 @@ fn merge_tblastx_subject_chunk_hits(
 
     let mut combined_overlap = Vec::new();
     for (idx, hsp) in combined.iter().enumerate() {
-        if hsp.s_aa_end > split_offset {
+        if hsp.s_aa_end as usize > split_offset {
             combined_overlap.push(idx);
         }
     }
 
     let mut incoming_overlap = Vec::new();
     for (idx, hsp) in incoming.iter().enumerate() {
-        if hsp.s_aa_start < split_offset.saturating_add(chunk_overlap_size) {
+        if (hsp.s_aa_start as usize) < split_offset.saturating_add(chunk_overlap_size) {
             incoming_overlap.push(idx);
         }
     }
@@ -620,9 +631,12 @@ fn adjust_tblastx_chunk_subject_offsets(hits: &mut [UngappedHit], offset: usize)
         return;
     }
     for hit in hits {
-        hit.s_aa_start += offset;
-        hit.s_aa_end += offset;
-        hit.s_seed_off += offset;
+        hit.s_aa_start = u32::try_from(hit.s_aa_start as usize + offset)
+            .expect("s_aa_start: a subject offset fits u32 (NCBI's BlastSeg offset is Int4)");
+        hit.s_aa_end = u32::try_from(hit.s_aa_end as usize + offset)
+            .expect("s_aa_end: a subject offset fits u32 (NCBI's BlastSeg end is Int4)");
+        hit.s_seed_off = u32::try_from(hit.s_seed_off as usize + offset)
+            .expect("s_seed_off: a subject offset fits u32 (NCBI's gapped_start is Int4)");
     }
 }
 
@@ -812,6 +826,9 @@ fn read_subject_set(
         subject_file,
         ReaderConfig::subject("TBLASTX", false, settings.data_loaders),
     );
+    // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs). No NCBI
+    // counterpart.
+    let t_read_fasta = crate::utils::xtiming::clock();
     let read_subject_records = {
         let mut stderr = std::io::stderr();
         read_subjects(
@@ -820,6 +837,7 @@ fn read_subject_set(
             &mut |message: &[u8]| std::io::Write::write_all(&mut stderr, message),
         )?
     };
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(subject_source);
     let (subjects, subject_placements) =
         match cut_subjects(&read_subject_records, subject_range.as_ref())? {
@@ -1078,7 +1096,11 @@ fn search_cli(
     // (`run_in_pool`). What ends the reading (the end of the input, an `eEOF`, a reader
     // error or LOSAT's rejection of a Seq-id line) comes in the batch that NCBI reads it in,
     // after the reports of the batches before (`run_in_pool`).
+    // Diagnostic (LOSAT_TIMING): the query FASTA for the common line (utils/xtiming.rs). No NCBI
+    // counterpart.
+    let t_read_fasta = crate::utils::xtiming::clock();
     let QueryRecords { records, end } = read_queries(&mut query_source);
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
@@ -2276,6 +2298,9 @@ impl BatchReports<'_> {
         warnings: &[Vec<u8>],
         epilog: bool,
     ) -> Result<()> {
+        // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); written
+        // after the batches are searched. No NCBI counterpart.
+        let t_output = crate::utils::xtiming::clock();
         let reported = done.searched.len();
         let queries = &self.query_runs.records[..reported];
         let mut hits = report_order(self.args, queries, done.hits);
@@ -2310,7 +2335,7 @@ impl BatchReports<'_> {
                 )
             }
         };
-        write_tblastx_outputs(
+        let written = write_tblastx_outputs(
             hits,
             outputs,
             &TblastxReportRun {
@@ -2327,7 +2352,9 @@ impl BatchReports<'_> {
                 epilog,
                 v1_titles: self.v1_titles,
             },
-        )
+        );
+        crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
+        written
     }
 
     /// Writes what NCBI has written when a query batch fails, before its error: the reports
@@ -2535,14 +2562,21 @@ fn search_query_batch(
     //    frame_offsets[context+1] = offset;
     // }
     // ```
+    // Diagnostic (LOSAT_TIMING): the queries' six-frame translation for the common line
+    // (utils/xtiming.rs). No NCBI counterpart.
+    let t_translate = crate::utils::xtiming::clock();
     let mut query_frames: Vec<Vec<QueryFrame>> = queries_raw
         .iter()
         .map(|r| generate_frames(r.seq(), &query_code))
         .collect();
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Translate, t_translate);
 
     // NCBI blast_args.cpp:404-406: opt.SetSegFilteringWindow(...);
     // opt.SetSegFilteringLocut(...); opt.SetSegFilteringHicut(...);
     if let Some(params) = args.seg_spec()?.params() {
+        // Diagnostic (LOSAT_TIMING): the queries' SEG for the common line (utils/xtiming.rs). No
+        // NCBI counterpart.
+        let t_seg = crate::utils::xtiming::clock();
         let seg = SegMasker::new(params.window, params.locut, params.hicut);
         for frames in &mut query_frames {
             for frame in frames {
@@ -2579,6 +2613,7 @@ fn search_query_batch(
                 }
             }
         }
+        crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     }
 
     t_read_queries = t_phase_read_queries.elapsed();
@@ -2642,9 +2677,11 @@ fn search_query_batch(
     // True when `lookup` is the stub: the reference frame loop must then run zero times
     // (asserted at dispatch point 2).
     let x_pair_lut_is_stub = x_pair_lut_stub.is_some();
+    // Dispatch point (LOSAT_X_TBXLUT, off unless set): the full table of the batch from the chain
+    // builder (`build_ncbi_lookup`) or filled in place from per-cell counts; the same table.
     let (lookup, contexts) = match x_pair_lut_stub {
         Some(stub) => stub,
-        None => build_ncbi_lookup(
+        None => crate::algorithm::tblastx::lookup::x_tbx_build_ncbi_lookup(
             &query_frames,
             crate::core::blast_util::ncbi_int4_from_double(args.threshold),
             &ungapped_params_for_xdrop, // Used for x_dropoff calculation only
@@ -2652,6 +2689,9 @@ fn search_query_batch(
         ),
     };
     t_build_lookup = t_phase_build_lookup.elapsed();
+    // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs). No
+    // NCBI counterpart.
+    crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
 
     // NCBI BLAST: word_params->cutoffs[context].x_dropoff_init
     // Compute per-context x_dropoff using kbp[context]->Lambda.
@@ -2869,6 +2909,13 @@ fn search_query_batch(
     // Reference: ncbi-blast/c++/include/algo/blast/core/lookup_wrap.h + lookup_wrap.c
     const OFFSET_ARRAY_SIZE: i32 = 4096;
     let offset_array_size: i32 = OFFSET_ARRAY_SIZE + lookup.longest_chain.max(0);
+    // EXPERIMENT (LOSAT_X_TBXSCANBF): with the switch, the offset arrays have X_SCAN_BF_SLACK
+    // entries after `offset_array_size`.
+    let offset_pairs_len =
+        crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
+    // EXPERIMENT (LOSAT_X_TBXSCANBF): whether the reference frame loop scans this batch's table with
+    // the branch-free loop (decided once per table).
+    let x_scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
 
     // EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW), dispatch point 1 (per batch): the
     // gates and the exactness guard, then one lookup table per query context (each backbone chain
@@ -2908,6 +2955,9 @@ fn search_query_batch(
         chunk_switches: use_serial_scan_chunks || use_parallel_chunks,
         // LOSAT_X_PAIRLUT / LOSAT_X_PAIRLUTSHADOW: the groups built at dispatch point 0.
         lut: x_pair_lut_batch,
+        // LOSAT_X_PAIRPARGATE: the thread count and threshold dispatch point 0 decided with.
+        threads: parallel_pool.threads(),
+        threshold: crate::core::blast_util::ncbi_int4_from_double(args.threshold),
     });
     // EXPERIMENT (LOSAT_X_SEEDRELEASE), dispatch point 1 (per batch): the batch's tables move
     // into two holders, `x_seed_batch.lookup` (the lookup table) and `x_seed_batch.units` (the
@@ -3410,13 +3460,32 @@ fn search_query_batch(
         // ```
         // The letters and the preliminary bases of the subject (`Subjects::with_search_bases`:
         // a database sequence's are made from its store, D2) live only while it is translated.
-        let (s_frames, s_frames_preliminary_owned) =
+        //
+        // EXPERIMENT (LOSAT_X_TBXFRAMES): only the frames the preliminary stage translates are
+        // made here, in windows (`Subjects::x_preliminary_frames`). For a subject with ambiguous
+        // bases the frames of its letters (`s_frames`) are made after the seed stage, once the
+        // preliminary frames are freed, and only when HSPs are left for the re-evaluation
+        // (`x_letter_frames_later`, below); until then `s_frames` is empty and the HSP lists
+        // index the preliminary frames, which have the same number and lengths
+        // (`s_frames_listed`). For a subject without ambiguous bases both are the same frames.
+        let x_frames_late = crate::algorithm::tblastx::subjects::x_frames_late();
+        let mut x_letter_frames_later = false;
+        let (s_frames, s_frames_preliminary_owned) = if x_frames_late {
+            let (frames, of_letters) = subjects.x_preliminary_frames(s_idx, &db_code);
+            if of_letters {
+                (frames, None)
+            } else {
+                x_letter_frames_later = true;
+                (Vec::new(), Some(frames))
+            }
+        } else {
             subjects.with_search_bases(s_idx, |letters, bases| {
                 (
                     generate_frames(letters, &db_code),
                     bases.map(|bases| generate_frames(bases, &db_code)),
                 )
-            });
+            })
+        };
         let s_frames_report = &s_frames;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:772-775
         // ```c
@@ -3440,6 +3509,14 @@ fn search_query_batch(
         // read the frames of the ncbi4na subject (`s_frames`, ambiguous codons are X).
         let s_frames_preliminary: &[QueryFrame] =
             s_frames_preliminary_owned.as_deref().unwrap_or(&s_frames);
+        // The frames the HSP lists of the seed stage index (`get_ungapped_hsp_list`, the frame
+        // bases of the first linking call): only their number and lengths are read, which the
+        // frames of the letters and the preliminary frames share.
+        let s_frames_listed: &[QueryFrame] = if x_letter_frames_later {
+            s_frames_preliminary
+        } else {
+            &s_frames
+        };
         x_lap.lap(XStage::Translate);
 
         // [C] BlastOffsetPair *offset_pairs
@@ -3525,7 +3602,7 @@ fn search_query_batch(
             Some(x) => {
                 let x_subject = x_pair_par::XSubject {
                     s_frames_preliminary,
-                    s_frames: &s_frames,
+                    s_frames: s_frames_listed,
                     contexts: contexts_ref,
                     cutoff_scores: &cutoff_scores,
                     x_dropoff_per_context: &x_dropoff_per_context,
@@ -3691,7 +3768,9 @@ fn search_query_batch(
                         } else {
                             None
                         };
-                        let hits = s_blast_aa_scan_subject(
+                        // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
+                        let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+                            x_scan_bf,
                             lookup_ref,
                             subject,
                             &seq_ranges,
@@ -4171,7 +4250,7 @@ fn search_query_batch(
                     // status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
                     //      kHspNumMax, &(backup.offset), INT4_MIN, overlap, ...);
                     // ```
-                    get_ungapped_hsp_list(init_hsps, contexts_ref, &s_frames)
+                    get_ungapped_hsp_list(init_hsps, contexts_ref, s_frames_listed)
                 };
                 adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
                 TblastxChunkScanResult { chunk, hits, stats }
@@ -4695,7 +4774,9 @@ fn search_query_batch(
                         } else {
                             None
                         };
-                        let hits = s_blast_aa_scan_subject(
+                        // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
+                        let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+                            x_scan_bf,
                             lookup_ref,
                             subject,
                             &seq_ranges,
@@ -4827,7 +4908,7 @@ fn search_query_batch(
                     // status = Blast_HSPListsMerge(&hsp_list, &combined_hsp_list,
                     //      kHspNumMax, &(backup.offset), INT4_MIN, overlap, ...);
                     // ```
-                    get_ungapped_hsp_list(init_hsps, contexts_ref, &s_frames)
+                    get_ungapped_hsp_list(init_hsps, contexts_ref, s_frames_listed)
                 };
                 adjust_tblastx_chunk_subject_offsets(&mut hits, chunk.offset);
                 TblastxChunkScanResult { chunk, hits, stats }
@@ -5068,7 +5149,7 @@ fn search_query_batch(
                             .map_init(
                                 || {
                                     (
-                                        vec![OffsetPair::default(); offset_array_size as usize],
+                                        vec![OffsetPair::default(); offset_pairs_len],
                                         vec![DiagStruct::default(); diag_array_size as usize],
                                     )
                                 },
@@ -5246,15 +5327,20 @@ fn search_query_batch(
         // In NCBI, HSP coords live in a concatenated translation buffer with sentinels.
         // LOSAT uses per-frame sequences; for linking we emulate absolute offsets by
         // concatenating frames in the same order as `generate_frames()`.
-        let mut subject_frame_bases: Vec<i32> = Vec::with_capacity(s_frames.len());
+        let mut subject_frame_bases: Vec<i32> = Vec::with_capacity(s_frames_listed.len());
         let mut base: i32 = 0;
-        for f in &s_frames {
+        for f in s_frames_listed {
             subject_frame_bases.push(base);
             // NCBI concatenation shares the trailing NULLB sentinel between frames:
             //   offset += length + 1;
             // where `length` is the number of residues (excluding sentinels).
             // Source: ncbi-blast/c++/src/algo/blast/core/blast_util.c:1098-1101
             base += f.aa_seq.len() as i32 - 1;
+        }
+        // EXPERIMENT (LOSAT_X_TBXFRAMES): nothing below reads the preliminary frames (the seed
+        // stage has ended); they are freed before the linking call, where the heap peaks.
+        if x_frames_late {
+            drop(s_frames_preliminary_owned);
         }
 
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_engine.c:870-899
@@ -5341,10 +5427,26 @@ fn search_query_batch(
         // NCBI: Blast_HSPListReevaluateUngapped equivalent
         // Reference: blast_engine.c:1492-1497, blast_hits.c:2609-2737
         // Perform batch reevaluation on all HSPs after merging all frames
+        //
+        // EXPERIMENT (LOSAT_X_TBXFRAMES): a subject with ambiguous bases gets the frames of its
+        // letters here, after its preliminary frames were freed, when HSPs are left for the
+        // re-evaluation (none are read otherwise).
+        let x_letter_frames: Vec<QueryFrame>;
+        let (s_frames, s_frames_report): (&[QueryFrame], &[QueryFrame]) = if x_letter_frames_later {
+            x_letter_frames = if prelinked_ungapped_hits.is_empty() {
+                Vec::new()
+            } else {
+                subjects.x_letter_frames(s_idx, &db_code)
+            };
+            x_lap.lap(XStage::Translate);
+            (&x_letter_frames, &x_letter_frames)
+        } else {
+            (&s_frames, s_frames_report)
+        };
         let mut ungapped_hits = reevaluate_ungapped_hsp_list(
             prelinked_ungapped_hits,
             contexts_ref,
-            &s_frames,
+            s_frames,
             s_frames_report,
             &cutoff_scores,
             timing_enabled,
@@ -5568,13 +5670,13 @@ fn search_query_batch(
                     output_snapshot_hits.push(h.clone());
                 }
 
-                let ctx = &contexts_ref[h.ctx_idx];
-                let s_score_frame = &s_frames[h.s_f_idx];
-                let s_frame = &s_frames_report[h.s_f_idx];
+                let ctx = &contexts_ref[h.ctx_idx as usize];
+                let s_score_frame = &s_frames[usize::from(h.s_f_idx)];
+                let s_frame = &s_frames_report[usize::from(h.s_f_idx)];
 
-                let len = h.q_aa_end.saturating_sub(h.q_aa_start);
-                let q0 = h.q_aa_start;
-                let s0 = h.s_aa_start;
+                let len = (h.q_aa_end as usize).saturating_sub(h.q_aa_start as usize);
+                let q0 = h.q_aa_start as usize;
+                let s0 = h.s_aa_start as usize;
 
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2708-2720
                 // ```c
@@ -5586,7 +5688,7 @@ fn search_query_batch(
                 // using the unmasked query and reporting subject buffers, then stores
                 // the identity count on the HSP. Reuse it here instead of rescanning
                 // every final hit.
-                let matches = h.num_ident;
+                let matches = h.num_ident as usize;
                 let mismatch = len.saturating_sub(matches);
                 let identity = if len > 0 {
                     (matches as f64 / len as f64) * 100.0
@@ -5601,12 +5703,20 @@ fn search_query_batch(
                 //    (hsp->score*kbp[hsp->context]->Lambda - kbp[hsp->context]->logK) /
                 //    NCBIMATH_LN2;
                 // ```
-                let bit_params = &contexts_ref[h.ctx_idx].karlin_params;
+                let bit_params = &contexts_ref[h.ctx_idx as usize].karlin_params;
                 let bit = calc_bit_score(h.raw_score, bit_params);
-                let (q_start, q_end) =
-                    convert_coords(h.q_aa_start, h.q_aa_end, ctx.frame, ctx.orig_len);
-                let (s_start, s_end) =
-                    convert_coords(h.s_aa_start, h.s_aa_end, s_frame.frame, s_len);
+                let (q_start, q_end) = convert_coords(
+                    h.q_aa_start as usize,
+                    h.q_aa_end as usize,
+                    ctx.frame,
+                    ctx.orig_len,
+                );
+                let (s_start, s_end) = convert_coords(
+                    h.s_aa_start as usize,
+                    h.s_aa_end as usize,
+                    s_frame.frame,
+                    s_len,
+                );
 
                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_filter.c:1379-1404
                 // ```c
@@ -5759,10 +5869,10 @@ fn search_query_batch(
                     // TBLASTX ScoreCompareHSPs uses the context/frame-relative
                     // BlastSeg offsets stored in Blast_HSPInit, not formatted
                     // nucleotide coordinates or LOSAT's concatenated frame bases.
-                    sort_query_offset: h.q_aa_start,
-                    sort_query_end: h.q_aa_end,
-                    sort_subject_offset: h.s_aa_start,
-                    sort_subject_end: h.s_aa_end,
+                    sort_query_offset: h.q_aa_start as usize,
+                    sort_query_end: h.q_aa_end as usize,
+                    sort_subject_offset: h.s_aa_start as usize,
+                    sort_subject_end: h.s_aa_end as usize,
                     has_sort_offsets: true,
                     gap_info: None,
                     num_positives: matches,
@@ -5936,7 +6046,7 @@ fn search_query_batch(
                         // ```
                         tx: None,
                         hits: Vec::new(),
-                        offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                        offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                         diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-63
                         // ```c
@@ -5972,7 +6082,7 @@ fn search_query_batch(
                 // ```
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
-                offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                 diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
@@ -5983,7 +6093,34 @@ fn search_query_batch(
     }
 
     #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-    if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
+    if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 && x_subject_next::on() {
+        // EXPERIMENT (LOSAT_X_TBXNEXT): each thread of the pool takes the next subject when it is
+        // free, with one worker state per thread, made by the same initializer as below when the
+        // thread takes its first subject (tblastx/x_subject_next.rs). Same `process_subject`.
+        let parallel_pool = parallel_pool;
+        parallel_pool.install(|| {
+            x_subject_next::for_each_subject(
+                subjects.count(),
+                &|| WorkerState {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
+                    // ```c
+                    //     /* iterate over all subject sequences */
+                    //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+                    //            != BLAST_SEQSRC_EOF) {
+                    // ```
+                    // The state of one thread's iterations of this loop (as below).
+                    tx: tx_opt.clone(),
+                    hits: Vec::new(),
+                    offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
+                    diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
+                    // NCBI: diag_table->offset = window_size;
+                    // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
+                    diag_offset: window,
+                },
+                &process_subject,
+            );
+        });
+    } else if use_parallel && !use_serial_scan_chunks && subjects.count() > 1 {
         let parallel_pool = parallel_pool;
         parallel_pool.install(|| {
             (0..subjects.count()).into_par_iter().for_each_init(
@@ -5997,7 +6134,7 @@ fn search_query_batch(
                     // ```
                     tx: tx_opt.clone(),
                     hits: Vec::new(),
-                    offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                    offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                     diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                     // NCBI: diag_table->offset = window_size;
                     // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
@@ -6019,7 +6156,7 @@ fn search_query_batch(
                 // ```
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
-                offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                 diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
@@ -6046,7 +6183,7 @@ fn search_query_batch(
                 // ```
                 tx: tx_opt.clone(),
                 hits: Vec::new(),
-                offset_pairs: vec![OffsetPair::default(); offset_array_size as usize],
+                offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                 diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
                 // NCBI: diag_table->offset = window_size;
                 // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
@@ -6159,6 +6296,9 @@ fn search_query_batch(
 
     if timing_enabled {
         let t_search = t_search_start.elapsed();
+        // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs).
+        // No NCBI counterpart.
+        crate::utils::xtiming::add_duration(crate::utils::xtiming::Phase::Search, t_search);
         let scan_s = scan_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
         let scan_n = scan_calls.load(AtomicOrdering::Relaxed);
         let ungapped_s = ungapped_ns.load(AtomicOrdering::Relaxed) as f64 / 1e9;
@@ -6233,16 +6373,16 @@ mod tests {
         UngappedHit {
             q_idx: 0,
             s_idx: 0,
-            ctx_idx,
+            ctx_idx: u32::try_from(ctx_idx).unwrap(),
             s_f_idx: 0,
             q_frame: 1,
             s_frame: 1,
-            q_aa_start: q_start,
-            q_aa_end: q_end,
-            s_aa_start: s_start,
-            s_aa_end: s_end,
-            q_seed_off: q_start,
-            s_seed_off: s_start,
+            q_aa_start: u32::try_from(q_start).unwrap(),
+            q_aa_end: u32::try_from(q_end).unwrap(),
+            s_aa_start: u32::try_from(s_start).unwrap(),
+            s_aa_end: u32::try_from(s_end).unwrap(),
+            q_seed_off: u32::try_from(q_start).unwrap(),
+            s_seed_off: u32::try_from(s_start).unwrap(),
             q_orig_len: 900,
             s_orig_len: 900,
             raw_score: score,

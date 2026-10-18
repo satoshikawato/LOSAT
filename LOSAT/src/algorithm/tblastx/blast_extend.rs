@@ -9,7 +9,7 @@
 ///
 /// NCBI uses a bitfield: signed last_hit:31 + unsigned flag:1.
 /// Reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:57-61
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DiagStruct {
     /// Packed bitfield storage mirroring NCBI layout.
     /// Reference: ncbi-blast/c++/include/algo/blast/core/blast_extend.h:57-61

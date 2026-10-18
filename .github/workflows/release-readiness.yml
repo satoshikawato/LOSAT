@@ -69,6 +69,9 @@ jobs:
       - name: Pure-Rust runtime boundary
         run: python LOSAT/tests/check_pure_rust_runtime_boundary.py --root .
 
+      - name: Floating-point contract (sources and cargo configuration)
+        run: python LOSAT/tests/check_fp_contract.py source
+
       - name: Focused release and certification tooling tests
         run: |
           python -m unittest LOSAT/tests/test_prepare_release_candidate_v010.py
@@ -165,6 +168,14 @@ jobs:
 
       - name: Build exact native release artifact
         run: cd LOSAT && cargo build --release --locked
+
+      # NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
+      # result *= expl(-z * z) / z;
+      # The shipped binary holds FMA instructions and references to fma only where LOSAT's one
+      # mul_add emulates that line (docs/agents/diagnostics.md, "Floating-point contract").
+      - name: Floating-point contract of the artifact
+        if: matrix.platform_id == 'linux-x64'
+        run: python3 LOSAT/tests/check_fp_contract.py binary --losat LOSAT/target/release/LOSAT
 
       - name: Assemble, extract, and smoke native artifact
         run: |

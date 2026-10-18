@@ -19,7 +19,8 @@ use super::lookup::{
     build_two_stage_lookup, NaLookupTable, PvDirectLookup, TwoStageLookup,
 };
 use crate::blastinput::fasta_reader::{FastaRecord, InputRecord};
-use crate::utils::dust::{DustMasker, MaskedInterval};
+use crate::utils::dust::MaskedInterval;
+use crate::utils::threading::SearchPool;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LookupTableKind {
@@ -904,6 +905,7 @@ fn merge_mask_intervals(mut intervals: Vec<MaskedInterval>) -> Vec<MaskedInterva
 pub fn apply_dust_masking<R: InputRecord>(
     args: &BlastnArgs,
     queries: &[R],
+    pool: &SearchPool<'_>,
 ) -> Vec<Vec<MaskedInterval>> {
     // NCBI blast_args.cpp:418-420: opt.SetDustFilteringLevel(...);
     // opt.SetDustFilteringWindow(...); opt.SetDustFilteringLinker(...);
@@ -919,22 +921,24 @@ pub fn apply_dust_masking<R: InputRecord>(
                 dust_level, dust_window, dust_linker
             );
         }
-        let masks: Vec<Vec<MaskedInterval>> = queries
-            .iter()
-            .map(|record| {
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:92-102
-                // ```c
-                // void s_CombineDustMasksWithUserProvidedMasks(...)
-                // {
-                //     CSymDustMasker duster(level, window, linker);
-                //     CRef<CPacked_seqint> masked_locations =
-                //         duster.GetMaskedInts(*query_id, data);
-                // ```
-                // NCBI constructs a fresh CSymDustMasker for each query, which
-                // resets the converter's CRandom state before scanning that query.
-                DustMasker::new(dust_level, dust_window, dust_linker).mask_sequence(record.seq())
-            })
-            .collect();
+        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/api/dust_filter.cpp:92-102
+        // ```c
+        // void s_CombineDustMasksWithUserProvidedMasks(...)
+        // {
+        //     CSymDustMasker duster(level, window, linker);
+        //     CRef<CPacked_seqint> masked_locations =
+        //         duster.GetMaskedInts(*query_id, data);
+        // ```
+        // NCBI constructs a fresh CSymDustMasker for each query, which
+        // resets the converter's CRandom state before scanning that query.
+        // `DustMasker::new(..).mask_sequence(..)` is that, once per query. EXPERIMENT
+        // (LOSAT_X_QDUSTPAR): the queries are masked on the search pool, in query order
+        // (`x_query_dust_par.rs`: the mask of a query is a function of its letters and the three
+        // parameters only, so the results are the serial ones); without the switch, or without a
+        // pool of two or more threads, the same map runs serially.
+        let seqs: Vec<&[u8]> = queries.iter().map(|record| record.seq()).collect();
+        let masks: Vec<Vec<MaskedInterval>> =
+            super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool);
 
         let total_masked: usize = masks
             .iter()
@@ -1143,8 +1147,12 @@ pub fn build_lookup_tables<R: InputRecord>(
 
 /// The masks of the queries: their DUST masks and, with `-lcase_masking`, their lower-case
 /// letters.
-pub fn query_masks<R: InputRecord>(args: &BlastnArgs, queries: &[R]) -> Vec<Vec<MaskedInterval>> {
-    let mut query_masks = apply_dust_masking(args, queries);
+pub fn query_masks<R: InputRecord>(
+    args: &BlastnArgs,
+    queries: &[R],
+    pool: &SearchPool<'_>,
+) -> Vec<Vec<MaskedInterval>> {
+    let mut query_masks = apply_dust_masking(args, queries, pool);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2547-2556
     // ```c
     // const bool use_lcase_masks = args.Exist(kArgUseLCaseMasking) ? ... : kDfltArgUseLCaseMasking;
@@ -1200,8 +1208,9 @@ pub fn chunk_query_masks<R: InputRecord>(
     args: &BlastnArgs,
     parts: &[R],
     restricted: Vec<Vec<MaskedInterval>>,
+    pool: &SearchPool<'_>,
 ) -> Vec<Vec<MaskedInterval>> {
-    apply_dust_masking(args, parts)
+    apply_dust_masking(args, parts, pool)
         .into_iter()
         .zip(restricted)
         .map(|(mut masks, restricted)| {

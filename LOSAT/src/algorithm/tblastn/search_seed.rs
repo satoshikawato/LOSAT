@@ -1,7 +1,9 @@
 //! Internal TBLASTN protein lookup and translated-subject seed stage.
 //! The public search remains unsupported; this is a bounded Stage C diagnostic.
 
-use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
+use crate::algorithm::blastp::encoding::{
+    encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
+};
 use crate::algorithm::tblastx::blast_aascan::{s_blast_aa_scan_subject_one_range, BlastOffsetPair};
 use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, build_ncbi_lookup_for_profile};
 use crate::algorithm::tblastx::translation::{generate_frames, QueryFrame};
@@ -28,7 +30,30 @@ pub(super) fn encode_tblastn_lookup_query(
     seg: Option<&SegParams>,
     mask_lowercase: bool,
 ) -> QueryFrame {
-    let mut frame = encode_protein_query_frame_with_seg(query, seg);
+    encode_tblastn_lookup_query_with(query, seg, mask_lowercase, false)
+}
+
+/// `encode_tblastn_lookup_query`; with LOSAT_TIMING the encoding and the SEG go to the common
+/// line (utils/xtiming.rs). For the driver's query preparation on the calling thread only.
+pub(super) fn encode_tblastn_lookup_query_timed(
+    query: &[u8],
+    seg: Option<&SegParams>,
+    mask_lowercase: bool,
+) -> QueryFrame {
+    encode_tblastn_lookup_query_with(query, seg, mask_lowercase, true)
+}
+
+fn encode_tblastn_lookup_query_with(
+    query: &[u8],
+    seg: Option<&SegParams>,
+    mask_lowercase: bool,
+    timed: bool,
+) -> QueryFrame {
+    let mut frame = if timed {
+        encode_protein_query_frame_with_seg_timed(query, seg)
+    } else {
+        encode_protein_query_frame_with_seg(query, seg)
+    };
     if !mask_lowercase {
         return frame;
     }
@@ -1016,10 +1041,20 @@ pub(super) fn x_scan_unit(
 ) {
     let (frame_index, chunk, ranges) = &plan.subject.units[unit];
     let frame = &plan.subject.frames[*frame_index];
-    if pairs.len() < plan.pair_capacity {
-        pairs.resize(plan.pair_capacity, BlastOffsetPair::default());
+    // EXPERIMENT (LOSAT_X_TBNSCANBF): the branch-free scan writes up to X_SCAN_BF_SLACK entries
+    // after the capacity.
+    let scan_bf = super::x_scan_bf::x_tbn_scan_bf();
+    let pairs_len = if scan_bf {
+        plan.pair_capacity + super::x_scan_bf::X_SCAN_BF_SLACK
+    } else {
+        plan.pair_capacity
+    };
+    if pairs.len() < pairs_len {
+        pairs.resize(pairs_len, BlastOffsetPair::default());
     }
     let pair_capacity = plan.pair_capacity as i32;
+    // EXPERIMENT (LOSAT_X_TBNSCANBF): the scan calls of the unit, for LOSAT_X_STATS.
+    let mut x_calls = 0u64;
     for (range_index, &(left, right)) in ranges.iter().enumerate() {
         // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:496-501
         // scan_range[1] = subject->seq_ranges[0].left;
@@ -1032,15 +1067,29 @@ pub(super) fn x_scan_unit(
         }
         let mut scan_range = [0, left, end];
         while scan_range[1] <= scan_range[2] {
-            let hits = s_blast_aa_scan_subject_one_range(
-                &plan.lookup,
-                &frame.aa_seq[1 + chunk.offset..],
-                pairs,
-                pair_capacity,
-                &mut scan_range,
-            );
+            let hits = if scan_bf {
+                super::x_scan_bf::x_scan_one_range_bf(
+                    &plan.lookup,
+                    &frame.aa_seq[1 + chunk.offset..],
+                    pairs,
+                    pair_capacity,
+                    &mut scan_range,
+                )
+            } else {
+                s_blast_aa_scan_subject_one_range(
+                    &plan.lookup,
+                    &frame.aa_seq[1 + chunk.offset..],
+                    pairs,
+                    pair_capacity,
+                    &mut scan_range,
+                )
+            };
             on_pairs(&pairs[..hits as usize]);
+            x_calls += 1;
         }
+    }
+    if super::x_scan_bf::x_stats() {
+        super::x_scan_bf::x_count_unit(scan_bf, x_calls);
     }
 }
 

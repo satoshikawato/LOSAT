@@ -68,14 +68,15 @@ use crate::algorithm::blastn::lookup::DiscTemplates;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-/// No NCBI counterpart: reads the switches once (LOSAT_X_PAIRPARDISC,
-/// LOSAT_X_PAIRPARDISCSHADOW; off unless set to any value, not in the strict set); they do
-/// not change any value NCBI computes.
+/// No NCBI counterpart: reads the switches once (LOSAT_X_PAIRPARDISC, a strict-set switch since
+/// 2026-10-17: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set;
+/// LOSAT_X_PAIRPARDISCSHADOW, off unless set to any value); they do not change any value NCBI
+/// computes.
 fn switches() -> (bool, bool) {
     static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();
     *SWITCHES.get_or_init(|| {
         (
-            std::env::var_os("LOSAT_X_PAIRPARDISC").is_some(),
+            crate::utils::xswitch::on("LOSAT_X_PAIRPARDISC"),
             std::env::var_os("LOSAT_X_PAIRPARDISCSHADOW").is_some(),
         )
     })
@@ -819,7 +820,7 @@ fn seed_stage(
 ///     }
 /// ```
 /// The parent's `run` for a discontiguous table: the seed stage of this chunk (the loop
-/// above with its two-hit extension) when LOSAT_X_PAIRPARDISC is set and the chunk is in
+/// above with its two-hit extension) when LOSAT_X_PAIRPARDISC is on and the chunk is in
 /// scope; `true` means it has run and the reference scan is skipped. With
 /// LOSAT_X_PAIRPARDISCSHADOW the stage runs on copies of the diagonal hash and the hit list,
 /// `false` is returned so the reference runs, and the parent's `shadow_check` compares the

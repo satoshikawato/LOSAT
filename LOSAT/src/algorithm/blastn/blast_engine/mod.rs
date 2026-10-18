@@ -19,6 +19,8 @@ mod run;
 // Re-export the main run function
 pub use run::run;
 pub use run::run_local;
+// EXPERIMENT (LOSAT_X_QPREPPARSHADOW): the summary line `main` prints at exit (no NCBI counterpart).
+pub use run::x_query_prep_par_print_summary;
 // ABI v1 (`web_api::v1_blastn`) checks a search without subjects as the CLI does.
 #[cfg(target_arch = "wasm32")]
 pub(crate) use run::check_subjects_not_empty;

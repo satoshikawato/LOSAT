@@ -765,6 +765,14 @@ impl SeqDb {
         self.volumes[volume].read_block(first, first + 1, ordinal)
     }
 
+    /// Whether the ambiguity data of nucleotide `ordinal` decode
+    /// (`Volume::check_ambiguity`: `SequenceBlock::ambiguity_runs`' error,
+    /// read without the letters).
+    pub fn check_ambiguity(&self, ordinal: u32) -> Result<(), SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].check_ambiguity(oid, ordinal)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2222-2241
     // ```c++
     //     if (adjust_oids && bdls.NotEmpty() && m_VolStart) {

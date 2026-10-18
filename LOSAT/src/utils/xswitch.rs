@@ -31,8 +31,15 @@ use std::ffi::OsStr;
 use std::ops::RangeInclusive;
 use std::sync::OnceLock;
 
-/// No NCBI counterpart: the switches of the strict set, the variables that are on by default.
-/// The last seventeen joined after the set became the default. `LOSAT_X_PAIRLUT` and
+/// No NCBI counterpart: the switches of the strict set, the variables that are on by default,
+/// sorted by name. A switch joins the set with its name in order here and its `export` line in
+/// order in the block of `docs/agents/diagnostics.md` ("Performance switches"; a test below
+/// compares the two), and its entry there says since when it is in the set and on what evidence.
+/// The size of the set is written nowhere, and a joining switch adds nothing at the end of a
+/// shared list, so two pull requests that each add a switch change different lines.
+///
+/// The switches that joined after the set became the default, until this rule (2026-10-17):
+/// `LOSAT_X_PAIRLUT` and
 /// `LOSAT_X_HSPINPLACE` were added after the change as switches that are off unless set and
 /// joined the set once they were verified with it on. `LOSAT_X_SEEDBUCKET` was left out at the
 /// change: it numbered the lookup hits of a chunk scan in a `u32`, exact only up to 2^32 hits
@@ -75,67 +82,148 @@ use std::sync::OnceLock;
 /// `LOSAT_X_TBNBATCHRULE` (which query batches `LOSAT_X_TBNBATCH` searches side by side, only the
 /// full waves of a small subject set, `tblastn/stage_d_pipeline.rs`) was added after the change as
 /// a switch that is off unless set and joined the set once it was verified and timed with it on.
-pub(crate) const STRICT_SET: [&str; 60] = [
-    "LOSAT_X_DPFAST",
-    "LOSAT_X_COMPFAST",
-    "LOSAT_X_PURGEFAST",
-    "LOSAT_X_ITREEFAST",
-    "LOSAT_X_CTXFAST",
-    "LOSAT_X_GREEDYFAST",
-    "LOSAT_X_GREEDYSPEC",
+/// The eight blastp switches of the OrthoFinder work (`LOSAT_X_BPSEED`,
+/// `LOSAT_X_BPUNGAP`, `LOSAT_X_BPGAP`, `LOSAT_X_BPLUT`, `LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`,
+/// `LOSAT_X_BPREDOFIT` and `LOSAT_X_BPQBLOCK`) joined after a 49-job full-scale run with all of
+/// them on: the outputs equal NCBI's and the max RSS is below NCBI's on every job.
+/// `LOSAT_X_BNSTREAM` (BLASTN hands each subject's HSPs to the hit lists in OID order from a
+/// bounded window while the threads search, `blastn/blast_engine/x_bnstream.rs`) was added after
+/// the change as a switch that is off unless set and joined the set once it was verified and timed
+/// with it on.
+/// `LOSAT_X_TBXNEXT` (the threads of TBLASTX's parallel subject loop take the next subject when
+/// they are free, `tblastx/x_subject_next.rs`) and `LOSAT_X_TBXFRAMES` (a TBLASTX subject's frames
+/// made when they are read and freed when they are no longer read, `tblastx/subjects.rs`) were
+/// added after the change as switches that are off unless set and joined the set together once
+/// they were verified and timed with it on.
+/// `LOSAT_X_BPDIAG` (the two-hit diagonal test of a lookup cell eight hits at a time,
+/// `blastp/x_seed_fused.rs`) joined after a second run of the same jobs with it on as well.
+/// `LOSAT_X_SEEDCOMPACT` (TBLASTX's unit path keeps the saved init HSPs of a unit as 28-byte
+/// records copied out at their exact length, `tblastx/x_pair_par.rs`) was added after the change as
+/// a switch that is off unless set and joined the set once it was verified and timed with it on.
+/// `LOSAT_X_BPCLUT` (the compressed lookup table of `blastp-fast` built flat, in three passes, by
+/// the search's pool at more than one thread, `tblastx/lookup/x_clut_direct.rs`) and
+/// `LOSAT_X_BPLKPFLAT` (how that build is scheduled and where its vectors come from, which acts
+/// only where `LOSAT_X_BPCLUT` builds the table on the pool, `tblastx/lookup/x_clut_par.rs`) were
+/// added after the change as switches that are off unless set and joined the set together once
+/// they were verified and timed with them on.
+/// `LOSAT_X_BPDEFER` (the candidates of a lookup cell's AVX2 batches called after its last batch
+/// of eight, `blastp/x_seed_fused.rs`) joined after a third run of the same jobs with it on as well.
+/// `LOSAT_X_TBNOWNPOOLS` (the query batches `LOSAT_X_TBNBATCHRULE` leaves one after another
+/// searched at the same time, each on a pool of its own, `tblastn/stage_d_pipeline.rs`) was added
+/// after the change as a switch that is off unless set and joined the set once it was verified
+/// and timed with it on.
+/// `LOSAT_X_BXSUBJFLOW` (BLASTX's subject loop of a query chunk as a flow of tasks of 64 subjects
+/// searched ahead by the pool's other threads, `blastx/x_subject_flow.rs`) joined the set in the
+/// pull request that added it (Owner 2026-10-17: speed-ups land default ON), after it was
+/// verified and timed with it on and off.
+/// `LOSAT_X_PAIRPARGATE` (TBLASTX's unit path only for the query batches where it is expected to
+/// be faster than the reference frame loop, `tblastx/x_pair_par.rs`) and `LOSAT_X_TBXLUT` (the
+/// reference loop's full lookup table filled in place from per-cell counts,
+/// `tblastx/lookup/x_lut_direct.rs`) were added after the change as switches that are off unless
+/// set and joined the set together once they were verified and timed with them on and off.
+pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
-    "LOSAT_X_ENVCACHE",
+    "LOSAT_X_BNSTREAM",
+    "LOSAT_X_BPCLUT",
+    "LOSAT_X_BPDBCUT",
+    "LOSAT_X_BPDEFER",
+    "LOSAT_X_BPDIAG",
+    "LOSAT_X_BPGAP",
+    "LOSAT_X_BPLKPAHEAD",
+    "LOSAT_X_BPLKPFLAT",
+    "LOSAT_X_BPLUT",
+    "LOSAT_X_BPPCOMPACT",
+    "LOSAT_X_BPPFREE",
+    "LOSAT_X_BPQBLOCK",
+    "LOSAT_X_BPREDOFIT",
+    "LOSAT_X_BPREDOLPT",
+    "LOSAT_X_BPREDOPAR",
+    "LOSAT_X_BPSCANBF",
+    "LOSAT_X_BPSEED",
+    "LOSAT_X_BPSUBJMETA",
+    "LOSAT_X_BPSUBJRUN",
+    "LOSAT_X_BPUNGAP",
+    "LOSAT_X_BXBATCH",
+    "LOSAT_X_BXCHUNK",
+    "LOSAT_X_BXDIAG",
+    "LOSAT_X_BXFLOW",
+    "LOSAT_X_BXLAZYCTX",
+    "LOSAT_X_BXLEAN",
+    "LOSAT_X_BXLUT",
+    "LOSAT_X_BXPAR",
+    "LOSAT_X_BXPOOL",
+    "LOSAT_X_BXSCAN",
+    "LOSAT_X_BXSCANBF",
+    "LOSAT_X_BXSEGMEMO",
+    "LOSAT_X_BXSUBJFLOW",
+    "LOSAT_X_CODONFAST",
+    "LOSAT_X_COMPFAST",
+    "LOSAT_X_CTXFAST",
+    "LOSAT_X_DEKKER",
+    "LOSAT_X_DIAGLV",
+    "LOSAT_X_DISCLUTPAR",
+    "LOSAT_X_DPAVX2",
+    "LOSAT_X_DPFAST",
+    "LOSAT_X_DPNEON",
+    "LOSAT_X_DPW128",
     "LOSAT_X_DUSTFAST",
     "LOSAT_X_DUSTRING",
-    "LOSAT_X_MBDELAY",
+    "LOSAT_X_ENVCACHE",
+    "LOSAT_X_ERFMEMO",
+    "LOSAT_X_GREEDYFAST",
+    "LOSAT_X_GREEDYFUSE",
+    "LOSAT_X_GREEDYPRELIM",
+    "LOSAT_X_GREEDYSPEC",
+    "LOSAT_X_HSPINPLACE",
+    "LOSAT_X_IDEALMEMO",
+    "LOSAT_X_ITREEFAST",
+    "LOSAT_X_KARLINFAST",
+    "LOSAT_X_LINKSLICES",
+    "LOSAT_X_LINKSORT",
+    "LOSAT_X_LUTARENA",
+    "LOSAT_X_LUTSPLIT",
     "LOSAT_X_MBBATCH",
+    "LOSAT_X_MBDELAY",
+    "LOSAT_X_NEWTONEXACT",
+    "LOSAT_X_NEWTONLANES",
+    "LOSAT_X_NEWTONLANES8",
+    "LOSAT_X_PAIRLUT",
+    "LOSAT_X_PAIRPAR",
+    "LOSAT_X_PAIRPARDISC",
+    "LOSAT_X_PAIRPARFOLD",
+    "LOSAT_X_PAIRPARGATE",
+    "LOSAT_X_PURGEFAST",
+    "LOSAT_X_QBATCHPAR",
+    "LOSAT_X_QDUSTPAR",
+    "LOSAT_X_QPREPPAR",
+    "LOSAT_X_RPTSTREAM",
+    "LOSAT_X_SEEDBUCKET",
+    "LOSAT_X_SEEDCOMPACT",
+    "LOSAT_X_SEEDRELEASE",
+    "LOSAT_X_SEEDUNMAP",
     "LOSAT_X_SEGFAST",
     "LOSAT_X_SEGMEMO",
     "LOSAT_X_SEGSHARE",
-    "LOSAT_X_KARLINFAST",
-    "LOSAT_X_IDEALMEMO",
-    "LOSAT_X_ERFMEMO",
-    "LOSAT_X_DEKKER",
-    "LOSAT_X_LUTARENA",
-    "LOSAT_X_LUTSPLIT",
-    "LOSAT_X_TBNPAR",
-    "LOSAT_X_TBNEVENTS",
-    "LOSAT_X_TBNQSIDE",
-    "LOSAT_X_TBNSSIDE",
     "LOSAT_X_TBNBATCH",
-    "LOSAT_X_BXPAR",
-    "LOSAT_X_BXLAZYCTX",
-    "LOSAT_X_BXLEAN",
-    "LOSAT_X_BXPOOL",
-    "LOSAT_X_BXCHUNK",
-    "LOSAT_X_BXBATCH",
-    "LOSAT_X_CODONFAST",
-    "LOSAT_X_NEWTONEXACT",
-    "LOSAT_X_DPAVX2",
-    "LOSAT_X_DPW128",
-    "LOSAT_X_BXLUT",
-    "LOSAT_X_BXSCAN",
-    "LOSAT_X_BXSEGMEMO",
-    "LOSAT_X_PAIRPAR",
-    "LOSAT_X_NEWTONLANES",
-    "LOSAT_X_GREEDYPRELIM",
-    "LOSAT_X_PAIRLUT",
-    "LOSAT_X_HSPINPLACE",
-    "LOSAT_X_SEEDBUCKET",
+    "LOSAT_X_TBNBATCHRULE",
+    "LOSAT_X_TBNEVENTS",
+    "LOSAT_X_TBNLINKWIN",
     "LOSAT_X_TBNOIDCHUNK",
-    "LOSAT_X_SEEDRELEASE",
-    "LOSAT_X_GREEDYFUSE",
-    "LOSAT_X_LINKSORT",
-    "LOSAT_X_NEWTONLANES8",
-    "LOSAT_X_TBNSTATE",
-    "LOSAT_X_TBNXLATE",
     "LOSAT_X_TBNOIDNEXT",
     "LOSAT_X_TBNOIDUNITS",
-    "LOSAT_X_LINKSLICES",
-    "LOSAT_X_BPSUBJRUN",
+    "LOSAT_X_TBNOWNPOOLS",
+    "LOSAT_X_TBNPAR",
+    "LOSAT_X_TBNQSIDE",
+    "LOSAT_X_TBNSCANBF",
+    "LOSAT_X_TBNSSIDE",
+    "LOSAT_X_TBNSTATE",
     "LOSAT_X_TBNSTORE",
-    "LOSAT_X_DPNEON",
-    "LOSAT_X_TBNBATCHRULE",
+    "LOSAT_X_TBNXLATE",
+    "LOSAT_X_TBNXLATESIMD",
+    "LOSAT_X_TBXFRAMES",
+    "LOSAT_X_TBXLUT",
+    "LOSAT_X_TBXNEXT",
+    "LOSAT_X_TBXSCANBF",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that
@@ -229,11 +317,35 @@ mod tests {
     }
 
     #[test]
-    fn the_strict_set_names_are_distinct() {
-        let mut names = STRICT_SET.to_vec();
-        names.sort_unstable();
-        names.dedup();
-        assert_eq!(names.len(), STRICT_SET.len());
-        assert!(names.iter().all(|name| name.starts_with("LOSAT_X_")));
+    fn the_strict_set_names_are_distinct_and_sorted() {
+        assert!(STRICT_SET.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(STRICT_SET.iter().all(|name| name.starts_with("LOSAT_X_")));
+    }
+
+    /// The block of `docs/agents/diagnostics.md` that writes the set as `export` lines names the
+    /// switches of `STRICT_SET`, one per line, in the same order.
+    #[test]
+    fn the_documented_block_lists_the_strict_set() {
+        let doc = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../docs/agents/diagnostics.md"
+        ));
+        let anchor = doc
+            .find("The strict set (the variables that are on;")
+            .expect("the block's heading in diagnostics.md");
+        let block = &doc[anchor..];
+        let start = block.find("```bash\n").expect("the block") + "```bash\n".len();
+        let end = start + block[start..].find("```").expect("the end of the block");
+        let documented: Vec<&str> = block[start..end]
+            .lines()
+            .map(|line| {
+                let name = line
+                    .strip_prefix("export ")
+                    .and_then(|rest| rest.split_once('='))
+                    .map(|(name, _)| name);
+                name.unwrap_or_else(|| panic!("not one `export NAME=value` line: {line:?}"))
+            })
+            .collect();
+        assert_eq!(documented, STRICT_SET);
     }
 }

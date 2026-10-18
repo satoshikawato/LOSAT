@@ -308,14 +308,14 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
     let mut kept_hits = Vec::new();
 
     for mut hit in ungapped_hits {
-        let ctx = &contexts[hit.ctx_idx];
-        let s_frame_scoring = &s_frames_scoring[hit.s_f_idx];
-        let s_frame_report = &s_frames_report[hit.s_f_idx];
+        let ctx = &contexts[hit.ctx_idx as usize];
+        let s_frame_scoring = &s_frames_scoring[usize::from(hit.s_f_idx)];
+        let s_frame_report = &s_frames_report[usize::from(hit.s_f_idx)];
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:686-688
         // ```c
         // Int4 cutoff_score = word_params->cutoffs[hsp->context].cutoff_score;
         // ```
-        let cutoff = cutoff_scores[hit.ctx_idx];
+        let cutoff = cutoff_scores[hit.ctx_idx as usize];
 
         // NCBI: query_start = query_blk->sequence + query_info->contexts[context].query_offset;
         // query->sequence points past the leading NULLB sentinel.
@@ -326,9 +326,9 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
         let subject = &subject_full[1..subject_full.len() - 1];
 
         // NCBI: query = query_start + hsp->query.offset (0-based offsets)
-        let qs = hit.q_aa_start;
-        let ss = hit.s_aa_start;
-        let len_u = hit.q_aa_end.saturating_sub(hit.q_aa_start);
+        let qs = hit.q_aa_start as usize;
+        let ss = hit.s_aa_start as usize;
+        let len_u = (hit.q_aa_end as usize).saturating_sub(hit.q_aa_start as usize);
 
         if len_u == 0 {
             continue;
@@ -428,12 +428,17 @@ pub(crate) fn reevaluate_ungapped_hsp_list(
         // Update hit with reevaluated coordinates and score (0-based offsets)
         let new_qe = new_qs + new_len;
         let new_se = new_ss + new_len;
-        hit.q_aa_start = new_qs;
-        hit.q_aa_end = new_qe;
-        hit.s_aa_start = new_ss;
-        hit.s_aa_end = new_se;
+        hit.q_aa_start = u32::try_from(new_qs)
+            .expect("q_aa_start: a query offset fits u32 (NCBI's BlastSeg offset is Int4)");
+        hit.q_aa_end = u32::try_from(new_qe)
+            .expect("q_aa_end: a query offset fits u32 (NCBI's BlastSeg end is Int4)");
+        hit.s_aa_start = u32::try_from(new_ss)
+            .expect("s_aa_start: a subject offset fits u32 (NCBI's BlastSeg offset is Int4)");
+        hit.s_aa_end = u32::try_from(new_se)
+            .expect("s_aa_end: a subject offset fits u32 (NCBI's BlastSeg end is Int4)");
         hit.raw_score = new_score;
-        hit.num_ident = num_ident;
+        hit.num_ident = u32::try_from(num_ident)
+            .expect("num_ident: an identity count fits u32 (NCBI's num_ident is Int4)");
 
         trace_ungapped_hit_if_match("after_reevaluate", &hit);
         kept_hits.push(hit);

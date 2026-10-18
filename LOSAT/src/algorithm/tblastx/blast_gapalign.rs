@@ -230,7 +230,33 @@ pub fn get_ungapped_hsp_list(
     contexts: &[QueryContext],
     s_frames: &[QueryFrame],
 ) -> Vec<UngappedHit> {
-    let mut ungapped_hits = Vec::new();
+    get_ungapped_hsp_list_into(init_hsps, contexts, s_frames, Vec::new())
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4730-4732
+// ```c
+//    /* The BlastHSPList structure can be allocated and passed from outside */
+//    if (*hsp_list_ptr != NULL)
+//       hsp_list = *hsp_list_ptr;
+// ```
+// `get_ungapped_hsp_list` with the list passed in by the caller, as NCBI's caller may pass its own
+// list; `get_ungapped_hsp_list` passes `Vec::new()`. EXPERIMENT (LOSAT_X_SEEDCOMPACT,
+// x_pair_par.rs) passes a Vec reserved at `init_hsps.len()` (one hit per init HSP), so the list is
+// not grown by doubling. The body after the assertion is the body `get_ungapped_hsp_list` had: it
+// reads the list's length (`hsp_list_order`) and elements, never its capacity, so the capacity
+// changes no element. The list must be empty, since `hsp_list_order` counts from its length and
+// the final sort covers all of it.
+/// `get_ungapped_hsp_list` into `ungapped_hits`, which must be empty (its capacity is kept).
+pub fn get_ungapped_hsp_list_into(
+    init_hsps: Vec<InitHSP>,
+    contexts: &[QueryContext],
+    s_frames: &[QueryFrame],
+    mut ungapped_hits: Vec<UngappedHit>,
+) -> Vec<UngappedHit> {
+    assert!(
+        ungapped_hits.is_empty(),
+        "get_ungapped_hsp_list_into: the list passed in must be empty"
+    );
 
     for init_hsp in init_hsps {
         let ctx = &contexts[init_hsp.ctx_idx];
@@ -292,17 +318,19 @@ pub fn get_ungapped_hsp_list(
         // query.end = ungapped_data->length + ungapped_data->q_start
         //
         // In LOSAT, q_start_relative is context-relative coordinate (0-based).
-        let qs = usize::try_from(q_start_relative)
+        // No NCBI counterpart: the record holds these `i32` (NCBI `Int4`) offsets in `u32`
+        // (`UngappedHit`'s field widths); a non-negative `i32` always fits.
+        let qs = u32::try_from(q_start_relative)
             .expect("NCBI BLAST requires non-negative ungapped query start");
-        let qe = usize::try_from(q_end_relative)
+        let qe = u32::try_from(q_end_relative)
             .expect("NCBI BLAST requires non-negative ungapped query end");
-        let ss = usize::try_from(init_hsp.s_start)
+        let ss = u32::try_from(init_hsp.s_start)
             .expect("NCBI BLAST requires non-negative ungapped subject start");
-        let se = usize::try_from(init_hsp.s_end)
+        let se = u32::try_from(init_hsp.s_end)
             .expect("NCBI BLAST requires non-negative ungapped subject end");
-        let q_seed = usize::try_from(q_seed_relative)
+        let q_seed = u32::try_from(q_seed_relative)
             .expect("NCBI BLAST requires non-negative ungapped query seed");
-        let s_seed = usize::try_from(init_hsp.s_seed)
+        let s_seed = u32::try_from(init_hsp.s_seed)
             .expect("NCBI BLAST requires non-negative ungapped subject seed");
 
         // Offsets are already 0-based in query/subject->sequence buffers.
@@ -312,12 +340,16 @@ pub fn get_ungapped_hsp_list(
 
         // Create UngappedHit with context-relative coordinates (before reevaluation)
         // NCBI: Blast_HSPInit creates HSP with original extension score
-        let hsp_list_order = ungapped_hits.len();
+        let hsp_list_order = u32::try_from(ungapped_hits.len())
+            .expect("hsp_list_order: an HSP list position fits u32 (NCBI's hspcnt is Int4)");
         let uh = UngappedHit {
             q_idx: init_hsp.q_idx,
             s_idx: init_hsp.s_idx,
-            ctx_idx: init_hsp.ctx_idx,
-            s_f_idx: init_hsp.s_f_idx,
+            ctx_idx: u32::try_from(init_hsp.ctx_idx).expect(
+                "ctx_idx: a query context index fits u32 (NCBI's BlastHSP context is Int4)",
+            ),
+            s_f_idx: u8::try_from(init_hsp.s_f_idx)
+                .expect("s_f_idx: a subject frame index (0..5) fits u8"),
             q_frame: init_hsp.q_frame,
             s_frame: init_hsp.s_frame,
             q_aa_start: qs_l,
@@ -332,8 +364,10 @@ pub fn get_ungapped_hsp_list(
             // ```
             q_seed_off: q_seed,
             s_seed_off: s_seed,
-            q_orig_len: init_hsp.q_orig_len,
-            s_orig_len: init_hsp.s_orig_len,
+            q_orig_len: u32::try_from(init_hsp.q_orig_len)
+                .expect("q_orig_len: a query length fits u32 (NCBI's sequence length is Int4)"),
+            s_orig_len: u32::try_from(init_hsp.s_orig_len)
+                .expect("s_orig_len: a subject length fits u32 (NCBI's sequence length is Int4)"),
             raw_score: init_hsp.score, // Original extension score (before reevaluation)
             e_value: f64::INFINITY,
             num_ident: 0, // Will be computed during reevaluation
@@ -559,7 +593,7 @@ mod tests {
             // qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
             //       ScoreCompareHSPs);
             // ```
-            hsp_list_order,
+            hsp_list_order: u32::try_from(hsp_list_order).expect("hsp_list_order fits u32"),
             ordering_method: 0,
             linked_set: false,
             start_of_chain: false,
@@ -608,9 +642,9 @@ mod tests {
             .map(|hit| {
                 (
                     hit.raw_score,
-                    hit.s_aa_start,
-                    hit.q_aa_end.saturating_sub(hit.q_aa_start),
-                    hit.q_aa_start,
+                    hit.s_aa_start as usize,
+                    (hit.q_aa_end as usize).saturating_sub(hit.q_aa_start as usize),
+                    hit.q_aa_start as usize,
                 )
             })
             .collect();
@@ -727,7 +761,7 @@ mod tests {
 
         let ordered: Vec<(i32, usize)> = hits
             .iter()
-            .map(|hit| (hit.raw_score, hit.hsp_list_order))
+            .map(|hit| (hit.raw_score, hit.hsp_list_order as usize))
             .collect();
         assert_eq!(ordered, vec![(100, 2), (100, 1), (90, 0)]);
     }
@@ -772,5 +806,60 @@ mod tests {
         };
 
         let _ = get_ungapped_hsp_list(vec![invalid], &contexts, &subject_frames);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:4730-4732
+    // ```c
+    //    /* The BlastHSPList structure can be allocated and passed from outside */
+    //    if (*hsp_list_ptr != NULL)
+    //       hsp_list = *hsp_list_ptr;
+    // ```
+    // The list passed in by the caller (LOSAT_X_SEEDCOMPACT reserves one hit per init HSP) gives
+    // the list of `get_ungapped_hsp_list`, every field (Debug, so E-values by their shortest
+    // round-trip text), in the caller's allocation; an empty input keeps the reservation.
+    #[test]
+    fn test_get_ungapped_hsp_list_into_a_reserved_list_equals_get_ungapped_hsp_list() {
+        let contexts = vec![make_context()];
+        let subject_frames = vec![make_subject_frame()];
+        let init_hsps = vec![
+            make_init_hsp(4, 10, 30, 36, 100),
+            make_init_hsp(2, 10, 20, 28, 100),
+            make_init_hsp(1, 8, 20, 27, 100),
+            make_init_hsp(3, 11, 20, 28, 120),
+        ];
+        let expected = get_ungapped_hsp_list(init_hsps.clone(), &contexts, &subject_frames);
+        let reserved = Vec::with_capacity(init_hsps.len());
+        let buffer = reserved.as_ptr();
+        let hits = get_ungapped_hsp_list_into(init_hsps, &contexts, &subject_frames, reserved);
+        assert_eq!(format!("{hits:?}"), format!("{expected:?}"));
+        assert_eq!((hits.len(), hits.capacity()), (4, 4));
+        assert_eq!(hits.as_ptr(), buffer, "the caller's allocation");
+        let empty = get_ungapped_hsp_list_into(
+            Vec::new(),
+            &contexts,
+            &subject_frames,
+            Vec::with_capacity(3),
+        );
+        assert!(empty.is_empty() && empty.capacity() == 3);
+    }
+
+    // No NCBI counterpart: the caller-given list must be empty (`hsp_list_order` counts from its
+    // length).
+    #[test]
+    #[should_panic(expected = "get_ungapped_hsp_list_into: the list passed in must be empty")]
+    fn test_get_ungapped_hsp_list_into_rejects_a_list_with_hits() {
+        let contexts = vec![make_context()];
+        let subject_frames = vec![make_subject_frame()];
+        let one = get_ungapped_hsp_list(
+            vec![make_init_hsp(1, 8, 20, 27, 100)],
+            &contexts,
+            &subject_frames,
+        );
+        let _ = get_ungapped_hsp_list_into(
+            vec![make_init_hsp(2, 10, 20, 28, 100)],
+            &contexts,
+            &subject_frames,
+            one,
+        );
     }
 }

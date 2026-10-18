@@ -5,6 +5,7 @@ use super::{
 use crate::algorithm::blastp::extension::{extend_one_hit_blosum62, extend_two_hit_blosum62};
 use crate::algorithm::tblastx::blast_aascan::s_blast_aa_scan_subject_one_range;
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair as OffsetPair;
+use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::{
     build_blosum62_compressed_lookup, BlastCompressedAaLookupTable,
 };
@@ -22,6 +23,22 @@ use anyhow::{ensure, Result};
 // (a child module, so that it uses the diagonal table's fields).
 #[path = "x_seed_scan.rs"]
 pub mod x_seed_scan;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-511
+// ```c
+//     while (scan_range[1] <= scan_range[2]) {
+//         /* scan the subject sequence for hits */
+//         hits = scansub(lookup_wrap, subject,
+//                                   offset_pairs, array_size, scan_range);
+//
+//         totalhits += hits;
+//         /* for each hit, */
+//         for (i = 0; i < hits; ++i) {
+// ```
+// EXPERIMENT (LOSAT_X_BXDIAG): the two-hit seed loop with the scan and the diagonal test fused
+// (a child module, so that it uses the diagonal table's fields).
+#[path = "x_seed_diag.rs"]
+pub mod x_seed_diag;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65
 // ```c++
@@ -46,8 +63,20 @@ pub mod x_seed_scan;
 //                 diag_table->window = window_size;
 //         }
 // ```
+// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_extend.h:57-60
+// ```c
+// typedef struct DiagStruct {
+//    signed int last_hit   : 31; /**< Offset of the last hit */
+//    unsigned int flag      : 1 ; /**< Reset the next extension? */
+// } DiagStruct;
+// ```
+// The entries are NCBI's bit-field (`DiagStruct`: `last_hit` truncated to 31 bits on write and
+// sign-extended on read), so a `s + diag_offset` past 2^30 wraps as in NCBI. That happens at a
+// `-window_size` near 2^29 from the second subject on (the offset grows by length + window per
+// subject until INT4_MAX / 4); NCBI 2.17.0 then drops that subject's two-hit seeds, and so does
+// LOSAT. The sums and differences on the entries wrap (two's complement i32), as NCBI's do.
 pub struct Diagonals {
-    entries: Vec<(i32, bool)>,
+    entries: Vec<DiagStruct>,
     offset: i32,
     window: i32,
 }
@@ -85,7 +114,7 @@ impl Diagonals {
             "BLASTX diagonal length exceeds Int4"
         );
         Ok(Self {
-            entries: vec![(0, false); n],
+            entries: vec![DiagStruct::default(); n],
             offset: window,
             window,
         })
@@ -134,7 +163,7 @@ impl Diagonals {
     pub fn finish_subject(&mut self, length: usize) -> Result<()> {
         if self.offset >= i32::MAX / 4 {
             self.offset = self.window;
-            self.entries.fill((-self.window, false));
+            self.entries.fill(DiagStruct::clear(self.window));
         } else {
             self.offset = self
                 .offset
@@ -392,6 +421,8 @@ impl Lookup {
         if window > 0 && range[2] < range[1] {
             range[2] = range[1];
         }
+        let mut pad = Vec::new();
+        let subject = x_scan_bytes(subject, range[2], word, &mut pad);
         let mut pairs = vec![OffsetPair::default(); self.capacity()];
         let capacity = pairs.len() as i32;
         let mut seeds = Vec::new();
@@ -411,6 +442,38 @@ impl Lookup {
             visit(&seeds);
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:505-506
+// ```c
+//     if (scan_range[2] < scan_range[1])
+//         scan_range[2] = scan_range[1];
+// ```
+// With a two-hit window the last scan position is at least 0, so the one position of a subject
+// shorter than a word less one letter has a word that runs past the sentinel, and NCBI reads the
+// bytes after it in its buffer (the next sequence of a database volume). No NCBI counterpart for
+// the copy: LOSAT scans such a subject from a copy with sentinels after it, as the fused loop
+// reads it (`blastp::x_seed_fused::x_scan_cells_bf`). One scan position extends no hit (the
+// two-hit test needs two hits on a diagonal), and the entry such a hit leaves lies a window and
+// the subject's length behind the next subject's offsets, so no hit and no report depends on
+// those bytes.
+/// The bytes a scan of positions up to `s_last` (each with its `word` letters) reads: `subject`
+/// (the residues and the sentinel), or, when the last word runs past it, a copy in `pad` with
+/// sentinels (0) after it.
+pub(crate) fn x_scan_bytes<'a>(
+    subject: &'a [u8],
+    s_last: i32,
+    word: i32,
+    pad: &'a mut Vec<u8>,
+) -> &'a [u8] {
+    let read = (s_last + word).max(0) as usize;
+    if read <= subject.len() {
+        return subject;
+    }
+    pad.clear();
+    pad.extend_from_slice(subject);
+    pad.resize(read, 0);
+    pad
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-607
@@ -705,9 +768,9 @@ fn word_finder_plain(
                 } else {
                     (q - s) & mask
                 } as usize;
-                let (last, flag) = &mut diagonals.entries[index];
+                let entry = &mut diagonals.entries[index];
                 let (u, end, extended) = if options.window_size == 0 {
-                    if s - (*last - diagonals.offset) < 0 {
+                    if s.wrapping_sub(entry.last_hit().wrapping_sub(diagonals.offset)) < 0 {
                         continue;
                     }
                     context = if lazy_context {
@@ -728,18 +791,18 @@ fn word_finder_plain(
                     };
                     (result.ungapped_data, result.s_last_off, true)
                 } else {
-                    if *flag {
-                        if s + diagonals.offset < *last {
+                    if entry.flag() != 0 {
+                        if s.wrapping_add(diagonals.offset) < entry.last_hit() {
                             continue;
                         }
-                        *last = s + diagonals.offset;
-                        *flag = false;
+                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
+                        entry.set_flag(0);
                         continue;
                     }
-                    let previous = *last - diagonals.offset;
-                    let diff = s - previous;
+                    let previous = entry.last_hit().wrapping_sub(diagonals.offset);
+                    let diff = s.wrapping_sub(previous);
                     if diff >= options.window_size {
-                        *last = s + diagonals.offset;
+                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
                         continue;
                     }
                     if diff < word {
@@ -752,7 +815,7 @@ fn word_finder_plain(
                     };
                     let p = &parameters[context];
                     if q - diff < batch.contexts[context].offset as i32 {
-                        *last = s + diagonals.offset;
+                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
                         continue;
                     }
                     let Some(result) = extend_two_hit_blosum62(
@@ -780,12 +843,12 @@ fn word_finder_plain(
                     });
                 }
                 if options.window_size == 0 {
-                    *last = end - (word - 1) + diagonals.offset;
+                    entry.set_last_hit((end - (word - 1)).wrapping_add(diagonals.offset));
                 } else if extended {
-                    *flag = true;
-                    *last = end - (word - 1) + diagonals.offset;
+                    entry.set_flag(1);
+                    entry.set_last_hit((end - (word - 1)).wrapping_add(diagonals.offset));
                 } else {
-                    *last = s + diagonals.offset;
+                    entry.set_last_hit(s.wrapping_add(diagonals.offset));
                 }
             }
         },
@@ -930,9 +993,9 @@ fn word_finder_bucketed(
                 } else {
                     (q - s) & mask
                 } as usize;
-                let (last, flag) = &mut diagonals.entries[index];
+                let entry = &mut diagonals.entries[index];
                 let (u, end, extended) = if options.window_size == 0 {
-                    if s - (*last - diagonals.offset) < 0 {
+                    if s.wrapping_sub(entry.last_hit().wrapping_sub(diagonals.offset)) < 0 {
                         break 'hit;
                     }
                     context = if lazy_context {
@@ -953,18 +1016,18 @@ fn word_finder_bucketed(
                     };
                     (result.ungapped_data, result.s_last_off, true)
                 } else {
-                    if *flag {
-                        if s + diagonals.offset < *last {
+                    if entry.flag() != 0 {
+                        if s.wrapping_add(diagonals.offset) < entry.last_hit() {
                             break 'hit;
                         }
-                        *last = s + diagonals.offset;
-                        *flag = false;
+                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
+                        entry.set_flag(0);
                         break 'hit;
                     }
-                    let previous = *last - diagonals.offset;
-                    let diff = s - previous;
+                    let previous = entry.last_hit().wrapping_sub(diagonals.offset);
+                    let diff = s.wrapping_sub(previous);
                     if diff >= options.window_size {
-                        *last = s + diagonals.offset;
+                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
                         break 'hit;
                     }
                     if diff < word {
@@ -977,7 +1040,7 @@ fn word_finder_bucketed(
                     };
                     let p = &parameters[context];
                     if q - diff < batch.contexts[context].offset as i32 {
-                        *last = s + diagonals.offset;
+                        entry.set_last_hit(s.wrapping_add(diagonals.offset));
                         break 'hit;
                     }
                     let Some(result) = extend_two_hit_blosum62(
@@ -1008,12 +1071,12 @@ fn word_finder_bucketed(
                     seq_keys.push(seq);
                 }
                 if options.window_size == 0 {
-                    *last = end - (word - 1) + diagonals.offset;
+                    entry.set_last_hit((end - (word - 1)).wrapping_add(diagonals.offset));
                 } else if extended {
-                    *flag = true;
-                    *last = end - (word - 1) + diagonals.offset;
+                    entry.set_flag(1);
+                    entry.set_last_hit((end - (word - 1)).wrapping_add(diagonals.offset));
                 } else {
-                    *last = s + diagonals.offset;
+                    entry.set_last_hit(s.wrapping_add(diagonals.offset));
                 }
             }
         }};
@@ -1126,13 +1189,19 @@ mod tests {
     fn diagonal_overflow_threshold_clears_flags_and_negative_window() {
         let mut d = Diagonals::new(500, 40).unwrap();
         d.offset = i32::MAX / 4 - 1;
-        d.entries[0] = (123, true);
+        let mut entry = DiagStruct::default();
+        entry.set_last_hit(123);
+        entry.set_flag(1);
+        d.entries[0] = entry;
         d.finish_subject(83).unwrap();
         assert_eq!(d.offset, i32::MAX / 4 - 1 + 83 + 40);
-        assert_eq!(d.entries[0], (123, true));
+        assert_eq!(d.entries[0], entry);
         d.finish_subject(83).unwrap();
         assert_eq!(d.offset, 40);
-        assert!(d.entries.iter().all(|x| *x == (-40, false)));
+        assert!(d
+            .entries
+            .iter()
+            .all(|x| x.last_hit() == -40 && x.flag() == 0));
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:49-59
     // ```c++
@@ -1159,7 +1228,15 @@ mod tests {
 
 #[cfg(test)]
 mod session_f_diagonal_boundary_tests {
-    use super::Diagonals;
+    use super::{DiagStruct, Diagonals};
+
+    /// An entry with `last_hit` and the flag set.
+    pub(super) fn flagged(last_hit: i32) -> DiagStruct {
+        let mut entry = DiagStruct::default();
+        entry.set_last_hit(last_hit);
+        entry.set_flag(1);
+        entry
+    }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:46-65
     // ```c++
@@ -1215,14 +1292,14 @@ mod session_f_diagonal_boundary_tests {
     fn reset_occurs_at_entry_threshold_and_clears_stale_flags() {
         for window in [0, 1, 39, 40, 41] {
             let mut d = Diagonals::new(65, window).unwrap();
-            d.entries.fill((123, true));
+            d.entries.fill(flagged(123));
             d.offset = 536_870_910; // INT4_MAX / 4 - 1, independent literal boundary.
             d.finish_subject(1).unwrap();
             assert_eq!(d.offset, 536_870_911 + window);
-            assert!(d.entries.iter().all(|x| *x == (123, true)));
+            assert!(d.entries.iter().all(|x| *x == flagged(123)));
             d.finish_subject(5_000_000).unwrap();
             assert_eq!(d.offset, window);
-            assert!(d.entries.iter().all(|x| *x == (-window, false)));
+            assert!(d.entries.iter().all(|x| *x == DiagStruct::clear(window)));
         }
     }
 
@@ -1257,6 +1334,7 @@ mod session_f_diagonal_boundary_tests {
 
 #[cfg(test)]
 mod session_f_word_finder_reset_tests {
+    use super::session_f_diagonal_boundary_tests::flagged;
     use super::*;
     use crate::algorithm::blastx::{input::parse_fasta, parameters, query_setup::prepare_queries};
 
@@ -1364,11 +1442,11 @@ mod session_f_word_finder_reset_tests {
             for state in 0..4 {
                 if state == 2 {
                     d.offset = 536_870_910;
-                    d.entries.fill((123, true));
+                    d.entries.fill(flagged(123));
                 }
                 if state == 3 {
                     d.offset = 536_870_911;
-                    d.entries.fill((536_870_900, true));
+                    d.entries.fill(flagged(536_870_900));
                     d.finish_subject(83).unwrap();
                 }
                 let mut actual = Vec::new();

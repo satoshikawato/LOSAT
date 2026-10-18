@@ -147,6 +147,11 @@ use std::sync::OnceLock;
 mod x_unit_probe;
 use x_unit_probe::{XNoProbe, XProbe, XProbeSlot, XStatsProbe, XTimeProbe};
 
+// EXPERIMENT (LOSAT_X_TBXBUCKET): the two-hit stage of a unit with its hits grouped by diagonal
+// range (x_tbx_bucket.rs).
+#[path = "x_tbx_bucket.rs"]
+mod x_tbx_bucket;
+
 // No NCBI counterpart: counters for LOSAT_X_STATS, the shadow summary and LOSAT_TIMING; they do not
 // change any value NCBI computes.
 static BATCHES: AtomicU64 = AtomicU64::new(0);
@@ -317,6 +322,7 @@ fn add_ns(counter: &AtomicU64, t0: Option<Instant>) {
 /// and one LOSAT_TIMING line.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
+    x_tbx_bucket::print_summary();
     // LOSAT_X_SEEDCOMPACT: printed whenever the switch is on, so also when the unit path does not
     // run (`LOSAT_X_PAIRPAR` off: zero counters). `bytes_saved` is what the unit outputs no longer
     // request: records x (size of `InitHSP` - size of `XUnitHsp`).
@@ -963,6 +969,8 @@ struct XScratch {
     /// LOSAT_X_STATS: the diagonal statistics of the unit that runs (x_unit_probe.rs); empty
     /// without the variable.
     stats_probe: XStatsProbe,
+    /// LOSAT_X_TBXBUCKET: the segments of the bucketed scan (x_tbx_bucket.rs); empty without it.
+    bucket: x_tbx_bucket::XBucketScratch,
 }
 
 impl XScratch {
@@ -1287,6 +1295,11 @@ struct XUnitHsp {
 trait XInitSink {
     /// Saves one init HSP as `x_hit` built it.
     fn push(&mut self, hsp: InitHSP);
+    /// LOSAT_X_TBXBUCKET: the number of init HSPs saved so far.
+    fn saved_len(&self) -> usize;
+    /// LOSAT_X_TBXBUCKET: puts the init HSPs saved from `start` on back into scan order
+    /// (`x_seed_bucket::restore_flush_order`).
+    fn restore_flush_order(&mut self, start: usize, keys: &mut Vec<u32>);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:351-355
@@ -1302,6 +1315,12 @@ impl XInitSink for Vec<InitHSP> {
     #[inline(always)]
     fn push(&mut self, hsp: InitHSP) {
         Vec::push(self, hsp);
+    }
+    fn saved_len(&self) -> usize {
+        self.len()
+    }
+    fn restore_flush_order(&mut self, start: usize, keys: &mut Vec<u32>) {
+        crate::algorithm::tblastx::x_seed_bucket::restore_flush_order(self, start, keys);
     }
 }
 
@@ -1333,6 +1352,12 @@ impl XInitSink for Vec<XUnitHsp> {
                     .expect("LOSAT_X_SEEDCOMPACT: a context index fits 32 bits"),
             },
         );
+    }
+    fn saved_len(&self) -> usize {
+        self.len()
+    }
+    fn restore_flush_order(&mut self, start: usize, keys: &mut Vec<u32>) {
+        crate::algorithm::tblastx::x_seed_bucket::restore_flush_order(self, start, keys);
     }
 }
 
@@ -1547,6 +1572,25 @@ impl XPairPar {
         // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): with either variable the same units run with
         // a probe (x_unit_probe.rs); without them, the functions without probes.
         let outputs = match (seed_compact(), x_unit_probe::mode()) {
+            // EXPERIMENT (LOSAT_X_TBXBUCKET): the bucketed scan (x_tbx_bucket.rs), compact records only.
+            (true, 0) if x_tbx_bucket::mode() != 0 => XUnitOutputs::Compact(self.run_units(
+                &units,
+                inp,
+                pool,
+                Self::run_unit_compact_bucketed,
+            )),
+            (true, 1) if x_tbx_bucket::mode() != 0 => XUnitOutputs::Compact(self.run_units(
+                &units,
+                inp,
+                pool,
+                Self::run_unit_compact_bucketed_probed::<XTimeProbe>,
+            )),
+            (true, _) if x_tbx_bucket::mode() != 0 => XUnitOutputs::Compact(self.run_units(
+                &units,
+                inp,
+                pool,
+                Self::run_unit_compact_bucketed_probed::<XStatsProbe>,
+            )),
             (true, 0) => {
                 XUnitOutputs::Compact(self.run_units(&units, inp, pool, Self::run_unit_compact))
             }

@@ -940,6 +940,11 @@ fn fill_with<const PAD: bool>(
     tables: Tables<'_>,
     in_pool: bool,
 ) -> FillStats {
+    // R5 probe (exp/r5-fill-probes, not for merge): R5_PROBE=cap=<k> caps the parts of this fill;
+    // pf=np|ht|all touches every page of the fresh next_pos / hashtable once before the fill, one
+    // span of pages per part (no two parts touch one page).
+    let x_r5_t0 = x_r5_probe::on().then(std::time::Instant::now);
+    let parts = x_r5_probe::parts(parts);
     let table_size = tables.hashtable.len();
     let (block_shift, owner) = plan(table_size, tables.pv_array_bts, parts);
     let parts = parts.clamp(1, 255);
@@ -950,6 +955,7 @@ fn fill_with<const PAD: bool>(
         pv_array_bts: tables.pv_array_bts,
         helper_array: Shared::new(tables.helper_array),
     };
+    let x_r5_pf = x_r5_probe::prefault(parts, shared, in_pool);
     let owner = owner.as_slice();
     let mut copies = Copies::new(PAD, parts, shared.helper_array.len, shared.pv_array.len);
     let mut copies = copies.parts();
@@ -1011,6 +1017,9 @@ fn fill_with<const PAD: bool>(
                 x,
             ));
         }
+    }
+    if let Some(t0) = x_r5_t0 {
+        x_r5_probe::report(PAD, parts, shared, t0, x_r5_pf);
     }
     FillStats {
         padded: PAD,
@@ -2030,5 +2039,106 @@ pub(super) mod tests {
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(&c, c_chain)));
             assert!(r.is_err(), "difference {which} not caught");
         }
+    }
+}
+
+/// R5 probe (exp/r5-fill-probes, not for merge): R5_PROBE, a comma-separated list of `cap=<k>`
+/// (at most k parts in the pool fill) and `pf=np|ht|all` (before the fill, each part writes 0 to
+/// the first element of every page of its own span of the fresh next_pos / hashtable / both).
+/// One `[R5]` line per fill on stderr while R5_PROBE is set.
+mod x_r5_probe {
+    use super::{SharedTables, Shared};
+    use std::sync::OnceLock;
+
+    struct Probe {
+        on: bool,
+        cap: usize,
+        np: bool,
+        ht: bool,
+    }
+
+    fn probe() -> &'static Probe {
+        static P: OnceLock<Probe> = OnceLock::new();
+        P.get_or_init(|| {
+            let v = std::env::var("R5_PROBE").ok();
+            let mut p = Probe { on: v.is_some(), cap: usize::MAX, np: false, ht: false };
+            for item in v.as_deref().unwrap_or("").split(',') {
+                if let Some(k) = item.strip_prefix("cap=") {
+                    p.cap = k.parse().expect("R5_PROBE cap=<k>");
+                } else if let Some(m) = item.strip_prefix("pf=") {
+                    p.np = m == "np" || m == "all";
+                    p.ht = m == "ht" || m == "all";
+                } else if !item.is_empty() {
+                    panic!("R5_PROBE: unknown item {item}");
+                }
+            }
+            if p.on {
+                eprintln!("[R5] probe cap={} np={} ht={}", p.cap, p.np, p.ht);
+            }
+            p
+        })
+    }
+
+    pub(super) fn on() -> bool {
+        probe().on
+    }
+
+    pub(super) fn parts(parts: usize) -> usize {
+        parts.min(probe().cap).max(1)
+    }
+
+    /// Writes 0 to the first element of each 4 KiB page of `s` in span `k` of `n`.
+    fn touch(s: Shared<u32>, k: usize, n: usize) {
+        const PAGE: usize = 4096 / std::mem::size_of::<u32>();
+        let pages = s.len.div_ceil(PAGE);
+        let (lo, hi) = (pages * k / n, pages * (k + 1) / n);
+        for pg in lo..hi {
+            // SAFETY: pg * PAGE < len; the table is fresh (all zero) and nothing reads it before the fill.
+            unsafe { std::ptr::write_volatile(s.ptr.add(pg * PAGE), 0) };
+        }
+    }
+
+    /// The prefault round (seconds), or None when off.
+    pub(super) fn prefault(parts: usize, t: SharedTables, in_pool: bool) -> Option<f64> {
+        let p = probe();
+        if !(p.np || p.ht) {
+            return None;
+        }
+        let t0 = std::time::Instant::now();
+        let run = |k: usize| {
+            if p.np {
+                touch(t.next_pos, k, parts);
+            }
+            if p.ht {
+                touch(t.hashtable, k, parts);
+            }
+        };
+        if in_pool && parts > 1 {
+            rayon::scope(|scope| {
+                for k in 1..parts {
+                    scope.spawn(move |_| run(k));
+                }
+                run(0);
+            });
+        } else {
+            for k in 0..parts {
+                run(k);
+            }
+        }
+        Some(t0.elapsed().as_secs_f64())
+    }
+
+    pub(super) fn report(pad: bool, parts: usize, t: SharedTables, t0: std::time::Instant, pf: Option<f64>) {
+        let all = t0.elapsed().as_secs_f64();
+        eprintln!(
+            "[R5] fill pad={} parts={} pool={} ht_mib={:.1} np_mib={:.1} prefault={:.4}s total={:.4}s",
+            pad,
+            parts,
+            rayon::current_num_threads(),
+            (t.hashtable.len * 4) as f64 / 1048576.0,
+            (t.next_pos.len * 4) as f64 / 1048576.0,
+            pf.unwrap_or(0.0),
+            all
+        );
     }
 }

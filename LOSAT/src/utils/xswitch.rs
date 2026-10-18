@@ -224,6 +224,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXLUT",
     "LOSAT_X_TBXNEXT",
     "LOSAT_X_TBXPREFETCH",
+    "LOSAT_X_TBXSCANBF",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that

@@ -55,10 +55,13 @@ twice per improvement).
 - Put its name in sorted order into `STRICT_SET` (`LOSAT/src/utils/xswitch.rs`) and its `export`
   line in sorted order into the block in `docs/agents/diagnostics.md` ("Performance switches"; the
   unit test `the_documented_block_lists_the_strict_set` compares them).
-- Say since when and on what evidence in the switch's own entry in `diagnostics.md` and in its own
-  CHANGELOG line. Write no count of the set, and add nothing at the end of a shared list or
-  paragraph. Then two such PRs touch different lines, and one merging does not make the other
-  `DIRTY` (the `dev` ruleset does not require an up-to-date branch).
+- Say since when and on what evidence in the switch's own entry in `diagnostics.md` and in the
+  PR's own changelog file `changelog.d/<branch, "/" as "-">.md` (`changelog.d/README.md`; do not
+  edit `CHANGELOG.md`: every line added under `[Unreleased]` lands right below the heading, so any
+  two such PRs conflicted there). Write no count of the set, and add nothing at the end of a shared
+  list or paragraph. Then two such PRs touch different lines, and one merging does not make the
+  other `DIRTY` (the `dev` ruleset does not require an up-to-date branch); only two names next to
+  each other in `STRICT_SET` and the `export` block still meet, and merging `origin/dev` keeps both.
 
 ## Watch CI
 

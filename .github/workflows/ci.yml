@@ -58,6 +58,10 @@ jobs:
         run: python3 LOSAT/tests/ncbi_unit_case_ledger.py check --root .
       - name: Ledger checker tests
         run: python3 -m unittest discover -s LOSAT/tests -p 'test_ncbi_unit_case_ledger.py'
+      # No NCBI counterpart: release bookkeeping. Pending CHANGELOG entries are one file per pull
+      # request (changelog.d/README.md), so two pull requests never conflict in CHANGELOG.md.
+      - name: Changelog fragments
+        run: python3 scripts/changelog_fragments.py check
       - run: cd LOSAT && cargo fmt --check
       - run: cd LOSAT && cargo clippy --all-targets --all-features -- -D warnings
       - run: cd LOSAT && cargo test --all-features

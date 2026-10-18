@@ -1357,10 +1357,17 @@ Rebuilding less:
   alone; NCBI 115.0). One 5.5 Mb subject (Sakai x MG1655, 8 threads) keeps its peak (196.2 -> 194.3; NCBI 152.8):
   there the query's copies dominate, not the subject.
   Time: 100 queries at one thread, 4 alternating pairs (load 6-12), pair ratio median 1.06 (0.87-1.11).
-  Stays opt-in (2026-10-17, perf/perfmb-default-bundle): it wins max RSS (above; 16S one query and 100 queries at one
-  thread go below NCBI `-db` only with it), but its time has been measured only on the loaded WSL machine (100
-  queries at one thread x1.06), so its default waits for alternating pairs on the workstation (16S one query and 100
-  queries at 1 and 8 threads, Sakai x MG1655 at 8; perf-mb `ws/defbundle_plan2.txt`, its `+BNSTORE` arms).
+  Stays opt-in (2026-10-17, perf/perfmb-default-bundle). Workstation pairs of 2026-10-18 (perf-mb
+  `ws/defbundle_plan2.txt`, the `+BNSTORE` arm against that bundle's new default, 16 physical cores of one node,
+  rotated rounds; NCBI BLAST+ 2.17.0 `-db` in brackets): megablast of 16S, one query, at 1 / 8 threads time 0.998 /
+  1.000 and max RSS 64 -> 27 / 64 -> 26 MiB [86 / 82]; 100 queries 1.000 / 1.000, 86 -> 47 / 90 -> 54 MiB [140 /
+  146]; Sakai x MG1655 at 8 threads 0.997, 145 -> 141 MiB [194]. So with the bundle's other switches (RPTSTREAM's
+  streamed reports) the 16S cells are below NCBI `-db` without it too, and it lowers them by a further 37-39 MiB at
+  no time cost. On dc-megablast of 1,775 cDNAs against 3 Mb of chromosome 2L it lost time: 1.033 (1.010-1.057 per
+  round) at 4 threads and 1.187 (1.098-1.355) at 8, searches of 0.6 s (1.000 at 1 thread, 0.998 at 16); on the other
+  dc-megablast and blastn cells its ratios lay on both sides of 1 (0.78-1.16), inside those cells' round spread. So
+  it stays opt-in: it wins max RSS on many-subject megablast and loses time on dc-megablast at 4 and 8 threads, and
+  no rule separating the two was tried (the perf-mb line closed).
 - `LOSAT_X_SEEDRELEASE=1` (TBLASTX, memory; in the strict set since 2026-10-13) the tables that only the
   scan reads are freed before the HSP list of the batch's last subject is merged and linked, which is where
   the heap of a large search peaks

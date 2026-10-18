@@ -742,6 +742,10 @@ where
                     7 => r2_call!(7),
                     8 => r2_call!(8),
                     9 => r2_call!(9),
+                    11 => r2_call!(11),
+                    12 => r2_call!(12),
+                    13 => r2_call!(13),
+                    14 => r2_call!(14),
                     _ => r2_call!(0),
                 }
             }
@@ -757,7 +761,9 @@ where
 /// 5 nop30 (30 NOPs per cell), 6 celllat4 (+4 cycles on each cell's hit-list pointer),
 /// 7 misp1 + remmask, 8 pfnext (prefetch the next batch's eight entries), 9 nop5 (the batch
 /// without port-5 shuffles: lanes by aligned store and reload, entries by broadcast loads and
-/// blends).
+/// blends), 11 oldlat4 (+4 cycles on the entries read), 12 newlat4 (+4 cycles on the values
+/// stored), 13 pklat4 (+4 cycles on the candidate mask: the packed count and the buffer
+/// store's address), 14 pipe (the next batch's hits loaded before this batch's stores).
 fn r2_probe() -> u32 {
     use std::sync::OnceLock;
     static P: OnceLock<u32> = OnceLock::new();
@@ -1341,6 +1347,11 @@ where
     let out = buffer.as_mut_ptr();
     let mut packed = 0usize;
     let mut next = 0usize;
+    let mut pending = if P == 14 && hits.len() >= X_DIAG_LANES {
+        _mm256_loadu_si256(hits.as_ptr().cast())
+    } else {
+        _mm256_setzero_si256()
+    };
     for batch in &mut batches {
         if P == 8 {
             // Prefetch the entries of the next full batch (if any) before testing this one.
@@ -1359,8 +1370,20 @@ where
                 }
             }
         }
-        let (query, lanes) = if P == 3 || P == 4 || P == 9 {
+        let (query, lanes) = if P == 3 || P == 4 || P == 9 || P == 11 || P == 12 || P == 13 {
             x_batch_avx2_probe::<P>(_mm256_loadu_si256(batch.as_ptr().cast()), s, table, test)
+        } else if P == 14 {
+            // This batch's hits were loaded by the previous iteration; load the next batch's
+            // (or this one's again after the last full batch) before this batch's stores.
+            let this = pending;
+            next += X_DIAG_LANES;
+            let at = if next + X_DIAG_LANES <= hits.len() {
+                next
+            } else {
+                next - X_DIAG_LANES
+            };
+            pending = _mm256_loadu_si256(hits.as_ptr().add(at).cast());
+            x_batch_avx2_probe::<14>(this, s, table, test)
         } else {
             x_batch_avx2(batch, s, table, test)
         };
@@ -1483,6 +1506,14 @@ unsafe fn x_batch_avx2_probe<const P: u32>(
         }
         _mm256_loadu_si256(lane_old.as_ptr().cast())
     };
+    let mut old = old;
+    if P == 11 {
+        std::arch::asm!(
+            "vpor {c}, {c}, {c}", "vpor {c}, {c}, {c}", "vpor {c}, {c}, {c}", "vpor {c}, {c}, {c}",
+            c = inout(ymm_reg) old,
+            options(pure, nomem, nostack, preserves_flags)
+        );
+    }
     let flag = _mm256_srai_epi32::<31>(old);
     let last = _mm256_srai_epi32::<1>(_mm256_slli_epi32::<1>(old));
     let diff = _mm256_sub_epi32(
@@ -1494,7 +1525,14 @@ unsafe fn x_batch_avx2_probe<const P: u32>(
     let keep = _mm256_blendv_epi8(in_window, sum_below_last, flag);
     let below_word = _mm256_cmpgt_epi32(_mm256_set1_epi32(test.word_size), diff);
     let candidates = _mm256_andnot_si256(_mm256_or_si256(flag, below_word), in_window);
-    let new = _mm256_blendv_epi8(_mm256_set1_epi32(written as i32), old, keep);
+    let mut new = _mm256_blendv_epi8(_mm256_set1_epi32(written as i32), old, keep);
+    if P == 12 {
+        std::arch::asm!(
+            "vpor {c}, {c}, {c}", "vpor {c}, {c}, {c}", "vpor {c}, {c}, {c}", "vpor {c}, {c}, {c}",
+            c = inout(ymm_reg) new,
+            options(pure, nomem, nostack, preserves_flags)
+        );
+    }
     if P == 9 {
         let mut ln = R2Lanes([0; X_DIAG_LANES]);
         _mm256_store_si256(ln.0.as_mut_ptr().cast(), new);
@@ -1516,7 +1554,14 @@ unsafe fn x_batch_avx2_probe<const P: u32>(
                 .set_raw_bits(raw);
         }
     }
-    let lanes = _mm256_movemask_ps(_mm256_castsi256_ps(candidates)) as u32;
+    let mut lanes = _mm256_movemask_ps(_mm256_castsi256_ps(candidates)) as u32;
+    if P == 13 {
+        std::arch::asm!(
+            "add {l:e}, 0", "add {l:e}, 0", "add {l:e}, 0", "add {l:e}, 0",
+            l = inout(reg) lanes,
+            options(pure, nomem, nostack)
+        );
+    }
     (query, lanes)
 }
 
@@ -1703,11 +1748,12 @@ mod tests {
         static R2_TEST_PROBE: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     }
 
-    /// v4-R R2: the probes that change the code (2 remmask, 7 misp1 + remmask, 8 pfnext, 9 nop5)
+    /// v4-R R2: the probes that change the code (2 remmask, 7 misp1 + remmask, 8 pfnext, 9 nop5,
+    /// 14 pipe)
     /// make the same calls and leave the same table as the per-hit test.
     #[test]
     fn r2_probes_equal_the_per_hit_test() {
-        for p in [2, 7, 8, 9] {
+        for p in [2, 7, 8, 9, 14] {
             R2_TEST_PROBE.set(p);
             batched_cells_equal_the_per_hit_test_on_random_tables();
             batched_cells_equal_the_per_hit_test_at_every_edge_of_the_test();
@@ -1804,6 +1850,14 @@ mod tests {
                                 &mut buffer,
                             ),
                             9 => x_cell_avx2_defer::<_, 9>(
+                                hits,
+                                *s,
+                                &mut table,
+                                test,
+                                &mut candidate,
+                                &mut buffer,
+                            ),
+                            14 => x_cell_avx2_defer::<_, 14>(
                                 hits,
                                 *s,
                                 &mut table,

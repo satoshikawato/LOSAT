@@ -104,7 +104,8 @@ def validate_thread_evidence(logtext, requested, kind):
         raise GateFailure("requested/pool/caller diagnostic mismatch")
     stages = [dict(program=p, stage=stage, work_items=int(items), parallel_selected=parallel == "true", measured_activity=None)
               for p, stage, items, parallel in re.findall(r"\[losat-thread-stage\] program=(\w+) stage=([\w-]+) work_items=(\d+) parallel_selected=(true|false)", logtext)]
-    if any(stage["program"] != program or (stage["parallel_selected"] and (pool <= 1 or stage["work_items"] <= 1)) for stage in stages):
+    # BLASTX names its pool BLASTX (the with_search_pool label) but its stage lines say blastx.
+    if any(stage["program"].lower() != program.lower() or (stage["parallel_selected"] and (pool <= 1 or stage["work_items"] <= 1)) for stage in stages):
         raise GateFailure("stage/pool diagnostic mismatch")
     counts = None
     if kind == "threaded":

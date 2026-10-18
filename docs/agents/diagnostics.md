@@ -342,8 +342,10 @@ export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNXLATE=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXFRAMES=1
+export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
+export LOSAT_X_TBXQFRAMES=1
 export LOSAT_X_TBXSCANBF=1
 export LOSAT_X_TBXUNGAP=1
 ```
@@ -1283,7 +1285,8 @@ Rebuilding less:
   also saves a sort at one thread. (2) An index sort of 32,768 indices or more runs as rayon's stable
   parallel sort (`par_sort_by`) when its call may use the search pool: the two sorts of a linking call
   under the call's `allow_parallel`, as its per-group linking; the other HSP sorts (the score sorts after
-  each frame, after the first linking call and after the re-evaluation) when the calling thread is a worker
+  each frame, which with `LOSAT_X_TBXKMERGE` only the reference frame loop makes, after the first
+  linking call and after the re-evaluation) when the calling thread is a worker
   of a rayon pool, which in a search started by the command line or the Web adapter it is exactly when
   `-num_threads` is 2 or more (the header names the one case this repository's code does not show: a
   program that calls a one-thread search from a thread of its own rayon pool). A stable sort with a
@@ -1314,6 +1317,39 @@ Rebuilding less:
   result. One line at exit: `[X_SHADOW] LINKSORT sorts= indices_compared=`. Together with
   `LOSAT_X_HSPINPLACESHADOW=1` the reference bodies are compared with the path's result end to end
   (`LOSAT/tests/tblastx_link_sort.rs` runs both).
+- `LOSAT_X_TBXKMERGE=1` (TBLASTX, speed; in the strict set since 2026-10-18, on by default; acts where
+  `LOSAT_X_PAIRPAR` runs the units) the merge of a subject's unit lists (`XPairPar::merge_subject`,
+  `tblastx/x_kmerge.rs`, exactness argument in its header) without its full sorts: each unit sorts its own
+  list in its task on the pool (a compact list between the copy it returns and the task's scratch
+  vector, so the sort allocates nothing); a chunk's init list is the k-way merge of its units' lists, ties
+  to the lower unit, where it was the stable sort of their concatenation; the conversion's final sort
+  (`Blast_HSPListSortByScore`) is a stable sort of each run of HSPs equal in score, subject start and
+  subject end (the list leaves the init sort in that order; a list that is not falls back to the full
+  sort); each frame list is merged into the subject's list by a backward two-way merge, where it was
+  appended and the whole list sorted. A stable sort with a comparator that is a lexicographic comparison of
+  integer fields has one result, so the list is the same element for element. `LOSAT_X_STATS=1` prints,
+  whenever the switch or its shadow is on (zeros where no unit path runs),
+  `[X_STATS] TBXKMERGE subjects= chunks= tie_runs= k1_fallback= frame_unsorted=` (the two fallbacks have
+  stayed 0). `LOSAT/tests/tblastx_kmerge.rs` runs it at 1-16 threads, with its
+  shadow and on tied HSPs of two queries, at three chunks per subject frame too. Measured on the
+  workstation (node 1, 16 cores with idle siblings, dev 79fab14e against the switch, alternating pairs,
+  reports identical): `[TIMING] x_pairpar` merge at 16 threads (the units' own sorts are counted in
+  `units` now) 2.30 -> 0.92 s for AP027131+AP027132+AP027133 x AP027133+AP027078+AP027131 (code 4),
+  0.13 -> 0.05 s for AP027131 x AP027133, 0.22 -> 0.09 s for NZ_CP006932 x itself, 5.82 -> 1.66 s for
+  Sakai x MG1655 (code 11); wall time, medians: the first 11.81 -> 11.68 s at 16 threads (5 pairs, ranges
+  apart) and 17.29 -> 16.86 s at 8 (3 pairs), AP027131 x AP027133 2.59 -> 2.48 s at 8 (5 pairs), Sakai x
+  MG1655 137 -> 124 s at 16 (3 pairs, a loaded node: 115-141 s); with the units sorting by
+  `slice::sort_by` (otherwise the same) NZ_CP006932 x itself 6.35 -> 6.21 s and 6.84 -> 6.70 s at 16 and
+  8 threads, and at one thread (3 pairs) x0.991, x0.982 and x0.995 for the first three inputs. Max RSS
+  in the same runs: Sakai x MG1655 1,967 -> 1,945 MiB at 16 threads (2,008 with `slice::sort_by`, whose
+  buffers the 16 tasks held at once), the first input 592 -> 540 and 439 -> 434 MiB, AP027131 x AP027133
+  117 -> 120 MiB at 8 threads (NCBI 233 MiB at one thread). The switch-off build runs 0.001 % more
+  instructions than dev (`perf stat`, one thread).
+- `LOSAT_X_TBXKMERGESHADOW=1` shadow of `LOSAT_X_TBXKMERGE` (turns the path on): the units return unsorted
+  lists, the merge runs the statements of the switch off on a copy and the switch's merge on the lists
+  (sorting them first), and every field of every HSP must be equal; the first difference stops the run.
+  One line at exit: `[X_SHADOW] TBXKMERGE subjects_compared= hsps_compared=`. `LOSAT_X_PAIRPARSHADOW=1`
+  compares the subject's list with the reference frame loop's as well.
 - `LOSAT_X_LINKSLICES=1` (TBLASTX, memory; in the strict set since 2026-10-15) the linking call of
   the in-place HSP list path links its groups as disjoint sub-slices of the one sorted list
   (`tblastx/x_link_slices.rs`, exactness argument in its header; it acts only where
@@ -2044,6 +2080,36 @@ Scheduling (each value computed by one thread with the original function; order 
   `logs/defaultset_ws_report.md` unless named); a reduction is 1 - with / without the switch, the other switches of
   the candidate set on): at 16 threads dc-megablast of 1,775 / 3,492 cDNAs against 3 Mb -26.6 / -23.2 % wall, blastn
   of 31,168 cDNAs -24.6 %, blastn of 1,775 -3.8 %; at 4 threads inside the rounds' spread; max RSS unchanged.
+- `LOSAT_X_TBXQFRAMES=1` (TBLASTX, speed; in the strict set since 2026-10-18, on by default, in the pull
+  request that added it; evidence at the end of this entry) the SEG of a query batch's frames is made on the search
+  pool, one task per frame, instead of one frame after the other before the lookup table is built
+  (`tblastx/x_query_frames.rs`, called from `search_query_batch` for every query batch, `-subject` and `-db`). NCBI
+  filters the contexts of a batch one after the other (`blast_filter.c:1280-1290`); each task reads and writes only
+  its own frame (letters, intervals, unmasked copy) and only reads the `SegMasker`, and SEG's two caches (the memo
+  of `LOSAT_X_SEGMEMO` and the histogram memo of `LOSAT_X_SEGFAST`) are `thread_local!` tables of a pure function of
+  the window's letter counts, so every frame gets the serial loop's intervals. It acts only with a pool of two or
+  more threads and two or more frames in the batch; with one thread, a build without the `parallel` feature,
+  WebAssembly without `wasm-threads`, the switch off, or `-seg no`, the serial loop runs. The translation of the
+  frames stays serial (at most a few ms per batch). BLASTX needs no such switch: its query SEG already runs on the
+  pool (`LOSAT_X_BXPAR`). Shadow: `LOSAT_X_TBXQFRAMESSHADOW=1` (implies the switch) also masks a copy of the frames
+  serially and compares every frame's letters, unmasked copy and intervals; a difference prints
+  `[X_SHADOW] TBXQFRAMES batches= frames= intervals= diffs= DIFFERENT` and panics; at the end of a run `main` prints
+  `[X_SHADOW] TBXQFRAMES batches= frames= intervals= diffs=0 identical` (the batches masked on the pool, their frames
+  and intervals; 0 when no batch had a pool). Tests: the unit tests of `x_query_frames.rs` (pool == serial at 1, 2,
+  3 and 7 threads for three SEG parameter sets, with batches of one query and none; a probe called once per frame
+  shows that the frames are masked by at least two workers of a 3-thread pool, and by none with the switch off or
+  one thread) and `LOSAT/tests/tblastx_query_frames.rs` (off / default / `LOSAT_X_DEFAULT=0` / shadow equal at 1
+  and 4 threads, with several query batches, other SEG parameters and `-seg no`). On by default since 2026-10-18
+  (perf/tbx-query-seg-par), on this evidence: the shadow over the TBLASTX fixtures at 2 and 4 threads
+  (`check_losat.py`, `ci_fast_regressions.py --programs tblastx --all-cases`) compared 2,910 frames (58,542 intervals) in 242 batches of 200 runs,
+  all identical, and every report equals the one without the switch; i9 (8 alternating off/on pairs after a
+  warm-up, load 5-9, `LOSAT_TIMING`, every report its frozen sha256), 8 threads, medians: AP027131 x AP027133 (code
+  4) SEG 0.223 -> 0.044 s, outside the search 0.381 -> 0.200 s, wall 1.864 -> 1.722 s (on/off 0.92); MelaMJNV x
+  PemoMJNVA 0.048 -> 0.009 s, 0.247 -> 0.210 s (0.86); AvCLPV x PsCLPV 0.122 -> 0.024 s, 1.130 -> 1.028 s (0.91);
+  NZ_CP006932 against itself 0.208 -> 0.042 s, 4.28 -> 4.22 s (0.96); the first 3 kb of MelaMJNV x PemoMJNVA 0.012
+  -> 0.011 s; at one thread both arms run the serial loop (SEG equal; wall ratios 0.96-1.03 within the spread of
+  the P and E cores). Max RSS at 8 threads within 2 MiB (AP027131 x AP027133 134-137 MiB, MelaMJNV x PemoMJNVA
+  46-48 MiB, 3 pairs).
 - `LOSAT_X_QPREPPAR=1` (BLASTN, all tasks; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the BLASTNA encoding of a query batch and the ungapped Karlin blocks of its contexts are made on the search pool
   instead of one query / context after the other (`blastn/blast_engine/x_query_prep_par.rs`, called from
   `search_query_batch`, so for every query batch, in the loop or in a `LOSAT_X_QBATCHPAR` slot; `-db` searches too).

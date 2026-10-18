@@ -161,6 +161,11 @@ mod x_unit_probe;
 mod x_kmerge;
 use x_unit_probe::{XNoProbe, XProbe, XProbeSlot, XStatsProbe, XTimeProbe};
 
+// EXPERIMENT (LOSAT_X_TBXEXTBATCH): the two-hit stage of a unit with its extensions held back and
+// resolved in batches (x_tbx_extbatch.rs).
+#[path = "x_tbx_extbatch.rs"]
+mod x_tbx_extbatch;
+
 // No NCBI counterpart: counters for LOSAT_X_STATS, the shadow summary and LOSAT_TIMING; they do not
 // change any value NCBI computes.
 static BATCHES: AtomicU64 = AtomicU64::new(0);
@@ -375,6 +380,7 @@ fn add_ns(counter: &AtomicU64, t0: Option<Instant>) {
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
     x_kmerge::print_summary();
+    x_tbx_extbatch::print_summary();
     // LOSAT_X_SEEDCOMPACT: printed whenever the switch is on, so also when the unit path does not
     // run (`LOSAT_X_PAIRPAR` off: zero counters). `bytes_saved` is what the unit outputs no longer
     // request: records x (size of `InitHSP` - size of `XUnitHsp`).
@@ -1843,6 +1849,34 @@ impl XPairPar {
         pool: &crate::utils::threading::SearchPool<'_>,
     ) -> XUnitOutputs {
         let sort = x_kmerge::mode() == 1;
+        // EXPERIMENT (LOSAT_X_TBXEXTBATCH): the batched extensions (x_tbx_extbatch.rs), without
+        // the probes, for the subjects of its rule (`x_tbx_extbatch::active`: the window leaves
+        // room for its pending marks and a unit's query-group span reaches the switch's value).
+        if x_unit_probe::mode() == 0
+            && x_tbx_extbatch::active(
+                inp.window,
+                inp.wordsize,
+                units.iter().map(|unit| x_unit_span(&self.groups[unit.g])),
+            )
+        {
+            return if seed_compact() {
+                XUnitOutputs::Compact(self.run_units(
+                    units,
+                    inp,
+                    pool,
+                    Self::run_unit_compact_batched::<PF>,
+                    sort,
+                ))
+            } else {
+                XUnitOutputs::Full(self.run_units(
+                    units,
+                    inp,
+                    pool,
+                    Self::run_unit_batched::<PF>,
+                    sort,
+                ))
+            };
+        }
         match (seed_compact(), x_unit_probe::mode()) {
             (true, 0) => XUnitOutputs::Compact(self.run_units(
                 units,

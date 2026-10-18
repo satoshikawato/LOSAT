@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_PAIRPARFOLD; off unless set to any value, not in the strict set): the
+//! EXPERIMENT (LOSAT_X_PAIRPARFOLD; a strict-set switch since 2026-10-17): the
 //! diagonal-hash fold of the strips paths of `LOSAT_X_PAIRPAR` (blastn's one-hit fold, the
 //! parent's `fold`) and `LOSAT_X_PAIRPARDISC` (dc-megablast's two-hit fold,
 //! `disc::fold_two_hit`) split by diagonal-hash bucket over the threads of the search pool,
@@ -118,11 +118,11 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-/// No NCBI counterpart: reads LOSAT_X_PAIRPARFOLD once (off unless set to any value; not in
-/// the strict set). It does not change any value NCBI computes.
+/// No NCBI counterpart: reads LOSAT_X_PAIRPARFOLD once (a strict-set switch: on unless it is `0`,
+/// or `LOSAT_X_DEFAULT=0` and it is not set). It does not change any value NCBI computes.
 fn switch_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_PAIRPARFOLD").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_PAIRPARFOLD"))
 }
 
 /// No NCBI counterpart: the number of partitions of a stage on `threads` threads (one per

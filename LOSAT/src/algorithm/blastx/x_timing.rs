@@ -29,6 +29,20 @@
 //!   pool inside) at the end of the input, the tasks the reading thread ran itself while it
 //!   waited (and their time), and the time it waited for a result with no task to run. Both
 //!   waits count as `search` of `blastx_run`.
+//! - `[TIMING] blastx_subject_waves: waves=N tasks=N wall ..s busy ..s longest ..s latest_start ..s
+//!   last_end ..s threads=N idle ..s`: the parallel subject waves of `search::search_core` (the
+//!   `scan_par` stage). A task is the subjects one worker searches in a wave (`LOSAT_X_BXCHUNK`
+//!   of them, or one). `wall` adds the waves' wall times, `busy` the tasks' own times, `longest`
+//!   each wave's longest task, `latest_start` each wave's latest task start and `last_end` each
+//!   wave's latest task end, both after the wave began; `idle = wall x threads - busy`. A wave
+//!   ends with its last task: `longest` near `wall` with `busy` well below `wall x threads` is
+//!   uneven work, `latest_start` the time workers take to begin, `wall - last_end` the join.
+//! - `[TIMING] blastx_subject_flow: loops=N tasks=N ahead=N taken=N wall ..s`: with
+//!   `LOSAT_X_BXSUBJFLOW` (instead of the waves), the subject loops run as a flow, their tasks,
+//!   the tasks searched ahead of the loop (by a helper, or by the loop's thread while it waited
+//!   for a helper's task) and those of them the loop took (it searched the others itself at their
+//!   turn), and the loops' wall time, the hand-over to the sink included (it is also the
+//!   `scan_par` of the batch line, whose `replay` is then 0).
 //! - `[TIMING] blastx_batch_<mode>: batches=N query_setup .. setup .. chunks_par .. lookup ..
 //!   scan_par .. scan_inline .. replay .. chunk_end .. batch_end .. sum ..`: the stages of
 //!   `search::search_core`, per query batch, in the order they run. Mode `side` is a batch
@@ -107,8 +121,20 @@ pub(crate) enum Run {
     FlowJobTime,
     FlowBlocked,
     FlowAlone,
+    SubjectWaves,
+    SubjectTasks,
+    SubjectWall,
+    SubjectBusy,
+    SubjectLongest,
+    SubjectLatestStart,
+    SubjectLastEnd,
+    FlowLoops,
+    FlowTasks,
+    FlowAhead,
+    FlowTaken,
+    FlowWall,
 }
-const RUN_LEN: usize = Run::FlowAlone as usize + 1;
+const RUN_LEN: usize = Run::FlowWall as usize + 1;
 
 // No NCBI counterpart: names of the stages of `search_core`.
 /// The stages of one query batch in `search::search_core`, in the order they run.
@@ -174,11 +200,110 @@ pub(crate) fn run_add(stage: Run, n: u64) {
     }
 }
 
+// No NCBI counterpart: the clocks of one wave of the parallel subject loop.
+/// One wave of `search::search_core`'s parallel subject loop (`blastx_subject_waves`): when it
+/// began and, over its tasks, the longest one, the latest start and end, and their sum.
+pub(crate) struct SubjectWave {
+    start: Option<Instant>,
+    tasks: AtomicU64,
+    busy: AtomicU64,
+    longest: AtomicU64,
+    latest_start: AtomicU64,
+    last_end: AtomicU64,
+}
+
+impl SubjectWave {
+    // No NCBI counterpart: a wave that begins now (no clock without LOSAT_TIMING).
+    pub(crate) fn begin() -> Self {
+        Self {
+            start: lap(),
+            tasks: AtomicU64::new(0),
+            busy: AtomicU64::new(0),
+            longest: AtomicU64::new(0),
+            latest_start: AtomicU64::new(0),
+            last_end: AtomicU64::new(0),
+        }
+    }
+
+    // No NCBI counterpart: runs one task of the wave, timing it when the wave has a clock.
+    #[inline]
+    pub(crate) fn task<T>(&self, f: impl FnOnce() -> T) -> T {
+        let Some(wave_start) = self.start else {
+            return f();
+        };
+        let t0 = Instant::now();
+        let result = f();
+        let ns = |d: std::time::Duration| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
+        let began = ns(t0.duration_since(wave_start));
+        let busy = ns(t0.elapsed());
+        self.tasks.fetch_add(1, Ordering::Relaxed);
+        self.busy.fetch_add(busy, Ordering::Relaxed);
+        self.longest.fetch_max(busy, Ordering::Relaxed);
+        self.latest_start.fetch_max(began, Ordering::Relaxed);
+        self.last_end
+            .fetch_max(began.saturating_add(busy), Ordering::Relaxed);
+        result
+    }
+
+    // No NCBI counterpart: adds the wave to the run's counters (a wave without tasks: nothing).
+    pub(crate) fn end(self) {
+        let wall = since(self.start);
+        let tasks = self.tasks.into_inner();
+        if self.start.is_none() || tasks == 0 {
+            return;
+        }
+        for (stage, value) in [
+            (Run::SubjectWaves, 1),
+            (Run::SubjectTasks, tasks),
+            (Run::SubjectWall, wall),
+            (Run::SubjectBusy, self.busy.into_inner()),
+            (Run::SubjectLongest, self.longest.into_inner()),
+            (Run::SubjectLatestStart, self.latest_start.into_inner()),
+            (Run::SubjectLastEnd, self.last_end.into_inner()),
+        ] {
+            RUN[stage as usize].fetch_add(value, Ordering::Relaxed);
+        }
+    }
+}
+
+// No NCBI counterpart: adds one subject flow (`x_subject_flow::run`) to the run's counters.
+pub(crate) fn subject_flow(start: Option<Instant>, tasks: u64, (ahead, taken): (u64, u64)) {
+    if start.is_none() {
+        return;
+    }
+    for (stage, value) in [
+        (Run::FlowLoops, 1),
+        (Run::FlowTasks, tasks),
+        (Run::FlowAhead, ahead),
+        (Run::FlowTaken, taken),
+        (Run::FlowWall, since(start)),
+    ] {
+        RUN[stage as usize].fetch_add(value, Ordering::Relaxed);
+    }
+}
+
 // No NCBI counterpart: adds the time since `start` to a stage of this thread's batch mode.
 #[inline]
 pub(crate) fn batch(stage: Batch, start: Option<Instant>) {
     if start.is_some() {
-        BATCH[mode()][stage as usize].fetch_add(since(start), Ordering::Relaxed);
+        let ns = since(start);
+        BATCH[mode()][stage as usize].fetch_add(ns, Ordering::Relaxed);
+        // Diagnostic (LOSAT_TIMING): the same intervals feed the common line (utils/xtiming.rs),
+        // each once: the chunk lookups are `build_lookup`; the subject waves, the replay, the
+        // chunk end, the batch end and the parallel chunk path (which builds its lookups inside)
+        // are `search`. `query_setup` (translate, seg) is marked in `prepare_queries`; `setup`
+        // and `scan_inline` (inside `replay`) are not marked here. No NCBI counterpart.
+        use crate::utils::xtiming::{add_duration, Phase};
+        let d = std::time::Duration::from_nanos(ns);
+        match stage {
+            Batch::Lookup => add_duration(Phase::BuildLookup, d),
+            Batch::ChunksPar
+            | Batch::ScanPar
+            | Batch::Replay
+            | Batch::ChunkEnd
+            | Batch::BatchEnd => add_duration(Phase::Search, d),
+            _ => {}
+        }
     }
 }
 
@@ -214,6 +339,24 @@ fn s(counter: &AtomicU64) -> f64 {
 // No NCBI counterpart: a count.
 fn n(counter: &AtomicU64) -> u64 {
     counter.load(Ordering::Relaxed)
+}
+
+// No NCBI counterpart: the run's share of the common line (utils/xtiming.rs), once at the end of
+// `native::run`: the reports (`prolog`, `render`, `epilog`) are `output`; the queries' reader is
+// `read_fasta`, taken as `input` of `blastx_run` is (`loop - search - render`: it includes the
+// pool's start and end and, with LOSAT_X_BXBATCH, the queueing of batches).
+pub(crate) fn common_run() {
+    if !on() {
+        return;
+    }
+    use crate::utils::xtiming::{add_duration, Phase};
+    let r = |stage: Run| RUN[stage as usize].load(Ordering::Relaxed);
+    let input = r(Run::Loop).saturating_sub(r(Run::Search).saturating_add(r(Run::Render)));
+    add_duration(Phase::ReadFasta, std::time::Duration::from_nanos(input));
+    let output = r(Run::Prolog)
+        .saturating_add(r(Run::Render))
+        .saturating_add(r(Run::Epilog));
+    add_duration(Phase::Output, std::time::Duration::from_nanos(output));
 }
 
 /// Writes the `[TIMING]` lines of the run (nothing without `LOSAT_TIMING`).
@@ -259,6 +402,30 @@ pub(crate) fn write(out: &mut dyn Write, threads: usize) -> io::Result<()> {
         n(r(Run::FlowJobs)),
         s(r(Run::FlowJobTime)),
         s(r(Run::FlowBlocked)),
+    )?;
+    let wall = s(r(Run::SubjectWall));
+    let busy = s(r(Run::SubjectBusy));
+    writeln!(
+        out,
+        "[TIMING] blastx_subject_waves: waves={} tasks={} wall {:.3}s busy {:.3}s longest {:.3}s latest_start {:.3}s last_end {:.3}s threads={} idle {:.3}s",
+        n(r(Run::SubjectWaves)),
+        n(r(Run::SubjectTasks)),
+        wall,
+        busy,
+        s(r(Run::SubjectLongest)),
+        s(r(Run::SubjectLatestStart)),
+        s(r(Run::SubjectLastEnd)),
+        threads,
+        (wall * threads as f64 - busy).max(0.0),
+    )?;
+    writeln!(
+        out,
+        "[TIMING] blastx_subject_flow: loops={} tasks={} ahead={} taken={} wall {:.3}s",
+        n(r(Run::FlowLoops)),
+        n(r(Run::FlowTasks)),
+        n(r(Run::FlowAhead)),
+        n(r(Run::FlowTaken)),
+        s(r(Run::FlowWall)),
     )?;
     for (m, name) in [(0, "side"), (1, "alone")] {
         let b = |stage: Batch| &BATCH[m][stage as usize];

@@ -1,15 +1,15 @@
 //! The discontiguous megablast tables filled by the search pool (`LOSAT_X_DISCLUTPAR`,
 //! `src/algorithm/blastn/x_disc_lookup_par.rs`) on whole searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). It chooses between
-//! two LOSAT code paths with the same result: the tables of `s_FillDiscMBTable` filled by one
-//! loop, or by the threads of the search pool, each owning whole blocks of cells of both
-//! templates' tables. So the property under test is that the report does not depend on it: for
-//! `-task dc-megablast` with one template and with two (`coding_and_optimal`), template lengths
-//! 16, 18 and 21 and word sizes 11 and 12, with `-subject` and with `-db`, at 1 and 4 threads,
-//! the searches without the switch, with it, and with the shadow (`LOSAT_X_DISCLUTPARSHADOW`,
-//! which builds the tables the other way as well and compares every element) give the same
-//! bytes. The shadow's counters show that the pool built the tables at 4 threads and not at 1,
+//! The switch is in the strict set: on unless `LOSAT_X_DISCLUTPAR=0` (or `LOSAT_X_DEFAULT=0`). It
+//! chooses between two LOSAT code paths with the same result: the tables of `s_FillDiscMBTable`
+//! filled by one loop, or by the threads of the search pool, each owning whole blocks of cells of
+//! both templates' tables. So the property under test is that the report does not depend on it:
+//! for `-task dc-megablast` with one template and with two (`coding_and_optimal`), template
+//! lengths 16, 18 and 21 and word sizes 11 and 12, with `-subject` and with `-db`, at 1 and 4
+//! threads, the searches with the switch off (`=0`), by default, with it set to 1, and with the
+//! shadow (`LOSAT_X_DISCLUTPARSHADOW`, which builds the tables the other way as well and compares
+//! every element) give the same bytes. The shadow's counters show that the pool built the tables at 4 threads and not at 1,
 //! and how many tables had two templates. The same holds with `LOSAT_X_PAIRPARDISC`, in
 //! `LOSAT_X_QBATCHPAR` slots (private pools of two threads), for split query chunks
 //! (`CHUNK_SIZE`), and for megablast with a template (`-word_size 11 -template_type ...`);
@@ -23,7 +23,26 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
+/// `0`, the default before, unless the search sets it: every search here runs as it was written,
+/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
+    ("LOSAT_X_BPDBCUT", "0"),
+    ("LOSAT_X_BPLKPAHEAD", "0"),
+    ("LOSAT_X_BPREDOLPT", "0"),
+    ("LOSAT_X_BPREDOPAR", "0"),
+    ("LOSAT_X_BPSUBJMETA", "0"),
+    ("LOSAT_X_DIAGLV", "0"),
+    ("LOSAT_X_PAIRPARDISC", "0"),
+    ("LOSAT_X_PAIRPARFOLD", "0"),
+    ("LOSAT_X_QBATCHPAR", "0"),
+    ("LOSAT_X_QDUSTPAR", "0"),
+    ("LOSAT_X_QPREPPAR", "0"),
+    ("LOSAT_X_RPTSTREAM", "0"),
+];
+
 const SWITCH: (&str, &str) = ("LOSAT_X_DISCLUTPAR", "1");
+const OFF: (&str, &str) = ("LOSAT_X_DISCLUTPAR", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_DISCLUTPARSHADOW", "1");
 
 fn fasta(name: &str) -> PathBuf {
@@ -183,6 +202,7 @@ fn blastn(
         .args(extra)
         .args(["-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
+        .envs(PREVIOUS_DEFAULT.iter().copied())
         .envs(vars.iter().copied())
         .output()
         .expect("run LOSAT");
@@ -217,28 +237,33 @@ fn shadow_counts(stderr: &str, expected: &str) -> (u64, u64, u64) {
     (field("tables="), field("pool="), field("two_templates="))
 }
 
-/// For one search (`subject` and `extra` arguments): the report without the switch at one thread,
-/// then off, on and the shadow at 1 and 4 threads, all the same bytes; the switch writes nothing,
-/// the shadow one line whose tables were built on the pool only at 4 threads, with two templates
-/// exactly when `two_templates`.
+/// For one search (`subject` and `extra` arguments): the report with the switch off at one
+/// thread, then off, by default (on), on (`=1`) and the shadow at 1 and 4 threads, all the same
+/// bytes; the switch writes nothing, the shadow one line whose tables were built on the pool only
+/// at 4 threads, with two templates exactly when `two_templates`.
 fn check(subject: &[&str], extra: &[&str], two_templates: bool, env: &[Var]) {
     let queries = queries();
     let with = |more: &[Var]| -> Vec<Var> { env.iter().chain(more).copied().collect() };
-    let (expected, expected_stderr) = blastn(&queries, subject, extra, 1, &with(&[]));
+    let (expected, expected_stderr) = blastn(&queries, subject, extra, 1, &with(&[OFF]));
     assert!(!expected.is_empty(), "{extra:?}: no hits");
     for threads in [1, 4] {
-        let (report, stderr) = blastn(&queries, subject, extra, threads, &with(&[]));
+        let (report, stderr) = blastn(&queries, subject, extra, threads, &with(&[OFF]));
         assert!(
             report == expected,
             "{extra:?} threads {threads}: off differs"
         );
         assert_eq!(stderr, expected_stderr, "{extra:?} threads {threads}");
-        let (report, stderr) = blastn(&queries, subject, extra, threads, &with(&[SWITCH]));
-        assert!(
-            report == expected,
-            "{extra:?} threads {threads}: on differs"
-        );
-        assert_eq!(stderr, expected_stderr, "{extra:?} threads {threads}");
+        for (on, what) in [(&[][..], "default"), (&[SWITCH][..], "on")] {
+            let (report, stderr) = blastn(&queries, subject, extra, threads, &with(on));
+            assert!(
+                report == expected,
+                "{extra:?} threads {threads}: {what} differs"
+            );
+            assert_eq!(
+                stderr, expected_stderr,
+                "{extra:?} threads {threads} {what}"
+            );
+        }
         let (report, stderr) = blastn(&queries, subject, extra, threads, &with(&[SHADOW]));
         assert!(
             report == expected,
@@ -385,12 +410,14 @@ fn qbatchpar_slots_and_split_chunks() {
             |more: &[Var]| -> Vec<Var> { env.iter().chain(slots).chain(more).copied().collect() };
         let (expected, expected_stderr) = blastn(&queries, &subject, &extra, 1, env);
         assert!(!expected.is_empty(), "{env:?}: no hits");
-        let (report, stderr) = blastn(&queries, &subject, &extra, 4, &with(&[]));
+        let (report, stderr) = blastn(&queries, &subject, &extra, 4, &with(&[OFF]));
         assert!(report == expected, "{env:?} {slots:?}: off differs");
         assert_eq!(stderr, expected_stderr, "{env:?}");
-        let (report, stderr) = blastn(&queries, &subject, &extra, 4, &with(&[SWITCH]));
-        assert!(report == expected, "{env:?} {slots:?}: on differs");
-        assert_eq!(stderr, expected_stderr, "{env:?}");
+        for on in [&[][..], &[SWITCH][..]] {
+            let (report, stderr) = blastn(&queries, &subject, &extra, 4, &with(on));
+            assert!(report == expected, "{env:?} {slots:?} {on:?}: on differs");
+            assert_eq!(stderr, expected_stderr, "{env:?}");
+        }
         let (report, stderr) = blastn(&queries, &subject, &extra, 4, &with(&[SHADOW]));
         assert!(report == expected, "{env:?} {slots:?}: shadow differs");
         let (tables, pool, _) = shadow_counts(&stderr, &expected_stderr);
@@ -426,9 +453,10 @@ fn megablast_with_and_without_a_template() {
 }
 
 // With LOSAT_TIMING the builds print their summed wall time at exit, with or without the switch,
-// and how many were built on a pool: all of them with the switch at 4 threads, none without it
-// or at 1 thread; and the split line: the chunks and phases of the pool fills, or the time of the
-// original loop.
+// and how many were built on a pool: all of them with the switch at 4 threads (by default and set
+// to 1), none with it off (`=0`, or `LOSAT_X_DEFAULT=0`) or at 1 thread; and the split line: the
+// chunks and phases of the pool fills (and its prefault rounds, at most one per fill), or the time
+// of the original loop.
 #[test]
 fn timing_line_is_printed() {
     let queries = queries();
@@ -438,7 +466,13 @@ fn timing_line_is_printed() {
     let (expected, _) = blastn(&queries, &subject, &extra, 1, &[]);
     for (threads, vars, on_pool) in [
         (4, &[("LOSAT_TIMING", "1"), SWITCH][..], true),
-        (4, &[("LOSAT_TIMING", "1")][..], false),
+        (4, &[("LOSAT_TIMING", "1")][..], true),
+        (4, &[("LOSAT_TIMING", "1"), OFF][..], false),
+        (
+            4,
+            &[("LOSAT_TIMING", "1"), ("LOSAT_X_DEFAULT", "0")][..],
+            false,
+        ),
         (1, &[("LOSAT_TIMING", "1"), SWITCH][..], false),
     ] {
         let (report, stderr) = blastn(&queries, &subject, &extra, threads, vars);
@@ -467,6 +501,15 @@ fn timing_line_is_printed() {
         assert_eq!(nonzero("pool_fill="), on_pool, "{stderr}");
         assert_eq!(nonzero("read_wall="), on_pool, "{stderr}");
         assert_eq!(nonzero("loop="), !on_pool, "{stderr}");
+        // The prefault rounds: at most one per pool fill, none off the pool; they touch whole
+        // 2 MiB regions of the cells only (512 pages each, one zero per page).
+        let rounds: u64 = split_field(&stderr, "x_prefault_rounds=").parse().unwrap();
+        let touches: u64 = split_field(&stderr, "x_prefault_touches=").parse().unwrap();
+        assert!(rounds <= builds, "{stderr}");
+        assert_eq!(touches % 512, 0, "{stderr}");
+        if !on_pool {
+            assert_eq!((rounds, touches), (0, 0), "{stderr}");
+        }
     }
     // Megablast builds no discontiguous table: no line.
     let (_, stderr) = blastn(
@@ -493,7 +536,7 @@ fn split_field(stderr: &str, name: &str) -> String {
 
 // A table filled in several chunks of the pool fill: AP027131 (0.66 Mb, so about 1.3 million
 // positions on both strands, against chunks of 524,288) against NZ_CP006932, dc-megablast with
-// one template and with two (`coding_and_optimal`, 18): off at 1 thread, on and the shadow at 4
+// one template and with two (`coding_and_optimal`, 18): off at 1 and 4 threads, on and the shadow at 4
 // threads give the same bytes, the shadow compares pool-built tables with the original loop's,
 // and LOSAT_TIMING's split counts more chunks than tables.
 #[test]
@@ -515,8 +558,11 @@ fn dc_megablast_across_chunk_boundaries() {
             true,
         ),
     ] {
-        let (expected, expected_stderr) = blastn(&query, &subject, extra, 1, &[]);
+        let (expected, expected_stderr) = blastn(&query, &subject, extra, 1, &[OFF]);
         assert!(!expected.is_empty(), "{extra:?}: no hits");
+        let (report, stderr) = blastn(&query, &subject, extra, 4, &[OFF]);
+        assert!(report == expected, "{extra:?}: off differs");
+        assert_eq!(stderr, expected_stderr, "{extra:?}");
         let (report, stderr) = blastn(&query, &subject, extra, 4, &[SWITCH]);
         assert!(report == expected, "{extra:?}: on differs");
         assert_eq!(stderr, expected_stderr, "{extra:?}");

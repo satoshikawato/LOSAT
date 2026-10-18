@@ -81,12 +81,41 @@ pub fn encode_protein_sequence(seq: &[u8]) -> EncodedProtein {
 // query_blk->sequence_nomask = query_blk->sequence_start_nomask + 1;
 // ```
 pub fn encode_protein_query_frame_with_seg(seq: &[u8], seg: Option<&SegParams>) -> QueryFrame {
+    encode_query_frame(seq, seg, false)
+}
+
+/// As `encode_protein_query_frame_with_seg`, and with LOSAT_TIMING the encoding and the SEG are
+/// added to the common line's `encode` and `seg` (utils/xtiming.rs). For the drivers' query
+/// preparation on the calling thread only, not for per-subject work.
+pub fn encode_protein_query_frame_with_seg_timed(
+    seq: &[u8],
+    seg: Option<&SegParams>,
+) -> QueryFrame {
+    encode_query_frame(seq, seg, true)
+}
+
+fn encode_query_frame(seq: &[u8], seg: Option<&SegParams>, timed: bool) -> QueryFrame {
+    // Diagnostic (LOSAT_TIMING): the encoding for the common line (utils/xtiming.rs). No NCBI
+    // counterpart.
+    let t_encode = if timed {
+        crate::utils::xtiming::clock()
+    } else {
+        None
+    };
     let encoded = encode_protein_sequence(seq);
     let mut aa_seq = encoded.aa_seq.clone();
     let mut aa_seq_nomask = None;
     let mut seg_masks = Vec::new();
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
 
     if let Some(params) = seg {
+        // Diagnostic (LOSAT_TIMING): the query's SEG for the common line (utils/xtiming.rs). No
+        // NCBI counterpart.
+        let t_seg = if timed {
+            crate::utils::xtiming::clock()
+        } else {
+            None
+        };
         let masker = SegMasker::with_params(params);
         let intervals = masker.mask_sequence(&aa_seq[1..aa_seq.len() - 1]);
         if !intervals.is_empty() {
@@ -98,6 +127,7 @@ pub fn encode_protein_query_frame_with_seg(seq: &[u8], seg: Option<&SegParams>) 
                 }
             }
         }
+        crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
     }
 
     QueryFrame {

@@ -1,15 +1,15 @@
 //! BLASTX's query batches searched as a flow of tasks (`LOSAT_X_BXFLOW`,
 //! `x_flow` in `src/algorithm/blastx/native.rs`) on whole searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). With two or more
-//! threads blastx's default path queues short query batches (a batch is the queries up to
+//! The switch is in the strict set (on unless `LOSAT_X_BXFLOW=0`); the reference runs here set it
+//! to `0`. With two or more threads blastx's path without it queues short query batches (a batch is the queries up to
 //! 10,002 nucleotides) and searches them in waves of `threads * 4`; with the switch every batch
 //! is a task of its own (spawned once `threads` batches follow it; the last `threads` batches of
 //! the input are searched with the pool inside, side by side) and the results, the reader's
 //! warnings and the stop at a failing batch are written in the reader's order. So the property
 //! under test is that nothing the run writes
 //! depends on it: standard output (or the `-out` file), standard error (byte for byte) and the
-//! exit status equal those of the same search without the switch, for two, three and four
+//! exit status equal those of the same search with the switch off, for two, three and four
 //! threads (the bound of `threads * 4` unwritten batches is reached at two and three), outfmt 0,
 //! 6 and 7, `-max_target_seqs 1`, a database (`-db`), an input of fewer batches than threads
 //! (every batch searched with the pool inside), and an error of the reader in a later batch after
@@ -29,6 +29,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const SWITCH: (&str, &str) = ("LOSAT_X_BXFLOW", "1");
+/// The switch off: the waves (the switch is in the strict set, so a run without it flows).
+const OFF: (&str, &str) = ("LOSAT_X_BXFLOW", "0");
 
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -198,7 +200,7 @@ fn blastx(args: &[&str], env: &[(&str, &str)]) -> Run {
 /// byte for byte, the exit status); returns the run without it. Unless `fails`, that run must
 /// have succeeded and written a report, so that the comparison cannot pass vacuously.
 fn same_as_without(what: &str, args: &[&str], fails: bool) -> Run {
-    let reference = blastx(args, &[]);
+    let reference = blastx(args, &[OFF]);
     if fails {
         assert_ne!(
             reference.code,

@@ -78,7 +78,7 @@
 //!   so with the switch a block comes after the warnings of the batches before it (the same
 //!   lines in another order).
 //!
-//! Off (the reports after the loop, as without the switch): the switch not set; outputs other
+//! Off (the reports after the loop, as without the switch): the switch off; outputs other
 //! than one format of the command line's kind (the hit records and the format observer of the Web
 //! adapter, whose HSP numbers count over the whole search; file sinks, which are created when
 //! their report is written; two or more formats, which the library API allows on one stream,
@@ -130,20 +130,28 @@ use super::{
     BlastnOutputFormat, QueryBatching, SubjectLetters, SubjectRanges, SubjectSource,
 };
 
-// No NCBI counterpart: reads the switches once (any value turns them on; the shadow implies the
-// switch; neither is in the strict set). They choose when LOSAT writes the same reports.
+// No NCBI counterpart: reads the switches once (LOSAT_X_RPTSTREAM is a strict-set switch since
+// 2026-10-17: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; the shadow, off
+// unless set to any value, implies the switch). They choose when LOSAT writes the same reports.
 /// 0 = off, 1 = LOSAT_X_RPTSTREAM, 2 = LOSAT_X_RPTSTREAMSHADOW.
 fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_RPTSTREAMSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_RPTSTREAM").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_RPTSTREAM") {
             1
         } else {
             0
         }
     })
+}
+
+/// Whether the switch (or its shadow) is set: the reports may be written batch by batch, so a
+/// batch's query records need not outlive the batch (LOSAT_X_QSTREAM reads them per batch only
+/// then, `x_query_stream`).
+pub(super) fn switch_on() -> bool {
+    mode() != 0
 }
 
 /// Why the reports of a search are written after its batch loop (`Stream::start`).

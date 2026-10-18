@@ -30,6 +30,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
+/// `0`, the default before, unless the search sets it: every search here runs as it was written,
+/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
+    ("LOSAT_X_BPDBCUT", "0"),
+    ("LOSAT_X_BPLKPAHEAD", "0"),
+    ("LOSAT_X_BPREDOLPT", "0"),
+    ("LOSAT_X_BPREDOPAR", "0"),
+    ("LOSAT_X_BPSUBJMETA", "0"),
+    ("LOSAT_X_DIAGLV", "0"),
+    ("LOSAT_X_PAIRPARDISC", "0"),
+    ("LOSAT_X_PAIRPARFOLD", "0"),
+    ("LOSAT_X_QBATCHPAR", "0"),
+    ("LOSAT_X_QDUSTPAR", "0"),
+    ("LOSAT_X_QPREPPAR", "0"),
+    ("LOSAT_X_RPTSTREAM", "0"),
+];
+
 const PIECE: usize = 6_000;
 
 /// The letters of the first record of a FASTA file.
@@ -169,6 +187,7 @@ fn blastn(
         .arg(subjects)
         .args(options)
         .env("LOSAT_X_STATS", "1")
+        .envs(PREVIOUS_DEFAULT.iter().copied())
         .envs(variables.iter().copied())
         .output()
         .expect("run LOSAT");

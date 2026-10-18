@@ -54,7 +54,10 @@ const THREADS: [u32; 2] = [1, 4];
 /// `LOSAT_X_DEFAULT` of the test's own environment is dropped as well: every test states the
 /// default it runs with. `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the
 /// `blastx-worker-probe` feature (`cargo test --all-features`, as in CI) needs that file name as
-/// soon as a search has more than one thread, and it selects nothing.
+/// soon as a search has more than one thread, and it selects nothing. `LOSAT_X_PAIRPARGATE=0`
+/// comes first (a test's own variables may set it again): the fixtures' query batches are short,
+/// so the gate, in the strict set, would send them to the reference frame loop, and these tests
+/// are about the unit path.
 fn losat(switches: &[(&str, &str)]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
     for (name, _) in std::env::vars_os() {
@@ -62,6 +65,7 @@ fn losat(switches: &[(&str, &str)]) -> Command {
             command.env_remove(name);
         }
     }
+    command.env("LOSAT_X_PAIRPARGATE", "0");
     command.envs(switches.iter().copied());
     command
 }

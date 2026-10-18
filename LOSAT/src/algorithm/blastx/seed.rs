@@ -421,6 +421,8 @@ impl Lookup {
         if window > 0 && range[2] < range[1] {
             range[2] = range[1];
         }
+        let mut pad = Vec::new();
+        let subject = x_scan_bytes(subject, range[2], word, &mut pad);
         let mut pairs = vec![OffsetPair::default(); self.capacity()];
         let capacity = pairs.len() as i32;
         let mut seeds = Vec::new();
@@ -440,6 +442,38 @@ impl Lookup {
             visit(&seeds);
         }
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:505-506
+// ```c
+//     if (scan_range[2] < scan_range[1])
+//         scan_range[2] = scan_range[1];
+// ```
+// With a two-hit window the last scan position is at least 0, so the one position of a subject
+// shorter than a word less one letter has a word that runs past the sentinel, and NCBI reads the
+// bytes after it in its buffer (the next sequence of a database volume). No NCBI counterpart for
+// the copy: LOSAT scans such a subject from a copy with sentinels after it, as the fused loop
+// reads it (`blastp::x_seed_fused::x_scan_cells_bf`). One scan position extends no hit (the
+// two-hit test needs two hits on a diagonal), and the entry such a hit leaves lies a window and
+// the subject's length behind the next subject's offsets, so no hit and no report depends on
+// those bytes.
+/// The bytes a scan of positions up to `s_last` (each with its `word` letters) reads: `subject`
+/// (the residues and the sentinel), or, when the last word runs past it, a copy in `pad` with
+/// sentinels (0) after it.
+pub(crate) fn x_scan_bytes<'a>(
+    subject: &'a [u8],
+    s_last: i32,
+    word: i32,
+    pad: &'a mut Vec<u8>,
+) -> &'a [u8] {
+    let read = (s_last + word).max(0) as usize;
+    if read <= subject.len() {
+        return subject;
+    }
+    pad.clear();
+    pad.extend_from_slice(subject);
+    pad.resize(read, 0);
+    pad
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-607

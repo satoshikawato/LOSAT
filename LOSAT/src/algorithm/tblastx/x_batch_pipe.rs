@@ -38,15 +38,25 @@
 //!    thread runs the pool's jobs (`rayon::yield_now`), and sleeps 50 us when there is none, so
 //!    no thread waits for a condition outside rayon's latches and no job waits at all (plan v4
 //!    §5: a waiting helper that a nested wait runs deadlocks).
-//! 4. Admission: a batch holds its HSP lists from its seed-stage end until its search returns.
-//!    The next batch starts early only while the HSPs held by such batches, the starting batch's
-//!    own included, are at most `HSP_LIMIT` (4 Mi HSPs: 352 MiB of 88-byte records); otherwise
+//! 4. Admission: a subject holds its HSP list from its seed-stage end until it returns (its chain
+//!    links it, re-evaluates it and converts it). The next batch starts early only while the
+//!    subjects past their seed stage hold at most `HSP_LIMIT` HSPs (4 Mi: 352 MiB of 88-byte
+//!    records); otherwise
 //!    the loop starts it when it reaches it, as before. The genome 3 x 3 batches hold 1.2-1.4 M
 //!    HSPs; one 5 Mb by 5 Mb pair holds about 23 M, so a query file of such genomes keeps today's
 //!    peak. The tables of two batches are never held at once: the next batch builds its own after
 //!    the batch before has freed its tables.
 //! 5. A search that returns an error stops the early starts. The loop then meets that batch's
 //!    error where it met it before; batches started after it are discarded unread.
+//! 6. While a later batch may run, a batch's subjects link without the pool (their two linking
+//!    calls get `allow_parallel` false, the path of one thread, which gives the same lists): a
+//!    thread waiting for its pool tasks runs whatever the pool holds, so a chain that waited for
+//!    its link groups ran the next batch's subjects inside the wait and ended after them, and the
+//!    chains of three batches ended one after the other on one thread at the end of the search
+//!    (genome 3 x 3, 16 threads: the last batch's tail 1.43 s, against 0.91 s without the pipe).
+//!    A chain without a wait never runs other work. The other threads run the next batch's units
+//!    meanwhile. The subjects of the plan's last batch, and of a batch whose subjects hold more
+//!    HSPs than the limit (no batch starts early then), link on the pool as before.
 //!
 //! # Why the output is the loop's
 //!
@@ -121,59 +131,117 @@ fn hsp_limit() -> u64 {
     })
 }
 
+// No NCBI counterpart: the pipe's count of the HSPs held (module header, item 4).
+/// The HSPs that subjects past their seed stage hold, the most held at once, and the admission
+/// limit.
+#[derive(Default)]
+pub(super) struct XHeld {
+    now: AtomicU64,
+    most: AtomicU64,
+    limit: u64,
+}
+
+impl XHeld {
+    fn with_limit(limit: u64) -> Self {
+        Self {
+            limit,
+            ..Self::default()
+        }
+    }
+
+    /// Adds `hsps`; the HSPs held now.
+    fn add(&self, hsps: u64) -> u64 {
+        let now = self.now.fetch_add(hsps, Ordering::SeqCst) + hsps;
+        self.most.fetch_max(now, Ordering::Relaxed);
+        now
+    }
+
+    fn release(&self, hsps: u64) {
+        self.now.fetch_sub(hsps, Ordering::SeqCst);
+    }
+
+    fn room(&self) -> bool {
+        self.now.load(Ordering::SeqCst) <= self.limit
+    }
+}
+
 // No NCBI counterpart: the stage of one batch search that `process_subject` reports to the pipe.
 /// The seed-stage end of one batch search: the subjects whose seed stage has not ended, the HSPs
 /// of those that have, and what to do when the last one ends.
 pub(super) struct XSeedEnd<'a> {
     left: AtomicUsize,
     hsps: AtomicU64,
-    ended: AtomicBool,
     on_end: &'a (dyn Fn(u64) + Sync),
+    held: &'a XHeld,
+    /// The batch is the plan's last: no batch can start while it links.
+    last: bool,
 }
 
 impl<'a> XSeedEnd<'a> {
-    /// `subjects` seed stages; `on_end` gets the batch's HSPs when the last one ends.
-    pub(super) fn new(subjects: usize, on_end: &'a (dyn Fn(u64) + Sync)) -> Self {
+    /// `subjects` seed stages counted into `held`; `on_end` gets the batch's HSPs when the last
+    /// one ends; `last` when no batch follows in the plan.
+    pub(super) fn new(
+        subjects: usize,
+        on_end: &'a (dyn Fn(u64) + Sync),
+        held: &'a XHeld,
+        last: bool,
+    ) -> Self {
         Self {
             left: AtomicUsize::new(subjects),
             hsps: AtomicU64::new(0),
-            ended: AtomicBool::new(false),
             on_end,
+            held,
+            last,
         }
     }
 
-    fn subject_ended(&self, hsps: usize) {
-        self.hsps.fetch_add(hsps as u64, Ordering::SeqCst);
+    /// One subject's seed stage has ended with `hsps` HSPs, which it holds until it returns.
+    /// True when its chain may use the pool (module header, item 6).
+    fn subject_ended(&self, hsps: u64) -> bool {
+        let held = self.held.add(hsps);
+        let total = self.hsps.fetch_add(hsps, Ordering::SeqCst) + hsps;
         if self.left.fetch_sub(1, Ordering::SeqCst) == 1 {
-            self.ended.store(true, Ordering::SeqCst);
-            (self.on_end)(self.hsps.load(Ordering::SeqCst));
+            (self.on_end)(total);
         }
-    }
-
-    /// The batch's HSPs when every seed stage has ended, `None` before.
-    fn held(&self) -> Option<u64> {
-        self.ended
-            .load(Ordering::SeqCst)
-            .then(|| self.hsps.load(Ordering::SeqCst))
+        self.last || held > self.held.limit
     }
 }
 
 // No NCBI counterpart: one subject's part of `XSeedEnd`.
 /// The seed stage of one subject: `end` with its HSP count, or the drop (a subject that returns
-/// before the seed stage ends, as one too short to search) with none.
+/// before the seed stage ends, as one too short to search) with none; the drop releases the HSPs
+/// from the count.
 pub(super) struct XSeedGuard<'a> {
     seed_end: Option<&'a XSeedEnd<'a>>,
+    ended: bool,
+    hsps: u64,
 }
 
 impl<'a> XSeedGuard<'a> {
     pub(super) fn new(seed_end: Option<&'a XSeedEnd<'a>>) -> Self {
-        Self { seed_end }
+        Self {
+            seed_end,
+            ended: false,
+            hsps: 0,
+        }
     }
 
-    /// The subject's seed stage has ended with `hsps` HSPs.
-    pub(super) fn end(&mut self, hsps: usize) {
-        if let Some(seed_end) = self.seed_end.take() {
-            seed_end.subject_ended(hsps);
+    /// The subject's seed stage has ended with `hsps` HSPs. True when the subject's chain (its
+    /// linking calls) may use the pool: always without the pipe; with it, in the plan's last batch
+    /// and when the HSPs held exceed the admission limit (no batch starts early then), else false:
+    /// a later batch runs meanwhile, and a chain waiting for its pool tasks would run that batch's
+    /// subjects inside the wait and end after them.
+    pub(super) fn end(&mut self, hsps: usize) -> bool {
+        if self.ended {
+            return true;
+        }
+        self.ended = true;
+        match self.seed_end {
+            Some(seed_end) => {
+                self.hsps = hsps as u64;
+                seed_end.subject_ended(self.hsps)
+            }
+            None => true,
         }
     }
 }
@@ -181,8 +249,12 @@ impl<'a> XSeedGuard<'a> {
 impl Drop for XSeedGuard<'_> {
     fn drop(&mut self) {
         // An unwinding subject starts nothing.
-        if !std::thread::panicking() {
-            self.end(0);
+        if std::thread::panicking() {
+            return;
+        }
+        self.end(0);
+        if let Some(seed_end) = self.seed_end {
+            seed_end.held.release(self.hsps);
         }
     }
 }
@@ -196,7 +268,6 @@ struct Counts {
     loop_searched: AtomicU64,
     waited: AtomicU64,
     key_mismatch: AtomicU64,
-    max_held: AtomicU64,
     compared: AtomicU64,
 }
 
@@ -221,8 +292,7 @@ pub(super) struct XPipe<'s, R> {
     slots: Vec<Mutex<Option<Result<R>>>>,
     next: AtomicUsize,
     stop: AtomicBool,
-    held: AtomicU64,
-    limit: u64,
+    held: XHeld,
     counts: Counts,
 }
 
@@ -259,8 +329,7 @@ impl<'s, R: Send> XPipe<'s, R> {
             slots: (0..n).map(|_| Mutex::new(None)).collect(),
             next: AtomicUsize::new(0),
             stop: AtomicBool::new(false),
-            held: AtomicU64::new(0),
-            limit,
+            held: XHeld::with_limit(limit),
             counts: Counts::default(),
         })
     }
@@ -320,25 +389,21 @@ impl<'s, R: Send> XPipe<'s, R> {
 
     /// Searches batch `i` with its seed-stage end, which may start batch `i + 1`.
     fn run(&'s self, scope: &rayon::Scope<'s>, i: usize) -> Result<R> {
-        let on_end = |hsps: u64| self.seed_ended(scope, i, hsps);
-        let seed_end = XSeedEnd::new(self.subjects, &on_end);
+        let on_end = |_: u64| self.seed_ended(scope, i);
+        let last = i + 1 == self.plan.len();
+        let seed_end = XSeedEnd::new(self.subjects, &on_end, &self.held, last);
         let result = (self.search)(self.plan[i].clone(), Some(&seed_end));
-        if let Some(hsps) = seed_end.held() {
-            self.held.fetch_sub(hsps, Ordering::SeqCst);
-        }
         if result.is_err() {
             self.stop.store(true, Ordering::SeqCst);
         }
         result
     }
 
-    /// Batch `i` has ended its seed stage holding `hsps` HSPs: batch `i + 1` starts now if the
-    /// admission rule lets it and nothing started it yet.
-    fn seed_ended(&'s self, scope: &rayon::Scope<'s>, i: usize, hsps: u64) {
-        let held = self.held.fetch_add(hsps, Ordering::SeqCst) + hsps;
-        self.counts.max_held.fetch_max(held, Ordering::Relaxed);
+    /// Batch `i` has ended its seed stage: batch `i + 1` starts now if the HSPs held leave room
+    /// and nothing started it yet.
+    fn seed_ended(&'s self, scope: &rayon::Scope<'s>, i: usize) {
         let next = i + 1;
-        if held > self.limit
+        if !self.held.room()
             || next >= self.plan.len()
             || self.stop.load(Ordering::SeqCst)
             || self.started[next].swap(true, Ordering::SeqCst)
@@ -388,7 +453,7 @@ impl<'s, R: Send> XPipe<'s, R> {
                 c.loop_searched.load(Ordering::Relaxed),
                 c.waited.load(Ordering::Relaxed),
                 c.key_mismatch.load(Ordering::Relaxed),
-                c.max_held.load(Ordering::Relaxed),
+                self.held.most.load(Ordering::Relaxed),
             ));
         }
         if shadow() {
@@ -544,6 +609,30 @@ mod tests {
         });
         assert_eq!(values, vec![vec![0, 1], vec![2]]);
         assert_eq!(pipe.counts.key_mismatch.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_chain_links_on_the_pool_in_the_last_batch_or_over_the_limit() {
+        let noop = |_: u64| {};
+        let held = XHeld::with_limit(10);
+        {
+            let seed_end = XSeedEnd::new(3, &noop, &held, false);
+            let mut a = XSeedGuard::new(Some(&seed_end));
+            let mut b = XSeedGuard::new(Some(&seed_end));
+            assert!(!a.end(3), "room left, a later batch may run");
+            assert!(b.end(8), "11 HSPs held, over the limit");
+            assert_eq!(held.now.load(Ordering::SeqCst), 11);
+            drop(a);
+            assert_eq!(held.now.load(Ordering::SeqCst), 8);
+            // A subject that returns before its seed stage ends holds nothing.
+            drop(XSeedGuard::new(Some(&seed_end)));
+            drop(b);
+        }
+        assert_eq!(held.now.load(Ordering::SeqCst), 0);
+        assert_eq!(held.most.load(Ordering::SeqCst), 11);
+        let last = XSeedEnd::new(1, &noop, &held, true);
+        assert!(XSeedGuard::new(Some(&last)).end(1), "the plan's last batch");
+        assert!(XSeedGuard::new(None).end(1), "no pipe");
     }
 
     #[test]

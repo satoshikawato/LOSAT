@@ -5487,8 +5487,10 @@ fn search_query_batch(
             x_seed_release::drop_worker_table(&mut st.diag_array);
         }
         // EXPERIMENT (LOSAT_X_TBXPIPE): the seed stage of this subject has ended with the HSP list
-        // that the linking below takes; the batch's last one may start the next batch.
-        x_pipe_seed.end(combined_ungapped_hits.len());
+        // that the linking below takes; the batch's last one may start the next batch. While a
+        // later batch may run, the two linking calls below do not use the pool (`x_link_on_pool`,
+        // tblastx/x_batch_pipe.rs item 6); the lists are the same with or without it.
+        let x_link_on_pool = use_parallel && x_pipe_seed.end(combined_ungapped_hits.len());
         x_lap.lap(XStage::SeedRelease);
 
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:561-584
@@ -5554,7 +5556,7 @@ fn search_query_batch(
                 &subject_frame_bases,
                 &length_adj_per_context,
                 &eff_searchsp_per_context,
-                use_parallel,
+                x_link_on_pool,
             )
         };
         x_link_timer.disarm();
@@ -5761,7 +5763,7 @@ fn search_query_batch(
                 &subject_frame_bases,
                 &length_adj_per_context,
                 &eff_searchsp_per_context,
-                use_parallel,
+                x_link_on_pool,
             );
             x_link_timer.disarm();
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/link_hsps.c:959-982

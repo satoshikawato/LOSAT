@@ -12,7 +12,10 @@
 //! Variables: `R1_DIR` (capture directory; the synthetic problems take the matrix and gap costs of
 //! its first 8-bit score-only problem), `R1_CAT` (so8, tb8, so16, tb16), `R1_SYNTH` (identical,
 //! 80pct, 60pct, 45pct; unset = the captures), `R1_REPS` (default 0), `R1_LIMIT` (most problems),
-//! `R1_OUT` (append the result line to this file).
+//! `R1_OUT` (append the result line to this file), `R1_LAYOUT` (`spread`: before the timed loop, the
+//! kernels' rows move into one leaked arena at offsets modulo 4096 at least 512 bytes apart, see
+//! `spread`; unset = the rows where the scratch put them). The line also gives each row's address
+//! modulo 4096 (`lay=`).
 
 use super::super::tests::Rng;
 use super::super::x_capture::load_dir;
@@ -377,6 +380,85 @@ fn shape(p: &Prob<'_>, rec: &[(u32, u32, u32)], w8: bool, limit_rebase: i32, st:
     }
 }
 
+/// Address modulo 4096 and length in bytes of each row buffer of the scratch.
+fn layout(sc: &XdropScratch) -> String {
+    let f = |n: &str, p: usize, b: usize| format!("{n}:{}/{}", p % 4096, b);
+    [
+        f("ha", sc.ha.as_ptr() as usize, sc.ha.len() * 2),
+        f("hb", sc.hb.as_ptr() as usize, sc.hb.len() * 2),
+        f("e", sc.e.as_ptr() as usize, sc.e.len() * 2),
+        f("h8a", sc.h8a.as_ptr() as usize, sc.h8a.len()),
+        f("h8b", sc.h8b.as_ptr() as usize, sc.h8b.len()),
+        f("e8", sc.e8.as_ptr() as usize, sc.e8.len()),
+        f("sb", sc.sb.as_ptr() as usize, sc.sb.len()),
+        f("tabs", sc.tabs.as_ptr() as usize, sc.tabs.len()),
+        f("trace", sc.trace.as_ptr() as usize, sc.trace.capacity()),
+    ]
+    .join(",")
+}
+
+/// `R1_LAYOUT=spread`: the rows `ha`, `hb`, `e`, `h8a`, `h8b`, `e8`, `sb` copied into one leaked
+/// arena, each starting at its own offset modulo 4096 (64 + 576 i), with whole pages between them;
+/// lengths kept. The timed loop replays problems the scratch has already been grown for, so no
+/// `grow` (which would reallocate these vectors) runs while they live in the arena; the caller
+/// forgets them before the scratch drops (`unspread`).
+fn spread(sc: &mut XdropScratch) {
+    let lens = [
+        sc.ha.len() * 2,
+        sc.hb.len() * 2,
+        sc.e.len() * 2,
+        sc.h8a.len(),
+        sc.h8b.len(),
+        sc.e8.len(),
+        sc.sb.len(),
+    ];
+    let slot = |l: usize| l.div_ceil(4096) * 4096 + 4096;
+    let total: usize = lens.iter().map(|&l| slot(l)).sum::<usize>() + 8192;
+    let arena: &'static mut [u8] = Vec::leak(vec![0u8; total]);
+    let base = arena.as_mut_ptr() as usize;
+    let mut at = base.div_ceil(4096) * 4096;
+    let mut ptrs = [0usize; 7];
+    for (i, &l) in lens.iter().enumerate() {
+        ptrs[i] = at + 64 + 576 * i;
+        at += slot(l);
+    }
+    assert!(at <= base + total);
+    // SAFETY: each target range lies inside the leaked arena and the ranges do not overlap; the
+    // vectors built here are never freed or grown (see `unspread`).
+    unsafe {
+        let mv16 = |v: &mut Vec<i16>, p: usize| {
+            let n = v.len();
+            std::ptr::copy_nonoverlapping(v.as_ptr(), p as *mut i16, n);
+            let old = std::mem::replace(v, Vec::from_raw_parts(p as *mut i16, n, n));
+            drop(old);
+        };
+        let mv8 = |v: &mut Vec<u8>, p: usize| {
+            let n = v.len();
+            std::ptr::copy_nonoverlapping(v.as_ptr(), p as *mut u8, n);
+            let old = std::mem::replace(v, Vec::from_raw_parts(p as *mut u8, n, n));
+            drop(old);
+        };
+        mv16(&mut sc.ha, ptrs[0]);
+        mv16(&mut sc.hb, ptrs[1]);
+        mv16(&mut sc.e, ptrs[2]);
+        mv8(&mut sc.h8a, ptrs[3]);
+        mv8(&mut sc.h8b, ptrs[4]);
+        mv8(&mut sc.e8, ptrs[5]);
+        mv8(&mut sc.sb, ptrs[6]);
+    }
+}
+
+/// Forgets the arena-backed rows of `spread` (they must not reach the allocator).
+fn unspread(sc: &mut XdropScratch) {
+    std::mem::forget(std::mem::take(&mut sc.ha));
+    std::mem::forget(std::mem::take(&mut sc.hb));
+    std::mem::forget(std::mem::take(&mut sc.e));
+    std::mem::forget(std::mem::take(&mut sc.h8a));
+    std::mem::forget(std::mem::take(&mut sc.h8b));
+    std::mem::forget(std::mem::take(&mut sc.e8));
+    std::mem::forget(std::mem::take(&mut sc.sb));
+}
+
 /// One call as `xdrop_align` makes it with the 256-bit kernels on: `x_avx2::align`.
 #[inline(never)]
 fn call(p: &Prob<'_>, tb: bool, sc: &mut XdropScratch) -> Option<XdropResult> {
@@ -569,6 +651,12 @@ fn r1_loop() {
         }
     }
     // the loop the counters are taken over
+    let lay_before = layout(&sc);
+    let spread_on = var("R1_LAYOUT").as_deref() == Some("spread");
+    if spread_on {
+        spread(&mut sc);
+    }
+    let lay = layout(&sc);
     let t0 = Instant::now();
     for _ in 0..reps {
         for p in &list {
@@ -576,10 +664,14 @@ fn r1_loop() {
         }
     }
     let loop_s = t0.elapsed().as_secs_f64();
+    if spread_on {
+        unspread(&mut sc);
+    }
     let rows_total = st.rows as f64 * reps as f64;
     let line = format!(
         "R1 cat={cat} synth={} dir={dir} problems={} handled={ok} declined={declined} reps={reps} \
-         load_s={load_s:.3} loop_s={loop_s:.6} ns_per_row={:.3} | {}\n",
+         load_s={load_s:.3} loop_s={loop_s:.6} ns_per_row={:.3} layout={} lay0={lay_before} \
+         lay={lay} | {}\n",
         synth.as_deref().unwrap_or("-"),
         list.len(),
         if rows_total > 0.0 {
@@ -587,6 +679,7 @@ fn r1_loop() {
         } else {
             0.0
         },
+        if spread_on { "spread" } else { "as-is" },
         st.line()
     );
     eprint!("{line}");

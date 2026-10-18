@@ -90,7 +90,8 @@
 //! saturated values, minus infinity plus a score) is `< thr` in both computations, so it cannot
 //! win the `max` of a surviving cell, change which cells are dropped, or change a script bit the
 //! traceback walk reads (the walk only visits surviving cells). Each lane here holds exactly the
-//! value the 128-bit kernel holds for the same cell:
+//! value the 128-bit kernel holds for the same cell, except the values below the threshold that
+//! the last item changes:
 //!
 //! - Same stored values (`score - base + bias`, 0 = minus infinity), the same `bias`, rebase
 //!   limit and acceptance tests, and lookup tables with the bytes of `build_row_table`.
@@ -110,22 +111,26 @@
 //!   the next block is below the threshold, or at the end of `B` (or the fence). A 32-lane step
 //!   is taken while more than 16 lanes of the band are left, so a row may run up to 16 lanes past
 //!   the point where the 128-bit kernel stops. Those lanes lie past the band with a row gap below
-//!   the threshold and nothing above it from the previous row, so they are dropped (H = 0, E
-//!   cleared right of the last survivor) and change nothing. The first and last survivors, hence
-//!   the band of the next row, the cell count, the best cell and the traceback rows the walk
-//!   reads are those of the 128-bit kernel. The traceback walk is the 128-bit kernels' `finish`.
+//!   the threshold and nothing above it from the previous row, so they are dropped (H = 0; E 0
+//!   from the clearing at the row end, or from the block itself in the 8-bit `EM` instances) and
+//!   change nothing. The first and last survivors, hence the band of the next row, the cell
+//!   count, the best cell and the traceback rows the walk reads are those of the 128-bit kernel.
+//!   The traceback walk is the 128-bit kernels' `finish`.
 //! - Row end of the 8-bit lanes (`LOSAT_X_DPEMASK`, the `EM` instances of `align8`; on by
 //!   default): each block stores the E of a dropped cell as 0 (minus infinity) instead of
 //!   `max(H - gap_open_extend, E - gap_extend)`, and the row no longer clears E right of its last
 //!   survivor (it also keeps the high-water mark `dirty8` as a max, the same value). A dropped
-//!   cell has `H < thr` and `E <= H`, so the E it passes down is below the threshold in both forms
-//!   and changes nothing (the argument above). Every lane right of the last survivor was dropped
-//!   in the row that last wrote it (a lane the next row reads but this row did not write lies
-//!   right of the band of the row after the one that wrote it), so it holds 0 without the
-//!   clearing. Without the clearing the next row's E loads no longer overlap a store whose address
-//!   the end of the row decides, which made them wait until that store was written (line R, R1).
-//!   The 16-bit lanes keep the clearing: there the store-forward blocks were 0.1-0.2 per row and
-//!   the change gained nothing.
+//!   cell has `H < thr` and `E <= H`, so the E it passes down is below the threshold in both
+//!   forms. What differs downstream is gap states below the threshold, and the gap-extension
+//!   script bits that only such gap states decide; the walk reads such a bit only where it enters
+//!   a cell through a gap whose state is at least the threshold, so no surviving cell's score,
+//!   drop decision or script bit the walk reads changes (the argument above). Every lane right of
+//!   the last survivor was dropped in the row that last wrote it (a lane the next row reads but
+//!   this row did not write lies right of the band of the row after the one that wrote it), so it
+//!   holds 0 without the clearing. Without the clearing the next row's E loads no longer overlap
+//!   a store whose address the end of the row decides, which made them wait until that store was
+//!   written (line R, R1). The 16-bit lanes keep the clearing: there the store-forward blocks
+//!   were 0.1-0.2 per row and the change gained nothing.
 //!
 //! Less work per row and per call than the 128-bit kernels: wider steps, first and last
 //! survivor tracked while the row runs (no survivor bitmap), the first lane's missing diagonal
@@ -1954,26 +1959,31 @@ mod tests {
                                 &mut sc256,
                             )
                         };
-                        // SAFETY: AVX2 detected above.
-                        let r256z = unsafe {
-                            run(
-                                Kern::V256Z,
-                                m,
-                                tb,
-                                &rows,
-                                &cols,
-                                &scores,
-                                len1,
-                                len2,
-                                go,
-                                ge,
-                                x,
-                                tb,
-                                &mut sc256z,
-                            )
+                        // on 16-bit lanes V256Z is the same `align16` call
+                        let r256z = if !wide8 {
+                            r256
+                        } else {
+                            // SAFETY: AVX2 detected above.
+                            unsafe {
+                                run(
+                                    Kern::V256Z,
+                                    m,
+                                    tb,
+                                    &rows,
+                                    &cols,
+                                    &scores,
+                                    len1,
+                                    len2,
+                                    go,
+                                    ge,
+                                    x,
+                                    tb,
+                                    &mut sc256z,
+                                )
+                            }
                         };
                         assert_eq!(r256, r256z, "{tag}: 256 vs 256 with the E clearing");
-                        if r256.is_some() {
+                        if wide8 && r256.is_some() {
                             assert_eq!(sc256.ops, sc256z.ops, "{tag}: 256 vs 256z ops");
                         }
                         match (r128, r256) {

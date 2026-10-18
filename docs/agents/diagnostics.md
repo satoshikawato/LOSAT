@@ -2838,11 +2838,13 @@ Scheduling (each value computed by one thread with the original function; order 
   calls `get_score`, which tests both codes and multiplies for the row, and its right walk reloads its
   bounds from the stack). Same counts, positions, statements and exit tests; an X-drop outside 1..=127 or a
   word that does not fit runs the reference, and so does the debug output. All callers (the unit path and
-  the reference frame loops) go through it. Measured (workstation, node 1, 8 rounds, reports identical):
-  MelaMJNV x PemoMJNVA 1 thread x0.986, AP027131 x AP027133 (code 4) 1 thread x0.987 (instructions
-  72.7 -> 69.0 G, cycles -2.5 %, branch misses unchanged: about 118 instructions and 28 cycles fewer per
-  extension) and 8 threads x0.992. What is left of an extension is the latency of its first query
-  loads and the mispredicted exits of the walks.
+  the reference frame loops) go through it. Measured against the dev binary before it (workstation, node 1
+  without other timed runs, 8 alternating rounds, medians of the per-round ratios, reports and max RSS
+  identical): MelaMJNV x PemoMJNVA 1 thread x0.978, AP027131 x AP027133 (code 4) 1 thread x0.971 and 8
+  threads x0.984, Sakai x MG1655[0:1 Mb] (code 11) 8 threads x0.988. perf stat at 1 thread: AP027131 x
+  AP027133 instructions 72.2 -> 69.0 G, cycles 34.9 -> 34.1 G (about 100 instructions and 25 cycles fewer
+  per extension). What is left of an extension is the latency of its first query loads and the
+  mispredicted exits of the walks (`LOSAT_X_TBXEXTLANES`, next).
 - `LOSAT_X_TBXUNGAPSHADOW=1` shadow of `LOSAT_X_TBXUNGAP` (turns the path on): every extension runs both
   ways and the seven results (offsets, score, `right_extend`, `s_last_off`) must be equal; any difference
   panics with the inputs; the reference's result is used. One line at exit:

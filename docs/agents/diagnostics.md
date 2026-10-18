@@ -2,6 +2,55 @@
 
 Moved from `AGENTS.md` on 2026-10-08 so that it is read only when needed.
 
+## Floating-point contract
+
+The reports match NCBI's bytes only while every floating-point value is computed as NCBI's C
+code computes it on the same machine. Every build keeps these rules (written down 2026-10-18,
+plan v4 D6 (c)); `LOSAT/tests/check_fp_contract.py` checks them in CI: `source` in the `rust`
+job and in the release workflow's quality job, `binary` on the release binary of the
+`fast output regressions` job and on the Linux x64 release artifact.
+
+- **No contraction.** rustc emits each `*`, `+`, `-` and `/` as its own IEEE operation, rounded
+  once, and never fuses `a * b + c` into a fused multiply-add: it sets no `contract` or fast-math
+  flag, whatever the target CPU or `#[target_feature]`. An FMA-capable target (x86-64-v3,
+  aarch64, the `avx512f` helper of `x_newton_exact.rs`) changes only how `mul_add` itself is
+  computed. Do not add fast-math LLVM options (`-C llvm-args=-fp-contract=fast`,
+  `-enable-unsafe-fp-math`, `-enable-no-nans-fp-math` and the like), the `*_fast` and
+  `*_algebraic` operations, FMA intrinsics (`_mm*_fmadd_*` and the other `_mm*_fm*` /
+  `_mm*_fnm*`, `vfmaq_*`, `vfmsq_*`), or the Wasm `relaxed-simd` feature (its `relaxed_madd`
+  fuses or not depending on the engine). The Wasm builds enable `+simd128` only.
+- **One fused multiply-add**, `f64::mul_add` in `stats/spouge.rs::x_product_error`: the exact
+  rounding error of a product in the double-double emulation of the long-double line
+  `result *= expl(-z * z) / z` of NCBI's `boost_erf.c`. The other call is its test
+  `x_dekker_product_error_matches_fused_multiply_add`. `mul_add` rounds once (IEEE 754
+  fusedMultiplyAdd) on every target, so an instruction and a library routine give the same bits.
+  In the release binary of dev 79fab14e it sits in `stats::spouge::erf_impl_ncbi`:
+  - on baseline x86-64, as calls (13 call sites, through one GOT slot) of the `fma` of Rust's
+    compiler-builtins, not glibc's. That `fma` takes `vfmadd213sd` when the CPU has FMA, the FMA4
+    form when it has only FMA4, and a software fused multiply-add otherwise; these two
+    instructions are the binary's only FMA instructions;
+  - with `-C target-cpu=x86-64-v3`, as 13 inline `vfmsub213sd`, and no other function holds an
+    FMA instruction;
+  - on aarch64, as inline `fmadd` / `fmsub` (not counted in CI yet).
+
+  A new `mul_add` needs the same argument (the fused result is the value NCBI computes) and an
+  entry in the checker's `MUL_ADD_SITES` (and, in another module, `MUL_ADD_FUNCTION_PREFIXES`).
+- **The C library's math functions.** `ln`, `exp`, `powf` and the other transcendental functions
+  call the platform's libm (glibc on Linux, Apple's libm on macOS, the UCRT on Windows, wasi-libc
+  in Wasm), as NCBI's C code does, so on one machine both get the same values. No build option
+  changes which function is called: glibc picks its variant (for example `__log_fma` on an
+  FMA-capable CPU) when it is loaded, from the CPU, not from LOSAT's target CPU. Do not
+  replace these calls by another implementation (the `libm` crate in `LOSAT/Cargo.toml` is not
+  called; the release binary holds none of its functions).
+- **Release builds.** `cargo build --release`: fat LTO, one codegen unit, `panic = "abort"`
+  (`LOSAT/Cargo.toml`) and the x86-64 loop alignment of `LOSAT/.cargo/config.toml`, for the
+  baseline CPU of the target; the AVX2 kernels are chosen at run time
+  (`is_x86_feature_detected!`). Extra flags for one build go in `CARGO_TARGET_<TRIPLE>_RUSTFLAGS`,
+  which cargo joins with the configuration's `[target.'cfg(target_arch = "x86_64")']` flags;
+  `RUSTFLAGS` replaces them.
+
+## Debug and trace variables
+
 - `LOSAT_TRACE_HSP="qstart,qend,sstart,send"` trace a specific TBLASTX HSP.
 - `LOSAT_TRACE_HSP_MASKS=1` print mask coverage for the traced TBLASTX HSP.
 - `LOSAT_TRACE_CHAIN_HSP="qstart,qend,sstart,send"` trace TBLASTX chain

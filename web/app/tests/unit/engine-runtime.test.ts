@@ -14,7 +14,15 @@ import { toProgramDescription } from '../../src/infra/reactor/control';
 import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
 import type { FastaParserKind } from '../../src/domain/dataset';
 import { PROGRAMS } from '../../src/domain/programs';
-import { AUTO_MAX_THREADS, AUTO_SERIAL_BELOW_BYTES, chooseThreads, DEFAULT_RENEWAL, renewalReason } from '../../src/infra/engine-worker/policy';
+import {
+  AUTO_MANY_THREADS_FROM_BYTES,
+  AUTO_MAX_THREADS,
+  AUTO_SERIAL_BELOW_BYTES,
+  AUTO_SMALL_MAX_THREADS,
+  chooseThreads,
+  DEFAULT_RENEWAL,
+  renewalReason,
+} from '../../src/infra/engine-worker/policy';
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
 
 describe('chooseThreads', () => {
@@ -28,11 +36,19 @@ describe('chooseThreads', () => {
   });
 
   it('runs Auto with up to half the logical processors from the threshold on, within the maximum', () => {
-    expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 8)).toBe(Math.min(AUTO_MAX_THREADS, 4));
-    expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 64)).toBe(AUTO_MAX_THREADS);
+    expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 8)).toBe(4);
+    expect(chooseThreads('auto', AUTO_MANY_THREADS_FROM_BYTES, 32)).toBe(16);
+    expect(chooseThreads('auto', AUTO_MANY_THREADS_FROM_BYTES, 64)).toBe(AUTO_MAX_THREADS);
+    expect(chooseThreads('auto', AUTO_MANY_THREADS_FROM_BYTES, 256)).toBe(AUTO_MAX_THREADS);
     expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 1)).toBe(1);
     // A browser that does not report the processors.
     expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 0)).toBe(1);
+  });
+
+  it('runs Auto on fewer threads below the size from which many threads pay', () => {
+    expect(chooseThreads('auto', AUTO_MANY_THREADS_FROM_BYTES - 1, 64)).toBe(AUTO_SMALL_MAX_THREADS);
+    expect(chooseThreads('auto', AUTO_SERIAL_BELOW_BYTES, 64)).toBe(AUTO_SMALL_MAX_THREADS);
+    expect(chooseThreads('auto', AUTO_MANY_THREADS_FROM_BYTES - 1, 8)).toBe(4);
   });
 });
 

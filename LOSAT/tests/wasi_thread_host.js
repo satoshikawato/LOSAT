@@ -57,17 +57,17 @@ function debug(message) {
 //         ...
 //             m_NumThreads = num_threads;
 // ```
-// Host-only, opt-in (LOSAT_WASI_PRESPAWN): the number of thread workers to boot ahead of
-// `_start`. `auto` reads the requested -num_threads from argv (the caller is one of the N
-// threads, so N-1 workers); a value the guest will reject gives 0. The limit is the
+// Host-only (LOSAT_WASI_PRESPAWN; `auto` when unset since 2026-10-18, `0` boots none): the
+// number of thread workers to boot ahead of `_start`. `auto` reads the requested
+// -num_threads from argv (the caller is one of the N threads, so N-1 workers); a value the
+// guest will reject gives 0. The limit is the
 // guest's: rayon-core 1.13.0 sleep/counters.rs:57-77 (THREADS_BITS = 8 on 32-bit targets,
 // THREADS_MAX = 255) bounds the pool that LOSAT/src/utils/threading.rs validate_threads
 // accepts, so at most 254 workers. Booting ahead changes when a worker boots, not which
 // workers the guest gets or what they run.
 const PRESPAWN_MAX = 254;
 function prespawnCount(argv) {
-  const raw = process.env.LOSAT_WASI_PRESPAWN;
-  if (raw === undefined) return 0;
+  const raw = process.env.LOSAT_WASI_PRESPAWN ?? "auto";
   if (raw === "auto") {
     let value;
     for (let i = 0; i < argv.length; i++) {
@@ -185,9 +185,34 @@ function failWorker(err) {
   process.kill(process.pid, "SIGTERM");
 }
 
-// Control words shared with a thread worker: the start confirmation (every worker) and,
-// for a LOSAT_WASI_PRESPAWN standby worker, its start order with the tid and startArg.
-const START_STATE = 0, START_ORDER = 1, START_TID = 2, START_ARG = 3, START_WORDS = 4;
+// Control words shared with a thread worker: the start confirmation (every worker); for a
+// worker that waits for its thread (a LOSAT_WASI_PRESPAWN standby worker, or a reactor's
+// worker whose earlier thread returned, LOSAT_WASI_RECYCLE), the start order with the tid and
+// startArg; and for a recycled worker, whether it waits for a thread (SLOT_STATE).
+const START_STATE = 0, START_ORDER = 1, START_TID = 2, START_ARG = 3, SLOT_STATE = 4, START_WORDS = 5;
+// SLOT_STATE: a thread runs (or the worker boots for its first thread), the worker waits for a
+// thread, the host gave it one, or its thread returned and it instantiates the module again.
+const SLOT_RUNNING = 0, SLOT_READY = 1, SLOT_TAKEN = 2, SLOT_PREPARING = 3;
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
+// ```c++
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         (*thread)->Run();
+//     }
+// ```
+// Host-only (LOSAT_WASI_RECYCLE; `1` when unset, `0` turns it off): in a reactor, a thread
+// worker outlives its guest thread. When the thread returns, the worker instantiates the
+// module again on the shared memory (a new instance per guest thread, as before) and waits
+// for a start order, so a later search's `thread-spawn` takes it instead of booting a new
+// Node worker (about 20 ms each, one after another while the guest waits). This is what the
+// browser's thread host (web/app/src/infra/engine-worker/thread-host.ts) does. A command
+// runs one search, so its workers still exit with their threads. The guest gets the same
+// threads in the same order; only the worker that runs each one changes.
+function recycleWorkers(kind) {
+  const raw = process.env.LOSAT_WASI_RECYCLE ?? "1";
+  if (raw !== "0" && raw !== "1") throw new Error("LOSAT_WASI_RECYCLE must be 0 or 1");
+  return kind === "threaded-reactor" && raw === "1";
+}
 
 function markWorkerStart(control, state) {
   const view = new Int32Array(control);
@@ -201,11 +226,14 @@ function markWorkerStart(control, state) {
 //         (*thread)->Run();
 //     }
 // ```
-// A standby worker blocks here, after instantiation, until spawnThread assigns it a thread.
+// A standby or recycled worker blocks here, after instantiation, until spawnThread assigns
+// it a thread. The order is consumed, so a recycled worker waits again after this thread.
 function waitForStartOrder(control) {
   const view = new Int32Array(control);
   while (Atomics.load(view, START_ORDER) === 0) Atomics.wait(view, START_ORDER, 0);
-  return { tid: Atomics.load(view, START_TID), startArg: Atomics.load(view, START_ARG) };
+  const order = { tid: Atomics.load(view, START_TID), startArg: Atomics.load(view, START_ARG) };
+  Atomics.store(view, START_ORDER, 0);
+  return order;
 }
 
 // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:177-188
@@ -266,8 +294,7 @@ function createImports(wasi, memory, spawnThread, extra) {
   };
 }
 
-async function instantiateWithMemory(module, memory, args, spawnThread, provided) {
-  const wasi = createWasi(args);
+async function instantiateWithMemory(module, memory, args, spawnThread, provided, wasi = createWasi(args)) {
   const instance = await WebAssembly.instantiate(
     module,
     createImports(wasi, memory, spawnThread, hostImports(module, provided)),
@@ -303,7 +330,8 @@ async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
 // (*thread)->Run(); (*thread)->Join(&result);
 // Explicit module reuse for host measurements: each create still owns a fresh
 // instance/memory/worker set. There is no global cache or retained search pool
-// (LOSAT_WASI_GUARD_CACHE keeps only guarded bytes on disk, and only when set).
+// (LOSAT_WASI_GUARD_CACHE keeps only guarded bytes on disk, and only when set); a reactor's
+// thread workers stay with its host between searches (LOSAT_WASI_RECYCLE) until close().
 async function prepareThreadHost(wasmPath, kind) {
   const start = performance.now();
   const bytes = fs.readFileSync(wasmPath);
@@ -321,9 +349,12 @@ async function prepareThreadHost(wasmPath, kind) {
 
 async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, options) {
   const args = [wasmPath, ...argv];
-  const prespawn = prespawnCount(argv);
+  const prespawn = prespawnCount(argv), recycle = recycleWorkers(kind);
   const workers = new Set(), exits = new Map(), events = [], standby = [];
-  let nextTid = 1, attempt = 0, mainMemory, closing = false, failure = null;
+  // LOSAT_WASI_RECYCLE: the workers that run one guest thread after another, the guest threads
+  // they run now (tids), and how each of those threads' exit promise is resolved.
+  const recycled = [], running = new Set(), returned = new Map();
+  let nextTid = 1, attempt = 0, nextSlot = 0, mainMemory, closing = false, failure = null;
   const event = (type, fields = {}) => {
     const record = { event: type, at_ms: performance.now(), ...fields }; events.push(record);
     if (DEBUG) fs.writeSync(2, `[losat-wasi-event] ${JSON.stringify(record)}\n`);
@@ -360,11 +391,85 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     Atomics.store(view, START_ORDER, 1); Atomics.notify(view, START_ORDER, 1);
     return awaitThreadStart(view, tid);
   };
+  // LOSAT_WASI_RECYCLE: a recycled worker's guest thread ends with the worker's `returned`
+  // message (the worker lives on). While the guest runs, the main thread cannot receive
+  // messages, so whether a worker waits for a thread is read from its control words.
+  const threadStarted = (tid) => {
+    running.add(tid); exits.set(tid, new Promise(resolve => returned.set(tid, resolve)));
+  };
+  const threadEnded = (tid, code) => {
+    if (!running.delete(tid)) return;
+    event("exited", { tid, code }); returned.get(tid)(); returned.delete(tid);
+  };
+  const recycledWorker = (data) => {
+    const control = new SharedArrayBuffer(4 * START_WORDS);
+    const worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
+      control, fault: options.fault || null, recycle: true, ...data } });
+    const slot = { index: nextSlot++, worker, control, state: new Int32Array(control), tid: data.tid ?? null };
+    if (data.tid === undefined) Atomics.store(slot.state, SLOT_STATE, SLOT_PREPARING);
+    worker.on("message", message => {
+      if (!message || message.type !== "returned") return;
+      threadEnded(message.tid, 0);
+      // An idle worker never keeps the process alive; spawnThread refs it again.
+      if (Atomics.load(slot.state, SLOT_STATE) !== SLOT_TAKEN) worker.unref();
+    });
+    worker.on("exit", code => {
+      const at = recycled.indexOf(slot);
+      if (at >= 0) recycled.splice(at, 1);
+      if (closing) return;
+      failure = new Error(`WASI worker ${slot.tid ?? `slot ${slot.index}`} exited with code ${code}`);
+      if (slot.tid !== null) threadEnded(slot.tid, code);
+    });
+    worker.on("error", err => { failure = err; writeError(err); });
+    recycled.push(slot);
+    return slot;
+  };
+  // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:171-174
+  // ```c++
+  //     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+  //         (*thread)->Run();
+  //     }
+  // ```
+  // A recycled worker that waits receives this tid and startArg, and the guest gets the tid
+  // after the same start confirmation as from a new worker.
+  // A worker that waits, else one whose thread has returned and that instantiates the module
+  // again (a few ms; a new worker takes about 20 ms to boot). A worker whose thread still runs
+  // is not waited for: it may be a thread of the previous pool, which returns only after this
+  // spawn (the guest holds a lock across thread-spawn that an ending thread needs).
+  const claimRecycled = () => {
+    const deadline = performance.now() + (options.startTimeoutMs || WORKER_START_TIMEOUT_MS);
+    for (;;) {
+      const waiting = recycled.find(slot =>
+        Atomics.compareExchange(slot.state, SLOT_STATE, SLOT_READY, SLOT_TAKEN) === SLOT_READY);
+      if (waiting) return waiting;
+      const preparing = recycled.find(slot => Atomics.load(slot.state, SLOT_STATE) === SLOT_PREPARING);
+      if (!preparing || performance.now() > deadline) return undefined;
+      Atomics.wait(preparing.state, SLOT_STATE, SLOT_PREPARING, 50);
+    }
+  };
+  const startRecycled = (slot, tid, startArg) => {
+    const view = slot.state;
+    Atomics.store(view, START_STATE, 0);
+    slot.tid = tid; slot.worker.ref(); threadStarted(tid); event("spawned", { tid, recycled: slot.index });
+    Atomics.store(view, START_TID, tid); Atomics.store(view, START_ARG, startArg);
+    Atomics.store(view, START_ORDER, 1); Atomics.notify(view, START_ORDER, 1);
+    return awaitThreadStart(view, tid);
+  };
   const spawnThread = (startArg) => {
     attempt++; const tid = nextTid++; event("spawn_attempt", { tid, attempt });
     if (options.rejectSpawn && options.rejectSpawn(attempt)) { event("spawn_rejected", { tid }); return -1; }
     if (standby.length) return startStandby(standby.shift(), tid, startArg);
-    const control = new SharedArrayBuffer(4), view = new Int32Array(control);
+    if (recycle) {
+      const waiting = claimRecycled();
+      if (waiting) return startRecycled(waiting, tid, startArg);
+      // None waits or is about to (the first search, or the threads of the previous pool have
+      // not returned yet): boot a worker for this thread, which then stays.
+      let slot;
+      try { slot = recycledWorker({ tid, startArg }); } catch (err) { event("spawn_rejected", { tid, error: String(err) }); return -1; }
+      threadStarted(tid); event("spawned", { tid });
+      return awaitThreadStart(slot.state, tid);
+    }
+    const control = new SharedArrayBuffer(4 * START_WORDS), view = new Int32Array(control);
     let worker;
     try {
       worker = new Worker(__filename, { workerData: { module, wasmPath, args, memory: mainMemory,
@@ -390,6 +495,13 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
   // keeps the process alive (unref until taken), and close() terminates the unused ones.
   const prespawnWorkers = (count) => {
     for (let index = 0; index < count; index++) {
+      if (recycle) {
+        // A recycled worker that waits from the start; spawnThread takes it like the others.
+        try { recycledWorker({ standby: index }).worker.unref(); }
+        catch (err) { event("standby_rejected", { standby: index, error: String(err) }); return; }
+        event("standby_spawned", { standby: index });
+        continue;
+      }
       const control = new SharedArrayBuffer(4 * START_WORDS);
       let worker;
       try {
@@ -431,7 +543,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
         })]);
         exits.clear();
         if (failure) throw failure;
-        if (workers.size !== 0) throw new Error("unreaped WASI workers");
+        if (workers.size !== 0 || running.size !== 0) throw new Error("unreaped WASI workers");
         // Return this search's evidence to its owner instead of retaining a
         // growing history on a repeatedly used reactor host.
         return events.splice(0);
@@ -440,7 +552,8 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     async close() {
       closing = true;
       for (const slot of standby) event("standby_unused", { standby: slot.index });
-      await Promise.all([terminateWorkers(workers), terminateWorkers(new Set(standby.splice(0).map(slot => slot.worker)))]);
+      await Promise.all([terminateWorkers(workers), terminateWorkers(new Set(standby.splice(0).map(slot => slot.worker))),
+        terminateWorkers(new Set(recycled.splice(0).map(slot => slot.worker)))]);
       exits.clear();
     },
   };
@@ -448,8 +561,9 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
 module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached };
 
 if (!isMainThread) {
-  const { module: workerModule, wasmPath, args, memory, control, fault, standby } = workerData;
-  // A standby worker (LOSAT_WASI_PRESPAWN) learns its tid and startArg from its start order.
+  const { module: workerModule, wasmPath, args, memory, control, fault, standby, recycle } = workerData;
+  // A standby worker (LOSAT_WASI_PRESPAWN) learns its tid and startArg from its start order,
+  // and so does a recycled worker (LOSAT_WASI_RECYCLE) for every thread after its first.
   let { startArg, tid } = workerData;
   const name = standby === undefined ? `tid=${tid}` : `standby=${standby}`;
   // NCBI reference: c++/src/app/blast/blast_app_util.hpp:260-266
@@ -471,24 +585,40 @@ if (!isMainThread) {
       if (fault === "startup-error") throw new Error("injected worker startup error");
       const module = workerModule || await compileThreadedModule(wasmPath);
       const spawnThread = () => -1;
-      debug(standby === undefined ? `worker instantiate tid=${tid} start_arg=${startArg}` : `worker instantiate ${name}`);
-      const { instance, wasi } = await instantiateWithMemory(module, memory, args, spawnThread);
-      initializeWasiThreadInstance(wasi, instance);
-      if (typeof instance.exports.wasi_thread_start !== "function") {
-        throw new Error(`${wasmPath} does not export wasi_thread_start`);
+      const view = new Int32Array(control);
+      let waits = standby !== undefined, wasi = null;
+      for (;;) {
+        debug(waits ? `worker instantiate ${name}` : `worker instantiate tid=${tid} start_arg=${startArg}`);
+        // A new instance on the shared memory for every guest thread, recycled worker or not. A
+        // recycled worker keeps its one WASI context (bound once to the same shared memory): a
+        // new context per thread would hold one more open preopen descriptor for each thread.
+        const created = wasi === null;
+        const instantiated = await instantiateWithMemory(module, memory, args, spawnThread, undefined, wasi ?? undefined);
+        const { instance } = instantiated;
+        wasi = instantiated.wasi;
+        if (created) initializeWasiThreadInstance(wasi, instance);
+        if (typeof instance.exports.wasi_thread_start !== "function") {
+          throw new Error(`${wasmPath} does not export wasi_thread_start`);
+        }
+        if (waits) {
+          if (recycle) { Atomics.store(view, SLOT_STATE, SLOT_READY); Atomics.notify(view, SLOT_STATE); }
+          debug(`worker standby ${name}`);
+          ({ tid, startArg } = waitForStartOrder(control));
+          debug(`worker ${name} takes tid=${tid} start_arg=${startArg}`);
+        }
+        debug(`worker start tid=${tid}`);
+        markWorkerStart(control, 1);
+        if (fault === "trap") throw new WebAssembly.RuntimeError("injected worker trap");
+        if (fault === "abnormal-exit") process.exit(23);
+        instance.exports.wasi_thread_start(tid, startArg);
+        debug(`worker done tid=${tid}`);
+        if (!recycle) break;
+        // Claimable when the next instance is ready; until then the host may wait for it.
+        Atomics.store(view, SLOT_STATE, SLOT_PREPARING);
+        parentPort.postMessage({ type: "returned", tid });
+        waits = true;
       }
-      if (standby !== undefined) {
-        debug(`worker standby ${name}`);
-        ({ tid, startArg } = waitForStartOrder(control));
-        debug(`worker ${name} takes tid=${tid} start_arg=${startArg}`);
-      }
-      debug(`worker start tid=${tid}`);
-      markWorkerStart(control, 1);
-      if (fault === "trap") throw new WebAssembly.RuntimeError("injected worker trap");
-      if (fault === "abnormal-exit") process.exit(23);
-      instance.exports.wasi_thread_start(tid, startArg);
       completed = true;
-      debug(`worker done tid=${tid}`);
       if (parentPort) {
         parentPort.close();
       }

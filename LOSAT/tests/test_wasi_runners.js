@@ -346,7 +346,7 @@ function checkLifecycle(events, spawned, standby, label) {
 test("LOSAT_WASI_PRESPAWN keeps output and status with auto, fewer and more workers", () => {
   const bytes = spawner(3);
   const argv = ["-num_threads", "4"];
-  const reference = runThreaded(bytes, argv);
+  const reference = runThreaded(bytes, argv, { LOSAT_WASI_PRESPAWN: "0" });
   assert.deepEqual(outcome(reference), { status: 7, signal: null, stdout: "3g\n", stderr: "" });
   for (const [prespawn, standby] of [["auto", 3], ["1", 1], ["5", 5], ["0", 0]]) {
     assert.deepEqual(outcome(runThreaded(bytes, argv, { LOSAT_WASI_PRESPAWN: prespawn })), outcome(reference), prespawn);
@@ -388,7 +388,7 @@ for (const [fault, message] of [
   ["abnormal-exit", /WASI worker 1 exited unexpectedly with code 23/],
 ]) {
   test(`fault ${fault} has the same result with LOSAT_WASI_PRESPAWN`, () => {
-    for (const env of [{}, { LOSAT_WASI_PRESPAWN: "auto" }, { LOSAT_WASI_PRESPAWN: "3" }]) {
+    for (const env of [{ LOSAT_WASI_PRESPAWN: "0" }, {}, { LOSAT_WASI_PRESPAWN: "auto" }, { LOSAT_WASI_PRESPAWN: "3" }]) {
       const result = runThreaded(spawner(1), ["-num_threads", "2"], env, { fault, startTimeoutMs: 1000 });
       const label = `${fault} ${JSON.stringify(env)}`;
       assert.equal(result.signal, "SIGTERM", `${label}\n${result.stderr}`);
@@ -401,7 +401,7 @@ for (const [fault, message] of [
 test("a rejected spawn has the same result with LOSAT_WASI_PRESPAWN", () => {
   const bytes = spawner(3);
   const argv = ["-num_threads", "4"];
-  const reference = runThreaded(bytes, argv, {}, { rejectAt: 2 });
+  const reference = runThreaded(bytes, argv, { LOSAT_WASI_PRESPAWN: "0" }, { rejectAt: 2 });
   assert.deepEqual(outcome(reference), { status: 90, signal: null, stdout: "", stderr: "" });
   for (const [prespawn, standby] of [["auto", 3], ["1", 1]]) {
     assert.deepEqual(outcome(runThreaded(bytes, argv, { LOSAT_WASI_PRESPAWN: prespawn }, { rejectAt: 2 })),
@@ -502,5 +502,131 @@ test("LOSAT_WASI_GUARD_CACHE runs give the default host's output, cold and warm"
     }
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:156-180
+// ```c++
+//     // Create the threads ...
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         thread->Reset(new CPrelimSearchThread(internal_data,
+//     ...
+//     // ... launch the threads ...
+//     NON_CONST_ITERATE(TBlastThreads, thread, the_threads) {
+//         (*thread)->Run();
+//     ...
+//         (*thread)->Join(&result);
+// ```
+// A threaded reactor whose `run(spawns)` export clears its counters, starts `spawns` threads
+// (start_arg 1, 2, 4, ...; -1 when a spawn fails), waits until every thread has added its
+// start_arg and tid, releases them, and returns the start_arg sum (the tid sum stays at
+// address 8). The threads wait for the release, so the threads of one call run at the same
+// time. Each call is one search of `spawns` + 1 threads; the API exports that the artifact
+// check asks for are aliases of `_initialize` and are never called.
+function reactorSpawner() {
+  const types = vector([
+    [0x60, 0, 0],                                // _initialize()
+    [0x60, 1, 0x7f, 1, 0x7f],                    // thread-spawn(i32) -> i32
+    [0x60, 2, 0x7f, 0x7f, 0],                    // wasi_thread_start(i32, i32)
+  ]);
+  const imports = [
+    [...name("env"), ...name("memory"), 2, 3, 1, ...uleb(16384)],
+    [...name("wasi"), ...name("thread-spawn"), 0, 1],
+  ];
+  const load = (address) => [...i32(address), 0xfe, 0x10, 2, 0];                   // i32.atomic.load
+  const store = (address, value) => [...i32(address), ...value, 0xfe, 0x17, 2, 0];  // i32.atomic.store
+  const add = (address, value) => [...i32(address), ...value, 0xfe, 0x1e, 2, 0, 0x1a]; // atomic add; drop
+  const spawns = [0x20, 0], i = 1;                                             // local 0 = spawns, local 1 = i
+  const run = [...store(0, i32(0)), ...store(4, i32(0)), ...store(8, i32(0)), ...store(12, i32(0)),
+    // block { loop { if (i >= spawns) break; if (thread-spawn(1 << i) < 1) return -1; i += 1 } }
+    0x02, 0x40, 0x03, 0x40, 0x20, i, ...spawns, 0x4e, 0x0d, 1,
+    ...i32(1), 0x20, i, 0x74, 0x10, 0, ...i32(1), 0x48, 0x04, 0x40, ...i32(-1), 0x0f, 0x0b,
+    0x20, i, ...i32(1), 0x6a, 0x21, i, 0x0c, 0, 0x0b, 0x0b,
+    // block { loop { if (count == spawns) break; memory.atomic.wait32(0, count, -1) } }
+    0x02, 0x40, 0x03, 0x40, ...load(0), ...spawns, 0x46, 0x0d, 1,
+    ...i32(0), ...load(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b,
+    ...store(12, i32(1)), ...i32(12), ...spawns, 0xfe, 0x00, 2, 0, 0x1a,          // release; notify(12, spawns)
+    ...load(4),
+  ];
+  const withLocal = (instructions) => {                                          // one i32 local
+    const bytes = [1, 1, 0x7f, ...instructions, 0x0b];
+    return [...uleb(bytes.length), ...bytes];
+  };
+  const thread = [...add(4, [0x20, 1]), ...add(8, [0x20, 0]), ...add(0, i32(1)),
+    ...i32(0), ...i32(1), 0xfe, 0x00, 2, 0, 0x1a,                              // notify(0, 1)
+    // block { loop { if (released) break; memory.atomic.wait32(12, 0, -1) } }
+    0x02, 0x40, 0x03, 0x40, ...load(12), ...i32(1), 0x46, 0x0d, 1,
+    ...i32(12), ...i32(0), 0x42, 0x7f, 0xfe, 0x01, 2, 0, 0x1a, 0x0c, 0, 0x0b, 0x0b];
+  const api = ["losat_web_run_pair", "losat_web_alloc", "losat_web_dealloc",
+    "losat_web_result_ptr", "losat_web_result_len", "losat_web_error_ptr", "losat_web_error_len"];
+  return Buffer.from([
+    0, 97, 115, 109, 1, 0, 0, 0,
+    ...section(1, types),
+    ...section(2, vector(imports)),
+    ...section(3, vector([[0], [1], [2]])),
+    ...section(7, vector([[...name("memory"), 2, 0], [...name("_initialize"), 0, 1],
+      ...api.map((alias) => [...name(alias), 0, 1]), [...name("run"), 0, 2],
+      [...name("wasi_thread_start"), 0, 3]])),
+    ...section(10, vector([body([]), withLocal(run), body(thread)])),
+  ]);
+}
+
+// A reactor's calls get the same threads, in the same order, with recycled workers
+// (LOSAT_WASI_RECYCLE, on by default) and without them. Recycled workers run the threads of
+// later calls; a call that needs more threads than there are idle workers boots new ones
+// instead of waiting for a worker whose thread runs (the threads of a call wait for each other).
+test("a reactor's thread workers outlive their threads (LOSAT_WASI_RECYCLE)", async () => {
+  const { createThreadHost } = require("./wasi_thread_host");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "losat-wasi-recycle-"));
+  const saved = Object.fromEntries(["LOSAT_WASI_RECYCLE", "LOSAT_WASI_PRESPAWN"].map((key) => [key, process.env[key]]));
+  try {
+    const fixture = path.join(directory, "reactor.wasm");
+    const bytes = reactorSpawner();
+    assert.ok(WebAssembly.validate(bytes));
+    fs.writeFileSync(fixture, bytes);
+    delete process.env.LOSAT_WASI_PRESPAWN;
+    for (const recycle of [undefined, "1", "0"]) {
+      if (recycle === undefined) delete process.env.LOSAT_WASI_RECYCLE;
+      else process.env.LOSAT_WASI_RECYCLE = recycle;
+      const label = `LOSAT_WASI_RECYCLE=${recycle}`;
+      const host = await createThreadHost(fixture, "threaded-reactor");
+      try {
+        // Threads per call, and the recycled workers each call takes: none in the first call, the
+        // three of the first call (plus two new ones) for five threads, then two of the five.
+        let next = 1;
+        for (const [call, spawns, reusedCount] of [[0, 3, 0], [1, 5, 3], [2, 2, 2], [3, 5, 5]]) {
+          assert.equal(host.instance.exports.run(spawns), 2 ** spawns - 1, `${label} call ${call}`);
+          const events = await host.waitForWorkers();
+          const tids = Array.from({ length: spawns }, (_, k) => next + k);
+          next += spawns;
+          assert.equal(new Int32Array(host.memory.buffer, 8, 1)[0], tids.reduce((a, b) => a + b), `${label} call ${call}`);
+          for (const type of ["spawn_attempt", "spawned", "ready", "exited"]) {
+            assert.deepEqual(tidsOf(events, type), tids, `${label} call ${call} ${type}`);
+          }
+          assert.ok(events.filter((e) => e.event === "exited").every((e) => e.code === 0), label);
+          const reused = events.filter((e) => e.event === "spawned" && e.recycled !== undefined).length;
+          assert.equal(reused, recycle === "0" ? 0 : reusedCount, `${label} call ${call} recycled`);
+        }
+      } finally { await host.close(); }
+    }
+    process.env.LOSAT_WASI_RECYCLE = "yes";
+    await assert.rejects(createThreadHost(fixture, "threaded-reactor"), /LOSAT_WASI_RECYCLE must be 0 or 1/);
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("LOSAT_WASI_PRESPAWN is auto when unset and 0 boots no worker", () => {
+  const bytes = spawner(3);
+  const argv = ["-num_threads", "4"];
+  for (const [env, standby] of [[{}, 3], [{ LOSAT_WASI_PRESPAWN: "0" }, 0]]) {
+    const result = runThreaded(bytes, argv, { ...env, LOSAT_WASI_THREADS_DEBUG: "1" });
+    assert.equal(result.status, 7, result.stderr);
+    assert.equal(result.stdout, "3g\n");
+    checkLifecycle(hostEvents(result.stderr), 3, standby, JSON.stringify(env));
   }
 });

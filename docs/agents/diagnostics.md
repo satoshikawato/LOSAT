@@ -295,6 +295,7 @@ export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXFRAMES=1
 export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
+export LOSAT_X_TBXSCANBF=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -2631,15 +2632,15 @@ Scheduling (each value computed by one thread with the original function; order 
   off): human genome x one protein 0.88 at one thread (27.9 -> 24.5 s; NCBI BLAST+ 2.17.0 `-db` 47.1
   s) and 0.94 at 8 threads; zebrafish genome x one protein 0.99; fly genome x one batch and MG1655 x
   16 batches at 8 threads 0.99-1.00.
-- `LOSAT_X_TBXSCANBF=1` TBLASTX (speed; not in the strict set: off unless set, to any value, and
-  `LOSAT_X_DEFAULT` does not touch it; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
+- `LOSAT_X_TBXSCANBF=1` TBLASTX (speed; in the strict set since 2026-10-17, on by default; `=0` turns
+  it off; `tblastx/x_scan_bf.rs`): the lookup scans of the unit path
   (`x_pair_par.rs`) and of the reference frame loop (`blast_engine/run_impl.rs`) walk the subject
   ranges as NCBI's `s_BlastAaScanSubject` (`blast_aascan.c:48-131`) does and scan each range with
   the branch-free loop of `LOSAT_X_TBNSCANBF` (`tblastn/x_scan_bf.rs` `x_scan_one_range_bf`), passing
   on the room the earlier ranges of the call left, so every call returns NCBI's pairs and scan range
   (test `x_scan_subject_bf_equals_ncbi_scan_on_random_subjects` against `s_blast_aa_scan_subject`:
   TBLASTX tables, subjects of one or many ranges, offset arrays down to the longest chain). The
-  offset arrays get three entries more while the variable is set. Only a table whose presence bits
+  offset arrays get three entries more while the switch is on. Only a table whose presence bits
   are set in fewer than half of its backbone cells is scanned this way (`x_scan_bf_for`, decided once
   per unit group and once per reference batch): the table of a translated query of more than about
   60 kb holds every word of the 25 common letters, its bit is set at nearly every subject word, the
@@ -2655,7 +2656,8 @@ Scheduling (each value computed by one thread with the original function; order 
   (18.8 kb) against the zebrafish cDNA database 0.85 at one thread (59.95 -> 50.81 s) and at 8
   (7.83 -> 6.68 s, NCBI 5.88 s). With `LOSAT_X_PAIRPARGATE` these 10 transcripts run in the
   reference frame loop, which scans each subject frame once with the batch's table: 0.99 (47.33 ->
-  46.91 s).
+  46.91 s). Joined the strict set on these timings (no case slower; Owner decision of 2026-10-17 that
+  the branch-free scans of blastp / blastx / tblastx join the set once each shows no loss).
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject` without `-subject_loc`: each subject record's letters are
   packed as soon as the reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST
   database volume: ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of

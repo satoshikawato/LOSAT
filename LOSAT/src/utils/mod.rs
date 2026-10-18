@@ -12,3 +12,4 @@ pub(crate) mod xdrop_simd;
 pub(crate) mod xenv;
 pub mod xstats;
 pub(crate) mod xswitch;
+pub mod xtiming;

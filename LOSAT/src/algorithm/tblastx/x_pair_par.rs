@@ -130,6 +130,13 @@ use crate::algorithm::tblastx::lookup::x_pair_lut::{
 use crate::algorithm::tblastx::lookup::{BackboneCell, BlastAaLookupTable, AA_HITS_PER_CELL};
 use std::sync::OnceLock;
 
+// Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): what the scan of a unit records besides its init
+// HSPs (the seed / extension split of the units' time, the diagonal statistics). No NCBI
+// counterpart.
+#[path = "x_unit_probe.rs"]
+mod x_unit_probe;
+use x_unit_probe::{XNoProbe, XProbe, XProbeSlot, XStatsProbe, XTimeProbe};
+
 // No NCBI counterpart: counters for LOSAT_X_STATS, the shadow summary and LOSAT_TIMING; they do not
 // change any value NCBI computes.
 static BATCHES: AtomicU64 = AtomicU64::new(0);
@@ -314,6 +321,13 @@ pub fn print_summary() {
             load(&SUBJECTS),
             load(&UNITS)
         );
+    }
+    // The units' seed / extension split (LOSAT_TIMING) or diagonal statistics (LOSAT_X_STATS).
+    if let Some(line) = x_unit_probe::timing_line() {
+        eprintln!("{line}");
+    }
+    for line in x_unit_probe::stats_lines() {
+        eprintln!("{line}");
     }
     let lm = lut_mode();
     if lm == 0 {
@@ -882,6 +896,11 @@ struct XScratch {
     /// LOSAT_X_SEEDCOMPACT: the records of the unit that runs (`run_unit_compact`), cleared at
     /// the start of every unit and kept across units; empty while the switch is off.
     records: Vec<XUnitHsp>,
+    /// LOSAT_TIMING: the clocks of the unit that runs (x_unit_probe.rs).
+    time_probe: XTimeProbe,
+    /// LOSAT_X_STATS: the diagonal statistics of the unit that runs (x_unit_probe.rs); empty
+    /// without the variable.
+    stats_probe: XStatsProbe,
 }
 
 /// The read-only values of the per-hit body (`x_hit`).
@@ -1302,10 +1321,37 @@ impl XPairPar {
         // EXPERIMENT (LOSAT_X_SEEDCOMPACT): one read of the switch per subject chooses the form
         // of the units' lists (section above `XUnitHsp`); the units, their order and the scan
         // are the same in both.
-        let outputs = if seed_compact() {
-            XUnitOutputs::Compact(self.run_units(&units, inp, pool, Self::run_unit_compact))
-        } else {
-            XUnitOutputs::Full(self.run_units(&units, inp, pool, Self::run_unit))
+        // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): with either variable the same units run with
+        // a probe (x_unit_probe.rs); without them, the functions without probes.
+        let outputs = match (seed_compact(), x_unit_probe::mode()) {
+            (true, 0) => {
+                XUnitOutputs::Compact(self.run_units(&units, inp, pool, Self::run_unit_compact))
+            }
+            (false, 0) => XUnitOutputs::Full(self.run_units(&units, inp, pool, Self::run_unit)),
+            (true, 1) => XUnitOutputs::Compact(self.run_units(
+                &units,
+                inp,
+                pool,
+                Self::run_unit_compact_probed::<XTimeProbe>,
+            )),
+            (false, 1) => XUnitOutputs::Full(self.run_units(
+                &units,
+                inp,
+                pool,
+                Self::run_unit_probed::<XTimeProbe>,
+            )),
+            (true, _) => XUnitOutputs::Compact(self.run_units(
+                &units,
+                inp,
+                pool,
+                Self::run_unit_compact_probed::<XStatsProbe>,
+            )),
+            (false, _) => XUnitOutputs::Full(self.run_units(
+                &units,
+                inp,
+                pool,
+                Self::run_unit_probed::<XStatsProbe>,
+            )),
         };
         add_ns(&NS_UNITS, t_units);
         XSubjectUnits {
@@ -1544,7 +1590,24 @@ impl XPairPar {
     /// The saved init HSPs of one unit, in its scan order.
     fn run_unit(&self, unit: &XUnit, inp: &XSubject<'_>, scratch: &mut XScratch) -> Vec<InitHSP> {
         let mut init_hsps: Vec<InitHSP> = Vec::new();
-        self.scan_unit(unit, inp, scratch, &mut init_hsps);
+        self.scan_unit(unit, inp, scratch, &mut init_hsps, &mut XNoProbe);
+        init_hsps
+    }
+
+    // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): `run_unit` with a probe (x_unit_probe.rs). Its
+    // own function, so that `run_unit` keeps the scan without probes. No NCBI counterpart.
+    /// `run_unit`, recording into the thread's probe `P`.
+    #[inline(never)]
+    fn run_unit_probed<P: XProbeSlot>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+    ) -> Vec<InitHSP> {
+        let mut probe = std::mem::take(P::slot(scratch));
+        let mut init_hsps: Vec<InitHSP> = Vec::new();
+        self.scan_unit(unit, inp, scratch, &mut init_hsps, &mut probe);
+        *P::slot(scratch) = probe;
         init_hsps
     }
 
@@ -1576,9 +1639,29 @@ impl XPairPar {
     ) -> Vec<XUnitHsp> {
         let mut records = std::mem::take(&mut scratch.records);
         records.clear();
-        self.scan_unit(unit, inp, scratch, &mut records);
+        self.scan_unit(unit, inp, scratch, &mut records, &mut XNoProbe);
         let exact = records.to_vec();
         scratch.records = records;
+        exact
+    }
+
+    // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): `run_unit_compact` with a probe
+    // (x_unit_probe.rs), in its own function as `run_unit_probed`. No NCBI counterpart.
+    /// `run_unit_compact`, recording into the thread's probe `P`.
+    #[inline(never)]
+    fn run_unit_compact_probed<P: XProbeSlot>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+    ) -> Vec<XUnitHsp> {
+        let mut probe = std::mem::take(P::slot(scratch));
+        let mut records = std::mem::take(&mut scratch.records);
+        records.clear();
+        self.scan_unit(unit, inp, scratch, &mut records, &mut probe);
+        let exact = records.to_vec();
+        scratch.records = records;
+        *P::slot(scratch) = probe;
         exact
     }
 
@@ -1586,13 +1669,15 @@ impl XPairPar {
     // chunk, a fresh table (RI:2930-2933: `DiagStruct::default()`, diag_offset = window) indexed by
     // the raw diagonal minus the group's lowest one, without the mask (module doc, item 3). The
     // body of what was `run_unit`; the list it saves into is the caller's (`XInitSink`).
-    /// Scans one unit and saves its init HSPs, in scan order, into `init_hsps`.
-    fn scan_unit<S: XInitSink>(
+    /// Scans one unit and saves its init HSPs, in scan order, into `init_hsps`; `probe` records
+    /// the diagnostics of LOSAT_TIMING / LOSAT_X_STATS (`XNoProbe`: nothing).
+    fn scan_unit<S: XInitSink, P: XProbe>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
         scratch: &mut XScratch,
         init_hsps: &mut S,
+        probe: &mut P,
     ) {
         let group = &self.groups[unit.g];
         let sub = &group.lookup;
@@ -1621,6 +1706,7 @@ impl XPairPar {
         // cells run from 0 to (q_max - q_min) + (s_len - 1).
         let width = (group.q_max - group.q_min) as usize + chunk.length;
         let lo = group.q_min.wrapping_sub(chunk.length as u32 - 1);
+        probe.unit_begin(width);
         scratch.diag.clear();
         scratch.diag.resize(width, DiagStruct::default());
 
@@ -1674,6 +1760,7 @@ impl XPairPar {
                     // The reference's safety guard (RI:3157-3161).
                     break;
                 }
+                probe.batch(hits as usize);
                 let diag_ptr = scratch.diag.as_mut_ptr();
                 let offset_pairs_ptr = scratch.offset_pairs.as_ptr();
                 // [C] for (i = 0; i < hits; ++i)
@@ -1690,10 +1777,21 @@ impl XPairPar {
                     // SAFETY: q_min <= query_offset <= q_max (the group's entries) and
                     // subject_offset < s_len, so diag_coord < width = scratch.diag.len().
                     let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
-                    let _ = x_hit(diag_entry, query_offset, subject_offset, &h, init_hsps);
+                    probe.at(diag_coord, subject_offset);
+                    let outcome = x_hit(
+                        diag_entry,
+                        query_offset,
+                        subject_offset,
+                        &h,
+                        init_hsps,
+                        probe,
+                    );
+                    probe.hit(outcome, window);
                 }
+                probe.batch_end();
             }
         }
+        probe.unit_end();
     }
 }
 
@@ -1785,12 +1883,13 @@ impl XPairPar {
 // `XUnitHsp`), by the same push statement.
 /// The two-hit test and extension of one hit on its cell.
 #[inline(always)]
-fn x_hit<S: XInitSink>(
+fn x_hit<S: XInitSink, P: XProbe>(
     diag_entry: &mut DiagStruct,
     query_offset: u32,
     subject_offset: u32,
     h: &XHitCtx<'_>,
     init_hsps: &mut S,
+    probe: &mut P,
 ) -> XHit {
     let diag_offset = &h.diag_offset;
     let window = h.window;
@@ -1848,6 +1947,9 @@ fn x_hit<S: XInitSink>(
 
         // [C] score = s_BlastAaExtendTwoHit(matrix, subject, query,
         //                                   last_hit + wordsize, subject_offset, query_offset, ...)
+        // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): the probe around the extension
+        // (x_unit_probe.rs; `XNoProbe` does nothing). No NCBI counterpart.
+        let mark = probe.ext_begin();
         let (hsp_q_u, hsp_qe_u, hsp_s_u, _hsp_se_u, score, right_extend, s_last_off_u) =
             extend_hit_two_hit(
                 query,
@@ -1858,6 +1960,15 @@ fn x_hit<S: XInitSink>(
                 x_dropoff,
                 false,
             );
+        probe.ext_end(
+            mark,
+            query,
+            h.subject,
+            (last_hit + wordsize) as usize,
+            subject_offset as usize,
+            q_raw,
+            x_dropoff,
+        );
 
         let hsp_q: i32 = hsp_q_u as i32;
         let hsp_s: i32 = hsp_s_u as i32;
@@ -2253,6 +2364,7 @@ mod tests {
                             pair.s_off,
                             &h,
                             &mut init_hsps,
+                            &mut XNoProbe,
                         ));
                     }
                 }

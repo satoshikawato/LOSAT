@@ -70,7 +70,7 @@ use super::{
     Inputs, PartScratch, Seed, StageStats, Stash, StripJob, STASH,
 };
 use crate::algorithm::blastn::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
-use super::super::x_r4_probe::{self, prefetch, CellPv, CtxTab, Probe, RING};
+use super::super::x_r4_probe::{self, ring_flush, ring_step, CellPv, CtxTab, Probe, RING};
 use crate::algorithm::blastn::lookup::DiscTemplates;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -245,14 +245,16 @@ fn scan_strip_disc(x: &Inputs<'_>, disc: &DiscTemplates, job: &StripJob, out: &m
 
 /// EXPERIMENT (exp/r4-scan-probes, v4-R R4; evidence only): `scan_strip_disc` with the R4_PROBE
 /// arms (`x_r4_probe.rs`) for one template: the same words in the same order, `pf` words late
-/// through a FIFO ring with the backbone prefetch (and with `ST2` the first chain element's), the
-/// empty cells dropped with `PV`, and with `CTX` the seeds' contexts from the table.
-fn scan_strip_disc_r4<const ST2: bool, const PV: bool, const CTX: bool>(
+/// through a FIFO ring with the prefetches of level `lvl` (`x_r4_probe::ring_step`), the empty
+/// cells dropped with `PV`, and with `CTX` the seeds' contexts from the table.
+#[allow(clippy::too_many_arguments)]
+fn scan_strip_disc_r4<const PV: bool, const CTX: bool>(
     x: &Inputs<'_>,
     disc: &DiscTemplates,
     job: &StripJob,
     out: &mut Vec<Seed>,
     pf: usize,
+    lvl: u8,
     pv: Option<&CellPv>,
     ctx: Option<&CtxTab>,
 ) {
@@ -274,7 +276,6 @@ fn scan_strip_disc_r4<const ST2: bool, const PV: bool, const CTX: bool>(
     };
     let mut ring = [(0i32, 0u32); RING];
     let mut n = 0usize;
-    let mask = pf.wrapping_sub(1);
     disc_word_scan_subject(
         kind,
         x.search_seq_packed,
@@ -290,28 +291,21 @@ fn scan_strip_disc_r4<const ST2: bool, const PV: bool, const CTX: bool>(
                 emit(s_off, index);
                 return;
             }
-            prefetch(hashtable.as_ptr().wrapping_add(index as usize));
-            if ST2 && n >= pf / 2 {
-                let mid = ring[(n - pf / 2) & mask].1 as usize;
-                let v = hashtable[mid] as usize;
-                if v != 0 {
-                    prefetch(next_pos.as_ptr().wrapping_add(v));
-                }
-            }
-            let slot = n & mask;
-            if n >= pf {
-                let (so, ix) = ring[slot];
-                emit(so, ix);
-            }
-            ring[slot] = (s_off, index);
-            n += 1;
+            ring_step(
+                &mut ring,
+                &mut n,
+                pf,
+                lvl,
+                hashtable,
+                next_pos,
+                |e: &(i32, u32)| e.1 as usize,
+                (s_off, index),
+                &mut |(so, ix): (i32, u32)| emit(so, ix),
+            );
         },
     );
     if pf > 0 {
-        for m in n.saturating_sub(pf)..n {
-            let (so, ix) = ring[m & mask];
-            emit(so, ix);
-        }
+        ring_flush(&ring, n, pf, &mut |(so, ix): (i32, u32)| emit(so, ix));
     }
 }
 
@@ -351,16 +345,12 @@ fn scan_strip_disc_r4_dispatch(
     pv: Option<&CellPv>,
     ctx: Option<&CtxTab>,
 ) {
-    let pf = r4.pf;
-    match (r4.st2, r4.pv, r4.ctx) {
-        (false, false, false) => scan_strip_disc_r4::<false, false, false>(x, disc, job, out, pf, pv, ctx),
-        (true, false, false) => scan_strip_disc_r4::<true, false, false>(x, disc, job, out, pf, pv, ctx),
-        (false, true, false) => scan_strip_disc_r4::<false, true, false>(x, disc, job, out, pf, pv, ctx),
-        (true, true, false) => scan_strip_disc_r4::<true, true, false>(x, disc, job, out, pf, pv, ctx),
-        (false, false, true) => scan_strip_disc_r4::<false, false, true>(x, disc, job, out, pf, pv, ctx),
-        (true, false, true) => scan_strip_disc_r4::<true, false, true>(x, disc, job, out, pf, pv, ctx),
-        (false, true, true) => scan_strip_disc_r4::<false, true, true>(x, disc, job, out, pf, pv, ctx),
-        (true, true, true) => scan_strip_disc_r4::<true, true, true>(x, disc, job, out, pf, pv, ctx),
+    let (pf, lvl) = (r4.pf, r4.lvl);
+    match (r4.pv, r4.ctx) {
+        (false, false) => scan_strip_disc_r4::<false, false>(x, disc, job, out, pf, lvl, pv, ctx),
+        (true, false) => scan_strip_disc_r4::<true, false>(x, disc, job, out, pf, lvl, pv, ctx),
+        (false, true) => scan_strip_disc_r4::<false, true>(x, disc, job, out, pf, lvl, pv, ctx),
+        (true, true) => scan_strip_disc_r4::<true, true>(x, disc, job, out, pf, lvl, pv, ctx),
     }
 }
 

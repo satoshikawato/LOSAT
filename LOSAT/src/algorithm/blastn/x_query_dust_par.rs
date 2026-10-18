@@ -74,16 +74,17 @@ use crate::utils::threading::SearchPool;
 ))]
 use rayon::prelude::*;
 
-// No NCBI counterpart: reads the switches once (any value turns them on; the shadow implies the
-// switch; neither is in the strict set). They choose between two LOSAT code paths with the same
-// result and change no value NCBI computes.
+// No NCBI counterpart: reads the switches once (LOSAT_X_QDUSTPAR is a strict-set switch since
+// 2026-10-17: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; the shadow, off
+// unless set to any value, implies the switch). They choose between two LOSAT code paths with
+// the same result and change no value NCBI computes.
 /// 0 = off, 1 = LOSAT_X_QDUSTPAR, 2 = LOSAT_X_QDUSTPARSHADOW.
 fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_QDUSTPARSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_QDUSTPAR").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_QDUSTPAR") {
             1
         } else {
             0

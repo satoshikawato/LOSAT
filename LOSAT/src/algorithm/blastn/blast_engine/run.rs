@@ -7222,7 +7222,12 @@ fn run_in_pool(
             scope,
             qbp_input,
             parallel_pool.threads(),
-            x_qbatch_par::Profile::of_task(&args.task),
+            x_qbatch_par::Profile::of_search(
+                &args.task,
+                super::super::coordination::determine_effective_word_size(&args),
+                x_query_file_bytes(&args.query),
+                x_subject_letters(source),
+            ),
             Box::new(|letters: u64, max_len: usize| {
                 let mut config = configure_task(&args);
                 let discontig_template = config.mb_template_length > 0;
@@ -7923,6 +7928,8 @@ fn run_in_pool(
 /// `x_qbatch_par.rs`). A database keeps the loop (each batch reads the database's blocks); so
 /// do verbose, debug and trace output, which a batch writes while it is searched, and subjects
 /// of at least as many 5 Mb work units as threads, whose batches already keep the pool busy.
+/// The subjects' lengths come from their letters (`SubjectLetters::len`), which
+/// LOSAT_X_BNSTORE holds packed while the records keep none.
 fn x_qbatch_par_off(
     args: &BlastnArgs,
     source: SubjectSource<'_>,
@@ -7941,15 +7948,40 @@ fn x_qbatch_par_off(
     if x_debug_output(args) {
         return Some(Off::Debug);
     }
-    let units: usize = prepared
-        .records
-        .iter()
-        .map(|record| record.seq().len().div_ceil(MAX_DBSEQ_LEN))
+    let letters = prepared.letters();
+    let units: usize = (0..prepared.records.len())
+        .map(|index| letters.len(index).div_ceil(MAX_DBSEQ_LEN))
         .sum();
     if units >= threads {
         return Some(Off::Subjects);
     }
     None
+}
+
+// No NCBI counterpart (scheduling only): the size NCBI's blastn reads for its split by queries
+// (`x_qbatch_par::ncbi_splits_by_queries`); it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_QBATCHPAR): the length of the query file in bytes, as NCBI's `CFile`
+/// gives it (`stat`, through symbolic links); `None` for standard input (`-`) or a path that
+/// cannot be read.
+fn x_query_file_bytes(query: &std::path::Path) -> Option<u64> {
+    if query == std::path::Path::new("-") {
+        return None;
+    }
+    std::fs::metadata(query).ok().map(|metadata| metadata.len())
+}
+
+// No NCBI counterpart (scheduling only): it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_QBATCHPAR): the letters of the searched subjects (`-subject`), the
+/// database size in `x_qbatch_par::ncbi_splits_by_queries`; 0 for a database, where the slots
+/// do not run.
+fn x_subject_letters(source: SubjectSource<'_>) -> u64 {
+    let Some(prepared) = source.prepared() else {
+        return 0;
+    };
+    let letters = prepared.letters();
+    (0..prepared.records.len())
+        .map(|index| letters.len(index) as u64)
+        .sum()
 }
 
 // No NCBI counterpart: LOSAT's verbose, debug and trace output (it changes no value NCBI computes).

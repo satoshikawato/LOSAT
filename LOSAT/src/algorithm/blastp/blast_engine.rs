@@ -9003,7 +9003,7 @@ fn run_resolved_in_pool(
     // #pragma omp for schedule(static)
     //         for (b = 0; b < numMatches; ++b) {
     // ```
-    // EXPERIMENT (LOSAT_X_BPREDOPAR / LOSAT_X_BPREDOPARSHADOW, off unless set): NCBI splits one
+    // EXPERIMENT (LOSAT_X_BPREDOPAR, a strict-set switch / LOSAT_X_BPREDOPARSHADOW): NCBI splits one
     // loop over the matches of all queries between its threads. With the switch, more than one
     // thread and at least two matches, the matches run on the pool in jobs of up to four matches
     // of one query, and the early termination test, the heap insertions and the error that ends

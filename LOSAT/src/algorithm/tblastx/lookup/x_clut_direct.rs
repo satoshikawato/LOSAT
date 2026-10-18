@@ -162,7 +162,7 @@
 //! (`XFlatSpare`), and tasks of another computation (the contexts' Karlin blocks of
 //! `blastp/x_query_blocks.rs`) run by the appends pass after its chunks (`XExtraTasks`).
 //! `LOSAT_X_BPLKPFLATSHADOW` builds the table again with the `par_iter` passes on fresh vectors and
-//! compares the two, slot for slot. `LOSAT_X_BPLKPAHEAD` (off unless set; not in the strict set) runs
+//! compares the two, slot for slot. `LOSAT_X_BPLKPAHEAD` (a strict-set switch since 2026-10-17) runs
 //! the same build for the next query block ahead of that block, on vectors that the block search's
 //! thread allocated (`XFlatArgs::x_ahead`, `XFlatSpare::x_make_room`).
 

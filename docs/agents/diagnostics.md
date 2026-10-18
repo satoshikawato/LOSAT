@@ -8,7 +8,8 @@ The reports match NCBI's bytes only while every floating-point value is computed
 code computes it on the same machine. Every build keeps these rules (written down 2026-10-18,
 plan v4 D6 (c)); `LOSAT/tests/check_fp_contract.py` checks them in CI: `source` in the `rust`
 job and in the release workflow's quality job, `binary` on the release binary of the
-`fast output regressions` job and on the Linux x64 release artifact.
+`fast output regressions` job, on the Linux x64 release artifact, and on the release binary of
+the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(b)).
 
 - **No contraction.** rustc emits each `*`, `+`, `-` and `/` as its own IEEE operation, rounded
   once, and never fuses `a * b + c` into a fused multiply-add: it sets no `contract` or fast-math
@@ -30,8 +31,14 @@ job and in the release workflow's quality job, `binary` on the release binary of
     form when it has only FMA4, and a software fused multiply-add otherwise; these two
     instructions are the binary's only FMA instructions;
   - with `-C target-cpu=x86-64-v3`, as 13 inline `vfmsub213sd`, and no other function holds an
-    FMA instruction;
-  - on aarch64, as inline `fmadd` / `fmsub` (not counted in CI yet).
+    FMA instruction; the same with PGO (`-Cprofile-use`, dev 0b928fff);
+  - on aarch64, as 13 inline `fnmsub` (a cross build for `aarch64-unknown-linux-musl` of dev
+    0b928fff, counted with `llvm-objdump`; that static build also holds the 7 FMA instructions
+    of musl's `log`, `log2` and `pow`, which the glibc build of the Linux arm64 cell calls in
+    the shared libm instead).
+
+  PGO and other inlining changes may move the site into a caller outside `stats::spouge`; the
+  check then fails and names the function.
 
   A new `mul_add` needs the same argument (the fused result is the value NCBI computes) and an
   entry in the checker's `MUL_ADD_SITES` (and, in another module, `MUL_ADD_FUNCTION_PREFIXES`).
@@ -47,7 +54,12 @@ job and in the release workflow's quality job, `binary` on the release binary of
   baseline CPU of the target; the AVX2 kernels are chosen at run time
   (`is_x86_feature_detected!`). Extra flags for one build go in `CARGO_TARGET_<TRIPLE>_RUSTFLAGS`,
   which cargo joins with the configuration's `[target.'cfg(target_arch = "x86_64")']` flags;
-  `RUSTFLAGS` replaces them.
+  `RUSTFLAGS` replaces them. Measured 2026-10-18 (plan v4 D6 (a)(b); ws, 11 small bench5 jobs
+  of all five programs at 1 and 8 threads, 8 rounds; every output identical): a build for
+  `x86-64-v3` takes ×1.00 of the baseline's time at 1 thread and ×1.01 at 8 (TBLASTX ×1.01 to
+  ×1.035: 2.9 % fewer instructions, 3 % more cycles), and PGO (`-Cprofile-use`, profile of 8 of
+  the jobs) ×0.98 (best ×0.93, megablast at 1 thread; a 0.06 s BLASTN job ×1.03 to ×1.07).
+  The release builds stay at the baseline CPU, without PGO.
 
 ## Debug and trace variables
 
@@ -347,6 +359,7 @@ export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
 export LOSAT_X_TBXQFRAMES=1
 export LOSAT_X_TBXSCANBF=1
+export LOSAT_X_TBXUNGAP=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -2896,6 +2909,27 @@ Scheduling (each value computed by one thread with the original function; order 
   sends back (the timings of `LOSAT_X_PAIRPARGATE` above) it takes x0.95-1.00 of the chain
   builder's time; max RSS 23 -> 19 MiB on 40 kb x 3,000 cDNAs, 15 -> 17 MiB on 5 kb x 3,000 cDNAs
   at 8 threads (the default before both: 21 and 19 MiB).
+- `LOSAT_X_TBXUNGAP=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-10-18; `=0` turns it off; native builds, the wasm32 build keeps its 16-residue v128 walks) the
+  two-hit ungapped extension (`extend_hit_two_hit`, NCBI `s_BlastAaExtendTwoHit`: the word loop and the
+  `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks) reads its scores from one 256 x 256 byte table
+  (`q << 8 | s`, the scores of `get_score` for every two bytes, `BLAST_SCORE_MIN` stored as -128) and runs
+  each walk in a function of its own (`tblastx/extension/x_two_hit_fast.rs`, exactness argument in its
+  header): 18 instructions a step on the left and 19 on the right, against 22 and about 30 (the reference
+  calls `get_score`, which tests both codes and multiplies for the row, and its right walk reloads its
+  bounds from the stack). Same counts, positions, statements and exit tests; an X-drop outside 1..=127 or a
+  word that does not fit runs the reference, and so does the debug output. All callers (the unit path and
+  the reference frame loops) go through it. Measured against the dev binary before it (workstation, node 1
+  without other timed runs, 8 alternating rounds, medians of the per-round ratios, reports and max RSS
+  identical): MelaMJNV x PemoMJNVA 1 thread x0.978, AP027131 x AP027133 (code 4) 1 thread x0.971 and 8
+  threads x0.984, Sakai x MG1655[0:1 Mb] (code 11) 8 threads x0.988. perf stat at 1 thread: AP027131 x
+  AP027133 instructions 72.2 -> 69.0 G, cycles 34.9 -> 34.1 G (about 100 instructions and 25 cycles fewer
+  per extension). What is left of an extension is the latency of its first query loads and the
+  mispredicted exits of the walks (`LOSAT_X_TBXEXTLANES`, next).
+- `LOSAT_X_TBXUNGAPSHADOW=1` shadow of `LOSAT_X_TBXUNGAP` (turns the path on): every extension runs both
+  ways and the seven results (offsets, score, `right_extend`, `s_last_off`) must be equal; any difference
+  panics with the inputs; the reference's result is used. One line at exit:
+  `[X_SHADOW] TBXUNGAP compared=`.
 - `LOSAT_X_PAIRLUT=1` (in the strict set; acts while `LOSAT_X_PAIRPAR` is on, not with its
   shadow) TBLASTX:
   the lookup tables of the unit path, one per context group, built directly from the query instead

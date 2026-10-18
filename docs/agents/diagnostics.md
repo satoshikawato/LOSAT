@@ -2044,6 +2044,36 @@ Scheduling (each value computed by one thread with the original function; order 
   `logs/defaultset_ws_report.md` unless named); a reduction is 1 - with / without the switch, the other switches of
   the candidate set on): at 16 threads dc-megablast of 1,775 / 3,492 cDNAs against 3 Mb -26.6 / -23.2 % wall, blastn
   of 31,168 cDNAs -24.6 %, blastn of 1,775 -3.8 %; at 4 threads inside the rounds' spread; max RSS unchanged.
+- `LOSAT_X_TBXQFRAMES=1` (TBLASTX, speed; in the strict set since 2026-10-18, on by default, in the pull
+  request that added it; evidence at the end of this entry) the SEG of a query batch's frames is made on the search
+  pool, one task per frame, instead of one frame after the other before the lookup table is built
+  (`tblastx/x_query_frames.rs`, called from `search_query_batch` for every query batch, `-subject` and `-db`). NCBI
+  filters the contexts of a batch one after the other (`blast_filter.c:1280-1290`); each task reads and writes only
+  its own frame (letters, intervals, unmasked copy) and only reads the `SegMasker`, and SEG's two caches (the memo
+  of `LOSAT_X_SEGMEMO` and the histogram memo of `LOSAT_X_SEGFAST`) are `thread_local!` tables of a pure function of
+  the window's letter counts, so every frame gets the serial loop's intervals. It acts only with a pool of two or
+  more threads and two or more frames in the batch; with one thread, a build without the `parallel` feature,
+  WebAssembly without `wasm-threads`, the switch off, or `-seg no`, the serial loop runs. The translation of the
+  frames stays serial (at most a few ms per batch). BLASTX needs no such switch: its query SEG already runs on the
+  pool (`LOSAT_X_BXPAR`). Shadow: `LOSAT_X_TBXQFRAMESSHADOW=1` (implies the switch) also masks a copy of the frames
+  serially and compares every frame's letters, unmasked copy and intervals; a difference prints
+  `[X_SHADOW] TBXQFRAMES batches= frames= intervals= diffs= DIFFERENT` and panics; at the end of a run `main` prints
+  `[X_SHADOW] TBXQFRAMES batches= frames= intervals= diffs=0 identical` (the batches masked on the pool, their frames
+  and intervals; 0 when no batch had a pool). Tests: the unit tests of `x_query_frames.rs` (pool == serial at 1, 2,
+  3 and 7 threads for three SEG parameter sets, with batches of one query and none; a probe called once per frame
+  shows that the frames are masked by at least two workers of a 3-thread pool, and by none with the switch off or
+  one thread) and `LOSAT/tests/tblastx_query_frames.rs` (off / default / `LOSAT_X_DEFAULT=0` / shadow equal at 1
+  and 4 threads, with several query batches, other SEG parameters and `-seg no`). On by default since 2026-10-18
+  (perf/tbx-query-seg-par), on this evidence: the shadow over the TBLASTX fixtures at 2 and 4 threads
+  (`check_losat.py`, `ci_fast_regressions.py --programs tblastx --all-cases`) compared 2,910 frames (58,542 intervals) in 242 batches of 200 runs,
+  all identical, and every report equals the one without the switch; i9 (8 alternating off/on pairs after a
+  warm-up, load 5-9, `LOSAT_TIMING`, every report its frozen sha256), 8 threads, medians: AP027131 x AP027133 (code
+  4) SEG 0.223 -> 0.044 s, outside the search 0.381 -> 0.200 s, wall 1.864 -> 1.722 s (on/off 0.92); MelaMJNV x
+  PemoMJNVA 0.048 -> 0.009 s, 0.247 -> 0.210 s (0.86); AvCLPV x PsCLPV 0.122 -> 0.024 s, 1.130 -> 1.028 s (0.91);
+  NZ_CP006932 against itself 0.208 -> 0.042 s, 4.28 -> 4.22 s (0.96); the first 3 kb of MelaMJNV x PemoMJNVA 0.012
+  -> 0.011 s; at one thread both arms run the serial loop (SEG equal; wall ratios 0.96-1.03 within the spread of
+  the P and E cores). Max RSS at 8 threads within 2 MiB (AP027131 x AP027133 134-137 MiB, MelaMJNV x PemoMJNVA
+  46-48 MiB, 3 pairs).
 - `LOSAT_X_QPREPPAR=1` (BLASTN, all tasks; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the BLASTNA encoding of a query batch and the ungapped Karlin blocks of its contexts are made on the search pool
   instead of one query / context after the other (`blastn/blast_engine/x_query_prep_par.rs`, called from
   `search_query_batch`, so for every query batch, in the loop or in a `LOSAT_X_QBATCHPAR` slot; `-db` searches too).

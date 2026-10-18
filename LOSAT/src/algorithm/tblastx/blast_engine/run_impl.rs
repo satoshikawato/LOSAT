@@ -1472,6 +1472,9 @@ pub(crate) struct TblastxReportRun<'a> {
     pub epilog: bool,
     /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
     pub v1_titles: bool,
+    /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the pool the report stage runs on (tblastx/x_rpt_par.rs),
+    /// `None` for the serial stage.
+    pub x_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
 }
 
 /// The database of a `-db` search as its reports show it.
@@ -1644,13 +1647,23 @@ fn write_tblastx_outputs(
     if run.v1_titles && output_formats.contains(&report::TblastxOutputFormat::Pairwise) {
         check_shown_subject_titles(&hits, run.subjects)?;
     }
-    report::set_displayed_identities(
-        &mut hits,
-        run.queries,
-        run.subject_letters,
-        &query_code,
-        &db_code,
-    );
+    match run.x_pool {
+        Some(pool) => crate::algorithm::tblastx::x_rpt_par::set_displayed_identities(
+            pool,
+            &mut hits,
+            run.queries,
+            run.subject_letters,
+            &query_code,
+            &db_code,
+        ),
+        None => report::set_displayed_identities(
+            &mut hits,
+            run.queries,
+            run.subject_letters,
+            &query_code,
+            &db_code,
+        ),
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
     // ```c
     // CBlastFormat::PrintOneResultSet(const blast::CSearchResults& results,
@@ -1659,8 +1672,22 @@ fn write_tblastx_outputs(
     // displayed rows of outfmt 0.
     let pairwise = (outputs.hits.is_some()
         || output_formats.contains(&report::TblastxOutputFormat::Pairwise))
-    .then(|| {
-        report::pairwise_hits(
+    .then(|| match run.x_pool {
+        Some(pool) => crate::algorithm::tblastx::x_rpt_par::pairwise_hits(
+            pool,
+            &hits,
+            &report::PairwiseRows::new(
+                run.queries,
+                run.subjects,
+                run.subject_letters,
+                run.query_stats,
+                &query_code,
+                &db_code,
+                &run.ranges.input.placements,
+                run.ranges.subject_placements,
+            ),
+        ),
+        None => report::pairwise_hits(
             &hits,
             run.queries,
             run.subjects,
@@ -1670,7 +1697,7 @@ fn write_tblastx_outputs(
             &db_code,
             &run.ranges.input.placements,
             run.ranges.subject_placements,
-        )
+        ),
     });
     // The tabular rows print record coordinates (`report::shift_to_records`); the outfmt 0
     // rows above were read from the searched letters first.
@@ -1816,8 +1843,25 @@ fn write_tblastx_outputs(
                 )?;
             }
             report::TblastxOutputFormat::Tabular
-            | report::TblastxOutputFormat::TabularWithComments => {
-                report::write_tabular(
+            | report::TblastxOutputFormat::TabularWithComments => match run.x_pool {
+                // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows formatted on the pool; with the format
+                // observer (which flushes around every row) the serial writer.
+                Some(pool) if probe.is_none() => {
+                    crate::algorithm::tblastx::x_rpt_par::write_tabular(
+                        pool,
+                        &hits,
+                        &mut writer,
+                        output_format == report::TblastxOutputFormat::TabularWithComments,
+                        &query_titles,
+                        &database,
+                        run.query_ids,
+                        &subject_ids,
+                        &unsearched,
+                        run.epilog,
+                        warnings.as_mut(),
+                    )?
+                }
+                _ => report::write_tabular(
                     &hits,
                     &mut writer,
                     output_format == report::TblastxOutputFormat::TabularWithComments,
@@ -1829,10 +1873,13 @@ fn write_tblastx_outputs(
                     run.epilog,
                     probe.as_mut(),
                     warnings.as_mut(),
-                )?;
-            }
+                )?,
+            },
         }
         writer.flush()?;
+    }
+    if run.x_pool.is_some() {
+        crate::algorithm::tblastx::x_rpt_par::print_shadow_summary();
     }
     // Without an output format the warnings are written all at once.
     if let Some(warnings) = format_warnings {
@@ -1969,6 +2016,7 @@ fn run_in_pool(
         subjects: &subjects.shown,
         titles: std::cell::RefCell::new(DatabaseTitles::new()),
         v1_titles,
+        pool: parallel_pool,
     };
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:173
     // ```c
@@ -2485,6 +2533,8 @@ struct BatchReports<'a> {
     /// `-db`: the stored titles of the batches' reported sequences (`run_in_pool`).
     titles: std::cell::RefCell<DatabaseTitles>,
     v1_titles: bool,
+    /// The search's pool (`TblastxReportRun::x_pool`).
+    pool: &'a crate::utils::threading::SearchPool<'a>,
 }
 
 impl BatchReports<'_> {
@@ -2551,6 +2601,7 @@ impl BatchReports<'_> {
                 ranges: self.query_runs,
                 epilog,
                 v1_titles: self.v1_titles,
+                x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.pool),
             },
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);

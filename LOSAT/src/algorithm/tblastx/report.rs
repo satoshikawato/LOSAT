@@ -541,83 +541,144 @@ pub(crate) fn pairwise_hits(
     query_placements: &Placements,
     subject_placements: &Placements,
 ) -> Vec<PairwiseHit> {
-    let query_masks: Vec<Vec<(i8, Vec<(i32, i32)>)>> = query_stats
-        .iter()
-        .zip(queries)
-        .enumerate()
-        .map(|(q_idx, (stats, query))| {
-            shown_query_masks(
-                query_dna_masks(stats, query.seq().len()),
-                query.seq().len(),
-                query_placements.offset(q_idx),
-            )
-        })
-        .collect();
+    let rows = PairwiseRows::new(
+        queries,
+        subjects,
+        subject_letters,
+        query_stats,
+        query_code,
+        db_code,
+        query_placements,
+        subject_placements,
+    );
     let mut window = Vec::new();
-    hits.iter()
-        .map(|hsp| {
-            let query = &queries[hsp.hit.q_idx as usize];
-            let subject = &subjects[hsp.hit.s_idx as usize];
-            let (mut query_row, subject_row) =
-                subject_letters.rows(hsp, query.seq(), query_code, db_code, &mut window);
-            let (identities, positives) = row_counts(&query_row, &subject_row);
-            let (q_idx, s_idx) = (hsp.hit.q_idx as usize, hsp.hit.s_idx as usize);
-            let mut hit = hsp.hit.clone();
-            shift_hit(&mut hit, query_placements, subject_placements);
-            let query_length = query_placements.length(q_idx, query.seq().len());
-            let subject_length = subject_placements.length(s_idx, subject_letters.length(s_idx));
-            let (low, high) = (
-                hit.q_start.min(hit.q_end) as i32 - 1,
-                hit.q_start.max(hit.q_end) as i32 - 1,
-            );
-            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:430-440
-            // ```c++
-            // static int s_GetStdsegMasterFrame(const CStd_seg& ss, CScope& scope)
-            // {
-            //     const CRef<CSeq_loc> slc = ss.GetLoc().front();
-            //     ENa_strand strand = GetStrand(*slc);
-            //     int frame = s_GetFrame(strand ==  eNa_strand_plus ?
-            //                            GetStart(*slc, &scope) : GetStop(*slc, &scope),
-            //                            strand ==  eNa_strand_plus ?
-            //                            eNa_strand_plus : eNa_strand_minus,
-            //                            *(ss.GetIds().front()), scope);
-            //     return frame;
-            // }
-            // ```
-            // The frames that the report prints come from the records' coordinates and
-            // lengths (`seq_range::record_frame`); without ranges they are the search's.
-            let query_frame =
-                record_frame(hit.query_frame > 0, hit.q_start as usize - 1, query_length) as i8;
-            let subject_frame = record_frame(
-                hsp.subject_frame > 0,
-                hit.s_start as usize - 1,
-                subject_length,
-            ) as i8;
-            lowercase_query_row(&mut query_row, query_frame, low, high, &query_masks[q_idx]);
-            hit.num_ident = identities;
-            hit.num_positives = positives;
-            PairwiseHit {
-                hit,
-                query_seq: Some(String::from_utf8_lossy(&query_row).into_owned()),
-                subject_seq: Some(String::from_utf8_lossy(&subject_row).into_owned()),
-                query_frame: Some(query_frame),
-                subject_frame: Some(subject_frame),
-                positives: Some(positives),
-                gaps: Some(0),
-                subject_length: Some(subject_length),
-                // The title after its first word (the `bio` description of the inputs
-                // that `bio` read alike), as BLASTN's; the reports take the subject's
-                // title bytes by subject index (`write_tblastx_pairwise_report`).
-                subject_title: subject
-                    .title
-                    .iter()
-                    .position(|&byte| byte == b' ')
-                    .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
-                comp_adjust_method: None,
-                sum_n: Some(hsp.num),
-            }
-        })
-        .collect()
+    hits.iter().map(|hsp| rows.hit(hsp, &mut window)).collect()
+}
+
+/// What the outfmt 0 row of an HSP (`PairwiseRows::hit`) reads besides the HSP: the inputs of
+/// `pairwise_hits`, with the queries' shown masks made once.
+pub(crate) struct PairwiseRows<'a> {
+    queries: &'a [FastaRecord],
+    subjects: &'a [FastaRecord],
+    subject_letters: SubjectLetters<'a>,
+    query_masks: Vec<Vec<(i8, Vec<(i32, i32)>)>>,
+    query_code: &'a GeneticCode,
+    db_code: &'a GeneticCode,
+    query_placements: &'a Placements,
+    subject_placements: &'a Placements,
+}
+
+impl<'a> PairwiseRows<'a> {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        queries: &'a [FastaRecord],
+        subjects: &'a [FastaRecord],
+        subject_letters: SubjectLetters<'a>,
+        query_stats: &[TblastxQueryStats],
+        query_code: &'a GeneticCode,
+        db_code: &'a GeneticCode,
+        query_placements: &'a Placements,
+        subject_placements: &'a Placements,
+    ) -> Self {
+        let query_masks: Vec<Vec<(i8, Vec<(i32, i32)>)>> = query_stats
+            .iter()
+            .zip(queries)
+            .enumerate()
+            .map(|(q_idx, (stats, query))| {
+                shown_query_masks(
+                    query_dna_masks(stats, query.seq().len()),
+                    query.seq().len(),
+                    query_placements.offset(q_idx),
+                )
+            })
+            .collect();
+        Self {
+            queries,
+            subjects,
+            subject_letters,
+            query_masks,
+            query_code,
+            db_code,
+            query_placements,
+            subject_placements,
+        }
+    }
+
+    /// The outfmt 0 row of `hsp` (its displayed rows, frames, counts, linked-set size and
+    /// subject); `window` is the buffer of a stored subject's letters.
+    pub(crate) fn hit(&self, hsp: &TblastxHsp, window: &mut Vec<u8>) -> PairwiseHit {
+        let (queries, subjects, subject_letters) =
+            (self.queries, self.subjects, self.subject_letters);
+        let (query_code, db_code) = (self.query_code, self.db_code);
+        let (query_placements, subject_placements) =
+            (self.query_placements, self.subject_placements);
+        let query = &queries[hsp.hit.q_idx as usize];
+        let subject = &subjects[hsp.hit.s_idx as usize];
+        let (mut query_row, subject_row) =
+            subject_letters.rows(hsp, query.seq(), query_code, db_code, window);
+        let (identities, positives) = row_counts(&query_row, &subject_row);
+        let (q_idx, s_idx) = (hsp.hit.q_idx as usize, hsp.hit.s_idx as usize);
+        let mut hit = hsp.hit.clone();
+        shift_hit(&mut hit, query_placements, subject_placements);
+        let query_length = query_placements.length(q_idx, query.seq().len());
+        let subject_length = subject_placements.length(s_idx, subject_letters.length(s_idx));
+        let (low, high) = (
+            hit.q_start.min(hit.q_end) as i32 - 1,
+            hit.q_start.max(hit.q_end) as i32 - 1,
+        );
+        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:430-440
+        // ```c++
+        // static int s_GetStdsegMasterFrame(const CStd_seg& ss, CScope& scope)
+        // {
+        //     const CRef<CSeq_loc> slc = ss.GetLoc().front();
+        //     ENa_strand strand = GetStrand(*slc);
+        //     int frame = s_GetFrame(strand ==  eNa_strand_plus ?
+        //                            GetStart(*slc, &scope) : GetStop(*slc, &scope),
+        //                            strand ==  eNa_strand_plus ?
+        //                            eNa_strand_plus : eNa_strand_minus,
+        //                            *(ss.GetIds().front()), scope);
+        //     return frame;
+        // }
+        // ```
+        // The frames that the report prints come from the records' coordinates and
+        // lengths (`seq_range::record_frame`); without ranges they are the search's.
+        let query_frame =
+            record_frame(hit.query_frame > 0, hit.q_start as usize - 1, query_length) as i8;
+        let subject_frame = record_frame(
+            hsp.subject_frame > 0,
+            hit.s_start as usize - 1,
+            subject_length,
+        ) as i8;
+        lowercase_query_row(
+            &mut query_row,
+            query_frame,
+            low,
+            high,
+            &self.query_masks[q_idx],
+        );
+        hit.num_ident = identities;
+        hit.num_positives = positives;
+        PairwiseHit {
+            hit,
+            query_seq: Some(String::from_utf8_lossy(&query_row).into_owned()),
+            subject_seq: Some(String::from_utf8_lossy(&subject_row).into_owned()),
+            query_frame: Some(query_frame),
+            subject_frame: Some(subject_frame),
+            positives: Some(positives),
+            gaps: Some(0),
+            subject_length: Some(subject_length),
+            // The title after its first word (the `bio` description of the inputs
+            // that `bio` read alike), as BLASTN's; the reports take the subject's
+            // title bytes by subject index (`write_tblastx_pairwise_report`).
+            subject_title: subject
+                .title
+                .iter()
+                .position(|&byte| byte == b' ')
+                .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
+            comp_adjust_method: None,
+            sum_n: Some(hsp.num),
+        }
+    }
 }
 
 /// Moves a hit's reported coordinates from the searched letters into the records: by the
@@ -675,7 +736,7 @@ pub(crate) fn shift_to_records(
 /// The block header of one query in outfmt 7: the program, the query, the subjects, and,
 /// for a searched query (`num_hits` is `Some`), the fields when there are hits and the
 /// count of HSPs.
-fn write_outfmt7_query_header<W: Write>(
+pub(crate) fn write_outfmt7_query_header<W: Write>(
     writer: &mut W,
     query_title: &[u8],
     database: &str,
@@ -751,37 +812,12 @@ pub(crate) fn write_tabular<W: Write>(
             )?;
         }
         for &(hsp_index, hsp) in query_hits {
-            let hit = &hsp.hit;
-            // The query ID of the record (`FastaRecord::shown_id`) and the subject's
-            // `GetSeqIdList` ID (`tabular_subject_id`), as bytes.
-            let query_id = query_ids
-                .get(hit.q_idx as usize)
-                .map_or(&b""[..], |id| id.as_ref());
-            let subject_id = subject_ids
-                .get(hit.s_idx as usize)
-                .map_or(&b""[..], |id| id.as_ref());
             // One printed row is one HSP; the probe marks it without changing it.
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.begin(hsp_index);
             }
-            write_hit_fields_bytes(
-                writer,
-                query_id,
-                subject_id,
-                hit.identity,
-                hit.num_ident,
-                hit.length,
-                hit.mismatch,
-                hit.gapopen,
-                hit.q_start,
-                hit.q_end,
-                hit.s_start,
-                hit.s_end,
-                hit.e_value,
-                hit.bit_score,
-                &config,
-            )?;
+            write_tabular_row(writer, hsp, query_ids, subject_ids, &config)?;
             if let Some(probe) = probe.as_mut() {
                 writer.flush()?;
                 probe.end(hsp_index);
@@ -805,6 +841,42 @@ pub(crate) fn write_tabular<W: Write>(
         writeln!(writer, "# BLAST processed {} queries", query_titles.len())?;
     }
     Ok(())
+}
+
+/// The outfmt 6 / 7 row of one HSP (`write_tabular`).
+pub(crate) fn write_tabular_row<W: Write>(
+    writer: &mut W,
+    hsp: &TblastxHsp,
+    query_ids: &[Arc<[u8]>],
+    subject_ids: &[Arc<[u8]>],
+    config: &OutputConfig,
+) -> io::Result<()> {
+    let hit = &hsp.hit;
+    // The query ID of the record (`FastaRecord::shown_id`) and the subject's
+    // `GetSeqIdList` ID (`tabular_subject_id`), as bytes.
+    let query_id = query_ids
+        .get(hit.q_idx as usize)
+        .map_or(&b""[..], |id| id.as_ref());
+    let subject_id = subject_ids
+        .get(hit.s_idx as usize)
+        .map_or(&b""[..], |id| id.as_ref());
+    write_hit_fields_bytes(
+        writer,
+        query_id,
+        subject_id,
+        hit.identity,
+        hit.num_ident,
+        hit.length,
+        hit.mismatch,
+        hit.gapopen,
+        hit.q_start,
+        hit.q_end,
+        hit.s_start,
+        hit.s_end,
+        hit.e_value,
+        hit.bit_score,
+        config,
+    )
 }
 
 /// The TBLASTX output formats (`-outfmt` 0, 6 and 7, `tblastx_outfmt`).

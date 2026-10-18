@@ -3,9 +3,9 @@
 //! `src/algorithm/blastn/blast_engine/x_query_stream.rs`), on whole searches.
 //!
 //! The switch is in the strict set since 2026-10-18 (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set), with a rule (off where LOSAT_X_QBATCHPAR's slots may read at least half of
-//! the file ahead; not the shadow). It chooses when LOSAT
-//! reads the same records: all of them before the search, or a first reading that keeps their
+//! and it is not set), with a rule (off for `-task megablast`, for a file shorter than twice the
+//! largest query batch, and where LOSAT_X_QBATCHPAR's slots may read at least half of the file
+//! ahead; not the shadow). It chooses when LOSAT reads the same records: all of them before the search, or a first reading that keeps their
 //! lengths and a second one batch by batch, which it does only where the reports may be written
 //! batch by batch (LOSAT_X_RPTSTREAM on; off, the shadow line says `off=reports`).
 //! So the property under test is that nothing a run writes depends on it: for megablast, blastn
@@ -456,6 +456,13 @@ fn out_files_qbatchpar_slots_and_the_report_shadow_give_the_off_bytes() {
                             && stderr.contains(" off=reports"),
                         "{what}: {stderr}"
                     );
+                } else if task == "megablast" {
+                    // The rule: the switch does not act for megablast (the shadow above does).
+                    assert!(
+                        stderr.contains("[X_STATS] QSTREAM records=0 read=0 ")
+                            && stderr.contains(" off=megablast"),
+                        "{what}: {stderr}"
+                    );
                 } else {
                     assert!(
                         number("[X_STATS] QSTREAM ", "slots=") > 0
@@ -828,34 +835,41 @@ fn a_database_search_gives_the_off_bytes() {
 
 /// The switch is on by default (an empty value): with LOSAT_X_RPTSTREAM it reads the batches
 /// again (its `[X_STATS]` line with `off=none`); with `LOSAT_X_QSTREAM=0`, or `LOSAT_X_DEFAULT=0`
-/// and no value, the records are read before the search (no line). Its rule: where the slots of
-/// LOSAT_X_QBATCHPAR may run and the file is shorter than twice what their budget holds (here
-/// a budget set by `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads), the line says
-/// `off=slots`, and the shadow still reads the batches again. The bytes are the same.
+/// and no value, the records are read before the search (no line). Its rule, where the line says
+/// why and the shadow still reads the batches again: `-task megablast` (`off=megablast`); a file
+/// shorter than twice the largest batch (`off=batch`; here `BATCH_SIZE` half the file's bytes plus
+/// one, and half the file's bytes on); where the slots of LOSAT_X_QBATCHPAR may run, a file
+/// shorter than twice what their budget holds (`off=slots`; a budget set by
+/// `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads, none at one thread). The bytes are the
+/// same.
 #[test]
 fn the_switch_is_on_by_default() {
     let dir = TempDir::new("default");
     let query = queries(&dir, "q.fa", b"");
     let subject = fasta("LC738868.fasta");
-    let args = [
-        "-task",
-        "megablast",
-        "-query",
-        query.to_str().unwrap(),
-        "-subject",
-        subject.to_str().unwrap(),
-        "-outfmt",
-        "6",
-    ];
-    let line = |run: &Run| -> Option<String> {
+    let args = |task| {
+        [
+            "-task",
+            task,
+            "-query",
+            query.to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            "6",
+        ]
+    };
+    let blastn_args = args("blastn");
+    let line = |run: &Run| -> String {
         String::from_utf8_lossy(&run.stderr)
             .lines()
             .find(|line| line.starts_with("[X_STATS] QSTREAM "))
             .map(str::to_string)
+            .unwrap_or_default()
     };
     let default = ("LOSAT_X_QSTREAM", "");
-    let on = blastn(&args, 4, &[RPTSTREAM, STATS, default], None);
-    let read = line(&on).expect("the switch's line");
+    let on = blastn(&blastn_args, 4, &[RPTSTREAM, STATS, default], None);
+    let read = line(&on);
     assert!(
         read.contains(" off=none") && read.contains(" read=19 "),
         "{read}"
@@ -864,10 +878,14 @@ fn the_switch_is_on_by_default() {
         &[RPTSTREAM, STATS][..],
         &[RPTSTREAM, STATS, default, ("LOSAT_X_DEFAULT", "0")],
     ] {
-        let off = blastn(&args, 4, switches, None);
-        assert_eq!(line(&off), None, "{switches:?}");
+        let off = blastn(&blastn_args, 4, switches, None);
+        assert_eq!(line(&off), "", "{switches:?}");
         assert_eq!((off.status, &off.report), (on.status, &on.report));
     }
+    // The rule: (task, threads, switches, the line's `off=`); each against the switch `0`, and the
+    // shadow, which ignores the rule.
+    let half = std::fs::metadata(&query).unwrap().len() / 2;
+    let (batch_off, batch_on) = ((half + 1).to_string(), half.to_string());
     let slots = [
         RPTSTREAM,
         STATS,
@@ -875,22 +893,51 @@ fn the_switch_is_on_by_default() {
         QBATCHPAR,
         ("LOSAT_X_QBATCHPARMEM", "64"),
     ];
-    let ruled = blastn(&args, 2, &slots, None);
-    let read = line(&ruled).expect("the switch's line");
-    assert!(
-        read.contains(" off=slots") && read.contains(" read=0 "),
-        "{read}"
-    );
-    assert_eq!((ruled.status, &ruled.report), (on.status, &on.report));
-    let shadowed = blastn(&args, 2, &[&slots[..], &[SHADOW]].concat(), None);
-    let read = line(&shadowed).expect("the switch's line");
-    assert!(read.contains(" off=none"), "{read}");
-    assert_eq!(shadowed.status, on.status);
-    assert!(shadowed.report == on.report);
-    // At one thread no slot runs: the rule leaves the switch on.
-    let one = blastn(&args, 1, &slots, None);
-    let read = line(&one).expect("the switch's line");
-    assert!(read.contains(" off=none"), "{read}");
+    let cases: [(&str, u32, Vec<(&str, &str)>, &str); 5] = [
+        ("megablast", 4, vec![RPTSTREAM, STATS, default], "megablast"),
+        (
+            "blastn",
+            4,
+            vec![RPTSTREAM, STATS, default, ("BATCH_SIZE", &batch_off)],
+            "batch",
+        ),
+        (
+            "blastn",
+            4,
+            vec![RPTSTREAM, STATS, default, ("BATCH_SIZE", &batch_on)],
+            "none",
+        ),
+        ("blastn", 2, slots.to_vec(), "slots"),
+        ("blastn", 1, slots.to_vec(), "none"),
+    ];
+    for (task, threads, switches, why) in cases {
+        let what = format!("{task} {threads} {switches:?}");
+        let ruled = blastn(&args(task), threads, &switches, None);
+        let read = line(&ruled);
+        let off_word = format!("off={why}");
+        assert!(
+            read.split_whitespace().any(|word| word == off_word),
+            "{what}: {read}"
+        );
+        if why != "none" {
+            assert!(read.contains(" read=0 "), "{what}: {read}");
+        }
+        let mut zero = switches.clone();
+        zero.push(("LOSAT_X_QSTREAM", "0"));
+        let off = blastn(&args(task), threads, &zero, None);
+        assert_eq!(
+            (ruled.status, &ruled.report),
+            (off.status, &off.report),
+            "{what}"
+        );
+        let mut shadow = switches.clone();
+        shadow.push(SHADOW);
+        let shadowed = blastn(&args(task), threads, &shadow, None);
+        let read = line(&shadowed);
+        assert!(read.contains(" off=none"), "{what} shadow: {read}");
+        assert_eq!(shadowed.status, off.status, "{what} shadow");
+        assert!(shadowed.report == off.report, "{what} shadow");
+    }
 }
 
 /// The records of the batches are kept only where a writer reads them after their batch: none
@@ -903,7 +950,7 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
     let subject = fasta("LC738868.fasta");
     let args = [
         "-task",
-        "megablast",
+        "blastn",
         "-query",
         query.to_str().unwrap(),
         "-subject",

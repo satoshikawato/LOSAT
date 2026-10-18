@@ -6125,10 +6125,11 @@ fn search_cli(
     // batch is read.
     let shared_standard_input =
         args.query.as_os_str() == "-" && args.subject_path().as_os_str() == "-";
-    // EXPERIMENT (LOSAT_X_QSTREAM): its rule (`x_query_stream::slots_hold_file`), from the size of
-    // the query file and whether LOSAT_X_QBATCHPAR's slots may run: the switch on, `-subject`,
-    // and a budget (`x_qbatch_par::Profile::of_search`'s default, or LOSAT_X_QBATCHPARMEM).
-    let x_slots_hold_file = match (subjects.as_ref(), x_query_file_bytes(&args.query)) {
+    // EXPERIMENT (LOSAT_X_QSTREAM): what its rule reads (`x_query_stream::Rule`): the task, the
+    // largest query batch, and whether LOSAT_X_QBATCHPAR's slots may run: the switch on,
+    // `-subject`, and a budget (`x_qbatch_par::Profile::of_search`'s default, or
+    // LOSAT_X_QBATCHPARMEM).
+    let x_slots_may_run = match (subjects.as_ref(), x_query_file_bytes(&args.query)) {
         (Some((Subjects::Records(letters), _)), Some(bytes)) => {
             let switches = x_qbatch_par::Switches::from_env();
             let subject_letters = (0..letters.records().len())
@@ -6140,9 +6141,15 @@ fn search_cli(
                     Some(bytes),
                     subject_letters,
                 );
-            x_query_stream::slots_hold_file(bytes, args.num_threads, switches.on && budget)
+            switches.on && budget
         }
         _ => false,
+    };
+    let x_rule = x_query_stream::Rule {
+        megablast: args.task == "megablast",
+        batch_letters: x_query_batch_letters(&args.task),
+        threads: args.num_threads,
+        slots_may_run: x_slots_may_run,
     };
     // EXPERIMENT (LOSAT_X_QSTREAM): whether the query file is read a second time, batch by batch
     // (a second handle on it, at the position its reader starts from), where the reports may be
@@ -6152,7 +6159,7 @@ fn search_cli(
         &query_file,
         shared_standard_input,
         x_rpt_stream::switch_on(),
-        x_slots_hold_file,
+        x_rule,
     );
     let query_config = ReaderConfig::query("BLASTN", false, settings.data_loaders);
     let mut query_source = FastaInputSource::from_argument(&args.query, query_file, query_config);
@@ -7988,6 +7995,22 @@ fn x_query_file_bytes(query: &std::path::Path) -> Option<u64> {
         return None;
     }
     std::fs::metadata(query).ok().map(|metadata| metadata.len())
+}
+
+// No NCBI counterpart (when LOSAT reads the records only): it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_QSTREAM): the letters of the largest query batch of a search of `task`, as
+/// `run_in_pool` reads its batches (`query_batching_from_environment`): `BATCH_SIZE` when it is
+/// set (a `TSeqPos`), else the `CBatchSizeMixer` maximum (`CHUNK_SIZE`, or the task's chunk size,
+/// less 1000: 999,000 letters for blastn, 4,999,000 for megablast and dc-megablast); 0 when the
+/// variables cannot be read (the search stops at them before its first batch).
+fn x_query_batch_letters(task: &str) -> u64 {
+    match query_batching_from_environment(super::super::coordination::task_uses_megablast_chunks(
+        task,
+    )) {
+        Ok(batching) if batching.fixed_batch_size != 0 => u64::from(batching.batch_size),
+        Ok(batching) => batching.split.mixer_max_batch_size().max(0) as u64,
+        Err(_) => 0,
+    }
 }
 
 // No NCBI counterpart (scheduling only): it changes no value NCBI computes.

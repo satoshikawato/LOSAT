@@ -1425,6 +1425,25 @@ Rebuilding less:
   it took from the pipe again itself, on the whole pool, and compares the two results (`searched`, the
   query statistics, and every field of every HSP, each subject's in its list order); the first difference
   stops the run. One line at exit: `[X_SHADOW] TBXPIPE batches= compared= diffs=0`.
+- `LOSAT_X_TBXRPTPAR=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads))
+  the report stage after the last query batch (`write_tblastx_outputs`) runs its per-HSP work on the
+  search's pool (`tblastx/x_rpt_par.rs`, exactness argument in its header): the displayed identities
+  (each HSP's codons translated again), the outfmt 0 rows (translated again, masks lowercased; also the
+  Web adapter's hit records) and the outfmt 6 / 7 rows of a query with more than 1,024 rows, formatted
+  into one buffer per 1,024 rows by the pool's threads, in windows of 4 chunks per thread that the loop's
+  thread writes in order before the next window (warnings, outfmt 7 headers and the last line stay on the
+  loop's thread). Each value is the serial function of one HSP or row; the list and row order are the
+  serial order. With the Web adapter's format observer the rows stay serial. Without it the whole stage
+  ran on one thread while the pool waited: on AP027131+AP027132+AP027133 x AP027133+AP027078+AP027131
+  (code 4) at 16 threads (ws, dev d7e13f99) the stage took 1.31 s of 8.6 s with outfmt 6 (identities 0.99 s,
+  rows 0.17 s, final order 0.15 s) and 3.37 s of 10.6 s with outfmt 0 (outfmt 0 rows 1.80 s, formatting
+  0.41 s), the same at 8 threads.
+- `LOSAT_X_TBXRPTPARSHADOW=1` shadow of `LOSAT_X_TBXRPTPAR` (turns the path on): also runs the serial
+  stage on a copy and compares every HSP's displayed identities, positives, mismatches and identity
+  (bits), every outfmt 0 row (`Debug`) and the bytes of every tabular report (both written into memory,
+  without warnings); a difference prints `[X_SHADOW] TBXRPTPAR ... DIFFERENT` and stops the run. One line
+  after the reports (two or more threads): `[X_SHADOW] TBXRPTPAR hsps= pairwise= bytes= identical`.
 - `LOSAT_X_LINKSLICES=1` (TBLASTX, memory; in the strict set since 2026-10-15) the linking call of
   the in-place HSP list path links its groups as disjoint sub-slices of the one sorted list
   (`tblastx/x_link_slices.rs`, exactness argument in its header; it acts only where

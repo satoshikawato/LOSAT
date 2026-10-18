@@ -222,7 +222,7 @@ test("LOSAT_WASI_GUARD_CACHE is on by default in the user's cache directory, and
     const reference = runThreaded(bytes, [], { LOSAT_WASI_GUARD_CACHE: "0" });
     assert.equal(reference.status, 3, reference.stderr);
     const user = { HOME: home, USERPROFILE: home, XDG_CACHE_HOME: path.join(home, "xdg"), LOCALAPPDATA: path.join(home, "local") };
-    const dir = defaultGuardCacheDir(user);
+    const dir = defaultGuardCacheDir(user, process.platform, home);
     assert.ok(dir.startsWith(home), dir);
     for (const state of ["miss", "hit"]) {
       const result = runThreaded(bytes, [], { ...user, LOSAT_WASI_GUARD_CACHE: undefined, LOSAT_WASI_THREADS_DEBUG: "1" });
@@ -284,7 +284,17 @@ test("the guard cache keeps the entries used last", () => {
     assert.equal(sidecars().length, 8);
     assert.equal(fs.readdirSync(directory).filter((file) => file.endsWith(".wasm")).length, 8);
     assert.equal(guardSharedMemoryCached(modules[0]).cache, "hit");
+    // Bytes without a sidecar and temporary files go once they are an hour old.
+    const old = Date.now() / 1000 - 7200;
+    const leftovers = [`guarded-${"a".repeat(64)}-${"b".repeat(64)}.wasm`, `guarded-${"c".repeat(64)}-${"d".repeat(64)}.json.1.ab.tmp`];
+    for (const [i, name] of leftovers.entries()) {
+      fs.writeFileSync(path.join(directory, name), "x");
+      if (i === 0) fs.utimesSync(path.join(directory, name), old, old);
+    }
     assert.equal(guardSharedMemoryCached(modules[1]).cache, "miss");
+    const left = fs.readdirSync(directory);
+    assert.equal(left.includes(leftovers[0]), false);
+    assert.equal(left.includes(leftovers[1]), true);
   } finally {
     if (saved === undefined) delete process.env.LOSAT_WASI_GUARD_CACHE;
     else process.env.LOSAT_WASI_GUARD_CACHE = saved;

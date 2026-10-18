@@ -147,9 +147,7 @@ function writeAtomic(file, data) {
 
 // The user's cache directory: $XDG_CACHE_HOME (absolute) or ~/.cache, ~/Library/Caches on
 // macOS, %LOCALAPPDATA% on Windows; null without a home directory.
-function defaultGuardCacheDir(env = process.env, platform = process.platform) {
-  let home;
-  try { home = os.homedir(); } catch { home = ""; }
+function defaultGuardCacheDir(env = process.env, platform = process.platform, home = homeDir()) {
   let base = null;
   if (platform === "win32") base = env.LOCALAPPDATA || (home && path.join(home, "AppData", "Local"));
   else if (platform === "darwin") base = home && path.join(home, "Library", "Caches");
@@ -157,14 +155,28 @@ function defaultGuardCacheDir(env = process.env, platform = process.platform) {
   return base ? path.join(base, "losat", "wasi-guard") : null;
 }
 
+function homeDir() {
+  try { return os.homedir(); } catch { return ""; }
+}
+
 const GUARD_ENTRY = /^guarded-[0-9a-f]{64}-[0-9a-f]{64}\.json$/;
-// Removes the entries (sidecar and bytes) beyond the GUARD_CACHE_KEEP used last.
+const GUARD_LEFTOVER = /^guarded-[0-9a-f]{64}-[0-9a-f]{64}\.wasm(?:\..*\.tmp)?$|^guarded-.*\.json\..*\.tmp$/;
+// Older than this, bytes without a sidecar and temporary files are left over from a run that
+// stopped between its writes; a younger one may belong to a run that is writing now.
+const GUARD_LEFTOVER_MS = 3_600_000;
+// Removes the entries (sidecar and bytes) beyond the GUARD_CACHE_KEEP used last, and leftovers.
 function pruneGuardCache(dir) {
   const entries = [];
-  for (const name of fs.readdirSync(dir)) {
-    if (!GUARD_ENTRY.test(name)) continue;
+  const names = fs.readdirSync(dir);
+  const sidecars = new Set(names.filter((name) => GUARD_ENTRY.test(name)));
+  for (const name of names) {
     try {
-      entries.push({ stem: path.join(dir, name.slice(0, -5)), used: fs.statSync(path.join(dir, name)).mtimeMs });
+      if (sidecars.has(name)) {
+        entries.push({ stem: path.join(dir, name.slice(0, -5)), used: fs.statSync(path.join(dir, name)).mtimeMs });
+      } else if (GUARD_LEFTOVER.test(name) && !sidecars.has(name.replace(/\.wasm$/, ".json"))) {
+        const file = path.join(dir, name);
+        if (Date.now() - fs.statSync(file).mtimeMs > GUARD_LEFTOVER_MS) fs.rmSync(file, { force: true });
+      }
     } catch { /* removed by another run meanwhile */ }
   }
   entries.sort((a, b) => b.used - a.used);

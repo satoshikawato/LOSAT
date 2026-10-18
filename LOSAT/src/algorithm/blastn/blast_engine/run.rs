@@ -145,6 +145,10 @@ use crate::utils::dust::MaskedInterval;
 #[path = "x_pair_seed.rs"]
 mod x_pair_seed;
 
+// EXPERIMENT (exp/r4-scan-probes, v4-R R4; evidence only): the R4_PROBE arms of the lookup scan.
+#[path = "x_r4_probe.rs"]
+mod x_r4_probe;
+
 // EXPERIMENT (LOSAT_X_BNSTREAM): the subjects of a subject set searched by the pool threads in
 // OID order with a bounded window of results that the owner hands over in OID order.
 #[path = "x_bnstream.rs"]
@@ -12241,6 +12245,44 @@ fn search_query_batch(
                     } else {
                         let mb_scan_kind =
                             select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
+                        // EXPERIMENT (exp/r4-scan-probes, v4-R R4): the R4_PROBE arms.
+                        let r4 = x_r4_probe::probe();
+                        if r4.on() {
+                            let (r4_ht, r4_np) = two_stage.x_r4_raw();
+                            let r4_pv = r4.pv.then(|| x_r4_probe::CellPv::build(r4_ht));
+                            macro_rules! r4_scan {
+                                ($st2:literal, $pv:literal) => {{
+                                    let mut ring = x_r4_probe::BnRing::<$st2, $pv>::new(
+                                        r4.pf,
+                                        r4_ht,
+                                        r4_np,
+                                        r4_pv.as_ref(),
+                                    );
+                                    let mut emit =
+                                        |a: usize, b: usize, c: u64| on_word(a, b, c, None);
+                                    scan_subject_kmers_with_ranges(
+                                        search_seq_packed,
+                                        s_len,
+                                        word_length,
+                                        lut_word_length,
+                                        scan_step,
+                                        &subject_seq_ranges,
+                                        subject_masked,
+                                        mb_scan_kind,
+                                        |kmer_start, s_range, current_lut_kmer| {
+                                            ring.push((kmer_start, s_range, current_lut_kmer), &mut emit)
+                                        },
+                                    );
+                                    ring.flush(&mut emit);
+                                }};
+                            }
+                            match (r4.st2, r4.pv) {
+                                (false, false) => r4_scan!(false, false),
+                                (true, false) => r4_scan!(true, false),
+                                (false, true) => r4_scan!(false, true),
+                                (true, true) => r4_scan!(true, true),
+                            }
+                        } else {
                         scan_subject_kmers_with_ranges(
                             search_seq_packed,
                             s_len,
@@ -12254,6 +12296,7 @@ fn search_query_batch(
                                 on_word(kmer_start, s_range, current_lut_kmer, None)
                             },
                         );
+                        }
                     }
 
                     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207

@@ -2972,13 +2972,17 @@ Scheduling (each value computed by one thread with the original function; order 
   switch (`=0` and the binary before it run the same instruction counts). For one query the rule holds
   from about 0.8 Mb; a batch of more than 6 contexts merges contexts into a group (`X_MAX_GROUPS`), so
   smaller queries can reach it there (not measured).
-  Measured (workstation, 8 booked cores of a node without other timed runs, alternating rounds,
-  medians of the per-round ratios against `=0`, every report identical): Sakai x MG1655[0:1 Mb] (code
-  11, frames of 1.83 M letters) 8 threads x0.918 (23.25 -> 21.33 s); the first 0.4 / 0.8 / 1.6 / 3.2 Mb
-  of Sakai against the same subject (frames of 133 k / 267 k / 533 k / 1.07 M letters) x1.005 / 0.985 /
-  0.977 / 0.956; with the path on every unit MelaMJNV x PemoMJNVA (96 k letters) 1 thread x1.015,
-  AP027131 x AP027133 (67 k, code 4) 1 thread x1.004 and 8 threads x0.999: the built-in 256 lies
-  between the spans that lost and the first that gained. An 8 x i32 AVX2 lane kernel for the batch (the
+  Measured (workstation, 8 booked cores of a node without other timed runs, alternating rounds after a
+  warm-up, medians of the per-round ratios, every report identical, max RSS equal), against the binary
+  before the switch: Sakai x MG1655 (code 11, frames of 1.83 M letters) 8 threads x0.940 (112.9 ->
+  105.9 s, 4 rounds), Sakai x MG1655[0:1 Mb] x0.926 (21.48 -> 19.89 s; x0.935 against `=0`), Sakai's
+  first 0.8 Mb against it (frames of 267 k letters) x0.987; below the rule AP027131 x AP027133 and
+  MelaMJNV x PemoMJNVA run the same instructions as before (76.99 G and 9.906 G at one thread). How
+  the built-in was chosen (the path on every unit against `=0`, 8 threads): Sakai's first 0.4 / 0.8 /
+  1.6 / 3.2 Mb and all of it against MG1655[0:1 Mb] (frames of 133 k / 267 k / 533 k / 1.07 M / 1.83 M
+  letters) x1.005 / 0.985 / 0.977 / 0.956 / 0.918; MelaMJNV x PemoMJNVA (96 k letters) 1 thread
+  x1.015, AP027131 x AP027133 (67 k, code 4) 1 thread x1.004 and 8 threads x0.999: 256 Ki lies between
+  the span that lost and the first that gained. An 8 x i32 AVX2 lane kernel for the batch (the
   walks of 8 extensions side by side) was built and measured, and lost to this scalar resolution on
   every case (branch `exp/a5-lanes-kernel`; v4-A DESIGN_A5 §4.2).
 - `LOSAT_X_TBXEXTBATCHSHADOW=1` shadow of `LOSAT_X_TBXEXTBATCH` (on every target, whatever the size rule

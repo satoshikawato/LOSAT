@@ -10,6 +10,13 @@ v0.1.0 gate lives in:
 - [BLASTP v0.1.0 certification](docs/release/blastp_v0.1.0_certification.md)
 - [TBLASTX v0.1.0 certification](docs/release/tblastx_v0.1.0_certification.md)
 
+## CHANGELOG entries
+
+Pull requests leave their entries in [`changelog.d/`](changelog.d/README.md), one file each, not in
+`CHANGELOG.md`. Before a release names its version in `CHANGELOG.md`, run
+`python3 scripts/changelog_fragments.py collect` (it moves the entries under `## [Unreleased]`,
+newest first, and deletes the files) and commit both.
+
 ## v0.2.0 TLOSAN preparation
 
 The [v0.2.0 readiness record](docs/release/v0.2.0.md) defines the declared local TBLASTN scope, candidate checks, current distribution blockers, and reproducible commands. The v0.1.0 workflow and exact-SHA contract below are historical and must not be presented as a v0.2.0 artifact handoff.

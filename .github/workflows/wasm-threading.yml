@@ -86,6 +86,7 @@ jobs:
           33b64bc67d3149cee2459b2f7766b363323df632cf12c099546de00aea9698b5  ncbi-blast-2.17.0+/bin/blastn
           5ce267c04e4988c265357bfbedc64e809545b6fcfae7ff6775266fabbee8ba0e  ncbi-blast-2.17.0+/bin/blastp
           583e5d60bbd444ac455d20e0956c5aa0aeef675da8daee8204d8f9376ddb8804  ncbi-blast-2.17.0+/bin/tblastx
+          fea14b77d4452a524a003196824f414812126bd3fb64d950feec8bacccf4976c  ncbi-blast-2.17.0+/bin/tblastn
           0dac09bed17043dfdf93ad71d50e6e177f273d5311897b9e653e45142bb3ef80  ncbi-blast-2.17.0+/bin/blastx
           CHECKSUMS
           sha256sum --check executables.sha256

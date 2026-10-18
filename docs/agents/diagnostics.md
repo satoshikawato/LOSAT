@@ -1376,10 +1376,20 @@ Rebuilding less:
   the seed-stage end of the batch before (the last subject's dispatch point 5, where
   `LOSAT_X_SEEDRELEASE` has freed that batch's tables), on the same pool. Admission: the next batch starts
   early only while the batches past their seed-stage end hold at most 4,194,304 HSPs
-  (`LOSAT_X_TBXPIPEHSPS=<n>` changes it, for tests); otherwise when the loop reaches it, as before. A
+  (`LOSAT_X_TBXPIPEHSPS=<n>` changes it, for tests); otherwise when the loop reaches it, as before. While a
+  later batch may run (the batch is not the last one and its held HSPs are within the limit), a batch links
+  each subject's HSPs on the subject's own thread instead of on the pool: a thread that waits in a pool
+  call runs any job of the pool (rayon), so a linking call on the pool could wait inside another batch's
+  whole subject chain and hold its own batch's end back (16 threads below: 9.54 s instead of 8.59 s). The
+  last batch, and a batch over the limit, links on the pool as before. A
   batch's `LOSAT_TIMING` block is printed when the loop takes the batch. `LOSAT_X_STATS=1` prints
   `[X_STATS] TBXPIPE planned= taken= early= loop= waited= key_mismatch= max_held_hsps=`.
-  MEASUREMENTS-TBD
+  On the workstation (16 CPUs of one socket, medians of alternating runs, reports equal), the three
+  batches above took 8.59 s with it and 10.51 s without at 16 threads (peak memory 558 / 559 MiB), 14.00 /
+  15.60 s at 8 (456 / 434 MiB) and 24.69 / 26.02 s at 4 (365 / 327 MiB); two batches (AP027131+AP027132 x
+  AP027133+AP027078) 3.84 / 4.17 s at 16 (294 / 330 MiB). One-batch inputs (MelaMJNV x 9 MJNV genomes at
+  16 threads, a one-genome pair at 8) are equal in time and memory. The memory cost is the next batch's
+  tables and HSPs while the batch before links (up to +38 MiB at 4 threads here).
 - `LOSAT_X_TBXPIPESHADOW=1` shadow of `LOSAT_X_TBXPIPE` (needs the path on): the loop searches every batch
   it took from the pipe again itself, on the whole pool, and compares the two results (`searched`, the
   query statistics, and every field of every HSP, each subject's in its list order); the first difference

@@ -58,6 +58,9 @@ def fixtures(directory):
     codons = dict(zip("ACDEFGHIKLMNPQRSTVWY", ["GCT","TGT","GAT","GAA","TTT","GGT","CAT","ATT","AAA","CTG","ATG","AAT","CCT","CAA","CGT","TCT","ACT","GTT","TGG","TAT"]))
     records["blastx-query"] = ["".join(codons[x] for x in aa)]
     (directory / "blastx-query.fasta").write_text(">seq0\n" + records["blastx-query"][0] + "\n")
+    # TBLASTN subjects: the coding sequence, a nucleotide prefix and a short piece of the coding sequence.
+    records["tblastn-subjects"] = [records["blastx-query"][0], seq[:900], records["blastx-query"][0][:120]]
+    (directory / "tblastn-subjects.fasta").write_text("".join(f">seq{i}\n{value}\n" for i, value in enumerate(records["tblastn-subjects"])))
     return {name: directory / f"{name}.fasta" for name in records}
 
 
@@ -125,6 +128,10 @@ def main():
              ("blastp", "blastp", "aa3", "aa3", 10)]
     # BLASTX joins the parity and thread contract (its pool line names the program BLASTX).
     cases += [("blastx", "blastx", "blastx-query", "aa3", 10)]
+    # TBLASTN joins it too; its -subject records are packed while they are read (LOSAT_X_TBNSTORE),
+    # which must start no thread beyond the pool.
+    cases += [("tblastn", "tblastn", "aa1", "blastx-query", 10),
+              ("tblastn-aa3-subjects", "tblastn", "aa3", "tblastn-subjects", 10)]
     cases += [(f"tblastx-{q}-{s}-e{e}", "tblastx", q, s, e)
               for q, s in [("nuc1", "nuc1"), ("nuc1", "nuc3"), ("nuc3", "nuc1"), ("nuc3", "nuc3"),
                            ("nuc1", "unequal"), ("nuc1", "remainder"), ("short-context", "short-subject")]
@@ -188,6 +195,7 @@ def main():
         ("blastn", "nuc3", "nuc3", ["0", "7"], "megablast"),
         ("blastn", "nuc3", "nuc3", ["0", "7"], "blastn"),
         ("tblastx", "nuc3", "nuc3", ["0", "7"], None),
+        ("tblastn", "aa1", "tblastn-subjects", ["0", "7"], None),
     ]:
         for index, fmt in enumerate(formats):
             common = ["-query", inputs[query], "-subject", inputs[subject], "-outfmt", fmt, "-out", "{out}"]

@@ -120,6 +120,16 @@
 //! of its exact length and moves the first chunk's list into the empty frame list. The section
 //! above `XUnitHsp` gives the exactness argument; `LOSAT_X_PAIRPARSHADOW=1` with the switch
 //! compares the result with the reference loop's.
+//!
+//! `LOSAT_X_SEEDUNMAP` (in the strict set: on unless `LOSAT_X_SEEDUNMAP` is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set; it acts on Linux with glibc only, where transparent huge
+//! pages do not round mapped blocks up (`x_thp_rounds_up`), and only on the search pool, at two or
+//! more threads): where a unit's query-group span and subject chunk are both at least
+//! `X_MAPPED_MIN_SIDE` letters (`x_unit_mapped`), the unit diagonal table and the record vector of
+//! a thread's split and the unit's copy of its records get a capacity that glibc always maps, so
+//! they are returned to the system when dropped instead of staying in the worker threads' arenas
+//! through the linking call. Only capacities change; the section above `X_MAPPED_BYTES` gives the
+//! reason, the three rules (sides, huge pages, one thread) and why no value changes.
 
 use super::*;
 use crate::algorithm::tblastx::blast_gapalign::get_ungapped_hsp_list_into;
@@ -165,6 +175,12 @@ static NS_LUT_DIRECT: AtomicU64 = AtomicU64::new(0);
 static SC_SUBJECTS: AtomicU64 = AtomicU64::new(0);
 static SC_UNITS: AtomicU64 = AtomicU64::new(0);
 static SC_RECORDS: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart: counters of LOSAT_X_SEEDUNMAP (blocks given the mapped capacity: unit
+// diagonal tables, record vectors of a split, unit copies of the records); they do not change any
+// value NCBI computes.
+static SU_DIAG: AtomicU64 = AtomicU64::new(0);
+static SU_RECORDS: AtomicU64 = AtomicU64::new(0);
+static SU_COPIES: AtomicU64 = AtomicU64::new(0);
 
 /// Largest number of context groups (units per subject chunk).
 const X_MAX_GROUPS: usize = 6;
@@ -253,6 +269,36 @@ fn seed_compact() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SEEDCOMPACT"))
 }
 
+// No NCBI counterpart: chooses the capacity LOSAT gives three blocks of the unit path so that glibc
+// maps them (section above `X_MAPPED_BYTES`); it does not change any value NCBI computes. Read once
+// per process, as the other modes of this file.
+/// A strict-set switch (on unless `LOSAT_X_SEEDUNMAP` is `0`, or `LOSAT_X_DEFAULT=0` and it is
+/// not set; `utils/xswitch.rs`). It joined the set on 2026-10-17 in the change that added it, on by
+/// default under the Owner's rule of 2026-10-17 (a speed-up or memory reduction lands on by default).
+fn seed_unmap() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_SEEDUNMAP"))
+}
+
+// No NCBI counterpart: whether LOSAT_X_SEEDUNMAP acts in this process (section above
+// `X_MAPPED_BYTES`): the switch is on, the target is Linux with glibc, and transparent huge pages
+// do not round mapped blocks up (`x_thp_rounds_up`; the two files are read only when the first two
+// hold). Read once per process.
+/// LOSAT_X_SEEDUNMAP as it acts here: the value the scratches of the search pool get.
+fn seed_unmap_active() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        seed_unmap()
+            && cfg!(all(target_os = "linux", target_env = "gnu"))
+            && !x_thp_rounds_up(
+                std::fs::read_to_string("/sys/kernel/mm/transparent_hugepage/enabled")
+                    .ok()
+                    .as_deref(),
+                std::fs::read_to_string("/proc/self/status").ok().as_deref(),
+            )
+    })
+}
+
 // No NCBI counterpart: LOSAT_TIMING read once; it does not change any value NCBI computes.
 fn timing() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
@@ -283,6 +329,18 @@ pub fn print_summary() {
             SC_UNITS.load(AtomicOrdering::Relaxed),
             records,
             records * saved_per_record
+        );
+    }
+    // LOSAT_X_SEEDUNMAP: printed whenever the switch is on; `active` is 1 where it acts
+    // (`seed_unmap_active`). Zero counters at one thread, where no unit path runs, where the rule
+    // never holds, and where it does not act.
+    if seed_unmap() && std::env::var_os("LOSAT_X_STATS").is_some() {
+        eprintln!(
+            "[X_STATS] SEEDUNMAP active={} diag={} records={} copies={}",
+            u8::from(seed_unmap_active()),
+            SU_DIAG.load(AtomicOrdering::Relaxed),
+            SU_RECORDS.load(AtomicOrdering::Relaxed),
+            SU_COPIES.load(AtomicOrdering::Relaxed)
         );
     }
     let m = mode();
@@ -896,11 +954,174 @@ struct XScratch {
     /// LOSAT_X_SEEDCOMPACT: the records of the unit that runs (`run_unit_compact`), cleared at
     /// the start of every unit and kept across units; empty while the switch is off.
     records: Vec<XUnitHsp>,
+    /// LOSAT_X_SEEDUNMAP as it acts in this process (`seed_unmap_active`) when the scratch was made
+    /// (`x_unit_mapped`); always false for the serial path of `run_units`.
+    unmap: bool,
     /// LOSAT_TIMING: the clocks of the unit that runs (x_unit_probe.rs).
     time_probe: XTimeProbe,
     /// LOSAT_X_STATS: the diagonal statistics of the unit that runs (x_unit_probe.rs); empty
     /// without the variable.
     stats_probe: XStatsProbe,
+}
+
+impl XScratch {
+    /// An empty scratch; `unmap` is LOSAT_X_SEEDUNMAP as it acts here on the search pool
+    /// (`seed_unmap_active`), false on the serial path, or a test's choice.
+    fn new(unmap: bool) -> Self {
+        Self {
+            unmap,
+            ..Self::default()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// EXPERIMENT (LOSAT_X_SEEDUNMAP): the unit path's large per-split blocks mapped by glibc.
+//
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
+// ```c
+//         diag_table->hit_level_array = (DiagStruct *)
+//             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:336-341
+// ```c
+//     if (num >= num_avail) {
+//         if (init_hitlist->do_not_reallocate)
+//             return FALSE;
+//         num_avail *= 2;
+//         match_array = (BlastInitHSP *)
+//             realloc(match_array, num_avail * sizeof(BlastInitHSP));
+// ```
+// No NCBI counterpart for the capacities: NCBI allocates one diagonal table and one init hit list
+// per search thread (`BlastExtendWordNew`, `BLAST_InitHitListNew`, blast_engine.c:1043) and keeps
+// them for the thread's subjects. The unit path holds, per rayon split of a subject's units
+// (`run_units`, `map_init`), a unit diagonal table (`XScratch::diag`) and a record vector
+// (`XScratch::records`, LOSAT_X_SEEDCOMPACT), and per unit a copy of its records that lives until
+// the subject's merge. glibc maps a block of at least its mmap threshold and unmaps it when it is
+// freed, but it raises the threshold to the size of each mapped block that is freed (up to
+// 32 MiB; in a TBLASTX search SEG's buffer and the pair lookup's group tables are such blocks) and
+// its trim threshold to twice that. These blocks then come from the worker threads' arenas, and
+// when they are freed the arenas keep their freed tops through the linking call, where the search
+// peaks (AP027131 x AP027133, genetic code 4, 8 threads: 10-14 % of the max RSS). With the switch,
+// for a unit where `x_unit_mapped` holds, the three blocks get a capacity above glibc's largest
+// dynamic threshold (`X_MAPPED_BYTES`), so that glibc maps them and unmaps them when they are
+// dropped (at the end of the split, and in the merge); the pages beyond their length are never
+// touched and are not resident. Other allocators return large blocks on their own.
+//
+// Where mapping costs more than it returns, three rules:
+// 1. Long on both sides. A mapped table is new zeroed pages at every split, about one page fault
+//    per 1,024 cells of its width (query-group span + chunk), where the arena handed the same block
+//    back; the unit's scan work grows with span x chunk, so the cost per work is about
+//    1 / span + 1 / chunk and small only when both are long. Measured at 8 threads with a rule that
+//    mapped every unit whose chunk was at least a quarter of its table: 200 queries of about 3 kb
+//    from AP027131 against AP027133 (genetic code 4; 50 query batches, group spans of about 4,000
+//    letters, chunks of 202,000) mapped 1,748 tables, sys 0.05-0.2 -> 0.4-0.7 s and x1.05-1.07 of
+//    the wall time; MelaMJNV against AP027133 in six pieces (span about 96,000, chunks about
+//    33,000) mapped 159 tables, sys 0.034 -> 0.070 s; AP027131 against 200 contigs of about 3 kb
+//    x1.07 with every table mapped. So a unit is mapped only when its query-group span and its
+//    chunk are both at least `X_MAPPED_MIN_SIDE` letters (the table is then at least 512 KiB, above
+//    `X_MAPPED_MIN`); AP027131 x AP027133 (span about 220,000, chunk 202,000), NZ_CP006932 against
+//    itself (219,000 / 219,000) and MelaMJNV x PemoMJNVA (96,000 / 98,000) are mapped, the three
+//    searches above are not. A copy is mapped only when it has at least `X_MAPPED_MIN` bytes.
+// 2. Transparent huge pages that round mapped blocks up. Where the kernel gives anonymous mappings
+//    huge pages by default (`/sys/kernel/mm/transparent_hugepage/enabled` "[always]": WSL2's
+//    kernel, the RHEL family's default), the 32 MiB regions get 2 MiB pages on first touch, so a
+//    mapped block of 0.1-0.5 MiB is resident as 2 MiB (8 threads, 5 pairs: the 200 queries above
+//    53-56 -> 60-67 MiB of max RSS, AP027131 x AP027133 137-140 -> 124-145, higher in 4 of 5
+//    pairs; the same binary with THP disabled for the process by prctl PR_SET_THP_DISABLE: 52 ->
+//    44, 135 -> 122 and NZ_CP006932 185 -> 168 MiB, lower in 5 of 5). So the switch acts only where
+//    that file selects "[madvise]" or "[never]", or `/proc/self/status` says `THP_enabled: 0`
+//    (`x_thp_rounds_up`, read once per process with `std::fs`, `seed_unmap_active`); with the file
+//    unreadable it does nothing.
+// 3. One thread. `run_units` then takes its serial path on the calling thread, whose blocks come
+//    from glibc's main arena, which glibc trims: nothing is retained there (AP027131 x AP027133 at
+//    one thread: 78 MiB of max RSS with and without MALLOC_ARENA_MAX or a fixed threshold), and
+//    mapping only costs (77 -> 78 MiB and 2,800 more page faults with the blocks mapped). So only
+//    the scratches of the search pool (`pool.enabled()`, two or more threads) carry the switch; the
+//    serial scratch keeps today's capacities.
+//
+// Why no value changes: (1) `scan_unit` still clears the table and resizes it to the unit's width,
+// writing every cell it reads, and reads no capacity; (2) the record vector is still cleared at the
+// start of the unit and filled by the same pushes; (3) the copy is the records in their order
+// (`extend_from_slice` instead of `to_vec`), and the merge (`merge_subject_compact`,
+// `x_expand_unit`) reads the lengths and the elements of the copies, never their capacity.
+// ---------------------------------------------------------------------------------------------
+
+/// No NCBI counterpart: glibc's largest dynamic mmap threshold (DEFAULT_MMAP_THRESHOLD_MAX on
+/// 64-bit) and one page more; a block of at least this capacity is mapped.
+const X_MAPPED_BYTES: usize = (32 << 20) + 4096;
+
+/// No NCBI counterpart: glibc's default mmap threshold; a smaller copy is left to the arenas.
+const X_MAPPED_MIN: usize = 128 << 10;
+
+/// No NCBI counterpart: a unit's blocks are mapped only when its query-group span and its subject
+/// chunk both have at least this many letters (section above, rule 1).
+const X_MAPPED_MIN_SIDE: usize = 1 << 16;
+
+/// No NCBI counterpart: the capacity of a mapped block of `len` elements of `T`.
+fn x_mapped_len<T>(len: usize) -> usize {
+    len.max(X_MAPPED_BYTES / std::mem::size_of::<T>() + 1)
+}
+
+/// No NCBI counterpart: the rule of LOSAT_X_SEEDUNMAP for a unit whose query group spans `span`
+/// letters (`x_unit_span`) and whose subject chunk has `chunk_len` letters: the switch acts (`on`,
+/// `XScratch::unmap`), the target is Linux with glibc, and both sides have at least
+/// `X_MAPPED_MIN_SIDE` letters (section above, rule 1; the table is then at least 512 KiB, so the
+/// table's own minimum of `X_MAPPED_MIN` is implied and not tested).
+fn x_unit_mapped(on: bool, span: usize, chunk_len: usize) -> bool {
+    on && cfg!(all(target_os = "linux", target_env = "gnu"))
+        && span >= X_MAPPED_MIN_SIDE
+        && chunk_len >= X_MAPPED_MIN_SIDE
+}
+
+/// No NCBI counterpart (LOSAT_X_SEEDUNMAP, section above `X_MAPPED_BYTES`): a unit's copy of its
+/// records, exact (`to_vec`), or, for a unit where `x_unit_mapped` holds (`mapped`) whose records
+/// have at least `X_MAPPED_MIN` bytes, the records in their order in a vector of the mapped capacity.
+fn x_unit_copy(records: &[XUnitHsp], mapped: bool) -> Vec<XUnitHsp> {
+    if mapped && std::mem::size_of_val(records) >= X_MAPPED_MIN {
+        let mut copy = Vec::with_capacity(x_mapped_len::<XUnitHsp>(records.len()));
+        copy.extend_from_slice(records);
+        SU_COPIES.fetch_add(1, AtomicOrdering::Relaxed);
+        copy
+    } else {
+        records.to_vec()
+    }
+}
+
+/// No NCBI counterpart: whether transparent huge pages round the mapped blocks of LOSAT_X_SEEDUNMAP
+/// up (section above, rule 2), from the text of `/sys/kernel/mm/transparent_hugepage/enabled`
+/// (`enabled`, the selected value in brackets) and of `/proc/self/status` (`status`). False only
+/// when the process has huge pages disabled (`THP_enabled: 0`, prctl PR_SET_THP_DISABLE) or the
+/// kernel gives them only on request ("[madvise]") or never ("[never]"); true for "[always]", an
+/// unreadable file or text it does not recognise.
+fn x_thp_rounds_up(enabled: Option<&str>, status: Option<&str>) -> bool {
+    let disabled_here = status.is_some_and(|text| {
+        text.lines().any(|line| {
+            line.strip_prefix("THP_enabled:")
+                .is_some_and(|value| value.trim() == "0")
+        })
+    });
+    let selected = enabled.and_then(|text| {
+        let start = text.find('[')? + 1;
+        let end = start + text[start..].find(']')?;
+        Some(&text[start..end])
+    });
+    !(disabled_here || matches!(selected, Some("madvise") | Some("never")))
+}
+
+// No NCBI counterpart: the unit cells of `scan_unit` (the cell of hit (q, s) is q - s - lo,
+// lo = q_min - (s_len - 1)), so they run from 0 to (q_max - q_min) + (s_len - 1). One pair of
+// helpers for the table of `scan_unit` and for LOSAT_X_SEEDUNMAP's rule (in `scan_unit` and
+// `run_unit_compact`), so that they agree.
+/// The query-group span of a unit of `group`: its lookup entries' highest query offset minus the
+/// lowest.
+fn x_unit_span(group: &XGroup) -> usize {
+    (group.q_max - group.q_min) as usize
+}
+
+/// The number of cells of the unit diagonal table of a unit of `group` on `chunk`.
+fn x_unit_width(group: &XGroup, chunk: &SubjectChunk) -> usize {
+    x_unit_span(group) + chunk.length
 }
 
 /// The read-only values of the per-hit body (`x_hit`).
@@ -989,7 +1210,8 @@ enum XHit {
 // 2. The records of a unit go into its thread's scratch vector (`XScratch::records`, cleared at the
 //    start of every unit and kept across units, as NCBI keeps one init hit list per thread and
 //    resets it per chunk, blast_engine.c:491,1043), and the unit's output is an exact copy of the
-//    records (`to_vec`, `run_unit_compact`).
+//    records (`to_vec`, `run_unit_compact`; with LOSAT_X_SEEDUNMAP a large copy has the mapped
+//    capacity, section above `X_MAPPED_BYTES`, and the same elements).
 // 3. `merge_subject_compact` fills each chunk's init list by expanding the records of the chunk's
 //    units (`x_expand_unit`), converts it with `get_ungapped_hsp_list_into` into a Vec reserved at
 //    the list's length, and a chunk list that meets an empty frame list becomes the frame list.
@@ -1534,7 +1756,10 @@ impl XPairPar {
     // Scheduling only: the units run on the search pool (an indexed map, results in unit order),
     // or in order on the calling thread when the search has one thread. `unit_fn` is
     // `Self::run_unit` (today's lists) or `Self::run_unit_compact` (LOSAT_X_SEEDCOMPACT), a
-    // function item, so this function is compiled once for each.
+    // function item, so this function is compiled once for each. The scratches of the pool carry
+    // LOSAT_X_SEEDUNMAP as it acts in this process (`seed_unmap_active`, `XScratch::unmap`); the
+    // serial scratch never maps (section above `X_MAPPED_BYTES`, rule 3: at one thread nothing is
+    // retained, mapping only costs).
     fn run_units<T: Send>(
         &self,
         units: &[XUnit],
@@ -1547,17 +1772,19 @@ impl XPairPar {
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         if pool.enabled() {
+            let unmap = seed_unmap_active();
             return pool.install(|| {
                 units
                     .par_iter()
-                    .map_init(XScratch::default, |scratch, unit| {
-                        unit_fn(self, unit, inp, scratch)
-                    })
+                    .map_init(
+                        || XScratch::new(unmap),
+                        |scratch, unit| unit_fn(self, unit, inp, scratch),
+                    )
                     .collect()
             });
         }
         let _ = pool;
-        let mut scratch = XScratch::default();
+        let mut scratch = XScratch::new(false);
         units
             .iter()
             .map(|unit| unit_fn(self, unit, inp, &mut scratch))
@@ -1625,12 +1852,38 @@ impl XPairPar {
     //         sfree(init_hitlist->init_hsp_array[index].ungapped_data);
     //     init_hitlist->total = 0;
     // ```
+    // EXPERIMENT (LOSAT_X_SEEDUNMAP, section above `X_MAPPED_BYTES`): whether the blocks of `unit`
+    // are mapped (`x_unit_mapped` on its query-group span and chunk), and for such a unit the
+    // cleared record vector replaced by an empty one of the mapped capacity unless it has that much
+    // room. Shared by `run_unit_compact` and `run_unit_compact_probed`. No NCBI counterpart.
+    /// `x_unit_mapped` for `unit`; where it holds, `records` (empty) gets the mapped capacity.
+    fn x_unit_records(
+        &self,
+        unit: &XUnit,
+        scratch: &XScratch,
+        records: &mut Vec<XUnitHsp>,
+    ) -> bool {
+        let span = x_unit_span(&self.groups[unit.g]);
+        let mapped = x_unit_mapped(scratch.unmap, span, unit.chunk.length);
+        if mapped && records.capacity() * std::mem::size_of::<XUnitHsp>() < X_MAPPED_BYTES {
+            *records = Vec::with_capacity(x_mapped_len::<XUnitHsp>(0));
+            SU_RECORDS.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+        mapped
+    }
+
     // EXPERIMENT (LOSAT_X_SEEDCOMPACT): the records of one unit (section above `XUnitHsp`, item
     // 2). NCBI keeps one init hit list per thread and empties it for every chunk, keeping its
     // array; the unit fills its thread's scratch vector, emptied here and kept for the thread's
     // next unit, and returns an exact copy of it (`to_vec`: the records in their order, with
     // no spare room), since the outputs of a subject's units live until its merge.
-    /// The saved init HSPs of one unit as compact records, in its scan order, at their exact length.
+    // EXPERIMENT (LOSAT_X_SEEDUNMAP, section above `X_MAPPED_BYTES`): for a unit where
+    // `x_unit_mapped` holds, the scratch vector is replaced, before the scan, by an empty one of the
+    // mapped capacity unless it has that much room, and a copy of at least `X_MAPPED_MIN` bytes is
+    // the records in their order in a vector of the mapped capacity (its pages beyond the records
+    // are never touched).
+    /// The saved init HSPs of one unit as compact records, in its scan order, at their exact length
+    /// (LOSAT_X_SEEDUNMAP: a large copy has the mapped capacity instead).
     fn run_unit_compact(
         &self,
         unit: &XUnit,
@@ -1639,14 +1892,16 @@ impl XPairPar {
     ) -> Vec<XUnitHsp> {
         let mut records = std::mem::take(&mut scratch.records);
         records.clear();
+        let mapped = self.x_unit_records(unit, scratch, &mut records);
         self.scan_unit(unit, inp, scratch, &mut records, &mut XNoProbe);
-        let exact = records.to_vec();
+        let exact = x_unit_copy(&records, mapped);
         scratch.records = records;
         exact
     }
 
     // Diagnostic (LOSAT_TIMING, LOSAT_X_STATS): `run_unit_compact` with a probe
-    // (x_unit_probe.rs), in its own function as `run_unit_probed`. No NCBI counterpart.
+    // (x_unit_probe.rs), in its own function as `run_unit_probed`; LOSAT_X_SEEDUNMAP acts here as
+    // in `run_unit_compact` (`x_unit_records`, `x_unit_copy`). No NCBI counterpart.
     /// `run_unit_compact`, recording into the thread's probe `P`.
     #[inline(never)]
     fn run_unit_compact_probed<P: XProbeSlot>(
@@ -1658,8 +1913,9 @@ impl XPairPar {
         let mut probe = std::mem::take(P::slot(scratch));
         let mut records = std::mem::take(&mut scratch.records);
         records.clear();
+        let mapped = self.x_unit_records(unit, scratch, &mut records);
         self.scan_unit(unit, inp, scratch, &mut records, &mut probe);
-        let exact = records.to_vec();
+        let exact = x_unit_copy(&records, mapped);
         scratch.records = records;
         *P::slot(scratch) = probe;
         exact
@@ -1704,9 +1960,18 @@ impl XPairPar {
         }
         // Unit cell of hit (q, s): q - s - lo, lo = q_min - (s_len - 1) (u32 wrapping), so the
         // cells run from 0 to (q_max - q_min) + (s_len - 1).
-        let width = (group.q_max - group.q_min) as usize + chunk.length;
+        let width = x_unit_width(group, &chunk);
         let lo = group.q_min.wrapping_sub(chunk.length as u32 - 1);
         probe.unit_begin(width);
+        // EXPERIMENT (LOSAT_X_SEEDUNMAP, section above `X_MAPPED_BYTES`): a table too small for a
+        // unit where `x_unit_mapped` holds is replaced by an empty one of the mapped capacity; the
+        // clear and resize below write every cell of the unit's width as before.
+        if scratch.diag.capacity() < width
+            && x_unit_mapped(scratch.unmap, x_unit_span(group), chunk.length)
+        {
+            scratch.diag = Vec::with_capacity(x_mapped_len::<DiagStruct>(width));
+            SU_DIAG.fetch_add(1, AtomicOrdering::Relaxed);
+        }
         scratch.diag.clear();
         scratch.diag.resize(width, DiagStruct::default());
 
@@ -2379,7 +2644,7 @@ mod tests {
     /// The unit path's sorted init-HSP list of every frame (one chunk per frame here).
     fn unit_lists(pp: &XPairPar, inp: &XSubject<'_>) -> Vec<Vec<InitHSP>> {
         let mut out = Vec::new();
-        let mut scratch = XScratch::default();
+        let mut scratch = XScratch::new(false);
         for (f, s_frame) in inp.s_frames_preliminary.iter().enumerate() {
             let chunk = SubjectChunk {
                 offset: 0,
@@ -3386,7 +3651,13 @@ mod tests {
         };
         for (unit, (list, records)) in units.iter().zip(full.iter().zip(&compact)) {
             let at = format!("unit f {} k {} g {}", unit.f, unit.k, unit.g);
-            assert_eq!(records.capacity(), records.len(), "{at}: spare room");
+            // No spare room, except in a copy that LOSAT_X_SEEDUNMAP gave the mapped capacity.
+            let mapped_copy = records.len() * std::mem::size_of::<XUnitHsp>() >= X_MAPPED_MIN
+                && records.capacity() == x_mapped_len::<XUnitHsp>(records.len());
+            assert!(
+                records.capacity() == records.len() || mapped_copy,
+                "{at}: spare room"
+            );
             let mut expanded = Vec::new();
             x_expand_unit(records, unit.f, &inp, &mut expanded);
             assert_eq!(&expanded, list, "{at}");
@@ -3647,6 +3918,242 @@ mod tests {
                 }
                 (on, _) => panic!("run_subject_units chose the other form (switch {on})"),
             }
+        }
+    }
+
+    // No NCBI counterpart: LOSAT_X_SEEDUNMAP's rule at its boundaries: a query-group span or a
+    // chunk of 65,535 and 65,536 letters, a long side with a short one (the 200 short queries
+    // against AP027133, and the reverse), no overflow at the largest sizes; never with the switch
+    // off, and only on Linux with glibc. Two minimum sides make a table of at least 512 KiB, above
+    // `X_MAPPED_MIN`. The mapped capacities pass glibc's largest dynamic mmap threshold for both
+    // element types.
+    #[test]
+    fn seed_unmap_rule_at_its_boundaries() {
+        let glibc = cfg!(all(target_os = "linux", target_env = "gnu"));
+        let side = X_MAPPED_MIN_SIDE;
+        assert_eq!(side, 65_536);
+        assert_eq!(std::mem::size_of::<DiagStruct>(), 4);
+        assert!(2 * side * std::mem::size_of::<DiagStruct>() >= X_MAPPED_MIN);
+        for (span, chunk_len, holds) in [
+            (side - 1, side, false),
+            (side, side - 1, false),
+            (side, side, true),
+            (side - 1, side - 1, false),
+            (1 << 22, side, true),
+            (side, 1 << 22, true),
+            (4_000, 202_000, false),
+            (220_000, 1_000, false),
+            (220_000, 202_000, true),
+            (0, 0, false),
+            (usize::MAX, usize::MAX, true),
+        ] {
+            let at = format!("span {span} chunk {chunk_len}");
+            assert_eq!(x_unit_mapped(true, span, chunk_len), glibc && holds, "{at}");
+            assert!(!x_unit_mapped(false, span, chunk_len), "{at}: switch off");
+        }
+        assert_eq!(X_MAPPED_BYTES, (32 << 20) + 4096);
+        assert!(x_mapped_len::<DiagStruct>(0) * std::mem::size_of::<DiagStruct>() > X_MAPPED_BYTES);
+        assert!(x_mapped_len::<XUnitHsp>(0) * std::mem::size_of::<XUnitHsp>() > X_MAPPED_BYTES);
+        assert_eq!(x_mapped_len::<DiagStruct>(1 << 24), 1 << 24);
+        assert_eq!(x_mapped_len::<XUnitHsp>(1 << 21), 1 << 21);
+    }
+
+    // No NCBI counterpart: LOSAT_X_SEEDUNMAP's THP gate on the texts of
+    // /sys/kernel/mm/transparent_hugepage/enabled and /proc/self/status: huge pages round the
+    // mapped blocks up with "[always]", an unreadable or unrecognised file, unless the process has
+    // them disabled (`THP_enabled: 0`); not with "[madvise]" or "[never]".
+    #[test]
+    fn seed_unmap_thp_gate_reads_the_two_files() {
+        let status_1 = "Name:\tLOSAT\nUmask:\t0022\nTHP_enabled:\t1\nThreads:\t8\n";
+        let status_0 = "Name:\tLOSAT\nUmask:\t0022\nTHP_enabled:\t0\nThreads:\t8\n";
+        let status_without = "Name:\tLOSAT\nUmask:\t0022\nThreads:\t8\n";
+        for (enabled, status, rounds_up) in [
+            (Some("always [madvise] never\n"), Some(status_1), false),
+            (Some("[always] madvise never\n"), Some(status_1), true),
+            (Some("always madvise [never]\n"), Some(status_1), false),
+            (None, Some(status_1), true),
+            (Some("[always] madvise never\n"), Some(status_0), false),
+            (None, Some(status_0), false),
+            (Some("[always] madvise never\n"), Some(status_without), true),
+            (
+                Some("always [madvise] never\n"),
+                Some(status_without),
+                false,
+            ),
+            (Some("[always] madvise never\n"), None, true),
+            (Some("always madvise [never]\n"), None, false),
+            (None, None, true),
+            (Some(""), None, true),
+            (Some("always madvise never\n"), None, true),
+            (Some("[madvise"), None, true),
+            (
+                Some("[always] madvise never\n"),
+                Some("THP_enabled:\t01\n"),
+                true,
+            ),
+        ] {
+            assert_eq!(
+                x_thp_rounds_up(enabled, status),
+                rounds_up,
+                "{enabled:?} {status:?}"
+            );
+        }
+    }
+
+    /// One LOSAT_X_SEEDUNMAP case: one query context of `W` blocks of 100 letters around `q_fill`
+    /// letters of `D`, and two subject frames of `s_len` letters in blocks of 20 `W` and 380 `P`
+    /// (one chunk each). Every query position has lookup entries (the context's span is about
+    /// `q_fill + 200`), the subject hits only the `W` blocks, and each block saves about 220 init
+    /// HSPs, so long sides stay cheap and a unit's copy passes `X_MAPPED_MIN`.
+    fn unmap_case(q_fill: usize, s_len: usize) -> CompactCase {
+        let query = format!("{0}{1}{0}", "W".repeat(100), "D".repeat(q_fill));
+        let frames = vec![frame(1, &aa(&query))];
+        let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+        let (lookup, contexts) = build_ncbi_lookup(&[frames], 11, &params, true);
+        let block = format!("{}{}", "W".repeat(20), "P".repeat(380));
+        let subject: String = block.chars().cycle().take(s_len).collect();
+        let shifted: String = block.chars().cycle().skip(200).take(s_len).collect();
+        CompactCase {
+            pp: XPairPar {
+                groups: build_groups(&lookup, &contexts),
+                shadow: false,
+                stub: false,
+            },
+            cutoff_scores: vec![12; contexts.len()],
+            x_dropoff_per_context: vec![16; contexts.len()],
+            contexts,
+            s_frames: vec![frame(2, &aa(&subject)), frame(-1, &aa(&shifted))],
+        }
+    }
+
+    /// The units of `case`, run in order on a scratch with LOSAT_X_SEEDUNMAP and on one without:
+    /// the same records, the same copies (with the mapped capacity where a large copy of a unit of
+    /// the rule gets it, on Linux with glibc), the same lists of `run_unit` and the same merge.
+    /// Returns the units where the rule holds and the copies given the mapped capacity.
+    fn unmap_check(case: &CompactCase) -> (usize, usize) {
+        let inp = case.inp();
+        let (frame_chunks, units) = list_units(&case.pp, &inp, MAX_DBSEQ_LEN);
+        assert!(!units.is_empty());
+        let mut today = XScratch::new(false);
+        let mut mapped = XScratch::new(true);
+        let (mut held, mut copies) = (0usize, 0usize);
+        let mut today_records = Vec::new();
+        let mut mapped_records = Vec::new();
+        for unit in &units {
+            let at = format!("unit f {} k {} g {}", unit.f, unit.k, unit.g);
+            let span = x_unit_span(&case.pp.groups[unit.g]);
+            let rule = x_unit_mapped(true, span, unit.chunk.length);
+            held += usize::from(rule);
+            let exact = case.pp.run_unit_compact(unit, &inp, &mut today);
+            let copy = case.pp.run_unit_compact(unit, &inp, &mut mapped);
+            assert_eq!(copy, exact, "{at}");
+            assert_eq!(
+                exact.capacity(),
+                exact.len(),
+                "{at}: spare room without the switch"
+            );
+            let large = rule && copy.len() * std::mem::size_of::<XUnitHsp>() >= X_MAPPED_MIN;
+            let capacity = if large {
+                x_mapped_len::<XUnitHsp>(copy.len())
+            } else {
+                copy.len()
+            };
+            assert_eq!(copy.capacity(), capacity, "{at}");
+            copies += usize::from(large);
+            // Today's lists on the scratch with the mapped table, and the records expand to them.
+            let list = case.pp.run_unit(unit, &inp, &mut today);
+            assert_eq!(case.pp.run_unit(unit, &inp, &mut mapped), list, "{at}");
+            let mut expanded = Vec::new();
+            x_expand_unit(&copy, unit.f, &inp, &mut expanded);
+            assert_eq!(expanded, list, "{at}");
+            today_records.push(exact);
+            mapped_records.push(copy);
+        }
+        if held > 0 {
+            assert!(mapped.diag.capacity() >= x_mapped_len::<DiagStruct>(0));
+            assert!(mapped.records.capacity() >= x_mapped_len::<XUnitHsp>(0));
+        } else {
+            assert!(mapped.diag.capacity() < x_mapped_len::<DiagStruct>(0));
+            assert!(mapped.records.capacity() < x_mapped_len::<XUnitHsp>(0));
+        }
+        assert!(today.diag.capacity() < x_mapped_len::<DiagStruct>(0));
+        assert!(today.records.capacity() < x_mapped_len::<XUnitHsp>(0));
+        let today_hits = XPairPar::merge_subject(
+            XSubjectUnits {
+                frame_chunks: frame_chunks.clone(),
+                units: units.clone(),
+                outputs: XUnitOutputs::Compact(today_records),
+            },
+            &inp,
+        );
+        let mapped_hits = XPairPar::merge_subject(
+            XSubjectUnits {
+                frame_chunks,
+                units,
+                outputs: XUnitOutputs::Compact(mapped_records),
+            },
+            &inp,
+        );
+        shadow_compare(inp.s_idx, &mapped_hits, &today_hits);
+        assert!(!today_hits.is_empty());
+        (held, copies)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:145-146
+    // ```c
+    //         diag_table->hit_level_array = (DiagStruct *)
+    //             calloc(diag_table->diag_array_length, sizeof(DiagStruct));
+    // ```
+    // LOSAT_X_SEEDUNMAP on units where the rule holds (a context of about 66,200 letters against
+    // subject frames of 66,000: both sides long; every unit's copy passes 128 KiB), where the
+    // query side is short (a context of about 1,200 letters; the copies pass 128 KiB too) and where
+    // the chunk is short (2,000 letters): the same records, lists and merge, and mapped capacities
+    // only where the rule holds.
+    #[test]
+    fn seed_unmap_units_with_the_mapped_capacities_are_todays() {
+        let glibc = cfg!(all(target_os = "linux", target_env = "gnu"));
+        for (q_fill, s_len, rule) in [
+            (66_000, 66_000, true),
+            (1_000, 66_000, false),
+            (66_000, 2_000, false),
+        ] {
+            let at = format!("query fill {q_fill} subjects of {s_len}");
+            let case = unmap_case(q_fill, s_len);
+            let (held, copies) = unmap_check(&case);
+            let expected = if glibc && rule { 2 } else { 0 };
+            assert_eq!((held, copies), (expected, expected), "{at}");
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1043
+    // ```c
+    //     aux_struct->init_hitlist = BLAST_InitHitListNew();
+    // ```
+    // On search pools of 1, 2 and 8 threads (at one thread the serial scratch, which never maps;
+    // at 2 and 8 one scratch per rayon job, with the switch as it acts in this process): the
+    // records of units where the rule holds are those of a scratch without it.
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+    #[test]
+    fn seed_unmap_units_on_search_pools_are_todays() {
+        let case = unmap_case(66_000, 66_000);
+        let inp = case.inp();
+        let (_, units) = list_units(&case.pp, &inp, MAX_DBSEQ_LEN);
+        let mut today = XScratch::new(false);
+        let expected: Vec<Vec<XUnitHsp>> = units
+            .iter()
+            .map(|unit| case.pp.run_unit_compact(unit, &inp, &mut today))
+            .collect();
+        assert!(expected.iter().all(|records| !records.is_empty()));
+        for threads in [1usize, 2, 8] {
+            crate::utils::threading::with_search_pool(threads, "tblastx", |pool| {
+                assert_eq!(pool.enabled(), threads > 1);
+                let got = case
+                    .pp
+                    .run_units(&units, &inp, pool, XPairPar::run_unit_compact);
+                assert_eq!(got, expected, "threads {threads}");
+                Ok(())
+            })
+            .expect("search pool");
         }
     }
 }

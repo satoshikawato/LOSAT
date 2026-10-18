@@ -271,6 +271,7 @@ export LOSAT_X_RPTSTREAM=1
 export LOSAT_X_SEEDBUCKET=1
 export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDRELEASE=1
+export LOSAT_X_SEEDUNMAP=1
 export LOSAT_X_SEGFAST=1
 export LOSAT_X_SEGMEMO=1
 export LOSAT_X_SEGSHARE=1
@@ -1456,6 +1457,56 @@ Rebuilding less:
   132.2 -> 123.9 and 226.3 -> 215.1 (at eight threads the peak is then the first linking call). The medians
   of `units`, `merge` (`[TIMING] x_pairpar`) and `search_total` moved within the run-to-run spread of that
   machine; the probe build measured the same memory on the workstation (-22.6, -7.5, -8.1 and -9.4 MiB).
+- `LOSAT_X_SEEDUNMAP=1` (TBLASTX, memory; Linux with glibc only, at two or more threads, and only where
+  transparent huge pages are not "always"; in the strict set since 2026-10-17, on by default from the change
+  that added it, under the Owner's rule of 2026-10-17 that a speed-up or memory reduction lands on by default)
+  three blocks of the unit path of `LOSAT_X_PAIRPAR` on the search pool get a capacity that glibc always maps,
+  so that they are returned to the system when they are dropped (`tblastx/x_pair_par.rs`, the section above
+  `X_MAPPED_BYTES`): the unit diagonal table and the record vector of `LOSAT_X_SEEDCOMPACT` that each rayon split
+  of a subject's units keeps, and the copy of a unit's records that lives until the subject's merge. glibc
+  raises its mmap threshold to the size of each mapped block that is freed (up to 32 MiB; SEG's buffer and the
+  pair lookup's group tables are such blocks) and its trim threshold to twice that, so without the switch these
+  blocks come from the worker threads' arenas, which keep their freed tops through the linking call, where the
+  search peaks (10-14 % of the max RSS at 8 threads). With it, for a unit whose query-group span and subject
+  chunk both have at least 65,536 letters (`x_unit_mapped`), the split's table and record vector are replaced
+  by empty ones with a capacity of 32 MiB and 4 KiB (above glibc's largest dynamic threshold) unless they have
+  that much room, and a copy of at least 128 KiB gets that capacity; the pages beyond their length are never
+  touched and are not resident. Three rules keep today's capacities where mapping costs more than it returns.
+  (1) Both sides long: a mapped table is new pages at every split, about one page fault per 1,024 cells of its
+  width (span + chunk), while the unit's scan grows with span x chunk, so the cost per work is about
+  1 / span + 1 / chunk. With an earlier rule (the chunk at least a quarter of the table), 200 queries of about
+  3 kb from AP027131 against AP027133 (genetic code 4, 8 threads; 50 query batches, group spans of about 4,000
+  letters, chunks of 202,000) mapped 1,748 tables: sys time 0.05-0.2 -> 0.4-0.7 s, wall x1.05-1.07; MelaMJNV
+  against AP027133 in six pieces (span about 96,000, chunks about 33,000) mapped 159 (sys 0.034 -> 0.070 s); and
+  AP027131 against 200 contigs of about 3 kb took x1.07 of the time with every table mapped. Under the two-side
+  rule none of these three maps; AP027131 x AP027133 (span about 220,000, chunk 202,000), NZ_CP006932 against
+  itself (219,000 / 219,000) and MelaMJNV x PemoMJNVA (96,000 / 98,000) do. (2) Transparent huge pages: where
+  the kernel gives anonymous mappings huge pages by default (`/sys/kernel/mm/transparent_hugepage/enabled`
+  "[always]": WSL2's kernel and the RHEL family's default), the mapped 32 MiB regions get 2 MiB pages on first
+  touch, so blocks of 0.1-0.5 MiB are resident as 2 MiB (WSL2, 8 threads, 5 alternating pairs: the 200 queries
+  above 53-56 -> 60-67 MiB of max RSS, AP027131 x AP027133 137-140 -> 124-145, higher in 4 of 5 pairs; the same
+  binary with THP disabled for the process by prctl PR_SET_THP_DISABLE: 52 -> 44, 135 -> 122 and NZ_CP006932
+  185 -> 168 MiB, lower in 5 of 5). So the switch acts only where that file selects "[madvise]" or "[never]" or
+  `/proc/self/status` says `THP_enabled: 0`, read once per process; on machines with THP "always" (WSL2, the
+  RHEL family's default) or where the file cannot be read it does nothing. (3) One thread: the units then run
+  on the calling thread, whose blocks come from glibc's main arena, which glibc trims, so nothing is retained
+  there and mapping only costs (AP027131 x AP027133: 77 -> 78 MiB and 2,800 more page faults when mapped); that
+  serial path keeps today's capacities. No value, order or sort changes: the table is still cleared and resized
+  to the unit's width, the record vector is still cleared for every unit and filled by the same pushes, and the
+  copy holds the records in their order; the merge reads the lengths and the elements of the copies, never
+  their capacity. With `LOSAT_X_SEEDCOMPACT=0` only the table acts; with the switch off, at one thread, with THP
+  "always" and off Linux with glibc, every capacity is as before. There is no shadow variable: only capacities
+  change, so there is no second result to compare. `LOSAT_X_STATS=1` prints, whenever the switch is on,
+  `[X_STATS] SEEDUNMAP active= diag= records= copies=` (`active` 1 where the switch acts in the process: Linux
+  with glibc and the THP condition; then the blocks given the mapped capacity at the three places, all 0 at one
+  thread, where no unit path runs, where the rule never holds, and where the switch does not act).
+  `LOSAT/tests/tblastx_seed_unmap.rs` reads the line. On the workstation (THP "[madvise]", so the switch acts;
+  8 rounds alternating with `LOSAT_X_SEEDUNMAP=0`, one warm-up per block, every report the frozen one or the
+  case's first run), the max RSS at 8 threads went from 128 to 118 MiB on AP027131 x AP027133, from 176 to 163 MiB
+  on NZ_CP006932 against itself and from 41 to 37 MiB on MelaMJNV x PemoMJNVA (lower in 8 of 8 rounds each), with
+  the time x1.006, x1.000 and x1.001 (median of the per-round ratios); MelaMJNV against AP027133 in six pieces
+  (44 MiB), the 200 queries (46 MiB) and AP027131 against 200 contigs (84 MiB) keep the arena and did not change;
+  nothing changed at one thread.
 
 - `LOSAT_X_TBXFRAMES=1` (TBLASTX, memory; in the strict set since 2026-10-17, on by default) a
   subject's frames are made when they are read and only as long

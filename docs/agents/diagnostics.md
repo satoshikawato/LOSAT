@@ -342,6 +342,7 @@ export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNXLATE=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXFRAMES=1
+export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
 export LOSAT_X_TBXPREFETCH=1536
@@ -1286,7 +1287,8 @@ Rebuilding less:
   also saves a sort at one thread. (2) An index sort of 32,768 indices or more runs as rayon's stable
   parallel sort (`par_sort_by`) when its call may use the search pool: the two sorts of a linking call
   under the call's `allow_parallel`, as its per-group linking; the other HSP sorts (the score sorts after
-  each frame, after the first linking call and after the re-evaluation) when the calling thread is a worker
+  each frame, which with `LOSAT_X_TBXKMERGE` only the reference frame loop makes, after the first
+  linking call and after the re-evaluation) when the calling thread is a worker
   of a rayon pool, which in a search started by the command line or the Web adapter it is exactly when
   `-num_threads` is 2 or more (the header names the one case this repository's code does not show: a
   program that calls a one-thread search from a thread of its own rayon pool). A stable sort with a
@@ -1317,6 +1319,39 @@ Rebuilding less:
   result. One line at exit: `[X_SHADOW] LINKSORT sorts= indices_compared=`. Together with
   `LOSAT_X_HSPINPLACESHADOW=1` the reference bodies are compared with the path's result end to end
   (`LOSAT/tests/tblastx_link_sort.rs` runs both).
+- `LOSAT_X_TBXKMERGE=1` (TBLASTX, speed; in the strict set since 2026-10-18, on by default; acts where
+  `LOSAT_X_PAIRPAR` runs the units) the merge of a subject's unit lists (`XPairPar::merge_subject`,
+  `tblastx/x_kmerge.rs`, exactness argument in its header) without its full sorts: each unit sorts its own
+  list in its task on the pool (a compact list between the copy it returns and the task's scratch
+  vector, so the sort allocates nothing); a chunk's init list is the k-way merge of its units' lists, ties
+  to the lower unit, where it was the stable sort of their concatenation; the conversion's final sort
+  (`Blast_HSPListSortByScore`) is a stable sort of each run of HSPs equal in score, subject start and
+  subject end (the list leaves the init sort in that order; a list that is not falls back to the full
+  sort); each frame list is merged into the subject's list by a backward two-way merge, where it was
+  appended and the whole list sorted. A stable sort with a comparator that is a lexicographic comparison of
+  integer fields has one result, so the list is the same element for element. `LOSAT_X_STATS=1` prints,
+  whenever the switch or its shadow is on (zeros where no unit path runs),
+  `[X_STATS] TBXKMERGE subjects= chunks= tie_runs= k1_fallback= frame_unsorted=` (the two fallbacks have
+  stayed 0). `LOSAT/tests/tblastx_kmerge.rs` runs it at 1-16 threads, with its
+  shadow and on tied HSPs of two queries, at three chunks per subject frame too. Measured on the
+  workstation (node 1, 16 cores with idle siblings, dev 79fab14e against the switch, alternating pairs,
+  reports identical): `[TIMING] x_pairpar` merge at 16 threads (the units' own sorts are counted in
+  `units` now) 2.30 -> 0.92 s for AP027131+AP027132+AP027133 x AP027133+AP027078+AP027131 (code 4),
+  0.13 -> 0.05 s for AP027131 x AP027133, 0.22 -> 0.09 s for NZ_CP006932 x itself, 5.82 -> 1.66 s for
+  Sakai x MG1655 (code 11); wall time, medians: the first 11.81 -> 11.68 s at 16 threads (5 pairs, ranges
+  apart) and 17.29 -> 16.86 s at 8 (3 pairs), AP027131 x AP027133 2.59 -> 2.48 s at 8 (5 pairs), Sakai x
+  MG1655 137 -> 124 s at 16 (3 pairs, a loaded node: 115-141 s); with the units sorting by
+  `slice::sort_by` (otherwise the same) NZ_CP006932 x itself 6.35 -> 6.21 s and 6.84 -> 6.70 s at 16 and
+  8 threads, and at one thread (3 pairs) x0.991, x0.982 and x0.995 for the first three inputs. Max RSS
+  in the same runs: Sakai x MG1655 1,967 -> 1,945 MiB at 16 threads (2,008 with `slice::sort_by`, whose
+  buffers the 16 tasks held at once), the first input 592 -> 540 and 439 -> 434 MiB, AP027131 x AP027133
+  117 -> 120 MiB at 8 threads (NCBI 233 MiB at one thread). The switch-off build runs 0.001 % more
+  instructions than dev (`perf stat`, one thread).
+- `LOSAT_X_TBXKMERGESHADOW=1` shadow of `LOSAT_X_TBXKMERGE` (turns the path on): the units return unsorted
+  lists, the merge runs the statements of the switch off on a copy and the switch's merge on the lists
+  (sorting them first), and every field of every HSP must be equal; the first difference stops the run.
+  One line at exit: `[X_SHADOW] TBXKMERGE subjects_compared= hsps_compared=`. `LOSAT_X_PAIRPARSHADOW=1`
+  compares the subject's list with the reference frame loop's as well.
 - `LOSAT_X_LINKSLICES=1` (TBLASTX, memory; in the strict set since 2026-10-15) the linking call of
   the in-place HSP list path links its groups as disjoint sub-slices of the one sorted list
   (`tblastx/x_link_slices.rs`, exactness argument in its header; it acts only where

@@ -221,6 +221,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNXLATE",
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXFRAMES",
+    "LOSAT_X_TBXKMERGE",
     "LOSAT_X_TBXLUT",
     "LOSAT_X_TBXNEXT",
     "LOSAT_X_TBXPREFETCH",

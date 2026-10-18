@@ -1,7 +1,6 @@
-//! EXPERIMENT (LOSAT_X_MBLUTONCE; off unless set to any value, not in the strict set: its default
-//! waits for the workstation's paired timings and max RSS, as LOSAT_X_MBLUTPAD's private copies,
-//! which it always uses, raised max RSS there; `LOSAT_X_DEFAULT=0` turns `LOSAT_X_PAIRPAR` off and
-//! with it this fill): `LOSAT_X_PAIRPAR`'s pool fill of the megablast lookup table of
+//! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set, which also turns `LOSAT_X_PAIRPAR` off and with it this
+//! fill): `LOSAT_X_PAIRPAR`'s pool fill of the megablast lookup table of
 //! `build_mb_lookup` (`x_mb_lookup_par.rs`) with each query position read once. In the fill of
 //! `x_mb_lookup_par` every worker reads every word of the query and applies those of its own
 //! cells, so each worker pays the whole read (0.65 s of each worker's time at 16 threads for
@@ -34,7 +33,7 @@
 //! The positions the loop reads, all positions of the unmasked ranges of all queries in the loop's
 //! order (`segments`: the loop's `build_unmasked_ranges` per query, without the queries shorter
 //! than `lut_word_length` and the ranges shorter than `word_length`, which the loop skips), form
-//! one stream, cut into chunks of `CHUNK_POSITIONS` positions; each chunk is cut into P spans of
+//! one stream, cut into chunks of `chunk_positions(P)` positions; each chunk is cut into P spans of
 //! equal length in stream order, one per reader. Per chunk:
 //! - A (read, job = reader `a`): reader `a` reads the words that end in its span with the loop's
 //!   statements (the same ambiguity resets, `current_kmer`, `valid_bases < lut_word_length` and
@@ -93,16 +92,18 @@
 //!
 //! Memory. One arena per fill, of the calling thread, not zeroed (every element is written before
 //! it is read): P reader regions of `2 x ceil(ceil(c / P) / 8)` lines of 64 bytes (scratch and
-//! sorted, 8-byte entries), with `c` the smaller of `CHUNK_POSITIONS` and the positions the loop
-//! reads, and P rows of `ceil((P + 1) / 16)` lines (the sub-range bounds), each region and row on
-//! lines of its own: at most `16 x (c + 8 P)` bytes of regions, 8.0 MiB at 16 and at 64 threads and
-//! 8.3 MiB with the rows at 255 for a query of 2^19 positions or more, whatever P is; it does not
+//! sorted, 8-byte entries), with `c` the smaller of the chunk (`chunk_positions`: `min(2^19, P <<
+//! 15)` positions) and the positions the loop reads, and P rows of `ceil((P + 1) / 16)` lines (the
+//! sub-range bounds), each region and row on lines of its own: at most `16 x (c + 8 P)` bytes of
+//! regions, about P x 0.5 MiB up to 16 threads (2.0 MiB at 4, 8.0 MiB at 16) and 8.0 MiB at 16 to
+//! 64 threads (8.3 MiB with the rows at 255) for a query of 2^19 positions or more; it does not
 //! grow. That is per fill, not per process: fills that run at the same time each hold their own
 //! arena, and with LOSAT_X_QBATCHPAR each slot of `m >= 2` threads that fills a table while others
-//! do holds about 8 MiB whatever `m` is, so k such slots hold about k x 8 MiB at once (8 slots of 8
-//! threads at 64 threads: 64 MiB), which `x_qbatch_par::batch_estimate_bytes` does not count. (A
-//! chunk that scales with P, such as `min(2^19, P << 15)` positions, about P x 0.5 MiB of arena, is
-//! the candidate if the workstation's max RSS shows that cost; not measured yet.) On Linux with
+//! do holds about m x 0.5 MiB, so the slots (whose threads add up to n) hold about n x 0.5 MiB at
+//! once, what one fill of n <= 16 threads holds (`x_qbatch_par::batch_estimate_bytes` does not
+//! count it). Until 2026-10-18 the chunk was 2^19 positions at every P, and k slots held about k x
+//! 8 MiB: megablast of three E. coli genomes (15.9 Mb) against LC738868 at 16 threads, 3 slots of
+//! 5 threads, max RSS +25 MiB against the loop's fill (v4-D session 4, ws window w1). On Linux with
 //! glibc its capacity is at least 32 MiB + 4 KiB (`x_mb_lookup_par::lines_capacity`, the rule of
 //! `x_frame_capacity` in `tblastn/x_subject_translate.rs`), so glibc maps it and unmaps it when it
 //! is freed at the end of the fill without moving its mmap threshold, and only the touched part is
@@ -139,10 +140,25 @@ use super::{build_unmasked_ranges, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// No NCBI counterpart (scheduling only): the stream positions per chunk (each chunk is read,
-/// updated and linked before the next; the arena holds the words of one chunk), as
+/// No NCBI counterpart (scheduling only): the most stream positions per chunk (each chunk is
+/// read, updated and linked before the next; the arena holds the words of one chunk), as
 /// LOSAT_X_DISCLUTPAR.
 const CHUNK_POSITIONS: usize = 1 << 19;
+
+/// No NCBI counterpart (scheduling only): the stream positions per chunk for each worker of the
+/// fill, up to `CHUNK_POSITIONS` (`chunk_positions`).
+const CHUNK_POSITIONS_PER_PART: usize = 1 << 15;
+
+/// No NCBI counterpart (scheduling only): the positions per chunk of a fill of `parts` workers,
+/// `min(2^19, parts << 15)`: the arena (16 bytes a position) is about `parts x 0.5 MiB` up to 16
+/// workers, so the fills that run at the same time on the slots of LOSAT_X_QBATCHPAR (whose threads
+/// add up to the pool's, n) hold together about n x 0.5 MiB, what one fill on the whole pool holds
+/// for n <= 16 (beyond, one fill stops at 8 MiB while the slots' fills add up: 8 slots of 8 threads
+/// at 64 threads about 32 MiB). The chunk size changes no element of the tables (the module
+/// documentation).
+fn chunk_positions(parts: usize) -> usize {
+    CHUNK_POSITIONS.min(parts.clamp(1, 255) * CHUNK_POSITIONS_PER_PART)
+}
 
 /// No NCBI counterpart (scheduling only): how far ahead phase B prefetches the cells of a
 /// sub-range on x86_64 (as `x_mb_lookup_par`'s fill and LOSAT_X_DISCLUTPAR's phase B).
@@ -796,7 +812,7 @@ pub(super) fn fill(
     in_pool: bool,
     timed: bool,
 ) -> OnceStats {
-    fill_chunked(parts, words, tables, in_pool, timed, CHUNK_POSITIONS)
+    fill_chunked(parts, words, tables, in_pool, timed, chunk_positions(parts))
 }
 
 /// `fill` with the chunk size (the tests take others).
@@ -1480,5 +1496,17 @@ mod tests {
             assert!(bytes <= (8 << 20) + 64 * 1024, "P {parts}: {bytes}");
         }
         assert!(Shape::new(CHUNK_POSITIONS, 255).lines() * 64 <= (8 << 20) + 400 * 1024);
+        // The chunk follows the workers up to 2^19 positions: about P x 0.5 MiB of arena.
+        assert_eq!(chunk_positions(0), 1 << 15);
+        assert_eq!(chunk_positions(1), 1 << 15);
+        assert_eq!(chunk_positions(4), 1 << 17);
+        assert_eq!(chunk_positions(5), 5 << 15);
+        assert_eq!(chunk_positions(16), CHUNK_POSITIONS);
+        assert_eq!(chunk_positions(64), CHUNK_POSITIONS);
+        assert_eq!(chunk_positions(usize::MAX), CHUNK_POSITIONS);
+        for parts in [2usize, 4, 5, 8, 16] {
+            let bytes = Shape::new(chunk_positions(parts), parts).lines() * 64;
+            assert!(bytes <= parts * (1 << 19) + 64 * 1024, "P {parts}: {bytes}");
+        }
     }
 }

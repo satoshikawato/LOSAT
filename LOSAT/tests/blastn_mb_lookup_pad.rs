@@ -1,7 +1,9 @@
 //! The private counters and presence-vector words of `LOSAT_X_PAIRPAR`'s megablast table fill
 //! (`LOSAT_X_MBLUTPAD`, `src/algorithm/blastn/x_mb_lookup_par.rs`) on whole searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). It chooses between
+//! The switch is off unless set to any value (it is not in the strict set), and it acts only with
+//! `LOSAT_X_MBLUTONCE=0` (the read-once fill, on by default since 2026-10-18, always counts into
+//! the private copies), so every search here sets `LOSAT_X_MBLUTONCE=0`. It chooses between
 //! two LOSAT code paths with the same tables: the pool fill counting into the shared
 //! `helper_array` / `pv_array`, or into private copies added in at the end. So the property under
 //! test is that the report does not depend on it, and that the padded fill really runs where the
@@ -24,8 +26,8 @@ fn fasta(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// One search, `-outfmt 6` on standard output, with the given variables as its only `LOSAT_*`
-/// variables. `LOSAT_BLASTX_WORKER_LOG` stays, or is set to a file of this test when the
+/// One search, `-outfmt 6` on standard output, with `LOSAT_X_MBLUTONCE=0` and the given variables
+/// as its only `LOSAT_*` variables. `LOSAT_BLASTX_WORKER_LOG` stays, or is set to a file of this test when the
 /// environment has none: a binary built with the `blastx-worker-probe` feature (`cargo test
 /// --all-features`, as in CI) needs that file name as soon as a search has more than one thread,
 /// and it selects nothing. Returns the report and the standard error.
@@ -60,6 +62,7 @@ fn blastn(
         .arg(fasta(subject))
         .args(["-outfmt", "6"])
         .args(["-num_threads", &threads.to_string()])
+        .env("LOSAT_X_MBLUTONCE", "0")
         .envs(switches.iter().copied())
         .output()
         .expect("run LOSAT");

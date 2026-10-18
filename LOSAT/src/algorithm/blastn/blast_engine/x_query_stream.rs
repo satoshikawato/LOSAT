@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_QSTREAM, shadow LOSAT_X_QSTREAMSHADOW; off unless set, not in the strict
-//! set): blastn reads the records of each query batch from the query file when the batch loop of
+//! EXPERIMENT (LOSAT_X_QSTREAM, in the strict set since 2026-10-18: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set; shadow LOSAT_X_QSTREAMSHADOW, off unless set): blastn reads the records of each query batch from the query file when the batch loop of
 //! `run_in_pool` takes the batch (or a LOSAT_X_QBATCHPAR slot searches it ahead of the loop), as
 //! NCBI reads its query batches one at a time, instead of holding the records of the whole query
 //! file for the whole search. It saves memory (the records of the batches not in flight) and costs
@@ -87,6 +87,27 @@
 //! handle cannot be had (`Io`, for example `try_clone` on WASI). LOSAT reads no compressed query
 //! file. `run_local` (the Web adapter and ABI v1) gets its records from its caller.
 //!
+//! The rule (`Rule::off`; not for the shadow): the switch does not act on a regular file where the
+//! second reading saves little memory and costs time (v4-D sessions 4 and 5, ws windows w1, w4):
+//! - `-task megablast` (`Megablast`): its searches are fast for their query bytes, so the serial
+//!   first reading is several % of the time (31,168 cDNAs against 3 Mb at 4 and 16 threads: 1.052
+//!   and 1.037 of the time; 1,775 cDNAs at 8 and 16 threads: 1.039 and 1.063), and its max RSS
+//!   stays below NCBI's without the switch (31,168 cDNAs at 4 threads: 241 MiB, NCBI 358.5);
+//! - a file shorter than twice the largest query batch (`Batch`, `Rule::batch_letters`: `BATCH_SIZE`,
+//!   or the `CBatchSizeMixer` maximum, 999,000 letters for blastn and 4,999,000 for dc-megablast):
+//!   the batch in flight holds most of the file anyway. The file's bytes are compared with the
+//!   batch's letters (titles and line ends make the file a little longer than its letters);
+//! - where the slots of LOSAT_X_QBATCHPAR may run (LOSAT_X_QBATCHPAR on, the conditions of
+//!   `run.rs`'s `x_qbatch_par_off`: `-subject`, two threads or more, fewer subject units than
+//!   threads; and a budget: LOSAT_X_QBATCHPARMEM when set, else the default one of
+//!   `x_qbatch_par::ncbi_splits_by_queries`, or a slot count set), a file shorter than
+//!   twice what their default budget holds (`Slots`), `SLOT_WINDOW_BYTES_PER_THREAD` bytes per thread
+//!   beyond the first: the slots read most of the file ahead of the loop anyway (blastn against 3 Mb
+//!   at 16 threads: a 40 MB query file -12 MiB at 1.012 of the time, 15 MB -1.6 MiB at 1.014).
+//!
+//! Elsewhere the second reading saved 3-77 MiB at 0.994-1.006 of the time (blastn and
+//! dc-megablast).
+//!
 //! What is kept for every query (`query_input_of`): the length of each input record, whether it is
 //! skipped, the input position and placement of each searched query and its searched length
 //! (about 33 bytes per record without `-query_loc`). The records of every batch are kept as well
@@ -136,15 +157,16 @@ use crate::blastinput::seq_range::{
     SequenceRange,
 };
 
-// No NCBI counterpart: reads the switches once (any value turns them on; the shadow implies the
-// switch; neither is in the strict set). They choose when LOSAT reads the same records.
+// No NCBI counterpart: reads the switches once (LOSAT_X_QSTREAM is in the strict set; any value
+// turns the shadow on, and the shadow implies the switch). They choose when LOSAT reads the same
+// records.
 /// 0 = off, 1 = LOSAT_X_QSTREAM, 2 = LOSAT_X_QSTREAMSHADOW.
 fn mode() -> u8 {
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_QSTREAMSHADOW").is_some() {
             2
-        } else if std::env::var_os("LOSAT_X_QSTREAM").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_QSTREAM") {
             1
         } else {
             0
@@ -165,6 +187,13 @@ pub(super) enum Off {
     NotAFile,
     /// The file's position or a second handle on it could not be had.
     Io,
+    /// `-task megablast` (`Rule::off`).
+    Megablast,
+    /// The file is shorter than twice the largest query batch (`Rule::off`).
+    Batch,
+    /// The slots of LOSAT_X_QBATCHPAR would read at least half of the file ahead anyway
+    /// (`Rule::off`).
+    Slots,
 }
 
 impl Off {
@@ -175,6 +204,9 @@ impl Off {
             Off::StandardInput => "standard_input",
             Off::NotAFile => "not_a_file",
             Off::Io => "io",
+            Off::Megablast => "megablast",
+            Off::Batch => "batch",
+            Off::Slots => "slots",
         }
     }
 }
@@ -190,14 +222,23 @@ pub(super) struct Opening {
 impl Opening {
     /// `path` is `-query` and `file` the file `run` opened for it, before its reader is made;
     /// `shared_standard_input` is `-query -` with `-subject -`; `reports_streamed` is whether
-    /// LOSAT_X_RPTSTREAM is on (`x_rpt_stream::switch_on`).
+    /// LOSAT_X_RPTSTREAM is on (`x_rpt_stream::switch_on`); `rule` is what the rule reads of the
+    /// search (`Rule::off`).
     pub(super) fn new(
         path: &Path,
         file: &File,
         shared_standard_input: bool,
         reports_streamed: bool,
+        rule: Rule,
     ) -> Opening {
-        Opening::with_mode(mode(), path, file, shared_standard_input, reports_streamed)
+        Opening::with_mode(
+            mode(),
+            path,
+            file,
+            shared_standard_input,
+            reports_streamed,
+            rule,
+        )
     }
 
     /// `new` with the switches' value `mode` (`mode()`; the unit tests set it).
@@ -207,6 +248,7 @@ impl Opening {
         file: &File,
         shared_standard_input: bool,
         reports_streamed: bool,
+        rule: Rule,
     ) -> Opening {
         let off = |off| Opening {
             mode,
@@ -222,10 +264,16 @@ impl Opening {
         if path.as_os_str() == "-" || shared_standard_input {
             return off(Off::StandardInput);
         }
-        match file.metadata() {
-            Ok(metadata) if metadata.is_file() => {}
+        let bytes = match file.metadata() {
+            Ok(metadata) if metadata.is_file() => metadata.len(),
             Ok(_) => return off(Off::NotAFile),
             Err(_) => return off(Off::Io),
+        };
+        // The rule; the shadow reads the file again wherever it can (a test mode).
+        if mode == 1 {
+            if let Some(why) = rule.off(bytes) {
+                return off(why);
+            }
         }
         let mut handle = file;
         let Ok(start) = handle.stream_position() else {
@@ -244,6 +292,51 @@ impl Opening {
     /// Whether the records are read batch by batch (`Store::read`).
     pub(super) fn acts(&self) -> bool {
         self.again.is_some()
+    }
+}
+
+/// No NCBI counterpart (when LOSAT reads the records only): the query bytes that the default
+/// budget of LOSAT_X_QBATCHPAR's slots holds in flight per thread beyond the first, about 2 Mb
+/// of query in both profiles (`x_qbatch_par::allowance_mib` over the per-letter memory of a batch
+/// in flight: 96 MiB at about 50 bytes a blastn letter, 28 MiB at about 15 bytes a megablast or
+/// dc-megablast letter).
+const SLOT_WINDOW_BYTES_PER_THREAD: u64 = 2_000_000;
+
+/// No NCBI counterpart (when LOSAT reads the records only): what the rule of LOSAT_X_QSTREAM
+/// reads of a search (`Rule::off`).
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Rule {
+    /// `-task megablast`.
+    pub(super) megablast: bool,
+    /// The letters of the largest query batch of the search: `BATCH_SIZE` when it is set, else
+    /// the `CBatchSizeMixer` maximum of the task (`run.rs`, `x_query_batch_letters`).
+    pub(super) batch_letters: u64,
+    /// `-num_threads`.
+    pub(super) threads: usize,
+    /// Whether the slots of LOSAT_X_QBATCHPAR may run: the switch on, the conditions of
+    /// `x_qbatch_par_off` (`run.rs`), and a budget (LOSAT_X_QBATCHPARMEM when it is set, else
+    /// `x_qbatch_par::ncbi_splits_by_queries`) or a slot count (LOSAT_X_QBATCHPARSLOTS).
+    pub(super) slots_may_run: bool,
+}
+
+impl Rule {
+    /// Why the switch does not act on a regular query file of `file_bytes` bytes (the module's
+    /// rule), or `None` where it acts: `-task megablast`; a file shorter than twice the largest
+    /// query batch; where the slots may run, a file shorter than twice the bytes their default
+    /// budget holds (`SLOT_WINDOW_BYTES_PER_THREAD` per thread beyond the first).
+    fn off(self, file_bytes: u64) -> Option<Off> {
+        if self.megablast {
+            return Some(Off::Megablast);
+        }
+        if file_bytes < self.batch_letters.saturating_mul(2) {
+            return Some(Off::Batch);
+        }
+        let window =
+            SLOT_WINDOW_BYTES_PER_THREAD.saturating_mul(self.threads.saturating_sub(1) as u64);
+        if self.slots_may_run && file_bytes < window.saturating_mul(2) {
+            return Some(Off::Slots);
+        }
+        None
     }
 }
 
@@ -1170,7 +1263,7 @@ mod tests {
     /// with the switches' value `mode`, and how the first reading ended.
     fn store(mode: u8, path: &Path, range: Option<&SequenceRange>) -> (Store, QueryEnd) {
         let file = File::open(path).expect("open the test file");
-        let opening = Opening::with_mode(mode, path, &file, false, true);
+        let opening = Opening::with_mode(mode, path, &file, false, true, NO_RULE);
         assert!(opening.acts());
         let mut source = FastaInputSource::from_file(file, config());
         assert!(!source.stream_is_empty());
@@ -1526,28 +1619,49 @@ mod tests {
         let file = TempFile::new("off", b">a\nACGT\n");
         let handle = File::open(&file.0).unwrap();
         assert_eq!(
-            Opening::with_mode(0, &file.0, &handle, false, true).off,
+            Opening::with_mode(0, &file.0, &handle, false, true, NO_RULE).off,
             Some(Off::NotSet)
         );
         assert_eq!(
-            Opening::with_mode(1, &file.0, &handle, false, false).off,
+            Opening::with_mode(1, &file.0, &handle, false, false, NO_RULE).off,
             Some(Off::Reports)
         );
         assert_eq!(
-            Opening::with_mode(1, Path::new("-"), &handle, false, true).off,
+            Opening::with_mode(1, Path::new("-"), &handle, false, true, NO_RULE).off,
             Some(Off::StandardInput)
         );
         assert_eq!(
-            Opening::with_mode(1, &file.0, &handle, true, true).off,
+            Opening::with_mode(1, &file.0, &handle, true, true, NO_RULE).off,
             Some(Off::StandardInput)
         );
-        assert!(Opening::with_mode(1, &file.0, &handle, false, true).acts());
-        assert!(Opening::with_mode(2, &file.0, &handle, false, true).acts());
+        assert!(Opening::with_mode(1, &file.0, &handle, false, true, NO_RULE).acts());
+        assert!(Opening::with_mode(2, &file.0, &handle, false, true, NO_RULE).acts());
+        // The rule turns the switch off, not the shadow; it reads the file's length.
+        let megablast = Rule {
+            megablast: true,
+            ..NO_RULE
+        };
+        assert_eq!(
+            Opening::with_mode(1, &file.0, &handle, false, true, megablast).off,
+            Some(Off::Megablast)
+        );
+        assert!(Opening::with_mode(2, &file.0, &handle, false, true, megablast).acts());
+        // The file is 8 bytes: off for a batch of 5 letters, on for 4.
+        for (letters, off) in [(5, Some(Off::Batch)), (4, None)] {
+            let rule = Rule {
+                batch_letters: letters,
+                ..NO_RULE
+            };
+            assert_eq!(
+                Opening::with_mode(1, &file.0, &handle, false, true, rule).off,
+                off
+            );
+        }
         #[cfg(unix)]
         {
             let dir = File::open(std::env::temp_dir()).unwrap();
             assert_eq!(
-                Opening::with_mode(1, &std::env::temp_dir(), &dir, false, true).off,
+                Opening::with_mode(1, &std::env::temp_dir(), &dir, false, true, NO_RULE).off,
                 Some(Off::NotAFile)
             );
         }
@@ -1566,5 +1680,85 @@ mod tests {
             assert_eq!(lengths, old_lengths, "seed {seed}");
             assert_eq!(end_text(&end), end_text(&old.end), "seed {seed}");
         }
+    }
+
+    /// A rule that never turns the switch off.
+    const NO_RULE: Rule = Rule {
+        megablast: false,
+        batch_letters: 0,
+        threads: 1,
+        slots_may_run: false,
+    };
+
+    /// The rule: off for `-task megablast`, for a file shorter than twice the largest batch, and,
+    /// where the slots may run, for a file shorter than twice their window (2,000,000 bytes per
+    /// thread beyond the first); the files of v4-D's ws windows (1,775 cDNAs 5,398,904 bytes,
+    /// 3,492 cDNAs 10,779,147, 5,000 cDNAs 15,440,261, 40 MB 40,005,015, 31,168 cDNAs 96,191,719).
+    #[test]
+    fn the_rule_follows_the_task_the_batch_and_the_slots_window() {
+        const BLASTN: u64 = 999_000;
+        const DC: u64 = 4_999_000;
+        let rule = |megablast, batch_letters, threads, slots_may_run| Rule {
+            megablast,
+            batch_letters,
+            threads,
+            slots_may_run,
+        };
+        assert_eq!(NO_RULE.off(0), None);
+        // megablast: off at any size, with or without slots.
+        for (bytes, threads, slots) in [
+            (5_398_904, 16, false),
+            (96_191_719, 16, true),
+            (1, 1, false),
+        ] {
+            assert_eq!(
+                rule(true, DC, threads, slots).off(bytes),
+                Some(Off::Megablast)
+            );
+        }
+        // The batch: blastn off below 1,998,000 bytes, dc-megablast below 9,998,000 (named before
+        // the slots), BATCH_SIZE 4,000 below 8,000.
+        assert_eq!(
+            rule(false, BLASTN, 1, false).off(1_997_999),
+            Some(Off::Batch)
+        );
+        assert_eq!(rule(false, BLASTN, 1, false).off(1_998_000), None);
+        assert_eq!(rule(false, BLASTN, 16, false).off(5_398_904), None);
+        assert_eq!(rule(false, DC, 16, false).off(5_398_904), Some(Off::Batch));
+        assert_eq!(rule(false, DC, 16, true).off(5_398_904), Some(Off::Batch));
+        assert_eq!(rule(false, DC, 4, false).off(9_997_999), Some(Off::Batch));
+        assert_eq!(rule(false, DC, 4, false).off(9_998_000), None);
+        assert_eq!(rule(false, DC, 16, false).off(96_191_719), None);
+        assert_eq!(rule(false, 4_000, 4, false).off(7_999), Some(Off::Batch));
+        assert_eq!(rule(false, 4_000, 4, false).off(8_000), None);
+        // The slots (blastn's batch): 16 threads, a window of 30 MB, off below 60 MB.
+        for bytes in [15_440_261, 40_005_015, 59_999_999] {
+            assert_eq!(rule(false, BLASTN, 16, true).off(bytes), Some(Off::Slots));
+            assert_eq!(rule(false, BLASTN, 16, false).off(bytes), None);
+        }
+        assert_eq!(rule(false, BLASTN, 16, true).off(60_000_000), None);
+        assert_eq!(rule(false, DC, 16, true).off(96_191_719), None);
+        // 8 threads: off below 28 MB; 4 threads: below 12 MB; 2 threads: below 4 MB; one thread
+        // has no window.
+        assert_eq!(rule(false, BLASTN, 8, true).off(40_005_015), None);
+        assert_eq!(
+            rule(false, BLASTN, 8, true).off(27_999_999),
+            Some(Off::Slots)
+        );
+        assert_eq!(rule(false, BLASTN, 4, true).off(15_440_261), None);
+        assert_eq!(
+            rule(false, BLASTN, 4, true).off(10_779_147),
+            Some(Off::Slots)
+        );
+        assert_eq!(rule(false, BLASTN, 2, true).off(10_779_147), None);
+        assert_eq!(rule(false, BLASTN, 1, true).off(1_998_000), None);
+        // The ends saturate.
+        assert_eq!(
+            rule(false, u64::MAX, 1, false).off(u64::MAX - 1),
+            Some(Off::Batch)
+        );
+        assert_eq!(rule(false, u64::MAX, 1, false).off(u64::MAX), None);
+        assert_eq!(rule(false, 0, usize::MAX, true).off(0), Some(Off::Slots));
+        assert_eq!(rule(false, 0, usize::MAX, true).off(u64::MAX), None);
     }
 }

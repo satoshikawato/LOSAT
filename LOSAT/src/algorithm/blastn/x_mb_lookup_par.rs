@@ -47,7 +47,9 @@
 //! touches the same cells and links of the same words, so each worker applies it to its own
 //! words.
 //!
-//! EXPERIMENT (LOSAT_X_MBLUTPAD; off unless set, not in the strict set): private counters and
+//! EXPERIMENT (LOSAT_X_MBLUTPAD; off unless set, not in the strict set; since LOSAT_X_MBLUTONCE is
+//! on by default (2026-10-18) it acts only with `LOSAT_X_MBLUTONCE=0`, as the read-once fill always
+//! uses its copies): private counters and
 //! presence-vector words. The blocks are dealt round robin, so one 64-byte line of
 //! `helper_array` (16 counters, one per 2048-cell block when `pv_array_bts <= 11`, as for every
 //! table of `lut_word_length` 12 or less) holds the counters of up to 16 different workers, and a
@@ -111,7 +113,8 @@
 //! wasm32) the buffer has the fill's size and is freed at the end of the fill: those allocators
 //! return large blocks themselves, and there is no threshold to keep low.
 //!
-//! EXPERIMENT (LOSAT_X_MBLUTONCE; off unless set to any value, not in the strict set): `fill`
+//! EXPERIMENT (LOSAT_X_MBLUTONCE; in the strict set since 2026-10-18: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set): `fill`
 //! hands the table to the read-once fill of `x_mb_lookup_once.rs` (its first dispatch), in which
 //! each query position is read by one worker and each word handed to the owner of its cell,
 //! instead of every worker reading every word as above. That fill always counts into the private
@@ -135,8 +138,8 @@ use std::sync::OnceLock;
 pub(super) const K_COMPRESSION_FACTOR_SHIFT: usize = 11;
 
 /// No NCBI counterpart: reads the switches once; they do not change any value NCBI computes.
-/// (LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARSHADOW, LOSAT_X_MBLUTPAD, LOSAT_X_MBLUTONCE; the last two are
-/// off unless set to any value and not in the strict set)
+/// (LOSAT_X_PAIRPAR, LOSAT_X_PAIRPARSHADOW, LOSAT_X_MBLUTPAD, LOSAT_X_MBLUTONCE; LOSAT_X_MBLUTPAD
+/// is off unless set to any value and not in the strict set, LOSAT_X_MBLUTONCE is in it)
 fn switches() -> (bool, bool, bool, bool) {
     static SWITCHES: OnceLock<(bool, bool, bool, bool)> = OnceLock::new();
     *SWITCHES.get_or_init(|| {
@@ -144,7 +147,7 @@ fn switches() -> (bool, bool, bool, bool) {
             crate::utils::xswitch::on("LOSAT_X_PAIRPAR"),
             std::env::var_os("LOSAT_X_PAIRPARSHADOW").is_some(),
             std::env::var_os("LOSAT_X_MBLUTPAD").is_some(),
-            std::env::var_os("LOSAT_X_MBLUTONCE").is_some(),
+            crate::utils::xswitch::on("LOSAT_X_MBLUTONCE"),
         )
     })
 }

@@ -2,9 +2,11 @@
 //! LOSAT_X_QBATCHPAR slot) needs them (`LOSAT_X_QSTREAM`,
 //! `src/algorithm/blastn/blast_engine/x_query_stream.rs`), on whole searches.
 //!
-//! The switch is off unless set to any value (it is not in the strict set). It chooses when LOSAT
-//! reads the same records: all of them before the search, or a first reading that keeps their
-//! lengths and a second one batch by batch, which it does only where the reports may be written
+//! The switch is in the strict set since 2026-10-18 (on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+//! and it is not set), with a rule (off for `-task megablast`, for a file shorter than twice the
+//! largest query batch, and where LOSAT_X_QBATCHPAR's slots may read at least half of the file
+//! ahead; not the shadow). It chooses when LOSAT reads the same records: all of them before the
+//! search, or a first reading that keeps their lengths and a second one batch by batch, which it does only where the reports may be written
 //! batch by batch (LOSAT_X_RPTSTREAM on; off, the shadow line says `off=reports`).
 //! So the property under test is that nothing a run writes depends on it: for megablast, blastn
 //! and dc-megablast, outfmt 0, 6 and 7, at 1 and 4 threads, with small query batches
@@ -12,7 +14,10 @@
 //! with the shadow (`LOSAT_X_QSTREAMSHADOW`, which also reads the whole file the
 //! old way and compares the records of every batch and every slot's copy) give the same exit
 //! status, standard output (or `-out` file) and standard error (the shadow's line taken out), and
-//! the shadow line shows that the batches were read again (with LOSAT_X_RPTSTREAM). The same
+//! the shadow line shows that the batches were read again (with LOSAT_X_RPTSTREAM). For megablast
+//! the rule keeps the switch from acting (`off=megablast`), so there only the shadow, which ignores
+//! the rule, reads the batches again and is compared; blastn and dc-megablast act with the switch
+//! (the tests keep `BATCH_SIZE` small, so the batch part of the rule does not apply). The same
 //! holds with LOSAT_X_QBATCHPAR slots reading the records of the batches they search ahead, with
 //! `-query_loc` (skipped records and queries without data), `-subject_loc` and `-lcase_masking`,
 //! with `-max_target_seqs`, `-max_hsps` and `-subject_besthit`, with the reader's warnings and
@@ -20,7 +25,7 @@
 //! without letters, LOSAT's refusals that come before every report (LOSAT_X_RPTSTREAM then keeps
 //! its reports after the loop, and the records of every batch are kept for them), LOSAT_X_RPTSTREAM's
 //! shadow (the same), and `-db`. Standard input and a pipe are read once (the shadow line names
-//! why), and the switch is off unless set. That those bytes equal NCBI's is the business of the
+//! why), and the switch is on by default and off by its rule. That those bytes equal NCBI's is the business of the
 //! blastn fixtures.
 
 use std::io::Write;
@@ -28,9 +33,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
-/// `0`, the default before, unless the search sets it: every search here runs as it was written,
-/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and this
+/// file's own on 2026-10-18 (perf/bn-memory-rules), each `0`, the default before, unless the
+/// search sets it: every search here runs as it was written, with the switches off that it does
+/// not name (the default runs in `default_bundle.rs` and `the_switch_is_on_by_default`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),
@@ -43,6 +49,7 @@ const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_QBATCHPAR", "0"),
     ("LOSAT_X_QDUSTPAR", "0"),
     ("LOSAT_X_QPREPPAR", "0"),
+    ("LOSAT_X_QSTREAM", "0"),
     ("LOSAT_X_RPTSTREAM", "0"),
 ];
 
@@ -426,39 +433,53 @@ fn out_files_qbatchpar_slots_and_the_report_shadow_give_the_off_bytes() {
                 assert!(!off.report.is_empty(), "{what}");
                 read_as_the_reports_need(&what, reports, &shadow);
                 assert_eq!(shadow.slots > 0, !reports.is_empty(), "{what}: {shadow:?}");
-                // The slots searched batches ahead of the loop, with copies of records read again
-                // (with LOSAT_X_RPTSTREAM).
-                extra.extend_from_slice(&[SWITCH, STATS]);
-                let stats = blastn(&args, 4, &extra, None);
-                let stderr = String::from_utf8_lossy(&stats.stderr);
-                let number = |prefix: &str, name: &str| -> u64 {
-                    stderr
-                        .lines()
-                        .find(|line| line.starts_with(prefix))
-                        .and_then(|line| {
-                            line.split_whitespace()
-                                .find_map(|word| word.strip_prefix(name))
-                        })
-                        .and_then(|value| value.parse().ok())
-                        .unwrap_or_else(|| panic!("{what}: {stderr}"))
-                };
-                assert!(
-                    number("[X_STATS] QBATCHPAR ", "precomputed=") > 0,
-                    "{what}: {stderr}"
-                );
-                if reports.is_empty() {
+                // The slots searched batches ahead of the loop. The switch does not act here: its
+                // rule (`off=megablast`, and `off=slots` for the forced slots on this small file);
+                // the shadow, which ignores the rule, read copies of the records again for the
+                // slots (with LOSAT_X_RPTSTREAM).
+                for (mode, acting) in [(SWITCH, false), (SHADOW, true)] {
+                    let mut with = extra.clone();
+                    with.extend_from_slice(&[mode, STATS]);
+                    let stats = blastn(&args, 4, &with, None);
+                    let stderr = String::from_utf8_lossy(&stats.stderr);
+                    let what = format!("{what} {mode:?}");
+                    let number = |prefix: &str, name: &str| -> u64 {
+                        stderr
+                            .lines()
+                            .find(|line| line.starts_with(prefix))
+                            .and_then(|line| {
+                                line.split_whitespace()
+                                    .find_map(|word| word.strip_prefix(name))
+                            })
+                            .and_then(|value| value.parse().ok())
+                            .unwrap_or_else(|| panic!("{what}: {stderr}"))
+                    };
                     assert!(
-                        stderr.contains("[X_STATS] QSTREAM records=0 read=0 ")
-                            && stderr.contains(" off=reports"),
+                        number("[X_STATS] QBATCHPAR ", "precomputed=") > 0,
                         "{what}: {stderr}"
                     );
-                } else {
-                    assert!(
-                        number("[X_STATS] QSTREAM ", "slots=") > 0
-                            && number("[X_STATS] QSTREAM ", "read=")
-                                == number("[X_STATS] QSTREAM ", "records="),
-                        "{what}: {stderr}"
-                    );
+                    let why = if reports.is_empty() {
+                        Some("reports")
+                    } else if acting {
+                        None
+                    } else if task == "megablast" {
+                        Some("megablast")
+                    } else {
+                        Some("slots")
+                    };
+                    match why {
+                        Some(why) => assert!(
+                            stderr.contains("[X_STATS] QSTREAM records=0 read=0 ")
+                                && stderr.contains(&format!(" off={why}")),
+                            "{what}: {stderr}"
+                        ),
+                        None => assert!(
+                            number("[X_STATS] QSTREAM ", "slots=") > 0
+                                && number("[X_STATS] QSTREAM ", "read=")
+                                    == number("[X_STATS] QSTREAM ", "records="),
+                            "{what}: {stderr}"
+                        ),
+                    }
                 }
             }
         }
@@ -822,39 +843,111 @@ fn a_database_search_gives_the_off_bytes() {
     }
 }
 
-/// The switch is off unless set: with it (and LOSAT_X_RPTSTREAM) it reads the batches again (its
-/// `[X_STATS]` line with `off=none`); without it the records are read before the search (no line);
-/// the bytes are the same.
+/// The switch is on by default (an empty value): with LOSAT_X_RPTSTREAM it reads the batches
+/// again (its `[X_STATS]` line with `off=none`); with `LOSAT_X_QSTREAM=0`, or `LOSAT_X_DEFAULT=0`
+/// and no value, the records are read before the search (no line). Its rule, where the line says
+/// why and the shadow still reads the batches again: `-task megablast` (`off=megablast`); a file
+/// shorter than twice the largest batch (`off=batch`; here `BATCH_SIZE` half the file's bytes plus
+/// one, and half the file's bytes on); where the slots of LOSAT_X_QBATCHPAR may run, a file
+/// shorter than twice what their budget holds (`off=slots`; a budget set by
+/// `LOSAT_X_QBATCHPARMEM` for a small file at 2 threads, none at one thread). The bytes are the
+/// same.
 #[test]
-fn the_switch_is_off_unless_set() {
+fn the_switch_is_on_by_default() {
     let dir = TempDir::new("default");
     let query = queries(&dir, "q.fa", b"");
     let subject = fasta("LC738868.fasta");
-    let args = [
-        "-task",
-        "megablast",
-        "-query",
-        query.to_str().unwrap(),
-        "-subject",
-        subject.to_str().unwrap(),
-        "-outfmt",
-        "6",
-    ];
-    let line = |run: &Run| -> Option<String> {
+    let args = |task| {
+        [
+            "-task",
+            task,
+            "-query",
+            query.to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            "6",
+        ]
+    };
+    let blastn_args = args("blastn");
+    let line = |run: &Run| -> String {
         String::from_utf8_lossy(&run.stderr)
             .lines()
             .find(|line| line.starts_with("[X_STATS] QSTREAM "))
             .map(str::to_string)
+            .unwrap_or_default()
     };
-    let on = blastn(&args, 4, &[RPTSTREAM, STATS, SWITCH], None);
-    let read = line(&on).expect("the switch's line");
+    let default = ("LOSAT_X_QSTREAM", "");
+    let on = blastn(&blastn_args, 4, &[RPTSTREAM, STATS, default], None);
+    let read = line(&on);
     assert!(
         read.contains(" off=none") && read.contains(" read=19 "),
         "{read}"
     );
-    let off = blastn(&args, 4, &[RPTSTREAM, STATS], None);
-    assert_eq!(line(&off), None);
-    assert_eq!((off.status, &off.report), (on.status, &on.report));
+    for switches in [
+        &[RPTSTREAM, STATS][..],
+        &[RPTSTREAM, STATS, default, ("LOSAT_X_DEFAULT", "0")],
+    ] {
+        let off = blastn(&blastn_args, 4, switches, None);
+        assert_eq!(line(&off), "", "{switches:?}");
+        assert_eq!((off.status, &off.report), (on.status, &on.report));
+    }
+    // The rule: (task, threads, switches, the line's `off=`); each against the switch `0`, and the
+    // shadow, which ignores the rule.
+    let half = std::fs::metadata(&query).unwrap().len() / 2;
+    let (batch_off, batch_on) = ((half + 1).to_string(), half.to_string());
+    let slots = [
+        RPTSTREAM,
+        STATS,
+        default,
+        QBATCHPAR,
+        ("LOSAT_X_QBATCHPARMEM", "64"),
+    ];
+    let cases = [
+        ("megablast", 4, vec![RPTSTREAM, STATS, default], "megablast"),
+        (
+            "blastn",
+            4,
+            vec![RPTSTREAM, STATS, default, ("BATCH_SIZE", &batch_off)],
+            "batch",
+        ),
+        (
+            "blastn",
+            4,
+            vec![RPTSTREAM, STATS, default, ("BATCH_SIZE", &batch_on)],
+            "none",
+        ),
+        ("blastn", 2, slots.to_vec(), "slots"),
+        ("blastn", 1, slots.to_vec(), "none"),
+    ];
+    for (task, threads, switches, why) in cases {
+        let what = format!("{task} {threads} {switches:?}");
+        let ruled = blastn(&args(task), threads, &switches, None);
+        let read = line(&ruled);
+        let off_word = format!("off={why}");
+        assert!(
+            read.split_whitespace().any(|word| word == off_word),
+            "{what}: {read}"
+        );
+        if why != "none" {
+            assert!(read.contains(" read=0 "), "{what}: {read}");
+        }
+        let mut zero = switches.clone();
+        zero.push(("LOSAT_X_QSTREAM", "0"));
+        let off = blastn(&args(task), threads, &zero, None);
+        assert_eq!(
+            (ruled.status, &ruled.report),
+            (off.status, &off.report),
+            "{what}"
+        );
+        let mut shadow = switches.clone();
+        shadow.push(SHADOW);
+        let shadowed = blastn(&args(task), threads, &shadow, None);
+        let read = line(&shadowed);
+        assert!(read.contains(" off=none"), "{what} shadow: {read}");
+        assert_eq!(shadowed.status, off.status, "{what} shadow");
+        assert!(shadowed.report == off.report, "{what} shadow");
+    }
 }
 
 /// The records of the batches are kept only where a writer reads them after their batch: none
@@ -867,7 +960,7 @@ fn the_records_are_kept_only_for_a_writer_after_the_loop() {
     let subject = fasta("LC738868.fasta");
     let args = [
         "-task",
-        "megablast",
+        "blastn",
         "-query",
         query.to_str().unwrap(),
         "-subject",

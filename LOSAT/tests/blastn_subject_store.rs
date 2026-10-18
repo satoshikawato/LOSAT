@@ -11,13 +11,14 @@
 //!         return retval;
 //! ```
 //! NCBI keeps the subjects in its scope and makes each one's search forms from it. With
-//! `LOSAT_X_BNSTORE` set (to any value; the switch is not in the strict set) the reader's records
+//! `LOSAT_X_BNSTORE` on (the strict set since 2026-10-18: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set) the reader's records
 //! keep their deflines and the letters are held packed (2 bits per base, the runs of ambiguous
 //! letters, the lower-case intervals): the preliminary stage reads the packed bases, the traceback
 //! makes the blastna letters of a subject, the pairwise report the letters of each row. The switch
 //! must change nothing a user sees, so the tests compare the report and the messages with those of
-//! a run without the variable, and read the `[X_STATS] BNSTORE` line to check that the subjects
-//! were held packed.
+//! a run with `LOSAT_X_BNSTORE=0`, and read the `[X_STATS] BNSTORE` line to check that the
+//! subjects were held packed.
 //!
 //! The subjects are pieces of `tests/fasta/MelaMJNV.fasta` with what the packed form keeps apart
 //! from the bases: lower-case runs (soft masking with `-lcase_masking`, lower-case rows in the
@@ -30,10 +31,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
-/// `0`, the default before, unless the search sets it: every search here runs as it was written,
-/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and this
+/// file's own on 2026-10-18 (perf/bn-memory-rules), each `0`, the default before, unless the
+/// search sets it: every search here runs as it was written, with the switches off that it does
+/// not name (the default runs in `default_bundle.rs` and
+/// `the_subjects_are_held_packed_by_default`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
+    ("LOSAT_X_BNSTORE", "0"),
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
@@ -242,12 +246,12 @@ type Search<'a> = (&'a [&'a str], &'a [(&'a str, &'a str)]);
 //         		warning += "Subject sequence contains no data";
 // ```
 // Every search below gives one report and the same messages (the warning of the subject without
-// letters among them) without the variable and with it: tabular, commented tabular and pairwise
+// letters among them) with the variable `0` (the default before 2026-10-18) and `1`: tabular, commented tabular and pairwise
 // reports, megablast, blastn and dc-megablast, `-lcase_masking`, one and three threads, and three
 // threads with every subject searched before the hand-over (`LOSAT_X_BNSTREAM=0`; it is on by
-// default). With the variable the six
+// default). With `1` the six
 // subjects are held packed, the traceback makes the blastna letters of each subject with hits and
-// the pairwise report the letters of each row; without it none.
+// the pairwise report the letters of each row; with `0` none.
 #[test]
 fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
     let (queries, subjects) = inputs();
@@ -318,6 +322,27 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
             assert_eq!(counter(&stats, "rows_made"), 0, "{options:?}: {stats}");
         }
     }
+}
+
+// No NCBI counterpart: the switch is on by default (an empty value, as unset): the six subjects
+// are held packed; with `LOSAT_X_DEFAULT=0` and no value they are not; the report and the
+// messages are the same.
+#[test]
+fn the_subjects_are_held_packed_by_default() {
+    let (queries, subjects) = inputs();
+    let options = ["-outfmt", "6", "-num_threads", "3"];
+    let default = ("LOSAT_X_BNSTORE", "");
+    let (report, messages, stats) = blastn(queries, subjects, &options, &[default]);
+    assert_eq!(counter(&stats, "subjects"), 6, "{stats}");
+    let (old_report, old_messages, old_stats) = blastn(
+        queries,
+        subjects,
+        &options,
+        &[default, ("LOSAT_X_DEFAULT", "0")],
+    );
+    assert_eq!(counter(&old_stats, "subjects"), 0, "{old_stats}");
+    assert!(report == old_report, "the default changes the report");
+    assert_eq!(messages, old_messages);
 }
 
 // No NCBI counterpart: where the switch acts. A subject range (`-subject_loc`) keeps the

@@ -993,8 +993,11 @@ impl<T> Strips<T> {
         loop {
             if self.ahead > 0 {
                 // spin a little, then sleep 20 us, doubling up to 1 ms (a helper that the
-                // owner does not need costs a few wake-ups per millisecond)
+                // owner does not need costs a few wake-ups per millisecond); on wasm32 only
+                // yield: `std::thread::sleep` panics under the browser's WASI shim (as in
+                // `x_pair_seed_part.rs`'s `pause`)
                 let mut idle = 0u32;
+                #[cfg(not(target_arch = "wasm32"))]
                 let mut nap = 20u64;
                 loop {
                     let cursor = self.cursor.load(Ordering::Relaxed);
@@ -1008,8 +1011,13 @@ impl<T> Strips<T> {
                     if idle < 128 {
                         std::hint::spin_loop();
                     } else {
-                        std::thread::sleep(std::time::Duration::from_micros(nap));
-                        nap = (nap * 2).min(1000);
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            std::thread::sleep(std::time::Duration::from_micros(nap));
+                            nap = (nap * 2).min(1000);
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        std::thread::yield_now();
                     }
                 }
             }

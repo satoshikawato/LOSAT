@@ -817,6 +817,10 @@ impl TblastnArgs {
             // Dispatch point: NCBI keeps the subjects in its scope and makes each one's search forms
             // from it. With the switch the records keep their deflines and the letters are held packed,
             // made again when a subject is searched or reported; without it the records keep them.
+            // Diagnostic (LOSAT_TIMING): the subject FASTA for the common line (utils/xtiming.rs);
+            // with LOSAT_X_TBNSTORE the packing of each record is in this interval too. No NCBI
+            // counterpart.
+            let t_read_fasta = crate::utils::xtiming::clock();
             let (read_subject_records, x_subject_stores) = {
                 let mut stderr = std::io::stderr();
                 let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
@@ -833,6 +837,7 @@ impl TblastnArgs {
                     )
                 }
             };
+            crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
             drop(subject_source);
             let (subjects, subject_placements) =
                 match seq_range::cut_subjects(&read_subject_records, subject_range.as_ref())? {
@@ -1041,7 +1046,11 @@ fn search_cli(
     // (`read_query_batches`). What ends the reading (the end of the input, an `eEOF`, a
     // reader error or LOSAT's rejection of a Seq-id line) comes in the batch that NCBI reads
     // it in, after the reports of the batches before.
+    // Diagnostic (LOSAT_TIMING): the query FASTA for the common line (utils/xtiming.rs). No NCBI
+    // counterpart.
+    let t_read_fasta = crate::utils::xtiming::clock();
     let QueryRecords { records, end } = read_queries(&mut query_source);
+    crate::utils::xtiming::add(crate::utils::xtiming::Phase::ReadFasta, t_read_fasta);
     drop(query_source);
     let reading = match end {
         QueryEnd::Input => QueryReading::End,
@@ -1676,6 +1685,9 @@ fn search(
                 },
             ),
         };
+        // Diagnostic (LOSAT_TIMING): the report for the common line (utils/xtiming.rs); it is
+        // written after all batches are searched. No NCBI counterpart.
+        let t_output = crate::utils::xtiming::clock();
         render(
             outputs,
             queries,
@@ -1706,6 +1718,7 @@ fn search(
                 epilog: batches.stop.is_none() && failed.is_none(),
             },
         )?;
+        crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
         // The failed batch's reading messages, then its error.
         if let Some((range, error)) = failed {
             for warnings in &batches.warnings[range] {

@@ -87,8 +87,9 @@
 //! error is reported) is replayed on the same heaps in the same sequence; a match is left out
 //! before its replay only where that replay's test is true.
 //!
-//! Off unless `LOSAT_X_BPREDOPAR` is set (to any value). Not in the strict set. With
-//! `LOSAT_TIMING=1` each search the path runs prints
+//! `LOSAT_X_BPREDOPAR` is a switch of the strict set (on by default since 2026-10-17): on unless it
+//! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With `LOSAT_TIMING=1` each search the path runs
+//! prints
 //! `[TIMING] x_bpredopar: matches=<n> jobs=<j> windows=<w> split=<s> ended=<e> skipped=<k> wasted=<x> par_s=<s> replay_s=<s>`
 //! (`split`: windows that end inside a query; `ended`: the matches the early termination test
 //! ended, as many as the one-thread loop ends; `skipped`: those of them not computed; `wasted`:
@@ -105,15 +106,15 @@
 //! `[X_SHADOW] BPREDOPAR searches= queries= matches_compared= lists_compared= diffs=`. With
 //! `LOSAT_TIMING=1` the new path's `[TIMING] x_bpredopar:` line is printed as well.
 //!
-//! `LOSAT_X_BPREDOLPT=1` (off unless set; it acts only where this path runs, the shadow mode
-//! included) computes a window of two or more jobs in one `rayon::scope` of `min(threads, jobs)`
+//! `LOSAT_X_BPREDOLPT` (a switch of the strict set, on by default since 2026-10-17; it acts only
+//! where this path runs, the shadow mode included) computes a window of two or more jobs in one `rayon::scope` of `min(threads, jobs)`
 //! tasks instead of a `par_iter` over its jobs: each task holds one set of scratch and takes the
 //! window's jobs one at a time from one counter, in the order of their estimated cost (the sum
 //! over a job's computed matches of query letters times subject letters, largest first, ties by
 //! job index), and stores each job's results in the job's slot (`x_compute_window_lpt`). The
 //! window's results are read by job index as without it. With it on, the `[TIMING] x_bpredopar:`
 //! line ends with `lpt_windows=<windows computed so>`, and the shadow mode's line with `lpt=1`
-//! (which says only that the switch is set; `lpt_windows=` counts the windows that ran with it).
+//! (which says only that the switch is on; `lpt_windows=` counts the windows that ran with it).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3398-3399,3421,3447-3449
 //! ```c
@@ -165,14 +166,14 @@ pub(crate) enum XRedoPar {
 
 // No NCBI counterpart: reads the LOSAT_X_BPREDOPAR / LOSAT_X_BPREDOPARSHADOW switches once; it does
 // not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BPREDOPAR): off unless set to any value; `LOSAT_X_BPREDOPARSHADOW` (any
-/// value) selects the shadow mode.
+/// EXPERIMENT (LOSAT_X_BPREDOPAR): a strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+/// and it is not set; `LOSAT_X_BPREDOPARSHADOW` (any value) selects the shadow mode.
 pub(crate) fn x_bp_redo_par() -> XRedoPar {
     static MODE: OnceLock<XRedoPar> = OnceLock::new();
     *MODE.get_or_init(|| {
         if std::env::var_os("LOSAT_X_BPREDOPARSHADOW").is_some() {
             XRedoPar::Shadow
-        } else if std::env::var_os("LOSAT_X_BPREDOPAR").is_some() {
+        } else if crate::utils::xswitch::on("LOSAT_X_BPREDOPAR") {
             XRedoPar::On
         } else {
             XRedoPar::Off
@@ -182,11 +183,12 @@ pub(crate) fn x_bp_redo_par() -> XRedoPar {
 
 // No NCBI counterpart: reads the LOSAT_X_BPREDOLPT switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPREDOLPT): off unless set to any value. It acts only where the redo runs
+/// EXPERIMENT (LOSAT_X_BPREDOLPT): a strict-set switch, on unless it is `0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set. It acts only where the redo runs
 /// in windows (`LOSAT_X_BPREDOPAR` or `LOSAT_X_BPREDOPARSHADOW`).
 pub(crate) fn x_bp_redo_lpt() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("LOSAT_X_BPREDOLPT").is_some())
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPREDOLPT"))
 }
 
 /// Jobs per thread that a window holds at most, unless `LOSAT_X_BPREDOPARWINDOW` gives another
@@ -1495,7 +1497,7 @@ fn x_shadow_print_line() {
         X_SHADOW_MATCHES.load(Ordering::Relaxed),
         X_SHADOW_LISTS.load(Ordering::Relaxed),
         X_SHADOW_DIFFS.load(Ordering::Relaxed),
-        // EXPERIMENT (LOSAT_X_BPREDOLPT): ` lpt=1` says the switch is set (the shadow checked the
+        // EXPERIMENT (LOSAT_X_BPREDOLPT): ` lpt=1` says the switch is on (the shadow checked the
         // windows computed with it, if any: one thread or one-job windows have none); the windows
         // that ran with it are counted by `lpt_windows=` on the `[TIMING]` line.
         if x_bp_redo_lpt() { " lpt=1" } else { "" },

@@ -17,9 +17,20 @@ use crate::utils::dust::MaskedInterval;
 #[path = "x_mb_lookup_par.rs"]
 pub(crate) mod x_mb_lookup_par;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1090-1091
+// ```c
+//          mb_lt->next_pos[index] = mb_lt->hashtable[ecode];
+//          mb_lt->hashtable[ecode] = index;
+// ```
+// EXPERIMENT (LOSAT_X_MBLUTONCE): the pool fill of `x_mb_lookup_par` with each query position
+// read once and each word applied by the owner of its cell.
+#[path = "x_mb_lookup_once.rs"]
+mod x_mb_lookup_once;
+
 /// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): the
-/// `[X_SHADOW] MBLUTPAD` line (LOSAT_X_MBLUTPAD with LOSAT_X_PAIRPARSHADOW) and, with LOSAT_TIMING,
-/// the `[TIMING] x_mb_lookup_*` lines of the megablast table builds.
+/// `[X_SHADOW] MBLUTPAD` and `[X_SHADOW] MBLUTONCE` lines (LOSAT_X_MBLUTPAD or LOSAT_X_MBLUTONCE
+/// with LOSAT_X_PAIRPARSHADOW) and, with LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the
+/// megablast table builds.
 pub fn x_mb_lookup_print_summary() {
     x_mb_lookup_par::print_summary();
 }
@@ -1768,9 +1779,9 @@ fn build_mb_lookup(
     // thread owns whole blocks of cells); see x_mb_lookup_par.rs.
     x_clock.fill();
     let x_on_pool = x_mb_lookup_par::parts(db_word_counts.is_none() && !debug_mode);
-    let mut x_padded = false;
+    let mut x_filled = x_mb_lookup_par::FillStats::default();
     if let Some(x_parts) = x_on_pool {
-        x_padded = x_mb_lookup_par::fill(
+        x_filled = x_mb_lookup_par::fill(
             x_parts,
             &x_mb_lookup_par::Words {
                 queries_blastna,
@@ -1916,7 +1927,7 @@ fn build_mb_lookup(
         longest_chain = longest_chain.max(value as usize);
     }
     // No NCBI counterpart: the end of the `[TIMING] x_mb_lookup_build` interval.
-    x_clock.record(x_on_pool.is_some(), x_padded);
+    x_clock.record(x_on_pool.is_some(), x_filled);
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1104-1106
     // ```c
     //    longest_chain = 2;

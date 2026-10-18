@@ -22,6 +22,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
+/// `0`, the default before, unless the search sets it: every search here runs as it was written,
+/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
+    ("LOSAT_X_BPDBCUT", "0"),
+    ("LOSAT_X_BPLKPAHEAD", "0"),
+    ("LOSAT_X_BPREDOLPT", "0"),
+    ("LOSAT_X_BPREDOPAR", "0"),
+    ("LOSAT_X_BPSUBJMETA", "0"),
+    ("LOSAT_X_DIAGLV", "0"),
+    ("LOSAT_X_PAIRPARDISC", "0"),
+    ("LOSAT_X_PAIRPARFOLD", "0"),
+    ("LOSAT_X_QBATCHPAR", "0"),
+    ("LOSAT_X_QDUSTPAR", "0"),
+    ("LOSAT_X_QPREPPAR", "0"),
+    ("LOSAT_X_RPTSTREAM", "0"),
+];
+
 const SWITCH: (&str, &str) = ("LOSAT_X_RPTSTREAM", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_RPTSTREAMSHADOW", "1");
 const QBATCHPAR: (&str, &str) = ("LOSAT_X_QBATCHPAR", "1");
@@ -161,6 +179,7 @@ fn blastn(args: &[&str], threads: u32, switches: &[(&str, &str)], out: Option<&P
         .args(args)
         .args(["-num_threads", &threads.to_string()])
         .env("BATCH_SIZE", "4000")
+        .envs(PREVIOUS_DEFAULT.iter().copied())
         .envs(switches.iter().copied());
     if let Some(out) = out {
         let _ = std::fs::remove_file(out);

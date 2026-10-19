@@ -864,9 +864,9 @@ struct MbLookupTable {
     pv_array_bts: usize,
     longest_chain: usize,
     /// EXPERIMENT (LOSAT_X_MBLUTKEEP): the batch loop's keep that takes `hashtable` back when the
-    /// table is dropped, with the number of cells the build used (`x_mb_lut_keep.rs`; a kept
-    /// `hashtable` can be longer than the table, whose cells are its first ones); `None` frees
-    /// it, as NCBI's `BlastMBLookupTableDestruct`.
+    /// table is dropped, with the number of its first elements that may hold values (`Keep::take`;
+    /// `x_mb_lut_keep.rs`; a kept `hashtable` can be longer than the table, whose cells are its
+    /// first ones); `None` frees it, as NCBI's `BlastMBLookupTableDestruct`.
     x_keep: Option<(std::sync::Arc<x_mb_lut_keep::Keep>, usize)>,
 }
 
@@ -877,8 +877,8 @@ struct MbLookupTable {
 // EXPERIMENT (LOSAT_X_MBLUTKEEP): the hashtable goes back to the batch loop's keep instead.
 impl Drop for MbLookupTable {
     fn drop(&mut self) {
-        if let Some((keep, cells)) = self.x_keep.take() {
-            keep.give_back(std::mem::take(&mut self.hashtable), cells);
+        if let Some((keep, dirty)) = self.x_keep.take() {
+            keep.give_back(std::mem::take(&mut self.hashtable), dirty);
         }
     }
 }
@@ -1751,9 +1751,9 @@ fn build_mb_lookup(
     // `table_size` cells, with every cell 0 (`x_resident`: its pages are mapped; the table is its
     // first `table_size` cells, `hashtable[..table_size]` below), otherwise a fresh zeroed table
     // as before (`x_mb_lut_keep.rs`).
-    let (mut hashtable, x_resident) = match x_keep {
+    let (mut hashtable, x_resident, x_dirty) = match x_keep {
         Some(keep) => keep.take(table_size, x_mb_lookup_par::pool_threads().is_some()),
-        None => (vec![0u32; table_size], false),
+        None => (vec![0u32; table_size], false, table_size),
     };
     let max_query_offset = queries_blastna
         .iter()
@@ -2041,7 +2041,7 @@ fn build_mb_lookup(
         pv_array,
         pv_array_bts,
         longest_chain,
-        x_keep: x_keep.map(|keep| (keep.clone(), table_size)),
+        x_keep: x_keep.map(|keep| (keep.clone(), x_dirty)),
     }
 }
 

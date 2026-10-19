@@ -18,18 +18,22 @@
 //! of LOSAT_X_MBLUTPREFAULT), and freeing it unmaps the pages and flushes their entries from the
 //! TLBs of every CPU the search ran on. Here the batch loop holds a `Keep`; a table built for the
 //! loop goes to it when its batch drops the table (`MbLookupTable`'s `Drop`), and the next build
-//! takes it when it is at least as long as the build's table: it writes 0 to the cells the last
-//! build used (on the search pool when the build runs on a pool of two threads or more; the other
-//! cells are 0 already) and the build uses its first cells as its table. The longest table is
-//! kept: NCBI's `CBatchSizeMixer` alternates full batches with small probe batches (megablast of
-//! 31,168 D. melanogaster cDNAs: 18 tables of 4^12 cells and 19 of 4^8 or 4^11), and a probe
-//! batch's table is the start of the kept one. A build whose table is longer than the kept one
-//! frees the kept one first and allocates a fresh table, which the keep takes back instead. The
-//! loop frees the `Keep` and its table when it ends.
+//! takes it when it is at least as long as the build's table: it writes 0 to the cells of its table
+//! that earlier builds wrote (on the search pool when the build runs on a pool of two threads or
+//! more; the other cells are 0 already) and the build uses its first cells as its table. The
+//! longest table is kept: NCBI's `CBatchSizeMixer` alternates full batches with small probe
+//! batches (megablast of 31,168 D. melanogaster cDNAs: 18 tables of 4^12 cells and 19 of 4^8 or
+//! 4^11), and a probe batch's table is the start of the kept one. The keep records the longest
+//! start of the table that builds wrote since it was last zeroed (`dirty`), so a probe batch's
+//! build zeroes its own cells only and leaves the rest of the full batch's cells to the next build
+//! that uses them (a search that ends with probe batches never zeroes them; megablast of 1,775
+//! cDNAs builds tables of 4^11, 4^8 and 4^12 cells). A build whose table is longer than the kept
+//! one frees the kept one first and allocates a fresh table, which the keep takes back instead.
+//! The loop frees the `Keep` and its table when it ends.
 //!
 //! Why the table is NCBI's. The fill reads a cell before it writes it (`hashtable[ecode] == 0`, the
 //! cell's head) and relies on `calloc`'s zeros; on a kept table every cell of the build's table is
-//! 0 before the fill starts (the cells written by the last build are set to 0, and no build writes
+//! 0 before the fill starts (its cells that earlier builds wrote are set to 0, and no build writes
 //! past its own cells), so the fill sees what it sees in a fresh table and writes the same cells
 //! (the other arrays, `next_pos`, `pv_array` and the counters of `longest_chain`, are allocated as
 //! before). Every reader takes cells by a word's index, below `1 << 2 * lut_word_length` (the
@@ -92,7 +96,8 @@ static SHADOW_TABLES: AtomicU64 = AtomicU64::new(0);
 static SHADOW_CELLS: AtomicU64 = AtomicU64::new(0);
 
 /// The kept table: as long as the largest table built so far; its first `dirty` elements may
-/// hold values of the last fill (the cells that build used), the others are 0.
+/// hold values of earlier fills (the longest start that builds wrote since it was last zeroed),
+/// the others are 0.
 struct Kept {
     table: Vec<u32>,
     dirty: usize,
@@ -110,34 +115,37 @@ impl Keep {
         on().then(|| Arc::new(Keep::default()))
     }
 
-    /// A table for a build of `cells` cells, its first `cells` elements 0: the kept one when it
-    /// has at least that many elements (`true`; the build uses its first `cells`), with the cells
-    /// of the last fill set to 0; else a fresh `vec![0; cells]` (`false`), after the kept one is
+    /// A table for a build of `cells` cells, its first `cells` elements 0, and the number of its
+    /// first elements that may hold values once the build has filled it: the kept one when it has
+    /// at least that many elements (`true`; the build uses its first `cells`), with the elements of
+    /// its first `cells` that earlier fills wrote set to 0 (the written elements past them stay as
+    /// they are and stay counted); else a fresh `vec![0; cells]` (`false`), after the kept one is
     /// freed. `on_pool`: the build runs on a pool of two threads or more, which writes the zeros.
-    pub(super) fn take(&self, cells: usize, on_pool: bool) -> (Vec<u32>, bool) {
+    pub(super) fn take(&self, cells: usize, on_pool: bool) -> (Vec<u32>, bool, usize) {
         let kept = self.kept.lock().unwrap_or_else(|e| e.into_inner()).take();
         let Some(Kept { mut table, dirty }) = kept.filter(|kept| kept.table.len() >= cells) else {
             FRESH.fetch_add(1, Ordering::Relaxed);
-            return (vec![0u32; cells], false);
+            return (vec![0u32; cells], false, cells);
         };
         let start = super::x_mb_lookup_par::timing_on().then(std::time::Instant::now);
-        zero(&mut table[..dirty], on_pool);
+        zero(&mut table[..dirty.min(cells)], on_pool);
         if let Some(start) = start {
             ZERO_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
         KEPT.fetch_add(1, Ordering::Relaxed);
-        (table, true)
+        (table, true, dirty.max(cells))
     }
 
-    /// Takes back the table of a dropped `MbLookupTable`, whose build used its first `cells`
-    /// elements: kept when nothing is kept or the kept one is shorter, else freed.
-    pub(super) fn give_back(&self, table: Vec<u32>, cells: usize) {
+    /// Takes back the table of a dropped `MbLookupTable`, whose first `dirty` elements may hold
+    /// values (`take`'s third value): kept when nothing is kept or the kept one is shorter, else
+    /// freed.
+    pub(super) fn give_back(&self, table: Vec<u32>, dirty: usize) {
         let mut slot = self.kept.lock().unwrap_or_else(|e| e.into_inner());
         if slot
             .as_ref()
             .is_none_or(|kept| kept.table.len() < table.len())
         {
-            let dirty = cells.min(table.len());
+            let dirty = dirty.min(table.len());
             let old = slot.replace(Kept { table, dirty });
             drop(slot);
             drop(old);
@@ -241,29 +249,42 @@ mod tests {
         assert_eq!(built.longest_chain, fresh.longest_chain, "{what}");
     }
 
-    // A keep takes back the longest table with the cells its build used, gives it out to builds
-    // of no more cells with those cells set to 0, and frees it for a longer build.
+    // A keep takes back the longest table with the start that builds wrote, gives it out to
+    // builds of no more cells with their cells set to 0 (the written elements past them stay and
+    // stay counted), and frees it for a longer build.
     #[test]
     fn the_keep_holds_the_longest_table_and_gives_it_out_zeroed() {
         let keep = Keep::default();
-        let (table, from_keep) = keep.take(8, false);
-        assert!(!from_keep);
+        let (table, from_keep, dirty) = keep.take(8, false);
+        assert_eq!((from_keep, dirty), (false, 8));
         assert_eq!(table, vec![0; 8]);
         keep.give_back(vec![7; 8], 8);
         keep.give_back(vec![5; 4], 4);
         assert_eq!(kept(&keep), Some((8, 8)), "a shorter table is freed");
-        let (mut table, from_keep) = keep.take(4, false);
+        let (mut table, from_keep, dirty) = keep.take(4, false);
         assert!(from_keep, "a shorter build takes the kept table");
-        assert_eq!(table, vec![0; 8], "every cell the last build used is 0");
+        assert_eq!(
+            dirty, 8,
+            "the written elements past the build's cells stay counted"
+        );
+        assert_eq!(
+            table,
+            [0, 0, 0, 0, 7, 7, 7, 7],
+            "only the build's cells are set to 0"
+        );
         assert_eq!(kept(&keep), None);
-        table[..4].fill(3);
+        table[..2].fill(3);
+        keep.give_back(table, dirty);
+        assert_eq!(kept(&keep), Some((8, 8)));
+        let (table, from_keep, dirty) = keep.take(8, false);
+        assert_eq!((from_keep, dirty), (true, 8));
+        assert_eq!(table, vec![0; 8]);
         keep.give_back(table, 4);
         assert_eq!(kept(&keep), Some((8, 4)));
-        let (table, from_keep) = keep.take(8, false);
-        assert!(from_keep);
-        assert_eq!(table, vec![0; 8]);
-        keep.give_back(vec![1; 8], 8);
-        let (table, from_keep) = keep.take(16, false);
+        let (table, from_keep, dirty) = keep.take(2, false);
+        assert_eq!((from_keep, dirty), (true, 4));
+        keep.give_back(table, dirty);
+        let (table, from_keep, _) = keep.take(16, false);
         assert!(!from_keep, "a longer build allocates");
         assert_eq!(table, vec![0; 16]);
         assert_eq!(kept(&keep), None, "the shorter kept table is freed first");
@@ -277,9 +298,16 @@ mod tests {
                 .num_threads(4)
                 .build()
                 .unwrap();
-            let (table, from_keep) = pool.install(|| keep.take(1 << 12, true));
-            assert!(from_keep);
-            assert!(table.iter().all(|&cell| cell == 0), "zeroed on the pool");
+            let (table, from_keep, dirty) = pool.install(|| keep.take(1 << 12, true));
+            assert_eq!((from_keep, dirty), (true, 1 << 20));
+            assert!(
+                table[..1 << 12].iter().all(|&cell| cell == 0),
+                "zeroed on the pool"
+            );
+            assert!(
+                table[1 << 12..].iter().all(|&cell| cell == 9),
+                "past the build's cells"
+            );
         }
     }
 
@@ -292,7 +320,7 @@ mod tests {
     // with the `resident` flag; these queries are too short for the prefault round, which the
     // whole-search tests cover): every build equals the same build on a fresh table, every build
     // of no more cells than the kept table takes it (filled by earlier builds), and the elements
-    // past the cells the last build used stay 0.
+    // past the start that builds wrote stay 0.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -335,7 +363,8 @@ mod tests {
                         );
                         (
                             kept.table.len(),
-                            kept.table[..kept.dirty].iter().any(|&c| c != 0),
+                            kept.dirty,
+                            kept.table[..kept.dirty.min(cells)].iter().any(|&c| c != 0),
                         )
                     });
                     let built = build_mb_lookup(
@@ -350,15 +379,19 @@ mod tests {
                         ascending,
                         Some(&keep),
                     );
-                    match before {
-                        Some((len, dirty)) if len >= cells => {
+                    let dirty = match before {
+                        Some((len, dirty, written)) if len >= cells => {
                             assert_eq!(kept(&keep), None, "case {case}: the kept table taken");
                             assert_eq!(built.hashtable.len(), len, "case {case}");
                             reused += 1;
-                            reused_dirty += usize::from(dirty);
+                            reused_dirty += usize::from(written);
+                            dirty.max(cells)
                         }
-                        _ => assert_eq!(built.hashtable.len(), cells, "case {case}: fresh"),
-                    }
+                        _ => {
+                            assert_eq!(built.hashtable.len(), cells, "case {case}: fresh");
+                            cells
+                        }
+                    };
                     assert_same(
                         &built,
                         &fresh,
@@ -366,7 +399,7 @@ mod tests {
                     );
                     let len = built.hashtable.len();
                     drop(built);
-                    assert_eq!(kept(&keep), Some((len, cells)), "case {case}: given back");
+                    assert_eq!(kept(&keep), Some((len, dirty)), "case {case}: given back");
                 }
                 // Every build but the first (4^11) and the first 4^12, which is longer than the
                 // kept table: 14 of 16.

@@ -3178,7 +3178,7 @@ Scheduling (each value computed by one thread with the original function; order 
   builder's time; max RSS 23 -> 19 MiB on 40 kb x 3,000 cDNAs, 15 -> 17 MiB on 5 kb x 3,000 cDNAs
   at 8 threads (the default before both: 21 and 19 MiB).
 - `LOSAT_X_TBXUNGAP=1` (TBLASTX, speed; in the strict set from the pull request that added it,
-  2026-10-18; `=0` turns it off; native builds, the wasm32 build keeps its 16-residue v128 walks) the
+  2026-10-18; `=0` turns it off; every target, the wasm32 builds (LOSAT Web) since 2026-10-19) the
   two-hit ungapped extension (`extend_hit_two_hit`, NCBI `s_BlastAaExtendTwoHit`: the word loop and the
   `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` walks) reads its scores from one 256 x 256 byte table
   (`q << 8 | s`, the scores of `get_score` for every two bytes, `BLAST_SCORE_MIN` stored as -128) and runs
@@ -3194,6 +3194,15 @@ Scheduling (each value computed by one thread with the original function; order 
   AP027133 instructions 72.2 -> 69.0 G, cycles 34.9 -> 34.1 G (about 100 instructions and 25 cycles fewer
   per extension). What is left of an extension is the latency of its first query loads and the
   mispredicted exits of the walks (`LOSAT_X_TBXEXTBATCH` takes the first).
+  wasm32 (plan v4 line W, item W7): until 2026-10-19 the wasm32 builds kept the 16-residue v128 walks of
+  `two_hit.rs`, which take each lane out of the vector and call `get_score` for it, so every step was the
+  reference's scalar step. With the table, Node 26 (V8 TurboFan), warm searches of the LOSAT Web threaded
+  and serial reactors, all arms in one process alternating search by search (6 rounds), CPU time per stage
+  from `perf` (cpu-clock) in each search's window, divided by the stages the change does not touch
+  (linking, SEG, reports, statistics, sorting) because this machine's CPU time moves by up to 2x with core
+  placement: the extension stage x0.851 (AP027131 x AP027133 code 4, 8 threads, 6/6 rounds faster), x0.784
+  (MelaMJNV x PemoMJNVA, 8 threads, 6/6) and x0.841 (MelaMJNV x PemoMJNVA, serial reactor, 5/6); the whole
+  search x0.970, x0.966 and x0.978; every report identical.
 - `LOSAT_X_TBXUNGAPSHADOW=1` shadow of `LOSAT_X_TBXUNGAP` (turns the path on): every extension runs both
   ways and the seven results (offsets, score, `right_extend`, `s_last_off`) must be equal; any difference
   panics with the inputs; the reference's result is used. One line at exit:

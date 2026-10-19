@@ -4,8 +4,7 @@
 
 use super::get_score;
 use super::ungapped::extend_hit_ungapped;
-// EXPERIMENT (LOSAT_X_TBXUNGAP): native builds only (x_two_hit_fast.rs).
-#[cfg(not(target_arch = "wasm32"))]
+// EXPERIMENT (LOSAT_X_TBXUNGAP): x_two_hit_fast.rs.
 use super::x_two_hit_fast;
 
 // Import the internal extension functions from ungapped module
@@ -373,8 +372,7 @@ fn extend_right_ungapped(
 /// * `x_drop` - X-drop threshold (LOSAT default: 11, NCBI standard: 7)
 // EXPERIMENT (LOSAT_X_TBXUNGAP / LOSAT_X_TBXUNGAPSHADOW): the same values from the table walks of
 // x_two_hit_fast.rs, which hand back to `extend_hit_two_hit_reference` what they do not cover; the
-// debug output (`debug_ext`) stays with the reference, and the wasm32 build calls the reference as
-// before.
+// debug output (`debug_ext`) stays with the reference.
 #[inline]
 pub fn extend_hit_two_hit(
     q_seq: &[u8],
@@ -385,7 +383,6 @@ pub fn extend_hit_two_hit(
     x_drop: i32,
     debug_ext: bool,
 ) -> (usize, usize, usize, usize, i32, bool, usize) {
-    #[cfg(not(target_arch = "wasm32"))]
     if !debug_ext {
         match x_two_hit_fast::mode() {
             0 => {}

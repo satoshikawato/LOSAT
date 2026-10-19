@@ -1,0 +1,1 @@
+- LOSAT Web (wasm32): `tblastx` two-hit extensions read their scores from the byte table of `LOSAT_X_TBXUNGAP`, as the native builds do since 2026-10-18 (the wasm32 builds kept the reference walks); warm searches under Node: extension stage x0.78-0.85, whole search x0.97-0.98 (same results).

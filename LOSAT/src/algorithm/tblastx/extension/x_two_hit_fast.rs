@@ -49,8 +49,10 @@
 //!   -128 and a -32768 step to wrap differently, where the reference (and NCBI's `Int4`) overflows
 //!   too.
 //!
-//! The switch acts on every target but wasm32, whose build keeps the 16-residue v128 walks of
-//! `two_hit.rs` (not measured in the browser; line W of plan v4).
+//! The switch acts on every target. Until line W of plan v4 measured it (item W7), wasm32 kept the
+//! 16-residue v128 walks of `two_hit.rs`, which take each lane out of the vector and call
+//! `get_score` for it (scalar steps); with the table the two-hit extension of the LOSAT Web
+//! engine takes 0.78-0.85 of that time (`docs/agents/diagnostics.md`, entry `LOSAT_X_TBXUNGAP`).
 //!
 //! No NCBI counterpart for the switch itself: it chooses between two LOSAT code paths with the
 //! same result.
@@ -109,12 +111,8 @@ static STATE: OnceLock<State> = OnceLock::new();
 fn state() -> &'static State {
     STATE.get_or_init(|| {
         // `LOSAT_X_TBXUNGAP` is a strict-set switch; the shadow variable is read first, as "set to
-        // any value". wasm32 keeps the reference walks (module comment).
-        let table = if cfg!(target_arch = "wasm32") {
-            None
-        } else {
-            build_table()
-        };
+        // any value".
+        let table = build_table();
         let mode = if table.is_none() {
             0
         } else if std::env::var_os("LOSAT_X_TBXUNGAPSHADOW").is_some() {
@@ -342,8 +340,7 @@ pub(super) fn shadow(
     expect
 }
 
-// The fast path is off on wasm32 (the table is not built there).
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

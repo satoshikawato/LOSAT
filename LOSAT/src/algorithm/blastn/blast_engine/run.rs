@@ -12053,7 +12053,66 @@ fn search_query_batch(
                                 );
                             }
                         };
-                    if let Some(disc) = two_stage.disc() {
+                    // EXPERIMENT (exp/r11-csr, v4-R R11; evidence only): `on_word` over the CSR
+                    // of the chains (R4_PROBE csr; one template, no debug counters): the same
+                    // presence test, the cell's run of `qs` in the chain's order, the same
+                    // flushes of the offset array; with `pf` through `x_r4_probe::CsrRing`.
+                    macro_rules! r11_csr_scan {
+                        (|$push:ident| $scan:block) => {{
+                            let r11 = x_r4_probe::probe();
+                            let (r11_off, r11_qs) = two_stage.x_r11_csr();
+                            let mut emit = |kmer_start: usize, s_range: usize, kmer: u64| {
+                                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
+                                if two_stage.has_hits(kmer) {
+                                    let c = kmer as usize;
+                                    let run = &r11_qs[r11_off[c] as usize..r11_off[c + 1] as usize];
+                                    for &q_off_1 in run {
+                                        offset_pairs[offset_pairs_len] = OffsetPair {
+                                            q_off: q_off_1 as usize - 1,
+                                            s_off: kmer_start,
+                                            s_range,
+                                        };
+                                        offset_pairs_len += 1;
+                                    }
+                                }
+                                if offset_pairs_len >= offset_array_size {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
+                            };
+                            let mut ring = x_r4_probe::CsrRing::new(r11, r11_off, r11_qs);
+                            {
+                                let mut $push =
+                                    |a: usize, b: usize, c: u64| ring.push((a, b, c), &mut emit);
+                                $scan
+                            }
+                            ring.flush(&mut emit);
+                        }};
+                    }
+                    if let Some(disc) = two_stage.disc().filter(|_| x_r4_probe::probe().csr) {
+                        assert!(!disc.two_templates, "R4_PROBE csr: one template only");
+                        r11_csr_scan!(|push| {
+                            scan_subject_disc_words_with_ranges(
+                                search_seq_packed,
+                                s_len,
+                                disc,
+                                &subject_seq_ranges,
+                                subject_masked,
+                                |s_off, s_range, index, _index2| push(s_off, s_range, index),
+                            );
+                        });
+                    } else if let Some(disc) = two_stage.disc() {
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:1647-1684
                         // ```c
                         //     scan_range[0] = 0;  /* subject seq mask index */
@@ -12095,7 +12154,21 @@ fn search_query_batch(
                             select_mb_scan_kind(lut_word_length, scan_step, subject_masked);
                         // EXPERIMENT (exp/r4-scan-probes, v4-R R4): the R4_PROBE arms.
                         let r4 = x_r4_probe::probe();
-                        if r4.on() {
+                        if r4.csr {
+                            r11_csr_scan!(|push| {
+                                scan_subject_kmers_with_ranges(
+                                    search_seq_packed,
+                                    s_len,
+                                    word_length,
+                                    lut_word_length,
+                                    scan_step,
+                                    &subject_seq_ranges,
+                                    subject_masked,
+                                    mb_scan_kind,
+                                    |a, b, c| push(a, b, c),
+                                );
+                            });
+                        } else if r4.on() {
                             let (r4_ht, r4_np) = two_stage.x_r4_raw();
                             let r4_pv = r4.pv.then(|| x_r4_probe::CellPv::build(r4_ht));
                             macro_rules! r4_scan {
@@ -12118,7 +12191,10 @@ fn search_query_batch(
                                         subject_masked,
                                         mb_scan_kind,
                                         |kmer_start, s_range, current_lut_kmer| {
-                                            ring.push((kmer_start, s_range, current_lut_kmer), &mut emit)
+                                            ring.push(
+                                                (kmer_start, s_range, current_lut_kmer),
+                                                &mut emit,
+                                            )
                                         },
                                     );
                                     ring.flush(&mut emit);
@@ -12130,19 +12206,19 @@ fn search_query_batch(
                                 r4_scan!(false)
                             }
                         } else {
-                        scan_subject_kmers_with_ranges(
-                            search_seq_packed,
-                            s_len,
-                            word_length,
-                            lut_word_length,
-                            scan_step,
-                            &subject_seq_ranges,
-                            subject_masked,
-                            mb_scan_kind,
-                            |kmer_start, s_range, current_lut_kmer| {
-                                on_word(kmer_start, s_range, current_lut_kmer, None)
-                            },
-                        );
+                            scan_subject_kmers_with_ranges(
+                                search_seq_packed,
+                                s_len,
+                                word_length,
+                                lut_word_length,
+                                scan_step,
+                                &subject_seq_ranges,
+                                subject_masked,
+                                mb_scan_kind,
+                                |kmer_start, s_range, current_lut_kmer| {
+                                    on_word(kmer_start, s_range, current_lut_kmer, None)
+                                },
+                            );
                         }
                     }
 

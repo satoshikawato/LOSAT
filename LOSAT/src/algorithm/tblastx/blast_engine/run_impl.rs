@@ -1647,6 +1647,7 @@ fn write_tblastx_outputs(
     if run.v1_titles && output_formats.contains(&report::TblastxOutputFormat::Pairwise) {
         check_shown_subject_titles(&hits, run.subjects)?;
     }
+    // EXPERIMENT (LOSAT_X_TBXRPTPAR): the identities over chunks of the list on the pool.
     match run.x_pool {
         Some(pool) => crate::algorithm::tblastx::x_rpt_par::set_displayed_identities(
             pool,
@@ -1672,6 +1673,7 @@ fn write_tblastx_outputs(
     // displayed rows of outfmt 0.
     let pairwise = (outputs.hits.is_some()
         || output_formats.contains(&report::TblastxOutputFormat::Pairwise))
+    // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows as an indexed map on the pool.
     .then(|| match run.x_pool {
         Some(pool) => crate::algorithm::tblastx::x_rpt_par::pairwise_hits(
             pool,
@@ -1878,6 +1880,7 @@ fn write_tblastx_outputs(
         }
         writer.flush()?;
     }
+    // EXPERIMENT (LOSAT_X_TBXRPTPARSHADOW): the shadow's line after the reports.
     if run.x_pool.is_some() {
         crate::algorithm::tblastx::x_rpt_par::print_shadow_summary();
     }
@@ -2016,7 +2019,7 @@ fn run_in_pool(
         subjects: &subjects.shown,
         titles: std::cell::RefCell::new(DatabaseTitles::new()),
         v1_titles,
-        pool: parallel_pool,
+        x_search_pool: parallel_pool,
     };
     // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:173
     // ```c
@@ -2533,8 +2536,9 @@ struct BatchReports<'a> {
     /// `-db`: the stored titles of the batches' reported sequences (`run_in_pool`).
     titles: std::cell::RefCell<DatabaseTitles>,
     v1_titles: bool,
-    /// The search's pool (`TblastxReportRun::x_pool`).
-    pool: &'a crate::utils::threading::SearchPool<'a>,
+    /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the search's pool, for the report stage
+    /// (`TblastxReportRun::x_pool`).
+    x_search_pool: &'a crate::utils::threading::SearchPool<'a>,
 }
 
 impl BatchReports<'_> {
@@ -2601,7 +2605,7 @@ impl BatchReports<'_> {
                 ranges: self.query_runs,
                 epilog,
                 v1_titles: self.v1_titles,
-                x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.pool),
+                x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
             },
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);

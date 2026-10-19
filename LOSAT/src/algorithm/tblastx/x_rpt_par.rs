@@ -5,9 +5,9 @@
 //! Before this switch every part of that stage ran on that thread while the other threads of
 //! the pool waited: on the genome 3 x 3 input at 16 threads (ws, 2026-10-19) the stage took
 //! 1.31 s of 8.6 s with outfmt 6 and 3.37 s of 10.6 s with outfmt 0, of which the displayed
-//! identities took 0.99 s (each HSP's codons translated again from the nucleotides) and the
-//! outfmt 0 rows 1.80 s (translated a second time, with the masks lowercased), and the tabular
-//! rows 0.17 s (v4-B `DESIGN_B7.md` §1).
+//! identities took 0.99 s (each HSP's codons translated again from the nucleotides), the
+//! outfmt 0 rows 1.80 s (translated a second time, with the masks lowercased), the tabular rows
+//! 0.17 s (outfmt 0's text 0.41 s) and the final order (`report_order`) 0.15 s.
 //!
 //! What the switch changes (read once per process, `mode`), when the pool has two threads or
 //! more (`pool`):
@@ -22,15 +22,16 @@
 //!    warnings before each query, the outfmt 7 headers and the last line stay on the loop's
 //!    thread, in the serial order. With the Web adapter's format observer (`FormatProbe`, which
 //!    flushes around every row) the rows are written by the serial function.
+//! The final order (`report_order`), the outfmt 0 text (`write_tblastx_pairwise_report`) and the
+//! writes stay on the loop's thread.
 //!
 //! Why the bytes are those of the serial stage: every value is computed by the serial code's
 //! function of one HSP (or of one row) on the same inputs (the HSP, the query and subject
 //! letters, the genetic codes, the placements, the masks), which reads nothing another HSP
 //! writes; the order of the final list is not changed (chunks are disjoint slices; the map is
 //! collected by index); the rows of a query are the serial rows, concatenated in chunk order.
-//! No floating-point value is summed across HSPs. A failed write of the output stops the run as
-//! before, at the write of a buffer instead of a row (what reached the output before the error
-//! can be shorter by less than a window).
+//! No floating-point value is summed across HSPs. The same bytes go to the writer in the same
+//! order, in larger writes; a failed write stops the run as before.
 //!
 //! Off (the serial stage): the switch off (`LOSAT_X_TBXRPTPAR=0`, or `LOSAT_X_DEFAULT=0` and it
 //! is not set); a pool of one thread or none (`-num_threads 1`, builds without the `parallel`
@@ -414,6 +415,8 @@ fn format_rows(
         .collect()
 }
 
+// No NCBI counterpart: the shadow's line after the reports (`LOSAT_X_TBXRPTPARSHADOW`); it does not
+// change any value NCBI computes.
 /// The shadow's line after the reports (`LOSAT_X_TBXRPTPARSHADOW`).
 pub(crate) fn print_shadow_summary() {
     if mode() == 2 {

@@ -142,6 +142,17 @@ fn check_format(outfmt: &str) {
         "the empty record has a warning: {}",
         stderr(&off)
     );
+    if outfmt != "0" {
+        // The first query's rows are formatted in windows of chunks (more than 1,024 rows).
+        let rows = String::from_utf8_lossy(&off.stdout)
+            .lines()
+            .filter(|line| line.starts_with("a\t"))
+            .count();
+        assert!(
+            rows > 2_048,
+            "outfmt {outfmt}: {rows} rows of the first query"
+        );
+    }
     for threads in THREADS {
         let on = tblastx(threads, outfmt, &[]);
         assert!(on.status.success(), "threads {threads}: {}", stderr(&on));

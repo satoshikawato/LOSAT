@@ -2819,7 +2819,7 @@ const X_GREEDY_BLOCK: usize = 256;
 ///
 /// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
 #[inline(always)]
-unsafe fn x_greedy_row_impl<const REVERSE: bool>(
+unsafe fn x_greedy_row_impl<const REVERSE: bool, const SCALAR2: bool>(
     seq1: *const u8,
     seq2: *const u8,
     len1: i32,
@@ -2889,6 +2889,11 @@ unsafe fn x_greedy_row_impl<const REVERSE: bool>(
         } else {
             let longest_match_run = cold.longest_match_run;
             for i in 0..block_len {
+                // EXPERIMENT (R9_PROBE=sc): an empty asm statement keeps this loop scalar (one
+                // `tzcnt` / `lzcnt` per diagonal); compiled out of the default instance.
+                if SCALAR2 {
+                    std::arch::asm!("", options(nomem, nostack, preserves_flags));
+                }
                 let seq2_index = *start.add(i);
                 let seq1_index = seq2_index + block_first + i as i32;
                 // Sign bit set when the diagonal was dropped, when either
@@ -3048,7 +3053,7 @@ unsafe fn x_greedy_row_any(
     st: &mut XGreedyRowState,
 ) -> bool {
     if reverse {
-        x_greedy_row_impl::<true>(
+        x_greedy_row_impl::<true, false>(
             seq1,
             seq2,
             len1,
@@ -3061,7 +3066,7 @@ unsafe fn x_greedy_row_any(
             st,
         )
     } else {
-        x_greedy_row_impl::<false>(
+        x_greedy_row_impl::<false, false>(
             seq1,
             seq2,
             len1,
@@ -3116,6 +3121,54 @@ unsafe fn x_greedy_row_avx2(
     )
 }
 
+/// EXPERIMENT (R9_PROBE=sc; line R's R9 probe, not for merge): `x_greedy_row_avx2` with the
+/// second pass kept scalar (`SCALAR2`), to time the vectorized `tzcnt` emulation of pass 2.
+///
+/// SAFETY: as `x_greedy_row_avx2`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,bmi1,bmi2,lzcnt")]
+unsafe fn x_greedy_row_avx2_sc(
+    reverse: bool,
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    previous: &[i32],
+    current: &mut [i32],
+    tmp_diag_lower: i32,
+    diag_origin: i32,
+    xdrop_score: i32,
+    st: &mut XGreedyRowState,
+) -> bool {
+    if reverse {
+        x_greedy_row_impl::<true, true>(
+            seq1,
+            seq2,
+            len1,
+            len2,
+            previous,
+            current,
+            tmp_diag_lower,
+            diag_origin,
+            xdrop_score,
+            st,
+        )
+    } else {
+        x_greedy_row_impl::<false, true>(
+            seq1,
+            seq2,
+            len1,
+            len2,
+            previous,
+            current,
+            tmp_diag_lower,
+            diag_origin,
+            xdrop_score,
+            st,
+        )
+    }
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537
 /// ```c
 ///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
@@ -3148,6 +3201,22 @@ unsafe fn x_greedy_row(
                 && std::is_x86_feature_detected!("bmi2")
                 && std::is_x86_feature_detected!("lzcnt")
         }) {
+            // EXPERIMENT (R9_PROBE=sc): the scalar pass 2 instead.
+            if crate::algorithm::blastn::x_r9_probe::sc_on() {
+                return x_greedy_row_avx2_sc(
+                    reverse,
+                    seq1,
+                    seq2,
+                    len1,
+                    len2,
+                    previous,
+                    current,
+                    tmp_diag_lower,
+                    diag_origin,
+                    xdrop_score,
+                    st,
+                );
+            }
             return x_greedy_row_avx2(
                 reverse,
                 seq1,

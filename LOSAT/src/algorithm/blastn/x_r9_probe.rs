@@ -10,6 +10,8 @@
 //!   (both directions) goes to the power-of-two bucket of its alignment length (as R7's `gt`).
 //! - `we`: per word extension of the scan, the bases compared on the left and on the right
 //!   (matches plus the mismatch that stops the loop).
+//! - `sc`: the traceback rows run `x_greedy_row_avx2_sc`, the same kernel with its second pass
+//!   kept scalar (one `tzcnt` / `lzcnt` per diagonal instead of the vectorized emulation).
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -21,6 +23,17 @@ fn flags() -> (bool, bool) {
         let v = std::env::var("R9_PROBE").unwrap_or_default();
         let has = |t: &str| v.split(',').any(|x| x.trim() == t);
         (has("gc"), has("we"))
+    })
+}
+
+/// `sc`: the greedy rows use the kernel with a scalar pass 2 (`x_greedy_row_avx2_sc`).
+#[inline]
+pub(crate) fn sc_on() -> bool {
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| {
+        std::env::var("R9_PROBE")
+            .map(|v| v.split(',').any(|x| x.trim() == "sc"))
+            .unwrap_or(false)
     })
 }
 

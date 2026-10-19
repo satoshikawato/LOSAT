@@ -14894,6 +14894,10 @@ fn search_query_batch(
                             // value of the same call made ahead on another scratch.
                             // EXPERIMENT (LOSAT_X_GREEDYSPEC): the same call, already made
                             // for this HSP on another scratch, or made here.
+                            // EXPERIMENT (R7_PROBE=gt): the call's time by alignment length.
+                            let x_r7_t = crate::algorithm::blastn::x_r7_greedy::start();
+                            let x_r7_pre =
+                                matches!(precomputed, Some((_, XSpecTraceback::Greedy(_))));
                             let x_greedy_result = match precomputed {
                                 Some((_, XSpecTraceback::Greedy(result))) => result,
                                 _ => greedy_gapped_alignment_with_traceback(
@@ -14910,6 +14914,13 @@ fn search_query_batch(
                                     &mut subject_scratch.greedy_align_scratch,
                                 ),
                             };
+                            if let Some(t0) = x_r7_t {
+                                crate::algorithm::blastn::x_r7_greedy::stop(
+                                    t0,
+                                    x_greedy_result.as_ref().map(|r| r.5 as usize),
+                                    x_r7_pre,
+                                );
+                            }
                             match x_greedy_result {
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:583-597
                                 // ```c

@@ -37,6 +37,7 @@ mod x_r7_probe;
 /// megablast table builds.
 pub fn x_mb_lookup_print_summary() {
     x_mb_lookup_par::print_summary();
+    super::x_r7_greedy::print();
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804

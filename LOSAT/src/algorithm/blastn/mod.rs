@@ -29,6 +29,8 @@ pub(crate) mod x_subject_store;
 // NCBI c++/src/algo/blast/api/dust_filter.cpp:92-102,171-180: the DUST masks of a query batch, one
 // fresh masker per query. EXPERIMENT (LOSAT_X_QDUSTPAR): made on the search pool, in query order.
 pub(crate) mod x_query_dust_par;
+// EXPERIMENT (R7_PROBE=gt, line R probe, not for merge): greedy traceback time by alignment length.
+pub(crate) mod x_r7_greedy;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-166
 // ```c
 // typedef struct BlastHSP {

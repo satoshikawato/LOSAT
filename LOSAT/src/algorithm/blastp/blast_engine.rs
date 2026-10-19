@@ -2948,6 +2948,7 @@ fn write_blastp_tabular_output(
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     epilog: bool,
+    queries_before: usize,
 ) -> Result<()> {
     // NCBI reference: c++/src/objtools/align_format/tabular.cpp:1264-1283,1322-1325
     // PrintHeader(..., const CBioseq& bioseq, ..., const CSeq_align_set* align_set, ...);
@@ -3021,9 +3022,15 @@ fn write_blastp_tabular_output(
         start = end;
     }
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
-    // writes no epilog (blastp_app.cpp:294-295, `PrintEpilog`).
+    // writes no epilog (blastp_app.cpp:294-295, `PrintEpilog`). The count is every query
+    // formatted (NCBI's `m_QueriesFormatted`): EXPERIMENT (LOSAT_X_BPQBLOCKFMT) the last block of
+    // the block search adds the queries of the blocks before it (`queries_before`).
     if outfmt == OutputFormat::TabularWithComments && epilog {
-        writeln!(writer, "# BLAST processed {} queries", query_titles.len())?;
+        writeln!(
+            writer,
+            "# BLAST processed {} queries",
+            queries_before + query_titles.len()
+        )?;
     }
     Ok(())
 }
@@ -3075,6 +3082,7 @@ fn write_blastp_tabular_hit_lists(
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut crate::report::query_warnings::QueryWarnings<'_>>,
     epilog: bool,
+    queries_before: usize,
 ) -> Result<()> {
     let config = OutputConfig::ncbi_compat();
     let use_default_fields = fields == default_blastp_tabular_fields();
@@ -3171,9 +3179,15 @@ fn write_blastp_tabular_hit_lists(
     }
 
     // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
-    // writes no epilog (blastp_app.cpp:294-295, `PrintEpilog`).
+    // writes no epilog (blastp_app.cpp:294-295, `PrintEpilog`). The count is every query
+    // formatted (NCBI's `m_QueriesFormatted`): EXPERIMENT (LOSAT_X_BPQBLOCKFMT) the last block of
+    // the block search adds the queries of the blocks before it (`queries_before`).
     if outfmt == OutputFormat::TabularWithComments && epilog {
-        writeln!(writer, "# BLAST processed {} queries", query_titles.len())?;
+        writeln!(
+            writer,
+            "# BLAST processed {} queries",
+            queries_before + query_titles.len()
+        )?;
     }
     Ok(())
 }
@@ -5471,10 +5485,10 @@ fn check_v1_query_intervals(
 /// past (`report::defline::check_shown_protein_subject_title`). ABI v1's titles are its
 /// `bio` deflines (`web_api::v1_bio::from_bio`).
 fn check_v1_shown_subject_titles(
-    shown: &std::collections::BTreeSet<usize>,
+    shown: impl IntoIterator<Item = usize>,
     subject_records: &[FastaRecord],
 ) -> Result<()> {
-    for &index in shown {
+    for index in shown {
         crate::report::defline::check_shown_protein_subject_title(
             &String::from_utf8_lossy(&subject_records[index].title),
             index + 1,
@@ -5498,10 +5512,10 @@ fn check_v1_shown_subject_titles(
 ///     x_CleanAndCompress (final, penult, m_IsAA);
 /// ```
 fn check_shown_subject_titles(
-    shown: &std::collections::BTreeSet<usize>,
+    shown: impl IntoIterator<Item = usize>,
     subject_records: &[FastaRecord],
 ) -> Result<()> {
-    for &index in shown {
+    for index in shown {
         let title = &subject_records[index].title;
         let reads_past_end = [false, true].into_iter().any(|leave_prefix| {
             crate::report::defline::generate_defline(title, true, leave_prefix)
@@ -5758,13 +5772,70 @@ fn search(
     // A run that stops at a query batch writes the reports of the batches before it
     // without the epilog.
     let epilog = batches.stop.is_none();
+    // The searches and reports of the batches up to the input record `input_done` and
+    // the searched query `searched_done`.
+    let search_batches = |args: ResolvedBlastpArgs,
+                          outputs: &mut ReportOutputs<'_>,
+                          pool: &crate::utils::threading::SearchPool<'_>,
+                          input_done: usize,
+                          searched_done: usize,
+                          epilog: bool|
+     -> Result<()> {
+        let done_input = seq_range::QueryInput {
+            placements: seq_range::Placements(
+                query_input
+                    .placements
+                    .0
+                    .iter()
+                    .take(searched_done)
+                    .copied()
+                    .collect(),
+            ),
+            ordinals: query_input.ordinals[..searched_done].to_vec(),
+            input_lengths: query_input.input_lengths[..input_done].to_vec(),
+            skipped: query_input.skipped[..input_done].to_vec(),
+            range_length: query_input.range_length,
+        };
+        let ranges = BlastpRanges {
+            input_records: &query_records[..input_done],
+            query_input: &done_input,
+            subject_placements: &subjects.placements,
+            x_ordinal_base: 0,
+        };
+        let reports = BlastpReports {
+            reader_warnings: &batches.warnings[..searched_done],
+            epilog,
+            v1_titles: v1.is_some(),
+            x_prolog: true,
+            x_queries_before: 0,
+        };
+        let result = run_resolved_in_pool(
+            args,
+            &searched_queries[..searched_done],
+            subject_source,
+            "",
+            subject_label,
+            outputs,
+            pool,
+            None,
+            &ranges,
+            &reports,
+            x_lookup_ahead::XAheadBlock::none(),
+        );
+        // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
+        super::x_bp_redo_par_shadow_error(&result);
+        result
+    };
     // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries in blocks of whole batches, each block a search
-    // of its own whose rows are written before the next block is searched
-    // (`x_query_blocks.rs`, exactness argument in its header), where only the rows of tabular
-    // format 6 are written; otherwise the search of all queries below. With `-db` the blocks
-    // are searched only when no definition line of the database can fail a batch where its
-    // titles are read (`database::x_titles_allow_blocks`, read in the block search's pool before
-    // the first block); otherwise the search of all queries below.
+    // of its own whose report is written before the next block is searched
+    // (`x_query_blocks.rs`, exactness argument in its header), where the one report is tabular
+    // format 6, or with LOSAT_X_BPQBLOCKFMT outfmt 0 or 7 (the outfmt 0 prolog with the first
+    // block, the epilog and outfmt 7's count of the queries with the last); otherwise the search of
+    // all queries below. With `-db` the blocks are searched only when no definition line of the
+    // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, read
+    // in the block search's pool before the first block), and with outfmt 0 and `-subject` only
+    // when no subject's title is refused where the report shows it
+    // (`x_block_shown_titles_allowed`); otherwise the search of all queries below.
     if let Some(blocks) = x_query_block_plan(
         &args,
         &searched_queries,
@@ -5773,6 +5844,7 @@ fn search(
         subject_source,
         outputs,
         batch_size,
+        v1.is_some(),
     ) {
         let reader_warnings = &batches.warnings;
         let ReportOutputs {
@@ -5781,19 +5853,30 @@ fn search(
             ..
         } = &mut *outputs;
         let outfmt = formats[0].outfmt;
+        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): an outfmt 0 report, whose shown titles are checked below.
+        let x_pairwise = matches!(OutputFormat::parse(outfmt), Ok((OutputFormat::Pairwise, _)));
+        // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): copies of what the blocks write, compared below
+        // with the search of all queries.
+        let x_shadow = super::x_query_blocks::x_bp_qblock_fmt() == 2;
         let searched_in_blocks =
             crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
                 // The last checks of the block search, on the pool; when one fails, nothing has
                 // been written and the search of all queries below runs: the lookup tables' words
                 // (`x_block_words_fit`), then with `-db` the definition lines
-                // (`database::x_titles_allow_blocks`).
+                // (`database::x_titles_allow_blocks`), with outfmt 0 and `-subject` the subjects'
+                // titles (`x_block_shown_titles_allowed`).
                 if !x_block_words_fit(&args, &searched_queries, &query_input, batch_size, pool) {
-                    return Ok(false);
+                    return Ok(None);
                 }
-                if let Some(database) = database {
-                    if !database::x_titles_allow_blocks(database, pool) {
-                        return Ok(false);
+                let titles_allowed = match database {
+                    Some(database) => database::x_titles_allow_blocks(database, x_pairwise, pool),
+                    None => {
+                        !x_pairwise
+                            || x_block_shown_titles_allowed(&subjects.records, v1.is_some(), pool)
                     }
+                };
+                if !titles_allowed {
+                    return Ok(None);
                 }
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks
                 // (`x_query_blocks::XBlockSubjects`), on the search's pool.
@@ -5805,6 +5888,14 @@ fn search(
                 crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
                 let pool = &pool.x_with_ext(&x_subjects);
                 let mut sink = super::x_query_blocks::XBlockSink::new(&mut formats[0].sink);
+                let mut x_output = super::x_query_blocks::XCopyWriter {
+                    inner: &mut sink,
+                    copy: x_shadow.then(Vec::new),
+                };
+                let mut x_warnings = super::x_query_blocks::XCopyWriter {
+                    inner: &mut **diagnostics,
+                    copy: x_shadow.then(Vec::new),
+                };
                 // EXPERIMENT (LOSAT_X_BPLKPAHEAD): each block's search builds the next block's lookup
                 // table beside it, on the pool (`blast_engine/x_lookup_ahead.rs`).
                 let mut x_ahead = x_lookup_ahead::XLookupAhead::new(&args, pool, batch_size);
@@ -5817,9 +5908,9 @@ fn search(
                     let mut block_outputs = ReportOutputs {
                         formats: vec![crate::api::local_blast::FormatOutput {
                             outfmt,
-                            sink: OutputSink::Writer(&mut sink),
+                            sink: OutputSink::Writer(&mut x_output),
                         }],
-                        diagnostics: &mut **diagnostics,
+                        diagnostics: &mut x_warnings,
                         hits: None,
                         observer: None,
                     };
@@ -5843,6 +5934,8 @@ fn search(
                                 reader_warnings: &reader_warnings[block.clone()],
                                 epilog: epilog && index + 1 == blocks.len(),
                                 v1_titles: v1.is_some(),
+                                x_prolog: index == 0,
+                                x_queries_before: block.start,
                             },
                             x_block,
                         )
@@ -5851,66 +5944,45 @@ fn search(
                     super::x_bp_redo_par_shadow_error(&result);
                     result?;
                 }
-                sink.flush()?;
-                Ok(true)
+                x_output.flush()?;
+                Ok(Some((x_output.copy, x_warnings.copy)))
             })?;
-        if searched_in_blocks {
+        if let Some(x_copies) = searched_in_blocks {
+            // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): the search of all queries, its report and
+            // warnings written into memory, against the blocks' bytes.
+            if let (Some(written), Some(warned)) = x_copies {
+                let mut reference = Vec::new();
+                let mut reference_warnings = Vec::new();
+                let mut reference_outputs = ReportOutputs {
+                    formats: vec![crate::api::local_blast::FormatOutput {
+                        outfmt,
+                        sink: OutputSink::Writer(&mut reference),
+                    }],
+                    diagnostics: &mut reference_warnings,
+                    hits: None,
+                    observer: None,
+                };
+                crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
+                    search_batches(
+                        args.clone(),
+                        &mut reference_outputs,
+                        pool,
+                        batches.input_done,
+                        batches.searched_done,
+                        epilog,
+                    )
+                })?;
+                drop(reference_outputs);
+                super::x_query_blocks::x_block_shadow_compare(
+                    blocks.len(),
+                    (&written, &warned),
+                    (&reference, &reference_warnings),
+                );
+            }
             return Ok(());
         }
     }
     if batches.searched_done > 0 {
-        // The searches and reports of the batches up to the input record `input_done` and
-        // the searched query `searched_done`.
-        let search_batches = |args: ResolvedBlastpArgs,
-                              outputs: &mut ReportOutputs<'_>,
-                              pool: &crate::utils::threading::SearchPool<'_>,
-                              input_done: usize,
-                              searched_done: usize,
-                              epilog: bool|
-         -> Result<()> {
-            let done_input = seq_range::QueryInput {
-                placements: seq_range::Placements(
-                    query_input
-                        .placements
-                        .0
-                        .iter()
-                        .take(searched_done)
-                        .copied()
-                        .collect(),
-                ),
-                ordinals: query_input.ordinals[..searched_done].to_vec(),
-                input_lengths: query_input.input_lengths[..input_done].to_vec(),
-                skipped: query_input.skipped[..input_done].to_vec(),
-                range_length: query_input.range_length,
-            };
-            let ranges = BlastpRanges {
-                input_records: &query_records[..input_done],
-                query_input: &done_input,
-                subject_placements: &subjects.placements,
-                x_ordinal_base: 0,
-            };
-            let reports = BlastpReports {
-                reader_warnings: &batches.warnings[..searched_done],
-                epilog,
-                v1_titles: v1.is_some(),
-            };
-            let result = run_resolved_in_pool(
-                args,
-                &searched_queries[..searched_done],
-                subject_source,
-                "",
-                subject_label,
-                outputs,
-                pool,
-                None,
-                &ranges,
-                &reports,
-                x_lookup_ahead::XAheadBlock::none(),
-            );
-            // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): an error of the one-thread redo.
-            super::x_bp_redo_par_shadow_error(&result);
-            result
-        };
         crate::utils::threading::with_search_pool(args.num_threads, "blastp", |pool| {
             let result = search_batches(
                 args.clone(),
@@ -6023,16 +6095,18 @@ fn x_bp_encode_block_subjects(
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the blocks of the block search, or `None` for the search of all
-// queries. The block search is taken only where a block's report is its rows and nothing else:
-// one output, tabular format 6, no `-query_loc` (every record is searched whole), every batch
-// read, more than one block, no subject whose tabular ID the reference path rejects before it
-// writes any row (`tabular_subject_ids`; with `-db`, the definition lines are checked where the
-// blocks are searched, `database::x_titles_allow_blocks`), no query whose effective search space
-// in NCBI's `Int8` the reference path rejects (`blastp_database_search_space`, with `-db` or
-// `-dbsize`), and none of the other refusals of the search of all queries that come before its
-// rows (`x_block_search_refuses_nothing`): a block search would have written the rows of the
-// blocks before. Both lookup tables (`AaLookupTable`, and `CompressedAaLookupTable` of
-// blastp-fast) take it.
+// queries. The block search is taken only where the blocks' reports written one after the other
+// are the report of the search of all queries: one output, tabular format 6 (or with
+// LOSAT_X_BPQBLOCKFMT outfmt 0 or 7, `x_query_blocks.rs`), no `-query_loc` (every record is
+// searched whole), every batch read, more than one block, no subject whose tabular ID the
+// reference path rejects before it writes any row (`tabular_subject_ids`, for outfmt 6 and 7;
+// with `-db`, the definition lines are checked where the blocks are searched,
+// `database::x_titles_allow_blocks`; outfmt 0's titles also there, `x_block_shown_titles_allowed`),
+// no query whose effective search space in NCBI's `Int8` the reference path rejects
+// (`blastp_database_search_space`, with `-db` or `-dbsize`), and none of the other refusals of the
+// search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
+// search would have written the reports of the blocks before. Both lookup tables
+// (`AaLookupTable`, and `CompressedAaLookupTable` of blastp-fast) take it.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 #[allow(clippy::too_many_arguments)]
 fn x_query_block_plan(
@@ -6043,6 +6117,7 @@ fn x_query_block_plan(
     subject_source: BlastpSubjectSource<'_>,
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
+    v1: bool,
 ) -> Option<Vec<std::ops::Range<usize>>> {
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
     if args.query_range.is_some()
@@ -6052,23 +6127,38 @@ fn x_query_block_plan(
         || batches.stop.is_some()
         || batches.searched_done != queries.len()
         || batches.input_done != queries.len()
-        || !matches!(
-            OutputFormat::parse(outputs.formats[0].outfmt),
-            Ok((OutputFormat::Tabular, _))
-        )
     {
         return None;
     }
+    // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): outfmt 0 and 7 too.
+    let tabular = match OutputFormat::parse(outputs.formats[0].outfmt) {
+        Ok((OutputFormat::Tabular, _)) => true,
+        Ok((OutputFormat::TabularWithComments, _))
+            if super::x_query_blocks::x_bp_qblock_fmt() > 0 =>
+        {
+            true
+        }
+        // ABI v1's outfmt 0 titles of a database are not argued here.
+        Ok((OutputFormat::Pairwise, _))
+            if super::x_query_blocks::x_bp_qblock_fmt() > 0
+                && !(v1 && subject_source.database().is_some()) =>
+        {
+            false
+        }
+        _ => return None,
+    };
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
-            if subjects.iter().any(|subject| {
-                crate::report::defline::tabular_subject_id(
-                    subject.local_id.as_bytes(),
-                    &subject.title,
-                    true,
-                )
-                .is_err()
-            }) {
+            if tabular
+                && subjects.iter().any(|subject| {
+                    crate::report::defline::tabular_subject_id(
+                        subject.local_id.as_bytes(),
+                        &subject.title,
+                        true,
+                    )
+                    .is_err()
+                })
+            {
                 return None;
             }
         }
@@ -6230,6 +6320,40 @@ fn x_block_words_fit(
         .all(|searched| fits(&mut words, searched))
 }
 
+// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): the outfmt 0 report of the search of all queries refuses a
+// subject title that LOSAT does not write as NCBI where the report shows the subject
+// (`check_shown_subject_titles`, and ABI v1's `check_v1_shown_subject_titles`), before it writes
+// anything; a block search would have written the reports of the blocks before. So with outfmt 0
+// and `-subject` the blocks are searched only when no subject's title is refused (with `-db`:
+// `database::x_titles_allow_blocks`). Tested on the pool before the first block, in groups of
+// consecutive subjects on its threads when it has more than one; the outcome is whether all pass.
+// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
+fn x_block_shown_titles_allowed(
+    subject_records: &[FastaRecord],
+    v1: bool,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    let allowed = |subjects: std::ops::Range<usize>| {
+        check_shown_subject_titles(subjects.clone(), subject_records).is_ok()
+            && (!v1 || check_v1_shown_subject_titles(subjects, subject_records).is_ok())
+    };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() && pool.threads() > 1 {
+        let group = subject_records.len().div_ceil(pool.threads()).max(1);
+        return pool.install(|| {
+            (0..subject_records.len())
+                .into_par_iter()
+                .step_by(group)
+                .all(|start| allowed(start..(start + group).min(subject_records.len())))
+        });
+    }
+    let _ = pool;
+    allowed(0..subject_records.len())
+}
+
 /// The `Database:` text of the reports of a local `-subject` search (`subject_label`, or
 /// the `-subject` argument).
 ///
@@ -6349,6 +6473,7 @@ fn write_reports_without_queries(
                     None,
                     None,
                     true,
+                    true,
                 )?;
             }
             OutputFormat::TabularWithComments => {
@@ -6407,7 +6532,11 @@ fn preliminary_search_error(
         );
     }
     let written = (|| -> Result<()> {
-        write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): a block after the first of the block search follows
+        // the prolog that the first block wrote.
+        if reports.x_prolog {
+            write_pairwise_prologs(args, subject_source, subject_label, outputs)?;
+        }
         if let Some(first_batch_messages) = reports.reader_warnings.first() {
             outputs.diagnostics.write_all(first_batch_messages)?;
         }
@@ -6427,6 +6556,12 @@ struct BlastpReports<'a> {
     reader_warnings: &'a [Vec<u8>],
     epilog: bool,
     v1_titles: bool,
+    /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): whether the outfmt 0 report starts with the prolog
+    /// (false for the blocks after the first of the block search, `x_query_blocks.rs`).
+    x_prolog: bool,
+    /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): the queries of the blocks before this one, which outfmt
+    /// 7's last line counts with this call's (0 outside the block search).
+    x_queries_before: usize,
 }
 
 /// The environment that NCBI's blastp reads around its search that LOSAT rejects:
@@ -6501,6 +6636,7 @@ fn search_split_query_batches(
     preliminary_hit_lists: &mut [Option<BlastpHitList>],
     x_compact_hit_lists: &mut [Option<BlastpHitList<XPrelimHsp>>],
     x_split_queries: &mut [bool],
+    x_prolog: bool,
 ) -> Result<()> {
     use crate::algorithm::common::protein_query_split::{
         protein_chunk_would_be_split, split_protein_batch,
@@ -6559,10 +6695,14 @@ fn search_split_query_batches(
                     x_ordinal_base: 0,
                 },
                 // A chunk's search ends after its preliminary stage, before any report.
+                // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): a chunk of a block after the first follows the
+                // first block's outfmt 0 prolog (`preliminary_search_error`).
                 &BlastpReports {
                     reader_warnings: &[],
                     epilog: false,
                     v1_titles: false,
+                    x_prolog,
+                    x_queries_before: 0,
                 },
                 x_lookup_ahead::XAheadBlock::none(),
             )?;
@@ -8676,6 +8816,7 @@ fn run_resolved_in_pool(
         &mut preliminary_hit_lists,
         &mut x_compact_hit_lists,
         &mut x_split_queries,
+        reports.x_prolog,
     )?;
 
     // A database: the sequences of the preliminary hit lists are read now, by ordinal id,
@@ -10194,11 +10335,11 @@ fn run_resolved_in_pool(
                     .map(|hit| hit.hit.s_idx as usize)
                     .collect();
                 if reports.v1_titles {
-                    check_v1_shown_subject_titles(&shown, subject_records)?;
+                    check_v1_shown_subject_titles(shown.iter().copied(), subject_records)?;
                 }
                 match listed_titles.as_ref() {
                     Some(titles) => titles.check_shown_titles(&shown)?,
-                    None => check_shown_subject_titles(&shown, subject_records)?,
+                    None => check_shown_subject_titles(shown.iter().copied(), subject_records)?,
                 }
                 let masked_hits =
                     masked_query_rows(pairwise_hits, &query_frames, &ranges.query_input.placements);
@@ -10213,6 +10354,7 @@ fn run_resolved_in_pool(
                     pairwise_database.as_ref(),
                     probe.as_mut(),
                     warnings.as_mut(),
+                    reports.x_prolog,
                     reports.epilog,
                 )?;
                 Ok(())
@@ -10249,6 +10391,7 @@ fn run_resolved_in_pool(
                         probe.as_mut(),
                         warnings.as_mut(),
                         reports.epilog,
+                        reports.x_queries_before,
                     )?;
                 } else {
                     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
@@ -10278,6 +10421,7 @@ fn run_resolved_in_pool(
                         probe.as_mut(),
                         warnings.as_mut(),
                         reports.epilog,
+                        reports.x_queries_before,
                     )?;
                 }
                 // NCBI reference: ncbi-blast/c++/src/corelib/ncbidiag.cpp:4086

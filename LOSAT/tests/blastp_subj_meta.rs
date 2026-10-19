@@ -273,8 +273,9 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// Where the block search is not taken (outfmt 0, which it does not write) or has no subject
-// records (`-db`), the switch changes nothing and its shadow compares nothing.
+// Where the block search takes no tabular IDs (outfmt 0, whose report shows titles; with
+// `LOSAT_X_BPQBLOCKFMT` it is written in blocks) or has no subject records (`-db`), the switch
+// changes nothing and its shadow compares nothing.
 #[test]
 fn the_switch_does_not_act_without_the_subject_block_search() {
     let dir = test_dir("other-paths");

@@ -34,8 +34,41 @@
 //!   batch of the whole input).
 //! The rows of tabular format 6 depend only on each query's hit list and come in query order,
 //! so the blocks' rows written one after the other are the rows of the whole search. The block
-//! search is used only where nothing else is written around the rows (see
-//! `blast_engine.rs` `search`); everything else takes the reference path.
+//! search is used only where the blocks' reports written one after the other are the report of
+//! the whole search (see `blast_engine.rs` `search` and `x_query_block_plan`); everything else
+//! takes the reference path.
+//!
+//! LOSAT_X_BPQBLOCKFMT (strict set, `x_bp_qblock_fmt`) also takes outfmt 0 and 7, whose reports
+//! hold more than the rows (NCBI prints the prolog, then each batch's result sets in its batch
+//! loop, then the epilog: `blastp_app.cpp` below):
+//! - each query's part depends only on that query's final list and on fixed inputs: outfmt 7's
+//!   header (program, version, the query's title, the `# Database:` name, the query's hit count)
+//!   and outfmt 0's section (the query's title and length, its description table and alignments,
+//!   the subjects' titles, the footer with the Karlin-Altschul block of the query's context and its
+//!   search space, its validity and whether its batch was searched: a batch property, and blocks
+//!   are whole batches). With `-db` a reported sequence is numbered by its rank among the
+//!   sequences that the call's lists name; the rank only indexes the call's records and titles,
+//!   so a rank among one block's sequences writes the same bytes as one among all. A query's
+//!   warnings come before its part in both (`QueryWarnings`, the block's reader messages).
+//! - what is not per query: the outfmt 0 prolog (the program, the `Database:` header of the
+//!   subject set or the database: fixed inputs) is written by the first block only
+//!   (`BlastpReports::x_prolog`); the outfmt 0 epilog (the database lines, the gapped
+//!   Karlin-Altschul and Gumbel blocks of the scoring and the database length, the options: fixed
+//!   inputs) by the last block only, as before; outfmt 7's last line counts the queries formatted
+//!   (NCBI's `m_QueriesFormatted`), so the last block adds the queries of the blocks before
+//!   (`BlastpReports::x_queries_before`).
+//! - the refusals of the reference path that come before it writes anything and depend on the
+//!   hits are, for outfmt 0, those of a shown subject's title (a title of punctuation that NCBI's
+//!   `x_CleanAndCompress` reads past, ABI v1's titles): the blocks are searched only when no
+//!   subject's title is refused (`blast_engine.rs` `x_block_shown_titles_allowed`, with `-db`
+//!   `database::x_titles_allow_blocks`), so that none comes after the reports of the blocks
+//!   before. The other refusals are those of outfmt 6 above.
+//! - nothing else is written to standard error while a block is searched (only the debug trace and
+//!   `LOSAT_TIMING`'s lines, which each block prints for itself).
+//! The shadow (LOSAT_X_BPQBLOCKFMTSHADOW, implies the switch) keeps a copy of the bytes that the
+//! blocks write to the output and to standard error (`XCopyWriter`), then searches all queries
+//! again, writes their report and warnings into memory and compares both streams
+//! (`x_block_shadow_compare`), for every format the block search takes.
 //!
 //! With `-db` the kernel runs over the database's subjects one after the other on one diagonal
 //! table (`blast_engine/database.rs` `search_blocks`, whose blocks start at the one-thread
@@ -88,6 +121,20 @@
 //! not set or is not a positive number. `0`, or `LOSAT_X_DEFAULT=0` with the variable not set,
 //! turns the block path off.
 //!
+//! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:253-295
+//! ```c++
+//!         formatter.PrintProlog();
+//!     ...
+//!                     formatter.PrintOneResultSet(**result, query_batch);
+//!     ...
+//!         formatter.PrintEpilog(opt);
+//! ```
+//! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1430,2235
+//! ```c++
+//!     m_QueriesFormatted++;
+//!     ...
+//!         tabinfo.PrintNumProcessed(m_QueriesFormatted);
+//! ```
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:562-572
 //! ```c
 //!                 /* Check if the last hit hits current query. Because last_hit
@@ -223,6 +270,85 @@ pub(crate) fn x_bp_qblock() -> Option<usize> {
     use std::sync::OnceLock;
     static N: OnceLock<Option<usize>> = OnceLock::new();
     *N.get_or_init(|| crate::utils::xswitch::value("LOSAT_X_BPQBLOCK", 1..=usize::MAX, 50_000))
+}
+
+// No NCBI counterpart: reads LOSAT_X_BPQBLOCKFMT (a strict-set switch: on unless it is `0`, or
+// `LOSAT_X_DEFAULT=0` and it is not set) and its shadow LOSAT_X_BPQBLOCKFMTSHADOW (off unless set to
+// any value; it implies the switch) once. They choose which reports the block search writes, not
+// any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): 0 = the block search only for one outfmt 6 report, 1 = for one
+/// report of outfmt 0, 6 or 7, 2 = the shadow (`x_block_shadow_compare`).
+pub(crate) fn x_bp_qblock_fmt() -> u8 {
+    use std::sync::OnceLock;
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if std::env::var_os("LOSAT_X_BPQBLOCKFMTSHADOW").is_some() {
+            2
+        } else if crate::utils::xswitch::on("LOSAT_X_BPQBLOCKFMT") {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+// No NCBI counterpart: a copy of what LOSAT writes, for the shadow (LOSAT_X_BPQBLOCKFMTSHADOW); it
+// does not change any byte written.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): a writer that keeps a copy of the bytes it passes on
+/// when `copy` is set (the shadow), and only passes them on otherwise.
+pub(crate) struct XCopyWriter<'a, W: Write + ?Sized> {
+    pub(crate) inner: &'a mut W,
+    pub(crate) copy: Option<Vec<u8>>,
+}
+
+impl<W: Write + ?Sized> Write for XCopyWriter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        if let Some(copy) = self.copy.as_mut() {
+            copy.extend_from_slice(&buf[..written]);
+        }
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+// No NCBI counterpart: the check of the shadow (LOSAT_X_BPQBLOCKFMTSHADOW); it does not change any
+// value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): compares what the block search wrote (`blocks`, its
+/// output and its warnings) with what the search of all queries wrote into memory (`reference`).
+/// On a difference it prints `[X_SHADOW] BPQBLOCKFMT ... DIFFERENT` and panics; otherwise
+/// `[X_SHADOW] BPQBLOCKFMT blocks= bytes= stderr_bytes= identical`.
+pub(crate) fn x_block_shadow_compare(
+    blocks: usize,
+    written: (&[u8], &[u8]),
+    reference: (&[u8], &[u8]),
+) {
+    for (stream, block_bytes, reference_bytes) in [
+        ("output", written.0, reference.0),
+        ("stderr", written.1, reference.1),
+    ] {
+        if block_bytes != reference_bytes {
+            let at = block_bytes
+                .iter()
+                .zip(reference_bytes)
+                .position(|(a, b)| a != b)
+                .unwrap_or(block_bytes.len().min(reference_bytes.len()));
+            eprintln!(
+                "[X_SHADOW] BPQBLOCKFMT {stream} DIFFERENT at byte {at} (blocks {} bytes, search of all queries {} bytes)",
+                block_bytes.len(),
+                reference_bytes.len()
+            );
+            panic!("LOSAT_X_BPQBLOCKFMTSHADOW: the block search's {stream} differs from the search of all queries");
+        }
+    }
+    eprintln!(
+        "[X_SHADOW] BPQBLOCKFMT blocks={blocks} bytes={} stderr_bytes={} identical",
+        written.0.len(),
+        written.1.len()
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-287

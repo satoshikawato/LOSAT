@@ -604,8 +604,14 @@ impl<'a> PairwiseRows<'a> {
         }
     }
 
+    // No NCBI counterpart for the attribute: on wasm32 (LOSAT Web) the row of an HSP stays a
+    // function of its own, called once per HSP, so that V8 runs the later HSPs in its optimized
+    // code (it switches a function to that code only at a later call, never inside a running
+    // one); inlined into the map, the rows of a whole list (or of a pool task's part of it) were
+    // one call in V8's baseline code. Other targets keep the compiler's choice.
     /// The outfmt 0 row of `hsp` (its displayed rows, frames, counts, linked-set size and
     /// subject); `window` is the buffer of a stored subject's letters.
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     pub(crate) fn hit(&self, hsp: &TblastxHsp, window: &mut Vec<u8>) -> PairwiseHit {
         let (queries, subjects, subject_letters) =
             (self.queries, self.subjects, self.subject_letters);

@@ -372,6 +372,7 @@ export LOSAT_X_TBNSTATE=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNXLATE=1
 export LOSAT_X_TBNXLATESIMD=1
+export LOSAT_X_TBXBAND=1
 export LOSAT_X_TBXEXTBATCH=256
 export LOSAT_X_TBXFRAMES=1
 export LOSAT_X_TBXKMERGE=1
@@ -3286,15 +3287,51 @@ Scheduling (each value computed by one thread with the original function; order 
   order on the calling thread with one thread); each unit scans with a lookup table holding only its
   context's chains (order kept) on a fresh unmasked diagonal table, and the unit lists go through the
   reference's sort and merge in the reference order (`tblastx/x_pair_par.rs`, exactness argument in
-  its header). Only when every query context, or every subject chunk, is at most `slack` = diagonal
-  table size minus query length long, and `slack` plus twice the longest subject chunk stays under
-  2^29 (it does unless `-window_size` is near 2^29); otherwise, and with the trace, debug,
-  diagnostics and chunk switches, the reference loop runs (`LOSAT_X_STATS=1` counts `fallback_guard` / `fallback_gate`;
-  `LOSAT_TIMING` prints one `x_pairpar` line). Strict-set candidate (S-E, round 5).
+  its header). Only when `slack` (diagonal table size minus query length) plus twice the longest
+  subject chunk stays under 2^29 (it does unless `-window_size` is near 2^29) and, without
+  `LOSAT_X_TBXBAND` (`=0`, or `LOSAT_X_DEFAULT=0` with it unset), every query context or every
+  subject chunk is at most `slack` long; otherwise,
+  and with the trace, debug, diagnostics and chunk switches, the reference loop runs
+  (`LOSAT_X_STATS=1` counts `fallback_guard` / `fallback_gate`; `LOSAT_TIMING` prints one `x_pairpar`
+  line). Strict-set candidate (S-E, round 5).
 - `LOSAT_X_PAIRPARSHADOW=1` shadow of `LOSAT_X_PAIRPAR`: the unit path and the reference loop for
   every subject, the subject's combined ungapped HSP list compared field by field (the first
   difference stops the run with subject, frame, index and both values); one `[X_SHADOW] PAIRPAR`
   summary line at exit (subjects, units, HSPs compared, fallbacks).
+- `LOSAT_X_TBXBAND=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-10-19; `=0` turns it off; acts while `LOSAT_X_PAIRPAR` is on) the unit path no longer applies
+  its first guard (every query context, or every subject chunk, at most `slack` long). That guard
+  came from a looser form of item 3 of the exactness argument in `tblastx/x_pair_par.rs`; the
+  argument holds without it: the last right extension of a raw diagonal, started at query offset
+  q0, ends at the end of q0's context, at most `query_length - q0` letters right of its seed, while
+  a hit of a diagonal that shares its masked cell lies at least `table size - q0` letters right of
+  it, so that hit is never masked. The batches the guard sent to the reference frame loop, which
+  searches a subject on one thread, are those whose longest context and longest subject chunk are
+  both longer than `slack`: for one query of N bases, N in (3/7 2^k, 2^(k-1)] for the table of 2^k
+  cells (1.76-2.0 kb, 7.0-8.2 kb, ..., 56-65 kb, 112-131 kb, 225-262 kb, 0.45-0.52 Mb, 0.90-1.05 Mb,
+  1.8-2.1 Mb, 3.6-4.2 Mb), and multi-query batches whose letters lie just below a power of two,
+  each against a subject frame longer than `slack`. Those whose longest subject chunk has at most
+  as many letters as the reference table has cells (subjects of up to about six times the query's
+  bases) now go through `LOSAT_X_PAIRPARGATE` like any other batch (small tables keep the reference
+  loop at one thread). The others keep the reference loop: a memory rule (`x_band_fits`), since a
+  unit's diagonal table has a cell for every raw diagonal of its query group and subject chunk, one
+  table per thread, against the reference's one table of 2^k cells per subject in flight.
+  `LOSAT_X_STATS=1` adds `band=` (such batches the units took) to the `[X_STATS] PAIRPAR` line;
+  the `[X_SHADOW] PAIRPAR` line of the shadow carries the same count. `tests/tblastx_band.rs` runs a
+  band batch through the binary. Measured (workstation node 1, 16 or 8 booked cores or one, each
+  run after a 3 s warm-up of its cores, alternating order, medians of 3 runs unless noted, every
+  report equal across arms), against `=0`: Sakai 1 Mb x MG1655 1 Mb at 1 thread 27.27 -> 18.59 s
+  (x0.682), 8 threads 24.85 -> 3.28 s (x0.132), 16 threads 24.69 -> 2.42 s (x0.098), max RSS 184 ->
+  129 / 148 / 167 MiB; Sakai 1-3.9 Mb x MG1655 at 1 thread 668 -> 325 s (x0.49, one run each),
+  8 threads 616 -> 63.3 s (x0.10, 1 and 2 runs), 16 threads 624 -> 52.2 s (x0.084, 2 runs), max
+  RSS 1,035 -> 700 MiB at 1 thread and 1,389 -> 1,348 MiB at 8 and 16. Outside the band, Sakai
+  0.88 Mb x MG1655 1 Mb against the binary before the switch x0.965-0.977 (the same path; build
+  differences), max RSS equal. Without the rule, 3 fruit fly transcripts (2,005 bases) against the
+  fruit fly genome database ran 1.91 -> 1.41 s at 8 threads and 1.93 -> 0.87 s at 16 but its max
+  RSS grew from 318 to 600-650 and 873 MiB (NCBI BLAST+ 2.17.0: 368 MiB at 8 threads), and a 1.9 kb
+  query against MG1655 0.30 -> 0.10 s and 0.31 -> 0.09 s with 21 -> 68-82 and 111 MiB; the rule
+  leaves both on the reference loop (as before). A masked unit table sized by the query group (also
+  exact by item 3) would let these batches take the units without that memory.
 - `LOSAT_X_PAIRPARGATE=1` (TBLASTX, speed; in the strict set since 2026-10-18, on by default, with
   `LOSAT_X_TBXLUT`; added off unless set in #255; acts only while `LOSAT_X_PAIRPAR` is on without
   its shadow and without `LOSAT_X_PAIRLUTSHADOW`) a query batch that the gates and the guard of
@@ -3308,7 +3345,7 @@ Scheduling (each value computed by one thread with the original function; order 
   which NCBI converts to INT_MIN, every word, the option-sweep inputs took 14.2 GB in the reference
   loop, 3.3 GB in the units and 5.9 GB in NCBI). Otherwise the batch
   runs the reference loop with the full lookup table, as for the guard (`LOSAT_X_STATS=1` counts it
-  as `fallback_cost` at the end of the `[X_STATS] PAIRPAR` line). A unit scans its subject frame
+  as `fallback_cost` on the `[X_STATS] PAIRPAR` line). A unit scans its subject frame
   with one group's table, so each frame is scanned once per group (up to 6 times), and every unit
   makes its own diagonal table and lists: on short queries this costs more than the small tables
   save. Both paths give the reference's list (the exactness argument of `LOSAT_X_PAIRPAR`), so

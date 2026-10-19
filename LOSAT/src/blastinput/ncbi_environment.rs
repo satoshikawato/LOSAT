@@ -8,7 +8,8 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 /// Registry entries (section, name; case-insensitive) that change no output of a search with
-/// `-subject`: the database and data-loader settings and the data directory, and
+/// `-subject`: the database and data-loader settings, the data directory, the directory of
+/// the WindowMasker files of blastn's `-window_masker_taxid` (`window_masker_path_of`), and
 /// `[NCBI] DONT_USE_NCBIRC`, which only decides whether `.ncbirc` is read.
 ///
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:1436-1439
@@ -28,6 +29,7 @@ const HARMLESS_ENTRIES: &[(&str, &str)] = &[
     ("BLAST", "MAX_SEQID_LENGTH"),
     ("NCBI", "DATA"),
     ("NCBI", "DONT_USE_NCBIRC"),
+    ("WINDOW_MASKER", "WINDOW_MASKER_PATH"),
 ];
 
 /// Environment variables, besides the `DIAG_` and `NCBI_CONFIG__` families, that the NCBI
@@ -403,20 +405,26 @@ fn find_registry(search_path: &[PathBuf], file_name: &str) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-fn check_registry_file(path: &Path) -> Result<Vec<(String, String, String)>, String> {
+/// The entries of the registry file at `path`, or why LOSAT rejects it (it cannot read the
+/// file, or the file has a line NCBI reports as a syntax error).
+fn read_registry_file(path: &Path) -> Result<Vec<(String, String, String)>, String> {
     let bytes = std::fs::read(path)
         .map_err(|error| format!("NCBI BLAST+ would read the registry file {} ({error}), which LOSAT cannot check; this is not supported by LOSAT", path.display()))?;
     let text = String::from_utf8_lossy(&bytes);
-    let entries = registry_entries(&text).map_err(|reason| {
+    registry_entries(&text).map_err(|reason| {
         format!(
             "the registry file {} has {reason}, which NCBI BLAST+ reports as a syntax error; this is not supported by LOSAT",
             path.display()
         )
-    })?;
+    })
+}
+
+fn check_registry_file(path: &Path) -> Result<Vec<(String, String, String)>, String> {
+    let entries = read_registry_file(path)?;
     for (section, name, value) in &entries {
         if !is_harmless_entry(section, name, value) {
             return Err(format!(
-                "the registry file {} sets [{section}] {name}, which LOSAT does not know to change no output of NCBI BLAST+ (LOSAT accepts only [BLAST] BLASTDB, BLASTMAT, DATA_LOADERS, BLASTDB_NUCL_DATA_LOADER, BLASTDB_PROT_DATA_LOADER, IGDATA, MAX_SEQID_LENGTH, BLAST_USAGE_REPORT with a Boolean, [NCBI] DATA and DONT_USE_NCBIRC); this is not supported by LOSAT",
+                "the registry file {} sets [{section}] {name}, which LOSAT does not know to change no output of NCBI BLAST+ (LOSAT accepts only [BLAST] BLASTDB, BLASTMAT, DATA_LOADERS, BLASTDB_NUCL_DATA_LOADER, BLASTDB_PROT_DATA_LOADER, IGDATA, MAX_SEQID_LENGTH, BLAST_USAGE_REPORT with a Boolean, [NCBI] DATA and DONT_USE_NCBIRC, [WINDOW_MASKER] WINDOW_MASKER_PATH); this is not supported by LOSAT",
                 path.display()
             ));
         }
@@ -438,6 +446,12 @@ pub struct ApplicationSettings {
     /// reads it; only a program that opens a database has to refuse to run then, since
     /// the entry changes nothing else.
     pub blastdb: Result<Option<String>, String>,
+    /// The directory where blastn's `-window_masker_taxid` looks for
+    /// `<taxid>/wmasker.obinary` (`window_masker_path_of`): `Ok(None)` when no layer has the
+    /// entry, `Ok(Some(value))` with the value; NCBI uses the current directory for both
+    /// `None` and an empty value. `Err(reason)` when LOSAT does not read the value as NCBI
+    /// does; only `-window_masker_taxid` has to refuse to run then.
+    pub window_masker_path: Result<Option<String>, String>,
 }
 
 impl Default for ApplicationSettings {
@@ -453,6 +467,7 @@ impl Default for ApplicationSettings {
         Self {
             data_loaders: true,
             blastdb: Ok(None),
+            window_masker_path: Ok(None),
         }
     }
 }
@@ -651,7 +666,7 @@ fn stored_registry_value(value: &str) -> Result<&str, &'static str> {
     Ok(&value[beg..end.max(beg)])
 }
 
-/// The value of `[BLAST] <name>` that a registry file stores: that of its last entry (a
+/// The value of `[<section>] <entry>` that a registry file stores: that of its last entry (a
 /// later entry replaces an earlier one, `Set` without `fNoOverride`). `Err` holds why
 /// LOSAT does not read the value as NCBI reads it (`stored_registry_value`).
 ///
@@ -666,21 +681,24 @@ fn stored_registry_value(value: &str) -> Result<&str, &'static str> {
 ///                 Set(section, name, value, set_flags, comment);
 ///                 comment.erase();
 /// ```
-fn file_blast_entry(
+fn file_entry(
     path: &Path,
     entries: &[(String, String, String)],
+    section: &str,
     entry: &str,
 ) -> Result<Option<String>, String> {
-    let Some((_, _, value)) = entries.iter().rev().find(|(section, name, _)| {
-        section.eq_ignore_ascii_case("BLAST") && name.eq_ignore_ascii_case(entry)
-    }) else {
+    let Some((_, _, value)) = entries
+        .iter()
+        .rev()
+        .find(|(s, name, _)| s.eq_ignore_ascii_case(section) && name.eq_ignore_ascii_case(entry))
+    else {
         return Ok(None);
     };
     stored_registry_value(value)
         .map(|value| Some(value.to_string()))
         .map_err(|reason| {
             format!(
-                "the registry file {} sets [BLAST] {entry} to a value with {reason}; this is not supported by LOSAT",
+                "the registry file {} sets [{section}] {entry} to a value with {reason}; this is not supported by LOSAT",
                 path.display()
             )
         })
@@ -749,12 +767,67 @@ fn blastdb_of(
     Ok(None)
 }
 
+/// `[WINDOW_MASKER] WINDOW_MASKER_PATH` from the registry that blastn builds for
+/// `-window_masker_taxid`, highest priority first: the environment layer
+/// (`NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH`, `config`), the variable
+/// `WINDOW_MASKER_PATH` (`plain`, mapped in at `ePriority_MaxUser`, below the environment
+/// layer's `ePriority_Environment`), then `.ncbirc` (`ncbirc`). As for `[BLAST] BLASTDB`
+/// (`blastdb_of`), a variable set to the empty string and an empty value in the file are
+/// entries that hide the layers below; NCBI then uses the current directory (`Ok(None)` too).
+/// This registry is not the application's: it has no `.ini` file, so the program's `.ini`
+/// neither sets the entry nor turns `.ncbirc` off (`tests/winmask/expected/taxid_path.tsv`,
+/// NCBI 2.17.0 on 2026-10-19).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/winmask_filter.cpp:374-395
+/// ```c++
+///     string retval = WindowMaskerPathGet();
+///     if ( !retval.empty() ) {
+///         return retval;
+///     }
+///     const string kEnvVar("WINDOW_MASKER_PATH");
+///     const string kSection("WINDOW_MASKER");
+///     CNcbiIstrstream empty_stream(kEmptyStr);
+///     CRef<CNcbiRegistry> reg(new CNcbiRegistry(empty_stream,
+///                                               IRegistry::fWithNcbirc));
+///     CRef<CSimpleEnvRegMapper> mapper(new CSimpleEnvRegMapper(kSection,
+///                                                              kEmptyStr));
+///     CRef<CEnvironmentRegistry> env_reg(new CEnvironmentRegistry);
+///     env_reg->AddMapper(*mapper, CEnvironmentRegistry::ePriority_Max);
+///     reg->Add(*env_reg, CNcbiRegistry::ePriority_MaxUser);
+///     retval = reg->Get(kSection, kEnvVar);
+///     if (retval == kEmptyStr) {
+///         retval = CDir::GetCwd();
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/include/corelib/ncbireg.hpp:808-811,978-981
+/// ```c++
+///         ePriority_MaxUser  = CCompoundRegistry::ePriority_Max - 0x10000,
+///         ePriority_Reserved ///< Everything greater is for internal use.
+/// ...
+///         ePriority_File = ePriority_Reserved,
+///         ePriority_Overrides,
+///         ePriority_Environment,
+/// ```
+/// `WindowMaskerPathGet()` is empty in blastn (only `WindowMaskerPathInit` sets it, and the
+/// applications do not call it).
+fn window_masker_path_of(
+    config: Option<Result<String, String>>,
+    plain: Option<Result<String, String>>,
+    ncbirc: Result<Option<String>, String>,
+) -> Result<Option<String>, String> {
+    match config.or(plain) {
+        Some(value) => value.map(Some),
+        None => ncbirc,
+    }
+}
+
 /// Rejects the NCBI application settings that change `program`'s output: the environment
 /// variables of the NCBI C++ Toolkit and the entries of the registry files that NCBI loads
 /// (`<program>.ini`, then `.ncbirc` unless it is turned off). Returns the settings that
 /// LOSAT reproduces: whether the data loaders are used (`[BLAST] DATA_LOADERS`, which
-/// decides whether a record's first line can be a sequence identifier), and the registry
-/// entry `[BLAST] BLASTDB` of the database search path.
+/// decides whether a record's first line can be a sequence identifier), the registry
+/// entry `[BLAST] BLASTDB` of the database search path, and the directory of
+/// `-window_masker_taxid` (`window_masker_path_of`).
 ///
 /// NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1254-1259
 /// ```c
@@ -835,8 +908,9 @@ fn application_settings(
         }
     }
     let search_path = registry_search_path(env);
-    let mut use_ncbirc = env("NCBI_DONT_USE_NCBIRC").is_none()
+    let ncbirc_allowed = env("NCBI_DONT_USE_NCBIRC").is_none()
         && env("NCBI_CONFIG__NCBI__DONT_USE_NCBIRC").is_none();
+    let mut use_ncbirc = ncbirc_allowed;
     let mut ini_data_loaders = None;
     let mut ini_blastdb = Ok(None);
     if let Some(path) = find_registry(&search_path, &format!("{program}.ini")) {
@@ -846,24 +920,45 @@ fn application_settings(
         }) {
             use_ncbirc = false;
         }
-        ini_data_loaders = file_blast_entry(&path, &entries, "DATA_LOADERS")?;
-        ini_blastdb = file_blast_entry(&path, &entries, "BLASTDB");
+        ini_data_loaders = file_entry(&path, &entries, "BLAST", "DATA_LOADERS")?;
+        ini_blastdb = file_entry(&path, &entries, "BLAST", "BLASTDB");
     }
     let mut ncbirc_data_loaders = None;
     let mut ncbirc_blastdb = Ok(None);
-    if use_ncbirc {
-        if let Some(path) = find_registry(&search_path, ".ncbirc") {
+    let mut ncbirc_window_masker = Ok(None);
+    if let Some(path) = ncbirc_allowed
+        .then(|| find_registry(&search_path, ".ncbirc"))
+        .flatten()
+    {
+        if use_ncbirc {
             let entries = check_registry_file(&path)?;
-            ncbirc_data_loaders = file_blast_entry(&path, &entries, "DATA_LOADERS")?;
-            ncbirc_blastdb = file_blast_entry(&path, &entries, "BLASTDB");
+            ncbirc_data_loaders = file_entry(&path, &entries, "BLAST", "DATA_LOADERS")?;
+            ncbirc_blastdb = file_entry(&path, &entries, "BLAST", "BLASTDB");
+            ncbirc_window_masker =
+                file_entry(&path, &entries, "WINDOW_MASKER", "WINDOW_MASKER_PATH");
+        } else {
+            // The program's .ini turned .ncbirc off, but not for the registry of
+            // `-window_masker_taxid` (`window_masker_path_of`), which reads only this entry
+            // (a syntax error there is a message on stderr in NCBI).
+            ncbirc_window_masker = read_registry_file(&path).and_then(|entries| {
+                file_entry(&path, &entries, "WINDOW_MASKER", "WINDOW_MASKER_PATH")
+            });
         }
     }
-    let env_data_loaders = env("NCBI_CONFIG__BLAST__DATA_LOADERS");
-    let env_blastdb = env("NCBI_CONFIG__BLAST__BLASTDB").map(|value| {
-        value.into_string().map_err(|_| {
-            "the environment variable NCBI_CONFIG__BLAST__BLASTDB is not valid UTF-8; this is not supported by LOSAT".to_string()
+    let utf8_variable = |name: &str| {
+        env(name).map(|value| {
+            value.into_string().map_err(|_| {
+                format!("the environment variable {name} is not valid UTF-8; this is not supported by LOSAT")
+            })
         })
-    });
+    };
+    let env_data_loaders = env("NCBI_CONFIG__BLAST__DATA_LOADERS");
+    let env_blastdb = utf8_variable("NCBI_CONFIG__BLAST__BLASTDB");
+    let window_masker_path = window_masker_path_of(
+        utf8_variable("NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH"),
+        utf8_variable("WINDOW_MASKER_PATH"),
+        ncbirc_window_masker,
+    );
     Ok(ApplicationSettings {
         data_loaders: data_loaders_of(
             env_data_loaders.as_deref().map(OsStr::as_encoded_bytes),
@@ -873,6 +968,7 @@ fn application_settings(
             ],
         ),
         blastdb: blastdb_of(env_blastdb, [ini_blastdb, ncbirc_blastdb]),
+        window_masker_path,
     })
 }
 
@@ -1203,6 +1299,136 @@ mod tests {
             cases += 1;
         }
         assert!(cases >= 15, "{cases} cases");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `tests/winmask/expected/taxid_path.tsv`: the directory whose `7227/wmasker.obinary`
+    /// NCBI's blastn `-window_masker_taxid 7227` used (told apart by the masks of three
+    /// different counts files) for the two variables, another variable, a `blastn.ini` and
+    /// a `.ncbirc` in the current directory and in the home directory; `{R}` stands for the
+    /// directory of the run and `<cwd>` for the current directory. The search path here is
+    /// the current directory, then the home directory, as NCBI's (`registry_search_path`).
+    #[test]
+    fn the_window_masker_directory_is_ncbis() {
+        let table =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/winmask/expected/taxid_path.tsv");
+        let text = std::fs::read_to_string(&table).unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "losat-ncbi-environment-window-masker-{}",
+            std::process::id()
+        ));
+        let (cwd, home) = (dir.join("cwd"), dir.join("home"));
+        let place = |value: &str| value.replace("{R}", "/sandbox");
+        let mut cases = 0;
+        for line in text.lines().skip(1) {
+            let row: Vec<String> = line.split('\t').map(unescape).collect();
+            assert_eq!(row.len(), 9, "{line:?}");
+            let id = &row[0];
+            std::fs::create_dir_all(&cwd).unwrap();
+            std::fs::create_dir_all(&home).unwrap();
+            for (file, content) in [
+                (cwd.join("blastn.ini"), &row[4]),
+                (cwd.join(".ncbirc"), &row[5]),
+                (home.join(".ncbirc"), &row[6]),
+            ] {
+                let _ = std::fs::remove_file(&file);
+                if content != "<unset>" {
+                    std::fs::write(&file, place(content)).unwrap();
+                }
+            }
+            let mut all = vec![(
+                "NCBI_CONFIG_PATH".to_string(),
+                format!("{}:{}", cwd.display(), home.display()),
+            )];
+            for (name, value) in [
+                ("NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH", &row[1]),
+                ("WINDOW_MASKER_PATH", &row[2]),
+            ] {
+                if value != "<unset>" {
+                    all.push((name.to_string(), place(value)));
+                }
+            }
+            if row[3] != "<unset>" {
+                let (name, value) = row[3].split_once('=').unwrap();
+                all.push((name.to_string(), place(value)));
+            }
+            let env = |name: &str| {
+                all.iter()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| OsString::from(value))
+            };
+            let settings = application_settings(
+                "blastn",
+                all.iter()
+                    .map(|(n, v)| (OsString::from(n), OsString::from(v))),
+                &env,
+            )
+            .unwrap_or_else(|reason| panic!("{id}: {reason}"));
+            let used = settings
+                .window_masker_path
+                .unwrap_or_else(|reason| panic!("{id}: {reason}"))
+                .filter(|value| !value.is_empty());
+            let expected = (row[7] != "<cwd>").then(|| place(&row[7]));
+            assert_eq!(used, expected, "{id}");
+            cases += 1;
+        }
+        assert_eq!(cases, 20);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The entry is accepted in every program's registry files, and a value LOSAT cannot
+    /// read, or a `.ncbirc` with a syntax error that only `-window_masker_taxid` would read
+    /// (the program's `.ini` turned `.ncbirc` off), is kept for `-window_masker_taxid`.
+    #[test]
+    fn an_unreadable_window_masker_directory_is_kept_for_the_taxid() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-ncbi-environment-window-masker-kept-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.display().to_string();
+        let settings = |program: &str| {
+            let env =
+                |name: &str| (name == "NCBI_CONFIG_PATH").then(|| OsString::from(&config_path));
+            application_settings(
+                program,
+                [(
+                    OsString::from("NCBI_CONFIG_PATH"),
+                    OsString::from(&config_path),
+                )]
+                .into_iter(),
+                &env,
+            )
+        };
+        let ncbirc = dir.join(".ncbirc");
+        std::fs::write(&ncbirc, "[WINDOW_MASKER]\nWINDOW_MASKER_PATH = /w\n").unwrap();
+        for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
+            assert_eq!(
+                settings(program).unwrap().window_masker_path,
+                Ok(Some("/w".to_string())),
+                "{program}"
+            );
+        }
+        std::fs::write(&ncbirc, "[WINDOW_MASKER]\nWINDOW_MASKER_PATH = a\"b\n").unwrap();
+        let reason = settings("blastn").unwrap().window_masker_path.unwrap_err();
+        assert!(
+            reason.contains("[WINDOW_MASKER] WINDOW_MASKER_PATH"),
+            "{reason}"
+        );
+        let ini = dir.join("blastn.ini");
+        std::fs::write(&ini, "[NCBI]\nDONT_USE_NCBIRC = 1\n").unwrap();
+        std::fs::write(
+            &ncbirc,
+            "[BLAST]\nLONG_SEQID = 1\n[WINDOW_MASKER]\nWINDOW_MASKER_PATH = /w\n",
+        )
+        .unwrap();
+        assert_eq!(
+            settings("blastn").unwrap().window_masker_path,
+            Ok(Some("/w".to_string()))
+        );
+        std::fs::write(&ncbirc, "[WINDOW_MASKER\nWINDOW_MASKER_PATH = /w\n").unwrap();
+        let reason = settings("blastn").unwrap().window_masker_path.unwrap_err();
+        assert!(reason.contains("syntax error"), "{reason}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

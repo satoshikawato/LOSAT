@@ -11,6 +11,7 @@
 
 mod istat;
 mod score;
+mod taxid;
 mod window;
 
 #[cfg(test)]
@@ -20,6 +21,7 @@ use std::fmt;
 use std::path::Path;
 
 pub use istat::{discover_stat_type, StatFile, StatType, UnitCounts};
+pub use taxid::taxid_stat_file;
 
 use score::ScoreMean;
 use window::Window;

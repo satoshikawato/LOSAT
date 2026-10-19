@@ -1,0 +1,21 @@
+id	NCBI_CONFIG__WINDOW_MASKER__WINDOW_MASKER_PATH	WINDOW_MASKER_PATH	variable	blastn.ini	cwd .ncbirc	home .ncbirc	used	note
+c01_env	<unset>	{R}/wmA	<unset>	<unset>	<unset>	<unset>	{R}/wmA	\e
+c02_ncbirc	<unset>	<unset>	<unset>	<unset>	[WINDOW_MASKER]\nWINDOW_MASKER_PATH={R}/wmB\n	<unset>	{R}/wmB	\e
+c03_env_over_ncbirc	<unset>	{R}/wmA	<unset>	<unset>	[WINDOW_MASKER]\nWINDOW_MASKER_PATH={R}/wmB\n	<unset>	{R}/wmA	\e
+c04_config	{R}/wmB	<unset>	<unset>	<unset>	<unset>	<unset>	{R}/wmB	\e
+c05_config_over_env	{R}/wmB	{R}/wmA	<unset>	<unset>	<unset>	<unset>	{R}/wmB	NCBI_CONFIG__ (ePriority_Environment) is above the mapper of WINDOW_MASKER_PATH (ePriority_MaxUser)
+c06_config_over_ncbirc	{R}/wmA	<unset>	<unset>	<unset>	[WINDOW_MASKER]\nWINDOW_MASKER_PATH={R}/wmB\n	<unset>	{R}/wmA	\e
+c07_nothing	<unset>	<unset>	<unset>	<unset>	<unset>	<unset>	<cwd>	\e
+c09_empty_env_hides_ncbirc	<unset>	\e	<unset>	<unset>	[WINDOW_MASKER]\nWINDOW_MASKER_PATH={R}/wmB\n	<unset>	<cwd>	a variable set to the empty string is an entry; an empty directory is the current one
+c09b_ncbirc_with_cwd_file	<unset>	<unset>	<unset>	<unset>	[WINDOW_MASKER]\nWINDOW_MASKER_PATH={R}/wmB\n	<unset>	{R}/wmB	the current directory also has the file
+c11_relative	<unset>	wmA	<unset>	<unset>	<unset>	<unset>	wmA	relative to the current directory
+c12_trailing_slash	<unset>	{R}/wmA/	<unset>	<unset>	<unset>	<unset>	{R}/wmA/	\e
+c13_dont_use_ncbirc	<unset>	<unset>	NCBI_DONT_USE_NCBIRC=1	<unset>	[WINDOW_MASKER]\nWINDOW_MASKER_PATH={R}/wmB\n	<unset>	<cwd>	\e
+c13b_config_dont_use_ncbirc	<unset>	<unset>	NCBI_CONFIG__NCBI__DONT_USE_NCBIRC=1	<unset>	[WINDOW_MASKER]\nWINDOW_MASKER_PATH={R}/wmB\n	<unset>	<cwd>	\e
+c14_home_ncbirc	<unset>	<unset>	<unset>	<unset>	<unset>	[WINDOW_MASKER]\nWINDOW_MASKER_PATH={R}/wmB\n	{R}/wmB	\e
+c15_case_spaces_quotes	<unset>	<unset>	<unset>	<unset>	[window_masker]\n  window_masker_path = "{R}/wmB"\n	<unset>	{R}/wmB	\e
+c16_empty_value_first_ncbirc	<unset>	<unset>	<unset>	<unset>	[WINDOW_MASKER]\nWINDOW_MASKER_PATH=\n	[WINDOW_MASKER]\nWINDOW_MASKER_PATH={R}/wmB\n	<cwd>	only the first .ncbirc is read
+c16b_env_over_empty_value	<unset>	{R}/wmA	<unset>	<unset>	[WINDOW_MASKER]\nWINDOW_MASKER_PATH=\n	<unset>	{R}/wmA	\e
+c17_ini_not_read	<unset>	<unset>	<unset>	[WINDOW_MASKER]\nWINDOW_MASKER_PATH={R}/wmB\n	<unset>	<unset>	<cwd>	the registry of s_FindPathToWM has no .ini
+c18_ini_dont_use_ncbirc_ignored	<unset>	<unset>	<unset>	[NCBI]\nDONT_USE_NCBIRC=1\n	[WINDOW_MASKER]\nWINDOW_MASKER_PATH={R}/wmB\n	<unset>	{R}/wmB	the [NCBI] DONT_USE_NCBIRC of the .ini does not reach that registry
+c19_lower_case_variable	<unset>	<unset>	window_masker_path={R}/wmA	<unset>	<unset>	<unset>	<cwd>	\e

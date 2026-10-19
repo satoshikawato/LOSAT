@@ -7,6 +7,7 @@ mod seg_lnfact;
 // (*thread)->Run(); (*thread)->Join(&result);
 pub mod threading;
 pub mod x_logclone;
+pub mod x_seg_trim_memo;
 pub(crate) mod xahead;
 pub(crate) mod xdrop_simd;
 pub(crate) mod xenv;

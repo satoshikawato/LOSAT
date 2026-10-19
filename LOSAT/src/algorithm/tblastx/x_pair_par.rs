@@ -114,10 +114,15 @@
 //!
 //! `LOSAT_X_TBXBAND` (in the strict set: on unless `LOSAT_X_TBXBAND` is `0`, or `LOSAT_X_DEFAULT=0`
 //! and it is not set): `decide` does not apply `guard` (item 3). The batches it let through change
-//! nothing. The ones it rejected, a longest context and a longest subject chunk both longer than the
-//! slack (query batches of about 3/7 to 1/2 of a power of two in letters with a long subject: 0.9-1.05
-//! Mb or 3.6-4.2 Mb genome pairs), go to the units instead of the reference frame loop, which
-//! searches a subject on one thread. `LOSAT_X_STATS` counts them (`band`).
+//! nothing. The ones it rejected have a longest context and a longest subject chunk both longer than
+//! the slack: for one query of N bases, N in (3/7 2^k, 2^(k-1)] for the table of 2^k cells (1.76-2.0
+//! kb, 7.0-8.2 kb, ..., 56-65 kb, 112-131 kb, 225-262 kb, 0.45-0.52 Mb, 0.90-1.05 Mb, 1.8-2.1 Mb,
+//! 3.6-4.2 Mb), and multi-query batches whose letters lie just below a power of two, against a
+//! subject frame longer than the slack. They go through `LOSAT_X_PAIRPARGATE` like any other batch
+//! (small tables keep the reference loop at one thread and take the units at several threads when
+//! one subject holds more than one and a half thread's share of the bases) instead of always going
+//! to the reference frame loop, which searches a subject on one thread. The `[X_STATS] PAIRPAR` and
+//! `[X_SHADOW] PAIRPAR` lines count them (`band`).
 //!
 //! `LOSAT_X_PAIRLUT=1` (with `LOSAT_X_PAIRPAR`): the group tables are built directly from the
 //! query (`lookup/x_pair_lut.rs`, exactness argument in its header) and the batch's full table is
@@ -623,7 +628,8 @@ pub(super) enum XDecision {
     Off,
     /// A trace, debug, diagnostics or chunk switch: the reference loop ("fallback: gate").
     Gate,
-    /// The exactness guard fails: the reference loop ("fallback: guard").
+    /// An exactness guard fails (`last_hit_fits`, or `guard` without LOSAT_X_TBXBAND): the
+    /// reference loop ("fallback: guard").
     Guard,
     /// LOSAT_X_PAIRPARGATE: the units would be slower than the reference loop, which runs
     /// ("fallback: cost"; `units_gain`).
@@ -1609,15 +1615,18 @@ impl XPairPar {
             !(stub && m == 2),
             "LOSAT_X_PAIRLUT: the reference loop of LOSAT_X_PAIRPARSHADOW cannot run on the stub table"
         );
-        // LOSAT_X_TBXBAND: a batch the first guard rejects (counted for LOSAT_X_STATS).
-        let (max_context_len, longest_subject_chunk) = x_guard_lengths(b.contexts, b.subjects);
-        if !guard(
-            max_context_len,
-            longest_subject_chunk,
-            b.query_length,
-            b.diag_array_size,
-        ) {
-            BAND.fetch_add(1, AtomicOrdering::Relaxed);
+        // LOSAT_X_TBXBAND: a batch the first guard rejects, counted for the `[X_STATS] PAIRPAR` and
+        // `[X_SHADOW] PAIRPAR` lines (without the switch no such batch gets here).
+        if tbx_band() {
+            let (max_context_len, longest_subject_chunk) = x_guard_lengths(b.contexts, b.subjects);
+            if !guard(
+                max_context_len,
+                longest_subject_chunk,
+                b.query_length,
+                b.diag_array_size,
+            ) {
+                BAND.fetch_add(1, AtomicOrdering::Relaxed);
+            }
         }
         Some(Self {
             groups,
@@ -2839,7 +2848,9 @@ mod tests {
     /// The reference two-hit stage of one subject on one masked table shared by the frames
     /// (RI:3019-3572): the batch lookup, `(q - s) & mask`, the same per-hit body, the diagonal
     /// offset advanced after every frame (`Blast_ExtendWordExit`). Returns the sorted init-HSP list
-    /// of every frame and how often each branch was taken.
+    /// of every frame, how often each branch was taken, and how many hits met a cell whose flag 1
+    /// was written by a right extension on another raw diagonal (the masked-aliasing case of
+    /// module doc item 3).
     #[allow(clippy::too_many_arguments)]
     fn masked_reference(
         lookup: &BlastAaLookupTable,
@@ -2850,11 +2861,14 @@ mod tests {
         window: i32,
         diag_array: &mut [DiagStruct],
         diag_offset: &mut i32,
-    ) -> (Vec<Vec<InitHSP>>, Vec<XHit>) {
+    ) -> (Vec<Vec<InitHSP>>, Vec<XHit>, usize) {
         let wordsize = 3;
         let mask = (diag_array.len() - 1) as u32;
         let mut per_frame = Vec::new();
         let mut outcomes = Vec::new();
+        // The raw diagonal of the right extension that last set each cell's flag.
+        let mut flag_writer = vec![i64::MIN; diag_array.len()];
+        let mut aliased = 0usize;
         let array_size = OFFSET_ARRAY_SIZE + lookup.longest_chain.max(0);
         let mut offset_pairs = vec![OffsetPair::default(); array_size as usize];
         for (f, s_frame) in s_frames.iter().enumerate() {
@@ -2888,14 +2902,27 @@ mod tests {
                     );
                     for pair in &offset_pairs[..hits as usize] {
                         let cell = (pair.q_off.wrapping_sub(pair.s_off) & mask) as usize;
-                        outcomes.push(x_hit(
+                        let raw = pair.q_off as i64 - pair.s_off as i64;
+                        if diag_array[cell].flag() != 0
+                            && flag_writer[cell] != i64::MIN
+                            && flag_writer[cell] != raw
+                        {
+                            aliased += 1;
+                        }
+                        let outcome = x_hit(
                             &mut diag_array[cell],
                             pair.q_off,
                             pair.s_off,
                             &h,
                             &mut init_hsps,
                             &mut XNoProbe,
-                        ));
+                        );
+                        if matches!(outcome, XHit::Extended | XHit::Saved)
+                            && diag_array[cell].flag() != 0
+                        {
+                            flag_writer[cell] = raw;
+                        }
+                        outcomes.push(outcome);
                     }
                 }
             }
@@ -2903,7 +2930,7 @@ mod tests {
             sort_init_hsps_by_score_ncbi(&mut init_hsps);
             per_frame.push(init_hsps);
         }
-        (per_frame, outcomes)
+        (per_frame, outcomes, aliased)
     }
 
     /// The unit path's sorted init-HSP list of every frame (one chunk per frame here).
@@ -2965,7 +2992,7 @@ mod tests {
                 &mut diag_offset,
             );
         }
-        let (reference, outcomes) = masked_reference(
+        let (reference, outcomes, _) = masked_reference(
             &lookup,
             &contexts,
             &case.s_frames,
@@ -3272,7 +3299,7 @@ mod tests {
         let mut rng = Rng(0x7e57_ab1e_5eed_0001);
         let alphabets = [aa("AW"), aa("ACW"), aa("ACDEKW")];
         let window = 40;
-        let (mut checked, mut long_reach, mut masked) = (0usize, 0usize, 0usize);
+        let (mut checked, mut long_reach, mut aliased_cases) = (0usize, 0usize, 0usize);
         for case_no in 0..400 {
             let alphabet = &alphabets[case_no % alphabets.len()];
             // One long context (longer than the slack) and up to two short ones.
@@ -3311,7 +3338,7 @@ mod tests {
             let x_dropoff_per_context = vec![16; contexts.len()];
             let mut diag_array = vec![DiagStruct::default(); size as usize];
             let mut diag_offset = window;
-            let (reference, outcomes) = masked_reference(
+            let (reference, outcomes, aliased) = masked_reference(
                 &lookup,
                 &contexts,
                 &s_frames,
@@ -3348,20 +3375,27 @@ mod tests {
                 "case {case_no}: batched unit lists differ from the masked reference"
             );
             // A saved extension that ran further right of its seed than the earlier argument's
-            // bound allowed (its reach is at least `s_end - s_seed`).
+            // bound allowed: the reach `s_last_off - s0` is at least `s_end - s_seed - 1`
+            // (`s_end` is one past the best end, which is at most the last letter scanned), and the
+            // earlier argument fails only for a reach above `slack + 3 + 2`.
             if reference
                 .iter()
                 .flatten()
-                .any(|h| h.s_end - h.s_seed > slack + 3 + 2)
+                .any(|h| h.s_end - h.s_seed - 1 > slack + 3 + 2)
             {
                 long_reach += 1;
             }
-            masked += usize::from(outcomes.contains(&XHit::Masked));
+            // A hit of the reference met a flag set by a right extension on another raw diagonal
+            // sharing its cell (the masked-aliasing case), and took the unmasked branch.
+            if aliased > 0 {
+                aliased_cases += 1;
+            }
+            assert!(outcomes.len() >= aliased);
             checked += 1;
         }
         assert!(checked > 150, "checked {checked}");
         assert!(long_reach > 50, "long_reach {long_reach}");
-        assert!(masked > 50, "masked {masked}");
+        assert!(aliased_cases > 20, "aliased_cases {aliased_cases}");
     }
 
     /// The unit lists of `inp` with the batched extensions of LOSAT_X_TBXEXTBATCH (`unit_lists`
@@ -3742,6 +3776,27 @@ mod tests {
         assert_eq!(decision(0, &short, false, false), XDecision::Off);
         assert_eq!(decision(0, &long, true, true), XDecision::Off);
         assert_eq!(decision_band(0, &long, false, false, true), XDecision::Off);
+        // LOSAT_X_PAIRPARGATE still decides after the guard: this table of 256 cells at one thread.
+        let gated = |m: u8, band: bool| {
+            decide(
+                m,
+                &XGates {
+                    contexts: &contexts,
+                    query_length,
+                    diag_array_size,
+                    subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(&long),
+                    debugging: false,
+                    chunk_switches: false,
+                    threads: 1,
+                    cost_gate: true,
+                    threshold: 13,
+                    band,
+                },
+            )
+        };
+        assert_eq!(gated(1, true), XDecision::Cost);
+        assert_eq!(gated(1, false), XDecision::Guard);
+        assert_eq!(gated(2, true), XDecision::Units);
         // The second guard (`last_hit_fits`): with a window just under 2^29 the slack is almost
         // 2^29, so the first guard holds for the short subject and the units still do not run.
         let wide = diag_array_size_for(query_length, 536_870_000);

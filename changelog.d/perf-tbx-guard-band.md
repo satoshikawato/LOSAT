@@ -1,0 +1,1 @@
+- `tblastx` searches query batches of about 0.90-1.05 Mb, 1.8-2.1 Mb or 3.6-4.2 Mb against a long subject on all threads (the unit path; before, one thread searched each subject): `LOSAT_X_TBXBAND`, one of the switches above; `=0` turns it off; same results.

@@ -364,6 +364,7 @@ export LOSAT_X_TBNSTATE=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNXLATE=1
 export LOSAT_X_TBNXLATESIMD=1
+export LOSAT_X_TBXBAND=1
 export LOSAT_X_TBXEXTBATCH=256
 export LOSAT_X_TBXFRAMES=1
 export LOSAT_X_TBXKMERGE=1
@@ -3056,15 +3057,30 @@ Scheduling (each value computed by one thread with the original function; order 
   order on the calling thread with one thread); each unit scans with a lookup table holding only its
   context's chains (order kept) on a fresh unmasked diagonal table, and the unit lists go through the
   reference's sort and merge in the reference order (`tblastx/x_pair_par.rs`, exactness argument in
-  its header). Only when every query context, or every subject chunk, is at most `slack` = diagonal
-  table size minus query length long, and `slack` plus twice the longest subject chunk stays under
-  2^29 (it does unless `-window_size` is near 2^29); otherwise, and with the trace, debug,
-  diagnostics and chunk switches, the reference loop runs (`LOSAT_X_STATS=1` counts `fallback_guard` / `fallback_gate`;
-  `LOSAT_TIMING` prints one `x_pairpar` line). Strict-set candidate (S-E, round 5).
+  its header). Only when `slack` (diagonal table size minus query length) plus twice the longest
+  subject chunk stays under 2^29 (it does unless `-window_size` is near 2^29) and, with
+  `LOSAT_X_TBXBAND=0`, every query context or every subject chunk is at most `slack` long; otherwise,
+  and with the trace, debug, diagnostics and chunk switches, the reference loop runs
+  (`LOSAT_X_STATS=1` counts `fallback_guard` / `fallback_gate`; `LOSAT_TIMING` prints one `x_pairpar`
+  line). Strict-set candidate (S-E, round 5).
 - `LOSAT_X_PAIRPARSHADOW=1` shadow of `LOSAT_X_PAIRPAR`: the unit path and the reference loop for
   every subject, the subject's combined ungapped HSP list compared field by field (the first
   difference stops the run with subject, frame, index and both values); one `[X_SHADOW] PAIRPAR`
   summary line at exit (subjects, units, HSPs compared, fallbacks).
+- `LOSAT_X_TBXBAND=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-10-19; `=0` turns it off; acts while `LOSAT_X_PAIRPAR` is on) the unit path no longer applies
+  its first guard (every query context, or every subject chunk, at most `slack` long). That guard
+  came from a looser form of item 3 of the exactness argument in `tblastx/x_pair_par.rs`; the
+  argument holds without it: the last right extension of a raw diagonal, started at query offset
+  q0, ends at the end of q0's context, at most `query_length - q0` letters right of its seed, while
+  a hit of a diagonal that shares its masked cell lies at least `table size - q0` letters right of
+  it, so that hit is never masked. The batches the guard sent to the reference frame loop, which
+  searches a subject on one thread, are query batches whose longest context and longest subject
+  chunk are both longer than `slack`: for one query of N bases, N in (3/7 2^k, 2^(k-1)] for the
+  table of 2^k cells (0.90-1.05 Mb, 1.8-2.1 Mb, 3.6-4.2 Mb, ...) with a subject frame longer than
+  `slack`. They now take the units on the pool (still subject to `LOSAT_X_PAIRPARGATE`).
+  `LOSAT_X_STATS=1` adds `band=` (such batches the units took) to the `[X_STATS] PAIRPAR` and
+  `[X_SHADOW] PAIRPAR` lines. Measured: see the pull request (A/B to be added).
 - `LOSAT_X_PAIRPARGATE=1` (TBLASTX, speed; in the strict set since 2026-10-18, on by default, with
   `LOSAT_X_TBXLUT`; added off unless set in #255; acts only while `LOSAT_X_PAIRPAR` is on without
   its shadow and without `LOSAT_X_PAIRLUTSHADOW`) a query batch that the gates and the guard of

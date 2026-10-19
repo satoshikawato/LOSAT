@@ -3698,27 +3698,24 @@ mod tests {
             FastaRecord::new("", b"l", &[b'A'; 123]),
         ];
         let none: [FastaRecord; 0] = [];
-        let decision_band = |m: u8,
-                             subjects: &[FastaRecord],
-                             debugging: bool,
-                             chunk_switches: bool,
-                             band: bool| {
-            decide(
-                m,
-                &XGates {
-                    contexts: &contexts,
-                    query_length,
-                    diag_array_size,
-                    subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
-                    debugging,
-                    chunk_switches,
-                    threads: 1,
-                    cost_gate: false,
-                    threshold: 13,
-                    band,
-                },
-            )
-        };
+        let decision_band =
+            |m: u8, subjects: &[FastaRecord], debugging: bool, chunk_switches: bool, band: bool| {
+                decide(
+                    m,
+                    &XGates {
+                        contexts: &contexts,
+                        query_length,
+                        diag_array_size,
+                        subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
+                        debugging,
+                        chunk_switches,
+                        threads: 1,
+                        cost_gate: false,
+                        threshold: 13,
+                        band,
+                    },
+                )
+            };
         let decision = |m: u8, subjects: &[FastaRecord], debugging: bool, chunk_switches: bool| {
             decision_band(m, subjects, debugging, chunk_switches, false)
         };
@@ -3731,8 +3728,14 @@ mod tests {
             // The gates come before the guard, as in the counters of LOSAT_X_STATS.
             assert_eq!(decision(m, &long, true, false), XDecision::Gate);
             // LOSAT_X_TBXBAND: the first guard is not applied; the gates still are.
-            assert_eq!(decision_band(m, &long, false, false, true), XDecision::Units);
-            assert_eq!(decision_band(m, &short, false, false, true), XDecision::Units);
+            assert_eq!(
+                decision_band(m, &long, false, false, true),
+                XDecision::Units
+            );
+            assert_eq!(
+                decision_band(m, &short, false, false, true),
+                XDecision::Units
+            );
             assert_eq!(decision_band(m, &long, true, false, true), XDecision::Gate);
             assert_eq!(decision_band(m, &short, false, true, true), XDecision::Gate);
         }
@@ -3759,7 +3762,16 @@ mod tests {
             };
             assert_eq!(decide(m, &gates), XDecision::Guard);
             // LOSAT_X_TBXBAND does not lift the second guard.
-            assert_eq!(decide(m, &XGates { band: true, ..gates }), XDecision::Guard);
+            assert_eq!(
+                decide(
+                    m,
+                    &XGates {
+                        band: true,
+                        ..gates
+                    }
+                ),
+                XDecision::Guard
+            );
         }
     }
 

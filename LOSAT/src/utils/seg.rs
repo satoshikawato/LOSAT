@@ -1654,6 +1654,7 @@ impl SegMasker {
     // `mask_sequence_reference`; only the entropy array and the trim use the histogram.
     /// `mask_sequence` through `x_entropy_array` and `x_trim_segment`.
     fn x_mask_sequence(&self, seq: &[u8]) -> Vec<MaskedInterval> {
+        crate::utils::x_c4probe::note("seg", "mask_call", seq.len() as u64, crate::utils::x_c4probe::key_of(seq));
         let index = self.x_letter_index();
         let mut segs_inclusive: Vec<(usize, usize)> = Vec::new();
 
@@ -1669,6 +1670,7 @@ impl SegMasker {
             if seq.len() < masker.window {
                 return;
             }
+            crate::utils::x_c4probe::note("seg", "entropy_positions", seq.len() as u64, crate::utils::x_c4probe::key_of(seq));
             let h = masker.x_entropy_array(seq, index);
             let first = masker.downset;
             let last = seq.len().saturating_sub(masker.upset);
@@ -1683,6 +1685,19 @@ impl SegMasker {
                     let mut leftend = loi - masker.downset;
                     let mut rightend = hii + masker.upset - 1; // inclusive
 
+                    {
+                        let l = rightend.min(seq.len().saturating_sub(1)) + 1 - leftend.min(rightend);
+                        let minlen = if l.saturating_sub(masker.maxtrim) > 1 { l - masker.maxtrim } else { 1 };
+                        let evals: u64 = (minlen + 1..=l).map(|c| (l - c + 1) as u64).sum();
+                        crate::utils::x_c4probe::note("seg", "trim", evals, crate::utils::x_c4probe::key_of(&seq[leftend.min(seq.len())..=rightend.min(seq.len().saturating_sub(1))]));
+                        crate::utils::x_c4probe::note("seg", "trim_len", l as u64, 0);
+                        if let Some(path) = std::env::var_os("LOSAT_C5TRIMLOG") {
+                            use std::io::Write;
+                            let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+                            writeln!(f, "{:x} {} {}", crate::utils::x_c4probe::key_of(&seq[leftend.min(seq.len())..=rightend.min(seq.len().saturating_sub(1))]), evals, l).unwrap();
+                        }
+                        if l > X_TRIM_MAX { crate::utils::x_c4probe::note("seg", "trim_ref", l as u64, 0); }
+                    }
                     (leftend, rightend) = masker.x_trim_segment(seq, leftend, rightend, index);
 
                     if i + masker.upset - 1 < leftend {
@@ -1690,6 +1705,7 @@ impl SegMasker {
                         if lend < leftend {
                             let rend = leftend - 1;
                             if rend < seq.len() && lend <= rend {
+                                crate::utils::x_c4probe::note("seg", "recurse", (rend + 1 - lend) as u64, 0);
                                 if masker.ncbi_left_segments {
                                     let mut left_segs: Vec<(usize, usize)> = Vec::new();
                                     seg_seq(

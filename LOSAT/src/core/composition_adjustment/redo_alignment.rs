@@ -1666,6 +1666,7 @@ fn translated_query_composition(
     let start = usize::try_from(align.query_start - range.begin)?;
     let finish = usize::try_from(align.query_end - range.begin)?;
     let (left, right) = blast_get_composition_range(query.data(), start, finish)?;
+    crate::utils::x_c4probe::note("bx_qcomp", "call", (right - left) as u64, crate::utils::x_c4probe::key_of(&query.data()[left..right]));
     Ok(read_aa_composition(&query.data()[left..right]))
 }
 
@@ -1716,6 +1717,8 @@ fn translated_subject_window_sequence(
         translated.push(aa_char_to_ncbistdaa(genetic_code.get(codon)));
     }
     translated.push(0);
+    crate::utils::x_c4probe::note("tbn_range", "xlate", (range.end - range.begin) as u64, crate::utils::x_c4probe::key_of(&translated));
+    crate::utils::x_c4probe::note("tbn_range", "xlate_window", (range.end - range.begin) as u64, crate::utils::x_c4probe::key_of(&(range.context, range.begin, range.end, subject_nt.len())));
     if translated.len() != (range.end - range.begin) as usize + 2 {
         bail!("NCBI translated subject window length differs");
     }
@@ -1732,6 +1735,7 @@ fn translated_subject_composition(
     translation: &[u8],
     range: &BlastCompoSequenceRange,
     align: &BlastCompoAlignment,
+    c5_site: &'static str,
 ) -> Result<BlastAminoAcidComposition> {
     if translation.len() < 2 || translation[0] != 0 || translation[translation.len() - 1] != 0 {
         bail!("NCBI translated subject data lacks sentinels");
@@ -1740,6 +1744,8 @@ fn translated_subject_composition(
     let start = usize::try_from(align.match_start - range.begin)?;
     let finish = usize::try_from(align.match_end - range.begin)?;
     let (left, right) = blast_get_composition_range(data, start, finish)?;
+    crate::utils::x_c4probe::note("tbn_comp", c5_site, (right - left) as u64, crate::utils::x_c4probe::key_of(&data[left..right]));
+    crate::utils::x_c4probe::note("tbn_comp", "range_window", (finish - start) as u64, crate::utils::x_c4probe::key_of(&(data.len(), start, finish, left, right)));
     Ok(read_aa_composition(&data[left..right]))
 }
 
@@ -1755,6 +1761,7 @@ fn mask_translated_subject_seg(translation: &mut [u8]) -> Result<bool> {
     }
     let data_len = translation.len() - 1;
     let data = &mut translation[1..data_len];
+    crate::utils::x_c4probe::note("tbn_seg", "call", data.len() as u64, crate::utils::x_c4probe::key_of(&*data));
     let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1));
     let intervals = masker.mask_sequence(data);
     for interval in &intervals {
@@ -1796,6 +1803,7 @@ pub fn translated_subject_get_range<'seq>(
         .genetic_code_id
         .ok_or_else(|| anyhow::anyhow!("TBLASTN translated range requires subject genetic code"))?;
     let genetic_code = GeneticCode::try_from_id(code_id).map_err(anyhow::Error::msg)?;
+    crate::utils::x_c4probe::note("tbn_range", "get_range", (query_range.end - query_range.begin) as u64, 0);
     let query =
         BlastCompoSequenceData::copy_query_range_with_selenocysteine_fix(orig_query, query_range);
     let translated =
@@ -2271,6 +2279,7 @@ pub fn test_near_identical(
     query_words: Option<&[u64]>,
     align: &BlastCompoAlignment,
 ) -> bool {
+    crate::utils::x_c4probe::note("near_ident", "test_near_identical", 1, 0);
     let q_start_i32 = align.query_start - query_offset;
     let q_end_i32 = align.query_end - query_offset - 1;
     let s_start_i32 = align.match_start - seq_offset;
@@ -2363,6 +2372,7 @@ pub fn preliminary_test_near_identical(
     align: &BlastCompoAlignment,
     cutoff: f64,
 ) -> bool {
+    crate::utils::x_c4probe::note("near_ident", "preliminary_test_near_identical", 1, 0);
     let query_length = query_info.seq.length;
     if cutoff > 0.0 {
         if (align.match_end - align.match_start + 1)
@@ -2725,6 +2735,7 @@ fn x_newton_lanes_prefetch_windows<'seq>(
                 &range.subject.buffer,
                 &window.subject_range,
                 current,
+                "prefetch",
             ) {
                 if query_info.composition.num_true_amino_acids != 0
                     && subject_composition.num_true_amino_acids != 0
@@ -3096,6 +3107,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                             &range.subject.buffer,
                             &window.subject_range,
                             current,
+                            "redo",
                         )?
                     } else {
                         crate::utils::x_c4probe::note("aacomp", "redo", range.subject.data().len() as u64, crate::utils::x_c4probe::key_of(range.subject.data()));

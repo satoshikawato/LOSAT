@@ -14,6 +14,7 @@ pub fn on() -> bool {
 struct Site {
     calls: u64,
     units: u64,
+    units_first: u64,
     distinct: HashSet<u64>,
 }
 
@@ -44,7 +45,9 @@ pub fn note(group: &'static str, site: &'static str, units: u64, key: u64) {
         let entry = map.entry((group, s)).or_default();
         entry.calls += 1;
         entry.units += units;
-        entry.distinct.insert(key);
+        if entry.distinct.insert(key) {
+            entry.units_first += units;
+        }
     }
 }
 
@@ -52,17 +55,18 @@ pub fn dump() {
     if !on() {
         return;
     }
-    let guard = SITES.lock().expect("c4probe lock");
-    let Some(map) = guard.as_ref() else {
+    let mut guard = SITES.lock().expect("c4probe lock");
+    let Some(map) = guard.take() else {
         return;
     };
     let mut rows: Vec<_> = map.iter().collect();
     rows.sort_by(|a, b| a.0.cmp(b.0));
     for ((group, site), s) in rows {
         eprintln!(
-            "[C4PROBE] {group}\t{site}\tcalls={}\tunits={}\tdistinct={}",
+            "[C4PROBE] {group}\t{site}\tcalls={}\tunits={}\tunits_first={}\tdistinct={}",
             s.calls,
             s.units,
+            s.units_first,
             s.distinct.len()
         );
     }

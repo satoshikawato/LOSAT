@@ -226,6 +226,7 @@ fn main() -> Result<()> {
             }
         }
     }
+    LOSAT::utils::x_c4probe::dump();
     LOSAT::utils::xstats::print();
     LOSAT::core::composition_adjustment::adjust_scores::x_adjmemo_print_stats();
     LOSAT::core::composition_adjustment::adjust_scores::x_newtonexact_print_stats();

@@ -309,6 +309,7 @@ fn get_range<'a>(
     let query =
         BlastCompoSequenceData::copy_query_range_with_selenocysteine_fix(orig_query, query_range);
     let mut subject = BlastCompoSequenceData::from_ncbistdaa(matching.data);
+    crate::utils::x_c4probe::note("bx_range", "subject_copy", matching.data.len() as u64, crate::utils::x_c4probe::key_of(matching.data));
     let mut biased = biased;
     if params.uses_composition_based_stats()
         && biased
@@ -324,7 +325,9 @@ fn get_range<'a>(
         // intervals come from a per-thread memo of the last subject's SEG (byte-equal input, the
         // same masker call on a miss; x_seg_memo.rs); without it the masker runs here.
         let intervals = if super::x_seg_memo::x_bxsegmemo_mode() != 0 {
+            crate::utils::x_c4probe::note("bx_seg", "call", subject.data().len() as u64, crate::utils::x_c4probe::key_of(subject.data()));
             super::x_seg_memo::x_subject_seg(subject.data(), |data| {
+                crate::utils::x_c4probe::note("bx_seg", "masker_run", data.len() as u64, crate::utils::x_c4probe::key_of(data));
                 SegMasker::with_params(&SegParams::new(10, 1.8, 2.1))
                     .keeping_all_left_segments()
                     .mask_sequence(data)

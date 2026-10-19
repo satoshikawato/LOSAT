@@ -2127,7 +2127,13 @@ impl XPairPar {
         scratch: &XScratch,
         records: &mut Vec<XUnitHsp>,
     ) -> bool {
-        x_records_for(x_unit_span(&self.groups[unit.g]), unit, scratch, records)
+        let span = x_unit_span(&self.groups[unit.g]);
+        let mapped = x_unit_mapped(scratch.unmap, span, unit.chunk.length);
+        if mapped && records.capacity() * std::mem::size_of::<XUnitHsp>() < X_MAPPED_BYTES {
+            *records = Vec::with_capacity(x_mapped_len::<XUnitHsp>(0));
+            SU_RECORDS.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+        mapped
     }
 
     /// The number of context groups of the batch (the `g` of its units).

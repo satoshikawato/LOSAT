@@ -261,6 +261,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastp::x_ungapped_fast::print_shadow_stats();
     LOSAT::algorithm::tblastx::extension::x_tbxungap_print_shadow_stats();
     LOSAT::utils::x_logclone::print_shadow_stats();
+    LOSAT::seqdb::x_dbidxread_print_summary();
     // Diagnostic (LOSAT_TIMING): the common line, last (utils/xtiming.rs).
     LOSAT::utils::xtiming::print();
     Ok(())

@@ -353,13 +353,22 @@ fn block_subject(block: &SequenceBlock, i: usize) -> BlastpSubjectRef<'_> {
 /// the one-thread offset so that its table holds the values of the one-thread table and
 /// the INT4_MAX / 4 reset (which keeps the 31-bit `last_hit` in range) falls on the
 /// same sequences.
+///
+/// The lengths come from the index entries that the block's read reads (`Volume::read_block`):
+/// when they cannot be read here, the offset is returned unchanged, and the block's read meets
+/// the same error, which the round returns.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 fn diag_offset_after(db: &SeqDb, range: BlockRange, mut diag_offset: i32, window: i32) -> i32 {
-    let offsets = db.volumes()[range.volume].index().sequence_offsets();
-    for bounds in offsets[range.first as usize..=range.end as usize].windows(2) {
+    let Ok(offsets) = db.volumes()[range.volume]
+        .index()
+        .sequence_offsets(range.first, range.end)
+    else {
+        return diag_offset;
+    };
+    for bounds in offsets.windows(2) {
         // The sequence and the sentinel byte after it.
         let subject_length = (bounds[1] - bounds[0]).saturating_sub(1);
         if subject_length == 0 {
@@ -957,14 +966,22 @@ impl ListedTitles<'_> {
 /// it, or with `pairwise` (an outfmt 0 report, LOSAT_X_BPQBLOCKFMT, which writes no tabular id) a
 /// title that the outfmt 0 report writes as NCBI. Read in `pool` over the ordinal ids; a reader
 /// error is `false` (the search of all queries then reports it where NCBI does).
+/// EXPERIMENT (LOSAT_X_DBIDXREAD): the definition lines are read in ranges of
+/// `HEADER_RANGE_SEQS` sequences (`SeqDb::visit_deflines`, the same results as
+/// `SeqDb::deflines`) instead of one sequence at a time.
 pub(super) fn x_titles_allow_blocks(
     database: &BlastpDatabase,
     pairwise: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     let db = &database.db;
-    let allowed = |ordinal: u32| -> bool {
-        match db.deflines(ordinal) {
+    let allowed_deflines = |ordinal: u32,
+                            deflines: std::result::Result<
+        Vec<crate::seqdb::OrdinalDefline>,
+        crate::seqdb::SeqDbError,
+    >|
+     -> bool {
+        match deflines {
             Ok(deflines) => {
                 deflines.len() == 1
                     && deflines[0].replaced_title_bytes == 0
@@ -979,6 +996,24 @@ pub(super) fn x_titles_allow_blocks(
             Err(_) => false,
         }
     };
+    if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
+        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+        let allowed_range = |range: &BlockRange| -> bool {
+            db.visit_deflines(*range, |ordinal, deflines| {
+                allowed_deflines(ordinal, deflines)
+            })
+        };
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if pool.enabled() {
+            return pool.install(|| ranges.par_iter().all(allowed_range));
+        }
+        let _ = pool;
+        return ranges.iter().all(allowed_range);
+    }
+    let allowed = |ordinal: u32| -> bool { allowed_deflines(ordinal, db.deflines(ordinal)) };
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1740,8 +1775,10 @@ mod tests {
         fn a_damaged_database_gives_the_one_thread_error_with_the_cut() {
             let (dir, name) = generated_database("damaged", "3GB");
             let psq = Path::new(&name).with_extension("psq");
-            let sequence_100 =
-                open_path(&name).db.volumes()[0].index().sequence_offsets()[100] as usize;
+            let sequence_100 = open_path(&name).db.volumes()[0]
+                .index()
+                .sequence_start(100)
+                .unwrap() as usize;
             let mut bytes = std::fs::read(&psq).unwrap();
             bytes.truncate(bytes.len() - 500);
             std::fs::write(&psq, &bytes).unwrap();

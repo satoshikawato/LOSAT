@@ -1,0 +1,1 @@
+- SEG no longer trims the same low-complexity segment twice in one thread: the trim of a segment is kept by its letters and reused (`LOSAT_X_SEGTRIMMEMO`, among the switches above since 2026-10-19; `=0` or `LOSAT_X_DEFAULT=0` turns it off). Reports do not change. TIMINGS

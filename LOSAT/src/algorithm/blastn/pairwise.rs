@@ -15,7 +15,7 @@ use crate::stats::{
 use crate::utils::dust::MaskedInterval;
 
 use super::alignment::build_blastna_matrix;
-use super::hsp::{BlastnHitList, BlastnHsp};
+use super::hsp::{BlastnHitList, BlastnHsp, BlastnHspList};
 use super::lookup::reverse_complement;
 use super::x_subject_store::SubjectLetters;
 
@@ -40,8 +40,8 @@ pub(crate) fn pairwise_hits(
     queries: &[FastaRecord],
     subjects: SubjectLetters<'_>,
     masks: &DisplayMasks<'_>,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<Vec<PairwiseHit>> {
-    let mut hits = Vec::new();
     let query_masks: Vec<Vec<MaskedInterval>> = masks
         .query
         .iter()
@@ -58,65 +58,123 @@ pub(crate) fn pairwise_hits(
     let subject_masks: Option<Vec<Vec<MaskedInterval>>> = masks
         .subject
         .map(|masks| masks.iter().map(|masks| merged(masks)).collect());
-    for hit_list in hit_lists.iter().flatten() {
-        for hsp_list in &hit_list.hsplist_array {
-            let list_subject_masks = subject_masks.as_ref().and_then(|subject_masks| {
-                let s_idx = hsp_list.hsps.first()?.s_idx as usize;
-                Some(shown_subject_masks(&subject_masks[s_idx], &hsp_list.hsps))
-            });
-            for hsp in &hsp_list.hsps {
-                let query = queries
-                    .get(hsp.q_idx as usize)
-                    .context("BLASTN HSP of an unknown query")?;
-                let s_idx = hsp.s_idx as usize;
-                let subject = subjects
-                    .records()
-                    .get(s_idx)
-                    .context("BLASTN HSP of an unknown subject")?;
-                let subject_length = subjects.len(s_idx);
-                let (mut query_row, mut subject_row) =
-                    displayed_rows(hsp, query.seq(), subject_length, |from, to| {
-                        subjects.upper_letters(s_idx, from, to)
-                    })?;
-                lowercase_masked(
-                    &mut query_row,
-                    hsp.q_start,
-                    1,
-                    &query_masks[hsp.q_idx as usize],
-                );
-                if let Some(subject_masks) = &list_subject_masks {
-                    let step = if hsp.s_start > hsp.s_end { -1 } else { 1 };
-                    lowercase_masked(&mut subject_row, hsp.s_start, step, subject_masks);
-                }
-                let gaps = query_row
-                    .iter()
-                    .chain(&subject_row)
-                    .filter(|&&residue| residue == b'-')
-                    .count();
-                hits.push(PairwiseHit {
-                    hit: hsp.clone().into_hit(),
-                    query_seq: Some(String::from_utf8(query_row).context("BLASTN query row")?),
-                    subject_seq: Some(
-                        String::from_utf8(subject_row).context("BLASTN subject row")?,
-                    ),
-                    query_frame: None,
-                    subject_frame: None,
-                    positives: None,
-                    gaps: Some(gaps),
-                    subject_length: Some(subject_length),
-                    // The title after its first word (the `bio` description of the
-                    // inputs that `bio` read alike); the reports take the subject's title
-                    // bytes by subject index.
-                    subject_title: subject.title.iter().position(|&byte| byte == b' ').map(
-                        |space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned(),
-                    ),
-                    comp_adjust_method: None,
-                    sum_n: None,
-                });
-            }
+    let rows = Rows {
+        queries,
+        subjects,
+        query_masks: &query_masks,
+        subject_masks: subject_masks.as_deref(),
+    };
+    let hsp_lists = hit_lists
+        .iter()
+        .flatten()
+        .flat_map(|hit_list| &hit_list.hsplist_array);
+    // EXPERIMENT (LOSAT_X_PAIRWISEPAR): each subject's list of each query on the pool, the rows
+    // collected in the list order (`report::x_pairwise_par`); the same function of each list.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if let Some(pool) = x_pool {
+        use rayon::prelude::*;
+        let lists: Vec<&BlastnHspList> = hsp_lists.collect();
+        let rows_of_lists: Vec<Result<Vec<PairwiseHit>>> = pool.install(|| {
+            lists
+                .par_iter()
+                .map(|hsp_list| {
+                    let mut hits = Vec::with_capacity(hsp_list.hsps.len());
+                    rows.list(hsp_list, &mut hits)?;
+                    Ok(hits)
+                })
+                .collect()
+        });
+        let mut hits = Vec::with_capacity(lists.iter().map(|list| list.hsps.len()).sum());
+        for list_rows in rows_of_lists {
+            hits.append(&mut list_rows?);
         }
+        return Ok(hits);
+    }
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let _ = x_pool;
+    let mut hits = Vec::new();
+    for hsp_list in hsp_lists {
+        rows.list(hsp_list, &mut hits)?;
     }
     Ok(hits)
+}
+
+/// What the displayed rows of an HSP read besides the HSP (`pairwise_hits`).
+struct Rows<'a> {
+    queries: &'a [FastaRecord],
+    subjects: SubjectLetters<'a>,
+    /// Per query, the shown masks (`shown_query_masks`).
+    query_masks: &'a [Vec<MaskedInterval>],
+    /// Per subject, with `-lcase_masking`: its merged masks.
+    subject_masks: Option<&'a [Vec<MaskedInterval>]>,
+}
+
+impl Rows<'_> {
+    /// The rows of every HSP of one subject's list, appended to `hits` in the list's order.
+    fn list(&self, hsp_list: &BlastnHspList, hits: &mut Vec<PairwiseHit>) -> Result<()> {
+        let (queries, subjects) = (self.queries, self.subjects);
+        let list_subject_masks = self.subject_masks.and_then(|subject_masks| {
+            let s_idx = hsp_list.hsps.first()?.s_idx as usize;
+            Some(shown_subject_masks(&subject_masks[s_idx], &hsp_list.hsps))
+        });
+        for hsp in &hsp_list.hsps {
+            let query = queries
+                .get(hsp.q_idx as usize)
+                .context("BLASTN HSP of an unknown query")?;
+            let s_idx = hsp.s_idx as usize;
+            let subject = subjects
+                .records()
+                .get(s_idx)
+                .context("BLASTN HSP of an unknown subject")?;
+            let subject_length = subjects.len(s_idx);
+            let (mut query_row, mut subject_row) =
+                displayed_rows(hsp, query.seq(), subject_length, |from, to| {
+                    subjects.upper_letters(s_idx, from, to)
+                })?;
+            lowercase_masked(
+                &mut query_row,
+                hsp.q_start,
+                1,
+                &self.query_masks[hsp.q_idx as usize],
+            );
+            if let Some(subject_masks) = &list_subject_masks {
+                let step = if hsp.s_start > hsp.s_end { -1 } else { 1 };
+                lowercase_masked(&mut subject_row, hsp.s_start, step, subject_masks);
+            }
+            let gaps = query_row
+                .iter()
+                .chain(&subject_row)
+                .filter(|&&residue| residue == b'-')
+                .count();
+            hits.push(PairwiseHit {
+                hit: hsp.clone().into_hit(),
+                query_seq: Some(String::from_utf8(query_row).context("BLASTN query row")?),
+                subject_seq: Some(String::from_utf8(subject_row).context("BLASTN subject row")?),
+                query_frame: None,
+                subject_frame: None,
+                positives: None,
+                gaps: Some(gaps),
+                subject_length: Some(subject_length),
+                // The title after its first word (the `bio` description of the
+                // inputs that `bio` read alike); the reports take the subject's title
+                // bytes by subject index.
+                subject_title: subject
+                    .title
+                    .iter()
+                    .position(|&byte| byte == b' ')
+                    .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
+                comp_adjust_method: None,
+                sum_n: None,
+            });
+        }
+        Ok(())
+    }
 }
 
 // The rows of one HSP as NCBI shows them: the query on its plus strand.

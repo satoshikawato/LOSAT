@@ -374,6 +374,7 @@ export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXBAND=1
 export LOSAT_X_TBXEXTBATCH=256
 export LOSAT_X_TBXFRAMES=1
+export LOSAT_X_TBXHITBF=1
 export LOSAT_X_TBXKMERGE=1
 export LOSAT_X_TBXLUT=1
 export LOSAT_X_TBXNEXT=1
@@ -3378,6 +3379,36 @@ Scheduling (each value computed by one thread with the original function; order 
   ways and the seven results (offsets, score, `right_extend`, `s_last_off`) must be equal; any difference
   panics with the inputs; the reference's result is used. One line at exit:
   `[X_SHADOW] TBXUNGAP compared=`.
+- `LOSAT_X_TBXHITBF=1` (TBLASTX, speed; in the strict set from the pull request that added it,
+  2026-10-19; `=0` turns it off) the hit loop of the unit scan of `LOSAT_X_PAIRPAR` (`scan_unit`, and the
+  batched scan of `LOSAT_X_TBXEXTBATCH`; `tblastx/x_tbx_hitbf.rs`, exactness argument in its header) takes
+  the two outcomes most hits end in, too far (`diff >= window`: `last_hit = s + window`) and overlap
+  (`diff < wordsize`: nothing), from one subtraction, `d = s - last_hit` (too far: `d >= 0`; a
+  candidate: `d + window - wordsize` in `[0, window - wordsize)`, one unsigned compare), and writes the
+  cell's next value chosen without a branch (`s + window`, or the value it read);
+  a flag-1 cell or a hit past both tests goes to the per-hit body as before (one branch, rarely taken).
+  The loop walks the batch by pointer and the prefetch of `LOSAT_X_TBXPREFETCH` reads its entry ahead
+  without a bound test. Acts on a unit when `1 <= wordsize < window` and its subject chunk + window is
+  below 2^29 (the batch guard `last_hit_fits` already keeps the unit path inside it); a unit outside runs
+  the loop before the switch. With `LOSAT_TIMING` or `LOSAT_X_STATS` (their probes count every outcome)
+  the units run the loop before the switch, so timings taken with those variables do not include it.
+  On AP027131 x AP027133 at one thread 80 % of the hits are too far and 16 % overlap, and the too-far
+  test was mispredicted 0.14 times per hit (v4-R6 REPORT). Measured (workstation, node 0, the booked
+  cores warmed 3 s before every run, arm order reversed every other round, 6 rounds, medians of the
+  per-round ratios against the dev binary before the switch, every report identical, max RSS equal):
+  AP027131 x AP027133 (code 4) 1 thread x0.792 (10.59 -> 8.39 s; cycles x0.792, instructions x0.867,
+  mispredicted branches x0.537) and 8 threads x0.851; AvCLPV x PsCLPV 1 thread x0.873 and 8 threads
+  x0.937; MelaMJNV x PemoMJNVA 1 thread x0.786 and 8 threads x0.874; Sakai x MG1655[0:1 Mb] (code 11,
+  the batched scan) 8 threads x0.857 (22.15 -> 19.14 s). With `=0` the reports are the same and the
+  loop before the switch runs, but its build differs in inlining from the binary before the switch:
+  instructions x1.000 / x0.989 / x0.982 on the three pairs above at one thread, time x0.98-0.99.
+  A first form of the test from the v4-R6 probe (`2s - 2 last_hit` against two constants) kept both
+  constants on the stack and was 3-4 % slower at one thread.
+- `LOSAT_X_TBXHITBFSHADOW=1` shadow of `LOSAT_X_TBXHITBF` (turns the path on): each unit inside the
+  switch's range runs the loop before the switch and the branch-free one on fresh tables (the batched
+  scan: with and without the switch), and the saved records and every cell of the final table must be
+  equal; a difference panics with the unit. One line at exit:
+  `[X_SHADOW] TBXHITBF units_compared= records_compared= outside=`.
 - `LOSAT_X_TBXEXTBATCH=256` (TBLASTX, speed; a value switch, in the strict set from the pull request
   that added it, 2026-10-18; x86-64 only; `=0` turns it off) the unit scan of `LOSAT_X_PAIRPAR`
   (`tblastx/x_tbx_extbatch.rs`, exactness argument in its header) holds back the two-hit extensions of

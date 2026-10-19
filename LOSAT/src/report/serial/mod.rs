@@ -11,11 +11,20 @@
 //!                 *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
 //! ```
 //!
-//! `real` holds the real-number digits of every object stream; the Seq-annot model and the
-//! encoders of item OF3 (outfmt-20261019) build on it.
+//! `real` holds the real-number digits of every object stream; `encoder` the object-stream
+//! calls that the type writers make, with one implementation per format (`asn_text`,
+//! `json`); `seqalign` the Seq-annot of Seq-aligns of outfmt 8 and 12 (`write_query`).
 
+pub mod asn_text;
+pub mod encoder;
+pub mod json;
 pub mod real;
+pub mod seqalign;
 mod x87;
+
+pub use seqalign::{write_query, SeqAlignError, SerialFormat};
 
 #[cfg(test)]
 mod real_tests;
+#[cfg(test)]
+mod seqalign_tests;

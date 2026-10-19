@@ -1,0 +1,1 @@
+- `tblastx` takes the two-hit test's two common outcomes (too far, overlap) of the unit scan without a branch (`LOSAT_X_TBXHITBF`, one of the switches above; `=0` turns it off; same results; runs with `LOSAT_TIMING` or `LOSAT_X_STATS` do not use it).

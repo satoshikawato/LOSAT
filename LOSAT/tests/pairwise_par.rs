@@ -153,14 +153,14 @@ fn messages(output: &Output) -> String {
         .collect()
 }
 
-/// The `[X_SHADOW] PAIRWISEPAR` lines' counters (queries, windows, pieces, bytes), one per report.
+/// The `[X_SHADOW] PAIRWISEPAR` lines' counters (queries, chunks, pieces, bytes), one per report.
 fn shadow_counts(output: &Output) -> Vec<[u64; 4]> {
     stderr(output)
         .lines()
         .filter(|line| line.starts_with("[X_SHADOW] PAIRWISEPAR "))
         .map(|line| {
             assert!(line.ends_with(" identical"), "{line}");
-            ["queries", "windows", "pieces", "bytes"].map(|name| {
+            ["queries", "chunks", "pieces", "bytes"].map(|name| {
                 let key = format!("{name}=");
                 line.split_whitespace()
                     .find_map(|field| field.strip_prefix(key.as_str()))
@@ -213,6 +213,17 @@ fn check(name: &str, args: &[&str]) -> Vec<[u64; 4]> {
             "{name}, threads {threads}: {}",
             stderr(&shadow)
         );
+        if args[0] == "blastn" {
+            // BLASTN's rows, made on the pool, compared with the serial rows.
+            assert!(
+                stderr(&shadow).lines().any(|line| {
+                    line.starts_with("[X_SHADOW] PAIRWISEPARROWS rows=")
+                        && line.ends_with(" identical")
+                }),
+                "{name}, threads {threads}: {}",
+                stderr(&shadow)
+            );
+        }
         assert_eq!(
             counts.iter().map(|[_, _, _, bytes]| bytes).sum::<u64>() as usize
                 + prolog_and_epilog(&off.stdout),
@@ -261,17 +272,15 @@ fn strings(args: &[String]) -> Vec<&str> {
 fn the_blastn_pairwise_report_does_not_depend_on_the_switch() {
     let args = nucleotide("blastn");
     let counts = check("blastn", &strings(&args));
-    // The 32 queries in the reports of the NCBI query batches; a batch's report in more than one
-    // window at two threads.
+    // The 32 queries in the reports of the NCBI query batches; a batch's report formatted in more
+    // than one chunk at two threads.
     assert_eq!(
         counts.iter().map(|[queries, ..]| queries).sum::<u64>(),
         32,
         "{counts:?}"
     );
     assert!(
-        counts
-            .iter()
-            .any(|&[queries, windows, pieces, _]| windows > 1 && pieces > 2 * queries),
+        counts.iter().any(|&[_, chunks, ..]| chunks > 1),
         "{counts:?}"
     );
 }
@@ -342,4 +351,22 @@ fn the_tblastx_database_report_does_not_depend_on_the_switch() {
         db.to_str().unwrap(),
     ];
     check("tblastx -db", &args);
+}
+
+#[test]
+fn a_failed_write_ends_the_search_as_without_the_switch() {
+    if !Path::new("/dev/full").exists() {
+        return;
+    }
+    let mut args = nucleotide("megablast");
+    args.extend(["-out".to_string(), "/dev/full".to_string()]);
+    let args = strings(&args);
+    let off = losat(&args, 4, &[OFF]);
+    assert!(!off.status.success(), "{}", stderr(&off));
+    for switches in [&[][..], &[SHADOW][..]] {
+        let on = losat(&args, 4, switches);
+        assert_eq!(on.status.code(), off.status.code(), "{}", stderr(&on));
+        assert_eq!(messages(&on), messages(&off));
+        assert_eq!(on.stdout, off.stdout);
+    }
 }

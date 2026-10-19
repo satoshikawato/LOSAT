@@ -5079,7 +5079,7 @@ struct BlastnReportInputs<'a> {
     subject_cache: Option<&'a x_rpt_stream::SubjectCache>,
     /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool that formats the outfmt 0 rows and text
     /// (`report::x_pairwise_par`); `None`: the serial writer.
-    x_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
+    x_pairwise_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
 }
 
 /// The per-query and run-level data of the pairwise report.
@@ -5577,7 +5577,7 @@ fn post_process_hits_and_write(
                     query_offsets: &report.ranges.queries.placements,
                     subject: subject_masks.as_deref(),
                 },
-                report.x_pool,
+                report.x_pairwise_pool,
             )?;
             // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2479
             // ```c++
@@ -5695,7 +5695,7 @@ fn post_process_hits_and_write(
                 pairwise_report,
                 probe.as_mut(),
                 format_warnings.as_mut(),
-                report.x_pool,
+                report.x_pairwise_pool,
             )?;
         } else {
             write_output_blastn_hitlists_to_writer(
@@ -7854,7 +7854,7 @@ fn run_in_pool(
                     subjects: subject_ranges,
                 };
                 // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool formats the batch's outfmt 0 report while
-                // it is idle (no LOSAT_X_QBATCHPAR slot runs).
+                // it is idle (no thread of a LOSAT_X_QBATCHPAR slot exists).
                 let x_pool = qbp.x_slots_idle().then_some(parallel_pool);
                 stream.write(outputs, count, false, |outputs, written| {
                     write_reports(
@@ -8377,9 +8377,9 @@ fn write_batch_reports(
 /// except for LOSAT_X_RPTSTREAM's calls, `x_rpt_stream`, which also run while LOSAT_X_QBATCHPAR
 /// slots search the batches ahead).
 ///
-/// EXPERIMENT (LOSAT_X_PAIRWISEPAR): `x_pool` is the search's pool when no LOSAT_X_QBATCHPAR slot
-/// runs (its threads are idle; the slots have their own pools, and the reports already overlap
-/// their searches); `None` keeps the serial writer.
+/// EXPERIMENT (LOSAT_X_PAIRWISEPAR): `x_pool` is the search's pool when no thread of a
+/// LOSAT_X_QBATCHPAR slot exists (its threads are idle; the slots have their own pools, and the
+/// reports already overlap their searches); `None` keeps the serial writer.
 #[allow(clippy::too_many_arguments)]
 fn write_reports(
     args: &BlastnArgs,
@@ -8496,7 +8496,7 @@ fn write_reports_untimed(
             }),
         queries_before: written.queries,
         subject_cache: written.subjects,
-        x_pool: x_pool.and_then(crate::report::x_pairwise_par::pool),
+        x_pairwise_pool: x_pool.and_then(crate::report::x_pairwise_par::pool),
     };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:482-496
     // ```c++

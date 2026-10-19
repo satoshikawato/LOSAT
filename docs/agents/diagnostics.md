@@ -1495,7 +1495,12 @@ Rebuilding less:
   these formats ran the search of all queries: sp4 3000 x Species6 (`-subject`) at 16 threads 6.56 s
   (outfmt 0) and 6.35 s (outfmt 7) against 4.16 s for outfmt 6 in blocks, 350 MiB against 50 MiB; BP-yeast
   (yeast proteome x yeast, `-db`) 33.67 / 32.14 s against 21.91 s, 1,267 / 1,208 MiB against 58 MiB (ws node 0,
-  dev d7e13f99).
+  dev d7e13f99). With it (ws node 0, 16 CPUs of one socket, 3 s warm-up per run, medians of 3 alternating runs, every
+  report identical; off = `LOSAT_X_BPQBLOCKFMT=0`): sp4 3000 x Species6 outfmt 0 4.43 / 6.55 s at 16 threads, 7.93 /
+  10.02 s at 8, 59.5 / 73.1 s at 1; outfmt 7 4.15 / 6.31 s and 7.65 / 9.82 s; BP-yeast outfmt 0 24.63 / 34.40 s at 16,
+  40.14 / 56.61 s at 8, 281.3 / 353.6 s at 1; outfmt 7 21.91 / 32.37 s and 37.83 / 53.57 s. Peak memory 36-58 MiB with it
+  against 217-350 MiB (sp4) and 662-1,266 MiB (BP-yeast) without. outfmt 6 (the switch does not act) equal to dev within
+  1 %. A query set of one block (BP-q100 x Swiss-Prot, 35,048 letters) is unchanged.
 - `LOSAT_X_BPQBLOCKFMTSHADOW=1` shadow of the block search (turns `LOSAT_X_BPQBLOCKFMT` on; any format the
   block search takes): keeps a copy of the bytes the blocks write to the output and to standard error, then
   searches all queries again and writes their report and warnings into memory; a difference prints

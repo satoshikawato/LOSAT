@@ -1500,6 +1500,9 @@ pub(crate) struct TblastxReportRun<'a> {
     /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the pool the report stage runs on (tblastx/x_rpt_par.rs),
     /// `None` for the serial stage.
     pub x_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
+    /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool that formats the outfmt 0 text
+    /// (`report::x_pairwise_par`), `None` for the serial writer.
+    pub x_pairwise_pool: Option<&'a crate::utils::threading::SearchPool<'a>>,
 }
 
 /// The database of a `-db` search as its reports show it.
@@ -1912,6 +1915,7 @@ fn write_tblastx_outputs(
                     run.database.map(|database| database.pairwise),
                     probe.as_mut(),
                     warnings.as_mut(),
+                    run.x_pairwise_pool,
                 )?;
             }
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
@@ -2736,6 +2740,7 @@ impl BatchReports<'_> {
                 epilog,
                 v1_titles: self.v1_titles,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
+                x_pairwise_pool: crate::report::x_pairwise_par::pool(self.x_search_pool),
             },
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);

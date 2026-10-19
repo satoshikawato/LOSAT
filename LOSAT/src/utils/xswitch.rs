@@ -217,6 +217,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_SEGFAST",
     "LOSAT_X_SEGMEMO",
     "LOSAT_X_SEGSHARE",
+    "LOSAT_X_SEGTRIMMEMO",
     "LOSAT_X_TBNBATCH",
     "LOSAT_X_TBNBATCHRULE",
     "LOSAT_X_TBNEVENTS",

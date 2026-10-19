@@ -175,14 +175,31 @@ fn shadow_counts(output: &Output) -> Vec<[u64; 4]> {
         .collect()
 }
 
+/// Whether the shadow compared rows made on the pool with the serial rows (BLASTN, BLASTP).
+fn rows_compared(output: &Output) -> bool {
+    stderr(output).lines().any(|line| {
+        line.starts_with("[X_SHADOW] PAIRWISEPARROWS rows=") && line.ends_with(" identical")
+    })
+}
+
 /// Checks the property for one search; returns the shadow's counters at two threads.
 fn check(name: &str, args: &[&str]) -> Vec<[u64; 4]> {
-    let off = losat(args, 1, &[OFF]);
+    check_with(name, args, &[])
+}
+
+/// `check` with more variables in every run.
+fn check_with(name: &str, args: &[&str], extra: &[(&str, &str)]) -> Vec<[u64; 4]> {
+    let with = |switches: &[(&'static str, &'static str)]| {
+        let mut all = extra.to_vec();
+        all.extend_from_slice(switches);
+        all
+    };
+    let off = losat(args, 1, &with(&[OFF]));
     assert!(off.status.success(), "{name}: {}", stderr(&off));
     assert!(!off.stdout.is_empty(), "{name}");
     let mut at_two = Vec::new();
     for threads in THREADS {
-        let on = losat(args, threads, &[]);
+        let on = losat(args, threads, &with(&[]));
         assert!(
             on.status.success(),
             "{name}, threads {threads}: {}",
@@ -190,7 +207,7 @@ fn check(name: &str, args: &[&str]) -> Vec<[u64; 4]> {
         );
         assert_eq!(on.stdout, off.stdout, "{name}, threads {threads}");
         assert_eq!(messages(&on), messages(&off), "{name}, threads {threads}");
-        let shadow = losat(args, threads, &[SHADOW]);
+        let shadow = losat(args, threads, &with(&[SHADOW]));
         assert!(
             shadow.status.success(),
             "{name}, threads {threads}: {}",
@@ -216,13 +233,10 @@ fn check(name: &str, args: &[&str]) -> Vec<[u64; 4]> {
             "{name}, threads {threads}: {}",
             stderr(&shadow)
         );
-        if args[0] == "blastn" {
-            // BLASTN's rows, made on the pool, compared with the serial rows.
+        if args[0] == "blastn" || args[0] == "blastp" {
+            // BLASTN's and BLASTP's rows, made on the pool, compared with the serial rows.
             assert!(
-                stderr(&shadow).lines().any(|line| {
-                    line.starts_with("[X_SHADOW] PAIRWISEPARROWS rows=")
-                        && line.ends_with(" identical")
-                }),
+                rows_compared(&shadow),
                 "{name}, threads {threads}: {}",
                 stderr(&shadow)
             );
@@ -237,7 +251,7 @@ fn check(name: &str, args: &[&str]) -> Vec<[u64; 4]> {
             at_two = counts;
         }
     }
-    let previous = losat(args, 4, &[PREVIOUS]);
+    let previous = losat(args, 4, &with(&[PREVIOUS]));
     assert!(previous.status.success(), "{name}: {}", stderr(&previous));
     assert_eq!(previous.stdout, off.stdout, "{name}, LOSAT_X_DEFAULT=0");
     at_two
@@ -410,13 +424,16 @@ fn the_blastp_pairwise_report_does_not_depend_on_the_switch() {
             "-evalue",
             "0.001",
         ];
-        let counts = check(&format!("blastp {subject}"), &args);
-        // The 101 queries' reports (in LOSAT_X_BPQBLOCK's blocks of 50,000 letters).
-        assert_eq!(
-            counts.iter().map(|[queries, ..]| queries).sum::<u64>(),
-            101,
-            "{subject}: {counts:?}"
-        );
+        // LOSAT_X_BPQBLOCK's blocks of 50,000 letters (two here), and one search of all queries.
+        for extra in [&[][..], &[("LOSAT_X_BPQBLOCK", "0")][..]] {
+            let counts = check_with(&format!("blastp {subject} {extra:?}"), &args, extra);
+            // The 101 queries' reports.
+            assert_eq!(
+                counts.iter().map(|[queries, ..]| queries).sum::<u64>(),
+                101,
+                "{subject} {extra:?}: {counts:?}"
+            );
+        }
     }
 }
 
@@ -442,10 +459,21 @@ fn the_blastp_block_reports_do_not_depend_on_the_switch() {
     assert!(off.status.success(), "{}", stderr(&off));
     for threads in [2, 4] {
         let on = losat(&args, threads, &with(&[]));
+        assert!(on.status.success(), "threads {threads}: {}", stderr(&on));
         assert_eq!(on.stdout, off.stdout, "threads {threads}");
         assert_eq!(messages(&on), messages(&off), "threads {threads}");
         let shadow = losat(&args, threads, &with(&[SHADOW]));
+        assert!(
+            shadow.status.success(),
+            "threads {threads}: {}",
+            stderr(&shadow)
+        );
         assert_eq!(shadow.stdout, off.stdout, "threads {threads}, shadow");
+        assert!(
+            rows_compared(&shadow),
+            "threads {threads}: {}",
+            stderr(&shadow)
+        );
         let counts = shadow_counts(&shadow);
         assert!(counts.len() > 1, "threads {threads}: {counts:?}");
         assert_eq!(

@@ -3692,7 +3692,6 @@ fn recount_pyrrolysine_identities(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn build_pairwise_hits(
     hits: Vec<(Hit, u8)>,
     query_contexts: &[QueryContext],
@@ -10384,7 +10383,8 @@ fn run_resolved_in_pool(
                     reports.x_prolog,
                     reports.epilog,
                     // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the queries' parts formatted on the
-                    // search's pool, idle after the search (`report::x_pairwise_par`).
+                    // search's pool after the search (`report::x_pairwise_par`); with
+                    // LOSAT_X_BPLKPAHEAD the next block's lookup build may still run on it.
                     crate::report::x_pairwise_par::pool(blastp_parallel_pool),
                 )?;
                 Ok(())

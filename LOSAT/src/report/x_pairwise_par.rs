@@ -1,6 +1,7 @@
 //! EXPERIMENT (LOSAT_X_PAIRWISEPAR, shadow LOSAT_X_PAIRWISEPARSHADOW): the per-query parts of the
 //! pairwise reports (outfmt 0) of BLASTN, TBLASTX and BLASTP formatted on the search's pool, and
-//! BLASTN's outfmt 0 rows (`algorithm/blastn/pairwise.rs`, `pairwise_hits`) made on it.
+//! BLASTN's and BLASTP's outfmt 0 rows (`algorithm/blastn/pairwise.rs`, `pairwise_hits`;
+//! `algorithm/blastp/blast_engine.rs`, `build_pairwise_hits`) made on it.
 //!
 //! The writers (`write_blastn_pairwise_report`, `write_tblastx_pairwise_report`,
 //! `write_blastp_pairwise_report` in `pairwise.rs`) run on the thread of the search's loop while
@@ -27,7 +28,8 @@
 //! most the same estimated bytes (at least one piece); the calling thread writes a chunk's
 //! buffers in order, each query's warnings before its head, before the next chunk is formatted.
 //! BLASTN's rows: each subject's HSP list of each query on the pool, collected in the list order
-//! (also with a format observer: the rows are values, not writes).
+//! (also with a format observer: the rows are values, not writes). BLASTP's rows: each hit of the
+//! final list on the pool, collected in the list order, the first error in that order.
 //!
 //! Why the bytes are those of the serial writer: every piece is the serial writer's calls on the
 //! same arguments (the same functions, `write_serial` calls them on the writer), into a buffer
@@ -51,11 +53,12 @@
 //! query; the groups of one window of queries.
 //!
 //! The shadow (`LOSAT_X_PAIRWISEPARSHADOW`, implies the switch) also writes the report by the
-//! serial writer into memory and compares the bytes (without warnings), and makes BLASTN's rows
+//! serial writer into memory and compares the bytes (without warnings), and makes BLASTN's and
+//! BLASTP's rows
 //! serially too and compares them (`Debug`); on a difference it prints `[X_SHADOW] PAIRWISEPAR ...
 //! DIFFERENT` and panics; after each report it prints `[X_SHADOW] PAIRWISEPAR queries= chunks=
-//! pieces= bytes= identical` (and `[X_SHADOW] PAIRWISEPARROWS rows= identical` after BLASTN's
-//! rows).
+//! pieces= bytes= identical` (and `[X_SHADOW] PAIRWISEPARROWS rows= identical` after rows made on
+//! the pool).
 
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -530,7 +533,8 @@ fn write_parallel_with<S: QuerySections, W: Write>(
     Ok((chunks, pieces_written))
 }
 
-// No NCBI counterpart: the shadow's comparison of BLASTN's rows (LOSAT_X_PAIRWISEPARSHADOW); it does
+// No NCBI counterpart: the shadow's comparison of BLASTN's and BLASTP's rows
+// (LOSAT_X_PAIRWISEPARSHADOW); it does
 // not change any value NCBI computes.
 /// The shadow's check of rows made on the pool against the serial rows (`Debug`).
 pub(crate) fn compare_rows(parallel: &[PairwiseHit], serial: &[PairwiseHit]) {

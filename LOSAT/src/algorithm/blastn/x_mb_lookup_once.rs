@@ -158,7 +158,8 @@
 //! tables of megablast of 65 records of three E. coli genomes against LC738868 at 64 threads made
 //! 102,000 such copies, which sent 6.4 million TLB shootdowns (to 63 CPUs each); a probe round that
 //! wrote every page of the table before the fill removed them and took whole runs to 0.73-0.94 of
-//! the read-once fill's time. `next_pos` is not touched: phase C writes it without reading it (no
+//! the read-once fill's time; this round took whole runs to 0.61-0.93 of the time without it at
+//! 4-32 threads on an i9 (WSL2, 2026-10-19; `docs/agents/diagnostics.md`). `next_pos` is not touched: phase C writes it without reading it (no
 //! zero page, no flush), and touching it did not pay there (0.97-1.04). Pages and max RSS: at 4 KiB
 //! pages the round touches only pages the fill writes, so the pages it maps are pages the fill maps
 //! anyway. It does not keep to whole 2 MiB regions (LOSAT_X_DISCLUTPAR's round does, for its

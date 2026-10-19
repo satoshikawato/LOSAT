@@ -607,7 +607,7 @@ fn pairwise_hit(
         hit.q_start.min(hit.q_end) as i32 - 1,
         hit.q_start.max(hit.q_end) as i32 - 1,
     );
-    // NCBI reference: c++/src/objtools/align_format/showalign.cpp:430-440
+    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showalign.cpp:430-440
     // ```c++
     // static int s_GetStdsegMasterFrame(const CStd_seg& ss, CScope& scope)
     // {

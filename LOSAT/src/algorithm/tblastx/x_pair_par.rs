@@ -2215,7 +2215,7 @@ impl XPairPar {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:494-516
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:501-508
 // ```c
 // while (scan_range[1] <= scan_range[2]) {
 //     /* scan the subject sequence for hits */
@@ -2227,9 +2227,10 @@ impl XPairPar {
 // One pass of the scan loop of `scan_unit` (one `scansub` call and the two-hit test of its hits),
 // statement for statement the loop body it was. No NCBI counterpart for the function boundary: on
 // wasm32 (LOSAT Web) it is a function of its own, so that the later batches of a unit run the
-// optimized code. V8 runs a function's first calls in its baseline code (Liftoff) and switches to
-// its optimized code (TurboFan) only at a later call, never inside a running call (no on-stack
-// replacement for Wasm), and a unit was one long call. Elsewhere it is inlined into `scan_unit`.
+// optimized code. V8 runs the first calls of a freshly compiled function in its baseline code
+// (Liftoff) and switches to its optimized code (TurboFan) only at a later call, never inside a
+// running call (no on-stack replacement for Wasm), and a unit was one long call. Elsewhere it is
+// inlined into `scan_unit`.
 /// One batch of `scan_unit`'s loop: scans the next hits of `subject` and runs the two-hit test of
 /// each on its cell of the unit table; false when the loop stops (no hit and no progress).
 #[cfg_attr(target_arch = "wasm32", inline(never))]

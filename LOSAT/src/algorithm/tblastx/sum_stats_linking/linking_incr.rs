@@ -1225,10 +1225,10 @@ fn link_group<'g, K: LinkKey>(
 // No NCBI counterpart for the struct and the function boundary: link_group's locals that its
 // round loop uses (s_BlastEvenGapLinkHSPs' `while (number_of_hsps > 0)`, link_hsps.c:589),
 // borrowed for one round, so that a round is one call of `round`. On wasm32 (LOSAT Web) `round`
-// is a function of its own: V8 runs a function's first calls in its baseline code (Liftoff) and
-// switches to its optimized code (TurboFan) only at a later call, never inside a running call
-// (no on-stack replacement for Wasm), and a group was one long call. Elsewhere `round` is
-// inlined into the loop, which it was the body of.
+// is a function of its own: V8 runs the first calls of a freshly compiled function in its baseline
+// code (Liftoff) and switches to its optimized code (TurboFan) only at a later call, never inside a
+// running call (no on-stack replacement for Wasm), and a group was one long call. Elsewhere
+// `round` is inlined into the loop, which it was the body of.
 /// One round's view of a group: its read-only values, and references to the pass values and
 /// structures and to the loop's variables, which `link_group` owns.
 struct LinkRounds<'r, K> {
@@ -1363,8 +1363,11 @@ impl<K: LinkKey> LinkRounds<'_, K> {
         let mut path_changed = *path_changed_at;
         let mut active_head = *active_head_at;
         // The vectors that a round only indexes, as slices: their buffers and lengths are values
-        // of this call, not read again from link_group's frame after a store (wasm32, where
-        // `round` is its own function).
+        // of this call, so they are not read again from link_group's frame after each store
+        // (that is what `round` would otherwise do where it is its own function, on wasm32).
+        // Inlined into link_group (other targets), the loop compiles to fewer instructions with
+        // these slices and references than as the locals it was (callgrind: link_group -5 to -6 %
+        // on TBLASTX at one thread).
         let (indeg, alive, next_active, prev_active, leaf_dirty, fen) = (
             &mut indeg[..],
             &mut alive[..],

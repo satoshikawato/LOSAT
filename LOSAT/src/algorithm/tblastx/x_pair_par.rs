@@ -113,16 +113,18 @@
 //! at the first difference of `combined_ungapped_hits`; the summary is printed by `main`.
 //!
 //! `LOSAT_X_TBXBAND` (in the strict set: on unless `LOSAT_X_TBXBAND` is `0`, or `LOSAT_X_DEFAULT=0`
-//! and it is not set): `decide` does not apply `guard` (item 3). The batches it let through change
+//! and it is not set): `decide` does not apply `guard` (item 3) to a batch whose longest subject
+//! chunk has at most as many letters as the reference table has cells (`x_band_fits`, a memory
+//! rule: the units' tables grow with the subject chunk). The batches the guard let through change
 //! nothing. The ones it rejected have a longest context and a longest subject chunk both longer than
 //! the slack: for one query of N bases, N in (3/7 2^k, 2^(k-1)] for the table of 2^k cells (1.76-2.0
 //! kb, 7.0-8.2 kb, ..., 56-65 kb, 112-131 kb, 225-262 kb, 0.45-0.52 Mb, 0.90-1.05 Mb, 1.8-2.1 Mb,
-//! 3.6-4.2 Mb), and multi-query batches whose letters lie just below a power of two, against a
-//! subject frame longer than the slack. They go through `LOSAT_X_PAIRPARGATE` like any other batch
-//! (small tables keep the reference loop at one thread and take the units at several threads when
-//! one subject holds more than one and a half thread's share of the bases) instead of always going
-//! to the reference frame loop, which searches a subject on one thread. The `[X_STATS] PAIRPAR` and
-//! `[X_SHADOW] PAIRPAR` lines count them (`band`).
+//! 3.6-4.2 Mb), and multi-query batches whose letters lie just below a power of two. With the rule,
+//! those against subject frames of at most 2^k letters (genome pairs of similar size) go through
+//! `LOSAT_X_PAIRPARGATE` like any other batch instead of always going to the reference frame loop,
+//! which searches a subject on one thread; those against longer subjects (a gene against a genome)
+//! keep the reference loop. The `[X_STATS] PAIRPAR` and `[X_SHADOW] PAIRPAR` lines count the band
+//! batches the units took (`band`).
 //!
 //! `LOSAT_X_PAIRLUT=1` (with `LOSAT_X_PAIRPAR`): the group tables are built directly from the
 //! query (`lookup/x_pair_lut.rs`, exactness argument in its header) and the batch's full table is
@@ -682,8 +684,8 @@ pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
     }
     let (max_context_len, longest_subject_chunk) = x_guard_lengths(g.contexts, g.subjects);
     // EXPERIMENT (LOSAT_X_TBXBAND): with the switch the first guard is not applied (module doc
-    // item 3).
-    if !(g.band
+    // item 3) where the subject chunks fit the reference table (`x_band_fits`).
+    if !((g.band && x_band_fits(longest_subject_chunk, g.diag_array_size))
         || guard(
             max_context_len,
             longest_subject_chunk,
@@ -698,6 +700,22 @@ pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
         return XDecision::Cost;
     }
     XDecision::Units
+}
+
+// No NCBI counterpart: a memory rule of LOSAT_X_TBXBAND (module doc). The units need no length
+// condition for exactness (item 3), but a unit's diagonal table has a cell for every raw diagonal
+// of its query group and subject chunk, one table per thread, where the reference loop has one
+// table of `diag_array_size` cells per subject in flight. With a subject chunk of at most that
+// many letters a unit's table is less than twice the reference's. Measured (workstation, 8 and 16
+// threads): a 1 Mb and a 3.9 Mb query against 1 and 4.6 Mb genomes (chunks of 0.16 and 0.18 of the
+// table) ran x0.08-0.13 with a lower max RSS; 3 fruit fly transcripts (2,005 bases, 4,096 cells)
+// against the fruit fly genome database and a 1.9 kb query against MG1655 (chunks of 2,000 and
+// 380 times the table) ran x0.29-0.74, but their max RSS grew from 318 to 600-873 MiB (NCBI 368
+// MiB at 8 threads) and from 21 to 68-111 MiB, so such batches keep the reference loop.
+/// LOSAT_X_TBXBAND: the longest subject chunk has at most as many letters as the reference's
+/// diagonal table has cells.
+fn x_band_fits(longest_subject_chunk: usize, diag_array_size: i32) -> bool {
+    longest_subject_chunk as i64 <= diag_array_size as i64
 }
 
 // No NCBI counterpart: the lengths the guards compare, from the batch's contexts and subjects (a
@@ -3776,6 +3794,18 @@ mod tests {
         assert_eq!(decision(0, &short, false, false), XDecision::Off);
         assert_eq!(decision(0, &long, true, true), XDecision::Off);
         assert_eq!(decision_band(0, &long, false, false, true), XDecision::Off);
+        // The memory rule: a subject chunk longer than the table's 256 cells keeps the guard.
+        let longer = [FastaRecord::new("", b"l", &[b'A'; 3 * 257])];
+        let fits = [FastaRecord::new("", b"l", &[b'A'; 3 * 256])];
+        assert_eq!(
+            decision_band(1, &longer, false, false, true),
+            XDecision::Guard
+        );
+        assert_eq!(
+            decision_band(1, &fits, false, false, true),
+            XDecision::Units
+        );
+        assert!(x_band_fits(256, 256) && !x_band_fits(257, 256));
         // LOSAT_X_PAIRPARGATE still decides after the guard: this table of 256 cells at one thread.
         let gated = |m: u8, band: bool| {
             decide(

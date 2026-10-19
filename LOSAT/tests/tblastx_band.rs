@@ -1,11 +1,13 @@
 //! `LOSAT_X_TBXBAND` on whole runs of the binary: the unit path of `LOSAT_X_PAIRPAR` takes a query
 //! batch whose longest context and longest subject chunk are both longer than the slack of the
 //! reference's diagonal table (`guard` in `src/algorithm/tblastx/x_pair_par.rs`, which the switch no
-//! longer applies; module doc item 3 for why the units stay exact). The case: the first 1,900 bases
-//! of MjeNMV (six frames of 632-633 letters, a table of 4,096 cells, a slack of about 290) against
-//! the PemoMJNVA genome. `LOSAT_X_PAIRPARGATE` still decides first: at one thread the batch keeps
-//! the reference loop ("fallback: cost"), at several the units split the one long subject over the
-//! pool.
+//! longer applies; module doc item 3 for why the units stay exact), when the subject chunks have at
+//! most as many letters as that table has cells (`x_band_fits`, a memory rule). The query is the
+//! first 1,900 bases of MjeNMV (six frames of 632-633 letters, a table of 4,096 cells, a slack of
+//! about 290); the subject is MjeNMV's first 9,000 bases (frames of about 3,000 letters: the band)
+//! or the PemoMJNVA genome (frames of about 99,000 letters: the rule keeps the guard).
+//! `LOSAT_X_PAIRPARGATE` still decides after the guards: at one thread the batch keeps the reference
+//! loop ("fallback: cost"), at several the units split the one subject over the pool.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
 //! ```c
@@ -71,13 +73,18 @@ fn query(name: &str, length: usize) -> PathBuf {
 }
 
 /// One run: the report (`-outfmt 6`) and the whole stderr.
-fn tblastx(query: &Path, threads: u32, switches: &[(&str, &str)]) -> (Vec<u8>, String) {
+fn tblastx(
+    query: &Path,
+    subject: &Path,
+    threads: u32,
+    switches: &[(&str, &str)],
+) -> (Vec<u8>, String) {
     let output = losat(switches)
         .arg("tblastx")
         .arg("-query")
         .arg(query)
         .arg("-subject")
-        .arg(fasta("PemoMJNVA.fasta"))
+        .arg(subject)
         .args(["-outfmt", "6", "-num_threads", &threads.to_string()])
         .output()
         .expect("run LOSAT");
@@ -114,8 +121,9 @@ const PAIRPAR_FIELDS: [&str; 4] = ["units", "fallback_guard", "fallback_cost", "
 #[test]
 fn a_band_batch_takes_the_units_at_several_threads_with_the_same_report() {
     let q = query("MjeNMV.fasta", 1_900);
+    let s = query("MjeNMV.fasta", 9_000);
     for threads in [2, 4] {
-        let (reference, off) = tblastx(&q, threads, &[STATS, BAND_OFF]);
+        let (reference, off) = tblastx(&q, &s, threads, &[STATS, BAND_OFF]);
         assert!(
             reference.iter().filter(|&&b| b == b'\n').count() > 5,
             "the search finds hits"
@@ -125,7 +133,7 @@ fn a_band_batch_takes_the_units_at_several_threads_with_the_same_report() {
             [0, 1, 0, 0],
             "threads {threads}: without the switch the guard sends the batch to the reference loop"
         );
-        let (report, on) = tblastx(&q, threads, &[STATS]);
+        let (report, on) = tblastx(&q, &s, threads, &[STATS]);
         assert!(
             report == reference,
             "threads {threads}: the report differs with the switch"
@@ -138,7 +146,7 @@ fn a_band_batch_takes_the_units_at_several_threads_with_the_same_report() {
             "threads {threads}: the batch of the band"
         );
         // The shadow compares the units with the reference loop on the subject.
-        let (shadowed, shadow) = tblastx(&q, threads, &[("LOSAT_X_PAIRPARSHADOW", "1")]);
+        let (shadowed, shadow) = tblastx(&q, &s, threads, &[("LOSAT_X_PAIRPARSHADOW", "1")]);
         assert!(
             shadowed == reference,
             "threads {threads}: the shadow's report differs"
@@ -164,9 +172,27 @@ fn a_band_batch_takes_the_units_at_several_threads_with_the_same_report() {
 #[test]
 fn the_cost_gate_still_decides_at_one_thread() {
     let q = query("MjeNMV.fasta", 1_900);
-    let (reference, off) = tblastx(&q, 1, &[STATS, BAND_OFF]);
+    let s = query("MjeNMV.fasta", 9_000);
+    let (reference, off) = tblastx(&q, &s, 1, &[STATS, BAND_OFF]);
     assert_eq!(counters(&off, PAIRPAR_LINE, PAIRPAR_FIELDS), [0, 1, 0, 0]);
-    let (report, on) = tblastx(&q, 1, &[STATS]);
+    let (report, on) = tblastx(&q, &s, 1, &[STATS]);
     assert!(report == reference, "the report differs with the switch");
     assert_eq!(counters(&on, PAIRPAR_LINE, PAIRPAR_FIELDS), [0, 0, 1, 0]);
+}
+
+// A subject longer than the reference table's cells (the PemoMJNVA genome) keeps the guard: the
+// reference loop at several threads, with the switch as without it.
+#[test]
+fn a_subject_longer_than_the_table_keeps_the_reference_loop() {
+    let q = query("MjeNMV.fasta", 1_900);
+    let genome = fasta("PemoMJNVA.fasta");
+    let (reference, off) = tblastx(&q, &genome, 2, &[STATS, BAND_OFF]);
+    assert!(
+        reference.iter().filter(|&&b| b == b'\n').count() > 5,
+        "the search finds hits"
+    );
+    assert_eq!(counters(&off, PAIRPAR_LINE, PAIRPAR_FIELDS), [0, 1, 0, 0]);
+    let (report, on) = tblastx(&q, &genome, 2, &[STATS]);
+    assert!(report == reference, "the report differs with the switch");
+    assert_eq!(counters(&on, PAIRPAR_LINE, PAIRPAR_FIELDS), [0, 1, 0, 0]);
 }

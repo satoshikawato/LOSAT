@@ -13,7 +13,7 @@ compared with <fixture_id>.db.out instead, NCBI's search with the subject as a d
 outside the lines that name the database (`normalize_database_lines`); its line says
 `exception` and how many lines differ from NCBI's local search (<fixture_id>.out).
 
-Usage: check_losat.py --losat LOSAT [--programs blastn,blastp,tblastn,tblastx] [--threads N]
+Usage: check_losat.py --losat LOSAT [--programs blastn,blastp,tblastn,tblastx,blastx] [--threads N]
        [--only PREFIX]
 """
 from __future__ import annotations
@@ -68,7 +68,7 @@ def normalize_database_lines(report: bytes) -> bytes:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--losat", type=Path, required=True)
-    parser.add_argument("--programs", default="blastn,blastp,tblastn,tblastx")
+    parser.add_argument("--programs", default="blastn,blastp,tblastn,tblastx,blastx")
     parser.add_argument("--threads", type=int)
     parser.add_argument("--only", default="")
     args = parser.parse_args()

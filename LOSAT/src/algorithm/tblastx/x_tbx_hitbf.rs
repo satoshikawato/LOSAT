@@ -55,10 +55,12 @@
 //! The reference's too-far write stores `s + diag_offset` truncated to 31 bits with the flag kept
 //! (0); `s + window` is below 2^29, so the raw word `s + window` is that value. The overlap path
 //! writes back the word it read. A flag-1 cell or a candidate goes to the per-hit body unchanged,
-//! which then reads and writes the cell as in the reference. Each hit reads and writes only its own
-//! cell, in scan order, so every cell goes through the reference's states and every call of the
-//! per-hit body sees the cell the reference loop gives it; the init HSPs are saved by the same calls
-//! in the same order. A unit outside `fits` runs the reference loop, which keeps the 31-bit field's
+//! which then reads and writes the cell as in the reference. The loop reads and writes only the cell
+//! of the hit at hand, after every call of the per-hit body for the hits before it, and keeps no
+//! cell value across such a call (the batched body writes other cells too: it resolves held-back
+//! extensions, x_tbx_extbatch.rs). So every cell goes through the reference's states in scan order,
+//! every call of the per-hit body sees the table the loop before the switch gives it, and the init
+//! HSPs are saved by the same calls in the same order. A unit outside `fits` runs the reference loop, which keeps the 31-bit field's
 //! truncation (memory `losat-no-ncbi-bug-reproduction`, 2026-10-12); the batch guard `last_hit_fits`
 //! already keeps the units of the unit path inside it.
 //!
@@ -71,8 +73,8 @@
 use super::x_tbx_extbatch::{XShadowList, XShadowRef};
 use super::*;
 
-// No NCBI counterpart: counters of LOSAT_X_TBXHITBFSHADOW (units compared, records compared) and of
-// the units outside `fits` while the switch is on; they do not change any value NCBI computes.
+// No NCBI counterpart: counters of LOSAT_X_TBXHITBFSHADOW (units compared, records compared, units
+// outside `fits`); they do not change any value NCBI computes.
 static HB_SHADOW_UNITS: AtomicU64 = AtomicU64::new(0);
 static HB_SHADOW_RECORDS: AtomicU64 = AtomicU64::new(0);
 static HB_OUTSIDE: AtomicU64 = AtomicU64::new(0);
@@ -114,7 +116,9 @@ fn unit_mode(m: u8, chunk_length: usize, window: i32, wordsize: i32) -> u8 {
         return 0;
     }
     if !fits(chunk_length, window, wordsize) {
-        HB_OUTSIDE.fetch_add(1, AtomicOrdering::Relaxed);
+        if m == 2 {
+            HB_OUTSIDE.fetch_add(1, AtomicOrdering::Relaxed);
+        }
         return 0;
     }
     m
@@ -152,8 +156,8 @@ pub(super) fn print_summary() {
 /// SAFETY: `pairs` points to `n` entries, and with `PF` to `X_PREFETCH_AHEAD` initialized entries
 /// after them; every hit's cell is below `width`, the length of the table `diag_ptr` points into;
 /// `fits(chunk length, window, wordsize)` holds, every subject offset is below the chunk length and
-/// every flag-0 cell holds a value the unit stored (module doc); `rare` writes at most the cell it
-/// is given.
+/// every flag-0 cell holds a value the unit stored (module doc); `rare` writes only cells of the
+/// table, values the unit's per-hit body stores (the loop keeps no cell value across a call).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub(super) unsafe fn x_hits_bf<const PF: bool>(
@@ -288,8 +292,8 @@ impl XPairPar {
         }
     }
 
-    // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, so that the loop gets its own registers and
-    // the units outside the switch keep the code of `scan_unit`.
+    // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, so that the loop gets its own registers; the
+    // units outside the switch run the instance of `scan_unit` without it.
     /// `scan_unit` with the branch-free hit loop.
     #[inline(never)]
     fn scan_unit_bf<S: XInitSink, const PF: bool>(
@@ -530,11 +534,16 @@ mod tests {
                 2 => 64,
                 _ => 1 << 20,
             };
-            // Every seventh round the longest chunk `fits` takes.
+            // Every seventh round the longest chunk `fits` takes; every thirteenth the widest window.
             let chunk_len: usize = if round % 7 == 0 {
                 ((X_HITBF_LIMIT - 1) - window as i64) as usize
             } else {
                 1 + rng.below(5000) as usize
+            };
+            let window = if round % 13 == 6 {
+                ((X_HITBF_LIMIT - 1) as usize - chunk_len) as i32
+            } else {
+                window
             };
             assert!(fits(chunk_len, window, wordsize));
             assert!(!fits(chunk_len + 1, window, wordsize) || round % 7 != 0);

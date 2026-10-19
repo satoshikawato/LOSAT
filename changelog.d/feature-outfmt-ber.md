@@ -1,0 +1,1 @@
+- `-outfmt 9` (Seq-align, binary ASN.1) in all five programs, with `-subject` and `-db`: the BER Seq-annot that NCBI BLAST+ 2.17.0 writes (indefinite-length SEQUENCE and SET OF, explicit context tags, `REAL` as decimal text), byte for byte at every thread count, one document per query with hits and nothing between them. Outfmt 0/6/7 are unchanged.

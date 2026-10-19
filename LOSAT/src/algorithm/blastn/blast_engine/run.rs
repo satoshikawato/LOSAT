@@ -81,9 +81,10 @@ use super::super::filtering::{
     subject_best_hit, subject_best_hit_by, BestHitKey, ReevalParams,
 };
 use super::super::hsp::{
-    evalue_comp, get_prelim_hitlist_size, parse_blastn_output_format, sort_hsplist_by_evalue,
-    sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists_to_writer, BlastnHitList,
-    BlastnHsp, BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
+    evalue_comp, get_prelim_hitlist_size, parse_blastn_output_format, score_compare_hsps,
+    sort_hsplist_by_evalue, sort_hsps_by_score, trim_by_max_hsps,
+    write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
+    BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{
@@ -13855,11 +13856,18 @@ fn search_query_batch(
                 // ```
                 // NCBI purges redundant preliminary score-only gapped HSPs
                 // before subject chunk offset adjustment and final traceback.
-                // With LOSAT_X_QGROUPPAR the queries' lists were purged by their tasks.
-                if !x_purged {
+                // With LOSAT_X_QGROUPPAR the queries' lists were purged by their tasks, and the
+                // same stable sort runs on the pool.
+                if x_purged {
+                    x_qgroup_par::sort_stable(
+                        parallel_pool,
+                        &mut chunk_prelim_hits,
+                        score_compare_prelim_hits,
+                    );
+                } else {
                     chunk_prelim_hits = purge_prelim_hits_with_common_endpoints(chunk_prelim_hits);
+                    sort_prelim_hits_by_score(&mut chunk_prelim_hits);
                 }
-                sort_prelim_hits_by_score(&mut chunk_prelim_hits);
                 for hit in chunk_prelim_hits.iter_mut() {
                     hit.prelim_ss = hit.prelim_ss.saturating_add(chunk.offset);
                     hit.prelim_se = hit.prelim_se.saturating_add(chunk.offset);
@@ -15744,10 +15752,252 @@ fn search_query_batch(
 
             (local_hits, hits_step1, hits_step2, hits_step3, hits_step4)
         };
+        // The passes after the second purge on one list: the score sort, the final tree and the
+        // e-values. Returns the HSPs kept and their number after the tree (for the debug line).
+        let x_final_list = |mut local_hits: Vec<BlastnHsp>,
+                            interval_tree: &mut BlastIntervalTree| {
+            // Step 5: Re-sort by gapped score
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-672
+            // ```c
+            // /* Sort HSPs by score again, as the scores might have changed. */
+            // Blast_HSPListSortByScore(hsp_list);
+            // ```
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353 (ScoreCompareHSPs)
+            // ```c
+            // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
+            //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
+            //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
+            //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
+            //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
+            // }
+            // ```
+            let score_resort_start = if timing_enabled {
+                Some(std::time::Instant::now())
+            } else {
+                None
+            };
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-672
+            // ```c
+            // /* Sort HSPs by score again, as the scores might have changed. */
+            // Blast_HSPListSortByScore(hsp_list);
+            // ```
+            sort_hsps_by_score(&mut local_hits);
+            if let (Some(timing), Some(score_resort_start)) = (timing_ref, score_resort_start) {
+                BlastnTiming::record_duration(
+                    &timing.traceback_score_resort_ns,
+                    score_resort_start,
+                );
+            }
+
+            // Step 6: Phase 2 - Tree reset and second containment pass
+            // NCBI reference: blast_traceback.c:678
+            // Blast_IntervalTreeReset(tree);
+            interval_tree.reset();
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:66-70
+            // ```c
+            // if (tree->num_used == tree->num_alloc) {
+            //     tree->num_alloc = 2 * tree->num_alloc;
+            //     tree->nodes = (SIntervalNode *)realloc(tree->nodes, tree->num_alloc *
+            //                                                  sizeof(SIntervalNode));
+            // }
+            // ```
+            // The final containment pass adds at most one tree HSP for each surviving
+            // HSP. Reserving here only removes allocator churn; containment and order
+            // are still controlled by BlastIntervalTreeContainsHSP/AddHSP.
+            interval_tree.reserve_nodes_for_hsps(local_hits.len());
+
+            // NCBI reference: blast_traceback.c:679-692
+            // Remove any HSPs that are contained within other HSPs.
+            // Since the list is sorted by score already, any HSP
+            // contained by a previous HSP is guaranteed to have a
+            // lower score, and may be purged.
+            let mut final_hits = Vec::with_capacity(local_hits.len());
+            for hit in local_hits {
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
+                // ```c
+                // query_start = query_context_offset;
+                // region_start = query_start + hsp->query.offset;
+                // region_end = query_start + hsp->query.end;
+                // ```
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
+                // ```c
+                // tmp_hsp.query.offset = q_start;
+                // tmp_hsp.query.end = q_end;
+                // tmp_hsp.query.frame = query_info->contexts[context].frame;
+                // tmp_hsp.subject.offset = s_start;
+                // tmp_hsp.subject.end = s_end;
+                // ```
+                // NCBI uses canonical coordinates: subject.offset < subject.end always
+                let query_context_offset = hit.internal_query_context_offset;
+                let tree_hsp = TreeHsp {
+                    query_offset: hit.internal_q_offset_0 as i32,
+                    query_end: hit.internal_q_end_0 as i32,
+                    subject_offset: hit.internal_s_offset_0 as i32,
+                    subject_end: hit.internal_s_end_0 as i32,
+                    score: hit.raw_score,
+                    query_frame: hit.query_frame,
+                    query_length: hit.query_length as i32,
+                    query_context_offset,
+                    subject_frame_sign: 1,
+                };
+
+                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-688
+                // ```c
+                // Blast_IntervalTreeReset(tree);
+                // for (index = 0; index < hsp_list->hspcnt; index++) {
+                //     if (BlastIntervalTreeContainsHSP(tree, hsp, query_info,
+                //                                  hit_options->min_diag_separation)) {
+                //         hsp_array[index] = Blast_HSPFree(hsp);
+                //     } else {
+                //         BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
+                //     }
+                // }
+                // ```
+                let final_tree_contains_start = if timing_enabled {
+                    Some(std::time::Instant::now())
+                } else {
+                    None
+                };
+                let final_tree_containing_hsp = interval_tree.containing_hsp(
+                    &tree_hsp,
+                    query_context_offset,
+                    min_diag_separation,
+                );
+                let final_tree_contains = final_tree_containing_hsp.is_some();
+                if let (Some(timing), Some(final_tree_contains_start)) =
+                    (timing_ref, final_tree_contains_start)
+                {
+                    BlastnTiming::record_duration(
+                        &timing.traceback_final_tree_contains_ns,
+                        final_tree_contains_start,
+                    );
+                }
+                if blastn_trace_enabled
+                    && blastn_trace::should_trace_range(
+                        "purge",
+                        (hit.q_idx * 2 + if hit.query_frame < 0 { 1 } else { 0 }) as u32,
+                        s_idx,
+                        s_id,
+                        hit.internal_q_offset_0,
+                        hit.internal_q_end_0,
+                        hit.internal_s_offset_0,
+                        hit.internal_s_end_0,
+                        hit.query_length,
+                        hit.query_frame,
+                    )
+                {
+                    blastn_trace::log(
+                        "purge",
+                        format!(
+                            "subject={}({}) context={} pass=final_interval_tree q{}..{} s{}..{} raw_score={} contained={} containing_hsp={:?} min_diag_separation={}",
+                            s_id,
+                            s_idx,
+                            hit.q_idx * 2 + if hit.query_frame < 0 { 1 } else { 0 },
+                            hit.internal_q_offset_0,
+                            hit.internal_q_end_0,
+                            hit.internal_s_offset_0,
+                            hit.internal_s_end_0,
+                            hit.raw_score,
+                            final_tree_contains,
+                            final_tree_containing_hsp,
+                            min_diag_separation
+                        ),
+                    );
+                }
+                if !final_tree_contains {
+                    let final_tree_add_start = if timing_enabled {
+                        Some(std::time::Instant::now())
+                    } else {
+                        None
+                    };
+                    interval_tree.add_hsp(
+                        tree_hsp,
+                        query_context_offset,
+                        IndexMethod::QueryAndSubject,
+                    );
+                    if let (Some(timing), Some(final_tree_add_start)) =
+                        (timing_ref, final_tree_add_start)
+                    {
+                        BlastnTiming::record_duration(
+                            &timing.traceback_final_tree_add_ns,
+                            final_tree_add_start,
+                        );
+                    }
+                    final_hits.push(hit);
+                } else if let Some(timing) = timing_ref {
+                    BlastnTiming::record_count(&timing.traceback_removed_final_tree_hsps, 1);
+                }
+                // else: HSP is contained within another, skip (implicit delete)
+            }
+
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-692
+            // ```c
+            // Blast_IntervalTreeReset(tree);
+            // for (index = 0; index < hsp_list->hspcnt; index++) {
+            //    if (BlastIntervalTreeContainsHSP(...)) {
+            //       hsp_array[index] = Blast_HSPFree(hsp);
+            //    } else {
+            //       BlastIntervalTreeAddHSP(...);
+            //    }
+            // }
+            // ```
+            // Keep the final-containment count separate from the later E-value reap.
+            let final_tree_hit_count = final_hits.len();
+
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-246
+            // ```c
+            // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
+            //                         hsp_list, kGapped, FALSE, sbp, 0,
+            //                         scale_factor);
+            // Blast_HSPListReapByEvalue(hsp_list, hit_params->options);
+            // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
+            // ```
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1983-2003
+            // ```c
+            // cutoff = hit_options->expect_value;
+            // for (index = 0; index < hsp_list->hspcnt; index++) {
+            //    hsp = hsp_array[index];
+            //    if (hsp->evalue > cutoff) {
+            //       hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+            //    } else {
+            //       if (index > hsp_cnt)
+            //          hsp_array[hsp_cnt] = hsp_array[index];
+            //       hsp_cnt++;
+            //    }
+            // }
+            // ```
+            // Apply final gapped E-value assignment and reaping after all
+            // post-traceback survivor-set operations, matching
+            // s_HSPListPostTracebackUpdate.
+            let before_evalue_reap = final_hits.len();
+            for hit in final_hits.iter_mut() {
+                let context_idx =
+                    (hit.q_idx as usize) * 2 + if hit.query_frame < 0 { 1 } else { 0 };
+                let eff_searchsp = query_eff_searchsp.get(context_idx).copied().unwrap_or(0);
+                let (bit_score, eval) = calculate_blastn_context_statistics(
+                    hit.raw_score,
+                    &search_karlin_ref[context_idx].gapped,
+                    eff_searchsp,
+                    round_down_evalue_score,
+                );
+                hit.bit_score = bit_score;
+                hit.e_value = eval;
+            }
+            final_hits.retain(|hit| hsp_survives_evalue_reap(hit.e_value, evalue_threshold));
+            if let Some(timing) = timing_ref {
+                BlastnTiming::record_count(
+                    &timing.traceback_deleted_evalue_cutoff_hsps,
+                    before_evalue_reap.saturating_sub(final_hits.len()) as u64,
+                );
+            }
+
+            (final_hits, final_tree_hit_count)
+        };
         // Dispatch point of LOSAT_X_QGROUPPAR for the traceback: the kept HSPs are the queries'
-        // hit lists one after another, so each query's are one slice; per query on the pool,
-        // the lists after the second purge concatenated in query order (the serial second
-        // purge's output, see x_qgroup_par.rs), or the loop over the subject's list.
+        // hit lists one after another, so each query's are one slice; per query on the pool, the
+        // final lists concatenated in query order and sorted by score (stable, so ties stay in
+        // query order, as the serial sort leaves them: its input, the second purge's output, is
+        // ordered by context first; see x_qgroup_par.rs), or the loop over the subject's list.
         let prelim_hits = &mut combined_prelim_hits;
         let x_trace_counts = (x_qgroup_batch
             && x_qgroup_par::in_query_order(prelim_hits.iter().map(|hit| hit.query_idx)))
@@ -15755,7 +16005,7 @@ fn search_query_batch(
         let x_trace_order = x_trace_counts
             .as_deref()
             .and_then(|counts| x_qgroup_par::plan(counts, x_qgroup_par::Stage::Traceback));
-        let (mut local_hits, hits_step1, hits_step2, hits_step3, hits_step4) =
+        let (final_hits, [hits_step1, hits_step2, hits_step3, hits_step4, final_tree_hit_count]) =
             if let Some(order) = x_trace_order.as_ref() {
                 let x_starts = x_qgroup_par::starts(x_trace_counts.as_deref().unwrap_or(&[]));
                 let x_kept: &[PrelimHit] = prelim_hits;
@@ -15788,25 +16038,24 @@ fn search_query_batch(
                             &mut edit_lengths,
                             &mut alignment_lengths,
                         );
-                        (
-                            x_post_purge(std::mem::take(hits)),
-                            edit_lengths,
-                            alignment_lengths,
-                        )
+                        let (list, s1, s2, s3, s4) = x_post_purge(std::mem::take(hits));
+                        let (list, s5) = x_final_list(list, tree);
+                        (list, [s1, s2, s3, s4, s5], edit_lengths, alignment_lengths)
                     },
                 );
                 let mut fast: Vec<BlastnHsp> = Vec::new();
-                let mut steps = [0usize; 4];
-                for ((list, s1, s2, s3, s4), edit_lengths, alignment_lengths) in
+                let mut steps = [0usize; 5];
+                for (list, counts, edit_lengths, alignment_lengths) in
                     x_results.into_iter().flatten()
                 {
                     fast.extend(list);
-                    for (sum, step) in steps.iter_mut().zip([s1, s2, s3, s4]) {
+                    for (sum, step) in steps.iter_mut().zip(counts) {
                         *sum += step;
                     }
                     traceback_edit_script_lengths.extend(edit_lengths);
                     traceback_alignment_lengths.extend(alignment_lengths);
                 }
+                x_qgroup_par::sort_stable(parallel_pool, &mut fast, score_compare_hsps);
                 if x_qgroup_par::shadow() {
                     let mut edit_lengths = Vec::new();
                     let mut alignment_lengths = Vec::new();
@@ -15820,11 +16069,12 @@ fn search_query_batch(
                         &mut edit_lengths,
                         &mut alignment_lengths,
                     );
-                    let slow = x_post_purge(hits.drain(..).collect());
-                    x_qgroup_par::compare(x_qgroup_par::Stage::Traceback, &slow.0, &fast);
-                    slow
+                    let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
+                    let (slow, s5) = x_final_list(list, &mut interval_tree);
+                    x_qgroup_par::compare(x_qgroup_par::Stage::Traceback, &slow, &fast);
+                    (slow, [s1, s2, s3, s4, s5])
                 } else {
-                    (fast, steps[0], steps[1], steps[2], steps[3])
+                    (fast, steps)
                 }
             } else {
                 x_trace_list(
@@ -15837,233 +16087,11 @@ fn search_query_batch(
                     &mut traceback_edit_script_lengths,
                     &mut traceback_alignment_lengths,
                 );
-                x_post_purge(hits.drain(..).collect())
+                let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
+                let (list, s5) = x_final_list(list, &mut interval_tree);
+                (list, [s1, s2, s3, s4, s5])
             };
         prelim_hits.clear();
-
-        // Step 5: Re-sort by gapped score
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-672
-        // ```c
-        // /* Sort HSPs by score again, as the scores might have changed. */
-        // Blast_HSPListSortByScore(hsp_list);
-        // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1330-1353 (ScoreCompareHSPs)
-        // ```c
-        // if (0 == (result = BLAST_CMP(hsp2->score,          hsp1->score)) &&
-        //     0 == (result = BLAST_CMP(hsp1->subject.offset, hsp2->subject.offset)) &&
-        //     0 == (result = BLAST_CMP(hsp2->subject.end,    hsp1->subject.end)) &&
-        //     0 == (result = BLAST_CMP(hsp1->query  .offset, hsp2->query  .offset))) {
-        //     result = BLAST_CMP(hsp2->query.end, hsp1->query.end);
-        // }
-        // ```
-        let score_resort_start = if timing_enabled {
-            Some(std::time::Instant::now())
-        } else {
-            None
-        };
-        // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:671-672
-        // ```c
-        // /* Sort HSPs by score again, as the scores might have changed. */
-        // Blast_HSPListSortByScore(hsp_list);
-        // ```
-        sort_hsps_by_score(&mut local_hits);
-        if let (Some(timing), Some(score_resort_start)) = (timing_ref, score_resort_start) {
-            BlastnTiming::record_duration(&timing.traceback_score_resort_ns, score_resort_start);
-        }
-
-        // Step 6: Phase 2 - Tree reset and second containment pass
-        // NCBI reference: blast_traceback.c:678
-        // Blast_IntervalTreeReset(tree);
-        interval_tree.reset();
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:66-70
-        // ```c
-        // if (tree->num_used == tree->num_alloc) {
-        //     tree->num_alloc = 2 * tree->num_alloc;
-        //     tree->nodes = (SIntervalNode *)realloc(tree->nodes, tree->num_alloc *
-        //                                                  sizeof(SIntervalNode));
-        // }
-        // ```
-        // The final containment pass adds at most one tree HSP for each surviving
-        // HSP. Reserving here only removes allocator churn; containment and order
-        // are still controlled by BlastIntervalTreeContainsHSP/AddHSP.
-        interval_tree.reserve_nodes_for_hsps(local_hits.len());
-
-        // NCBI reference: blast_traceback.c:679-692
-        // Remove any HSPs that are contained within other HSPs.
-        // Since the list is sorted by score already, any HSP
-        // contained by a previous HSP is guaranteed to have a
-        // lower score, and may be purged.
-        let mut final_hits = Vec::with_capacity(local_hits.len());
-        for hit in local_hits {
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_itree.c:537-550
-            // ```c
-            // query_start = query_context_offset;
-            // region_start = query_start + hsp->query.offset;
-            // region_end = query_start + hsp->query.end;
-            // ```
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
-            // ```c
-            // tmp_hsp.query.offset = q_start;
-            // tmp_hsp.query.end = q_end;
-            // tmp_hsp.query.frame = query_info->contexts[context].frame;
-            // tmp_hsp.subject.offset = s_start;
-            // tmp_hsp.subject.end = s_end;
-            // ```
-            // NCBI uses canonical coordinates: subject.offset < subject.end always
-            let query_context_offset = hit.internal_query_context_offset;
-            let tree_hsp = TreeHsp {
-                query_offset: hit.internal_q_offset_0 as i32,
-                query_end: hit.internal_q_end_0 as i32,
-                subject_offset: hit.internal_s_offset_0 as i32,
-                subject_end: hit.internal_s_end_0 as i32,
-                score: hit.raw_score,
-                query_frame: hit.query_frame,
-                query_length: hit.query_length as i32,
-                query_context_offset,
-                subject_frame_sign: 1,
-            };
-
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-688
-            // ```c
-            // Blast_IntervalTreeReset(tree);
-            // for (index = 0; index < hsp_list->hspcnt; index++) {
-            //     if (BlastIntervalTreeContainsHSP(tree, hsp, query_info,
-            //                                  hit_options->min_diag_separation)) {
-            //         hsp_array[index] = Blast_HSPFree(hsp);
-            //     } else {
-            //         BlastIntervalTreeAddHSP(hsp, tree, query_info, eQueryAndSubject);
-            //     }
-            // }
-            // ```
-            let final_tree_contains_start = if timing_enabled {
-                Some(std::time::Instant::now())
-            } else {
-                None
-            };
-            let final_tree_containing_hsp =
-                interval_tree.containing_hsp(&tree_hsp, query_context_offset, min_diag_separation);
-            let final_tree_contains = final_tree_containing_hsp.is_some();
-            if let (Some(timing), Some(final_tree_contains_start)) =
-                (timing_ref, final_tree_contains_start)
-            {
-                BlastnTiming::record_duration(
-                    &timing.traceback_final_tree_contains_ns,
-                    final_tree_contains_start,
-                );
-            }
-            if blastn_trace_enabled
-                && blastn_trace::should_trace_range(
-                    "purge",
-                    (hit.q_idx * 2 + if hit.query_frame < 0 { 1 } else { 0 }) as u32,
-                    s_idx,
-                    s_id,
-                    hit.internal_q_offset_0,
-                    hit.internal_q_end_0,
-                    hit.internal_s_offset_0,
-                    hit.internal_s_end_0,
-                    hit.query_length,
-                    hit.query_frame,
-                )
-            {
-                blastn_trace::log(
-                    "purge",
-                    format!(
-                        "subject={}({}) context={} pass=final_interval_tree q{}..{} s{}..{} raw_score={} contained={} containing_hsp={:?} min_diag_separation={}",
-                        s_id,
-                        s_idx,
-                        hit.q_idx * 2 + if hit.query_frame < 0 { 1 } else { 0 },
-                        hit.internal_q_offset_0,
-                        hit.internal_q_end_0,
-                        hit.internal_s_offset_0,
-                        hit.internal_s_end_0,
-                        hit.raw_score,
-                        final_tree_contains,
-                        final_tree_containing_hsp,
-                        min_diag_separation
-                    ),
-                );
-            }
-            if !final_tree_contains {
-                let final_tree_add_start = if timing_enabled {
-                    Some(std::time::Instant::now())
-                } else {
-                    None
-                };
-                interval_tree.add_hsp(tree_hsp, query_context_offset, IndexMethod::QueryAndSubject);
-                if let (Some(timing), Some(final_tree_add_start)) =
-                    (timing_ref, final_tree_add_start)
-                {
-                    BlastnTiming::record_duration(
-                        &timing.traceback_final_tree_add_ns,
-                        final_tree_add_start,
-                    );
-                }
-                final_hits.push(hit);
-            } else if let Some(timing) = timing_ref {
-                BlastnTiming::record_count(&timing.traceback_removed_final_tree_hsps, 1);
-            }
-            // else: HSP is contained within another, skip (implicit delete)
-        }
-
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:678-692
-        // ```c
-        // Blast_IntervalTreeReset(tree);
-        // for (index = 0; index < hsp_list->hspcnt; index++) {
-        //    if (BlastIntervalTreeContainsHSP(...)) {
-        //       hsp_array[index] = Blast_HSPFree(hsp);
-        //    } else {
-        //       BlastIntervalTreeAddHSP(...);
-        //    }
-        // }
-        // ```
-        // Keep the final-containment count separate from the later E-value reap.
-        let final_tree_hit_count = final_hits.len();
-
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:234-246
-        // ```c
-        // Blast_HSPListGetEvalues(program_number, query_info, subject_length,
-        //                         hsp_list, kGapped, FALSE, sbp, 0,
-        //                         scale_factor);
-        // Blast_HSPListReapByEvalue(hsp_list, hit_params->options);
-        // Blast_HSPListGetBitScores(hsp_list, kGapped, sbp);
-        // ```
-        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:1983-2003
-        // ```c
-        // cutoff = hit_options->expect_value;
-        // for (index = 0; index < hsp_list->hspcnt; index++) {
-        //    hsp = hsp_array[index];
-        //    if (hsp->evalue > cutoff) {
-        //       hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-        //    } else {
-        //       if (index > hsp_cnt)
-        //          hsp_array[hsp_cnt] = hsp_array[index];
-        //       hsp_cnt++;
-        //    }
-        // }
-        // ```
-        // Apply final gapped E-value assignment and reaping after all
-        // post-traceback survivor-set operations, matching
-        // s_HSPListPostTracebackUpdate.
-        let before_evalue_reap = final_hits.len();
-        for hit in final_hits.iter_mut() {
-            let context_idx = (hit.q_idx as usize) * 2 + if hit.query_frame < 0 { 1 } else { 0 };
-            let eff_searchsp = query_eff_searchsp.get(context_idx).copied().unwrap_or(0);
-            let (bit_score, eval) = calculate_blastn_context_statistics(
-                hit.raw_score,
-                &search_karlin_ref[context_idx].gapped,
-                eff_searchsp,
-                round_down_evalue_score,
-            );
-            hit.bit_score = bit_score;
-            hit.e_value = eval;
-        }
-        final_hits.retain(|hit| hsp_survives_evalue_reap(hit.e_value, evalue_threshold));
-        if let Some(timing) = timing_ref {
-            BlastnTiming::record_count(
-                &timing.traceback_deleted_evalue_cutoff_hsps,
-                before_evalue_reap.saturating_sub(final_hits.len()) as u64,
-            );
-        }
 
         // Phase 2 debug output
         if debug_mode || blastn_debug {

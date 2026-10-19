@@ -267,6 +267,25 @@ where
     results
 }
 
+/// Sorts `items` stably by `compare`: on `pool` with rayon's parallel merge sort, which is stable
+/// as `sort_by` is, so both give the same order; serially without a pool of two or more threads.
+pub(super) fn sort_stable<T: Send>(
+    pool: &SearchPool<'_>,
+    items: &mut [T],
+    compare: impl Fn(&T, &T) -> std::cmp::Ordering + Send + Sync,
+) {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() && pool.threads() > 1 {
+        pool.install(|| items.par_sort_by(compare));
+        return;
+    }
+    let _ = pool;
+    items.sort_by(compare);
+}
+
 /// The shadow's comparison of the owner loop's list (`slow`) with the per-query form's (`fast`):
 /// counts the comparison, and on a difference prints the `DIFFERENT` line and panics.
 pub(super) fn compare<T: std::fmt::Debug>(stage: Stage, slow: &[T], fast: &[T]) {

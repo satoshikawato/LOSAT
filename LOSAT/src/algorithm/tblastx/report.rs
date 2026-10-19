@@ -556,68 +556,103 @@ pub(crate) fn pairwise_hits(
     let mut window = Vec::new();
     hits.iter()
         .map(|hsp| {
-            let query = &queries[hsp.hit.q_idx as usize];
-            let subject = &subjects[hsp.hit.s_idx as usize];
-            let (mut query_row, subject_row) =
-                subject_letters.rows(hsp, query.seq(), query_code, db_code, &mut window);
-            let (identities, positives) = row_counts(&query_row, &subject_row);
-            let (q_idx, s_idx) = (hsp.hit.q_idx as usize, hsp.hit.s_idx as usize);
-            let mut hit = hsp.hit.clone();
-            shift_hit(&mut hit, query_placements, subject_placements);
-            let query_length = query_placements.length(q_idx, query.seq().len());
-            let subject_length = subject_placements.length(s_idx, subject_letters.length(s_idx));
-            let (low, high) = (
-                hit.q_start.min(hit.q_end) as i32 - 1,
-                hit.q_start.max(hit.q_end) as i32 - 1,
-            );
-            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:430-440
-            // ```c++
-            // static int s_GetStdsegMasterFrame(const CStd_seg& ss, CScope& scope)
-            // {
-            //     const CRef<CSeq_loc> slc = ss.GetLoc().front();
-            //     ENa_strand strand = GetStrand(*slc);
-            //     int frame = s_GetFrame(strand ==  eNa_strand_plus ?
-            //                            GetStart(*slc, &scope) : GetStop(*slc, &scope),
-            //                            strand ==  eNa_strand_plus ?
-            //                            eNa_strand_plus : eNa_strand_minus,
-            //                            *(ss.GetIds().front()), scope);
-            //     return frame;
-            // }
-            // ```
-            // The frames that the report prints come from the records' coordinates and
-            // lengths (`seq_range::record_frame`); without ranges they are the search's.
-            let query_frame =
-                record_frame(hit.query_frame > 0, hit.q_start as usize - 1, query_length) as i8;
-            let subject_frame = record_frame(
-                hsp.subject_frame > 0,
-                hit.s_start as usize - 1,
-                subject_length,
-            ) as i8;
-            lowercase_query_row(&mut query_row, query_frame, low, high, &query_masks[q_idx]);
-            hit.num_ident = identities;
-            hit.num_positives = positives;
-            PairwiseHit {
-                hit,
-                query_seq: Some(String::from_utf8_lossy(&query_row).into_owned()),
-                subject_seq: Some(String::from_utf8_lossy(&subject_row).into_owned()),
-                query_frame: Some(query_frame),
-                subject_frame: Some(subject_frame),
-                positives: Some(positives),
-                gaps: Some(0),
-                subject_length: Some(subject_length),
-                // The title after its first word (the `bio` description of the inputs
-                // that `bio` read alike), as BLASTN's; the reports take the subject's
-                // title bytes by subject index (`write_tblastx_pairwise_report`).
-                subject_title: subject
-                    .title
-                    .iter()
-                    .position(|&byte| byte == b' ')
-                    .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
-                comp_adjust_method: None,
-                sum_n: Some(hsp.num),
-            }
+            pairwise_hit(
+                hsp,
+                queries,
+                subjects,
+                &subject_letters,
+                query_code,
+                db_code,
+                query_placements,
+                subject_placements,
+                &query_masks,
+                &mut window,
+            )
         })
         .collect()
+}
+
+// No NCBI counterpart for the function boundary: the record of one HSP of `pairwise_hits`, the
+// body of its map statement for statement. On wasm32 (LOSAT Web) it is a function of its own,
+// called once per HSP, so that V8 runs the later HSPs in its optimized code (it switches a
+// function to that code only at a later call, never inside a running one); the whole list was
+// one call. Elsewhere it is inlined into the map, as the closure was.
+/// The pairwise record of `hsp`: its rows, counts, frames and the shown coordinates.
+#[cfg_attr(target_arch = "wasm32", inline(never))]
+#[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+#[allow(clippy::too_many_arguments)]
+fn pairwise_hit(
+    hsp: &TblastxHsp,
+    queries: &[FastaRecord],
+    subjects: &[FastaRecord],
+    subject_letters: &SubjectLetters<'_>,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+    query_placements: &Placements,
+    subject_placements: &Placements,
+    query_masks: &[Vec<(i8, Vec<(i32, i32)>)>],
+    window: &mut Vec<u8>,
+) -> PairwiseHit {
+    let query = &queries[hsp.hit.q_idx as usize];
+    let subject = &subjects[hsp.hit.s_idx as usize];
+    let (mut query_row, subject_row) =
+        subject_letters.rows(hsp, query.seq(), query_code, db_code, window);
+    let (identities, positives) = row_counts(&query_row, &subject_row);
+    let (q_idx, s_idx) = (hsp.hit.q_idx as usize, hsp.hit.s_idx as usize);
+    let mut hit = hsp.hit.clone();
+    shift_hit(&mut hit, query_placements, subject_placements);
+    let query_length = query_placements.length(q_idx, query.seq().len());
+    let subject_length = subject_placements.length(s_idx, subject_letters.length(s_idx));
+    let (low, high) = (
+        hit.q_start.min(hit.q_end) as i32 - 1,
+        hit.q_start.max(hit.q_end) as i32 - 1,
+    );
+    // NCBI reference: c++/src/objtools/align_format/showalign.cpp:430-440
+    // ```c++
+    // static int s_GetStdsegMasterFrame(const CStd_seg& ss, CScope& scope)
+    // {
+    //     const CRef<CSeq_loc> slc = ss.GetLoc().front();
+    //     ENa_strand strand = GetStrand(*slc);
+    //     int frame = s_GetFrame(strand ==  eNa_strand_plus ?
+    //                            GetStart(*slc, &scope) : GetStop(*slc, &scope),
+    //                            strand ==  eNa_strand_plus ?
+    //                            eNa_strand_plus : eNa_strand_minus,
+    //                            *(ss.GetIds().front()), scope);
+    //     return frame;
+    // }
+    // ```
+    // The frames that the report prints come from the records' coordinates and
+    // lengths (`seq_range::record_frame`); without ranges they are the search's.
+    let query_frame =
+        record_frame(hit.query_frame > 0, hit.q_start as usize - 1, query_length) as i8;
+    let subject_frame = record_frame(
+        hsp.subject_frame > 0,
+        hit.s_start as usize - 1,
+        subject_length,
+    ) as i8;
+    lowercase_query_row(&mut query_row, query_frame, low, high, &query_masks[q_idx]);
+    hit.num_ident = identities;
+    hit.num_positives = positives;
+    PairwiseHit {
+        hit,
+        query_seq: Some(String::from_utf8_lossy(&query_row).into_owned()),
+        subject_seq: Some(String::from_utf8_lossy(&subject_row).into_owned()),
+        query_frame: Some(query_frame),
+        subject_frame: Some(subject_frame),
+        positives: Some(positives),
+        gaps: Some(0),
+        subject_length: Some(subject_length),
+        // The title after its first word (the `bio` description of the inputs
+        // that `bio` read alike), as BLASTN's; the reports take the subject's
+        // title bytes by subject index (`write_tblastx_pairwise_report`).
+        subject_title: subject
+            .title
+            .iter()
+            .position(|&byte| byte == b' ')
+            .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()),
+        comp_adjust_method: None,
+        sum_n: Some(hsp.num),
+    }
 }
 
 /// Moves a hit's reported coordinates from the searched letters into the records: by the

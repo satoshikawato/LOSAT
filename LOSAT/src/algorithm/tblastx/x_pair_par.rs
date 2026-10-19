@@ -166,6 +166,12 @@ use x_unit_probe::{XNoProbe, XProbe, XProbeSlot, XStatsProbe, XTimeProbe};
 #[path = "x_tbx_extbatch.rs"]
 mod x_tbx_extbatch;
 
+// EXPERIMENT (LOSAT_X_TBXQSLICE / LOSAT_X_TBXQSLICESHADOW): the scan of a unit in slices of its
+// query group, one lookup table per slice, on the unit's one diagonal table (x_tbx_qslice.rs).
+#[path = "x_tbx_qslice.rs"]
+mod x_tbx_qslice;
+use x_tbx_qslice::XSliced;
+
 // No NCBI counterpart: counters for LOSAT_X_STATS, the shadow summary and LOSAT_TIMING; they do not
 // change any value NCBI computes.
 static BATCHES: AtomicU64 = AtomicU64::new(0);
@@ -381,6 +387,7 @@ fn add_ns(counter: &AtomicU64, t0: Option<Instant>) {
 pub fn print_summary() {
     x_kmerge::print_summary();
     x_tbx_extbatch::print_summary();
+    x_tbx_qslice::print_summary();
     // LOSAT_X_SEEDCOMPACT: printed whenever the switch is on, so also when the unit path does not
     // run (`LOSAT_X_PAIRPAR` off: zero counters). `bytes_saved` is what the unit outputs no longer
     // request: records x (size of `InitHSP` - size of `XUnitHsp`).
@@ -705,6 +712,9 @@ pub(super) struct XLutEarly<'a> {
 /// The direct groups of a batch, made at the lookup build site and handed to `prepare`.
 pub(super) struct XLutBatch {
     groups: Vec<XGroup>,
+    /// EXPERIMENT (LOSAT_X_TBXQSLICE): the slices of the batch's groups when one is cut
+    /// (x_tbx_qslice.rs); `groups` is then empty, except in the switch's shadow mode.
+    sliced: Option<Vec<XSliced>>,
     /// The stub of the full table and the batch's contexts, until the build site takes them
     /// (`take_stub`); the shadow keeps them for its comparison.
     stub: Option<(BlastAaLookupTable, Vec<QueryContext>)>,
@@ -844,10 +854,31 @@ fn lut_direct(e: &XLutEarly<'_>, shadow: bool) -> Option<XLutBatch> {
     if decide(mode(), &gates) != XDecision::Units {
         return None;
     }
-    let groups = lut_direct_groups(&q, e.pool, lut_on_pool())?;
-    let stub = q.x_into_stub(groups.iter().map(|g| &g.lookup));
+    // EXPERIMENT (LOSAT_X_TBXQSLICE): the tables of the slices of the groups the switch cuts,
+    // built directly as the groups are (x_tbx_qslice.rs); the whole groups only in its shadow mode.
+    let starts = group_starts(contexts);
+    let (groups, sliced) = match x_tbx_qslice::partition(contexts, &starts) {
+        None => (lut_direct_groups(&q, e.pool, lut_on_pool())?, None),
+        Some(parts) => {
+            let sliced =
+                x_tbx_qslice::lut_direct_sliced(&q, &starts, &parts, e.pool, lut_on_pool())?;
+            let groups = if x_tbx_qslice::shadow() {
+                lut_direct_groups(&q, e.pool, lut_on_pool())?
+            } else {
+                Vec::new()
+            };
+            (groups, Some(sliced))
+        }
+    };
+    // The stub's `longest_chain` sums every cell over a partition of the entries: the whole
+    // groups, or the slices (x_tbx_qslice.rs, item 5).
+    let stub = match &sliced {
+        None => q.x_into_stub(groups.iter().map(|g| &g.lookup)),
+        Some(sliced) => q.x_into_stub(x_tbx_qslice::tables(sliced)),
+    };
     Some(XLutBatch {
         groups,
+        sliced,
         stub: Some(stub),
         shadow,
     })
@@ -882,6 +913,18 @@ fn lut_direct_groups(
 ) -> Option<Vec<XGroup>> {
     let starts = group_starts(q.contexts());
     let locations = q.x_group_locations(&starts)?;
+    Some(lut_direct_tables(q, &locations, pool, on_pool))
+}
+
+/// One table per list of lookup locations (`XPairLutQuery::x_build_group`), in list order: the
+/// groups of `lut_direct_groups`, or the slices of LOSAT_X_TBXQSLICE (x_tbx_qslice.rs). On the
+/// search pool with `on_pool` (LOSAT_X_PAIRLUT_POOL), as `lut_direct_groups` says.
+fn lut_direct_tables(
+    q: &XPairLutQuery,
+    locations: &[Vec<(i32, i32)>],
+    pool: &crate::utils::threading::SearchPool<'_>,
+    on_pool: bool,
+) -> Vec<XGroup> {
     let to_group = |g: XPairLutGroup| XGroup {
         scan_bf: crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&g.table),
         lookup: g.table,
@@ -893,20 +936,18 @@ fn lut_direct_groups(
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     if on_pool && pool.enabled() {
-        return Some(pool.install(|| {
+        return pool.install(|| {
             locations
                 .par_iter()
                 .map(|group_locations| to_group(q.x_build_group(group_locations)))
                 .collect()
-        }));
+        });
     }
     let _ = (pool, on_pool);
-    Some(
-        locations
-            .iter()
-            .map(|group_locations| to_group(q.x_build_group(group_locations)))
-            .collect(),
-    )
+    locations
+        .iter()
+        .map(|group_locations| to_group(q.x_build_group(group_locations)))
+        .collect()
 }
 
 // No NCBI counterpart: a tuning knob for where the groups are built (the calling thread or the
@@ -930,6 +971,7 @@ fn lut_on_pool() -> bool {
 fn lut_shadow_compare(
     lut: &XLutBatch,
     groups: &[XGroup],
+    sliced: Option<&[XSliced]>,
     lookup: &BlastAaLookupTable,
     contexts: &[QueryContext],
 ) {
@@ -947,6 +989,8 @@ fn lut_shadow_compare(
             (reference.q_min, reference.q_max),
         );
     }
+    // EXPERIMENT (LOSAT_X_TBXQSLICE): the slices, table by table, and each group's bounds.
+    x_tbx_qslice::lut_shadow_compare(lut.sliced.as_deref(), sliced);
     let (stub, stub_contexts) = lut
         .stub
         .as_ref()
@@ -1151,6 +1195,23 @@ fn x_unit_copy(records: &[XUnitHsp], mapped: bool) -> Vec<XUnitHsp> {
     } else {
         records.to_vec()
     }
+}
+
+/// No NCBI counterpart (LOSAT_X_SEEDUNMAP, section above): `x_unit_mapped` for a unit whose query
+/// group spans `span` letters; where it holds, `records` (empty) gets the mapped capacity unless it
+/// has that much room. `XPairPar::x_unit_records`, and LOSAT_X_TBXQSLICE's units (x_tbx_qslice.rs).
+fn x_records_for(
+    span: usize,
+    unit: &XUnit,
+    scratch: &XScratch,
+    records: &mut Vec<XUnitHsp>,
+) -> bool {
+    let mapped = x_unit_mapped(scratch.unmap, span, unit.chunk.length);
+    if mapped && records.capacity() * std::mem::size_of::<XUnitHsp>() < X_MAPPED_BYTES {
+        *records = Vec::with_capacity(x_mapped_len::<XUnitHsp>(0));
+        SU_RECORDS.fetch_add(1, AtomicOrdering::Relaxed);
+    }
+    mapped
 }
 
 /// No NCBI counterpart: whether transparent huge pages round the mapped blocks of LOSAT_X_SEEDUNMAP
@@ -1474,11 +1535,16 @@ impl<'a, 'b> XExpand<'a, 'b> {
 
 /// The unit path of one batch: the sub-lookups of its context groups.
 pub(super) struct XPairPar {
+    /// The groups' tables. Empty when LOSAT_X_TBXQSLICE cuts a group of the batch (`sliced`),
+    /// except in that switch's shadow mode.
     groups: Vec<XGroup>,
     shadow: bool,
     /// LOSAT_X_PAIRLUT: the groups were built directly and the batch's table is a stub without
     /// entries, which the reference frame loop must not scan.
     stub: bool,
+    /// EXPERIMENT (LOSAT_X_TBXQSLICE): the batch's groups as slices, when the switch cuts one of
+    /// them (x_tbx_qslice.rs); the units then index this list and scan with its tables.
+    sliced: Option<Vec<XSliced>>,
 }
 
 impl XPairPar {
@@ -1537,24 +1603,37 @@ impl XPairPar {
             );
             return None;
         }
-        let (groups, stub) = match b.lut {
+        let (groups, sliced, stub) = match b.lut {
             // LOSAT_X_PAIRLUT: the groups built at the lookup build site (`lut_build`); the
             // batch's table is the stub the build site took.
             Some(lut) if !lut.shadow => {
                 let stub = lut.stub.is_none();
-                (lut.groups, stub)
+                (lut.groups, lut.sliced, stub)
             }
             lut => {
                 let t0 = timing().then(Instant::now);
-                let groups = build_groups(b.lookup, b.contexts);
+                // EXPERIMENT (LOSAT_X_TBXQSLICE): the slices filtered out of the batch's table, as
+                // the groups are; the whole groups only where no group is cut, or in the
+                // switch's shadow mode.
+                let starts = group_starts(b.contexts);
+                let sliced = x_tbx_qslice::partition(b.contexts, &starts)
+                    .map(|parts| x_tbx_qslice::build_sliced(b.lookup, &parts));
+                let groups = if sliced.is_none() || x_tbx_qslice::shadow() {
+                    build_groups(b.lookup, b.contexts)
+                } else {
+                    Vec::new()
+                };
                 add_ns(&NS_SUBLOOKUP, t0);
                 // LOSAT_X_PAIRLUTSHADOW: the direct groups against these.
                 if let Some(lut) = &lut {
-                    lut_shadow_compare(lut, &groups, b.lookup, b.contexts);
+                    lut_shadow_compare(lut, &groups, sliced.as_deref(), b.lookup, b.contexts);
                 }
-                (groups, false)
+                (groups, sliced, false)
             }
         };
+        if let Some(sliced) = &sliced {
+            x_tbx_qslice::count_batch(sliced);
+        }
         assert!(
             !(stub && m == 2),
             "LOSAT_X_PAIRLUT: the reference loop of LOSAT_X_PAIRPARSHADOW cannot run on the stub table"
@@ -1563,6 +1642,7 @@ impl XPairPar {
             groups,
             shadow: m == 2,
             stub,
+            sliced,
         })
     }
 
@@ -1614,8 +1694,8 @@ impl XPairPar {
                 if chunk.length < inp.wordsize as usize {
                     continue;
                 }
-                for (g, group) in self.groups.iter().enumerate() {
-                    if group.lookup.longest_chain > 0 {
+                for g in 0..self.x_group_count() {
+                    if self.x_group_has_entries(g) {
                         units.push(XUnit {
                             f,
                             k,
@@ -1629,19 +1709,26 @@ impl XPairPar {
         }
 
         let t_units = timing().then(Instant::now);
-        // EXPERIMENT (LOSAT_X_TBXPREFETCH, module doc): all units of the subject scan with the
-        // prefetch when one of their tables is large enough; the units and their order are the
-        // same either way.
-        let prefetch = x_prefetch_units(
-            tbx_prefetch_min_kib(),
-            units.iter().map(|unit| {
-                x_unit_width(&self.groups[unit.g], &unit.chunk) * std::mem::size_of::<DiagStruct>()
-            }),
-        );
-        let outputs = if prefetch {
-            self.run_subject_unit_fns::<true>(&units, inp, pool)
+        let outputs = if let Some(sliced) = &self.sliced {
+            // EXPERIMENT (LOSAT_X_TBXQSLICE): the units of a batch with a cut group scan in
+            // slices (x_tbx_qslice.rs); the units and their order are the same.
+            self.run_subject_unit_fns_sliced(sliced, &units, inp, pool)
         } else {
-            self.run_subject_unit_fns::<false>(&units, inp, pool)
+            // EXPERIMENT (LOSAT_X_TBXPREFETCH, module doc): all units of the subject scan with the
+            // prefetch when one of their tables is large enough; the units and their order are
+            // the same either way.
+            let prefetch = x_prefetch_units(
+                tbx_prefetch_min_kib(),
+                units.iter().map(|unit| {
+                    x_unit_width(&self.groups[unit.g], &unit.chunk)
+                        * std::mem::size_of::<DiagStruct>()
+                }),
+            );
+            if prefetch {
+                self.run_subject_unit_fns::<true>(&units, inp, pool)
+            } else {
+                self.run_subject_unit_fns::<false>(&units, inp, pool)
+            }
         };
         add_ns(&NS_UNITS, t_units);
         XSubjectUnits {
@@ -2042,13 +2129,24 @@ impl XPairPar {
         scratch: &XScratch,
         records: &mut Vec<XUnitHsp>,
     ) -> bool {
-        let span = x_unit_span(&self.groups[unit.g]);
-        let mapped = x_unit_mapped(scratch.unmap, span, unit.chunk.length);
-        if mapped && records.capacity() * std::mem::size_of::<XUnitHsp>() < X_MAPPED_BYTES {
-            *records = Vec::with_capacity(x_mapped_len::<XUnitHsp>(0));
-            SU_RECORDS.fetch_add(1, AtomicOrdering::Relaxed);
+        x_records_for(x_unit_span(&self.groups[unit.g]), unit, scratch, records)
+    }
+
+    /// The number of context groups of the batch (the `g` of its units).
+    fn x_group_count(&self) -> usize {
+        match &self.sliced {
+            Some(sliced) => sliced.len(),
+            None => self.groups.len(),
         }
-        mapped
+    }
+
+    /// Whether group `g` has lookup entries (its units are listed): its table, or LOSAT_X_TBXQSLICE's
+    /// slices of it.
+    fn x_group_has_entries(&self, g: usize) -> bool {
+        match &self.sliced {
+            Some(sliced) => sliced[g].has_entries(),
+            None => self.groups[g].lookup.longest_chain > 0,
+        }
     }
 
     // EXPERIMENT (LOSAT_X_SEEDCOMPACT): the records of one unit (section above `XUnitHsp`, item
@@ -2535,6 +2633,17 @@ fn group_starts(contexts: &[QueryContext]) -> Vec<usize> {
 // filtered to the group's contexts (`BSearchContextInfo` ranges of `frame_bases`), order kept;
 // pv bit, inline entries or overflow cursor (cells in index order), and longest_chain rebuilt.
 fn build_groups(lookup: &BlastAaLookupTable, contexts: &[QueryContext]) -> Vec<XGroup> {
+    let starts = group_starts(contexts);
+    let bounds: Vec<i32> = starts.iter().map(|&c| lookup.frame_bases[c]).collect();
+    build_tables(lookup, &bounds)
+}
+
+// No NCBI counterpart beyond `build_groups`'s: its filter for any partition of the query offsets
+// into intervals (LOSAT_X_TBXQSLICE's slices, x_tbx_qslice.rs, or the groups).
+/// One table per interval of query offsets, each chain of `lookup` filtered to the interval with
+/// its order kept: interval i holds the offsets q with `bounds[i] <= q < bounds[i + 1]` (the first
+/// also those below `bounds[0]`, the last those above). `bounds` ascends.
+fn build_tables(lookup: &BlastAaLookupTable, bounds: &[i32]) -> Vec<XGroup> {
     /// One group's table while it is filled.
     struct Build {
         backbone: Vec<BackboneCell>,
@@ -2545,16 +2654,10 @@ fn build_groups(lookup: &BlastAaLookupTable, contexts: &[QueryContext]) -> Vec<X
         q_max: u32,
         chain: Vec<i32>,
     }
-    let starts = group_starts(contexts);
-    // The group of a query offset: the last group whose first context starts at or before it.
-    let bounds: Vec<i32> = starts.iter().map(|&c| lookup.frame_bases[c]).collect();
-    let group_of = |q: i32| -> usize {
-        let mut g = bounds.len() - 1;
-        while g > 0 && q < bounds[g] {
-            g -= 1;
-        }
-        g
-    };
+    // The group of a query offset: the last group whose first context starts at or before it
+    // (the first group when none does).
+    debug_assert!(bounds.windows(2).all(|w| w[0] <= w[1]), "bounds ascend");
+    let group_of = |q: i32| -> usize { bounds.partition_point(|&b| b <= q).saturating_sub(1) };
     let mut builds: Vec<Build> = bounds
         .iter()
         .map(|_| Build {
@@ -2889,6 +2992,7 @@ mod tests {
             groups: build_groups(&lookup, &contexts),
             shadow: false,
             stub: false,
+            sliced: None,
         };
         let mut diag_array = vec![start; size as usize];
         let mut diag_offset = start_offset;
@@ -3243,10 +3347,11 @@ mod tests {
         let stub = q.x_into_stub(direct.iter().map(|g| &g.lookup));
         let lut = XLutBatch {
             groups: direct,
+            sliced: None,
             stub: Some(stub),
             shadow: true,
         };
-        lut_shadow_compare(&lut, &reference, &full, &contexts);
+        lut_shadow_compare(&lut, &reference, None, &full, &contexts);
         (
             reference.len(),
             reference
@@ -3669,6 +3774,7 @@ mod tests {
             let stub = q.x_into_stub(groups.iter().map(|g| &g.lookup));
             XLutBatch {
                 groups,
+                sliced: None,
                 stub: Some(stub),
                 shadow,
             }
@@ -3752,6 +3858,7 @@ mod tests {
                     groups: build_groups(&lookup, &contexts),
                     shadow: false,
                     stub: false,
+                    sliced: None,
                 },
                 cutoff_scores: vec![12; contexts.len()],
                 x_dropoff_per_context: vec![16; contexts.len()],
@@ -4267,6 +4374,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 shadow: false,
                 stub: false,
+                sliced: None,
             },
             cutoff_scores: vec![12; contexts.len()],
             x_dropoff_per_context: vec![16; contexts.len()],

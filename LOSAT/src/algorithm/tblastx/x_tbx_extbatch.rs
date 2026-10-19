@@ -192,7 +192,7 @@ struct XCand {
 }
 
 /// The candidates of the batch that is filling, and the unit's counters.
-struct XPendBatch {
+pub(super) struct XPendBatch {
     c: [XCand; BATCH],
     /// Slots filled.
     n: usize,
@@ -201,6 +201,26 @@ struct XPendBatch {
     cands: u64,
     early: u64,
     batches: u64,
+}
+
+impl XPendBatch {
+    /// An empty batch of `len` slots (1 to `BATCH`).
+    pub(super) fn new(len: usize) -> Self {
+        debug_assert!((1..=BATCH).contains(&len));
+        Self {
+            c: [XCand::default(); BATCH],
+            n: 0,
+            len,
+            cands: 0,
+            early: 0,
+            batches: 0,
+        }
+    }
+
+    /// Candidates recorded and not yet resolved by `flush`.
+    pub(super) fn pending(&self) -> usize {
+        self.n
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-605 (module doc)
@@ -313,7 +333,7 @@ unsafe fn resolve_early(
 ///
 /// SAFETY: every candidate's cell is below the length of the table `diag_ptr` points into.
 #[inline(never)]
-unsafe fn flush<S: XInitSink>(
+pub(super) unsafe fn flush<S: XInitSink>(
     b: &mut XPendBatch,
     diag_ptr: *mut DiagStruct,
     h: &XHitCtx<'_>,
@@ -362,7 +382,7 @@ unsafe fn flush<S: XInitSink>(
 /// SAFETY: `cell` and the cell of every candidate of `b` are below the length of the table
 /// `diag_ptr` points into.
 #[inline(always)]
-unsafe fn x_hit_batched<S: XInitSink>(
+pub(super) unsafe fn x_hit_batched<S: XInitSink>(
     diag_ptr: *mut DiagStruct,
     cell: usize,
     query_offset: u32,
@@ -475,7 +495,7 @@ unsafe fn x_hit_batched<S: XInitSink>(
 /// A probe that records nothing, for the shadow's run of `scan_unit`: its own type, so that the
 /// shadow adds no caller to the instance of `scan_unit` the units run (`XNoProbe`).
 #[derive(Default)]
-struct XShadowRef;
+pub(super) struct XShadowRef;
 
 impl XProbe for XShadowRef {
     type Mark = ();
@@ -500,7 +520,7 @@ impl XProbe for XShadowRef {
 }
 
 /// The lists the shadow compares (`Vec<InitHSP>`, `Vec<XUnitHsp>`).
-trait XShadowList: XInitSink + Default + PartialEq + std::fmt::Debug {
+pub(super) trait XShadowList: XInitSink + Default + PartialEq + std::fmt::Debug {
     fn len_of(&self) -> usize;
     fn first_difference(&self, other: &Self) -> usize;
 }
@@ -849,6 +869,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 shadow: false,
                 stub: false,
+                sliced: None,
             };
             // Windows the module takes (`active`): from its smallest, wordsize + BATCH.
             let window = [40, 3 + BATCH as i32, 64][case % 3];

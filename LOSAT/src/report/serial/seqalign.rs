@@ -6,19 +6,18 @@
 //!
 //! The documents are made by `write_query`, one per query with alignments, from the report
 //! records of `report::record`. The segment computation is that of `s_CollectSeqAlignData`
-//! for every program (translated rows included); this step writes the Dense-seg of the
-//! non-translated gapped programs (BLASTN, BLASTP), and `writes` refuses the others. The
-//! translated programs add, next to `write_dense_seg` and `write_seq_align_gapped`:
-//! - `write_std_segs(enc, query_id, subject_id, &Segments, [translate1, translate2],
-//!   [query offset, subject offset])`: `s_CreateStdSegs` (blast_seqalign.cpp:306-370) over the
-//!   same `Segments` (one Std-seg per segment, `int` Seq-intervals or `empty` for a gap row),
-//!   chosen by `write_seq_align_gapped` when a row is translated (`s_CreateSeqAlign`);
-//! - `write_seq_align_diags(enc, run, query, subject, &[HspRecord])`:
-//!   `BLASTUngappedHspListToSeqAlign` / `x_UngappedHSPToStdSeg` (blast_seqalign.cpp:1323-1458),
-//!   one `diags` Seq-align per run of consecutive `HspRecord`s of one subject, each Std-seg with
-//!   its `scores` (`write_score_list` with the nucleotide query length);
-//! - and, for `-subject`, the mapper's Std-seg rules of `s_RemapToSubjectLoc`
-//!   (`CSeq_align_Mapper_Base::x_GetDstStd`), as `remap_strands` is for the Dense-seg.
+//! for every program; the forms are NCBI's:
+//! - a gapped search whose rows are not translated (BLASTN, BLASTP): one Seq-align per HSP
+//!   with a Dense-seg (`write_dense_seg`, `s_CreateDenseg`);
+//! - a gapped search with a translated row (BLASTX, TBLASTN): one Seq-align per HSP with one
+//!   Std-seg per segment (`write_std_segs`, `s_CreateStdSegs`): Seq-intervals in nucleotides
+//!   on the translated row, `empty` for a gap row;
+//! - an ungapped translated search (TBLASTX, BLASTX `-ungapped`): one `diags` Seq-align per
+//!   subject, one Std-seg with its scores per HSP (`write_seq_align_diags`,
+//!   `BLASTUngappedHspListToSeqAlign` / `x_UngappedHSPToStdSeg`).
+//! The Dense-diag of an ungapped BLASTN or BLASTP search is not made: neither program runs an
+//! ungapped search (`writes`). A `-subject` search's Seq-aligns go through NCBI's mapper of
+//! `s_RemapToSubjectLoc` (`remap_strands` for a Dense-seg, `std_seg_kept` for Std-segs).
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:677-707
 //! ```c++
@@ -1110,6 +1109,415 @@ fn remap_strands(segments: &mut Segments) {
     }
 }
 
+/// A Seq-loc `int`: the Seq-interval `from`..`to` on `strand` of `id` (BLAST sets the strand
+/// of every interval it makes, `unknown` included, so it is always written).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqloc/seqloc.asn:79-99
+/// ```text
+/// Seq-loc ::= CHOICE {
+///     null NULL ,           -- not placed
+///     empty Seq-id ,        -- to NULL one Seq-id in a collection
+///     whole Seq-id ,        -- whole sequence
+///     int Seq-interval ,    -- from to
+///     ...
+/// Seq-interval ::= SEQUENCE {
+///     from INTEGER ,
+///     to INTEGER ,
+///     strand Na-strand OPTIONAL ,
+///     id Seq-id ,    -- WARNING: this used to be optional
+///     fuzz-from Int-fuzz OPTIONAL ,
+///     fuzz-to Int-fuzz OPTIONAL }
+/// ```
+fn write_seq_interval<E: Encoder>(enc: &mut E, id: &SeqId<'_>, from: i32, to: i32, strand: Strand) {
+    enc.variant("int", 3);
+    enc.begin_sequence();
+    enc.member("from", 0);
+    enc.int(from);
+    enc.end_member();
+    enc.member("to", 1);
+    enc.int(to);
+    enc.end_member();
+    enc.member("strand", 2);
+    enc.enumerated(strand.name(), strand.value());
+    enc.end_member();
+    enc.member("id", 3);
+    id.write(enc);
+    enc.end_member();
+    enc.end_sequence();
+    enc.end_variant();
+}
+
+/// A Seq-loc `empty`: the gap row of a Std-seg (`master_loc->SetEmpty(*master)`, see
+/// `write_std_segs`).
+fn write_seq_loc_empty<E: Encoder>(enc: &mut E, id: &SeqId<'_>) {
+    enc.variant("empty", 1);
+    id.write(enc);
+    enc.end_variant();
+}
+
+/// The start of a Std-seg (an element of the caller's SEQUENCE OF Std-seg): `dim` and `ids`,
+/// then `loc` opened for its two Seq-locs (closed by `end_std_seg_locs`).
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/seqalign.asn:94-98
+/// ```text
+/// Std-seg ::= SEQUENCE {
+///     dim INTEGER DEFAULT 2 ,       -- dimensionality
+///     ids SEQUENCE OF Seq-id OPTIONAL ,
+///     loc SEQUENCE OF Seq-loc ,
+///     scores SET OF Score OPTIONAL }
+/// ```
+/// (BLAST sets `dim` to `kBlastAlignmentDim`, so it is written.)
+fn begin_std_seg<E: Encoder>(enc: &mut E, query_id: &SeqId<'_>, subject_id: &SeqId<'_>) {
+    enc.element();
+    enc.begin_sequence();
+    enc.member("dim", 0);
+    enc.int(BLAST_ALIGNMENT_DIM);
+    enc.end_member();
+    enc.member("ids", 1);
+    enc.begin_list(false);
+    enc.element();
+    query_id.write(enc);
+    enc.element();
+    subject_id.write(enc);
+    enc.end_list();
+    enc.end_member();
+    enc.member("loc", 2);
+    enc.begin_list(false);
+}
+
+/// The end of a Std-seg's `loc` (`begin_std_seg`).
+fn end_std_seg_locs<E: Encoder>(enc: &mut E) {
+    enc.end_list();
+    enc.end_member();
+}
+
+/// Whether the Std-seg of segment `seg` (of `numseg`, `gap` telling whether a segment has a
+/// gap row) is kept by the mapper of `s_RemapToSubjectLoc` (a `-subject` search; see
+/// `remap_strands`), which rebuilds the Std-segs and leaves out a first and a last segment
+/// with fewer than two aligned rows. (The segments of a BLAST edit script start and end with
+/// a substitution, so this keeps every segment of LOSAT's HSPs.)
+///
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_align_mapper_base.cpp:1568-1580
+/// ```c++
+///         seg_n++;
+///         // Ignore starting segments with no actually aligned sequences.
+///         if (seg_it == m_Segs.begin()  &&  non_gap_count < 2) {
+///             continue;
+///         }
+///         // Ignore empty segments
+///         if ( std_seg->GetLoc().empty() ) continue;
+///         std_segs.push_back(std_seg);
+///     }
+///     if (non_gap_count < 2  &&  !std_segs.empty()) {
+///         // Remove the last segment if there are no aligned sequences in it.
+///         std_segs.pop_back();
+///     }
+/// ```
+fn std_seg_kept(seg: usize, numseg: usize, gap: impl Fn(usize) -> bool) -> bool {
+    !(seg == 0 && gap(0)) && !(seg + 1 == numseg && gap(seg))
+}
+
+/// The Std-segs of an HSP of a gapped translated search (`segs std`), one per segment, with
+/// the remap of the query row (`RemapToQueryLoc`, `CStd_seg::OffsetRow`: the `-query_loc`
+/// start added to an interval's ends) and of the subject row (`s_RemapToSubjectLoc` of a
+/// `-subject` search, `remapped`: the `-subject_loc` start, on the plus strand that LOSAT's
+/// ranges have; the mapper keeps each interval's strand, `CMappingRange::Map_Strand` with
+/// the strand set, and `std_seg_kept`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:306-368
+/// ```c++
+/// static CSeq_align::C_Segs::TStd
+/// s_CreateStdSegs(CRef<CSeq_id> master, CRef<CSeq_id> slave,
+///                 CDense_seg::TStarts& starts,
+///                 CDense_seg::TLens& lengths,
+///                 CDense_seg::TStrands& strands,
+///                 bool translate_master,
+///                 bool translate_slave)
+/// {
+///     ...
+///     for (int i = 0; i < nsegs; i++) {
+///         CRef<CStd_seg> std_seg(new CStd_seg());
+///         CRef<CSeq_loc> master_loc(new CSeq_loc());
+///         CRef<CSeq_loc> slave_loc(new CSeq_loc());
+///
+///         std_seg->SetDim(kBlastAlignmentDim);
+///
+///         // Set master seqloc
+///         if ( (m_start = starts[2*i]) != GAP_VALUE) {
+///             master_loc->SetInt().SetId(*master);
+///             master_loc->SetInt().SetFrom(m_start);
+///             if (translate_master)
+///                 m_stop = m_start + CODON_LENGTH*lengths[i] - 1;
+///             else
+///                 m_stop = m_start + lengths[i] - 1;
+///             master_loc->SetInt().SetTo(m_stop);
+///             master_loc->SetInt().SetStrand(strands[2*i]);
+///         } else {
+///             master_loc->SetEmpty(*master);
+///         }
+///
+///         // Set slave seqloc
+///         if ( (s_start = starts[2*i+1]) != GAP_VALUE) {
+///             slave_loc->SetInt().SetId(*slave);
+///             slave_loc->SetInt().SetFrom(s_start);
+///             if (translate_slave)
+///                 s_stop = s_start + CODON_LENGTH*lengths[i] - 1;
+///             else
+///                 s_stop = s_start + lengths[i] - 1;
+///             slave_loc->SetInt().SetTo(s_stop);
+///             slave_loc->SetInt().SetStrand(strands[2*i+1]);
+///         } else {
+///             slave_loc->SetEmpty(*slave);
+///         }
+///
+///         std_seg->SetIds().reserve(kBlastAlignmentDim);
+///         std_seg->SetLoc().reserve(kBlastAlignmentDim);
+///         std_seg->SetIds().push_back(master);
+///         std_seg->SetIds().push_back(slave);
+///         std_seg->SetLoc().push_back(master_loc);
+///         std_seg->SetLoc().push_back(slave_loc);
+///
+///         retval.push_back(std_seg);
+///     }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objects/seqalign/Std_seg.cpp:170-188
+/// ```c++
+/// void CStd_seg::OffsetRow(TDim row,
+///                          TSignedSeqPos offset)
+///
+/// {
+///     if (offset == 0) return;
+///
+///     CSeq_loc& src_loc = *SetLoc()[row];
+///
+///     switch (src_loc.Which()) {
+///     case CSeq_loc::e_Int:
+///         ...
+///         src_loc.SetInt().SetFrom() += offset;
+///         src_loc.SetInt().SetTo() += offset;
+///         break;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/objects/seq/seq_loc_mapper_base.cpp:312-327
+/// ```c++
+/// bool CMappingRange::Map_Strand(bool        is_set_strand,
+///                                ENa_strand  src,
+///                                ENa_strand* dst) const
+/// {
+///     _ASSERT(dst);
+///     if ( m_Reverse ) {
+///         // Always convert to reverse strand, even if the source
+///         // strand is unknown.
+///         *dst = Reverse(src);
+///         return true;
+///     }
+///     if (is_set_strand) {
+///         // Use original strand if set
+///         *dst = src;
+///         return true;
+///     }
+/// ```
+fn write_std_segs<E: Encoder>(
+    enc: &mut E,
+    query_id: &SeqId<'_>,
+    subject_id: &SeqId<'_>,
+    segments: &Segments,
+    translate: [bool; 2],
+    offsets: [i32; 2],
+    remapped: bool,
+) {
+    let numseg = segments.lens.len();
+    let gap = |seg: usize| {
+        segments.starts[2 * seg] == GAP_VALUE || segments.starts[2 * seg + 1] == GAP_VALUE
+    };
+    let ids = [query_id, subject_id];
+    enc.begin_list(false);
+    for seg in 0..numseg {
+        if remapped && !std_seg_kept(seg, numseg, gap) {
+            continue;
+        }
+        begin_std_seg(enc, query_id, subject_id);
+        for row in 0..2 {
+            enc.element();
+            let start = segments.starts[2 * seg + row];
+            if start == GAP_VALUE {
+                write_seq_loc_empty(enc, ids[row]);
+            } else {
+                let len = segments.lens[seg];
+                let stop = if translate[row] {
+                    start + CODON_LENGTH * len - 1
+                } else {
+                    start + len - 1
+                };
+                write_seq_interval(
+                    enc,
+                    ids[row],
+                    start + offsets[row],
+                    stop + offsets[row],
+                    segments.strands[2 * seg + row],
+                );
+            }
+        }
+        end_std_seg_locs(enc);
+        enc.end_sequence();
+    }
+    enc.end_list();
+}
+
+/// The interval `(from, to)` of one row of an ungapped HSP (`offset`, `end` exclusive, in
+/// the frame's letters; `length` the row's searched nucleotide length for a frame).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1348-1361
+/// ```c++
+///     if (hsp->query.frame == 0) {
+///        query_loc->SetInt().SetFrom(hsp->query.offset);
+///        query_loc->SetInt().SetTo(hsp->query.end - 1);
+///     } else if (hsp->query.frame > 0) {
+///        query_loc->SetInt().SetFrom(CODON_LENGTH*(hsp->query.offset) +
+///                                    hsp->query.frame - 1);
+///        query_loc->SetInt().SetTo(CODON_LENGTH*(hsp->query.end) +
+///                                  hsp->query.frame - 2);
+///     } else {
+///        query_loc->SetInt().SetFrom(query_length -
+///            CODON_LENGTH*(hsp->query.end) + hsp->query.frame + 1);
+///        query_loc->SetInt().SetTo(query_length - CODON_LENGTH*hsp->query.offset
+///                                  + hsp->query.frame);
+///     }
+/// ```
+/// (The subject's interval, :1363-1377, is the same with `subject_length`.)
+fn ungapped_interval(offset: i32, end: i32, frame: i8, length: i32) -> (i32, i32) {
+    let frame = i32::from(frame);
+    if frame == 0 {
+        (offset, end - 1)
+    } else if frame > 0 {
+        (
+            CODON_LENGTH * offset + frame - 1,
+            CODON_LENGTH * end + frame - 2,
+        )
+    } else {
+        (
+            length - CODON_LENGTH * end + frame + 1,
+            length - CODON_LENGTH * offset + frame,
+        )
+    }
+}
+
+/// The `diags` Seq-align of one subject's HSPs in an ungapped translated search: no `dim`, no
+/// `score`, one Std-seg per HSP with the HSP's scores (the coverage over the query length
+/// of the construction, a translated query's in nucleotides), and the remaps of
+/// `write_std_segs` (an ungapped Std-seg has no gap row, so the mapper keeps them all).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1323-1346,1379-1386
+/// ```c++
+/// CRef<CStd_seg>
+/// x_UngappedHSPToStdSeg(BlastHSP* hsp, CRef<CSeq_id> query_id,
+///                       CRef<CSeq_id> subject_id,
+///                       Int4 query_length, Int4 subject_length,
+///                       const vector<string> & seqid_list)
+/// {
+///     CRef<CStd_seg> retval(new CStd_seg());
+///
+///     retval->SetDim(kBlastAlignmentDim);
+///     retval->SetLoc().reserve(kBlastAlignmentDim);
+///
+///     CRef<CSeq_loc> query_loc(new CSeq_loc());
+///     CRef<CSeq_loc> subject_loc(new CSeq_loc());
+///     query_loc->SetInt().SetId(*query_id);
+///     subject_loc->SetInt().SetId(*subject_id);
+///
+///     // Set the sequence ids
+///     CStd_seg::TIds& ids = retval->SetIds();
+///     ids.reserve(kBlastAlignmentDim);
+///     ids.push_back(query_id);
+///     ids.push_back(subject_id);
+///
+///     query_loc->SetInt().SetStrand(s_Frame2Strand(hsp->query.frame));
+///     subject_loc->SetInt().SetStrand(s_Frame2Strand(hsp->subject.frame));
+///     ...
+///     retval->SetLoc().push_back(query_loc);
+///     retval->SetLoc().push_back(subject_loc);
+///
+///     CSeq_align::TScore& score_list = retval->SetScores();
+///     s_BuildScoreList(hsp, score_list, seqid_list, query_length);
+///
+///     return retval;
+/// }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1406-1447
+/// ```c++
+///     CRef<CSeq_align> seqalign(new CSeq_align());
+///     ...
+///     seqalign->SetType(CSeq_align::eType_diags);
+///     ...
+///     } else { // Translated search
+///         for (index=0; index<hsp_list->hspcnt; index++) {
+///             BlastHSP* hsp = hsp_array[index];
+///             seqalign->SetSegs().SetStd().push_back(
+///                 x_UngappedHSPToStdSeg(hsp,
+///                                       query_id,
+///                                       subject_id,
+/// 		                              query_length,
+///                                       subject_length,
+///                                       emptyList));
+///         }
+///     }
+///     s_AddUserObjectToSeqAlign(seqalign, seqid_list);
+///     sa_vector.push_back(seqalign);
+/// ```
+/// (`s_AddUserObjectToSeqAlign` adds nothing without a Seq-id list.)
+fn write_seq_align_diags<E: Encoder>(
+    enc: &mut E,
+    query: &QueryRecord<'_>,
+    subject: &SubjectRecord<'_>,
+    hsps: &[HspRecord<'_>],
+) {
+    enc.element();
+    enc.begin_sequence();
+    enc.member("type", 0);
+    enc.enumerated("diags", 2);
+    enc.end_member();
+    enc.member("segs", 3);
+    enc.variant("std", 2);
+    enc.begin_list(false);
+    for hsp in hsps {
+        let (q_from, q_to) =
+            ungapped_interval(hsp.q_offset, hsp.q_end, hsp.q_frame, query.searched_length);
+        let (s_from, s_to) = ungapped_interval(
+            hsp.s_offset,
+            hsp.s_end,
+            hsp.s_frame,
+            subject.searched_length,
+        );
+        begin_std_seg(enc, &query.id, &subject.id);
+        enc.element();
+        write_seq_interval(
+            enc,
+            &query.id,
+            q_from + query.offset,
+            q_to + query.offset,
+            Strand::of_frame(hsp.q_frame),
+        );
+        enc.element();
+        write_seq_interval(
+            enc,
+            &subject.id,
+            s_from + subject.offset,
+            s_to + subject.offset,
+            Strand::of_frame(hsp.s_frame),
+        );
+        end_std_seg_locs(enc);
+        enc.member("scores", 3);
+        enc.begin_list(true);
+        write_score_list(enc, hsp, query.searched_length);
+        enc.end_list();
+        enc.end_member();
+        enc.end_sequence();
+    }
+    enc.end_list();
+    enc.end_variant();
+    enc.end_member();
+    enc.end_sequence();
+}
+
 /// The Seq-align of one HSP of a gapped search, or nothing for an HSP of score 0.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:627-656
@@ -1190,7 +1598,10 @@ fn write_seq_align_gapped<E: Encoder>(
         translate2,
         segments,
     );
-    if run.remaps_subjects() {
+    let translated = translate1 || translate2;
+    // The mapper of `s_RemapToSubjectLoc` rebuilds a Dense-seg's strands (`remap_strands`);
+    // it keeps a Std-seg's (`write_std_segs`).
+    if run.remaps_subjects() && !translated {
         remap_strands(segments);
     }
     enc.element();
@@ -1220,26 +1631,79 @@ fn write_seq_align_gapped<E: Encoder>(
     enc.end_list();
     enc.end_member();
     enc.member("segs", 3);
-    enc.variant("denseg", 1);
-    write_dense_seg(
-        enc,
-        &query.id,
-        &subject.id,
-        segments,
-        [query.offset, subject.offset],
-    );
+    if translated {
+        enc.variant("std", 2);
+        write_std_segs(
+            enc,
+            &query.id,
+            &subject.id,
+            segments,
+            [translate1, translate2],
+            [query.offset, subject.offset],
+            run.remaps_subjects(),
+        );
+    } else {
+        enc.variant("denseg", 1);
+        write_dense_seg(
+            enc,
+            &query.id,
+            &subject.id,
+            segments,
+            [query.offset, subject.offset],
+        );
+    }
     enc.end_variant();
     enc.end_member();
     enc.end_sequence();
 }
 
-/// Whether `write_query` writes the Seq-aligns of the run's program and mode.
+/// Whether `write_query` writes the Seq-aligns of the run's program and mode: every gapped
+/// search, and the ungapped translated searches (`BLASTUngappedHspListToSeqAlign` makes the
+/// Std-segs of `write_seq_align_diags` for them, a Dense-diag for an ungapped BLASTN or
+/// BLASTP search, which LOSAT does not run).
 pub fn writes(run: &RunRecord<'_>) -> bool {
-    run.gapped && !query_is_translated(run.program) && !subject_is_translated(run.program)
+    run.gapped || query_is_translated(run.program) || subject_is_translated(run.program)
 }
 
-/// The Seq-annot of one query's Seq-aligns: the `desc` user objects and `data align` with
-/// one Seq-align per HSP of score other than 0, subject by subject in the order of `hsps`.
+/// Whether the HSPs of a query make a Seq-align (`results.HasAlignments()`): in a gapped
+/// search an HSP of score 0 makes none (`s_BlastHSP2SeqAlign`); an ungapped search makes one
+/// Seq-align of every subject's HSPs.
+fn has_alignments(run: &RunRecord<'_>, hsps: &[HspRecord<'_>]) -> bool {
+    if run.gapped {
+        hsps.iter().any(|hsp| hsp.score != 0)
+    } else {
+        !hsps.is_empty()
+    }
+}
+
+/// The Seq-annot of one query's Seq-aligns: the `desc` user objects and `data align` with,
+/// subject by subject in the order of `hsps`, one Seq-align per HSP of score other than 0
+/// (a gapped search) or one `diags` Seq-align per subject (an ungapped search).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1606-1626
+/// ```c++
+///         GetFilteredRedundantSeqids(*seqinfo_src, hsp_list->oid, seqid_list, subject_id->IsGi());
+///         // stores a CSeq_align for each matching sequence
+///         vector<CRef<CSeq_align > > hit_align;
+///         if (is_gapped) {
+///                 BLASTHspListToSeqAlign(prog,
+///                                        hsp_list,
+///                                        query_id,
+///                                        subject_id,
+///                                        query_length,
+///                                        subj_length,
+///                                        is_ooframe,
+///                                        seqid_list,
+///                                        hit_align);
+///         } else {
+///                 BLASTUngappedHspListToSeqAlign(prog,
+///                                                hsp_list,
+///                                                query_id,
+///                                                subject_id,
+///                                                query_length,
+///                                                subj_length,
+///                                                seqid_list,
+/// ```
 ///
 /// NCBI reference (598d8ae6): c++/src/objects/seq/seq.asn:460-476
 /// ```text
@@ -1276,9 +1740,15 @@ fn write_seq_annot<E: Encoder>(
     enc.member("data", 4);
     enc.variant("align", 1);
     enc.begin_list(true);
-    for hsp in hsps.iter().filter(|hsp| hsp.score != 0) {
-        let subject = &subjects[hsp.subject as usize];
-        write_seq_align_gapped(enc, run, query, subject, hsp, &mut segments);
+    if run.gapped {
+        for hsp in hsps.iter().filter(|hsp| hsp.score != 0) {
+            let subject = &subjects[hsp.subject as usize];
+            write_seq_align_gapped(enc, run, query, subject, hsp, &mut segments);
+        }
+    } else {
+        for list in hsps.chunk_by(|a, b| a.subject == b.subject) {
+            write_seq_align_diags(enc, query, &subjects[list[0].subject as usize], list);
+        }
     }
     enc.end_list();
     enc.end_variant();
@@ -1327,7 +1797,7 @@ pub fn write_query(
     if !writes(run) {
         return Err(SeqAlignError::Unsupported(run.program));
     }
-    if !hsps.iter().any(|hsp| hsp.score != 0) {
+    if !has_alignments(run, hsps) {
         return Ok(false);
     }
     let start = buf.len();

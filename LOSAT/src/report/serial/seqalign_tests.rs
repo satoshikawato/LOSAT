@@ -422,18 +422,14 @@ fn score_zero_hsps_write_nothing() {
     assert_eq!(buf, b"kept");
 }
 
-/// The programs and modes whose Seq-aligns are not written yet are refused, not written.
+/// The ungapped searches whose Seq-aligns would be Dense-diags (BLASTN, BLASTP; neither runs
+/// an ungapped search) are refused, not written.
 #[test]
-fn translated_and_ungapped_runs_are_refused() {
+fn untranslated_ungapped_runs_are_refused() {
     let subjects = [subject(SeqId::Local("Subject_1"), 100)];
     let ops = [Sub(10)];
     let one = hsp(0, (0, 0), (1, 0), 30, 1.0, 1.0, (10, 0, 0), &ops);
-    for (program, gapped) in [
-        (Program::Blastx, true),
-        (Program::Tblastn, true),
-        (Program::Tblastx, false),
-        (Program::Blastp, false),
-    ] {
+    for (program, gapped) in [(Program::Blastn, false), (Program::Blastp, false)] {
         let run = RunRecord {
             program,
             db_title: None,
@@ -519,4 +515,102 @@ fn databases_that_ncbi_describes_otherwise_are_refused() {
         Program::Blastp
     )
     .is_ok());
+}
+
+/// The mapper of a `-subject` search's remap leaves out a first and a last Std-seg with a gap
+/// row (seq_align_mapper_base.cpp:1568-1580, `std_seg_kept`); a database search keeps every
+/// segment. (BLAST's edit scripts start and end with a substitution; this script does not.)
+#[test]
+fn subject_remap_drops_std_segs_that_start_or_end_with_a_gap() {
+    let ops = [Del(2), Sub(10), Ins(1), Sub(5), Ins(3)];
+    let one = hsp(0, (0, 0), (1, 0), 30, 1.0, 1.0, (10, 12, 0), &ops);
+    let segments = |db_title: Option<&'static [u8]>| {
+        let run = RunRecord {
+            program: Program::Blastx,
+            db_title,
+            gapped: true,
+        };
+        let subjects = [subject(SeqId::Local("Subject_1"), 100)];
+        let mut buf = Vec::new();
+        assert_eq!(
+            write_query(
+                SerialFormat::AsnText,
+                &run,
+                &query("Query_1", 300),
+                &subjects,
+                &[one],
+                &mut buf
+            ),
+            Ok(true)
+        );
+        let text = String::from_utf8(buf).unwrap();
+        (
+            text.matches("ids {").count(),
+            text.matches("empty local").count(),
+        )
+    };
+    assert_eq!(segments(None), (3, 1));
+    assert_eq!(segments(Some(b"db")), (5, 3));
+}
+
+/// An ungapped translated search writes one `diags` Seq-align per subject (no `dim`, no
+/// `score`), one Std-seg with its scores per HSP, the minus frame's interval counted from the
+/// end of the searched letters and moved by the ranges' starts
+/// (blast_seqalign.cpp:1348-1361, 1406-1447).
+#[test]
+fn ungapped_translated_hsps_are_diags_seq_aligns() {
+    let run = RunRecord {
+        program: Program::Tblastx,
+        db_title: None,
+        gapped: false,
+    };
+    let subjects = [
+        SubjectRecord {
+            offset: 5,
+            ..subject(SeqId::Local("Subject_1"), 60)
+        },
+        subject(SeqId::Local("Subject_2"), 90),
+    ];
+    let query = QueryRecord {
+        offset: 20,
+        ..query("Query_1", 100)
+    };
+    let mut first = hsp(0, (0, 2), (-1, 2), 30, 1.0, 20.0, (8, 9, 0), &[]);
+    first.q_end = 10;
+    first.s_end = 12;
+    first.num = 2;
+    let mut second = first;
+    second.q_frame = 3;
+    let mut third = first;
+    third.subject = 1;
+    third.num = 0;
+    let mut buf = Vec::new();
+    assert_eq!(
+        write_query(
+            SerialFormat::AsnText,
+            &run,
+            &query,
+            &subjects,
+            &[first, second, third],
+            &mut buf
+        ),
+        Ok(true)
+    );
+    let text = String::from_utf8(buf).unwrap();
+    assert_eq!(text.matches("type diags,").count(), 2);
+    assert_eq!(text.matches("scores {").count(), 3);
+    assert_eq!(text.matches("sum_n").count(), 2);
+    // The Seq-align level has neither `dim` nor `score` (6 spaces in).
+    assert!(!text.contains("\n      dim ") && !text.contains("\n      score {"));
+    // Query frame -1, offsets 0..10 of 100 letters: 70..99, plus the -query_loc start 20.
+    assert!(
+        text.contains("from 90,\n              to 119,\n              strand minus,"),
+        "{text}"
+    );
+    // Query frame +3: 3*0+3-1 = 2 .. 3*10+3-2 = 31, plus 20.
+    assert!(text.contains("from 22,\n              to 51,\n              strand plus,"));
+    // Subject frame +2: 3*2+2-1 = 7 .. 3*12+2-2 = 36, plus the -subject_loc start 5.
+    assert!(text.contains("from 12,\n              to 41,\n              strand plus,"));
+    // An empty edit script and no gap: no `empty` row.
+    assert!(!text.contains("empty"));
 }

@@ -2272,3 +2272,8 @@ mod tests {
 #[cfg(test)]
 #[path = "x_xdrop_r1probe.rs"]
 mod r1probe;
+// EXPERIMENT (line C, C3 premise probe; branch exp/c3-pairlane-probe, not for merging): the
+// pair-lane traceback DP probe (test build only).
+#[cfg(test)]
+#[path = "x_xdrop_pairprobe.rs"]
+mod pairprobe;

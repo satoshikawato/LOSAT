@@ -1039,148 +1039,69 @@ fn ncbi_k_bits_for(ctoolkit_compatible: bool) -> &'static str {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:830-837
+// The description table of a report whose subjects are named by `subject_ids` and the
+// title of their first HSP (BLASTX and `write_pairwise`).
+//
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/align_format_util.cpp:4299-4302
 // ```c++
-//             if((m_Option & eShowSumN) || (m_Option & eShowPercentIdent)){
-//                 CAlignFormatUtil::AddSpace(out, m_MaxEvalueLen - kValue_size);
-//                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
-//             }
-//             if(m_Option & eShowSumN){
-//                 out << kN;
-//             }
-//             if (m_Option & eShowPercentIdent) {
+//         if (bits > highest_bits) {
+//             highest_bits = bits;
+//             lowest_evalue = evalue;
+//         }
 // ```
+// The rows, the widths and the N column follow `x_InitDeflineTable` as in every other
+// program's table (`write_description_table`): each row shows the subject's highest bit
+// score and that HSP's E-value, which need not be the subject's first HSP (the first
+// one by E-value, which sum statistics can give to a lower score).
 fn write_subject_summary_table<W: Write>(
     writer: &mut W,
     subject_order: &[u32],
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
     subject_ids: &[Arc<str>],
 ) -> io::Result<()> {
-    write_subject_summary_table_with_sum_n(writer, subject_order, subject_hits, subject_ids, false)
+    // Every subject of the list is described, so the last one is NCBI's "last hit"
+    // (showdefline.cpp:1133-1134).
+    write_subject_summary_table_with_sum_n(
+        writer,
+        subject_order,
+        true,
+        subject_hits,
+        subject_ids,
+        false,
+    )
 }
-// NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:830-837
-// ```c++
-//             if((m_Option & eShowSumN) || (m_Option & eShowPercentIdent)){
-//                 CAlignFormatUtil::AddSpace(out, m_MaxEvalueLen - kValue_size);
-//                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
-//             }
-//             if(m_Option & eShowSumN){
-//                 out << kN;
-//             }
-//             if (m_Option & eShowPercentIdent) {
-// ```
+
 fn write_subject_summary_table_with_sum_n<W: Write>(
     writer: &mut W,
     subject_order: &[u32],
+    last_row_counted: bool,
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
     subject_ids: &[Arc<str>],
     show_sum_n: bool,
 ) -> io::Result<()> {
-    // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:668-709,760-829,929-959
-    // m_MaxScoreLen = kBits_size; m_MaxEvalueLen = kValue_size;
-    // AddSpace(out, m_LineLen+2); out << kScore; AddSpace(out,m_MaxScoreLen-kScore_size);
-    let max_score = subject_order
-        .iter()
-        .filter_map(|i| subject_hits.get(i)?.first())
-        .map(|h| format_bitscore_ncbi(h.hit.bit_score).len())
-        .max()
-        .unwrap_or(6)
-        .max(6);
-    let max_evalue = subject_order
-        .iter()
-        .filter_map(|i| subject_hits.get(i)?.first())
-        .map(|h| format_evalue_ncbi(h.hit.e_value).len())
-        .max()
-        .unwrap_or(5)
-        .max(5);
-    write_spaces(writer, 70)?;
-    writeln!(writer, "{:<max_score$}    E", "Score")?;
-    write!(
+    write_description_table(
         writer,
-        "{:<69}",
-        "Sequences producing significant alignments:"
-    )?;
-    // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:830-840
-    // ```c++
-    //             if((m_Option & eShowSumN) || (m_Option & eShowPercentIdent)){
-    //                 CAlignFormatUtil::AddSpace(out, m_MaxEvalueLen - kValue_size);
-    //                 CAlignFormatUtil::AddSpace(out, kTwoSpaceMargin_size);
-    //             }
-    //             if(m_Option & eShowSumN){
-    //                 out << kN;
-    //             }
-    //             if (m_Option & eShowPercentIdent) {
-    //                 out << kIdentLine2;//"ident"
-    //             }
-    //             out << "\n";
-    // ```
-    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:811-813
-    // ```c
-    // out << kBits;
-    // //in case m_MaxScoreLen > kBits.size()
-    // CAlignFormatUtil::AddSpace(out, m_MaxScoreLen - kBits_size);
-    // ```
-    write!(writer, "{:<max_score$}  Value", ncbi_k_bits())?;
-    let max_sum_n = subject_order
-        .iter()
-        .filter_map(|i| subject_hits.get(i)?.first())
-        .map(|h| h.sum_n.unwrap_or(1).to_string().len())
-        .max()
-        .unwrap_or(1)
-        .max(1);
-    if show_sum_n {
-        write_spaces(writer, max_evalue - 5 + 2)?;
-        write!(writer, "N")?;
-    }
-    writeln!(writer)?;
-    writeln!(writer)?;
-    for s_idx in subject_order {
-        let Some(shits) = subject_hits.get(s_idx) else {
-            continue;
-        };
-        let Some(best_hit) = shits.first() else {
-            continue;
-        };
-        let subject_id = subject_ids
-            .get(*s_idx as usize)
-            .map(|id| id.as_ref())
-            .unwrap_or("unknown");
-        let mut label = subject_id.to_string();
-        if let Some(title) = best_hit.subject_title.as_deref() {
-            label.push(' ');
-            label.push_str(title);
-        }
-        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:914-931
-        // actual_line_component = line_component.substr(0,m_LineLen-line_length-3); actual_line_component += kEllipsis;
-        // String widths are byte counts, including non-ASCII FASTA titles.
-        if label.len() > 68 {
-            writer.write_all(&label.as_bytes()[..65])?;
-            writer.write_all(b"...")?;
-        } else {
-            writer.write_all(label.as_bytes())?;
-            write_spaces(writer, 68 - label.len())?;
-        }
-        write!(
-            writer,
-            "  {:<max_score$}  {:<max_evalue$}",
-            format_bitscore_ncbi(best_hit.hit.bit_score),
-            format_evalue_ncbi(best_hit.hit.e_value)
-        )?;
-        // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:961-965
-        // ```c++
-        //         if(m_Option & eShowSumN){
-        //             out << kTwoSpaceMargin << (*iter)->sum_n;
-        //             CAlignFormatUtil::AddSpace(out, m_MaxSumNLen -
-        //                      NStr::IntToString((*iter)->sum_n).size());
-        //         }
-        // ```
-        if show_sum_n {
-            write!(writer, "  {:<max_sum_n$}", best_hit.sum_n.unwrap_or(1))?;
-        }
-        writeln!(writer)?;
-    }
-    writeln!(writer)?;
-    Ok(())
+        subject_order,
+        last_row_counted,
+        subject_hits,
+        show_sum_n,
+        |s_idx| {
+            let subject_id = subject_ids
+                .get(s_idx as usize)
+                .map(|id| id.as_ref())
+                .unwrap_or("unknown");
+            let mut label = subject_id.as_bytes().to_vec();
+            let title = subject_hits
+                .get(&s_idx)
+                .and_then(|hits| hits.first())
+                .and_then(|hit| hit.subject_title.as_deref());
+            if let Some(title) = title {
+                label.push(b' ');
+                label.extend_from_slice(title.as_bytes());
+            }
+            label
+        },
+    )
 }
 
 #[inline]
@@ -2171,7 +2092,10 @@ pub struct BlastnPairwiseReport {
     pub prolog: bool,
 }
 
-// The description table of the BLASTN report.
+// The description table of a report: BLASTN's, BLASTP's, TBLASTN's and TBLASTX's
+// (`write_blastn_description_table`), BLASTX's and `write_pairwise`'s
+// (`write_subject_summary_table_with_sum_n`), which differ only in the line that names a
+// subject (`label_of`).
 //
 // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:1004-1011
 // ```c++
@@ -2228,7 +2152,9 @@ pub struct BlastnPairwiseReport {
 // width that NCBI assigns there is the score width). The last row exists only when the
 // subjects fit in the table: otherwise the loop stops with an empty last group. A total
 // is wider than "Total" only above 99999 bits (`%5.3le`), which `format_bitscore_ncbi`
-// formats alike. The header and the rows are those of `write_subject_summary_table`.
+// formats alike. The highest bit score is the first of equal maxima (`>`), and the
+// subject's first HSP (the first by E-value) can have a lower one: sum statistics give a
+// linked set of lower scores a lower E-value than a single HSP of a higher score.
 //
 // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:4229-4230,4259
 // ```c++
@@ -2247,14 +2173,13 @@ pub struct BlastnPairwiseReport {
 // With `show_sum_n` (NCBI's `eShowSumN`: ungapped sum statistics, blast_format.cpp:165-167,
 // 503-504) a last column shows the linked-set size of the subject's first HSP; the HSP
 // without a "sum_n" score (`num` of 1) shows 1.
-fn write_blastn_description_table<W: Write>(
+fn write_description_table<W: Write>(
     writer: &mut W,
     described: &[u32],
     last_row_counted: bool,
     subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
-    subject_titles: &std::collections::HashMap<u32, Vec<u8>>,
     show_sum_n: bool,
-    protein: bool,
+    mut label_of: impl FnMut(u32) -> Vec<u8>,
 ) -> io::Result<()> {
     let rows: Vec<(u32, &PairwiseHit, f64, i32)> = described
         .iter()
@@ -2304,6 +2229,12 @@ fn write_blastn_description_table<W: Write>(
         "{:<69}",
         "Sequences producing significant alignments:"
     )?;
+    // NCBI reference: ncbi-blast/c++/src/objtools/align_format/showdefline.cpp:811-813
+    // ```c
+    // out << kBits;
+    // //in case m_MaxScoreLen > kBits.size()
+    // CAlignFormatUtil::AddSpace(out, m_MaxScoreLen - kBits_size);
+    // ```
     write!(writer, "{:<max_score$}  Value", ncbi_k_bits())?;
     // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:829-836
     // ```c++
@@ -2323,23 +2254,7 @@ fn write_blastn_description_table<W: Write>(
     writeln!(writer)?;
     writeln!(writer)?;
     for (s_idx, best, _, sum_n) in &rows {
-        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:498
-        // The description keeps the prefixes (`fLeavePrefixSuffix`, `defline.rs`).
-        // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:1579-1592
-        // ```c++
-        //     sdl->defline = "Unknown";
-        //     ...
-        //     try{
-        //         const CBioseq_Handle& handle = m_ScopeRef->GetBioseqHandle(*id);
-        //         x_FillDeflineAndId(handle, *id, use_this_seqid, sdl, blast_rank);
-        //     } catch (const CException&){
-        //         sdl->defline = "Unknown";
-        // ```
-        let title = subject_titles.get(s_idx).map_or(&[][..], Vec::as_slice);
-        let label = match super::defline::generate_defline(title, protein, true) {
-            Ok(defline) => defline.text,
-            Err(super::defline::UnknownEncoding) => b"Unknown".to_vec(),
-        };
+        let label = label_of(*s_idx);
         // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:915-918,930
         // ```c++
         //         if(line_component.size()+line_length > m_LineLen){
@@ -2377,6 +2292,45 @@ fn write_blastn_description_table<W: Write>(
         writeln!(writer)?;
     }
     writeln!(writer)
+}
+
+// The description table of BLASTN, BLASTP, TBLASTN and TBLASTX: a subject's line is the
+// title of its record (`write_description_table`).
+fn write_blastn_description_table<W: Write>(
+    writer: &mut W,
+    described: &[u32],
+    last_row_counted: bool,
+    subject_hits: &std::collections::HashMap<u32, Vec<&PairwiseHit>>,
+    subject_titles: &std::collections::HashMap<u32, Vec<u8>>,
+    show_sum_n: bool,
+    protein: bool,
+) -> io::Result<()> {
+    write_description_table(
+        writer,
+        described,
+        last_row_counted,
+        subject_hits,
+        show_sum_n,
+        |s_idx| {
+            // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:498
+            // The description keeps the prefixes (`fLeavePrefixSuffix`, `defline.rs`).
+            // NCBI reference: c++/src/objtools/align_format/showdefline.cpp:1579-1592
+            // ```c++
+            //     sdl->defline = "Unknown";
+            //     ...
+            //     try{
+            //         const CBioseq_Handle& handle = m_ScopeRef->GetBioseqHandle(*id);
+            //         x_FillDeflineAndId(handle, *id, use_this_seqid, sdl, blast_rank);
+            //     } catch (const CException&){
+            //         sdl->defline = "Unknown";
+            // ```
+            let title = subject_titles.get(&s_idx).map_or(&[][..], Vec::as_slice);
+            match super::defline::generate_defline(title, protein, true) {
+                Ok(defline) => defline.text,
+                Err(super::defline::UnknownEncoding) => b"Unknown".to_vec(),
+            }
+        },
+    )
 }
 
 // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:387-407
@@ -4594,10 +4548,21 @@ pub fn write_blastx_pairwise_report<W: Write>(
                     .or_insert_with(Vec::new)
                     .push(*hit);
             }
+            // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
+            // ```c++
+            //     CShowBlastDefline showdef(*aln_set, *m_Scope,
+            //                               defline_length == -1 ? kFormatLineLength:defline_length,
+            //                               m_NumSummary + additional);
+            // ```
+            // The table follows `x_InitDeflineTable` (`write_description_table`): the
+            // subject's highest bit score and that HSP's E-value, for the first
+            // `m_NumDescriptions` subjects; the last one is NCBI's "last hit" when every
+            // subject fits.
             let descriptions = &order[..order.len().min(options.num_descriptions)];
             write_subject_summary_table_with_sum_n(
                 &mut writer,
                 descriptions,
+                order.len() <= options.num_descriptions,
                 &grouped,
                 subject_ids,
                 !options.gapped && options.sum_stats,
@@ -5201,6 +5166,42 @@ mod tblastx_tests {
         assert!(lines[1].ends_with("(Bits)  Value  N"), "{text}");
         assert!(lines[3].ends_with("  120     2e-30  12"), "{text}");
         assert!(lines[4].ends_with("  30.2    0.50   1 "), "{text}");
+    }
+
+    // NCBI c++/src/objtools/align_format/align_format_util.cpp:4259,4299-4302: BLASTX's row
+    // shows the subject's highest bit score and that HSP's E-value (the first of equal
+    // maxima), not its first HSP by E-value, and the N column the first HSP's linked-set
+    // size. NCBI BLAST+ 2.17.0 `blastx -query tests/fasta/outfmt0/bx_best_hsp_query.fna
+    // -subject tests/fasta/outfmt0/bx_best_hsp_subject.faa` (fixture `best_hsp.blastx`):
+    // HSPs of 119 bits (Expect(2) = 8e-38), 45.4 and 131 (5e-35); the row is `131     5e-35`.
+    #[test]
+    fn blastx_description_row_is_the_highest_bit_score() {
+        let mut first = tblastx_hit(2);
+        first.hit.bit_score = 119.2;
+        first.hit.e_value = 8e-38;
+        let mut best = tblastx_hit(1);
+        best.hit.bit_score = 131.3;
+        best.hit.e_value = 5e-35;
+        let mut tie = best.clone();
+        tie.hit.e_value = 0.5;
+        for hit in [&mut first, &mut best, &mut tie] {
+            hit.subject_title = Some("pep YOL075C".to_string());
+        }
+        let hits: std::collections::HashMap<u32, Vec<&PairwiseHit>> =
+            [(0, vec![&first, &best, &tie])].into_iter().collect();
+        let ids = [Arc::<str>::from("YOL075C")];
+        for (show_sum_n, end) in [(false, ""), (true, "  2")] {
+            let mut out = Vec::new();
+            write_subject_summary_table_with_sum_n(&mut out, &[0], true, &hits, &ids, show_sum_n)
+                .unwrap();
+            let text = String::from_utf8(out).unwrap();
+            let lines: Vec<&str> = text.lines().collect();
+            assert_eq!(
+                lines[3],
+                format!("{:<68}  131     5e-35{end}", "YOL075C pep YOL075C"),
+                "{text}"
+            );
+        }
     }
 
     /// The title that the FASTA reader gives a record with the defline `defline`.

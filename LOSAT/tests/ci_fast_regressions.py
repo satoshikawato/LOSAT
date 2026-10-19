@@ -57,6 +57,7 @@ from frozen_allowlist import Allowlist  # noqa: E402
 
 PROGRAMS = capture_outputs.PROGRAMS
 FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")
+OUTFMT0_PROGRAMS = (*FIXTURE_PROGRAMS, "blastx")  # the programs of outfmt0_manifest.tsv (check_losat.py)
 DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx")  # the programs of db_search_manifest.tsv
 REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
 # TBLASTX manifest cases that finish in under 30 s (2026-10-01, native release binary);
@@ -206,7 +207,7 @@ def run_fasta_input_fixtures(losat: Path, programs: set[str], out: Path, jobs: i
 
 def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
     failures = []
-    selected = [program for program in FIXTURE_PROGRAMS if program in programs]
+    selected = [program for program in OUTFMT0_PROGRAMS if program in programs]
     if not selected:
         return failures
     for threads in (1, 4):

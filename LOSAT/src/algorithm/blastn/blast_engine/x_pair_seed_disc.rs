@@ -55,6 +55,9 @@
 //! of a pool of two threads or more. A contiguous table in two-hit mode stays with the
 //! reference (the parent module takes one-hit contiguous tables only).
 
+use super::super::x_r4_probe::{
+    self, ring_flush, ring_step, ring_step_csr, CellPv, CtxTab, Probe, RING,
+};
 use super::super::{
     extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, mask_lookup_index,
     packed_kmer_at_seed_mask, type_of_word, BlastnTiming, DiagHashTable, UngappedHit,
@@ -64,7 +67,6 @@ use super::{
     PartScratch, Seed, StageStats, Stash, StripJob, STASH,
 };
 use crate::algorithm::blastn::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
-use super::super::x_r4_probe::{self, ring_flush, ring_step, CellPv, CtxTab, Probe, RING};
 use crate::algorithm::blastn::lookup::DiscTemplates;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -208,7 +210,14 @@ fn scan_strip_disc_r4<const PV: bool, const CTX: bool>(
         two_stage.for_each_hit(index as u64, |q_off_1| {
             if q_off_1 != 0 {
                 if CTX {
-                    seed_of_pair_ctx(x, ctx.unwrap(), q_off_1 as usize - 1, kmer_start, s_range, out);
+                    seed_of_pair_ctx(
+                        x,
+                        ctx.unwrap(),
+                        q_off_1 as usize - 1,
+                        kmer_start,
+                        s_range,
+                        out,
+                    );
                 } else {
                     seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
                 }
@@ -239,6 +248,78 @@ fn scan_strip_disc_r4<const PV: bool, const CTX: bool>(
                 lvl,
                 hashtable,
                 next_pos,
+                |e: &(i32, u32)| e.1 as usize,
+                (s_off, index),
+                &mut |(so, ix): (i32, u32)| emit(so, ix),
+            );
+        },
+    );
+    if pf > 0 {
+        ring_flush(&ring, n, pf, &mut |(so, ix): (i32, u32)| emit(so, ix));
+    }
+}
+
+/// EXPERIMENT (exp/r11-csr, v4-R R11; evidence only): `scan_strip_disc_r4` over the CSR of the
+/// chains (`TwoStageLookup::x_r11_csr`): the same presence test, then the cell's run
+/// `qs[offsets[cell] .. offsets[cell + 1]]`, which lists the chain's offsets in its order; with
+/// `pf` the words go through the ring of `x_r4_probe::ring_step_csr`.
+#[allow(clippy::too_many_arguments)]
+fn scan_strip_disc_r11<const CTX: bool>(
+    x: &Inputs<'_>,
+    disc: &DiscTemplates,
+    job: &StripJob,
+    out: &mut Vec<Seed>,
+    pf: usize,
+    lvl: u8,
+    ctx: Option<&CtxTab>,
+) {
+    let two_stage = x.two_stage;
+    let s_range = job.s_range;
+    let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
+    let (offsets, qs) = two_stage.x_r11_csr();
+    let mut emit = |s_off: i32, index: u32| {
+        let kmer_start = s_off as usize;
+        if !two_stage.has_hits(index as u64) {
+            return;
+        }
+        let c = index as usize;
+        let run = &qs[offsets[c] as usize..offsets[c + 1] as usize];
+        for &q_off_1 in run {
+            if CTX {
+                seed_of_pair_ctx(
+                    x,
+                    ctx.unwrap(),
+                    q_off_1 as usize - 1,
+                    kmer_start,
+                    s_range,
+                    out,
+                );
+            } else {
+                seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+            }
+        }
+    };
+    let mut ring = [(0i32, 0u32); RING];
+    let mut n = 0usize;
+    disc_word_scan_subject(
+        kind,
+        x.search_seq_packed,
+        disc.template_type,
+        disc.second_template_type,
+        disc.template_length as i32,
+        [job.start as i32, job.end as i32],
+        &mut |s_off, index, _index2| {
+            if pf == 0 {
+                emit(s_off, index);
+                return;
+            }
+            ring_step_csr(
+                &mut ring,
+                &mut n,
+                pf,
+                lvl,
+                offsets,
+                qs,
                 |e: &(i32, u32)| e.1 as usize,
                 (s_off, index),
                 &mut |(so, ix): (i32, u32)| emit(so, ix),
@@ -287,6 +368,14 @@ fn scan_strip_disc_r4_dispatch(
     ctx: Option<&CtxTab>,
 ) {
     let (pf, lvl) = (r4.pf, r4.lvl);
+    if r4.csr {
+        if r4.ctx {
+            scan_strip_disc_r11::<true>(x, disc, job, out, pf, lvl, ctx);
+        } else {
+            scan_strip_disc_r11::<false>(x, disc, job, out, pf, lvl, ctx);
+        }
+        return;
+    }
     match (r4.pv, r4.ctx) {
         (false, false) => scan_strip_disc_r4::<false, false>(x, disc, job, out, pf, lvl, pv, ctx),
         (true, false) => scan_strip_disc_r4::<true, false>(x, disc, job, out, pf, lvl, pv, ctx),
@@ -851,7 +940,15 @@ fn seed_stage(
     });
     let produce = |i: usize, out: &mut Vec<Seed>| {
         if r4_on {
-            scan_strip_disc_r4_dispatch(x, disc, &jobs[i], out, r4, r4_pv.as_ref(), r4_ctx.as_ref());
+            scan_strip_disc_r4_dispatch(
+                x,
+                disc,
+                &jobs[i],
+                out,
+                r4,
+                r4_pv.as_ref(),
+                r4_ctx.as_ref(),
+            );
         } else {
             scan_strip_disc(x, disc, &jobs[i], out);
         }

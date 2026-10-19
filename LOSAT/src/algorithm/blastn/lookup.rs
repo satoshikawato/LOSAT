@@ -48,6 +48,10 @@ pub fn x_mb_lookup_print_summary() {
 #[path = "x_disc_lookup_par.rs"]
 pub mod x_disc_lookup_par;
 
+// EXPERIMENT (exp/r11-csr, v4-R R11; evidence only): the chains as CSR (R4_PROBE csr / csrb).
+#[path = "x_r11_csr.rs"]
+pub(crate) mod x_r11_csr;
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:37-43
 // ```c
 // /** bitfield used to detect ambiguities in uncompressed
@@ -974,6 +978,13 @@ impl TwoStageLookup {
     /// prefetches and cell-level presence bits.
     pub fn x_r4_raw(&self) -> (&[u32], &[u32]) {
         (&self.mb_lookup.hashtable, &self.mb_lookup.next_pos)
+    }
+
+    /// EXPERIMENT (exp/r11-csr, v4-R R11): the CSR of the (first template's) chains,
+    /// `(offsets, qs)`; built only with R4_PROBE csr / csrb and one template.
+    pub fn x_r11_csr(&self) -> (&[u32], &[u32]) {
+        assert!(self.disc.as_ref().is_none_or(|d| !d.two_templates));
+        x_r11_csr::view(&self.mb_lookup.hashtable, &self.mb_lookup.next_pos)
     }
 
     /// Visit hits for a lut_word_length k-mer.
@@ -1976,6 +1987,11 @@ fn build_mb_lookup(
         );
     }
 
+    // EXPERIMENT (exp/r11-csr): the chains as CSR in `next_pos`'s spare capacity.
+    if x_r11_csr::mode().build {
+        x_r11_csr::attach(&hashtable, &mut next_pos);
+    }
+
     MbLookupTable {
         hashtable,
         next_pos,
@@ -2513,6 +2529,11 @@ pub fn build_disc_mb_lookup(
             },
             total_longest_chain,
         );
+    }
+
+    // EXPERIMENT (exp/r11-csr): the first template's chains as CSR (one template only).
+    if x_r11_csr::mode().build && !two_templates {
+        x_r11_csr::attach(&hashtable, &mut next_pos);
     }
 
     TwoStageLookup {

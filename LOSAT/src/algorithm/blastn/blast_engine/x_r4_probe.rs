@@ -14,6 +14,12 @@
 //!   no chain, so the reference does nothing for it.
 //! - `ctx` (dc only): the context of a seed from a table of the first run of every 256 offsets
 //!   plus a forward walk, the value of `QueryContextIndex::x_direct`.
+//! - `csr` (exp/r11-csr, v4-R R11): the scans read the chains from their CSR
+//!   (`lookup::x_r11_csr`, built after the fill): `offsets[cell] .. offsets[cell + 1]` of `qs`,
+//!   in the chain's order, after the same presence test. With `pf`, a word entering the ring
+//!   prefetches `offsets[cell]`, and with `st2` the word `D / 2` places back reads its two
+//!   offsets and prefetches the first and the last line of its run of `qs`.
+//! - `csrb`: the CSR is built (its cost and memory), the scans walk the chains.
 //! Unset or empty = the dev code paths.
 use super::QueryContextIndex;
 use std::sync::OnceLock;
@@ -27,12 +33,14 @@ pub(super) struct Probe {
     pub(super) lvl: u8,
     pub(super) pv: bool,
     pub(super) ctx: bool,
+    /// R11: the scans read the CSR.
+    pub(super) csr: bool,
 }
 
 impl Probe {
     #[inline(always)]
     pub(super) fn on(&self) -> bool {
-        self.pf > 0 || self.pv || self.ctx
+        self.pf > 0 || self.pv || self.ctx || self.csr
     }
 }
 
@@ -52,6 +60,9 @@ pub(super) fn probe() -> Probe {
                     "nopf" => p.lvl = 0,
                     "pv" => p.pv = true,
                     "ctx" => p.ctx = true,
+                    "csr" => p.csr = true,
+                    // Read by `lookup::x_r11_csr` (build only).
+                    "csrb" => {}
                     _ if t.starts_with("pf=") => {
                         let d: usize = t[3..].parse().expect("R4_PROBE pf=D");
                         assert!(d.is_power_of_two() && d >= 2 && d <= RING, "R4_PROBE pf=D");
@@ -60,7 +71,14 @@ pub(super) fn probe() -> Probe {
                     _ => panic!("R4_PROBE: unknown item {t}"),
                 }
             }
-            assert!(p.lvl == 1 || p.pf >= 4, "R4_PROBE st2 / st3 / nopf need pf=D >= 4");
+            assert!(
+                p.lvl == 1 || p.pf >= 4,
+                "R4_PROBE st2 / st3 / nopf need pf=D >= 4"
+            );
+            assert!(
+                !(p.csr && (p.pv || p.lvl == 3)),
+                "R4_PROBE csr: no pv / st3"
+            );
             eprintln!("[R4_PROBE] {p:?}");
         }
         p
@@ -249,6 +267,105 @@ impl<'a, const PV: bool> BnRing<'a, PV> {
             self.lvl,
             self.hashtable,
             self.next_pos,
+            |e: &(usize, usize, u64)| e.2 as usize,
+            w,
+            &mut |e: (usize, usize, u64)| emit(e.0, e.1, e.2),
+        );
+    }
+
+    pub(super) fn flush(&mut self, emit: &mut impl FnMut(usize, usize, u64)) {
+        if self.d == 0 {
+            return;
+        }
+        ring_flush(&self.buf, self.n, self.d, &mut |e: (usize, usize, u64)| {
+            emit(e.0, e.1, e.2)
+        });
+        self.n = 0;
+    }
+}
+
+/// EXPERIMENT (exp/r11-csr, v4-R R11): one step of the FIFO of the scan's words over the CSR:
+/// the word `w` enters the ring (level 1: prefetch of `offsets[cell]`), with level 2 the word
+/// `d / 2` places back reads its two offsets and prefetches the first and the last line of its
+/// run of `qs`, and the word `d` places back leaves through `emit`.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub(super) fn ring_step_csr<T: Copy>(
+    buf: &mut [T; RING],
+    n: &mut usize,
+    d: usize,
+    lvl: u8,
+    offsets: &[u32],
+    qs: &[u32],
+    cell: impl Fn(&T) -> usize,
+    w: T,
+    emit: &mut impl FnMut(T),
+) {
+    let mask = d - 1;
+    if lvl >= 1 {
+        prefetch(offsets.as_ptr().wrapping_add(cell(&w)));
+    }
+    if lvl >= 2 && *n >= d / 2 {
+        let c = cell(&buf[(*n - d / 2) & mask]);
+        let a = offsets[c] as usize;
+        let b = offsets[c + 1] as usize;
+        if b > a {
+            let pa = qs.as_ptr().wrapping_add(a);
+            let pb = qs.as_ptr().wrapping_add(b - 1);
+            prefetch(pa);
+            if (pa as usize >> 6) != (pb as usize >> 6) {
+                prefetch(pb);
+            }
+        }
+    }
+    let slot = *n & mask;
+    if *n >= d {
+        emit(buf[slot]);
+    }
+    buf[slot] = w;
+    *n += 1;
+}
+
+/// EXPERIMENT (exp/r11-csr): the FIFO of the reference scans' words `(kmer_start, s_range,
+/// index)` over the CSR (`ring_step_csr`); `d == 0` = no ring.
+pub(super) struct CsrRing<'a> {
+    buf: [(usize, usize, u64); RING],
+    n: usize,
+    d: usize,
+    lvl: u8,
+    offsets: &'a [u32],
+    qs: &'a [u32],
+}
+
+impl<'a> CsrRing<'a> {
+    pub(super) fn new(p: Probe, offsets: &'a [u32], qs: &'a [u32]) -> Self {
+        Self {
+            buf: [(0, 0, 0); RING],
+            n: 0,
+            d: p.pf,
+            lvl: p.lvl,
+            offsets,
+            qs,
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn push(
+        &mut self,
+        w: (usize, usize, u64),
+        emit: &mut impl FnMut(usize, usize, u64),
+    ) {
+        if self.d == 0 {
+            emit(w.0, w.1, w.2);
+            return;
+        }
+        ring_step_csr(
+            &mut self.buf,
+            &mut self.n,
+            self.d,
+            self.lvl,
+            self.offsets,
+            self.qs,
             |e: &(usize, usize, u64)| e.2 as usize,
             w,
             &mut |e: (usize, usize, u64)| emit(e.0, e.1, e.2),

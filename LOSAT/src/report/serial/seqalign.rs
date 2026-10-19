@@ -7,11 +7,18 @@
 //! The documents are made by `write_query`, one per query with alignments, from the report
 //! records of `report::record`. The segment computation is that of `s_CollectSeqAlignData`
 //! for every program (translated rows included); this step writes the Dense-seg of the
-//! non-translated gapped programs (BLASTN, BLASTP). The Std-seg of the translated gapped
-//! programs (BLASTX, TBLASTN: `s_CreateStdSegs` over the same `Segments`) and the `diags`
-//! Seq-align of an ungapped search (`BLASTUngappedHspListToSeqAlign` /
-//! `x_UngappedHSPToStdSeg`, one Seq-align per subject from its consecutive `HspRecord`s)
-//! join `write_seq_align` here; until then `write_query` refuses them.
+//! non-translated gapped programs (BLASTN, BLASTP), and `writes` refuses the others. The
+//! translated programs add, next to `write_dense_seg` and `write_seq_align_gapped`:
+//! - `write_std_segs(enc, query_id, subject_id, &Segments, [translate1, translate2],
+//!   [query offset, subject offset])`: `s_CreateStdSegs` (blast_seqalign.cpp:306-370) over the
+//!   same `Segments` (one Std-seg per segment, `int` Seq-intervals or `empty` for a gap row),
+//!   chosen by `write_seq_align_gapped` when a row is translated (`s_CreateSeqAlign`);
+//! - `write_seq_align_diags(enc, run, query, subject, &[HspRecord])`:
+//!   `BLASTUngappedHspListToSeqAlign` / `x_UngappedHSPToStdSeg` (blast_seqalign.cpp:1323-1458),
+//!   one `diags` Seq-align per run of consecutive `HspRecord`s of one subject, each Std-seg with
+//!   its `scores` (`write_score_list` with the nucleotide query length);
+//! - and, for `-subject`, the mapper's Std-seg rules of `s_RemapToSubjectLoc`
+//!   (`CSeq_align_Mapper_Base::x_GetDstStd`), as `remap_strands` is for the Dense-seg.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:677-707
 //! ```c++

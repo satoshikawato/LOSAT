@@ -581,6 +581,24 @@ pub(super) struct XSubjectPlan {
     pub units: Vec<(usize, TranslatedChunk, Vec<(i32, i32)>)>,
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631
+// ```c
+//     if (program_number != eBlastTypeRpsTblastn) {
+//         if (translation_buffer) {
+//             sfree(translation_buffer);
+//         }
+//     }
+// ```
+// NCBI frees a subject's translation after the subject; a dropped plan gives its frames to the
+// next plan of the thread instead (LOSAT_X_TBNFRAMEREUSE).
+impl Drop for XSubjectPlan {
+    fn drop(&mut self) {
+        for frame in self.frames.drain(..) {
+            super::x_subject_translate::x_reuse_frame(frame.aa_seq);
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
 // ```c
 //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,

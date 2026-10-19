@@ -205,7 +205,7 @@ mod x_query_prep_par;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:3850 and
 // c++/src/algo/blast/core/blast_traceback.c:375 (the two loops over one subject's HSPs).
 // EXPERIMENT (LOSAT_X_QGROUPPAR): both loops of one subject run per query on the batch's search
-// pool (a child module, so that it reads the private types of this file).
+// pool (a child module, beside the other modules of `search_query_batch`).
 #[path = "x_qgroup_par.rs"]
 mod x_qgroup_par;
 
@@ -13042,15 +13042,19 @@ fn search_query_batch(
                 .as_deref()
                 .and_then(|counts| x_qgroup_par::plan(counts, x_qgroup_par::Stage::Prelim));
             let x_shadow = x_order.is_some() && x_qgroup_par::shadow();
-            let mut x_split = match (&x_order, &x_counts) {
-                (Some(_), Some(counts)) => {
-                    x_qgroup_par::by_query(ungapped_hits, |hit| hit.query_idx, counts)
-                }
-                _ => Vec::new(),
+            // The shadow's copy for the owner loop (the per-query form groups the hits in place).
+            let mut x_shadow_hits = if x_shadow {
+                ungapped_hits.clone()
+            } else {
+                Vec::new()
             };
-            if x_order.is_none() || x_shadow {
-                ungapped_hits.sort_by(score_compare_ungapped_hits);
+            match (&x_order, &x_counts) {
+                (Some(_), Some(counts)) => {
+                    x_qgroup_par::group_in_place(ungapped_hits, |hit| hit.query_idx, counts)
+                }
+                _ => ungapped_hits.sort_by(score_compare_ungapped_hits),
             }
+            x_shadow_hits.sort_by(score_compare_ungapped_hits);
 
             // Debug counters for containment analysis
             let mut dbg_containment_skipped = 0usize;
@@ -13728,7 +13732,7 @@ fn search_query_batch(
             let mut x_purged = false;
             if let Some(order) = x_order.as_ref() {
                 let x_starts = x_qgroup_par::starts(x_counts.as_deref().unwrap_or(&[]));
-                let mut x_rest: &mut [UngappedHit] = &mut x_split;
+                let mut x_rest: &mut [UngappedHit] = ungapped_hits;
                 let mut x_slices = Vec::with_capacity(queries.len());
                 for query in 0..queries.len() {
                     let (head, tail) = x_rest.split_at_mut(x_starts[query + 1] - x_starts[query]);
@@ -13739,6 +13743,7 @@ fn search_query_batch(
                 let x_tree_s_max = (s_len + 1) as i32;
                 let x_results = x_qgroup_par::run(
                     parallel_pool,
+                    x_qgroup_par::Stage::Prelim,
                     order,
                     queries.len(),
                     || {
@@ -13746,21 +13751,17 @@ fn search_query_batch(
                             BlastIntervalTree::new(0, x_tree_q_max, 0, x_tree_s_max),
                             GapAlignScratch::new(),
                             GreedyAlignScratch::new(),
-                            Vec::new(),
                         )
                     },
-                    |(tree, gap, greedy, out), query| {
+                    |(tree, gap, greedy), query| {
                         let mut hits = x_slices[query as usize]
                             .lock()
                             .expect("each query's hits are taken by one task");
                         hits.sort_by(score_compare_ungapped_hits);
                         tree.reset();
-                        out.clear();
-                        let counts = x_prelim_list(&hits, tree, gap, greedy, None, out);
-                        (
-                            purge_prelim_hits_with_common_endpoints(std::mem::take(out)),
-                            counts,
-                        )
+                        let mut out = Vec::new();
+                        let dbg = x_prelim_list(&hits, tree, gap, greedy, None, &mut out);
+                        (purge_prelim_hits_with_common_endpoints(out), dbg)
                     },
                 );
                 let mut x_hits: Vec<PrelimHit> = Vec::new();
@@ -13770,15 +13771,23 @@ fn search_query_batch(
                     x_hits.extend(hits);
                 }
                 if x_shadow {
+                    // The owner loop on the copy; both lists compared after their purge and
+                    // score sort (the pooled sort included), the loop's kept.
                     let (calls, skipped) = x_prelim_list(
-                        ungapped_hits,
+                        &x_shadow_hits,
                         &mut interval_tree,
                         gap_scratch,
                         greedy_align_scratch,
                         Some(&mut subject_scratch.x_ahead_scratch),
                         prelim_hits,
                     );
-                    let slow = purge_prelim_hits_with_common_endpoints(prelim_hits.clone());
+                    let mut slow = purge_prelim_hits_with_common_endpoints(prelim_hits.clone());
+                    sort_prelim_hits_by_score(&mut slow);
+                    x_qgroup_par::sort_stable(
+                        parallel_pool,
+                        &mut x_hits,
+                        score_compare_prelim_hits,
+                    );
                     x_qgroup_par::compare(x_qgroup_par::Stage::Prelim, &slow, &x_hits);
                     dbg_gapped_calls = calls;
                     dbg_containment_skipped = skipped;
@@ -16013,6 +16022,7 @@ fn search_query_batch(
                 let x_tree_s_max = (s_len_full + 1) as i32;
                 let x_results = x_qgroup_par::run(
                     parallel_pool,
+                    x_qgroup_par::Stage::Traceback,
                     order,
                     queries.len(),
                     || {
@@ -16020,36 +16030,35 @@ fn search_query_batch(
                             BlastIntervalTree::new(0, x_tree_q_max, 0, x_tree_s_max),
                             GapAlignScratch::new(),
                             GreedyAlignScratch::new(),
-                            Vec::new(),
                         )
                     },
-                    |(tree, gap, greedy, hits), query| {
+                    |(tree, gap, greedy), query| {
                         let query = query as usize;
                         let mut edit_lengths = Vec::new();
                         let mut alignment_lengths = Vec::new();
-                        hits.clear();
+                        let mut hits = Vec::new();
                         x_trace_list(
                             &x_kept[x_starts[query]..x_starts[query + 1]],
                             tree,
                             gap,
                             greedy,
                             None,
-                            hits,
+                            &mut hits,
                             &mut edit_lengths,
                             &mut alignment_lengths,
                         );
-                        let (list, s1, s2, s3, s4) = x_post_purge(std::mem::take(hits));
+                        let (list, s1, s2, s3, s4) = x_post_purge(hits);
                         let (list, s5) = x_final_list(list, tree);
                         (list, [s1, s2, s3, s4, s5], edit_lengths, alignment_lengths)
                     },
                 );
                 let mut fast: Vec<BlastnHsp> = Vec::new();
                 let mut steps = [0usize; 5];
-                for (list, counts, edit_lengths, alignment_lengths) in
+                for (list, step_counts, edit_lengths, alignment_lengths) in
                     x_results.into_iter().flatten()
                 {
                     fast.extend(list);
-                    for (sum, step) in steps.iter_mut().zip(counts) {
+                    for (sum, step) in steps.iter_mut().zip(step_counts) {
                         *sum += step;
                     }
                     traceback_edit_script_lengths.extend(edit_lengths);

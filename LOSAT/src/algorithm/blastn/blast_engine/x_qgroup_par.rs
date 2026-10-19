@@ -26,13 +26,20 @@
 //! the two loops, the purges and the sorts around them were 57 % of a blastn batch's wall
 //! (31,168 cDNAs against 3 Mb; v4-D session 8 probe).
 //!
-//! Why a query's results do not depend on the other queries: the tree answers per context
-//! (`containing_hsp` returns false across contexts, `interval_tree.rs`), the purges sort by
-//! context first and compare only within a context (`purge_prelim_hits_with_common_endpoints`,
+//! Why a query's results do not depend on the other queries: the tree's answers are per context.
+//! `containing_hsp` returns false across contexts, and `add_hsp`'s walk over the HSPs that share
+//! an endpoint with the new one (which rejects the new HSP or unlinks an old one) also compares
+//! only HSPs of the same context; both walks visit every node that can hold such an HSP, so the
+//! tree's shape (which depends on what else it holds) cannot change an answer, and the
+//! LOSAT_X_ITREEFAST grid gives the tree's yes / no (`interval_tree.rs`). Only the trace reads
+//! which HSP contains another, and the trace keeps the owner loop. The purges sort by context
+//! first and compare only within a context (`purge_prelim_hits_with_common_endpoints`,
 //! `purge_hsps_with_common_endpoints_ex`), the re-evaluation and the identity test read one HSP
-//! and its context's cutoff and statistics, and the sorts are stable. So running the loop of one
-//! query over that query's HSPs, in the relative order they have in the batch's list, with a tree
-//! of its own, gives the HSPs the batch's loop gives for that query, in the same relative order.
+//! and its context's cutoff and statistics, the alignment scratch carries nothing from one call
+//! to the next that changes a result (LOSAT_X_AHEAD's helpers already compute with scratch of
+//! their own), and the sorts are stable. So running the loop of one query over that query's HSPs,
+//! in the relative order they have in the batch's list, with a tree of its own, gives the HSPs the
+//! batch's loop gives for that query, in the same relative order.
 //!
 //! With the switch on, a search pool of two or more threads and one subject on the owner thread
 //! (`!use_parallel`; with several subjects the pool already searches subjects in parallel):
@@ -48,13 +55,15 @@
 //!   slice runs the traceback loop, the first purge (trimmed HSPs at its end), the re-evaluation of
 //!   the trimmed HSPs, the second purge, the score sort, the final tree and the e-values; the final
 //!   lists are concatenated in query order and sorted by score with the same stable sort. The
-//!   second purge orders by context first and keeps, within a context, the input's relative order
-//!   for its ties, which is the same in both forms (kept HSPs before trimmed ones, each group in
-//!   the order of the first purge), so a query's list after it is the serial list's part for that
-//!   query; the score sort, the tree and the e-values keep that per query; and the serial score
-//!   sort leaves ties between queries in the order of its input, which is query order, as the
-//!   stable sort of the concatenation does. So the subject's final list is the serial one element
-//!   for element.
+//!   first purge leaves the HSPs it keeps in context order, then the HSPs its second pass trimmed,
+//!   then those its first pass trimmed, each group in the reverse order of trimming; one query's
+//!   trims happen in the same relative order in both forms, so its HSPs come in the same relative
+//!   order, and the re-evaluation takes the same HSPs (the trimmed ones). The second purge orders
+//!   by context first and keeps, within a context, the input's relative order for its ties, so a
+//!   query's list after it is the serial list's part for that query; the score sort, the tree and
+//!   the e-values keep that per query; and the serial score sort leaves ties between queries in
+//!   the order of its input, which is query order, as the stable sort of the concatenation does.
+//!   So the subject's final list is the serial one element for element.
 //!
 //! The queries are handed out to the threads from an atomic counter, the query with the most HSPs
 //! first (the counts are known before each stage), each thread with its own tree and alignment
@@ -72,8 +81,17 @@
 //! `[X_SHADOW] QGROUPPAR prelim= traceback= hsps= diffs=0 identical` at exit (`prelim=` and
 //! `traceback=` count the stages compared, `hsps=` the HSPs compared). The search keeps the owner
 //! loop's lists. With `LOSAT_X_STATS`, `main` prints
-//! `[X_STATS] QGROUPPAR prelim= prelim_queries= traceback= traceback_queries= owner=`, the stages
-//! run per query, the query tasks they ran and the stages that kept the owner loop by the rule.
+//! `[X_STATS] QGROUPPAR prelim= prelim_queries= traceback= traceback_queries= owner=` when a stage
+//! was planned: the stages run per query, the query tasks they ran and the stages with HSPs that
+//! kept the owner loop by the rule. With `LOSAT_WASI_THREADS_DEBUG=1` each stage run per query
+//! prints `[losat-thread-stage] program=blastn stage=prelim_queries|traceback_queries`. In the
+//! per-query form the `[TIMING]` steps inside the stages (alignment, purge passes, re-evaluation,
+//! final tree) are sums over the threads, while `gapped_extend` and `traceback_prune` stay the
+//! stages' wall times.
+//!
+//! The chunk's ungapped hits are grouped by query in place (a counting sort's destinations, 4
+//! bytes per hit, applied by swaps), so the stage holds no second copy of them; the shadow keeps
+//! one for the owner loop.
 //!
 //! Programs that reach it: BLASTN only (megablast, dc-megablast, blastn, blastn-short), from
 //! `search_query_batch` (the loop, a LOSAT_X_QBATCHPAR slot of two or more threads, and a `-db`
@@ -145,16 +163,41 @@ pub(super) fn counts(query_of: impl Iterator<Item = u32>, num_queries: usize) ->
     counts
 }
 
-/// The order in which the queries with HSPs are handed out (most HSPs first, then query order),
-/// or `None` when the owner loop stays: fewer than two queries with HSPs, or one query with more
-/// than a quarter of the HSPs.
-pub(super) fn plan(counts: &[u32], stage: Stage) -> Option<Vec<u32>> {
+/// What a stage does with its HSPs per query.
+#[derive(Debug, PartialEq, Eq)]
+enum Choice {
+    /// No HSPs: nothing to run.
+    Empty,
+    /// The owner loop: fewer than two queries with HSPs, or one query with more than a quarter.
+    Owner,
+    /// The queries as tasks on the pool.
+    Queries,
+}
+
+fn choose(counts: &[u32]) -> Choice {
     let total: u64 = counts.iter().map(|&count| u64::from(count)).sum();
     let largest = counts.iter().copied().max().unwrap_or(0);
     let with_hsps = counts.iter().filter(|&&count| count > 0).count();
-    if with_hsps < 2 || u64::from(largest) * 4 > total {
-        OWNER.fetch_add(1, Ordering::Relaxed);
-        return None;
+    if total == 0 {
+        Choice::Empty
+    } else if with_hsps < 2 || u64::from(largest) * 4 > total {
+        Choice::Owner
+    } else {
+        Choice::Queries
+    }
+}
+
+/// The order in which the queries with HSPs are handed out (most HSPs first, then query order),
+/// or `None` when the owner loop stays: no HSPs, fewer than two queries with HSPs, or one query
+/// with more than a quarter of the HSPs (counted as `owner=` unless there are no HSPs).
+pub(super) fn plan(counts: &[u32], stage: Stage) -> Option<Vec<u32>> {
+    match choose(counts) {
+        Choice::Empty => return None,
+        Choice::Owner => {
+            OWNER.fetch_add(1, Ordering::Relaxed);
+            return None;
+        }
+        Choice::Queries => {}
     }
     let mut order: Vec<u32> = (0..counts.len() as u32)
         .filter(|&query| counts[query as usize] > 0)
@@ -182,26 +225,30 @@ pub(super) fn starts(counts: &[u32]) -> Vec<usize> {
     starts
 }
 
-/// The items of `items` grouped by query (`query_of`), each query's items in their order in
-/// `items` (a counting sort); with `starts(counts)` the slice of query `q` is
+/// Groups `items` by query (`query_of`) in place, each query's items in their order in `items`:
+/// the destinations of a counting sort (4 bytes per item) applied by swaps, so no second copy of
+/// the items is made. With `starts(counts)` the slice of query `q` is then
 /// `starts[q]..starts[q + 1]`.
-pub(super) fn by_query<T: Clone>(
-    items: &[T],
-    query_of: impl Fn(&T) -> u32,
-    counts: &[u32],
-) -> Vec<T> {
-    let starts = starts(counts);
-    let mut next = starts[..counts.len()].to_vec();
-    let mut slots: Vec<Option<T>> = vec![None; items.len()];
-    for item in items {
-        let query = query_of(item) as usize;
-        slots[next[query]] = Some(item.clone());
-        next[query] += 1;
+pub(super) fn group_in_place<T>(items: &mut [T], query_of: impl Fn(&T) -> u32, counts: &[u32]) {
+    let mut next = starts(counts);
+    next.pop();
+    let mut destination: Vec<u32> = items
+        .iter()
+        .map(|item| {
+            let query = query_of(item) as usize;
+            let at = next[query];
+            next[query] += 1;
+            u32::try_from(at).expect("fewer than 2^32 hits in a chunk")
+        })
+        .collect();
+    // Each swap puts the item at `at` where it belongs, so at most one swap per item.
+    for at in 0..items.len() {
+        while destination[at] as usize != at {
+            let to = destination[at] as usize;
+            items.swap(at, to);
+            destination.swap(at, to);
+        }
     }
-    slots
-        .into_iter()
-        .map(|slot| slot.expect("every slot of a counted query is filled"))
-        .collect()
 }
 
 /// Whether the query indices of `query_of` never decrease (each query's items are one slice).
@@ -223,6 +270,7 @@ pub(super) fn in_query_order(mut query_of: impl Iterator<Item = u32>) -> bool {
 /// each query's result at its query index (`None` for the queries not in `order`).
 pub(super) fn run<S, R>(
     pool: &SearchPool<'_>,
+    stage: Stage,
     order: &[u32],
     num_queries: usize,
     new_state: impl Fn() -> S + Sync,
@@ -239,6 +287,15 @@ where
     ))]
     {
         let workers = pool.threads().min(order.len());
+        crate::utils::threading::report_stage(
+            "blastn",
+            match stage {
+                Stage::Prelim => "prelim_queries",
+                Stage::Traceback => "traceback_queries",
+            },
+            order.len(),
+            pool.enabled() && workers > 1,
+        );
         if pool.enabled() && workers > 1 {
             let next = std::sync::atomic::AtomicUsize::new(0);
             let parts: Vec<Vec<(u32, R)>> = pool.install(|| {
@@ -264,6 +321,7 @@ where
             return results;
         }
     }
+    let _ = stage;
     let mut state = new_state();
     for &query in order {
         results[query as usize] = Some(task(&mut state, query));
@@ -317,7 +375,7 @@ pub(super) fn compare<T: std::fmt::Debug>(stage: Stage, slow: &[T], fast: &[T]) 
 }
 
 /// The lines `main` prints at exit: the shadow's summary (with the shadow) and the counters (with
-/// `LOSAT_X_STATS`). No NCBI counterpart: it prints counters and changes no value NCBI computes.
+/// `LOSAT_X_STATS`, when a stage was planned). No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub(super) fn print_summary() {
     if shadow() {
         let diffs = DIFFS.load(Ordering::Relaxed);
@@ -329,7 +387,10 @@ pub(super) fn print_summary() {
             if diffs == 0 { "identical" } else { "DIFFERENT" }
         );
     }
-    if std::env::var_os("LOSAT_X_STATS").is_some() {
+    let planned = PRELIM.load(Ordering::Relaxed)
+        + TRACEBACK.load(Ordering::Relaxed)
+        + OWNER.load(Ordering::Relaxed);
+    if std::env::var_os("LOSAT_X_STATS").is_some() && planned > 0 {
         eprintln!(
             "[X_STATS] QGROUPPAR prelim={} prelim_queries={} traceback={} traceback_queries={} owner={}",
             PRELIM.load(Ordering::Relaxed),
@@ -361,16 +422,20 @@ mod tests {
     }
 
     #[test]
-    fn by_query_keeps_each_querys_order() {
-        let items = [(2u32, 'a'), (0, 'b'), (2, 'c'), (1, 'd'), (0, 'e')];
+    fn group_in_place_keeps_each_querys_order() {
+        let mut items = [(2u32, 'a'), (0, 'b'), (2, 'c'), (1, 'd'), (0, 'e')];
         let counts = counts(items.iter().map(|item| item.0), 4);
         assert_eq!(counts, vec![2, 1, 2, 0]);
-        let grouped = by_query(&items, |item| item.0, &counts);
-        assert_eq!(
-            grouped,
-            vec![(0, 'b'), (0, 'e'), (1, 'd'), (2, 'a'), (2, 'c')]
-        );
+        group_in_place(&mut items, |item| item.0, &counts);
+        assert_eq!(items, [(0, 'b'), (0, 'e'), (1, 'd'), (2, 'a'), (2, 'c')]);
         assert_eq!(starts(&counts), vec![0, 2, 3, 5, 5]);
+        // Longer cycles: a reversed list of 3 queries x 50 items, each query's items numbered.
+        let mut items: Vec<(u32, u32)> = (0..150u32).rev().map(|i| (i % 3, i)).collect();
+        let three = super::counts(items.iter().map(|item| item.0), 3);
+        group_in_place(&mut items, |item| item.0, &three);
+        let mut want: Vec<(u32, u32)> = (0..150u32).rev().map(|i| (i % 3, i)).collect();
+        want.sort_by_key(|item| item.0);
+        assert_eq!(items, want);
     }
 
     #[test]
@@ -381,10 +446,81 @@ mod tests {
     }
 
     #[test]
+    fn the_rule_names_empty_stages_and_dominant_queries() {
+        assert_eq!(choose(&[0, 0, 0]), Choice::Empty);
+        assert_eq!(choose(&[]), Choice::Empty);
+        assert_eq!(choose(&[0, 7, 0]), Choice::Owner);
+        assert_eq!(choose(&[5, 4, 4, 3]), Choice::Owner);
+        assert_eq!(choose(&[4, 4, 4, 4]), Choice::Queries);
+    }
+
+    #[test]
+    fn sort_stable_keeps_ties_in_order() {
+        let items: Vec<(u32, u32)> = (0..2_000u32).map(|i| ((i * 7) % 13, i)).collect();
+        let mut want = items.clone();
+        want.sort_by_key(|item| item.0);
+        let mut serial = items.clone();
+        sort_stable(&SearchPool::x_serial(), &mut serial, |a, b| a.0.cmp(&b.0));
+        assert_eq!(serial, want);
+        #[cfg(feature = "parallel")]
+        crate::utils::threading::with_search_pool(4, "blastn", |pool| {
+            let mut pooled = items.clone();
+            sort_stable(pool, &mut pooled, |a, b| a.0.cmp(&b.0));
+            assert_eq!(pooled, want);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "differ from the loop's at 1")]
+    fn compare_panics_on_a_difference() {
+        compare(Stage::Prelim, &[1, 2, 3], &[1, 5, 3]);
+    }
+
+    #[test]
+    #[should_panic(expected = "differ from the loop's at 2")]
+    fn compare_panics_on_a_length_mismatch() {
+        compare(Stage::Traceback, &[1, 2], &[1, 2, 3]);
+    }
+
+    /// On a pool of four threads every query of the order runs exactly once and its result lands
+    /// at its index, also with more threads than queries.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn run_on_a_pool_runs_each_query_once() {
+        use std::sync::atomic::AtomicUsize;
+        crate::utils::threading::with_search_pool(4, "blastn", |pool| {
+            for order in [(0..40u32).rev().collect::<Vec<_>>(), vec![3u32, 1]] {
+                let calls: Vec<AtomicUsize> = (0..41).map(|_| AtomicUsize::new(0)).collect();
+                let results = run(
+                    pool,
+                    Stage::Prelim,
+                    &order,
+                    41,
+                    || (),
+                    |_, query| {
+                        calls[query as usize].fetch_add(1, Ordering::SeqCst);
+                        query * 3
+                    },
+                );
+                for (query, result) in results.iter().enumerate() {
+                    let ran = order.contains(&(query as u32));
+                    assert_eq!(*result, ran.then_some(query as u32 * 3), "query {query}");
+                    assert_eq!(calls[query].load(Ordering::SeqCst), usize::from(ran));
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn run_gives_every_query_its_own_result() {
         let order = [4u32, 1, 2];
         let serial = run(
             &SearchPool::x_serial(),
+            Stage::Traceback,
             &order,
             6,
             || 0usize,

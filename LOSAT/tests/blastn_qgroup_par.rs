@@ -248,8 +248,11 @@ fn check_task(
 
 #[test]
 fn megablast_stages_per_query() {
-    let (_, traceback, hsps) = check_task(&Queries::subject_pieces(), "megablast", &[], &[]);
-    assert!(traceback > 0 && hsps > 0, "{traceback} {hsps}");
+    let (prelim, traceback, hsps) = check_task(&Queries::subject_pieces(), "megablast", &[], &[]);
+    assert!(
+        prelim > 0 && traceback > 0 && hsps > 0,
+        "{prelim} {traceback} {hsps}"
+    );
 }
 
 #[test]
@@ -263,8 +266,8 @@ fn blastn_stages_per_query() {
 
 #[test]
 fn dc_megablast_stages_per_query() {
-    let (_, traceback, _) = check_task(&Queries::subject_pieces(), "dc-megablast", &[], &[]);
-    assert!(traceback > 0, "{traceback}");
+    let (prelim, traceback, _) = check_task(&Queries::subject_pieces(), "dc-megablast", &[], &[]);
+    assert!(prelim > 0 && traceback > 0, "{prelim} {traceback}");
 }
 
 #[test]
@@ -341,7 +344,7 @@ fn stats_show_which_form_ran() {
     let (_, stderr) = blastn(&pieces, &args, 4, &[STATS]);
     assert!(field(&stderr, stats, "prelim=") > 0, "{stderr}");
     assert!(field(&stderr, stats, "traceback_queries=") > 1, "{stderr}");
+    // At one thread no stage is planned, so the line is not printed.
     let (_, stderr) = blastn(&pieces, &args, 1, &[STATS]);
-    assert_eq!(field(&stderr, stats, "prelim="), 0, "{stderr}");
-    assert_eq!(field(&stderr, stats, "traceback="), 0, "{stderr}");
+    assert!(!stderr.contains(stats), "{stderr}");
 }

@@ -481,6 +481,82 @@ pub struct BlastRedoRangeResult {
     pub query: BlastCompoSequenceData,
     pub subject: BlastCompoSequenceData,
     pub subject_maybe_biased: bool,
+    /// EXPERIMENT (LOSAT_X_BPCOMPOREUSE): `read_aa_composition(subject.data())`, computed once
+    /// when blastp's SEG cache took these subject bytes; `None` where nothing computed it.
+    pub x_subject_composition: Option<XSubjectComposition>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:935-937
+// ```c
+//         right = length;
+//     }
+//     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+// ```
+// No NCBI counterpart: the composition NCBI reads from a subject range, kept with the range's
+// bytes so that the same bytes are not read again. Two values are equal when their bits are.
+#[derive(Debug, Clone)]
+pub struct XSubjectComposition(pub BlastAminoAcidComposition);
+
+impl PartialEq for XSubjectComposition {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.num_true_amino_acids == other.0.num_true_amino_acids
+            && self
+                .0
+                .prob
+                .iter()
+                .zip(&other.0.prob)
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+    }
+}
+
+impl Eq for XSubjectComposition {}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:935-937
+// ```c
+//         right = length;
+//     }
+//     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+// ```
+// No NCBI counterpart: the switch, read once per process. 0 reads every subject composition,
+// 1 keeps the composition of the bytes blastp's SEG cache holds and reuses it, 2 does so and
+// reads the bytes again to compare (`LOSAT_X_BPCOMPOREUSESHADOW`).
+pub(crate) fn x_compo_reuse() -> u8 {
+    use std::sync::OnceLock;
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if !crate::utils::xswitch::on("LOSAT_X_BPCOMPOREUSE") {
+            0
+        } else if std::env::var_os("LOSAT_X_BPCOMPOREUSESHADOW").is_some() {
+            2
+        } else {
+            1
+        }
+    })
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:935-937
+// ```c
+//         right = length;
+//     }
+//     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+// ```
+// The composition of a whole, untranslated subject range: the stored one when the range carries
+// it (EXPERIMENT LOSAT_X_BPCOMPOREUSE: it was read from the same bytes by the same function),
+// otherwise read here.
+pub(crate) fn x_whole_subject_composition(
+    range: &BlastRedoRangeResult,
+) -> BlastAminoAcidComposition {
+    if let Some(stored) = &range.x_subject_composition {
+        if x_compo_reuse() == 2 {
+            let fresh = XSubjectComposition(read_aa_composition(range.subject.data()));
+            assert!(
+                fresh == *stored,
+                "LOSAT_X_BPCOMPOREUSESHADOW: stored subject composition differs"
+            );
+        }
+        return stored.0.clone();
+    }
+    read_aa_composition(range.subject.data())
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/composition_adjustment/redo_alignment.h:312-322
@@ -1746,6 +1822,7 @@ pub fn translated_subject_get_range<'seq>(
         query,
         subject,
         subject_maybe_biased: maybe_biased,
+        x_subject_composition: None,
     })
 }
 
@@ -3017,7 +3094,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                             current,
                         )?
                     } else {
-                        read_aa_composition(range.subject.data())
+                        x_whole_subject_composition(range)
                     };
                     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1256
                     // ```c++
@@ -4127,6 +4204,7 @@ mod tests {
                         as usize
                 ]),
                 subject_maybe_biased: false,
+                x_subject_composition: None,
             })
         }
 

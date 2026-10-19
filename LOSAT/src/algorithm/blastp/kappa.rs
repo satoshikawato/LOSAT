@@ -27,6 +27,9 @@ use crate::core::composition_adjustment::redo_alignment::{
     BlastCompoQueryInfo, BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks,
     BlastRedoRangeResult, EMatrixAdjustRule,
 };
+use crate::core::composition_adjustment::redo_alignment::{
+    x_compo_reuse, x_whole_subject_composition, XSubjectComposition,
+};
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
 
@@ -284,6 +287,9 @@ pub(crate) struct BlastpKappaQueryWorkspace {
 struct CachedSubjectRangeData {
     subject: BlastCompoSequenceData,
     subject_maybe_biased: bool,
+    // EXPERIMENT (LOSAT_X_BPCOMPOREUSE): `read_aa_composition(subject.data())`, read when the
+    // entry was made.
+    x_composition: Option<XSubjectComposition>,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1614-1646
@@ -412,6 +418,7 @@ impl BlastpKappaSubjectRangeCache {
         subject_range: &BlastCompoSequenceRange,
         subject: &BlastCompoSequenceData,
         subject_maybe_biased: bool,
+        x_composition: Option<XSubjectComposition>,
     ) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
         // ```c
@@ -425,6 +432,7 @@ impl BlastpKappaSubjectRangeCache {
             let value = CachedSubjectRangeData {
                 subject: subject.clone(),
                 subject_maybe_biased,
+                x_composition,
             };
             shared.shard(&key).insert(key, value);
             return;
@@ -434,6 +442,7 @@ impl BlastpKappaSubjectRangeCache {
             CachedSubjectRangeData {
                 subject: subject.clone(),
                 subject_maybe_biased,
+                x_composition,
             },
         );
     }
@@ -1283,6 +1292,7 @@ fn build_subject_range_data(
                         query,
                         subject: cached.subject,
                         subject_maybe_biased: cached.subject_maybe_biased,
+                        x_subject_composition: cached.x_composition,
                     };
                 }
             }
@@ -1309,6 +1319,16 @@ fn build_subject_range_data(
                 subject.buffer[subject.data_offset + pos] = ncbistdaa::X;
             }
         }
+        // EXPERIMENT (LOSAT_X_BPCOMPOREUSE): the composition of the masked bytes, read once here
+        // and kept with them.
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:935-937
+        // ```c
+        //         right = length;
+        //     }
+        //     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+        // ```
+        let x_composition = (x_compo_reuse() != 0)
+            .then(|| XSubjectComposition(read_aa_composition(subject.data())));
         if let Some(expected) = x_expected {
             assert!(
                 expected.subject.buffer == subject.buffer
@@ -1319,12 +1339,19 @@ fn build_subject_range_data(
             );
             crate::utils::xstats::SEG_SHARE_CHECKED.fetch_add(1, AtomicOrdering::Relaxed);
         } else if let Some(cache) = subject_range_cache.as_mut() {
-            cache.insert(matching_seq, subject_range, &subject, subject_maybe_biased);
+            cache.insert(
+                matching_seq,
+                subject_range,
+                &subject,
+                subject_maybe_biased,
+                x_composition.clone(),
+            );
         }
         return BlastRedoRangeResult {
             query,
             subject,
             subject_maybe_biased,
+            x_subject_composition: x_composition,
         };
     }
 
@@ -1335,6 +1362,7 @@ fn build_subject_range_data(
         query,
         subject,
         subject_maybe_biased,
+        x_subject_composition: None,
     }
 }
 
@@ -2189,7 +2217,7 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
             redo_align_params,
             Some(&mut *subject_range_cache),
         );
-        let subject_composition = read_aa_composition(range.subject.data());
+        let subject_composition = x_whole_subject_composition(&range);
         if query_info.composition.num_true_amino_acids == 0
             || subject_composition.num_true_amino_acids == 0
         {

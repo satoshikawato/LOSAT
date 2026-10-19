@@ -27,12 +27,25 @@ pub(crate) mod x_mb_lookup_par;
 #[path = "x_mb_lookup_once.rs"]
 mod x_mb_lookup_once;
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262,1376
+// ```c
+//    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
+// ...
+//    sfree(mb_lt->hashtable);
+// ```
+// EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast hashtable kept from batch to batch of the batch
+// loop and zeroed, instead of allocated and freed per batch.
+#[path = "x_mb_lut_keep.rs"]
+pub(crate) mod x_mb_lut_keep;
+
 /// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): the
 /// `[X_SHADOW] MBLUTPAD` and `[X_SHADOW] MBLUTONCE` lines (LOSAT_X_MBLUTPAD or LOSAT_X_MBLUTONCE
 /// with LOSAT_X_PAIRPARSHADOW) and, with LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the
-/// megablast table builds.
+/// megablast table builds; then the `[X_SHADOW] MBLUTKEEP` line (LOSAT_X_MBLUTKEEPSHADOW) and,
+/// with LOSAT_TIMING, the `[TIMING] x_mb_lut_keep` line (`x_mb_lut_keep::print_summary`).
 pub fn x_mb_lookup_print_summary() {
     x_mb_lookup_par::print_summary();
+    x_mb_lut_keep::print_summary();
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:785-786,803-804
@@ -850,6 +863,23 @@ struct MbLookupTable {
     pv_array: Vec<PvArrayType>,
     pv_array_bts: usize,
     longest_chain: usize,
+    /// EXPERIMENT (LOSAT_X_MBLUTKEEP): the batch loop's keep that takes `hashtable` back when the
+    /// table is dropped (`x_mb_lut_keep.rs`); `None` frees it, as NCBI's
+    /// `BlastMBLookupTableDestruct`.
+    x_keep: Option<std::sync::Arc<x_mb_lut_keep::Keep>>,
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1376
+// ```c
+//    sfree(mb_lt->hashtable);
+// ```
+// EXPERIMENT (LOSAT_X_MBLUTKEEP): the hashtable goes back to the batch loop's keep instead.
+impl Drop for MbLookupTable {
+    fn drop(&mut self) {
+        if let Some(keep) = self.x_keep.take() {
+            keep.give_back(std::mem::take(&mut self.hashtable));
+        }
+    }
 }
 
 impl MbLookupTable {
@@ -1699,6 +1729,7 @@ fn build_mb_lookup(
     max_db_word_count: u8,
     approx_table_entries: usize,
     ascending_cells: bool,
+    x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
 ) -> MbLookupTable {
     debug_assert_eq!(queries_blastna.len(), query_offsets.len());
     // No NCBI counterpart: the start of the `[TIMING] x_mb_lookup_build` interval (LOSAT_TIMING).
@@ -1711,7 +1742,17 @@ fn build_mb_lookup(
         db_word_counts.is_some(),
         lut_word_length,
     );
-    let mut hashtable = vec![0u32; table_size];
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262
+    // ```c
+    //    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
+    // ```
+    // Dispatch point of LOSAT_X_MBLUTKEEP: the batch loop's kept table of `table_size` cells with
+    // every cell set to 0 when it has one (`x_resident`: its pages are mapped), otherwise a fresh
+    // zeroed table as before (`x_mb_lut_keep.rs`).
+    let (mut hashtable, x_resident) = match x_keep {
+        Some(keep) => keep.take(table_size, x_mb_lookup_par::pool_threads().is_some()),
+        None => (vec![0u32; table_size], false),
+    };
     let max_query_offset = queries_blastna
         .iter()
         .zip(query_offsets.iter())
@@ -1800,6 +1841,7 @@ fn build_mb_lookup(
                 helper_array: &mut helper_array,
             },
             true,
+            x_resident,
         );
     } else if let Some(x_queue) = x_mb_queue() {
         x_fill_mb_queued(
@@ -1955,6 +1997,27 @@ fn build_mb_lookup(
             longest_chain,
         );
     }
+    // Dispatch point of LOSAT_X_MBLUTKEEPSHADOW: a build on a kept table is made again on a fresh
+    // table (the same build without the keep) and the arrays are compared.
+    if x_resident && x_mb_lut_keep::shadow() {
+        let fresh = build_mb_lookup(
+            queries_blastna,
+            query_offsets,
+            word_length,
+            lut_word_length,
+            query_masks,
+            db_word_counts,
+            max_db_word_count,
+            approx_table_entries,
+            ascending_cells,
+            None,
+        );
+        x_mb_lut_keep::shadow_check(
+            [&hashtable, &next_pos, &pv_array],
+            [&fresh.hashtable, &fresh.next_pos, &fresh.pv_array],
+            (longest_chain, fresh.longest_chain),
+        );
+    }
 
     if debug_mode {
         let hashtable_bytes = hashtable.len() * std::mem::size_of::<u32>();
@@ -1976,6 +2039,7 @@ fn build_mb_lookup(
         pv_array,
         pv_array_bts,
         longest_chain,
+        x_keep: x_keep.cloned(),
     }
 }
 
@@ -1989,6 +2053,34 @@ pub fn build_two_stage_lookup(
     max_db_word_count: u8,
     approx_table_entries: usize,
     ascending_cells: bool,
+) -> TwoStageLookup {
+    build_two_stage_lookup_kept(
+        queries_blastna,
+        query_offsets,
+        word_length,
+        lut_word_length,
+        query_masks,
+        db_word_counts,
+        max_db_word_count,
+        approx_table_entries,
+        ascending_cells,
+        None,
+    )
+}
+
+/// `build_two_stage_lookup` with the batch loop's keep of LOSAT_X_MBLUTKEEP (`x_keep`: the
+/// table is built on the kept one when it has the size, and goes back to it when dropped).
+pub(crate) fn build_two_stage_lookup_kept(
+    queries_blastna: &[&[u8]],
+    query_offsets: &[i32],
+    word_length: usize,
+    lut_word_length: usize,
+    query_masks: &[Vec<MaskedInterval>],
+    db_word_counts: Option<&[u8]>,
+    max_db_word_count: u8,
+    approx_table_entries: usize,
+    ascending_cells: bool,
+    x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
 ) -> TwoStageLookup {
     let debug_mode = std::env::var("BLEMIR_DEBUG").is_ok();
 
@@ -2009,6 +2101,7 @@ pub fn build_two_stage_lookup(
         max_db_word_count,
         approx_table_entries,
         ascending_cells,
+        x_keep,
     );
 
     TwoStageLookup {
@@ -2516,6 +2609,7 @@ pub fn build_disc_mb_lookup(
             pv_array,
             pv_array_bts,
             longest_chain: total_longest_chain,
+            x_keep: None,
         },
         lut_word_length,
         word_length: word_size,

@@ -1187,6 +1187,28 @@ where
         self.shared.switches.shadow && self.phase == Phase::Active
     }
 
+    /// Whether a slot may still search a batch of this search: `false` once the driver is off
+    /// (nothing starts any more, and `take` has waited for the slots to be idle), and before the
+    /// first commit when no slot can start (no `LOSAT_X_QBATCHPARSLOTS` and a budget of 0, which
+    /// `choose_slots` answers with `Off::Budget` at that commit). LOSAT_X_MBLUTKEEP keeps the loop's
+    /// lookup table between its batches only then (`lookup::x_mb_lut_keep`).
+    pub(super) fn may_speculate(&self) -> bool {
+        match self.phase {
+            Phase::Off(_) => false,
+            Phase::Active => true,
+            Phase::Pending => self.shared.switches.slots.is_some() || self.budget_mib() > 0,
+        }
+    }
+
+    /// The budget of the batches in flight beyond the loop's (MiB): `LOSAT_X_QBATCHPARMEM`, or the
+    /// profile's allowance per thread beyond the first.
+    fn budget_mib(&self) -> u64 {
+        self.shared
+            .switches
+            .mem_mib
+            .unwrap_or(self.profile.allowance_mib * (self.threads as u64).saturating_sub(1))
+    }
+
     /// The result of batch `key` if a slot searched it (waiting for it if a slot is searching
     /// it or will); `None` when the loop searches it itself, on the whole pool: then no slot is
     /// running and none can start. The first batch is never searched ahead.
@@ -1405,9 +1427,7 @@ where
             .max()
             .unwrap_or(0);
         let switches = self.shared.switches;
-        let budget_mib = switches
-            .mem_mib
-            .unwrap_or(self.profile.allowance_mib * (self.threads as u64).saturating_sub(1));
+        let budget_mib = self.budget_mib();
         self.stats.budget_mib = budget_mib;
         self.stats.estimate_mib = estimate.div_ceil(MIB);
         let (choice, layout) = choose_slots(

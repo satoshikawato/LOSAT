@@ -862,8 +862,6 @@ const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 const CUSTOM: &[&str] = &["blastp", "blastx"];
 const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
-const SEQALIGN: &[&str] = &["blastn", "blastp"];
-const NO_SEQALIGN: &[&str] = &["blastx", "tblastn", "tblastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
     "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
@@ -940,14 +938,12 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "10", None, UNSUPPORTED),
         (ALL, "18", None, UNSUPPORTED),
         (ALL, "20", None, UNSUPPORTED),
-        // Line OF track S (structured formats): 8 and 12 in BLASTN and BLASTP (OF3b), NCBI
+        // Line OF track S (structured formats): 8 and 12 in every program (OF3b), NCBI
         // dropping a custom specification (blast_args.cpp:2844-2851); the others not yet.
-        (SEQALIGN, "8", None, Writes(AsnText)),
-        (SEQALIGN, "12", None, Writes(JsonSeqalign)),
-        (SEQALIGN, " 8 std", None, Writes(AsnText)),
-        (SEQALIGN, "12 delim=,", None, Writes(JsonSeqalign)),
-        (NO_SEQALIGN, "8", None, UNSUPPORTED),
-        (NO_SEQALIGN, "12", None, UNSUPPORTED),
+        (ALL, "8", None, Writes(AsnText)),
+        (ALL, "12", None, Writes(JsonSeqalign)),
+        (ALL, " 8 std", None, Writes(AsnText)),
+        (ALL, "12 delim=,", None, Writes(JsonSeqalign)),
         (ALL, "5", None, UNSUPPORTED),
         (ALL, "9", None, UNSUPPORTED),
         (ALL, "11", None, UNSUPPORTED),

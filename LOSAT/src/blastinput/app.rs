@@ -355,10 +355,10 @@ impl Program {
             CommaSeparatedValuesWithHeader => false,
             // Line OF track S (structured formats).
             Xml => false,
-            AsnText => matches!(self, Program::Blastn | Program::Blastp),
+            AsnText => true,
             AsnBinary => false,
             ArchiveFormat => false,
-            JsonSeqalign => matches!(self, Program::Blastn | Program::Blastp),
+            JsonSeqalign => true,
             Json => false,
             Xml2 => false,
             JsonS => false,
@@ -1083,8 +1083,8 @@ mod tests {
         );
     }
 
-    // The one table of the formats LOSAT writes (`Program::writes`): 0, 6 and 7 in every
-    // program, 8 and 12 in BLASTN and BLASTP (line OF track S, OF3b).
+    // The one table of the formats LOSAT writes (`Program::writes`): 0, 6, 7, 8 and 12 in
+    // every program (8 and 12: line OF track S, OF3b).
     #[test]
     fn every_program_writes_its_formats_only() {
         for program in PROGRAMS {
@@ -1093,11 +1093,7 @@ mod tests {
                 .filter(|&format| program.writes(format))
                 .map(ReportFormat::number)
                 .collect();
-            let expected: &[i32] = match program {
-                Program::Blastn | Program::Blastp => &[0, 6, 7, 8, 12],
-                _ => &[0, 6, 7],
-            };
-            assert_eq!(written, expected, "{program:?}");
+            assert_eq!(written, [0, 6, 7, 8, 12], "{program:?}");
         }
         assert_eq!(
             PROGRAMS.map(Program::name),

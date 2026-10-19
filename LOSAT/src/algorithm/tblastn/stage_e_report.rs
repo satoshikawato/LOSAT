@@ -68,6 +68,21 @@ impl ShownSubjects<'_> {
             Self::Database { pairwise, .. } => Some(pairwise),
         }
     }
+
+    /// The database title of the Seq-annots (`RunRecord::db_title`; NCBI's
+    /// `m_DbInfo.front().definition`, the `Database:` line's title), `None` for `-subject`.
+    pub(super) fn db_title(&self) -> Option<&[u8]> {
+        self.pairwise_database()
+            .map(|pairwise| pairwise.definition.as_slice())
+    }
+
+    /// The ordinal ID of the reported database sequence of rank `rank`, `None` for `-subject`.
+    pub(super) fn ordinal(&self, rank: usize) -> Option<u32> {
+        match self {
+            Self::Fasta { .. } => None,
+            Self::Database { reported, .. } => Some(reported.ordinals[rank]),
+        }
+    }
 }
 
 // NCBI c++/src/algo/blast/format/blast_format.cpp:759-835,1411-1458:
@@ -221,6 +236,34 @@ pub(super) fn render(
                 max_target_seqs_given,
                 ranges,
                 probe.as_mut(),
+                warnings.as_mut(),
+            )?,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
+            // ```c++
+            //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
+            //         if (results.HasAlignments()) {
+            //     	    CRef<CSeq_align_set> aln_set (new CSeq_align_set);
+            //             CBlastFormatUtil::PruneSeqalign(*(results.GetSeqAlign()), *aln_set, m_HitlistSize);
+            //             if(m_FormatType == CFormattingArgs::eAsnText)
+            //             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+            //             else
+            //             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+            //         }
+            // ```
+            // The Seq-annot of each query with alignments.
+            number @ (8 | 12) => super::seqalign::write_tblastn_seqalign(
+                if number == 8 {
+                    crate::report::serial::SerialFormat::AsnText
+                } else {
+                    crate::report::serial::SerialFormat::Json
+                },
+                &mut writer,
+                query_records,
+                subject_records,
+                subject_letters,
+                shown,
+                hitlists,
+                ranges,
                 warnings.as_mut(),
             )?,
             _ => bail!("unsupported TBLASTN outfmt {}", format.outfmt),
@@ -580,6 +623,7 @@ mod tests {
                     max_target_seqs: 500,
                     query_offsets: &[],
                     subject_set: Default::default(),
+                    engine_positives: false,
                 },
                 mode == 2,
                 true,

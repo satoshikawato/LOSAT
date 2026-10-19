@@ -966,6 +966,20 @@ fn search_cli(
         Some(name) => Some(super::database::TblastnDatabase::open(name, &settings)?),
         None => None,
     };
+    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // (`report::serial::seqalign::check_database`).
+    if let (Some(database), Some(serial)) = (
+        database.as_ref(),
+        crate::blastinput::app::ReportFormat::from_number(choice.number)
+            .and_then(crate::report::serial::SerialFormat::of),
+    ) {
+        crate::report::serial::seqalign::check_database(
+            serial,
+            database.name(),
+            &database.pairwise_database().definition,
+            crate::blastinput::app::Program::Tblastn,
+        )?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:200-221
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -1324,6 +1338,14 @@ fn search(
         Some(stores) => SubjectLetters::Packed(stores),
         None => SubjectLetters::Records(&subject_seqs),
     };
+    // What the requested formats need beyond outfmt 0, 6 and 7, decided once for the search
+    // (`ReportNeeds`): with the Seq-aligns (outfmt 8, 12), the engine positives of the
+    // composition-adjusted matches (`LocalStageDProfile::engine_positives`).
+    let engine_positives =
+        crate::report::record::ReportNeeds::of(outputs.formats.iter().filter_map(|format| {
+            app::ReportFormat::from_number(super::stage_e_report::format_number(format.outfmt))
+        }))
+        .seqalign;
     // A database's numbers and `-dbsize` (`SubjectSetNumbers`), and the `Database:` lines of
     // a database search.
     let subject_set = SubjectSetNumbers {
@@ -1489,6 +1511,7 @@ fn search(
                 max_target_seqs: resolved.hitlist_size,
                 query_offsets: &query_offsets[range],
                 subject_set,
+                engine_positives,
             },
             composition_mode2,
             resolved.sum_stats,
@@ -1529,6 +1552,7 @@ fn search(
                             max_target_seqs: resolved.hitlist_size,
                             query_offsets: &query_offsets[range.clone()],
                             subject_set,
+                            engine_positives,
                         },
                         composition_mode2,
                         resolved.sum_stats,
@@ -1630,11 +1654,38 @@ fn search(
         // (`query_warning`): the O characters read as X, and the message of its set-up (a
         // query without letters) or of its Karlin-Altschul parameters (an invalid query
         // with letters).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
+        // ```c++
+        //     if (m_FormatType == CFormattingArgs::eAsnText
+        //       ...
+        //       || m_FormatType == CFormattingArgs::eJsonSeqalign
+        //       || m_FormatType == CFormattingArgs::eSAM)
+        //     {
+        //         x_PrintStructuredReport(results, queries);
+        //         return;
+        //     }
+        //     ...
+        //     if (results.HasWarnings()) {
+        //         ERR_POST(Warning << results.GetWarningStrings());
+        //     }
+        // ```
+        // A structured format (outfmt 8, 12) writes none of a query's own warnings
+        // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
+        let result_warnings = outputs.formats.first().is_none_or(|format| {
+            crate::blastinput::app::ReportFormat::from_number(super::stage_e_report::format_number(
+                format.outfmt,
+            ))
+            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings)
+        });
         let query_warning_lines: Vec<Vec<u8>> = queries
             .iter()
             .zip(&query_validity)
             .enumerate()
             .map(|(index, (query, valid))| {
+                let mut lines = batches.warnings[index].clone();
+                if !result_warnings {
+                    return lines;
+                }
                 let mut messages = Vec::new();
                 messages.extend(crate::report::query_warnings::replaced_o_message(
                     query.seq(),
@@ -1644,7 +1695,6 @@ fn search(
                 } else if !valid {
                     messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
                 }
-                let mut lines = batches.warnings[index].clone();
                 lines.extend(crate::report::query_warnings::query_warning(
                     "tblastn",
                     query_input.ordinal(index),

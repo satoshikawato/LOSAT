@@ -268,13 +268,19 @@ mod tests {
         assert_eq!(table, vec![0; 16]);
         assert_eq!(kept(&keep), None, "the shorter kept table is freed first");
         keep.give_back(vec![9; 1 << 20], 1 << 20);
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(4)
-            .build()
-            .unwrap();
-        let (table, from_keep) = pool.install(|| keep.take(1 << 12, true));
-        assert!(from_keep);
-        assert!(table.iter().all(|&cell| cell == 0), "zeroed on the pool");
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(4)
+                .build()
+                .unwrap();
+            let (table, from_keep) = pool.install(|| keep.take(1 << 12, true));
+            assert!(from_keep);
+            assert!(table.iter().all(|&cell| cell == 0), "zeroed on the pool");
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1262
@@ -287,6 +293,10 @@ mod tests {
     // whole-search tests cover): every build equals the same build on a fresh table, every build
     // of no more cells than the kept table takes it (filled by earlier builds), and the elements
     // past the cells the last build used stay 0.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     #[test]
     fn builds_on_a_kept_table_are_the_fresh_builds() {
         const LUTS: [usize; 8] = [11, 8, 11, 11, 4, 12, 9, 12];

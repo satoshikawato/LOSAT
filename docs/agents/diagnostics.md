@@ -3147,8 +3147,9 @@ Scheduling (each value computed by one thread with the original function; order 
   2026-10-19; `=0` turns it off) the hit loop of the unit scan of `LOSAT_X_PAIRPAR` (`scan_unit`, and the
   batched scan of `LOSAT_X_TBXEXTBATCH`; `tblastx/x_tbx_hitbf.rs`, exactness argument in its header) takes
   the two outcomes most hits end in, too far (`diff >= window`: `last_hit = s + window`) and overlap
-  (`diff < wordsize`: nothing), from one subtraction, `2s - 2 last_hit` against `2 (wordsize - window)`
-  and 0, and writes the cell's next value chosen without a branch (`s + window`, or the value it read);
+  (`diff < wordsize`: nothing), from one subtraction, `d = s - last_hit` (too far: `d >= 0`; a
+  candidate: `d + window - wordsize` in `[0, window - wordsize)`, one unsigned compare), and writes the
+  cell's next value chosen without a branch (`s + window`, or the value it read);
   a flag-1 cell or a hit past both tests goes to the per-hit body as before (one branch, rarely taken).
   The loop walks the batch by pointer and the prefetch of `LOSAT_X_TBXPREFETCH` reads its entry ahead
   without a bound test. Acts on a unit when `1 <= wordsize < window` and its subject chunk + window is

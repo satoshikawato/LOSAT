@@ -23,13 +23,13 @@
 //! ```
 //! In the reference loop most hits end in one of these two `continue`s (on AP027131 x AP027133,
 //! 80 % too far and 16 % overlap), and which one is taken depends on the data: the too-far test
-//! was mispredicted 0.14 times per hit there (v4-R6 REPORT, workstation). `x_hits_bf` computes both tests from one
-//! subtraction and writes the cell's next value, chosen without a branch: `s + window` (too far) or
-//! the value it read (overlap: the same value back). A flag-1 cell or a hit that passes both tests
-//! (a candidate) goes to the per-hit body of the scan (`x_hit`, or `x_hit_batched`), one branch that
-//! is rarely taken. The loop walks the batch by pointer, and the prefetch of
-//! LOSAT_X_TBXPREFETCH (`PF`) reads the entry `X_PREFETCH_AHEAD` ahead without a bound test (the
-//! offset-pair vector has that many entries more; `scan_unit_hits`).
+//! was mispredicted 0.14 times per hit there (v4-R6 REPORT, workstation). `x_hits_bf` computes
+//! both tests from one subtraction and writes the cell's next value, chosen without a branch:
+//! `s + window` (too far) or the value it read (overlap: the same value back). A flag-1 cell or a
+//! hit that passes both tests (a candidate) goes to the per-hit body of the scan (`x_hit`, or
+//! `x_hit_batched`), a branch that is rarely taken. The loop walks the batch by pointer, and the
+//! prefetch of LOSAT_X_TBXPREFETCH (`PF`) reads the entry `X_PREFETCH_AHEAD` ahead without a bound
+//! test (the offset-pair vector has that many entries more; `scan_unit_hits`).
 //!
 //! Why the result is that of the reference loop. Let L be a cell's `last_hit` (the 31-bit field,
 //! sign-extended) and s the hit's subject offset. A unit's table starts at raw 0 with
@@ -37,21 +37,20 @@
 //! `diff = s - L + window`, and in exact integers
 //! - too far: `diff >= window` <=> `s - L >= 0`;
 //! - overlap: `diff < wordsize` <=> `s - L < wordsize - window`;
-//! - otherwise `wordsize - window <= s - L < 0`, the candidate.
+//! - otherwise `0 <= diff - wordsize < window - wordsize`, the candidate.
 //!
 //! The rule `fits` (checked per unit): `1 <= wordsize < window` and chunk length + window < 2^29.
 //! Every s is below the chunk length. Every value a unit stores with flag 0 is 0 (the fresh cell)
 //! or `s + window` (too far, the flag reset, the context check, an extension without a right
-//! extension), so a flag-0 cell holds L in [0, 2^29) in its raw word (bit 31 clear), with nothing
+//! extension), so a flag-0 cell holds L in [0, 2^29) as its raw word (bit 31 clear), with nothing
 //! cut by the 31-bit field. The values stored with flag 1 (a right extension; LOSAT_X_TBXEXTBATCH's
-//! pending marks) are never decoded here. So for a flag-0 cell `d2 = 2s - 2 raw` (wrapping i32) is
-//! exactly 2 (s - L), with |2 (s - L)| < 2^30, and with `ow2 = 2 (wordsize - window)`, which lies in
-//! (-2^30, 0):
-//! - too far <=> `d2 >= 0`;
-//! - overlap <=> `d2 < ow2` (both sides even);
-//! - candidate <=> `ow2 <= d2 < 0` <=> `(d2 - ow2) as u32 < -ow2`: d2 - ow2 is exact in i32 (it
-//!   lies in (-2^30, 2^31)), and outside the range it is negative (2^31 or more as u32) or at least
-//!   -ow2.
+//! pending marks) are never decoded here: the sign of the raw word sends them to the per-hit body
+//! first. So for a flag-0 cell `d = s - raw` (wrapping i32) is exactly s - L, |d| < 2^29, and with
+//! `k = window - wordsize` (in [1, 2^29)) `t = d + k` is exactly `diff - wordsize`, in
+//! (-2^29, 2^30):
+//! - too far <=> `d >= 0`;
+//! - overlap <=> `t < 0`;
+//! - candidate <=> `0 <= t < k` <=> `t as u32 < k`: a negative t is 2^31 or more as u32.
 //!
 //! The reference's too-far write stores `s + diag_offset` truncated to 31 bits with the flag kept
 //! (0); `s + window` is below 2^29, so the raw word `s + window` is that value. The overlap path
@@ -145,7 +144,7 @@ pub(super) fn print_summary() {
 // The hit loop of `scan_unit` over one batch: the cell of each hit as there (the raw diagonal minus
 // the unit's lowest one), the too-far and overlap outcomes of the flag-0 branch from one
 // subtraction with the cell's next value selected (module doc), and `rare` for a flag-1 cell or a
-// candidate. `ow2` and `cand_len` are locals so that they stay in registers.
+// candidate. One constant (`k`) besides the window, so that both can stay in registers.
 /// The two-hit test of the `n` hits at `pairs` on the unit table at `diag_ptr` (cell of a hit
 /// (q, s): q - s - lo), with `rare(cell, q, s)` for a hit whose cell has flag 1 or that passes the
 /// test; `PF` prefetches the cell of the hit `X_PREFETCH_AHEAD` entries ahead (x86-64).
@@ -168,9 +167,8 @@ pub(super) unsafe fn x_hits_bf<const PF: bool>(
     mut rare: impl FnMut(usize, u32, u32),
 ) {
     let window_u = window as u32;
-    // 2 (wordsize - window), below 0, and the length of the candidate range [ow2, 0).
-    let ow2 = (wordsize - window).wrapping_mul(2);
-    let cand_len = ow2.wrapping_neg() as u32;
+    // window - wordsize, at least 1 (`fits`): the length of the candidate range of diff - wordsize.
+    let k = window.wrapping_sub(wordsize) as u32;
     let mut p = pairs;
     // SAFETY: the caller's bound (n entries).
     let end = unsafe { pairs.add(n) };
@@ -206,11 +204,10 @@ pub(super) unsafe fn x_hits_bf<const PF: bool>(
         let entry = unsafe { diag_ptr.add(cell) };
         // SAFETY: as above.
         let raw = unsafe { (*entry).raw_bits() };
-        // 2 (s - L) for a flag-0 cell (module doc); any value for a flag-1 cell, which goes to
-        // `rare` below.
-        let d2 = (subject_offset.wrapping_add(subject_offset) as i32)
-            .wrapping_sub(raw.wrapping_add(raw) as i32);
-        let candidate = (d2.wrapping_sub(ow2) as u32) < cand_len;
+        // s - L and diff - wordsize for a flag-0 cell (module doc); any values for a flag-1 cell,
+        // which goes to `rare` below.
+        let d = subject_offset.wrapping_sub(raw) as i32;
+        let candidate = (d as u32).wrapping_add(k) < k;
         // [C] if (diag_array[diag_coord].flag), or a hit past both tests.
         if ((raw as i32) < 0) | candidate {
             rare(cell, query_offset, subject_offset);
@@ -218,7 +215,7 @@ pub(super) unsafe fn x_hits_bf<const PF: bool>(
         }
         // [C] if (diff >= window) last_hit = subject_offset + diag_offset;
         // [C] if (diff < wordsize) continue;
-        let next = if d2 >= 0 {
+        let next = if d >= 0 {
             subject_offset.wrapping_add(window_u)
         } else {
             raw

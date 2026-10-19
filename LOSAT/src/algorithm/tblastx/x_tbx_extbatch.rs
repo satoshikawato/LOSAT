@@ -587,14 +587,16 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
+        // EXPERIMENT (LOSAT_X_TBXHITBF): the batched scan or its branch-free hit loop
+        // (x_tbx_hitbf.rs).
         if !shadow() {
-            self.scan_unit_batched::<S, PF>(unit, inp, scratch, init_hsps, BATCH);
+            self.scan_unit_batched_or_bf::<S, PF>(unit, inp, scratch, init_hsps);
             return;
         }
         let mut reference = S::default();
         self.scan_unit::<S, XShadowRef, PF>(unit, inp, scratch, &mut reference, &mut XShadowRef);
         let reference_diag = scratch.diag.clone();
-        self.scan_unit_batched::<S, PF>(unit, inp, scratch, init_hsps, BATCH);
+        self.scan_unit_batched_or_bf::<S, PF>(unit, inp, scratch, init_hsps);
         if *init_hsps != reference || scratch.diag != reference_diag {
             let first = init_hsps.first_difference(&reference);
             let cell = scratch
@@ -624,7 +626,24 @@ impl XPairPar {
     /// Scans one unit and saves its init HSPs, in scan order, into `init_hsps`, with batches of
     /// `len` candidates (1 to `BATCH`). Returns the candidates and the early resolutions.
     #[inline(always)]
-    fn scan_unit_batched<S: XInitSink, const PF: bool>(
+    pub(super) fn scan_unit_batched<S: XInitSink, const PF: bool>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+        len: usize,
+    ) -> (u64, u64) {
+        self.scan_unit_batched_hits::<S, PF, false>(unit, inp, scratch, init_hsps, len)
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
+    // `x_hits_bf`, which takes the too-far and overlap outcomes without a branch and hands the
+    // others (a flag, which includes a pending mark, or a candidate) to `x_hit_batched`; without
+    // it this is the loop before the switch. `BF` runs only where `x_tbx_hitbf::fits` holds.
+    /// `scan_unit_batched`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF.
+    #[inline(always)]
+    pub(super) fn scan_unit_batched_hits<S: XInitSink, const PF: bool, const BF: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -648,8 +667,11 @@ impl XPairPar {
         }
 
         let offset_array_size: i32 = OFFSET_ARRAY_SIZE + sub.longest_chain.max(0);
+        // EXPERIMENT (LOSAT_X_TBXHITBF): with `BF` and `PF`, X_PREFETCH_AHEAD entries more, as in
+        // `scan_unit_hits`.
         let offset_pairs_len =
-            crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
+            crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size)
+                + if BF && PF { X_PREFETCH_AHEAD } else { 0 };
         if scratch.offset_pairs.len() < offset_pairs_len {
             scratch
                 .offset_pairs
@@ -719,6 +741,35 @@ impl XPairPar {
                 }
                 let diag_ptr = scratch.diag.as_mut_ptr();
                 let offset_pairs_ptr = scratch.offset_pairs.as_ptr();
+                // EXPERIMENT (LOSAT_X_TBXHITBF): the loop below, with the too-far and overlap
+                // outcomes taken without a branch (x_tbx_hitbf.rs).
+                if BF {
+                    // SAFETY: as in `scan_unit_hits`; every candidate's cell is a cell of this
+                    // unit's table.
+                    unsafe {
+                        x_tbx_hitbf::x_hits_bf::<PF>(
+                            diag_ptr,
+                            offset_pairs_ptr,
+                            hits as usize,
+                            lo,
+                            width,
+                            window,
+                            wordsize,
+                            |cell, query_offset, subject_offset| {
+                                x_hit_batched(
+                                    diag_ptr,
+                                    cell,
+                                    query_offset,
+                                    subject_offset,
+                                    &h,
+                                    &mut b,
+                                    init_hsps,
+                                );
+                            },
+                        )
+                    };
+                    continue;
+                }
                 for i in 0..hits as usize {
                     #[cfg(target_arch = "x86_64")]
                     if PF && i + X_PREFETCH_AHEAD < hits as usize {

@@ -1754,7 +1754,9 @@ fn mask_translated_subject_seg(translation: &mut [u8]) -> Result<bool> {
     }
     let data_len = translation.len() - 1;
     let data = &mut translation[1..data_len];
-    let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1));
+    // EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the windows of one subject overlap from query to query, so
+    // this masker takes the trim of a segment trimmed before on this thread from its memo.
+    let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1)).x_with_trim_memo();
     let intervals = masker.mask_sequence(data);
     for interval in &intervals {
         for residue in &mut data[interval.start..interval.end] {

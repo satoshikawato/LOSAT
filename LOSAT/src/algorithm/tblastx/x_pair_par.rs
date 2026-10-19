@@ -866,7 +866,7 @@ fn lut_direct(e: &XLutEarly<'_>, shadow: bool) -> Option<XLutBatch> {
     // EXPERIMENT (LOSAT_X_TBXQSLICE): the tables of the slices of the groups the switch cuts,
     // built directly as the groups are (x_tbx_qslice.rs); the whole groups only in its shadow mode.
     let starts = group_starts(contexts);
-    let (groups, sliced) = match x_tbx_qslice::partition(contexts, &starts) {
+    let (groups, sliced) = match x_tbx_qslice::partition(contexts, &starts, e.pool.threads()) {
         None => (lut_direct_groups(&q, e.pool, lut_on_pool())?, None),
         Some(parts) => {
             let sliced =
@@ -1628,7 +1628,7 @@ impl XPairPar {
                 // the groups are; the whole groups only where no group is cut, or in the
                 // switch's shadow mode.
                 let starts = group_starts(b.contexts);
-                let sliced = x_tbx_qslice::partition(b.contexts, &starts)
+                let sliced = x_tbx_qslice::partition(b.contexts, &starts, b.threads)
                     .map(|parts| x_tbx_qslice::build_sliced(b.lookup, &parts));
                 let groups = if sliced.is_none() || x_tbx_qslice::shadow() {
                     build_groups(b.lookup, b.contexts)

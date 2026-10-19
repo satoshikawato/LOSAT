@@ -64,14 +64,19 @@
 //!
 //! # The rule
 //!
-//! `LOSAT_X_TBXQSLICE` is a value switch: the most letters of a slice (built-in `X_QSLICE_LETTERS`).
-//! A group whose query offsets span more letters (its contexts' extent, sentinels included) is cut
-//! into the fewest equal slices of at most that many letters (`X_QSLICE_MAX_SLICES` at most;
-//! `x_partition`); the cut does not depend on the subjects. A batch in which no group is cut runs
-//! as before (`scan_unit`, whose machine code does not change); in a batch with a cut group every
-//! group's units take this path (a group that is not cut is one slice). The size of a slice changes
-//! no output. x86-64 only (where it was measured). The probes of LOSAT_TIMING / LOSAT_X_STATS
-//! (x_unit_probe.rs) need the group's table: with them nothing is cut.
+//! `LOSAT_X_TBXQSLICE` is a value switch. Unset (or `=1`), a group is cut into slices of at most
+//! `X_QSLICE_LETTERS` letters where its query offsets (its contexts' extent, sentinels included)
+//! span more letters and, times the search's threads, at least `X_QSLICE_MIN_SPAN_THREADS`: there
+//! the diagonal tables of all threads at once (4 bytes a cell) crowd the L3; below it the whole
+//! group's scan (with LOSAT_X_TBXPREFETCH where the table is large) is as fast or faster (Sakai at
+//! one thread: the slices x1.015). `=N` (2 to `X_QSLICE_MAX_LETTERS`) cuts every group of more than N letters into
+//! slices of at most N, whatever the threads (tuning and tests). A group is cut into the fewest
+//! equal slices (`X_QSLICE_MAX_SLICES` at most; `x_partition`); the cut does not depend on the
+//! subjects. A batch in which no group is cut runs as before (`scan_unit`, whose machine code does
+//! not change); in a batch with a cut group every group's units take this path (a group that is not
+//! cut is one slice). The size of a slice changes no output. x86-64 only (where it was measured).
+//! The probes of LOSAT_TIMING / LOSAT_X_STATS (x_unit_probe.rs) need the group's table: with them
+//! nothing is cut.
 //!
 //! Interactions, read by the window (the widest slice's span of entries) in place of the group:
 //! LOSAT_X_TBXPREFETCH prefetches where the window reaches its size, and LOSAT_X_TBXEXTBATCH holds
@@ -99,31 +104,49 @@ static QS_SCANS: AtomicU64 = AtomicU64::new(0);
 static QS_SHADOW_UNITS: AtomicU64 = AtomicU64::new(0);
 static QS_SHADOW_RECORDS: AtomicU64 = AtomicU64::new(0);
 
-/// The switch's built-in: the most letters of a slice (256 Ki). Prototype value, to be measured.
-const X_QSLICE_LETTERS: usize = 1 << 18;
+/// The most letters of a slice when the switch is not given a number (128 Ki: a window of
+/// 512 KiB, which fits the core's L2 with the slice's table).
+const X_QSLICE_LETTERS: usize = 1 << 17;
+/// The rule's bound when the switch is not given a number: a group is cut only where its span times
+/// the search's threads reaches this many letters (6 Mi: 24 MiB of diagonal tables at once; on the
+/// workstation 4.3 M lost 0.5 % and 7.3 M gained 28 %).
+const X_QSLICE_MIN_SPAN_THREADS: u64 = 6 << 20;
 /// The largest number the switch takes; a value outside 2..=X_QSLICE_MAX_LETTERS other than `0`,
-/// or a non-numeric one, gives the built-in (`xswitch::value`).
+/// or a non-numeric one, gives the built-in rule (`xswitch::value`).
 const X_QSLICE_MAX_LETTERS: usize = 1 << 30;
 /// The most slices of one group: each slice table has its own backbone (about 460 KB), so a small
 /// value of the switch on a long group widens the slices instead.
 const X_QSLICE_MAX_SLICES: u64 = 64;
 
+/// The switch's rule: the most letters of a slice, and the least span times threads of a group that
+/// is cut (0: every group longer than a slice).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct XSliceRule {
+    letters: usize,
+    min_span_threads: u64,
+}
+
 // No NCBI counterpart: which scan the units of the unit path use (scheduling only). Read once per
 // process, as the other modes of x_pair_par.rs.
 /// LOSAT_X_TBXQSLICE: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off (`0`,
-/// or `LOSAT_X_DEFAULT=0` and it is not set) and on targets other than x86-64; otherwise the most
-/// letters of a slice.
-fn slice_letters() -> Option<usize> {
-    static LETTERS: OnceLock<Option<usize>> = OnceLock::new();
-    *LETTERS.get_or_init(|| {
-        if cfg!(target_arch = "x86_64") {
-            crate::utils::xswitch::value(
-                "LOSAT_X_TBXQSLICE",
-                2..=X_QSLICE_MAX_LETTERS,
-                X_QSLICE_LETTERS,
-            )
-        } else {
-            None
+/// or `LOSAT_X_DEFAULT=0` and it is not set) and on targets other than x86-64; the built-in rule
+/// when it is not given a number (the built-in passed to `xswitch::value` is 0, outside the range);
+/// otherwise slices of at most the number given, on every group.
+fn slice_rule() -> Option<XSliceRule> {
+    static RULE: OnceLock<Option<XSliceRule>> = OnceLock::new();
+    *RULE.get_or_init(|| {
+        if !cfg!(target_arch = "x86_64") {
+            return None;
+        }
+        match crate::utils::xswitch::value("LOSAT_X_TBXQSLICE", 2..=X_QSLICE_MAX_LETTERS, 0)? {
+            0 => Some(XSliceRule {
+                letters: X_QSLICE_LETTERS,
+                min_span_threads: X_QSLICE_MIN_SPAN_THREADS,
+            }),
+            letters => Some(XSliceRule {
+                letters,
+                min_span_threads: 0,
+            }),
         }
     })
 }
@@ -138,16 +161,21 @@ pub(super) fn shadow() -> bool {
 
 // No NCBI counterpart: the rule of the switch for one batch (module doc). The groups are those of
 // `group_starts`; group g holds the query offsets from its first context's `frame_base` to the
-// next group's (the last group: to the end of its last context).
+// next group's (the last group: to the end of its last context). `threads` are the search pool's.
 /// For each group, the first query offset of each of its slices (the group's own first offset
-/// first), or None when no group is cut: the switch is off, a probe runs, or no group spans more
-/// letters than the switch's value.
-pub(super) fn partition(contexts: &[QueryContext], starts: &[usize]) -> Option<Vec<Vec<i32>>> {
-    let width = slice_letters()?;
+/// first), or None when no group is cut: the switch is off, a probe runs, or no group passes the
+/// rule.
+pub(super) fn partition(
+    contexts: &[QueryContext],
+    starts: &[usize],
+    threads: usize,
+) -> Option<Vec<Vec<i32>>> {
+    let rule = slice_rule()?;
     if x_unit_probe::mode() != 0 {
         return None;
     }
-    x_partition(&x_group_spans(contexts, starts), width)
+    let min_len = rule.min_span_threads.div_ceil(threads.max(1) as u64);
+    x_partition(&x_group_spans(contexts, starts), rule.letters, min_len)
 }
 
 /// The query offsets `[a, b)` of each group (`group_starts`'s first contexts `starts`).
@@ -170,17 +198,21 @@ fn x_group_spans(contexts: &[QueryContext], starts: &[usize]) -> Vec<(i32, i32)>
 }
 
 /// `partition` for groups of query offsets `spans` and slices of at most `width` letters: a group
-/// of `len > width` letters is cut into `k = ceil(len / width)` slices (at most
-/// `X_QSLICE_MAX_SLICES`) starting at `a + floor(j len / k)`, j = 0..k; None when no group is cut.
-fn x_partition(spans: &[(i32, i32)], width: usize) -> Option<Vec<Vec<i32>>> {
+/// of `len > width` letters and at least `min_len` is cut into `k = ceil(len / width)` slices (at
+/// most `X_QSLICE_MAX_SLICES`) starting at `a + floor(j len / k)`, j = 0..k; None when no group is
+/// cut.
+fn x_partition(spans: &[(i32, i32)], width: usize, min_len: u64) -> Option<Vec<Vec<i32>>> {
     let mut cut = false;
     let parts = spans
         .iter()
         .map(|&(a, b)| {
             let len = (i64::from(b) - i64::from(a)).max(0) as u64;
-            let k = len
-                .div_ceil(width.max(1) as u64)
-                .clamp(1, X_QSLICE_MAX_SLICES);
+            let k = if len >= min_len {
+                len.div_ceil(width.max(1) as u64)
+                    .clamp(1, X_QSLICE_MAX_SLICES)
+            } else {
+                1
+            };
             cut |= k > 1;
             (0..k).map(|j| a + (j * len / k) as i32).collect()
         })
@@ -404,13 +436,13 @@ pub(super) fn print_summary() {
         load(&QS_SHADOW_RECORDS)
     );
     eprintln!(
-        "[X_STATS] TBXQSLICE batches={} groups_cut={} slices={} units={} slice_scans={} letters={:?}",
+        "[X_STATS] TBXQSLICE batches={} groups_cut={} slices={} units={} slice_scans={} rule={:?}",
         load(&QS_BATCHES),
         load(&QS_GROUPS_CUT),
         load(&QS_SLICES),
         load(&QS_UNITS),
         load(&QS_SCANS),
-        slice_letters()
+        slice_rule()
     );
 }
 
@@ -807,21 +839,31 @@ mod tests {
     // No NCBI counterpart: the rule's arithmetic (module doc).
     #[test]
     fn the_partition_cuts_only_groups_wider_than_a_slice() {
-        assert_eq!(x_partition(&[(1, 101), (102, 150)], 100), None);
-        let parts = x_partition(&[(1, 102), (103, 150)], 100).expect("a cut");
+        assert_eq!(x_partition(&[(1, 101), (102, 150)], 100, 0), None);
+        let parts = x_partition(&[(1, 102), (103, 150)], 100, 0).expect("a cut");
         assert_eq!(parts, vec![vec![1, 51], vec![103]]);
         // Equal slices, the last ending at the group's end.
-        let parts = x_partition(&[(10, 1010)], 300).expect("a cut");
+        let parts = x_partition(&[(10, 1010)], 300, 0).expect("a cut");
         assert_eq!(parts, vec![vec![10, 260, 510, 760]]);
         // At most X_QSLICE_MAX_SLICES slices; strictly ascending starts.
-        let parts = x_partition(&[(0, 1_000_000)], 2).expect("a cut");
+        let parts = x_partition(&[(0, 1_000_000)], 2, 0).expect("a cut");
         assert_eq!(parts[0].len() as u64, X_QSLICE_MAX_SLICES);
         assert!(parts[0].windows(2).all(|w| w[0] < w[1]));
         // A group shorter than the cap of slices: one letter each.
-        let parts = x_partition(&[(5, 9)], 1).expect("a cut");
+        let parts = x_partition(&[(5, 9)], 1, 0).expect("a cut");
         assert_eq!(parts, vec![vec![5, 6, 7, 8]]);
         // An empty group stays one slice.
-        assert_eq!(x_partition(&[(7, 7)], 2), None);
+        assert_eq!(x_partition(&[(7, 7)], 2, 0), None);
+        // The built-in rule's bound: only the groups of at least `min_len` letters are cut.
+        assert_eq!(x_partition(&[(0, 1000), (1000, 1500)], 100, 1001), None);
+        let parts = x_partition(&[(0, 1000), (1000, 1500)], 100, 600).expect("a cut");
+        assert_eq!(parts[0].len(), 10);
+        assert_eq!(parts[1], vec![1000]);
+        assert_eq!(
+            X_QSLICE_MIN_SPAN_THREADS.div_ceil(8),
+            768 << 10,
+            "8 threads: groups of 768 Ki letters or more"
+        );
     }
 
     // No NCBI counterpart: the cut of the lookup locations (module doc, item 5): every word start of
@@ -925,7 +967,7 @@ mod tests {
             // not cut).
             let spans = x_group_spans(&contexts, &starts);
             let width = [7usize, 60, 150, 1000][case % 4];
-            let parts = x_partition(&spans, width)
+            let parts = x_partition(&spans, width, 0)
                 .unwrap_or_else(|| spans.iter().map(|&(a, _)| vec![a]).collect());
             let filtered = build_sliced(&lookup, &parts);
             let q = XPairLutQuery::x_prepare(&queries, threshold, true).expect("direct builder");

@@ -5,7 +5,7 @@ use super::{
     preliminary::{compare_score, PreliminaryHsp},
     query_setup::PreparedQueryBatch,
 };
-use crate::stats::sum_statistics::{gap_decay_divisor, large_gap_sum_e, small_gap_sum_e};
+use crate::stats::sum_statistics::{gap_decay_divisor, ncbi_large_gap_sum_e, small_gap_sum_e};
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_parameters.c:998-1097
 // ```c++
 // CalculateLinkHSPCutoffs(EBlastProgramType program, BlastQueryInfo* query_info,
@@ -1033,7 +1033,9 @@ pub(crate) fn link_even(
                         (probs[0] / gap_prob).min(i32::MAX as f64)
                     };
                 }
-                probs[1] = large_gap_sum_e(
+                // NCBI reference: c++/src/algo/blast/core/blast_stat.c:4560-4561 (the large-gap sum
+                // e-value subtracts `num*log(...) - lnfact` as one difference: `ncbi_large_gap_sum_e`)
+                probs[1] = ncbi_large_gap_sum_e(
                     n as i16,
                     paths[b].xsum[1],
                     qlen,
@@ -1051,7 +1053,7 @@ pub(crate) fn link_even(
                 method = if probs[0] <= probs[1] { 0 } else { 1 };
             } else {
                 paths[b].sum[1] += n * cutoff[1];
-                probs[1] = large_gap_sum_e(
+                probs[1] = ncbi_large_gap_sum_e(
                     n as i16,
                     paths[b].xsum[1],
                     qlen,

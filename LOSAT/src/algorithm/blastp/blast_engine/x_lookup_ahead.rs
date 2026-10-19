@@ -115,14 +115,18 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
-use super::{blastp_compressed_lookup, blastp_query_frames, BlastpRuntimeLookup};
+use super::{
+    blastp_aa_lookup, blastp_aa_lookup_ahead, blastp_compressed_lookup, blastp_query_frames,
+    BlastpRuntimeLookup,
+};
 use crate::algorithm::blastp::args::{BlastpLookupTableType, ResolvedBlastpArgs};
-use crate::algorithm::blastp::x_query_blocks::{x_bp_lookup_spares, XLookupFor};
+use crate::algorithm::blastp::x_query_blocks::{x_bp_aa_spares, x_bp_lookup_spares, XLookupFor};
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_assert_same_flat_tables_as, x_bpclut_mode, XFlatCompressedLookup,
 };
 use crate::algorithm::tblastx::lookup::x_pair_lut::x_assert_same_contexts_as;
 use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::algorithm::tblastx::lookup::{x_assert_same_table_as, x_same_table};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
@@ -195,13 +199,13 @@ fn x_key(query_records: &[FastaRecord]) -> (usize, usize) {
     (query_records.as_ptr() as usize, query_records.len())
 }
 
-/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): a block's query frames, flat lookup table and query contexts,
-/// built ahead of its search (`x_build_ahead`).
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): a block's query frames, lookup table (blastp-fast's flat table
+/// or exact blastp's table) and query contexts, built ahead of its search (`x_build_ahead`).
 pub(super) struct XAheadLookup {
     /// The block's query records (`x_key`).
     key: (usize, usize),
     query_frames: Vec<Vec<QueryFrame>>,
-    table: XFlatCompressedLookup,
+    table: BlastpRuntimeLookup,
     contexts: Vec<QueryContext>,
 }
 
@@ -289,39 +293,60 @@ pub(super) fn x_use_prebuilt(
         if let Some(difference) = x_frames_difference(query_frames, &inline_frames) {
             x_shadow_difference(&difference);
         }
-        let (inline_lookup, inline_contexts) = match blastp_compressed_lookup(
-            args,
-            &inline_frames,
-            query_batches,
-            query_lengths,
-            pool,
-            XLookupFor::Search,
-        ) {
-            Ok(built) => built,
-            Err(error) => x_shadow_difference(&format!(
-                "values were built ahead where the block's own build fails: {error:#}"
-            )),
+        let inline_contexts = match &table {
+            BlastpRuntimeLookup::CompressedFlat(table) => {
+                let (inline_lookup, inline_contexts) = match blastp_compressed_lookup(
+                    args,
+                    &inline_frames,
+                    query_batches,
+                    query_lengths,
+                    pool,
+                    XLookupFor::Search,
+                ) {
+                    Ok(built) => built,
+                    Err(error) => x_shadow_difference(&format!(
+                        "values were built ahead where the block's own build fails: {error:#}"
+                    )),
+                };
+                let BlastpRuntimeLookup::CompressedFlat(inline_table) = inline_lookup else {
+                    x_shadow_difference("the block's own build makes no flat table");
+                };
+                if !x_same_flat_tables(table, &inline_table) {
+                    eprintln!("{}", x_summary_line("DIFFERENT"));
+                    x_assert_same_flat_tables_as("LOSAT_X_BPLKPAHEADSHADOW:", table, &inline_table);
+                    panic!("LOSAT_X_BPLKPAHEADSHADOW: the tables differ");
+                }
+                // The inline table's vectors go back to the block spare, as its search would give
+                // them.
+                if let Some((block, _)) = x_bp_lookup_spares(pool) {
+                    block.give(inline_table);
+                }
+                inline_contexts
+            }
+            BlastpRuntimeLookup::Aa(table) => {
+                let (inline_lookup, inline_contexts) = blastp_aa_lookup(args, &inline_frames);
+                let BlastpRuntimeLookup::Aa(inline_table) = inline_lookup else {
+                    x_shadow_difference("the block's own build makes no exact table");
+                };
+                if !x_same_table(table, &inline_table) {
+                    eprintln!("{}", x_summary_line("DIFFERENT"));
+                    x_assert_same_table_as("LOSAT_X_BPLKPAHEADSHADOW:", table, &inline_table);
+                    panic!("LOSAT_X_BPLKPAHEADSHADOW: the tables differ");
+                }
+                inline_contexts
+            }
+            BlastpRuntimeLookup::Compressed(_) => {
+                x_shadow_difference("values were built ahead with a table it does not build")
+            }
         };
-        let BlastpRuntimeLookup::CompressedFlat(inline_table) = inline_lookup else {
-            x_shadow_difference("the block's own build makes no flat table");
-        };
-        if !x_same_flat_tables(&table, &inline_table) {
-            eprintln!("{}", x_summary_line("DIFFERENT"));
-            x_assert_same_flat_tables_as("LOSAT_X_BPLKPAHEADSHADOW:", &table, &inline_table);
-            panic!("LOSAT_X_BPLKPAHEADSHADOW: the tables differ");
-        }
         if !x_same_contexts(&contexts, &inline_contexts) {
             eprintln!("{}", x_summary_line("DIFFERENT"));
             x_assert_same_contexts_as("LOSAT_X_BPLKPAHEADSHADOW:", &contexts, &inline_contexts);
             panic!("LOSAT_X_BPLKPAHEADSHADOW: the contexts differ");
         }
-        // The inline table's vectors go back to the block spare, as its search would give them.
-        if let Some((block, _)) = x_bp_lookup_spares(pool) {
-            block.give(inline_table);
-        }
         X_COMPARED.fetch_add(1, Ordering::Relaxed);
     }
-    (BlastpRuntimeLookup::CompressedFlat(table), contexts)
+    (table, contexts)
 }
 
 // No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
@@ -393,6 +418,15 @@ fn x_same_contexts(a: &[QueryContext], b: &[QueryContext]) -> bool {
                 && a.is_valid == b.is_valid
                 && bits(a) == bits(b)
         })
+}
+
+// PROBE (temporary, session 7 probe; not for the PR): LOSAT_X_BPLKPPROBE prints the times of the
+// builds ahead in microseconds from the first call.
+fn x_probe_us() -> Option<u128> {
+    static EPOCH: OnceLock<Option<std::time::Instant>> = OnceLock::new();
+    EPOCH
+        .get_or_init(|| std::env::var_os("LOSAT_X_BPLKPPROBE").map(|_| std::time::Instant::now()))
+        .map(|epoch| epoch.elapsed().as_micros())
 }
 
 /// What the build ahead of a block gave (`V`: its values).
@@ -476,22 +510,41 @@ fn x_make_room(
     lookup: &BlastpRuntimeLookup,
     largest_hits: &Cell<usize>,
 ) -> bool {
-    let BlastpRuntimeLookup::CompressedFlat(table) = lookup else {
-        return false;
-    };
-    let Some((block, ahead)) = x_bp_lookup_spares(pool) else {
-        return false;
-    };
-    let largest = largest_hits.get().max(table.hits.len());
-    largest_hits.set(largest);
-    let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
-    ahead.x_make_room(
-        block,
-        table.starts.len().saturating_sub(1),
-        room,
-        (2 * largest).max(room),
-    );
-    true
+    match lookup {
+        BlastpRuntimeLookup::CompressedFlat(table) => {
+            let Some((block, ahead)) = x_bp_lookup_spares(pool) else {
+                return false;
+            };
+            let largest = largest_hits.get().max(table.hits.len());
+            largest_hits.set(largest);
+            let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
+            ahead.x_make_room(
+                block,
+                table.starts.len().saturating_sub(1),
+                room,
+                (2 * largest).max(room),
+            );
+            true
+        }
+        // Exact blastp: the same rule for the overflow entries; the backbone and the pv array have
+        // the sizes of the block's own table (fixed by the word length and the alphabet).
+        BlastpRuntimeLookup::Aa(table) => {
+            let Some(spares) = x_bp_aa_spares(pool) else {
+                return false;
+            };
+            let largest = largest_hits.get().max(table.overflow.len());
+            largest_hits.set(largest);
+            let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
+            spares.x_make_room(
+                table.backbone.len(),
+                table.pv.len(),
+                room,
+                (2 * largest).max(room),
+            );
+            true
+        }
+        BlastpRuntimeLookup::Compressed(_) => false,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (module header)
@@ -511,22 +564,31 @@ fn x_build_ahead(
     pool: &SearchPool<'_>,
 ) -> Option<XAheadLookup> {
     let query_frames = blastp_query_frames(args, query_records);
-    let query_lengths: Vec<usize> = query_records
-        .iter()
-        .map(|record| record.seq().len())
-        .collect();
-    let query_batches = seq_range::QueryInput::whole(query_records).batches(batch_size);
-    let (lookup, contexts) = blastp_compressed_lookup(
-        args,
-        &query_frames,
-        &query_batches,
-        &query_lengths,
-        pool,
-        XLookupFor::Ahead,
-    )
-    .ok()?;
-    let BlastpRuntimeLookup::CompressedFlat(table) = lookup else {
-        return None;
+    let (table, contexts) = match args.lookup_table_type {
+        // Exact blastp: `blastp_aa_lookup`'s call on the block search's spare vectors.
+        BlastpLookupTableType::AaLookupTable => {
+            blastp_aa_lookup_ahead(args, &query_frames, x_bp_aa_spares(pool)?)?
+        }
+        BlastpLookupTableType::CompressedAaLookupTable => {
+            let query_lengths: Vec<usize> = query_records
+                .iter()
+                .map(|record| record.seq().len())
+                .collect();
+            let query_batches = seq_range::QueryInput::whole(query_records).batches(batch_size);
+            let (lookup, contexts) = blastp_compressed_lookup(
+                args,
+                &query_frames,
+                &query_batches,
+                &query_lengths,
+                pool,
+                XLookupFor::Ahead,
+            )
+            .ok()?;
+            if !matches!(lookup, BlastpRuntimeLookup::CompressedFlat(_)) {
+                return None;
+            }
+            (lookup, contexts)
+        }
     };
     Some(XAheadLookup {
         key: x_key(query_records),
@@ -558,13 +620,17 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
         pool: &'a SearchPool<'p>,
         batch_size: u32,
     ) -> Self {
+        let _ = x_probe_us();
         let acts = cfg!(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         )) && x_bp_lkp_ahead() != XLkpAhead::Off
-            && args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable
-            && x_bpclut_mode() == 1
-            && x_bp_lookup_spares(pool).is_some();
+            && match args.lookup_table_type {
+                BlastpLookupTableType::CompressedAaLookupTable => {
+                    x_bpclut_mode() == 1 && x_bp_lookup_spares(pool).is_some()
+                }
+                BlastpLookupTableType::AaLookupTable => x_bp_aa_spares(pool).is_some(),
+            };
         Self {
             args,
             pool,
@@ -608,22 +674,57 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
         if let Some(next) = next {
             let (args, pool, batch_size, largest_hits) =
                 (self.args, self.pool, self.batch_size, &self.largest_hits);
+            let t_block = x_probe_us();
+            let t_spawn = Cell::new(None);
+            let t_run_end = Cell::new(None);
             let (result, built) = x_run_with_build_ahead(
-                move || x_build_ahead(args, next, batch_size, pool),
+                move || {
+                    let t0 = x_probe_us();
+                    let built = x_build_ahead(args, next, batch_size, pool);
+                    if let (Some(t0), Some(t1)) = (t0, x_probe_us()) {
+                        let bytes = match built.as_ref().map(|b| &b.table) {
+                            Some(BlastpRuntimeLookup::Aa(t)) => (
+                                t.backbone.len() * std::mem::size_of_val(&t.backbone[0]),
+                                t.overflow.len() * 4,
+                                t.pv.len() * 4,
+                            ),
+                            _ => (0, 0, 0),
+                        };
+                        eprintln!(
+                            "[X_PROBE] lkp build thread={:?} start={t0} end={t1} us={} backbone_b={} overflow_b={} pv_b={}",
+                            rayon::current_thread_index(),
+                            t1 - t0,
+                            bytes.0,
+                            bytes.1,
+                            bytes.2
+                        );
+                    }
+                    built
+                },
                 |spawn| {
                     // On this thread, when the block's table is ready: the next table's vectors are
                     // made ready here, then its build is spawned.
                     let start_next = |lookup: &BlastpRuntimeLookup| {
                         if x_make_room(pool, lookup, largest_hits) {
+                            t_spawn.set(x_probe_us());
                             spawn();
                         }
                     };
-                    run(XAheadBlock {
+                    let result = run(XAheadBlock {
                         prebuilt,
                         start_next: Some(&start_next),
-                    })
+                    });
+                    t_run_end.set(x_probe_us());
+                    result
                 },
             );
+            if let (Some(t_block), Some(t_end)) = (t_block, x_probe_us()) {
+                eprintln!(
+                    "[X_PROBE] lkp block start={t_block} spawn={:?} run_end={:?} scope_end={t_end}",
+                    t_spawn.get(),
+                    t_run_end.get()
+                );
+            }
             self.next = built;
             return result;
         }

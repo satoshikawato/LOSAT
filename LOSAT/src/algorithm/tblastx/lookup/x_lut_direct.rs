@@ -103,6 +103,195 @@ thread_local! {
     static X_MEMO: RefCell<Option<XNeighborMemo>> = const { RefCell::new(None) };
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:321-336
+// ```c
+//       lookup->thick_backbone =
+//             calloc(lookup->backbone_size, sizeof(AaLookupBackboneCell));
+// ...
+//       pv = lookup->pv = (PV_ARRAY_TYPE *) calloc(
+//             (lookup->backbone_size >> PV_ARRAY_BTS) + 1,
+//              sizeof(PV_ARRAY_TYPE));
+// ...
+//       if (overflow_cells_needed > 0) {
+//           lookup->overflow =
+//                  calloc(overflow_cells_needed, sizeof(Int4));
+// ```
+// NCBI allocates a zeroed table for each search and frees it with the search. Buffer reuse only:
+// the vectors taken are cleared and filled with zeros to the table's sizes before the build writes
+// them, as the C `calloc` gives them.
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the backbone, overflow and pv vectors of a BLASTP table, kept
+/// for another table's build ([`XAaSpares`]).
+#[derive(Default)]
+pub(crate) struct XAaVectors {
+    backbone: Vec<BackboneCell>,
+    overflow: Vec<i32>,
+    pv: Vec<u32>,
+}
+
+impl XAaVectors {
+    // No NCBI counterpart: buffer reuse only (above).
+    /// The three vectors, cleared and zero-filled to `backbone_size`, `pv_size` and `overflow_size`
+    /// entries, where each has the capacity (nothing is allocated); else `None`, nothing taken.
+    fn x_take_zeroed(
+        &mut self,
+        backbone_size: usize,
+        pv_size: usize,
+        overflow_size: usize,
+    ) -> Option<(Vec<BackboneCell>, Vec<u32>, Vec<i32>)> {
+        if self.backbone.capacity() < backbone_size
+            || self.pv.capacity() < pv_size
+            || self.overflow.capacity() < overflow_size
+        {
+            return None;
+        }
+        let mut backbone = std::mem::take(&mut self.backbone);
+        backbone.clear();
+        backbone.resize(backbone_size, BackboneCell::default());
+        let mut pv = std::mem::take(&mut self.pv);
+        pv.clear();
+        pv.resize(pv_size, 0);
+        let mut overflow = std::mem::take(&mut self.overflow);
+        overflow.clear();
+        overflow.resize(overflow_size, 0);
+        Some((backbone, pv, overflow))
+    }
+
+    // No NCBI counterpart: buffer reuse only.
+    fn is_empty(&self) -> bool {
+        self.backbone.capacity() == 0 && self.overflow.capacity() == 0 && self.pv.capacity() == 0
+    }
+}
+
+// No NCBI counterpart: buffer reuse, and the thread that allocates a table's vectors and the
+// neighbour lists (LOSAT_X_BPLKPAHEAD, `blastp/blast_engine/x_lookup_ahead.rs`); it changes no value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): what the blastp block search (`blastp/x_query_blocks.rs`
+/// `XBlockSubjects`) keeps for the build of the next block's exact table ahead of that block, on a
+/// task of the search's pool (`x_build_ahead`): the vectors of the last table its search no longer
+/// reads (`give`), the vectors the next build takes (`x_make_room`), and the neighbour lists that
+/// build uses. Every vector of a table built ahead is allocated by the block search's thread
+/// (`x_make_room`), never by the pool's task (a pool thread's allocations stay in its own glibc
+/// arena, which keeps them resident after they are freed), and one set of neighbour lists serves
+/// every build ahead (the block search's thread's, moved here), not one set per pool thread.
+#[derive(Default)]
+pub(crate) struct XAaSpares {
+    block: std::sync::Mutex<XAaVectors>,
+    ahead: std::sync::Mutex<XAaVectors>,
+    memo: std::sync::Mutex<Option<XNeighborMemo>>,
+}
+
+// No NCBI counterpart: a lock held only around a move; a poisoned lock's value is still a valid
+// spare (buffer reuse only).
+fn x_locked<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl XAaSpares {
+    // No NCBI counterpart: where the build ahead applies; it reads switches and changes no value
+    // NCBI computes.
+    /// Whether exact blastp's table is built by [`x_build_direct`] (`LOSAT_X_BPLUT`, mode 1, outside
+    /// diagnostics mode, whose reference builder prints its phases), the build [`Self::x_build_ahead`]
+    /// makes.
+    pub(crate) fn x_applies() -> bool {
+        x_bplut_mode() == 1 && !diagnostics_enabled()
+    }
+
+    // No NCBI counterpart: buffer reuse only (`XAaSpares`).
+    /// Keeps `table`'s backbone, overflow and pv vectors (in place of any kept before); the rest of
+    /// the table is dropped.
+    pub(crate) fn give(&self, table: BlastAaLookupTable) {
+        *x_locked(&self.block) = XAaVectors {
+            backbone: table.backbone,
+            overflow: table.overflow,
+            pv: table.pv,
+        };
+    }
+
+    // No NCBI counterpart: buffer reuse, and the thread that allocates the next table's vectors
+    // (`XAaSpares`).
+    /// On the block search's thread, before the build of the next block's table ahead of that block:
+    /// keeps for that build vectors with the room for `backbone_size` cells, `pv_size` pv words and
+    /// `overflow` overflow entries: its own, else those the block before gave back (`give`), and each
+    /// one short of its room is replaced here by an empty one of that capacity (`overflow_grown`, at
+    /// least `overflow`, for the overflow). Nothing is written into them. Also keeps this thread's
+    /// neighbour lists for the builds ahead, if none are kept. Returns the number of vectors
+    /// allocated.
+    pub(crate) fn x_make_room(
+        &self,
+        backbone_size: usize,
+        pv_size: usize,
+        overflow: usize,
+        overflow_grown: usize,
+    ) -> usize {
+        let mut kept = std::mem::take(&mut *x_locked(&self.ahead));
+        if kept.is_empty() {
+            kept = std::mem::take(&mut *x_locked(&self.block));
+        }
+        let mut allocated = 0;
+        if kept.backbone.capacity() < backbone_size {
+            kept.backbone = Vec::with_capacity(backbone_size);
+            allocated += 1;
+        }
+        if kept.pv.capacity() < pv_size {
+            kept.pv = Vec::with_capacity(pv_size);
+            allocated += 1;
+        }
+        if kept.overflow.capacity() < overflow {
+            kept.overflow = Vec::with_capacity(overflow_grown.max(overflow));
+            allocated += 1;
+        }
+        *x_locked(&self.ahead) = kept;
+        let mut memo = x_locked(&self.memo);
+        if memo.is_none() {
+            *memo = X_MEMO.with(|own| own.borrow_mut().take());
+        }
+        allocated
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469 (see `x_dispatch`)
+    // ```c
+    //     for (i = 0; i < lookup->backbone_size; i++) {
+    //         if (exact_backbone[i] != NULL) {
+    //             s_AddWordHits(lookup, matrix, query->sequence,
+    //                           exact_backbone[i], query_bias, row_max);
+    // ```
+    /// `x_bp_build_lookup(1, queries, threshold, karlin_params, check_ideal)` (where
+    /// [`Self::x_applies`]), the table built on the vectors `x_make_room` kept and with the neighbour
+    /// lists kept here (both taken while it builds and given back after, the vectors only where no
+    /// table was made). `None` where no table was made: the vectors lack the room, or the in-place
+    /// builder declines (the reference builder would build it).
+    pub(crate) fn x_build_ahead(
+        &self,
+        queries: &[Vec<QueryFrame>],
+        threshold: i32,
+        karlin_params: &KarlinParams,
+        check_ideal: bool,
+    ) -> Option<(BlastAaLookupTable, Vec<QueryContext>)> {
+        let _ = karlin_params;
+        let prepared = x_bp_prepared_query(queries, check_ideal);
+        // build_lookup_from_prepared returns the prepared contexts unchanged.
+        let contexts = prepared.contexts.clone();
+        let mut room = std::mem::take(&mut *x_locked(&self.ahead));
+        let mut memo = x_locked(&self.memo).take();
+        let built = x_build_direct_in(
+            prepared,
+            threshold,
+            ScoringMatrix::Blosum62,
+            LOOKUP_WORD_LENGTH,
+            &mut memo,
+            Some(&mut room),
+        );
+        *x_locked(&self.memo) = memo;
+        *x_locked(&self.ahead) = room;
+        match built {
+            Ok(Some(table)) => Some((table, contexts)),
+            Ok(None) | Err(_) => None,
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:562-563,580-582,600-604
 // ```c
 //     score -= info->row_max[query_word[current_pos]];
@@ -307,6 +496,31 @@ pub(super) fn x_build_direct(
     matrix: ScoringMatrix,
     word_length: usize,
 ) -> std::result::Result<BlastAaLookupTable, PreparedLookupQuery> {
+    X_MEMO.with(|memo| {
+        x_build_direct_in(
+            prepared,
+            threshold,
+            matrix,
+            word_length,
+            &mut memo.borrow_mut(),
+            None,
+        )
+        .map(|table| table.expect("fresh vectors have the room for any table"))
+    })
+}
+
+/// [`x_build_direct`] with the neighbour lists of `memo` (the calling thread's, or those an
+/// `XAaSpares` keeps), and, with `room` (LOSAT_X_BPLKPAHEAD), the table's backbone, overflow and pv
+/// vectors taken from `room` instead of allocated: `Ok(None)` (nothing taken) where one of them
+/// lacks the capacity.
+fn x_build_direct_in(
+    prepared: PreparedLookupQuery,
+    threshold: i32,
+    matrix: ScoringMatrix,
+    word_length: usize,
+    memo: &mut Option<XNeighborMemo>,
+    room: Option<&mut XAaVectors>,
+) -> std::result::Result<Option<BlastAaLookupTable>, PreparedLookupQuery> {
     let alphabet_size = LOOKUP_ALPHABET_SIZE;
     let charsize = ilog2(alphabet_size) + 1;
     if diagnostics_enabled() || word_length * charsize > 16 || word_length > 32 {
@@ -348,116 +562,120 @@ pub(super) fn x_build_direct(
         &mut skipped_invalid_residue,
     );
 
-    X_MEMO.with(|memo| {
-        let mut memo = memo.borrow_mut();
-        let key = (matrix, threshold, word_length, alphabet_size);
-        if memo
-            .as_ref()
-            .is_none_or(|m| m.key != key || m.lists.len() != backbone_size)
-        {
-            *memo = Some(XNeighborMemo {
-                key,
-                lists: std::iter::repeat_with(|| None)
-                    .take(backbone_size)
-                    .collect(),
-            });
-        }
-        let lists = &mut memo.as_mut().expect("memo set above").lists;
+    let key = (matrix, threshold, word_length, alphabet_size);
+    if memo
+        .as_ref()
+        .is_none_or(|m| m.key != key || m.lists.len() != backbone_size)
+    {
+        *memo = Some(XNeighborMemo {
+            key,
+            lists: std::iter::repeat_with(|| None)
+                .take(backbone_size)
+                .collect(),
+        });
+    }
+    let lists = &mut memo.as_mut().expect("memo set above").lists;
 
-        // Count pass: count[w] = number of appends the reference makes to cell w.
-        let mut counts: Vec<u32> = vec![0; backbone_size];
-        for idx in 0..backbone_size {
-            let Some(offset_list) = exact_backbone[idx].as_deref() else {
-                continue;
-            };
-            let k = lookup_chain_num_used(offset_list) as u32;
-            let list = lists[idx].get_or_insert_with(|| {
-                // blast_aalookup.c:490: w = query + offset_list[2];
-                let first =
-                    usize::try_from(offset_list[2]).expect("NCBI BLAST query offset must fit");
-                x_target_list(
-                    &concat_query[first..],
-                    alphabet_size,
-                    word_length,
-                    charsize,
-                    &row_max,
-                    threshold,
-                    matrix,
-                )
-            });
-            for &w in list.iter() {
-                counts[w as usize] += k;
-            }
+    // Count pass: count[w] = number of appends the reference makes to cell w.
+    let mut counts: Vec<u32> = vec![0; backbone_size];
+    for idx in 0..backbone_size {
+        let Some(offset_list) = exact_backbone[idx].as_deref() else {
+            continue;
+        };
+        let k = lookup_chain_num_used(offset_list) as u32;
+        let list = lists[idx].get_or_insert_with(|| {
+            // blast_aalookup.c:490: w = query + offset_list[2];
+            let first = usize::try_from(offset_list[2]).expect("NCBI BLAST query offset must fit");
+            x_target_list(
+                &concat_query[first..],
+                alphabet_size,
+                word_length,
+                charsize,
+                &row_max,
+                threshold,
+                matrix,
+            )
+        });
+        for &w in list.iter() {
+            counts[w as usize] += k;
         }
+    }
 
-        // Layout: BlastAaLookupFinalize's rule applied to the counts.
-        let mut backbone: Vec<BackboneCell> = vec![BackboneCell::default(); backbone_size];
-        let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
-        let mut pv: Vec<u32> = vec![0u32; pv_size];
-        let mut overflow_size = 0usize;
-        let mut longest_chain: i32 = 0;
-        for &count in &counts {
-            if count as usize > AA_HITS_PER_CELL {
-                overflow_size += count as usize;
-            }
-            if (count as i32) > longest_chain {
-                longest_chain = count as i32;
-            }
+    // Layout: BlastAaLookupFinalize's rule applied to the counts.
+    let pv_size = (backbone_size >> PV_ARRAY_BTS) + 1;
+    let mut overflow_size = 0usize;
+    let mut longest_chain: i32 = 0;
+    for &count in &counts {
+        if count as usize > AA_HITS_PER_CELL {
+            overflow_size += count as usize;
         }
-        let mut overflow: Vec<i32> = vec![0; overflow_size];
-        let mut base: Vec<u32> = vec![0; backbone_size];
-        let mut overflow_cursor = 0usize;
-        for (idx, &count) in counts.iter().enumerate() {
-            if count == 0 {
-                continue;
-            }
-            pv_set(&mut pv, idx);
-            backbone[idx].num_used = count as i32;
-            if count as usize > AA_HITS_PER_CELL {
-                backbone[idx].entries[0] = overflow_cursor as i32;
-                base[idx] = overflow_cursor as u32;
-                overflow_cursor += count as usize;
-            }
+        if (count as i32) > longest_chain {
+            longest_chain = count as i32;
         }
+    }
+    let (mut backbone, mut pv, mut overflow) = match room {
+        None => (
+            vec![BackboneCell::default(); backbone_size],
+            vec![0u32; pv_size],
+            vec![0i32; overflow_size],
+        ),
+        Some(room) => match room.x_take_zeroed(backbone_size, pv_size, overflow_size) {
+            Some(vectors) => vectors,
+            None => return Ok(None),
+        },
+    };
+    let mut base: Vec<u32> = vec![0; backbone_size];
+    let mut overflow_cursor = 0usize;
+    for (idx, &count) in counts.iter().enumerate() {
+        if count == 0 {
+            continue;
+        }
+        pv_set(&mut pv, idx);
+        backbone[idx].num_used = count as i32;
+        if count as usize > AA_HITS_PER_CELL {
+            backbone[idx].entries[0] = overflow_cursor as i32;
+            base[idx] = overflow_cursor as u32;
+            overflow_cursor += count as usize;
+        }
+    }
 
-        // Fill pass: the reference's appends, in the reference's order.
-        let mut fill: Vec<u32> = vec![0; backbone_size];
-        for idx in 0..backbone_size {
-            let Some(offset_list) = exact_backbone[idx].as_deref() else {
-                continue;
-            };
-            // query_bias is 0 here (build_lookup_from_prepared passes 0).
-            let offsets = lookup_chain_entries(offset_list);
-            let list = lists[idx].as_deref().expect("listed in the count pass");
-            for &w in list {
-                let w = w as usize;
-                let at = fill[w] as usize;
-                if counts[w] as usize <= AA_HITS_PER_CELL {
-                    backbone[w].entries[at..at + offsets.len()].copy_from_slice(offsets);
-                } else {
-                    let start = base[w] as usize + at;
-                    overflow[start..start + offsets.len()].copy_from_slice(offsets);
-                }
-                fill[w] += offsets.len() as u32;
+    // Fill pass: the reference's appends, in the reference's order.
+    let mut fill: Vec<u32> = vec![0; backbone_size];
+    for idx in 0..backbone_size {
+        let Some(offset_list) = exact_backbone[idx].as_deref() else {
+            continue;
+        };
+        // query_bias is 0 here (build_lookup_from_prepared passes 0).
+        let offsets = lookup_chain_entries(offset_list);
+        let list = lists[idx].as_deref().expect("listed in the count pass");
+        for &w in list {
+            let w = w as usize;
+            let at = fill[w] as usize;
+            if counts[w] as usize <= AA_HITS_PER_CELL {
+                backbone[w].entries[at..at + offsets.len()].copy_from_slice(offsets);
+            } else {
+                let start = base[w] as usize + at;
+                overflow[start..start + offsets.len()].copy_from_slice(offsets);
             }
+            fill[w] += offsets.len() as u32;
         }
+    }
 
-        Ok(BlastAaLookupTable {
-            backbone,
-            overflow,
-            pv,
-            frame_bases,
-            num_contexts: contexts.len(),
-            query_length,
-            word_length: word_length as i32,
-            alphabet_size: alphabet_size as i32,
-            charsize: charsize as i32,
-            mask: mask as i32,
-            longest_chain,
-            threshold,
-            row_max,
-        })
-    })
+    Ok(Some(BlastAaLookupTable {
+        backbone,
+        overflow,
+        pv,
+        frame_bases,
+        num_contexts: contexts.len(),
+        query_length,
+        word_length: word_length as i32,
+        alphabet_size: alphabet_size as i32,
+        charsize: charsize as i32,
+        mask: mask as i32,
+        longest_chain,
+        threshold,
+        row_max,
+    }))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:446-469
@@ -628,6 +846,24 @@ pub(super) fn x_tbx_build_lookup(
     )
 }
 
+/// The query of `queries` prepared as `build_ncbi_lookup_for_profile(.., Blosum62,
+/// LOOKUP_WORD_LENGTH)` prepares it (modes 1 and 2 of [`x_build_ncbi_lookup_counted`], and
+/// [`XAaSpares::x_build_ahead`]).
+fn x_bp_prepared_query(queries: &[Vec<QueryFrame>], check_ideal: bool) -> PreparedLookupQuery {
+    let matrix = ScoringMatrix::Blosum62;
+    // The arguments of build_ncbi_lookup_for_profile for BLOSUM62.
+    let bounds = (-4, 11);
+    prepare_lookup_query(
+        queries,
+        ideal_karlin_params_for_matrix(matrix, bounds),
+        &compute_std_aa_composition(),
+        LOOKUP_WORD_LENGTH,
+        check_ideal,
+        matrix,
+        bounds,
+    )
+}
+
 /// The body of [`x_bp_build_lookup`] and [`x_tbx_build_lookup`]: mode 0 calls
 /// `build_ncbi_lookup`; mode 1 prepares the query as `build_ncbi_lookup_for_profile(..,
 /// Blosum62, LOOKUP_WORD_LENGTH)` does and builds the table with [`x_build_direct`], falling back
@@ -645,17 +881,7 @@ fn x_build_ncbi_lookup_counted(
         return build_ncbi_lookup(queries, threshold, karlin_params, check_ideal);
     }
     let matrix = ScoringMatrix::Blosum62;
-    // The arguments of build_ncbi_lookup_for_profile for BLOSUM62.
-    let bounds = (-4, 11);
-    let prepared = prepare_lookup_query(
-        queries,
-        ideal_karlin_params_for_matrix(matrix, bounds),
-        &compute_std_aa_composition(),
-        LOOKUP_WORD_LENGTH,
-        check_ideal,
-        matrix,
-        bounds,
-    );
+    let prepared = x_bp_prepared_query(queries, check_ideal);
     if mode == 1 {
         // build_lookup_from_prepared returns the prepared contexts unchanged.
         let contexts = prepared.contexts.clone();
@@ -683,15 +909,49 @@ fn x_build_ncbi_lookup_counted(
 
 /// EXPERIMENT (LOSAT_X_BXLUTSHADOW): assert that two tables are equal field by field.
 pub(super) fn x_assert_same_table(direct: &BlastAaLookupTable, reference: &BlastAaLookupTable) {
+    x_assert_same_table_as("LOSAT_X_BXLUTSHADOW:", direct, reference);
+}
+
+// No NCBI counterpart: a check of the shadow modes; it changes no value NCBI computes.
+/// Whether two tables are equal field by field ([`x_assert_same_table_as`] names the first
+/// difference).
+pub(crate) fn x_same_table(a: &BlastAaLookupTable, b: &BlastAaLookupTable) -> bool {
+    a.backbone.len() == b.backbone.len()
+        && a.backbone
+            .iter()
+            .zip(&b.backbone)
+            .all(|(a, b)| a.num_used == b.num_used && a.entries == b.entries)
+        && a.overflow == b.overflow
+        && a.pv == b.pv
+        && a.frame_bases == b.frame_bases
+        && a.num_contexts == b.num_contexts
+        && a.query_length == b.query_length
+        && a.word_length == b.word_length
+        && a.alphabet_size == b.alphabet_size
+        && a.charsize == b.charsize
+        && a.mask == b.mask
+        && a.longest_chain == b.longest_chain
+        && a.threshold == b.threshold
+        && a.row_max == b.row_max
+}
+
+// No NCBI counterpart: a check of the shadow modes; it changes no value NCBI computes.
+/// Asserts that two tables are equal field by field; the first difference panics with a message
+/// that starts with `prefix`.
+pub(crate) fn x_assert_same_table_as(
+    prefix: &str,
+    direct: &BlastAaLookupTable,
+    reference: &BlastAaLookupTable,
+) {
     assert_eq!(
         direct.backbone.len(),
         reference.backbone.len(),
-        "LOSAT_X_BXLUTSHADOW: backbone size differs"
+        "{prefix} backbone size differs"
     );
     for (idx, (a, b)) in direct.backbone.iter().zip(&reference.backbone).enumerate() {
         assert!(
             a.num_used == b.num_used && a.entries == b.entries,
-            "LOSAT_X_BXLUTSHADOW: backbone cell {idx} differs ({} {:?} vs {} {:?})",
+            "{prefix} backbone cell {idx} differs ({} {:?} vs {} {:?})",
             a.num_used,
             a.entries,
             b.num_used,
@@ -700,9 +960,9 @@ pub(super) fn x_assert_same_table(direct: &BlastAaLookupTable, reference: &Blast
     }
     assert!(
         direct.overflow == reference.overflow,
-        "LOSAT_X_BXLUTSHADOW: overflow array differs"
+        "{prefix} overflow array differs"
     );
-    assert!(direct.pv == reference.pv, "LOSAT_X_BXLUTSHADOW: pv differs");
+    assert!(direct.pv == reference.pv, "{prefix} pv differs");
     assert!(
         direct.frame_bases == reference.frame_bases
             && direct.num_contexts == reference.num_contexts
@@ -714,7 +974,7 @@ pub(super) fn x_assert_same_table(direct: &BlastAaLookupTable, reference: &Blast
             && direct.longest_chain == reference.longest_chain
             && direct.threshold == reference.threshold
             && direct.row_max == reference.row_max,
-        "LOSAT_X_BXLUTSHADOW: table header differs"
+        "{prefix} table header differs"
     );
 }
 
@@ -999,5 +1259,168 @@ mod tests {
             }
         }
         assert!(long_cells > 0, "the fixture must give long cells");
+    }
+
+    /// BLASTP queries whose table reaches the overflow array (as in
+    /// `bplut_table_and_contexts_equal_build_ncbi_lookup`).
+    fn bp_queries(seed: &mut u64) -> Vec<Vec<QueryFrame>> {
+        let mut low_complexity = vec![1u8; 200];
+        low_complexity.extend(residues(seed, 30));
+        vec![
+            bp_query(residues(seed, 900), vec![(40, 90)], true),
+            bp_query(residues(seed, 2), vec![], false),
+            bp_query(low_complexity, vec![(150, 199)], true),
+            bp_query(Vec::new(), vec![], false),
+            bp_query(residues(seed, 1500), vec![], false),
+        ]
+    }
+
+    /// `x_bp_build_lookup(1, ..)`'s table and contexts are those of `got`: every table field, and
+    /// every context field (the Karlin blocks by their bits).
+    fn assert_same_bp(got: &(BlastAaLookupTable, Vec<QueryContext>), queries: &[Vec<QueryFrame>]) {
+        let params = blosum62_ideal_karlin_params();
+        let (want, want_contexts) = x_bp_build_lookup(1, queries, 11, &params, false);
+        x_assert_same_table_as("ahead:", &got.0, &want);
+        assert!(x_same_table(&got.0, &want));
+        assert_eq!(got.1.len(), want_contexts.len());
+        for (a, b) in got.1.iter().zip(&want_contexts) {
+            assert!(
+                a.q_idx == b.q_idx
+                    && a.aa_seq == b.aa_seq
+                    && a.frame_base == b.frame_base
+                    && a.is_valid == b.is_valid
+                    && format!("{:?}", a.karlin_params) == format!("{:?}", b.karlin_params),
+                "context {} differs",
+                a.q_idx
+            );
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:321-336
+    // ```c
+    //       lookup->thick_backbone =
+    //             calloc(lookup->backbone_size, sizeof(AaLookupBackboneCell));
+    // ...
+    //           lookup->overflow =
+    //                  calloc(overflow_cells_needed, sizeof(Int4));
+    // ```
+    /// LOSAT_X_BPLKPAHEAD: the table built ahead on vectors kept by `XAaSpares` (a table given back
+    /// with other values, then moved to the build by `x_make_room`) is `x_bp_build_lookup(1, ..)`'s;
+    /// `x_make_room` allocates only the vectors short of their room, and keeps the calling thread's
+    /// neighbour lists for the builds, which give them back.
+    #[test]
+    fn aa_spares_build_the_bplut_table_on_kept_vectors() {
+        let mut seed = 41u64;
+        let queries = bp_queries(&mut seed);
+        let params = blosum62_ideal_karlin_params();
+        let (first, _) = x_bp_build_lookup(1, &queries, 11, &params, false);
+        let (backbone, pv, overflow) = (first.backbone.len(), first.pv.len(), first.overflow.len());
+        assert!(overflow > 0, "the fixture must reach the overflow array");
+        assert!(X_MEMO.with(|memo| memo.borrow().is_some()));
+        let spares = XAaSpares::default();
+        // Fresh spares: all three allocated here, and this thread's lists move to the spares.
+        assert_eq!(spares.x_make_room(backbone, pv, overflow, overflow), 3);
+        assert!(X_MEMO.with(|memo| memo.borrow().is_none()));
+        assert!(x_locked(&spares.memo).is_some());
+        let built = spares
+            .x_build_ahead(&queries, 11, &params, false)
+            .expect("room for the table");
+        assert_same_bp(&built, &queries);
+        assert!(x_locked(&spares.memo).is_some(), "the lists are given back");
+        assert!(
+            x_locked(&spares.ahead).is_empty(),
+            "the build took the vectors"
+        );
+        // A table given back with other values: its vectors serve the next build.
+        let (mut table, _) = built;
+        for cell in table.backbone.iter_mut() {
+            cell.num_used = 99;
+            cell.entries = [7; AA_HITS_PER_CELL];
+        }
+        table.overflow.fill(-5);
+        table.pv.fill(u32::MAX);
+        spares.give(table);
+        assert_eq!(spares.x_make_room(backbone, pv, overflow, overflow), 0);
+        // Its own vectors are kept; only a vector short of its room is replaced.
+        assert_eq!(spares.x_make_room(backbone, pv, overflow, overflow), 0);
+        assert_eq!(
+            spares.x_make_room(backbone, pv, overflow * 4, overflow * 8),
+            1
+        );
+        assert!(x_locked(&spares.ahead).overflow.capacity() >= overflow * 8);
+        let other = bp_queries(&mut seed);
+        let built = spares
+            .x_build_ahead(&other, 11, &params, false)
+            .expect("room for the table");
+        assert_same_bp(&built, &other);
+    }
+
+    /// LOSAT_X_BPLKPAHEAD: vectors without the room for the table give no table and are left as
+    /// they were; the neighbour lists are kept.
+    #[test]
+    fn aa_spares_without_the_room_give_no_table() {
+        let mut seed = 43u64;
+        let queries = bp_queries(&mut seed);
+        let params = blosum62_ideal_karlin_params();
+        let (table, _) = x_bp_build_lookup(1, &queries, 11, &params, false);
+        let (backbone, pv, overflow) = (table.backbone.len(), table.pv.len(), table.overflow.len());
+        for (b, p, o) in [
+            (backbone, pv, overflow - 1),
+            (backbone - 1, pv, overflow),
+            (backbone, pv - 1, overflow),
+        ] {
+            let spares = XAaSpares::default();
+            spares.x_make_room(b, p, o, o);
+            let capacities = |spares: &XAaSpares| {
+                let ahead = x_locked(&spares.ahead);
+                (
+                    ahead.backbone.capacity(),
+                    ahead.pv.capacity(),
+                    ahead.overflow.capacity(),
+                )
+            };
+            let before = capacities(&spares);
+            assert!(spares.x_build_ahead(&queries, 11, &params, false).is_none());
+            assert_eq!(capacities(&spares), before);
+            assert!(x_locked(&spares.memo).is_some());
+        }
+    }
+
+    /// LOSAT_X_BPLKPAHEADSHADOW: the comparison finds one backbone cell, one overflow entry, one pv
+    /// bit and one header field that differ, and names the first difference after its prefix.
+    #[test]
+    fn same_table_finds_one_cell_entry_bit_or_field() {
+        let mut seed = 47u64;
+        let queries = bp_queries(&mut seed);
+        let params = blosum62_ideal_karlin_params();
+        let build = || x_bp_build_lookup(1, &queries, 11, &params, false).0;
+        let want = build();
+        assert!(x_same_table(&build(), &want));
+        let cell = want
+            .backbone
+            .iter()
+            .position(|cell| cell.num_used > 0 && cell.num_used as usize <= AA_HITS_PER_CELL)
+            .expect("a cell with entries");
+        let changes: [(&str, &dyn Fn(&mut BlastAaLookupTable)); 4] = [
+            ("backbone cell", &|t| t.backbone[cell].entries[0] += 1),
+            ("overflow array", &|t| t.overflow[0] += 1),
+            ("pv", &|t| t.pv[0] ^= 1 << 31),
+            ("table header", &|t| t.longest_chain += 1),
+        ];
+        for (what, change) in changes {
+            let mut got = build();
+            change(&mut got);
+            assert!(!x_same_table(&got, &want), "{what}");
+            let message = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                x_assert_same_table_as("PREFIX:", &got, &want)
+            }))
+            .expect_err(what);
+            let message = message
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| message.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default();
+            assert!(message.starts_with(&format!("PREFIX: {what}")), "{message}");
+        }
     }
 }

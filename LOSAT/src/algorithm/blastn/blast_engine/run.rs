@@ -4252,7 +4252,8 @@ impl QueryContextIndex {
         // run because the map starts out as zeros.
         let mut x_mode = x_ctx_mode();
         // EXPERIMENT (LOSAT_X_CTXO1): the constant-time form, where the layout allows it. It takes
-        // the place of the runs; the shadow (mode 2) keeps the table to compare with.
+        // the place of the runs (kept only for the offsets of its crowded blocks) and of the table
+        // (kept only for the shadow (mode 2) to compare with).
         let x_o1 = if x_ctx_o1_on() {
             x_ctx_o1::CtxO1::build(contexts, total_len)
         } else {
@@ -4263,9 +4264,10 @@ impl QueryContextIndex {
             x_mode = if x_shadow { 0 } else { 1 };
         }
         let (x_o1, x_o1_shadow) = if x_shadow { (None, x_o1) } else { (x_o1, None) };
-        let x_o1_built = x_o1.is_some() || x_o1_shadow.is_some();
+        // the runs answer what the form leaves (offsets in a crowded block of `x_ctx_o1.rs`)
+        let x_o1_alone = x_o1.as_ref().is_some_and(|o1| !o1.needs_runs()) || x_o1_shadow.is_some();
         let mut x_ranges: Vec<(usize, usize, u32)> = Vec::new();
-        if x_mode != 0 && !x_o1_built {
+        if x_mode != 0 && !x_o1_alone {
             for (idx, ctx) in contexts.iter().enumerate() {
                 let start = ctx.query_offset.max(0) as usize;
                 let end = start.saturating_add(ctx.len);
@@ -4305,7 +4307,7 @@ impl QueryContextIndex {
             max_length,
             direct_map,
             x_ranges,
-            x_total_len: if x_mode == 0 || x_o1_built {
+            x_total_len: if x_mode == 0 || x_o1_alone {
                 0
             } else {
                 total_len
@@ -16878,6 +16880,62 @@ fn merge_prelim_hit_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // QueryContextIndex answers the value of `direct_map` at every offset, through whichever form
+    // the switches choose (by default LOSAT_X_CTXO1: division, or the block table, here with the
+    // runs for its crowded blocks in the second case: a query of 3 letters among 500 of 300).
+    #[test]
+    fn the_context_index_answers_the_table_at_every_offset() {
+        let mut crowded = vec![300usize; 1000];
+        crowded[200] = 3;
+        crowded[201] = 3;
+        crowded.extend([0, 0]);
+        for (case, lengths) in [
+            vec![24usize; 40],
+            crowded,
+            vec![0, 0, 18, 18, 30, 30, 25, 25, 19, 19],
+            vec![5000, 5000],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut contexts = Vec::new();
+            let mut offset = 0usize;
+            for (i, &len) in lengths.iter().enumerate() {
+                contexts.push(QueryContext {
+                    query_idx: (i / 2) as u32,
+                    frame: if i % 2 == 0 { 1 } else { -1 },
+                    query_offset: offset as i32,
+                    len,
+                    masks: Vec::new(),
+                });
+                offset += if len == 0 { 0 } else { len + 1 };
+            }
+            let total = contexts
+                .iter()
+                .map(|c| c.query_offset as usize + c.len)
+                .max()
+                .unwrap();
+            let mut table = vec![0usize; total];
+            for (idx, c) in contexts.iter().enumerate() {
+                let start = c.query_offset as usize;
+                table[start..start + c.len].fill(idx);
+            }
+            let index = QueryContextIndex::new(&contexts);
+            if case == 1 {
+                if let Some(o1) = &index.x_o1 {
+                    assert!(o1.needs_runs() && !index.x_ranges.is_empty());
+                }
+            }
+            for (n, &want) in table.iter().enumerate() {
+                assert_eq!(
+                    index.context_for_offset(n),
+                    want,
+                    "offset {n} of {lengths:?}"
+                );
+            }
+        }
+    }
 
     /// The records of a FASTA text as NCBI's reader reads them (`config`).
     fn reader_records(fasta: &str, config: ReaderConfig) -> Vec<FastaRecord> {

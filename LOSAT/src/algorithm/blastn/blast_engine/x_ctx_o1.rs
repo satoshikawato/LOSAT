@@ -54,27 +54,34 @@
 //!   multiplication by `ceil(2^64 / (L + 1))` and a shift by 64, exact for every `n < 2^32`
 //!   (Lemire, Kaser and Kurz, "Faster remainder by direct computation", 2019, theorem 1 with
 //!   F = 64, N = 32); the concatenated length is checked to be below 2^32.
-//! - `Blocks`, for any other layout: one `u32` per block of `2^k` offsets, with `2^k` at most the
-//!   shortest context with letters plus one, so a block holds at most one sentinel (two sentinels
-//!   are a context and one apart). The entry is `rank << (k + 1) | p`: `rank` numbers (from 0, in
-//!   offset order) the context with letters whose letters or sentinel hold the block's first
-//!   offset, and `p` is the sentinel's place in the block, or `2^k` if the block has none. Offset
-//!   `n` with `low = n mod 2^k` is the sentinel if `low == p`, in context `rank` if `low < p`, and
-//!   in context `rank + 1` if `low > p` (the context after a sentinel starts right after it). The
-//!   rank is the context's index unless some context has no letters; then a second table maps
-//!   ranks to indices. The rank fits in the `32 - (k + 1)` upper bits: `rank` contexts of at least
-//!   `2^k - 1` letters and their sentinels take `rank * 2^k` offsets, below 2^31.
+//! - `Blocks`, for any other layout: one `u32` per block of `2^k` offsets. A block with at most one
+//!   sentinel has the entry `rank << (k + 1) | p`: `rank` numbers (from 0, in offset order) the
+//!   context with letters whose letters or sentinel hold the block's first offset, and `p` is the
+//!   sentinel's place in the block, or `2^k` if the block has none. Offset `n` with
+//!   `low = n mod 2^k` is the sentinel if `low == p`, in context `rank` if `low < p`, and in context
+//!   `rank + 1` if `low > p` (the context after a sentinel starts right after it). A block with two
+//!   sentinels or more (it holds a whole context shorter than `2^k - 1` letters) has `p = 2^(k+1) - 1`
+//!   ("crowded"), and `get` answers `None` there: the caller asks its runs, which give the same
+//!   value. The rank is the context's index unless some context has no letters; then a second
+//!   table maps ranks to indices. `k` is the largest value (up to 30) for which the rank fits in the
+//!   `32 - (k + 1)` upper bits and at most one block in `CROWDED_SHARE` is crowded; it is at least
+//!   `log2` of the shortest context plus one rounded down, where no block is crowded (two sentinels
+//!   are a context and one apart).
 //!
 //! Neither form reads more than one `u32` (the second table only with empty contexts), where the
 //! binary search reads up to 16 entries of a 1.4 MB array for 30,000 queries (R8: 318 cycles a
 //! lookup hit in blastn-short) and `direct_map` reads one of 4 bytes a letter. The block table
-//! takes `4 * len / 2^k` bytes (375 KB for 30,000 queries of 24 letters, k = 4); a table above
-//! `MAX_TABLE_BYTES` is not built.
+//! takes `4 * len / 2^k` bytes (375 KB for 30,000 queries of 24 letters, k = 4; 2.8 MB for both
+//! strands of 31,168 cDNAs of 30 to 71,382 letters, k = 8, where the shortest one alone would give
+//! k = 4 and 45 MB); a table above `MAX_TABLE_BYTES` is not built.
 
 use super::QueryContext;
 
 /// No NCBI counterpart: the largest block table `build` makes (bytes).
 const MAX_TABLE_BYTES: usize = 64 << 20;
+
+/// No NCBI counterpart: a block size is taken while at most one block in this many is crowded.
+const CROWDED_SHARE: usize = 256;
 
 /// No NCBI counterpart: the constant-time form of `direct_map` (see the module header).
 pub(super) enum CtxO1 {
@@ -92,6 +99,8 @@ pub(super) enum CtxO1 {
         /// Index of the context of each rank, empty when every context has letters.
         rank_context: Vec<u32>,
         total_len: usize,
+        /// Some block is crowded (`get` answers `None` there).
+        crowded: bool,
     },
 }
 
@@ -160,15 +169,35 @@ impl CtxO1 {
                 total_len,
             });
         }
+        let last = ends.len() - 1;
+        let rank_fits = |shift: u32| last < 1usize << (31 - shift);
+        // blocks of 2^shift offsets with two sentinels or more (an upper bound: a block with three
+        // counts twice)
+        let crowded_blocks = |shift: u32| {
+            ends.windows(2)
+                .filter(|w| w[0] >> shift == w[1] >> shift)
+                .count()
+        };
         // 2^shift <= min_len + 1: at most one sentinel per block
-        let shift = (usize::BITS - 1 - (min_len + 1).leading_zeros()).min(30);
-        let block = 1usize << shift;
-        let blocks = total_len.div_ceil(block);
-        if blocks.checked_mul(4)? > MAX_TABLE_BYTES || ends.len() - 1 >= 1usize << (31 - shift) {
+        let mut shift = (usize::BITS - 1 - (min_len + 1).leading_zeros()).min(30);
+        if !rank_fits(shift) {
             return None;
         }
+        while shift < 30
+            && rank_fits(shift + 1)
+            && crowded_blocks(shift + 1) * CROWDED_SHARE
+                <= total_len.div_ceil(1usize << (shift + 1))
+        {
+            shift += 1;
+        }
+        let block = 1usize << shift;
+        let blocks = total_len.div_ceil(block);
+        if blocks.checked_mul(4)? > MAX_TABLE_BYTES {
+            return None;
+        }
+        let crowded_place = (2u32 << shift) - 1;
+        let mut crowded = false;
         let mut entries = Vec::with_capacity(blocks);
-        let last = ends.len() - 1;
         let mut rank = 0usize;
         for j in 0..blocks {
             let first = j << shift;
@@ -178,8 +207,13 @@ impl CtxO1 {
                 rank += 1;
             }
             debug_assert!(ends[rank] >= first);
-            let place = (ends[rank] - first).min(block);
-            entries.push(((rank as u32) << (shift + 1)) | place as u32);
+            let place = if rank < last && ends[rank + 1] < first + block {
+                crowded = true;
+                crowded_place
+            } else {
+                (ends[rank] - first).min(block) as u32
+            };
+            entries.push(((rank as u32) << (shift + 1)) | place);
         }
         if !any_empty {
             rank_context = Vec::new();
@@ -189,6 +223,7 @@ impl CtxO1 {
             entries,
             rank_context,
             total_len,
+            crowded,
         })
     }
 
@@ -198,7 +233,8 @@ impl CtxO1 {
     ///         b = MIN(n / (A->max_length + 1), size - 1);
     ///         e = MIN(n / (A->min_length + 1) + 1, size);
     /// ```
-    /// `direct_map[n]` for `n` below the concatenated length, `None` above it.
+    /// `direct_map[n]` for `n` below the concatenated length, `None` above it and in a crowded
+    /// block.
     #[inline(always)]
     pub(super) fn get(&self, n: usize) -> Option<usize> {
         match self {
@@ -220,13 +256,18 @@ impl CtxO1 {
                 entries,
                 rank_context,
                 total_len,
+                ..
             } => {
                 if n >= *total_len {
                     return None;
                 }
                 let entry = entries[n >> *shift];
                 let low = (n as u32) & ((1u32 << *shift) - 1);
-                let place = entry & ((2u32 << *shift) - 1);
+                let crowded_place = (2u32 << *shift) - 1;
+                let place = entry & crowded_place;
+                if place == crowded_place {
+                    return None;
+                }
                 let rank = (entry >> (*shift + 1)) + u32::from(low > place);
                 let context = if rank_context.is_empty() {
                     rank
@@ -238,16 +279,23 @@ impl CtxO1 {
         }
     }
 
-    /// No NCBI counterpart: the form's name and bytes (tests).
+    /// No NCBI counterpart: whether `get` answers `None` for some offset below the length (the
+    /// caller then keeps its runs).
+    pub(super) fn needs_runs(&self) -> bool {
+        matches!(self, CtxO1::Blocks { crowded: true, .. })
+    }
+
+    /// No NCBI counterpart: the form's name, bytes and block shift (tests).
     #[cfg(test)]
-    pub(super) fn describe(&self) -> (&'static str, usize) {
+    pub(super) fn describe(&self) -> (&'static str, usize, u32) {
         match self {
-            CtxO1::Div { .. } => ("div", 0),
+            CtxO1::Div { .. } => ("div", 0, 0),
             CtxO1::Blocks {
+                shift,
                 entries,
                 rank_context,
                 ..
-            } => ("blocks", 4 * (entries.len() + rank_context.len())),
+            } => ("blocks", 4 * (entries.len() + rank_context.len()), *shift),
         }
     }
 }
@@ -291,20 +339,39 @@ mod tests {
         map
     }
 
+    // every offset: the table's value, or `None` in a block with two sentinels or more
     fn check(lengths: &[usize], force_blocks: bool) -> &'static str {
         let (contexts, total) = contexts_of(lengths);
         let form = CtxO1::build_with(&contexts, total, force_blocks).expect("form");
+        let (name, _, shift) = form.describe();
         let map = direct_map(&contexts, total);
+        let sentinels: Vec<usize> = contexts
+            .iter()
+            .filter(|c| c.len > 0)
+            .map(|c| c.query_offset as usize + c.len)
+            .collect();
+        let mut unanswered = 0usize;
         for (n, &want) in map.iter().enumerate() {
-            assert_eq!(
-                form.get(n),
-                Some(want as usize),
-                "offset {n} of lengths {lengths:?} (force_blocks {force_blocks})"
-            );
+            match form.get(n) {
+                Some(got) => assert_eq!(
+                    got, want as usize,
+                    "offset {n} of lengths {lengths:?} (force_blocks {force_blocks})"
+                ),
+                None => {
+                    let block = n >> shift;
+                    let in_block = sentinels.iter().filter(|&&e| e >> shift == block).count();
+                    assert!(
+                        name == "blocks" && form.needs_runs() && in_block >= 2,
+                        "offset {n}"
+                    );
+                    unanswered += 1;
+                }
+            }
         }
+        assert_eq!(form.needs_runs(), unanswered > 0);
         assert_eq!(form.get(total), None);
         assert_eq!(form.get(total + 1000), None);
-        form.describe().0
+        name
     }
 
     fn lcg(state: &mut u64) -> u64 {
@@ -357,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn the_block_holds_one_sentinel_at_most_at_every_shortest_length() {
+    fn tight_shortest_lengths_agree_with_the_table() {
         // the shortest context sets the block: lengths 2^k - 1 and 2^k - 2 are the tight cases
         for k in 1..12u32 {
             let short = (1usize << k) - 1;
@@ -369,6 +436,34 @@ mod tests {
                 assert_eq!(check(&lengths, false), "blocks");
             }
         }
+    }
+
+    #[test]
+    fn a_short_context_among_long_ones_takes_the_long_ones_block_size() {
+        let mut state = 0x0b10c_u64;
+        let mut lengths = Vec::new();
+        for i in 0..200 {
+            let len = if i == 77 {
+                5
+            } else {
+                300 + (lcg(&mut state) as usize % 400)
+            };
+            lengths.push(len);
+            lengths.push(len);
+        }
+        assert_eq!(check(&lengths, false), "blocks");
+        let (contexts, total) = contexts_of(&lengths);
+        let form = CtxO1::build_with(&contexts, total, false).unwrap();
+        // the shortest context alone gives blocks of 4; 256 still holds every context but two
+        assert_eq!(form.describe().2, 8);
+        assert!(form.needs_runs());
+        // without the short one, the same blocks and none crowded
+        lengths[154] = 300;
+        lengths[155] = 300;
+        let (contexts, total) = contexts_of(&lengths);
+        let form = CtxO1::build_with(&contexts, total, false).unwrap();
+        assert_eq!(form.describe().2, 8);
+        assert!(!form.needs_runs());
     }
 
     #[test]

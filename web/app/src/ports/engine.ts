@@ -136,4 +136,17 @@ export interface EngineGateway {
   run(request: EngineRunRequest, output: MessagePort, onPhase: (phase: EnginePhase) => void): Promise<RuntimeInfo>;
   /** Stops the run as soon as possible. Unknown or finished runs are ignored. */
   cancel(runId: string): void;
+  /**
+   * A hint that a search like `hint` may come soon: the engine may start what its first
+   * search would start (its runtime and threads) now instead. Optional; it changes no
+   * search and reports nothing (a failure shows in the search).
+   */
+  prepare?(hint: EnginePrepareHint): void;
+}
+
+/** What `EngineGateway.prepare` may prepare for. */
+export interface EnginePrepareHint {
+  readonly requestedThreads: number | 'auto';
+  /** About the query and subject bytes of the search. */
+  readonly inputBytes: number;
 }

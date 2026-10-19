@@ -16,7 +16,7 @@ import { FakeInputChecker, FakeScanner } from '../fake/fake-fasta';
 import type { ReactorAbi } from '../reactor/abi';
 import { ReactorInputChecker } from '../reactor/checker';
 import { reactorControl, type EngineControl } from '../reactor/control';
-import { compileReactor, fetchReactor, instantiateSerial } from '../reactor/instance';
+import { instantiateSerial, loadReactor } from '../reactor/instance';
 import { ReactorScanner, reopening } from '../reactor/scanner';
 import { DATA_GATEWAY_METHODS, DATA_WORKER_METHODS, type DataWorkerApi } from './methods';
 import { serveRpc, type RpcEndpoint } from './rpc';
@@ -40,9 +40,7 @@ if (ENGINE_ASSETS === null) {
   let compiled: Promise<WebAssembly.Module> | undefined;
   const module = () => {
     if (compiled === undefined) {
-      const loading = fetchReactor(serial)
-        .then(compileReactor)
-        .then((reactor) => reactor.module);
+      const loading = loadReactor(serial).then((reactor) => reactor.module);
       compiled = loading;
       // A module that failed to load is loaded again by the next use.
       loading.catch(() => {

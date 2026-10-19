@@ -14,7 +14,7 @@ import { startDataWorker } from '../../../src/infra/data-worker/gateway';
 import { WasmEngine } from '../../../src/infra/engine-worker/gateway';
 import type { RenewalLimits } from '../../../src/infra/engine-worker/policy';
 import type { EngineEvent, WorkerTestCommand } from '../../../src/infra/engine-worker/protocol';
-import type { EngineInput, RuntimeInfo } from '../../../src/ports/engine';
+import type { EngineGateway, EngineInput, RuntimeInfo } from '../../../src/ports/engine';
 import type { OutputStream } from '../../../src/ports/run-output';
 import { runCases, type CaseResult } from '../../contract/contract';
 import { ENGINE_INPUT_CASES } from '../../contract/engine-input.contract';
@@ -199,6 +199,21 @@ export async function searches(list: readonly SearchCase[], options: SessionOpti
     results.push(result);
   }
   return results;
+}
+
+/**
+ * Runs `search` as the first search of a new application, `afterMs` after the engine was
+ * told to prepare for it (EngineGateway.prepare, as the search form does): at 0 the search
+ * meets the preparation still in progress.
+ */
+export async function preparedSearch(search: SearchCase, afterMs: number): Promise<SearchResult> {
+  const session = new SearchSession();
+  // The gateway that the draft holds; the application exposes no engine of its own.
+  const { engine } = (session.app.draft as unknown as { readonly deps: { readonly engine: EngineGateway } }).deps;
+  const [query, subject] = await Promise.all([fetchFile(search.query), fetchFile(search.subject)]);
+  engine.prepare?.({ requestedThreads: search.threads, inputBytes: query.size + subject.size });
+  await new Promise((resolve) => setTimeout(resolve, afterMs));
+  return session.search(search);
 }
 
 export interface CancelResult {

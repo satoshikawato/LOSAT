@@ -273,8 +273,9 @@ the old `LOSAT_TBLASTX_PARALLEL_SCAN_CHUNKS` name has been removed.
 Three host variables of the Node threaded runner (`wasi_thread_host.js`) shorten
 its fixed startup cost. None changes the module, the guest or its output.
 `LOSAT_WASI_PRESPAWN` (`auto`) and `LOSAT_WASI_RECYCLE` (`1`) are on by default
-since 2026-10-18 (`LOSAT_WASI_PRESPAWN=0` and `LOSAT_WASI_RECYCLE=0` give the
-runner of before); `LOSAT_WASI_GUARD_CACHE` is off unless set.
+since 2026-10-18 and `LOSAT_WASI_GUARD_CACHE` since 2026-10-19
+(`LOSAT_WASI_PRESPAWN=0`, `LOSAT_WASI_RECYCLE=0` and `LOSAT_WASI_GUARD_CACHE=0`
+give the runner of before).
 
 - `LOSAT_WASI_PRESPAWN=auto|N` (`auto` when unset) boots thread workers before
   `_start`, all at once, instead of one per `thread-spawn` call while the guest
@@ -309,14 +310,22 @@ runner of before); `LOSAT_WASI_GUARD_CACHE` is off unless set.
   (code 0) records that the worker reported its thread's return. Measured on
   p03 (TBLASTX, `-num_threads 8`, ABI v2 reactor, i9): the host's spawns took
   148-205 ms of every later search without it and 1 ms with it.
-- `LOSAT_WASI_GUARD_CACHE=<dir>` stores the output of the shared-memory guard
+- `LOSAT_WASI_GUARD_CACHE=<dir>|0` stores the output of the shared-memory guard
   in `<dir>` (created if needed), keyed by the SHA-256 of the artifact and of
-  `wasi_shared_memory.js`. A later run uses the stored bytes only when their
-  SHA-256 and length match the sidecar record, whose own SHA-256 covers the
-  key and the fill/copy counts; otherwise it recomputes the guard and replaces
-  the entry through a temporary file and a rename. The stored bytes are the
-  guard's output, byte for byte. With `LOSAT_WASI_THREADS_DEBUG=1` the runner
-  logs `guard cache hit`, `miss` or `invalid`.
+  `wasi_shared_memory.js`. Unset, the directory is `losat/wasi-guard` in the
+  user's cache directory (`$XDG_CACHE_HOME` if absolute, else `~/.cache`;
+  `~/Library/Caches` on macOS; `%LOCALAPPDATA%` on Windows), and a run that
+  cannot use it computes the guard as before; a directory that the variable
+  names must work. `0` turns the cache off. A later run uses the stored bytes
+  only when their SHA-256 and length match the sidecar record, whose own
+  SHA-256 covers the key and the fill/copy counts; otherwise it recomputes the
+  guard and replaces the entry through a temporary file and a rename. A write
+  keeps the 8 entries used last. The stored bytes are the guard's output, byte
+  for byte. With `LOSAT_WASI_THREADS_DEBUG=1` the runner logs `guard cache hit`,
+  `miss`, `invalid` or `unusable`. Measured on the i9 (threaded command, 6.8 MB):
+  the guard takes 150-220 ms and a hit 9-13 ms; TBLASTX p03 at 8 threads took
+  0.83-1.05 s instead of 0.95-1.18 s (8 pairs). `test_wasi_runners.js` keeps
+  its own cache directory.
 
 The nightly workflow (`nightly.yml`, also `workflow_dispatch` and release
 readiness) runs `check_wasm_threading_regressions.py --jobs 3` against all frozen

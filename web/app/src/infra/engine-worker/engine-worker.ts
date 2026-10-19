@@ -5,9 +5,9 @@
 import { InputMismatchError } from '../../ports/engine';
 import type { OutputStream } from '../../ports/run-output';
 import { EngineStoppedError } from '../reactor/abi';
-import { compileReactor, fetchReactor } from '../reactor/instance';
+import { loadReactor } from '../reactor/instance';
 import { RunOutputWriter } from '../run-output/writer';
-import type { EngineCommand, EngineEvent, EngineInit, ModuleSource, WorkerError, WorkerRun, WorkerTestCommand } from './protocol';
+import type { EngineCommand, EngineEvent, EngineInit, ModuleSource, WorkerError, WorkerPrepare, WorkerRun, WorkerTestCommand } from './protocol';
 import { EngineRuntime } from './runtime';
 
 const scope = self as unknown as {
@@ -17,9 +17,30 @@ const scope = self as unknown as {
 
 let generation = 0;
 let runtime: EngineRuntime | undefined;
+// Preparations and searches use the runtime one after another, in the order they came.
+let previous: Promise<unknown> = Promise.resolve();
+// The threads of the latest preparation that waits for its turn: newer ones replace it, and a
+// search drops it (the search prepares for itself).
+let pendingThreads: number | undefined;
+
+function inTurn(work: () => Promise<unknown>): void {
+  const turn = previous.then(work);
+  previous = turn.catch(() => undefined);
+}
+
+function queuePrepare(command: WorkerPrepare): void {
+  const queued = pendingThreads !== undefined;
+  pendingThreads = command.threads;
+  if (queued) return;
+  inTurn(async () => {
+    const threads = pendingThreads;
+    pendingThreads = undefined;
+    if (threads !== undefined) await prepare(threads);
+  });
+}
 
 async function moduleOf(source: ModuleSource) {
-  return 'module' in source ? source : compileReactor(await fetchReactor(source.asset));
+  return 'module' in source ? source : loadReactor(source.asset);
 }
 
 function init(command: EngineInit): void {
@@ -43,6 +64,14 @@ function toWorkerError(error: unknown): WorkerError {
     return { name: error.name, message: error.message, ...(error instanceof EngineStoppedError ? { stopped: true } : {}) };
   }
   return { name: 'Error', message: String(error) };
+}
+
+async function prepare(threads: number): Promise<void> {
+  try {
+    await runtime?.prepare(threads);
+  } catch {
+    // The search that follows starts the runtime again and reports what fails.
+  }
 }
 
 async function run(command: WorkerRun): Promise<void> {
@@ -84,6 +113,9 @@ function test(command: WorkerTestCommand): void {
 scope.onmessage = (event) => {
   const command = event.data;
   if (command.type === 'init') init(command);
-  else if (command.type === 'run') void run(command);
+  else if (command.type === 'run') {
+    pendingThreads = undefined;
+    inTurn(() => run(command));
+  } else if (command.type === 'prepare') queuePrepare(command);
   else if (__LOSAT_TEST_HOOKS__) test(command);
 };

@@ -4,11 +4,11 @@
 // RecordScanner contract runs against the serial reactor in Node.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { findReactors } from '../../build/reactors';
 import { ReactorAbi, stopMessage, type AbiExports } from '../../src/infra/reactor/abi';
 import { ABI_EXPORTS, inspectReactor } from '../../src/infra/reactor/artifact';
-import { instantiateSerial } from '../../src/infra/reactor/instance';
+import { instantiateSerial, loadReactor } from '../../src/infra/reactor/instance';
 import { ReactorInputChecker } from '../../src/infra/reactor/checker';
 import { toProgramDescription } from '../../src/infra/reactor/control';
 import { ReactorScanner, reopening } from '../../src/infra/reactor/scanner';
@@ -23,6 +23,7 @@ import {
   DEFAULT_RENEWAL,
   renewalReason,
 } from '../../src/infra/engine-worker/policy';
+import { EngineRuntime } from '../../src/infra/engine-worker/runtime';
 import { RECORD_SCANNER_CASES } from '../contract/record-scanner.contract';
 
 describe('chooseThreads', () => {
@@ -91,9 +92,11 @@ interface ModuleSpec {
   /** env.memory: [flags, initial, maximum?] with flag bit 0 = has maximum, bit 1 = shared. */
   readonly importedMemory?: readonly number[];
   readonly ownMemory?: readonly number[];
+  /** What every function returns (0 to 63); 0 by default. */
+  readonly returns?: number;
 }
 
-/** A module whose functions all have type () -> i32 and return 0. */
+/** A module whose functions all have type () -> i32 and return 0 (or `returns`). */
 function moduleBytes(spec: ModuleSpec): Uint8Array {
   const functionImports = spec.functionImports ?? [];
   const exports = spec.exports ?? [];
@@ -114,7 +117,7 @@ function moduleBytes(spec: ModuleSpec): Uint8Array {
       7,
       vector(exports.map((e) => (e === 'memory' ? [...name(e), 2, 0] : [...name(e), 0, ...uleb(offset + functions.indexOf(e))]))),
     ),
-    ...section(10, vector(functions.map(() => [4, 0, 0x41, 0, 0x0b]))),
+    ...section(10, vector(functions.map(() => [4, 0, 0x41, spec.returns ?? 0, 0x0b]))),
   ]);
 }
 
@@ -150,6 +153,87 @@ describe('inspectReactor', () => {
 
   it('rejects bytes that are not a WebAssembly module', () => {
     expect(() => inspectReactor(new TextEncoder().encode('<!doctype html>'))).toThrow('the engine file is not a WebAssembly module');
+  });
+});
+
+describe('loadReactor', () => {
+  const bytes = moduleBytes(SERIAL);
+  const asset = { url: '/engine/serial.wasm', sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length, artifactSha256: 'a'.repeat(64) };
+  const serve = (type: string, status = 200) =>
+    vi.stubGlobal('fetch', async () => new Response(status === 200 ? (bytes as BufferSource) : null, { status, headers: { 'Content-Type': type } }));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('compiles a Wasm response while it arrives and returns the module after the SHA-256 check', async () => {
+    serve('application/wasm');
+    const streaming = vi.spyOn(WebAssembly, 'compileStreaming');
+    const loaded = await loadReactor(asset);
+    expect(streaming).toHaveBeenCalledTimes(1);
+    expect(loaded.module).toBeInstanceOf(WebAssembly.Module);
+    expect(loaded.artifact.kind).toBe('serial-reactor');
+  });
+
+  it('refuses bytes of another SHA-256 even when they compile', async () => {
+    serve('application/wasm');
+    await expect(loadReactor({ ...asset, sha256: 'b'.repeat(64) })).rejects.toThrow(
+      `the engine file /engine/serial.wasm is not the one of this release (SHA-256 ${asset.sha256})`,
+    );
+  });
+
+  it('compiles from the bytes when the response is not served as Wasm', async () => {
+    serve('application/octet-stream');
+    const streaming = vi.spyOn(WebAssembly, 'compileStreaming');
+    expect((await loadReactor(asset)).artifact.kind).toBe('serial-reactor');
+    expect(streaming).not.toHaveBeenCalled();
+  });
+
+  it('reports a response that is not OK', async () => {
+    serve('text/plain', 404);
+    await expect(loadReactor(asset)).rejects.toThrow('the engine file /engine/serial.wasm could not be loaded (HTTP 404)');
+  });
+});
+
+describe('EngineRuntime.prepare', () => {
+  // A serial module whose ABI version export returns 2, as a reactor's does.
+  function setup() {
+    const calls = { serial: 0, threads: 0 };
+    const runtime = new EngineRuntime({
+      serial: async () => {
+        calls.serial++;
+        return WebAssembly.compile(moduleBytes({ ...SERIAL, returns: 2 }) as BufferSource);
+      },
+      threads: async () => {
+        calls.threads++;
+        throw new Error('unused');
+      },
+      builds: { serial: 'serial', threads: 'threads' },
+      faultChannel: 'faults',
+    });
+    return { runtime, calls };
+  }
+
+  it('starts the serial instance for one thread, once', async () => {
+    const { runtime, calls } = setup();
+    await runtime.prepare(1);
+    await runtime.prepare(1);
+    expect(calls.serial).toBe(1);
+  });
+
+  it('keeps a working instance of the other module, which a queued search may still use', async () => {
+    const { runtime, calls } = setup();
+    await runtime.prepare(1);
+    await runtime.prepare(4);
+    expect(calls).toEqual({ serial: 1, threads: 0 });
+  });
+
+  it('records that the threaded engine cannot start, and then prepares the serial one', async () => {
+    const { runtime, calls } = setup();
+    // Node is not cross-origin isolated: the threaded instance cannot start.
+    await expect(runtime.prepare(4)).rejects.toThrow(/cross-origin isolated/);
+    await runtime.prepare(4);
+    expect(calls).toEqual({ serial: 1, threads: 0 });
   });
 });
 

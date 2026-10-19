@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { InputMismatchError, RunCancelledError, type EngineRunRequest, type RuntimeInfo } from '../../src/ports/engine';
 import { WasmEngine } from '../../src/infra/engine-worker/gateway';
-import type { EngineCommand, EngineEvent, EngineInit, WorkerRun, WorkerRunResult } from '../../src/infra/engine-worker/protocol';
+import type { EngineCommand, EngineEvent, EngineInit, WorkerPrepare, WorkerRun, WorkerRunResult } from '../../src/infra/engine-worker/protocol';
 import type { EngineAssets } from '../../src/infra/reactor/assets';
 
 class FakeWorker {
@@ -28,6 +28,10 @@ class FakeWorker {
 
   get runs(): WorkerRun[] {
     return this.posted.filter((command): command is WorkerRun => command.type === 'run');
+  }
+
+  get prepares(): WorkerPrepare[] {
+    return this.posted.filter((command): command is WorkerPrepare => command.type === 'prepare');
   }
 
   send(event: EngineEvent): void {
@@ -89,6 +93,16 @@ async function posted(worker: () => FakeWorker | undefined, count: number): Prom
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
   throw new Error('the run was not posted');
+}
+
+/** Waits until `worker` has received `count` prepare commands. */
+async function prepared(worker: () => FakeWorker | undefined, count: number): Promise<FakeWorker> {
+  for (let i = 0; i < 100; i++) {
+    const current = worker();
+    if (current !== undefined && current.prepares.length >= count) return current;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error('the preparation was not posted');
 }
 
 describe('WasmEngine', () => {
@@ -240,6 +254,52 @@ describe('WasmEngine', () => {
     await expect(run).rejects.toThrow('The engine stopped: thread 2 trapped');
     channel.close();
     expect(worker.terminated).toBe(true);
+  });
+
+  it('prepares the runtime of a search before it comes, once per thread count, and runs the search there', async () => {
+    const { engine, workers } = setup();
+    engine.prepare({ requestedThreads: 'auto', inputBytes: 2_000_000 });
+    engine.prepare({ requestedThreads: 'auto', inputBytes: 2_000_000 });
+    const worker = await prepared(() => workers[0], 1);
+    expect(worker.init.generation).toBe(1);
+    engine.prepare({ requestedThreads: 2, inputBytes: 10 });
+    await prepared(() => workers[0], 2);
+    // Auto on 8 hardware threads: 4 for an input of 1 MB or more.
+    expect(worker.prepares).toEqual([
+      { type: 'prepare', generation: 1, threads: 4 },
+      { type: 'prepare', generation: 1, threads: 2 },
+    ]);
+    const run = engine.run(request('r1', 2), output(), () => undefined);
+    await posted(() => workers[0], 1);
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: RESULT });
+    expect((await run).runtimeGeneration).toBe(1);
+    expect(workers).toHaveLength(1);
+    // A search may change what its runtime holds, so the same hint prepares again after it.
+    engine.prepare({ requestedThreads: 2, inputBytes: 10 });
+    await prepared(() => workers[0], 3);
+  });
+
+  it('does not prepare while a search runs', async () => {
+    const { engine, workers } = setup();
+    const run = engine.run(request('r1'), output(), () => undefined);
+    const worker = await posted(() => workers[0], 1);
+    engine.prepare({ requestedThreads: 2, inputBytes: 10 });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(worker.prepares).toEqual([]);
+    worker.send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: RESULT });
+    await run;
+  });
+
+  it('prepares the renewal that the next search would make', async () => {
+    const { engine, workers } = setup({ maxRuns: 1 });
+    const run = engine.run(request('r1'), output(), () => undefined);
+    const old = await posted(() => workers[0], 1);
+    old.send({ type: 'done', generation: 1, runId: 'r1', ok: true, result: RESULT });
+    await run;
+    engine.prepare({ requestedThreads: 2, inputBytes: 10 });
+    const worker = await prepared(() => workers[1], 1);
+    expect(old.terminated).toBe(true);
+    expect(worker.prepares).toEqual([{ type: 'prepare', generation: 2, threads: 2 }]);
   });
 
   it('runs one search at a time', async () => {

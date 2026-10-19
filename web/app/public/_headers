@@ -5,3 +5,8 @@
   Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
+# The engine modules (build/reactors.ts): their file names carry their SHA-256, so a new
+# build has new URLs and a browser may keep these for good. Chromium then keeps the code it
+# compiled from them too (src/infra/reactor/instance.ts, loadReactor).
+/engine/*
+  Cache-Control: public, max-age=31536000, immutable

@@ -22,6 +22,7 @@ pub mod json;
 pub mod real;
 pub mod seqalign;
 mod x87;
+pub mod xml;
 
 pub use seqalign::{write_query, SeqAlignError, SerialFormat};
 

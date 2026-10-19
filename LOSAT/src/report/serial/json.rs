@@ -277,7 +277,7 @@ impl Encoder for JsonEncoder<'_> {
     ///     StartBlock();
     /// }
     /// ```
-    fn begin_sequence(&mut self) {
+    fn begin_sequence(&mut self, _type_name: &str) {
         self.start_block();
     }
 
@@ -427,6 +427,11 @@ impl Encoder for JsonEncoder<'_> {
     fn int(&mut self, value: i32) {
         let mut digits = itoa_i32(value);
         self.out.extend_from_slice(digits.text());
+    }
+
+    /// `WriteInt8`: the decimal digits, as `WriteInt4`.
+    fn big_int(&mut self, value: i64) {
+        self.out.extend_from_slice(value.to_string().as_bytes());
     }
 
     /// An ENUMERATED value is its name as a string (not an INTEGER with named values).

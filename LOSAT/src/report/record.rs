@@ -59,6 +59,9 @@ pub struct ReportNeeds {
     /// `HspRecord`s, and a database's name and title are checked
     /// (`report::serial::seqalign::check_database`).
     pub seqalign: bool,
+    /// BLAST XML is written (outfmt 5): the reports build the rows of every final HSP, keep the
+    /// query's warning messages, and give the writer the run's values (`report::blast_xml`).
+    pub blast_xml: bool,
 }
 
 impl ReportNeeds {
@@ -67,6 +70,7 @@ impl ReportNeeds {
         let mut needs = Self::default();
         for format in formats {
             needs.seqalign |= crate::report::serial::SerialFormat::of(format).is_some();
+            needs.blast_xml |= format == ReportFormat::Xml;
         }
         needs
     }

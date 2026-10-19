@@ -188,7 +188,7 @@ impl Encoder for AsnBinaryEncoder<'_> {
     fn end_document(&mut self) {}
 
     /// `BeginClass`: `30 80`.
-    fn begin_sequence(&mut self) {
+    fn begin_sequence(&mut self, _type_name: &str) {
         self.out
             .extend_from_slice(&[TAG_SEQUENCE, INDEFINITE_LENGTH]);
     }
@@ -232,6 +232,21 @@ impl Encoder for AsnBinaryEncoder<'_> {
     fn int(&mut self, value: i32) {
         self.out.push(TAG_INTEGER);
         self.number(value);
+    }
+
+    /// `WriteInt8`: INTEGER in the fewest big-endian two's-complement bytes of the value.
+    fn big_int(&mut self, value: i64) {
+        let bytes = value.to_be_bytes();
+        let mut start = 0;
+        while start < 7
+            && ((bytes[start] == 0x00 && bytes[start + 1] & 0x80 == 0)
+                || (bytes[start] == 0xff && bytes[start + 1] & 0x80 != 0))
+        {
+            start += 1;
+        }
+        self.out.push(TAG_INTEGER);
+        self.out.push((8 - start) as u8);
+        self.out.extend_from_slice(&bytes[start..]);
     }
 
     /// `WriteEnum`: ENUMERATED with the number of the value.

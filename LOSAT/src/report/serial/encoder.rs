@@ -48,6 +48,13 @@ pub enum SerialError {
     /// A NaN or an infinity in the ASN.1 binary stream, which NCBI marks with its own form
     /// byte and LOSAT does not write (no BLAST report has one).
     NonFiniteReal,
+    /// A byte >= 0x80 in a string of the XML stream, whose US-ASCII encoding cannot hold it:
+    /// NCBI's `CUtf8::SymbolToChar` throws (rc 255, or a document cut after the failed
+    /// element); the callers refuse such strings first, so this does not occur.
+    NonAsciiChar(u8),
+    /// A call that the XML stream does not write for outfmt 5 (a BOOLEAN, an ENUMERATED
+    /// value or a CHOICE).
+    XmlUnsupported(&'static str),
 }
 
 impl std::fmt::Display for SerialError {
@@ -61,6 +68,13 @@ impl std::fmt::Display for SerialError {
                 f,
                 "a character 0x{byte:02x} outside the visible ASCII range in an ASN.1 VisibleString is not supported by LOSAT"
             ),
+            SerialError::NonAsciiChar(byte) => write!(
+                f,
+                "a character 0x{byte:02x} outside the US-ASCII range in an XML string is not supported by LOSAT"
+            ),
+            SerialError::XmlUnsupported(what) => {
+                write!(f, "an XML {what} is not supported by LOSAT")
+            }
         }
     }
 }
@@ -74,8 +88,9 @@ pub trait Encoder {
     fn begin_document(&mut self, type_name: &str);
     /// `EndOfWrite` and the separator after the top-level object.
     fn end_document(&mut self);
-    /// `BeginClass`: a SEQUENCE value starts.
-    fn begin_sequence(&mut self);
+    /// `BeginClass`: a SEQUENCE value of the ASN.1 type `type_name` starts (only the XML
+    /// stream reads the name: it writes `<Type>` and `<Type_member>` tags).
+    fn begin_sequence(&mut self, type_name: &str);
     /// `EndClass`.
     fn end_sequence(&mut self);
     /// `BeginClassMember(id)`: member `name` (position `tag`) of the current SEQUENCE.
@@ -95,6 +110,9 @@ pub trait Encoder {
     fn end_variant(&mut self);
     /// `WriteInt4`.
     fn int(&mut self, value: i32);
+    /// `WriteInt8`: an INTEGER written as a BigInt (XML and the text formats print it
+    /// decimal).
+    fn big_int(&mut self, value: i64);
     /// `WriteEnum` of an ENUMERATED value: its name and number.
     fn enumerated(&mut self, name: &str, value: i32);
     /// `WriteBool`.

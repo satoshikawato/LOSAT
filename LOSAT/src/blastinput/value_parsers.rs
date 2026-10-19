@@ -917,6 +917,21 @@ impl SegSpec {
         !matches!(self, Self::No)
     }
 
+    /// The options as NCBI's filter string prints them (`BlastFilteringOptionsToString`): the
+    /// defaults for `yes`, the given window, locut and hicut otherwise (the substitution of
+    /// the defaults for a value not above 0 is `params`', after the options are set).
+    pub fn filter_options(&self) -> Option<(i32, f64, f64)> {
+        match *self {
+            Self::No => None,
+            Self::Yes => Some((12, 2.2, 2.5)),
+            Self::WindowLocutHicut {
+                window,
+                locut,
+                hicut,
+            } => Some((window, locut, hicut)),
+        }
+    }
+
     /// The SEG parameters of the query filter: a window, locut or hicut that is not above
     /// 0 keeps NCBI's default (`SegParametersNewAa`), then SEG checks the parameters
     /// (`SegParams::new`, blast_seg.c:2247-2258).

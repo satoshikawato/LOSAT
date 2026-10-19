@@ -721,6 +721,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 shadow: false,
                 stub: false,
+                sliced: None,
             };
             // The default window, the smallest `fits` takes, a wide one, and the smallest of the
             // batched scan.
@@ -880,6 +881,7 @@ mod tests {
             groups: build_groups(&lookup, &contexts),
             shadow: false,
             stub: false,
+            sliced: None,
         };
         let inp = XSubject {
             s_frames_preliminary: &s_frames,

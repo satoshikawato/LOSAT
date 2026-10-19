@@ -238,6 +238,20 @@ test('a search that builds one thread pool after another runs threaded from a ne
   }
 });
 
+test('a search after the engine prepared for it runs in the prepared runtime with the expected bytes', async ({ context }) => {
+  const page = await openHarness(context, isolated);
+  const vbr = vbrCases()[0]!;
+  for (const [threads, afterMs] of [[1, 0], [4, 0], [4, 1500]] as const) {
+    const result = await page.evaluate(([s, ms]) => window.losatHarness!.engine.preparedSearch(s, ms), [searchOf(vbr, threads), afterMs] as const);
+    expect(result.status, result.record.error).toBe('completed');
+    expect(result.sha256[0]).toBe(vbr.frozen[0]!.sha256);
+    expect(result.record.runtimeGeneration).toBe(1);
+    expect(result.record.runtimePath).toBe(threads === 1 ? 'serial' : 'threaded');
+    expect(result.record.threads).toBe(threads);
+    if (NATIVE !== undefined) expectOutputs(vbr, result);
+  }
+});
+
 test('a cancelled search ends its runtime; the next search runs in a new one with the expected bytes', async ({ context, browserName }) => {
   const page = await openHarness(context, isolated);
   const next = vbrCases()[0]!;

@@ -126,12 +126,62 @@
 //! is this fill (`[X_SHADOW] MBLUTONCE tables= cells= diffs=0 identical` at exit); with
 //! LOSAT_TIMING `[TIMING] x_mb_lookup_build` counts `once=<n>` (the builds this fill made) and
 //! `[TIMING] x_mb_lookup_once: fills= chunks= read_wall= read_max= read_sum= read_late= update_...
-//! last_... arena=` gives, per phase summed over the chunks of the search's fills (not the
-//! shadow's): the calling worker's wall time from before the phase's first job to the return of its
-//! last, the longest job, the jobs' summed time and the latest start of a job; `read` is the scope
-//! of A (with C of the chunk before), `update` that of B and `last` the scope that links the last
-//! chunk and flushes the copies; `arena` the largest arena of one fill (MiB).
+//! last_... prefault_... arena= prefault_rounds= prefault_touches=` gives, per phase summed over
+//! the chunks of the search's fills (not the shadow's): the calling worker's wall time from before
+//! the phase's first job to the return of its last, the longest job, the jobs' summed time and the
+//! latest start of a job; `read` is the scope of A (with C of the chunk before), `update` that of B,
+//! `last` the scope that links the last chunk and flushes the copies and `prefault` the prefault
+//! round (below); `arena` the largest arena of one fill (MiB); `prefault_rounds` the fills that ran
+//! the round and `prefault_touches` the zeros those rounds wrote.
+//!
+//! EXPERIMENT (LOSAT_X_MBLUTPREFAULT; in the strict set since 2026-10-19: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set, which turns this fill off anyway): the prefault round
+//! (scheduling only), the form of LOSAT_X_DISCLUTPAR's round (`x_disc_lookup_par.rs`, "The
+//! prefault round") for the one array here. Between phases A and B of the first chunk (in
+//! processing order), when that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per
+//! 1,024 cells (4 KiB) of `hashtable` (`prefault_gate`), a set of P jobs writes 0 to one element of
+//! each page of `hashtable` that
+//! holds the cell of a word of that chunk: the readers mark in phase A the page of every word's
+//! cell, in bits of their own (`PageBits`); the calling thread ORs them; toucher `j` writes 0 to
+//! the middle element of each marked page whose middle element lies in a block of owner `j` (one
+//! job per page). Phase B writes the cell of every word, so a marked page is a page the fill
+//! writes; and before the first phase B every element of `hashtable` still holds the 0 it was
+//! allocated with (NCBI's `calloc`: `build_mb_lookup` and the shadow allocate the table zeroed),
+//! so the round writes 0 over 0 and every array is what it is without it. Why: phase B reads a cell
+//! before it writes it (`head = hashtable[cell]`), so on a page the process has not touched yet
+//! the read maps the kernel's shared zero page and the write then replaces it with a page of the
+//! process's own: a second fault, and a copy-on-write that flushes the page's entry from the TLBs
+//! of every other CPU that runs the search. Written first, the page takes one fault and no flush.
+//! The saving rests on Linux's zero page and copy-on-write, and the timing evidence is Linux only;
+//! where memory comes zeroed and mapped (wasm32's linear memory) the round only costs its writes.
+//! On the workstation (Linux 6.8, THP `madvise`; line R's R5, `v4-R/REPORT_R5.md` §2-5) the 7
+//! tables of megablast of 65 records of three E. coli genomes against LC738868 at 64 threads made
+//! 102,000 such copies, which sent 6.4 million TLB shootdowns (to 63 CPUs each); a probe round that
+//! wrote every page of the table before the fill removed them and took whole runs to 0.73-0.94 of
+//! the read-once fill's time; this round took whole runs to 0.61-0.93 of the time without it at
+//! 4-32 threads on an i9 (WSL2, 2026-10-19; `docs/agents/diagnostics.md`). `next_pos` is not touched: phase C writes it without reading it (no
+//! zero page, no flush), and touching it did not pay there (0.97-1.04). Pages and max RSS: at 4 KiB
+//! pages the round touches only pages the fill writes, so the pages it maps are pages the fill maps
+//! anyway. It does not keep to whole 2 MiB regions (LOSAT_X_DISCLUTPAR's round does, for its
+//! discontiguous tables of fixed width): the width of this table grows with the query
+//! (`choose_na_lookup_table`: 4^11 cells from 8,500 table entries, 4^12 from 300,000 for word sizes
+//! above 12), so where the round runs nearly every page is written, and three E. coli genomes
+//! complete no 2 MiB region of a 4^12 table in a first chunk of 163,840 positions (6 of 32 in one
+//! of 2^19) while they leave 9 of its 16,385 pages unwritten in 2,000,000. Under transparent huge
+//! pages (`enabled=always`) a first write can map a whole 2 MiB page where the loop's first read
+//! maps the huge zero page; such a page holds marked pages and at most the pages of the table that
+//! no word of the whole fill writes (on this WSL machine, THP `always`, megablast of 5 kb to 4.6 Mb of
+//! MG1655 against LC738868 at 8 threads kept its max RSS within 0.4 MiB of the fill without the
+//! round). Memory: with the round, the readers' marks, one bit per page per reader on whole cache
+//! lines (576 bytes per reader at 4^11 cells and 2,112 at 4^12 for a table that starts 16 bytes into
+//! a page, as glibc's mapped blocks do, 512 and 2,048 for a page-aligned one: 33 KiB at P = 16, 526
+//! KiB at 255), freed at the end of the fill, and their OR (one row), freed after the round; in
+//! every fill, P counters of the zeros written.
 
+use super::x_disc_lookup_par::{
+    middle, page_offset, pages_of, touch, PageBits, SharedBits, TouchLog, HASHTABLE,
+    PAGE_ELEMS_SHIFT, PREFAULT_MIN_WORDS_PER_PAGE,
+};
 use super::x_mb_lookup_par::{
     flush_private, lines_capacity, plan, timing_on, Copies, Line, Private, Shared, SharedTables,
     Tables, Unready, Words, K_COMPRESSION_FACTOR_SHIFT,
@@ -139,6 +189,7 @@ use super::x_mb_lookup_par::{
 use super::{build_unmasked_ranges, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK};
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
 
 /// No NCBI counterpart (scheduling only): the most stream positions per chunk (each chunk is
 /// read, updated and linked before the next; the arena holds the words of one chunk), as
@@ -185,13 +236,25 @@ impl PhaseTimes {
     }
 }
 
-// No NCBI counterpart (LOSAT_TIMING only): the phases' split, the fills and chunks of the search's
-// read-once fills, and the largest arena of one fill (bytes).
-static PHASE_TIMES: [PhaseTimes; 3] = [const { PhaseTimes::new() }; 3];
-const PHASE_NAMES: [&str; 3] = ["read", "update", "last"];
+// No NCBI counterpart (LOSAT_TIMING only): the phases' split (the prefault round last,
+// `PREFAULT_PHASE`), the fills and chunks of the search's read-once fills, the largest arena of one
+// fill (bytes), and the prefault rounds and their page touches (the zeros written).
+static PHASE_TIMES: [PhaseTimes; 4] = [const { PhaseTimes::new() }; 4];
+const PHASE_NAMES: [&str; 4] = ["read", "update", "last", "prefault"];
+/// The index of the prefault round in `PHASE_TIMES`.
+const PREFAULT_PHASE: usize = 3;
 static FILLS: AtomicU64 = AtomicU64::new(0);
 static CHUNKS: AtomicU64 = AtomicU64::new(0);
 static ARENA_PEAK_BYTES: AtomicU64 = AtomicU64::new(0);
+static PREFAULT_ROUNDS: AtomicU64 = AtomicU64::new(0);
+static PREFAULT_TOUCHES: AtomicU64 = AtomicU64::new(0);
+
+/// No NCBI counterpart (scheduling only): LOSAT_X_MBLUTPREFAULT, the prefault round (module
+/// documentation), read once.
+fn prefault_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_MBLUTPREFAULT"))
+}
 
 /// No NCBI counterpart: with LOSAT_TIMING, when a read-once fill of the search ran, the `[TIMING]
 /// x_mb_lookup_once` line (module documentation), printed at exit after `x_mb_lookup_par`'s lines.
@@ -217,8 +280,10 @@ pub(super) fn print_timing() {
         ));
     }
     line.push_str(&format!(
-        " arena={:.1}MiB",
-        load(&ARENA_PEAK_BYTES) as f64 / 1048576.0
+        " arena={:.1}MiB prefault_rounds={} prefault_touches={}",
+        load(&ARENA_PEAK_BYTES) as f64 / 1048576.0,
+        load(&PREFAULT_ROUNDS),
+        load(&PREFAULT_TOUCHES)
     ));
     eprintln!("{line}");
 }
@@ -430,6 +495,17 @@ struct Checks {
     subranges_in_order: std::sync::atomic::AtomicUsize,
 }
 
+/// No NCBI counterpart (scheduling only): the prefault round's state of one fill (module
+/// documentation): the page offset (`page_offset`) of `hashtable`, the readers' marks of the pages
+/// of their words' cells in the first chunk (one row per reader; no rows without the round), and
+/// each job's count of the zeros it wrote (in tests also its log of them).
+#[derive(Clone, Copy)]
+struct Faults<'a> {
+    offset: usize,
+    marks: SharedBits,
+    touched: &'a Slots<(usize, TouchLog)>,
+}
+
 /// No NCBI counterpart (scheduling only): the plan and the shared state of one fill.
 struct Fill<'a, 'w, 'c> {
     words: &'a Words<'w>,
@@ -440,6 +516,7 @@ struct Fill<'a, 'w, 'c> {
     tables: SharedTables,
     arena: SharedArena,
     copies: &'a Slots<OwnerCopies<'c>>,
+    faults: Faults<'a>,
     #[cfg(test)]
     checks: &'a Checks,
 }
@@ -468,12 +545,19 @@ impl Fill<'_, '_, '_> {
     /// owner of the cell; its row gets the start of each owner's sub-range and the number of words.
     /// A range is entered up to `lut_word_length - 1` positions before `s0` (not before its start),
     /// so that the k-mer and `valid_bases >= lut_word_length` at the positions from `s0` on are the
-    /// loop's.
+    /// loop's. With `MARK` (the first chunk, when the prefault round runs) it also marks in its own
+    /// bits (`Faults::marks`), after clearing them, the page of `hashtable` of each word's cell; the
+    /// other chunks run the loop without the marking code.
     ///
-    /// SAFETY: no other job of the phase uses reader `a`'s region or row.
-    unsafe fn read(&self, a: usize, s0: usize, s1: usize) {
+    /// SAFETY: no other job of the phase uses reader `a`'s region, row or marks.
+    unsafe fn read<const MARK: bool>(&self, a: usize, s0: usize, s1: usize) {
         let words = self.words;
         let lut_word_length = words.lut_word_length;
+        let (marks, cells) = (self.faults.marks, self.faults.offset);
+        if MARK {
+            // SAFETY: reader `a`'s marks are this job's.
+            unsafe { marks.clear(a) };
+        }
         let scratch = self.arena.scratch(a);
         let mut counts = [0u32; 256];
         let mut n = 0usize;
@@ -513,6 +597,11 @@ impl Fill<'_, '_, '_> {
                 };
                 n += 1;
                 counts[self.owner[cell >> self.block_shift] as usize] += 1;
+                if MARK {
+                    // SAFETY: reader `a`'s bits; the page is one of `hashtable`'s (`cell` < its
+                    // length).
+                    unsafe { marks.mark(a, (cells + cell) >> PAGE_ELEMS_SHIFT) };
+                }
             }
             g += 1;
         }
@@ -535,6 +624,36 @@ impl Fill<'_, '_, '_> {
             // SAFETY: `at[o]` < the end of owner `o`'s sub-range <= `n` <= `half`.
             unsafe { sorted.add(at[o] as usize).write(*e) };
             at[o] += 1;
+        }
+    }
+
+    /// The prefault round (module documentation; between phases A and B of the first chunk only, and
+    /// only when that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per page of
+    /// `hashtable`, `fill_chunked`), toucher `j`: writes 0 to the middle element of each page in
+    /// `marked` (the OR of the readers' marks, by page of `hashtable`) whose middle element lies in
+    /// a block of owner `j`, so that phase B finds the page mapped. A marked page holds the cell of a
+    /// word of the first chunk, which phase B writes; no phase B has run, so the element holds the 0
+    /// it was allocated with, and each page has one toucher: the round writes 0 over 0 and changes
+    /// no value (no NCBI counterpart; scheduling only).
+    ///
+    /// SAFETY: no other job of the phase uses slot `j` of `Faults::touched`; the round runs before
+    /// the first phase B, on a table allocated zeroed; `marked` holds pages of `hashtable` only.
+    unsafe fn prefault(&self, j: usize, marked: &[u64]) {
+        let (offset, len) = (self.faults.offset, self.tables.hashtable.len);
+        // SAFETY: slot `j` is this job's.
+        let (touches, log) = unsafe { self.faults.touched.at(j) };
+        for (w, &bits) in marked.iter().enumerate() {
+            let mut bits = bits;
+            while bits != 0 {
+                let page = (w << 6) + bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                let m = middle(offset, len, page);
+                if self.owner[m >> self.block_shift] as usize == j {
+                    // SAFETY: as above: element `m` of a page of this job, before the first phase B.
+                    unsafe { touch(self.tables.hashtable, m, HASHTABLE, log) };
+                    *touches += 1;
+                }
+            }
         }
     }
 
@@ -777,19 +896,27 @@ fn run_phase<F: Fn(usize) + Sync>(
     t.late.fetch_add(late, Ordering::Relaxed);
 }
 
-/// No NCBI counterpart (scheduling only): what one fill did: its chunks and the lines of its arena;
-/// in tests also the owners whose copies held a value before the flush, the non-empty sub-ranges
-/// phase B took and how many of them were in increasing query offset (reading) order.
-#[derive(Clone, Copy, Debug, Default)]
+/// No NCBI counterpart (scheduling only): what one fill did: its chunks, the lines of its arena,
+/// its prefault rounds (0 or 1) and the zeros they wrote; in tests also the owners whose copies
+/// held a value before the flush, the non-empty sub-ranges phase B took and how many of them were
+/// in increasing query offset (reading) order, the prefault round's writes (`Touch`) and the pages
+/// of `hashtable` (by address) that the first chunk wrote.
+#[derive(Clone, Debug, Default)]
 pub(super) struct OnceStats {
     pub(super) chunks: usize,
     pub(super) arena_lines: usize,
+    pub(super) prefault_rounds: usize,
+    pub(super) touches: usize,
     #[cfg(test)]
     pub(super) owners_with_values: usize,
     #[cfg(test)]
     subranges: usize,
     #[cfg(test)]
     subranges_in_order: usize,
+    #[cfg(test)]
+    touch_log: TouchLog,
+    #[cfg(test)]
+    first_pages: std::collections::BTreeSet<usize>,
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1032-1033,1081-1091
@@ -804,7 +931,9 @@ pub(super) struct OnceStats {
 /// `ascending_cells`), each query position read once, with `parts` workers on the search pool (or
 /// one after another, `in_pool == false`, for the shadow without a pool); the module documentation
 /// gives the phases and why every element of the four arrays is the loop's. `timed`: a build of
-/// the search (LOSAT_TIMING's `[TIMING] x_mb_lookup_once` counts it), not the shadow's.
+/// the search (LOSAT_TIMING's `[TIMING] x_mb_lookup_once` counts it), not the shadow's. `hashtable`
+/// must be zeroed (as `build_mb_lookup` and the shadow allocate it, NCBI's `calloc`): the loop's
+/// empty cells, and the premise of the prefault round (LOSAT_X_MBLUTPREFAULT).
 pub(super) fn fill(
     parts: usize,
     words: &Words<'_>,
@@ -812,10 +941,29 @@ pub(super) fn fill(
     in_pool: bool,
     timed: bool,
 ) -> OnceStats {
-    fill_chunked(parts, words, tables, in_pool, timed, chunk_positions(parts))
+    fill_chunked(
+        parts,
+        words,
+        tables,
+        in_pool,
+        timed,
+        chunk_positions(parts),
+        prefault_on(),
+    )
 }
 
-/// `fill` with the chunk size (the tests take others).
+/// No NCBI counterpart (scheduling only): whether a first chunk of `first` positions runs the prefault
+/// round (LOSAT_X_MBLUTPREFAULT) on a table of `cells` cells: at least `PREFAULT_MIN_WORDS_PER_PAGE`
+/// positions per 1,024 cells (4 KiB), counted on the table's size, not on the pages it spans, so
+/// that the allocation's offset in its first page (16 bytes for glibc's mapped blocks, 0 for a
+/// page-aligned one) does not move the boundary: 131,072 positions for 4^12 cells, the first chunk
+/// of 4 workers (`chunk_positions`).
+fn prefault_gate(first: usize, cells: usize) -> bool {
+    first > 0
+        && first >= PREFAULT_MIN_WORDS_PER_PAGE.saturating_mul((cells >> PAGE_ELEMS_SHIFT).max(1))
+}
+
+/// `fill` with the chunk size and LOSAT_X_MBLUTPREFAULT (`prefault`) given (the tests take others).
 fn fill_chunked(
     parts: usize,
     words: &Words<'_>,
@@ -823,6 +971,7 @@ fn fill_chunked(
     in_pool: bool,
     timed: bool,
     chunk: usize,
+    prefault: bool,
 ) -> OnceStats {
     let table_size = tables.hashtable.len();
     let (block_shift, owner) = plan(table_size, tables.pv_array_bts, parts);
@@ -860,6 +1009,30 @@ fn fill_chunked(
     // A chunk holds at most `min(chunk, total)` positions: a small query gets a small arena.
     let shape = Shape::new(chunk.min(total), parts);
     let mut arena: Vec<Line> = Vec::with_capacity(lines_capacity(shape.lines()));
+    let chunks = total.div_ceil(chunk);
+    // Chunk `k` of the processing order: the chunks in stream order, last to first for
+    // `ascending_cells`.
+    let bounds = |k: usize| {
+        let c = if words.ascending_cells {
+            chunks - 1 - k
+        } else {
+            k
+        };
+        (c * chunk, total.min((c + 1) * chunk))
+    };
+    // The prefault round runs in the first chunk (of the processing order) only, and only when
+    // that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per 4 KiB of `hashtable`
+    // (`prefault_gate`); without it the readers' marks have no rows.
+    let offset = page_offset(shared.hashtable.ptr);
+    let pages = pages_of(offset, table_size);
+    let (first_start, first_end) = bounds(0);
+    let round_on = prefault && prefault_gate(first_end - first_start, table_size);
+    let mut marks = PageBits::new(if round_on { pages } else { 0 }, parts);
+    let touched = Slots(
+        (0..parts)
+            .map(|_| UnsafeCell::new((0usize, TouchLog::default())))
+            .collect(),
+    );
     #[cfg(test)]
     let checks = Checks::default();
     let fill = Fill {
@@ -874,19 +1047,13 @@ fn fill_chunked(
             shape,
         },
         copies: &slots,
+        faults: Faults {
+            offset,
+            marks: marks.shared(),
+            touched: &touched,
+        },
         #[cfg(test)]
         checks: &checks,
-    };
-    let chunks = total.div_ceil(chunk);
-    // Chunk `k` of the processing order: the chunks in stream order, last to first for
-    // `ascending_cells`.
-    let bounds = |k: usize| {
-        let c = if words.ascending_cells {
-            chunks - 1 - k
-        } else {
-            k
-        };
-        (c * chunk, total.min((c + 1) * chunk))
     };
     let span = |(start, end): (usize, usize), a: usize| {
         (
@@ -895,21 +1062,55 @@ fn fill_chunked(
         )
     };
     let mut clock = (timed && in_pool && timing_on()).then(|| JobClock::new(parts));
-    // SAFETY (all phases): job `i` of a phase uses only reader `i`'s region and row, owner `i`'s
-    // sub-ranges, cells and copies, and the `next_pos` entries of reader `i`'s words (see
-    // `SharedArena`, `Fill::read`, `Fill::update`, `Fill::link`, `Fill::flush`); `run_jobs` returns
-    // after every job of the phase has returned.
+    // SAFETY (all phases): job `i` of a phase uses only reader `i`'s region, row and marks, owner
+    // `i`'s sub-ranges, cells and copies, the `next_pos` entries of reader `i`'s words, and toucher
+    // `i`'s pages and slot of `touched` (see `SharedArena`, `Fill::read`, `Fill::prefault`,
+    // `Fill::update`, `Fill::link`, `Fill::flush`); `run_jobs` returns after every job of the phase
+    // has returned.
     for k in 0..chunks {
         let current = bounds(k);
+        // In the first chunk (with `round_on`) the readers mark their words' pages and the prefault
+        // round runs before phase B (`Fill::prefault`); later chunks run neither.
+        let mark = round_on && k == 0;
         run_phase(&mut clock, 0, parts, in_pool, |a| {
             if k > 0 {
                 // C of the chunk before.
                 unsafe { fill.link(a) };
             }
             let (s0, s1) = span(current, a);
-            unsafe { fill.read(a, s0, s1) };
+            if mark {
+                unsafe { fill.read::<true>(a, s0, s1) };
+            } else {
+                unsafe { fill.read::<false>(a, s0, s1) };
+            }
         });
+        if mark {
+            // Between two phases: the OR of the readers' marks.
+            let words = pages.div_ceil(64);
+            let marked: Vec<u64> = (0..words)
+                .map(|w| {
+                    (0..parts).fold(0, |bits, r| {
+                        // SAFETY: no job is running; `w` < the rows' stride.
+                        bits | unsafe { fill.faults.marks.word(r, w) }
+                    })
+                })
+                .collect();
+            run_phase(&mut clock, PREFAULT_PHASE, parts, in_pool, |j| unsafe {
+                fill.prefault(j, &marked)
+            });
+            stats.prefault_rounds += 1;
+        }
         run_phase(&mut clock, 1, parts, in_pool, |o| unsafe { fill.update(o) });
+        // Tests: the pages of `hashtable` the first chunk wrote (every written cell holds a 1-based
+        // query offset, other than 0), which the round must have touched.
+        #[cfg(test)]
+        if k == 0 {
+            let t = fill.tables.hashtable;
+            // SAFETY: between two phases; the table outlives the fill.
+            stats.first_pages = super::x_disc_lookup_par::nonzero_pages(unsafe {
+                std::slice::from_raw_parts(t.ptr, t.len)
+            });
+        }
     }
     run_phase(&mut clock, 2, parts, in_pool, |i| unsafe {
         fill.link(i);
@@ -917,22 +1118,31 @@ fn fill_chunked(
     });
     stats.chunks = chunks;
     stats.arena_lines = shape.lines();
+    let mut touched = touched.0;
+    stats.touches = touched.iter_mut().map(|slot| slot.get_mut().0).sum();
     #[cfg(test)]
     {
         stats.owners_with_values = checks.owners_with_values.into_inner();
         stats.subranges = checks.subranges.into_inner();
         stats.subranges_in_order = checks.subranges_in_order.into_inner();
+        stats.touch_log = touched
+            .iter_mut()
+            .flat_map(|slot| slot.get_mut().1.drain(..))
+            .collect();
     }
     if clock.is_some() {
         FILLS.fetch_add(1, Ordering::Relaxed);
         CHUNKS.fetch_add(chunks as u64, Ordering::Relaxed);
         ARENA_PEAK_BYTES.fetch_max((shape.lines() * LINE_BYTES) as u64, Ordering::Relaxed);
+        PREFAULT_ROUNDS.fetch_add(stats.prefault_rounds as u64, Ordering::Relaxed);
+        PREFAULT_TOUCHES.fetch_add(stats.touches as u64, Ordering::Relaxed);
     }
     stats
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::x_disc_lookup_par::PAGE_BYTES;
     use super::super::x_mb_lookup_par::tests::{random_case, repeat_case, Lcg};
     use super::super::{build_two_stage_lookup, MaskedInterval};
     use super::*;
@@ -1060,7 +1270,8 @@ mod tests {
                 + 1
         }
 
-        /// The read-once fill, from start values `helper0` / `pv0`.
+        /// The read-once fill, from start values `helper0` / `pv0`, with the prefault round
+        /// (LOSAT_X_MBLUTPREFAULT), which `check_prefault` checks.
         fn once(
             &self,
             shape: (usize, usize),
@@ -1069,6 +1280,23 @@ mod tests {
             chunk: usize,
             helper0: &[u32],
             pv0: &[PvArrayType],
+        ) -> (Built, OnceStats) {
+            let (b, stats) = self.once_mode(shape, parts, in_pool, chunk, helper0, pv0, true);
+            check_prefault(&b.hashtable, &stats, self.first_chunk(chunk), true);
+            (b, stats)
+        }
+
+        /// `once` with LOSAT_X_MBLUTPREFAULT given (`prefault`), unchecked.
+        #[allow(clippy::too_many_arguments)]
+        fn once_mode(
+            &self,
+            shape: (usize, usize),
+            parts: usize,
+            in_pool: bool,
+            chunk: usize,
+            helper0: &[u32],
+            pv0: &[PvArrayType],
+            prefault: bool,
         ) -> (Built, OnceStats) {
             let (cells, bts) = shape;
             let refs = self.refs();
@@ -1092,6 +1320,7 @@ mod tests {
                 in_pool,
                 false,
                 chunk,
+                prefault,
             );
             (b, stats)
         }
@@ -1120,6 +1349,54 @@ mod tests {
             let refs = self.refs();
             segments(&self.words(&refs)).1
         }
+
+        /// The positions of the first chunk of the processing order for chunks of `chunk` (the
+        /// last stream chunk for `ascending_cells`).
+        fn first_chunk(&self, chunk: usize) -> usize {
+            let (total, chunk) = (self.positions(), chunk.max(1));
+            if self.ascending && total > 0 {
+                total - (total.div_ceil(chunk) - 1) * chunk
+            } else {
+                chunk.min(total)
+            }
+        }
+    }
+
+    /// The prefault round of a fill of `v` (`hashtable` as filled in place) with
+    /// LOSAT_X_MBLUTPREFAULT `prefault` and a first chunk of `first` positions, from its log of
+    /// writes (`OnceStats::touch_log`): each wrote 0 over 0; the round ran once exactly when the
+    /// switch is on and the first chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per
+    /// 1,024 cells of `hashtable`, never otherwise; and the pages it wrote to are exactly the pages
+    /// the first chunk wrote (`OnceStats::first_pages`), each once, when it ran. So it maps no page
+    /// the fill does not write, and misses none of the first chunk's. Returns the number of pages
+    /// touched.
+    fn check_prefault(v: &[u32], stats: &OnceStats, first: usize, prefault: bool) -> usize {
+        let per_page = PREFAULT_MIN_WORDS_PER_PAGE * (v.len() / 1024).max(1);
+        let round = prefault && first > 0 && first >= per_page;
+        assert_eq!(stats.prefault_rounds, usize::from(round), "{stats:?}");
+        assert_eq!(stats.touches, stats.touch_log.len());
+        let mut touched = std::collections::BTreeSet::new();
+        for t in &stats.touch_log {
+            assert!(
+                t.array == HASHTABLE && t.before == 0 && t.after == 0 && t.index < v.len(),
+                "the prefault wrote {} over {} at element {} of array {}",
+                t.after,
+                t.before,
+                t.index,
+                t.array
+            );
+            let page = (v.as_ptr() as usize + 4 * t.index) / PAGE_BYTES;
+            assert!(touched.insert(page), "page {page} touched twice");
+        }
+        if round {
+            assert_eq!(
+                touched, stats.first_pages,
+                "touched / the first chunk's pages"
+            );
+        } else {
+            assert!(touched.is_empty());
+        }
+        touched.len()
     }
 
     fn longest(helper: &[u32]) -> usize {
@@ -1444,6 +1721,139 @@ mod tests {
                 assert!(walk.windows(2).all(|w| w[0] > w[1]), "newest first");
             }
         }
+    }
+
+    // LOSAT_X_MBLUTPREFAULT on pools of 2, 5 and 16 threads and off the pool: long repeats and
+    // random letters at `lut_word_length` 8, 11 and 12, both `ascending_cells`, first chunks on
+    // both sides of `PREFAULT_MIN_WORDS_PER_PAGE` positions per page: the tables are the loop's
+    // with the round and without it, the round touches exactly the first chunk's pages
+    // (`check_prefault`) and nothing without the switch; some rounds touched thousands of pages,
+    // and some fills ran without a round because their first chunk was too short.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn prefault_touches_the_first_chunks_pages_and_changes_no_table() {
+        let mut rng = Lcg(0x9F_A017_0003);
+        let random = |rng: &mut Lcg, len: usize| (0..len).map(|_| rng.below(4) as u8).collect();
+        let mut cases = Vec::new();
+        for (lut, asc) in [(8usize, false), (11, true), (12, false), (12, true)] {
+            cases.push((Case::one(random(&mut rng, 150_000), lut + 4, lut, asc), lut));
+            cases.push((
+                Case::one(repeat_case(&mut rng, 40_000), lut + 4, lut, asc),
+                lut,
+            ));
+        }
+        let (mut most, mut skipped) = (0usize, 0usize);
+        for (i, (c, lut)) in cases.iter().enumerate() {
+            let (reference, bts, chain) = c.reference(if *lut == 8 { 30_000 } else { 1_000_000 });
+            let shape = (reference.hashtable.len(), bts);
+            let zeros = (
+                vec![0u32; reference.helper_array.len()],
+                vec![0 as PvArrayType; reference.pv_array.len()],
+            );
+            for threads in [1usize, 2, 5, 16] {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .unwrap();
+                for chunk in [4_096usize, 70_000, CHUNK_POSITIONS] {
+                    let what = format!("case {i} lut {lut} pool {threads} chunk {chunk}");
+                    for prefault in [true, false] {
+                        let (b, stats) = pool.install(|| {
+                            c.once_mode(
+                                shape,
+                                threads,
+                                threads > 1,
+                                chunk,
+                                &zeros.0,
+                                &zeros.1,
+                                prefault,
+                            )
+                        });
+                        assert_built(&reference, chain, &b, &format!("{what} {prefault}"));
+                        let pages =
+                            check_prefault(&b.hashtable, &stats, c.first_chunk(chunk), prefault);
+                        if prefault {
+                            most = most.max(pages);
+                            skipped += usize::from(stats.prefault_rounds == 0);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(most > 4_000, "{most}");
+        assert!(skipped > 0);
+    }
+
+    // LOSAT_X_MBLUTPREFAULT with `hashtable` at element offsets 0, 4 (glibc's mapped blocks) and
+    // 1,023 (a first page of one element) in its first page, at `lut_word_length` 11 and 12, on a
+    // pool of 5 threads, with a first chunk just at the gate (8 positions per 1,024 cells) and one
+    // below it: the tables are the loop's, the round touches exactly the first chunk's pages, and it
+    // runs on both sides of the gate as `prefault_gate` says, whatever the offset.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn prefault_pages_do_not_depend_on_the_tables_offset() {
+        fn aligned(len: usize, offset: usize) -> (Vec<u32>, usize) {
+            let v = vec![0u32; len + offset + 1024];
+            let skip = (PAGE_BYTES - v.as_ptr() as usize % PAGE_BYTES) % PAGE_BYTES / 4;
+            (v, skip + offset)
+        }
+        let mut rng = Lcg(0x9F_A017_0004);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(5)
+            .build()
+            .unwrap();
+        let mut rounds = 0;
+        for lut in [11usize, 12] {
+            let q: Vec<u8> = (0..200_000).map(|_| rng.below(4) as u8).collect();
+            let c = Case::one(q, lut + 4, lut, false);
+            let (reference, bts, chain) = c.reference(1_000_000);
+            let cells = reference.hashtable.len();
+            let gate = PREFAULT_MIN_WORDS_PER_PAGE * (cells >> 10);
+            for chunk in [gate, gate - 1] {
+                for offset in [0usize, 4, 1023] {
+                    let refs = c.refs();
+                    let words = c.words(&refs);
+                    let (mut cells_v, c0) = aligned(cells, offset);
+                    let mut b = Built {
+                        hashtable: Vec::new(),
+                        next_pos: vec![0u32; c.next_len()],
+                        pv_array: vec![0 as PvArrayType; reference.pv_array.len()],
+                        helper_array: vec![0u32; reference.helper_array.len()],
+                    };
+                    let stats = pool.install(|| {
+                        fill_chunked(
+                            5,
+                            &words,
+                            Tables {
+                                hashtable: &mut cells_v[c0..c0 + cells],
+                                next_pos: &mut b.next_pos,
+                                pv_array: &mut b.pv_array,
+                                pv_array_bts: bts,
+                                helper_array: &mut b.helper_array,
+                            },
+                            true,
+                            false,
+                            chunk,
+                            true,
+                        )
+                    });
+                    let what = format!("lut {lut} chunk {chunk} offset {offset}");
+                    let table = &cells_v[c0..c0 + cells];
+                    check_prefault(table, &stats, c.first_chunk(chunk), true);
+                    assert_eq!(stats.prefault_rounds, usize::from(chunk == gate), "{what}");
+                    rounds += stats.prefault_rounds;
+                    b.hashtable = table.to_vec();
+                    assert_built(&reference, chain, &b, &what);
+                }
+            }
+        }
+        assert_eq!(rounds, 6);
     }
 
     // The arena: each reader's region and row on lines of their own, the regions within

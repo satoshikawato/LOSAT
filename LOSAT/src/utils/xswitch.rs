@@ -187,6 +187,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_MBBATCH",
     "LOSAT_X_MBDELAY",
     "LOSAT_X_MBLUTONCE",
+    "LOSAT_X_MBLUTPREFAULT",
     "LOSAT_X_NEWTONEXACT",
     "LOSAT_X_NEWTONLANES",
     "LOSAT_X_NEWTONLANES8",
@@ -232,6 +233,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXPIPE",
     "LOSAT_X_TBXPREFETCH",
     "LOSAT_X_TBXQFRAMES",
+    "LOSAT_X_TBXRPTPAR",
     "LOSAT_X_TBXSCANBF",
     "LOSAT_X_TBXUNGAP",
 ];

@@ -5,22 +5,25 @@
 // search starts a new generation, whose instance registers the subject again from the run
 // snapshot's bytes (R1). Messages of an older generation are dropped. A runtime is also
 // renewed before a search when its instance ran too many searches or its memory grew too
-// much (policy.ts). `describe` and `validate` go to the Data worker's serial reactor, which
-// can answer while a search runs (src/infra/reactor/control.ts).
+// much (policy.ts). A preparation hint (prepare) starts the generation, its instance and its
+// thread workers, or that renewal, before the search that would start them. `describe` and
+// `validate` go to the Data worker's serial reactor, which can answer while a search runs
+// (src/infra/reactor/control.ts).
 import {
   InputMismatchError,
   RunCancelledError,
   type EngineGateway,
   type EngineInput,
   type EnginePhase,
+  type EnginePrepareHint,
   type EngineRunRequest,
   type ProgramDescription,
   type RuntimeInfo,
   type ValidationResult,
 } from '../../ports/engine';
-import { engineBuildName, type EngineAssets, type ReactorAsset } from '../reactor/assets';
+import { engineBuildName, type EngineAssets } from '../reactor/assets';
 import type { EngineControl } from '../reactor/control';
-import { compileReactor, fetchReactor } from '../reactor/instance';
+import { loadReactor } from '../reactor/instance';
 import { chooseThreads, DEFAULT_RENEWAL, renewalReason, type RenewalLimits } from './policy';
 import type { EngineCommand, EngineEvent, EngineInit, ModuleSource, ThreadFault, WorkerError, WorkerInput, WorkerRun } from './protocol';
 
@@ -42,6 +45,8 @@ interface Generation {
   readonly faults: BroadcastChannel;
   /** Set after a search whose instance must be renewed before the next one. */
   renew: string | undefined;
+  /** The threads of the last preparation posted since the last search (prepare). */
+  prepared: number | undefined;
 }
 
 interface ActiveRun {
@@ -84,6 +89,32 @@ export class WasmEngine implements EngineGateway {
     });
   }
 
+  /**
+   * Starts the runtime of a search like `hint` before it comes (EngineGateway.prepare): the
+   * modules, the Engine worker, the instance and the thread workers that the search would
+   * start, and a renewal that the next search would make. Nothing happens while a search runs.
+   */
+  prepare(hint: EnginePrepareHint): void {
+    if (this.active !== undefined) return;
+    const threads = chooseThreads(
+      hint.requestedThreads,
+      hint.inputBytes,
+      this.options.hardwareConcurrency ?? navigator.hardwareConcurrency,
+    );
+    this.compiled()
+      .then((modules) => {
+        // A search that started meanwhile prepares for itself.
+        if (this.active !== undefined) return;
+        if (this.current?.renew !== undefined) this.retire();
+        const generation = this.current ?? this.startGeneration(modules);
+        if (generation.prepared === threads) return;
+        generation.prepared = threads;
+        this.post(generation.worker, { type: 'prepare', generation: generation.id, threads });
+      })
+      // The next search loads the modules (or starts the worker) again and reports the failure.
+      .catch(() => undefined);
+  }
+
   cancel(runId: string): void {
     const active = this.active;
     if (active === undefined || active.runId !== runId || active.settled) return;
@@ -106,6 +137,7 @@ export class WasmEngine implements EngineGateway {
     if (this.current?.renew !== undefined) this.retire();
     const generation = this.current ?? this.startGeneration(modules);
     active.generation = generation;
+    generation.prepared = undefined;
     const program = request.argv[0] ?? '';
     const command: WorkerRun = {
       type: 'run',
@@ -124,10 +156,9 @@ export class WasmEngine implements EngineGateway {
   /** Fetches, checks and compiles both modules once; each generation gets the compiled ones. */
   private compiled(): Promise<{ readonly serial: ModuleSource; readonly threads: ModuleSource }> {
     if (this.modules === undefined) {
-      const load = async (asset: ReactorAsset): Promise<ModuleSource> => compileReactor(await fetchReactor(asset));
       const modules =
         this.options.loadModules?.() ??
-        Promise.all([load(this.options.assets.serial), load(this.options.assets.threads)]).then(([serial, threads]) => ({
+        Promise.all([loadReactor(this.options.assets.serial), loadReactor(this.options.assets.threads)]).then(([serial, threads]) => ({
           serial,
           threads,
         }));
@@ -146,7 +177,7 @@ export class WasmEngine implements EngineGateway {
       this.options.createWorker?.() ??
       new Worker(new URL('./engine-worker.ts', import.meta.url), { type: 'module', name: 'losat-engine' });
     const faults = new BroadcastChannel(`losat-web:engine-faults:${crypto.randomUUID()}`);
-    const generation: Generation = { id, worker, faults, renew: undefined };
+    const generation: Generation = { id, worker, faults, renew: undefined, prepared: undefined };
     worker.onmessage = (event: MessageEvent<EngineEvent>) => this.receive(generation, event.data);
     worker.onerror = (event) => {
       event.preventDefault();

@@ -2,6 +2,7 @@ const { Worker, isMainThread, parentPort, workerData } = require("worker_threads
 const { WASI } = require("wasi");
 const fs = require("fs");
 const crypto = require("node:crypto");
+const os = require("node:os");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 const { inspectArtifact } = require("./wasi_artifact");
@@ -86,14 +87,18 @@ function prespawnCount(argv) {
 
 // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3205-3222
 // m_NumThreads = num_threads;
-// Host-only, opt-in (LOSAT_WASI_GUARD_CACHE=<dir>): reuse the guarded bytes of an earlier
-// run. The key is the SHA-256 of the input bytes and of the guard's own source, so a
-// changed artifact or guard never reuses an entry. A hit is used only when its sidecar
-// names this key, the sidecar's own SHA-256 covers its fields (the fill / copy counts
-// included), and the cached bytes have the recorded SHA-256 and length; anything else
-// is recomputed by guardSharedMemory and replaced atomically (temporary file, then
-// rename). The guarded bytes themselves are never changed here.
+// Host-only (LOSAT_WASI_GUARD_CACHE; on by default since 2026-10-19, `0` turns it off): reuse
+// the guarded bytes of an earlier run. The key is the SHA-256 of the input bytes and of the
+// guard's own source, so a changed artifact or guard never reuses an entry. A hit is used
+// only when its sidecar names this key, the sidecar's own SHA-256 covers its fields (the
+// fill / copy counts included), and the cached bytes have the recorded SHA-256 and length;
+// anything else is recomputed by guardSharedMemory and replaced atomically (temporary file,
+// then rename). The guarded bytes themselves are never changed here. Unset, the directory is
+// the user's cache directory (defaultGuardCacheDir), and a failure to use it only means that
+// the guard is computed as without a cache; a directory that the variable names must work.
+// A write keeps the GUARD_CACHE_KEEP entries used last (a hit marks its entry used).
 const GUARD_CACHE_FORMAT = 1;
+const GUARD_CACHE_KEEP = 8;
 const sha256 = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
 let guardVersionKey = null;
 function guardVersion() {
@@ -140,19 +145,88 @@ function writeAtomic(file, data) {
   }
 }
 
+// The user's cache directory: $XDG_CACHE_HOME (absolute) or ~/.cache, ~/Library/Caches on
+// macOS, %LOCALAPPDATA% on Windows; null without a home directory.
+function defaultGuardCacheDir(env = process.env, platform = process.platform, home = homeDir()) {
+  let base = null;
+  if (platform === "win32") base = env.LOCALAPPDATA || (home && path.join(home, "AppData", "Local"));
+  else if (platform === "darwin") base = home && path.join(home, "Library", "Caches");
+  else base = env.XDG_CACHE_HOME && path.isAbsolute(env.XDG_CACHE_HOME) ? env.XDG_CACHE_HOME : home && path.join(home, ".cache");
+  return base ? path.join(base, "losat", "wasi-guard") : null;
+}
+
+function homeDir() {
+  try { return os.homedir(); } catch { return ""; }
+}
+
+const GUARD_ENTRY = /^guarded-[0-9a-f]{64}-[0-9a-f]{64}\.json$/;
+const GUARD_LEFTOVER = /^guarded-[0-9a-f]{64}-[0-9a-f]{64}\.wasm(?:\..*\.tmp)?$|^guarded-.*\.json\..*\.tmp$/;
+// Older than this, bytes without a sidecar and temporary files are left over from a run that
+// stopped between its writes; a younger one may belong to a run that is writing now.
+const GUARD_LEFTOVER_MS = 3_600_000;
+// Removes the entries (sidecar and bytes) beyond the GUARD_CACHE_KEEP used last, and leftovers.
+function pruneGuardCache(dir) {
+  const entries = [];
+  const names = fs.readdirSync(dir);
+  const sidecars = new Set(names.filter((name) => GUARD_ENTRY.test(name)));
+  for (const name of names) {
+    try {
+      if (sidecars.has(name)) {
+        entries.push({ stem: path.join(dir, name.slice(0, -5)), used: fs.statSync(path.join(dir, name)).mtimeMs });
+      } else if (GUARD_LEFTOVER.test(name) && !sidecars.has(name.replace(/\.wasm$/, ".json"))) {
+        const file = path.join(dir, name);
+        if (Date.now() - fs.statSync(file).mtimeMs > GUARD_LEFTOVER_MS) fs.rmSync(file, { force: true });
+      }
+    } catch { /* removed by another run meanwhile */ }
+  }
+  entries.sort((a, b) => b.used - a.used);
+  for (const { stem } of entries.slice(GUARD_CACHE_KEEP)) {
+    // The sidecar first: bytes without a sidecar are never used.
+    fs.rmSync(`${stem}.json`, { force: true });
+    fs.rmSync(`${stem}.wasm`, { force: true });
+  }
+}
+
 function guardSharedMemoryCached(bytes, inputSha256 = sha256(bytes)) {
-  const dir = process.env.LOSAT_WASI_GUARD_CACHE;
-  if (dir === undefined) return { ...guardSharedMemory(bytes), cache: "off" };
-  if (dir === "") throw new Error("LOSAT_WASI_GUARD_CACHE must name a directory");
+  const named = process.env.LOSAT_WASI_GUARD_CACHE;
+  if (named === "0") return { ...guardSharedMemory(bytes), cache: "off" };
+  if (named === "") throw new Error("LOSAT_WASI_GUARD_CACHE must name a directory or be 0");
+  const dir = named ?? defaultGuardCacheDir();
+  if (dir === null) return { ...guardSharedMemory(bytes), cache: "off" };
+  // The default directory may be unusable (no home, read-only, a file in the way).
+  const unusable = (err) => {
+    if (named !== undefined) throw err;
+    debug(`guard cache unusable (${err.message}): ${dir}`);
+  };
   const stem = path.join(dir, `guarded-${inputSha256}-${guardVersion()}`);
-  const cached = readGuardCache(stem, inputSha256);
+  let cached;
+  try {
+    cached = readGuardCache(stem, inputSha256);
+  } catch (err) {
+    unusable(err);
+    return { ...guardSharedMemory(bytes), cache: "off" };
+  }
   debug(`guard cache ${cached.cache}: ${stem}.wasm`);
-  if (cached.cache === "hit") return cached;
+  if (cached.cache === "hit") {
+    const now = new Date();
+    try { fs.utimesSync(`${stem}.json`, now, now); } catch { /* only the order of pruning */ }
+    return cached;
+  }
   const guarded = guardSharedMemory(bytes);
-  fs.mkdirSync(dir, { recursive: true });
-  // The sidecar is written last; a reader that pairs it with other bytes rejects the pair.
-  writeAtomic(`${stem}.wasm`, guarded.bytes);
-  writeAtomic(`${stem}.json`, `${JSON.stringify(guardCacheRecord(inputSha256, guarded))}\n`);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    // The sidecar is written last; a reader that pairs it with other bytes rejects the pair.
+    writeAtomic(`${stem}.wasm`, guarded.bytes);
+    writeAtomic(`${stem}.json`, `${JSON.stringify(guardCacheRecord(inputSha256, guarded))}\n`);
+  } catch (err) {
+    unusable(err);
+    return { ...guarded, cache: "off" };
+  }
+  try {
+    pruneGuardCache(dir);
+  } catch (err) {
+    debug(`guard cache not pruned (${err.message}): ${dir}`);
+  }
   return { ...guarded, cache: cached.cache };
 }
 
@@ -330,7 +404,7 @@ async function createThreadHost(wasmPath, kind, argv = [], options = {}) {
 // (*thread)->Run(); (*thread)->Join(&result);
 // Explicit module reuse for host measurements: each create still owns a fresh
 // instance/memory/worker set. There is no global cache or retained search pool
-// (LOSAT_WASI_GUARD_CACHE keeps only guarded bytes on disk, and only when set); a reactor's
+// (LOSAT_WASI_GUARD_CACHE keeps only guarded bytes on disk); a reactor's
 // thread workers stay with its host between searches (LOSAT_WASI_RECYCLE) until close().
 async function prepareThreadHost(wasmPath, kind) {
   const start = performance.now();
@@ -558,7 +632,7 @@ async function instantiatePreparedHost(wasmPath, kind, module, identity, argv, o
     },
   };
 }
-module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached };
+module.exports = { createThreadHost, prepareThreadHost, compileThreadedModule, guardSharedMemoryCached, defaultGuardCacheDir };
 
 if (!isMainThread) {
   const { module: workerModule, wasmPath, args, memory, control, fault, standby, recycle } = workerData;

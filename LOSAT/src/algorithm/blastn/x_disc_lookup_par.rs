@@ -729,22 +729,22 @@ impl SharedBuckets {
 /// smallest page of the targets; where pages are larger, some get more than one touch, which writes
 /// the same 0). The argument that the round maps no page the fill does not write holds at this
 /// granularity; for 2 MiB transparent huge pages see `Fill::prefault` and the size rule.
-const PAGE_BYTES: usize = 4096;
+pub(super) const PAGE_BYTES: usize = 4096;
 
 /// log2 of the 4-byte elements of a page (every array the round touches holds 4-byte elements).
-const PAGE_ELEMS_SHIFT: usize = 10;
+pub(super) const PAGE_ELEMS_SHIFT: usize = 10;
 
 const _: () = assert!(PAGE_BYTES == 4 << PAGE_ELEMS_SHIFT);
 const _: () = assert!(std::mem::size_of::<PvArrayType>() == 4);
 
 /// The element offset of `ptr` (4-byte elements) in its page: element `i` of an array that starts
 /// there lies on the array's page `(offset + i) >> PAGE_ELEMS_SHIFT` (its first page is 0).
-fn page_offset<T>(ptr: *const T) -> usize {
+pub(super) fn page_offset<T>(ptr: *const T) -> usize {
     (ptr as usize % PAGE_BYTES) / 4
 }
 
 /// The pages of an array of `len` 4-byte elements from page offset `offset`.
-fn pages_of(offset: usize, len: usize) -> usize {
+pub(super) fn pages_of(offset: usize, len: usize) -> usize {
     if len == 0 {
         0
     } else {
@@ -754,7 +754,7 @@ fn pages_of(offset: usize, len: usize) -> usize {
 
 /// The arrays whose pages the prefault round touches (`FaultJob::pages`, `Faults::marks`, and
 /// the tests' log of touches): `HASHTABLE` + template and `PV_ARRAY`.
-const HASHTABLE: usize = 0;
+pub(super) const HASHTABLE: usize = 0;
 const PV_ARRAY: usize = 2;
 
 /// No NCBI counterpart (scheduling only): 512 page bits on a 64-byte line of their own.
@@ -766,13 +766,13 @@ struct BitLine([u64; 8]);
 /// `r`'s bits are the `stride` words from word `r * stride`, a whole number of lines, so no two
 /// readers' bits share a line. A set bit: in phase A of the current chunk, the reader read a word
 /// whose cell (or the cell's presence-vector word) lies on that page.
-struct PageBits {
+pub(super) struct PageBits {
     lines: Vec<BitLine>,
     stride: usize,
 }
 
 impl PageBits {
-    fn new(pages: usize, parts: usize) -> Self {
+    pub(super) fn new(pages: usize, parts: usize) -> Self {
         let stride = pages.div_ceil(64).div_ceil(8) * 8;
         Self {
             lines: vec![BitLine([0; 8]); parts * stride / 8],
@@ -780,7 +780,7 @@ impl PageBits {
         }
     }
 
-    fn shared(&mut self) -> SharedBits {
+    pub(super) fn shared(&mut self) -> SharedBits {
         SharedBits {
             ptr: self.lines.as_mut_ptr().cast::<u64>(),
             stride: self.stride,
@@ -791,7 +791,7 @@ impl PageBits {
 /// No NCBI counterpart (scheduling only): `PageBits` shared by the jobs: in phase A each reader
 /// writes only its own bits; in the prefault round the jobs only read them.
 #[derive(Clone, Copy)]
-struct SharedBits {
+pub(super) struct SharedBits {
     ptr: *mut u64,
     stride: usize,
 }
@@ -806,7 +806,7 @@ impl SharedBits {
     /// Clears reader `r`'s bits.
     ///
     /// SAFETY: phase A, job `r`.
-    unsafe fn clear(self, r: usize) {
+    pub(super) unsafe fn clear(self, r: usize) {
         // SAFETY: reader `r`'s bits (above).
         unsafe { std::ptr::write_bytes(self.ptr.add(r * self.stride), 0, self.stride) };
     }
@@ -815,7 +815,7 @@ impl SharedBits {
     ///
     /// SAFETY: phase A, job `r`; `page < 64 * stride`.
     #[inline(always)]
-    unsafe fn mark(self, r: usize, page: usize) {
+    pub(super) unsafe fn mark(self, r: usize, page: usize) {
         debug_assert!(page < 64 * self.stride);
         // SAFETY: in reader `r`'s bits (above).
         unsafe { *self.ptr.add(r * self.stride + (page >> 6)) |= 1u64 << (page & 63) };
@@ -825,7 +825,7 @@ impl SharedBits {
     ///
     /// SAFETY: no job writes the bits; `w < stride`.
     #[inline(always)]
-    unsafe fn word(self, r: usize, w: usize) -> u64 {
+    pub(super) unsafe fn word(self, r: usize, w: usize) -> u64 {
         debug_assert!(w < self.stride);
         // SAFETY: as above.
         unsafe { *self.ptr.add(r * self.stride + w) }
@@ -846,18 +846,18 @@ impl SharedBits {
 /// the element, and its value before and after the write.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug)]
-struct Touch {
-    array: usize,
-    index: usize,
-    before: u32,
-    after: u32,
+pub(super) struct Touch {
+    pub(super) array: usize,
+    pub(super) index: usize,
+    pub(super) before: u32,
+    pub(super) after: u32,
 }
 
 /// The log of the prefault round's writes: in tests a list of `Touch`es, else nothing.
 #[cfg(test)]
-type TouchLog = Vec<Touch>;
+pub(super) type TouchLog = Vec<Touch>;
 #[cfg(not(test))]
-type TouchLog = ();
+pub(super) type TouchLog = ();
 
 /// No NCBI counterpart (scheduling only): what toucher `j` of a fill keeps for the prefault round,
 /// on lines of its own (it writes them in the round; the calling thread reads them after it): its
@@ -911,7 +911,7 @@ struct Faults {
 
 /// No NCBI counterpart (scheduling only): the middle element of page `page` of an array of `len`
 /// 4-byte elements from page offset `offset` (`page < pages_of(offset, len)`).
-fn middle(offset: usize, len: usize, page: usize) -> usize {
+pub(super) fn middle(offset: usize, len: usize, page: usize) -> usize {
     let lo = (page << PAGE_ELEMS_SHIFT).saturating_sub(offset);
     let hi = (((page + 1) << PAGE_ELEMS_SHIFT) - offset).min(len);
     debug_assert!(lo < hi);
@@ -957,7 +957,7 @@ fn page_touchers(
 ///
 /// SAFETY: `i < t.len`, and no other job reads or writes element `i` during the phase.
 #[inline(always)]
-unsafe fn touch(t: Shared<u32>, i: usize, array: usize, log: &mut TouchLog) {
+pub(super) unsafe fn touch(t: Shared<u32>, i: usize, array: usize, log: &mut TouchLog) {
     debug_assert!(i < t.len);
     #[cfg(test)]
     // SAFETY: as the caller's.
@@ -1508,7 +1508,7 @@ const PREFAULT_RULE: PrefaultRule = PrefaultRule {
 };
 
 /// See `PrefaultRule::min_words_per_page` and `PREFAULT_RULE`.
-const PREFAULT_MIN_WORDS_PER_PAGE: usize = 8;
+pub(super) const PREFAULT_MIN_WORDS_PER_PAGE: usize = 8;
 
 /// No NCBI counterpart (scheduling only): after phase A of the first chunk, between two phases
 /// (no job running), sets in `faults.touch[k]` the pages the round touches: for each array, the
@@ -1808,7 +1808,7 @@ fn fill_with<P: Fn(u8) + Sync>(
 /// Tests only (`FillStats::first_pages`, `check_prefault`): the pages of `v` that hold an element
 /// other than 0 (a fast test per page: most pages are all zero or all written).
 #[cfg(test)]
-fn nonzero_pages(v: &[u32]) -> std::collections::BTreeSet<usize> {
+pub(super) fn nonzero_pages(v: &[u32]) -> std::collections::BTreeSet<usize> {
     static ZEROS: [u32; 1024] = [0; 1024];
     let base = v.as_ptr() as usize;
     let mut pages = std::collections::BTreeSet::new();

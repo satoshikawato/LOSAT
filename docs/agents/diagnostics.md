@@ -265,6 +265,7 @@ export LOSAT_X_AHEAD=16
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
 export LOSAT_X_BPCLUT=1
+export LOSAT_X_BPCOMPOREUSE=1
 export LOSAT_X_BPDBCUT=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
@@ -310,6 +311,7 @@ export LOSAT_X_DPW128=1
 export LOSAT_X_DUSTFAST=1
 export LOSAT_X_DUSTRING=1
 export LOSAT_X_ENVCACHE=1
+export LOSAT_X_ERFABSORB=1
 export LOSAT_X_ERFMEMO=1
 export LOSAT_X_GREEDYFAST=1
 export LOSAT_X_GREEDYFUSE=1
@@ -733,6 +735,20 @@ Same values, faster computation:
   window kept in a ring buffer. Shadow: `LOSAT_X_DUSTSHADOW=1`.
 - `LOSAT_X_KARLINFAST=1` Karlin K convolution in eight lanes (same per-lane order).
 - `LOSAT_X_ERFMEMO=1` Spouge ErfC memoised per thread by the argument's bits.
+- `LOSAT_X_ERFABSORB=1` (speed; in the strict set from the pull request that added it, 2026-10-19;
+  `=0` or `LOSAT_X_DEFAULT=0` returns to the previous path) Spouge ErfC returns 2.0 for an
+  argument below -6 without evaluating ErfImpl. The reference computes `2.0 - ErfImpl(-z, TRUE)`
+  there, and ErfImpl of 6 or more is below 2.2e-17 (a fifth of 2^-53; the bound is argued at
+  `erfc_ncbi` in `stats/spouge.rs`), so the difference rounds to 2.0. The unit test
+  `x_erfc_below_minus_six_is_two_and_the_switched_function_has_the_reference_bits` checks the
+  reference on a grid, on random arguments and on the doubles next to -6. Shadow:
+  `LOSAT_X_ERFABSORBSHADOW=1` evaluates the reference as well and stops on a difference.
+  ErfImpl's long-double `expl` (double-double, 40 series terms and nine squarings) costs about
+  5,000 cycles a call; on WSSV x PajaWSV (blastp, one thread) 13,046 of the 18,964 calls that
+  reached it had an argument below -6 (line C, v4-C DECISIONS 25). Workstation, one core, 8
+  rounds (2026-10-19): WSSV x PajaWSV n1 0.969 of the time with this switch alone (0.943 with
+  `LOSAT_X_BPCOMPOREUSE` as well, n8 0.958), tblastn AP027131 x AP027133 0.994, blastx
+  AP027131 x AP027133 0.987, OrthoFinder q0 x Species6 n8 0.995 and n1 1.00 (both switches).
 - `LOSAT_X_DEKKER=1` (Wasm only) ErfC product error by Dekker's product instead of `fma`.
 - `LOSAT_X_CODONFAST=1` an unambiguous codon translated by one table read.
 - `LOSAT_X_PURGEFAST=1` blastn common-endpoint purge without shifting the array per removal.
@@ -775,6 +791,20 @@ Rebuilding less:
 
 - `LOSAT_X_SEGSHARE=1` blastp with 2+ threads: the subject SEG masks shared by the whole search,
   as in the one-thread path. Shadow: `LOSAT_X_SEGSHARESHADOW=1`.
+- `LOSAT_X_BPCOMPOREUSE=1` (blastp, speed; in the strict set from the pull request that added it,
+  2026-10-19; `=0` or `LOSAT_X_DEFAULT=0` returns to the previous path) an entry of the subject SEG
+  cache also keeps the amino-acid composition of its masked bytes, read once when the entry is
+  made, and the composition-based redo and its Newton prefetch take it instead of reading the
+  same bytes again for every query (`read_aa_composition` on the same bytes gives the same
+  bits). A range SEG does not mask (near-identical or not biased) is read as before; a masked
+  range whose window the redo skips has its composition read once anyway. Shadow:
+  `LOSAT_X_BPCOMPOREUSESHADOW=1` reads the bytes again and stops on a difference (and
+  `LOSAT_X_SEGSHARESHADOW=1` compares the stored composition too). On WSSV x PajaWSV (one thread)
+  the subject composition was read 9,434 times from 86 different byte strings, all of them cache
+  entries (line C, v4-C DECISIONS 25). Each entry holds a pointer and, when the switch is on,
+  232 bytes on the heap. Workstation, one core, 8 rounds (2026-10-19): WSSV x PajaWSV n1 0.978
+  of the time with this switch alone (0.943 with `LOSAT_X_ERFABSORB` as well); max RSS
+  unchanged.
 - `LOSAT_X_TBNQSIDE=1` tblastn: query SEG and lookup table once per query set.
 - `LOSAT_X_TBNSSIDE=1` tblastn: subject six-frame translations once per search of four or more
   query batches (20,000 query residues per batch), up to 256 MiB of translated residues. A

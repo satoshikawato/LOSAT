@@ -231,8 +231,8 @@ their variables mean
   diagnostics mode; `BPQBLOCK` takes the block path only for one `-outfmt 6` report (with
   `BPQBLOCKFMT`, one outfmt 0, 6 or 7 report) with more than one block (see its entry), and
   `BPQBLOCKFMT` acts only with `BPQBLOCK`; `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
-  `TBXNEXT` only in TBLASTX's parallel subject loop (2 or more threads, several subjects, native
-  builds); `BPCLUT` acts on `blastp -task blastp-fast` only, and `BPLKPFLAT` only where the search's pool
+  `TBXNEXT` only in TBLASTX's parallel subject loop (2 or more threads, several subjects; native
+  builds and the threaded Wasm module); `BPCLUT` acts on `blastp -task blastp-fast` only, and `BPLKPFLAT` only where the search's pool
   builds the flat table of `BPCLUT` (`BPCLUT` on, 2 or more threads), so with `BPCLUT=0` it changes
   nothing.
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
@@ -3053,7 +3053,8 @@ Scheduling (each value computed by one thread with the original function; order 
   subject whose units ran on the pool prints a `prelim_units` stage line with
   `parallel_selected=true`; `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
 - `LOSAT_X_TBXNEXT=1` (TBLASTX, speed; in the strict set since 2026-10-17, on by default; acts only
-  where the parallel subject loop runs: two or more threads and more than one subject, native builds) each thread of the pool takes the next subject from one
+  where the parallel subject loop runs: two or more threads and more than one subject; native builds, and the
+  threaded Wasm module (`wasm-threads`, LOSAT Web) since 2026-10-20) each thread of the pool takes the next subject from one
   counter when it is free (`tblastx/x_subject_next.rs`, one broadcast job per thread), with one worker
   state per thread made when it takes its first subject. Without it the loop gives rayon the subject indices
   as one indexed range (`for_each_init`), which rayon cuts into pieces before the search, so the long
@@ -3064,6 +3065,16 @@ Scheduling (each value computed by one thread with the original function; order 
   MiB, NCBI 359 MiB). With both at 8 threads (node 0, CPUs 8-15, medians of 3 alternating pairs, reports
   identical): that search 11.48 -> 2.58 s (NCBI `-db` 2.73 s), max RSS 257 -> 316 MiB; with the genome FASTA
   as `-subject` 12.83 -> 3.14 s (410 MiB); 10 transcripts x the zebrafish cDNA database 8.51 -> 8.01 s.
+  The threaded Wasm module (the LOSAT Web reactor under Node 26 on the i9-14900HX, both modules in one process
+  alternating search by search, warm searches, every report identical): 3 query pieces of 1.5 kb against the
+  Sakai and MG1655 genomes cut into 165 pieces of log-normal lengths (500 b to 600 kb) in length order (10.1
+  Mb, the reference loop of each subject on one thread) at 8 threads 411 -> 160 ms (x0.391, 4/4 rounds faster)
+  and at 4 threads 792 -> 327 ms (x0.569, 4/4), the CPU time divided by threads x wall 0.40-0.48 -> 1.02-1.04;
+  against the 28 distinct genomes of `LOSAT/tests/fasta` in length order (25.2 Mb, the 3 E. coli first) at 4
+  threads 2.41 -> 0.97 s (x0.444, 4/4); 25 genomes of 0.24-0.66 Mb x0.915 (8 threads, 4/4) and x0.960 (4
+  threads, 8/8); the 28 genomes in reverse order at 4 threads x0.998 (4/8) and in length order at 8 threads,
+  where `LOSAT_X_PAIRPAR`'s units split each subject over the pool, x1.009 (3/8; 8 rounds at load 41-48, pair
+  ratios 0.79-1.19).
 - `LOSAT_X_TBXPREFETCH=1536` (TBLASTX, speed; a value switch, in the strict set since 2026-10-18
   from the pull request that added it, on by default; x86-64 only) the unit scan of
   `LOSAT_X_PAIRPAR` (`scan_unit` in `tblastx/x_pair_par.rs`) prefetches, for each hit of a

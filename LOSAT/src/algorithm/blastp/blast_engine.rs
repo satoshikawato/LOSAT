@@ -3764,142 +3764,167 @@ fn build_pairwise_hits(
     render_alignment: bool,
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<Vec<PairwiseHit>> {
-    hits.into_iter()
-        .map(|(mut hit, comp_adjustment_method)| -> Result<PairwiseHit> {
-            let q_idx = hit.q_idx as usize;
-            let s_idx = hit.s_idx as usize;
-            let query = query_nomask_sequence(&query_contexts[q_idx]);
-            let subject = &subjects[s_idx].aa_seq[1..subjects[s_idx].aa_seq.len() - 1];
+    let row = |(mut hit, comp_adjustment_method): (Hit, u8)| -> Result<PairwiseHit> {
+        let q_idx = hit.q_idx as usize;
+        let s_idx = hit.s_idx as usize;
+        let query = query_nomask_sequence(&query_contexts[q_idx]);
+        let subject = &subjects[s_idx].aa_seq[1..subjects[s_idx].aa_seq.len() - 1];
 
-            let (query_seq, subject_seq) = if render_alignment {
-                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
-                // ```c
-                // s_Blast_HSPGetNumIdentitiesAndPositives(...)
-                // {
-                //    if (!hsp->gap_info) { ... } else { ... }
-                // }
-                // ```
-                let rendered = build_alignment_view_with_matrix(query, subject, &hit, matrix);
-                if let Some(view) = rendered {
-                    (Some(view.query_aln), Some(view.subject_aln))
-                } else {
-                    let q_start = hit.q_start.saturating_sub(1);
-                    let q_end = hit.q_end.min(query.len());
-                    let s_start = hit.s_start.saturating_sub(1);
-                    let s_end = hit.s_end.min(subject.len());
-                    let ungapped_span = q_end
-                        .saturating_sub(q_start)
-                        .min(s_end.saturating_sub(s_start));
-                    if ungapped_span == hit.length {
-                        (
-                            decode_alignment(query, q_start, q_start + ungapped_span),
-                            decode_alignment(subject, s_start, s_start + ungapped_span),
-                        )
-                    } else {
-                        (None, None)
-                    }
-                }
-            } else {
-                (None, None)
-            };
-            let query_seq = restore_displayed_o(
-                query_seq,
-                query_records
-                    .get(q_idx)
-                    .map_or(&[][..], |record| record.seq()),
-                hit.q_start.saturating_sub(1),
-            );
-            let subject_seq = restore_displayed_o(
-                subject_seq,
-                subject_records
-                    .get(s_idx)
-                    .map_or(&[][..], |record| record.seq()),
-                hit.s_start.saturating_sub(1),
-            );
-            // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1028
-            // ```c++
-            //             int num_matches = 0;
-            //             num_ident = 0;
-            //             // The query and subject sequence strings must be the same size in a correct
-            //             // alignment, but if alignment extends beyond the end of sequence because of
-            //             // a bug, one of the sequence strings may be truncated, hence it is
-            //             // necessary to take a minimum here.
-            //             /// @todo FIXME: Should an exception be thrown instead?
-            //             for (unsigned int i = 0;
-            //                  i < min(m_QuerySeq.size(), m_SubjectSeq.size());
-            //                  ++i) {
-            //                 if (m_QuerySeq[i] == m_SubjectSeq[i]) {
-            //                     ++num_ident;
-            //                     ++num_positives;
-            //                     ++num_matches;
-            //                 } else {
-            //                     if(num_matches > 0) {
-            //                         btop_string +=  NStr::Int8ToString(num_matches);
-            //                         num_matches=0;
-            //                     }
-            //                     btop_string += m_QuerySeq[i];
-            //                     btop_string += m_SubjectSeq[i];
-            //                     if (matrix && !matrix->GetData().empty() &&
-            //                            (*matrix)(m_QuerySeq[i], m_SubjectSeq[i]) > 0) {
-            //                         ++num_positives;
-            //                     }
-            //                 }
-            //             }
-            //
-            //             if (num_matches > 0) {
-            //                 btop_string +=  NStr::Int8ToString(num_matches);
-            //             }
-            //             SetBTOP(btop_string);
-            //         }
+        let (query_seq, subject_seq) = if render_alignment {
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
+            // ```c
+            // s_Blast_HSPGetNumIdentitiesAndPositives(...)
+            // {
+            //    if (!hsp->gap_info) { ... } else { ... }
+            // }
             // ```
-            let positives = if render_alignment {
-                let (Some(query), Some(subject)) = (&query_seq, &subject_seq) else {
-                    anyhow::bail!("unimplemented BLASTP report alignment for final HSP");
-                };
-                crate::utils::matrix::protein_display_positives(query, subject, matrix)
+            let rendered = build_alignment_view_with_matrix(query, subject, &hit, matrix);
+            if let Some(view) = rendered {
+                (Some(view.query_aln), Some(view.subject_aln))
             } else {
-                hit.num_positives
+                let q_start = hit.q_start.saturating_sub(1);
+                let q_end = hit.q_end.min(query.len());
+                let s_start = hit.s_start.saturating_sub(1);
+                let s_end = hit.s_end.min(subject.len());
+                let ungapped_span = q_end
+                    .saturating_sub(q_start)
+                    .min(s_end.saturating_sub(s_start));
+                if ungapped_span == hit.length {
+                    (
+                        decode_alignment(query, q_start, q_start + ungapped_span),
+                        decode_alignment(subject, s_start, s_start + ungapped_span),
+                    )
+                } else {
+                    (None, None)
+                }
+            }
+        } else {
+            (None, None)
+        };
+        let query_seq = restore_displayed_o(
+            query_seq,
+            query_records
+                .get(q_idx)
+                .map_or(&[][..], |record| record.seq()),
+            hit.q_start.saturating_sub(1),
+        );
+        let subject_seq = restore_displayed_o(
+            subject_seq,
+            subject_records
+                .get(s_idx)
+                .map_or(&[][..], |record| record.seq()),
+            hit.s_start.saturating_sub(1),
+        );
+        // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:996-1028
+        // ```c++
+        //             int num_matches = 0;
+        //             num_ident = 0;
+        //             // The query and subject sequence strings must be the same size in a correct
+        //             // alignment, but if alignment extends beyond the end of sequence because of
+        //             // a bug, one of the sequence strings may be truncated, hence it is
+        //             // necessary to take a minimum here.
+        //             /// @todo FIXME: Should an exception be thrown instead?
+        //             for (unsigned int i = 0;
+        //                  i < min(m_QuerySeq.size(), m_SubjectSeq.size());
+        //                  ++i) {
+        //                 if (m_QuerySeq[i] == m_SubjectSeq[i]) {
+        //                     ++num_ident;
+        //                     ++num_positives;
+        //                     ++num_matches;
+        //                 } else {
+        //                     if(num_matches > 0) {
+        //                         btop_string +=  NStr::Int8ToString(num_matches);
+        //                         num_matches=0;
+        //                     }
+        //                     btop_string += m_QuerySeq[i];
+        //                     btop_string += m_SubjectSeq[i];
+        //                     if (matrix && !matrix->GetData().empty() &&
+        //                            (*matrix)(m_QuerySeq[i], m_SubjectSeq[i]) > 0) {
+        //                         ++num_positives;
+        //                     }
+        //                 }
+        //             }
+        //
+        //             if (num_matches > 0) {
+        //                 btop_string +=  NStr::Int8ToString(num_matches);
+        //             }
+        //             SetBTOP(btop_string);
+        //         }
+        // ```
+        let positives = if render_alignment {
+            let (Some(query), Some(subject)) = (&query_seq, &subject_seq) else {
+                anyhow::bail!("unimplemented BLASTP report alignment for final HSP");
             };
-            hit.num_positives = positives;
-            let gaps = hit.gap_letters();
+            crate::utils::matrix::protein_display_positives(query, subject, matrix)
+        } else {
+            hit.num_positives
+        };
+        hit.num_positives = positives;
+        let gaps = hit.gap_letters();
 
-            Ok(PairwiseHit {
-                hit,
-                query_seq,
-                subject_seq,
-                // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1049-1093
-                // ```c
-                // int query_frame = 1, subject_frame = 1;
-                // ...
-                // SetCounts(num_ident, align_length, num_gaps, num_gap_opens,
-                //           num_positives, query_frame, subject_frame);
-                // ```
-                query_frame: Some(1),
-                subject_frame: Some(1),
-                positives: Some(positives),
-                gaps: Some(gaps),
-                subject_length: Some(subjects[s_idx].aa_len),
-                // The title after its first word (the `bio` description of the inputs that
-                // `bio` read alike), as the other programs give it; the reports take the
-                // subject's title bytes by subject index (`write_blastp_pairwise_report`).
-                subject_title: subject_records.get(s_idx).and_then(|subject| {
-                    subject
-                        .title
-                        .iter()
-                        .position(|&byte| byte == b' ')
-                        .map(|space| {
-                            String::from_utf8_lossy(&subject.title[space + 1..]).into_owned()
-                        })
-                }),
-                // NCBI core/blast_kappa.c:332-342: the HSP's composition adjustment.
-                comp_adjust_method: Some(comp_adjustment_method),
-                // NCBI showalign.cpp:3595-3598: this optional Stage E field is
-                // consumed only by the TBLASTN writer; BLASTP keeps its writer.
-                sum_n: None,
-            })
+        Ok(PairwiseHit {
+            hit,
+            query_seq,
+            subject_seq,
+            // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1049-1093
+            // ```c
+            // int query_frame = 1, subject_frame = 1;
+            // ...
+            // SetCounts(num_ident, align_length, num_gaps, num_gap_opens,
+            //           num_positives, query_frame, subject_frame);
+            // ```
+            query_frame: Some(1),
+            subject_frame: Some(1),
+            positives: Some(positives),
+            gaps: Some(gaps),
+            subject_length: Some(subjects[s_idx].aa_len),
+            // The title after its first word (the `bio` description of the inputs that
+            // `bio` read alike), as the other programs give it; the reports take the
+            // subject's title bytes by subject index (`write_blastp_pairwise_report`).
+            subject_title: subject_records.get(s_idx).and_then(|subject| {
+                subject
+                    .title
+                    .iter()
+                    .position(|&byte| byte == b' ')
+                    .map(|space| String::from_utf8_lossy(&subject.title[space + 1..]).into_owned())
+            }),
+            // NCBI core/blast_kappa.c:332-342: the HSP's composition adjustment.
+            comp_adjust_method: Some(comp_adjustment_method),
+            // NCBI showalign.cpp:3595-3598: this optional Stage E field is
+            // consumed only by the TBLASTN writer; BLASTP keeps its writer.
+            sum_n: None,
         })
-        .collect()
+    };
+    // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the rows of the final list as an indexed map on the
+    // search's pool (`report::x_pairwise_par`), the first error in the list order; each row is
+    // `row` of its hit, which reads nothing another hit writes.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if let Some(pool) = x_pool {
+        use rayon::prelude::*;
+        let reference = (crate::report::x_pairwise_par::mode() == 2).then(|| hits.clone());
+        let rows: Vec<Result<PairwiseHit>> =
+            pool.install(|| hits.into_par_iter().map(&row).collect());
+        let rows = rows.into_iter().collect::<Result<Vec<_>>>()?;
+        if let Some(reference) = reference {
+            let serial = reference
+                .into_iter()
+                .map(&row)
+                .collect::<Result<Vec<_>>>()?;
+            crate::report::x_pairwise_par::compare_rows(&rows, &serial);
+        }
+        return Ok(rows);
+    }
+    #[cfg(not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )))]
+    let _ = x_pool;
+    hits.into_iter().map(row).collect()
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-61
@@ -6557,6 +6582,7 @@ fn write_reports_without_queries(
                     None,
                     true,
                     true,
+                    None,
                 )?;
             }
             OutputFormat::TabularWithComments => {
@@ -10200,6 +10226,7 @@ fn run_resolved_in_pool(
             true,
             query_records,
             subject_records,
+            crate::report::x_pairwise_par::pool(blastp_parallel_pool),
         )?)
     } else {
         None
@@ -10502,6 +10529,10 @@ fn run_resolved_in_pool(
                     warnings.as_mut(),
                     reports.x_prolog,
                     reports.epilog,
+                    // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the queries' parts formatted on the
+                    // search's pool after the search (`report::x_pairwise_par`); with
+                    // LOSAT_X_BPLKPAHEAD the next block's lookup build may still run on it.
+                    crate::report::x_pairwise_par::pool(blastp_parallel_pool),
                 )?;
                 Ok(())
             })(),

@@ -1531,6 +1531,9 @@ pub(crate) fn prefetch(inputs: Vec<NewtonInput>) {
     if inputs.is_empty() {
         return;
     }
+    for input in &inputs {
+        crate::utils::x_c4probe::note("newton", "prefetch", 1, crate::utils::x_c4probe::key_f64s(&input.q) ^ crate::utils::x_c4probe::key_f64s(&input.row).rotate_left(5) ^ crate::utils::x_c4probe::key_f64s(&input.col).rotate_left(11) ^ input.relative_entropy.to_bits());
+    }
     let mut outputs = vec![NewtonOutput::new(); inputs.len()];
     solve_batch(&inputs, &mut outputs);
     PREFETCHED.fetch_add(inputs.len() as u64, Ordering::Relaxed);
@@ -1589,10 +1592,12 @@ pub(crate) fn take(
                 let entry = store.remove(position).expect("stored entry");
                 x.copy_from_slice(&entry.x);
                 HITS.fetch_add(1, Ordering::Relaxed);
+                crate::utils::x_c4probe::note("newton", "take_hit", 1, 0);
                 Some(entry.status)
             }
             None => {
                 MISSES.fetch_add(1, Ordering::Relaxed);
+                crate::utils::x_c4probe::note("newton", "take_miss", 1, 0);
                 None
             }
         }

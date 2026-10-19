@@ -793,6 +793,7 @@ fn compute_k_from_lambda_h(sfp: &ScoreFreqProfile, lambda: f64, h: f64) -> Resul
 
 /// Compute Karlin-Altschul parameters from score frequency profile
 pub fn compute_karlin_params_ungapped(sfp: &ScoreFreqProfile) -> Result<KarlinParams, String> {
+    crate::utils::x_c4probe::note("karlin", "core_calc", sfp.sprob.len() as u64, crate::utils::x_c4probe::key_f64s(&sfp.sprob));
     let lambda = compute_lambda_nr(sfp, BLAST_KARLIN_LAMBDA0_DEFAULT)?;
     let h = compute_h_from_lambda(sfp, lambda)?;
     let k = compute_k_from_lambda_h(sfp, lambda, h)?;

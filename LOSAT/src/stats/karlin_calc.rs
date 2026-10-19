@@ -850,6 +850,7 @@ fn compute_k_from_lambda_h_impl(
 /// # Returns
 /// Karlin parameters (Lambda, K, H) or error
 pub fn compute_karlin_params_ungapped(sfp: &ScoreFreqProfile) -> Result<KarlinParams, String> {
+    crate::utils::x_c4probe::note("karlin", "stats_calc", sfp.sprob.len() as u64, crate::utils::x_c4probe::key_f64s(&sfp.sprob) ^ (sfp.obs_min as u64) << 32 ^ sfp.obs_max as u64);
     // Calculate Lambda
     let lambda = compute_lambda_nr(sfp, BLAST_KARLIN_LAMBDA0_DEFAULT)?;
 

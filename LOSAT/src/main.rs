@@ -132,7 +132,9 @@ fn main() -> Result<()> {
             let settings =
                 LOSAT::blastinput::ncbi_environment::check_ncbi_application_settings("blastp")
                     .map_err(anyhow::Error::msg)?;
-            if let Err(error) = blastp::run(args, settings) {
+            let c4_result = blastp::run(args, settings);
+            LOSAT::utils::x_c4probe::dump();
+            if let Err(error) = c4_result {
                 LOSAT::cli::exit_on_native_error(&error);
                 return Err(error);
             }

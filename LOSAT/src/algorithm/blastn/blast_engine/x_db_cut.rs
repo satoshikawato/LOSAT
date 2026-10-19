@@ -57,9 +57,10 @@
 //! and it is not set. It acts for every BLASTN task with `-db` (megablast, blastn, dc-megablast,
 //! blastn-short).
 //!
-//! `LOSAT_X_BNDBCUTSHADOW=1` (shadow mode, implies the switch): each search with the cut keeps what
-//! it hands to the merge, the search runs again as without the switch (`search_blocks_of` with
-//! `BLOCK_BYTES`, the same pool, rounds and kernel), and the two are compared: the ordinal ids in
+//! `LOSAT_X_BNDBCUTSHADOW=1` (shadow mode, implies the switch): each `-db` search (at one thread too,
+//! where both have blocks of `BLOCK_BYTES`) keeps what it hands to the merge, holding the kept
+//! results of the whole database, the search runs again as without the switch (`search_blocks_of`
+//! with `BLOCK_BYTES`, the same pool, rounds and kernel), and the two are compared: the ordinal ids in
 //! order and each kept result (its `Debug` text) and the good initial extensions each counted, or
 //! the texts of the two errors. The count of good initial extensions, which sizes the next query
 //! batch (NCBI's batch size mixer), is put back to what the search with the cut left, and the kept
@@ -159,14 +160,19 @@ pub(super) fn x_count_blocks(db: &SeqDb, block_bytes: u64) -> u64 {
     blocks
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1416
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1426
 // ```c
+//     /* iterate over all subject sequences */
 //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
 //            != BLAST_SEQSRC_EOF) {
 //        Int4 stat_length;
-//        if (seq_arg.oid == BLAST_SEQSRC_ERROR)
+//        if (seq_arg.oid == BLAST_SEQSRC_ERROR) {
+//            status = BLASTERR_SEQSRC;
 //            break;
-//        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0)
+//        }
+// ...
+//        if (BlastSeqSrcGetSequence(seq_src, &seq_arg) < 0) {
+//            continue;
 // ```
 // The one-thread loop of `search_blocks_of` reads its blocks of `BLOCK_BYTES` in ordinal order and
 // stops at the first block that cannot be read or the first sequence whose length is rejected

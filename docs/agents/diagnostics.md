@@ -1026,25 +1026,25 @@ Rebuilding less:
   smaller block can meet another error first or name another byte range. Memory: a worker holds one block of at most
   the cut (or one longer sequence); more threads search at once, each with its scratch, as in the parallel `-subject`
   path. Measured on the workstation (node 1; 16 or 8 booked cores with their siblings idle, or one core; a 3 s warm-up
-  before each run, alternating order, medians of 3 pairs against `LOSAT_X_BNDBCUT=0` with the same binary; every
+  before each run, alternating order, medians of 3 timed pairs after an untimed one, against `LOSAT_X_BNDBCUT=0` with the same binary; every
   output equal to NCBI 2.17.0 `-db -num_threads 1`; line G `results/g3ab/ab.tsv`), 100 16S queries: megablast x the
   first 2,000 16S at 16 threads 2.60 -> 0.97 s (x0.373; NCBI `-db` 3.08 s), at 8 threads 3.08 -> 1.81 s (x0.588);
   megablast x 28,036 16S at 16 threads 6.42 -> 5.84 s (x0.910; NCBI 10.26 s), at 8 threads 12.81 -> 10.06 s
   (x0.785); dc-megablast x the first 2,000 16S at 16 threads 6.19 -> 1.39 s (x0.225; NCBI 6.48 s), at 8 threads 6.52
   -> 2.46 s (x0.377); megablast of the Sakai genome (one 5.5 Mb query) x 28,036 16S at 16 threads 0.60 -> 0.54 s
   (x0.900), at 8 threads 1.10 -> 0.78 s (x0.709). One thread unchanged (x0.999-1.005). User and system time fall
-  (dc-megablast at 16 threads: user 31.9 -> 18.6 s, system 8.71 -> 0.37 s), and max RSS falls in every cell (139-143
+  (dc-megablast at 16 threads: user 31.9 -> 18.6 s, system 8.71 -> 0.37 s), and the median max RSS falls in every cell (139-143
   -> 119-122 MiB and 147-151 -> 117-121 MiB for megablast at 16 threads), below NCBI's except for the Sakai query at
   16 threads: 197-203 MiB with the switch and 200-203 MiB without it, against NCBI's 194 MiB.
-- `LOSAT_X_BNDBCUTSHADOW=1` shadow of `LOSAT_X_BNDBCUT` (implies it): each `-db` search with the cut keeps what it
-  hands to the hit lists, the search runs again with blocks of 1 MiB (the same pool, rounds and kernel), and the two
+- `LOSAT_X_BNDBCUTSHADOW=1` shadow of `LOSAT_X_BNDBCUT` (implies it): each `-db` search (at one thread too, where
+  both searches have blocks of 1 MiB) keeps what it hands to the hit lists, those of the whole database at once, the search runs again with blocks of 1 MiB (the same pool, rounds and kernel), and the two
   are compared (the ordinal ids in order, each kept result by its `Debug` text, and the good initial extensions each
   search counted; or the texts of the two errors). The count of good initial extensions, which sizes the next query
   batch (NCBI's batch size mixer), is put back to what the search with the cut left, and the kept results go to the
   hit lists after the comparison, so the run continues as without the shadow. The first difference stops the run
   (panic) after printing the line that is otherwise printed at exit: `[X_SHADOW] BNDBCUT searches= blocks=
   blocks_ref= merged= identical` (`blocks`: blocks of the cut; `blocks_ref`: blocks of 1 MiB; `merged`: kept results
-  compared). The preliminary stage runs twice, so its `LOSAT_TIMING` and `LOSAT_X_STATS` count double.
+  compared). The preliminary stage runs twice, so its `LOSAT_TIMING` and `LOSAT_X_STATS` count double, and its results are held twice.
 - `LOSAT_X_DBIDXREAD=1` (every program's `-db`, memory; in the strict set since 2026-10-19 (perf/db-index-pread, evidence
   at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the index file of each volume
   (`.pin` / `.nin`) stays open after the volume is opened, and the reader reads the ranges of its offset arrays that it

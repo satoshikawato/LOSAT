@@ -19,7 +19,8 @@ mod run;
 // Re-export the main run function
 pub use run::run;
 pub use run::run_local;
-// EXPERIMENT (LOSAT_X_QPREPPARSHADOW): the summary line `main` prints at exit (no NCBI counterpart).
+// EXPERIMENT (LOSAT_X_BNDBCUTSHADOW, LOSAT_X_QGROUPPARSHADOW, LOSAT_X_QPREPPARSHADOW): the summary lines
+// `main` prints at exit (no NCBI counterpart).
 pub use run::x_db_cut_print_summary;
 pub use run::x_qgroup_par_print_summary;
 pub use run::x_query_prep_par_print_summary;

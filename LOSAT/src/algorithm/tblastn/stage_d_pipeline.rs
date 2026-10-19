@@ -433,6 +433,60 @@ fn x_batches_side_by_side(
     batches / threads * threads
 }
 
+// No NCBI counterpart: chooses which query batches are searched side by side, each on one
+// thread; every batch is searched as NCBI searches it and the reports keep the batch order.
+/// EXPERIMENT (LOSAT_X_TBNBATCH, LOSAT_X_TBNBATCHRULE): how many of the first `batches` query
+/// batches `LOSAT_X_TBNBATCH` searches side by side at `threads` threads: none unless `allowed`
+/// (`LOSAT_X_TBNSSIDE` with four or more batches, and subject plans that would fit,
+/// `XSubjectSide::all_fit`); with `LOSAT_X_TBNBATCHRULE` those of `x_batches_side_by_side`;
+/// without it every batch, once there is at least one per thread.
+#[cfg(feature = "parallel")]
+fn x_side_by_side_batches(
+    subject_bases: usize,
+    subjects: usize,
+    batches: usize,
+    threads: usize,
+    allowed: bool,
+) -> usize {
+    if !allowed {
+        0
+    } else if x_tbn_batch_rule() {
+        x_batches_side_by_side(subject_bases, subjects, batches, threads)
+    } else if batches >= threads {
+        batches
+    } else {
+        0
+    }
+}
+
+// No NCBI counterpart: decides whether the subject plans of a search are kept; it does not change
+// any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNKEEPFEW): true when a search of `batches` query batches (four or more,
+/// with `LOSAT_X_TBNSSIDE`) at `threads` threads searches more batches side by side than it has
+/// threads (`x_side_by_side_batches`): the batches after the first round then start when the
+/// plans of every subject have been made, and read them instead of making them again. The plans
+/// are kept for such a search; side by side needs plans that fit, so they hold at most two bytes
+/// per subject base of `X_SIDE_BY_SIDE_MAX_BASES` (or of fewer than two subjects per thread).
+/// Timed on the workstation (2026-10-19, 8 batches of fly proteins against 5,000 fly cDNAs, 14.3
+/// Mb, `-db`): at 4 threads (two rounds) the search without them took 1.004 of the time (0.997-1.008,
+/// 8 pairs), at 8 threads (one round) 0.998.
+fn x_side_by_side_in_rounds(subjects: SubjectLetters<'_>, batches: usize, threads: usize) -> bool {
+    #[cfg(feature = "parallel")]
+    {
+        if threads < 2 || !crate::utils::xswitch::on("LOSAT_X_TBNBATCH") {
+            return false;
+        }
+        let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
+        let bases = subjects.lengths().fold(0usize, usize::saturating_add);
+        x_side_by_side_batches(bases, subjects.count(), batches, threads, fits) > threads
+    }
+    #[cfg(not(feature = "parallel"))]
+    {
+        let _ = (subjects, batches, threads);
+        false
+    }
+}
+
 // No NCBI counterpart: reads the LOSAT_X_TBNOWNPOOLS variable once; it does not change any value
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): a switch of the strict set (`utils/xswitch.rs`), on unless
@@ -562,7 +616,8 @@ pub(super) fn x_search_batches<'p>(
     let x_keep = !x_subject_side_on
         || ranges.len() < super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
         || !super::search_seed::XSubjectSide::keep_few()
-        || super::search_seed::XSubjectSide::kept_within_threads(subjects.lengths(), threads);
+        || super::search_seed::XSubjectSide::kept_within_threads(subjects.lengths(), threads)
+        || x_side_by_side_in_rounds(subjects, ranges.len(), threads);
     let x_subject_side = super::search_seed::XSubjectSide::for_batches(
         x_subject_side_on && x_keep,
         ranges.len(),
@@ -624,22 +679,14 @@ pub(super) fn x_search_batches<'p>(
         // as the one-thread search, and the reports are returned in batch order.
         if crate::utils::xswitch::on("LOSAT_X_TBNBATCH") && pool.enabled() {
             let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
-            // EXPERIMENT (LOSAT_X_TBNBATCHRULE): side by side only for the full waves of a small
-            // subject set (x_batches_side_by_side); without it every batch, once there is at
-            // least one per thread.
             let bases = subjects.lengths().fold(0usize, usize::saturating_add);
-            let side_by_side = if x_tbn_batch_rule() {
-                x_batches_side_by_side(bases, subjects.count(), ranges.len(), pool.threads())
-            } else if ranges.len() >= pool.threads() {
-                ranges.len()
-            } else {
-                0
-            };
-            let side_by_side = if x_ssided_layout && fits {
-                side_by_side
-            } else {
-                0
-            };
+            let side_by_side = x_side_by_side_batches(
+                bases,
+                subjects.count(),
+                ranges.len(),
+                pool.threads(),
+                x_ssided_layout && fits,
+            );
             // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the batches left after those, at the same time
             // on pools of their own (x_batches_on_own_pools).
             let own_pools = if x_tbn_own_pools() && x_tbn_batch_rule() {
@@ -6063,6 +6110,42 @@ mod tests {
                 );
             }
         }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBNKEEPFEW): many subjects searched side by side by more batches than
+    // threads keep their plans for the batches after the first round; one round, one thread, or
+    // batches one after another do not.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn x_plans_are_kept_for_batches_side_by_side_in_rounds() {
+        let subjects: Vec<Vec<u8>> = (0..100usize)
+            .map(|n| (0..3_000usize).map(|i| b"ACGT"[(i * 7 + n) % 4]).collect())
+            .collect();
+        let slices = subject_slices(&subjects);
+        let rounds = |batches, threads| {
+            x_side_by_side_in_rounds(SubjectLetters::Records(&slices), batches, threads)
+        };
+        if !crate::utils::xswitch::on("LOSAT_X_TBNBATCH") {
+            assert!(!rounds(8, 4) && !rounds(16, 8));
+            return;
+        }
+        if !x_tbn_batch_rule() {
+            return;
+        }
+        assert!(rounds(8, 4));
+        assert!(rounds(16, 8));
+        assert!(rounds(12, 4));
+        assert!(!rounds(8, 8));
+        assert!(!rounds(5, 4));
+        assert!(!rounds(9, 8));
+        assert!(!rounds(8, 1));
+        // A set of more than 24 Mb of many subjects is searched one batch after another.
+        let large: Vec<&[u8]> = std::iter::repeat_n(&subjects[0][..], 8_001).collect();
+        assert!(!x_side_by_side_in_rounds(
+            SubjectLetters::Records(&large),
+            16,
+            4
+        ));
     }
 
     // EXPERIMENT (LOSAT_X_TBNBATCHRULE): the full waves of a small subject set or of fewer than

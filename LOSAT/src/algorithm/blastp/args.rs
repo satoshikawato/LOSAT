@@ -705,7 +705,10 @@ impl BlastpArgs {
         //     }
         // ```
         let choice = crate::blastinput::app::parse_formatting_string(&self.outfmt)?;
-        crate::blastinput::app::formatting_handler_check(&choice, false)?;
+        crate::blastinput::app::formatting_handler_check(
+            &choice,
+            crate::blastinput::app::Program::Blastp,
+        )?;
         if self.max_target_seqs.is_some_and(|size| size < 5) {
             diagnostics.write_all(&crate::report::query_warnings::few_matches_warning(
                 "blastp",

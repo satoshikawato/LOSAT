@@ -1357,16 +1357,18 @@ Rebuilding less:
   table, `hits` only where it had the room; with `LOSAT_X_BPLKPAHEAD` on, also builds ahead on the second
   spare's vectors, which `x_make_room` allocated or moved there, since the reuse test sees only capacity; `contexts_from_tasks`: contexts computed by the builds' tasks). With `LOSAT_X_BPCLUTSHADOW` the pool's build is the switch's (on the vectors that the
   previous block's pool build gave back) and is compared with the serial flat build as well.
-- `LOSAT_X_BPLKPAHEAD=1` (BLASTP `-task blastp-fast`, speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; acts only in the block search of `LOSAT_X_BPQBLOCK`, with `-subject`
-  or `-db`, where `LOSAT_X_BPLKPFLAT` acts on the pool's flat table of `LOSAT_X_BPCLUT`: more than one thread;
-  not with `LOSAT_X_BPCLUTSHADOW`, not for exact blastp) builds the next query block's query frames, lookup
+- `LOSAT_X_BPLKPAHEAD=1` (BLASTP `-task blastp-fast`, and exact blastp since 2026-10-20 (perf/bp-lkp-exact), speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; acts only in the block search of `LOSAT_X_BPQBLOCK`, with `-subject`
+  or `-db`, with more than one thread: for blastp-fast where `LOSAT_X_BPLKPFLAT` acts on the pool's flat table
+  of `LOSAT_X_BPCLUT` (not with `LOSAT_X_BPCLUTSHADOW`); for exact blastp where its table is built in place
+  (`LOSAT_X_BPLUT`; not with `LOSAT_X_BPLUT=0`, `LOSAT_X_BPLUTSHADOW` or `LOSAT_DIAGNOSTICS`, whose reference
+  builder prints its phases)) builds the next query block's query frames, lookup
   table and contexts during the block before it, as one task on the search's pool, instead of at the start
   of the next block's own search (`blastp/blast_engine/x_lookup_ahead.rs`, exactness argument in its
   header): the block loop runs each block's search in a `rayon::in_place_scope`, and when the block's own
   table is ready (at once when it was itself built ahead) the next block's build is spawned there; the next
   block's search then takes the values instead of computing them. They are the values of the same calls
-  (`blastp_query_frames`, `blastp_compressed_lookup`) on the same records, batches and pool, so the reports
-  do not change. A build ahead that fails, refuses, would need the reference builder (`TooLarge`) or lacks
+  (`blastp_query_frames`, `blastp_compressed_lookup`; exact blastp: `blastp_aa_lookup`, a leaf task without
+  rayon) on the same records, batches and pool, so the reports do not change. A build ahead that fails, refuses, would need the reference builder (`TooLarge`) or lacks
   the room in its vectors gives nothing, and the block builds inline, so an error is raised where it is
   without the switch; a panic of the build is kept and resumed where the block's search would start (with
   `panic = "abort"`, the release profile, it ends the process when it happens). Memory: one more table
@@ -1374,7 +1376,12 @@ Rebuilding less:
   is built; every vector of that table is allocated by the block search's thread, never by a pool task:
   that thread keeps a second spare (`x_query_blocks.rs` `XBlockSubjects`) with the room for the largest
   table so far plus a half (new vectors of twice its hits where they are short; untouched capacity is not
-  resident), which the build ahead takes whole (`XFlatArgs::x_ahead`). At one thread nothing changes.
+  resident), which the build ahead takes whole (`XFlatArgs::x_ahead`). Exact blastp: one more table
+  (backbone 0.44 MiB, overflow 6-8.5 MiB at 50,000-letter blocks, PV 3.5 KiB), on vectors the block search's
+  thread allocates and recycles (`lookup/x_lut_direct.rs` `XAaSpares`: the same room rule for the overflow;
+  each block's table is given back at the end of its search), with that thread's neighbour lists moved to the
+  builds ahead (one set; given back to it before a block that builds its own table and at the last block). At
+  one thread nothing changes.
   Measured 2026-10-16 on the workstation (node 0, 16 physical cores, siblings idle; Species4 hsap x Species6 scer
   blastp-fast `-subject`, #199's blastp switches + `LOSAT_X_BPCLUT` `LOSAT_X_BPREDOPAR` `LOSAT_X_BPLKPFLAT`
   `LOSAT_X_BPSUBJRUN` in every run; alternating pairs, medians; binary built from a local merge of this branch
@@ -1399,16 +1406,31 @@ Rebuilding less:
   the candidate set on): blastp-fast of 23,879 human proteins against the yeast proteome (`-subject`) at 16 threads
   -6.1 % wall (all four rounds at a matched clock, -4.1..-14.6 %), at 4 threads -1.3 %; with `-db` and
   `LOSAT_X_BPDBCUT` x0.932 (four pairs, 0.928-0.937, perf-mb `logs/lkpdb_report.md`). Max RSS +23-28 MiB, below
-  NCBI's (123 vs 328 MiB `-subject`, 116 vs 582 MiB `-db`). Exact blastp: it does not act. Not measured: blastp-fast `-db` on a database that `LOSAT_X_BPDBCUT` leaves in 1 MiB blocks (at least 4 MiB per thread); the only pairs near it (the 2.9 MB database with the cut off) read x1.143 and x0.987 (perf-mb `logs/lkpahead_report.md`); a Swiss-Prot blastp-fast pair is in the pending workstation plan (`ws/defbundle_plan2.txt`).
+  NCBI's (123 vs 328 MiB `-subject`, 116 vs 582 MiB `-db`). Exact blastp since 2026-10-20 (perf/bp-lkp-exact;
+  workstation node 1, 16 physical cores, siblings idle, 3 s warm-up of the booked cores before each run,
+  alternating pairs, medians, every output the same; `v4-B/results/lkpab/`): before, each block's table was
+  built on the block's thread alone while the pool waited (about 14 ms per 50,000-letter block, 60 ms for the
+  first with a cold neighbour memo: 0.37 s of 4.10 s for 3,000 human proteins x the yeast proteome at 16
+  threads); with the switch only the first block builds its own (0.06 s). 3,000 human proteins x yeast
+  (`-subject`, outfmt 6) 16 threads 4.105 -> 3.750 s (x0.914, 8 pairs 0.912-0.919), 8 threads 7.600 -> 7.285 s
+  (x0.959, 8 pairs), 2 threads 28.81 -> 28.59 s (x0.992, 3 pairs); outfmt 0 at 16 threads 4.170 -> 3.820 s
+  (x0.916, 8 pairs); the yeast proteome against its own `-db` 16 threads 21.10 -> 20.25 s (x0.959, 4 pairs),
+  8 threads 36.46 -> 35.72 s (x0.980, 4 pairs); every switch-on run faster than every switch-off run of its
+  case. Max RSS +3-5 MiB (16 threads 48.7-50.4 -> 53.2-55.0 MiB; NCBI 327 MiB). The builds ran on one pool
+  thread, took as long as inline (median 13.9 ms) and ended at least 81 ms (median 145 ms) before the end of
+  their block's search, so they did not overlap its report (the binary had #328's `LOSAT_X_PAIRWISEPAR`,
+  which writes outfmt 0 on the pool) and the block never waited for one. Not measured: blastp-fast `-db` on a database that `LOSAT_X_BPDBCUT` leaves in 1 MiB blocks (at least 4 MiB per thread); the only pairs near it (the 2.9 MB database with the cut off) read x1.143 and x0.987 (perf-mb `logs/lkpahead_report.md`); a Swiss-Prot blastp-fast pair is in the pending workstation plan (`ws/defbundle_plan2.txt`).
 - `LOSAT_X_BPLKPAHEADSHADOW=1` shadow of `LOSAT_X_BPLKPAHEAD` (implies it): each block that takes values
-  built ahead also builds them inline as without the switch (on the block spare's vectors, given back
-  after) and compares them: the query frames field for field, the flat tables field for field and slot for
-  slot, the contexts with their Karlin blocks bit for bit. The first difference prints the line below with
+  built ahead also builds them inline as without the switch (blastp-fast's on the block spare's vectors,
+  given back after) and compares them: the query frames field for field, the flat tables field for field and
+  slot for slot (exact blastp's tables every field, cell by cell), the contexts with their Karlin blocks bit
+  for bit. The first difference prints the line below with
   `DIFFERENT` and stops the run (panic). One line at exit: `[X_SHADOW] BPLKPAHEAD blocks= prebuilt= dropped=
   compared= identical` (`blocks`: blocks searched where the switch acts; `prebuilt`: blocks that took
   values built ahead; `dropped`: builds ahead that gave none, whose blocks built inline; `compared`: blocks
   compared; every block but the last starts one build once its own table is ready, if that table is a flat
-  one, as it is unless the reference builder made it, so `prebuilt + dropped = blocks - 1`).
+  one or (exact blastp) one built in place, as it is unless the reference builder made it, so
+  `prebuilt + dropped = blocks - 1`).
 - `LOSAT_X_BPDIAG=1` (BLASTP, speed; in the strict set since 2026-10-17; `=0` turns it off; acts only in
   the fused loop of `LOSAT_X_BPSEED` or `LOSAT_X_BPSEEDSHADOW`) the two-hit
   diagonal test of the hits of one lookup cell in batches of eight instead of one after the other

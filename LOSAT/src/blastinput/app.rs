@@ -1,7 +1,8 @@
 //! NCBI's application layer shared by the BLASTP, TBLASTN and TBLASTX command lines
 //! (`CBlastAppArgs::SetOptions` and the `CATCH_ALL` of the applications): the error
-//! frames, the `-outfmt` string, the `-seg` and `-comp_based_stats` strings that NCBI
-//! reads in its option handlers, after the input and output files are opened.
+//! frames, the `-outfmt` string (read so by all five programs), the `-seg` and
+//! `-comp_based_stats` strings that NCBI reads in its option handlers, after the input and
+//! output files are opened.
 
 use std::path::Path;
 
@@ -75,45 +76,90 @@ pub fn empty_subjects_error() -> anyhow::Error {
     engine_error("Empty CBlastQueryVector")
 }
 
-/// The numbers of NCBI's output formats that this module names.
+/// NCBI's output format numbers (`CFormattingArgs::EOutputFormat`).
 ///
-/// NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1024-1072
+/// NCBI reference: c++/include/algo/blast/blastinput/blast_args.hpp:1023-1074
 /// ```c
+///     /// Defines the output formats supported by our command line formatter
 ///     enum EOutputFormat {
 ///         /// Standard pairwise alignments
 ///         ePairwise = 0,
-/// ...
+///         ///< Query anchored showing identities
+///         eQueryAnchoredIdentities,
+///         ///< Query anchored no identities
+///         eQueryAnchoredNoIdentities,
+///         ///< Flat query anchored showing identities
+///         eFlatQueryAnchoredIdentities,
+///         ///< Flat query anchored no identities
+///         eFlatQueryAnchoredNoIdentities,
+///         /// XML output
+///         eXml,
 ///         /// Tabular output
 ///         eTabular,
 ///         /// Tabular output with comments
 ///         eTabularWithComments,
-/// ...
+///         /// ASN.1 text output
+///         eAsnText,
+///         /// ASN.1 binary output
+///         eAsnBinary,
+///         /// Comma-separated values
+///         eCommaSeparatedValues,
+///         /// BLAST archive format
+///         eArchiveFormat,
+///         /// JSON seq-align
+///         eJsonSeqalign,
 ///         /// JSON XInclude
 ///         eJson,
 ///         /// XML2 XInclude
 ///         eXml2,
-/// ...
+///         /// JSON2 single file
+///         eJson_S,
+///         /// XML2 single file
+///         eXml2_S,
 ///         /// SAM format
 ///         eSAM,
-/// ...
+///
+///         eTaxFormat,
+///
 ///         ///igblast AIRR rearrangement, 19
 ///         eAirrRearrangement,
-/// ...
+///         /// Comma-separated values with a header
+///         eCommaSeparatedValuesWithHeader,
+///
+///         /// unaligned reads in magicblast
 ///         eFasta,
 ///         /// Sentinel value for error checking
 ///         eEndValue
+///
+///     };
 /// ```
-const PAIRWISE: i32 = 0;
-const TABULAR: i32 = 6;
-const TABULAR_WITH_COMMENTS: i32 = 7;
-const COMMA_SEPARATED: i32 = 10;
-const JSON: i32 = 13;
-const XML2: i32 = 14;
-const SAM: i32 = 17;
-const AIRR: i32 = 19;
-const COMMA_SEPARATED_WITH_HEADER: i32 = 20;
-const FASTA: i32 = 21;
-const END_VALUE: i32 = 22;
+pub mod output_format {
+    pub const PAIRWISE: i32 = 0;
+    pub const QUERY_ANCHORED_IDENTITIES: i32 = 1;
+    pub const QUERY_ANCHORED_NO_IDENTITIES: i32 = 2;
+    pub const FLAT_QUERY_ANCHORED_IDENTITIES: i32 = 3;
+    pub const FLAT_QUERY_ANCHORED_NO_IDENTITIES: i32 = 4;
+    pub const XML: i32 = 5;
+    pub const TABULAR: i32 = 6;
+    pub const TABULAR_WITH_COMMENTS: i32 = 7;
+    pub const ASN_TEXT: i32 = 8;
+    pub const ASN_BINARY: i32 = 9;
+    pub const COMMA_SEPARATED_VALUES: i32 = 10;
+    pub const ARCHIVE_FORMAT: i32 = 11;
+    pub const JSON_SEQALIGN: i32 = 12;
+    pub const JSON: i32 = 13;
+    pub const XML2: i32 = 14;
+    pub const JSON_S: i32 = 15;
+    pub const XML2_S: i32 = 16;
+    pub const SAM: i32 = 17;
+    pub const TAX_FORMAT: i32 = 18;
+    pub const AIRR_REARRANGEMENT: i32 = 19;
+    pub const COMMA_SEPARATED_VALUES_WITH_HEADER: i32 = 20;
+    pub const FASTA: i32 = 21;
+    pub const END_VALUE: i32 = 22;
+}
+
+use output_format::*;
 
 /// A `-outfmt` value as NCBI's `ParseFormattingString` reads it: the format number and the
 /// custom specification (fields and a delimiter) that remains for it (only the tabular,
@@ -143,12 +189,146 @@ impl FormatChoice {
     }
 }
 
-/// The reports that LOSAT writes.
+/// The reports of NCBI's search programs: every `EOutputFormat` that blastn, blastp, blastx,
+/// tblastn or tblastx writes (blast_args.hpp:1023-1074 above). The AIRR rearrangement (19)
+/// and FASTA (21) formats are igblastn's and magicblast's (`formatting_handler_check`).
+/// Which of them LOSAT writes is `Program::writes`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
 pub enum ReportFormat {
-    Pairwise,
-    Tabular,
-    TabularWithComments,
+    Pairwise = PAIRWISE,
+    QueryAnchoredIdentities = QUERY_ANCHORED_IDENTITIES,
+    QueryAnchoredNoIdentities = QUERY_ANCHORED_NO_IDENTITIES,
+    FlatQueryAnchoredIdentities = FLAT_QUERY_ANCHORED_IDENTITIES,
+    FlatQueryAnchoredNoIdentities = FLAT_QUERY_ANCHORED_NO_IDENTITIES,
+    Xml = XML,
+    Tabular = TABULAR,
+    TabularWithComments = TABULAR_WITH_COMMENTS,
+    AsnText = ASN_TEXT,
+    AsnBinary = ASN_BINARY,
+    CommaSeparatedValues = COMMA_SEPARATED_VALUES,
+    ArchiveFormat = ARCHIVE_FORMAT,
+    JsonSeqalign = JSON_SEQALIGN,
+    Json = JSON,
+    Xml2 = XML2,
+    JsonS = JSON_S,
+    Xml2S = XML2_S,
+    Sam = SAM,
+    TaxFormat = TAX_FORMAT,
+    CommaSeparatedValuesWithHeader = COMMA_SEPARATED_VALUES_WITH_HEADER,
+}
+
+impl ReportFormat {
+    /// The report of NCBI's format number; `None` for 19 and 21 (the formats of other
+    /// programs) and for a number outside `EOutputFormat`.
+    pub fn from_number(number: i32) -> Option<Self> {
+        use ReportFormat::*;
+        Some(match number {
+            PAIRWISE => Pairwise,
+            QUERY_ANCHORED_IDENTITIES => QueryAnchoredIdentities,
+            QUERY_ANCHORED_NO_IDENTITIES => QueryAnchoredNoIdentities,
+            FLAT_QUERY_ANCHORED_IDENTITIES => FlatQueryAnchoredIdentities,
+            FLAT_QUERY_ANCHORED_NO_IDENTITIES => FlatQueryAnchoredNoIdentities,
+            XML => Xml,
+            TABULAR => Tabular,
+            TABULAR_WITH_COMMENTS => TabularWithComments,
+            ASN_TEXT => AsnText,
+            ASN_BINARY => AsnBinary,
+            COMMA_SEPARATED_VALUES => CommaSeparatedValues,
+            ARCHIVE_FORMAT => ArchiveFormat,
+            JSON_SEQALIGN => JsonSeqalign,
+            JSON => Json,
+            XML2 => Xml2,
+            JSON_S => JsonS,
+            XML2_S => Xml2S,
+            SAM => Sam,
+            TAX_FORMAT => TaxFormat,
+            COMMA_SEPARATED_VALUES_WITH_HEADER => CommaSeparatedValuesWithHeader,
+            _ => return None,
+        })
+    }
+
+    /// NCBI's number of the format (`-outfmt`).
+    pub fn number(self) -> i32 {
+        self as i32
+    }
+}
+
+/// LOSAT's search programs, for what depends on the program in the reading of `-outfmt`.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blastn_args.cpp:104
+/// ```c
+///     m_FormattingArgs.Reset(new CFormattingArgs(false, CFormattingArgs::eIsSAM));
+/// ```
+/// NCBI reference: c++/src/algo/blast/blastinput/blastp_args.cpp:95 (blastx_args.cpp:113,
+/// tblastn_args.cpp:110 and tblastx_args.cpp:104 are the same)
+/// ```c
+///     m_FormattingArgs.Reset(new CFormattingArgs);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Program {
+    Blastn,
+    Blastp,
+    Blastx,
+    Tblastn,
+    Tblastx,
+}
+
+impl Program {
+    /// The name in LOSAT's rejections ("... is not supported by LOSAT's BLASTN").
+    pub fn name(self) -> &'static str {
+        match self {
+            Program::Blastn => "BLASTN",
+            Program::Blastp => "BLASTP",
+            Program::Blastx => "BLASTX",
+            Program::Tblastn => "TBLASTN",
+            Program::Tblastx => "TBLASTX",
+        }
+    }
+
+    /// Whether NCBI's formatting arguments of the program have `eIsSAM` (blastn only).
+    pub fn is_sam(self) -> bool {
+        self == Program::Blastn
+    }
+
+    /// Whether LOSAT's program writes custom tabular field lists (BLASTP and BLASTX check
+    /// their fields themselves).
+    pub fn custom_fields(self) -> bool {
+        matches!(self, Program::Blastp | Program::Blastx)
+    }
+
+    /// Whether LOSAT's program writes the format: the one table of the formats of every
+    /// program. One arm per format, grouped by the line OF track that adds it, so that a
+    /// change for one format edits its own line. No NCBI counterpart: NCBI's programs write
+    /// every format of `ReportFormat` (blastn alone writes SAM, `report_format`).
+    pub fn writes(self, format: ReportFormat) -> bool {
+        use ReportFormat::*;
+        match format {
+            // Written today by every program.
+            Pairwise => true,
+            Tabular => true,
+            TabularWithComments => true,
+            // Line OF track T (text formats): none yet.
+            QueryAnchoredIdentities => false,
+            QueryAnchoredNoIdentities => false,
+            FlatQueryAnchoredIdentities => false,
+            FlatQueryAnchoredNoIdentities => false,
+            CommaSeparatedValues => false,
+            TaxFormat => false,
+            CommaSeparatedValuesWithHeader => false,
+            // Line OF track S (structured formats): none yet.
+            Xml => false,
+            AsnText => false,
+            AsnBinary => false,
+            ArchiveFormat => false,
+            JsonSeqalign => false,
+            Json => false,
+            Xml2 => false,
+            JsonS => false,
+            Xml2S => false,
+            Sam => false,
+        }
+    }
 }
 
 /// NCBI's reading of a `-outfmt` value, which `SetOptions` does before every other handler
@@ -247,7 +427,11 @@ pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
     }
     let keeps_spec = matches!(
         number,
-        TABULAR | TABULAR_WITH_COMMENTS | COMMA_SEPARATED | COMMA_SEPARATED_WITH_HEADER | SAM
+        TABULAR
+            | TABULAR_WITH_COMMENTS
+            | COMMA_SEPARATED_VALUES
+            | COMMA_SEPARATED_VALUES_WITH_HEADER
+            | SAM
     );
     if !keeps_spec {
         custom.clear();
@@ -260,38 +444,53 @@ pub fn parse_formatting_string(spec: &str) -> anyhow::Result<FormatChoice> {
     })
 }
 
-/// The report of a format choice. A format that NCBI runs and LOSAT does not write is
-/// rejected here, before the inputs are read; `None` is a format that NCBI itself rejects
-/// later (`formatting_handler_check`, `xinclude_check`), where the run then stops.
-/// `blastn` is whether the program is BLASTN (NCBI's `eIsSAM`); `custom_fields` is whether
-/// the program writes custom tabular field lists (BLASTP checks its fields itself).
+/// The report of a format choice. A format that NCBI runs and LOSAT's program does not
+/// write (`Program::writes`) is rejected here, before the inputs are read; `None` is a
+/// format that NCBI itself rejects later (`formatting_handler_check`, `xinclude_check`),
+/// where the run then stops: SAM (17) in a program without `eIsSAM`, AIRR rearrangement (19),
+/// FASTA (21), and the XInclude formats (13, 14) written to standard output. A custom
+/// specification is rejected unless the program writes custom fields
+/// (`Program::custom_fields`), and a custom delimiter always.
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886
+/// ```c
+///     ParseFormattingString(args, m_OutputFormat, m_CustomOutputFormatSpec,m_CustomDelim);
+///     if((m_OutputFormat == eSAM) && !(m_FormatFlags & eIsSAM) ){
+///     		NCBI_THROW(CInputException, eInvalidInput,
+///     		                        "SAM format is only applicable to blastn" );
+///     }
+/// ```
+/// NCBI reference: c++/src/app/blast/blast_app_util.cpp:891-893
+/// ```c
+/// 	if((fmt ==  CFormattingArgs::eXml2) || (fmt ==  CFormattingArgs::eJson)) {
+/// 	   if (s == "-"){
+/// 		   string f_str = (fmt == CFormattingArgs::eXml2) ? "14.": "13.";
+/// ```
 pub fn report_format(
     choice: &FormatChoice,
-    program: &str,
-    blastn: bool,
+    program: Program,
     out: Option<&Path>,
-    custom_fields: bool,
 ) -> anyhow::Result<Option<ReportFormat>> {
     let to_standard_output = out.is_none_or(|path| path.as_os_str() == "-");
-    let format = match choice.number {
-        PAIRWISE => ReportFormat::Pairwise,
-        TABULAR => ReportFormat::Tabular,
-        TABULAR_WITH_COMMENTS => ReportFormat::TabularWithComments,
-        SAM if !blastn => return Ok(None),
-        AIRR | FASTA => return Ok(None),
-        JSON | XML2 if to_standard_output => return Ok(None),
-        number => {
-            anyhow::bail!("output format {number} is not supported by LOSAT's {program}")
-        }
+    let name = program.name();
+    let format = match ReportFormat::from_number(choice.number) {
+        Some(ReportFormat::Sam) if !program.is_sam() => return Ok(None),
+        Some(ReportFormat::Json | ReportFormat::Xml2) if to_standard_output => return Ok(None),
+        Some(format) if program.writes(format) => format,
+        None if matches!(choice.number, AIRR_REARRANGEMENT | FASTA) => return Ok(None),
+        _ => anyhow::bail!(
+            "output format {} is not supported by LOSAT's {name}",
+            choice.number
+        ),
     };
-    if choice.custom() && !custom_fields {
+    if choice.custom() && !program.custom_fields() {
         anyhow::bail!(
-            "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {program}"
+            "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {name}"
         );
     }
     if !choice.delimiter.is_empty() {
         anyhow::bail!(
-            "a custom delimiter (delim=) in the output format is not supported by LOSAT's {program}"
+            "a custom delimiter (delim=) in the output format is not supported by LOSAT's {name}"
         );
     }
     Ok(Some(format))
@@ -316,10 +515,10 @@ pub fn report_format(
 ///                    "FASTA output format is only applicable to magicblast");
 ///     }
 /// ```
-pub fn formatting_handler_check(choice: &FormatChoice, blastn: bool) -> anyhow::Result<()> {
+pub fn formatting_handler_check(choice: &FormatChoice, program: Program) -> anyhow::Result<()> {
     match choice.number {
-        SAM if !blastn => Err(options_error("SAM format is only applicable to blastn")),
-        AIRR => Err(options_error(
+        SAM if !program.is_sam() => Err(options_error("SAM format is only applicable to blastn")),
+        AIRR_REARRANGEMENT => Err(options_error(
             "AIRR rearrangement format is only applicable to igblastn",
         )),
         FASTA => Err(options_error(
@@ -821,6 +1020,58 @@ mod tests {
         );
     }
 
+    const PROGRAMS: [Program; 5] = [
+        Program::Blastn,
+        Program::Blastp,
+        Program::Blastx,
+        Program::Tblastn,
+        Program::Tblastx,
+    ];
+
+    // NCBI blast_args.hpp:1023-1074: the numbers of `EOutputFormat`; 19 (AIRR) and 21 (FASTA)
+    // are igblastn's and magicblast's, 22 is `eEndValue`.
+    #[test]
+    fn report_formats_are_ncbis_format_numbers() {
+        for number in (0..=18).chain([20]) {
+            let format = ReportFormat::from_number(number).unwrap();
+            assert_eq!(format.number(), number);
+        }
+        for number in [-1, AIRR_REARRANGEMENT, FASTA, END_VALUE, 99] {
+            assert_eq!(ReportFormat::from_number(number), None, "{number}");
+        }
+        assert_eq!(ReportFormat::from_number(17), Some(ReportFormat::Sam));
+        assert_eq!(
+            ReportFormat::from_number(20),
+            Some(ReportFormat::CommaSeparatedValuesWithHeader)
+        );
+    }
+
+    // The one table of the formats LOSAT writes (`Program::writes`): 0, 6 and 7 in every
+    // program, no other format yet.
+    #[test]
+    fn every_program_writes_the_pairwise_and_tabular_formats_only() {
+        for program in PROGRAMS {
+            let written: Vec<i32> = (0..END_VALUE)
+                .filter_map(ReportFormat::from_number)
+                .filter(|&format| program.writes(format))
+                .map(ReportFormat::number)
+                .collect();
+            assert_eq!(written, [0, 6, 7], "{program:?}");
+        }
+        assert_eq!(
+            PROGRAMS.map(Program::name),
+            ["BLASTN", "BLASTP", "BLASTX", "TBLASTN", "TBLASTX"]
+        );
+        assert_eq!(
+            PROGRAMS.map(Program::is_sam),
+            [true, false, false, false, false]
+        );
+        assert_eq!(
+            PROGRAMS.map(Program::custom_fields),
+            [false, true, true, false, false]
+        );
+    }
+
     #[test]
     fn report_formats_defer_ncbis_own_errors() {
         let choice = |number| FormatChoice {
@@ -828,33 +1079,101 @@ mod tests {
             spec: String::new(),
             delimiter: String::new(),
         };
+        let file = Some(Path::new("o.json"));
+        for program in PROGRAMS {
+            let name = program.name();
+            assert_eq!(
+                report_format(&choice(0), program, None).unwrap(),
+                Some(ReportFormat::Pairwise)
+            );
+            // NCBI rejects these later (`formatting_handler_check`, `xinclude_check`).
+            for number in [AIRR_REARRANGEMENT, FASTA, JSON, XML2] {
+                assert_eq!(
+                    report_format(&choice(number), program, None).unwrap(),
+                    None,
+                    "{name} {number}"
+                );
+            }
+            assert_eq!(
+                report_format(&choice(JSON), program, Some(Path::new("-"))).unwrap(),
+                None
+            );
+            // Formats that NCBI writes and LOSAT does not, before the inputs are read.
+            for number in (1..=5).chain(8..=16).chain([18, 20]) {
+                assert_eq!(
+                    report_format(&choice(number), program, file)
+                        .unwrap_err()
+                        .to_string(),
+                    format!("output format {number} is not supported by LOSAT's {name}")
+                );
+            }
+            let sam = report_format(&choice(SAM), program, None);
+            if program.is_sam() {
+                assert_eq!(
+                    sam.unwrap_err().to_string(),
+                    "output format 17 is not supported by LOSAT's BLASTN"
+                );
+            } else {
+                assert_eq!(sam.unwrap(), None);
+            }
+            let delimited = parse_formatting_string("6 delim=, std").unwrap();
+            assert!(report_format(&delimited, program, None)
+                .unwrap_err()
+                .to_string()
+                .ends_with(&format!("is not supported by LOSAT's {name}")));
+        }
+        // A number outside NCBI's enum (no `-outfmt` reads so) is LOSAT's rejection.
+        assert!(report_format(&choice(END_VALUE), Program::Blastp, None).is_err());
+    }
+
+    // NCBI blast_args.cpp:2874-2886 and blast_app_util.cpp:888-899.
+    #[test]
+    fn ncbis_later_format_errors_are_its_messages() {
+        let choice = |number| FormatChoice {
+            number,
+            spec: String::new(),
+            delimiter: String::new(),
+        };
+        let options = |text: &str| {
+            format!(
+                "1 BLAST query/options error: {text}\nPlease refer to the BLAST+ user manual.\n"
+            )
+        };
+        for program in PROGRAMS {
+            let sam = formatting_handler_check(&choice(SAM), program);
+            if program.is_sam() {
+                assert!(sam.is_ok());
+            } else {
+                assert_eq!(
+                    message(sam.unwrap_err()),
+                    options("SAM format is only applicable to blastn")
+                );
+            }
+            assert_eq!(
+                message(
+                    formatting_handler_check(&choice(AIRR_REARRANGEMENT), program).unwrap_err()
+                ),
+                options("AIRR rearrangement format is only applicable to igblastn")
+            );
+            assert_eq!(
+                message(formatting_handler_check(&choice(FASTA), program).unwrap_err()),
+                options("FASTA output format is only applicable to magicblast")
+            );
+            for number in (0..=16).chain([18, 20]) {
+                assert!(formatting_handler_check(&choice(number), program).is_ok());
+            }
+        }
         assert_eq!(
-            report_format(&choice(0), "BLASTP", false, None, false).unwrap(),
-            Some(ReportFormat::Pairwise)
+            message(xinclude_check(&choice(JSON)).unwrap_err()),
+            options("Please provide a file name for outfmt 13.")
         );
         assert_eq!(
-            report_format(&choice(17), "BLASTP", false, None, false).unwrap(),
-            None
+            message(xinclude_check(&choice(XML2)).unwrap_err()),
+            options("Please provide a file name for outfmt 14.")
         );
-        assert!(report_format(&choice(17), "BLASTN", true, None, false).is_err());
-        assert_eq!(
-            report_format(&choice(13), "BLASTP", false, None, false).unwrap(),
-            None
-        );
-        assert!(report_format(
-            &choice(13),
-            "BLASTP",
-            false,
-            Some(Path::new("o.json")),
-            false
-        )
-        .is_err());
-        assert!(report_format(&choice(5), "BLASTP", false, None, false).is_err());
-        let delimited = parse_formatting_string("6 delim=, std").unwrap();
-        assert!(report_format(&delimited, "BLASTP", false, None, true)
-            .unwrap_err()
-            .to_string()
-            .contains("not supported by LOSAT's BLASTP"));
+        for number in (0..=12).chain(15..=21) {
+            assert!(xinclude_check(&choice(number)).is_ok());
+        }
     }
 
     #[test]

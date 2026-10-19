@@ -480,7 +480,7 @@ impl TblastnArgs {
         //     }
         // ```
         let choice = parse_formatting_string(&self.outfmt)?;
-        formatting_handler_check(&choice, false)?;
+        formatting_handler_check(&choice, crate::blastinput::app::Program::Tblastn)?;
         if self.max_target_seqs.is_some_and(|size| size < 5) {
             diagnostics.write_all(&crate::report::query_warnings::few_matches_warning(
                 "tblastn",
@@ -719,7 +719,7 @@ impl TblastnArgs {
         // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
         // there too.
         let choice = app::parse_formatting_string(&args.outfmt)?;
-        let format = app::report_format(&choice, "TBLASTN", false, args.out.as_deref(), false)?;
+        let format = app::report_format(&choice, app::Program::Tblastn, args.out.as_deref())?;
         // LOSAT's thread capability is checked before any input or output, as for BLASTN.
         crate::utils::threading::validate_threads(args.num_threads)?;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2553-2562
@@ -1183,8 +1183,8 @@ pub fn run_local(
     }
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, "TBLASTN", false, None, false)?.is_none() {
-            app::formatting_handler_check(&choice, false)?;
+        if app::report_format(&choice, app::Program::Tblastn, None)?.is_none() {
+            app::formatting_handler_check(&choice, app::Program::Tblastn)?;
             app::xinclude_check(&choice)?;
         }
     }

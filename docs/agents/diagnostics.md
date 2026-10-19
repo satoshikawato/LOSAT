@@ -745,7 +745,10 @@ Same values, faster computation:
   `LOSAT_X_ERFABSORBSHADOW=1` evaluates the reference as well and stops on a difference.
   ErfImpl's long-double `expl` (double-double, 40 series terms and nine squarings) costs about
   5,000 cycles a call; on WSSV x PajaWSV (blastp, one thread) 13,046 of the 18,964 calls that
-  reached it had an argument below -6 (line C, v4-C DECISIONS 25).
+  reached it had an argument below -6 (line C, v4-C DECISIONS 25). Workstation, one core, 8
+  rounds (2026-10-19): WSSV x PajaWSV n1 0.969 of the time with this switch alone (0.943 with
+  `LOSAT_X_BPCOMPOREUSE` as well, n8 0.958), tblastn AP027131 x AP027133 0.994, blastx
+  AP027131 x AP027133 0.987, OrthoFinder q0 x Species6 n8 0.995 and n1 1.00 (both switches).
 - `LOSAT_X_DEKKER=1` (Wasm only) ErfC product error by Dekker's product instead of `fma`.
 - `LOSAT_X_CODONFAST=1` an unambiguous codon translated by one table read.
 - `LOSAT_X_PURGEFAST=1` blastn common-endpoint purge without shifting the array per removal.
@@ -799,7 +802,9 @@ Rebuilding less:
   `LOSAT_X_SEGSHARESHADOW=1` compares the stored composition too). On WSSV x PajaWSV (one thread)
   the subject composition was read 9,434 times from 86 different byte strings, all of them cache
   entries (line C, v4-C DECISIONS 25). Each entry holds a pointer and, when the switch is on,
-  232 bytes on the heap.
+  232 bytes on the heap. Workstation, one core, 8 rounds (2026-10-19): WSSV x PajaWSV n1 0.978
+  of the time with this switch alone (0.943 with `LOSAT_X_ERFABSORB` as well); max RSS
+  unchanged.
 - `LOSAT_X_TBNQSIDE=1` tblastn: query SEG and lookup table once per query set.
 - `LOSAT_X_TBNSSIDE=1` tblastn: subject six-frame translations once per search of four or more
   query batches (20,000 query residues per batch), up to 256 MiB of translated residues. A

@@ -31,6 +31,10 @@ mod x_mb_lookup_once;
 #[path = "x_r7_probe.rs"]
 mod x_r7_probe;
 
+// EXPERIMENT (R10_PROBE, line R probe, not for merge): the serial fill's window and shapes.
+#[path = "x_r10_probe.rs"]
+mod x_r10_probe;
+
 /// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): the
 /// `[X_SHADOW] MBLUTPAD` and `[X_SHADOW] MBLUTONCE` lines (LOSAT_X_MBLUTPAD or LOSAT_X_MBLUTONCE
 /// with LOSAT_X_PAIRPARSHADOW) and, with LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the
@@ -1787,6 +1791,35 @@ fn build_mb_lookup(
     x_clock.fill();
     let x_on_pool = x_mb_lookup_par::parts(db_word_counts.is_none() && !debug_mode);
     let mut x_filled = x_mb_lookup_par::FillStats::default();
+    // EXPERIMENT (R10_PROBE): `dump=` writes the words first; then the fill's window opens.
+    if x_on_pool.is_none() {
+        x_r10_probe::dump(
+            queries_blastna,
+            query_offsets,
+            query_masks,
+            word_length,
+            lut_word_length,
+            kmer_mask,
+            db_word_counts,
+            max_db_word_count,
+            &mut XMbTables {
+                hashtable: &mut hashtable,
+                next_pos: &mut next_pos,
+                pv_array: &mut pv_array,
+                pv_array_bts,
+                helper_array: &mut helper_array,
+                words: &mut words,
+                total_positions: &mut total_positions,
+                ambiguous_skipped: &mut ambiguous_skipped,
+            },
+        );
+    }
+    let x_r10 = x_r10_probe::begin();
+    let x_r10_shape = if x_on_pool.is_none() {
+        x_r10_probe::depth()
+    } else {
+        None
+    };
     if let Some(x_parts) = x_on_pool {
         x_filled = x_mb_lookup_par::fill(
             x_parts,
@@ -1808,6 +1841,31 @@ fn build_mb_lookup(
             },
             true,
         );
+    } else if x_r10_shape.is_some_and(|x_shape| {
+        x_r10_probe::fill(
+            x_shape,
+            queries_blastna,
+            query_offsets,
+            query_masks,
+            word_length,
+            lut_word_length,
+            kmer_mask,
+            db_word_counts,
+            max_db_word_count,
+            ascending_cells,
+            &mut XMbTables {
+                hashtable: &mut hashtable,
+                next_pos: &mut next_pos,
+                pv_array: &mut pv_array,
+                pv_array_bts,
+                helper_array: &mut helper_array,
+                words: &mut words,
+                total_positions: &mut total_positions,
+                ambiguous_skipped: &mut ambiguous_skipped,
+            },
+        )
+    }) {
+        // EXPERIMENT (R10_PROBE=d<N>): filled by the probe's copy of the loop above.
     } else if let Some(x_queue) = x_mb_queue() {
         x_fill_mb_queued(
             x_queue,
@@ -1927,6 +1985,8 @@ fn build_mb_lookup(
             hashtable[bucket as usize] = q_off_1;
         }
     }
+    // EXPERIMENT (R10_PROBE): the end of the fill's window.
+    x_r10_probe::end(x_r10, total_positions);
     x_clock.chain();
 
     let mut longest_chain = 2usize;

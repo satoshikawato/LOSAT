@@ -336,8 +336,13 @@ pass only with their listed output); an entry that matches again, or is not
 executed, fails so the list is cleaned. Pull requests run
 `ci_fast_regressions.py` instead: the `capture_outputs.py` cases of the programs
 selected from the changed paths against the S02 baseline and the frozen hashes,
-the outfmt 0 fixtures and the BLASTP/BLASTN `-db` fixtures (`db_search_fixtures.py`), without NCBI executables (TBLASTX runs only its short
-cases; `--all-cases` runs all of them nightly). `--jobs` overlaps independent
+the `-subject` fixtures of `outfmt0_manifest.tsv` (`check_losat.py`) and the `-db` fixtures of the five programs
+(`db_search_fixtures.py`), without NCBI executables (TBLASTX runs only its short
+cases; `--all-cases` runs all of them nightly). Both manifests freeze NCBI's
+outfmt 0/6/7 and, in the rows `sa.*` and `db.sa.*`, outfmt 8 (Seq-annot, ASN.1 text)
+and 12 (Seq-annot, JSON) of all five programs (the BLASTX `-subject` rows are 8 and 12
+only); `run_oracle.py --freeze --only sa.` and `db_search_fixtures.py freeze --only db.sa.`
+freeze those rows alone. `--jobs` overlaps independent
 comparison processes; it does not change a search's requested thread count.
 The frozen runner uses a 3600-second per-search deadline, configurable with a
 positive `--timeout-seconds`; long genome cases can exceed a 900-second limit.

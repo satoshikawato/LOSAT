@@ -482,11 +482,12 @@ pub struct BlastRedoRangeResult {
     pub subject: BlastCompoSequenceData,
     pub subject_maybe_biased: bool,
     /// EXPERIMENT (LOSAT_X_BPCOMPOREUSE): `read_aa_composition(subject.data())`, computed once
-    /// when blastp's SEG cache took these subject bytes; `None` where nothing computed it.
-    pub x_subject_composition: Option<XSubjectComposition>,
+    /// when blastp's SEG pass masked these subject bytes (and its cache keeps them); `None` where
+    /// nothing computed it. Shared, so that a cache hit copies a pointer.
+    pub x_subject_composition: Option<std::sync::Arc<XSubjectComposition>>,
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:935-937
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:934-936
 // ```c
 //         right = length;
 //     }
@@ -511,7 +512,7 @@ impl PartialEq for XSubjectComposition {
 
 impl Eq for XSubjectComposition {}
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:935-937
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:934-936
 // ```c
 //         right = length;
 //     }
@@ -534,7 +535,7 @@ pub(crate) fn x_compo_reuse() -> u8 {
     })
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:935-937
+// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:934-936
 // ```c
 //         right = length;
 //     }
@@ -550,7 +551,7 @@ pub(crate) fn x_whole_subject_composition(
         if x_compo_reuse() == 2 {
             let fresh = XSubjectComposition(read_aa_composition(range.subject.data()));
             assert!(
-                fresh == *stored,
+                fresh == **stored,
                 "LOSAT_X_BPCOMPOREUSESHADOW: stored subject composition differs"
             );
         }

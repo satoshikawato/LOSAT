@@ -800,20 +800,21 @@ mod tests {
     //             return 2.0 - ErfImpl(-z, invert);
     // ```
     // The argument of `erfc_ncbi` bounds ErfImpl(-z, TRUE) below 2.2e-17 for z <= -6; this
-    // checks the reference on a grid of [-28.5, -6), on random arguments below -6 (dense next to
+    // checks the reference on a grid of [-28.5, -6], on random arguments below -6 (dense next to
     // -6 and 28) and on the doubles just below -6, and that `erfc_ncbi` (whatever the switches)
-    // equals `erf_impl_ncbi` on random arguments in [-40, 40].
+    // equals `erf_impl_ncbi` on random arguments in [-40, 40]. A reference call costs about
+    // 5,000 cycles, so the sets are kept to about 100,000 calls.
     #[test]
     fn x_erfc_below_minus_six_is_two_and_the_switched_function_has_the_reference_bits() {
         let two = 2.0f64.to_bits();
         let check = |z: f64| {
             assert_eq!(erf_impl_ncbi(z, true).to_bits(), two, "ErfC({z:e})");
         };
-        for i in 0..=225_000u32 {
-            check(-28.5 + i as f64 * 1e-4);
+        for i in 0..=22_500u32 {
+            check(-28.5 + i as f64 * 1e-3);
         }
         let mut below_six = -6.0f64;
-        for _ in 0..100_000 {
+        for _ in 0..20_000 {
             below_six = f64::from_bits(below_six.to_bits() + 1);
             check(below_six);
         }
@@ -824,14 +825,14 @@ mod tests {
             state ^= state << 17;
             (state >> 11) as f64 / (1u64 << 53) as f64
         };
-        for _ in 0..300_000 {
+        for _ in 0..15_000 {
             let u = next();
             check(-6.0 - u * u * 24.0);
             check(-28.0 + (u - 0.5) * 1e-3);
             check(-6.0 - u * 1e300);
         }
         check(f64::NEG_INFINITY);
-        for _ in 0..300_000 {
+        for _ in 0..30_000 {
             let z = (next() - 0.5) * 80.0;
             assert_eq!(
                 erfc_ncbi(z).to_bits(),

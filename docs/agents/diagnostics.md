@@ -793,10 +793,13 @@ Rebuilding less:
   cache also keeps the amino-acid composition of its masked bytes, read once when the entry is
   made, and the composition-based redo and its Newton prefetch take it instead of reading the
   same bytes again for every query (`read_aa_composition` on the same bytes gives the same
-  bits). A range that does not come from the cache is read as before. Shadow:
-  `LOSAT_X_BPCOMPOREUSESHADOW=1` reads the bytes again and stops on a difference. On WSSV x
-  PajaWSV (one thread) the subject composition was read 9,434 times from 86 different byte
-  strings, all of them cache entries (line C, v4-C DECISIONS 25). Each entry holds 232 more bytes.
+  bits). A range SEG does not mask (near-identical or not biased) is read as before; a masked
+  range whose window the redo skips has its composition read once anyway. Shadow:
+  `LOSAT_X_BPCOMPOREUSESHADOW=1` reads the bytes again and stops on a difference (and
+  `LOSAT_X_SEGSHARESHADOW=1` compares the stored composition too). On WSSV x PajaWSV (one thread)
+  the subject composition was read 9,434 times from 86 different byte strings, all of them cache
+  entries (line C, v4-C DECISIONS 25). Each entry holds a pointer and, when the switch is on,
+  232 bytes on the heap.
 - `LOSAT_X_TBNQSIDE=1` tblastn: query SEG and lookup table once per query set.
 - `LOSAT_X_TBNSSIDE=1` tblastn: subject six-frame translations once per search of four or more
   query batches (20,000 query residues per batch), up to 256 MiB of translated residues. A

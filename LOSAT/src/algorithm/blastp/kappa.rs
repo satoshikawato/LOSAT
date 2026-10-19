@@ -23,12 +23,10 @@ use crate::core::composition_adjustment::adjust_scores::{
 use crate::core::composition_adjustment::redo_alignment::{
     blast_compo_alignment_new, blast_redo_one_match_with_workspace, build_query_word_hashes,
     preliminary_test_near_identical, test_near_identical, windows_from_protein_aligns,
-    BlastCompoAlignment, BlastCompoAlignmentContext, BlastCompoMatchingSequence,
-    BlastCompoQueryInfo, BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks,
-    BlastRedoRangeResult, EMatrixAdjustRule,
-};
-use crate::core::composition_adjustment::redo_alignment::{
-    x_compo_reuse, x_whole_subject_composition, XSubjectComposition,
+    x_compo_reuse, x_whole_subject_composition, BlastCompoAlignment, BlastCompoAlignmentContext,
+    BlastCompoMatchingSequence, BlastCompoQueryInfo, BlastCompoSequenceData,
+    BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoRangeResult, EMatrixAdjustRule,
+    XSubjectComposition,
 };
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
@@ -289,7 +287,7 @@ struct CachedSubjectRangeData {
     subject_maybe_biased: bool,
     // EXPERIMENT (LOSAT_X_BPCOMPOREUSE): `read_aa_composition(subject.data())`, read when the
     // entry was made.
-    x_composition: Option<XSubjectComposition>,
+    x_composition: Option<std::sync::Arc<XSubjectComposition>>,
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:1614-1646
@@ -418,7 +416,7 @@ impl BlastpKappaSubjectRangeCache {
         subject_range: &BlastCompoSequenceRange,
         subject: &BlastCompoSequenceData,
         subject_maybe_biased: bool,
-        x_composition: Option<XSubjectComposition>,
+        x_composition: Option<std::sync::Arc<XSubjectComposition>>,
     ) {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1635-1636
         // ```c
@@ -1321,20 +1319,21 @@ fn build_subject_range_data(
         }
         // EXPERIMENT (LOSAT_X_BPCOMPOREUSE): the composition of the masked bytes, read once here
         // and kept with them.
-        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:935-937
+        // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:934-936
         // ```c
         //         right = length;
         //     }
         //     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
         // ```
         let x_composition = (x_compo_reuse() != 0)
-            .then(|| XSubjectComposition(read_aa_composition(subject.data())));
+            .then(|| std::sync::Arc::new(XSubjectComposition(read_aa_composition(subject.data()))));
         if let Some(expected) = x_expected {
             assert!(
                 expected.subject.buffer == subject.buffer
                     && expected.subject.data_offset == subject.data_offset
                     && expected.subject.length == subject.length
-                    && expected.subject_maybe_biased == subject_maybe_biased,
+                    && expected.subject_maybe_biased == subject_maybe_biased
+                    && expected.x_composition == x_composition,
                 "LOSAT_X_SEGSHARESHADOW: shared masked subject range differs"
             );
             crate::utils::xstats::SEG_SHARE_CHECKED.fetch_add(1, AtomicOrdering::Relaxed);
@@ -2782,6 +2781,70 @@ mod tests {
         );
         assert!(range.subject_maybe_biased);
         assert!(range.subject.data().contains(&ncbistdaa::X));
+    }
+
+    // EXPERIMENT (LOSAT_X_BPCOMPOREUSE): the masked range carries the composition of its bytes,
+    // on the miss that masks it and on the cache hit that returns it.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:934-936
+    // ```c
+    //         right = length;
+    //     }
+    //     Blast_ReadAaComposition(composition, alphsize, &data[left], right-left);
+    // ```
+    #[test]
+    fn x_masked_subject_range_carries_the_composition_of_its_bytes() {
+        if x_compo_reuse() == 0 {
+            return;
+        }
+        let mut matching_residues = vec![1u8; 80];
+        for (i, residue) in matching_residues.iter_mut().enumerate().skip(40) {
+            *residue = 1 + (i % 19) as u8;
+        }
+        let matching_seq = BlastCompoMatchingSequence::new(0, &matching_residues);
+        let subject_range = BlastCompoSequenceRange {
+            begin: 0,
+            end: 80,
+            context: 0,
+        };
+        let params = test_redo_align_params();
+        let query = BlastCompoSequenceData::from_ncbistdaa(&vec![2u8; 80]);
+        let query_range = subject_range;
+        let align = blast_compo_alignment_new(
+            80,
+            EMatrixAdjustRule::DontAdjustMatrix,
+            0,
+            80,
+            0,
+            0,
+            80,
+            0,
+            None,
+        );
+        let words = build_query_word_hashes(query.data());
+        let mut cache = BlastpKappaSubjectRangeCache::new();
+        let get = |cache: &mut BlastpKappaSubjectRangeCache| {
+            build_subject_range_data(
+                &matching_seq,
+                &subject_range,
+                &query,
+                &query_range,
+                Some(&words),
+                &align,
+                false,
+                true,
+                &params,
+                Some(cache),
+            )
+        };
+        let miss = get(&mut cache);
+        let hit = get(&mut cache);
+        assert!(miss.subject.data().contains(&ncbistdaa::X));
+        assert_eq!(hit.subject, miss.subject);
+        for range in [&miss, &hit] {
+            let expected = XSubjectComposition(read_aa_composition(range.subject.data()));
+            assert_eq!(range.x_subject_composition.as_deref(), Some(&expected));
+            assert_eq!(x_whole_subject_composition(range), expected.0);
+        }
     }
 
     #[test]

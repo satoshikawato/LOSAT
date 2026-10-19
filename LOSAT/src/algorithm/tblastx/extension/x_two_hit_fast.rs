@@ -52,7 +52,7 @@
 //! The switch acts on every target. Until line W of plan v4 measured it (item W7), wasm32 kept the
 //! 16-residue v128 walks of `two_hit.rs`, which take each lane out of the vector and call
 //! `get_score` for it (scalar steps); with the table the two-hit extension of the LOSAT Web
-//! engine takes 0.78-0.85 of that time (`docs/agents/diagnostics.md`, entry `LOSAT_X_TBXUNGAP`).
+//! engine takes 0.77-0.89 of that time (`docs/agents/diagnostics.md`, entry `LOSAT_X_TBXUNGAP`).
 //!
 //! No NCBI counterpart for the switch itself: it chooses between two LOSAT code paths with the
 //! same result.

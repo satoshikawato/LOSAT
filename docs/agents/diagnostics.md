@@ -3200,9 +3200,10 @@ Scheduling (each value computed by one thread with the original function; order 
   and serial reactors, all arms in one process alternating search by search (6 rounds), CPU time per stage
   from `perf` (cpu-clock) in each search's window, divided by the stages the change does not touch
   (linking, SEG, reports, statistics, sorting) because this machine's CPU time moves by up to 2x with core
-  placement: the extension stage x0.851 (AP027131 x AP027133 code 4, 8 threads, 6/6 rounds faster), x0.784
-  (MelaMJNV x PemoMJNVA, 8 threads, 6/6) and x0.841 (MelaMJNV x PemoMJNVA, serial reactor, 5/6); the whole
-  search x0.970, x0.966 and x0.978; every report identical.
+  placement. Against dev fd75dd9f (medians of 6 rounds, rounds faster in brackets): AP027131 x AP027133 (code 4)
+  8 threads extension x0.772 (5/6), whole search x0.916 (5/6); serial reactor x0.807 (5/6), x0.913 (5/6);
+  MelaMJNV x PemoMJNVA 8 threads x0.889 (6/6), x0.977 (4/6); serial reactor x0.846 (6/6), x0.957 (6/6);
+  every report identical. (The method's noise: the same unchanged code read x0.92-1.02.)
 - `LOSAT_X_TBXUNGAPSHADOW=1` shadow of `LOSAT_X_TBXUNGAP` (turns the path on): every extension runs both
   ways and the seven results (offsets, score, `right_extend`, `s_last_off`) must be equal; any difference
   panics with the inputs; the reference's result is used. One line at exit:

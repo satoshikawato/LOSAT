@@ -139,7 +139,8 @@
 //! (scheduling only), the form of LOSAT_X_DISCLUTPAR's round (`x_disc_lookup_par.rs`, "The
 //! prefault round") for the one array here. Between phases A and B of the first chunk (in
 //! processing order), when that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per
-//! page of `hashtable`, a set of P jobs writes 0 to one element of each page of `hashtable` that
+//! 1,024 cells (4 KiB) of `hashtable` (`prefault_gate`), a set of P jobs writes 0 to one element of
+//! each page of `hashtable` that
 //! holds the cell of a word of that chunk: the readers mark in phase A the page of every word's
 //! cell, in bits of their own (`PageBits`); the calling thread ORs them; toucher `j` writes 0 to
 //! the middle element of each marked page whose middle element lies in a block of owner `j` (one
@@ -151,6 +152,8 @@
 //! the read maps the kernel's shared zero page and the write then replaces it with a page of the
 //! process's own: a second fault, and a copy-on-write that flushes the page's entry from the TLBs
 //! of every other CPU that runs the search. Written first, the page takes one fault and no flush.
+//! The saving rests on Linux's zero page and copy-on-write, and the timing evidence is Linux only;
+//! where memory comes zeroed and mapped (wasm32's linear memory) the round only costs its writes.
 //! On the workstation (Linux 6.8, THP `madvise`; line R's R5, `v4-R/REPORT_R5.md` §2-5) the 7
 //! tables of megablast of 65 records of three E. coli genomes against LC738868 at 64 threads made
 //! 102,000 such copies, which sent 6.4 million TLB shootdowns (to 63 CPUs each); a probe round that
@@ -166,13 +169,17 @@
 //! of 2^19) while they leave 9 of its 16,385 pages unwritten in 2,000,000. Under transparent huge
 //! pages (`enabled=always`) a first write can map a whole 2 MiB page where the loop's first read
 //! maps the huge zero page; such a page holds marked pages and at most the pages of the table that
-//! no word of the whole fill writes. Memory: the readers' marks, one bit per page per reader on
-//! whole cache lines (576 bytes per reader at 4^11 cells, 2,112 at 4^12: 33 KiB at P = 16, 526 KiB
-//! at 255), and their OR (one row), freed at the end of the fill; nothing without the round.
+//! no word of the whole fill writes (on this WSL machine, THP `always`, megablast of 5 kb to 4.6 Mb of
+//! MG1655 against LC738868 at 8 threads kept its max RSS within 0.4 MiB of the fill without the
+//! round). Memory: with the round, the readers' marks, one bit per page per reader on whole cache
+//! lines (576 bytes per reader at 4^11 cells and 2,112 at 4^12 for a table that starts 16 bytes into
+//! a page, as glibc's mapped blocks do, 512 and 2,048 for a page-aligned one: 33 KiB at P = 16, 526
+//! KiB at 255), freed at the end of the fill, and their OR (one row), freed after the round; in
+//! every fill, P counters of the zeros written.
 
 use super::x_disc_lookup_par::{
-    middle, page_offset, pages_of, touch, PageBits, SharedBits, TouchLog, PAGE_ELEMS_SHIFT,
-    PREFAULT_MIN_WORDS_PER_PAGE,
+    middle, page_offset, pages_of, touch, PageBits, SharedBits, TouchLog, HASHTABLE,
+    PAGE_ELEMS_SHIFT, PREFAULT_MIN_WORDS_PER_PAGE,
 };
 use super::x_mb_lookup_par::{
     flush_private, lines_capacity, plan, timing_on, Copies, Line, Private, Shared, SharedTables,
@@ -642,7 +649,7 @@ impl Fill<'_, '_, '_> {
                 let m = middle(offset, len, page);
                 if self.owner[m >> self.block_shift] as usize == j {
                     // SAFETY: as above: element `m` of a page of this job, before the first phase B.
-                    unsafe { touch(self.tables.hashtable, m, 0, log) };
+                    unsafe { touch(self.tables.hashtable, m, HASHTABLE, log) };
                     *touches += 1;
                 }
             }
@@ -923,9 +930,9 @@ pub(super) struct OnceStats {
 /// `ascending_cells`), each query position read once, with `parts` workers on the search pool (or
 /// one after another, `in_pool == false`, for the shadow without a pool); the module documentation
 /// gives the phases and why every element of the four arrays is the loop's. `timed`: a build of
-/// the search (LOSAT_TIMING's `[TIMING] x_mb_lookup_once` counts it), not the shadow's. The tables
-/// must be zeroed (as `build_mb_lookup` and the shadow allocate them): the loop's start values,
-/// and the premise of the prefault round (LOSAT_X_MBLUTPREFAULT).
+/// the search (LOSAT_TIMING's `[TIMING] x_mb_lookup_once` counts it), not the shadow's. `hashtable`
+/// must be zeroed (as `build_mb_lookup` and the shadow allocate it, NCBI's `calloc`): the loop's
+/// empty cells, and the premise of the prefault round (LOSAT_X_MBLUTPREFAULT).
 pub(super) fn fill(
     parts: usize,
     words: &Words<'_>,
@@ -942,6 +949,17 @@ pub(super) fn fill(
         chunk_positions(parts),
         prefault_on(),
     )
+}
+
+/// No NCBI counterpart (scheduling only): whether a first chunk of `first` positions runs the prefault
+/// round (LOSAT_X_MBLUTPREFAULT) on a table of `cells` cells: at least `PREFAULT_MIN_WORDS_PER_PAGE`
+/// positions per 1,024 cells (4 KiB), counted on the table's size, not on the pages it spans, so
+/// that the allocation's offset in its first page (16 bytes for glibc's mapped blocks, 0 for a
+/// page-aligned one) does not move the boundary: 131,072 positions for 4^12 cells, the first chunk
+/// of 4 workers (`chunk_positions`).
+fn prefault_gate(first: usize, cells: usize) -> bool {
+    first > 0
+        && first >= PREFAULT_MIN_WORDS_PER_PAGE.saturating_mul((cells >> PAGE_ELEMS_SHIFT).max(1))
 }
 
 /// `fill` with the chunk size and LOSAT_X_MBLUTPREFAULT (`prefault`) given (the tests take others).
@@ -1002,13 +1020,12 @@ fn fill_chunked(
         (c * chunk, total.min((c + 1) * chunk))
     };
     // The prefault round runs in the first chunk (of the processing order) only, and only when
-    // that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per page of `hashtable`;
-    // without it the readers' marks have no rows.
+    // that chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per 4 KiB of `hashtable`
+    // (`prefault_gate`); without it the readers' marks have no rows.
     let offset = page_offset(shared.hashtable.ptr);
     let pages = pages_of(offset, table_size);
     let (first_start, first_end) = bounds(0);
-    let round_on =
-        prefault && first_end - first_start >= PREFAULT_MIN_WORDS_PER_PAGE.saturating_mul(pages);
+    let round_on = prefault && prefault_gate(first_end - first_start, table_size);
     let mut marks = PageBits::new(if round_on { pages } else { 0 }, parts);
     let touched = Slots(
         (0..parts)
@@ -1124,6 +1141,7 @@ fn fill_chunked(
 
 #[cfg(test)]
 mod tests {
+    use super::super::x_disc_lookup_par::PAGE_BYTES;
     use super::super::x_mb_lookup_par::tests::{random_case, repeat_case, Lcg};
     use super::super::{build_two_stage_lookup, MaskedInterval};
     use super::*;
@@ -1263,7 +1281,7 @@ mod tests {
             pv0: &[PvArrayType],
         ) -> (Built, OnceStats) {
             let (b, stats) = self.once_mode(shape, parts, in_pool, chunk, helper0, pv0, true);
-            check_prefault(&b, &stats, self.first_chunk(chunk), true);
+            check_prefault(&b.hashtable, &stats, self.first_chunk(chunk), true);
             (b, stats)
         }
 
@@ -1343,31 +1361,30 @@ mod tests {
         }
     }
 
-    /// The prefault round of a fill of `b` (`hashtable` as filled in place) with
+    /// The prefault round of a fill of `v` (`hashtable` as filled in place) with
     /// LOSAT_X_MBLUTPREFAULT `prefault` and a first chunk of `first` positions, from its log of
     /// writes (`OnceStats::touch_log`): each wrote 0 over 0; the round ran once exactly when the
-    /// switch is on and the first chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per page
-    /// of `hashtable`, never otherwise; and the pages it wrote to are exactly the pages the first
-    /// chunk wrote (`OnceStats::first_pages`), each once, when it ran. So it maps no page the fill
-    /// does not write, and misses none of the first chunk's. Returns the number of pages touched.
-    fn check_prefault(b: &Built, stats: &OnceStats, first: usize, prefault: bool) -> usize {
-        let v = &b.hashtable;
-        let pages = pages_of(page_offset(v.as_ptr()), v.len());
-        let round = prefault && first > 0 && first >= PREFAULT_MIN_WORDS_PER_PAGE * pages;
+    /// switch is on and the first chunk has at least `PREFAULT_MIN_WORDS_PER_PAGE` positions per
+    /// 1,024 cells of `hashtable`, never otherwise; and the pages it wrote to are exactly the pages
+    /// the first chunk wrote (`OnceStats::first_pages`), each once, when it ran. So it maps no page
+    /// the fill does not write, and misses none of the first chunk's. Returns the number of pages
+    /// touched.
+    fn check_prefault(v: &[u32], stats: &OnceStats, first: usize, prefault: bool) -> usize {
+        let per_page = PREFAULT_MIN_WORDS_PER_PAGE * (v.len() / 1024).max(1);
+        let round = prefault && first > 0 && first >= per_page;
         assert_eq!(stats.prefault_rounds, usize::from(round), "{stats:?}");
         assert_eq!(stats.touches, stats.touch_log.len());
         let mut touched = std::collections::BTreeSet::new();
         for t in &stats.touch_log {
             assert!(
-                t.array == 0 && t.before == 0 && t.after == 0 && t.index < v.len(),
+                t.array == HASHTABLE && t.before == 0 && t.after == 0 && t.index < v.len(),
                 "the prefault wrote {} over {} at element {} of array {}",
                 t.after,
                 t.before,
                 t.index,
                 t.array
             );
-            let page =
-                (v.as_ptr() as usize + 4 * t.index) / super::super::x_disc_lookup_par::PAGE_BYTES;
+            let page = (v.as_ptr() as usize + 4 * t.index) / PAGE_BYTES;
             assert!(touched.insert(page), "page {page} touched twice");
         }
         if round {
@@ -1755,7 +1772,8 @@ mod tests {
                             )
                         });
                         assert_built(&reference, chain, &b, &format!("{what} {prefault}"));
-                        let pages = check_prefault(&b, &stats, c.first_chunk(chunk), prefault);
+                        let pages =
+                            check_prefault(&b.hashtable, &stats, c.first_chunk(chunk), prefault);
                         if prefault {
                             most = most.max(pages);
                             skipped += usize::from(stats.prefault_rounds == 0);
@@ -1766,6 +1784,75 @@ mod tests {
         }
         assert!(most > 4_000, "{most}");
         assert!(skipped > 0);
+    }
+
+    // LOSAT_X_MBLUTPREFAULT with `hashtable` at element offsets 0, 4 (glibc's mapped blocks) and
+    // 1,023 (a first page of one element) in its first page, at `lut_word_length` 11 and 12, on a
+    // pool of 5 threads, with a first chunk just at the gate (8 positions per 1,024 cells) and one
+    // below it: the tables are the loop's, the round touches exactly the first chunk's pages, and it
+    // runs on both sides of the gate as `prefault_gate` says, whatever the offset.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn prefault_pages_do_not_depend_on_the_tables_offset() {
+        fn aligned(len: usize, offset: usize) -> (Vec<u32>, usize) {
+            let v = vec![0u32; len + offset + 1024];
+            let skip = (PAGE_BYTES - v.as_ptr() as usize % PAGE_BYTES) % PAGE_BYTES / 4;
+            (v, skip + offset)
+        }
+        let mut rng = Lcg(0x9F_A017_0004);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(5)
+            .build()
+            .unwrap();
+        let mut rounds = 0;
+        for lut in [11usize, 12] {
+            let q: Vec<u8> = (0..200_000).map(|_| rng.below(4) as u8).collect();
+            let c = Case::one(q, lut + 4, lut, false);
+            let (reference, bts, chain) = c.reference(1_000_000);
+            let cells = reference.hashtable.len();
+            let gate = PREFAULT_MIN_WORDS_PER_PAGE * (cells >> 10);
+            for chunk in [gate, gate - 1] {
+                for offset in [0usize, 4, 1023] {
+                    let refs = c.refs();
+                    let words = c.words(&refs);
+                    let (mut cells_v, c0) = aligned(cells, offset);
+                    let mut b = Built {
+                        hashtable: Vec::new(),
+                        next_pos: vec![0u32; c.next_len()],
+                        pv_array: vec![0 as PvArrayType; reference.pv_array.len()],
+                        helper_array: vec![0u32; reference.helper_array.len()],
+                    };
+                    let stats = pool.install(|| {
+                        fill_chunked(
+                            5,
+                            &words,
+                            Tables {
+                                hashtable: &mut cells_v[c0..c0 + cells],
+                                next_pos: &mut b.next_pos,
+                                pv_array: &mut b.pv_array,
+                                pv_array_bts: bts,
+                                helper_array: &mut b.helper_array,
+                            },
+                            true,
+                            false,
+                            chunk,
+                            true,
+                        )
+                    });
+                    let what = format!("lut {lut} chunk {chunk} offset {offset}");
+                    let table = &cells_v[c0..c0 + cells];
+                    check_prefault(table, &stats, c.first_chunk(chunk), true);
+                    assert_eq!(stats.prefault_rounds, usize::from(chunk == gate), "{what}");
+                    rounds += stats.prefault_rounds;
+                    b.hashtable = table.to_vec();
+                    assert_built(&reference, chain, &b, &what);
+                }
+            }
+        }
+        assert_eq!(rounds, 6);
     }
 
     // The arena: each reader's region and row on lines of their own, the regions within

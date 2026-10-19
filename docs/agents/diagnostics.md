@@ -1865,10 +1865,12 @@ Scheduling (each value computed by one thread with the original function; order 
   identical` at exit (with `LOSAT_X_MBLUTPAD` set too, the read-once fill makes that build and the `[X_SHADOW]
   MBLUTPAD` line says `tables=0`). With `LOSAT_TIMING` `[TIMING] x_mb_lookup_build` counts `once=<n>` (the builds the
   read-once fill made; `padded=` counts only those of `LOSAT_X_MBLUTPAD`'s fill), and `[TIMING] x_mb_lookup_once:
-  fills= chunks= read_wall= read_max= read_sum= read_late= update_... last_... arena=` gives, per phase summed over
-  the chunks of the search's fills (not the shadow's), the calling worker's wall time, the longest job, the jobs'
-  summed time and the latest start (`read`: the read and the links of the chunk before; `update`: the owners' updates;
-  `last`: the last links and the copies' flush) and the largest arena (MiB).
+  fills= chunks= read_wall= read_max= read_sum= read_late= update_... last_... prefault_... arena= prefault_rounds=
+  prefault_touches=` gives, per phase summed over the chunks of the search's fills (not the shadow's), the calling
+  worker's wall time, the longest job, the jobs' summed time and the latest start (`read`: the read and the links of
+  the chunk before; `update`: the owners' updates; `last`: the last links and the copies' flush; `prefault`: the
+  prefault round of `LOSAT_X_MBLUTPREFAULT`), the largest arena (MiB), and the fills that ran that round and the
+  zeros it wrote.
   Measured 2026-10-18 on the workstation (da08ced7, the same release code; 16 physical cores of node 1 with their
   siblings idle for 2-16 threads, 32 with their siblings for 64; a warm-up, then 3-5 rounds of wall runs and 1-2 of
   `LOSAT_TIMING` runs per cell, arms rotated: base without the switch, the switch, `LOSAT_X_MBLUTPAD` alone, and the

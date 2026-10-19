@@ -754,13 +754,13 @@ pub(super) fn pages_of(offset: usize, len: usize) -> usize {
 
 /// The arrays whose pages the prefault round touches (`FaultJob::pages`, `Faults::marks`, and
 /// the tests' log of touches): `HASHTABLE` + template and `PV_ARRAY`.
-const HASHTABLE: usize = 0;
+pub(super) const HASHTABLE: usize = 0;
 const PV_ARRAY: usize = 2;
 
 /// No NCBI counterpart (scheduling only): 512 page bits on a 64-byte line of their own.
 #[repr(C, align(64))]
 #[derive(Clone, Copy)]
-pub(super) struct BitLine([u64; 8]);
+struct BitLine([u64; 8]);
 
 /// No NCBI counterpart (scheduling only): one bit per page of one array for each reader: reader
 /// `r`'s bits are the `stride` words from word `r * stride`, a whole number of lines, so no two
@@ -835,7 +835,7 @@ impl SharedBits {
     ///
     /// SAFETY: no job writes the bits (the prefault round); `page < 64 * stride`.
     #[inline(always)]
-    pub(super) unsafe fn marked(self, r: usize, page: usize) -> bool {
+    unsafe fn marked(self, r: usize, page: usize) -> bool {
         debug_assert!(page < 64 * self.stride);
         // SAFETY: as above.
         unsafe { *self.ptr.add(r * self.stride + (page >> 6)) & (1u64 << (page & 63)) != 0 }

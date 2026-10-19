@@ -1400,6 +1400,7 @@ fn build_preliminary_hsp_list_for_hitlist(
     let hsps: Vec<BlastpHsp> = preliminary_hits
         .iter()
         .map(|hit| {
+            crate::utils::x_c4probe::note("stoe", "prelim", 1, crate::utils::x_c4probe::key_of(&(hit.raw_score, query_length, subject_length, karlin_params.lambda.to_bits())));
             blastp_hsp_from_preliminary(
                 hit,
                 blast_spouge_stoe(
@@ -1443,13 +1444,13 @@ fn x_build_compact_preliminary_hsp_list(
         .iter()
         .map(|hit| XPrelimHsp {
             hsp: *hit,
-            e_value: blast_spouge_stoe(
+            e_value: { crate::utils::x_c4probe::note("stoe", "prelim_compact", 1, crate::utils::x_c4probe::key_of(&(hit.raw_score, query_length, subject_length, karlin_params.lambda.to_bits()))); blast_spouge_stoe(
                 hit.raw_score,
                 karlin_params,
                 gumbel_params,
                 query_length as i32,
                 subject_length as i32,
-            ),
+            ) },
         })
         .collect();
     let mut hsp_list = BlastpHspList {

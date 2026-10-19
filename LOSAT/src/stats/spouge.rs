@@ -147,6 +147,8 @@ pub fn lookup_protein_gumbel_params(
 // NCBI blast_stat.c:5216,5223 calls ErfC, not NCBI_ErfC.
 #[inline]
 fn erfc_ncbi(z: f64) -> f64 {
+    crate::utils::x_c4probe::note("erfc", "call", 1, z.to_bits());
+    crate::utils::x_c4probe::note("erfc", if z.abs() < 0.5 { "cls_lt0.5" } else if z < 0.0 { "cls_neg_ge0.5" } else if z < 28.0 { "cls_pos_0.5_28" } else { "cls_ge28" }, 1, z.to_bits());
     // EXPERIMENT (LOSAT_X_ERFABSORB): for z < -6 the reference's value is 2.0 whatever ErfImpl
     // returns, so ErfImpl is not called.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59,111,207,224-229,234-235
@@ -222,6 +224,13 @@ fn erfc_ncbi(z: f64) -> f64 {
             let (stored, value) = memo[slot];
             if stored == key {
                 return f64::from_bits(value);
+            }
+            crate::utils::x_c4probe::note("erfc", "memo_miss", 1, z.to_bits());
+            {
+                let x = z.abs();
+                let b = if x < 0.5 { "lt0.5" } else if x < 1.5 { "0.5-1.5" } else if x < 2.5 { "1.5-2.5" } else if x < 4.5 { "2.5-4.5" } else if x < 6.0 { "4.5-6" } else if x < 28.0 { "6-28" } else { "ge28" };
+                let s = if z < 0.0 { "neg" } else { "pos" };
+                crate::utils::x_c4probe::note("erfc_miss", if s == "neg" { match b { "lt0.5" => "neg lt0.5", "0.5-1.5" => "neg 0.5-1.5", "1.5-2.5" => "neg 1.5-2.5", "2.5-4.5" => "neg 2.5-4.5", "4.5-6" => "neg 4.5-6", "6-28" => "neg 6-28", _ => "neg ge28" } } else { match b { "lt0.5" => "pos lt0.5", "0.5-1.5" => "pos 0.5-1.5", "1.5-2.5" => "pos 1.5-2.5", "2.5-4.5" => "pos 2.5-4.5", "4.5-6" => "pos 4.5-6", "6-28" => "pos 6-28", _ => "pos ge28" } }, 1, z.to_bits());
             }
             let result = erf_impl_ncbi(z, true);
             // A key of all ones marks an empty slot; that argument (a NaN) is
@@ -638,6 +647,7 @@ pub fn blast_spouge_stoe(
     query_length: i32,
     subject_length: i32,
 ) -> f64 {
+    crate::utils::x_c4probe::note("stoe", "all", 1, crate::utils::x_c4probe::key_of(&(score, query_length, subject_length, kbp.lambda.to_bits(), kbp.k.to_bits())));
     let scale_factor = kbp.lambda / gbp.lambda;
     let db_scale_factor = if gbp.db_length != 0 {
         (gbp.db_length as f64) / (subject_length as f64)
@@ -702,6 +712,7 @@ pub fn blast_spouge_etos(
     query_length: i32,
     subject_length: i32,
 ) -> i32 {
+    crate::utils::x_c4probe::note("etos", "call", 1, crate::utils::x_c4probe::key_of(&(evalue.to_bits(), query_length, subject_length, kbp.lambda.to_bits())));
     let mut a = 0i32;
     let db_scale_factor = if gbp.db_length != 0 {
         gbp.db_length as f64

@@ -37,6 +37,7 @@ pub(crate) fn redo_calc_lambda(
     max_score: i32,
     lambda0: f64,
 ) -> Result<f64> {
+    crate::utils::x_c4probe::note("calc_lambda", "redo", probs.len() as u64, crate::utils::x_c4probe::key_f64s(probs) ^ lambda0.to_bits());
     compute_lambda_from_score_probs(probs, min_score, max_score, lambda0)
         .map_err(|err| anyhow::anyhow!(err))
 }
@@ -2865,6 +2866,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
             .ok_or_else(|| anyhow::anyhow!("BLASTP redo requires query information"))?;
         windows_from_protein_aligns(incoming_aligns, query_info, matching_seq.length)?
     };
+    crate::utils::x_c4probe::note("redo", "one_match", windows.len() as u64, 0);
     let mut alignments_by_query: Vec<Option<Box<BlastCompoAlignment>>> = Vec::new();
     let mut pvalue_for_this_pair = None;
     let mut lambda_ratio = None;
@@ -2948,6 +2950,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
         let mut in_align = window.align.as_deref();
 
         while let Some(current) = in_align {
+            crate::utils::x_c4probe::note("redo", "hsp", 1, 0);
             let near_identical = if hsp_index == 0 || subject_maybe_biased {
                 preliminary_test_near_identical(
                     query_info,
@@ -3095,6 +3098,7 @@ pub(crate) fn blast_redo_one_match_with_workspace_queries_and_matrix_observed<'s
                             current,
                         )?
                     } else {
+                        crate::utils::x_c4probe::note("aacomp", "redo", range.subject.data().len() as u64, crate::utils::x_c4probe::key_of(range.subject.data()));
                         x_whole_subject_composition(range)
                     };
                     // NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1239-1256

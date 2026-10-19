@@ -1223,6 +1223,7 @@ fn build_subject_range_data(
     // queryData->data[idx] = (origData[idx] != 24) ? origData[idx] : 3;
     // return s_SequenceGetProteinRange(..., queryData, ...);
     // ```
+    crate::utils::x_c4probe::note("range", "call", 0, 0);
     let query = build_query_range_data(orig_query, query_range);
     let mut subject_for_near_identical: Option<BlastCompoSequenceData> = None;
     let mut subject_maybe_biased = subject_maybe_biased_in;
@@ -1282,6 +1283,7 @@ fn build_subject_range_data(
                     x_expected = Some(cached);
                 } else {
                     record_blastp_kappa_range_event(&BLASTP_KAPPA_SUBJECT_SEG_CACHE_HITS);
+                    crate::utils::x_c4probe::note("range", "seg_cache_hit", cached.subject.length as u64, 0);
                     record_blastp_kappa_range_counter(
                         &BLASTP_KAPPA_SUBJECT_RANGE_BYTES_COPIED,
                         cached.subject.length.max(0) as usize,
@@ -1302,6 +1304,7 @@ fn build_subject_range_data(
         let seg_params = blastp_subject_seg_params();
         let masker = SegMasker::with_params(&seg_params);
         record_blastp_kappa_range_event(&BLASTP_KAPPA_SUBJECT_SEG_CALLS);
+        crate::utils::x_c4probe::note("range", "seg_fresh", subject.length as u64, crate::utils::x_c4probe::key_of(&(matching_seq.index, subject_range.begin, subject_range.end)));
         record_blastp_kappa_range_counter(
             &BLASTP_KAPPA_SUBJECT_SEG_RANGE_BYTES,
             subject.length.max(0) as usize,
@@ -1354,6 +1357,7 @@ fn build_subject_range_data(
         };
     }
 
+    crate::utils::x_c4probe::note("range", "direct", subject_range.end as u64 - subject_range.begin as u64, crate::utils::x_c4probe::key_of(&(matching_seq.index, subject_range.begin, subject_range.end)));
     let subject = subject_for_near_identical
         .take()
         .unwrap_or_else(|| build_subject_range_data_direct(matching_seq, subject_range));
@@ -1809,6 +1813,7 @@ fn evaluate_and_purge(
     // ```
     let eval_params = scaled_karlin_params(params, score_divisor);
     for hsp in &mut hsp_list.hsps {
+        crate::utils::x_c4probe::note("stoe", "redo", 1, crate::utils::x_c4probe::key_of(&(hsp.raw_score, query_workspace.query_length, subject_length, eval_params.lambda.to_bits())));
         hsp.e_value = blast_spouge_stoe(
             hsp.raw_score,
             &eval_params,
@@ -2216,6 +2221,7 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
             redo_align_params,
             Some(&mut *subject_range_cache),
         );
+        crate::utils::x_c4probe::note("aacomp", "prefetch", range.subject.data().len() as u64, crate::utils::x_c4probe::key_of(range.subject.data()));
         let subject_composition = x_whole_subject_composition(&range);
         if query_info.composition.num_true_amino_acids == 0
             || subject_composition.num_true_amino_acids == 0

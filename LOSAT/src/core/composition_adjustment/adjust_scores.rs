@@ -1340,6 +1340,7 @@ pub(crate) fn blast_get_composition_range(
 // }
 // ```
 pub fn read_aa_composition(sequence: &[u8]) -> BlastAminoAcidComposition {
+    crate::utils::x_c4probe::note("aacomp", "all", sequence.len() as u64, crate::utils::x_c4probe::key_of(sequence));
     let mut composition = BlastAminoAcidComposition::empty();
     for &residue in sequence {
         let residue_index = residue as usize;
@@ -3780,6 +3781,7 @@ pub(crate) fn blast_adjust_scores(
     {
         EMatrixAdjustRule::CompoScaleOldMatrix
     } else {
+        crate::utils::x_c4probe::note("rule", "adjust", 1, 0);
         blast_choose_matrix_adjust_rule(
             query_length,
             subject_length,
@@ -3927,6 +3929,7 @@ pub(crate) fn x_newton_input(
     {
         return None;
     }
+    crate::utils::x_c4probe::note("rule", "prefetch", 1, 0);
     let matrix_adjust_rule = blast_choose_matrix_adjust_rule(
         query_length,
         subject_length,
@@ -4167,6 +4170,7 @@ fn blast_choose_matrix_adjust_rule(
     matrix: ScoringMatrix,
     composition_adjust_mode: BlastCompoAdjustMode,
 ) -> Result<EMatrixAdjustRule> {
+    crate::utils::x_c4probe::note("rule", "all", 1, crate::utils::x_c4probe::key_f64s(prob_array1) ^ crate::utils::x_c4probe::key_f64s(prob_array2).rotate_left(7) ^ ((length1 as u64) << 32 | length2 as u64));
     match composition_adjust_mode {
         BlastCompoAdjustMode::NoCompositionBasedStats => Ok(EMatrixAdjustRule::DontAdjustMatrix),
         BlastCompoAdjustMode::CompositionBasedStats => Ok(EMatrixAdjustRule::CompoScaleOldMatrix),

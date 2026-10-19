@@ -33,6 +33,8 @@ pub enum BlastnOutputFormat {
     /// The Seq-annot of Seq-aligns of each query: outfmt 8 (ASN.1 text) or 12 (JSON)
     /// (`report::serial::write_query`, through `algorithm::blastn::seqalign`).
     Seqalign(crate::report::serial::SerialFormat),
+    /// BLAST XML (outfmt 5; `report::blast_xml`, through `algorithm::blastn::blast_xml`).
+    Xml,
 }
 
 impl BlastnOutputFormat {
@@ -68,6 +70,7 @@ impl BlastnOutputFormat {
             ReportFormat::Pairwise => Ok(BlastnOutputFormat::Pairwise),
             ReportFormat::Tabular => Ok(BlastnOutputFormat::Tabular),
             ReportFormat::TabularWithComments => Ok(BlastnOutputFormat::TabularWithComments),
+            ReportFormat::Xml => Ok(BlastnOutputFormat::Xml),
             other => match crate::report::serial::SerialFormat::of(other) {
                 Some(serial) => Ok(BlastnOutputFormat::Seqalign(serial)),
                 None => anyhow::bail!(
@@ -87,9 +90,12 @@ impl BlastnOutputFormat {
     }
 
     /// Whether NCBI writes a query's result warnings with its report
-    /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
+    /// (`ReportFormat::writes_query_warnings`): not for the structured formats.
     pub(crate) fn writes_query_warnings(self) -> bool {
-        !matches!(self, BlastnOutputFormat::Seqalign(_))
+        !matches!(
+            self,
+            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Xml
+        )
     }
 
     /// Whether the format is one of the tabular formats (outfmt 6 and 7), which read the

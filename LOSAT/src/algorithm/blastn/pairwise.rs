@@ -112,6 +112,28 @@ pub(crate) fn pairwise_hits(
     Ok(hits)
 }
 
+/// The displayed rows of one HSP (the query on its plus strand, the subject reverse-complemented
+/// with it for a minus-strand HSP, upper case, no masking) for BLAST XML, which recounts its
+/// identities from them (`algorithm::blastn::blast_xml`). The same function of the HSP as the
+/// outfmt 0 rows, without a `PairwiseHit`.
+pub(crate) fn xml_rows(
+    hsp: &BlastnHsp,
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+) -> Result<(Vec<u8>, Vec<u8>)> {
+    let query = queries
+        .get(hsp.q_idx as usize)
+        .context("BLASTN HSP of an unknown query")?;
+    let s_idx = hsp.s_idx as usize;
+    subjects
+        .records()
+        .get(s_idx)
+        .context("BLASTN HSP of an unknown subject")?;
+    displayed_rows(hsp, query.seq(), subjects.len(s_idx), |from, to| {
+        subjects.upper_letters(s_idx, from, to)
+    })
+}
+
 /// What the displayed rows of an HSP read besides the HSP (`pairwise_hits`).
 struct Rows<'a> {
     queries: &'a [FastaRecord],

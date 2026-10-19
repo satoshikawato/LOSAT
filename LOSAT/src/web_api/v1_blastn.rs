@@ -83,7 +83,9 @@ pub(super) fn run_web_pair(
         BlastnOutputFormat::Tabular => "6".to_string(),
         BlastnOutputFormat::TabularWithComments => "7".to_string(),
         // `v1_output_format` reads 0, 6 and 7 only.
-        BlastnOutputFormat::Seqalign(_) => anyhow::bail!("unsupported BLASTN output format"),
+        BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Xml => {
+            anyhow::bail!("unsupported BLASTN output format")
+        }
     };
     // ABI v1 is frozen (plan TD-1) except fail-fast fixes. Before S07+ it checked the
     // thread count first (in its search pool) and gave the empty report of an empty

@@ -381,7 +381,10 @@ export LOSAT_X_TBXUNGAP=1
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
 built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64), `LOSAT_X_TBXPREFETCH` (2 to
 4,194,304, built-in 1,536: KiB of a subject's largest unit table), `LOSAT_X_TBXEXTBATCH` (2 to
-4,194,304, built-in 256: Ki letters of a subject's largest unit query-group span), `LOSAT_X_BPQBLOCK` (1 or
+4,194,304, built-in 256: Ki letters of a subject's largest unit query-group span), `LOSAT_X_TBXQSLICE`
+(2 to 1,073,741,824: letters of a query slice, on every group longer than that; `1` or unset: the
+built-in rule, slices of 131,072 letters where a group's span times the threads reaches 6 Mi
+letters), `LOSAT_X_BPQBLOCK` (1 or
 more, built-in 50,000: query letters per block; a value that is not a positive number is the
 built-in value).
 
@@ -3180,6 +3183,49 @@ Scheduling (each value computed by one thread with the original function; order 
   batched scan on fresh tables, and the saved records and every cell of the final table must be equal;
   a difference panics with the unit. Lines at exit: `[X_SHADOW] TBXEXTBATCH units_compared=` and
   `[X_STATS] TBXEXTBATCH units= candidates= early= batches=`.
+- `LOSAT_X_TBXQSLICE=1` (TBLASTX, speed; a value switch, in the strict set from the pull request that
+  added it, 2026-10-19; x86-64 only; `=0` turns it off) the unit scan of `LOSAT_X_PAIRPAR`
+  (`tblastx/x_tbx_qslice.rs`, rule and exactness argument in its header) cuts a long query group into
+  slices of consecutive query offsets, each with its own lookup table (the group's chains filtered to
+  the slice), and scans the unit's subject chunk once per slice, in slice order, on the unit's one
+  diagonal table, which is not cleared between slices. At one subject position a slice's hits touch
+  cells in a window of the slice's width, which moves one cell per position: with slices of 128 Ki
+  letters it is 512 KiB and stays in the core's L2, where the whole group's table (4 bytes a cell: the
+  group's span plus the chunk; 7 MB for one frame of Sakai) is read from the L3 or, with 8 or 16
+  threads, from memory. Each diagonal sees its hits in the same order, the table ends the same cell
+  for cell and the unit's records are the same after the chunk's stable sort, so the reports are
+  those without it. Unset (or `=1`), a group is cut into slices of at most 131,072 letters where its
+  span is longer and its span times the search's threads reaches 6 Mi letters (24 MiB of tables at
+  once; for one query, a frame of 1.5 Mi letters at 4 threads, 768 Ki at 8, 384 Ki at 16); below that
+  the whole group's scan (with `LOSAT_X_TBXPREFETCH` where the table is large) is as fast or faster.
+  `=N` (2 to 2^30) cuts every group of more than N letters into slices of at most N, whatever the
+  threads (tuning and tests); at most 64 slices a group. A batch with no cut group runs `scan_unit`,
+  whose machine code is the one before the switch (the binary before it, the default and `=0` run the
+  same instruction counts: AP027131 x AP027133 76.99 G, MelaMJNV x PemoMJNVA 9.906 G, AvCLPV x
+  PsCLPV 43.61 G at one thread); in a batch with a cut group every unit takes the sliced scan (a
+  group that is not cut is one slice). In the slices `LOSAT_X_TBXPREFETCH` and `LOSAT_X_TBXEXTBATCH`
+  apply their rules to the widest slice instead of the group: with 128 Ki slices neither acts
+  (forced on, they lost 1.4-1.8 % at 8 threads). Each slice table has its own backbone (about 460 KB).
+  With `LOSAT_TIMING` or `LOSAT_X_STATS` (their probes) or `LOSAT_X_TBXEXTBATCHSHADOW` nothing is cut.
+  Measured (workstation, Xeon 6338, L2 1.25 MiB per core, L3 48 MiB per node; booked cores of a node
+  without other timed runs, one warm-up round, then rounds alternating the order, medians; every
+  report identical): Sakai x MG1655 (code 11) at 8 threads 106.1 -> 85.6 s against the binary before
+  (x0.807; x0.818 against `=0`), at 16 threads 86.5 -> 62.8 s (x0.730), cycles 2.0 -> 1.5 T at 8;
+  Sakai x MG1655[0:1 Mb] at 16 threads x0.690, at 8 x0.801; Sakai's first 3.2 Mb (frames of 1.07 M
+  letters) at 8 threads x0.961; at one thread, below the rule, the same code. How the rule was chosen
+  (slices on every group against `=0`): 64 / 128 / 256 / 512 Ki letters on Sakai x MG1655[0:1 Mb] at
+  16 threads x0.696 / 0.690 / 0.716 / 0.693 (max RSS +149 / +26 / +8 / +1 MB), at 8 x0.797 / 0.801 /
+  0.836 / 0.797; with 128 Ki, Sakai's first 1.6 Mb at 8 threads (4.3 M letters x threads) x1.005, its
+  first 0.8 Mb x0.997, Sakai x MG1655[0:1 Mb] at one thread x1.015 (2 threads x1.006; 4 threads x0.724,
+  a node with other runs). Max RSS of Sakai x MG1655 at 8 threads: +51 MB on one node, +262 MB on the
+  other (2.0 -> 2.26 GB), equal with `MALLOC_ARENA_MAX=1` (1956 vs 1948 MB): glibc's per-thread arenas
+  keep what the units free, and the peak lies in the stage after the scan.
+- `LOSAT_X_TBXQSLICESHADOW=1` shadow of `LOSAT_X_TBXQSLICE` (where it cuts; `=N` cuts small groups): the
+  whole groups are built as well, and every unit of a batch with a cut group also runs `scan_unit` on a
+  table of its own; the unit's records after the chunk's stable sort and every cell of the two final
+  tables must be equal; a difference panics with the unit. Lines at exit: `[X_SHADOW] TBXQSLICE
+  units_compared= records_compared=` and `[X_STATS] TBXQSLICE batches= groups_cut= slices= units=
+  slice_scans= rule=`.
 - `LOSAT_X_PAIRLUT=1` (in the strict set; acts while `LOSAT_X_PAIRPAR` is on, not with its
   shadow) TBLASTX:
   the lookup tables of the unit path, one per context group, built directly from the query instead

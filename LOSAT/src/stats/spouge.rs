@@ -147,6 +147,47 @@ pub fn lookup_protein_gumbel_params(
 // NCBI blast_stat.c:5216,5223 calls ErfC, not NCBI_ErfC.
 #[inline]
 fn erfc_ncbi(z: f64) -> f64 {
+    // EXPERIMENT (LOSAT_X_ERFABSORB): for z < -6 the reference's value is 2.0 whatever ErfImpl
+    // returns, so ErfImpl is not called.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59,111,207,224-229,234-235
+    // ```c
+    //         else if (z < -0.5) {
+    //             return 2.0 - ErfImpl(-z, invert);
+    // ...
+    //     else if (invert ? (z < 28.0) : (z < 5.8)) {
+    // ...
+    //             static const double Y = 0.5579090118408203125;
+    // ...
+    //             double x = 1.0 / z;
+    // ...
+    //             result = Y + p / q;
+    //             result *= expl(-z * z) / z;
+    // ...
+    //         /* Any value of z larger than 28 will underflow to zero: */
+    //         result = 0;
+    // ```
+    // With x = -z >= 6, ErfImpl(x, TRUE) takes the last rational branch (x >= 4.5) or, from
+    // x = 28 on, returns 0. In that branch Y + p / q lies in [0.5566, 0.5639] for 1/x in
+    // (1/28, 1/6] (|p / q| <= 0.006, q >= 1), expl(-x * x) <= e^-36 (`exp_long_double_product_ncbi`
+    // squares a value below 1 nine times; an underflow only lowers it, never below 0) and the
+    // quotient by x >= 6 divides by six, so 0 <= r <= 0.5639 * e^-36 / 6 < 2.2e-17, a fifth of
+    // 2^-53. The reference's 2.0 - r then rounds to 2.0: the exact difference lies in
+    // [2 - 2^-53, 2], and 2 - 2^-53 is the midpoint between 2 - 2^-52 and 2.0, which rounds to
+    // the even 2.0. A NaN fails the comparison and takes the reference path.
+    // `LOSAT_X_ERFABSORBSHADOW=1` computes the reference too and stops if its bits differ.
+    if z < -6.0 {
+        let mode = x_erf_absorb();
+        if mode != 0 {
+            if mode == 2 {
+                let reference = erf_impl_ncbi(z, true);
+                assert!(
+                    reference.to_bits() == 2.0f64.to_bits(),
+                    "LOSAT_X_ERFABSORBSHADOW: ErfC({z:e}) = {reference:e}, not 2.0"
+                );
+            }
+            return 2.0;
+        }
+    }
     // EXPERIMENT (LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
     // BLAST_SpougeEtoS (blast_stat.c:5236-5282) asks for the same arguments again
     // for every subject of the same length; keep the last results per thread.
@@ -207,6 +248,28 @@ fn x_erf_memo() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_ERFMEMO"))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59
+// ```c
+//         else if (z < -0.5) {
+//             return 2.0 - ErfImpl(-z, invert);
+// ```
+// No NCBI counterpart: the switch is read once per process. 0 calls ErfImpl for every argument,
+// 1 returns the reference's 2.0 for z < -6 without it (the argument in `erfc_ncbi`), 2 does so
+// after checking it against ErfImpl (`LOSAT_X_ERFABSORBSHADOW`).
+fn x_erf_absorb() -> u8 {
+    use std::sync::OnceLock;
+    static MODE: OnceLock<u8> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if !crate::utils::xswitch::on("LOSAT_X_ERFABSORB") {
+            0
+        } else if std::env::var_os("LOSAT_X_ERFABSORBSHADOW").is_some() {
+            2
+        } else {
+            1
+        }
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_stat.c:5248-5254
@@ -728,6 +791,60 @@ mod tests {
     }
 
     use super::*;
+
+    // EXPERIMENT (LOSAT_X_ERFABSORB): the reference ErfC is 2.0 for every z < -6, and the
+    // switched function has the reference's bits everywhere.
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59
+    // ```c
+    //         else if (z < -0.5) {
+    //             return 2.0 - ErfImpl(-z, invert);
+    // ```
+    // The argument of `erfc_ncbi` bounds ErfImpl(-z, TRUE) below 2.2e-17 for z <= -6; this
+    // checks the reference on a grid of [-28.5, -6], on random arguments below -6 (dense next to
+    // -6 and 28) and on the doubles just below -6, and that `erfc_ncbi` (whatever the switches)
+    // equals `erf_impl_ncbi` on random arguments in [-40, 40]. A reference call costs about
+    // 5,000 cycles, so the sets are kept to about 100,000 calls.
+    #[test]
+    fn x_erfc_below_minus_six_is_two_and_the_switched_function_has_the_reference_bits() {
+        let two = 2.0f64.to_bits();
+        let check = |z: f64| {
+            assert_eq!(erf_impl_ncbi(z, true).to_bits(), two, "ErfC({z:e})");
+        };
+        for i in 0..=22_500u32 {
+            check(-28.5 + i as f64 * 1e-3);
+        }
+        let mut below_six = -6.0f64;
+        for _ in 0..20_000 {
+            below_six = f64::from_bits(below_six.to_bits() + 1);
+            check(below_six);
+        }
+        let mut state = 0x0DDB_A11C_AFE5_EED5u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..15_000 {
+            let u = next();
+            check(-6.0 - u * u * 24.0);
+            check(-28.0 + (u - 0.5) * 1e-3);
+            check(-6.0 - u * 1e300);
+        }
+        check(f64::NEG_INFINITY);
+        for _ in 0..30_000 {
+            let z = (next() - 0.5) * 80.0;
+            assert_eq!(
+                erfc_ncbi(z).to_bits(),
+                erf_impl_ncbi(z, true).to_bits(),
+                "z={z:e}"
+            );
+        }
+        assert_eq!(
+            erfc_ncbi(f64::NAN).to_bits(),
+            erf_impl_ncbi(f64::NAN, true).to_bits()
+        );
+    }
 
     // NCBI c++/src/algo/blast/core/boost_erf.c:252-255:
     // double ErfC(double z) { return ErfImpl(z, TRUE); }

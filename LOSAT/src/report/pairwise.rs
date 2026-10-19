@@ -1962,6 +1962,9 @@ fn write_final_database_report<W: Write>(
 // display.DisplaySeqalign(m_Outfile);
 // x_PrintOneQueryFooter(*results.GetAncillaryData());
 // ```
+/// The report of `queries`: the prolog when `prolog` is set (EXPERIMENT (LOSAT_X_BPQBLOCKFMT):
+/// false for the query blocks after the first of blastp's block search, whose first block wrote
+/// it), each query's section, and the epilog when `epilog` is set.
 pub fn write_blastp_pairwise_report<W: Write>(
     hits: &[PairwiseHit],
     writer: &mut W,
@@ -1973,23 +1976,26 @@ pub fn write_blastp_pairwise_report<W: Write>(
     database: Option<&PairwiseDatabase>,
     mut probe: Option<&mut FormatProbe<'_>>,
     mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    prolog: bool,
     epilog: bool,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
 
-    write_blastp_pairwise_intro(writer, &report.version)?;
-    // The prolog ends with one blank line; each query's preamble starts with two
-    // (blast_format.cpp:1491), after the query's warnings.
-    match database {
-        Some(database) => write_blast_database_header(writer, database)?,
-        None => write_blastp_database_header_spacing(
-            writer,
-            &report.database_name,
-            report.database_num_sequences,
-            report.database_total_letters,
-            1,
-        )?,
+    if prolog {
+        write_blastp_pairwise_intro(writer, &report.version)?;
+        // The prolog ends with one blank line; each query's preamble starts with two
+        // (blast_format.cpp:1491), after the query's warnings.
+        match database {
+            Some(database) => write_blast_database_header(writer, database)?,
+            None => write_blastp_database_header_spacing(
+                writer,
+                &report.database_name,
+                report.database_num_sequences,
+                report.database_total_letters,
+                1,
+            )?,
+        }
     }
 
     // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1411

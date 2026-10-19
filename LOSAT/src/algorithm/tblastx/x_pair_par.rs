@@ -2072,7 +2072,13 @@ impl XPairPar {
         let mut records = std::mem::take(&mut scratch.records);
         records.clear();
         let mapped = self.x_unit_records(unit, scratch, &mut records);
-        self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut records, &mut XNoProbe);
+        match r6_variant() {
+            1 => self.scan_unit_r6::<_, PF, 1>(unit, inp, scratch, &mut records),
+            2 => self.scan_unit_r6::<_, PF, 2>(unit, inp, scratch, &mut records),
+            3 => self.scan_unit_r6::<_, PF, 3>(unit, inp, scratch, &mut records),
+            4 => self.scan_unit_r6::<_, PF, 4>(unit, inp, scratch, &mut records),
+            _ => self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut records, &mut XNoProbe),
+        }
         let exact = x_unit_copy(&records, mapped);
         scratch.records = records;
         exact
@@ -2258,6 +2264,178 @@ impl XPairPar {
             }
         }
         probe.unit_end();
+    }
+
+    // R6 PROBE (exp/r6-hit-probes, not for merging): variants of the hit loop of `scan_unit`,
+    // chosen by LOSAT_R6V (run_unit_compact).
+    #[allow(clippy::too_many_lines)]
+    fn scan_unit_r6<S: XInitSink, const PF: bool, const V: u8>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+    ) {
+        let group = &self.groups[unit.g];
+        let sub = &group.lookup;
+        let wordsize = inp.wordsize;
+        let window = inp.window;
+        let s_frame = &inp.s_frames_preliminary[unit.f];
+        let subject_full = &s_frame.aa_seq;
+        let subject_all = &subject_full[1..subject_full.len() - 1];
+        let chunk = unit.chunk;
+        let chunk_end = chunk.offset.saturating_add(chunk.length);
+        let subject = &subject_all[chunk.offset..chunk_end];
+        if subject.len() < wordsize as usize {
+            return;
+        }
+
+        let offset_array_size: i32 = OFFSET_ARRAY_SIZE + sub.longest_chain.max(0);
+        // EXPERIMENT (LOSAT_X_TBXSCANBF): with the switch, X_SCAN_BF_SLACK entries more.
+        let offset_pairs_len =
+            crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size) + X_PREFETCH_AHEAD;
+        if scratch.offset_pairs.len() < offset_pairs_len {
+            scratch
+                .offset_pairs
+                .resize(offset_pairs_len, OffsetPair::default());
+        }
+        // Unit cell of hit (q, s): q - s - lo, lo = q_min - (s_len - 1) (u32 wrapping), so the
+        // cells run from 0 to (q_max - q_min) + (s_len - 1).
+        let width = x_unit_width(group, &chunk);
+        let lo = group.q_min.wrapping_sub(chunk.length as u32 - 1);
+        // EXPERIMENT (LOSAT_X_SEEDUNMAP, section above `X_MAPPED_BYTES`): a table too small for a
+        // unit where `x_unit_mapped` holds is replaced by an empty one of the mapped capacity; the
+        // clear and resize below write every cell of the unit's width as before.
+        if scratch.diag.capacity() < width
+            && x_unit_mapped(scratch.unmap, x_unit_span(group), chunk.length)
+        {
+            scratch.diag = Vec::with_capacity(x_mapped_len::<DiagStruct>(width));
+            SU_DIAG.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+        scratch.diag.clear();
+        scratch.diag.resize(width, DiagStruct::default());
+
+        let h = XHitCtx {
+            diag_offset: window,
+            window,
+            wordsize,
+            lookup: sub,
+            contexts: inp.contexts,
+            cutoff_scores: inp.cutoff_scores,
+            x_dropoff_per_context: inp.x_dropoff_per_context,
+            subject,
+            s_f_idx: unit.f,
+            s_frame: s_frame.frame,
+            s_idx: inp.s_idx,
+            s_len: inp.s_len,
+        };
+
+        let base_seq_ranges: [(i32, i32); 1] = [(0, chunk.length as i32)];
+        let scan_interiors = tblastx_scan_interiors(chunk.length, None);
+        for (interior_start, interior_end) in scan_interiors {
+            let seq_ranges = clip_tblastx_seq_ranges_for_scan_interior(
+                &base_seq_ranges,
+                interior_start,
+                interior_end,
+                wordsize as usize,
+                subject.len(),
+            );
+            if seq_ranges.is_empty() {
+                continue;
+            }
+            // [C] scan_range[0] = 0;
+            // [C] scan_range[1] = subject->seq_ranges[0].left;
+            // [C] scan_range[2] = subject->seq_ranges[0].right - wordsize;
+            let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
+            // [C] while (scan_range[1] <= scan_range[2])
+            while scan_range[1] <= scan_range[2] {
+                let prev_scan_left = scan_range[1];
+                // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+                // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
+                let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+                    group.scan_bf,
+                    sub,
+                    subject,
+                    &seq_ranges,
+                    &mut scratch.offset_pairs[..],
+                    offset_array_size,
+                    &mut scan_range,
+                );
+                if hits == 0 && scan_range[1] == prev_scan_left {
+                    // The reference's safety guard (RI:3157-3161).
+                    break;
+                }
+                let n = hits as usize;
+                let diag_ptr = scratch.diag.as_mut_ptr();
+                let offset_pairs_ptr = scratch.offset_pairs.as_ptr();
+                let window_u = window as u32;
+                // R6 PROBE: diff < wordsize <=> 2 (s - L) < 2 (wordsize - window), L = stored last_hit.
+                let ow2: i32 = (wordsize - window).wrapping_mul(2);
+                let mut dummy: u32 = 0;
+                // SAFETY (probe): offset_pairs has X_PREFETCH_AHEAD entries of slack (resize above);
+                // cells as in `scan_unit`.
+                unsafe {
+                    let mut p = offset_pairs_ptr;
+                    let end = p.add(n);
+                    while p < end {
+                        #[cfg(target_arch = "x86_64")]
+                        if PF {
+                            let ahead = &*p.add(X_PREFETCH_AHEAD);
+                            let cell =
+                                ahead.q_off.wrapping_sub(ahead.s_off).wrapping_sub(lo) as usize;
+                            core::arch::x86_64::_mm_prefetch(
+                                diag_ptr.wrapping_add(cell) as *const i8,
+                                core::arch::x86_64::_MM_HINT_T0,
+                            );
+                        }
+                        let pair = &*p;
+                        p = p.add(1);
+                        let q = pair.q_off;
+                        let s = pair.s_off;
+                        let cell = q.wrapping_sub(s).wrapping_sub(lo) as usize;
+                        let entry = &mut *diag_ptr.add(cell);
+                        if V == 1 {
+                            x_hit(entry, q, s, &h, init_hsps, &mut XNoProbe);
+                            continue;
+                        }
+                        let raw = entry.raw_bits();
+                        let d2 = (s.wrapping_add(s) as i32).wrapping_sub(raw.wrapping_add(raw) as i32);
+                        if V == 2 {
+                            if (raw as i32) < 0 {
+                                x_hit(entry, q, s, &h, init_hsps, &mut XNoProbe);
+                                continue;
+                            }
+                            if d2 >= 0 {
+                                entry.set_raw_bits(s.wrapping_add(window_u));
+                                continue;
+                            }
+                            if d2 < ow2 {
+                                continue;
+                            }
+                            x_hit(entry, q, s, &h, init_hsps, &mut XNoProbe);
+                            continue;
+                        }
+                        let cand = (d2.wrapping_sub(ow2) as u32) < (ow2.wrapping_neg() as u32);
+                        if ((raw as i32) < 0) | cand {
+                            x_hit(entry, q, s, &h, init_hsps, &mut XNoProbe);
+                            continue;
+                        }
+                        if V == 3 {
+                            let tgt: *mut u32 = if d2 >= 0 {
+                                entry as *mut DiagStruct as *mut u32
+                            } else {
+                                &mut dummy
+                            };
+                            tgt.write_volatile(s.wrapping_add(window_u));
+                        } else {
+                            let new = if d2 >= 0 { s.wrapping_add(window_u) } else { raw };
+                            entry.set_raw_bits(new);
+                        }
+                    }
+                }
+                std::hint::black_box(dummy);
+            }
+        }
     }
 }
 
@@ -2477,6 +2655,12 @@ fn x_hit<S: XInitSink, P: XProbe>(
             XHit::Extended
         }
     }
+}
+
+// R6 PROBE: LOSAT_R6V, read once (0 = the dev hit loop).
+fn r6_variant() -> u8 {
+    static V: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("LOSAT_R6V").ok().and_then(|v| v.parse().ok()).unwrap_or(0))
 }
 
 // No NCBI counterpart: how the contexts are grouped into units (scheduling only; module doc).

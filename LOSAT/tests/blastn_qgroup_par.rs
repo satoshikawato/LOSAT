@@ -77,10 +77,21 @@ impl Queries {
     /// fourth with a run of `N`s and lower case letters, then a poly-A query, one of 20 letters
     /// and one of 300 `N` followed by 400 letters: 27 queries.
     fn pieces() -> Self {
-        let genome = letters("LC738874.fasta");
+        Self::pieces_of("LC738874.fasta", 0)
+    }
+
+    /// The same kind of 27 queries cut from the subject itself (LC738868, 3,000 letters further
+    /// on, which keeps a repeat region of the subject from holding most of the HSPs), so that
+    /// megablast and dc-megablast find HSPs for most of them.
+    fn subject_pieces() -> Self {
+        Self::pieces_of("LC738868.fasta", 3_000)
+    }
+
+    fn pieces_of(name: &str, shift: usize) -> Self {
+        let genome = letters(name);
         let mut records = Vec::new();
         for i in 0..24usize {
-            let start = i * 11_000 + 137 * i;
+            let start = i * 11_000 + 137 * i + shift;
             let len = 900 + (i * 1_531) % 3_600;
             let mut seq = genome[start..start + len].to_vec();
             if i % 3 == 0 {
@@ -237,7 +248,7 @@ fn check_task(
 
 #[test]
 fn megablast_stages_per_query() {
-    let (_, traceback, hsps) = check_task(&Queries::pieces(), "megablast", &[], &[]);
+    let (_, traceback, hsps) = check_task(&Queries::subject_pieces(), "megablast", &[], &[]);
     assert!(traceback > 0 && hsps > 0, "{traceback} {hsps}");
 }
 
@@ -252,7 +263,7 @@ fn blastn_stages_per_query() {
 
 #[test]
 fn dc_megablast_stages_per_query() {
-    let (_, traceback, _) = check_task(&Queries::pieces(), "dc-megablast", &[], &[]);
+    let (_, traceback, _) = check_task(&Queries::subject_pieces(), "dc-megablast", &[], &[]);
     assert!(traceback > 0, "{traceback}");
 }
 

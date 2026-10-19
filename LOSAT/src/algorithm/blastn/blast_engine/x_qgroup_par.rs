@@ -46,11 +46,15 @@
 //! - Traceback (`process_subject` with the kept HSPs): the kept HSPs are the hit lists of the
 //!   queries one after another (`prelim_hits_by_subject`), so each query's HSPs are one slice. Each
 //!   slice runs the traceback loop, the first purge (trimmed HSPs at its end), the re-evaluation of
-//!   the trimmed HSPs and the second purge; the lists are concatenated in query order. The second
-//!   purge orders by context first and keeps, within a context, the input's relative order for its
-//!   ties, which is the same in both forms (kept HSPs before trimmed ones, each group in the
-//!   order of the first purge), so the concatenation is the serial second purge's output; the
-//!   score sort, the final tree and the e-values run on it as before.
+//!   the trimmed HSPs, the second purge, the score sort, the final tree and the e-values; the final
+//!   lists are concatenated in query order and sorted by score with the same stable sort. The
+//!   second purge orders by context first and keeps, within a context, the input's relative order
+//!   for its ties, which is the same in both forms (kept HSPs before trimmed ones, each group in
+//!   the order of the first purge), so a query's list after it is the serial list's part for that
+//!   query; the score sort, the tree and the e-values keep that per query; and the serial score
+//!   sort leaves ties between queries in the order of its input, which is query order, as the
+//!   stable sort of the concatenation does. So the subject's final list is the serial one element
+//!   for element.
 //!
 //! The queries are handed out to the threads from an atomic counter, the query with the most HSPs
 //! first (the counts are known before each stage), each thread with its own tree and alignment
@@ -343,8 +347,8 @@ mod tests {
 
     #[test]
     fn the_plan_hands_out_the_largest_queries_first() {
-        let order = plan(&[3, 0, 5, 3, 1], Stage::Prelim).expect("no query above a quarter");
-        assert_eq!(order, vec![2, 0, 3, 4]);
+        let order = plan(&[3, 0, 3, 3, 1, 2], Stage::Prelim).expect("no query above a quarter");
+        assert_eq!(order, vec![0, 2, 3, 5, 4]);
     }
 
     #[test]

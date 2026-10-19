@@ -6,24 +6,31 @@
 //! its shadow (`LOSAT_X_TBNHITBFSHADOW`) turns it on and compares it with the loop before the switch
 //! on every array.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:536-552
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
 //! ```c
-//! if (diff >= window) {
-//!     diag_array[diag_coord].last_hit =
-//!         subject_offset + diag_offset;
-//!     continue;
-//! }
-//! if (diff < wordsize) {
-//!     continue;
-//! }
+//!                 if (diff >= window) {
+//!                     /* We are beyond the window for this diagonal; start a
+//!                        new hit */
+//!                     diag_array[diag_coord].last_hit =
+//!                         subject_offset + diag_offset;
+//!                     continue;
+//!                 }
+//!
+//!                 /* If the difference is less than the wordsize (i.e. last
+//!                    hit and this hit overlap), give up */
+//!
+//!                 if (diff < wordsize) {
+//!                     continue;
+//!                 }
 //! ```
 //! The loop takes these two outcomes without a branch and hands the others to the per-hit body,
 //! with the same cell states and the same saved init HSPs (the module's argument), so the property
 //! under test is that the report does not depend on it. That reports equal NCBI's is the business of
 //! the fixture comparisons. The input (the first 40 proteins of AvCLPV against its genome) gives
-//! extensions, flag-1 cells and HSPs. The tests compare the default, `LOSAT_X_DEFAULT=0`, cleared
-//! tables per unit (`LOSAT_X_TBNSTATE=0`) and the shadow (which also shows that the loop ran and
-//! that no array fell outside its range) with `=0`.
+//! extensions, flag-1 cells and HSPs. The tests compare the default, cleared tables per unit
+//! (`LOSAT_X_TBNSTATE=0`), the switch alone in the unit path (`LOSAT_X_DEFAULT=0` with
+//! `LOSAT_X_TBNPAR=1`) and the shadow (which also shows that the loop ran on every offset array and
+//! that none fell outside its range) with `=0`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -39,6 +46,11 @@ const SHADOW: (&str, &str) = ("LOSAT_X_TBNHITBFSHADOW", "1");
 const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 /// A cleared table for every unit instead of the kept one (`XTwoHit::reset`).
 const CLEARED: (&str, &str) = ("LOSAT_X_TBNSTATE", "0");
+/// The unit path (`LOSAT_X_DEFAULT=0` turns it off with the rest of the strict set).
+const UNIT_PATH: (&str, &str) = ("LOSAT_X_TBNPAR", "1");
+const ON: (&str, &str) = ("LOSAT_X_TBNHITBF", "1");
+/// The `[X_STATS] TBNSCANBF` line: the scan calls of the unit path, one offset array each.
+const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 /// The proteins of the query.
 const PROTEINS: usize = 40;
 
@@ -139,7 +151,7 @@ fn the_branch_free_loop_gives_the_same_report() {
     for threads in [1, 2] {
         let (off, _) = inputs.tblastn(threads, &[OFF]);
         assert!(!off.is_empty(), "threads {threads}: no hits");
-        for switches in [&[][..], &[DEFAULT_OFF][..], &[CLEARED][..]] {
+        for switches in [&[][..], &[CLEARED][..]] {
             let (report, _) = inputs.tblastn(threads, switches);
             assert_eq!(report, off, "threads {threads} {switches:?}: against =0");
         }
@@ -154,6 +166,7 @@ fn the_shadow_compares_every_offset_array() {
     for threads in [1, 2] {
         let (off, _) = inputs.tblastn(threads, &[OFF]);
         for switches in [&[SHADOW][..], &[SHADOW, OFF][..], &[SHADOW, CLEARED][..]] {
+            let switches = &[switches, &[STATS][..]].concat();
             let (shadow, stderr) = inputs.tblastn(threads, switches);
             assert_eq!(
                 shadow, off,
@@ -172,8 +185,41 @@ fn the_shadow_compares_every_offset_array() {
                 0,
                 "threads {threads} {switches:?}: an array outside the range: {stderr}"
             );
+            assert_eq!(
+                field(&stderr, "[X_SHADOW] TBNHITBF", "arrays_compared"),
+                field(&stderr, "[X_STATS] TBNSCANBF", "calls_bf")
+                    + field(&stderr, "[X_STATS] TBNSCANBF", "calls_ref"),
+                "threads {threads} {switches:?}: one offset array per scan call: {stderr}"
+            );
         }
     }
+}
+
+// No NCBI counterpart: where the switch acts. With `LOSAT_X_DEFAULT=0` the unit path is off and so
+// is the switch: no loop of the unit path runs (no shadow line). With `LOSAT_X_TBNPAR=1` as well the
+// unit path runs again with the loop before the switch, unless LOSAT_X_TBNHITBF=1 or the shadow
+// turns it on.
+#[test]
+fn the_switch_acts_in_the_unit_path_only() {
+    let inputs = Inputs::new("unit");
+    let (off, _) = inputs.tblastn(1, &[OFF]);
+    for switches in [
+        &[DEFAULT_OFF][..],
+        &[DEFAULT_OFF, SHADOW][..],
+        &[DEFAULT_OFF, UNIT_PATH][..],
+        &[DEFAULT_OFF, UNIT_PATH, ON][..],
+    ] {
+        let (report, stderr) = inputs.tblastn(1, switches);
+        assert_eq!(report, off, "{switches:?}: against =0");
+        assert!(
+            lines(&stderr, "[X_SHADOW] TBNHITBF").is_empty(),
+            "{switches:?}: {stderr}"
+        );
+    }
+    let (report, stderr) = inputs.tblastn(1, &[DEFAULT_OFF, UNIT_PATH, SHADOW]);
+    assert_eq!(report, off, "the unit path with the shadow");
+    assert!(field(&stderr, "[X_SHADOW] TBNHITBF", "arrays_compared") > 0);
+    assert!(field(&stderr, "[X_SHADOW] TBNHITBF", "hits_compared") > 0);
 }
 
 #[test]

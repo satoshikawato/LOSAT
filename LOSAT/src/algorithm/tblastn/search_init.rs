@@ -738,6 +738,9 @@ impl<'a> XTwoHit<'a> {
             self.pairs(frame, chunk_offset, subject_sequence, pairs, hits);
             return;
         }
+        if pairs.is_empty() {
+            return;
+        }
         let before = self.diagonals.entries.clone();
         let mut reference_hits = Vec::new();
         self.pairs(
@@ -1722,7 +1725,8 @@ mod tests {
         let set: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
         let (query, offsets) = x_concatenated(&set);
         let mut found = 0;
-        let mut flags = 0;
+        // too far, overlap, flag 1, candidate (the last two go to `pairs` in `x_pairs_bf`).
+        let mut outcomes = [0u64; 4];
         for window in [40, 4] {
             for (mode, start) in [
                 ("cleared", None),
@@ -1752,8 +1756,25 @@ mod tests {
                         branch_free.reset();
                     }
                     let pairs = x_word_pairs(&query, unit);
+                    // The reference one hit at a time, its outcomes counted from the cell before.
                     let mut expected = Vec::new();
-                    reference.pairs(1, 0, unit, &pairs, &mut expected);
+                    for pair in &pairs {
+                        let mask = reference.x_table().len() - 1;
+                        let (last_hit, flag) = reference.x_table()
+                            [(pair.q_off.wrapping_sub(pair.s_off) as usize) & mask];
+                        let diff = pair.s_off as i32 - (last_hit - reference.diagonals.offset);
+                        let outcome = if flag {
+                            2
+                        } else if diff >= window {
+                            0
+                        } else if diff < 3 {
+                            1
+                        } else {
+                            3
+                        };
+                        outcomes[outcome] += 1;
+                        reference.pairs(1, 0, unit, std::slice::from_ref(pair), &mut expected);
+                    }
                     let mut got = Vec::new();
                     let mut rest = &pairs[..];
                     while !rest.is_empty() {
@@ -1768,7 +1789,6 @@ mod tests {
                         "window {window} {mode} unit {u}: table"
                     );
                     found += expected.len();
-                    flags += reference.x_table().iter().filter(|cell| cell.1).count();
                     if mode != "cleared" {
                         reference.exit(unit.len());
                         branch_free.exit(unit.len());
@@ -1777,7 +1797,10 @@ mod tests {
             }
         }
         assert!(found >= 200, "the units must give hits ({found})");
-        assert!(flags > 0, "no flag-1 cell");
+        assert!(
+            outcomes.iter().all(|&count| count > 0),
+            "outcomes {outcomes:?}"
+        );
     }
 
     // LOSAT_X_TBNHITBFSHADOW: the shadow keeps the branch-free run's init HSPs and table, which are

@@ -1,42 +1,56 @@
 //! EXPERIMENT (LOSAT_X_TBNHITBF): the two-hit loop of tblastn's unit path (`XTwoHit::pairs`)
 //! with its two common outcomes, too far and overlap, taken without a branch.
 //!
-//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-551
 //! ```c
-//!         diag_coord = (query_offset - subject_offset) & diag_mask;
+//!             diag_coord = (query_offset - subject_offset) & diag_mask;
 //!
-//!         if (diag_array[diag_coord].flag) {
-//!             if ((Int4)(subject_offset + diag_offset) <
-//!                 diag_array[diag_coord].last_hit) {
-//!                 continue;
+//!             /* If the reset bit is set, an extension just happened. */
+//!             if (diag_array[diag_coord].flag) {
+//!                 /* If we've already extended past this hit, skip it. */
+//!                 if ((Int4) (subject_offset + diag_offset) <
+//!                     diag_array[diag_coord].last_hit) {
+//!                     continue;
+//!                 }
+//!                 /* Otherwise, start a new hit. */
+//!                 else {
+//!                     diag_array[diag_coord].last_hit =
+//!                         subject_offset + diag_offset;
+//!                     diag_array[diag_coord].flag = 0;
+//!                 }
 //!             }
-//!             diag_array[diag_coord].last_hit =
-//!                 subject_offset + diag_offset;
-//!             diag_array[diag_coord].flag = 0;
-//!         }
-//!         else {
-//!             last_hit = diag_array[diag_coord].last_hit - diag_offset;
-//!             diff = subject_offset - last_hit;
+//!             /* If the reset bit is cleared, try to start an extension. */
+//!             else {
+//!                 /* find the distance to the last hit on this diagonal */
+//!                 last_hit = diag_array[diag_coord].last_hit - diag_offset;
+//!                 diff = subject_offset - last_hit;
 //!
-//!             if (diff >= window) {
-//!                 diag_array[diag_coord].last_hit =
-//!                     subject_offset + diag_offset;
-//!                 continue;
-//!             }
+//!                 if (diff >= window) {
+//!                     /* We are beyond the window for this diagonal; start a
+//!                        new hit */
+//!                     diag_array[diag_coord].last_hit =
+//!                         subject_offset + diag_offset;
+//!                     continue;
+//!                 }
 //!
-//!             if (diff < wordsize) {
-//!                 continue;
-//!             }
+//!                 /* If the difference is less than the wordsize (i.e. last
+//!                    hit and this hit overlap), give up */
+//!
+//!                 if (diff < wordsize) {
+//!                     continue;
+//!                 }
 //! ```
 //! On a genome searched with proteins most hits end in one of the two `continue`s of a flag-0 cell:
 //! too far (83-87 % of the hits of the four ledger cases, v4-A10 probe 1) or overlap (12-15 %).
-//! Which one is hard to predict, and the branches on it were mispredicted 0.18-0.54 times per hit
-//! in the loop before the switch. A flag-1 cell (0.5-0.7 %) or a hit past both tests, a candidate
-//! for the extension (1.2-1.5 %), is rare.
+//! Which one is hard to predict: taking both without a branch removed 0.12-0.17 mispredicted
+//! branches per hit from the whole run (0.25-0.35 before). A flag-1 cell (0.5-0.7 %) or a hit past
+//! both tests, a candidate for the extension (1.2-1.6 %), is rare.
 //!
 //! `x_hits_bf` reads the cell of each hit and computes `d = (s + diag_offset) - last_hit`. That is
-//! the reference's `diff = s - (last_hit - diag_offset)` with the same wrapping `i32` operations,
-//! so the same value whatever the operands. A candidate (`wordsize <= d < window`) is
+//! the reference's `diff = s - (last_hit - diag_offset)` in wrapping `i32` operations, so in a release
+//! build (no overflow checks) the same value whatever the operands; and the operands stay far from
+//! overflow (`Diagonals::finish_frame` starts again from `window` once the offset reaches
+//! INT4_MAX / 4). A candidate (`wordsize <= d < window`) is
 //! `(d - wordsize) as u32 < window - wordsize`, one unsigned compare: for `d >= window` the
 //! difference is at least `window - wordsize`; for `d < wordsize` it is negative, or, when it wraps
 //! (`d < i32::MIN + wordsize`), at least `2^31 - wordsize`, which is not below
@@ -58,8 +72,9 @@
 //! `LOSAT_X_TBNHITBFSHADOW` set (any value; it turns the path on) each offset array the scan fills
 //! runs the loop before the switch on a copy of the table and then the branch-free one, and the
 //! init HSPs and every cell of the table must be equal; `main` prints
-//! `[X_SHADOW] TBNHITBF arrays_compared= hits_compared= outside=` at exit. tblastx has its own
-//! loop of this form under LOSAT_X_TBXHITBF (`tblastx/x_tbx_hitbf.rs`).
+//! `[X_SHADOW] TBNHITBF arrays_compared= hits_compared= outside=` at exit when the unit path filled
+//! any offset array (one per scan call, empty ones included). TBLASTX's unit scan has a loop of this
+//! form under its own switch, LOSAT_X_TBXHITBF.
 
 use crate::algorithm::tblastx::blast_aascan::BlastOffsetPair;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -173,7 +188,7 @@ pub(super) fn x_shadow_count(hits: usize, outside: bool) {
 
 // No NCBI counterpart: compares two LOSAT runs of one offset array (LOSAT_X_TBNHITBFSHADOW).
 /// Panics at the first difference of the init HSPs or of the tables.
-pub(super) fn x_shadow_compare<H: PartialEq + std::fmt::Debug>(
+pub(super) fn x_shadow_compare<H: PartialEq>(
     frame: i8,
     chunk_offset: u32,
     hits: &[H],
@@ -255,6 +270,8 @@ mod tests {
         let mut rng = Rng(0x7b1f_5eed_a6a6_0001);
         // too far, overlap, flag 1, candidate; wrapped diff - wordsize.
         let mut taken = [0u64; 5];
+        // diff = window, window - 1, wordsize, wordsize - 1 on a flag-0 cell.
+        let mut edges = [0u64; 4];
         for round in 0..4000 {
             let word_size = [0, 1, 2, 3, 3, 5][round % 6];
             let window = match round % 7 {
@@ -307,6 +324,14 @@ mod tests {
                 let s = pair.s_off as i32;
                 let entry = expected[cell];
                 let diff = s.wrapping_sub(entry.0.wrapping_sub(offset));
+                if !entry.1 {
+                    for (edge, value) in [window, window - 1, word_size, word_size - 1]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        edges[edge] += u64::from(diff == value);
+                    }
+                }
                 match reference(entry, s, offset, window, word_size) {
                     None => {
                         taken[if entry.1 { 2 } else { 3 }] += 1;
@@ -327,6 +352,7 @@ mod tests {
             assert_eq!(table, expected, "round {round}: table");
         }
         assert!(taken.iter().all(|&count| count > 0), "outcomes {taken:?}");
+        assert!(edges.iter().all(|&count| count > 0), "boundaries {edges:?}");
     }
 
     #[test]

@@ -271,8 +271,9 @@ fn record(defline: &str, letters: &str) -> String {
 // ```
 // Ties that the conversion's sort reorders: query 1 is 900 bases of MjeNMV followed by the 600
 // bases X (bases 2,000-2,600), query 2 is X alone, and the subject is the first 6 kb of MjeNMV
-// (short enough for the unit path's exactness guard: the queries' 4.2 k residues leave a slack of
-// 4 k cells in the 8,192-cell diagonal table, more than a context's 500 residues). Every
+// (short enough for the first exactness guard that the unit path applies without LOSAT_X_TBXBAND:
+// the queries' 4.2 k residues leave a slack of 4 k cells in the 8,192-cell diagonal table, more
+// than a context's 500 residues). Every
 // subject hit of X is found in both queries with the same score and subject range; in the
 // concatenated query (the init order) query 1 comes first, in the context (the HSP order) query
 // 2's offset is 300 residues (900 bases) lower. The switch sorts those runs (`tie_runs` > 0) and the

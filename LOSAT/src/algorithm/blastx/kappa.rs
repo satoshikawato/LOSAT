@@ -347,6 +347,7 @@ fn get_range<'a>(
         query,
         subject,
         subject_maybe_biased: biased,
+        x_subject_composition: None,
     })
 }
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1896-1957

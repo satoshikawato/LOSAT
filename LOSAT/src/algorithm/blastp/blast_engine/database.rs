@@ -948,16 +948,18 @@ impl ListedTitles<'_> {
 // search that depend on its hits are those of the definition lines of the reported subjects:
 // NCBI's reader error (`HeaderReadError`, the batch of the query that reaches it fails after the
 // reports of the batches before) and LOSAT's refusals (`ListedSubjects::read_titles`,
-// `ListedTitles::check_reported_titles`, `ListedTitles::tabular_subject_ids`). When every
-// definition line of the database reads and none of them is refused, none of these failures can
-// happen in any batch.
+// `ListedTitles::check_reported_titles`, `ListedTitles::tabular_subject_ids`, and for outfmt 0
+// `ListedTitles::check_shown_titles`). When every definition line of the database reads and none
+// of them is refused, none of these failures can happen in any batch.
 // No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): whether every sequence of the database has one definition line
 /// that reads, holds no byte outside ' ' ..= '~' and gives a tabular subject id as NCBI writes
-/// it. Read in `pool` over the ordinal ids; a reader error is `false` (the search of all queries
-/// then reports it where NCBI does).
+/// it, or with `pairwise` (an outfmt 0 report, LOSAT_X_BPQBLOCKFMT, which writes no tabular id) a
+/// title that the outfmt 0 report writes as NCBI. Read in `pool` over the ordinal ids; a reader
+/// error is `false` (the search of all queries then reports it where NCBI does).
 pub(super) fn x_titles_allow_blocks(
     database: &BlastpDatabase,
+    pairwise: bool,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> bool {
     let db = &database.db;
@@ -966,7 +968,13 @@ pub(super) fn x_titles_allow_blocks(
             Ok(deflines) => {
                 deflines.len() == 1
                     && deflines[0].replaced_title_bytes == 0
-                    && crate::report::defline::database_subject_id(&deflines[0].title, true).is_ok()
+                    && if pairwise {
+                        shared::check_shown_protein_title(&deflines[0].title, ordinal, PROGRAM)
+                            .is_ok()
+                    } else {
+                        crate::report::defline::database_subject_id(&deflines[0].title, true)
+                            .is_ok()
+                    }
             }
             Err(_) => false,
         }
@@ -2054,7 +2062,7 @@ mod tests {
         let allowed = |database: &BlastpDatabase| -> [bool; 2] {
             [1, 4].map(|threads| {
                 crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
-                    Ok(x_titles_allow_blocks(database, pool))
+                    Ok(x_titles_allow_blocks(database, false, pool))
                 })
                 .unwrap()
             })

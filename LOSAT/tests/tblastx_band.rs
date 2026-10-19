@@ -28,6 +28,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -52,8 +53,11 @@ fn losat(switches: &[(&str, &str)]) -> Command {
     command
 }
 
-/// A file of one record, the first `length` bases of `name`.
+/// A new file of one record, the first `length` bases of `name`. Every call writes its own file: the
+/// tests of this binary run in parallel, and a shared name let one test read the file while another
+/// was writing it again (an empty or cut query).
 fn query(name: &str, length: usize) -> PathBuf {
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!("losat-tblastx-band-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let letters: Vec<u8> = std::fs::read_to_string(fasta(name))
@@ -67,7 +71,8 @@ fn query(name: &str, length: usize) -> PathBuf {
         text.push_str(std::str::from_utf8(line).unwrap());
         text.push('\n');
     }
-    let file = dir.join(format!("q{length}.fna"));
+    let call = CALLS.fetch_add(1, Ordering::Relaxed);
+    let file = dir.join(format!("q{length}-{call}.fna"));
     std::fs::write(&file, text).unwrap();
     file
 }

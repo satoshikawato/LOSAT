@@ -81,12 +81,19 @@
 //!    - masked aliasing: raw diagonals d > d' share a reference cell when d - d' = m 2^k. Both
 //!      exist only if s_len >= slack + 2. Then for any hit (q, s) on d and (q', s') on d',
 //!      s' - s = m 2^k - (q - q') >= slack + 3: the cell sees all hits of d, then all of d', with
-//!      a gap > slack >= window. At the first d' hit, flag 0 gives diff > slack >= window (too far);
-//!      flag 1 comes from an extension of d whose right end is bounded by its context,
-//!      `s_last_off <= s0 + len_c` for the triggering hit s0, so the first d' hit is masked only if
-//!      slack + 3 < len_c - 2: impossible when every context is at most slack long.
-//!    Hence the guard (`guard`): max context length <= slack, or longest subject chunk <= slack
-//!    (no aliasing at all). Otherwise the reference path runs ("fallback: guard").
+//!      a gap > slack >= window. At the first d' hit, flag 0 gives diff > slack >= window (too far).
+//!      Flag 1 comes from the last right extension of d, started by a hit (q0, s0), which wrote
+//!      `last_hit = s_last_off - (wordsize - 1) + D`. Its right walk ends at the end of q0's
+//!      context at the latest (`extend_hit_two_hit` walks at most `len_c - q_raw` letters right of
+//!      the word start, the query slice ends there), so `s_last_off - s0 <= QL - q0`. A hit
+//!      (q', s') on d' has q' >= 0, so `s' - s0 = q' - q0 + m 2^k >= 2^k - q0 >= QL + window - q0`,
+//!      and `s' >= s_last_off + window`: the first d' hit is never masked; it resets the cell.
+//!    Hence no condition on the lengths: with LOSAT_X_TBXBAND (section below) the units take every
+//!    batch the gates let through and `last_hit_fits` holds. Without the switch the guard of the
+//!    earlier, weaker argument (`guard`: max context length <= slack, or longest subject chunk
+//!    <= slack) sends the other batches to the reference path ("fallback: guard"). That argument
+//!    bounded `s_last_off - s0` by `len_c` and `s' - s0` by `slack + 3` apart, and so needed
+//!    `len_c <= slack`.
 //! 4. Same list. Within a unit the saved InitHSPs are the reference's saved InitHSPs of that
 //!    context, in the same order. The reference sorts the chunk list with the stable
 //!    `score_compare_match` (score, s_start, length, absolute q_start; blast_extend.c:274-310,
@@ -104,6 +111,20 @@
 //!
 //! `LOSAT_X_PAIRPARSHADOW=1` runs this path and the reference loop for every subject and stops
 //! at the first difference of `combined_ungapped_hits`; the summary is printed by `main`.
+//!
+//! `LOSAT_X_TBXBAND` (in the strict set: on unless `LOSAT_X_TBXBAND` is `0`, or `LOSAT_X_DEFAULT=0`
+//! and it is not set): `decide` does not apply `guard` (item 3) to a batch whose longest subject
+//! chunk has at most as many letters as the reference table has cells (`x_band_fits`, a memory
+//! rule: the units' tables grow with the subject chunk). The batches the guard let through change
+//! nothing. The ones it rejected have a longest context and a longest subject chunk both longer than
+//! the slack: for one query of N bases, N in (3/7 2^k, 2^(k-1)] for the table of 2^k cells (1.76-2.0
+//! kb, 7.0-8.2 kb, ..., 56-65 kb, 112-131 kb, 225-262 kb, 0.45-0.52 Mb, 0.90-1.05 Mb, 1.8-2.1 Mb,
+//! 3.6-4.2 Mb), and multi-query batches whose letters lie just below a power of two. With the rule,
+//! those against subject frames of at most 2^k letters (genome pairs of similar size) go through
+//! `LOSAT_X_PAIRPARGATE` like any other batch instead of always going to the reference frame loop,
+//! which searches a subject on one thread; those against longer subjects (a gene against a genome)
+//! keep the reference loop. The `[X_STATS] PAIRPAR` and `[X_SHADOW] PAIRPAR` lines count the band
+//! batches the units took (`band`).
 //!
 //! `LOSAT_X_PAIRLUT=1` (with `LOSAT_X_PAIRPAR`): the group tables are built directly from the
 //! query (`lookup/x_pair_lut.rs`, exactness argument in its header) and the batch's full table is
@@ -217,6 +238,9 @@ static SC_RECORDS: AtomicU64 = AtomicU64::new(0);
 static SU_DIAG: AtomicU64 = AtomicU64::new(0);
 static SU_RECORDS: AtomicU64 = AtomicU64::new(0);
 static SU_COPIES: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart: the counter of LOSAT_X_TBXBAND (batches the units took that `guard`
+// rejects); it does not change any value NCBI computes.
+static BAND: AtomicU64 = AtomicU64::new(0);
 
 /// Largest number of context groups (units per subject chunk).
 const X_MAX_GROUPS: usize = 6;
@@ -294,6 +318,16 @@ pub(super) fn cost_gate() -> bool {
             && mode() == 1
             && std::env::var_os("LOSAT_X_PAIRLUTSHADOW").is_none()
     })
+}
+
+// No NCBI counterpart: a LOSAT variable that chooses, per batch, between two LOSAT paths with the
+// same result (the unit path and the reference frame loop, module doc item 3); NCBI has one path.
+// Read once per process, as the other modes of this file.
+/// LOSAT_X_TBXBAND: a strict-set switch (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not
+/// set; `utils/xswitch.rs`). With it `decide` does not apply `guard` (module doc item 3).
+fn tbx_band() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXBAND"))
 }
 
 // No NCBI counterpart: chooses how LOSAT holds a unit's saved init HSPs between the units and the
@@ -433,24 +467,26 @@ pub fn print_summary() {
     let load = |c: &AtomicU64| c.load(AtomicOrdering::Relaxed);
     if m == 2 {
         eprintln!(
-            "[X_SHADOW] PAIRPAR subjects_compared={} units={} hsps_compared={} fallback_gate={} fallback_guard={} (combined_ungapped_hits identical)",
+            "[X_SHADOW] PAIRPAR subjects_compared={} units={} hsps_compared={} fallback_gate={} fallback_guard={} band={} (combined_ungapped_hits identical)",
             load(&SHADOW_SUBJECTS),
             load(&UNITS),
             load(&SHADOW_HSPS),
             load(&FALLBACK_GATE),
-            load(&FALLBACK_GUARD)
+            load(&FALLBACK_GUARD),
+            load(&BAND)
         );
     }
     if std::env::var_os("LOSAT_X_STATS").is_some() {
         eprintln!(
-            "[X_STATS] PAIRPAR batches={} subjects={} units={} init_hsps={} fallback_gate={} fallback_guard={} fallback_cost={}",
+            "[X_STATS] PAIRPAR batches={} subjects={} units={} init_hsps={} fallback_gate={} fallback_guard={} fallback_cost={} band={}",
             load(&BATCHES),
             load(&SUBJECTS),
             load(&UNITS),
             load(&INIT_HSPS),
             load(&FALLBACK_GATE),
             load(&FALLBACK_GUARD),
-            load(&FALLBACK_COST)
+            load(&FALLBACK_COST),
+            load(&BAND)
         );
     }
     if timing() {
@@ -515,10 +551,12 @@ pub fn print_summary() {
 // diag_table->diag_mask = diag_array_length-1;
 // ```
 // The reference table has diag_array_length cells and masks the diagonal with diag_mask. The units
-// may use unmasked tables only when the masking cannot change a decision (module doc, item 3):
-// every context is at most `slack` long, or no subject chunk is longer than `slack`.
-/// The exactness guard: `max context length <= slack || longest subject chunk <= slack`, with
-/// `slack = diag_array_size - query_length` (the reference's own table).
+// use unmasked tables; the masking cannot change a decision (module doc, item 3). This test is the
+// condition of the earlier, weaker argument of item 3: every context is at most `slack` long, or no
+// subject chunk is longer than `slack`. `decide` applies it only without LOSAT_X_TBXBAND.
+/// The first exactness guard of the earlier argument: `max context length <= slack || longest
+/// subject chunk <= slack`, with `slack = diag_array_size - query_length` (the reference's own
+/// table).
 pub(super) fn guard(
     max_context_len: usize,
     longest_subject_chunk: usize,
@@ -610,7 +648,8 @@ pub(super) enum XDecision {
     Off,
     /// A trace, debug, diagnostics or chunk switch: the reference loop ("fallback: gate").
     Gate,
-    /// The exactness guard fails: the reference loop ("fallback: guard").
+    /// An exactness guard fails (`last_hit_fits`, or `guard` without LOSAT_X_TBXBAND): the
+    /// reference loop ("fallback: guard").
     Guard,
     /// LOSAT_X_PAIRPARGATE: the units would be slower than the reference loop, which runs
     /// ("fallback: cost"; `units_gain`).
@@ -634,6 +673,8 @@ pub(super) struct XGates<'a> {
     pub cost_gate: bool,
     /// The lookup threshold (`lookup->threshold`, `ncbi_int4_from_double` of `-threshold`).
     pub threshold: i32,
+    /// `tbx_band()`: LOSAT_X_TBXBAND, `guard` is not applied.
+    pub band: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
@@ -647,9 +688,10 @@ pub(super) struct XGates<'a> {
 // ...
 // diag_table->diag_mask = diag_array_length-1;
 // ```
-// The decision of `prepare` (the gates, then the guard against the reference table size above and
-// the second guard, `last_hit_fits`) as one function, so that the lookup build site (`lut_build`,
-// before the table exists) and `prepare` (after it) decide with the same code.
+// The decision of `prepare` (the gates, then the guard against the reference table size above,
+// which LOSAT_X_TBXBAND drops, and the second guard, `last_hit_fits`) as one function, so that the
+// lookup build site (`lut_build`, before the table exists) and `prepare` (after it) decide with the
+// same code.
 /// Whether the unit path runs for a batch, for the switch mode `m` (`mode()`).
 pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
     if m == 0 {
@@ -658,20 +700,17 @@ pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
     if g.debugging || g.chunk_switches {
         return XDecision::Gate;
     }
-    let max_context_len = g.contexts.iter().map(|c| c.aa_len).max().unwrap_or(0);
-    let longest_subject_chunk = g
-        .subjects
-        .lengths()
-        .map(|length| length / 3)
-        .max()
-        .unwrap_or(0)
-        .min(tblastx_max_dbseq_len_for_run());
-    if !guard(
-        max_context_len,
-        longest_subject_chunk,
-        g.query_length,
-        g.diag_array_size,
-    ) || !last_hit_fits(longest_subject_chunk, g.query_length, g.diag_array_size)
+    let (max_context_len, longest_subject_chunk) = x_guard_lengths(g.contexts, g.subjects);
+    // EXPERIMENT (LOSAT_X_TBXBAND): with the switch the first guard is not applied (module doc
+    // item 3) where the subject chunks fit the reference table (`x_band_fits`).
+    if !((g.band && x_band_fits(longest_subject_chunk, g.diag_array_size))
+        || guard(
+            max_context_len,
+            longest_subject_chunk,
+            g.query_length,
+            g.diag_array_size,
+        ))
+        || !last_hit_fits(longest_subject_chunk, g.query_length, g.diag_array_size)
     {
         return XDecision::Guard;
     }
@@ -679,6 +718,39 @@ pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
         return XDecision::Cost;
     }
     XDecision::Units
+}
+
+// No NCBI counterpart: a memory rule of LOSAT_X_TBXBAND (module doc). The units need no length
+// condition for exactness (item 3), but a unit's diagonal table has a cell for every raw diagonal
+// of its query group and subject chunk, one table per thread, where the reference loop has one
+// table of `diag_array_size` cells per subject in flight. With a subject chunk of at most that
+// many letters a unit's table is less than twice the reference's. Measured (workstation, 8 and 16
+// threads): a 1 Mb and a 3.9 Mb query against 1 and 4.6 Mb genomes (chunks of 0.16 and 0.18 of the
+// table) ran x0.08-0.13 with a lower max RSS; 3 fruit fly transcripts (2,005 bases, 4,096 cells)
+// against the fruit fly genome database and a 1.9 kb query against MG1655 (chunks of 2,000 and
+// 380 times the table) ran x0.29-0.74, but their max RSS grew from 318 to 600-873 MiB (NCBI 368
+// MiB at 8 threads) and from 21 to 68-111 MiB, so such batches keep the reference loop.
+/// LOSAT_X_TBXBAND: the longest subject chunk has at most as many letters as the reference's
+/// diagonal table has cells.
+fn x_band_fits(longest_subject_chunk: usize, diag_array_size: i32) -> bool {
+    longest_subject_chunk as i64 <= diag_array_size as i64
+}
+
+// No NCBI counterpart: the lengths the guards compare, from the batch's contexts and subjects (a
+// subject's frame length, at most one chunk).
+/// The longest context and the longest subject chunk of a batch, in letters.
+fn x_guard_lengths(
+    contexts: &[QueryContext],
+    subjects: crate::algorithm::tblastx::subjects::Subjects<'_>,
+) -> (usize, usize) {
+    let max_context_len = contexts.iter().map(|c| c.aa_len).max().unwrap_or(0);
+    let longest_subject_chunk = subjects
+        .lengths()
+        .map(|length| length / 3)
+        .max()
+        .unwrap_or(0)
+        .min(tblastx_max_dbseq_len_for_run());
+    (max_context_len, longest_subject_chunk)
 }
 
 // No NCBI counterpart: a choice between two LOSAT paths with the same result (module doc items
@@ -861,6 +933,7 @@ fn lut_direct(e: &XLutEarly<'_>, shadow: bool) -> Option<XLutBatch> {
         threads: e.pool.threads(),
         cost_gate: cost_gate(),
         threshold: e.threshold,
+        band: tbx_band(),
     };
     if decide(mode(), &gates) != XDecision::Units {
         return None;
@@ -1592,6 +1665,7 @@ impl XPairPar {
                 threads: b.threads,
                 cost_gate: cost_gate(),
                 threshold: b.threshold,
+                band: tbx_band(),
             },
         );
         if decision != XDecision::Off {
@@ -1654,6 +1728,19 @@ impl XPairPar {
             !(stub && m == 2),
             "LOSAT_X_PAIRLUT: the reference loop of LOSAT_X_PAIRPARSHADOW cannot run on the stub table"
         );
+        // LOSAT_X_TBXBAND: a batch the first guard rejects, counted for the `[X_STATS] PAIRPAR` and
+        // `[X_SHADOW] PAIRPAR` lines (without the switch no such batch gets here).
+        if tbx_band() {
+            let (max_context_len, longest_subject_chunk) = x_guard_lengths(b.contexts, b.subjects);
+            if !guard(
+                max_context_len,
+                longest_subject_chunk,
+                b.query_length,
+                b.diag_array_size,
+            ) {
+                BAND.fetch_add(1, AtomicOrdering::Relaxed);
+            }
+        }
         Some(Self {
             groups,
             shadow: m == 2,
@@ -2957,7 +3044,9 @@ mod tests {
     /// The reference two-hit stage of one subject on one masked table shared by the frames
     /// (RI:3019-3572): the batch lookup, `(q - s) & mask`, the same per-hit body, the diagonal
     /// offset advanced after every frame (`Blast_ExtendWordExit`). Returns the sorted init-HSP list
-    /// of every frame and how often each branch was taken.
+    /// of every frame, how often each branch was taken, and how many hits met a cell whose flag 1
+    /// was written by a right extension on another raw diagonal (the masked-aliasing case of
+    /// module doc item 3).
     #[allow(clippy::too_many_arguments)]
     fn masked_reference(
         lookup: &BlastAaLookupTable,
@@ -2968,11 +3057,14 @@ mod tests {
         window: i32,
         diag_array: &mut [DiagStruct],
         diag_offset: &mut i32,
-    ) -> (Vec<Vec<InitHSP>>, Vec<XHit>) {
+    ) -> (Vec<Vec<InitHSP>>, Vec<XHit>, usize) {
         let wordsize = 3;
         let mask = (diag_array.len() - 1) as u32;
         let mut per_frame = Vec::new();
         let mut outcomes = Vec::new();
+        // The raw diagonal of the right extension that last set each cell's flag.
+        let mut flag_writer = vec![i64::MIN; diag_array.len()];
+        let mut aliased = 0usize;
         let array_size = OFFSET_ARRAY_SIZE + lookup.longest_chain.max(0);
         let mut offset_pairs = vec![OffsetPair::default(); array_size as usize];
         for (f, s_frame) in s_frames.iter().enumerate() {
@@ -3006,14 +3098,27 @@ mod tests {
                     );
                     for pair in &offset_pairs[..hits as usize] {
                         let cell = (pair.q_off.wrapping_sub(pair.s_off) & mask) as usize;
-                        outcomes.push(x_hit(
+                        let raw = pair.q_off as i64 - pair.s_off as i64;
+                        if diag_array[cell].flag() != 0
+                            && flag_writer[cell] != i64::MIN
+                            && flag_writer[cell] != raw
+                        {
+                            aliased += 1;
+                        }
+                        let outcome = x_hit(
                             &mut diag_array[cell],
                             pair.q_off,
                             pair.s_off,
                             &h,
                             &mut init_hsps,
                             &mut XNoProbe,
-                        ));
+                        );
+                        if matches!(outcome, XHit::Extended | XHit::Saved)
+                            && diag_array[cell].flag() != 0
+                        {
+                            flag_writer[cell] = raw;
+                        }
+                        outcomes.push(outcome);
                     }
                 }
             }
@@ -3021,7 +3126,7 @@ mod tests {
             sort_init_hsps_by_score_ncbi(&mut init_hsps);
             per_frame.push(init_hsps);
         }
-        (per_frame, outcomes)
+        (per_frame, outcomes, aliased)
     }
 
     /// The unit path's sorted init-HSP list of every frame (one chunk per frame here).
@@ -3084,7 +3189,7 @@ mod tests {
                 &mut diag_offset,
             );
         }
-        let (reference, outcomes) = masked_reference(
+        let (reference, outcomes, _) = masked_reference(
             &lookup,
             &contexts,
             &case.s_frames,
@@ -3365,6 +3470,155 @@ mod tests {
         }
         assert!(checked > 100, "checked {checked}");
         assert!(aliased > 20, "aliased {aliased}");
+    }
+
+    // No NCBI counterpart: LOSAT_X_TBXBAND (module doc item 3). Batches the first guard rejects: a
+    // context and the subject longer than the slack, the subject made of stretches copied from the
+    // long context so that extensions run past `slack + 3 + (wordsize - 1)` letters, the bound the
+    // earlier argument could not exclude. The units' lists are the masked reference's in every
+    // case, also with the batched extensions of LOSAT_X_TBXEXTBATCH.
+    //
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-528,598-604
+    // ```c
+    // if (diag_array[diag_coord].flag) {
+    //     if ((Int4) (subject_offset + diag_offset) <
+    //         diag_array[diag_coord].last_hit) {
+    //         continue;
+    //     }
+    // ...
+    // if (right_extend) {
+    //     diag_array[diag_coord].flag = 1;
+    //     diag_array[diag_coord].last_hit =
+    //         s_last_off - (wordsize - 1) + diag_offset;
+    // ```
+    #[test]
+    fn units_equal_the_masked_reference_where_the_first_guard_fails() {
+        let mut rng = Rng(0x7e57_ab1e_5eed_0001);
+        let alphabets = [aa("AW"), aa("ACW"), aa("ACDEKW")];
+        let window = 40;
+        let (mut checked, mut long_reach, mut aliased_cases) = (0usize, 0usize, 0usize);
+        for case_no in 0..400 {
+            let alphabet = &alphabets[case_no % alphabets.len()];
+            // One long context (longer than the slack) and up to two short ones.
+            let long = 90 + rng.below(120) as usize;
+            let mut frames = vec![frame(1, &random_residues(&mut rng, long, alphabet))];
+            for f in 0..rng.below(3) as usize {
+                let len = 3 + rng.below(20) as usize;
+                frames.push(frame(
+                    [2i8, 3][f],
+                    &random_residues(&mut rng, len, alphabet),
+                ));
+            }
+            let s_len = 150 + rng.below(350) as usize;
+            let mut residues = Vec::with_capacity(s_len);
+            while residues.len() < s_len {
+                if rng.below(2) == 0 {
+                    let from = rng.below(long as u64 / 2) as usize;
+                    let take = (long - from).min(s_len - residues.len());
+                    residues.extend_from_slice(&frames[0].aa_seq[1 + from..1 + from + take]);
+                } else {
+                    let take = (5 + rng.below(60) as usize).min(s_len - residues.len());
+                    residues.extend(random_residues(&mut rng, take, alphabet));
+                }
+            }
+            let s_frames = vec![frame(1, &residues)];
+            let (lookup, contexts) = lookup_for(&frames);
+            let query_length = query_length_of(&contexts);
+            let size = diag_array_size_for(query_length, window);
+            let max_ctx = contexts.iter().map(|c| c.aa_len).max().unwrap_or(0);
+            if guard(max_ctx, s_len, query_length, size) {
+                continue;
+            }
+            assert!(last_hit_fits(s_len, query_length, size));
+            let slack = size - query_length;
+            let cutoff_scores = vec![12; contexts.len()];
+            let x_dropoff_per_context = vec![16; contexts.len()];
+            let mut diag_array = vec![DiagStruct::default(); size as usize];
+            let mut diag_offset = window;
+            let (reference, outcomes, aliased) = masked_reference(
+                &lookup,
+                &contexts,
+                &s_frames,
+                &cutoff_scores,
+                &x_dropoff_per_context,
+                window,
+                &mut diag_array,
+                &mut diag_offset,
+            );
+            let inp = XSubject {
+                s_frames_preliminary: &s_frames,
+                s_frames: &s_frames,
+                contexts: &contexts,
+                cutoff_scores: &cutoff_scores,
+                x_dropoff_per_context: &x_dropoff_per_context,
+                window,
+                wordsize: 3,
+                s_idx: 0,
+                s_len: 999,
+            };
+            let pp = XPairPar {
+                groups: build_groups(&lookup, &contexts),
+                shadow: false,
+                stub: false,
+            };
+            assert_eq!(
+                unit_lists(&pp, &inp),
+                reference,
+                "case {case_no}: unit lists differ from the masked reference"
+            );
+            assert_eq!(
+                unit_lists_batched(&pp, &inp),
+                reference,
+                "case {case_no}: batched unit lists differ from the masked reference"
+            );
+            // A saved extension that ran further right of its seed than the earlier argument's
+            // bound allowed: the reach `s_last_off - s0` is at least `s_end - s_seed - 1`
+            // (`s_end` is one past the best end, which is at most the last letter scanned), and the
+            // earlier argument fails only for a reach above `slack + 3 + 2`.
+            if reference
+                .iter()
+                .flatten()
+                .any(|h| h.s_end - h.s_seed - 1 > slack + 3 + 2)
+            {
+                long_reach += 1;
+            }
+            // A hit of the reference met a flag set by a right extension on another raw diagonal
+            // sharing its cell (the masked-aliasing case), and took the unmasked branch.
+            if aliased > 0 {
+                aliased_cases += 1;
+            }
+            assert!(outcomes.len() >= aliased);
+            checked += 1;
+        }
+        assert!(checked > 150, "checked {checked}");
+        assert!(long_reach > 50, "long_reach {long_reach}");
+        assert!(aliased_cases > 20, "aliased_cases {aliased_cases}");
+    }
+
+    /// The unit lists of `inp` with the batched extensions of LOSAT_X_TBXEXTBATCH (`unit_lists`
+    /// with `run_unit_batched`).
+    fn unit_lists_batched(pp: &XPairPar, inp: &XSubject<'_>) -> Vec<Vec<InitHSP>> {
+        let mut out = Vec::new();
+        let mut scratch = XScratch::new(false);
+        for (f, s_frame) in inp.s_frames_preliminary.iter().enumerate() {
+            let chunk = SubjectChunk {
+                offset: 0,
+                length: s_frame.aa_len,
+                overlap: 0,
+            };
+            let mut init_hsps = Vec::new();
+            if chunk.length >= 3 {
+                for (g, group) in pp.groups.iter().enumerate() {
+                    if group.lookup.longest_chain > 0 {
+                        let unit = XUnit { f, k: 0, chunk, g };
+                        init_hsps.extend(pp.run_unit_batched::<false>(&unit, inp, &mut scratch));
+                    }
+                }
+            }
+            sort_init_hsps_by_score_ncbi(&mut init_hsps);
+            out.push(init_hsps);
+        }
+        out
     }
 
     /// A frame with mask intervals (start, end exclusive, as SEG gives them); the lookup locations
@@ -3676,21 +3930,26 @@ mod tests {
             FastaRecord::new("", b"l", &[b'A'; 123]),
         ];
         let none: [FastaRecord; 0] = [];
+        let decision_band =
+            |m: u8, subjects: &[FastaRecord], debugging: bool, chunk_switches: bool, band: bool| {
+                decide(
+                    m,
+                    &XGates {
+                        contexts: &contexts,
+                        query_length,
+                        diag_array_size,
+                        subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
+                        debugging,
+                        chunk_switches,
+                        threads: 1,
+                        cost_gate: false,
+                        threshold: 13,
+                        band,
+                    },
+                )
+            };
         let decision = |m: u8, subjects: &[FastaRecord], debugging: bool, chunk_switches: bool| {
-            decide(
-                m,
-                &XGates {
-                    contexts: &contexts,
-                    query_length,
-                    diag_array_size,
-                    subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
-                    debugging,
-                    chunk_switches,
-                    threads: 1,
-                    cost_gate: false,
-                    threshold: 13,
-                },
-            )
+            decision_band(m, subjects, debugging, chunk_switches, false)
         };
         for m in [1u8, 2] {
             assert_eq!(decision(m, &short, false, false), XDecision::Units);
@@ -3700,9 +3959,54 @@ mod tests {
             assert_eq!(decision(m, &short, false, true), XDecision::Gate);
             // The gates come before the guard, as in the counters of LOSAT_X_STATS.
             assert_eq!(decision(m, &long, true, false), XDecision::Gate);
+            // LOSAT_X_TBXBAND: the first guard is not applied; the gates still are.
+            assert_eq!(
+                decision_band(m, &long, false, false, true),
+                XDecision::Units
+            );
+            assert_eq!(
+                decision_band(m, &short, false, false, true),
+                XDecision::Units
+            );
+            assert_eq!(decision_band(m, &long, true, false, true), XDecision::Gate);
+            assert_eq!(decision_band(m, &short, false, true, true), XDecision::Gate);
         }
         assert_eq!(decision(0, &short, false, false), XDecision::Off);
         assert_eq!(decision(0, &long, true, true), XDecision::Off);
+        assert_eq!(decision_band(0, &long, false, false, true), XDecision::Off);
+        // The memory rule: a subject chunk longer than the table's 256 cells keeps the guard.
+        let longer = [FastaRecord::new("", b"l", &[b'A'; 3 * 257])];
+        let fits = [FastaRecord::new("", b"l", &[b'A'; 3 * 256])];
+        assert_eq!(
+            decision_band(1, &longer, false, false, true),
+            XDecision::Guard
+        );
+        assert_eq!(
+            decision_band(1, &fits, false, false, true),
+            XDecision::Units
+        );
+        assert!(x_band_fits(256, 256) && !x_band_fits(257, 256));
+        // LOSAT_X_PAIRPARGATE still decides after the guard: this table of 256 cells at one thread.
+        let gated = |m: u8, band: bool| {
+            decide(
+                m,
+                &XGates {
+                    contexts: &contexts,
+                    query_length,
+                    diag_array_size,
+                    subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(&long),
+                    debugging: false,
+                    chunk_switches: false,
+                    threads: 1,
+                    cost_gate: true,
+                    threshold: 13,
+                    band,
+                },
+            )
+        };
+        assert_eq!(gated(1, true), XDecision::Cost);
+        assert_eq!(gated(1, false), XDecision::Guard);
+        assert_eq!(gated(2, true), XDecision::Units);
         // The second guard (`last_hit_fits`): with a window just under 2^29 the slack is almost
         // 2^29, so the first guard holds for the short subject and the units still do not run.
         let wide = diag_array_size_for(query_length, 536_870_000);
@@ -3719,8 +4023,20 @@ mod tests {
                 threads: 1,
                 cost_gate: false,
                 threshold: 13,
+                band: false,
             };
             assert_eq!(decide(m, &gates), XDecision::Guard);
+            // LOSAT_X_TBXBAND does not lift the second guard.
+            assert_eq!(
+                decide(
+                    m,
+                    &XGates {
+                        band: true,
+                        ..gates
+                    }
+                ),
+                XDecision::Guard
+            );
         }
     }
 
@@ -3768,6 +4084,7 @@ mod tests {
                     threads,
                     cost_gate,
                     threshold,
+                    band: false,
                 },
             )
         };

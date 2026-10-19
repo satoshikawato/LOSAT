@@ -31,6 +31,8 @@ pub(crate) mod x_subject_store;
 pub(crate) mod x_query_dust_par;
 // EXPERIMENT (R7_PROBE=gt, line R probe, not for merge): greedy traceback time by alignment length.
 pub(crate) mod x_r7_greedy;
+// EXPERIMENT (R9_PROBE, line R probe, not for merge): greedy traceback rows and word extension counts.
+pub(crate) mod x_r9_probe;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-166
 // ```c
 // typedef struct BlastHSP {

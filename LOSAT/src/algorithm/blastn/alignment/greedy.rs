@@ -3289,6 +3289,12 @@ fn blast_greedy_align(
 
     index = find_first_mismatch_greedy(seq1, seq2, len1, len2, 0, 0, reverse, rem, fence_hit);
 
+    // EXPERIMENT (R9_PROBE=gc): rows of the traceback calls.
+    let x_r9 = store_traceback && crate::algorithm::blastn::x_r9_probe::gc_on();
+    if x_r9 {
+        crate::algorithm::blastn::x_r9_probe::gc_begin(reverse, index);
+    }
+
     *seq1_align_len = index;
     *seq2_align_len = index;
     seq1_index = index;
@@ -3301,6 +3307,9 @@ fn blast_greedy_align(
     if index == len1 || index == len2 {
         if let Some(block) = edit_block.as_mut() {
             block.add(GapAlignOpType::Sub, index);
+        }
+        if x_r9 {
+            crate::algorithm::blastn::x_r9_probe::gc_end(true, 0);
         }
         return 0;
     }
@@ -3444,6 +3453,15 @@ fn blast_greedy_align(
         // `rem != 4`, or when the lengths do not fit the slices. With the switch, `x_greedy_row`
         // does the same distance; a fence stop returns 0 as the C code does. The loop over
         // distances `d` and everything after the diagonals (scores, convergence) is shared.
+        // EXPERIMENT (R9_PROBE=gc): the surviving diagonals of this row.
+        if x_r9 {
+            crate::algorithm::blastn::x_r9_probe::gc_row_pre(
+                previous,
+                band_len,
+                tmp_diag_lower - diag_origin,
+                xdrop_score,
+            );
+        }
         // EXPERIMENT (LOSAT_X_GREEDYFAST / LOSAT_X_GREEDYSHADOW)
         let x_mode = x_greedy_mode();
         let mut x_done = false;
@@ -3590,6 +3608,10 @@ fn blast_greedy_align(
         // ...
         //             if (seq1_index + seq2_index > curr_extent) {
         // ```
+        // EXPERIMENT (R9_PROBE=gc): the slides of this row.
+        if x_r9 {
+            crate::algorithm::blastn::x_r9_probe::gc_row_post(current);
+        }
         // LOSAT_X_GREEDYSHADOW: after the ported loop has run, the state and the row it left are
         // compared with what the fast row left on its copy of the row. The reference loop did
         // not return inside this distance, so the fast row must not have stopped either.
@@ -3687,6 +3709,10 @@ fn blast_greedy_align(
         }
     }
 
+    // EXPERIMENT (R9_PROBE=gc): body (d <= best_dist) and tail rows.
+    if x_r9 {
+        crate::algorithm::blastn::x_r9_probe::gc_end(converged, best_dist);
+    }
     if !converged {
         return -1;
     }

@@ -10252,6 +10252,8 @@ fn search_query_batch(
             // }
             // ```
             let debug_enabled = debug_mode || blastn_debug;
+            // EXPERIMENT (R9_PROBE=we): bases compared by each word extension.
+            let x_r9_we = crate::algorithm::blastn::x_r9_probe::we_on();
 
             // Debug counters for this subject (only updated when debug_enabled)
             let mut dbg_total_s_positions = 0usize;
@@ -10899,6 +10901,13 @@ fn search_query_batch(
                                             }
                                             ext_left += 1;
                                         }
+                                        if x_r9_we {
+                                            crate::algorithm::blastn::x_r9_probe::we_left(
+                                                ext_left,
+                                                max_ext_left,
+                                                ext_to,
+                                            );
+                                        }
 
                                         // RIGHT extension (forwards from lut_word_length end)
                                         // NCBI BLAST: na_ungapped.c:1120-1136
@@ -10991,6 +11000,14 @@ fn search_query_batch(
                                                 if s_off % COMPRESSION_RATIO == 0 {
                                                     s_idx += 1;
                                                 }
+                                            }
+                                            if x_r9_we {
+                                                crate::algorithm::blastn::x_r9_probe::we_right(
+                                                    ext_left,
+                                                    max_ext_left,
+                                                    ext_right,
+                                                    ext_to - ext_left,
+                                                );
                                             }
 
                                             // NCBI BLAST: if (ext_left + ext_right < ext_to) continue;
@@ -14919,6 +14936,12 @@ fn search_query_batch(
                                     t0,
                                     x_greedy_result.as_ref().map(|r| r.5 as usize),
                                     x_r7_pre,
+                                );
+                            }
+                            // EXPERIMENT (R9_PROBE=gc): the rows of this call, by its length.
+                            if crate::algorithm::blastn::x_r9_probe::gc_on() {
+                                crate::algorithm::blastn::x_r9_probe::gc_flush(
+                                    x_greedy_result.as_ref().map(|r| r.5 as usize),
                                 );
                             }
                             match x_greedy_result {

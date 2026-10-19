@@ -27,6 +27,10 @@ pub(crate) mod x_mb_lookup_par;
 #[path = "x_mb_lookup_once.rs"]
 mod x_mb_lookup_once;
 
+// EXPERIMENT (R7_PROBE, line R probe, not for merge): page-fault probes before the fill.
+#[path = "x_r7_probe.rs"]
+mod x_r7_probe;
+
 /// No NCBI counterpart: printed by `main` at exit (`x_mb_lookup_par::print_summary`): the
 /// `[X_SHADOW] MBLUTPAD` and `[X_SHADOW] MBLUTONCE` lines (LOSAT_X_MBLUTPAD or LOSAT_X_MBLUTONCE
 /// with LOSAT_X_PAIRPARSHADOW) and, with LOSAT_TIMING, the `[TIMING] x_mb_lookup_*` lines of the
@@ -1777,6 +1781,8 @@ fn build_mb_lookup(
     // Dispatch point of LOSAT_X_PAIRPAR (first arm): `x_mb_lookup_par::fill` applies the same
     // update to the same words, each cell's words in the same order, on the pool threads (each
     // thread owns whole blocks of cells); see x_mb_lookup_par.rs.
+    // EXPERIMENT (R7_PROBE): page-fault probes on the fresh tables (no value changes).
+    x_r7_probe::before_fill(&mut hashtable, &mut next_pos);
     x_clock.fill();
     let x_on_pool = x_mb_lookup_par::parts(db_word_counts.is_none() && !debug_mode);
     let mut x_filled = x_mb_lookup_par::FillStats::default();

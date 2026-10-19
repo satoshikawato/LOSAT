@@ -1,7 +1,7 @@
 //! The ASN.1 text (outfmt 8) and JSON (outfmt 12) documents of `write_query` against NCBI
 //! BLAST+ 2.17.0's own output for the same HSPs, byte for byte.
 //!
-//! The expected files in `tests/fixtures/seqalign_unit/` are NCBI's output, unchanged
+//! The expected files in `tests/fixtures/seqalign/` are NCBI's output, unchanged
 //! (outfmt-20261019 `ncbi-samples/out/` and the OF3 design probes `S/tmp/probes/`):
 //! - `blastn-megablast_subject_fmt{8,12}.out`: `blastn -task megablast -query fixture/qnucl.fa
 //!   -subject fixture/snucl.fa -num_threads 1 -outfmt 8|12` (one plus-strand and one
@@ -29,7 +29,7 @@ macro_rules! fixture {
     ($name:literal) => {
         include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/seqalign_unit/",
+            "/tests/fixtures/seqalign/",
             $name
         ))
     };
@@ -489,4 +489,34 @@ fn integers_are_decimal() {
         let mut digits = super::asn_text::itoa_i32(value);
         assert_eq!(digits.text(), text.as_bytes());
     }
+}
+
+/// LOSAT's refusals of a database for the Seq-annot formats (`check_database`): a database
+/// named `n/a` or `SRA` (any case), and for the ASN.1 text a title byte outside 0x20..0x7E.
+#[test]
+fn databases_that_ncbi_describes_otherwise_are_refused() {
+    use super::seqalign::check_database;
+    for name in ["n/a", "N/A", "sra", "SRA"] {
+        for format in [SerialFormat::AsnText, SerialFormat::Json] {
+            let error = check_database(format, name, b"title", Program::Blastn).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .ends_with("is not supported by LOSAT's BLASTN"),
+                "{error}"
+            );
+        }
+    }
+    assert!(check_database(SerialFormat::AsnText, "db/x", b"a\tb", Program::Blastp).is_err());
+    assert!(check_database(SerialFormat::AsnText, "db/x", b"\xc3\xa9", Program::Blastp).is_err());
+    for title in [&b"a\tb"[..], b"\xc3\xa9", b"plain title"] {
+        assert!(check_database(SerialFormat::Json, "db/x", title, Program::Blastp).is_ok());
+    }
+    assert!(check_database(
+        SerialFormat::AsnText,
+        "db/nash",
+        b"fixture/sprot.fa",
+        Program::Blastp
+    )
+    .is_ok());
 }

@@ -683,20 +683,53 @@ impl ReportedSubjects {
 /// Every ordinal id is read in `pool` (the titles, then the ambiguity data of the sequences that
 /// have any; `SeqDb::check_ambiguity` reads only those bytes); a reader error is a refusal too
 /// (the reports then stay after the loop, and the batch that meets the error fails where it does
-/// without the switch).
+/// without the switch). EXPERIMENT (LOSAT_X_DBIDXREAD): both are read in ranges of
+/// `HEADER_RANGE_SEQS` sequences (`SeqDb::visit_deflines`, `SeqDb::visit_ambiguity`, the same
+/// results as `read_title` and `SeqDb::check_ambiguity`) instead of one sequence at a time.
 pub(super) fn x_streaming_refusal(
     database: &BlastnDatabase,
     pool: &crate::utils::threading::SearchPool<'_>,
 ) -> Option<super::x_rpt_stream::Off> {
     let db = &database.db;
-    let title = |ordinal: u32| -> bool {
-        match shared::read_title(db, ordinal, 0, PROGRAM) {
+    let title_allowed = |ordinal: u32, stored: Result<shared::StoredTitle>| -> bool {
+        match stored {
             Ok(stored) => {
                 !stored.replaced_bytes
                     && shared::tabular_subject_id(&stored.title, ordinal, false, PROGRAM).is_ok()
             }
             Err(_) => false,
         }
+    };
+    if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
+        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+        let all = |allowed: &(dyn Fn(&BlockRange) -> bool + Sync)| -> bool {
+            #[cfg(all(
+                feature = "parallel",
+                any(not(target_arch = "wasm32"), feature = "wasm-threads")
+            ))]
+            if pool.enabled() {
+                return pool.install(|| ranges.par_iter().all(allowed));
+            }
+            let _ = pool;
+            ranges.iter().all(allowed)
+        };
+        let titles = |range: &BlockRange| -> bool {
+            db.visit_deflines(*range, |ordinal, deflines| {
+                title_allowed(ordinal, shared::stored_title(deflines, ordinal, 0, PROGRAM))
+            })
+        };
+        if !all(&titles) {
+            return Some(super::x_rpt_stream::Off::Titles);
+        }
+        let ambiguity =
+            |range: &BlockRange| -> bool { db.visit_ambiguity(*range, |_, result| result.is_ok()) };
+        if !all(&ambiguity) {
+            return Some(super::x_rpt_stream::Off::Ambiguity);
+        }
+        return None;
+    }
+    let title = |ordinal: u32| -> bool {
+        title_allowed(ordinal, shared::read_title(db, ordinal, 0, PROGRAM))
     };
     let ambiguity = |ordinal: u32| -> bool { db.check_ambiguity(ordinal).is_ok() };
     let all = |allowed: &(dyn Fn(u32) -> bool + Sync)| -> bool {
@@ -1238,9 +1271,10 @@ mod tests {
         // old format of n05 and the new format of n06): the traceback's decoding refuses it.
         let clean = open("nucl_v4");
         let volume = &clean.db.volumes()[0];
+        let num_oids = volume.num_oids();
         let (seq_offsets, amb_offsets) = (
-            volume.index().sequence_offsets().to_vec(),
-            volume.index().ambiguity_offsets().to_vec(),
+            volume.index().sequence_offsets(0, num_oids).unwrap(),
+            volume.index().ambiguity_offsets(0, num_oids).unwrap(),
         );
         drop(clean);
         for (ordinal, tag) in [(4u32, "c"), (5, "d")] {

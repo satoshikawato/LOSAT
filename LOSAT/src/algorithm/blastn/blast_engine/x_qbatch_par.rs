@@ -1189,14 +1189,17 @@ where
 
     /// Whether a slot may still search a batch of this search: `false` once the driver is off
     /// (nothing starts any more, and `take` has waited for the slots to be idle), and before the
-    /// first commit when no slot can start (no `LOSAT_X_QBATCHPARSLOTS` and a budget of 0, which
-    /// `choose_slots` answers with `Off::Budget` at that commit). LOSAT_X_MBLUTKEEP keeps the loop's
-    /// lookup table between its batches only then (`lookup::x_mb_lut_keep`).
+    /// first commit when no slot can start: without `LOSAT_X_QBATCHPARSLOTS`, `choose_slots`
+    /// answers a budget of 0 with `Off::Budget` and one thread with `Off::Budget` or `Off::Single`
+    /// at that commit. LOSAT_X_MBLUTKEEP keeps the loop's lookup table between its batches only
+    /// then (`lookup::x_mb_lut_keep`).
     pub(super) fn may_speculate(&self) -> bool {
         match self.phase {
             Phase::Off(_) => false,
             Phase::Active => true,
-            Phase::Pending => self.shared.switches.slots.is_some() || self.budget_mib() > 0,
+            Phase::Pending => {
+                self.shared.switches.slots.is_some() || (self.budget_mib() > 0 && self.threads > 1)
+            }
         }
     }
 

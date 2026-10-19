@@ -864,9 +864,10 @@ struct MbLookupTable {
     pv_array_bts: usize,
     longest_chain: usize,
     /// EXPERIMENT (LOSAT_X_MBLUTKEEP): the batch loop's keep that takes `hashtable` back when the
-    /// table is dropped (`x_mb_lut_keep.rs`); `None` frees it, as NCBI's
-    /// `BlastMBLookupTableDestruct`.
-    x_keep: Option<std::sync::Arc<x_mb_lut_keep::Keep>>,
+    /// table is dropped, with the number of cells the build used (`x_mb_lut_keep.rs`; a kept
+    /// `hashtable` can be longer than the table, whose cells are its first ones); `None` frees
+    /// it, as NCBI's `BlastMBLookupTableDestruct`.
+    x_keep: Option<(std::sync::Arc<x_mb_lut_keep::Keep>, usize)>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1376
@@ -876,8 +877,8 @@ struct MbLookupTable {
 // EXPERIMENT (LOSAT_X_MBLUTKEEP): the hashtable goes back to the batch loop's keep instead.
 impl Drop for MbLookupTable {
     fn drop(&mut self) {
-        if let Some(keep) = self.x_keep.take() {
-            keep.give_back(std::mem::take(&mut self.hashtable));
+        if let Some((keep, cells)) = self.x_keep.take() {
+            keep.give_back(std::mem::take(&mut self.hashtable), cells);
         }
     }
 }
@@ -1746,9 +1747,10 @@ fn build_mb_lookup(
     // ```c
     //    mb_lt->hashtable = (Int4*)calloc(mb_lt->hashsize, sizeof(Int4));
     // ```
-    // Dispatch point of LOSAT_X_MBLUTKEEP: the batch loop's kept table of `table_size` cells with
-    // every cell set to 0 when it has one (`x_resident`: its pages are mapped), otherwise a fresh
-    // zeroed table as before (`x_mb_lut_keep.rs`).
+    // Dispatch point of LOSAT_X_MBLUTKEEP: the batch loop's kept table when it has at least
+    // `table_size` cells, with every cell 0 (`x_resident`: its pages are mapped; the table is its
+    // first `table_size` cells, `hashtable[..table_size]` below), otherwise a fresh zeroed table
+    // as before (`x_mb_lut_keep.rs`).
     let (mut hashtable, x_resident) = match x_keep {
         Some(keep) => keep.take(table_size, x_mb_lookup_par::pool_threads().is_some()),
         None => (vec![0u32; table_size], false),
@@ -1834,7 +1836,7 @@ fn build_mb_lookup(
                 ascending_cells,
             },
             x_mb_lookup_par::Tables {
-                hashtable: &mut hashtable,
+                hashtable: &mut hashtable[..table_size],
                 next_pos: &mut next_pos,
                 pv_array: &mut pv_array,
                 pv_array_bts,
@@ -1856,7 +1858,7 @@ fn build_mb_lookup(
             max_db_word_count,
             ascending_cells,
             &mut XMbTables {
-                hashtable: &mut hashtable,
+                hashtable: &mut hashtable[..table_size],
                 next_pos: &mut next_pos,
                 pv_array: &mut pv_array,
                 pv_array_bts,
@@ -1990,7 +1992,7 @@ fn build_mb_lookup(
                 ascending_cells,
             },
             pv_array_bts,
-            &hashtable,
+            &hashtable[..table_size],
             &next_pos,
             &pv_array,
             &helper_array,
@@ -2013,14 +2015,14 @@ fn build_mb_lookup(
             None,
         );
         x_mb_lut_keep::shadow_check(
-            [&hashtable, &next_pos, &pv_array],
+            [&hashtable[..table_size], &next_pos, &pv_array],
             [&fresh.hashtable, &fresh.next_pos, &fresh.pv_array],
             (longest_chain, fresh.longest_chain),
         );
     }
 
     if debug_mode {
-        let hashtable_bytes = hashtable.len() * std::mem::size_of::<u32>();
+        let hashtable_bytes = table_size * std::mem::size_of::<u32>();
         let next_pos_bytes = next_pos.len() * std::mem::size_of::<u32>();
         eprintln!(
             "[DEBUG] build_mb_lookup: lut_word_length={}, total_positions={}, ambiguous_skipped={}, hashtable={:.1}MB, next_pos={:.1}MB, longest_chain={}",
@@ -2039,7 +2041,7 @@ fn build_mb_lookup(
         pv_array,
         pv_array_bts,
         longest_chain,
-        x_keep: x_keep.cloned(),
+        x_keep: x_keep.map(|keep| (keep.clone(), table_size)),
     }
 }
 

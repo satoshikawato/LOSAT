@@ -7912,6 +7912,8 @@ fn run_in_pool(
             queries.done(input_end);
             input_start = input_end;
         }
+        // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop's kept table is freed with the loop.
+        drop(x_lut_keep);
 
         // EXPERIMENT (LOSAT_X_QBATCHPAR): every slot has stopped before the reports are written.
         qbp.finish();

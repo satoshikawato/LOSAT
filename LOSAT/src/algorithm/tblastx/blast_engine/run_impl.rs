@@ -708,10 +708,8 @@ pub fn run(
     let choice = crate::blastinput::app::parse_formatting_string(&args.outfmt)?;
     let format = crate::blastinput::app::report_format(
         &choice,
-        "TBLASTX",
-        false,
+        crate::blastinput::app::Program::Tblastx,
         args.out.as_deref(),
-        false,
     )?;
     crate::utils::threading::validate_threads(args.num_threads)?;
     use crate::blastinput::input_files;
@@ -943,7 +941,7 @@ fn check_ncbi_options(
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<Option<SequenceRange>> {
     use crate::blastinput::app::{
-        formatting_handler_check, options_error, parse_formatting_string,
+        formatting_handler_check, options_error, parse_formatting_string, Program,
     };
     args.seg_spec()?;
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
@@ -961,7 +959,7 @@ fn check_ncbi_options(
         crate::blastinput::seq_range::RangeRole::Query,
         "TBLASTX",
     )?;
-    formatting_handler_check(&parse_formatting_string(&args.outfmt)?, false)?;
+    formatting_handler_check(&parse_formatting_string(&args.outfmt)?, Program::Tblastx)?;
     if args
         .max_target_seqs
         .is_some_and(|max_target_seqs| max_target_seqs < 5)
@@ -1216,8 +1214,8 @@ fn check_report_formats(outputs: &ReportOutputs<'_>) -> Result<()> {
     use crate::blastinput::app;
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, "TBLASTX", false, None, false)?.is_none() {
-            app::formatting_handler_check(&choice, false)?;
+        if app::report_format(&choice, app::Program::Tblastx, None)?.is_none() {
+            app::formatting_handler_check(&choice, app::Program::Tblastx)?;
             app::xinclude_check(&choice)?;
         }
     }
@@ -3159,9 +3157,9 @@ fn search_query_batch(
     let x_scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
 
     // EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW), dispatch point 1 (per batch): the
-    // gates and the exactness guard, then one lookup table per query context (each backbone chain
-    // filtered to the context, order kept). None (switch off, gate or guard) keeps the reference
-    // loop for every subject of the batch.
+    // gates and the exactness guards (the first one only without LOSAT_X_TBXBAND), then one lookup
+    // table per query context (each backbone chain filtered to the context, order kept). None
+    // (switch off, gate or guard) keeps the reference loop for every subject of the batch.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
     // ```c
@@ -3180,8 +3178,9 @@ fn search_query_batch(
     //     PV_SET(pv, i, PV_ARRAY_BTS);
     //     bbc[i].num_used = lookup->thin_backbone[i][1];
     // ```
-    // The guard compares the context and subject lengths with the slack of this table (size above
-    // minus query_length); the per-context tables use the layout above.
+    // The guards compare the subject lengths (and, without LOSAT_X_TBXBAND, the context lengths)
+    // with the slack of this table (size above minus query_length); the per-context tables use the
+    // layout above.
     let x_pair_par_batch = x_pair_par::XPairPar::prepare(x_pair_par::XBatch {
         lookup: &lookup,
         contexts: &contexts,

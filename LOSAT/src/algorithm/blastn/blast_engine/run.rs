@@ -81,10 +81,9 @@ use super::super::filtering::{
     subject_best_hit, subject_best_hit_by, BestHitKey, ReevalParams,
 };
 use super::super::hsp::{
-    evalue_comp, get_prelim_hitlist_size, parse_blastn_output_format, score_compare_hsps,
-    sort_hsplist_by_evalue, sort_hsps_by_score, trim_by_max_hsps,
-    write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
-    BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
+    evalue_comp, get_prelim_hitlist_size, score_compare_hsps, sort_hsplist_by_evalue,
+    sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists_to_writer, BlastnHitList,
+    BlastnHsp, BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{
@@ -98,6 +97,7 @@ use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
+use crate::blastinput::app::{self as app, Program};
 // EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
 use super::super::x_subject_store::{
     x_blastna_into, x_bnstore, x_read_subject_stores, SubjectLetters,
@@ -4127,6 +4127,9 @@ struct XAheadScratch<'a> {
     greedy: &'a mut GreedyAlignScratch,
 }
 
+#[path = "x_ctx_o1.rs"]
+mod x_ctx_o1;
+
 struct QueryContextIndex {
     offsets: Vec<usize>,
     min_length: usize,
@@ -4161,6 +4164,12 @@ struct QueryContextIndex {
     // length it would have. Four bytes per query base become a few words.
     x_ranges: Vec<(usize, usize, u32)>,
     x_total_len: usize,
+    // EXPERIMENT (LOSAT_X_CTXO1): what `direct_map` holds, in constant time from the layout of the
+    // contexts (`x_ctx_o1.rs`). When it is built it answers the offsets the table covers, the runs
+    // only those of its crowded blocks, and the table is not built. With the shadow it is
+    // `x_o1_shadow` instead, and the table is built to compare with.
+    x_o1: Option<x_ctx_o1::CtxO1>,
+    x_o1_shadow: Option<x_ctx_o1::CtxO1>,
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:235-241
@@ -4176,13 +4185,15 @@ struct QueryContextIndex {
 /// answers the context of a query offset: the table of the answers (0), the runs (1), or both
 /// with a comparison (2).
 ///
-/// 0 = direct map, 1 = LOSAT_X_CTXFAST (ranges only), 2 = LOSAT_X_CTXSHADOW
-/// (both, compared on every lookup).
+/// 0 = direct map, 1 = LOSAT_X_CTXFAST (ranges only), 2 = LOSAT_X_CTXSHADOW or
+/// LOSAT_X_CTXO1SHADOW (the table as well, compared on every lookup with the form that answers).
 fn x_ctx_mode() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_CTXSHADOW").is_some() {
+        if std::env::var_os("LOSAT_X_CTXSHADOW").is_some()
+            || std::env::var_os("LOSAT_X_CTXO1SHADOW").is_some()
+        {
             2
         } else if crate::utils::xswitch::on("LOSAT_X_CTXFAST") {
             1
@@ -4190,6 +4201,13 @@ fn x_ctx_mode() -> u8 {
             0
         }
     })
+}
+
+/// No NCBI counterpart: reads the LOSAT_X_CTXO1 switch once (`x_ctx_o1.rs`).
+fn x_ctx_o1_on() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_CTXO1"))
 }
 
 impl QueryContextIndex {
@@ -4233,8 +4251,23 @@ impl QueryContextIndex {
         // only stands in for it when no two runs overlap; context 0 needs no
         // run because the map starts out as zeros.
         let mut x_mode = x_ctx_mode();
+        // EXPERIMENT (LOSAT_X_CTXO1): the constant-time form, where the layout allows it. It takes
+        // the place of the runs (kept only for the offsets of its crowded blocks) and of the table
+        // (kept only for the shadow (mode 2) to compare with).
+        let x_o1 = if x_ctx_o1_on() {
+            x_ctx_o1::CtxO1::build(contexts, total_len)
+        } else {
+            None
+        };
+        let x_shadow = x_mode == 2;
+        if x_o1.is_some() {
+            x_mode = if x_shadow { 0 } else { 1 };
+        }
+        let (x_o1, x_o1_shadow) = if x_shadow { (None, x_o1) } else { (x_o1, None) };
+        // the runs answer what the form leaves (offsets in a crowded block of `x_ctx_o1.rs`)
+        let x_o1_alone = x_o1.as_ref().is_some_and(|o1| !o1.needs_runs()) || x_o1_shadow.is_some();
         let mut x_ranges: Vec<(usize, usize, u32)> = Vec::new();
-        if x_mode != 0 {
+        if x_mode != 0 && !x_o1_alone {
             for (idx, ctx) in contexts.iter().enumerate() {
                 let start = ctx.query_offset.max(0) as usize;
                 let end = start.saturating_add(ctx.len);
@@ -4274,7 +4307,13 @@ impl QueryContextIndex {
             max_length,
             direct_map,
             x_ranges,
-            x_total_len: if x_mode == 0 { 0 } else { total_len },
+            x_total_len: if x_mode == 0 || x_o1_alone {
+                0
+            } else {
+                total_len
+            },
+            x_o1,
+            x_o1_shadow,
         }
     }
 
@@ -4308,6 +4347,22 @@ impl QueryContextIndex {
         }
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219
+    /// ```c
+    /// Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
+    /// ```
+    /// The context of query offset `n`. EXPERIMENT (LOSAT_X_CTXO1): the constant-time form answers
+    /// here, inlined into the seed loops; any other form is the out-of-line `x_context_for_offset_ref`.
+    #[inline(always)]
+    fn context_for_offset(&self, n: usize) -> usize {
+        if let Some(o1) = &self.x_o1 {
+            if let Some(context) = o1.get(n) {
+                return context;
+            }
+        }
+        self.x_context_for_offset_ref(n)
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-238 (BSearchContextInfo)
     // ```c
     // if (A->contexts[m].query_offset > n) e = m;
@@ -4315,7 +4370,9 @@ impl QueryContextIndex {
     // ...
     // return b;
     // ```
-    fn context_for_offset(&self, n: usize) -> usize {
+    // The forms before LOSAT_X_CTXO1 (and its shadow), out of line as `context_for_offset` was.
+    #[inline(never)]
+    fn x_context_for_offset_ref(&self, n: usize) -> usize {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
         // ```c
         // Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
@@ -4329,6 +4386,17 @@ impl QueryContextIndex {
         //     }
         //     return b;
         // ```
+        // LOSAT_X_CTXO1 with its shadow (LOSAT_X_CTXO1SHADOW or LOSAT_X_CTXSHADOW): the constant-time
+        // form answers every offset the table covers, and `assert!` compares it with the table.
+        if let Some(o1) = &self.x_o1_shadow {
+            if let Some(context) = o1.get(n) {
+                assert!(
+                    context == self.direct_map[n] as usize,
+                    "LOSAT_X_CTXO1SHADOW: context of offset {n} differs"
+                );
+                return context;
+            }
+        }
         // Dispatch point of LOSAT_X_CTXFAST / LOSAT_X_CTXSHADOW. The code after this block (the table,
         // then `bsearch_context_info`) ports `BSearchContextInfo`. With the runs the same context is found
         // without the table. In mode 2 both are computed and `assert!` compares them.
@@ -5805,8 +5873,9 @@ pub fn run(
     //     }
     // ```
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
-    // option handlers run.
-    let output_formats = parse_output_formats([args.outfmt.as_str()])?;
+    // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
+    // there too (`cli_output_formats`).
+    let output_formats = cli_output_formats(&args.outfmt, args.out.as_deref())?;
     // LOSAT's thread capability is checked before any input or output, as before.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3631-3636
@@ -6353,21 +6422,65 @@ pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
     Ok(())
 }
 
-/// The requested output formats, each parsed exactly as the single CLI `-outfmt` is,
-/// before NCBI's option handlers run (`run`).
+/// The report of the CLI's `-outfmt`, read as NCBI reads it before its option handlers run
+/// (`run`; `blastinput/app.rs` `parse_formatting_string`, `report_format`). A format that
+/// NCBI itself rejects later has no report: the run stops at NCBI's error, the formatting
+/// handler's in `process_options` (AIRR rearrangement, FASTA) or the XInclude formats' in
+/// `search` (13 and 14 to standard output).
+fn cli_output_formats(
+    outfmt: &str,
+    out: Option<&std::path::Path>,
+) -> Result<Vec<BlastnOutputFormat>> {
+    let choice = app::parse_formatting_string(outfmt)?;
+    app::report_format(&choice, Program::Blastn, out)?
+        .map(BlastnOutputFormat::of)
+        .into_iter()
+        .collect()
+}
+
+/// The requested output formats of `run_local`, each read as the CLI reads its single
+/// `-outfmt` (`cli_output_formats`); a format that NCBI rejects later fails here with NCBI's
+/// error, as in the other programs' `run_local` (they have no output file).
 fn parse_output_formats<'a>(
     formats: impl IntoIterator<Item = &'a str>,
 ) -> Result<Vec<BlastnOutputFormat>> {
     formats
         .into_iter()
-        .map(parse_blastn_output_format)
+        .map(|outfmt| {
+            let choice = app::parse_formatting_string(outfmt)?;
+            match app::report_format(&choice, Program::Blastn, None)? {
+                Some(format) => BlastnOutputFormat::of(format),
+                None => {
+                    app::formatting_handler_check(&choice, Program::Blastn)?;
+                    app::xinclude_check(&choice)?;
+                    anyhow::bail!(
+                        "output format {} is not supported by LOSAT's BLASTN",
+                        choice.number
+                    )
+                }
+            }
+        })
         .collect()
 }
 
 /// NCBI's processing of the options after the query and the output are opened
-/// (`SetOptions`): the few-matches warning of the formatting handler, and the check of the
-/// options.
+/// (`SetOptions`): the formatting handler (its errors for the formats of other programs,
+/// then its few-matches warning), and the check of the options.
 ///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886
+/// ```c
+///     ParseFormattingString(args, m_OutputFormat, m_CustomOutputFormatSpec,m_CustomDelim);
+///     if((m_OutputFormat == eSAM) && !(m_FormatFlags & eIsSAM) ){
+/// ...
+///     if((m_OutputFormat == eAirrRearrangement) && !(m_FormatFlags & eIsAirrRearrangement) ){
+///         NCBI_THROW(CInputException, eInvalidInput,
+///                    "AIRR rearrangement format is only applicable to igblastn" );
+///     }
+///     if (m_OutputFormat == eFasta) {
+///         NCBI_THROW(CInputException, eInvalidInput,
+///                    "FASTA output format is only applicable to magicblast");
+///     }
+/// ```
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
 /// ```c
 ///     if(hitlist_size < 5){
@@ -6380,6 +6493,13 @@ fn parse_output_formats<'a>(
 /// ```
 /// The hit list size is the -max_target_seqs value, or 500 when it is omitted.
 fn process_options(args: &BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Result<()> {
+    // The formatting handler comes after the query options handler (blastn_args.cpp:100-105).
+    for format in &outputs.formats {
+        app::formatting_handler_check(
+            &app::parse_formatting_string(format.outfmt)?,
+            Program::Blastn,
+        )?;
+    }
     if args
         .max_target_seqs
         .is_some_and(|max_target_seqs| max_target_seqs < 5)
@@ -6523,6 +6643,18 @@ fn search(
             "blastn",
             outputs.diagnostics,
         )?;
+    }
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:255-258
+    // ```c
+    //         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
+    //         }
+    //         formatter.PrintProlog();
+    // ```
+    // The XInclude formats written to standard output fail after the formatter is made (a
+    // format 13 or 14 to a file is LOSAT's rejection, `cli_output_formats`).
+    for format in &outputs.formats {
+        app::xinclude_check(&app::parse_formatting_string(format.outfmt)?)?;
     }
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
@@ -16837,6 +16969,66 @@ fn merge_prelim_hit_list(
 mod tests {
     use super::*;
 
+    // QueryContextIndex answers the value of `direct_map` at every offset, through whichever form
+    // the switches choose (by default LOSAT_X_CTXO1: division, or the block table, here with the
+    // runs for its crowded blocks in the second case: a query of 3 letters among 500 of 300).
+    #[test]
+    fn the_context_index_answers_the_table_at_every_offset() {
+        let mut crowded = vec![300usize; 1000];
+        crowded[200] = 3;
+        crowded[201] = 3;
+        crowded.extend([0, 0]);
+        for (case, lengths) in [
+            vec![24usize; 40],
+            crowded,
+            vec![0, 0, 18, 18, 30, 30, 25, 25, 19, 19],
+            vec![5000, 5000],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut contexts = Vec::new();
+            let mut offset = 0usize;
+            for (i, &len) in lengths.iter().enumerate() {
+                contexts.push(QueryContext {
+                    query_idx: (i / 2) as u32,
+                    frame: if i % 2 == 0 { 1 } else { -1 },
+                    query_offset: offset as i32,
+                    len,
+                    masks: Vec::new(),
+                });
+                offset += if len == 0 { 0 } else { len + 1 };
+            }
+            let total = contexts
+                .iter()
+                .map(|c| c.query_offset as usize + c.len)
+                .max()
+                .unwrap();
+            let mut table = vec![0usize; total];
+            for (idx, c) in contexts.iter().enumerate() {
+                let start = c.query_offset as usize;
+                table[start..start + c.len].fill(idx);
+            }
+            let index = QueryContextIndex::new(&contexts);
+            if case == 1 {
+                if let Some(o1) = &index.x_o1 {
+                    assert!(o1.needs_runs() && !index.x_ranges.is_empty());
+                }
+            }
+            for (n, &want) in table.iter().enumerate() {
+                assert_eq!(
+                    index.context_for_offset(n),
+                    want,
+                    "offset {n} of {lengths:?}"
+                );
+            }
+            // past the table: NCBI's search, as before the forms
+            for n in total..total + 40 {
+                assert_eq!(index.context_for_offset(n), bsearch_context_info(n, &index));
+            }
+        }
+    }
+
     /// The records of a FASTA text as NCBI's reader reads them (`config`).
     fn reader_records(fasta: &str, config: ReaderConfig) -> Vec<FastaRecord> {
         crate::blastinput::fasta_reader::read_all(
@@ -17501,5 +17693,128 @@ mod tests {
         single.update(list(5, &[10]));
         merge_prelim_hit_list(single, &mut empty, [0, 0], 100);
         assert_eq!(prelim_scores(empty.as_ref().unwrap()), vec![(5, vec![10])]);
+    }
+
+    /// The NCBI errors of BLASTN's `-outfmt` at NCBI's positions (blast_args.cpp:2745-2748,
+    /// 2874-2886, 2975-2977; blastn_app.cpp:255-258).
+    #[test]
+    fn output_formats_raise_ncbis_errors_where_ncbi_does() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Options {
+            #[command(flatten)]
+            blastn: BlastnArgs,
+        }
+        let args = |words: &[&str]| {
+            let mut argv = vec!["test", "-query", "q", "-subject", "s"];
+            argv.extend_from_slice(words);
+            crate::cli::try_parse_from::<Options, _, _>(argv)
+                .unwrap()
+                .blastn
+        };
+        let native = |error: anyhow::Error| {
+            let native = error.downcast::<crate::cli::NativeError>().unwrap();
+            (native.exit, native.message)
+        };
+        let options = |text: &str| {
+            (
+                1,
+                format!(
+                    "BLAST query/options error: {text}\nPlease refer to the BLAST+ user manual.\n"
+                ),
+            )
+        };
+        // The CLI: a format that NCBI rejects later has no report (`cli_output_formats`).
+        let file = Some(std::path::Path::new("o.json"));
+        for outfmt in ["13", "14", "19", "21"] {
+            assert!(
+                cli_output_formats(outfmt, None).unwrap().is_empty(),
+                "{outfmt}"
+            );
+        }
+        assert!(cli_output_formats("13", Some(std::path::Path::new("-")))
+            .unwrap()
+            .is_empty());
+        for outfmt in ["13", "17", "5"] {
+            assert_eq!(
+                cli_output_formats(outfmt, file).unwrap_err().to_string(),
+                format!("output format {outfmt} is not supported by LOSAT's BLASTN")
+            );
+        }
+        assert_eq!(
+            cli_output_formats("0 qaccver", None).unwrap(),
+            [BlastnOutputFormat::Pairwise]
+        );
+        assert_eq!(
+            cli_output_formats("7 qaccver", None).unwrap_err().to_string(),
+            "a custom output format specification (fields or a delimiter) is not supported by LOSAT's BLASTN"
+        );
+        assert_eq!(
+            native(cli_output_formats("22", None).unwrap_err()),
+            (
+                255,
+                "Error: Formatting choice is out of range\n".to_string()
+            )
+        );
+        // The formatting handler raises its errors before its warning; 13 passes it.
+        for (outfmt, error) in [
+            (
+                "19",
+                Some("AIRR rearrangement format is only applicable to igblastn"),
+            ),
+            (
+                "21",
+                Some("FASTA output format is only applicable to magicblast"),
+            ),
+            ("13", None),
+        ] {
+            let mut diagnostics = Vec::new();
+            let mut sink = Vec::new();
+            let mut outputs =
+                ReportOutputs::single(outfmt, OutputSink::Writer(&mut sink), &mut diagnostics);
+            let result = process_options(&args(&["-max_target_seqs", "1"]), &mut outputs);
+            drop(outputs);
+            match error {
+                Some(error) => {
+                    assert_eq!(native(result.unwrap_err()), options(error), "{outfmt}");
+                    assert!(diagnostics.is_empty(), "{outfmt}");
+                }
+                None => {
+                    result.unwrap();
+                    assert_eq!(
+                        String::from_utf8(diagnostics).unwrap(),
+                        "Warning: [blastn] Examining 5 or more matches is recommended\n"
+                    );
+                }
+            }
+        }
+        // `run_local` has no output file; its formats that NCBI rejects later fail at once.
+        for (outfmt, error) in [
+            ("13", "Please provide a file name for outfmt 13."),
+            ("14", "Please provide a file name for outfmt 14."),
+            (
+                "19",
+                "AIRR rearrangement format is only applicable to igblastn",
+            ),
+            ("21", "FASTA output format is only applicable to magicblast"),
+        ] {
+            assert_eq!(
+                native(parse_output_formats(["6", outfmt]).unwrap_err()),
+                options(error),
+                "{outfmt}"
+            );
+        }
+        assert_eq!(
+            parse_output_formats(["0", "6", "07"]).unwrap(),
+            [
+                BlastnOutputFormat::Pairwise,
+                BlastnOutputFormat::Tabular,
+                BlastnOutputFormat::TabularWithComments
+            ]
+        );
+        assert_eq!(
+            parse_output_formats(["17"]).unwrap_err().to_string(),
+            "output format 17 is not supported by LOSAT's BLASTN"
+        );
     }
 }

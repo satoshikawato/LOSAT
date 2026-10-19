@@ -340,7 +340,7 @@ pub struct BlastnArgs {
     ///
     /// Default fields: qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore
     // NCBI's argument is a string (blast_args.cpp:2657-2660), parsed when the options
-    // are set (`blastn/hsp.rs` `parse_blastn_output_format`).
+    // are set (`blastinput/app.rs` `parse_formatting_string` and `report_format`).
     #[arg(long, default_value = "0", value_name = "SPEC")]
     pub outfmt: String,
 }

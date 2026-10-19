@@ -610,10 +610,8 @@ fn a_database_search_where_the_switch_must_not_act() {
     let ambiguity = database(&dir, "ambiguity", |db| {
         let volume = LOSAT::seqdb::SeqDb::open(db, LOSAT::seqdb::SeqType::Nucleotide).unwrap();
         let index = volume.volumes()[0].index();
-        let (at, next) = (
-            index.ambiguity_offsets()[1] as usize,
-            index.sequence_offsets()[2] as usize,
-        );
+        let (at, next) = index.ambiguity_range(1).unwrap().unwrap();
+        let (at, next) = (at as usize, next as usize);
         assert!(at < next, "the second sequence has ambiguity data");
         drop(volume);
         let path = format!("{db}.nsq");

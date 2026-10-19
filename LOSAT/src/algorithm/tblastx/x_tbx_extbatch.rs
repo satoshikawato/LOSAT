@@ -118,7 +118,7 @@ fn min_span_ki() -> Option<usize> {
 
 // No NCBI counterpart: a comparison of two LOSAT code paths.
 /// LOSAT_X_TBXEXTBATCHSHADOW (set to any value): every unit runs both scans, compared.
-fn shadow() -> bool {
+pub(super) fn shadow() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBXEXTBATCHSHADOW").is_some())
 }
@@ -192,7 +192,7 @@ struct XCand {
 }
 
 /// The candidates of the batch that is filling, and the unit's counters.
-struct XPendBatch {
+pub(super) struct XPendBatch {
     c: [XCand; BATCH],
     /// Slots filled.
     n: usize,
@@ -201,6 +201,27 @@ struct XPendBatch {
     cands: u64,
     early: u64,
     batches: u64,
+}
+
+// No NCBI counterpart: the batch of held-back extensions (module doc).
+impl XPendBatch {
+    /// An empty batch of `len` slots (1 to `BATCH`).
+    pub(super) fn new(len: usize) -> Self {
+        debug_assert!((1..=BATCH).contains(&len));
+        Self {
+            c: [XCand::default(); BATCH],
+            n: 0,
+            len,
+            cands: 0,
+            early: 0,
+            batches: 0,
+        }
+    }
+
+    /// Candidates recorded and not yet resolved by `flush`.
+    pub(super) fn pending(&self) -> usize {
+        self.n
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:575-605 (module doc)
@@ -313,7 +334,7 @@ unsafe fn resolve_early(
 ///
 /// SAFETY: every candidate's cell is below the length of the table `diag_ptr` points into.
 #[inline(never)]
-unsafe fn flush<S: XInitSink>(
+pub(super) unsafe fn flush<S: XInitSink>(
     b: &mut XPendBatch,
     diag_ptr: *mut DiagStruct,
     h: &XHitCtx<'_>,
@@ -362,7 +383,7 @@ unsafe fn flush<S: XInitSink>(
 /// SAFETY: `cell` and the cell of every candidate of `b` are below the length of the table
 /// `diag_ptr` points into.
 #[inline(always)]
-unsafe fn x_hit_batched<S: XInitSink>(
+pub(super) unsafe fn x_hit_batched<S: XInitSink>(
     diag_ptr: *mut DiagStruct,
     cell: usize,
     query_offset: u32,
@@ -475,7 +496,7 @@ unsafe fn x_hit_batched<S: XInitSink>(
 /// A probe that records nothing, for the shadow's run of `scan_unit`: its own type, so that the
 /// shadow adds no caller to the instance of `scan_unit` the units run (`XNoProbe`).
 #[derive(Default)]
-struct XShadowRef;
+pub(super) struct XShadowRef;
 
 impl XProbe for XShadowRef {
     type Mark = ();
@@ -500,7 +521,7 @@ impl XProbe for XShadowRef {
 }
 
 /// The lists the shadow compares (`Vec<InitHSP>`, `Vec<XUnitHsp>`).
-trait XShadowList: XInitSink + Default + PartialEq + std::fmt::Debug {
+pub(super) trait XShadowList: XInitSink + Default + PartialEq + std::fmt::Debug {
     fn len_of(&self) -> usize;
     fn first_difference(&self, other: &Self) -> usize;
 }
@@ -566,14 +587,16 @@ impl XPairPar {
         scratch: &mut XScratch,
         init_hsps: &mut S,
     ) {
+        // EXPERIMENT (LOSAT_X_TBXHITBF): the batched scan or its branch-free hit loop
+        // (x_tbx_hitbf.rs).
         if !shadow() {
-            self.scan_unit_batched::<S, PF>(unit, inp, scratch, init_hsps, BATCH);
+            self.scan_unit_batched_or_bf::<S, PF>(unit, inp, scratch, init_hsps);
             return;
         }
         let mut reference = S::default();
         self.scan_unit::<S, XShadowRef, PF>(unit, inp, scratch, &mut reference, &mut XShadowRef);
         let reference_diag = scratch.diag.clone();
-        self.scan_unit_batched::<S, PF>(unit, inp, scratch, init_hsps, BATCH);
+        self.scan_unit_batched_or_bf::<S, PF>(unit, inp, scratch, init_hsps);
         if *init_hsps != reference || scratch.diag != reference_diag {
             let first = init_hsps.first_difference(&reference);
             let cell = scratch
@@ -603,7 +626,24 @@ impl XPairPar {
     /// Scans one unit and saves its init HSPs, in scan order, into `init_hsps`, with batches of
     /// `len` candidates (1 to `BATCH`). Returns the candidates and the early resolutions.
     #[inline(always)]
-    fn scan_unit_batched<S: XInitSink, const PF: bool>(
+    pub(super) fn scan_unit_batched<S: XInitSink, const PF: bool>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+        len: usize,
+    ) -> (u64, u64) {
+        self.scan_unit_batched_hits::<S, PF, false>(unit, inp, scratch, init_hsps, len)
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
+    // `x_hits_bf`, which takes the too-far and overlap outcomes without a branch and hands the
+    // others (a flag, which includes a pending mark, or a candidate) to `x_hit_batched`; without
+    // it this is the loop before the switch. `BF` runs only where `x_tbx_hitbf::fits` holds.
+    /// `scan_unit_batched`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF.
+    #[inline(always)]
+    pub(super) fn scan_unit_batched_hits<S: XInitSink, const PF: bool, const BF: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -627,8 +667,11 @@ impl XPairPar {
         }
 
         let offset_array_size: i32 = OFFSET_ARRAY_SIZE + sub.longest_chain.max(0);
+        // EXPERIMENT (LOSAT_X_TBXHITBF): with `BF` and `PF`, X_PREFETCH_AHEAD entries more, as in
+        // `scan_unit_hits`.
         let offset_pairs_len =
-            crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
+            crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size)
+                + if BF && PF { X_PREFETCH_AHEAD } else { 0 };
         if scratch.offset_pairs.len() < offset_pairs_len {
             scratch
                 .offset_pairs
@@ -698,6 +741,35 @@ impl XPairPar {
                 }
                 let diag_ptr = scratch.diag.as_mut_ptr();
                 let offset_pairs_ptr = scratch.offset_pairs.as_ptr();
+                // EXPERIMENT (LOSAT_X_TBXHITBF): the loop below, with the too-far and overlap
+                // outcomes taken without a branch (x_tbx_hitbf.rs).
+                if BF {
+                    // SAFETY: as in `scan_unit_hits`; every candidate's cell is a cell of this
+                    // unit's table.
+                    unsafe {
+                        x_tbx_hitbf::x_hits_bf::<PF>(
+                            diag_ptr,
+                            offset_pairs_ptr,
+                            hits as usize,
+                            lo,
+                            width,
+                            window,
+                            wordsize,
+                            |cell, query_offset, subject_offset| {
+                                x_hit_batched(
+                                    diag_ptr,
+                                    cell,
+                                    query_offset,
+                                    subject_offset,
+                                    &h,
+                                    &mut b,
+                                    init_hsps,
+                                );
+                            },
+                        )
+                    };
+                    continue;
+                }
                 for i in 0..hits as usize {
                     #[cfg(target_arch = "x86_64")]
                     if PF && i + X_PREFETCH_AHEAD < hits as usize {
@@ -849,6 +921,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 shadow: false,
                 stub: false,
+                sliced: None,
             };
             // Windows the module takes (`active`): from its smallest, wordsize + BATCH.
             let window = [40, 3 + BATCH as i32, 64][case % 3];

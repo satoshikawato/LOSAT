@@ -355,6 +355,7 @@ export LOSAT_X_SEGSHARE=1
 export LOSAT_X_TBNBATCH=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNEVENTS=1
+export LOSAT_X_TBNHITBF=1
 export LOSAT_X_TBNLINKWIN=1
 export LOSAT_X_TBNOIDCHUNK=1
 export LOSAT_X_TBNOIDNEXT=1
@@ -2977,6 +2978,22 @@ Scheduling (each value computed by one thread with the original function; order 
   (`x_candidates_w3c5`, #273: cycles -6.0 % on the human and zebrafish genomes x one protein). An
   AVX2 form of the loop (`vpgatherdd` of the presence words) cut instructions by a third but was 2-7
   % slower (IPC 3.6 -> 2.3) and is not used.
+- `LOSAT_X_TBNHITBF=1` tblastn (speed; in the strict set from the pull request that added it,
+  2026-10-19; `=0` turns it off) the two-hit loop of the unit path (`XTwoHit::pairs`, every offset array
+  the scan fills; `tblastn/x_tbn_hitbf.rs`, exactness argument in its header) takes the two outcomes most
+  hits end in, too far (`diff >= window`: `last_hit = s + diag_offset`) and overlap (`diff < wordsize`:
+  nothing), without a branch: `diff = (s + diag_offset) - last_hit` (the reference's value, same
+  wrapping operations), a candidate is `(diff - wordsize) as u32 < window - wordsize` (one unsigned
+  compare), and the cell's next `last_hit` is selected (`s + diag_offset`, or the value it read). A
+  flag-1 cell or a candidate stops the loop at that hit, which runs the body of `pairs` on its own, in
+  order. Acts when `0 <= wordsize < window` (otherwise `pairs` runs). On the four ledger cases at one
+  thread 83-87 % of the hits are too far, 12-15 % overlap, 0.5-0.7 % meet a flag-1 cell and 1.2-1.5 %
+  are candidates, HsG_p1 included (v4-A10 probe 1). TIMINGS_PLACEHOLDER
+- `LOSAT_X_TBNHITBFSHADOW=1` shadow of `LOSAT_X_TBNHITBF` (any value; turns the path on): each offset
+  array runs `pairs` on a copy of the table and then the branch-free loop, and the init HSPs and every
+  cell of the table must be equal; a difference panics with the frame and chunk. It copies the table for
+  every array, so it is slow on long query sets. One line at exit:
+  `[X_SHADOW] TBNHITBF arrays_compared= hits_compared= outside=`.
 - `LOSAT_X_TBNLINKWIN=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule of
   that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns it
   off; `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

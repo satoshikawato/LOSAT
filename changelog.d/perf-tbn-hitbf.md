@@ -1,0 +1,1 @@
+- `tblastn` takes the two-hit test's two common outcomes (too far, overlap) without a branch: CHANGELOG_PLACEHOLDER (`LOSAT_X_TBNHITBF`, one of the switches above; `=0` turns it off; same results).

@@ -569,6 +569,12 @@ impl<'a> XTwoHit<'a> {
         self.diagonals
     }
 
+    /// The diagonal table, for tests.
+    #[cfg(test)]
+    pub(super) fn x_table(&self) -> &[(i32, bool)] {
+        &self.diagonals.entries
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-606
     // ```c
     //             diag_coord = (query_offset - subject_offset) & diag_mask;
@@ -669,6 +675,89 @@ impl<'a> XTwoHit<'a> {
                 *last_hit = s + diagonals.offset;
             }
         }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516-552 (the tests of
+    // `pairs`; tblastn/x_tbn_hitbf.rs module doc)
+    // EXPERIMENT (LOSAT_X_TBNHITBF): `x_hits_bf` takes the too-far and overlap outcomes; the
+    // body of `pairs` runs on each hit it stops at (a flag-1 cell or a candidate), in order.
+    /// `pairs` with the too-far and overlap outcomes taken by `x_tbn_hitbf::x_hits_bf`; `pairs`
+    /// itself when `x_tbn_hitbf::fits` does not hold.
+    #[inline(never)]
+    pub(super) fn x_pairs_bf(
+        &mut self,
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
+        if !super::x_tbn_hitbf::fits(self.window, self.word_size) {
+            self.pairs(frame, chunk_offset, subject_sequence, pairs, hits);
+            return;
+        }
+        let word_size = self.word_size as i32;
+        let mut done = 0;
+        while done < pairs.len() {
+            done += super::x_tbn_hitbf::x_hits_bf(
+                &mut self.diagonals.entries,
+                self.diagonals.offset,
+                self.window,
+                word_size,
+                &pairs[done..],
+            );
+            if let Some(pair) = pairs.get(done) {
+                self.pairs(
+                    frame,
+                    chunk_offset,
+                    subject_sequence,
+                    std::slice::from_ref(pair),
+                    hits,
+                );
+                done += 1;
+            }
+        }
+    }
+
+    // No NCBI counterpart: runs `pairs` and `x_pairs_bf` on one offset array and compares them
+    // (LOSAT_X_TBNHITBFSHADOW); the table and init HSPs kept are those of `x_pairs_bf`.
+    /// EXPERIMENT (LOSAT_X_TBNHITBFSHADOW): `pairs` on a copy of the table, then `x_pairs_bf`;
+    /// panics at the first difference of the init HSPs or of the tables.
+    #[inline(never)]
+    pub(super) fn x_pairs_bf_shadow(
+        &mut self,
+        frame: i8,
+        chunk_offset: u32,
+        subject_sequence: &[u8],
+        pairs: &[crate::algorithm::tblastx::blast_aascan::BlastOffsetPair],
+        hits: &mut Vec<InitHsp>,
+    ) {
+        let outside = !super::x_tbn_hitbf::fits(self.window, self.word_size);
+        super::x_tbn_hitbf::x_shadow_count(pairs.len(), outside);
+        if outside {
+            self.pairs(frame, chunk_offset, subject_sequence, pairs, hits);
+            return;
+        }
+        let before = self.diagonals.entries.clone();
+        let mut reference_hits = Vec::new();
+        self.pairs(
+            frame,
+            chunk_offset,
+            subject_sequence,
+            pairs,
+            &mut reference_hits,
+        );
+        let reference_table = std::mem::replace(&mut self.diagonals.entries, before);
+        let start = hits.len();
+        self.x_pairs_bf(frame, chunk_offset, subject_sequence, pairs, hits);
+        super::x_tbn_hitbf::x_shadow_compare(
+            frame,
+            chunk_offset,
+            &hits[start..],
+            &reference_hits,
+            &self.diagonals.entries,
+            &reference_table,
+        );
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:274-309
@@ -1584,5 +1673,142 @@ mod tests {
             other.diagonals.entries.len(),
             (short_query.len() - 1 + window as usize).next_power_of_two()
         );
+    }
+
+    // LOSAT_X_TBNHITBF: `x_pairs_bf` against `pairs` on units made as in the test above (fragments
+    // of the queries with substitutions, so that extensions and flag-1 cells occur), on cleared
+    // tables, on a kept table and across the clear near INT4_MAX / 4, for windows 40 and
+    // wordsize + 1; each unit's offset pairs come in arrays of random lengths, as the scan fills
+    // them. The init HSPs and every cell must be equal after every unit.
+    #[test]
+    fn x_pairs_bf_gives_the_hits_and_table_of_pairs() {
+        let mut seed = 0x9e37_79b9_u64;
+        let mut next = move |bound: usize| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((seed >> 33) as usize) % bound
+        };
+        const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+        fn random(length: usize, next: &mut dyn FnMut(usize) -> usize) -> Vec<u8> {
+            (0..length).map(|_| RESIDUES[next(20)]).collect()
+        }
+        let queries: Vec<Vec<u8>> = [150, 90, 210]
+            .into_iter()
+            .map(|length| random(length, &mut next))
+            .collect();
+        let mut units = Vec::new();
+        for _ in 0..60 {
+            let mut unit = random(next(40), &mut next);
+            for _ in 0..1 + next(3) {
+                let query = &queries[next(queries.len())];
+                let start = next(query.len() - 30);
+                let end = (start + 30 + next(80)).min(query.len());
+                for &residue in &query[start..end] {
+                    unit.push(if next(100) < 15 {
+                        RESIDUES[next(20)]
+                    } else {
+                        residue
+                    });
+                }
+                unit.extend(random(next(30), &mut next));
+            }
+            units.push(
+                encode_tblastn_lookup_query(&unit, None, false).aa_seq[1..=unit.len()].to_vec(),
+            );
+        }
+        let x_dropoffs = [16, 16, 16];
+        let cutoffs = [24, 24, 24];
+        let set: Vec<&[u8]> = queries.iter().map(Vec::as_slice).collect();
+        let (query, offsets) = x_concatenated(&set);
+        let mut found = 0;
+        let mut flags = 0;
+        for window in [40, 4] {
+            for (mode, start) in [
+                ("cleared", None),
+                ("kept", None),
+                ("near the clear", Some(i32::MAX / 4 - 5_000)),
+            ] {
+                let new = || {
+                    XTwoHit::new(
+                        &query,
+                        &offsets,
+                        &x_dropoffs,
+                        &cutoffs,
+                        ScoringMatrix::Blosum62,
+                        window,
+                        3,
+                    )
+                };
+                let mut reference = new();
+                let mut branch_free = new();
+                if let Some(start) = start {
+                    reference.diagonals.offset = start;
+                    branch_free.diagonals.offset = start;
+                }
+                for (u, unit) in units.iter().enumerate() {
+                    if mode == "cleared" {
+                        reference.reset();
+                        branch_free.reset();
+                    }
+                    let pairs = x_word_pairs(&query, unit);
+                    let mut expected = Vec::new();
+                    reference.pairs(1, 0, unit, &pairs, &mut expected);
+                    let mut got = Vec::new();
+                    let mut rest = &pairs[..];
+                    while !rest.is_empty() {
+                        let (array, tail) = rest.split_at(1 + next(rest.len().min(50)));
+                        branch_free.x_pairs_bf(1, 0, unit, array, &mut got);
+                        rest = tail;
+                    }
+                    assert_eq!(got, expected, "window {window} {mode} unit {u}: init HSPs");
+                    assert_eq!(
+                        branch_free.x_table(),
+                        reference.x_table(),
+                        "window {window} {mode} unit {u}: table"
+                    );
+                    found += expected.len();
+                    flags += reference.x_table().iter().filter(|cell| cell.1).count();
+                    if mode != "cleared" {
+                        reference.exit(unit.len());
+                        branch_free.exit(unit.len());
+                    }
+                }
+            }
+        }
+        assert!(found >= 200, "the units must give hits ({found})");
+        assert!(flags > 0, "no flag-1 cell");
+    }
+
+    // LOSAT_X_TBNHITBFSHADOW: the shadow keeps the branch-free run's init HSPs and table, which are
+    // those of `pairs`.
+    #[test]
+    fn x_pairs_bf_shadow_keeps_the_hits_of_pairs() {
+        let raw: &[u8] = b"MKVLAAGIVGLLLAQWERTYIPASDFGHKLCVNM";
+        let (query, offsets) = x_concatenated(&[raw]);
+        let mut encoded =
+            encode_tblastn_lookup_query(raw, None, false).aa_seq[1..=raw.len()].to_vec();
+        encoded.extend_from_within(..);
+        let new = || {
+            XTwoHit::new(
+                &query,
+                &offsets,
+                &[16],
+                &[10],
+                ScoringMatrix::Blosum62,
+                40,
+                3,
+            )
+        };
+        let pairs = x_word_pairs(&query, &encoded);
+        let mut reference = new();
+        let mut expected = Vec::new();
+        reference.pairs(1, 0, &encoded, &pairs, &mut expected);
+        let mut shadow = new();
+        let mut got = Vec::new();
+        shadow.x_pairs_bf_shadow(1, 0, &encoded, &pairs, &mut got);
+        assert!(!expected.is_empty());
+        assert_eq!(got, expected);
+        assert_eq!(shadow.x_table(), reference.x_table());
     }
 }

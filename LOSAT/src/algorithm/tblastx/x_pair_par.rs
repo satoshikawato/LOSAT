@@ -198,6 +198,10 @@ use x_unit_probe::{XNoProbe, XProbe, XProbeSlot, XStatsProbe, XTimeProbe};
 #[path = "x_tbx_extbatch.rs"]
 mod x_tbx_extbatch;
 
+// EXPERIMENT (LOSAT_X_TBXHITBF / LOSAT_X_TBXHITBFSHADOW): the hit loop of a unit with the too-far
+// and overlap outcomes of the two-hit test taken without a branch (x_tbx_hitbf.rs).
+#[path = "x_tbx_hitbf.rs"]
+mod x_tbx_hitbf;
 // EXPERIMENT (LOSAT_X_TBXQSLICE / LOSAT_X_TBXQSLICESHADOW): the scan of a unit in slices of its
 // query group, one lookup table per slice, on the unit's one diagonal table (x_tbx_qslice.rs).
 #[path = "x_tbx_qslice.rs"]
@@ -432,6 +436,7 @@ fn add_ns(counter: &AtomicU64, t0: Option<Instant>) {
 pub fn print_summary() {
     x_kmerge::print_summary();
     x_tbx_extbatch::print_summary();
+    x_tbx_hitbf::print_summary();
     x_tbx_qslice::print_summary();
     // LOSAT_X_SEEDCOMPACT: printed whenever the switch is on, so also when the unit path does not
     // run (`LOSAT_X_PAIRPAR` off: zero counters). `bytes_saved` is what the unit outputs no longer
@@ -2186,7 +2191,8 @@ impl XPairPar {
         scratch: &mut XScratch,
     ) -> Vec<InitHSP> {
         let mut init_hsps: Vec<InitHSP> = Vec::new();
-        self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut init_hsps, &mut XNoProbe);
+        // EXPERIMENT (LOSAT_X_TBXHITBF): `scan_unit` or its branch-free hit loop (x_tbx_hitbf.rs).
+        self.scan_unit_or_bf::<_, PF>(unit, inp, scratch, &mut init_hsps);
         init_hsps
     }
 
@@ -2281,7 +2287,8 @@ impl XPairPar {
         let mut records = std::mem::take(&mut scratch.records);
         records.clear();
         let mapped = self.x_unit_records(unit, scratch, &mut records);
-        self.scan_unit::<_, _, PF>(unit, inp, scratch, &mut records, &mut XNoProbe);
+        // EXPERIMENT (LOSAT_X_TBXHITBF): `scan_unit` or its branch-free hit loop (x_tbx_hitbf.rs).
+        self.scan_unit_or_bf::<_, PF>(unit, inp, scratch, &mut records);
         let exact = x_unit_copy(&records, mapped);
         scratch.records = records;
         exact
@@ -2319,7 +2326,24 @@ impl XPairPar {
     /// Scans one unit and saves its init HSPs, in scan order, into `init_hsps`; `probe` records
     /// the diagnostics of LOSAT_TIMING / LOSAT_X_STATS (`XNoProbe`: nothing); `PF` adds the
     /// prefetch of LOSAT_X_TBXPREFETCH.
+    #[inline(always)]
     fn scan_unit<S: XInitSink, P: XProbe, const PF: bool>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+        probe: &mut P,
+    ) {
+        self.scan_unit_hits::<S, P, PF, false>(unit, inp, scratch, init_hsps, probe);
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
+    // `x_hits_bf`, which takes the too-far and overlap outcomes of `x_hit` without a branch and
+    // hands the others to `x_hit`; without it this is the loop before the switch. `BF` runs only
+    // with `XNoProbe` (the probes count every outcome) and where `x_tbx_hitbf::fits` holds.
+    /// `scan_unit`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF.
+    fn scan_unit_hits<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
         &self,
         unit: &XUnit,
         inp: &XSubject<'_>,
@@ -2343,8 +2367,11 @@ impl XPairPar {
 
         let offset_array_size: i32 = OFFSET_ARRAY_SIZE + sub.longest_chain.max(0);
         // EXPERIMENT (LOSAT_X_TBXSCANBF): with the switch, X_SCAN_BF_SLACK entries more.
+        // EXPERIMENT (LOSAT_X_TBXHITBF): with `BF` and `PF`, X_PREFETCH_AHEAD entries more
+        // (`x_hits_bf` reads the entry that far ahead without a bound test).
         let offset_pairs_len =
-            crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
+            crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size)
+                + if BF && PF { X_PREFETCH_AHEAD } else { 0 };
         if scratch.offset_pairs.len() < offset_pairs_len {
             scratch
                 .offset_pairs
@@ -2402,7 +2429,7 @@ impl XPairPar {
             // [C] while (scan_range[1] <= scan_range[2])
             while scan_range[1] <= scan_range[2] {
                 // One batch per call (`x_unit_batch`: its own function on wasm32 only).
-                if !x_unit_batch::<S, P, PF>(
+                if !x_unit_batch::<S, P, PF, BF>(
                     group,
                     subject,
                     &seq_ranges,
@@ -2445,7 +2472,7 @@ impl XPairPar {
 #[cfg_attr(target_arch = "wasm32", inline(never))]
 #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
 #[allow(clippy::too_many_arguments)]
-fn x_unit_batch<S: XInitSink, P: XProbe, const PF: bool>(
+fn x_unit_batch<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
     group: &XGroup,
     subject: &[u8],
     seq_ranges: &[(i32, i32)],
@@ -2476,6 +2503,37 @@ fn x_unit_batch<S: XInitSink, P: XProbe, const PF: bool>(
     probe.batch(hits as usize);
     let diag_ptr = scratch.diag.as_mut_ptr();
     let offset_pairs_ptr = scratch.offset_pairs.as_ptr();
+    // EXPERIMENT (LOSAT_X_TBXHITBF): the loop below, with the too-far and overlap outcomes of
+    // `x_hit` taken without a branch (x_tbx_hitbf.rs).
+    if BF {
+        // SAFETY: hits <= offset_array_size, and with `PF` the X_PREFETCH_AHEAD entries after them
+        // are in offset_pairs too (`scan_unit_hits` sizes it); every cell is below width =
+        // scratch.diag.len() as below; `fits` holds (the caller's rule). `x_hit` gets the cell of
+        // its hit, as below.
+        unsafe {
+            x_tbx_hitbf::x_hits_bf::<PF>(
+                diag_ptr,
+                offset_pairs_ptr,
+                hits as usize,
+                lo,
+                width,
+                h.window,
+                h.wordsize,
+                |cell, query_offset, subject_offset| {
+                    x_hit(
+                        &mut *diag_ptr.add(cell),
+                        query_offset,
+                        subject_offset,
+                        h,
+                        init_hsps,
+                        probe,
+                    );
+                },
+            )
+        };
+        probe.batch_end();
+        return true;
+    }
     // [C] for (i = 0; i < hits; ++i)
     for i in 0..hits as usize {
         // EXPERIMENT (LOSAT_X_TBXPREFETCH): the cell of the hit X_PREFETCH_AHEAD
@@ -3560,6 +3618,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 shadow: false,
                 stub: false,
+                sliced: None,
             };
             assert_eq!(
                 unit_lists(&pp, &inp),

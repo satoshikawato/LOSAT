@@ -326,7 +326,18 @@ pub(crate) fn read_title(
     query: usize,
     program: &str,
 ) -> Result<StoredTitle> {
-    let mut deflines = db.deflines(ordinal).map_err(|error| {
+    stored_title(db.deflines(ordinal), ordinal, query, program)
+}
+
+/// `read_title` of the sequence `ordinal` whose definition lines `deflines` were read
+/// (`SeqDb::deflines`, or `SeqDb::visit_deflines` with the same results).
+pub(crate) fn stored_title(
+    deflines: std::result::Result<Vec<crate::seqdb::OrdinalDefline>, crate::seqdb::SeqDbError>,
+    ordinal: u32,
+    query: usize,
+    program: &str,
+) -> Result<StoredTitle> {
+    let mut deflines = deflines.map_err(|error| {
         if error.ncbi_message().is_some() {
             anyhow::Error::new(HeaderReadError {
                 query,

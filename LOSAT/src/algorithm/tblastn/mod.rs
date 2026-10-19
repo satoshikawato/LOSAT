@@ -18,6 +18,9 @@ mod x_subject_store;
 // status = s_BlastAaWordFinder_TwoHit(..., init_hitlist, ...);
 // Blast_InitHitListSortByScore(init_hitlist);
 mod search_init;
+// NCBI c++/src/algo/blast/core/aa_ungapped.c:516-552: the two-hit tests of every hit.
+// EXPERIMENT (LOSAT_X_TBNHITBF): too far and overlap without a branch.
+mod x_tbn_hitbf;
 // NCBI c++/src/algo/blast/core/blast_engine.c:522-552:
 // aux_struct->GetGappedScore(..., init_hitlist, &hsp_list, ...);
 // Blast_HSPListPurgeHSPsWithCommonEndpoints(...);
@@ -68,3 +71,6 @@ pub use x_scan_bf::print_summary as x_scan_bf_print_summary;
 // EXPERIMENT (LOSAT_X_TBNLINKWIN): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use stage_d_linking::x_link_window_print_summary;
+// EXPERIMENT (LOSAT_X_TBNHITBF / LOSAT_X_TBNHITBFSHADOW): the summary line `main` prints at exit.
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub use x_tbn_hitbf::print_summary as x_tbn_hitbf_print_summary;

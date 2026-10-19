@@ -1709,10 +1709,8 @@ impl XPairPar {
         }
 
         let t_units = timing().then(Instant::now);
-        let outputs = if let Some(sliced) = &self.sliced {
-            // EXPERIMENT (LOSAT_X_TBXQSLICE): the units of a batch with a cut group scan in
-            // slices (x_tbx_qslice.rs); the units and their order are the same.
-            self.run_subject_unit_fns_sliced(sliced, &units, inp, pool)
+        let outputs = if self.sliced.is_some() {
+            unimplemented!("A9 probe V1: the sliced path compiled out")
         } else {
             // EXPERIMENT (LOSAT_X_TBXPREFETCH, module doc): all units of the subject scan with the
             // prefetch when one of their tables is large enough; the units and their order are

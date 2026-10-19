@@ -12,6 +12,7 @@
 mod istat;
 mod ncbi_report;
 mod score;
+mod taxid;
 mod window;
 
 #[cfg(test)]
@@ -24,6 +25,7 @@ use std::sync::Arc;
 pub use istat::{
     discover_stat_type, discover_stat_type_in, FormatSite, StatFile, StatType, UnitCounts,
 };
+pub use taxid::taxid_stat_file;
 
 use score::ScoreMean;
 use window::Window;

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Compare LOSAT with the frozen NCBI -subject fixtures (LOSAT/tests/outfmt0_manifest.tsv: outfmt 0, 6
-and 7, and 8 and 12 in the rows sa.*; BLASTX has rows of 8 and 12 only).
+and 7, and 8, 9 and 12 in the rows sa.*; BLASTX has rows of 8, 9 and 12 only).
 
 Every fixture runs from LOSAT/ as `LOSAT <program> <search_argv>` (the arguments of the
 oracle run). Its stdout must equal LOSAT/tests/fixtures/outfmt0/<fixture_id>.out byte for

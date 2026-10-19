@@ -139,6 +139,27 @@ Run from `LOSAT/`:
     rm tests/db_search/bslice.pjs
     cp tests/db_search/bslice.pin tests/db_search/bnophr.pin; cp tests/db_search/bslice.psq tests/db_search/bnophr.psq
 
+Query-coverage inputs of the ungapped searches (row `db.blastx.ungapped_qcov60_mts1.6`, and the TBLASTX
+`-subject` fixtures `qcov.tblastx.*` of `LOSAT/tests/outfmt0_manifest.tsv`), written by `make_qcov_inputs.py`
+(run from `LOSAT/`; random letters from `random.Random(20261019)`):
+
+- `qcovp_q.fna`: the query, 600 random bases.
+- `qcovp.fna`: `s_part` (the query's first 330 bases unchanged between random flanks: 55 % of the query and the
+  best e-value) and `s_full` (the whole query with 25 % substitutions: a weaker e-value).
+- `qcovp.faa`: the translations of the same two (`p_part`, `p_full`; `p_full` has its own substitutions), the
+  records of the database `qcovp`.
+- With `-max_target_seqs 1 -qcov_hsp_perc 60` NCBI reports `s_full` (`p_full` with `blastx -ungapped
+  -comp_based_stats 0`): an ungapped search removes the HSPs below the coverage before the preliminary hit list,
+  which has the final size, is filled (`blast_engine.c:1538`). Without the coverage it reports `s_part` alone.
+
+The database (version 4, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file was deleted). Run from
+`LOSAT/`:
+
+    python3 tests/db_search/make_qcov_inputs.py
+    makeblastdb -in tests/db_search/qcovp.faa -dbtype prot -out tests/db_search/qcovp \
+        -title "query coverage, ungapped" -blastdb_version 4
+    rm tests/db_search/qcovp.pjs
+
 Nucleotide-versus-nucleotide translated inputs (TBLASTX rows, `db.tblastx.*`), written by `make_tblastx_inputs.py`
 (run from `LOSAT/`; slices of `tests/fasta/MelaMJNV.fasta`, `LvMJNV.fasta` and `PemoMJNVA.fasta`; mutations and
 ambiguity codes come from a seeded generator). TBLASTX is slow, so the database holds 14 kb and the queries 5 kb:

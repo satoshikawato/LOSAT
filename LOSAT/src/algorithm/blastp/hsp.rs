@@ -707,20 +707,9 @@ pub(crate) fn reap_hsplist_by_evalue<H: HitListHsp>(
 //    ...
 // }
 // ```
+// The filter of every program (`core::blast_hits::trim_by_max_hsps`).
 pub(crate) fn trim_by_max_hsps(list: &mut BlastpHspList, max_hsps_per_subject: usize) {
-    if max_hsps_per_subject == 0 || list.hsps.len() <= max_hsps_per_subject {
-        return;
-    }
-
-    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:2059-2067
-    // ```c
-    // hsp_max = hit_options->max_hsps_per_subject;
-    // for (index = hsp_max; index < hsp_list->hspcnt; index++) {
-    //    hsp_array[index] = Blast_HSPFree(hsp_array[index]);
-    // }
-    // hsp_list->hspcnt = hsp_max;
-    // ```
-    list.hsps.truncate(max_hsps_per_subject);
+    crate::core::blast_hits::trim_by_max_hsps(&mut list.hsps, max_hsps_per_subject);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3077-3106
@@ -1230,6 +1219,36 @@ impl<H: HitListHsp> BlastpHitList<H> {
             self.hsplist_array[..self.hsplist_count].sort_unstable_by(compare_hsp_lists);
         }
         self.purge();
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3314-3326
+    // ```c
+    //    index1 = 0;
+    //    for (index=0; index<hsplist_count; index++) {
+    //       if (hsplist_array[index]) {
+    //          hsplist_array[index1] = hsplist_array[index];
+    //          index1++;
+    //       }
+    //    }
+    //
+    //    for (index=index1; index<hsplist_count; index++) {
+    //       hsplist_array[index] = NULL;
+    //    }
+    //
+    //    hit_list->hsplist_count = index1;
+    // ```
+    /// The lists that a filter left without HSPs (NCBI frees them) removed, the others kept
+    /// in their order.
+    pub(crate) fn purge_empty_hsp_lists(&mut self) {
+        let mut kept = 0usize;
+        for index in 0..self.hsplist_count {
+            if !self.hsplist_array[index].hsps.is_empty() {
+                self.hsplist_array.swap(kept, index);
+                kept += 1;
+            }
+        }
+        self.hsplist_count = kept;
+        self.hsplist_array.truncate(kept);
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892

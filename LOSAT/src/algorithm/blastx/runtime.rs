@@ -18,6 +18,7 @@ use super::{
     subjects::Subjects,
     traceback::ordinary_traceback,
 };
+use crate::core::blast_hits::{reap_by_query_coverage, trim_by_max_hsps};
 use anyhow::Result;
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1777
 // ```c++
@@ -37,6 +38,19 @@ use anyhow::Result;
 //        larger than the final hit list size */
 //     s_BlastPruneExtraHits(results, hit_params->options->hitlist_size);
 // ```
+/// The query offset, query end and context length of an HSP (`Blast_HSPQueryCoverageTest`):
+/// the offsets are in the residues of the HSP's query frame, whose length is the context's.
+fn query_extent(
+    hsp: &super::preliminary::PreliminaryHsp,
+    contexts: &[super::query_setup::QueryContext],
+) -> (i64, i64, i64) {
+    (
+        i64::from(hsp.q_start),
+        i64::from(hsp.q_end),
+        contexts[hsp.context].length as i64,
+    )
+}
+
 pub struct BatchResults {
     pub query_ordinal: usize,
     pub queries: Vec<Vec<HspList>>,
@@ -1209,6 +1223,22 @@ impl PreliminarySink for Runtime<'_> {
             reap_preliminary(&mut linked, self.options);
             self.observer
                 .reap("PRE_REAP_OUT", oid, &linked, reap_cutoff);
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1533-1538
+            // ```c++
+            //                } else {
+            //         	   status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
+            //                }
+            //
+            //                Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
+            // ```
+            // An ungapped search removes the HSPs below the query coverage before the hit list
+            // receives the subject (a subject left without HSPs never reaches it); the
+            // traceback's reap then removes nothing.
+            if self.options.query_cov_hsp_perc > 0.0 {
+                reap_by_query_coverage(&mut linked.hsps, self.options.query_cov_hsp_perc, |h| {
+                    query_extent(&h.hsp, &batch.contexts)
+                });
+            }
             let hsps = linked
                 .hsps
                 .into_iter()
@@ -2291,8 +2321,32 @@ impl PreliminarySink for Runtime<'_> {
                 // ```
                 if self.options.max_hsps > 0 {
                     self.observer.hsps("MAX_HSPS_IN", list.oid, &list.hsps);
-                    list.hsps.truncate(self.options.max_hsps as usize);
+                    trim_by_max_hsps(&mut list.hsps, self.options.max_hsps as usize);
                     self.observer.hsps("MAX_HSPS_OUT", list.oid, &list.hsps);
+                }
+                // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2015-2045
+                // ```c++
+                //    for (index = 0; index < hsp_list->hspcnt; index++) {
+                //       hsp = hsp_array[index];
+                //       ASSERT(hsp != NULL);
+                //       if ( Blast_HSPQueryCoverageTest(hsp, hit_options->query_cov_hsp_perc,
+                // 			                          query_info->contexts[hsp->context].query_length)) {
+                //          hsp_array[index] = Blast_HSPFree(hsp_array[index]);
+                //          removed = TRUE;
+                // ...
+                //    if (removed) {
+                //        hsp_list->best_evalue = s_BlastGetBestEvalue(hsp_list);
+                //    }
+                // ```
+                // The context of an HSP is its query frame, whose length is the frame's.
+                if self.options.query_cov_hsp_perc > 0.0
+                    && reap_by_query_coverage(
+                        &mut list.hsps,
+                        self.options.query_cov_hsp_perc,
+                        |h| query_extent(&h.hsp, &batch.contexts),
+                    )
+                {
+                    list.refresh();
                 }
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2538-2588
                 // ```c++
@@ -2356,6 +2410,17 @@ impl PreliminarySink for Runtime<'_> {
             }
         }
 
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:864-866
+        // ```c++
+        //        if(hit_options->query_cov_hsp_perc) {
+        //             Blast_HitListPurgeNullHSPLists(hit_list);
+        //        }
+        // ```
+        if self.options.query_cov_hsp_perc > 0.0 {
+            for query in &mut queries {
+                query.lists.retain(|list| !list.hsps.is_empty());
+            }
+        }
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1768-1777
         // ```c++
         //     /* Re-sort the hit lists according to their best e-values, because they

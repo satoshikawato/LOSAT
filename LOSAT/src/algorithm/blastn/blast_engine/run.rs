@@ -82,8 +82,9 @@ use super::super::filtering::{
 };
 use super::super::hsp::{
     evalue_comp, get_prelim_hitlist_size, score_compare_hsps, sort_hsplist_by_evalue,
-    sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists_to_writer, BlastnHitList,
-    BlastnHsp, BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
+    sort_hsps_by_score, trim_by_max_hsps, update_best_evalue,
+    write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
+    BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{
@@ -98,6 +99,7 @@ use super::super::scoring::{
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
 use crate::blastinput::app::{self as app, Program};
+use crate::core::blast_hits::reap_by_query_coverage;
 // EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
 use super::super::x_subject_store::{
     x_blastna_into, x_bnstore, x_read_subject_stores, SubjectLetters,
@@ -5302,15 +5304,18 @@ fn tabular_subject_ids(
 }
 
 /// The end of the traceback for the final hit list of one query (`hit_list`, of a query of
-/// `query_len` letters): the HSP lists cut to `max_hsps_per_subject` and their subject
-/// best hits (`-subject_besthit`), the lists sorted by e-value and cut to `hitlist_size`,
-/// and the HSPs of each list sorted for the Seq-aligns (`post_process_hits_and_write`;
-/// a database search does it after each query batch's traceback, `run_in_pool`).
+/// `query_len` letters, the length of each of its contexts): the HSP lists cut to
+/// `max_hsps_per_subject`, their HSPs below `query_cov_hsp_perc` percent of the query
+/// removed (`-qcov_hsp_perc`; a list left empty is removed) and their subject best hits
+/// (`-subject_besthit`), the lists sorted by e-value and cut to `hitlist_size`, and the HSPs
+/// of each list sorted for the Seq-aligns (`post_process_hits_and_write`; a database search
+/// does it after each query batch's traceback, `run_in_pool`).
 fn finish_query_hit_list(
     hit_list: &mut BlastnHitList,
     query_len: usize,
     hitlist_size: usize,
     max_hsps_per_subject: usize,
+    query_cov_hsp_perc: f64,
     subject_besthit: bool,
 ) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:836-867
@@ -5320,6 +5325,12 @@ fn finish_query_hit_list(
     //     if (hit_options->max_hsps_per_subject) {
     //         Blast_TrimHSPListByMaxHsps(hsp_list, hit_options);
     //     }
+    //     if(hit_options->query_cov_hsp_perc) {
+    //         Blast_HSPListReapByQueryCoverage(hsp_list, hit_options, query_info, program_number);
+    //         if(hsp_list->hspcnt == 0){
+    //             hit_list->hsplist_array[subject_index] =  Blast_HSPListFree(hsp_list);
+    //         }
+    //     }
     //     if ((hit_options->hsp_filt_opt != NULL) &&
     //         (hit_options->hsp_filt_opt->subject_besthit_opts != NULL)) {
     //         Blast_HSPListSubjectBestHit(program_number,
@@ -5327,14 +5338,36 @@ fn finish_query_hit_list(
     //             query_info, hsp_list);
     //     }
     // }
+    // if(hit_options->query_cov_hsp_perc) {
+    //     Blast_HitListPurgeNullHSPLists(hit_list);
+    // }
     // ```
     for hsp_list in &mut hit_list.hsplist_array {
         if max_hsps_per_subject > 0 {
             trim_by_max_hsps(hsp_list, max_hsps_per_subject);
         }
+        // Both contexts of a query have its length, and the offsets are those of the HSP's
+        // own context.
+        if query_cov_hsp_perc > 0.0
+            && reap_by_query_coverage(&mut hsp_list.hsps, query_cov_hsp_perc, |hsp| {
+                (
+                    hsp.internal_q_offset_0 as i64,
+                    hsp.internal_q_end_0 as i64,
+                    query_len as i64,
+                )
+            })
+        {
+            update_best_evalue(hsp_list);
+        }
         if subject_besthit {
             subject_best_hit(&mut hsp_list.hsps, query_len);
         }
+    }
+    if query_cov_hsp_perc > 0.0 {
+        hit_list
+            .hsplist_array
+            .retain(|hsp_list| !hsp_list.hsps.is_empty());
+        hit_list.hsplist_count = hit_list.hsplist_array.len();
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3383-3400
     // ```c
@@ -5412,6 +5445,7 @@ fn post_process_hits_and_write(
     mut hit_lists: Vec<Option<BlastnHitList>>,
     hitlist_size: usize,
     max_hsps_per_subject: usize,
+    query_cov_hsp_perc: f64,
     subject_besthit: bool,
     query_lengths: &[usize],
     outputs: &mut ReportOutputs<'_>,
@@ -5479,6 +5513,7 @@ fn post_process_hits_and_write(
                 query_lengths.get(q_idx).copied().unwrap_or_default(),
                 hitlist_size,
                 max_hsps_per_subject,
+                query_cov_hsp_perc,
                 subject_besthit,
             );
             drop_hsps_of_score_zero(hit_list);
@@ -7766,6 +7801,7 @@ fn run_in_pool(
                             lengths[start + q_idx],
                             hitlist_size,
                             args.max_hsps_per_subject.unwrap_or(0),
+                            args.qcov_hsp_perc.unwrap_or(0.0),
                             args.subject_besthit,
                         );
                     }
@@ -8588,6 +8624,7 @@ fn write_reports_untimed(
         hit_lists,
         hitlist_size,
         args.max_hsps_per_subject.unwrap_or(0),
+        args.qcov_hsp_perc.unwrap_or(0.0),
         args.subject_besthit,
         results.lengths,
         outputs,

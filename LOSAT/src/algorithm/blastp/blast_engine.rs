@@ -86,8 +86,8 @@ use super::gapalign::{
 use super::hsp::{
     blast_compo_early_termination, collect_hits_and_methods_from_hit_lists,
     collect_hits_from_hit_lists, fill_results_from_compo_heaps, hit_list_to_seqalign_order,
-    reap_hsplist_by_evalue, trim_by_max_hsps, BlastCompoHeap, BlastpHitList, BlastpHsp,
-    BlastpHspList,
+    reap_hsplist_by_evalue, trim_by_max_hsps, update_best_evalue, BlastCompoHeap, BlastpHitList,
+    BlastpHsp, BlastpHspList,
 };
 #[cfg(all(
     feature = "parallel",
@@ -104,6 +104,7 @@ use super::x_prelim_compact::{
     x_bp_prelim_compact, x_expand_hit_list, x_expanded_lists, x_finish_compact_lists,
     x_shadow_compare, XPrelimCompact, XPrelimHsp,
 };
+use crate::core::blast_hits::reap_by_query_coverage;
 // No NCBI counterpart: matches per LOSAT_X_NEWTONLANES prefetch in the BLASTP redo loops; it does
 // not change any value NCBI computes.
 const X_NEWTON_LANES_MATCHES: usize = 16;
@@ -9923,25 +9924,48 @@ fn run_resolved_in_pool(
     let final_traceback_start = blastp_timing_start(timing_enabled);
     for hit_list_opt in &mut hit_lists {
         if let Some(hit_list) = hit_list_opt.as_mut() {
-            hit_list.sort_by_evalue();
-            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:845-852
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:845-865
             // ```c
             // for (subject_index = 0; subject_index < hit_list->hsplist_count; ++subject_index) {
             //    BlastHSPList * hsp_list = hit_list->hsplist_array[subject_index];
             //    if(hit_options->max_hsps_per_subject) {
             //       Blast_TrimHSPListByMaxHsps(hsp_list, hit_options);
             //    }
+            //    if(hit_options->query_cov_hsp_perc) {
+            //       Blast_HSPListReapByQueryCoverage(hsp_list, hit_options, query_info, program_number);
+            //       if(hsp_list->hspcnt == 0){
+            //          hit_list->hsplist_array[subject_index] =  Blast_HSPListFree(hsp_list);
+            //       }
+            //    }
+            // }
+            // if(hit_options->query_cov_hsp_perc) {
+            //      Blast_HitListPurgeNullHSPLists(hit_list);
             // }
             // ```
-            if args.max_hsps_per_subject > 0 {
+            // The e-value sort below reads the best e-value and the first HSP of each list,
+            // which `-max_hsps` keeps, so it follows the cut as NCBI's does.
+            if args.max_hsps_per_subject > 0 || args.query_cov_hsp_perc > 0.0 {
                 for hsp_list in hit_list
                     .hsplist_array
                     .iter_mut()
                     .take(hit_list.hsplist_count)
                 {
                     trim_by_max_hsps(hsp_list, args.max_hsps_per_subject);
+                    if reap_by_query_coverage(&mut hsp_list.hsps, args.query_cov_hsp_perc, |hsp| {
+                        (
+                            hsp.q_start as i64 - 1,
+                            hsp.q_end as i64,
+                            hsp.query_length as i64,
+                        )
+                    }) {
+                        update_best_evalue(hsp_list);
+                    }
+                }
+                if args.query_cov_hsp_perc > 0.0 {
+                    hit_list.purge_empty_hsp_lists();
                 }
             }
+            hit_list.sort_by_evalue();
             hit_list.prune_by_size(args.max_target_seqs);
         }
     }
@@ -10639,6 +10663,7 @@ mod tests {
             out: None,
             max_target_seqs: None,
             max_hsps_per_subject: None,
+            qcov_hsp_perc: None,
             ungapped: false,
             window_size: None,
             matrix: None,

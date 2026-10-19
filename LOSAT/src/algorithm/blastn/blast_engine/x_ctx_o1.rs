@@ -53,7 +53,7 @@
 //!   `b = n / (len + 1)` and `e = b + 1`, so the loop does not run). The division is a
 //!   multiplication by `ceil(2^64 / (L + 1))` and a shift by 64, exact for every `n < 2^32`
 //!   (Lemire, Kaser and Kurz, "Faster remainder by direct computation", 2019, theorem 1 with
-//!   F = 64, N = 32); the concatenated length is checked to be below 2^32.
+//!   F = 64, N = 32); `build` takes only concatenated lengths below 2^31.
 //! - `Blocks`, for any other layout: one `u32` per block of `2^k` offsets. A block with at most one
 //!   sentinel has the entry `rank << (k + 1) | p`: `rank` numbers (from 0, in offset order) the
 //!   context with letters whose letters or sentinel hold the block's first offset, and `p` is the
@@ -71,7 +71,7 @@
 //! Neither form reads more than one `u32` (the second table only with empty contexts), where the
 //! binary search reads up to 16 entries of a 1.4 MB array for 30,000 queries (R8: 318 cycles a
 //! lookup hit in blastn-short) and `direct_map` reads one of 4 bytes a letter. The block table
-//! takes `4 * len / 2^k` bytes (375 KB for 30,000 queries of 24 letters, k = 4; 2.8 MB for both
+//! takes `4 * len / 2^k` bytes (375 KB for 30,000 queries of 18 to 30 letters, k = 4; 2.8 MB for both
 //! strands of 31,168 cDNAs of 30 to 71,382 letters, k = 8, where the shortest one alone would give
 //! k = 4 and 45 MB); a table above `MAX_TABLE_BYTES` is not built.
 
@@ -171,11 +171,11 @@ impl CtxO1 {
         }
         let last = ends.len() - 1;
         let rank_fits = |shift: u32| last < 1usize << (31 - shift);
-        // blocks of 2^shift offsets with two sentinels or more (an upper bound: a block with three
-        // counts twice)
+        // blocks of 2^shift offsets with two sentinels or more below `total_len` (an upper bound: a
+        // block with three counts twice; `ends[last]` is past the table unless empty contexts trail)
         let crowded_blocks = |shift: u32| {
             ends.windows(2)
-                .filter(|w| w[0] >> shift == w[1] >> shift)
+                .filter(|w| w[1] < total_len && w[0] >> shift == w[1] >> shift)
                 .count()
         };
         // 2^shift <= min_len + 1: at most one sentinel per block
@@ -185,8 +185,8 @@ impl CtxO1 {
         }
         while shift < 30
             && rank_fits(shift + 1)
-            && crowded_blocks(shift + 1) * CROWDED_SHARE
-                <= total_len.div_ceil(1usize << (shift + 1))
+            && crowded_blocks(shift + 1)
+                <= total_len.div_ceil(1usize << (shift + 1)) / CROWDED_SHARE
         {
             shift += 1;
         }
@@ -207,7 +207,7 @@ impl CtxO1 {
                 rank += 1;
             }
             debug_assert!(ends[rank] >= first);
-            let place = if rank < last && ends[rank + 1] < first + block {
+            let place = if rank < last && ends[rank + 1] < (first + block).min(total_len) {
                 crowded = true;
                 crowded_place
             } else {
@@ -464,6 +464,22 @@ mod tests {
         let form = CtxO1::build_with(&contexts, total, false).unwrap();
         assert_eq!(form.describe().2, 8);
         assert!(!form.needs_runs());
+    }
+
+    #[test]
+    fn a_short_last_context_leaves_the_last_block_uncrowded() {
+        // the end of the last context is the table's length, not a sentinel inside it: the block
+        // that holds the sentinel before it and that end has one sentinel
+        let mut lengths = vec![400usize; 600];
+        lengths.push(20);
+        assert_eq!(check(&lengths, false), "blocks");
+        let (contexts, total) = contexts_of(&lengths);
+        let form = CtxO1::build_with(&contexts, total, false).unwrap();
+        assert_eq!(form.describe().2, 8);
+        assert!(!form.needs_runs());
+        // with contexts without letters after it, that end is a sentinel (0) inside the table
+        lengths.extend([0, 0]);
+        assert_eq!(check(&lengths, false), "blocks");
     }
 
     #[test]

@@ -16934,6 +16934,10 @@ mod tests {
                     "offset {n} of {lengths:?}"
                 );
             }
+            // past the table: NCBI's search, as before the forms
+            for n in total..total + 40 {
+                assert_eq!(index.context_for_offset(n), bsearch_context_info(n, &index));
+            }
         }
     }
 

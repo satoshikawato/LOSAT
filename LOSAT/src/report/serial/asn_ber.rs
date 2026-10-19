@@ -97,10 +97,16 @@ impl<'b> AsnBinaryEncoder<'b> {
             return;
         }
         let bytes = (length as u64).to_be_bytes();
-        let count = bytes
-            .iter()
-            .position(|&byte| byte != 0)
-            .map_or(1, |first| 8 - first);
+        let count = if length <= 0xff {
+            1
+        } else if length <= 0xffff {
+            2
+        } else if length <= 0xff_ffff {
+            3
+        } else {
+            // `sizeof(length)`: eight bytes on x86-64 Linux, not the shortest four.
+            8
+        };
         self.out.push(0x80 + count as u8);
         self.out.extend_from_slice(&bytes[8 - count..]);
     }

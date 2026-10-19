@@ -96,6 +96,12 @@ fn visible_strings_have_short_and_long_lengths() {
         bytes(|enc| enc.visible_str(&string)),
         [&[0x1a, 0x83, 0x01, 0x11, 0x70][..], &string].concat()
     );
+    // Above 0xffffff NCBI writes all `sizeof(size_t)` = 8 bytes of the length.
+    let string = vec![b'w'; 0x100_0000];
+    assert_eq!(
+        bytes(|enc| enc.visible_str(&string))[..10],
+        [0x1a, 0x88, 0, 0, 0, 0, 0x01, 0, 0, 0]
+    );
 }
 
 /// A byte outside 0x20..0x7E is an error (the callers refuse such titles before the search),

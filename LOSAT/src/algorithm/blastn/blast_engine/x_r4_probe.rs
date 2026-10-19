@@ -61,8 +61,8 @@ pub(super) fn probe() -> Probe {
                     "pv" => p.pv = true,
                     "ctx" => p.ctx = true,
                     "csr" => p.csr = true,
-                    // Read by `lookup::x_r11_csr` (build only).
-                    "csrb" => {}
+                    // Read by `lookup::x_r11_csr` (how the CSR is built).
+                    "csrb" | "csrw" | "csrchk" => {}
                     _ if t.starts_with("pf=") => {
                         let d: usize = t[3..].parse().expect("R4_PROBE pf=D");
                         assert!(d.is_power_of_two() && d >= 2 && d <= RING, "R4_PROBE pf=D");

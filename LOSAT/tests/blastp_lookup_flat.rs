@@ -209,7 +209,8 @@ fn block_search_reports_with_the_switch_are_the_reports_without_it() {
     }
 }
 
-// The search of all queries (a pairwise report is not written in blocks): one build, by the pool,
+// The search of all queries (a pairwise report with `LOSAT_X_BPQBLOCKFMT=0` is not written in blocks):
+// one build, by the pool,
 // whose contexts' Karlin blocks are tasks of the build with `LOSAT_X_BPQBLOCK` set and are
 // computed as without the switch otherwise; no earlier table.
 #[test]
@@ -217,7 +218,11 @@ fn search_of_all_queries_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
     for (letters, tasks) in [("1", true), ("0", false)] {
-        let base = [("LOSAT_X_BPCLUT", "1"), ("LOSAT_X_BPQBLOCK", letters)];
+        let base = [
+            ("LOSAT_X_BPCLUT", "1"),
+            ("LOSAT_X_BPQBLOCK", letters),
+            ("LOSAT_X_BPQBLOCKFMT", "0"),
+        ];
         let counts = same_reports(&subject, 4, &base, "0");
         let what = format!("blocks {letters}: {counts:?}");
         assert_eq!(counts["tables_compared"], 1, "{what}");

@@ -226,8 +226,9 @@ their variables mean
   in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
   in `BPDIAG`'s AVX2 batch; `BPGAP` runs the
   vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPLUT` declines in
-  diagnostics mode; `BPQBLOCK` takes the block path only for one `-outfmt 6` report with more than
-  one block (see its entry); `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
+  diagnostics mode; `BPQBLOCK` takes the block path only for one `-outfmt 6` report (with
+  `BPQBLOCKFMT`, one outfmt 0, 6 or 7 report) with more than one block (see its entry), and
+  `BPQBLOCKFMT` acts only with `BPQBLOCK`; `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
   `TBXNEXT` only in TBLASTX's parallel subject loop (2 or more threads, several subjects, native
   builds); `BPCLUT` acts on `blastp -task blastp-fast` only, and `BPLKPFLAT` only where the search's pool
   builds the flat table of `BPCLUT` (`BPCLUT` on, 2 or more threads), so with `BPCLUT=0` it changes
@@ -273,6 +274,7 @@ export LOSAT_X_BPLUT=1
 export LOSAT_X_BPPCOMPACT=1
 export LOSAT_X_BPPFREE=1
 export LOSAT_X_BPQBLOCK=50000
+export LOSAT_X_BPQBLOCKFMT=1
 export LOSAT_X_BPREDOFIT=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
@@ -1462,8 +1464,8 @@ Rebuilding less:
   its hit lists) whose rows are written before the next block is searched, as NCBI searches and reports one
   batch at a time. Both lookup tables take it: the default one, and the compressed one of `-task blastp-fast`
   (word size 5), whose table each block builds for its own batches and tests for NCBI's overflow banks with
-  them. Taken only where a block's report is its rows: one output in tabular format 6, no `-query_loc`, every
-  batch read, more than one block, no subject whose tabular ID the reference path rejects, and none of the
+  them. Taken only where a block's report is its rows: one output in tabular format 6 (with
+  `LOSAT_X_BPQBLOCKFMT`, below, also outfmt 0 or 7), no `-query_loc`, every batch read, more than one block, no subject whose tabular ID the reference path rejects, and none of the
   reference path's other refusals that come before its rows (a `-window_size` whose diagonal table with all
   queries passes 2^30, a query split that LOSAT rejects, or with the compressed table a query batch whose
   offsets add more than four times NCBI's overflow cells, about 859 million words, counted before the search);
@@ -1481,6 +1483,25 @@ Rebuilding less:
   compressed table and more than one thread, the contexts' Karlin blocks of each block are computed on the
   pool's threads (`tblastx/lookup/backbone.rs` `x_prepare_blosum62_lookup_query_in_pool`: each context's
   block reads only its own letters, `x_context_karlin`).
+- `LOSAT_X_BPQBLOCKFMT=1` (BLASTP, speed and memory; in the strict set from the pull request that added it,
+  2026-10-19, on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search of `LOSAT_X_BPQBLOCK` also
+  for one outfmt 0 (blastp's default) or outfmt 7 report (`blastp/x_query_blocks.rs`, exactness argument in
+  its header): each block writes its queries' report before the next block is searched, the outfmt 0 prolog
+  with the first block, the epilog and outfmt 7's `# BLAST processed N queries` (N = every query) with the
+  last. With outfmt 0 the blocks are searched only when no subject's title is one that the report refuses
+  where it shows the subject (a title of punctuation that NCBI's `x_CleanAndCompress` reads past the end of,
+  ABI v1's titles; with `-db` checked with the definition lines, `x_titles_allow_blocks`); otherwise, and for
+  the cases `LOSAT_X_BPQBLOCK` leaves to the search of all queries, the search of all queries. Without it
+  these formats ran the search of all queries: sp4 3000 x Species6 (`-subject`) at 16 threads 6.56 s
+  (outfmt 0) and 6.35 s (outfmt 7) against 4.16 s for outfmt 6 in blocks, 350 MiB against 50 MiB; BP-yeast
+  (yeast proteome x yeast, `-db`) 33.67 / 32.14 s against 21.91 s, 1,267 / 1,208 MiB against 58 MiB (ws node 0,
+  dev d7e13f99).
+- `LOSAT_X_BPQBLOCKFMTSHADOW=1` shadow of the block search (turns `LOSAT_X_BPQBLOCKFMT` on; any format the
+  block search takes): keeps a copy of the bytes the blocks write to the output and to standard error, then
+  searches all queries again and writes their report and warnings into memory; a difference prints
+  `[X_SHADOW] BPQBLOCKFMT output|stderr DIFFERENT at byte N ...` and stops the run. One line after the
+  search: `[X_SHADOW] BPQBLOCKFMT blocks= bytes= stderr_bytes= identical`. The second search is a search of
+  its own: it prints its own `LOSAT_TIMING` block and adds to the other switches' counters and shadow lines.
 - `LOSAT_X_BPPFREE=1` (BLASTP, memory; in the strict set since 2026-10-14; `=0` turns it off) the preliminary
   hit lists hold no more than their HSPs need
   (`blastp/x_prelim_free.rs`, exactness argument in its header): a subject's HSP list for a query gives back

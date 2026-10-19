@@ -1,6 +1,7 @@
 //! The pairwise reports (outfmt 0) formatted on the search's pool (`LOSAT_X_PAIRWISEPAR`,
 //! `src/report/x_pairwise_par.rs`) on whole searches: BLASTN (the blastn and megablast tasks,
-//! `-subject` and `-db`) and TBLASTX (`-subject` and `-db`).
+//! `-subject` and `-db`), TBLASTX (`-subject` and `-db`) and BLASTP (`-subject` and `-db`, in one
+//! search and in LOSAT_X_BPQBLOCK's query blocks).
 //!
 //! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless `LOSAT_X_PAIRWISEPAR`
 //! is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it on and two or more threads, each
@@ -123,12 +124,14 @@ fn tblastx_subjects() -> &'static Path {
 }
 
 /// A search with the given variables as its only `LOSAT_*` variables that choose a code path
-/// (`LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature needs it
+/// (`BATCH_SIZE` of the test's environment is dropped too; `LOSAT_BLASTX_WORKER_LOG` stays: a binary built with the `blastx-worker-probe` feature needs it
 /// as soon as a search has more than one thread, and it selects nothing).
 fn losat(args: &[&str], threads: u32, switches: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
     for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
+        let text = name.to_string_lossy();
+        if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG") || text == "BATCH_SIZE"
+        {
             command.env_remove(name);
         }
     }
@@ -368,5 +371,87 @@ fn a_failed_write_ends_the_search_as_without_the_switch() {
         assert_eq!(on.status.code(), off.status.code(), "{}", stderr(&on));
         assert_eq!(messages(&on), messages(&off));
         assert_eq!(on.stdout, off.stdout);
+    }
+}
+
+/// A protein database of MejoMJNV (LOSAT makedb), made once.
+fn protein_database() -> &'static Path {
+    static DATABASE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DATABASE.get_or_init(|| {
+        let dir = std::env::temp_dir().join(format!("losat-pairwisepar-db-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temporary directory");
+        let name = dir.join("MejoMJNV");
+        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+            .arg("makedb")
+            .arg("-in")
+            .arg(manifest("tests/fasta/MejoMJNV.faa"))
+            .args(["-dbtype", "prot"])
+            .arg("-out")
+            .arg(&name)
+            .output()
+            .expect("run LOSAT makedb");
+        assert!(output.status.success(), "makedb: {}", stderr(&output));
+        name
+    })
+}
+
+#[test]
+fn the_blastp_pairwise_report_does_not_depend_on_the_switch() {
+    let query = manifest("tests/fasta/MeenMJNV.faa");
+    let fasta = manifest("tests/fasta/MejoMJNV.faa");
+    let db = protein_database();
+    for (subject, value) in [("-subject", fasta.as_path()), ("-db", db)] {
+        let args = [
+            "blastp",
+            "-query",
+            query.to_str().unwrap(),
+            subject,
+            value.to_str().unwrap(),
+            "-evalue",
+            "0.001",
+        ];
+        let counts = check(&format!("blastp {subject}"), &args);
+        // The 101 queries' reports (in LOSAT_X_BPQBLOCK's blocks of 50,000 letters).
+        assert_eq!(
+            counts.iter().map(|[queries, ..]| queries).sum::<u64>(),
+            101,
+            "{subject}: {counts:?}"
+        );
+    }
+}
+
+#[test]
+fn the_blastp_block_reports_do_not_depend_on_the_switch() {
+    // Small NCBI query batches and a block per batch (LOSAT_X_BPQBLOCK=1): one report per block.
+    let query = manifest("tests/fasta/MeenMJNV.faa");
+    let fasta = manifest("tests/fasta/MejoMJNV.faa");
+    let args = [
+        "blastp",
+        "-query",
+        query.to_str().unwrap(),
+        "-subject",
+        fasta.to_str().unwrap(),
+        "-evalue",
+        "0.001",
+    ];
+    let blocks = [("BATCH_SIZE", "3000"), ("LOSAT_X_BPQBLOCK", "1")];
+    let with = |extra: &[(&'static str, &'static str)]| -> Vec<(&'static str, &'static str)> {
+        blocks.iter().chain(extra).copied().collect()
+    };
+    let off = losat(&args, 1, &with(&[OFF]));
+    assert!(off.status.success(), "{}", stderr(&off));
+    for threads in [2, 4] {
+        let on = losat(&args, threads, &with(&[]));
+        assert_eq!(on.stdout, off.stdout, "threads {threads}");
+        assert_eq!(messages(&on), messages(&off), "threads {threads}");
+        let shadow = losat(&args, threads, &with(&[SHADOW]));
+        assert_eq!(shadow.stdout, off.stdout, "threads {threads}, shadow");
+        let counts = shadow_counts(&shadow);
+        assert!(counts.len() > 1, "threads {threads}: {counts:?}");
+        assert_eq!(
+            counts.iter().map(|[queries, ..]| queries).sum::<u64>(),
+            101,
+            "threads {threads}: {counts:?}"
+        );
     }
 }

@@ -74,7 +74,21 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    let command = T::command();
+    try_parse_from_command(T::command(), argv)
+}
+
+/// `try_parse_from` with `command`, one of `T`'s commands whose arguments a caller changed
+/// (Web ABI v1's BLASTX keeps its own `-outfmt` values, `blastx/web.rs`), read as clap's
+/// `Parser::try_parse_from` reads `T::command()`.
+pub(crate) fn try_parse_from_command<T, I, S>(
+    command: clap::Command,
+    argv: I,
+) -> Result<T, clap::Error>
+where
+    T: clap::FromArgMatches,
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
     let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
     // NCBI's application reads its own toolkit words before the program's arguments.
     if let Some(program) = tokens
@@ -202,7 +216,9 @@ where
             translated.push(format!("--{name}").into());
         }
     }
-    let parsed = T::try_parse_from(translated)?;
+    let mut matches = command.clone().try_get_matches_from(translated)?;
+    let parsed = T::from_arg_matches_mut(&mut matches)
+        .map_err(|error| error.format(&mut command.clone()))?;
     match non_utf8_value {
         Some((scope, name)) => Err(non_utf8_value_error(scope, &name)),
         None => Ok(parsed),

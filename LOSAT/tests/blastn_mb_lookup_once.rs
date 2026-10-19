@@ -15,6 +15,14 @@
 //! the shadow builds the second table of its comparison with the read-once fill and says so
 //! (`[X_SHADOW] MBLUTONCE tables=` more than 0, `diffs=0 identical`), and says nothing with
 //! `LOSAT_X_MBLUTONCE=0`. That the bytes equal NCBI's is the business of the blastn fixtures.
+//!
+//! The prefault round of the read-once fill (`LOSAT_X_MBLUTPREFAULT`, in the strict set since
+//! 2026-10-19) runs where the first chunk has at least 8 positions per 1,024 cells of the table:
+//! here megablast of LC738868 (306 kb, a table of 4^12 cells: at least 131,072 positions, on 16,384
+//! pages, 16,385 where the table starts inside a page) at 8 threads (chunks of 262,144 positions),
+//! counted by `prefault_rounds=` / `prefault_touches=` of `[TIMING] x_mb_lookup_once`; not at 2
+//! threads (65,536 positions), nor with `LOSAT_X_MBLUTPREFAULT=0`; the report is the same either way,
+//! and the shadow's read-once table equals the loop's with it.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -25,6 +33,7 @@ const PAD: (&str, &str) = ("LOSAT_X_MBLUTPAD", "1");
 const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const TIMING: (&str, &str) = ("LOSAT_TIMING", "1");
 const SHADOW: (&str, &str) = ("LOSAT_X_PAIRPARSHADOW", "1");
+const PREFAULT_OFF: (&str, &str) = ("LOSAT_X_MBLUTPREFAULT", "0");
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -178,4 +187,38 @@ fn megablast_gives_the_same_report_and_reads_its_table_once() {
 #[test]
 fn blastn_gives_the_same_report_and_reads_its_table_once() {
     check("blastn", "LC738868.fasta", "LC738869.fasta");
+}
+
+#[test]
+fn megablast_prefaults_the_table_where_the_first_chunk_is_dense() {
+    let (task, query) = ("megablast", "LC738868.fasta");
+    let (reference, _) = blastn(task, query, query, 8, &[OFF]);
+    assert!(!reference.is_empty());
+    let (report, stderr) = blastn(task, query, query, 8, &[TIMING]);
+    assert!(report == reference, "the report differs with the round");
+    let fills = field(&stderr, ONCE, "fills=");
+    assert!(fills > 0, "{stderr}");
+    assert_eq!(field(&stderr, ONCE, "prefault_rounds="), fills, "{stderr}");
+    let touches = field(&stderr, ONCE, "prefault_touches=");
+    assert!(
+        touches > 16_000 && touches <= 16_385,
+        "nearly every page of the 4^12 table: {stderr}"
+    );
+    let (report, stderr) = blastn(task, query, query, 8, &[PREFAULT_OFF, TIMING]);
+    assert!(report == reference, "the report differs without the round");
+    assert_eq!(field(&stderr, ONCE, "fills="), fills, "{stderr}");
+    assert_eq!(field(&stderr, ONCE, "prefault_rounds="), 0, "{stderr}");
+    assert_eq!(field(&stderr, ONCE, "prefault_touches="), 0, "{stderr}");
+    // 2 threads: a first chunk of 65,536 positions, below 8 per 1,024 of the 4^12 cells.
+    let (report, stderr) = blastn(task, query, query, 2, &[TIMING]);
+    assert!(report == reference, "the report differs at 2 threads");
+    assert_eq!(field(&stderr, ONCE, "prefault_rounds="), 0, "{stderr}");
+    let (report, stderr) = blastn(task, query, query, 8, &[SHADOW]);
+    assert!(report == reference, "the report differs with the shadow");
+    let line = stderr
+        .lines()
+        .find(|line| line.starts_with(SHADOW_LINE))
+        .unwrap_or_else(|| panic!("no shadow line:\n{stderr}"));
+    assert!(line.ends_with(" diffs=0 identical"), "{line}");
+    assert!(field(&stderr, SHADOW_LINE, "tables=") > 0, "{line}");
 }

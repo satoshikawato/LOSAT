@@ -326,6 +326,7 @@ export LOSAT_X_LUTSPLIT=1
 export LOSAT_X_MBBATCH=64
 export LOSAT_X_MBDELAY=1
 export LOSAT_X_MBLUTONCE=1
+export LOSAT_X_MBLUTPREFAULT=1
 export LOSAT_X_NEWTONEXACT=1
 export LOSAT_X_NEWTONLANES=1
 export LOSAT_X_NEWTONLANES8=1
@@ -1866,10 +1867,12 @@ Scheduling (each value computed by one thread with the original function; order 
   identical` at exit (with `LOSAT_X_MBLUTPAD` set too, the read-once fill makes that build and the `[X_SHADOW]
   MBLUTPAD` line says `tables=0`). With `LOSAT_TIMING` `[TIMING] x_mb_lookup_build` counts `once=<n>` (the builds the
   read-once fill made; `padded=` counts only those of `LOSAT_X_MBLUTPAD`'s fill), and `[TIMING] x_mb_lookup_once:
-  fills= chunks= read_wall= read_max= read_sum= read_late= update_... last_... arena=` gives, per phase summed over
-  the chunks of the search's fills (not the shadow's), the calling worker's wall time, the longest job, the jobs'
-  summed time and the latest start (`read`: the read and the links of the chunk before; `update`: the owners' updates;
-  `last`: the last links and the copies' flush) and the largest arena (MiB).
+  fills= chunks= read_wall= read_max= read_sum= read_late= update_... last_... prefault_... arena= prefault_rounds=
+  prefault_touches=` gives, per phase summed over the chunks of the search's fills (not the shadow's), the calling
+  worker's wall time, the longest job, the jobs' summed time and the latest start (`read`: the read and the links of
+  the chunk before; `update`: the owners' updates; `last`: the last links and the copies' flush; `prefault`: the
+  prefault round of `LOSAT_X_MBLUTPREFAULT`), the largest arena (MiB), and the fills that ran that round and the
+  zeros it wrote.
   Measured 2026-10-18 on the workstation (da08ced7, the same release code; 16 physical cores of node 1 with their
   siblings idle for 2-16 threads, 32 with their siblings for 64; a warm-up, then 3-5 rounds of wall runs and 1-2 of
   `LOSAT_TIMING` runs per cell, arms rotated: base without the switch, the switch, `LOSAT_X_MBLUTPAD` alone, and the
@@ -1901,6 +1904,42 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_MBLUTPAD` lost on few-table inputs), and every cell of these windows with an NCBI figure stays below
   NCBI's max RSS (blastn of 1,775 cDNAs at 16 threads 113.0 MiB with the switch, NCBI 143.5 at one thread); the
   chunk size changes no table element (the unit tests fill with chunks of 1 to 2^19 positions).
+- `LOSAT_X_MBLUTPREFAULT=1` (BLASTN wherever the read-once fill of `LOSAT_X_MBLUTONCE` builds the contiguous
+  megablast lookup table; in the strict set since 2026-10-19 (perf/mb-fill-prefault, evidence at the end of this
+  entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set, which turns that fill off anyway) a prefault
+  round before the fill's first update (`blastn/x_mb_lookup_once.rs`, the form of `LOSAT_X_DISCLUTPAR`'s round below,
+  page by page): when the first chunk of the processing order has at least 8 positions per 1,024 cells of the table
+  (131,072 for 4^12 cells, the first chunk of 4 threads), its readers mark the 4 KiB page of each word's cell, and the
+  fill's threads write 0 to the middle element of each marked page (one thread per page, the owner of that element's
+  block) before any cell is updated. The update reads a cell before it writes it, so without the round a fresh page is
+  first mapped to the kernel's zero page and then copied on write, which flushes its entry from the TLBs of every other
+  CPU running the search; written first, it takes one fault and no flush. Each element written holds the 0 it was
+  allocated with (the table is zeroed, NCBI's `calloc`), and only pages the fill writes are marked, so every array
+  and every report is what it is without the round, and at 4 KiB pages it maps no page the fill does not map (no
+  `next_pos` page: the links are written without a read). The saving rests on Linux's zero page and copy-on-write;
+  the timing evidence is Linux only. Memory: the readers' marks, one bit per page per reader on whole cache lines
+  (2,112 bytes per reader for a 4^12 table, 33 KiB at 16 threads), and their OR, freed with the fill. With
+  `LOSAT_TIMING` `[TIMING] x_mb_lookup_once` adds `prefault_wall= prefault_max= prefault_sum= prefault_late=` (the
+  round, as the other phases) and `prefault_rounds= prefault_touches=` (fills that ran it, zeros written). The shadow
+  of `LOSAT_X_PAIRPARSHADOW` builds its read-once table with the round and compares every element.
+  Evidence. Line R's R5 (workstation, Linux 6.8, THP `madvise`, `v4-R/REPORT_R5.md`): the fills of three E. coli
+  genomes (65 records) against LC738868 at 64 threads made 102,000 such copies-on-write, 6.4 million TLB shootdowns
+  to the search's CPUs; a probe that wrote every page before the fill removed them (2) and took whole runs to
+  0.73-0.94 of the read-once fill's time at 16-64 threads. This round, on the i9 (2026-10-19, ws unreachable; WSL2,
+  8 alternating pairs per cell in one run, load 4-6, every report of a cell identical, the cDNAs' equal to NCBI
+  BLAST+ 2.17.0's; v4-D `results/i9_ab*_summary.md`), round / without, wall per round, and max RSS (MiB): E. coli x
+  LC738868 0.69 at 4 threads (141 -> 141), 0.64 at 8 (228 -> 241), 0.61 at 16 (330 -> 349), 0.63 at 32 (332 -> 354),
+  0.73 at 16 with `LOSAT_X_QBATCHPAR=0` (148 -> 148); MG1655 x LC738868 (one table) 0.88 at 16 (129 -> 129) and
+  0.93 at 32 (130 -> 130); megablast of 31,168 D. melanogaster cDNAs against 3 Mb of chromosome 2L 0.79 at 8 (382 ->
+  383), 0.78 at 16 (620 -> 604), 0.78 at 32 (856 -> 830), 0.86 at 16 and 0.92 at 32 with `LOSAT_X_QBATCHPAR=0` (258 -> 257, 262 -> 264);
+  1.00 at one thread (no pool fill). The search's system time fell in every cell (0.25 -> 0.08 s on MG1655 at 16 threads, 6.29 -> 2.43 on the cDNAs at 32). Max RSS moves only where
+  `LOSAT_X_QBATCHPAR`'s slots fill tables side by side (+13 to +21 MiB on E. coli at 8-32 threads, -26 to +1 on the
+  cDNAs, spreads of 20-40 MiB): the round brings a slot's table to full residence at the start of its fill instead
+  of during it, within the batch memory the slots already admit. Those cells are above NCBI's max RSS without the
+  round too (NCBI with `-subject` does not split by queries and stays at 183 MiB for E. coli and 356 for the cDNAs at
+  1-16 threads), because of the slots, not of the round. On this WSL machine (THP `always`) megablast of 5 kb to 4.6
+  Mb of MG1655 against LC738868 at 8 threads kept its max RSS within 0.4 MiB of the fill without the round, at 0.57-0.86
+  of the time from 150 kb on.
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
   default ON: `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0` turn it off; evidence below, "Default ON") the

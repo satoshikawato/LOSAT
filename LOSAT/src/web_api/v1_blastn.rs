@@ -33,7 +33,8 @@ fn fasta_records_from_bytes(bytes: &[u8]) -> Result<Vec<bio::io::fasta::Record>>
 }
 
 /// ABI v1's reading of a BLASTN `-outfmt` value, which is frozen (plan TD-1): it keeps the
-/// values that it accepted before `parse_blastn_output_format` followed NCBI.
+/// values that it accepted before BLASTN's reading of `-outfmt` followed NCBI (now
+/// `blastinput/app.rs` `parse_formatting_string`).
 fn v1_output_format(spec: &str) -> Result<BlastnOutputFormat> {
     let mut parts = spec.split_whitespace();
     let format = parts.next().unwrap_or("6");

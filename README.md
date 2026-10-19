@@ -32,15 +32,44 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 
 | Program | Supported Tasks | Output Formats (`-outfmt`) | Description |
 |:---|:---|:---|:---|
-| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0` (pairwise, default), `6` (tabular), `7` (commented tabular) | Nucleotide vs. nucleotide alignment |
-| **`blastx`** | `blastx`; native and Wasm entry points | `0` (default), `6`, `7` | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
-| **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0` (default), `6`, `7` | Protein vs. protein alignment |
-| **`tblastx`** | `tblastx` | `0` (default), `6`, `7` | Translated 6-frame nucleotide vs. nucleotide alignment |
-| **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0` (default), `6`, `7` | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
+| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0`, `6`, `7` (see [Output formats](#output-formats)) | Nucleotide vs. nucleotide alignment |
+| **`blastx`** | `blastx`; native and Wasm entry points | `0`, `6`, `7` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
+| **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0`, `6`, `7` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
+| **`tblastx`** | `tblastx` | `0`, `6`, `7` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
+| **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0`, `6`, `7` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
 
 > **Note**: Tabular output (`-outfmt 6` and `7`) writes the 12 standard BLAST fields:  
 > `qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`.  
-> BLASTP and BLASTX also accept a custom field list (for example `-outfmt "6 qseqid sseqid evalue"`); BLASTN, TBLASTN and TBLASTX write the standard fields only. Other `-outfmt` numbers and `delim=` are rejected.
+> BLASTP and BLASTX also accept a custom field list (for example `-outfmt "6 qseqid sseqid evalue"`); BLASTN, TBLASTN and TBLASTX write the standard fields only. `delim=` is rejected.
+
+---
+
+## Output formats
+
+The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`) write; `19` and `21` belong to igblastn and magicblast. Every LOSAT program reads `-outfmt` as NCBI does and gives NCBI's error for a value that NCBI rejects. A format that NCBI writes and LOSAT does not write yet is rejected with "output format N is not supported by LOSAT's PROGRAM" before the inputs are read. The default is `0`.
+
+| `-outfmt` | NCBI name | NCBI programs that write it | LOSAT |
+|:---|:---|:---|:---|
+| `0` | Pairwise | all five | all five programs |
+| `1` | Query-anchored showing identities | all five | not yet |
+| `2` | Query-anchored no identities | all five | not yet |
+| `3` | Flat query-anchored showing identities | all five | not yet |
+| `4` | Flat query-anchored no identities | all five | not yet |
+| `5` | BLAST XML | all five | not yet |
+| `6` | Tabular | all five | all five programs |
+| `7` | Tabular with comment lines | all five | all five programs |
+| `8` | Seqalign (Text ASN.1) | all five | not yet |
+| `9` | Seqalign (Binary ASN.1) | all five | not yet |
+| `10` | Comma-separated values | all five | not yet |
+| `11` | BLAST archive (ASN.1) | all five | not yet |
+| `12` | Seqalign (JSON) | all five | not yet |
+| `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | not yet |
+| `14` | Multiple-file BLAST XML2 | all five, with `-out FILE` only | not yet |
+| `15` | Single-file BLAST JSON | all five | not yet |
+| `16` | Single-file BLAST XML2 | all five | not yet |
+| `17` | Sequence Alignment/Map (SAM) | `blastn` only | not yet |
+| `18` | Organism Report | all five | not yet |
+| `20` | Comma-separated values with header lines | all five | not yet |
 
 ---
 

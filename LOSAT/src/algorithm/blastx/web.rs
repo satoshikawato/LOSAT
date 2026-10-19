@@ -29,10 +29,66 @@ pub(crate) fn parse_args(extra: &[&str]) -> Result<BlastxArgs> {
     }
     let mut argv = vec!["losat", "blastx", "-query", "query", "-subject", "subject"];
     argv.extend_from_slice(extra);
-    match crate::cli::try_parse_from::<crate::cli::Cli, _, _>(argv)?.command {
+    // ABI v1 is frozen (plan TD-1): its `-outfmt` keeps the values and the parser errors of
+    // the CLI's BLASTX parser before it read `-outfmt` as NCBI (`v1_outfmt`).
+    use clap::CommandFactory;
+    let command = crate::cli::Cli::command().mut_subcommand("blastx", |blastx| {
+        blastx.mut_arg("outfmt", |outfmt| outfmt.value_parser(v1_outfmt))
+    });
+    match crate::cli::try_parse_from_command::<crate::cli::Cli, _, _>(command, argv)?.command {
         crate::cli::Commands::Blastx(args) => Ok(args),
         _ => unreachable!("fixed BLASTX subcommand"),
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2827-2845
+// ```c++
+//         }
+//         int val = 0;
+//         try { val = NStr::StringToInt(fmt_choice); }
+//         catch (const CStringException&) {   // probably a conversion error
+//             CNcbiOstrstream os;
+//             os << "'" << fmt_choice << "' is not a valid output format";
+//             string msg = CNcbiOstrstreamToString(os);
+//             NCBI_THROW(CInputException, eInvalidInput, msg);
+//         }
+//         if (val < 0 || val >= static_cast<int>(eEndValue)) {
+//             string msg("Formatting choice is out of range");
+//             throw std::out_of_range(msg);
+//         }
+//         if (m_IsIgBlast && (val != 3 && val != 4 && val != 7 && val != eAirrRearrangement)) {
+//             string msg("Formatting choice is not valid");
+//             throw std::out_of_range(msg);
+//         }
+//         fmt_type = static_cast<EOutputFormat>(val);
+//         if ( !(fmt_type == eTabular ||
+// ```
+/// ABI v1's reading of a BLASTX `-outfmt` value, which is frozen (plan TD-1): the values
+/// and the errors of the CLI's BLASTX parser before it read `-outfmt` as NCBI.
+fn v1_outfmt(value: &str) -> std::result::Result<String, String> {
+    let mut tokens = value.split_whitespace();
+    let f = tokens.next().ok_or("empty outfmt")?;
+    if !matches!(f, "0" | "6" | "7") {
+        return Err("unsupported BLASTX outfmt: use 0, 6 or 7".into());
+    }
+    let fields: Vec<_> = tokens.collect();
+    if f == "0" && !fields.is_empty() {
+        return Err("custom fields require outfmt 6/7".into());
+    }
+    for field in fields {
+        if field != "std" && !super::args::FIELDS.contains(&field) {
+            return Err(format!("unsupported BLASTX outfmt field '{field}'"));
+        }
+    }
+    Ok(value.to_string())
+}
+
+/// The options of ABI v1's BLASTX: the format number and the fields as ABI v1 read them
+/// (`v1_outfmt`: the words between white space), before BLASTX read `-outfmt` as NCBI.
+fn v1_resolve(args: &BlastxArgs) -> Result<super::args::ResolvedOptions> {
+    let mut words = args.outfmt.split_whitespace();
+    let outfmt = words.next().unwrap_or_default().parse::<u8>()?;
+    args.resolve_with_format(outfmt, words)
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_fasta_input.cpp:302-314
@@ -80,7 +136,7 @@ pub(crate) fn run_pair(
             .borrow_mut()
             .write_all(b"Warning: [blastx] Examining 5 or more matches is recommended\n")?;
     }
-    let options = args.resolve()?;
+    let options = v1_resolve(&args)?;
     if query.is_empty() {
         bail!("No sequence input was provided");
     }
@@ -327,4 +383,48 @@ pub(crate) fn run_pair(
     // ```
     report::write_epilog(&mut output, &options, &subjects, &shown, processed)?;
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ABI v1 is frozen (plan TD-1): its BLASTX `-outfmt` keeps the values and the parser
+    // errors of the CLI parser before BLASTX read `-outfmt` as NCBI (dev 0797cc40, whose
+    // `LOSAT blastx -outfmt 5` wrote these lines with exit status 2).
+    #[test]
+    fn web_v1_keeps_its_outfmt_values_and_errors() {
+        let error = |outfmt: &str| {
+            let error = parse_args(&["-outfmt", outfmt]).unwrap_err();
+            crate::cli::render_message(error.downcast_ref::<clap::Error>().unwrap())
+        };
+        for (outfmt, reason) in [
+            ("5", "unsupported BLASTX outfmt: use 0, 6 or 7"),
+            ("abc", "unsupported BLASTX outfmt: use 0, 6 or 7"),
+            ("13", "unsupported BLASTX outfmt: use 0, 6 or 7"),
+            ("0 std", "custom fields require outfmt 6/7"),
+            ("6 delim=", "unsupported BLASTX outfmt field 'delim='"),
+            ("7 qaccver foo", "unsupported BLASTX outfmt field 'foo'"),
+        ] {
+            assert_eq!(
+                error(outfmt),
+                format!(
+                    "error: invalid value '{outfmt}' for '-outfmt <OUTFMT>': {reason}\n\nFor more information, try '--help'.\n"
+                )
+            );
+        }
+        // White space between the words, read as ABI v1 read it.
+        for (outfmt, number, fields) in [
+            ("6\tqseqid", 6, &["qseqid"][..]),
+            (" 7 ", 7, &[]),
+            ("0", 0, &[]),
+        ] {
+            let args = parse_args(&["-outfmt", outfmt]).unwrap();
+            let options = v1_resolve(&args).unwrap();
+            assert_eq!(options.outfmt, number, "{outfmt:?}");
+            if !fields.is_empty() {
+                assert_eq!(options.fields, fields, "{outfmt:?}");
+            }
+        }
+    }
 }

@@ -4982,7 +4982,7 @@ pub fn run(
     // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
     // there too, and the custom tabular fields are checked (LOSAT's own list).
     let choice = app::parse_formatting_string(&args.outfmt)?;
-    let format = app::report_format(&choice, "BLASTP", false, args.out.as_deref(), true)?;
+    let format = app::report_format(&choice, app::Program::Blastp, args.out.as_deref())?;
     if format.is_some() {
         validate_cli_outfmt(&choice.normalized()).map_err(anyhow::Error::msg)?;
     }
@@ -5612,8 +5612,9 @@ fn resolve_for_formats(
         let mut requested = args.clone();
         requested.outfmt = format.outfmt.to_string();
         let choice = crate::blastinput::app::parse_formatting_string(&requested.outfmt)?;
-        if crate::blastinput::app::report_format(&choice, "BLASTP", false, None, true)?.is_none() {
-            crate::blastinput::app::formatting_handler_check(&choice, false)?;
+        let program = crate::blastinput::app::Program::Blastp;
+        if crate::blastinput::app::report_format(&choice, program, None)?.is_none() {
+            crate::blastinput::app::formatting_handler_check(&choice, program)?;
             crate::blastinput::app::xinclude_check(&choice)?;
         }
         validate_cli_outfmt(&choice.normalized()).map_err(anyhow::Error::msg)?;

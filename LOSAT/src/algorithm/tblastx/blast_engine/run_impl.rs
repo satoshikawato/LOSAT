@@ -708,10 +708,8 @@ pub fn run(
     let choice = crate::blastinput::app::parse_formatting_string(&args.outfmt)?;
     let format = crate::blastinput::app::report_format(
         &choice,
-        "TBLASTX",
-        false,
+        crate::blastinput::app::Program::Tblastx,
         args.out.as_deref(),
-        false,
     )?;
     crate::utils::threading::validate_threads(args.num_threads)?;
     use crate::blastinput::input_files;
@@ -943,7 +941,7 @@ fn check_ncbi_options(
     diagnostics: &mut dyn std::io::Write,
 ) -> Result<Option<SequenceRange>> {
     use crate::blastinput::app::{
-        formatting_handler_check, options_error, parse_formatting_string,
+        formatting_handler_check, options_error, parse_formatting_string, Program,
     };
     args.seg_spec()?;
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1995-1999
@@ -961,7 +959,7 @@ fn check_ncbi_options(
         crate::blastinput::seq_range::RangeRole::Query,
         "TBLASTX",
     )?;
-    formatting_handler_check(&parse_formatting_string(&args.outfmt)?, false)?;
+    formatting_handler_check(&parse_formatting_string(&args.outfmt)?, Program::Tblastx)?;
     if args
         .max_target_seqs
         .is_some_and(|max_target_seqs| max_target_seqs < 5)
@@ -1216,8 +1214,8 @@ fn check_report_formats(outputs: &ReportOutputs<'_>) -> Result<()> {
     use crate::blastinput::app;
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, "TBLASTX", false, None, false)?.is_none() {
-            app::formatting_handler_check(&choice, false)?;
+        if app::report_format(&choice, app::Program::Tblastx, None)?.is_none() {
+            app::formatting_handler_check(&choice, app::Program::Tblastx)?;
             app::xinclude_check(&choice)?;
         }
     }

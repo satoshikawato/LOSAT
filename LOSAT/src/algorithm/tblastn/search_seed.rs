@@ -727,8 +727,9 @@ impl XSubjectSide {
     }
 
     /// The subject plans of a search of `batches` query batches, or `None`
-    /// when the search keeps none: the switch is off (`on` is `enabled()`), or
-    /// there are fewer than `KEEP_FROM_BATCHES` batches. A kept plan is read by
+    /// when the search keeps none: `on` is false (`enabled()` is off, or
+    /// `LOSAT_X_TBNKEEPFEW` keeps none, `kept_within_threads`), or there are
+    /// fewer than `KEEP_FROM_BATCHES` batches. A kept plan is read by
     /// the batches after the first one that reaches its subject. A search of
     /// fewer batches makes its plans per use and drops them after the subject,
     /// like those above `KEEP_LIMIT`.
@@ -2336,8 +2337,8 @@ mod tests {
         assert!(within([3_000usize, 3_000], 2));
         assert!(within([3_000usize, 2_999, 1], 2));
         assert!(!within([3_000usize, 3_000, 1], 2));
-        // Three fly chromosomes: kept at 4 or more threads, not at 1 to 3 (76.9 Mb against
-        // three times 26.9 Mb is kept at 3).
+        // Three fly chromosomes (76.9 Mb): kept at 3 or more threads (three times the longest,
+        // 28.1 Mb, is 84.3 Mb), not at 1 or 2.
         let fly = [23_513_712usize, 25_286_936, 28_110_227];
         assert!(!within(fly, 1));
         assert!(!within(fly, 2));

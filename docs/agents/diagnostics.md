@@ -220,7 +220,8 @@ their variables mean
   where `MBDELAY` does not; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
   `NEWTONLANES8` acts only with `NEWTONLANES`, and only on aarch64; `TBNSTATE` and `TBNXLATE`
-  act only with `TBNPAR`; `TBNBATCHRULE` only with `TBNBATCH`; `TBNOWNPOOLS` only with `TBNBATCH`
+  act only with `TBNPAR`; `TBNKEEPFEW` only with `TBNSSIDE` and four or more query batches;
+  `TBNBATCHRULE` only with `TBNBATCH`; `TBNOWNPOOLS` only with `TBNBATCH`
   and `TBNBATCHRULE`, natively; `TBNSCANBF` only with `TBNPAR`; `TBNXLATESIMD` only with
   `TBNPAR` on a packed subject (`TBNSTORE`, `-db`) and with AVX2; `TBNOIDNEXT` and `TBNOIDUNITS` act
   only with `TBNOIDCHUNK`; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
@@ -826,13 +827,14 @@ Rebuilding less:
   search without them has 115 MiB less (max RSS 218-226 -> 103-113 MiB) and takes a median of
   1.03-1.11 of the time, on one 606 kb genome the same memory and 1.05-1.08 of the time
   (0.01-0.06 s). Four batches at 8 threads gave 1.06 on the 16S set, so the saving does not
-  start at four batches: the number is where the memory is preferred to it. `TBNBATCH` needs
+  start at four batches: the number is where the memory is preferred to it. `TBNBATCH` needed
   the kept translations, so two or three batches with at least one batch per thread are now
   searched one after another instead of side by side: 1.02-1.07 of the time on the 16S set and
   1.12-1.24 on the genome (0.04-0.09 s) with one batch per thread, 0.75-0.86 with three
   batches on two threads. Since `TBNKEEPFEW` (2026-10-19) a search of four or more batches
   keeps the translations only when they hold no more than the threads have in flight; the
-  batches are laid out as before.
+  batches are laid out as before (`TBNBATCH` reads `TBNSSIDE` and the number of batches, not
+  the kept translations).
 - `LOSAT_X_TBNBATCHRULE=1` tblastn, with `LOSAT_X_TBNBATCH` (speed; in the strict set since
   2026-10-16, on by default, `=0` turns it off; `tblastn/stage_d_pipeline.rs`
   `x_batches_side_by_side`): which query batches `TBNBATCH` searches side by side. With `=0`
@@ -3136,7 +3138,8 @@ Scheduling (each value computed by one thread with the original function; order 
   with `=0`, and every read of a kept plan also makes the plan of that use, as a search that keeps
   none makes it; a frame or a unit that differs panics. One line at exit:
   `[X_SHADOW] TBNKEEPFEW kept_plan_reads_compared= residues_compared=` (nothing compared below
-  four query batches, or with `LOSAT_X_TBNSSIDE=0`).
+  four query batches, with `LOSAT_X_TBNSSIDE=0`, `LOSAT_X_TBNPAR=0` or `LOSAT_X_DEFAULT=0`, or for
+  plans beyond `KEEP_LIMIT`).
 - `LOSAT_X_TBNLINKWIN=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule of
   that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns it
   off; `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

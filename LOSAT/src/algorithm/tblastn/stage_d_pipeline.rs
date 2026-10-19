@@ -512,9 +512,11 @@ fn x_own_pool_threads(threads: usize, pools: usize, index: usize) -> usize {
 /// them in the order of `ranges`. With `LOSAT_X_TBNPAR` one search pool serves every
 /// batch instead of one pool per batch; with `LOSAT_X_TBNSSIDE` and four or more batches the
 /// subject plans (translations, masks) are made once for the search and shared through the
-/// pool (a search of fewer batches keeps none, `XSubjectSide::KEEP_FROM_BATCHES`); with
-/// `LOSAT_X_TBNBATCH` (and the plans shared and fitting, and at least one batch per
-/// thread) the batches are searched side by side, each as the one-thread search. The
+/// pool (a search of fewer batches keeps none, `XSubjectSide::KEEP_FROM_BATCHES`, and with
+/// `LOSAT_X_TBNKEEPFEW` nor does one whose plans exceed what its threads have in flight,
+/// `XSubjectSide::kept_within_threads`); with `LOSAT_X_TBNBATCH` (and `LOSAT_X_TBNSSIDE`, four
+/// or more batches, plans that would fit, and at least one batch per thread) the batches are
+/// searched side by side, each as the one-thread search. The
 /// first failing batch in the order of `ranges` gives the error, as in the reference loop.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn x_search_batches<'p>(
@@ -555,7 +557,7 @@ pub(super) fn x_search_batches<'p>(
     // as before by the switch and the number of batches, whether or not the plans are kept.
     let x_subject_side_on = super::search_seed::XSubjectSide::enabled();
     #[cfg(feature = "parallel")]
-    let x_plans_shared =
+    let x_ssided_layout =
         x_subject_side_on && ranges.len() >= super::search_seed::XSubjectSide::KEEP_FROM_BATCHES;
     let x_keep = !x_subject_side_on
         || ranges.len() < super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
@@ -617,9 +619,9 @@ pub(super) fn x_search_batches<'p>(
         // 						chunk_num ++;
         // ```
         // Dispatch point: NCBI has a mode that searches several query batches at once as nodes of a
-        // master node (-mt_mode 1). Here, if the plans are shared and fit and there is at least one
-        // batch per thread, the batches are searched side by side, each as the one-thread search,
-        // and the reports are returned in batch order.
+        // master node (-mt_mode 1). Here, with LOSAT_X_TBNSSIDE, four or more batches, plans that
+        // would fit and at least one batch per thread, the batches are searched side by side, each
+        // as the one-thread search, and the reports are returned in batch order.
         if crate::utils::xswitch::on("LOSAT_X_TBNBATCH") && pool.enabled() {
             let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
             // EXPERIMENT (LOSAT_X_TBNBATCHRULE): side by side only for the full waves of a small
@@ -633,7 +635,7 @@ pub(super) fn x_search_batches<'p>(
             } else {
                 0
             };
-            let side_by_side = if x_plans_shared && fits {
+            let side_by_side = if x_ssided_layout && fits {
                 side_by_side
             } else {
                 0

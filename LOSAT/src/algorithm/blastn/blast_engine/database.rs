@@ -250,7 +250,10 @@ fn block_subject(block: &SequenceBlock, i: usize) -> Result<BlastnSubjectRef<'_>
 ///
 /// EXPERIMENT (LOSAT_X_BNDBCUT): with more than one thread the blocks are cut by the
 /// database size and the thread count, and a failed search returns the one-thread order's
-/// error (`x_db_cut.rs`, exactness argument in its header).
+/// error (`x_db_cut.rs`, exactness argument in its header). `x_extends` is the count of
+/// good initial extensions that `search` adds to (it sizes the next query batch); the
+/// shadow mode of the switch, which runs `search` twice, leaves it as one search leaves it.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn search_blocks<T, R, I, K, M>(
     database: &BlastnDatabase,
     pool: &SearchPool<'_>,
@@ -258,6 +261,7 @@ pub(super) fn search_blocks<T, R, I, K, M>(
     new_scratch: &I,
     search: &K,
     merge: &mut M,
+    x_extends: &std::sync::atomic::AtomicU64,
 ) -> Result<()>
 where
     R: Send + std::fmt::Debug,
@@ -292,9 +296,15 @@ where
                 new_scratch,
                 search,
                 merge,
+                x_extends,
             );
         }
     }
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    let _ = x_extends;
     search_blocks_of(
         database,
         pool,

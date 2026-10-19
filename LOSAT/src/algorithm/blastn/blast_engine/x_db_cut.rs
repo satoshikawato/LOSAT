@@ -38,9 +38,10 @@
 //!   one-thread ones;
 //! - a search that fails returns the first error of the one-thread order (`x_one_thread_error`):
 //!   with another cut a damaged database can meet its first error elsewhere (the byte range of a
-//!   read past the end of the file names the block, and a smaller block can read where a block of
-//!   1 MiB cannot, so a later sequence's length is rejected first), so the blocks of `BLOCK_BYTES`
-//!   are read again in order, with each sequence's length, until the first error.
+//!   read past the end of the file names the block, and a block reads the index entries of all its
+//!   sequences before their data, so a later sequence's index error and an earlier sequence's
+//!   read error come in the other order), so the blocks of `BLOCK_BYTES` are read again in order,
+//!   with each sequence's length, until the first error.
 //!
 //! Memory: a worker holds one block, at most the cut (or one longer sequence), and a round covers at
 //! most `BLOCKS_PER_THREAD` x threads blocks, so the sequence memory does not grow; a database below
@@ -59,9 +60,12 @@
 //! `LOSAT_X_BNDBCUTSHADOW=1` (shadow mode, implies the switch): each search with the cut keeps what
 //! it hands to the merge, the search runs again as without the switch (`search_blocks_of` with
 //! `BLOCK_BYTES`, the same pool, rounds and kernel), and the two are compared: the ordinal ids in
-//! order and each kept result (its `Debug` text), or the texts of the two errors. The kept results
-//! go to the merge after the comparison. The first difference stops the run (panic) after printing
-//! the line that is otherwise printed at exit:
+//! order and each kept result (its `Debug` text) and the good initial extensions each counted, or
+//! the texts of the two errors. The count of good initial extensions, which sizes the next query
+//! batch (NCBI's batch size mixer), is put back to what the search with the cut left, and the kept
+//! results go to the merge after the comparison: the run continues as without the shadow (only
+//! `LOSAT_TIMING` and `LOSAT_X_STATS` count the preliminary stage twice). The first difference
+//! stops the run (panic) after printing the line that is otherwise printed at exit:
 //! `[X_SHADOW] BNDBCUT searches= blocks= blocks_ref= merged= identical` (`blocks`: the blocks of
 //! the cut; `blocks_ref`: the blocks of `BLOCK_BYTES`; `merged`: kept results compared).
 
@@ -275,7 +279,8 @@ fn x_compare_merged<R: Debug>(found: &[(u32, R)], expected: &[(u32, String)]) ->
 /// The output is that of the blocks of `BLOCK_BYTES` (the one-thread order's) for any cut: the cut
 /// only moves where blocks end, a sequence's result does not depend on what the worker's scratch
 /// searched before it, and the round's results are merged in ordinal order (module header). No
-/// floating-point operation changes order.
+/// floating-point operation changes order. `extends`: the count of good initial extensions that
+/// `search` adds to; the shadow mode leaves it as the search with the cut leaves it.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn x_search_blocks_cut<T, R, I, K, M>(
     mode: XDbCut,
@@ -286,6 +291,7 @@ pub(super) fn x_search_blocks_cut<T, R, I, K, M>(
     new_scratch: &I,
     search: &K,
     merge: &mut M,
+    extends: &AtomicU64,
 ) -> Result<()>
 where
     R: Send + Debug,
@@ -316,6 +322,7 @@ where
         .map_err(one_thread_error);
     }
     let mut found: Vec<(u32, R)> = Vec::new();
+    let before = extends.load(Ordering::Relaxed);
     let result = search_blocks_of(
         database,
         pool,
@@ -327,6 +334,7 @@ where
         &mut |ordinal, result| found.push((ordinal, result)),
     )
     .map_err(one_thread_error);
+    let counted = extends.load(Ordering::Relaxed);
     let mut expected: Vec<(u32, String)> = Vec::new();
     let expected_result = search_blocks_of(
         database,
@@ -338,8 +346,20 @@ where
         search,
         &mut |ordinal, result| expected.push((ordinal, format!("{result:?}"))),
     );
+    // The second search's extensions do not count: the next query batch is sized as without the
+    // shadow.
+    let counted_ref = extends.load(Ordering::Relaxed).wrapping_sub(counted);
+    extends.store(counted, Ordering::Relaxed);
     let compared = match (&result, &expected_result) {
-        (Ok(()), Ok(())) => x_compare_merged(&found, &expected),
+        (Ok(()), Ok(())) => {
+            let counted_cut = counted.wrapping_sub(before);
+            if counted_cut != counted_ref {
+                x_shadow_difference(format!(
+                    "{counted_cut} good initial extensions counted, {counted_ref} without the cut"
+                ));
+            }
+            x_compare_merged(&found, &expected)
+        }
         (Err(error), Err(expected)) => {
             let (text, expected_text) = (format!("{error:#}"), format!("{expected:#}"));
             if text != expected_text {
@@ -370,6 +390,58 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn open(name: &str) -> BlastnDatabase {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/seqdb/db")
+            .join(name);
+        BlastnDatabase::open(
+            path.to_str().expect("fixture path is UTF-8"),
+            &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
+        )
+        .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+    }
+
+    // The shadow mode runs the kernel twice: the count of good initial extensions that the kernel
+    // adds to (it sizes the next query batch) is left as one search leaves it, and the kept results
+    // are merged once, in ordinal order, as with the switch on.
+    #[test]
+    fn the_shadow_leaves_the_extension_count_of_one_search_and_merges_once() {
+        let database = open("nucl_mv");
+        let sequences = u64::from(database.db.num_seqs());
+        assert_eq!(sequences, 12);
+        for mode in [XDbCut::On, XDbCut::Shadow] {
+            let extends = AtomicU64::new(5);
+            let mut merged = Vec::new();
+            crate::utils::threading::with_search_pool(2, "blastn", |pool| {
+                x_search_blocks_cut(
+                    mode,
+                    &database,
+                    pool,
+                    true,
+                    2,
+                    &|| 0u32,
+                    &|calls: &mut u32, ordinal: u32, _subject: BlastnSubjectRef<'_>| {
+                        *calls += 1;
+                        extends.fetch_add(2, Ordering::Relaxed);
+                        (ordinal % 3 == 0).then_some(ordinal)
+                    },
+                    &mut |ordinal, kept| {
+                        assert_eq!(ordinal, kept);
+                        merged.push(ordinal);
+                    },
+                    &extends,
+                )
+            })
+            .unwrap();
+            assert_eq!(
+                extends.load(Ordering::Relaxed),
+                5 + 2 * sequences,
+                "{mode:?}"
+            );
+            assert_eq!(merged, [0, 3, 6, 9], "{mode:?}");
+        }
+    }
 
     // The cut: one thread keeps `BLOCK_BYTES`; more threads a quarter of the bytes per thread,
     // between 4 KiB and 1 MiB.

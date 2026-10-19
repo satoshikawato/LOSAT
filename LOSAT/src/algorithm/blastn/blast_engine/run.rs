@@ -16438,6 +16438,7 @@ fn search_query_batch(
                             (!prelim_hits.is_empty()).then_some(prelim_hits)
                         },
                         &mut |ordinal, prelim_hits| collector.add(ordinal as usize, prelim_hits),
+                        &good_init_extends,
                     )
                     .map_err(|error| {
                         database_search_error(

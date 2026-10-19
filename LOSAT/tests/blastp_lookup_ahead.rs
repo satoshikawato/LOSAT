@@ -280,26 +280,30 @@ fn database_block_search_reports_with_the_switch_are_the_reports_without_it() {
 }
 
 // One block (blocks larger than the queries): the block plan takes the search of all queries for it
-// (`x_query_block_plan`), as for `LOSAT_X_BPQBLOCK=0` and for a pairwise report (not written in
-// blocks): one search, nothing built ahead, nothing counted. The last block of a block search builds
-// nothing ahead either (`assert_built_ahead`: blocks - 1 builds).
+// (`x_query_block_plan`), as for `LOSAT_X_BPQBLOCK=0` and for a pairwise report with
+// `LOSAT_X_BPQBLOCKFMT=0` (not written in blocks): one search, nothing built ahead, nothing counted.
+// The last block of a block search builds nothing ahead either (`assert_built_ahead`: blocks - 1
+// builds).
 #[test]
 fn one_block_and_the_search_of_all_queries_build_nothing_ahead() {
     let dir = test_dir("one");
     let subject = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), subject.as_os_str()];
-    for (letters, extra) in [
-        ("100000000", &[][..]),
-        ("0", &[][..]),
-        ("1", &["-outfmt", "0"][..]),
+    for (blocks, extra) in [
+        (&[("LOSAT_X_BPQBLOCK", "100000000")][..], &[][..]),
+        (&[("LOSAT_X_BPQBLOCK", "0")][..], &[][..]),
+        (
+            &[("LOSAT_X_BPQBLOCK", "1"), ("LOSAT_X_BPQBLOCKFMT", "0")][..],
+            &["-outfmt", "0"][..],
+        ),
     ] {
-        let base = with(&ACTS, &[("LOSAT_X_BPQBLOCK", letters)]);
+        let base = with(&ACTS, blocks);
         let (off, shadow) = same_runs(&dir, "blastp-fast", &subject, 4, &base, extra);
-        assert_eq!(off.searches(), 1, "blocks {letters} {extra:?}");
+        assert_eq!(off.searches(), 1, "{blocks:?} {extra:?}");
         let counts = shadow.shadow("BPLKPAHEAD");
         assert!(
             counts.values().all(|&count| count == 0),
-            "blocks {letters} {extra:?}: {counts:?}"
+            "{blocks:?} {extra:?}: {counts:?}"
         );
     }
     std::fs::remove_dir_all(&dir).ok();

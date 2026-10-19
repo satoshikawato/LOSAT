@@ -32,14 +32,15 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 
 | Program | Supported Tasks | Output Formats (`-outfmt`) | Description |
 |:---|:---|:---|:---|
-| **`blastn`** | `megablast` (default), `blastn` | `6` (tabular), `7` (commented tabular) | Nucleotide vs. nucleotide alignment |
-| **`blastx`** | local `blastx`, native and Wasm entry points | `0` (default), `6`, `7` | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
-| **`blastp`** | `blastp` | `0` (pairwise), `6`, `7` | Protein vs. protein alignment |
-| **`tblastx`** | `tblastx` | `6` | Translated 6-frame nucleotide vs. nucleotide alignment |
-| **`tblastn`** | local `tblastn` | `0`, `6`, `7` | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
+| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0` (pairwise, default), `6` (tabular), `7` (commented tabular) | Nucleotide vs. nucleotide alignment |
+| **`blastx`** | `blastx`; native and Wasm entry points | `0` (default), `6`, `7` | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
+| **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0` (default), `6`, `7` | Protein vs. protein alignment |
+| **`tblastx`** | `tblastx` | `0` (default), `6`, `7` | Translated 6-frame nucleotide vs. nucleotide alignment |
+| **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0` (default), `6`, `7` | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
 
-> **Note**: Standard tabular output (`-outfmt 6`) generates the 12 canonical BLAST fields:  
-> `qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`.
+> **Note**: Tabular output (`-outfmt 6` and `7`) writes the 12 standard BLAST fields:  
+> `qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`.  
+> BLASTP and BLASTX also accept a custom field list (for example `-outfmt "6 qseqid sseqid evalue"`); BLASTN, TBLASTN and TBLASTX write the standard fields only. Other `-outfmt` numbers and `delim=` are rejected.
 
 ---
 
@@ -184,9 +185,9 @@ LOSAT blastx \
 | `-query <file>` | File path | *(Required)* | Input query sequence file (FASTA) |
 | `-subject <file>` | File path | *(Required unless `-db`)* | Input subject sequence file (FASTA) |
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX; section 6) |
-| `-task <string>` | String | Program default | Task: `megablast` or `blastn` (for `blastn`); `blastp` (for `blastp`); `blastx` (for `blastx`); `tblastn` (for `tblastn`) |
+| `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp`, `blastp-fast` or `blastp-short` (for `blastp`); `blastx` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`) |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <int>` | Integer | `6` for tabular examples; `0` for BLASTX/TBLASTN | Output format (`6`=tabular, `7`=commented tabular, `0`=pairwise); availability varies by program |
+| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `6`=tabular, `7`=commented tabular; custom tabular fields in BLASTP and BLASTX only |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |

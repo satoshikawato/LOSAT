@@ -265,7 +265,7 @@ fn one_hit_reports_with_the_switch_are_the_reports_without_it() {
 }
 
 // The block search (`LOSAT_X_BPQBLOCK`, every block a search of all subjects) and the pairwise
-// report, which is not written in blocks.
+// report with `LOSAT_X_BPQBLOCKFMT=0`, which is then not written in blocks.
 #[test]
 fn block_search_and_pairwise_reports_with_the_switch_are_the_reports_without_it() {
     let subject = subject_file();
@@ -274,7 +274,12 @@ fn block_search_and_pairwise_reports_with_the_switch_are_the_reports_without_it(
     let counts = same_reports("blastp", &subject, 4, &base, &[], "6");
     assert!(counts["searches"] > 1, "{counts:?}");
     assert_engaged(&counts, counts["searches"], "block search");
-    let counts = same_reports("blastp-fast", &subject, 2, &base, &[], "0");
+    let pairwise = [
+        ("LOSAT_X_BPQBLOCK", "1"),
+        ("LOSAT_X_BPSEED", "1"),
+        ("LOSAT_X_BPQBLOCKFMT", "0"),
+    ];
+    let counts = same_reports("blastp-fast", &subject, 2, &pairwise, &[], "0");
     assert_engaged(&counts, 1, "pairwise report");
 }
 

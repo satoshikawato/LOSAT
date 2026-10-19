@@ -813,8 +813,9 @@ pub fn large_gap_sum_e(
 
 /// `large_gap_sum_e` in NCBI's order of evaluation: `xsum -= num*log(...) - lnfact`
 /// subtracts the difference, which rounds differently from subtracting the product and
-/// adding the factorial (the HSP order of TBLASTX depends on the last bit). BLASTX keeps
-/// `large_gap_sum_e` until it is integrated (plan DW-10, SX).
+/// adding the factorial (the HSP order of TBLASTX depends on the last bit, and BLASTX's sum
+/// e-values differ from NCBI's in the last digits otherwise). TBLASTX and BLASTX use it;
+/// `large_gap_sum_e` keeps the other order for its unit tests only.
 ///
 /// NCBI reference: c++/src/algo/blast/core/blast_stat.c:4560-4561
 /// ```c

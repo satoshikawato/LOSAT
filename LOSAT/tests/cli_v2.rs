@@ -843,58 +843,190 @@ fn flags_and_value_tokens_are_not_reinterpreted() {
     assert_eq!(a.query.to_str(), Some("-"));
 }
 
+/// What a program does with a `-outfmt` value (`OUTFMT_ROWS`).
+#[derive(Debug, Clone, Copy)]
+enum Outfmt {
+    /// LOSAT writes the format.
+    Writes(LOSAT::blastinput::app::ReportFormat),
+    /// NCBI's error when it reads the value, before the option handlers: exit status and
+    /// standard error (blast_args.cpp:2801-2851).
+    Ncbi(i32, &'static str),
+    /// NCBI's error after the input and output files are opened (its formatting handler or the
+    /// XInclude check): the message of "BLAST query/options error: ...".
+    NcbiLater(&'static str),
+    /// LOSAT's rejection before the inputs are read; `{P}` is the program's name.
+    Losat(&'static str),
+}
+
+const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
+const CUSTOM: &[&str] = &["blastp", "blastx"];
+const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
+const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
+const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
+const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
+    "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
+);
+const DELIMITER: Outfmt = Outfmt::Losat(
+    "a custom delimiter (delim=) in the output format is not supported by LOSAT's {P}",
+);
+const OUT_OF_RANGE: Outfmt = Outfmt::Ncbi(255, "Error: Formatting choice is out of range\n");
+const INVALID_DELIMITER: Outfmt = Outfmt::Ncbi(
+    1,
+    "BLAST query/options error: Delimiter format is invalid. Valid format is delim=<delimiter value>\nPlease refer to the BLAST+ user manual.\n",
+);
+
+/// The programs, `-outfmt` value, `-out` file and result of each case. A change that makes a
+/// program write a format edits or deletes the rows of that format only; the rows of a line OF
+/// track are grouped. `{N}` in a LOSAT message is the format number.
+#[rustfmt::skip]
+const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
+    use LOSAT::blastinput::app::ReportFormat::*;
+    use Outfmt::*;
+    &[
+        // Written today by every program; NCBI drops the specification of a format that is
+        // not tabular (blast_args.cpp:2844-2851) and reads the number as `NStr::StringToInt`.
+        (ALL, "0", None, Writes(Pairwise)),
+        (ALL, "6", None, Writes(Tabular)),
+        (ALL, "7", None, Writes(TabularWithComments)),
+        (ALL, " 6\t", None, Writes(Tabular)),
+        (ALL, "+6", None, Writes(Tabular)),
+        (ALL, "07", None, Writes(TabularWithComments)),
+        (ALL, "0 qseqid", None, Writes(Pairwise)),
+        (ALL, "0 std", None, Writes(Pairwise)),
+        (ALL, "0 delim=,", None, Writes(Pairwise)),
+        (ALL, "6 delim=", None, Writes(Tabular)),
+        (ALL, "7 delim= ", None, Writes(TabularWithComments)),
+        // Custom fields (BLASTP and BLASTX check their own lists) and delimiters.
+        (CUSTOM, "6 std", None, Writes(Tabular)),
+        (CUSTOM, "07 std", None, Writes(TabularWithComments)),
+        (CUSTOM, "6 qseqid sseqid pident length", None, Writes(Tabular)),
+        (NO_CUSTOM, "6 std", None, CUSTOM_SPEC),
+        (NO_CUSTOM, "6 qseqid", None, CUSTOM_SPEC),
+        (NO_CUSTOM, "7 qaccver", None, CUSTOM_SPEC),
+        (NO_CUSTOM, "7  qaccver", None, CUSTOM_SPEC),
+        (NO_CUSTOM, "6 delim=,", None, CUSTOM_SPEC),
+        (NO_CUSTOM, "6 delimiter=;", None, CUSTOM_SPEC),
+        (CUSTOM, "6 delim=, std", None, DELIMITER),
+        (CUSTOM, "6 delim=;", None, DELIMITER),
+        // NCBI's errors when it reads the value (the delimiter is read before the number).
+        (ALL, "abc", None, Ncbi(1, "BLAST query/options error: 'abc' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
+        (ALL, "0x6", None, Ncbi(1, "BLAST query/options error: '0x6' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
+        (ALL, "6\u{a0}", None, Ncbi(1, "BLAST query/options error: '6\u{a0}' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
+        (ALL, "6\tqseqid", None, Ncbi(1, "BLAST query/options error: '6\tqseqid' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
+        (ALL, " ", None, Ncbi(1, "BLAST query/options error: '' is not a valid output format\nPlease refer to the BLAST+ user manual.\n")),
+        (ALL, "-1", None, OUT_OF_RANGE),
+        (ALL, "22", None, OUT_OF_RANGE),
+        (ALL, "99", None, OUT_OF_RANGE),
+        (ALL, "6 delim", None, INVALID_DELIMITER),
+        (ALL, "0 delim", None, INVALID_DELIMITER),
+        (ALL, "abc delim", None, INVALID_DELIMITER),
+        (ALL, "99 delimiter qaccver", None, INVALID_DELIMITER),
+        // NCBI's errors after the inputs are opened: the formats of other programs, and the
+        // XInclude formats written to standard output.
+        (NOT_BLASTN, "17", None, NcbiLater("SAM format is only applicable to blastn")),
+        (NOT_BLASTN, "17 qseqid", None, NcbiLater("SAM format is only applicable to blastn")),
+        (ALL, "19", None, NcbiLater("AIRR rearrangement format is only applicable to igblastn")),
+        (ALL, "21", None, NcbiLater("FASTA output format is only applicable to magicblast")),
+        (ALL, "13", None, NcbiLater("Please provide a file name for outfmt 13.")),
+        (ALL, "13", Some("-"), NcbiLater("Please provide a file name for outfmt 13.")),
+        (ALL, "14", None, NcbiLater("Please provide a file name for outfmt 14.")),
+        // Line OF track T (text formats): not written yet.
+        (ALL, "1", None, UNSUPPORTED),
+        (ALL, "2", None, UNSUPPORTED),
+        (ALL, "3", None, UNSUPPORTED),
+        (ALL, "4", None, UNSUPPORTED),
+        (ALL, "10", None, UNSUPPORTED),
+        (ALL, "18", None, UNSUPPORTED),
+        (ALL, "20", None, UNSUPPORTED),
+        // Line OF track S (structured formats): not written yet.
+        (ALL, "5", None, UNSUPPORTED),
+        (ALL, "8", None, UNSUPPORTED),
+        (ALL, "9", None, UNSUPPORTED),
+        (ALL, "11", None, UNSUPPORTED),
+        (ALL, "12", None, UNSUPPORTED),
+        (ALL, "13", Some("o.json"), UNSUPPORTED),
+        (ALL, "14", Some("o.xml"), UNSUPPORTED),
+        (ALL, "15", None, UNSUPPORTED),
+        (ALL, "16", None, UNSUPPORTED),
+        (&["blastn"], "17", None, UNSUPPORTED),
+        (&["blastn"], "17 qseqid", None, UNSUPPORTED),
+    ]
+};
+
+fn program_of(name: &str) -> LOSAT::blastinput::app::Program {
+    use LOSAT::blastinput::app::Program;
+    match name {
+        "blastn" => Program::Blastn,
+        "blastp" => Program::Blastp,
+        "blastx" => Program::Blastx,
+        "tblastn" => Program::Tblastn,
+        "tblastx" => Program::Tblastx,
+        _ => unreachable!("{name}"),
+    }
+}
+
+// Every program reads -outfmt as NCBI when it sets the options (blast_args.cpp:2801-2851,
+// `blastinput/app.rs`): the argument parser accepts any value, and the format's report, NCBI's
+// errors and LOSAT's rejections follow `OUTFMT_ROWS`.
+#[test]
+fn output_formats_follow_the_format_table() {
+    use LOSAT::blastinput::app::{
+        formatting_handler_check, parse_formatting_string, report_format, xinclude_check,
+    };
+    let native = |error: anyhow::Error| match error.downcast::<LOSAT::cli::NativeError>() {
+        Ok(native) => (native.exit, native.message),
+        Err(other) => panic!("not NCBI's error: {other}"),
+    };
+    for &(programs, value, out, expected) in OUTFMT_ROWS {
+        for &name in programs {
+            let case = format!("{name} -outfmt {value:?} -out {out:?}");
+            let mut words = vec!["-outfmt", value];
+            if let Some(out) = out {
+                words.extend(["-out", out]);
+            }
+            parse(name, &words).unwrap_or_else(|error| panic!("{case}: {error}"));
+            let program = program_of(name);
+            let choice = match (parse_formatting_string(value), expected) {
+                (Err(error), Outfmt::Ncbi(exit, message)) => {
+                    assert_eq!(native(error), (exit, message.to_string()), "{case}");
+                    continue;
+                }
+                (Ok(choice), Outfmt::Ncbi(..)) => panic!("{case}: read as {choice:?}"),
+                (Ok(choice), _) => choice,
+                (Err(error), _) => panic!("{case}: {error:#}"),
+            };
+            let report = report_format(&choice, program, out.map(std::path::Path::new));
+            match expected {
+                Outfmt::Writes(format) => assert_eq!(report.unwrap(), Some(format), "{case}"),
+                Outfmt::Losat(message) => assert_eq!(
+                    report.unwrap_err().to_string(),
+                    message
+                        .replace("{P}", program.name())
+                        .replace("{N}", &choice.number.to_string()),
+                    "{case}"
+                ),
+                Outfmt::NcbiLater(message) => {
+                    assert_eq!(report.unwrap(), None, "{case}");
+                    let error = formatting_handler_check(&choice, program)
+                        .and_then(|()| xinclude_check(&choice))
+                        .unwrap_err();
+                    assert_eq!(
+                        native(error),
+                        (
+                            1,
+                            format!("BLAST query/options error: {message}\nPlease refer to the BLAST+ user manual.\n")
+                        ),
+                        "{case}"
+                    );
+                }
+                Outfmt::Ncbi(..) => unreachable!(),
+            }
+        }
+    }
+}
+
 #[test]
 fn output_capabilities_fail_explicitly_and_help_is_canonical() {
-    parse("blastp", &["-outfmt", "6 qseqid sseqid pident length"]).unwrap();
-    // TBLASTX reads -outfmt as NCBI and writes no other format, custom field list or
-    // delimiter.
-    for spec in ["5", "6 qseqid", "7 std", "6 delim=,"] {
-        parse("tblastx", &["-outfmt", spec]).unwrap();
-        let choice = LOSAT::blastinput::app::parse_formatting_string(spec).unwrap();
-        assert!(
-            LOSAT::blastinput::app::report_format(&choice, "TBLASTX", false, None, false)
-                .unwrap_err()
-                .to_string()
-                .contains("not supported by LOSAT's TBLASTX"),
-            "{spec}"
-        );
-    }
-    // BLASTP reads -outfmt when the options are set, as NCBI (blast_args.cpp:2801-2851);
-    // a custom specification counts only for the tabular formats.
-    use LOSAT::blastinput::app::{parse_formatting_string, report_format, ReportFormat};
-    for (spec, format) in [
-        ("0 qseqid", Some(ReportFormat::Pairwise)),
-        ("+6", Some(ReportFormat::Tabular)),
-        ("07 std", Some(ReportFormat::TabularWithComments)),
-        ("17", None),
-    ] {
-        parse("blastp", &["-outfmt", spec]).unwrap();
-        let choice = parse_formatting_string(spec).unwrap();
-        assert_eq!(
-            report_format(&choice, "BLASTP", false, None, true).unwrap(),
-            format,
-            "{spec}"
-        );
-    }
-    for spec in ["5", "6 delim=, std"] {
-        let choice = parse_formatting_string(spec).unwrap();
-        assert!(report_format(&choice, "BLASTP", false, None, true)
-            .unwrap_err()
-            .to_string()
-            .contains("not supported by LOSAT's BLASTP"));
-    }
-    // TBLASTX implements the pairwise report and both tabular formats (session S08).
-    for spec in ["0", "6", "7"] {
-        parse("tblastx", &["-outfmt", spec]).unwrap();
-    }
-    // BLASTN parses -outfmt when it sets the options, as NCBI (blast_args.cpp:2801-2851).
-    for spec in ["5", "6 qseqid", "0x6"] {
-        parse("blastn", &["-outfmt", spec]).unwrap();
-        assert!(LOSAT::algorithm::blastn::hsp::parse_blastn_output_format(spec).is_err());
-    }
-    // NCBI blast_args.cpp:2845-2851: a custom specification counts only for the tabular
-    // formats, so BLASTN's outfmt 0 ignores it.
-    parse("blastn", &["-outfmt", "0 qseqid"]).unwrap();
     for program in ["blastn", "blastp", "tblastx"] {
         for help in ["-help", "--help"] {
             let err = try_parse_from::<Cli, _, _>(["losat", program, help]).unwrap_err();

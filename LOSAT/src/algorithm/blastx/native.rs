@@ -231,6 +231,22 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     //         NCBI_THROW(CInputException, eInvalidInput, e.GetMsg());
     //     }
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
+    // ```c++
+    //     if (GetExportSearchStrategyStream(args) ||
+    //            m_FormattingArgs->ArchiveFormatRequested(args)) {
+    //         locality = CBlastOptions::eBoth;
+    //     }
+    // ```
+    // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
+    // option handlers run, with NCBI's errors; a format that NCBI runs and LOSAT does not
+    // write is rejected there too, and the custom tabular fields are checked (LOSAT's own
+    // list, `check_custom_fields`).
+    use crate::blastinput::app::{self, Program};
+    let choice = app::parse_formatting_string(&args.outfmt)?;
+    if app::report_format(&choice, Program::Blastx, args.out.as_deref())?.is_some() {
+        super::args::check_custom_fields(&choice)?;
+    }
     // Preserve explicit product refusals; defer supported semantic failures
     // until subject and standard query/output streams have been extracted.
     let resolution = args.resolve();
@@ -335,6 +351,30 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     //    		ERR_POST(Warning << "Examining 5 or more matches is recommended");
     //     }
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886
+    // ```c++
+    //     ParseFormattingString(args, m_OutputFormat, m_CustomOutputFormatSpec,m_CustomDelim);
+    //     if((m_OutputFormat == eSAM) && !(m_FormatFlags & eIsSAM) ){
+    //     		NCBI_THROW(CInputException, eInvalidInput,
+    //     		                        "SAM format is only applicable to blastn" );
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:110-126
+    // ```c++
+    //     arg.Reset(new CGeneticCodeArgs(CGeneticCodeArgs::eQuery));
+    //     m_Args.push_back(arg);
+    //
+    //     m_FormattingArgs.Reset(new CFormattingArgs);
+    //     arg.Reset(m_FormattingArgs);
+    //     m_Args.push_back(arg);
+    // ...
+    //     arg.Reset(new CCompositionBasedStatsArgs);
+    //     m_Args.push_back(arg);
+    // ```
+    // The formatting handler raises NCBI's errors for the formats of other programs (SAM,
+    // AIRR rearrangement, FASTA) before its warning. The deferred errors of `resolve` are
+    // those of the composition-based statistics handler and of `Validate`, which come later.
+    app::formatting_handler_check(&choice, Program::Blastx)?;
     if args.max_target_seqs.unwrap_or(500) < 5 {
         stderr.write_all(b"Warning: [blastx] Examining 5 or more matches is recommended\n")?;
     }
@@ -432,6 +472,16 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             s.internal_id, s.title
         )?;
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:251-254
+    // ```c++
+    // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
+    //         }
+    //         formatter.PrintProlog();
+    // ```
+    // The XInclude formats written to standard output fail after the formatter is made (a
+    // format 13 or 14 to a file is LOSAT's rejection, above).
+    app::xinclude_check(&choice)?;
     let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
     let no_reported = ReportedSubjects::default();
     let shown_run = match (&database, &pairwise_database) {

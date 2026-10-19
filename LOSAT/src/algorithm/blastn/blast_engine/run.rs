@@ -81,10 +81,9 @@ use super::super::filtering::{
     subject_best_hit, subject_best_hit_by, BestHitKey, ReevalParams,
 };
 use super::super::hsp::{
-    evalue_comp, get_prelim_hitlist_size, parse_blastn_output_format, score_compare_hsps,
-    sort_hsplist_by_evalue, sort_hsps_by_score, trim_by_max_hsps,
-    write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
-    BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
+    evalue_comp, get_prelim_hitlist_size, score_compare_hsps, sort_hsplist_by_evalue,
+    sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists_to_writer, BlastnHitList,
+    BlastnHsp, BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use super::super::lookup::{
@@ -98,6 +97,7 @@ use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
+use crate::blastinput::app::{self as app, Program};
 // EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
 use super::super::x_subject_store::{
     x_blastna_into, x_bnstore, x_read_subject_stores, SubjectLetters,
@@ -5868,8 +5868,9 @@ pub fn run(
     //     }
     // ```
     // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
-    // option handlers run.
-    let output_formats = parse_output_formats([args.outfmt.as_str()])?;
+    // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
+    // there too (`cli_output_formats`).
+    let output_formats = cli_output_formats(&args.outfmt, args.out.as_deref())?;
     // LOSAT's thread capability is checked before any input or output, as before.
     crate::utils::threading::validate_threads(args.num_threads)?;
     // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:3631-3636
@@ -6416,21 +6417,65 @@ pub(crate) fn check_subjects_not_empty<R>(subjects: &[R]) -> Result<()> {
     Ok(())
 }
 
-/// The requested output formats, each parsed exactly as the single CLI `-outfmt` is,
-/// before NCBI's option handlers run (`run`).
+/// The report of the CLI's `-outfmt`, read as NCBI reads it before its option handlers run
+/// (`run`; `blastinput/app.rs` `parse_formatting_string`, `report_format`). A format that
+/// NCBI itself rejects later has no report: the run stops at NCBI's error, the formatting
+/// handler's in `process_options` (AIRR rearrangement, FASTA) or the XInclude formats' in
+/// `search` (13 and 14 to standard output).
+fn cli_output_formats(
+    outfmt: &str,
+    out: Option<&std::path::Path>,
+) -> Result<Vec<BlastnOutputFormat>> {
+    let choice = app::parse_formatting_string(outfmt)?;
+    app::report_format(&choice, Program::Blastn, out)?
+        .map(BlastnOutputFormat::of)
+        .into_iter()
+        .collect()
+}
+
+/// The requested output formats of `run_local`, each read as the CLI reads its single
+/// `-outfmt` (`cli_output_formats`); a format that NCBI rejects later fails here with NCBI's
+/// error, as in the other programs' `run_local` (they have no output file).
 fn parse_output_formats<'a>(
     formats: impl IntoIterator<Item = &'a str>,
 ) -> Result<Vec<BlastnOutputFormat>> {
     formats
         .into_iter()
-        .map(parse_blastn_output_format)
+        .map(|outfmt| {
+            let choice = app::parse_formatting_string(outfmt)?;
+            match app::report_format(&choice, Program::Blastn, None)? {
+                Some(format) => BlastnOutputFormat::of(format),
+                None => {
+                    app::formatting_handler_check(&choice, Program::Blastn)?;
+                    app::xinclude_check(&choice)?;
+                    anyhow::bail!(
+                        "output format {} is not supported by LOSAT's BLASTN",
+                        choice.number
+                    )
+                }
+            }
+        })
         .collect()
 }
 
 /// NCBI's processing of the options after the query and the output are opened
-/// (`SetOptions`): the few-matches warning of the formatting handler, and the check of the
-/// options.
+/// (`SetOptions`): the formatting handler (its errors for the formats of other programs,
+/// then its few-matches warning), and the check of the options.
 ///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886
+/// ```c
+///     ParseFormattingString(args, m_OutputFormat, m_CustomOutputFormatSpec,m_CustomDelim);
+///     if((m_OutputFormat == eSAM) && !(m_FormatFlags & eIsSAM) ){
+/// ...
+///     if((m_OutputFormat == eAirrRearrangement) && !(m_FormatFlags & eIsAirrRearrangement) ){
+///         NCBI_THROW(CInputException, eInvalidInput,
+///                    "AIRR rearrangement format is only applicable to igblastn" );
+///     }
+///     if (m_OutputFormat == eFasta) {
+///         NCBI_THROW(CInputException, eInvalidInput,
+///                    "FASTA output format is only applicable to magicblast");
+///     }
+/// ```
 /// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
 /// ```c
 ///     if(hitlist_size < 5){
@@ -6443,6 +6488,13 @@ fn parse_output_formats<'a>(
 /// ```
 /// The hit list size is the -max_target_seqs value, or 500 when it is omitted.
 fn process_options(args: &BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Result<()> {
+    // The formatting handler comes after the query options handler (blastn_args.cpp:100-105).
+    for format in &outputs.formats {
+        app::formatting_handler_check(
+            &app::parse_formatting_string(format.outfmt)?,
+            Program::Blastn,
+        )?;
+    }
     if args
         .max_target_seqs
         .is_some_and(|max_target_seqs| max_target_seqs < 5)
@@ -6586,6 +6638,18 @@ fn search(
             "blastn",
             outputs.diagnostics,
         )?;
+    }
+    // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:255-258
+    // ```c
+    //         if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
+    //         }
+    //         formatter.PrintProlog();
+    // ```
+    // The XInclude formats written to standard output fail after the formatter is made (a
+    // format 13 or 14 to a file is LOSAT's rejection, `cli_output_formats`).
+    for format in &outputs.formats {
+        app::xinclude_check(&app::parse_formatting_string(format.outfmt)?)?;
     }
     // NCBI reads the queries after `Query is Empty!`, one batch at a time, with its
     // reader's warnings (`run_in_pool`).
@@ -17605,5 +17669,128 @@ mod tests {
         single.update(list(5, &[10]));
         merge_prelim_hit_list(single, &mut empty, [0, 0], 100);
         assert_eq!(prelim_scores(empty.as_ref().unwrap()), vec![(5, vec![10])]);
+    }
+
+    /// The NCBI errors of BLASTN's `-outfmt` at NCBI's positions (blast_args.cpp:2745-2748,
+    /// 2874-2886, 2975-2977; blastn_app.cpp:255-258).
+    #[test]
+    fn output_formats_raise_ncbis_errors_where_ncbi_does() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Options {
+            #[command(flatten)]
+            blastn: BlastnArgs,
+        }
+        let args = |words: &[&str]| {
+            let mut argv = vec!["test", "-query", "q", "-subject", "s"];
+            argv.extend_from_slice(words);
+            crate::cli::try_parse_from::<Options, _, _>(argv)
+                .unwrap()
+                .blastn
+        };
+        let native = |error: anyhow::Error| {
+            let native = error.downcast::<crate::cli::NativeError>().unwrap();
+            (native.exit, native.message)
+        };
+        let options = |text: &str| {
+            (
+                1,
+                format!(
+                    "BLAST query/options error: {text}\nPlease refer to the BLAST+ user manual.\n"
+                ),
+            )
+        };
+        // The CLI: a format that NCBI rejects later has no report (`cli_output_formats`).
+        let file = Some(std::path::Path::new("o.json"));
+        for outfmt in ["13", "14", "19", "21"] {
+            assert!(
+                cli_output_formats(outfmt, None).unwrap().is_empty(),
+                "{outfmt}"
+            );
+        }
+        assert!(cli_output_formats("13", Some(std::path::Path::new("-")))
+            .unwrap()
+            .is_empty());
+        for outfmt in ["13", "17", "5"] {
+            assert_eq!(
+                cli_output_formats(outfmt, file).unwrap_err().to_string(),
+                format!("output format {outfmt} is not supported by LOSAT's BLASTN")
+            );
+        }
+        assert_eq!(
+            cli_output_formats("0 qaccver", None).unwrap(),
+            [BlastnOutputFormat::Pairwise]
+        );
+        assert_eq!(
+            cli_output_formats("7 qaccver", None).unwrap_err().to_string(),
+            "a custom output format specification (fields or a delimiter) is not supported by LOSAT's BLASTN"
+        );
+        assert_eq!(
+            native(cli_output_formats("22", None).unwrap_err()),
+            (
+                255,
+                "Error: Formatting choice is out of range\n".to_string()
+            )
+        );
+        // The formatting handler raises its errors before its warning; 13 passes it.
+        for (outfmt, error) in [
+            (
+                "19",
+                Some("AIRR rearrangement format is only applicable to igblastn"),
+            ),
+            (
+                "21",
+                Some("FASTA output format is only applicable to magicblast"),
+            ),
+            ("13", None),
+        ] {
+            let mut diagnostics = Vec::new();
+            let mut sink = Vec::new();
+            let mut outputs =
+                ReportOutputs::single(outfmt, OutputSink::Writer(&mut sink), &mut diagnostics);
+            let result = process_options(&args(&["-max_target_seqs", "1"]), &mut outputs);
+            drop(outputs);
+            match error {
+                Some(error) => {
+                    assert_eq!(native(result.unwrap_err()), options(error), "{outfmt}");
+                    assert!(diagnostics.is_empty(), "{outfmt}");
+                }
+                None => {
+                    result.unwrap();
+                    assert_eq!(
+                        String::from_utf8(diagnostics).unwrap(),
+                        "Warning: [blastn] Examining 5 or more matches is recommended\n"
+                    );
+                }
+            }
+        }
+        // `run_local` has no output file; its formats that NCBI rejects later fail at once.
+        for (outfmt, error) in [
+            ("13", "Please provide a file name for outfmt 13."),
+            ("14", "Please provide a file name for outfmt 14."),
+            (
+                "19",
+                "AIRR rearrangement format is only applicable to igblastn",
+            ),
+            ("21", "FASTA output format is only applicable to magicblast"),
+        ] {
+            assert_eq!(
+                native(parse_output_formats(["6", outfmt]).unwrap_err()),
+                options(error),
+                "{outfmt}"
+            );
+        }
+        assert_eq!(
+            parse_output_formats(["0", "6", "07"]).unwrap(),
+            [
+                BlastnOutputFormat::Pairwise,
+                BlastnOutputFormat::Tabular,
+                BlastnOutputFormat::TabularWithComments
+            ]
+        );
+        assert_eq!(
+            parse_output_formats(["17"]).unwrap_err().to_string(),
+            "output format 17 is not supported by LOSAT's BLASTN"
+        );
     }
 }

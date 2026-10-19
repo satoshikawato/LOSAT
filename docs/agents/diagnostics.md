@@ -1003,7 +1003,21 @@ Rebuilding less:
   definition line or ambiguity check read in a range with the one read for its sequence alone; the first difference
   prints the line otherwise printed at exit and panics: `[X_SHADOW] DBIDXREAD volumes= reads= words= block_ends=
   run_records= identical` (`reads` / `words`: reads of the arrays and the entries they read; `run_records`: records
-  decoded from the ranges' reads). EVIDENCE-TO-COME.
+  decoded from the ranges' reads). After the open, every range of the arrays read again must keep the order the open
+  checked (the header and sequence offsets ascending, each ambiguity offset inside its sequence's data): an index file
+  changed in place during a run is a database format error ("... differ from those checked at open (the file changed)")
+  instead of a subtraction that underflows. Like NCBI (which keeps the index file mapped, `seqdbfile.hpp` `m_Lease`), a
+  volume now holds three open files (index, header, sequence) instead of two. Evidence 2026-10-19 (perf/db-index-pread,
+  ws node 0, untimed memory with `RssAnon` sampled every 0.2 s; `blastp -db` UniRef50 outfmt 6, every output equal to
+  NCBI 2.17.0's): peak anonymous memory with the switch / dev 0797cc40 / NCBI: q1 n1 3.5 / 300 / 8.8 MiB, q1 n8
+  18.5 / 315 / 72.6 MiB, q10 n8 44.4 / 340 / 99.6 MiB, q100 on volume `uniref50.04` n4 38.6 / 88.0 / 84.5 MiB, q100 on
+  `uniref50.03` n8 104.5 / 222.8 / 133.5 MiB (max RSS q1 n8 24 / 379 MiB, NCBI 11.6 GiB with the mapped files); the
+  same binary with `LOSAT_X_DBIDXREAD=0` 346 MiB on q1 n8. Timed (same binary on / off, 8 cores of node 0 with their
+  siblings idle, warmed, order alternated): median ratio of wall time x1.005 (0.965-1.073, 8 pairs) OrthoFinder
+  blastp-fast Species4 x BlastDBSpecies6, x1.000 (0.996-1.020, 8) Swiss-Prot q100, x1.004 (0.998-1.014, 8) megablast
+  16S q100, x0.971 (0.940-1.003, 4) `uniref50.04` q100 (max RSS 53-56 against 104 MiB). Gates: ci_fast all programs
+  with the switch, with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases, 0 failures each); `-db` fixtures of every program
+  at 1 and 4 threads under the shadow (0 differing, the exit line `identical` in every run that ends without an error).
 - `LOSAT_X_BPSUBJMETA=1` (BLASTP, speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; acts only in the `-subject` block search of `LOSAT_X_BPQBLOCK`, for
   blastp and blastp-fast) the subjects' tabular IDs and titles are made once for all blocks instead of once
   per block (`blastp/blast_engine/x_subject_meta.rs`, exactness argument in its header). Without it each

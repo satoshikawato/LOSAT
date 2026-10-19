@@ -50,8 +50,9 @@
 //! the result of `tabular_subject_ids` (the shown IDs, or the error's text). The first difference
 //! stops the run (panic) after printing the line that is otherwise printed at exit: `[X_SHADOW]
 //! BPSUBJMETA blocks= subjects_compared= identical` (`blocks`: output stages that took the stored
-//! values; `subjects_compared`: the subjects compared in them). The block search writes tabular
-//! format 6 only, so each block's output stage makes the IDs and is counted.
+//! values; `subjects_compared`: the subjects compared in them). The output stage of a block's
+//! tabular report (outfmt 6, or 7 with `LOSAT_X_BPQBLOCKFMT`) makes the IDs and is counted; an
+//! outfmt 0 report (`LOSAT_X_BPQBLOCKFMT`) makes none.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:218-227
 //! ```c++

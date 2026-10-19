@@ -2220,104 +2220,155 @@ impl XPairPar {
             let mut scan_range: [i32; 3] = [0, seq_ranges[0].0, seq_ranges[0].1 - wordsize];
             // [C] while (scan_range[1] <= scan_range[2])
             while scan_range[1] <= scan_range[2] {
-                let prev_scan_left = scan_range[1];
-                // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
-                // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
-                let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
-                    group.scan_bf,
-                    sub,
+                // One batch per call (`x_unit_batch`: its own function on wasm32 only).
+                if !x_unit_batch::<S, P, PF, BF>(
+                    group,
                     subject,
                     &seq_ranges,
-                    &mut scratch.offset_pairs[..],
                     offset_array_size,
                     &mut scan_range,
-                );
-                if hits == 0 && scan_range[1] == prev_scan_left {
+                    scratch,
+                    lo,
+                    width,
+                    &h,
+                    init_hsps,
+                    probe,
+                ) {
                     // The reference's safety guard (RI:3157-3161).
                     break;
                 }
-                probe.batch(hits as usize);
-                let diag_ptr = scratch.diag.as_mut_ptr();
-                let offset_pairs_ptr = scratch.offset_pairs.as_ptr();
-                // EXPERIMENT (LOSAT_X_TBXHITBF): the loop below, with the too-far and overlap
-                // outcomes of `x_hit` taken without a branch (x_tbx_hitbf.rs).
-                if BF {
-                    // SAFETY: hits <= offset_array_size, and with `PF` the X_PREFETCH_AHEAD entries
-                    // after them are in offset_pairs too (resize above); every cell is below width
-                    // = scratch.diag.len() as below; `fits` holds (the caller's rule). `x_hit`
-                    // gets the cell of its hit, as below.
-                    unsafe {
-                        x_tbx_hitbf::x_hits_bf::<PF>(
-                            diag_ptr,
-                            offset_pairs_ptr,
-                            hits as usize,
-                            lo,
-                            width,
-                            window,
-                            wordsize,
-                            |cell, query_offset, subject_offset| {
-                                x_hit(
-                                    &mut *diag_ptr.add(cell),
-                                    query_offset,
-                                    subject_offset,
-                                    &h,
-                                    init_hsps,
-                                    probe,
-                                );
-                            },
-                        )
-                    };
-                    probe.batch_end();
-                    continue;
-                }
-                // [C] for (i = 0; i < hits; ++i)
-                for i in 0..hits as usize {
-                    // EXPERIMENT (LOSAT_X_TBXPREFETCH): the cell of the hit X_PREFETCH_AHEAD
-                    // entries ahead, computed as below. A prefetch never faults and has no
-                    // architectural effect.
-                    #[cfg(target_arch = "x86_64")]
-                    if PF && i + X_PREFETCH_AHEAD < hits as usize {
-                        // SAFETY: i + X_PREFETCH_AHEAD < hits <= offset_pairs.len(), an entry
-                        // `scansub` wrote in this batch. The address is only prefetched
-                        // (`wrapping_add`: no bound needed; it lies in the table as below).
-                        unsafe {
-                            let ahead = &*offset_pairs_ptr.add(i + X_PREFETCH_AHEAD);
-                            let cell =
-                                ahead.q_off.wrapping_sub(ahead.s_off).wrapping_sub(lo) as usize;
-                            core::arch::x86_64::_mm_prefetch(
-                                diag_ptr.wrapping_add(cell) as *const i8,
-                                core::arch::x86_64::_MM_HINT_T0,
-                            );
-                        }
-                    }
-                    // SAFETY: i < hits <= offset_array_size <= offset_pairs.len().
-                    let pair = unsafe { &*offset_pairs_ptr.add(i) };
-                    let query_offset = pair.q_off;
-                    let subject_offset = pair.s_off;
-                    // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
-                    // Unit cell: the raw diagonal minus the unit's lowest one (no mask).
-                    let diag_coord =
-                        query_offset.wrapping_sub(subject_offset).wrapping_sub(lo) as usize;
-                    debug_assert!(diag_coord < width, "unit diagonal outside its table");
-                    // SAFETY: q_min <= query_offset <= q_max (the group's entries) and
-                    // subject_offset < s_len, so diag_coord < width = scratch.diag.len().
-                    let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
-                    probe.at(diag_coord, subject_offset);
-                    let outcome = x_hit(
-                        diag_entry,
-                        query_offset,
-                        subject_offset,
-                        &h,
-                        init_hsps,
-                        probe,
-                    );
-                    probe.hit(outcome, window);
-                }
-                probe.batch_end();
             }
         }
         probe.unit_end();
     }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:501-508
+// ```c
+// while (scan_range[1] <= scan_range[2]) {
+//     /* scan the subject sequence for hits */
+//     hits = scansub(lookup_wrap, subject,
+//                               offset_pairs, array_size, scan_range);
+// ...
+//     for (i = 0; i < hits; ++i) {
+// ```
+// One pass of the scan loop of `scan_unit` (one `scansub` call and the two-hit test of its hits),
+// statement for statement the loop body it was. No NCBI counterpart for the function boundary: on
+// wasm32 (LOSAT Web) it is a function of its own, so that the later batches of a unit run the
+// optimized code. V8 runs the first calls of a freshly compiled function in its baseline code
+// (Liftoff) and switches to its optimized code (TurboFan) only at a later call, never inside a
+// running call (no on-stack replacement for Wasm), and a unit was one long call. Elsewhere it is
+// inlined into `scan_unit`.
+/// One batch of `scan_unit`'s loop: scans the next hits of `subject` and runs the two-hit test of
+/// each on its cell of the unit table; false when the loop stops (no hit and no progress).
+#[cfg_attr(target_arch = "wasm32", inline(never))]
+#[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+#[allow(clippy::too_many_arguments)]
+fn x_unit_batch<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
+    group: &XGroup,
+    subject: &[u8],
+    seq_ranges: &[(i32, i32)],
+    offset_array_size: i32,
+    scan_range: &mut [i32; 3],
+    scratch: &mut XScratch,
+    lo: u32,
+    width: usize,
+    h: &XHitCtx<'_>,
+    init_hsps: &mut S,
+    probe: &mut P,
+) -> bool {
+    let prev_scan_left = scan_range[1];
+    // [C] hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
+    // EXPERIMENT (LOSAT_X_TBXSCANBF): the branch-free scan with the switch.
+    let hits = crate::algorithm::tblastx::x_scan_bf::x_scan_subject(
+        group.scan_bf,
+        &group.lookup,
+        subject,
+        seq_ranges,
+        &mut scratch.offset_pairs[..],
+        offset_array_size,
+        scan_range,
+    );
+    if hits == 0 && scan_range[1] == prev_scan_left {
+        return false;
+    }
+    probe.batch(hits as usize);
+    let diag_ptr = scratch.diag.as_mut_ptr();
+    let offset_pairs_ptr = scratch.offset_pairs.as_ptr();
+    // EXPERIMENT (LOSAT_X_TBXHITBF): the loop below, with the too-far and overlap outcomes of
+    // `x_hit` taken without a branch (x_tbx_hitbf.rs).
+    if BF {
+        // SAFETY: hits <= offset_array_size, and with `PF` the X_PREFETCH_AHEAD entries after them
+        // are in offset_pairs too (`scan_unit_hits` sizes it); every cell is below width =
+        // scratch.diag.len() as below; `fits` holds (the caller's rule). `x_hit` gets the cell of
+        // its hit, as below.
+        unsafe {
+            x_tbx_hitbf::x_hits_bf::<PF>(
+                diag_ptr,
+                offset_pairs_ptr,
+                hits as usize,
+                lo,
+                width,
+                h.window,
+                h.wordsize,
+                |cell, query_offset, subject_offset| {
+                    x_hit(
+                        &mut *diag_ptr.add(cell),
+                        query_offset,
+                        subject_offset,
+                        h,
+                        init_hsps,
+                        probe,
+                    );
+                },
+            )
+        };
+        probe.batch_end();
+        return true;
+    }
+    // [C] for (i = 0; i < hits; ++i)
+    for i in 0..hits as usize {
+        // EXPERIMENT (LOSAT_X_TBXPREFETCH): the cell of the hit X_PREFETCH_AHEAD
+        // entries ahead, computed as below. A prefetch never faults and has no
+        // architectural effect.
+        #[cfg(target_arch = "x86_64")]
+        if PF && i + X_PREFETCH_AHEAD < hits as usize {
+            // SAFETY: i + X_PREFETCH_AHEAD < hits <= offset_pairs.len(), an entry
+            // `scansub` wrote in this batch. The address is only prefetched
+            // (`wrapping_add`: no bound needed; it lies in the table as below).
+            unsafe {
+                let ahead = &*offset_pairs_ptr.add(i + X_PREFETCH_AHEAD);
+                let cell = ahead.q_off.wrapping_sub(ahead.s_off).wrapping_sub(lo) as usize;
+                core::arch::x86_64::_mm_prefetch(
+                    diag_ptr.wrapping_add(cell) as *const i8,
+                    core::arch::x86_64::_MM_HINT_T0,
+                );
+            }
+        }
+        // SAFETY: i < hits <= offset_array_size <= offset_pairs.len().
+        let pair = unsafe { &*offset_pairs_ptr.add(i) };
+        let query_offset = pair.q_off;
+        let subject_offset = pair.s_off;
+        // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
+        // Unit cell: the raw diagonal minus the unit's lowest one (no mask).
+        let diag_coord = query_offset.wrapping_sub(subject_offset).wrapping_sub(lo) as usize;
+        debug_assert!(diag_coord < width, "unit diagonal outside its table");
+        // SAFETY: q_min <= query_offset <= q_max (the group's entries) and
+        // subject_offset < s_len, so diag_coord < width = scratch.diag.len().
+        let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
+        probe.at(diag_coord, subject_offset);
+        let outcome = x_hit(
+            diag_entry,
+            query_offset,
+            subject_offset,
+            h,
+            init_hsps,
+            probe,
+        );
+        probe.hit(outcome, h.window);
+    }
+    probe.batch_end();
+    true
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-606

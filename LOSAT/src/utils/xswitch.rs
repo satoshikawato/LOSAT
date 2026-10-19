@@ -116,6 +116,9 @@ use std::sync::OnceLock;
 /// searched ahead by the pool's other threads, `blastx/x_subject_flow.rs`) joined the set in the
 /// pull request that added it (Owner 2026-10-17: speed-ups land default ON), after it was
 /// verified and timed with it on and off.
+/// `LOSAT_X_QGROUPPAR` (BLASTN's preliminary gapped loop and traceback of a subject searched on one
+/// thread run per query on the pool, `blastn/blast_engine/x_qgroup_par.rs`) joined the set in the
+/// pull request that added it, after it was verified and timed with it on and off.
 /// `LOSAT_X_PAIRPARGATE` (TBLASTX's unit path only for the query batches where it is expected to
 /// be faster than the reference frame loop, `tblastx/x_pair_par.rs`) and `LOSAT_X_TBXLUT` (the
 /// reference loop's full lookup table filled in place from per-cell counts,
@@ -126,6 +129,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
     "LOSAT_X_BPCLUT",
+    "LOSAT_X_BPCOMPOREUSE",
     "LOSAT_X_BPDBCUT",
     "LOSAT_X_BPDEFER",
     "LOSAT_X_BPDIAG",
@@ -136,6 +140,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPPCOMPACT",
     "LOSAT_X_BPPFREE",
     "LOSAT_X_BPQBLOCK",
+    "LOSAT_X_BPQBLOCKFMT",
     "LOSAT_X_BPREDOFIT",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",
@@ -171,6 +176,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_DUSTFAST",
     "LOSAT_X_DUSTRING",
     "LOSAT_X_ENVCACHE",
+    "LOSAT_X_ERFABSORB",
     "LOSAT_X_ERFMEMO",
     "LOSAT_X_GREEDYFAST",
     "LOSAT_X_GREEDYFUSE",
@@ -199,6 +205,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_PURGEFAST",
     "LOSAT_X_QBATCHPAR",
     "LOSAT_X_QDUSTPAR",
+    "LOSAT_X_QGROUPPAR",
     "LOSAT_X_QPREPPAR",
     "LOSAT_X_QSTREAM",
     "LOSAT_X_RPTSTREAM",

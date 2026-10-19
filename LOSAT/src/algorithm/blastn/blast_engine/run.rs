@@ -1040,6 +1040,11 @@ impl DiagHashTable {
 #[path = "x_diag_lv.rs"]
 mod x_diag_lv;
 
+// EXPERIMENT (R8_PROBE, line R probe, not for merge): the cost of `context_for_offset` per lookup
+// hit of the direct-table scan, and exact counts of its hits.
+#[path = "x_r8_probe.rs"]
+mod x_r8_probe;
+
 #[inline(always)]
 fn diag_hash_insert_window(window_size: usize, scan_range: usize, word_length: usize) -> i32 {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:825-858, 939-941
@@ -12101,6 +12106,11 @@ fn search_query_batch(
                     // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the level bound's constants
                     // of this chunk's seeds (`s_end` adds `safe_k`).
                     let x_lv_seeds = x_diag_lv::LvSeeds::new(window_size > 0, safe_k, window_size);
+                    // EXPERIMENT (R8_PROBE): the arm, its table and its counts.
+                    let x_r8 = x_r8_probe::probe();
+                    let x_r8_tab = (x_r8.ctx == 2)
+                        .then(|| x_r8_probe::CtxTab::build(&query_context_index, x_r8.tab_k));
+                    let mut x_r8_n = x_r8_probe::Counts::default();
                     scan_subject_kmers_with_ranges(
                         search_seq_packed,
                         s_len,
@@ -12159,6 +12169,9 @@ fn search_query_batch(
                                 if q_off_1 == 0 {
                                     continue;
                                 }
+                                if x_r8.cnt {
+                                    x_r8_n.hits += 1;
+                                }
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1406-1412
                                 // ```c
                                 // offset_pairs[i].qs_offsets.q_off = q_off - 1;
@@ -12168,7 +12181,16 @@ fn search_query_batch(
                                 // ```c
                                 // Int4 context = BSearchContextInfo(q_off, query_info);
                                 // ```
-                                let context_idx = query_context_index.context_for_offset(q_off0);
+                                let context_idx = if x_r8.ctx == 0 {
+                                    query_context_index.context_for_offset(q_off0)
+                                } else {
+                                    x_r8_probe::context(
+                                        x_r8.ctx,
+                                        x_r8_tab.as_ref(),
+                                        &query_context_index,
+                                        q_off0,
+                                    )
+                                };
                                 let ctx = &query_contexts[context_idx];
                                 let q_idx = context_idx as u32;
                                 let query_idx = ctx.query_idx as usize;
@@ -12333,6 +12355,9 @@ fn search_query_batch(
 
                                 // Hit within explored area should be rejected
                                 if s_off_pos_i32 < last_hit {
+                                    if x_r8.cnt {
+                                        x_r8_n.rejected += 1;
+                                    }
                                     continue;
                                 }
 
@@ -12750,6 +12775,9 @@ fn search_query_batch(
                                         &score_matrix,
                                     )
                                 };
+                                if x_r8.cnt {
+                                    x_r8_n.ungapped += 1;
+                                }
                                 if let Some(ungapped_start) = ungapped_start {
                                     let elapsed_ns = ungapped_start.elapsed().as_nanos() as u64;
                                     if let Some(timing) = timing_ref {
@@ -12886,6 +12914,9 @@ fn search_query_batch(
                                 if debug_enabled {
                                     dbg_gapped_attempted += 1;
                                 }
+                                if x_r8.cnt {
+                                    x_r8_n.passed += 1;
+                                }
 
                                 if in_window && debug_mode {
                                     eprintln!("[DEBUG WINDOW] Seed at q={}, s={} -> COLLECT UNGAPPED (score={}, len={})", q_pos_usize, s_pos, ungapped_score, qe - qs);
@@ -12960,6 +12991,9 @@ fn search_query_batch(
                     //     total_hits += num_hits;
                     // }
                     // ```
+                    if x_r8.cnt {
+                        x_r8_n.print(query_contexts.len(), s_len);
+                    }
                     if let Some(scan_start) = scan_start {
                         let elapsed_ns = scan_start.elapsed().as_nanos() as u64;
                         let scan_ns = elapsed_ns.saturating_sub(scan_pause_ns);

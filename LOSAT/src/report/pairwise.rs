@@ -311,28 +311,58 @@ pub fn write_subject_header<W: Write>(
 #[allow(clippy::too_many_arguments)]
 fn write_subject_alignments<W: Write>(
     writer: &mut W,
+    probe: Option<&mut FormatProbe<'_>>,
+    s_idx: u32,
+    title: &[u8],
+    protein: bool,
+    hits: &[&PairwiseHit],
+    hsp_indices: &[HspIndex],
+    write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+) -> io::Result<()> {
+    write_subject_alignments_part(
+        writer,
+        probe,
+        s_idx,
+        title,
+        protein,
+        hits,
+        hsp_indices,
+        0..hits.len(),
+        write_hsp,
+    )
+}
+
+/// `write_subject_alignments` for the HSPs `part` of the subject's (the heading with the first);
+/// the parts of `0..hits.len()` in order write its bytes (EXPERIMENT LOSAT_X_PAIRWISEPAR's pieces,
+/// `x_pairwise_par`).
+#[allow(clippy::too_many_arguments)]
+fn write_subject_alignments_part<W: Write>(
+    writer: &mut W,
     mut probe: Option<&mut FormatProbe<'_>>,
     s_idx: u32,
     title: &[u8],
     protein: bool,
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
+    part: std::ops::Range<usize>,
     mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
 ) -> io::Result<()> {
     let first_index = hsp_indices[0];
     let heading = super::defline::generate_defline(title, protein, false);
-    if let Some(probe) = probe.as_mut() {
-        writer.flush()?;
-        probe.subject_begin(first_index);
+    if part.start == 0 {
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.subject_begin(first_index);
+        }
+        if let Ok(heading) = &heading {
+            write_subject_header(writer, &heading.text, None, hits[0].subject_length)?;
+        }
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.subject_end(first_index);
+        }
     }
-    if let Ok(heading) = &heading {
-        write_subject_header(writer, &heading.text, None, hits[0].subject_length)?;
-    }
-    if let Some(probe) = probe.as_mut() {
-        writer.flush()?;
-        probe.subject_end(first_index);
-    }
-    for (hit, &hsp_index) in hits.iter().zip(hsp_indices) {
+    for (hit, &hsp_index) in hits[part.clone()].iter().zip(&hsp_indices[part]) {
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
             probe.begin(hsp_index);
@@ -406,24 +436,51 @@ fn write_subject_alignments<W: Write>(
 /// and BLASTN share this heading).
 fn write_database_subject_alignments<W: Write>(
     writer: &mut W,
+    probe: Option<&mut FormatProbe<'_>>,
+    title: &[u8],
+    protein: bool,
+    hits: &[&PairwiseHit],
+    hsp_indices: &[HspIndex],
+    write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
+) -> io::Result<()> {
+    write_database_subject_alignments_part(
+        writer,
+        probe,
+        title,
+        protein,
+        hits,
+        hsp_indices,
+        0..hits.len(),
+        write_hsp,
+    )
+}
+
+/// `write_database_subject_alignments` for the HSPs `part` of the subject's (the heading with
+/// the first), as `write_subject_alignments_part`.
+#[allow(clippy::too_many_arguments)]
+fn write_database_subject_alignments_part<W: Write>(
+    writer: &mut W,
     mut probe: Option<&mut FormatProbe<'_>>,
     title: &[u8],
     protein: bool,
     hits: &[&PairwiseHit],
     hsp_indices: &[HspIndex],
+    part: std::ops::Range<usize>,
     mut write_hsp: impl FnMut(&mut W, &PairwiseHit) -> io::Result<()>,
 ) -> io::Result<()> {
     let first_index = hsp_indices[0];
-    if let Some(probe) = probe.as_mut() {
-        writer.flush()?;
-        probe.subject_begin(first_index);
+    if part.start == 0 {
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.subject_begin(first_index);
+        }
+        write_database_subject_heading(writer, title, protein, hits[0].subject_length)?;
+        if let Some(probe) = probe.as_mut() {
+            writer.flush()?;
+            probe.subject_end(first_index);
+        }
     }
-    write_database_subject_heading(writer, title, protein, hits[0].subject_length)?;
-    if let Some(probe) = probe.as_mut() {
-        writer.flush()?;
-        probe.subject_end(first_index);
-    }
-    for (hit, &hsp_index) in hits.iter().zip(hsp_indices) {
+    for (hit, &hsp_index) in hits[part.clone()].iter().zip(&hsp_indices[part]) {
         if let Some(probe) = probe.as_mut() {
             writer.flush()?;
             probe.begin(hsp_index);
@@ -1917,10 +1974,11 @@ pub fn write_blastp_pairwise_report<W: Write>(
     subject_titles: &[Arc<[u8]>],
     report: &BlastpPairwiseReport,
     database: Option<&PairwiseDatabase>,
-    mut probe: Option<&mut FormatProbe<'_>>,
-    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    probe: Option<&mut FormatProbe<'_>>,
+    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
     prolog: bool,
     epilog: bool,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -1954,21 +2012,75 @@ pub fn write_blastp_pairwise_report<W: Write>(
         }
     }
 
-    for (q_idx, query) in queries.iter().enumerate() {
-        // The query's warnings come before its preamble (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, writer)?;
-        }
+    // The queries' reports, on `x_pool` with LOSAT_X_PAIRWISEPAR (`x_pairwise_par`).
+    super::x_pairwise_par::write(
+        writer,
+        &BlastpSections {
+            config,
+            queries,
+            query_titles,
+            report,
+            database,
+        },
+        &hits_by_query,
+        subject_titles,
+        probe,
+        warnings,
+        x_pool,
+    )?;
+
+    // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
+    // ```c++
+    //         BLAST_PROF_START( APP.POST );
+    //         formatter.PrintEpilog(opt);
+    // ```
+    // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
+    // writes no epilog.
+    if !epilog {
+        return writer.flush();
+    }
+
+    // The blank lines before the epilog (blast_format.cpp:2249).
+
+    writeln!(writer)?;
+
+    writeln!(writer)?;
+
+    write_blastp_final_footer(writer, report, database)?;
+    writer.flush()
+}
+
+/// The parts of one query's BLASTP pairwise report (`x_pairwise_par::QuerySections`).
+struct BlastpSections<'a> {
+    config: &'a PairwiseConfig,
+    queries: &'a [BlastpPairwiseQuery],
+    query_titles: &'a [Arc<[u8]>],
+    report: &'a BlastpPairwiseReport,
+    database: Option<&'a PairwiseDatabase>,
+}
+
+impl super::x_pairwise_par::QuerySections for BlastpSections<'_> {
+    fn num_alignments(&self) -> usize {
+        self.report.num_alignments
+    }
+
+    fn head<W: Write>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+        group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
+    ) -> io::Result<()> {
+        let (query, report) = (&self.queries[q_idx], self.report);
         // NCBI blast_format.cpp:1491: m_Outfile << "\n\n";
         writeln!(writer)?;
         writeln!(writer)?;
         // The title's bytes by query index (`query_name` is BLASTX's).
-        let query_title = query_titles
+        let query_title = self
+            .query_titles
             .get(q_idx)
             .map_or(&b""[..], |title| title.as_ref());
         write_blastp_query_header(writer, query_title, query.query_length)?;
-        let query_hits = &hits_by_query[q_idx];
-        if query_hits.is_empty() {
+        let Some(group) = group else {
             write_no_hits_found(writer)?;
             // NCBI c++/src/algo/blast/api/local_blast.cpp:177-180,204-208:
             // if (m_PrelimSearch->CheckInternalData() != 0)
@@ -1994,25 +2106,8 @@ pub fn write_blastp_pairwise_report<W: Write>(
                     false,
                 )?;
             }
-            continue;
-        }
-
-        use std::collections::HashMap;
-        let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
-        let mut subject_hit_indices: HashMap<u32, Vec<HspIndex>> = HashMap::new();
-        let mut subject_order: Vec<u32> = Vec::new();
-        for &(hsp_index, hit) in query_hits {
-            let s_idx = hit.hit.s_idx;
-            if !subject_hits.contains_key(&s_idx) {
-                subject_order.push(s_idx);
-            }
-            subject_hits.entry(s_idx).or_default().push(hit);
-            subject_hit_indices
-                .entry(s_idx)
-                .or_default()
-                .push(hsp_index);
-        }
-
+            return Ok(());
+        };
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
         // ```c++
         //     CShowBlastDefline showdef(*aln_set, *m_Scope,
@@ -2022,92 +2117,71 @@ pub fn write_blastp_pairwise_report<W: Write>(
         // The table follows `x_InitDeflineTable` (`write_blastn_description_table`): the
         // subject's highest bit score and that HSP's E-value, and the protein title of the
         // record read (by subject index), as TBLASTN's.
-        let subject_titles: std::collections::HashMap<u32, Vec<u8>> = subject_order
-            .iter()
-            .map(|&s_idx| {
-                let title = subject_titles
-                    .get(s_idx as usize)
-                    .map_or(&b""[..], |title| title.as_ref());
-                (s_idx, title.to_vec())
-            })
-            .collect();
-        let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
         write_blastn_description_table(
             writer,
-            described,
-            subject_order.len() <= report.num_descriptions,
-            &subject_hits,
-            &subject_titles,
+            group.described(report.num_descriptions),
+            group.subject_order.len() <= report.num_descriptions,
+            &group.subject_hits,
+            &group.subject_titles,
             false,
             true,
         )?;
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1520-1589
         // x_DisplayDeflines(aln_set, ...); ... display.DisplaySeqalign(m_Outfile);
-        writeln!(writer)?;
+        writeln!(writer)
+    }
 
-        // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
-        // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
-        let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
-        for &s_idx in aligned {
-            if database.is_some() {
-                write_database_subject_alignments(
-                    writer,
-                    probe.as_deref_mut(),
-                    &subject_titles[&s_idx],
-                    true,
-                    &subject_hits[&s_idx],
-                    &subject_hit_indices[&s_idx],
-                    |writer, hit| {
-                        write_hsp_info(writer, hit, config)?;
-                        write_alignment(writer, hit, config)
-                    },
-                )?;
-                continue;
-            }
-            write_subject_alignments(
+    fn subject<W: Write>(
+        &self,
+        writer: &mut W,
+        probe: Option<&mut FormatProbe<'_>>,
+        group: &super::x_pairwise_par::QueryGroup<'_>,
+        s_idx: u32,
+        part: std::ops::Range<usize>,
+    ) -> io::Result<()> {
+        let config = self.config;
+        if self.database.is_some() {
+            return write_database_subject_alignments_part(
                 writer,
-                probe.as_deref_mut(),
-                s_idx,
-                &subject_titles[&s_idx],
+                probe,
+                &group.subject_titles[&s_idx],
                 true,
-                &subject_hits[&s_idx],
-                &subject_hit_indices[&s_idx],
+                &group.subject_hits[&s_idx],
+                &group.subject_hit_indices[&s_idx],
+                part,
                 |writer, hit| {
                     write_hsp_info(writer, hit, config)?;
                     write_alignment(writer, hit, config)
                 },
-            )?;
+            );
         }
+        write_subject_alignments_part(
+            writer,
+            probe,
+            s_idx,
+            &group.subject_titles[&s_idx],
+            true,
+            &group.subject_hits[&s_idx],
+            &group.subject_hit_indices[&s_idx],
+            part,
+            |writer, hit| {
+                write_hsp_info(writer, hit, config)?;
+                write_alignment(writer, hit, config)
+            },
+        )
+    }
 
+    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+        let query = &self.queries[q_idx];
         write_blastp_query_footer_spacing(
             writer,
             query.ungapped_karlin,
-            report.gapped_karlin,
-            report.gumbel,
+            self.report.gapped_karlin,
+            self.report.gumbel,
             query.effective_search_space,
             false,
-        )?;
+        )
     }
-
-    // NCBI reference: c++/src/app/blast/blastp_app.cpp:294-295
-    // ```c++
-    //         BLAST_PROF_START( APP.POST );
-    //         formatter.PrintEpilog(opt);
-    // ```
-    // A search that stops at a query batch (`Empty CBlastQueryVector` with `-query_loc`)
-    // writes no epilog.
-    if !epilog {
-        return writer.flush();
-    }
-
-    // The blank lines before the epilog (blast_format.cpp:2249).
-
-    writeln!(writer)?;
-
-    writeln!(writer)?;
-
-    write_blastp_final_footer(writer, report, database)?;
-    writer.flush()
 }
 
 // =============================================================================
@@ -2645,8 +2719,9 @@ pub fn write_blastn_pairwise_report<W: Write>(
     queries: &[BlastnPairwiseQuery],
     subject_titles: &[Arc<[u8]>],
     report: &BlastnPairwiseReport,
-    mut probe: Option<&mut FormatProbe<'_>>,
-    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    probe: Option<&mut FormatProbe<'_>>,
+    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -2668,124 +2743,20 @@ pub fn write_blastn_pairwise_report<W: Write>(
             bucket.push((hsp_index, hit));
         }
     }
-
-    for (q_idx, query) in queries.iter().enumerate() {
-        // The query's warnings (and those of its batch's reading) come before its preamble
-        // (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, writer)?;
-        }
-        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
-        // ```c++
-        //     // print the preamble for this query
-        //
-        //     m_Outfile << "\n\n";
-        // ```
-        writer.write_all(b"\n\n")?;
-        write_blastp_query_header(writer, &query.query_name, query.query_length)?;
-        let query_hits = &hits_by_query[q_idx];
-        if query_hits.is_empty() {
-            write_no_hits_found(writer)?;
-            if report.unsearched.get(q_idx).copied().unwrap_or(false) {
-                write_tblastn_unsearched_query_footer_spacing(writer, false)?;
-            } else {
-                write_nucleotide_query_footer_spacing(
-                    writer,
-                    query.karlin,
-                    query.effective_search_space,
-                    false,
-                )?;
-            }
-            continue;
-        }
-
-        use std::collections::HashMap;
-        let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
-        let mut subject_hit_indices: HashMap<u32, Vec<HspIndex>> = HashMap::new();
-        let mut subject_order: Vec<u32> = Vec::new();
-        for &(hsp_index, hit) in query_hits {
-            let s_idx = hit.hit.s_idx;
-            if !subject_hits.contains_key(&s_idx) {
-                subject_order.push(s_idx);
-            }
-            subject_hits.entry(s_idx).or_default().push(hit);
-            subject_hit_indices
-                .entry(s_idx)
-                .or_default()
-                .push(hsp_index);
-        }
-
-        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
-        // ```c++
-        //     CShowBlastDefline showdef(*aln_set, *m_Scope,
-        //                               defline_length == -1 ? kFormatLineLength:defline_length,
-        //                               m_NumSummary + additional);
-        // ```
-        // The titles of the subjects of the records read (by subject index).
-        let subject_titles: HashMap<u32, Vec<u8>> = subject_order
-            .iter()
-            .map(|&s_idx| {
-                let title = subject_titles
-                    .get(s_idx as usize)
-                    .map_or(&b""[..], |title| title.as_ref());
-                (s_idx, title.to_vec())
-            })
-            .collect();
-        let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
-        write_blastn_description_table(
-            writer,
-            described,
-            subject_order.len() <= report.num_descriptions,
-            &subject_hits,
-            &subject_titles,
-            false,
-            false,
-        )?;
-        writeln!(writer)?;
-
-        // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
-        // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
-        let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
-        for &s_idx in aligned {
-            // A database sequence's heading is its stored title after `>` (a `BL_ORD_ID`
-            // id is not shown), as BLASTP's (`write_database_subject_alignments`).
-            if report.database.is_some() {
-                write_database_subject_alignments(
-                    writer,
-                    probe.as_deref_mut(),
-                    &subject_titles[&s_idx],
-                    false,
-                    &subject_hits[&s_idx],
-                    &subject_hit_indices[&s_idx],
-                    |writer, hit| {
-                        write_hsp_info(writer, hit, config)?;
-                        write_alignment(writer, hit, config)
-                    },
-                )?;
-                continue;
-            }
-            write_subject_alignments(
-                writer,
-                probe.as_deref_mut(),
-                s_idx,
-                &subject_titles[&s_idx],
-                false,
-                &subject_hits[&s_idx],
-                &subject_hit_indices[&s_idx],
-                |writer, hit| {
-                    write_hsp_info(writer, hit, config)?;
-                    write_alignment(writer, hit, config)
-                },
-            )?;
-        }
-
-        write_nucleotide_query_footer_spacing(
-            writer,
-            query.karlin,
-            query.effective_search_space,
-            false,
-        )?;
-    }
+    // The queries' reports, on `x_pool` with LOSAT_X_PAIRWISEPAR (`x_pairwise_par`).
+    super::x_pairwise_par::write(
+        writer,
+        &BlastnSections {
+            config,
+            queries,
+            report,
+        },
+        &hits_by_query,
+        subject_titles,
+        probe,
+        warnings,
+        x_pool,
+    )?;
 
     // NCBI reference: ncbi-blast/c++/src/app/blast/blastn_app.cpp:317-318
     // ```c
@@ -2799,6 +2770,119 @@ pub fn write_blastn_pairwise_report<W: Write>(
         write_blastn_final_footer(writer, report)?;
     }
     writer.flush()
+}
+
+/// The parts of one query's BLASTN pairwise report (`x_pairwise_par::QuerySections`).
+struct BlastnSections<'a> {
+    config: &'a PairwiseConfig,
+    queries: &'a [BlastnPairwiseQuery],
+    report: &'a BlastnPairwiseReport,
+}
+
+impl super::x_pairwise_par::QuerySections for BlastnSections<'_> {
+    fn num_alignments(&self) -> usize {
+        self.report.num_alignments
+    }
+
+    fn head<W: Write>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+        group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
+    ) -> io::Result<()> {
+        let (query, report) = (&self.queries[q_idx], self.report);
+        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
+        // ```c++
+        //     // print the preamble for this query
+        //
+        //     m_Outfile << "\n\n";
+        // ```
+        writer.write_all(b"\n\n")?;
+        write_blastp_query_header(writer, &query.query_name, query.query_length)?;
+        let Some(group) = group else {
+            write_no_hits_found(writer)?;
+            if report.unsearched.get(q_idx).copied().unwrap_or(false) {
+                write_tblastn_unsearched_query_footer_spacing(writer, false)?;
+            } else {
+                write_nucleotide_query_footer_spacing(
+                    writer,
+                    query.karlin,
+                    query.effective_search_space,
+                    false,
+                )?;
+            }
+            return Ok(());
+        };
+        // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-611
+        // ```c++
+        //     CShowBlastDefline showdef(*aln_set, *m_Scope,
+        //                               defline_length == -1 ? kFormatLineLength:defline_length,
+        //                               m_NumSummary + additional);
+        // ```
+        // The titles of the subjects of the records read (by subject index).
+        write_blastn_description_table(
+            writer,
+            group.described(report.num_descriptions),
+            group.subject_order.len() <= report.num_descriptions,
+            &group.subject_hits,
+            &group.subject_titles,
+            false,
+            false,
+        )?;
+        writeln!(writer)
+    }
+
+    fn subject<W: Write>(
+        &self,
+        writer: &mut W,
+        probe: Option<&mut FormatProbe<'_>>,
+        group: &super::x_pairwise_par::QueryGroup<'_>,
+        s_idx: u32,
+        part: std::ops::Range<usize>,
+    ) -> io::Result<()> {
+        let config = self.config;
+        // A database sequence's heading is its stored title after `>` (a `BL_ORD_ID`
+        // id is not shown), as BLASTP's (`write_database_subject_alignments`).
+        if self.report.database.is_some() {
+            return write_database_subject_alignments_part(
+                writer,
+                probe,
+                &group.subject_titles[&s_idx],
+                false,
+                &group.subject_hits[&s_idx],
+                &group.subject_hit_indices[&s_idx],
+                part,
+                |writer, hit| {
+                    write_hsp_info(writer, hit, config)?;
+                    write_alignment(writer, hit, config)
+                },
+            );
+        }
+        write_subject_alignments_part(
+            writer,
+            probe,
+            s_idx,
+            &group.subject_titles[&s_idx],
+            false,
+            &group.subject_hits[&s_idx],
+            &group.subject_hit_indices[&s_idx],
+            part,
+            |writer, hit| {
+                write_hsp_info(writer, hit, config)?;
+                write_alignment(writer, hit, config)
+            },
+        )
+    }
+
+    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+        let query = &self.queries[q_idx];
+        write_nucleotide_query_footer_spacing(
+            writer,
+            query.karlin,
+            query.effective_search_space,
+            false,
+        )
+    }
 }
 
 // =============================================================================
@@ -3267,8 +3351,9 @@ pub fn write_tblastx_pairwise_report<W: Write>(
     subject_titles: &[Arc<[u8]>],
     report: &TblastxPairwiseReport,
     database: Option<&PairwiseDatabase>,
-    mut probe: Option<&mut FormatProbe<'_>>,
-    mut warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    probe: Option<&mut FormatProbe<'_>>,
+    warnings: Option<&mut super::query_warnings::QueryWarnings<'_>>,
+    x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> io::Result<()> {
     let mut buffered = io::BufWriter::new(writer);
     let writer = &mut buffered;
@@ -3289,12 +3374,54 @@ pub fn write_tblastx_pairwise_report<W: Write>(
             bucket.push((hsp_index, hit));
         }
     }
+    // The queries' reports, on `x_pool` with LOSAT_X_PAIRWISEPAR (`x_pairwise_par`).
+    super::x_pairwise_par::write(
+        writer,
+        &TblastxSections {
+            config,
+            queries,
+            report,
+            database,
+        },
+        &hits_by_query,
+        subject_titles,
+        probe,
+        warnings,
+        x_pool,
+    )?;
 
-    for (q_idx, query) in queries.iter().enumerate() {
-        // The query's warnings come before its preamble (`QueryWarnings`).
-        if let Some(warnings) = warnings.as_deref_mut() {
-            warnings.before_query(q_idx, writer)?;
-        }
+    // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:209
+    // ```c
+    //         formatter.PrintEpilog(opt);
+    // ```
+    // An error in a later query batch skips the epilog, and nothing follows the last
+    // query's footer.
+    if report.epilog {
+        write_tblastx_epilog(writer, report, database)?;
+    }
+    writer.flush()
+}
+
+/// The parts of one query's TBLASTX pairwise report (`x_pairwise_par::QuerySections`).
+struct TblastxSections<'a> {
+    config: &'a PairwiseConfig,
+    queries: &'a [TblastxPairwiseQuery],
+    report: &'a TblastxPairwiseReport,
+    database: Option<&'a PairwiseDatabase>,
+}
+
+impl super::x_pairwise_par::QuerySections for TblastxSections<'_> {
+    fn num_alignments(&self) -> usize {
+        self.report.num_alignments
+    }
+
+    fn head<W: Write>(
+        &self,
+        writer: &mut W,
+        q_idx: usize,
+        group: Option<&super::x_pairwise_par::QueryGroup<'_>>,
+    ) -> io::Result<()> {
+        let (query, report) = (&self.queries[q_idx], self.report);
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:1489-1491
         // ```c++
         //     // print the preamble for this query
@@ -3303,33 +3430,15 @@ pub fn write_tblastx_pairwise_report<W: Write>(
         // ```
         writer.write_all(b"\n\n")?;
         write_blastp_query_header(writer, &query.query_name, query.query_length)?;
-        let query_hits = &hits_by_query[q_idx];
-        if query_hits.is_empty() {
+        let Some(group) = group else {
             write_no_hits_found(writer)?;
             if report.unsearched.get(q_idx).copied().unwrap_or(false) {
                 write_tblastn_unsearched_query_footer_spacing(writer, false)?;
             } else {
                 write_tblastx_query_footer(writer, query)?;
             }
-            continue;
-        }
-
-        use std::collections::HashMap;
-        let mut subject_hits: HashMap<u32, Vec<&PairwiseHit>> = HashMap::new();
-        let mut subject_hit_indices: HashMap<u32, Vec<HspIndex>> = HashMap::new();
-        let mut subject_order: Vec<u32> = Vec::new();
-        for &(hsp_index, hit) in query_hits {
-            let s_idx = hit.hit.s_idx;
-            if !subject_hits.contains_key(&s_idx) {
-                subject_order.push(s_idx);
-            }
-            subject_hits.entry(s_idx).or_default().push(hit);
-            subject_hit_indices
-                .entry(s_idx)
-                .or_default()
-                .push(hsp_index);
-        }
-
+            return Ok(());
+        };
         // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:606-613
         // ```c++
         //     CShowBlastDefline showdef(*aln_set, *m_Scope,
@@ -3345,81 +3454,68 @@ pub fn write_tblastx_pairwise_report<W: Write>(
         //     }
         // ```
         // The titles of the subjects of the records read (by subject index), as BLASTN's.
-        let subject_titles: HashMap<u32, Vec<u8>> = subject_order
-            .iter()
-            .map(|&s_idx| {
-                let title = subject_titles
-                    .get(s_idx as usize)
-                    .map_or(&b""[..], |title| title.as_ref());
-                (s_idx, title.to_vec())
-            })
-            .collect();
-        let described = &subject_order[..subject_order.len().min(report.num_descriptions)];
         write_blastn_description_table(
             writer,
-            described,
-            subject_order.len() <= report.num_descriptions,
-            &subject_hits,
-            &subject_titles,
+            group.described(report.num_descriptions),
+            group.subject_order.len() <= report.num_descriptions,
+            &group.subject_hits,
+            &group.subject_titles,
             true,
             false,
         )?;
-        writeln!(writer)?;
+        writeln!(writer)
+    }
 
-        // NCBI reference: c++/src/objtools/align_format/align_format_util.cpp:1014-1040
-        // (PruneSeqalign keeps the alignments of the first `m_NumAlignments` subjects).
-        let aligned = &subject_order[..subject_order.len().min(report.num_alignments)];
-        for &s_idx in aligned {
-            // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3971-3980
-            // ```c++
-            // 		x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
-            // 	...
-            //     out<<"\n";
-            // ```
-            let write_hsp = |writer: &mut io::BufWriter<&mut W>, hit: &PairwiseHit| {
-                write_tblastx_hsp_info(writer, hit)?;
-                write_tblastx_alignment(writer, hit, config)?;
-                writeln!(writer)
-            };
-            // A database sequence's heading is its stored title after `>` (as BLASTP's,
-            // BLASTN's and TBLASTN's `-db` reports).
-            if database.is_some() {
-                write_database_subject_alignments(
-                    writer,
-                    probe.as_deref_mut(),
-                    &subject_titles[&s_idx],
-                    false,
-                    &subject_hits[&s_idx],
-                    &subject_hit_indices[&s_idx],
-                    write_hsp,
-                )?;
-                continue;
-            }
-            write_subject_alignments(
+    fn subject<W: Write>(
+        &self,
+        writer: &mut W,
+        probe: Option<&mut FormatProbe<'_>>,
+        group: &super::x_pairwise_par::QueryGroup<'_>,
+        s_idx: u32,
+        part: std::ops::Range<usize>,
+    ) -> io::Result<()> {
+        let config = self.config;
+        // NCBI reference: c++/src/objtools/align_format/showalign.cpp:3971-3980
+        // ```c++
+        // 		x_ShowAlnvecInfo(out,aln_vec_info,show_defline);
+        // 	...
+        //     out<<"\n";
+        // ```
+        let write_hsp = |writer: &mut W, hit: &PairwiseHit| {
+            write_tblastx_hsp_info(writer, hit)?;
+            write_tblastx_alignment(writer, hit, config)?;
+            writeln!(writer)
+        };
+        // A database sequence's heading is its stored title after `>` (as BLASTP's,
+        // BLASTN's and TBLASTN's `-db` reports).
+        if self.database.is_some() {
+            return write_database_subject_alignments_part(
                 writer,
-                probe.as_deref_mut(),
-                s_idx,
-                &subject_titles[&s_idx],
+                probe,
+                &group.subject_titles[&s_idx],
                 false,
-                &subject_hits[&s_idx],
-                &subject_hit_indices[&s_idx],
+                &group.subject_hits[&s_idx],
+                &group.subject_hit_indices[&s_idx],
+                part,
                 write_hsp,
-            )?;
+            );
         }
-
-        write_tblastx_query_footer(writer, query)?;
+        write_subject_alignments_part(
+            writer,
+            probe,
+            s_idx,
+            &group.subject_titles[&s_idx],
+            false,
+            &group.subject_hits[&s_idx],
+            &group.subject_hit_indices[&s_idx],
+            part,
+            write_hsp,
+        )
     }
 
-    // NCBI reference: ncbi-blast/c++/src/app/blast/tblastx_app.cpp:209
-    // ```c
-    //         formatter.PrintEpilog(opt);
-    // ```
-    // An error in a later query batch skips the epilog, and nothing follows the last
-    // query's footer.
-    if report.epilog {
-        write_tblastx_epilog(writer, report, database)?;
+    fn foot<W: Write>(&self, writer: &mut W, q_idx: usize) -> io::Result<()> {
+        write_tblastx_query_footer(writer, &self.queries[q_idx])
     }
-    writer.flush()
 }
 
 // =============================================================================

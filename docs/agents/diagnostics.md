@@ -340,6 +340,7 @@ export LOSAT_X_PAIRPAR=1
 export LOSAT_X_PAIRPARDISC=1
 export LOSAT_X_PAIRPARFOLD=1
 export LOSAT_X_PAIRPARGATE=1
+export LOSAT_X_PAIRWISEPAR=1
 export LOSAT_X_PURGEFAST=1
 export LOSAT_X_QBATCHPAR=1
 export LOSAT_X_QDUSTPAR=1
@@ -1614,6 +1615,39 @@ Rebuilding less:
   `[X_SHADOW] BPQBLOCKFMT output|stderr DIFFERENT at byte N ...` and stops the run. One line after the
   search: `[X_SHADOW] BPQBLOCKFMT blocks= bytes= stderr_bytes= identical`. The second search is a search of
   its own: it prints its own `LOSAT_TIMING` block and adds to the other switches' counters and shadow lines.
+- `LOSAT_X_PAIRWISEPAR=1` (BLASTN, TBLASTX, BLASTP, speed; in the strict set from the pull request that added it,
+  2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads)) the pairwise
+  report (outfmt 0) of BLASTN (every task, `-subject` and `-db`), TBLASTX and BLASTP is formatted on the search's pool
+  (`report/x_pairwise_par.rs`, exactness argument in its header). The three writers of `report/pairwise.rs` have one
+  shape: after the prolog, per query its warnings, its head (header, then "No hits found" and the footer, or the
+  description table), the alignments of the first `-num_alignments` subjects and its footer; the epilog after the last.
+  With the switch the queries are taken in windows of about 1 MiB of estimated text per thread; the pool groups each
+  window's hits by subject and formats each query's head, runs of about 256 KiB of its alignments (cut between HSPs,
+  also within one subject's) and its footer into one buffer each, in chunks of the same estimated size; the loop's
+  thread writes a chunk's buffers in the serial order, each query's warnings before its head, before the next chunk is
+  formatted. BLASTN's and BLASTP's outfmt 0 rows (`pairwise_hits`, `build_pairwise_hits`) are made on the pool too, in
+  the list order (the first error in that order). Each piece is the serial writer's calls on the same arguments, into a
+  buffer instead of the writer; a piece that fails has its bytes up to the failure written, then the error. The serial
+  writer stays: `LOSAT_X_PAIRWISEPAR=0`, one thread, a format observer (the Web adapter's; text only), and BLASTN while
+  threads of `LOSAT_X_QBATCHPAR` slots exist (their pools share the CPUs; the slots' searches already overlap the
+  reports). Without it the writers ran on the loop's thread while the pool waited: megablast 100 queries x 16S rRNA
+  (`-subject`, 12 NCBI query batches, `LOSAT_X_RPTSTREAM` writes each batch's reports after its search) spent 1.4-2.0 s
+  of 7-10 s there at 8 and 16 threads, TBLASTX's outfmt 0 text 0.41 s of the three genomes below at 16 threads. On the
+  workstation (16 CPUs of one socket, 3 s warm-up per run, medians of alternating runs, every report identical; off =
+  `LOSAT_X_PAIRWISEPAR=0`): megablast 100 queries x 16S 4.96 / 6.41 s at 16 threads, 9.36 / 10.70 s at 8, 67.46 /
+  67.45 s at 1; TBLASTX AP027131+AP027132+AP027133 x AP027133+AP027078+AP027131 (code 4) 7.67 / 7.99 s at 16 threads,
+  12.95 / 13.23 s at 8; MelaMJNV x 9 MJNV genomes 1.23 / 1.30 s at 16; AP027131 x AP027133 2.01 / 2.07 s at 8;
+  BLASTP 3,000 proteins x Species6 (`-subject`) 4.59 / 4.85 s at 16 threads and 7.71 / 7.89 s at 8, the
+  yeast proteome against its own `-db` 23.13 / 25.72 s at 16 and 37.32 / 39.59 s at 8 (in `LOSAT_X_BPQBLOCKFMT`'s
+  blocks), equal at 1; BLASTN cDNA 31,168 x 3 Mb, where `LOSAT_X_QBATCHPAR`'s slots run (the switch does not act), 6.26 / 6.24 s.
+  Peak memory: a window's text is at most 1 MiB of estimate per thread plus one piece; megablast 85-87 / 89-94 MiB at
+  16 threads and 91-93 / 78-81 MiB at 8 (the pool threads' glibc arenas keep the freed buffers), TBLASTX and BLASTP within the
+  runs' spread (BLASTP 40-51 / 42-53 MiB).
+- `LOSAT_X_PAIRWISEPARSHADOW=1` shadow of `LOSAT_X_PAIRWISEPAR` (turns the path on): also writes each report by the
+  serial writer into memory and compares the bytes (without warnings), and makes BLASTN's and BLASTP's rows serially and
+  compares them (`Debug`); a difference prints `[X_SHADOW] PAIRWISEPAR ... DIFFERENT` and stops the run. One line after
+  each report written on the pool: `[X_SHADOW] PAIRWISEPAR queries= chunks= pieces= bytes= identical`, and
+  `[X_SHADOW] PAIRWISEPARROWS rows= identical` after rows made on the pool.
 - `LOSAT_X_BPPFREE=1` (BLASTP, memory; in the strict set since 2026-10-14; `=0` turns it off) the preliminary
   hit lists hold no more than their HSPs need
   (`blastp/x_prelim_free.rs`, exactness argument in its header): a subject's HSP list for a query gives back

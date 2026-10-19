@@ -7,9 +7,11 @@
 //! - `t`: only the line below (the fill's time and RSS).
 //! - `ctl`: perf stat control around the fill: writes `enable` / `disable` to the FIFO named by
 //!   `R10_CTL` and waits for perf's `ack` on `R10_ACK` (`perf stat -D -1 --control fifo:CTL,ACK`).
-//! - `d<N>[h2|hw]`: the fill with the prefetch `N` words ahead (N = 0, 1, 2, 4, 8, 16, 32, 64, 128;
+//! - `d<N>[h2|hw|bf]`: the fill with the prefetch `N` words ahead (N = 0, 1, 2, 4, 8, 16, 32, 64, 128;
 //!   0 = apply each word at once, no prefetch); `h2` = PREFETCHT2, `hw` = PREFETCHW, else
-//!   PREFETCHT0 (`d16` is the shape of the default LOSAT_X_MBDELAY loop).
+//!   PREFETCHT0 (`d16` is the shape of the default LOSAT_X_MBDELAY loop); `bf` = PREFETCHT0 and
+//!   the update without the branch on the old head (`x_apply_bf`: the PV word and the helper count
+//!   are always written, with 0 added where the branch would skip them; same values).
 //! - `dump=<path>`: before the fill, write each word's (cell, q_off_1) as two little-endian u32,
 //!   in the fill's order.
 //!
@@ -18,7 +20,7 @@
 
 use super::{
     build_unmasked_ranges, db_word_count_exceeds, x_mb_apply, MaskedInterval, XMbTables,
-    BLAST2NA_MASK,
+    BLAST2NA_MASK, PV_ARRAY_MASK,
 };
 use std::io::{Read, Write};
 use std::sync::OnceLock;
@@ -48,7 +50,9 @@ fn probe() -> &'static Probe {
             } else if k == "dump" {
                 p.dump = Some(val.to_string());
             } else if let Some(rest) = k.strip_prefix('d') {
-                let (n, h) = if let Some(n) = rest.strip_suffix("h2") {
+                let (n, h) = if let Some(n) = rest.strip_suffix("bf") {
+                    (n, 4u8)
+                } else if let Some(n) = rest.strip_suffix("h2") {
                     (n, 2u8)
                 } else if let Some(n) = rest.strip_suffix("hw") {
                     (n, 3u8)
@@ -247,6 +251,36 @@ fn prefetch<const H: u8>(p: *const u32) {
     let _ = p;
 }
 
+/// `x_mb_apply` without the branch on the old head: the PV word is ORed with 0 and the helper count
+/// gets a saturating 0 where the branch would skip them, so every value is the one `x_mb_apply`
+/// writes.
+#[inline(always)]
+fn x_apply_bf(t: &mut XMbTables<'_>, ascending_cells: bool, bucket: usize, q_off_1: u32) {
+    const K_COMPRESSION_FACTOR: usize = 2048;
+    let old = t.hashtable[bucket];
+    let empty = (old == 0) as u32;
+    let idx = bucket >> t.pv_array_bts;
+    if idx < t.pv_array.len() {
+        t.pv_array[idx] |= empty << (bucket & PV_ARRAY_MASK);
+    }
+    let h = &mut t.helper_array[bucket / K_COMPRESSION_FACTOR];
+    *h = h.saturating_add(1 - empty);
+    t.next_pos[q_off_1 as usize] = old;
+    t.hashtable[bucket] = q_off_1;
+    if ascending_cells {
+        t.words.push((bucket as u32, q_off_1));
+    }
+}
+
+#[inline(always)]
+fn apply<const H: u8>(t: &mut XMbTables<'_>, ascending_cells: bool, bucket: usize, q_off_1: u32) {
+    if H == 4 {
+        x_apply_bf(t, ascending_cells, bucket, q_off_1);
+    } else {
+        x_mb_apply(t, ascending_cells, bucket, q_off_1);
+    }
+}
+
 /// The LOSAT_X_MBDELAY loop with the delay `D` and the prefetch hint `H` (D = 0: no queue).
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
@@ -276,14 +310,14 @@ fn fill_delay<const D: usize, const H: u8>(
         t,
         |t, bucket, q_off_1| {
             if D == 0 {
-                x_mb_apply(t, ascending_cells, bucket, q_off_1);
+                apply::<H>(t, ascending_cells, bucket, q_off_1);
                 return;
             }
             prefetch::<H>(t.hashtable.as_ptr().wrapping_add(bucket));
             let slot = x_ring_len % D;
             if x_ring_len >= D {
                 let (b, q) = x_ring[slot];
-                x_mb_apply(t, ascending_cells, b as usize, q);
+                apply::<H>(t, ascending_cells, b as usize, q);
             }
             x_ring[slot] = (bucket as u32, q_off_1);
             x_ring_len += 1;
@@ -294,7 +328,7 @@ fn fill_delay<const D: usize, const H: u8>(
         let first = x_ring_len - pending;
         for k in first..x_ring_len {
             let (b, q) = x_ring[k % D];
-            x_mb_apply(t, ascending_cells, b as usize, q);
+            apply::<H>(t, ascending_cells, b as usize, q);
         }
     }
 }
@@ -331,6 +365,7 @@ pub(super) fn fill(
         };
     }
     match shape {
+        (0, 4) => go!(0, 4),
         (0, _) => go!(0, 0),
         (1, 0) => go!(1, 0),
         (2, 0) => go!(2, 0),
@@ -345,6 +380,9 @@ pub(super) fn fill(
         (64, 2) => go!(64, 2),
         (16, 3) => go!(16, 3),
         (32, 3) => go!(32, 3),
+        (16, 4) => go!(16, 4),
+        (32, 4) => go!(32, 4),
+        (64, 4) => go!(64, 4),
         _ => return false,
     }
     true

@@ -750,7 +750,12 @@ Same values, faster computation:
   (table up to 768 KiB), then clears the table; segments over 127 letters are not kept (line C,
   v4-C DECISIONS 31-34). Shadow: `LOSAT_X_SEGTRIMMEMOSHADOW=1` trims every hit again and stops on
   a difference; with `LOSAT_X_STATS=1` as well it prints `[X_SHADOW] SEGTRIMMEMO memo_hits_compared=`.
-  TIMINGS
+  Workstation, one core or eight, 8 rounds (2026-10-19): TBLASTN AP027131 x AP027133 n1 0.924 of
+  the time (pairs 0.921-0.926), n8 0.971; BLASTX AP027131 x AP027133 n1 0.927, n8 0.985 (memo on
+  every masker, e91c8864); with the two maskers of this version (cc7306b2, load 12-45) n1 0.932 /
+  0.935. WSSV x PajaWSV, OrthoFinder q0 x Species6 n8 and TBLASTX d04 do not use it. Max RSS +1 to
+  +4 MiB (BLASTX n8 68 MiB; NCBI n1 88 MiB). At eight threads the repeats fall on other threads'
+  tables, hence the smaller gain.
 - `LOSAT_X_DUSTFAST=1`, `LOSAT_X_DUSTRING=1` DUST perfect-interval list built in one merge,
   window kept in a ring buffer. Shadow: `LOSAT_X_DUSTSHADOW=1`.
 - `LOSAT_X_KARLINFAST=1` Karlin K convolution in eight lanes (same per-lane order).

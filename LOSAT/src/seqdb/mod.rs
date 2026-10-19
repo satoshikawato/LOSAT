@@ -19,6 +19,12 @@
 //! by id or taxonomy are left unread. The LMDB file of a version 5 database
 //! must exist, as for NCBI, but its contents are not checked.
 //!
+//! EXPERIMENT (LOSAT_X_DBIDXREAD, in the strict set): an index file stays open
+//! after it is checked, and the ranges of its offset arrays that a block, a
+//! header or a planned block needs are read by position, so the arrays take
+//! no memory (NCBI maps the file). Without the switch the arrays are held
+//! (4 bytes per sequence each).
+//!
 //! A search program opens the database named by its `-db` with
 //! [`SeqDb::open_in`] and a [`SearchPath`]: the name is looked for as NCBI
 //! BLAST+ looks for it (current directory, `BLASTDB`, the registry value
@@ -35,12 +41,59 @@ pub mod volume;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod x_dbidxread_tests;
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 pub use alias::SearchPath;
 pub use header::Defline;
 pub use volume::{AmbiguityRun, SequenceBlock, Volume, BLASTNA_SENTINEL};
+
+/// EXPERIMENT (LOSAT_X_DBIDXREAD): how the volumes read their index files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum XDbIdxRead {
+    /// The whole file is read and the offset arrays are held (`IndexFile::parse`).
+    Off,
+    /// The arrays are read from the open file where they are needed (`IndexFile::open`).
+    On,
+    /// `On`, with the held arrays beside them, compared with every read.
+    Shadow,
+}
+
+// No NCBI counterpart: reads the LOSAT_X_DBIDXREAD / LOSAT_X_DBIDXREADSHADOW switches once; it does
+// not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_DBIDXREAD): a strict-set switch, on unless it is `0`, or `LOSAT_X_DEFAULT=0`
+/// and it is not set; `LOSAT_X_DBIDXREADSHADOW` (any value) selects the shadow mode.
+pub(crate) fn x_dbidxread() -> XDbIdxRead {
+    static MODE: OnceLock<XDbIdxRead> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        if std::env::var_os("LOSAT_X_DBIDXREADSHADOW").is_some() {
+            XDbIdxRead::Shadow
+        } else if crate::utils::xswitch::on("LOSAT_X_DBIDXREAD") {
+            XDbIdxRead::On
+        } else {
+            XDbIdxRead::Off
+        }
+    })
+}
+
+// No NCBI counterpart: prints counters and changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_DBIDXREADSHADOW): the line `main` prints at exit.
+pub fn x_dbidxread_print_summary() {
+    if x_dbidxread() == XDbIdxRead::Shadow {
+        index::x_shadow_print_line(true);
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_DBIDXREAD): the most sequences of a range of
+/// `SeqDb::header_ranges` that the checks of every title read at once.
+pub const HEADER_RANGE_SEQS: u32 = 1024;
+
+/// EXPERIMENT (LOSAT_X_DBIDXREAD): the most bytes of the header file that
+/// `SeqDb::visit_deflines` reads at once (one longer record alone).
+const HEADER_PIECE_BYTES: u64 = 1 << 20;
 
 /// Sequence type of a database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -730,15 +783,16 @@ impl SeqDb {
     /// The block that starts at `first_ordinal`: as many following sequences
     /// of the same volume as fit `max_bytes` of the sequence file, at least
     /// one. `None` when `first_ordinal` is past the last sequence.
+    ///
+    /// When the index file cannot be read here (`LOSAT_X_DBIDXREAD`), the
+    /// block is the one sequence `first_ordinal`: reading it
+    /// ([`SeqDb::read_block`]) reads the same index entries and returns the
+    /// error where a block's read errors are reported.
     pub fn next_block(&self, first_ordinal: u32, max_bytes: u64) -> Option<BlockRange> {
         let (volume, first) = self.find_volume(first_ordinal).ok()?;
-        let vol = &self.volumes[volume];
-        // The ends `first + 1 ..= num_oids`; the offsets ascend, so the ends
-        // whose bytes fit form a prefix.
-        let candidates = first + 1..vol.num_oids() + 1;
-        let fitting =
-            partition_point_u32(candidates, |end| vol.block_bytes(first, end) <= max_bytes);
-        let end = first + (fitting.max(1) as u32);
+        let end = self.volumes[volume]
+            .block_end(first, max_bytes)
+            .unwrap_or(first + 1);
         Some(BlockRange {
             volume,
             first,
@@ -801,9 +855,19 @@ impl SeqDb {
     /// ordinal id of the volume, as NCBI reports it.
     pub fn deflines(&self, ordinal: u32) -> Result<Vec<OrdinalDefline>, SeqDbError> {
         let (volume, oid) = self.find_volume(ordinal)?;
+        self.ordinal_deflines(volume, ordinal, self.volumes[volume].deflines(oid))
+    }
+
+    /// The definition lines of a volume's sequence as `deflines` gives them for `ordinal`.
+    fn ordinal_deflines(
+        &self,
+        volume: usize,
+        ordinal: u32,
+        deflines: Result<Vec<Defline>, SeqDbError>,
+    ) -> Result<Vec<OrdinalDefline>, SeqDbError> {
         let volume_start = self.volume_starts[volume];
         let vol = &self.volumes[volume];
-        vol.deflines(oid)?
+        deflines?
             .into_iter()
             .map(|defline| {
                 let bl_ord_id = u64::from(volume_start) + u64::from(defline.volume_ordinal);
@@ -822,6 +886,124 @@ impl SeqDb {
                 })
             })
             .collect()
+    }
+
+    /// EXPERIMENT (LOSAT_X_DBIDXREAD): the ordinal ids of the database cut
+    /// into ranges of at most `max_seqs` sequences (at least one) inside one
+    /// volume each, in order: the ranges that a check of every sequence's
+    /// header or ambiguity data reads one at a time
+    /// ([`SeqDb::visit_deflines`], [`SeqDb::visit_ambiguity`]).
+    pub fn header_ranges(&self, max_seqs: u32) -> Vec<BlockRange> {
+        let max_seqs = max_seqs.max(1);
+        let mut ranges = Vec::new();
+        for (volume, vol) in self.volumes.iter().enumerate() {
+            let mut first = 0;
+            while first < vol.num_oids() {
+                let end = first + max_seqs.min(vol.num_oids() - first);
+                ranges.push(BlockRange {
+                    volume,
+                    first,
+                    end,
+                    first_ordinal: self.volume_starts[volume] + first,
+                });
+                first = end;
+            }
+        }
+        ranges
+    }
+
+    /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(ordinal, self.deflines(ordinal))` for
+    /// the sequences of `range` in order until `visit` returns false; returns whether every
+    /// call returned true. The headers of the range are read with one read of the index file
+    /// and one read of the header file per MiB (`Volume::visit_deflines`) instead of two reads
+    /// per sequence. `LOSAT_X_DBIDXREADSHADOW` compares every result with `deflines`'.
+    pub fn visit_deflines(
+        &self,
+        range: BlockRange,
+        mut visit: impl FnMut(u32, Result<Vec<OrdinalDefline>, SeqDbError>) -> bool,
+    ) -> bool {
+        let Some(vol) = self.volumes.get(range.volume) else {
+            return range.is_empty().then_some(true).unwrap_or_else(|| {
+                visit(range.first_ordinal, Err(volume_range_error(range, self)))
+            });
+        };
+        let shadow = x_dbidxread() == XDbIdxRead::Shadow;
+        vol.visit_deflines(
+            range.first,
+            range.end,
+            HEADER_PIECE_BYTES,
+            &mut |oid, deflines| {
+                let ordinal = range.first_ordinal + (oid - range.first);
+                let deflines = self.ordinal_deflines(range.volume, ordinal, deflines);
+                if shadow {
+                    let expected = self.deflines(ordinal);
+                    if x_result_text(&deflines) != x_result_text(&expected) {
+                        index::x_shadow_difference(format!(
+                        "the definition lines of sequence {ordinal} read in a range differ: {} \
+                         where deflines gives {}",
+                        x_result_text(&deflines),
+                        x_result_text(&expected)
+                    ));
+                    }
+                }
+                visit(ordinal, deflines)
+            },
+        )
+    }
+
+    /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(ordinal, self.check_ambiguity(ordinal))`
+    /// for the sequences of `range` in order until `visit` returns false; returns whether every
+    /// call returned true. The offsets of the range are read at once
+    /// (`Volume::visit_ambiguity`). `LOSAT_X_DBIDXREADSHADOW` compares every result with
+    /// `check_ambiguity`'s.
+    pub fn visit_ambiguity(
+        &self,
+        range: BlockRange,
+        mut visit: impl FnMut(u32, Result<(), SeqDbError>) -> bool,
+    ) -> bool {
+        let Some(vol) = self.volumes.get(range.volume) else {
+            return range.is_empty().then_some(true).unwrap_or_else(|| {
+                visit(range.first_ordinal, Err(volume_range_error(range, self)))
+            });
+        };
+        let shadow = x_dbidxread() == XDbIdxRead::Shadow;
+        vol.visit_ambiguity(
+            range.first,
+            range.end,
+            range.first_ordinal,
+            &mut |oid, result| {
+                let ordinal = range.first_ordinal + (oid - range.first);
+                if shadow {
+                    let expected = self.check_ambiguity(ordinal);
+                    if x_result_text(&result) != x_result_text(&expected) {
+                        index::x_shadow_difference(format!(
+                        "the ambiguity check of sequence {ordinal} read in a range differs: {} \
+                         where check_ambiguity gives {}",
+                        x_result_text(&result),
+                        x_result_text(&expected)
+                    ));
+                    }
+                }
+                visit(ordinal, result)
+            },
+        )
+    }
+}
+
+fn volume_range_error(range: BlockRange, db: &SeqDb) -> SeqDbError {
+    SeqDbError::Range(format!(
+        "volume {} is outside the database ({} volumes)",
+        range.volume,
+        db.volumes.len()
+    ))
+}
+
+// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_DBIDXREADSHADOW): a result as the shadow compares it (an error by its text).
+fn x_result_text<T: std::fmt::Debug>(result: &Result<T, SeqDbError>) -> String {
+    match result {
+        Ok(value) => format!("Ok({value:?})"),
+        Err(error) => format!("Err({error})"),
     }
 }
 

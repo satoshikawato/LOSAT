@@ -1,0 +1,1 @@
+- BLASTX computes the large-gap sum e-value of linked HSPs in NCBI's order of evaluation (`blast_stat.c:4560-4561`, as TBLASTX already did): the e-values of `-ungapped -comp_based_stats 0` linked sets now equal NCBI's to the last digit (they differed by 12-256 ULP, invisible in outfmt 0/6/7).

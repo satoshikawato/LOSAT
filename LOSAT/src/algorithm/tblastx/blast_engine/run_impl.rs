@@ -3154,9 +3154,9 @@ fn search_query_batch(
     let x_scan_bf = crate::algorithm::tblastx::x_scan_bf::x_scan_bf_for(&lookup);
 
     // EXPERIMENT (LOSAT_X_PAIRPAR / LOSAT_X_PAIRPARSHADOW), dispatch point 1 (per batch): the
-    // gates and the exactness guard, then one lookup table per query context (each backbone chain
-    // filtered to the context, order kept). None (switch off, gate or guard) keeps the reference
-    // loop for every subject of the batch.
+    // gates and the exactness guards (the first one only without LOSAT_X_TBXBAND), then one lookup
+    // table per query context (each backbone chain filtered to the context, order kept). None
+    // (switch off, gate or guard) keeps the reference loop for every subject of the batch.
     //
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
     // ```c
@@ -3175,8 +3175,9 @@ fn search_query_batch(
     //     PV_SET(pv, i, PV_ARRAY_BTS);
     //     bbc[i].num_used = lookup->thin_backbone[i][1];
     // ```
-    // The guard compares the context and subject lengths with the slack of this table (size above
-    // minus query_length); the per-context tables use the layout above.
+    // The guards compare the subject lengths (and, without LOSAT_X_TBXBAND, the context lengths)
+    // with the slack of this table (size above minus query_length); the per-context tables use the
+    // layout above.
     let x_pair_par_batch = x_pair_par::XPairPar::prepare(x_pair_par::XBatch {
         lookup: &lookup,
         contexts: &contexts,

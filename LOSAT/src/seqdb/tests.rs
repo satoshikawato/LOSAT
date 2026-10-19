@@ -202,7 +202,7 @@ fn check_database(db: &SeqDb, entries: &[Entry], max_bytes: u64, name: &str) {
         );
         if range.len() > 1 {
             assert!(
-                volume.block_bytes(range.first, range.end) <= max_bytes,
+                volume.block_bytes(range.first, range.end).unwrap() <= max_bytes,
                 "{name}: block within the budget"
             );
         }
@@ -627,8 +627,8 @@ fn index_file_errors() {
     assert_eq!(index.volume_length, 801);
     assert_eq!(index.max_length, 300);
     assert_eq!(index.title, b"LOSAT seqdb fixture, protein, version 4");
-    assert_eq!(index.sequence_range(0), (1, 63));
-    assert_eq!(index.ambiguity_range(0), None);
+    assert_eq!(index.sequence_range(0).unwrap(), (1, 63));
+    assert_eq!(index.ambiguity_range(0).unwrap(), None);
 
     let message = |result: Result<IndexFile, SeqDbError>| match result {
         Err(SeqDbError::Format { message, .. }) => message,
@@ -664,8 +664,8 @@ fn index_file_errors() {
     let index = IndexFile::parse(&bytes, SeqType::Nucleotide, &path).unwrap();
     assert_eq!(index.version, 5);
     assert_eq!(index.lmdb_file.as_deref(), Some(b"nucl_v5.ndb".as_slice()));
-    assert_eq!(index.sequence_range(0), (1, 12));
-    assert_eq!(index.ambiguity_range(0), Some((12, 12)));
+    assert_eq!(index.sequence_range(0).unwrap(), (1, 12));
+    assert_eq!(index.ambiguity_range(0).unwrap(), Some((12, 12)));
 }
 
 fn temp_dir(tag: &str) -> PathBuf {

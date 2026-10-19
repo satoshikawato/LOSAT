@@ -5,7 +5,8 @@
 //! 50,000 query letters, unless its variable is `0`, or `LOSAT_X_DEFAULT=0` and its variable is
 //! not set; a positive number in the variable sets the size of a block. With it on, a search
 //! whose only report is tabular format 6 searches its queries block by block and writes each
-//! block's rows before it searches the next block. Every test states the default it runs with:
+//! block's rows before it searches the next block (with `LOSAT_X_BPQBLOCKFMT`, also outfmt 0 and
+//! 7: `blastp_query_blocks_fmt.rs`). Every test states the default it runs with:
 //! these tests compare the rows with the search of all queries (`LOSAT_X_BPQBLOCK=0`) and check,
 //! from the `[TIMING] blastp_total` lines that each search of a query set prints with
 //! `LOSAT_TIMING`, that the block path ran (more searches than the reference) or did not (the
@@ -194,14 +195,17 @@ fn blocks_write_the_rows_to_one_output_file() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+// outfmt 0 and 7 with `LOSAT_X_BPQBLOCKFMT=0` (with it on, `blastp_query_blocks_fmt.rs`), and one
+// block, take the search of all queries.
 #[test]
 fn other_reports_and_one_block_take_the_search_of_all_queries() {
     let batch = ("BATCH_SIZE", "3000");
+    let fmt_off = ("LOSAT_X_BPQBLOCKFMT", "0");
     for (letters, outfmt) in [("1", "7"), ("1", "0"), ("100000000", "6")] {
         let (reference, reference_searches) = blastp(1, &[batch, SWITCH_OFF], &["-outfmt", outfmt]);
         let (report, searches) = blastp(
             1,
-            &[batch, ("LOSAT_X_BPQBLOCK", letters)],
+            &[batch, ("LOSAT_X_BPQBLOCK", letters), fmt_off],
             &["-outfmt", outfmt],
         );
         assert!(

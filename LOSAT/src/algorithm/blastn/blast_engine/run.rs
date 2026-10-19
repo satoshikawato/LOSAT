@@ -4127,6 +4127,9 @@ struct XAheadScratch<'a> {
     greedy: &'a mut GreedyAlignScratch,
 }
 
+#[path = "x_ctx_o1.rs"]
+mod x_ctx_o1;
+
 struct QueryContextIndex {
     offsets: Vec<usize>,
     min_length: usize,
@@ -4161,6 +4164,12 @@ struct QueryContextIndex {
     // length it would have. Four bytes per query base become a few words.
     x_ranges: Vec<(usize, usize, u32)>,
     x_total_len: usize,
+    // EXPERIMENT (LOSAT_X_CTXO1): what `direct_map` holds, in constant time from the layout of the
+    // contexts (`x_ctx_o1.rs`). When it is built it answers every offset the table covers, and
+    // neither the runs nor the table are built. With the shadow it is `x_o1_shadow` instead, and
+    // the table is built to compare with.
+    x_o1: Option<x_ctx_o1::CtxO1>,
+    x_o1_shadow: Option<x_ctx_o1::CtxO1>,
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:235-241
@@ -4176,13 +4185,15 @@ struct QueryContextIndex {
 /// answers the context of a query offset: the table of the answers (0), the runs (1), or both
 /// with a comparison (2).
 ///
-/// 0 = direct map, 1 = LOSAT_X_CTXFAST (ranges only), 2 = LOSAT_X_CTXSHADOW
-/// (both, compared on every lookup).
+/// 0 = direct map, 1 = LOSAT_X_CTXFAST (ranges only), 2 = LOSAT_X_CTXSHADOW or
+/// LOSAT_X_CTXO1SHADOW (the table as well, compared on every lookup with the form that answers).
 fn x_ctx_mode() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();
     *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_CTXSHADOW").is_some() {
+        if std::env::var_os("LOSAT_X_CTXSHADOW").is_some()
+            || std::env::var_os("LOSAT_X_CTXO1SHADOW").is_some()
+        {
             2
         } else if crate::utils::xswitch::on("LOSAT_X_CTXFAST") {
             1
@@ -4190,6 +4201,13 @@ fn x_ctx_mode() -> u8 {
             0
         }
     })
+}
+
+/// No NCBI counterpart: reads the LOSAT_X_CTXO1 switch once (`x_ctx_o1.rs`).
+fn x_ctx_o1_on() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_CTXO1"))
 }
 
 impl QueryContextIndex {
@@ -4233,8 +4251,21 @@ impl QueryContextIndex {
         // only stands in for it when no two runs overlap; context 0 needs no
         // run because the map starts out as zeros.
         let mut x_mode = x_ctx_mode();
+        // EXPERIMENT (LOSAT_X_CTXO1): the constant-time form, where the layout allows it. It takes
+        // the place of the runs; the shadow (mode 2) keeps the table to compare with.
+        let x_o1 = if x_ctx_o1_on() {
+            x_ctx_o1::CtxO1::build(contexts, total_len)
+        } else {
+            None
+        };
+        let x_shadow = x_mode == 2;
+        if x_o1.is_some() {
+            x_mode = if x_shadow { 0 } else { 1 };
+        }
+        let (x_o1, x_o1_shadow) = if x_shadow { (None, x_o1) } else { (x_o1, None) };
+        let x_o1_built = x_o1.is_some() || x_o1_shadow.is_some();
         let mut x_ranges: Vec<(usize, usize, u32)> = Vec::new();
-        if x_mode != 0 {
+        if x_mode != 0 && !x_o1_built {
             for (idx, ctx) in contexts.iter().enumerate() {
                 let start = ctx.query_offset.max(0) as usize;
                 let end = start.saturating_add(ctx.len);
@@ -4274,7 +4305,13 @@ impl QueryContextIndex {
             max_length,
             direct_map,
             x_ranges,
-            x_total_len: if x_mode == 0 { 0 } else { total_len },
+            x_total_len: if x_mode == 0 || x_o1_built {
+                0
+            } else {
+                total_len
+            },
+            x_o1,
+            x_o1_shadow,
         }
     }
 
@@ -4308,6 +4345,22 @@ impl QueryContextIndex {
         }
     }
 
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219
+    /// ```c
+    /// Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
+    /// ```
+    /// The context of query offset `n`. EXPERIMENT (LOSAT_X_CTXO1): the constant-time form answers
+    /// here, inlined into the seed loops; any other form is the out-of-line `x_context_for_offset_ref`.
+    #[inline(always)]
+    fn context_for_offset(&self, n: usize) -> usize {
+        if let Some(o1) = &self.x_o1 {
+            if let Some(context) = o1.get(n) {
+                return context;
+            }
+        }
+        self.x_context_for_offset_ref(n)
+    }
+
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_query_info.c:219-238 (BSearchContextInfo)
     // ```c
     // if (A->contexts[m].query_offset > n) e = m;
@@ -4315,7 +4368,9 @@ impl QueryContextIndex {
     // ...
     // return b;
     // ```
-    fn context_for_offset(&self, n: usize) -> usize {
+    // The forms before LOSAT_X_CTXO1 (and its shadow), out of line as `context_for_offset` was.
+    #[inline(never)]
+    fn x_context_for_offset_ref(&self, n: usize) -> usize {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
         // ```c
         // Int4 BSearchContextInfo(Int4 n, const BlastQueryInfo * A)
@@ -4329,6 +4384,17 @@ impl QueryContextIndex {
         //     }
         //     return b;
         // ```
+        // LOSAT_X_CTXO1 with its shadow (LOSAT_X_CTXO1SHADOW or LOSAT_X_CTXSHADOW): the constant-time
+        // form answers every offset the table covers, and `assert!` compares it with the table.
+        if let Some(o1) = &self.x_o1_shadow {
+            if let Some(context) = o1.get(n) {
+                assert!(
+                    context == self.direct_map[n] as usize,
+                    "LOSAT_X_CTXO1SHADOW: context of offset {n} differs"
+                );
+                return context;
+            }
+        }
         // Dispatch point of LOSAT_X_CTXFAST / LOSAT_X_CTXSHADOW. The code after this block (the table,
         // then `bsearch_context_info`) ports `BSearchContextInfo`. With the runs the same context is found
         // without the table. In mode 2 both are computed and `assert!` compares them.

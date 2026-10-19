@@ -302,6 +302,7 @@ export LOSAT_X_BXSUBJFLOW=1
 export LOSAT_X_CODONFAST=1
 export LOSAT_X_COMPFAST=1
 export LOSAT_X_CTXFAST=1
+export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DEKKER=1
 export LOSAT_X_DIAGLV=1
@@ -790,7 +791,32 @@ Same values, faster computation:
   answer "none contained" / "no such endpoint" without walking the tree. Shadow:
   `LOSAT_X_ITREESHADOW=1`.
 - `LOSAT_X_CTXFAST=1` blastn query-offset-to-context lookup by binary search instead of a per-base
-  table. Shadow: `LOSAT_X_CTXSHADOW=1`.
+  table. Shadow: `LOSAT_X_CTXSHADOW=1` (while `LOSAT_X_CTXO1` is on it compares that form instead; with
+  `LOSAT_X_CTXO1=0` it compares the binary search).
+- `LOSAT_X_CTXO1=1` (blastn, speed; in the strict set from the pull request that added it, 2026-10-19;
+  `=0` returns to `LOSAT_X_CTXFAST`'s binary search, `LOSAT_X_DEFAULT=0` to the per-base table) the
+  context of a lookup hit's query offset in constant time (`blastn/blast_engine/x_ctx_o1.rs`, argument
+  in its header): where every context has the same length `L`, `offset / (L + 1)` by a multiplication
+  (NCBI's `BSearchContextInfo` shortcut), else one `u32` per block of `2^k` offsets (the context at the
+  block's start and the place of the block's sentinel), with `k` the largest value at which at most one
+  block in 256 holds two sentinels; those few blocks keep the binary search. The answer is the per-base
+  table's at every offset. The binary search reads up to 16 entries of 24 bytes per context for each
+  lookup hit (R8: 52 % of the cycles of blastn-short with 30,000 queries, 318 cycles a hit). The block
+  table takes 4 bytes per `2^k` query letters (375 KB for 30,000 queries of 18 to 30 letters, 2.8 MB for
+  both strands of 31,168 cDNAs of 30 to 71,382 letters); it is not built above 64 MiB, nor where the
+  contexts are not laid out one after another with one sentinel, and the binary search answers.
+  `LOSAT_X_CTXO1FORM=blocks` (tuning, not in the strict set) builds the block table where the lengths
+  are equal. Shadow: `LOSAT_X_CTXO1SHADOW=1` (as `LOSAT_X_CTXSHADOW=1`, which now compares this form
+  while it is on) builds the per-base table as well and stops on a difference; in a shadow run the
+  table answers the crowded blocks (their binary search is covered by a unit test and by
+  `LOSAT_X_CTXO1=0 LOSAT_X_CTXSHADOW=1`).
+  Measured (workstation, Xeon 6338, booked cores of one node, alternating order, medians, every report
+  identical; base = the binary before): blastn-short of 30,000 queries of 24 letters against 3 Mb of
+  D. melanogaster 2L at one thread 57.15 -> 29.98 s (x0.525; NCBI `-db` 28.87 s; the block table instead
+  of the division x0.571), of lengths 18 to 30 57.36 -> 33.74 s (x0.588; NCBI 48.81 s); dc-megablast of
+  31,168 cDNAs against the same subject x0.822 at one thread, x0.939 at 16; blastn of the same x0.949
+  / x0.960; max RSS unchanged. `=0` x1.000-1.005 of the binary before (1.6 % more instructions on
+  blastn-short: the binary search moved out of line behind the check for this form).
 - `LOSAT_X_LUTARENA=1` protein lookup-table chains carved from one arena per table.
 - `LOSAT_X_MBDELAY=1`, `LOSAT_X_MBBATCH=64` megablast lookup construction touches (prefetches)
   hash cells ahead in batches of 64; same update order.

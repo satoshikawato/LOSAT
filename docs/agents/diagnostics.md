@@ -357,6 +357,7 @@ export LOSAT_X_SEGSHARE=1
 export LOSAT_X_TBNBATCH=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNEVENTS=1
+export LOSAT_X_TBNHITBF=1
 export LOSAT_X_TBNLINKWIN=1
 export LOSAT_X_TBNOIDCHUNK=1
 export LOSAT_X_TBNOIDNEXT=1
@@ -3082,6 +3083,33 @@ Scheduling (each value computed by one thread with the original function; order 
   (`x_candidates_w3c5`, #273: cycles -6.0 % on the human and zebrafish genomes x one protein). An
   AVX2 form of the loop (`vpgatherdd` of the presence words) cut instructions by a third but was 2-7
   % slower (IPC 3.6 -> 2.3) and is not used.
+- `LOSAT_X_TBNHITBF=1` tblastn (speed; in the strict set from the pull request that added it,
+  2026-10-19; `=0` turns it off) the two-hit loop of the unit path (`XTwoHit::pairs`, every offset array
+  the scan fills; `tblastn/x_tbn_hitbf.rs`, exactness argument in its header) takes the two outcomes most
+  hits end in, too far (`diff >= window`: `last_hit = s + diag_offset`) and overlap (`diff < wordsize`:
+  nothing), without a branch: `diff = (s + diag_offset) - last_hit` (the reference's value, both
+  wrapping in a release build), a candidate is `(diff - wordsize) as u32 < window - wordsize` (one unsigned
+  compare), and the cell's next `last_hit` is selected (`s + diag_offset`, or the value it read). A
+  flag-1 cell or a candidate stops the loop at that hit, which runs the body of `pairs` on its own, in
+  order. Acts when `0 <= wordsize < window` (otherwise `pairs` runs). On the four ledger cases at one
+  thread 83-87 % of the hits are too far, 12-15 % overlap, 0.5-0.7 % meet a flag-1 cell and 1.2-1.6 %
+  are candidates, HsG_p1 included (v4-A10 probe 1). Measured (workstation, node 0: one physical core
+  for 1 thread, 8 physical cores for 8 threads, HT siblings idle, the booked cores warmed 3 s before every
+  run, arm order reversed every other round, one warm-up round + 4 rounds, medians of the per-round
+  ratios against the dev binary before the switch; every report identical, max RSS equal; a gate ran on
+  other node-0 cores meanwhile): AP027131 proteins x MG1655 (`-subject`) 1 thread x0.831 (5.47 -> 4.55 s)
+  and 8 threads x0.852; Bac_d16 x0.832 and x0.817; FlyG_b1 x0.803 (20.93 -> 16.88 s) and x0.837; HsG_p1
+  x0.890 (23.32 -> 20.74 s) and x0.909. Cycles x0.80-0.88, instructions x0.96-0.99, mispredicted branches
+  x0.32-0.66. With `=0` the reports are the same and the instruction counts equal those of the binary
+  before the switch (x1.000), time x0.98-1.01. The 2026-10-17 conditional-move form of these tests
+  (perf-si-20261012 decision 180, not kept) added 7 % instructions on HsG_p1 and removed 2.5 % of the
+  mispredicted branches; this one keeps the instruction count and removes 68 % there.
+- `LOSAT_X_TBNHITBFSHADOW=1` shadow of `LOSAT_X_TBNHITBF` (any value; turns the path on): each offset
+  array runs `pairs` on a copy of the table and then the branch-free loop, and the init HSPs and every
+  cell of the table must be equal; a difference panics with the frame and chunk. It copies the table for
+  every array that is not empty, so it is slow on long query sets. One line at exit, when the unit path
+  filled any offset array (one per scan call, empty ones included; none with `LOSAT_X_DEFAULT=0`, which
+  turns the unit path off): `[X_SHADOW] TBNHITBF arrays_compared= hits_compared= outside=`.
 - `LOSAT_X_TBNLINKWIN=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule of
   that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns it
   off; `tblastn/stage_d_linking/x_link_window.rs`): the uneven-gap linking of a subject's HSP list

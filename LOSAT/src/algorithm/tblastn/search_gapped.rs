@@ -750,6 +750,7 @@ fn x_preliminary_protein_hsps_by_unit(
 ) -> Result<Vec<(usize, GappedHsp)>> {
     use super::search_init::XTwoHit;
     use super::search_seed::{x_scan_plan, x_scan_unit};
+    use super::x_tbn_hitbf::XHitLoop;
     if profile.gapped_cutoff.len() != queries.len() {
         bail!("one preliminary gapped cutoff is required per query context");
     }
@@ -798,6 +799,8 @@ fn x_preliminary_protein_hsps_by_unit(
     // EXPERIMENT (LOSAT_X_TBNSTATE): the units end with NCBI's offset step instead of starting on a
     // cleared table, and the sequential path below runs on this thread's kept buffers.
     let x_keep = x_tbn_state();
+    // EXPERIMENT (LOSAT_X_TBNHITBF): the two-hit loop of the units (tblastn/x_tbn_hitbf.rs).
+    let x_hit_loop = super::x_tbn_hitbf::x_hit_loop();
     let state_on = |kept: Option<XUnitBuffers>| {
         let (table, pairs, hits, scratch) = match kept {
             Some(kept) => (Some(kept.diagonals), kept.pairs, kept.hits, kept.scratch),
@@ -836,8 +839,16 @@ fn x_preliminary_protein_hsps_by_unit(
             two_hit.reset();
         }
         hits.clear();
-        x_scan_unit(&plan, unit, pairs, |filled| {
-            two_hit.pairs(frame.frame, chunk_offset, subject_sequence, filled, hits);
+        x_scan_unit(&plan, unit, pairs, |filled| match x_hit_loop {
+            XHitLoop::Reference => {
+                two_hit.pairs(frame.frame, chunk_offset, subject_sequence, filled, hits)
+            }
+            XHitLoop::BranchFree => {
+                two_hit.x_pairs_bf(frame.frame, chunk_offset, subject_sequence, filled, hits)
+            }
+            XHitLoop::Shadow => {
+                two_hit.x_pairs_bf_shadow(frame.frame, chunk_offset, subject_sequence, filled, hits)
+            }
         });
         // NCBI c++/src/algo/blast/core/aa_ungapped.c:608-609:
         // Blast_ExtendWordExit(ewp, subject->length);

@@ -3560,6 +3560,7 @@ mod tests {
                 groups: build_groups(&lookup, &contexts),
                 shadow: false,
                 stub: false,
+                sliced: None,
             };
             assert_eq!(
                 unit_lists(&pp, &inp),

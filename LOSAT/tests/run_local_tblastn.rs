@@ -21,7 +21,7 @@ use LOSAT::api::local_blast::{run_local_tblastn, FormatOutput, OutputSink, Repor
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 3] = ["0", "6", "7"];
+const FORMATS: [&str; 5] = ["0", "6", "7", "8", "12"];
 
 fn repository(path: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(path)

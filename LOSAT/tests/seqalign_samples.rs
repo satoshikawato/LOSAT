@@ -2,8 +2,16 @@
 
 //! outfmt 8 (ASN.1 text) and 12 (JSON) of the LOSAT CLI against NCBI BLAST+ 2.17.0's output
 //! for the same `-subject` searches, byte for byte, at one and four threads: BLASTN's three
-//! tasks (megablast, blastn, dc-megablast) and BLASTP on the outfmt sample inputs
+//! tasks (megablast, blastn, dc-megablast), BLASTP, BLASTX (gapped and `-ungapped`), TBLASTN
+//! (with and without `-subject_loc`) and TBLASTX on the outfmt sample inputs
 //! (`tests/fixtures/seqalign/in/`; outfmt-20261019 `ncbi-samples/fixture/`).
+//!
+//! The translated searches' files: `ncbi-samples/out/<name>.out` of `blastx -query
+//! fixture/qnucl.fa -subject fixture/sprot.fa`, `tblastn -query fixture/qprot.fa -subject
+//! fixture/snucl.fa` and `tblastx -query fixture/qnucl.fa -subject fixture/snucl.fa`
+//! (`-num_threads 1 -outfmt 8|12`), and the OF3 design probes (`S/tmp/probes/<name>.out`) with
+//! `-ungapped -comp_based_stats 0` (BLASTX) and `-subject_loc 31-400` (TBLASTN). TBLASTX's
+//! JSON (149 KB) is left to outfmt-20261019 `S/scripts/compare_samples_of3b2.py`.
 //!
 //! The expected files are NCBI's output, unchanged (`ncbi-samples/out/<name>.out` of
 //! `blastn -task <task> -query fixture/qnucl.fa -subject fixture/snucl.fa -num_threads 1
@@ -144,5 +152,93 @@ fn a_search_without_hits_writes_nothing() {
             output.stdout.is_empty() && output.stderr.is_empty(),
             "outfmt {outfmt}"
         );
+    }
+}
+
+/// The Std-seg forms of the translated programs: one Std-seg per edit-script operation with
+/// the translated row in nucleotides (BLASTX's query, TBLASTN's subject), and the `diags`
+/// Seq-aligns of an ungapped search (TBLASTX, BLASTX `-ungapped`) with each HSP's scores in
+/// its Std-seg (blast_seqalign.cpp:306-368, 1323-1447).
+#[test]
+fn translated_subject_searches_write_ncbis_seq_annots() {
+    let searches: [(&str, &[&str], &[&str]); 5] = [
+        (
+            "blastx_subject",
+            &["blastx", "-query", "in/qnucl.fa", "-subject", "in/sprot.fa"],
+            &["8", "12"],
+        ),
+        (
+            "blastx_subject_ungapped",
+            &[
+                "blastx",
+                "-query",
+                "in/qnucl.fa",
+                "-subject",
+                "in/sprot.fa",
+                "-ungapped",
+                "-comp_based_stats",
+                "0",
+            ],
+            &["8"],
+        ),
+        (
+            "tblastn_subject",
+            &[
+                "tblastn",
+                "-query",
+                "in/qprot.fa",
+                "-subject",
+                "in/snucl.fa",
+            ],
+            &["8", "12"],
+        ),
+        (
+            "tblastn_subject_sloc",
+            &[
+                "tblastn",
+                "-query",
+                "in/qprot.fa",
+                "-subject",
+                "in/snucl.fa",
+                "-subject_loc",
+                "31-400",
+            ],
+            &["8"],
+        ),
+        (
+            "tblastx_subject",
+            &[
+                "tblastx",
+                "-query",
+                "in/qnucl.fa",
+                "-subject",
+                "in/snucl.fa",
+            ],
+            &["8"],
+        ),
+    ];
+    for (name, argv, formats) in searches {
+        for &outfmt in formats {
+            let expected = std::fs::read(fixtures().join(format!("{name}_fmt{outfmt}.out")))
+                .expect("NCBI's output");
+            for threads in ["1", "4"] {
+                let output = losat()
+                    .args(argv)
+                    .args(["-outfmt", outfmt, "-num_threads", threads])
+                    .output()
+                    .expect("run LOSAT");
+                let case = format!("{name} -outfmt {outfmt} -num_threads {threads}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stderr),
+                    "",
+                    "{case}: standard error"
+                );
+                assert!(output.status.success(), "{case}: {:?}", output.status);
+                assert!(
+                    output.stdout == expected,
+                    "{case}: the documents differ from NCBI's"
+                );
+            }
+        }
     }
 }

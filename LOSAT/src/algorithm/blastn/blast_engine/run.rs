@@ -4165,9 +4165,9 @@ struct QueryContextIndex {
     x_ranges: Vec<(usize, usize, u32)>,
     x_total_len: usize,
     // EXPERIMENT (LOSAT_X_CTXO1): what `direct_map` holds, in constant time from the layout of the
-    // contexts (`x_ctx_o1.rs`). When it is built it answers every offset the table covers, and
-    // neither the runs nor the table are built. With the shadow it is `x_o1_shadow` instead, and
-    // the table is built to compare with.
+    // contexts (`x_ctx_o1.rs`). When it is built it answers the offsets the table covers, the runs
+    // only those of its crowded blocks, and the table is not built. With the shadow it is
+    // `x_o1_shadow` instead, and the table is built to compare with.
     x_o1: Option<x_ctx_o1::CtxO1>,
     x_o1_shadow: Option<x_ctx_o1::CtxO1>,
 }

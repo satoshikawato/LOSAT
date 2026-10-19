@@ -2231,6 +2231,44 @@ fn fill_disc_mb_tables(words: &DiscWords<'_>, t: DiscTables<'_>) {
     }
 }
 
+/// EXPERIMENT (exp/r11-csr, v4-R R11): the first template's words of `fill_disc_mb_tables`, in
+/// its order (the same loop without the updates).
+struct XR11DiscWords<'a>(&'a DiscWords<'a>);
+
+impl x_r11_csr::Words for XR11DiscWords<'_> {
+    fn each(&self, f: &mut impl FnMut(usize, u32)) {
+        let w = self.0;
+        for (q_idx, seq) in w.queries_blastna.iter().enumerate() {
+            let masks = w
+                .query_masks
+                .get(q_idx)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            let query_offset = w.query_offsets[q_idx].max(0) as usize;
+            for (range_start, range_end) in build_unmasked_ranges(seq.len(), masks) {
+                let mut accum: u64 = 0;
+                let mut valid_bases = 0usize;
+                for pos in range_start..range_end {
+                    let val = seq[pos];
+                    if (val & BLAST2NA_MASK) != 0 {
+                        accum = 0;
+                        valid_bases = 0;
+                        continue;
+                    }
+                    accum = (accum << 2) | val as u64;
+                    valid_bases += 1;
+                    if valid_bases < w.template_length {
+                        continue;
+                    }
+                    let index = (query_offset + pos + 2 - w.template_length) as u32;
+                    let ecode1 = compute_discontiguous_index(accum, w.template_type) as usize;
+                    f(ecode1, index);
+                }
+            }
+        }
+    }
+}
+
 /// The estimate of the longest chain of both templates' tables, from the compressed counters.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:808-824
@@ -2533,7 +2571,11 @@ pub fn build_disc_mb_lookup(
 
     // EXPERIMENT (exp/r11-csr): the first template's chains as CSR (one template only).
     if x_r11_csr::mode().build && !two_templates {
-        x_r11_csr::attach(&hashtable, &mut next_pos);
+        if x_r11_csr::mode().words {
+            x_r11_csr::attach_words(&XR11DiscWords(&words), &hashtable, &mut next_pos);
+        } else {
+            x_r11_csr::attach(&hashtable, &mut next_pos);
+        }
     }
 
     TwoStageLookup {

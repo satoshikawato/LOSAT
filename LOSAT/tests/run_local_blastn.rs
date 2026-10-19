@@ -19,7 +19,7 @@ use LOSAT::api::local_blast::{run_local_blastn, FormatOutput, OutputSink, Report
 use LOSAT::blastinput::fasta_reader::ReaderConfig;
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 3] = ["0", "6", "7"];
+const FORMATS: [&str; 5] = ["0", "6", "7", "8", "12"];
 
 /// Three queries against four subjects cut from two genomes. The first query overlaps
 /// two subjects, so `-max_target_seqs 1` removes a subject from its hit list.
@@ -586,10 +586,36 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
             && commented.contains("# BLAST processed 3 queries\n"),
         "{commented}"
     );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
+    // ```c++
+    //     if (m_FormatType == CFormattingArgs::eAsnText
+    //       ...
+    //       || m_FormatType == CFormattingArgs::eJsonSeqalign
+    //       || m_FormatType == CFormattingArgs::eSAM)
+    //     {
+    //         x_PrintStructuredReport(results, queries);
+    //         return;
+    //     }
+    //     ...
+    //     if (results.HasWarnings()) {
+    //         ERR_POST(Warning << results.GetWarningStrings());
+    //     }
+    // ```
+    // The warnings go with the first format (outfmt 0 here); outfmt 8 and 12 write no query
+    // result warnings, so their CLI runs equal `run_local` with that format alone.
     for (index, outfmt) in FORMATS.into_iter().enumerate() {
         let (cli_output, cli_stderr) = inputs.cli(outfmt, &[]);
         assert_eq!(run.outputs[index], cli_output, "outfmt {outfmt}");
-        assert_eq!(run.diagnostics, cli_stderr, "outfmt {outfmt}");
+        if matches!(outfmt, "8" | "12") {
+            let alone = inputs.run(&[outfmt], &[], false);
+            assert_eq!(
+                String::from_utf8_lossy(&alone.diagnostics),
+                "Warning: [blastn] Subject_2 s2 no letters: Subject sequence contains no data\n"
+            );
+            assert_eq!(alone.diagnostics, cli_stderr, "outfmt {outfmt}");
+        } else {
+            assert_eq!(run.diagnostics, cli_stderr, "outfmt {outfmt}");
+        }
     }
 }
 

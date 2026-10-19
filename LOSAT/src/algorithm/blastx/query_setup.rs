@@ -359,6 +359,10 @@ pub fn prepare_queries(
         )
         // BLASTX keeps LOSAT's former SEG until SX (plan DW-10).
         .keeping_all_left_segments()
+        // EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the chunks of a split query (split.rs) are masked
+        // again after the whole query, mostly over the same segments, so this masker takes the
+        // trim of a segment trimmed before on this thread from its memo.
+        .x_with_trim_memo()
     });
     // EXPERIMENT (LOSAT_X_BXPAR): SEG reads only the residues of its own context
     // and the hard masking below writes only there, so the contexts of a large

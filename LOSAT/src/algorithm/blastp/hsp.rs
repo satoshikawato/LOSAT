@@ -1240,15 +1240,9 @@ impl<H: HitListHsp> BlastpHitList<H> {
     /// The lists that a filter left without HSPs (NCBI frees them) removed, the others kept
     /// in their order.
     pub(crate) fn purge_empty_hsp_lists(&mut self) {
-        let mut kept = 0usize;
-        for index in 0..self.hsplist_count {
-            if !self.hsplist_array[index].hsps.is_empty() {
-                self.hsplist_array.swap(kept, index);
-                kept += 1;
-            }
-        }
-        self.hsplist_count = kept;
-        self.hsplist_array.truncate(kept);
+        self.hsplist_array.truncate(self.hsplist_count);
+        self.hsplist_array.retain(|list| !list.hsps.is_empty());
+        self.hsplist_count = self.hsplist_array.len();
     }
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:877-892

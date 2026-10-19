@@ -5359,6 +5359,8 @@ fn finish_query_hit_list(
         {
             update_best_evalue(hsp_list);
         }
+        // NCBI calls Blast_HSPListSubjectBestHit on a list the coverage left empty after
+        // freeing it (blast_traceback.c:853-861); LOSAT reads it as the empty list it was.
         if subject_besthit {
             subject_best_hit(&mut hsp_list.hsps, query_len);
         }

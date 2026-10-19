@@ -1008,7 +1008,9 @@ impl crate::algorithm::blastn::hsp::HitListEntry for TblastxHspList {
 /// HSPs, and a subject left without HSPs never reaches it. After the traceback (and the
 /// culling pipe) `s_FilterBlastResults` cuts each list to `-max_hsps` in its order (score
 /// order, or e-value order once the hit list has filled), without setting its best e-value
-/// again; its coverage reap then finds nothing to remove.
+/// again; its coverage reap then finds nothing to remove, because NCBI never splits the query
+/// of an ungapped search (split_query_cxx.cpp:60-61), so both reaps read the same context
+/// lengths.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct HitFilters<'a> {
     pub max_hsps: usize,

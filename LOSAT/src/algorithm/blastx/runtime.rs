@@ -1233,7 +1233,9 @@ impl PreliminarySink for Runtime<'_> {
             // ```
             // An ungapped search removes the HSPs below the query coverage before the hit list
             // receives the subject (a subject left without HSPs never reaches it); the
-            // traceback's reap then removes nothing.
+            // traceback's reap then removes nothing, because NCBI never splits the query of an
+            // ungapped search (split_query_cxx.cpp:60-61, "No split for ungapped mode"), so
+            // both reaps read the same context lengths.
             if self.options.query_cov_hsp_perc > 0.0 {
                 reap_by_query_coverage(&mut linked.hsps, self.options.query_cov_hsp_perc, |h| {
                     query_extent(&h.hsp, &batch.contexts)
@@ -2402,6 +2404,8 @@ impl PreliminarySink for Runtime<'_> {
                 // 	   	  // Flip query offsets of current hsp to target context frame
                 // 	   	  j = 1;
                 // ```
+                // NCBI calls Blast_HSPListSubjectBestHit on a list the coverage left empty after
+                // freeing it (blast_traceback.c:853-861); LOSAT skips the empty list.
                 if self.options.subject_besthit && !list.hsps.is_empty() {
                     self.observer.hsps("SUBJECT_BEST_IN", list.oid, &list.hsps);
                     subject_besthit(&mut list.hsps);

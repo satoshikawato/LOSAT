@@ -243,44 +243,36 @@ impl KappaResultHitList {
         query_cov_hsp_perc: f64,
         query_length: usize,
     ) {
-        use crate::core::blast_hits::{hsp_query_coverage_test, trim_by_max_hsps};
+        use crate::core::blast_hits::{reap_by_query_coverage, trim_by_max_hsps};
+        let extent = |linked: &LinkedHsp| {
+            (
+                i64::from(linked.hsp.q_start),
+                i64::from(linked.hsp.q_end),
+                query_length as i64,
+            )
+        };
         for list in &mut self.lists {
             trim_by_max_hsps(&mut list.hsps.hsps, max_hsps);
-            if !list.payloads.is_empty() {
-                trim_by_max_hsps(&mut list.payloads, max_hsps);
+            trim_by_max_hsps(&mut list.payloads, max_hsps);
+            let removed = if query_cov_hsp_perc <= 0.0 {
+                false
+            } else if list.payloads.is_empty() {
+                reap_by_query_coverage(&mut list.hsps.hsps, query_cov_hsp_perc, extent)
+            } else {
+                let mut paired: Vec<_> = std::mem::take(&mut list.hsps.hsps)
+                    .into_iter()
+                    .zip(std::mem::take(&mut list.payloads))
+                    .collect();
+                let removed =
+                    reap_by_query_coverage(&mut paired, query_cov_hsp_perc, |(linked, _)| {
+                        extent(linked)
+                    });
+                (list.hsps.hsps, list.payloads) = paired.into_iter().unzip();
+                removed
+            };
+            if removed {
+                refresh_best_evalue(&mut list.hsps);
             }
-            if query_cov_hsp_perc <= 0.0 {
-                continue;
-            }
-            let kept: Vec<bool> = list
-                .hsps
-                .hsps
-                .iter()
-                .map(|linked| {
-                    !hsp_query_coverage_test(
-                        query_cov_hsp_perc,
-                        i64::from(linked.hsp.q_start),
-                        i64::from(linked.hsp.q_end),
-                        query_length as i64,
-                    )
-                })
-                .collect();
-            if kept.iter().all(|&keep| keep) {
-                continue;
-            }
-            let mut index = 0;
-            list.hsps.hsps.retain(|_| {
-                index += 1;
-                kept[index - 1]
-            });
-            if !list.payloads.is_empty() {
-                let mut index = 0;
-                list.payloads.retain(|_| {
-                    index += 1;
-                    kept[index - 1]
-                });
-            }
-            refresh_best_evalue(&mut list.hsps);
         }
         if query_cov_hsp_perc > 0.0 {
             self.lists.retain(|list| !list.hsps.hsps.is_empty());

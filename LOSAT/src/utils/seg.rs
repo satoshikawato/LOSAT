@@ -1524,7 +1524,13 @@ impl SegMasker {
     // Windows of each length are visited left to right, with the smallest `prob` kept on a strict `<` as here.
     // Each window is updated from its neighbour by one removal and one addition, and the sums in `s_LnAss` and
     // `s_LnPerm` use the histogram in NCBI's order.
+    // No NCBI counterpart for the attribute: on wasm32 (LOSAT Web) the trim stays a function of its
+    // own, called once per segment, so that V8 runs the later segments in its optimized code (it
+    // switches a function to that code only at a later call, never inside a running one); inlined
+    // into `seg_seq`, the trims of a frame ran in V8's baseline code to the end of the frame. Other
+    // targets keep the compiler's choice.
     /// `trim_segment` with every window kept as a count histogram.
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     fn x_trim_segment(
         &self,
         seq: &[u8],

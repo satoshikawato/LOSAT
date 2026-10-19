@@ -243,6 +243,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastn::x_subject_store_print_summary();
     LOSAT::algorithm::blastn::x_query_dust_par_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_query_prep_par_print_summary();
+    LOSAT::algorithm::blastn::blast_engine::x_qgroup_par_print_summary();
     LOSAT::algorithm::blastp::x_bp_seed_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();

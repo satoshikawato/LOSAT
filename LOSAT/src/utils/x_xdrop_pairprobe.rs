@@ -162,7 +162,7 @@ struct St {
 /// lane; the lane operations of `x_xdrop_avx2.rs` `block16`, with the row gap sequential inside the
 /// lane and the running best per lane).
 #[inline(always)]
-unsafe fn step<const TB: bool, const FETCH: u8, const KILL: bool>(
+unsafe fn step<const TB: bool, const FETCH: u8, const KILL: bool, const BOFF: bool>(
     c: &K,
     s_: &mut St,
     pt: Ptrs,
@@ -198,9 +198,11 @@ unsafe fn step<const TB: bool, const FETCH: u8, const KILL: bool>(
     }
     let thr = _mm256_subs_epu16(s_.bestv, c.xv);
     let drop = _mm256_cmpgt_epi16(thr, hh);
-    let gt = _mm256_cmpgt_epi16(hh, s_.bestv);
+    if BOFF {
+        let gt = _mm256_cmpgt_epi16(hh, s_.bestv);
+        s_.boffv = _mm256_blendv_epi8(s_.boffv, s_.bv, gt);
+    }
     s_.bestv = _mm256_max_epi16(s_.bestv, hh);
-    s_.boffv = _mm256_blendv_epi8(s_.boffv, s_.bv, gt);
     st(h, _mm256_andnot_si256(drop, hh));
     let hg = _mm256_subs_epu16(hh, c.goe);
     let es = _mm256_subs_epu16(ep, c.ge);
@@ -229,7 +231,7 @@ unsafe fn step<const TB: bool, const FETCH: u8, const KILL: bool>(
 /// a live lane's row gap reaches its threshold (NCBI :652-664; past a lane's band the full
 /// recurrence gives H = F, E = F - gap_open_extend). Returns the end of the processed columns.
 #[inline(always)]
-unsafe fn pairs<const TB: bool, const FETCH: u8, const KILL: bool>(
+unsafe fn pairs<const TB: bool, const FETCH: u8, const KILL: bool, const BOFF: bool>(
     c: &K,
     s_: &mut St,
     pt: Ptrs,
@@ -241,8 +243,8 @@ unsafe fn pairs<const TB: bool, const FETCH: u8, const KILL: bool>(
 ) -> usize {
     let mut b = ufirst;
     while b < ubend {
-        let r0 = step::<TB, FETCH, KILL>(c, s_, pt, cur, b);
-        let r1 = step::<TB, FETCH, KILL>(c, s_, pt, cur, b + 1);
+        let r0 = step::<TB, FETCH, KILL, BOFF>(c, s_, pt, cur, b);
+        let r1 = step::<TB, FETCH, KILL, BOFF>(c, s_, pt, cur, b + 1);
         if TB {
             st(
                 tr.add((b - ufirst) * L),
@@ -260,8 +262,67 @@ unsafe fn pairs<const TB: bool, const FETCH: u8, const KILL: bool>(
         if _mm256_movemask_epi8(ok) == 0 {
             return b;
         }
-        let r0 = step::<TB, FETCH, KILL>(c, s_, pt, cur, b);
-        let r1 = step::<TB, FETCH, KILL>(c, s_, pt, cur, b + 1);
+        let r0 = step::<TB, FETCH, KILL, BOFF>(c, s_, pt, cur, b);
+        let r1 = step::<TB, FETCH, KILL, BOFF>(c, s_, pt, cur, b + 1);
+        if TB {
+            st(
+                tr.add((b - ufirst) * L),
+                _mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(r0, r1)),
+            );
+        }
+        b += 2;
+    }
+}
+
+/// `pairs` with the subject-end mask only where a live lane can be past its end: columns
+/// b < min N of the live lanes run without it (v2).
+#[inline(always)]
+unsafe fn pairs2<const TB: bool, const FETCH: u8, const BOFF: bool>(
+    c: &K,
+    s_: &mut St,
+    pt: Ptrs,
+    cur: &mut *mut W,
+    tr: *mut u8,
+    ufirst: usize,
+    ubend: usize,
+    alive: W,
+    minn: usize,
+) -> usize {
+    let mut b = ufirst;
+    let lim = ubend.min(minn);
+    while b < lim {
+        let r0 = step::<TB, FETCH, false, BOFF>(c, s_, pt, cur, b);
+        let r1 = step::<TB, FETCH, false, BOFF>(c, s_, pt, cur, b + 1);
+        if TB {
+            st(
+                tr.add((b - ufirst) * L),
+                _mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(r0, r1)),
+            );
+        }
+        b += 2;
+    }
+    while b < ubend {
+        let r0 = step::<TB, FETCH, true, BOFF>(c, s_, pt, cur, b);
+        let r1 = step::<TB, FETCH, true, BOFF>(c, s_, pt, cur, b + 1);
+        if TB {
+            st(
+                tr.add((b - ufirst) * L),
+                _mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi16(r0, r1)),
+            );
+        }
+        b += 2;
+    }
+    loop {
+        let thr = _mm256_subs_epu16(s_.bestv, c.xv);
+        let ok = _mm256_andnot_si256(
+            _mm256_or_si256(_mm256_cmpgt_epi16(thr, s_.f), _mm256_cmpgt_epi16(s_.bv, s_.nlim)),
+            alive,
+        );
+        if _mm256_movemask_epi8(ok) == 0 {
+            return b;
+        }
+        let r0 = step::<TB, FETCH, true, BOFF>(c, s_, pt, cur, b);
+        let r1 = step::<TB, FETCH, true, BOFF>(c, s_, pt, cur, b + 1);
         if TB {
             st(
                 tr.add((b - ufirst) * L),
@@ -295,7 +356,7 @@ unsafe fn fill(pb: &mut PB, lanes: &[&Captured], to: usize) {
 /// One batch of up to 16 problems; `mlim[p]` = rows to run in lane p (len1, or the best row of the
 /// score-only pass). Returns the lanes' results (cells only meaningful for full runs).
 #[target_feature(enable = "avx2,bmi1,lzcnt,popcnt")]
-unsafe fn batch<const TB: bool, const FETCH: u8>(
+unsafe fn batch<const TB: bool, const FETCH: u8, const V2: bool, const BOFF: bool>(
     lanes: &[&Captured],
     mlim: &[usize],
     pb: &mut PB,
@@ -473,10 +534,12 @@ unsafe fn batch<const TB: bool, const FETCH: u8>(
             pb.pre.reserve(tr_end + 2 - ufirst);
         }
         let mut cur: *mut W = pb.pre.as_mut_ptr().add(pb.pre_k);
-        let b = if kill {
-            pairs::<TB, FETCH, true>(&c, &mut s_, pt, &mut cur, tr, ufirst, ubend, alive)
+        let b = if V2 {
+            pairs2::<TB, FETCH, BOFF>(&c, &mut s_, pt, &mut cur, tr, ufirst, ubend, alive, minn)
+        } else if kill {
+            pairs::<TB, FETCH, true, BOFF>(&c, &mut s_, pt, &mut cur, tr, ufirst, ubend, alive)
         } else {
-            pairs::<TB, FETCH, false>(&c, &mut s_, pt, &mut cur, tr, ufirst, ubend, alive)
+            pairs::<TB, FETCH, false, BOFF>(&c, &mut s_, pt, &mut cur, tr, ufirst, ubend, alive)
         };
         // the row-gap extension stays within num_extra columns of the band end
         assert!(b + 2 <= tr_end, "row ran past the reserved columns");
@@ -617,7 +680,7 @@ fn to_res(o: &Out) -> XdropResult {
 }
 
 /// All batches of one kernel over `order` (problem indices); returns per-problem results.
-unsafe fn run_all<const TB: bool, const FETCH: u8>(
+unsafe fn run_all<const TB: bool, const FETCH: u8, const V2: bool>(
     list: &[&Captured],
     order: &[usize],
     two_pass: bool,
@@ -631,9 +694,14 @@ unsafe fn run_all<const TB: bool, const FETCH: u8>(
         let lanes: Vec<&Captured> = chunk.iter().map(|&i| list[i]).collect();
         let ml: Vec<usize> = lanes.iter().map(|q| q.len1).collect();
         if two_pass {
-            batch::<false, FETCH>(&lanes, &ml, pb, cnt, &mut out);
+            // pass 1 needs the best score and its row only (v2: no best column)
+            if V2 {
+                batch::<false, FETCH, true, false>(&lanes, &ml, pb, cnt, &mut out);
+            } else {
+                batch::<false, FETCH, false, true>(&lanes, &ml, pb, cnt, &mut out);
+            }
         } else {
-            batch::<TB, FETCH>(&lanes, &ml, pb, cnt, &mut out);
+            batch::<TB, FETCH, V2, true>(&lanes, &ml, pb, cnt, &mut out);
         }
         for (k, &i) in chunk.iter().enumerate() {
             res[i] = out[k].clone();
@@ -648,13 +716,13 @@ unsafe fn run_all<const TB: bool, const FETCH: u8>(
     for chunk in o2.chunks(L) {
         let lanes: Vec<&Captured> = chunk.iter().map(|&i| list[i]).collect();
         let ml: Vec<usize> = chunk.iter().map(|&i| res[i].a_off).collect();
-        batch::<true, FETCH>(&lanes, &ml, pb, cnt2, &mut out);
+        batch::<true, FETCH, V2, true>(&lanes, &ml, pb, cnt2, &mut out);
         for (k, &i) in chunk.iter().enumerate() {
             let r = &mut res[i];
-            debug_assert_eq!((out[k].a_off, out[k].b_off, out[k].score), (r.a_off, r.b_off, r.score));
-            if (out[k].a_off, out[k].b_off, out[k].score) != (r.a_off, r.b_off, r.score) {
+            if (out[k].a_off, out[k].score) != (r.a_off, r.score) || (!V2 && out[k].b_off != r.b_off) {
                 panic!("pass 2 differs from pass 1 at problem {i}");
             }
+            r.b_off = out[k].b_off;
             r.ops = std::mem::take(&mut out[k].ops);
         }
     }
@@ -671,6 +739,8 @@ fn pair_loop() {
     let kern = var("P_KERN").unwrap_or_else(|| "tb".into());
     let ord = var("P_ORDER").unwrap_or_else(|| "rows".into());
     let reps: usize = var("P_REPS").and_then(|v| v.parse().ok()).unwrap_or(0);
+    // P_V=2: subject-end mask only past the shortest live subject; no best column in pass 1
+    let v2 = var("P_V").as_deref() == Some("2");
     let limit: usize = var("P_LIMIT").and_then(|v| v.parse().ok()).unwrap_or(usize::MAX);
     let t_load = Instant::now();
     let probs = load_dir(std::path::Path::new(&dir)).expect("read the capture files");
@@ -747,10 +817,10 @@ fn pair_loop() {
         // SAFETY: AVX2 checked above.
         unsafe {
             match (tb, fetch_pre) {
-                (true, false) => run_all::<true, 0>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2),
-                (false, false) => run_all::<false, 0>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2),
-                (true, true) => run_all::<true, 2>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2),
-                (false, true) => run_all::<false, 2>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2),
+                (true, false) => if v2 { run_all::<true, 0, true>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2) } else { run_all::<true, 0, false>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2) },
+                (false, false) => if v2 { run_all::<false, 0, true>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2) } else { run_all::<false, 0, false>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2) },
+                (true, true) => if v2 { run_all::<true, 2, true>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2) } else { run_all::<true, 2, false>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2) },
+                (false, true) => if v2 { run_all::<false, 2, true>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2) } else { run_all::<false, 2, false>(&list, &order, two, &mut pb, &mut c1, &mut res, &mut c2) },
             }
         }
         let mut bad = 0usize;
@@ -798,10 +868,10 @@ fn pair_loop() {
             // SAFETY: AVX2 checked above.
             unsafe {
                 match (tb, fetch_pre) {
-                    (true, false) => run_all::<true, 0>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2),
-                    (false, false) => run_all::<false, 0>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2),
-                    (true, true) => run_all::<true, 1>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2),
-                    (false, true) => run_all::<false, 1>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2),
+                    (true, false) => if v2 { run_all::<true, 0, true>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2) } else { run_all::<true, 0, false>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2) },
+                    (false, false) => if v2 { run_all::<false, 0, true>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2) } else { run_all::<false, 0, false>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2) },
+                    (true, true) => if v2 { run_all::<true, 1, true>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2) } else { run_all::<true, 1, false>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2) },
+                    (false, true) => if v2 { run_all::<false, 1, true>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2) } else { run_all::<false, 1, false>(&list, &order, two, &mut pb, &mut d1, &mut res, &mut d2) },
                 }
             }
             std::hint::black_box(&res);
@@ -812,10 +882,11 @@ fn pair_loop() {
     let u = cells_total as f64 / (16.0 * c1.steps.max(1) as f64);
     let r = reps.max(1) as f64;
     let line = format!(
-        "PAIR kern={kern} order={ord} dir={dir} problems={} skipped={skipped} reps={reps} load_s={load_s:.3} \
+        "PAIR kern={kern} v={} order={ord} dir={dir} problems={} skipped={skipped} reps={reps} load_s={load_s:.3} \
          loop_s={loop_s:.6} cells={cells_total} rows_rowkernel={} batches={} steps1={} steps2={} \
          rows1={} rows2={} kill_rows={} rebases={} clears={} pre={pre_len} u1={u:.4} \
          ns_per_step={:.3} ns_per_cell={:.4}\n",
+        if v2 { 2 } else { 1 },
         list.len(),
         rows_run.iter().sum::<usize>(),
         c1.batches + c2.batches,

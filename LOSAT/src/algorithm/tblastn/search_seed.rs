@@ -632,10 +632,12 @@ impl Drop for XSubjectPlan {
 /// A search of fewer than `KEEP_FROM_BATCHES` batches gets no value
 /// (`for_batches`): one batch has no later reader, and two or three give the
 /// time their later readers would save for the memory of the plans. With
-/// `LOSAT_X_TBNKEEPFEW` (`keep_few`) a search of more batches gets none either
-/// unless its plans hold no more than its threads could have in flight
-/// (`kept_within_threads`): many subjects are translated again for each batch,
-/// as NCBI translates them, and few long ones are kept.
+/// `LOSAT_X_TBNKEEPFEW` (`keep_few`) a search of more batches that searches them
+/// one after another gets none either unless its plans hold no more than its
+/// threads could have in flight (`kept_within_threads`): many subjects are
+/// translated again for each batch, as NCBI translates them, and few long ones
+/// are kept. A search that searches batches side by side keeps them
+/// (`stage_d_pipeline::x_searched_side_by_side`).
 ///
 /// Batches can reach a subject at the same time. The cell of a subject is
 /// initialised by one of them while the others wait, so a plan is made once
@@ -686,7 +688,8 @@ impl XSubjectSide {
     /// EXPERIMENT (LOSAT_X_TBNKEEPFEW): a switch of the strict set (`utils/xswitch.rs`), on
     /// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it a search of
     /// `KEEP_FROM_BATCHES` or more batches keeps its plans only when `kept_within_threads`
-    /// holds. `LOSAT_X_TBNKEEPFEWSHADOW` (`shadow`) keeps them as with `=0`.
+    /// holds or it searches batches side by side (`stage_d_pipeline::x_searched_side_by_side`).
+    /// `LOSAT_X_TBNKEEPFEWSHADOW` (`shadow`) keeps them as with `=0`.
     pub(super) fn keep_few() -> bool {
         use std::sync::OnceLock;
         static ON: OnceLock<bool> = OnceLock::new();
@@ -718,11 +721,12 @@ impl XSubjectSide {
     /// no more than `threads` plans of the longest one: no more than the threads of a search
     /// that keeps none can have in flight, each on one subject. A few long subjects (one
     /// genome, a few chromosomes) are kept, and batches searched at the same time share one
-    /// plan of each instead of making one per batch. Many subjects are not: without the plans
-    /// the search held 115 MiB less on 28,036 16S subjects (40.6 Mb) and 309 MiB less on
-    /// 57,775 zebrafish cDNAs (122 Mb), with five query batches, and took 0.980-0.994 of the
-    /// time at 4, 8 and 16 threads (workstation, 2026-10-19: translating a packed subject again,
-    /// `LOSAT_X_TBNXLATESIMD`, costs less than holding its plan).
+    /// plan of each instead of making one per batch. Many subjects searched one batch after
+    /// another are not: without the plans the search held 115 MiB less on 28,036 16S subjects
+    /// (40.6 Mb) and 309 MiB less on 57,775 zebrafish cDNAs (122 Mb), with five query batches,
+    /// and took 0.980-0.994 of the time at 4, 8 and 16 threads (workstation, 2026-10-19:
+    /// translating a packed subject again, `LOSAT_X_TBNXLATESIMD`, costs less than holding its
+    /// plan; with `LOSAT_X_TBNFRAMEREUSE` 0.998 at one thread).
     pub(super) fn kept_within_threads(
         subject_lengths: impl IntoIterator<Item = usize>,
         threads: usize,

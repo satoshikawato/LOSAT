@@ -2070,6 +2070,46 @@ Scheduling (each value computed by one thread with the original function; order 
   1-16 threads), because of the slots, not of the round. On this WSL machine (THP `always`) megablast of 5 kb to 4.6
   Mb of MG1655 against LC738868 at 8 threads kept its max RSS within 0.4 MiB of the fill without the round, at 0.57-0.86
   of the time from 150 kb on.
+- `LOSAT_X_MBLUTKEEP=1` (BLASTN megablast and blastn, the contiguous megablast lookup table of `build_mb_lookup`; in the
+  strict set since 2026-10-19 (perf/mb-lut-keep, evidence at the end of this entry): on unless it is `0`, or
+  `LOSAT_X_DEFAULT=0` and it is not set) the batch loop keeps the table's `hashtable` from one query batch to the next
+  (`blastn/x_mb_lut_keep.rs`). NCBI allocates each batch's table zeroed (`calloc`, `blast_nalookup.c:1262`) and frees it
+  with the batch (`sfree`, `:1376`); a 4^12-cell table is 64 MiB, which glibc maps per batch and unmaps at the batch's
+  end, so each batch faulted the table's pages in again (or in the prefault round of `LOSAT_X_MBLUTPREFAULT`) and each
+  free unmapped them and flushed their TLB entries on every CPU of the search. With the switch the loop holds the
+  longest table built so far; the next build takes it when it is at least as long as the build's table, writes 0 to the
+  cells of its table that earlier builds wrote (on the search pool when the build runs on a pool of two threads or more;
+  the other cells are 0 already) and uses its first cells as its table. NCBI's `CBatchSizeMixer` alternates full batches
+  with small probe batches (megablast of 31,168 cDNAs: 18 tables of 4^12 cells, 19 of 4^8 or 4^11), so a probe batch's
+  table is the start of the kept one, and no build allocates a second table beside it (a longer build frees the kept one
+  first and allocates). The keep records the longest start of the table that builds wrote since it was last zeroed, so a
+  probe batch zeroes its own cells only and the rest of a full batch's cells wait for the next build that uses them
+  (megablast of 1,775 cDNAs builds tables of 4^11, 4^8 and 4^12 cells; zeroing the whole 4^11 start for the 4^8 build
+  cost 1.7 % of the run at one thread). The prefault round does not run on a kept table (its pages are mapped; the round
+  writes zeros over zeros). The fill finds every cell of its table at 0, as in a fresh one, and every reader takes cells
+  below the table's size, so every array and every report is what it is without the switch; `next_pos`, `pv_array` and
+  the counters are allocated as before. Where: only the batch loop of `run_in_pool`, for the batches it searches itself
+  and the query chunks of a split batch, and only while no `LOSAT_X_QBATCHPAR` slot can run (the driver turned off, or
+  before the first commit with no `LOSAT_X_QBATCHPARSLOTS` and a budget of 0 or one thread): the slots' tables are what
+  QBATCHPAR's budget counts. Not the discontiguous tables, the `LOSAT_X_PAIRPAR` sub-lookups or the tests. Memory:
+  between batches the loop holds the longest table instead of freeing it; a probe batch's peak with it stays below the
+  full batch's. `LOSAT_X_MBLUTKEEPSHADOW=1` builds every table built on the kept one again on a fresh table and compares
+  `hashtable`, `next_pos`, `pv_array` and the longest chain (a difference panics; at exit `[X_SHADOW] MBLUTKEEP tables=
+  cells= diffs=0 identical`; the second builds are counted in `[TIMING] x_mb_lookup_*`). With `LOSAT_TIMING` `[TIMING]
+  x_mb_lut_keep: kept= fresh= zero=` gives the loop's builds on the kept table, its builds on a fresh one and the time
+  spent zeroing (also in `x_mb_lookup_split`'s `alloc=`). Evidence. Premise probe (v4-D
+  `results/d10d2_probe1_summary.md`, workstation node 1, `LOSAT_X_QBATCHPAR=0`): megablast of 31,168 D. melanogaster
+  cDNAs against 3 Mb of chromosome 2L at 16 threads spent 0.141 s unmapping the batches' tables at their ends (serial,
+  outside `[TIMING] total`) and 0.060 s in prefault rounds; keeping the table took 0.038 s of zeroing instead, with
+  instructions:u -0.4 %, system time 2.24 -> 1.30 s, page faults 558K -> 268K and TLB shootdowns 152K -> 53K. Speed
+  (workstation node 1, windows v4d9-w2 and v4d9-w3 against dev 80405895 and 9bc7c3cb, `results/d10d2_w2_summary.md` and
+  `d10d2_w3_summary.md`, medians of rounds in alternating order on warmed CPUs): in the batch loop
+  (`LOSAT_X_QBATCHPAR=0`, against dev's loop) megablast of 100-250 kb E. coli pieces against LC738868 took 0.84-0.85 of
+  the time at 8-32 threads and 0.80-0.82 at one thread, megablast of the 31,168 cDNAs 0.85-0.88 at 8-32 threads and
+  0.90-0.91 at one, blastn and dc-megablast of cDNAs 0.97-1.02; by default (`LOSAT_X_QBATCHPAR`'s slots, which the
+  switch leaves alone, at 8-32 threads) 0.97-1.02; megablast of 1,775 cDNAs (the loop by default) 1.00 at one thread and
+  1.02-1.03 at 8 and 16 threads, within the rounds' spread (0.97-1.09) with the same page faults, TLB shootdowns, user
+  and system time as dev. Max RSS: the same (the 31,168 cDNAs in the loop 236 MiB against 249).
 - `LOSAT_X_DISCLUTPAR=1` (BLASTN `-task dc-megablast`, and megablast given `-template_type`,
   `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`; in the strict set since 2026-10-17,
   default ON: `LOSAT_X_DISCLUTPAR=0` or `LOSAT_X_DEFAULT=0` turn it off; evidence below, "Default ON") the

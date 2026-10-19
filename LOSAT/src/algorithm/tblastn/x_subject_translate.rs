@@ -710,6 +710,8 @@ fn x_frame_buffer(length: usize) -> Vec<u8> {
             if frame.len() >= length {
                 frame.truncate(length);
             } else {
+                // Grown to the length only, so that it stays a frame the thread keeps.
+                frame.reserve_exact(length - frame.len());
                 frame.resize(length, 0);
             }
             frame

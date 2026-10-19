@@ -459,13 +459,29 @@ fn x_side_by_side_batches(
     }
 }
 
+// No NCBI counterpart: chooses which query batches are searched at the same time on pools of
+// their own; every batch is searched as NCBI searches it and the reports keep the batch order.
+/// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): how many of the `left` batches that `x_side_by_side_batches`
+/// leaves are searched at the same time on pools of their own (`x_batches_on_own_pools`, with
+/// `LOSAT_X_TBNOWNPOOLS` and `LOSAT_X_TBNBATCHRULE`; none without them).
+#[cfg(feature = "parallel")]
+fn x_own_pool_batches(left: usize, subject_bases: usize, subjects: usize, threads: usize) -> usize {
+    if x_tbn_own_pools() && x_tbn_batch_rule() {
+        x_batches_on_own_pools(left, subject_bases, subjects, threads)
+    } else {
+        0
+    }
+}
+
 // No NCBI counterpart: decides whether the subject plans of a search are kept; it does not change
 // any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNKEEPFEW): true when a search of `batches` query batches (four or more,
 /// with `LOSAT_X_TBNSSIDE`) at `threads` threads searches some of them side by side
-/// (`x_side_by_side_batches`). Such a search keeps its plans, as before: side by side needs plans
-/// that fit (at most two bytes per base of `X_SIDE_BY_SIDE_MAX_BASES`, or fewer than two subjects
-/// per thread), and the batches after the first ones read them instead of making them again.
+/// (`x_side_by_side_batches`) or at the same time on pools of their own (`x_own_pool_batches`).
+/// Such a search keeps its plans, as before: batches searched at the same time share one plan of
+/// each subject, and those after the first ones read them instead of making them again. Side by
+/// side needs plans that fit (at most two bytes per base of `X_SIDE_BY_SIDE_MAX_BASES`, or fewer
+/// than two subjects per thread), and own pools fewer than two subjects per thread.
 /// Timed on the workstation (2026-10-19, 7 batches of fly proteins against 5,000 fly cDNAs, 14.3
 /// Mb, `-db`): at 4 threads (4 batches side by side, then 3 one after another) the search without
 /// them took 1.004 of the time (1.003-1.068, 8 pairs); at 8 threads (the 7 batches one after
@@ -478,7 +494,9 @@ fn x_searched_side_by_side(subjects: SubjectLetters<'_>, batches: usize, threads
         }
         let fits = super::search_seed::XSubjectSide::all_fit(subjects.lengths());
         let bases = subjects.lengths().fold(0usize, usize::saturating_add);
-        x_side_by_side_batches(bases, subjects.count(), batches, threads, fits) > 0
+        let side_by_side = x_side_by_side_batches(bases, subjects.count(), batches, threads, fits);
+        side_by_side > 0
+            || x_own_pool_batches(batches - side_by_side, bases, subjects.count(), threads) > 0
     }
     #[cfg(not(feature = "parallel"))]
     {
@@ -691,16 +709,12 @@ pub(super) fn x_search_batches<'p>(
             );
             // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the batches left after those, at the same time
             // on pools of their own (x_batches_on_own_pools).
-            let own_pools = if x_tbn_own_pools() && x_tbn_batch_rule() {
-                x_batches_on_own_pools(
-                    ranges.len() - side_by_side,
-                    bases,
-                    subjects.count(),
-                    pool.threads(),
-                )
-            } else {
-                0
-            };
+            let own_pools = x_own_pool_batches(
+                ranges.len() - side_by_side,
+                bases,
+                subjects.count(),
+                pool.threads(),
+            );
             if crate::utils::threading::diagnostics_enabled() {
                 eprintln!(
                     "[losat-thread-stage] program=tblastn stage=query_batches batches={} threads={} side_by_side={} one_after_another={} own_pools={}",
@@ -715,6 +729,9 @@ pub(super) fn x_search_batches<'p>(
             let (rest, own) = rest.split_at(rest.len() - own_pools);
             if side_by_side > 0 {
                 use rayon::prelude::*;
+                // LOSAT_X_TBNKEEPFEW keeps the plans of a search with batches side by side
+                // (x_searched_side_by_side).
+                debug_assert!(x_subject_side.is_some());
                 let x_serial = SearchPool::x_serial();
                 let x_serial_with_plans;
                 let x_serial = match x_subject_side.as_ref() {
@@ -6118,8 +6135,8 @@ mod tests {
         }
     }
 
-    // EXPERIMENT (LOSAT_X_TBNKEEPFEW): many subjects searched side by side keep their plans for the
-    // later batches; batches all one after another, or one thread, do not.
+    // EXPERIMENT (LOSAT_X_TBNKEEPFEW): subjects searched by batches side by side or on own pools keep
+    // their plans; batches all one after another, or one thread, do not.
     #[cfg(feature = "parallel")]
     #[test]
     fn x_plans_are_kept_for_batches_side_by_side() {
@@ -6150,6 +6167,15 @@ mod tests {
             16,
             4
         ));
+        // Ten long subjects (above 24 Mb) at 8 threads: four batches, none side by side, on four
+        // own pools (natively).
+        let long: Vec<u8> = (0..2_500_001usize).map(|i| b"ACGT"[i % 4]).collect();
+        let ten: Vec<&[u8]> = std::iter::repeat_n(&long[..], 10).collect();
+        assert_eq!(x_side_by_side_batches(25_000_010, 10, 4, 8, true), 0);
+        assert_eq!(
+            x_searched_side_by_side(SubjectLetters::Records(&ten), 4, 8),
+            x_tbn_own_pools()
+        );
     }
 
     // EXPERIMENT (LOSAT_X_TBNBATCHRULE): the full waves of a small subject set or of fewer than

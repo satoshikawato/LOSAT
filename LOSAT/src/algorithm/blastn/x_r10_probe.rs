@@ -4,6 +4,7 @@
 //! the same update to the same words in the same order (`x_mb_apply`).
 //!
 //! `R10_PROBE` is a comma-separated list:
+//! - `t`: only the line below (the fill's time and RSS).
 //! - `ctl`: perf stat control around the fill: writes `enable` / `disable` to the FIFO named by
 //!   `R10_CTL` and waits for perf's `ack` on `R10_ACK` (`perf stat -D -1 --control fifo:CTL,ACK`).
 //! - `d<N>[h2|hw]`: the fill with the prefetch `N` words ahead (N = 0, 1, 2, 4, 8, 16, 32, 64, 128;
@@ -40,7 +41,9 @@ fn probe() -> &'static Probe {
         for tok in v.split(',').map(str::trim).filter(|t| !t.is_empty()) {
             p.any = true;
             let (k, val) = tok.split_once('=').unwrap_or((tok, ""));
-            if k == "ctl" {
+            if k == "t" {
+                // the time and RSS line only
+            } else if k == "ctl" {
                 p.ctl = true;
             } else if k == "dump" {
                 p.dump = Some(val.to_string());

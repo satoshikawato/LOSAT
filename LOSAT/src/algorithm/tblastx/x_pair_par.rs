@@ -141,11 +141,13 @@
 //! switch.
 //!
 //! `LOSAT_X_TBXQSLICE` (in the strict set, a value switch: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; x86-64 only): a batch whose context group spans more query
-//! letters than the switch's value (built-in 262,144) has its groups cut into slices of consecutive
-//! query offsets, one lookup table each, and its units scan their chunk once per slice on their one
-//! diagonal table (x_tbx_qslice.rs, exactness argument in its header): the table cells a slice's
-//! scan touches at one subject position span the slice, not the group. Each cell sees its hits in
+//! `LOSAT_X_DEFAULT=0` and it is not set; x86-64 only): unset (or `=1`), a context group of more than
+//! 128 Ki letters whose span times the search's threads reaches 6 Mi letters is cut into slices of
+//! at most 128 Ki consecutive query offsets; `=N` cuts every group of more than N letters into
+//! slices of at most N (at most 64 slices a group). Each slice has its own lookup table, and the
+//! units of a batch with a cut group scan their chunk once per slice on their one diagonal table
+//! (x_tbx_qslice.rs, rule and exactness argument in its header): the table cells a slice's scan
+//! touches at one subject position span the slice, not the group. Each cell sees its hits in
 //! the same order, so the table and the chunk's sorted init HSPs are those of `scan_unit`. A batch
 //! with no cut group runs `scan_unit`, whose machine code is the one before the switch.
 
@@ -925,6 +927,8 @@ fn lut_direct_groups(
     Some(lut_direct_tables(q, &locations, pool, on_pool))
 }
 
+// No NCBI counterpart: scheduling of the builds (the NCBI reference above `lut_direct_groups`;
+// each table is built by `XPairLutQuery::x_build_group`).
 /// One table per list of lookup locations (`XPairLutQuery::x_build_group`), in list order: the
 /// groups of `lut_direct_groups`, or the slices of LOSAT_X_TBXQSLICE (x_tbx_qslice.rs). On the
 /// search pool with `on_pool` (LOSAT_X_PAIRLUT_POOL), as `lut_direct_groups` says.
@@ -2150,6 +2154,7 @@ impl XPairPar {
         mapped
     }
 
+    // No NCBI counterpart: the unit listing of the unit path (scheduling only).
     /// The number of context groups of the batch (the `g` of its units).
     fn x_group_count(&self) -> usize {
         match &self.sliced {
@@ -2158,6 +2163,7 @@ impl XPairPar {
         }
     }
 
+    // No NCBI counterpart: the unit listing of the unit path (scheduling only).
     /// Whether group `g` has lookup entries (its units are listed): its table, or LOSAT_X_TBXQSLICE's
     /// slices of it.
     fn x_group_has_entries(&self, g: usize) -> bool {

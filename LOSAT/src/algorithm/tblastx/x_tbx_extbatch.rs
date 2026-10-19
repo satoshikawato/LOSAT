@@ -118,7 +118,7 @@ fn min_span_ki() -> Option<usize> {
 
 // No NCBI counterpart: a comparison of two LOSAT code paths.
 /// LOSAT_X_TBXEXTBATCHSHADOW (set to any value): every unit runs both scans, compared.
-fn shadow() -> bool {
+pub(super) fn shadow() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("LOSAT_X_TBXEXTBATCHSHADOW").is_some())
 }
@@ -203,6 +203,7 @@ pub(super) struct XPendBatch {
     batches: u64,
 }
 
+// No NCBI counterpart: the batch of held-back extensions (module doc).
 impl XPendBatch {
     /// An empty batch of `len` slots (1 to `BATCH`).
     pub(super) fn new(len: usize) -> Self {

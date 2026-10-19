@@ -69,14 +69,16 @@
 //! span more letters and, times the search's threads, at least `X_QSLICE_MIN_SPAN_THREADS`: there
 //! the diagonal tables of all threads at once (4 bytes a cell) crowd the L3; below it the whole
 //! group's scan (with LOSAT_X_TBXPREFETCH where the table is large) is as fast or faster (Sakai at
-//! one thread: the slices x1.015). `=N` (2 to `X_QSLICE_MAX_LETTERS`) cuts every group of more than N letters into
-//! slices of at most N, whatever the threads (tuning and tests). A group is cut into the fewest
+//! one thread: the slices x1.015). `=N` (2 to `X_QSLICE_MAX_LETTERS`) cuts every group of more
+//! than N letters into slices of at most N, whatever the threads (tuning and tests; with at most
+//! `X_QSLICE_MAX_SLICES` slices a group, wider where N is small). A group is cut into the fewest
 //! equal slices (`X_QSLICE_MAX_SLICES` at most; `x_partition`); the cut does not depend on the
 //! subjects. A batch in which no group is cut runs as before (`scan_unit`, whose machine code does
 //! not change); in a batch with a cut group every group's units take this path (a group that is not
 //! cut is one slice). The size of a slice changes no output. x86-64 only (where it was measured).
-//! The probes of LOSAT_TIMING / LOSAT_X_STATS (x_unit_probe.rs) need the group's table: with them
-//! nothing is cut.
+//! The probes of LOSAT_TIMING / LOSAT_X_STATS (x_unit_probe.rs) and the shadow of
+//! LOSAT_X_TBXEXTBATCH (which compares `scan_unit` with the batched scan of the whole group,
+//! unit by unit) need the group's table: with them nothing is cut.
 //!
 //! Interactions, read by the window (the widest slice's span of entries) in place of the group:
 //! LOSAT_X_TBXPREFETCH prefetches where the window reaches its size, and LOSAT_X_TBXEXTBATCH holds
@@ -105,7 +107,7 @@ static QS_SHADOW_UNITS: AtomicU64 = AtomicU64::new(0);
 static QS_SHADOW_RECORDS: AtomicU64 = AtomicU64::new(0);
 
 /// The most letters of a slice when the switch is not given a number (128 Ki: a window of
-/// 512 KiB, which fits the core's L2 with the slice's table).
+/// 512 KiB, which fits the core's L2 with the slice's backbone).
 const X_QSLICE_LETTERS: usize = 1 << 17;
 /// The rule's bound when the switch is not given a number: a group is cut only where its span times
 /// the search's threads reaches this many letters (6 Mi: 24 MiB of diagonal tables at once; on the
@@ -171,13 +173,14 @@ pub(super) fn partition(
     threads: usize,
 ) -> Option<Vec<Vec<i32>>> {
     let rule = slice_rule()?;
-    if x_unit_probe::mode() != 0 {
+    if x_unit_probe::mode() != 0 || x_tbx_extbatch::shadow() {
         return None;
     }
     let min_len = rule.min_span_threads.div_ceil(threads.max(1) as u64);
     x_partition(&x_group_spans(contexts, starts), rule.letters, min_len)
 }
 
+// No NCBI counterpart: the rule's input (module doc).
 /// The query offsets `[a, b)` of each group (`group_starts`'s first contexts `starts`).
 fn x_group_spans(contexts: &[QueryContext], starts: &[usize]) -> Vec<(i32, i32)> {
     let end = contexts
@@ -197,6 +200,7 @@ fn x_group_spans(contexts: &[QueryContext], starts: &[usize]) -> Vec<(i32, i32)>
         .collect()
 }
 
+// No NCBI counterpart: the rule's arithmetic (module doc).
 /// `partition` for groups of query offsets `spans` and slices of at most `width` letters: a group
 /// of `len > width` letters and at least `min_len` is cut into `k = ceil(len / width)` slices (at
 /// most `X_QSLICE_MAX_SLICES`) starting at `a + floor(j len / k)`, j = 0..k; None when no group is
@@ -226,9 +230,12 @@ fn x_partition(spans: &[(i32, i32)], width: usize, min_len: u64) -> Option<Vec<V
 pub(super) struct XSliced {
     q_min: u32,
     q_max: u32,
+    /// The largest span of a slice's entries (`x_unit_span`), the window the rules read.
+    window: usize,
     slices: Vec<XGroup>,
 }
 
+// No NCBI counterpart: the bounds of a cut group's tables (scheduling and the rules only).
 impl XSliced {
     /// Whether the group has lookup entries (`longest_chain > 0` of its whole table).
     pub(super) fn has_entries(&self) -> bool {
@@ -242,15 +249,11 @@ impl XSliced {
 
     /// The window: the largest span of a slice's entries.
     fn window(&self) -> usize {
-        self.slices
-            .iter()
-            .filter(|s| s.lookup.longest_chain > 0)
-            .map(x_unit_span)
-            .max()
-            .unwrap_or(0)
+        self.window
     }
 }
 
+// No NCBI counterpart: the stub's `longest_chain` reads every table (module doc, item 5).
 /// The tables of every slice of every group, in order (the stub's partition of the entries).
 pub(super) fn tables(sliced: &[XSliced]) -> impl Iterator<Item = &BlastAaLookupTable> {
     sliced
@@ -258,6 +261,7 @@ pub(super) fn tables(sliced: &[XSliced]) -> impl Iterator<Item = &BlastAaLookupT
         .flat_map(|g| g.slices.iter().map(|s| &s.lookup))
 }
 
+// No NCBI counterpart: the slice tables arranged by group (scheduling only).
 /// The groups of `parts` from their slice `tables`, in (group, slice) order. A group's bounds are
 /// those of its slices with entries (0 and 0 without any, as for a whole table without entries).
 fn x_assemble(parts: &[Vec<i32>], tables: Vec<XGroup>) -> Vec<XSliced> {
@@ -275,6 +279,7 @@ fn x_assemble(parts: &[Vec<i32>], tables: Vec<XGroup>) -> Vec<XSliced> {
             XSliced {
                 q_min: full().map(|s| s.q_min).min().unwrap_or(0),
                 q_max: full().map(|s| s.q_max).max().unwrap_or(0),
+                window: full().map(x_unit_span).max().unwrap_or(0),
                 slices,
             }
         })
@@ -395,6 +400,7 @@ pub(super) fn lut_shadow_compare(direct: Option<&[XSliced]>, reference: Option<&
                     (b.q_min, b.q_max, b.slices.len()),
                     "LOSAT_X_PAIRLUTSHADOW: group {g}: bounds or slices differ (direct vs reference)"
                 );
+                // `t` numbers the slice tables of the batch ("group" in the messages).
                 for (x, y) in a.slices.iter().zip(&b.slices) {
                     x_assert_same_group(
                         t,
@@ -413,6 +419,7 @@ pub(super) fn lut_shadow_compare(direct: Option<&[XSliced]>, reference: Option<&
     }
 }
 
+// No NCBI counterpart: counters of the summary.
 /// Counts a batch with a cut group (LOSAT_X_TBXQSLICE's summary).
 pub(super) fn count_batch(sliced: &[XSliced]) {
     QS_BATCHES.fetch_add(1, AtomicOrdering::Relaxed);
@@ -472,6 +479,7 @@ impl XPairPar {
         }
     }
 
+    // No NCBI counterpart: dispatch only.
     /// `run_units` with the sliced unit functions: batched extensions (`B`) and the prefetch
     /// (`PF`), today's lists or the compact records (LOSAT_X_SEEDCOMPACT).
     fn run_units_sliced<const B: bool, const PF: bool>(
@@ -500,6 +508,7 @@ impl XPairPar {
         }
     }
 
+    // No NCBI counterpart: the unit's group (scheduling only).
     /// The group of `unit` in a batch with a cut group.
     fn x_sliced(&self, unit: &XUnit) -> &XSliced {
         &self

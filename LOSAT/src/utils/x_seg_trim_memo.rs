@@ -1,5 +1,5 @@
 //! EXPERIMENT (LOSAT_X_SEGTRIMMEMO / LOSAT_X_SEGTRIMMEMOSHADOW): the trim of a SEG segment
-//! computed once per thread for each segment's bytes.
+//! computed once per thread for each segment's bytes, for the maskers that ask for it.
 //!
 //! NCBI trims every candidate segment that `s_SegSeq` finds, by evaluating `s_GetProb` on every
 //! window of every length from the segment's length down to `max(1, length - maxtrim) + 1`:
@@ -24,12 +24,19 @@
 //! ```
 //!
 //! The pair (lend, rend) is a function of the segment's letters, `maxtrim` and the alphabet;
-//! no position, no entropy value and no other state of the caller enters it. The callers of the
-//! fast path (`SegMasker::x_mask_sequence`) always use the 20-letter alphabet. TBLASTN's
-//! composition-based redo masks a window of the translated subject around each alignment
-//! (blast_kappa.c:1530-1548), so a low-complexity stretch of the subject is trimmed again for
-//! every query whose window covers it (v4-C DECISIONS 31: 118,765 trims of 12,584 distinct
-//! segments on AP027131 x AP027133); BLASTX's query frames repeat segments too.
+//! no position, no entropy value and no other state of the caller enters it. The fast path
+//! (`SegMasker::x_mask_sequence`) always uses the 20-letter alphabet.
+//!
+//! Two maskers repeat segments and use this memo (`SegMasker::x_with_trim_memo`):
+//! - TBLASTN's composition-based redo masks a window of the translated subject around each
+//!   alignment (blast_kappa.c:1518-1541), so a low-complexity stretch of the subject is trimmed
+//!   again for every query whose window covers it (v4-C DECISIONS 31: 118,765 trims of 12,584
+//!   distinct segments on AP027131 x AP027133);
+//! - BLASTX masks the frames of a long query and then, again, the frames of each of its chunks
+//!   (`split.rs`), whose segments are mostly those of the whole query (51 % of the trim work on
+//!   AP027131 x AP027133).
+//! Other maskers repeat few segments (TBLASTX d04: 2 %) and do not use it, so their threads
+//! keep no table.
 //!
 //! This module keeps, per thread, the bytes of the segments it trimmed and their pairs. A call
 //! whose bytes and `maxtrim` equal a stored entry (the whole slice is compared; the hash only
@@ -62,11 +69,12 @@ pub(crate) fn x_segtrimmemo_mode() -> u8 {
 pub(crate) static X_SHADOW_CALLS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
-/// EXPERIMENT (LOSAT_X_SEGTRIMMEMOSHADOW): the shadow-mode summary (printed by `main` at exit
-/// in shadow mode).
+/// EXPERIMENT (LOSAT_X_SEGTRIMMEMOSHADOW): the shadow-mode summary, printed by `main` at exit in
+/// shadow mode when `LOSAT_X_STATS` is set as well (the regression harnesses compare stderr, so a
+/// shadow run alone writes nothing).
 // No NCBI counterpart: prints the shadow-mode counter; it does not change any value NCBI computes.
 pub fn print_shadow_stats() {
-    if x_segtrimmemo_mode() == 2 {
+    if x_segtrimmemo_mode() == 2 && std::env::var_os("LOSAT_X_STATS").is_some() {
         eprintln!(
             "[X_SHADOW] SEGTRIMMEMO memo_hits_compared={} (trimmed segments identical)",
             X_SHADOW_CALLS.load(std::sync::atomic::Ordering::Relaxed)
@@ -84,16 +92,22 @@ const X_MAX_ENTRIES: usize = 32_768;
 /// would hold more.
 const X_MAX_ARENA: usize = 1 << 20;
 /// Slots of a new table; it doubles while it is more than half full, up to twice
-/// `X_MAX_ENTRIES`.
+/// `X_MAX_ENTRIES` (65,536 slots of 12 bytes).
 const X_FIRST_SLOTS: usize = 1_024;
-/// Longest segment stored (the fast trim's own bound, `X_TRIM_MAX` in seg.rs). Longer segments
-/// are trimmed every time.
-pub(crate) const X_MAX_SEGMENT: usize = 127;
+/// Longest segment stored: the fast trim's own bound. Longer segments are trimmed every time.
+const X_MAX_SEGMENT: usize = crate::utils::seg::X_TRIM_MAX;
+const _: () = assert!(
+    X_MAX_SEGMENT <= u8::MAX as usize
+        && X_FIRST_SLOTS.is_power_of_two()
+        && X_MAX_ARENA <= u32::MAX as usize
+);
 
 /// One stored trim. `len == 0` marks an empty slot (a stored segment has at least one letter).
 #[derive(Clone, Copy, Default)]
 struct Slot {
-    hash: u32,
+    /// The high 32 bits of the segment's hash.
+    tag: u32,
+    /// Offset of the segment's letters in the arena.
     start: u32,
     len: u8,
     maxtrim: u8,
@@ -101,12 +115,11 @@ struct Slot {
     rend: u8,
 }
 
-#[derive(Default)]
+/// The stored trims of one thread.
 struct Memo {
     slots: Vec<Slot>,
     arena: Vec<u8>,
     entries: usize,
-    #[cfg(test)]
     hits: u64,
 }
 
@@ -129,6 +142,15 @@ fn hash_of(segment: &[u8], maxtrim: u8) -> u64 {
 }
 
 impl Memo {
+    const fn new() -> Self {
+        Self {
+            slots: Vec::new(),
+            arena: Vec::new(),
+            entries: 0,
+            hits: 0,
+        }
+    }
+
     /// The slot holding `segment`, or the empty slot where it would go.
     #[inline]
     fn position(&self, hash: u64, segment: &[u8], maxtrim: u8) -> usize {
@@ -140,7 +162,7 @@ impl Memo {
             if slot.len == 0 {
                 return index;
             }
-            if slot.hash == tag
+            if slot.tag == tag
                 && usize::from(slot.len) == segment.len()
                 && slot.maxtrim == maxtrim
                 && &self.arena[slot.start as usize..slot.start as usize + segment.len()] == segment
@@ -173,45 +195,33 @@ impl Memo {
             self.slots[index] = slot;
         }
     }
-}
 
-thread_local! {
-    /// The segments this thread trimmed and their (lend, rend) pairs.
-    static X_MEMO: RefCell<Memo> = RefCell::new(Memo::default());
-}
-
-/// EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the pair `trim()` returns for `segment` (offsets of the
-/// trimmed segment within `segment`), from the per-thread memo when `segment` and `maxtrim`
-/// equal a stored entry. `trim` must be the pure trim of exactly these letters with this
-/// `maxtrim`. Segments longer than `X_MAX_SEGMENT`, an empty segment and a `maxtrim` above 255
-/// are trimmed without the memo. With the shadow switch a hit evaluates `trim` as well and
-/// compares.
-pub(crate) fn x_trimmed(
-    segment: &[u8],
-    maxtrim: usize,
-    trim: impl FnOnce() -> (usize, usize),
-) -> (usize, usize) {
-    let (Ok(maxtrim), true) = (
-        u8::try_from(maxtrim),
-        (1..=X_MAX_SEGMENT).contains(&segment.len()),
-    ) else {
-        return trim();
-    };
-    let hash = hash_of(segment, maxtrim);
-    X_MEMO.with(|memo| {
-        let mut memo = memo.borrow_mut();
-        if memo.slots.is_empty() {
-            memo.clear();
+    /// The pair `trim()` returns for `segment`, from this table when `segment` and `maxtrim`
+    /// equal a stored entry (see `x_trimmed`). `shadow`: evaluate `trim` on a hit as well and
+    /// compare.
+    fn trimmed(
+        &mut self,
+        segment: &[u8],
+        maxtrim: usize,
+        shadow: bool,
+        trim: impl FnOnce() -> (usize, usize),
+    ) -> (usize, usize) {
+        let (Ok(maxtrim), true) = (
+            u8::try_from(maxtrim),
+            (1..=X_MAX_SEGMENT).contains(&segment.len()),
+        ) else {
+            return trim();
+        };
+        if self.slots.is_empty() {
+            self.clear();
         }
-        let index = memo.position(hash, segment, maxtrim);
-        let slot = memo.slots[index];
+        let hash = hash_of(segment, maxtrim);
+        let mut index = self.position(hash, segment, maxtrim);
+        let slot = self.slots[index];
         if slot.len != 0 {
             let stored = (usize::from(slot.lend), usize::from(slot.rend));
-            #[cfg(test)]
-            {
-                memo.hits += 1;
-            }
-            if x_segtrimmemo_mode() == 2 {
+            self.hits += 1;
+            if shadow {
                 let fresh = trim();
                 assert!(
                     fresh == stored,
@@ -226,27 +236,47 @@ pub(crate) fn x_trimmed(
         let (Ok(lend), Ok(rend)) = (u8::try_from(fresh.0), u8::try_from(fresh.1)) else {
             return fresh;
         };
-        let mut index = index;
-        if memo.entries >= X_MAX_ENTRIES || memo.arena.len() + segment.len() > X_MAX_ARENA {
-            memo.clear();
-            index = memo.position(hash, segment, maxtrim);
-        } else if 2 * (memo.entries + 1) > memo.slots.len() {
-            memo.grow();
-            index = memo.position(hash, segment, maxtrim);
+        if self.entries >= X_MAX_ENTRIES || self.arena.len() + segment.len() > X_MAX_ARENA {
+            self.clear();
+            index = self.position(hash, segment, maxtrim);
+        } else if 2 * (self.entries + 1) > self.slots.len() {
+            self.grow();
+            index = self.position(hash, segment, maxtrim);
         }
-        let start = memo.arena.len() as u32;
-        memo.arena.extend_from_slice(segment);
-        memo.slots[index] = Slot {
-            hash: (hash >> 32) as u32,
+        let start = self.arena.len() as u32;
+        self.arena.extend_from_slice(segment);
+        self.slots[index] = Slot {
+            tag: (hash >> 32) as u32,
             start,
             len: segment.len() as u8,
             maxtrim,
             lend,
             rend,
         };
-        memo.entries += 1;
+        self.entries += 1;
         fresh
-    })
+    }
+}
+
+thread_local! {
+    /// The segments this thread trimmed and their (lend, rend) pairs.
+    static X_MEMO: RefCell<Memo> = const { RefCell::new(Memo::new()) };
+}
+
+/// EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the pair `trim()` returns for `segment` (offsets of the
+/// trimmed segment within `segment`), from the per-thread memo when `segment` and `maxtrim`
+/// equal a stored entry. `trim` must be the pure trim of exactly these letters with this
+/// `maxtrim`, and must not call `x_trimmed` itself or wait on other threads' work (it runs while
+/// this thread's table is borrowed). Segments longer than `X_MAX_SEGMENT`, an empty segment and
+/// a `maxtrim` above 255 are trimmed without the memo. With the shadow switch a hit evaluates
+/// `trim` as well and compares.
+pub(crate) fn x_trimmed(
+    segment: &[u8],
+    maxtrim: usize,
+    trim: impl FnOnce() -> (usize, usize),
+) -> (usize, usize) {
+    let shadow = x_segtrimmemo_mode() == 2;
+    X_MEMO.with(|memo| memo.borrow_mut().trimmed(segment, maxtrim, shadow, trim))
 }
 
 /// Memo hits of this thread so far (tests only).
@@ -262,6 +292,7 @@ mod tests {
 
     #[test]
     fn memo_returns_the_stored_pair_for_equal_bytes_and_maxtrim_only() {
+        let mut memo = Memo::new();
         let calls = Cell::new(0usize);
         let trim = |pair: (usize, usize)| {
             let calls = &calls;
@@ -272,28 +303,43 @@ mod tests {
         };
         let a = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
         let b = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12];
-        assert_eq!(x_trimmed(&a, 50, trim((1, 9))), (1, 9));
-        assert_eq!(x_trimmed(&a, 50, trim((0, 0))), (1, 9));
+        assert_eq!(memo.trimmed(&a, 50, false, trim((1, 9))), (1, 9));
+        // A hit returns the stored pair without calling the trim.
+        assert_eq!(memo.trimmed(&a, 50, false, trim((0, 0))), (1, 9));
         assert_eq!(calls.get(), 1);
-        // One letter differs (in the tail word): evaluated.
-        assert_eq!(x_trimmed(&b, 50, trim((2, 8))), (2, 8));
+        // The shadow evaluates the trim on a hit and agrees.
+        assert_eq!(memo.trimmed(&a, 50, true, trim((1, 9))), (1, 9));
         assert_eq!(calls.get(), 2);
-        // Same letters, other maxtrim: evaluated.
-        assert_eq!(x_trimmed(&a, 49, trim((3, 7))), (3, 7));
+        // One letter differs (in the tail word): evaluated.
+        assert_eq!(memo.trimmed(&b, 50, false, trim((2, 8))), (2, 8));
         assert_eq!(calls.get(), 3);
-        // A prefix is another segment.
-        assert_eq!(x_trimmed(&a[..10], 50, trim((0, 9))), (0, 9));
+        // Same letters, other maxtrim: evaluated.
+        assert_eq!(memo.trimmed(&a, 49, false, trim((3, 7))), (3, 7));
         assert_eq!(calls.get(), 4);
+        // A prefix is another segment.
+        assert_eq!(memo.trimmed(&a[..10], 50, false, trim((0, 9))), (0, 9));
+        assert_eq!(calls.get(), 5);
         // Too long for the memo: evaluated every time.
         let long = [7u8; X_MAX_SEGMENT + 1];
-        assert_eq!(x_trimmed(&long, 50, trim((5, 6))), (5, 6));
-        assert_eq!(x_trimmed(&long, 50, trim((5, 6))), (5, 6));
-        assert_eq!(calls.get(), 6);
+        assert_eq!(memo.trimmed(&long, 50, false, trim((5, 6))), (5, 6));
+        assert_eq!(memo.trimmed(&long, 50, false, trim((5, 6))), (5, 6));
+        assert_eq!(calls.get(), 7);
+        assert_eq!(memo.hits, 2);
     }
 
     #[test]
-    fn memo_keeps_every_entry_through_growth_and_clears_at_its_bound() {
-        // Distinct segments: the index in base 251 over three letters, plus a length byte.
+    #[should_panic(expected = "LOSAT_X_SEGTRIMMEMOSHADOW")]
+    fn shadow_stops_when_the_trim_disagrees_with_the_stored_pair() {
+        let mut memo = Memo::new();
+        let a = [3u8; 20];
+        memo.trimmed(&a, 50, false, || (1, 18));
+        memo.trimmed(&a, 50, true, || (2, 18));
+    }
+
+    #[test]
+    fn memo_keeps_every_entry_through_growth_and_clears_at_its_entry_bound() {
+        let mut memo = Memo::new();
+        // Distinct segments: the index in base 251 over three letters, plus one more.
         let segment = |n: usize| {
             vec![
                 (n % 251) as u8,
@@ -303,27 +349,29 @@ mod tests {
             ]
         };
         let pair = |n: usize| (n % 3, n % 5 + 3);
-        let calls = Cell::new(0usize);
         let count = 3 * X_FIRST_SLOTS;
         for n in 0..count {
-            let _ = x_trimmed(&segment(n), 50, || {
-                calls.set(calls.get() + 1);
-                pair(n)
-            });
+            assert_eq!(memo.trimmed(&segment(n), 50, false, || pair(n)), pair(n));
         }
-        assert_eq!(calls.get(), count);
+        assert_eq!(memo.entries, count);
+        assert!(memo.slots.len() >= 2 * count);
         // All of them are still there after the table doubled.
         for n in 0..count {
-            assert_eq!(x_trimmed(&segment(n), 50, || unreachable!()), pair(n));
+            assert_eq!(
+                memo.trimmed(&segment(n), 50, false, || unreachable!()),
+                pair(n)
+            );
         }
-        // Filling past the bound clears the table; the results stay the trim's.
+        // Filling past the bound clears the table once; the results stay the trim's.
         for n in count..X_MAX_ENTRIES + count + 10 {
-            assert_eq!(x_trimmed(&segment(n), 50, || pair(n)), pair(n));
+            assert_eq!(memo.trimmed(&segment(n), 50, false, || pair(n)), pair(n));
         }
+        assert_eq!(memo.entries, count + 10);
+        assert!(memo.slots.len() <= 2 * X_MAX_ENTRIES);
         let mut evaluated = 0usize;
         for n in 0..count {
             assert_eq!(
-                x_trimmed(&segment(n), 50, || {
+                memo.trimmed(&segment(n), 50, false, || {
                     evaluated += 1;
                     pair(n)
                 }),
@@ -331,5 +379,33 @@ mod tests {
             );
         }
         assert_eq!(evaluated, count, "the first entries were cleared");
+    }
+
+    #[test]
+    fn memo_clears_at_its_letter_bound() {
+        let mut memo = Memo::new();
+        // Distinct segments of X_MAX_SEGMENT letters: the arena fills before the entry bound.
+        let segment = |n: usize| {
+            let mut s = vec![(n % 251) as u8; X_MAX_SEGMENT];
+            s[0] = (n / 251) as u8;
+            s
+        };
+        let fit = X_MAX_ARENA / X_MAX_SEGMENT;
+        for n in 0..fit {
+            memo.trimmed(&segment(n), 50, false, || (0, 1));
+        }
+        assert_eq!(memo.entries, fit);
+        assert_eq!(
+            memo.trimmed(&segment(0), 50, false, || unreachable!()),
+            (0, 1)
+        );
+        // One more segment does not fit in the arena: the table is cleared first.
+        memo.trimmed(&segment(fit), 50, false, || (0, 2));
+        assert_eq!(memo.entries, 1);
+        assert_eq!(memo.arena.len(), X_MAX_SEGMENT);
+        assert_eq!(
+            memo.trimmed(&segment(fit), 50, false, || unreachable!()),
+            (0, 2)
+        );
     }
 }

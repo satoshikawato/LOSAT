@@ -653,6 +653,9 @@ pub struct SegMasker {
     /// Whether a recursion on the left part of a trimmed segment keeps only the head of
     /// its result, as NCBI's `s_SegSeq` does (true, the default; see `mask_sequence`).
     ncbi_left_segments: bool,
+    /// EXPERIMENT (LOSAT_X_SEGTRIMMEMO): whether the fast path takes a segment's trim from the
+    /// thread's memo (`x_seg_trim_memo.rs`); set by the maskers that repeat segments.
+    x_trim_memo: bool,
 }
 
 impl SegMasker {
@@ -675,6 +678,7 @@ impl SegMasker {
             downset,
             upset,
             ncbi_left_segments: true,
+            x_trim_memo: false,
         }
     }
 
@@ -683,6 +687,17 @@ impl SegMasker {
     /// NCBI's behavior.
     pub fn keeping_all_left_segments(mut self) -> Self {
         self.ncbi_left_segments = false;
+        self
+    }
+
+    /// EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the masker that takes the trim of a segment it (or
+    /// another such masker on this thread) trimmed before from the thread's memo. For maskers
+    /// that see the same segments again (TBLASTN's redo windows, BLASTX's query and its chunks);
+    /// the result is the same either way.
+    // No NCBI counterpart: chooses where a trim result comes from; it does not change any value
+    // NCBI computes.
+    pub(crate) fn x_with_trim_memo(mut self) -> Self {
+        self.x_trim_memo = true;
         self
     }
 
@@ -706,6 +721,7 @@ impl SegMasker {
             downset,
             upset,
             ncbi_left_segments: true,
+            x_trim_memo: false,
         }
     }
 
@@ -1159,7 +1175,7 @@ fn x_seg_fast() -> u8 {
 
 // No NCBI counterpart: size bound of the histogram arrays of `x_trim_segment`; longer segments use the reference trim; it does not change any value NCBI computes.
 /// Longest segment handled by the count histogram of `x_trim_segment`.
-const X_TRIM_MAX: usize = 127;
+pub(crate) const X_TRIM_MAX: usize = 127;
 
 thread_local! {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_seg.c:1593-1593,1599-1602,1621-1623
@@ -1689,10 +1705,10 @@ impl SegMasker {
                     //          status = s_Trim(temp_seq, &leftend, &rightend, sparamsp);
                     // ```
                     // EXPERIMENT (LOSAT_X_SEGTRIMMEMO): the trim's offsets within the segment are a
-                    // function of its letters and `maxtrim` (x_seg_trim_memo.rs); a segment this
-                    // thread trimmed before takes the stored offsets.
-                    (leftend, rightend) = if crate::utils::x_seg_trim_memo::x_segtrimmemo_mode()
-                        != 0
+                    // function of its letters and `maxtrim` (x_seg_trim_memo.rs); for a masker that
+                    // asks for it, a segment this thread trimmed before takes the stored offsets.
+                    (leftend, rightend) = if masker.x_trim_memo
+                        && crate::utils::x_seg_trim_memo::x_segtrimmemo_mode() != 0
                         && leftend <= rightend
                         && rightend < seq.len()
                     {
@@ -1834,67 +1850,6 @@ mod tests {
     //    lowlim = first;
     // ```
     // The test masks random sequences with both implementations and compares the intervals.
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1530-1548
-    // ```c
-    //     status = Blast_GetPartialTranslation(..., &translation_buffer, ...);
-    // ...
-    //             status = s_DoSegSequenceData(seqData, eBlastTypeTblastn,
-    //                                          subject_maybe_biased);
-    // ```
-    // EXPERIMENT (LOSAT_X_SEGTRIMMEMO): TBLASTN's redo masks overlapping windows of one subject;
-    // the windows below overlap so that their segments repeat and the trim memo answers. Every
-    // window's intervals must equal the reference SEG's.
-    #[test]
-    fn x_trim_memo_on_overlapping_windows_matches_reference() {
-        let mut state = 0x1357_9BDF_2468_ACE0u64;
-        let mut next = move || {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state
-        };
-        let valid: Vec<u8> = (0u8..28)
-            .filter(|&c| c == 1 || (3..=20).contains(&c) || c == 22)
-            .collect();
-        let mut seq = Vec::new();
-        while seq.len() < 6000 {
-            if next() % 4 == 0 {
-                let pool: Vec<u8> = (0..1 + next() % 3)
-                    .map(|_| valid[(next() % valid.len() as u64) as usize])
-                    .collect();
-                for _ in 0..8 + next() % 40 {
-                    seq.push(pool[(next() % pool.len() as u64) as usize]);
-                }
-            } else {
-                for _ in 0..1 + next() % 60 {
-                    seq.push(valid[(next() % valid.len() as u64) as usize]);
-                }
-            }
-        }
-        let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1));
-        let hits_before = crate::utils::x_seg_trim_memo::x_hits();
-        let mut masked = 0usize;
-        for _ in 0..300 {
-            let begin = (next() % 5000) as usize;
-            let end = (begin + 50 + (next() % 900) as usize).min(seq.len());
-            let window = &seq[begin..end];
-            let reference = masker.mask_sequence_reference(window);
-            assert_eq!(
-                masker.x_mask_sequence(window),
-                reference,
-                "window {begin}..{end}"
-            );
-            masked += reference.len();
-        }
-        assert!(masked > 300, "only {masked} intervals");
-        if crate::utils::x_seg_trim_memo::x_segtrimmemo_mode() != 0 {
-            assert!(
-                crate::utils::x_seg_trim_memo::x_hits() > hits_before + 100,
-                "the windows should repeat segments"
-            );
-        }
-    }
-
     #[test]
     fn x_fast_seg_matches_reference_on_random_sequences() {
         let mut state = 0x243F_6A88_85A3_08D3u64;
@@ -1974,6 +1929,69 @@ mod tests {
             masked > cases / 4,
             "only {masked} intervals in {cases} cases"
         );
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1518,1522,1540-1541
+    // ```c
+    //     status = Blast_GetPartialTranslation(na_sequence + translation_start,
+    // ...
+    //                                          &translation_buffer,
+    // ...
+    //                     status = s_DoSegSequenceData(seqData, eBlastTypeTblastn,
+    //                                                  subject_maybe_biased);
+    // ```
+    // EXPERIMENT (LOSAT_X_SEGTRIMMEMO): TBLASTN's redo masks overlapping windows of one subject;
+    // the windows below overlap so that their segments repeat and the trim memo answers. Every
+    // window's intervals must equal the reference SEG's.
+    #[test]
+    fn x_trim_memo_on_overlapping_windows_matches_reference() {
+        let mut state = 0x1357_9BDF_2468_ACE0u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let valid: Vec<u8> = (0u8..28)
+            .filter(|&c| c == 1 || (3..=20).contains(&c) || c == 22)
+            .collect();
+        let mut seq = Vec::new();
+        while seq.len() < 6000 {
+            if next() % 4 == 0 {
+                let pool: Vec<u8> = (0..1 + next() % 3)
+                    .map(|_| valid[(next() % valid.len() as u64) as usize])
+                    .collect();
+                for _ in 0..8 + next() % 40 {
+                    seq.push(pool[(next() % pool.len() as u64) as usize]);
+                }
+            } else {
+                for _ in 0..1 + next() % 60 {
+                    seq.push(valid[(next() % valid.len() as u64) as usize]);
+                }
+            }
+        }
+        let masker = SegMasker::with_params(&SegParams::new(10, 1.8, 2.1)).x_with_trim_memo();
+        let hits_before = crate::utils::x_seg_trim_memo::x_hits();
+        let mut masked = 0usize;
+        for _ in 0..300 {
+            let begin = (next() % 5000) as usize;
+            let end = (begin + 50 + (next() % 900) as usize).min(seq.len());
+            let window = &seq[begin..end];
+            let reference = masker.mask_sequence_reference(window);
+            assert_eq!(
+                masker.x_mask_sequence(window),
+                reference,
+                "window {begin}..{end}"
+            );
+            masked += reference.len();
+        }
+        assert!(masked > 300, "only {masked} intervals");
+        if crate::utils::x_seg_trim_memo::x_segtrimmemo_mode() != 0 {
+            assert!(
+                crate::utils::x_seg_trim_memo::x_hits() > hits_before + 100,
+                "the windows should repeat segments"
+            );
+        }
     }
 
     #[test]

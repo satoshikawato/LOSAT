@@ -139,6 +139,15 @@
 //! architectural effect, so the cells, the hits and the init HSPs are those without it. The other
 //! subjects run the scan without the hint (`PF` false), whose machine code is the one before the
 //! switch.
+//!
+//! `LOSAT_X_TBXQSLICE` (in the strict set, a value switch: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set; x86-64 only): a batch whose context group spans more query
+//! letters than the switch's value (built-in 262,144) has its groups cut into slices of consecutive
+//! query offsets, one lookup table each, and its units scan their chunk once per slice on their one
+//! diagonal table (x_tbx_qslice.rs, exactness argument in its header): the table cells a slice's
+//! scan touches at one subject position span the slice, not the group. Each cell sees its hits in
+//! the same order, so the table and the chunk's sorted init HSPs are those of `scan_unit`. A batch
+//! with no cut group runs `scan_unit`, whose machine code is the one before the switch.
 
 use super::*;
 use crate::algorithm::tblastx::blast_gapalign::get_ungapped_hsp_list_into;
@@ -1199,7 +1208,10 @@ fn x_unit_copy(records: &[XUnitHsp], mapped: bool) -> Vec<XUnitHsp> {
 
 /// No NCBI counterpart (LOSAT_X_SEEDUNMAP, section above): `x_unit_mapped` for a unit whose query
 /// group spans `span` letters; where it holds, `records` (empty) gets the mapped capacity unless it
-/// has that much room. `XPairPar::x_unit_records`, and LOSAT_X_TBXQSLICE's units (x_tbx_qslice.rs).
+/// has that much room. The statements of `XPairPar::x_unit_records`, for LOSAT_X_TBXQSLICE's units
+/// (x_tbx_qslice.rs), whose groups have no table in `groups`. `x_unit_records` keeps its own copy:
+/// calling this function from it changed the machine code of the default unit scan (one-thread
+/// instruction counts -2.0 % to +0.1 %, v4-A DECISIONS 19).
 fn x_records_for(
     span: usize,
     unit: &XUnit,
@@ -2129,7 +2141,13 @@ impl XPairPar {
         scratch: &XScratch,
         records: &mut Vec<XUnitHsp>,
     ) -> bool {
-        x_records_for(x_unit_span(&self.groups[unit.g]), unit, scratch, records)
+        let span = x_unit_span(&self.groups[unit.g]);
+        let mapped = x_unit_mapped(scratch.unmap, span, unit.chunk.length);
+        if mapped && records.capacity() * std::mem::size_of::<XUnitHsp>() < X_MAPPED_BYTES {
+            *records = Vec::with_capacity(x_mapped_len::<XUnitHsp>(0));
+            SU_RECORDS.fetch_add(1, AtomicOrdering::Relaxed);
+        }
+        mapped
     }
 
     /// The number of context groups of the batch (the `g` of its units).

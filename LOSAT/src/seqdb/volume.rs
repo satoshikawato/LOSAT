@@ -183,7 +183,17 @@ impl Volume {
     /// occupies (protein: with the sentinel bytes around them; nucleotide:
     /// with their ambiguity data).
     pub fn block_bytes(&self, first: u32, end: u32) -> Result<u64, SeqDbError> {
-        Ok(self.index.sequence_start(end)? - self.index.sequence_start(first)? + self.lead())
+        let (start, stop) = (
+            self.index.sequence_start(first)?,
+            self.index.sequence_start(end)?,
+        );
+        // Ascending when the arrays are held (checked at open); read from the file, the two
+        // entries can disagree only if the file changed after the open.
+        let bytes = stop.checked_sub(start).ok_or_else(|| {
+            self.index
+                .sequence_changed(first, (end - first) as usize + 1)
+        })?;
+        Ok(bytes + self.lead())
     }
 
     /// The end of the block that starts at `first` (`SeqDb::next_block`): the
@@ -236,7 +246,11 @@ impl Volume {
         let mut window = window.max(1);
         let mut next = first + 1;
         loop {
-            // The end `n` does not fit, so the scan stops at or before it.
+            // The end `n` does not fit, so the scan stops at or before it, unless the file
+            // changed after the open and the entry of `n` reads differently.
+            if next > n {
+                return Err(self.index.sequence_changed(first, (n - first) as usize + 1));
+            }
             let count = window.min((n + 1 - next) as usize);
             let offsets = self.index.sequence_offsets(next, next + count as u32 - 1)?;
             if let Some(at) = offsets.iter().position(|&offset| u64::from(offset) > limit) {
@@ -290,6 +304,16 @@ impl Volume {
         let seqtype = self.index.seqtype;
         let seq_offsets = self.index.sequence_offsets(first, end)?;
         let amb_offsets = self.index.ambiguity_offsets(first, end)?;
+        // Each sequence's ambiguity data inside its data (checked at open): read from the file,
+        // the entries can break it only if the file changed after the open.
+        if !self.index.holds_offsets()
+            && !amb_offsets
+                .iter()
+                .enumerate()
+                .all(|(i, &amb)| seq_offsets[i] < amb && amb <= seq_offsets[i + 1])
+        {
+            return Err(self.index.ambiguity_changed(first, amb_offsets.len()));
+        }
         let data_start = u64::from(seq_offsets[0]) - self.lead();
         let data_end = u64::from(seq_offsets[seq_offsets.len() - 1]);
         let file = self.seq_file()?;

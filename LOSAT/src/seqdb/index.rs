@@ -679,16 +679,80 @@ impl IndexFile {
         Ok(())
     }
 
+    /// EXPERIMENT (LOSAT_X_DBIDXREAD): the order that the open checked (`check_streamed`) in
+    /// the entries `first..` of `region` read again from the file after the open (`words`,
+    /// `pair`; the open's own pass gives `parse`'s errors): the header offsets ascend; the
+    /// sequence offsets ascend, strictly and from 1 in a protein volume with sequences (the
+    /// sentinel bytes). Entries that break it were written after the open, and the error
+    /// stands where the reads that use them (`Volume::read_block`, `Volume::visit_deflines`,
+    /// BLASTP's diagonal offset) would subtract them.
+    fn check_reread(&self, region: Region, first: usize, words: &[u32]) -> Result<(), SeqDbError> {
+        let strict = match (region, self.seqtype) {
+            (Region::Ambiguity, _) => return Ok(()),
+            (Region::Sequence, SeqType::Protein) => {
+                if self.num_oids > 0 && words.first() == Some(&0) {
+                    return Err(self.changed(region, first, words.len()));
+                }
+                true
+            }
+            _ => false,
+        };
+        let ordered = words.windows(2).all(|pair| {
+            if strict {
+                pair[0] < pair[1]
+            } else {
+                pair[0] <= pair[1]
+            }
+        });
+        if ordered {
+            Ok(())
+        } else {
+            Err(self.changed(region, first, words.len()))
+        }
+    }
+
+    /// The error of `check_reread`, also given where two reads of the file disagree
+    /// (`Volume::block_bytes`, `Volume::x_read_block_end`, `Volume::read_block`).
+    fn changed(&self, region: Region, first: usize, count: usize) -> SeqDbError {
+        let path = match &self.offsets {
+            Offsets::Read(read) => read.file.path().to_path_buf(),
+            Offsets::Held(_) => std::path::PathBuf::new(),
+        };
+        SeqDbError::Format {
+            path,
+            message: format!(
+                "{region:?} offsets {first}..{} differ from those checked at open (the file changed)",
+                first + count
+            ),
+        }
+    }
+
+    /// The error of `changed` for the sequence offsets `first..first + count`.
+    pub(super) fn sequence_changed(&self, first: u32, count: usize) -> SeqDbError {
+        self.changed(Region::Sequence, first as usize, count)
+    }
+
+    /// The error of `changed` for the ambiguity offsets `first..first + count`.
+    pub(super) fn ambiguity_changed(&self, first: u32, count: usize) -> SeqDbError {
+        self.changed(Region::Ambiguity, first as usize, count)
+    }
+
     /// The entries `first..first + count` of `region`.
     fn words(&self, region: Region, first: u32, count: usize) -> Result<Vec<u32>, SeqDbError> {
         let mut out = vec![0u32; count];
         self.read_words(region, first as usize, &mut out, &mut Vec::new())?;
+        if !self.holds_offsets() {
+            self.check_reread(region, first as usize, &out)?;
+        }
         Ok(out)
     }
 
     fn pair(&self, region: Region, first: u32) -> Result<(u64, u64), SeqDbError> {
         let mut out = [0u32; 2];
         self.read_words(region, first as usize, &mut out, &mut Vec::new())?;
+        if !self.holds_offsets() {
+            self.check_reread(region, first as usize, &out)?;
+        }
         Ok((u64::from(out[0]), u64::from(out[1])))
     }
 

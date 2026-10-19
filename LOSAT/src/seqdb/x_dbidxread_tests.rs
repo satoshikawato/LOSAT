@@ -451,3 +451,72 @@ fn damaged_ambiguity_data_check_in_ranges_as_one_by_one() {
         }
     }
 }
+
+/// Writes `words` at entry `entry` of array `array` (0 header, 1 sequence, 2 ambiguity) of the
+/// index file `path` in place (the same file, as a writer that edits it during a run would).
+fn overwrite_entries(path: &Path, arrays: usize, num_oids: usize, array: usize, words: &[u32]) {
+    use std::io::{Seek, SeekFrom, Write};
+    let len = std::fs::metadata(path).unwrap().len() as usize;
+    let at = len - 4 * (num_oids + 1) * arrays + 4 * (num_oids + 1) * array;
+    let mut file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    file.seek(SeekFrom::Start(at as u64)).unwrap();
+    let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_be_bytes()).collect();
+    file.write_all(&bytes).unwrap();
+}
+
+#[test]
+fn an_index_file_changed_after_the_open_gives_errors_not_panics() {
+    let dir = TempDir::new("changed");
+    for (name, exts, seqtype, arrays) in [
+        ("prot_v4", ["pin", "psq", "phr"], SeqType::Protein, 2),
+        ("nucl_v4", ["nin", "nsq", "nhr"], SeqType::Nucleotide, 3),
+    ] {
+        let base = copy_database(name, &exts, &dir.0);
+        let index = base.with_extension(exts[0]);
+        let pristine = std::fs::read(&index).unwrap();
+        let num_oids = Volume::open_as(&base, seqtype, XDbIdxRead::Off)
+            .unwrap()
+            .num_oids() as usize;
+        assert!(num_oids >= 3, "{name}");
+        let descending: Vec<u32> = (0..=num_oids as u32).rev().collect();
+        let zeros = vec![0u32; num_oids + 1];
+        let mut changes: Vec<(usize, &[u32])> =
+            vec![(0, &descending), (1, &descending), (1, &zeros)];
+        if arrays == 3 {
+            changes.push((2, &zeros[..num_oids]));
+        }
+        for (array, words) in changes {
+            std::fs::write(&index, &pristine).unwrap();
+            let volume = Volume::open_as(&base, seqtype, XDbIdxRead::On).unwrap();
+            overwrite_entries(&index, arrays, num_oids, array, words);
+            let n = num_oids as u32;
+            let label = format!("{name}, array {array} set to {:?}..", &words[..2]);
+            let block = volume.read_block(0, n, 0);
+            if array != 0 {
+                let error = block.expect_err(&label).to_string();
+                assert!(error.contains("the file changed"), "{label}: {error}");
+            }
+            for first in 0..n {
+                let _ = volume.block_end(first, 64);
+                let _ = volume.block_bytes(first, n);
+                let _ = volume.read_block(first, first + 1, first);
+            }
+            let mut visited = 0;
+            volume.visit_deflines(0, n, 1 << 20, &mut |_, _| {
+                visited += 1;
+                true
+            });
+            assert_eq!(visited, n, "{label}");
+            if array == 0 {
+                // Header offsets read again in a range break the order: the range is read one
+                // sequence at a time, and every sequence gets the error of its own read.
+                let error = volume
+                    .index()
+                    .header_offsets(0, n)
+                    .expect_err(&label)
+                    .to_string();
+                assert!(error.contains("the file changed"), "{label}: {error}");
+            }
+        }
+    }
+}

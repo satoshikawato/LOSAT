@@ -302,6 +302,7 @@ export LOSAT_X_BXSUBJFLOW=1
 export LOSAT_X_CODONFAST=1
 export LOSAT_X_COMPFAST=1
 export LOSAT_X_CTXFAST=1
+export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DEKKER=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DISCLUTPAR=1
@@ -978,6 +979,31 @@ Rebuilding less:
   identical` (`blocks`: blocks of the cut; `blocks_ref`: blocks of 1 MiB; `lists_compared`: hit lists
   compared that are not empty on either side). The preliminary stage runs twice, so its `LOSAT_TIMING`
   counts double.
+- `LOSAT_X_DBIDXREAD=1` (every program's `-db`, memory; in the strict set since 2026-10-19 (perf/db-index-pread, evidence
+  at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the index file of each volume
+  (`.pin` / `.nin`) stays open after the volume is opened, and the reader reads the ranges of its offset arrays that it
+  needs by position (`seqdb/index.rs` `IndexFile::open`): a block's sequence (and ambiguity) offsets with one read when
+  the block is read, a header's two offsets when a title is read, the offsets after a block's first sequence in windows
+  of 1,024 entries and more when the next block is planned (the end of the volume first, one entry), and the block's
+  offsets for BLASTP's diagonal offset of the next block. Without it the whole index file is read into a buffer when the
+  volume is opened and the arrays are held until the end of the run: 4 bytes per sequence for the header offsets and 4
+  for the sequence offsets (and 4 for the ambiguity offsets of a nucleotide volume), 296 MiB for UniRef50 (38.8 M
+  sequences, five volumes) with a 133 MB buffer of the largest volume while it is checked. The arrays are checked as
+  before when the volume is opened (ascending offsets, the protein sentinel bytes, the nucleotide ambiguity offsets
+  inside their sequence's data, the arrays inside the file), in one pass that reads 1 MiB at a time, with the same
+  errors in the same order. The checks of every title that the block search of `LOSAT_X_BPQBLOCK` and the report
+  streaming of `LOSAT_X_RPTSTREAM` (blastn) run before they start read the headers in ranges of 1,024 sequences (one read
+  of the index file and one read of the header file per MiB, `SeqDb::visit_deflines`) instead of two reads per sequence,
+  and blastn's ambiguity check reads the offsets of the same ranges at once (`SeqDb::visit_ambiguity`), the ambiguity
+  data of the sequences that have any as before. Every value read is the one of the held arrays, so blocks, reports and
+  errors do not change; a read of the index file that fails after the volume was opened is a LOSAT error of the read of
+  the block (or title) that needs it. Shadow: `LOSAT_X_DBIDXREADSHADOW=1` (implies the switch) also reads the whole file
+  as without the switch and holds the arrays: the two opens are compared (every value, or the two error texts), every
+  read of the arrays is compared with the held entries, every block end with the one the held arrays give, and every
+  definition line or ambiguity check read in a range with the one read for its sequence alone; the first difference
+  prints the line otherwise printed at exit and panics: `[X_SHADOW] DBIDXREAD volumes= reads= words= block_ends=
+  run_records= identical` (`reads` / `words`: reads of the arrays and the entries they read; `run_records`: records
+  decoded from the ranges' reads). EVIDENCE-TO-COME.
 - `LOSAT_X_BPSUBJMETA=1` (BLASTP, speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; acts only in the `-subject` block search of `LOSAT_X_BPQBLOCK`, for
   blastp and blastp-fast) the subjects' tabular IDs and titles are made once for all blocks instead of once
   per block (`blastp/blast_engine/x_subject_meta.rs`, exactness argument in its header). Without it each

@@ -6,8 +6,8 @@ use std::sync::OnceLock;
 
 use super::file::DbFile;
 use super::header::{decode_defline_set, Defline};
-use super::index::IndexFile;
-use super::{SeqDbError, SeqType};
+use super::index::{self, IndexFile};
+use super::{SeqDbError, SeqType, XDbIdxRead};
 
 /// One volume of a database (`NAME.pin` / `.psq` / `.phr`, or the `n` files).
 #[derive(Debug)]
@@ -39,10 +39,26 @@ impl Volume {
     // ```
     /// Opens the volume `base` (a path without extension) by reading its
     /// index file. The sequence and header files are opened on first use.
+    /// EXPERIMENT (LOSAT_X_DBIDXREAD): the index file stays open and its arrays
+    /// are read where they are needed (`IndexFile::open`); without the switch
+    /// the whole file is read and its arrays are held (`IndexFile::parse`).
     pub fn open(base: &Path, seqtype: SeqType) -> Result<Self, SeqDbError> {
+        Self::open_as(base, seqtype, super::x_dbidxread())
+    }
+
+    /// `open` with the index read as `mode` says.
+    pub(super) fn open_as(
+        base: &Path,
+        seqtype: SeqType,
+        mode: XDbIdxRead,
+    ) -> Result<Self, SeqDbError> {
         let index_path = with_extension(base, seqtype, "in");
-        let index_bytes = DbFile::open(&index_path)?.read_all()?;
-        let index = IndexFile::parse(&index_bytes, seqtype, &index_path)?;
+        let index_file = DbFile::open(&index_path)?;
+        let index = match mode {
+            XDbIdxRead::Off => IndexFile::parse(&index_file.read_all()?, seqtype, &index_path)?,
+            XDbIdxRead::On => IndexFile::open(index_file, seqtype, false)?,
+            XDbIdxRead::Shadow => IndexFile::open(index_file, seqtype, true)?,
+        };
         let volume = Self {
             base: base.to_path_buf(),
             index,
@@ -154,15 +170,81 @@ impl Volume {
         Ok(())
     }
 
+    /// Bytes before the first sequence that a block reads with it: the
+    /// protein sentinel byte.
+    fn lead(&self) -> u64 {
+        match self.index.seqtype {
+            SeqType::Protein => 1,
+            SeqType::Nucleotide => 0,
+        }
+    }
+
     /// Bytes of the sequence file that a block of the sequences `first..end`
     /// occupies (protein: with the sentinel bytes around them; nucleotide:
     /// with their ambiguity data).
-    pub fn block_bytes(&self, first: u32, end: u32) -> u64 {
-        self.index.sequence_start(end) - self.index.sequence_start(first)
-            + match self.index.seqtype {
-                SeqType::Protein => 1,
-                SeqType::Nucleotide => 0,
+    pub fn block_bytes(&self, first: u32, end: u32) -> Result<u64, SeqDbError> {
+        Ok(self.index.sequence_start(end)? - self.index.sequence_start(first)? + self.lead())
+    }
+
+    /// The end of the block that starts at `first` (`SeqDb::next_block`): the
+    /// last end in `first + 1 ..= num_oids` whose `block_bytes` fit
+    /// `max_bytes`, at least `first + 1`. The offsets ascend, so the ends that
+    /// fit form a prefix.
+    pub(super) fn block_end(&self, first: u32, max_bytes: u64) -> Result<u32, SeqDbError> {
+        if let Some(offsets) = self.index.held_sequence_offsets() {
+            return Ok(held_block_end(offsets, first, max_bytes, self.lead()));
+        }
+        let end = self.x_read_block_end(first, max_bytes, X_BLOCK_END_WINDOW)?;
+        if let Some(offsets) = self.index.x_shadow_sequence_offsets() {
+            index::X_SHADOW_BLOCK_ENDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let expected = held_block_end(offsets, first, max_bytes, self.lead());
+            if end != expected {
+                index::x_shadow_difference(format!(
+                    "{}: the block from {first} within {max_bytes} bytes ends at {end}, the held \
+                     array's at {expected}",
+                    self.base.display()
+                ));
             }
+        }
+        Ok(end)
+    }
+
+    /// EXPERIMENT (LOSAT_X_DBIDXREAD): `block_end` over the offsets in the
+    /// file: the end of the volume when it fits (one entry read), else the
+    /// offsets after `first` read forward in windows of `window` entries,
+    /// doubled up to `X_BLOCK_END_MAX_WINDOW`, to the first end that does not
+    /// fit.
+    pub(super) fn x_read_block_end(
+        &self,
+        first: u32,
+        max_bytes: u64,
+        window: usize,
+    ) -> Result<u32, SeqDbError> {
+        let n = self.num_oids();
+        let lead = self.lead();
+        if max_bytes < lead {
+            return Ok(first + 1);
+        }
+        // `block_bytes(first, end) <= max_bytes` is `sequence_start(end) <= limit`.
+        let limit = self
+            .index
+            .sequence_start(first)?
+            .saturating_add(max_bytes - lead);
+        if self.index.sequence_start(n)? <= limit {
+            return Ok(n);
+        }
+        let mut window = window.max(1);
+        let mut next = first + 1;
+        loop {
+            // The end `n` does not fit, so the scan stops at or before it.
+            let count = window.min((n + 1 - next) as usize);
+            let offsets = self.index.sequence_offsets(next, next + count as u32 - 1)?;
+            if let Some(at) = offsets.iter().position(|&offset| u64::from(offset) > limit) {
+                return Ok((next + at as u32).saturating_sub(1).max(first + 1));
+            }
+            next += count as u32;
+            window = (window * 2).min(X_BLOCK_END_MAX_WINDOW);
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1838
@@ -206,26 +288,20 @@ impl Volume {
     ) -> Result<SequenceBlock, SeqDbError> {
         self.check_range(first, end)?;
         let seqtype = self.index.seqtype;
-        let lead = match seqtype {
-            SeqType::Protein => 1,
-            SeqType::Nucleotide => 0,
-        };
-        let data_start = self.index.sequence_start(first) - lead;
-        let data_end = self.index.sequence_start(end);
+        let seq_offsets = self.index.sequence_offsets(first, end)?;
+        let amb_offsets = self.index.ambiguity_offsets(first, end)?;
+        let data_start = u64::from(seq_offsets[0]) - self.lead();
+        let data_end = u64::from(seq_offsets[seq_offsets.len() - 1]);
         let file = self.seq_file()?;
         let data = file.read_range(data_start, data_end)?;
-        let (lo, hi) = (first as usize, end as usize);
         let block = SequenceBlock {
             seqtype,
             first_ordinal,
             path: file.path().to_path_buf(),
             data,
             data_start,
-            seq_offsets: self.index.sequence_offsets()[lo..=hi].to_vec(),
-            amb_offsets: match seqtype {
-                SeqType::Protein => Vec::new(),
-                SeqType::Nucleotide => self.index.ambiguity_offsets()[lo..hi].to_vec(),
-            },
+            seq_offsets,
+            amb_offsets,
         };
         Ok(block)
     }
@@ -251,7 +327,7 @@ impl Volume {
     /// The encoded `Blast-def-line-set` of the sequence `oid` (volume-relative).
     pub fn header_bytes(&self, oid: u32) -> Result<Vec<u8>, SeqDbError> {
         self.check_range(oid, oid.saturating_add(1))?;
-        let (start, end) = self.index.header_range(oid);
+        let (start, end) = self.index.header_range(oid)?;
         self.hdr_file()?.read_range(start, end)
     }
 
@@ -286,11 +362,20 @@ impl Volume {
     /// volume has no ambiguity data.
     pub fn check_ambiguity(&self, oid: u32, ordinal: u32) -> Result<(), SeqDbError> {
         self.check_range(oid, oid.saturating_add(1))?;
-        if self.index.seqtype != SeqType::Nucleotide {
+        let Some((amb_start, next)) = self.index.ambiguity_words(oid)? else {
             return Ok(());
-        }
-        let amb_start = self.index.ambiguity_offsets()[oid as usize];
-        let next = self.index.sequence_offsets()[oid as usize + 1];
+        };
+        self.check_ambiguity_data(amb_start, next, ordinal)
+    }
+
+    /// `check_ambiguity` of the sequence whose ambiguity data are
+    /// `amb_start..next` of the sequence file.
+    fn check_ambiguity_data(
+        &self,
+        amb_start: u32,
+        next: u32,
+        ordinal: u32,
+    ) -> Result<(), SeqDbError> {
         if u64::from(amb_start) >= u64::from(next) {
             return Ok(());
         }
@@ -308,6 +393,130 @@ impl Volume {
         };
         block.ambiguity_runs(0).map(|_| ())
     }
+
+    /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(oid, self.deflines(oid))`
+    /// for the sequences `first..end` (volume-relative, non-empty) in order
+    /// until `visit` returns false; returns whether every call returned true.
+    /// The header offsets of the range are read at once and the records in
+    /// pieces of at most `piece_bytes` (one longer record alone), each with one
+    /// read; a record is decoded from its piece as `deflines` decodes it. A
+    /// sequence whose record passes the end of the header file, and every
+    /// sequence of a range or piece that cannot be read, goes through
+    /// `deflines`, which gives its own result.
+    pub(super) fn visit_deflines(
+        &self,
+        first: u32,
+        end: u32,
+        piece_bytes: u64,
+        visit: &mut dyn FnMut(u32, Result<Vec<Defline>, SeqDbError>) -> bool,
+    ) -> bool {
+        let one_by_one =
+            |oids: std::ops::Range<u32>,
+             visit: &mut dyn FnMut(u32, Result<Vec<Defline>, SeqDbError>) -> bool| {
+                oids.into_iter().all(|oid| visit(oid, self.deflines(oid)))
+            };
+        if self.check_range(first, end).is_err() {
+            return one_by_one(first..end, visit);
+        }
+        let (Ok(offsets), Ok(file)) = (self.index.header_offsets(first, end), self.hdr_file())
+        else {
+            return one_by_one(first..end, visit);
+        };
+        let hr_path = with_extension(&self.base, self.index.seqtype, "hr");
+        let mut i = 0usize;
+        let count = (end - first) as usize;
+        while i < count {
+            let start = u64::from(offsets[i]);
+            if u64::from(offsets[i + 1]) > file.len() {
+                // `read_range`'s error, from `deflines`.
+                if !one_by_one(first + i as u32..first + i as u32 + 1, visit) {
+                    return false;
+                }
+                i += 1;
+                continue;
+            }
+            let mut stop = i + 1;
+            while stop < count
+                && u64::from(offsets[stop + 1]) <= file.len()
+                && u64::from(offsets[stop + 1]) - start <= piece_bytes
+            {
+                stop += 1;
+            }
+            let piece_end = u64::from(offsets[stop]);
+            let Ok(data) = file.read_range(start, piece_end) else {
+                if !one_by_one(first + i as u32..first + stop as u32, visit) {
+                    return false;
+                }
+                i = stop;
+                continue;
+            };
+            for j in i..stop {
+                let lo = (u64::from(offsets[j]) - start) as usize;
+                let hi = (u64::from(offsets[j + 1]) - start) as usize;
+                if !visit(
+                    first + j as u32,
+                    decode_defline_set(&data[lo..hi], &hr_path),
+                ) {
+                    return false;
+                }
+            }
+            index::X_SHADOW_RUN_RECORDS
+                .fetch_add((stop - i) as u64, std::sync::atomic::Ordering::Relaxed);
+            i = stop;
+        }
+        true
+    }
+
+    /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(oid, self.check_ambiguity(oid, ordinal))`
+    /// for the sequences `first..end` (volume-relative, non-empty; `first_ordinal` the
+    /// database ordinal id of `first`) in order until `visit` returns false; returns whether
+    /// every call returned true. The sequence and ambiguity offsets of the range are read at
+    /// once; the ambiguity data are read as `check_ambiguity` reads them, only for the
+    /// sequences that have any. A range whose offsets cannot be read goes through
+    /// `check_ambiguity` one sequence at a time.
+    pub(super) fn visit_ambiguity(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        visit: &mut dyn FnMut(u32, Result<(), SeqDbError>) -> bool,
+    ) -> bool {
+        let offsets = match self.check_range(first, end) {
+            Ok(()) if self.index.seqtype == SeqType::Nucleotide => self
+                .index
+                .sequence_offsets(first, end)
+                .and_then(|seq| Ok((seq, self.index.ambiguity_offsets(first, end)?))),
+            _ => Err(SeqDbError::Range(String::new())),
+        };
+        let Ok((seq, amb)) = offsets else {
+            return (first..end).all(|oid| {
+                visit(
+                    oid,
+                    self.check_ambiguity(oid, first_ordinal + (oid - first)),
+                )
+            });
+        };
+        (0..(end - first) as usize).all(|i| {
+            visit(
+                first + i as u32,
+                self.check_ambiguity_data(amb[i], seq[i + 1], first_ordinal + i as u32),
+            )
+        })
+    }
+}
+
+/// Entries of the first window that `Volume::x_read_block_end` reads.
+const X_BLOCK_END_WINDOW: usize = 1024;
+/// The largest window of `Volume::x_read_block_end` (1 MiB of offsets).
+const X_BLOCK_END_MAX_WINDOW: usize = 1 << 18;
+
+/// `Volume::block_end` over the held sequence offsets (`lead`: `Volume::lead`).
+pub(super) fn held_block_end(offsets: &[u32], first: u32, max_bytes: u64, lead: u64) -> u32 {
+    let n = (offsets.len() - 1) as u32;
+    let block_bytes =
+        |end: u32| u64::from(offsets[end as usize]) - u64::from(offsets[first as usize]) + lead;
+    let fitting = super::partition_point_u32(first + 1..n + 1, |end| block_bytes(end) <= max_bytes);
+    first + (fitting.max(1) as u32)
 }
 
 /// A contiguous range of sequences of one volume, held in memory.

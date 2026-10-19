@@ -98,10 +98,11 @@ static SHADOW_ERRORS: AtomicU64 = AtomicU64::new(0);
 /// a time (`[1]`).
 static PACKED_CODONS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
-/// The summary lines (printed by `main` at exit): the shadow summary, and with LOSAT_X_STATS
-/// the number of subject plans made from the tables.
+/// The summary lines (printed by `main` at exit): the shadow summaries (`LOSAT_X_TBNKEEPFEWSHADOW`
+/// and this one), and with LOSAT_X_STATS the number of subject plans made from the tables.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
+    super::search_seed::x_keep_few_print_summary();
     if x_translate() == XTranslate::Shadow {
         let plans = SHADOW_PLANS.load(Ordering::Relaxed);
         let errors = SHADOW_ERRORS.load(Ordering::Relaxed);
@@ -525,12 +526,23 @@ fn x_plan_difference(
             return Some(format!("error \"{tables:#}\" for a plan of the reference"))
         }
     };
+    x_plan_fields_difference(tables, reference)
+}
+
+// No NCBI counterpart: the comparison of two plans of one subject for the shadow modes; it does
+// not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNXLATESHADOW, LOSAT_X_TBNKEEPFEWSHADOW): what differs between two plans
+/// of one subject, `None` when nothing does.
+pub(super) fn x_plan_fields_difference(
+    tables: &XSubjectPlan,
+    reference: &XSubjectPlan,
+) -> Option<String> {
     // Every field by name, so that a field added to a plan or to a frame has to be compared here.
     let XSubjectPlan { frames, units } = tables;
     let XSubjectPlan {
         frames: reference_frames,
         units: reference_units,
-    } = &**reference;
+    } = reference;
     if frames.len() != reference_frames.len() {
         return Some(format!(
             "{} frames for the reference's {}",

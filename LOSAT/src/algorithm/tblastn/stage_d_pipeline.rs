@@ -547,12 +547,22 @@ pub(super) fn x_search_batches<'p>(
     // NCBI frees the translation of a subject when the subject has been searched. The plans are
     // kept only for a later query batch to read, and only from four batches on
     // (XSubjectSide::KEEP_FROM_BATCHES): a search of fewer batches gets no XSubjectSide
-    // (XSubjectSide::for_batches) and each plan is dropped after its subject, as in NCBI. The gate
+    // (XSubjectSide::for_batches) and each plan is dropped after its subject, as in NCBI. With
+    // LOSAT_X_TBNKEEPFEW a search of more batches keeps none either unless its plans hold no
+    // more than its threads could have in flight (XSubjectSide::kept_within_threads). The gate
     // below reads the switch and not the object, so the number of batches does not decide which
-    // loop searches them.
+    // loop searches them, and the layout of the batches (side by side, own pools) is decided
+    // as before by the switch and the number of batches, whether or not the plans are kept.
     let x_subject_side_on = super::search_seed::XSubjectSide::enabled();
+    #[cfg(feature = "parallel")]
+    let x_plans_shared =
+        x_subject_side_on && ranges.len() >= super::search_seed::XSubjectSide::KEEP_FROM_BATCHES;
+    let x_keep = !x_subject_side_on
+        || ranges.len() < super::search_seed::XSubjectSide::KEEP_FROM_BATCHES
+        || !super::search_seed::XSubjectSide::keep_few()
+        || super::search_seed::XSubjectSide::kept_within_threads(subjects.lengths(), threads);
     let x_subject_side = super::search_seed::XSubjectSide::for_batches(
-        x_subject_side_on,
+        x_subject_side_on && x_keep,
         ranges.len(),
         subjects.count(),
         first.genetic_code,
@@ -589,10 +599,12 @@ pub(super) fn x_search_batches<'p>(
         // EXPERIMENT (LOSAT_X_TBNBATCH): search the batches side by side, each as the
         // one-thread search. The serial parts of a batch (query masking, lookup table,
         // linking, the hand-over between stages) then no longer leave the other threads
-        // idle. It needs the subject plans to be shared (LOSAT_X_TBNSSIDE, four or more
-        // batches) and to fit, or every batch in flight would hold its own translation of
-        // the subjects; and at least one batch per thread (with fewer, each batch uses the
-        // pool inside).
+        // idle. It needs LOSAT_X_TBNSSIDE with four or more batches, and subject plans that
+        // would fit (XSubjectSide::all_fit); and at least one batch per thread (with fewer,
+        // each batch uses the pool inside). The plans are kept for the batches to share
+        // unless LOSAT_X_TBNKEEPFEW finds them more than the batches in flight hold
+        // (XSubjectSide::kept_within_threads): each batch then makes the plan of the subject
+        // it is on and drops it after the subject, as a one-thread search does.
         #[cfg(feature = "parallel")]
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:380-393
         // ```c
@@ -621,7 +633,7 @@ pub(super) fn x_search_batches<'p>(
             } else {
                 0
             };
-            let side_by_side = if x_subject_side.is_some() && fits {
+            let side_by_side = if x_plans_shared && fits {
                 side_by_side
             } else {
                 0
@@ -650,15 +662,22 @@ pub(super) fn x_search_batches<'p>(
             }
             let (ranges, rest) = ranges.split_at(side_by_side);
             let (rest, own) = rest.split_at(rest.len() - own_pools);
-            if let Some(side) = x_subject_side.as_ref().filter(|_| side_by_side > 0) {
+            if side_by_side > 0 {
                 use rayon::prelude::*;
                 let x_serial = SearchPool::x_serial();
-                let x_serial = x_serial.x_with_ext(side);
+                let x_serial_with_plans;
+                let x_serial = match x_subject_side.as_ref() {
+                    Some(side) => {
+                        x_serial_with_plans = x_serial.x_with_ext(side);
+                        &x_serial_with_plans
+                    }
+                    None => &x_serial,
+                };
                 for wave in ranges.chunks(pool.threads() * 4) {
                     let computed: Vec<_> = pool.install(|| {
                         wave.par_iter()
                             .with_max_len(1)
-                            .map(|range| search_in(range.clone(), &x_serial))
+                            .map(|range| search_in(range.clone(), x_serial))
                             .collect()
                     });
                     for (range, report) in wave.iter().zip(computed) {
@@ -5944,6 +5963,102 @@ mod tests {
                 for (hitlist, expected) in results.iter().zip(&reference) {
                     assert_eq!(hitlist.lists().len(), expected.lists().len());
                 }
+            }
+        }
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:627-631
+    // ```c
+    //     if (program_number != eBlastTypeRpsTblastn) {
+    //         if (translation_buffer) {
+    //             sfree(translation_buffer);
+    //         }
+    //     }
+    // ```
+    // NCBI translates a subject for each batch and frees it after the subject. With
+    // LOSAT_X_TBNKEEPFEW the batches searched side by side on five subjects at two threads keep
+    // no plans (five subjects hold more than two of the longest), so each batch makes the plan
+    // of its subject as NCBI does; each batch's report is the one it has alone, with the plans
+    // kept (LOSAT_X_TBNKEEPFEW=0) or not.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn x_search_batches_side_by_side_without_kept_plans_gives_each_batch_its_report() {
+        let queries = vec![b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ".to_vec(); 4];
+        let subjects: Vec<Vec<u8>> = (0..5usize)
+            .map(|n| {
+                (0..3_000usize)
+                    .map(|i| b"ACGT"[(i * 7 + i / 3 + i / 11 + n) % 4])
+                    .collect()
+            })
+            .collect();
+        let lengths = || subjects.iter().map(Vec::len);
+        assert!(!super::super::search_seed::XSubjectSide::kept_within_threads(lengths(), 2));
+        assert_eq!(
+            x_batches_side_by_side(lengths().sum(), subjects.len(), 4, 2),
+            4
+        );
+        let seg = SegParams::default();
+        let profile = |_: std::ops::Range<usize>| LocalStageDProfile {
+            seg: Some(&seg),
+            soft_masking: false,
+            mask_lowercase: false,
+            genetic_code: 1,
+            expect_value: 10.0,
+            max_target_seqs: 500,
+            query_offsets: &[],
+            subject_set: Default::default(),
+        };
+        let ranges = vec![0..1, 1..2, 2..3, 3..4];
+        let searched = x_search_batches(
+            &queries,
+            SubjectLetters::Records(&subject_slices(&subjects)),
+            ranges.clone(),
+            profile,
+            true,
+            true,
+            LocalStageDScoring::default(),
+            2,
+        )
+        .unwrap();
+        let Some(searched) = searched else {
+            assert!(!x_tbn_parallel());
+            return;
+        };
+        assert_eq!(
+            searched
+                .iter()
+                .map(|(range, _)| range.clone())
+                .collect::<Vec<_>>(),
+            ranges
+        );
+        for (range, (results, parameters, _, validity)) in searched {
+            let (reference, reference_parameters, _, reference_validity) =
+                run_local_for_report_threads(
+                    &queries[range.clone()],
+                    SubjectLetters::Records(&subject_slices(&subjects)),
+                    profile(range.clone()),
+                    true,
+                    true,
+                    LocalStageDScoring::default(),
+                    1,
+                )
+                .unwrap();
+            assert_eq!(parameters, reference_parameters);
+            assert_eq!(validity, reference_validity);
+            assert_eq!(results.len(), reference.len());
+            for (hitlist, expected) in results.iter().zip(&reference) {
+                let lists = |hitlist: &KappaResultHitList| {
+                    hitlist
+                        .lists()
+                        .iter()
+                        .map(|list| (list.oid, list.payloads.len()))
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(lists(hitlist), lists(expected));
+                assert_eq!(
+                    hitlist.worst_evalue().to_bits(),
+                    expected.worst_evalue().to_bits()
+                );
             }
         }
     }

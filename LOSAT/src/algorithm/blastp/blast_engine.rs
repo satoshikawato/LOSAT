@@ -7844,17 +7844,34 @@ fn run_resolved_in_pool(
             //     }
             // ```
             match &lookup {
-                BlastpRuntimeLookup::Aa(aa_lookup) => super::x_seed_fused::x_scan_two_hit(
-                    aa_lookup,
-                    subject_sequence,
-                    subject.aa_len,
-                    &mut scratch.diag_array,
-                    diag_mask,
-                    subject_diag_offset,
-                    window,
-                    word_size,
-                    x_candidate,
-                ),
+                BlastpRuntimeLookup::Aa(aa_lookup) => {
+                    if super::f2_cap::enabled() {
+                        // F2 PROBE: the capture calls x_scan_two_hit with a closure of its own type.
+                        super::f2_cap::scan(
+                            aa_lookup,
+                            subject_sequence,
+                            subject.aa_len,
+                            &mut scratch.diag_array,
+                            diag_mask,
+                            subject_diag_offset,
+                            window,
+                            word_size,
+                            x_candidate,
+                        )
+                    } else {
+                        super::x_seed_fused::x_scan_two_hit(
+                            aa_lookup,
+                            subject_sequence,
+                            subject.aa_len,
+                            &mut scratch.diag_array,
+                            diag_mask,
+                            subject_diag_offset,
+                            window,
+                            word_size,
+                            x_candidate,
+                        )
+                    }
+                }
                 BlastpRuntimeLookup::Compressed(compressed_lookup) => {
                     super::x_seed_fused_compressed::x_scan_two_hit_compressed(
                         compressed_lookup,

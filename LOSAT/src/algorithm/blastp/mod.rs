@@ -48,6 +48,8 @@ mod x_redo_par;
 mod kappa;
 // EXPERIMENT (LOSAT_X_BPSEED): the subject scan and the two-hit test in one loop.
 pub(crate) mod x_seed_fused;
+// F2 PROBE (exp/f2-bp-cellcap only): F2CAP=<dir> writes the default seed stage's inputs.
+mod f2_cap;
 // EXPERIMENT (LOSAT_X_BPSEED): the same loop for the compressed lookup table of blastp-fast.
 mod x_seed_fused_compressed;
 // EXPERIMENT (LOSAT_X_BPSEED with LOSAT_X_BPCLUT): the same loop on the flat compressed table.

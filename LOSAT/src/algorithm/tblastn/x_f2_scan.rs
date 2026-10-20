@@ -51,6 +51,20 @@ fn w3c5(lookup: &BlastAaLookupTable) -> bool {
 
 /// The one-byte-per-word presence table (arms 1 and 2); empty otherwise.
 pub(super) fn x_f2_build_pvb(lookup: &BlastAaLookupTable) -> Vec<u8> {
+    if x_f2_check() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            eprintln!(
+                "[X_STATS] F2SCAN lookup word_length={} charsize={} mask={:#x} pv_len={} backbone_len={} arm={}",
+                lookup.word_length,
+                lookup.charsize,
+                lookup.mask,
+                lookup.pv.len(),
+                lookup.backbone.len(),
+                x_f2_arm()
+            )
+        });
+    }
     if x_f2_arm() == 0 || !w3c5(lookup) || lookup.pv.len() < ((MASK + 1) >> PV_ARRAY_BTS) {
         return Vec::new();
     }

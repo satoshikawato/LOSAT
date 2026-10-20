@@ -74,6 +74,16 @@
 //! reference loop (they count every outcome). `LOSAT_X_TBXHITBFSHADOW=1` (turns the path on) runs
 //! the reference loop and this one on each unit inside `fits`, each on a fresh table, and stops at
 //! the first difference of the saved records or of the final table.
+//!
+//! On wasm32 (LOSAT Web) `x_hits_bf` runs as `x_hits_bf_split`: a function of its own,
+//! `x_hits_bf_run`, takes the hits up to the first one for the per-hit body (flag 1 or a candidate)
+//! and returns it with its cell not written; the caller runs the per-hit body on it and goes on
+//! after it. The same reads and writes of the cells and the same calls of the per-hit body, in the
+//! same order (the caller reads that hit and computes its cell a second time), so the same states
+//! and calls as above. V8's optimized code (TurboFan) kept the table, the bounds and the loop
+//! pointer of the one loop in stack slots (the inlined per-hit body needs every register) and read
+//! or wrote six of them for every hit; no value of `x_hits_bf_run`'s loop lives across a call.
+//! Native builds keep the one loop.
 
 use super::x_tbx_extbatch::{XShadowList, XShadowRef};
 use super::x_tbx_qslice::XSliced;
@@ -164,6 +174,7 @@ pub(super) fn print_summary() {
 /// `fits(chunk length, window, wordsize)` holds, every subject offset is below the chunk length and
 /// every flag-0 cell holds a value the unit stored (module doc); `rare` writes only cells of the
 /// table, values the unit's per-hit body stores (the loop keeps no cell value across a call).
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub(super) unsafe fn x_hits_bf<const PF: bool>(
@@ -233,6 +244,135 @@ pub(super) unsafe fn x_hits_bf<const PF: bool>(
         // SAFETY: as above.
         unsafe { (*entry).set_raw_bits(next) };
     }
+}
+
+// No NCBI counterpart (scheduling only): `x_hits_bf` on wasm32 (LOSAT Web), the same statements in
+// two parts (`x_hits_bf_split`).
+/// `x_hits_bf` on wasm32: `x_hits_bf_split` (`PF` prefetches on x86-64 only).
+///
+/// SAFETY: as `x_hits_bf` above.
+#[cfg(target_arch = "wasm32")]
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub(super) unsafe fn x_hits_bf<const PF: bool>(
+    diag_ptr: *mut DiagStruct,
+    pairs: *const OffsetPair,
+    n: usize,
+    lo: u32,
+    width: usize,
+    window: i32,
+    wordsize: i32,
+    rare: impl FnMut(usize, u32, u32),
+) {
+    // SAFETY: the caller's bounds, passed on.
+    unsafe { x_hits_bf_split(diag_ptr, pairs, n, lo, width, window, wordsize, rare) }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510-552 (as `x_hits_bf`)
+// No NCBI counterpart for the function boundary (scheduling of the statements of `x_hits_bf`
+// only): on wasm32 (LOSAT Web) the loop of `x_hits_bf` runs as `x_hits_bf_run`, a function of its
+// own that takes the hits up to the first one for `rare`, and this loop, which calls `rare` for
+// that hit and goes on after it. In `x_hits_bf`'s one loop, V8's optimized code (TurboFan) kept
+// the table, the bounds and the loop pointer in stack slots and read or wrote six of them for every
+// hit, as the inlined per-hit body (`x_hit`, its extension and its calls) needs every register. No
+// value of `x_hits_bf_run`'s loop lives across a call: V8 inlines it into this loop and unrolls it,
+// without stack slots. Elsewhere `x_hits_bf` keeps its one loop.
+/// `x_hits_bf` (same arguments, same safety conditions, without `PF`): the same reads and writes of
+/// the cells and the same calls of `rare`, in the same order.
+#[cfg(any(target_arch = "wasm32", test))]
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+unsafe fn x_hits_bf_split(
+    diag_ptr: *mut DiagStruct,
+    pairs: *const OffsetPair,
+    n: usize,
+    lo: u32,
+    width: usize,
+    window: i32,
+    wordsize: i32,
+    mut rare: impl FnMut(usize, u32, u32),
+) {
+    let window_u = window as u32;
+    // window - wordsize, at least 1 (`fits`), as in `x_hits_bf`.
+    let k = window.wrapping_sub(wordsize) as u32;
+    // SAFETY: the caller's bound (n entries).
+    let end = unsafe { pairs.add(n) };
+    let mut p = pairs;
+    loop {
+        // SAFETY: pairs <= p <= end (the bounds `x_hits_bf_run` keeps).
+        p = unsafe { x_hits_bf_run(diag_ptr, p, end, lo, width, window_u, k) };
+        if p == end {
+            break;
+        }
+        // SAFETY: p < end: a hit `x_hits_bf_run` left for `rare` (its cell neither read into a
+        // value kept nor written).
+        let OffsetPair {
+            q_off: query_offset,
+            s_off: subject_offset,
+        } = unsafe { p.read() };
+        // SAFETY: p < end, so p + 1 <= end.
+        p = unsafe { p.add(1) };
+        // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
+        let cell = query_offset.wrapping_sub(subject_offset).wrapping_sub(lo) as usize;
+        debug_assert!(cell < width, "unit diagonal outside its table");
+        // [C] if (diag_array[diag_coord].flag), or a hit past both tests.
+        rare(cell, query_offset, subject_offset);
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-552 (module doc)
+// The flag-0 branch's too-far and overlap outcomes of `x_hits_bf`, statement for statement, up to
+// the first hit that goes to `rare` (`x_hits_bf_split`).
+/// From `p` up to `end`: each hit whose cell has flag 0 and that does not pass the test gets the
+/// cell's next value (`s + window`, or the word it read), as in `x_hits_bf`. Returns the first hit
+/// whose cell has flag 1 or that passes the test, its cell not written, or `end`.
+///
+/// SAFETY: `x_hits_bf`'s conditions for the hits from `p` to `end` (`p <= end`, `window_u` the
+/// window, `k` = window - wordsize).
+#[cfg(any(target_arch = "wasm32", test))]
+#[inline(never)]
+unsafe fn x_hits_bf_run(
+    diag_ptr: *mut DiagStruct,
+    mut p: *const OffsetPair,
+    end: *const OffsetPair,
+    lo: u32,
+    width: usize,
+    window_u: u32,
+    k: u32,
+) -> *const OffsetPair {
+    while p < end {
+        // SAFETY: p < end.
+        let OffsetPair {
+            q_off: query_offset,
+            s_off: subject_offset,
+        } = unsafe { p.read() };
+        // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
+        let cell = query_offset.wrapping_sub(subject_offset).wrapping_sub(lo) as usize;
+        debug_assert!(cell < width, "unit diagonal outside its table");
+        // SAFETY: cell < width (the caller's bound).
+        let entry = unsafe { diag_ptr.add(cell) };
+        // SAFETY: as above.
+        let raw = unsafe { (*entry).raw_bits() };
+        // s - L and diff - wordsize for a flag-0 cell (module doc).
+        let d = subject_offset.wrapping_sub(raw) as i32;
+        let candidate = (d as u32).wrapping_add(k) < k;
+        // [C] if (diag_array[diag_coord].flag), or a hit past both tests: `rare`.
+        if ((raw as i32) < 0) | candidate {
+            return p;
+        }
+        // [C] if (diff >= window) last_hit = subject_offset + diag_offset;
+        // [C] if (diff < wordsize) continue;
+        let next = if d >= 0 {
+            subject_offset.wrapping_add(window_u)
+        } else {
+            raw
+        };
+        // SAFETY: as above.
+        unsafe { (*entry).set_raw_bits(next) };
+        // SAFETY: p < end, so p + 1 <= end.
+        p = unsafe { p.add(1) };
+    }
+    end
 }
 
 // No NCBI counterpart: compares two LOSAT scans of one unit (LOSAT_X_TBXHITBFSHADOW).
@@ -602,6 +742,26 @@ mod tests {
         }
     }
 
+    // No NCBI counterpart: the test's per-hit body, `rare_apply` on the hit's cell, and for every
+    // third subject offset a write to another cell (the next one, cyclically) of the value a
+    // too-far write stores, `s + window`, as the batched body writes other cells when it resolves
+    // held-back extensions (x_tbx_extbatch.rs).
+    /// SAFETY: `table` points to `width` cells and `cell < width`.
+    unsafe fn rare_and_other(
+        table: *mut DiagStruct,
+        width: usize,
+        cell: usize,
+        s: u32,
+        window: i32,
+    ) {
+        // SAFETY: cell < width.
+        rare_apply(unsafe { &mut *table.add(cell) }, s, window);
+        if s % 3 == 0 {
+            // SAFETY: (cell + 1) % width < width.
+            unsafe { (*table.add((cell + 1) % width)).set_raw_bits(s.wrapping_add(window as u32)) };
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-552 (module doc)
     // `x_hits_bf` against the reference's statements on random tables and hits over the range of
     // `fits`, with the last_hit values on both sides of each boundary of the two tests.
@@ -611,6 +771,9 @@ mod tests {
         // too far, overlap, flag 1, candidate; s - L at 0, -1, wordsize - window, one below it.
         let mut taken = [0u64; 4];
         let mut edges = [0u64; 4];
+        // Batches of no hit, batches whose last hit goes to the per-hit body, and two hits in a
+        // row that go to it.
+        let mut shapes = [0u64; 3];
         for round in 0..3000 {
             let wordsize = [2, 3, 3, 5][round % 4];
             let window = match round % 5 {
@@ -683,14 +846,23 @@ mod tests {
             // The reference's statements (diag_offset = window).
             let mut reference = table.clone();
             let mut reference_log = Vec::new();
-            for pair in &pairs[..n] {
+            let mut last_rare = None;
+            shapes[0] += u64::from(n == 0);
+            let mut to_rare = |i: usize| {
+                shapes[1] += u64::from(i + 1 == n);
+                shapes[2] += u64::from(i > 0 && last_rare == Some(i - 1));
+                last_rare = Some(i);
+            };
+            for (i, pair) in pairs[..n].iter().enumerate() {
                 let (q, s) = (pair.q_off, pair.s_off);
                 let cell = q.wrapping_sub(s).wrapping_sub(lo) as usize;
                 let c = &mut reference[cell];
                 if c.flag() != 0 {
                     taken[2] += 1;
+                    to_rare(i);
                     reference_log.push((cell, q, s));
-                    rare_apply(c, s, window);
+                    // SAFETY: cell < width, the table's length.
+                    unsafe { rare_and_other(reference.as_mut_ptr(), width, cell, s, window) };
                     continue;
                 }
                 let d = s as i64 - c.last_hit() as i64;
@@ -717,23 +889,28 @@ mod tests {
                     continue;
                 }
                 taken[3] += 1;
+                to_rare(i);
                 reference_log.push((cell, q, s));
-                rare_apply(c, s, window);
+                // SAFETY: cell < width, the table's length.
+                unsafe { rare_and_other(reference.as_mut_ptr(), width, cell, s, window) };
             }
 
-            for pf in [false, true] {
+            // The loop with and without `PF`, and the wasm32 form (`x_hits_bf_split`).
+            for (pf, split) in [(false, false), (true, false), (false, true)] {
                 let mut got = table.clone();
                 let mut log = Vec::new();
                 let ptr = got.as_mut_ptr();
                 let rare = |cell: usize, q: u32, s: u32| {
                     log.push((cell, q, s));
                     // SAFETY: cell < width, the table's length (the loop's bound).
-                    rare_apply(unsafe { &mut *ptr.add(cell) }, s, window);
+                    unsafe { rare_and_other(ptr, width, cell, s, window) };
                 };
                 // SAFETY: n entries and X_PREFETCH_AHEAD more; every cell is below width; `fits`
                 // holds and every flag-0 value is below chunk_len + window.
                 unsafe {
-                    if pf {
+                    if split {
+                        x_hits_bf_split(ptr, pairs.as_ptr(), n, lo, width, window, wordsize, rare)
+                    } else if pf {
                         x_hits_bf::<true>(ptr, pairs.as_ptr(), n, lo, width, window, wordsize, rare)
                     } else {
                         x_hits_bf::<false>(
@@ -748,12 +925,16 @@ mod tests {
                         )
                     }
                 };
-                assert_eq!(log, reference_log, "round {round} pf {pf}: rare calls");
-                assert_eq!(got, reference, "round {round} pf {pf}: table");
+                assert_eq!(
+                    log, reference_log,
+                    "round {round} pf {pf} split {split}: rare calls"
+                );
+                assert_eq!(got, reference, "round {round} pf {pf} split {split}: table");
             }
         }
         assert!(taken.iter().all(|&t| t > 1000), "outcomes {taken:?}");
         assert!(edges.iter().all(|&e| e > 100), "edges {edges:?}");
+        assert!(shapes.iter().all(|&e| e > 0), "batch shapes {shapes:?}");
     }
 
     // No NCBI counterpart: compares the branch-free scans with the scans before the switch on the

@@ -3563,6 +3563,22 @@ Scheduling (each value computed by one thread with the original function; order 
   instructions x1.000 / x0.989 / x0.982 on the three pairs above at one thread, time x0.98-0.99.
   A first form of the test from the v4-R6 probe (`2s - 2 last_hit` against two constants) kept both
   constants on the stack and was 3-4 % slower at one thread.
+  On wasm32 (LOSAT Web; the switch acts there too) the loop runs, from 2026-10-20, as
+  `x_hits_bf_split`: a function of its own, `x_hits_bf_run`, takes the too-far and overlap hits up
+  to the first hit for the per-hit body, which its caller then runs: the same cell reads and writes
+  and calls of the per-hit body, in the same order. In the one loop V8's optimized code (TurboFan)
+  kept the table, the bounds and the loop pointer in stack slots (the inlined per-hit body needs
+  every register): 28 instructions per too-far or overlap hit, 6 of them stack reads and writes;
+  split, V8 inlines `x_hits_bf_run` into its caller and unrolls its loop 4 times, 18 instructions
+  per hit without stack slots (no value of that loop lives across a call). Native builds keep the
+  one loop (same machine code). Measured on Wasm (Node 26, the threaded and serial reactors, every
+  arm in one process, warm searches alternating, the `perf` CPU of a stage divided by that of the
+  stages no arm changes (linking, SEG, report, statistics, sort) in the same search, per-round
+  ratios, every report identical; v4-W DECISIONS 33 and 36): the switch against `=0` on dev
+  7e73ec9c, scan stage x0.62-0.75 and whole search x0.77-0.91 (AP027131 x AP027133, MelaMJNV x
+  PemoMJNVA, AvCLPV x PsCLPV at 1 and 8 threads, NZ_CP006932 against itself at 8 threads); the split
+  loop against the one loop, the loop's function x0.87-0.93 (AP027131 x AP027133 at 1 and 8 threads,
+  MelaMJNV x PemoMJNVA at 8 threads) and whole searches x0.97-0.99.
 - `LOSAT_X_TBXHITBFSHADOW=1` shadow of `LOSAT_X_TBXHITBF` (turns the path on): each unit inside the
   switch's range runs the loop before the switch and the branch-free one on fresh tables (the batched
   scan and the scan in slices: each with and without the switch), and the saved records (in scan order)

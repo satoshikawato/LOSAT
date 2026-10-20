@@ -8,17 +8,10 @@
 //! proved in `x_clut_direct.rs`). The diagonal test, the prefetch of a later hit's entry and the
 //! closure are those of `x_scan_two_hit_compressed`, so the argument of `x_seed_fused_compressed.rs`
 //! carries over unchanged.
-//!
-//! EXPERIMENT (LOSAT_X_BPHITBF): where its range holds, the loop takes a flag-0 entry's too-far and
-//! overlap outcomes without a branch (`x_scan_two_hit_compressed_flat_hitbf`, the test and the
-//! argument of `x_seed_fused.rs`, module header).
 
 use std::cell::Cell;
 
-use super::x_seed_fused::{
-    x_cell_per_hit_bf, x_hit_bf_for, x_prefetch, x_prefetch_distance, x_test_hit, XDiagTable,
-    XDiagTest, XHitBf,
-};
+use super::x_seed_fused::{x_prefetch, x_prefetch_distance, x_test_hit};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::XFlatCompressedLookup;
 
@@ -56,20 +49,6 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     assert!(diag_mask >= 0 && diag_array.len() > diag_mask as usize);
-    // EXPERIMENT (LOSAT_X_BPHITBF): the loop with the branch-free two-hit test, where it gives the
-    // reference's outcomes (`x_seed_fused.rs`, module header).
-    if let Some(bf) = x_hit_bf_for(true, diag_offset, subject_length, window, word_size) {
-        x_scan_two_hit_compressed_flat_hitbf(
-            lookup,
-            subject,
-            subject_length,
-            XDiagTable::new(diag_array, diag_mask),
-            XDiagTest::new(diag_offset, window, word_size),
-            bf,
-            candidate,
-        );
-        return;
-    }
     let prefetch_distance = x_prefetch_distance();
     let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
     lookup.for_each_cell(subject, subject_length, &mut cells, |s, cell_hits| {
@@ -85,34 +64,6 @@ pub(crate) fn x_scan_two_hit_compressed_flat<F>(
                 candidate(query_offset, s, last_hit, diff, entry);
             }
         }
-    });
-    X_CELLS.with(|slot| slot.set(Some(cells)));
-}
-
-/// EXPERIMENT (LOSAT_X_BPHITBF): [`x_scan_two_hit_compressed_flat`] with the branch-free two-hit
-/// test (`x_seed_fused::x_cell_per_hit_bf`). Out of line, and with a closure of its own type, so
-/// that the loop without the test keeps its code (the closure is moved here, so that the caller's
-/// loop keeps it as before rather than lending it out).
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
-// `x_scan_two_hit_compressed_flat`)
-#[inline(never)]
-fn x_scan_two_hit_compressed_flat_hitbf<F>(
-    lookup: &XFlatCompressedLookup,
-    subject: &[u8],
-    subject_length: usize,
-    mut table: XDiagTable<'_>,
-    test: XDiagTest,
-    bf: XHitBf,
-    mut candidate: F,
-) where
-    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
-{
-    let mut own = |query_offset, subject_offset, last_hit, diff, entry: &mut DiagStruct| {
-        candidate(query_offset, subject_offset, last_hit, diff, entry)
-    };
-    let mut cells = X_CELLS.with(Cell::take).unwrap_or_default();
-    lookup.for_each_cell(subject, subject_length, &mut cells, |s, cell_hits| {
-        x_cell_per_hit_bf(cell_hits, s, &mut table, test, bf, &mut own)
     });
     X_CELLS.with(|slot| slot.set(Some(cells)));
 }

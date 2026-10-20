@@ -1502,6 +1502,38 @@ Rebuilding less:
   10 proteins x volume 00 at 8 threads 0.995. In the strict set from its first pull request (no measured
   case slower; Owner decision of 2026-10-17 that the branch-free scans join the set once each shows no
   loss, and plan v4's rule that a switch that wins everywhere joins in the pull request that adds it).
+- `LOSAT_X_BPHITBF=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-20;
+  `=0` turns it off) the per-hit loop of the fused seed loop (`blastp/x_seed_fused.rs` `x_cell_per_hit`, the
+  loop without `LOSAT_X_BPDIAG`'s batches: the default where the CPU has no AVX2, aarch64 and WebAssembly;
+  exactness argument in the module header) takes the two outcomes most hits of a flag-0 entry end in, too far
+  (`diff >= window`: `last_hit = s + diag_offset`) and overlap (`diff < wordsize`: nothing), without a branch,
+  with the doubled test of `LOSAT_X_BXHITBF`: with the packed entry `raw`, `d2 = 2 (s + diag_offset) - (raw <<
+  1)` is twice the reference's `diff` (a cleared entry holds `-window`), a candidate is `(d2 - 2 wordsize) as
+  u32 < 2 (window - wordsize)`, and the entry's next value is selected. A flag-1 entry or a candidate goes on
+  to `x_test_hit`. The loop also reads ahead (`LOSAT_X_BPSEED_PREFETCH`, x86-64) in a loop of its own over the
+  hits that have a later hit, without a bound check per hit. Acts per subject where `1 <= wordsize < window`,
+  `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (otherwise the loop without the test runs:
+  the one-hit search, a window equal to the word size, offsets near 2^30). The AVX2 batches of
+  `LOSAT_X_BPDIAG` (the x86-64 default) and blastp-fast's loops keep their own tests (on blastp-fast the test
+  gave x0.97 on 300 yeast proteins x the fly proteome with 3-4 % more instructions and changed the loops
+  without it; not taken). With `LOSAT_X_BPDIAG=0` 72-74 % of the hits of WSSV x PajaWSV and of 300 yeast
+  proteins x the fly proteome are too far, 18.6-18.8 % overlap, 2.5-3.7 % meet a flag-1 entry and 4.7-5.3 %
+  are candidates (v4-A10 probe bp1). Shadow: `LOSAT_X_BPSEEDSHADOW=1` compares the fused loop that runs, this
+  one where it acts, with the reference on every subject, and prints `[X_SHADOW] BPHITBF subjects_compared=N`
+  beside BPSEED's line (N: the subjects this loop scanned).
+  Measured 2026-10-20 on the workstation (node 0, one physical core, its HT sibling idle, warmed 3 s before
+  every run, arm order reversed every other round, one warm-up round + 4 rounds, medians of the per-round
+  ratios against dev 23b4ef09, the binary before the switch; other lines' gates ran on node 0 meanwhile, load
+  12-27, so the cycle and instruction counts are the firmer measure; every report identical between the
+  arms). With `LOSAT_X_BPDIAG=0` (the per-hit loop on every subject, as without AVX2): 30 yeast proteins x the
+  fly proteome (`-db`, `-evalue 1e-5`) x0.824 (5.40 -> 4.45 s; cycles x0.823, instructions x0.988,
+  mispredicted branches x0.546); WSSV x PajaWSV (`-subject`) x0.966 (cycles x0.965, instructions x0.993,
+  mispredicted branches x0.768). By default with AVX2 the batches take every subject: x0.996-1.002,
+  instructions x1.0000. With `=0` the instruction counts equal those of the binary before the switch
+  (x1.0000-1.0001, with and without `LOSAT_X_BPDIAG=0`). On WebAssembly (LOSAT Web's serial reactor, ABI v2,
+  under Node 26 in one process: an instance per arm, the default and `=0` alternating, one warm-up search +
+  8 rounds, on one booked workstation core): AP027131 x AP027133 proteins x0.977 (19.51 -> 19.11 s, 7 of 8
+  rounds below 1), WSSV x PajaWSV x0.991 (6 of 8), the same output bytes.
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; in the
   strict set since 2026-10-14; `=0` turns it off) the word loop and the
   X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte

@@ -78,13 +78,11 @@
 //! (`x_scan_two_hit`) takes the same cells under its own switch, LOSAT_X_BPSCANBF (a switch of the
 //! strict set; [`x_bp_scan_bf`]).
 //!
-//! EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loops take the two outcomes most two-hit tests end in,
-//! too far and overlap, without a branch (blastx's LOSAT_X_BXHITBF, tblastn's LOSAT_X_TBNHITBF and
-//! TBLASTX's LOSAT_X_TBXHITBF do the same in their loops). The per-hit loops are `x_cell_per_hit`
-//! (the fused loop without LOSAT_X_BPDIAG's batches: the default where the CPU has no AVX2, i.e.
-//! aarch64 and WebAssembly) and blastp-fast's loops on the compressed table
-//! (`x_seed_fused_compressed.rs`) and on its flat build (`x_seed_fused_clut.rs`), which have no
-//! batch:
+//! EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loop (`x_cell_per_hit`: the fused loop without
+//! LOSAT_X_BPDIAG's batches, the default where the CPU has no AVX2, i.e. aarch64 and WebAssembly)
+//! takes the two outcomes most two-hit tests end in, too far and overlap, without a branch (blastx's
+//! LOSAT_X_BXHITBF, tblastn's LOSAT_X_TBNHITBF and TBLASTX's LOSAT_X_TBXHITBF do the same in their
+//! loops):
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
 //! ```c
@@ -135,13 +133,16 @@
 //! entries, and the initial HSPs are the same, in the same order.
 //!
 //! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_BPHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. Each loop with the test is its own
-//! function, never inlined and with a closure of its own type (`x_scan_two_hit_hitbf`,
-//! `x_scan_two_hit_compressed_hitbf`, `x_scan_two_hit_compressed_flat_hitbf`), so the loops without
-//! it keep their code; the AVX2 and scalar batches keep their own tests. With `LOSAT_X_BPSEEDSHADOW`
-//! the loop that runs, this one where the switch acts, is compared with the reference for every
-//! subject, and `main` prints `[X_SHADOW] BPHITBF subjects_compared=N` at exit beside BPSEED's line,
-//! N the subjects the loops with the test scanned.
+//! `LOSAT_X_BPHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. The loop with the test is its own
+//! function, never inlined and with a closure of its own type (`x_scan_two_hit_hitbf`), so the loops
+//! without it keep their code; the AVX2 and scalar batches keep their own tests, and so do
+//! blastp-fast's loops (`x_seed_fused_compressed.rs`, `x_seed_fused_clut.rs`: the test there gave a
+//! scan of 300 yeast proteins x the fly proteome x0.97 on x86-64, with 3-4 % more instructions, and
+//! changed the code of the loops without it). The loop with the test also reads ahead without a
+//! bound check per hit (`x_cell_per_hit_bf`). With `LOSAT_X_BPSEEDSHADOW` the loop that runs, this
+//! one where the switch acts, is compared with the reference for every subject, and `main` prints
+//! `[X_SHADOW] BPHITBF subjects_compared=N` at exit beside BPSEED's line, N the subjects the loop
+//! with the test scanned.
 
 use crate::algorithm::tblastn::x_scan_bf::{x_block_candidates, X_BLOCK};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
@@ -224,7 +225,7 @@ pub(crate) fn x_bp_scan_bf() -> bool {
 
 // No NCBI counterpart: reads the LOSAT_X_BPHITBF switch once; it does not change any value NCBI
 // computes.
-/// EXPERIMENT (LOSAT_X_BPHITBF): whether blastp's per-hit loops take the too-far and overlap
+/// EXPERIMENT (LOSAT_X_BPHITBF): whether blastp's per-hit loop takes the too-far and overlap
 /// outcomes without a branch where [`XHitBf::new`] finds the subject in range (module header); a
 /// switch of the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
 pub(crate) fn x_bp_hit_bf() -> bool {
@@ -236,7 +237,7 @@ pub(crate) fn x_bp_hit_bf() -> bool {
 /// EXPERIMENT (LOSAT_X_BPHITBF): the constants of the branch-free two-hit test ([`XHitBf::test`])
 /// for one subject: the diagonal offset, `2 wordsize`, `2 (window - wordsize)` and `2 window`.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct XHitBf {
+struct XHitBf {
     diag_offset: i32,
     word2: i32,
     span2: u32,
@@ -249,12 +250,7 @@ impl XHitBf {
     /// The test for a subject of `length` letters scanned at `diag_offset`, where it gives the
     /// reference's outcomes (module header): `1 <= word_size < window`, `0 <= diag_offset` and
     /// `diag_offset + length + 2 window < 2^30`. `None` elsewhere.
-    pub(super) fn new(
-        diag_offset: i32,
-        length: usize,
-        window: i32,
-        word_size: i32,
-    ) -> Option<Self> {
+    fn new(diag_offset: i32, length: usize, window: i32, word_size: i32) -> Option<Self> {
         let room = (1i64 << 30) - i64::from(diag_offset) - 2 * i64::from(window);
         let fits = 1 <= word_size
             && word_size < window
@@ -271,7 +267,7 @@ impl XHitBf {
 
     /// The subject offset plus the diagonal offset, the `here` of [`XHitBf::test`].
     #[inline(always)]
-    pub(super) fn here(self, subject_offset: i32) -> u32 {
+    fn here(self, subject_offset: i32) -> u32 {
         subject_offset.wrapping_add(self.diag_offset) as u32
     }
 
@@ -281,7 +277,7 @@ impl XHitBf {
     /// `true`; otherwise (a flag-1 entry or a candidate) leaves the entry and returns `false`.
     /// Exact where [`XHitBf::new`] gave the test (module header).
     #[inline(always)]
-    pub(super) fn test(self, entry: &mut DiagStruct, here: u32) -> bool {
+    fn test(self, entry: &mut DiagStruct, here: u32) -> bool {
         let raw = entry.raw_bits();
         let d2 = here.wrapping_mul(2).wrapping_sub(raw << 1) as i32;
         let candidate = (d2.wrapping_sub(self.word2) as u32) < self.span2;
@@ -430,13 +426,13 @@ pub(crate) fn x_bp_diag_print_timing() {
 // that the loops below read entries without a bounds check on a range checked once.
 /// The diagonal table of the fused loop and its mask; `new` checks that every
 /// `(q_off - s_off) & mask` names an entry.
-pub(super) struct XDiagTable<'a> {
+struct XDiagTable<'a> {
     entries: &'a mut [DiagStruct],
     mask: i32,
 }
 
 impl<'a> XDiagTable<'a> {
-    pub(super) fn new(entries: &'a mut [DiagStruct], mask: i32) -> Self {
+    fn new(entries: &'a mut [DiagStruct], mask: i32) -> Self {
         assert!(mask >= 0 && entries.len() > mask as usize);
         Self { entries, mask }
     }
@@ -495,24 +491,12 @@ impl<'a> XDiagTable<'a> {
 
 /// The values of the diagonal test that stay the same for a subject.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct XDiagTest {
+struct XDiagTest {
     diag_offset: i32,
     window: i32,
     word_size: i32,
     /// LOSAT_X_BPSEED_PREFETCH (the per-hit loop only).
     prefetch: usize,
-}
-
-impl XDiagTest {
-    /// The test's values, with the prefetch distance of LOSAT_X_BPSEED_PREFETCH.
-    pub(super) fn new(diag_offset: i32, window: i32, word_size: i32) -> Self {
-        Self {
-            diag_offset,
-            window,
-            word_size,
-            prefetch: x_prefetch_distance(),
-        }
-    }
 }
 
 // No NCBI counterpart: reads the LOSAT_X_BPSEEDSHADOW switch once; it does not change any value NCBI
@@ -529,8 +513,8 @@ pub(crate) fn x_bp_seed_shadow() -> bool {
 static X_SHADOW_SUBJECTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static X_SHADOW_HSPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static X_SHADOW_SHORT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// EXPERIMENT (LOSAT_X_BPHITBF): of the subjects, those a per-hit loop scanned with the branch-free
-/// test.
+/// EXPERIMENT (LOSAT_X_BPHITBF): of the subjects, those the per-hit loop scanned with the
+/// branch-free test.
 static X_SHADOW_HITBF_SUBJECTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// EXPERIMENT (LOSAT_X_BPSEEDSHADOW): compares one subject's two runs; panics on a difference.
@@ -601,7 +585,7 @@ pub fn x_bp_seed_print_summary() {
         }
         if x_bp_hit_bf() {
             eprintln!(
-                "[X_SHADOW] BPHITBF subjects_compared={} (the per-hit loops with the branch-free test; initial HSPs and diagonal tables identical)",
+                "[X_SHADOW] BPHITBF subjects_compared={} (the per-hit loop with the branch-free test; initial HSPs and diagonal tables identical)",
                 X_SHADOW_HITBF_SUBJECTS.load(std::sync::atomic::Ordering::Relaxed)
             );
         }
@@ -802,7 +786,7 @@ where
 /// EXPERIMENT (LOSAT_X_BPHITBF): the branch-free test for a subject when the switch is on, the
 /// loop is a per-hit loop (`per_hit`) and [`XHitBf::new`] finds the subject in range; with
 /// LOSAT_X_BPSEEDSHADOW the subject is counted for the shadow's line.
-pub(super) fn x_hit_bf_for(
+fn x_hit_bf_for(
     per_hit: bool,
     diag_offset: i32,
     subject_length: usize,
@@ -1253,11 +1237,10 @@ fn x_cell_per_hit<F>(
 
 /// EXPERIMENT (LOSAT_X_BPHITBF): [`x_cell_per_hit`] with each hit first through the branch-free
 /// test ([`XHitBf::test`]): a flag-1 entry or a candidate goes on to [`x_test_hit`], unchanged
-/// (module header). Also the per-hit loop of blastp-fast's fused loops
-/// (`x_seed_fused_compressed.rs`, `x_seed_fused_clut.rs`).
+/// (module header).
 // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
 #[inline(always)]
-pub(super) fn x_cell_per_hit_bf<F>(
+fn x_cell_per_hit_bf<F>(
     hits: &[i32],
     s: i32,
     table: &mut XDiagTable<'_>,

@@ -1,4 +1,4 @@
-//! The branch-free two-hit test of BLASTP's per-hit seed loops (`LOSAT_X_BPHITBF`,
+//! The branch-free two-hit test of BLASTP's per-hit seed loop (`LOSAT_X_BPHITBF`,
 //! `src/algorithm/blastp/x_seed_fused.rs`, module header) on whole searches.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
@@ -19,17 +19,16 @@
 //!                 }
 //! ```
 //! The switch is in the strict set (on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set).
-//! The per-hit loops take these two outcomes without a branch where their range holds and hand the
+//! The per-hit loop takes these two outcomes without a branch where its range holds and hands the
 //! others to the reference's statements, with the same entries and the same calls of the
 //! extension (the module's argument), so the property under test is that the report does not
-//! depend on it. That reports equal NCBI's is the business of the BLASTP fixtures. The blastp
-//! searches set `LOSAT_X_BPDIAG=0`, so that the fused loop tests the hits one after the other (the
-//! default where the CPU has no AVX2: aarch64, WebAssembly), besides the default; blastp-fast's loops
-//! (the compressed table, and its flat build `LOSAT_X_BPCLUT` by default) are per-hit loops
-//! everywhere. The shadow (`LOSAT_X_BPSEEDSHADOW`) compares the fused loop with the reference on
-//! every subject and counts the subjects the branch-free loops scanned: all of them at a two-hit
-//! window above the word size, none at a window equal to the word size, where the loops keep their
-//! statements.
+//! depend on it. That reports equal NCBI's is the business of the BLASTP fixtures. The searches set
+//! `LOSAT_X_BPDIAG=0`, so that the fused loop tests the hits one after the other (the default where
+//! the CPU has no AVX2: aarch64, WebAssembly), besides the default. The shadow
+//! (`LOSAT_X_BPSEEDSHADOW`) compares the fused loop with the reference on every subject and counts
+//! the subjects the branch-free loop scanned: all of them at a two-hit window above the word size,
+//! none at a window equal to the word size, where the loop keeps its statements, and none of
+//! blastp-fast's (its loops on the compressed table keep their tests).
 //!
 //! The queries are the first 30 proteins of AP027131, the subjects the first 150 proteins of the
 //! related AP027133, so there are extensions, flag-1 entries and HSPs.
@@ -232,7 +231,7 @@ fn search(
 }
 
 #[test]
-fn the_branch_free_test_gives_the_reports_of_the_loops_without_it() {
+fn the_branch_free_test_gives_the_reports_of_the_loop_without_it() {
     let inputs = Inputs::new();
     for db in [false, true] {
         for (task, outfmt, threads, window) in [
@@ -248,9 +247,8 @@ fn the_branch_free_test_gives_the_reports_of_the_loops_without_it() {
             let reference = blastp(&args, &[PER_HIT, OFF]);
             assert_eq!(reference.code, Some(0), "{what}: {}", reference.stderr);
             assert!(!reference.stdout.is_empty(), "{what}: no report");
-            // The per-hit loop with the test; the default (blastp: the AVX2 batch where the CPU has
-            // it, else the per-hit loop; blastp-fast: the flat table's loop); the switch alone,
-            // without the rest of the strict set (blastp-fast: the compressed table's loop).
+            // The per-hit loop with the test; the default (the AVX2 batch where the CPU has it, else
+            // the per-hit loop); the switch alone, without the rest of the strict set.
             let alone = blastp(&args, &[DEFAULT_OFF, SEED]);
             for (arm, run, against) in [
                 ("on", blastp(&args, &[PER_HIT]), &reference),
@@ -269,15 +267,14 @@ fn the_branch_free_test_gives_the_reports_of_the_loops_without_it() {
 }
 
 #[test]
-fn the_shadow_compares_the_branch_free_loops_on_every_subject_in_their_range() {
+fn the_shadow_compares_the_branch_free_loop_on_every_subject_in_its_range() {
     let inputs = Inputs::new();
-    // A two-hit window above the word size (3 for blastp, 5 for blastp-fast): every subject; a
-    // window equal to the word size: none.
+    // A two-hit window above the word size (3): every subject; a window equal to the word size, and
+    // blastp-fast (the compressed table's loops): none.
     for (task, window, all) in [
         ("blastp", "40", true),
         ("blastp", "3", false),
-        ("blastp-fast", "40", true),
-        ("blastp-fast", "5", false),
+        ("blastp-fast", "40", false),
     ] {
         let what = format!("{task} window={window}");
         let args = search(&inputs, false, task, "6", "1", window);
@@ -294,7 +291,7 @@ fn the_shadow_compares_the_branch_free_loops_on_every_subject_in_their_range() {
             .unwrap_or_else(|| panic!("{what}: no BPHITBF line: {}", run.stderr));
         assert!(compared >= 150, "{what}: {compared} subjects");
         assert_eq!(branch_free, if all { compared } else { 0 }, "{what}");
-        // Without the switch the shadow compares the loops without the test and has no BPHITBF
+        // Without the switch the shadow compares the loop without the test and has no BPHITBF
         // line.
         let off = blastp(&args, &[PER_HIT, SHADOW, OFF]);
         assert_eq!(off.code, Some(0), "{what}: {}", off.stderr);

@@ -1236,6 +1236,12 @@ impl StageStats {
     }
 }
 
+/// No NCBI counterpart (scheduling only): strips per thread of a chunk's scan with the
+/// partitioned fold (LOSAT_X_PAIRPARFOLD), and strips per thread that the participants may scan
+/// past the slowest partition (`seed_stage`).
+const PART_STRIPS_PER_THREAD: usize = 64;
+const PART_AHEAD_PER_THREAD: usize = 2;
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
 /// ```c
 ///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
@@ -1257,13 +1263,23 @@ fn seed_stage(
     timed: bool,
     fold_part: Option<part::FoldPart<'_>>,
 ) -> StageStats {
+    // The partitioned fold holds the seeds of the strips within its look-ahead of the slowest
+    // partition: `PART_AHEAD_PER_THREAD` of `PART_STRIPS_PER_THREAD` strips per thread, 1/32 of a
+    // chunk's seeds (as `disc`), where 2 of 8 per thread held a quarter (blastn of the Sakai
+    // genome against MG1655, 30 M seeds, at 4 threads: about +70 MiB over the search without
+    // strips; LOSAT_X_BNFEWSUBJ gives that shape to searches of two subjects or more).
+    let strips_per_thread = if fold_part.is_some() {
+        PART_STRIPS_PER_THREAD
+    } else {
+        8
+    };
     let jobs = plan_strips(
         x.subject_seq_ranges,
         x.s_len,
         x.two_stage.word_length(),
         x.two_stage.lut_word_length(),
         x.scan_step,
-        8 * threads.max(4),
+        strips_per_thread * threads.max(4),
     );
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip(x, &jobs[i], out);
     if let Some(fold_part) = fold_part {
@@ -1292,7 +1308,7 @@ fn seed_stage(
         let r = part::seed_stage_part(
             jobs.len(),
             threads,
-            2 * threads,
+            PART_AHEAD_PER_THREAD * threads,
             hash,
             hits,
             fold_part,

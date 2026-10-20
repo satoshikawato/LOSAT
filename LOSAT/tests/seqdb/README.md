@@ -46,8 +46,9 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   `-parse_seqids`: the masks name the sequences by their number, `local id N`).
 - `mask_wm.asnt`, `mask_wm_opts.asnt`, `mask_wm_colon.asnt`: hand-written windowmasker mask files
   (`Blast-db-mask-info` in ASN.1 text; the second states the option `-t_extend 3`, the third
-  `-x a:b`). The dust
-  and seg masks come from dustmasker and segmasker and are not kept.
+  `-x a:b`).
+- `mask_dust.asnb`, `mask_seg.asnb`: the dust and seg masks of the same databases, written by
+  dustmasker and segmasker (`-outfmt maskinfo_asn1_bin`, ASN.1 binary).
 - `db/mask_*`: databases written by makeblastdb 2.17.0 with mask data: `mask_nucl_v4`,
   `mask_nucl_v5` (needs its `.ndb`), `mask_nucl_mv` (an alias of two volumes), `mask_nucl_ids`
   (ids 100 and 101 from `-mask_id`, a description with `:`), `mask_nucl_z`, `mask_nucl_y`,

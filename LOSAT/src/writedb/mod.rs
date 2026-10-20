@@ -22,6 +22,8 @@ pub mod format_guess;
 pub mod header;
 pub mod local_offset;
 pub mod makeblastdb;
+pub mod mask_data;
+pub mod mask_info;
 pub mod time;
 pub mod volume;
 pub mod writer;

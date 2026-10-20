@@ -57,17 +57,7 @@ fn encode_tblastn_lookup_query_with(
     if !mask_lowercase {
         return frame;
     }
-    let mut start = None;
-    for (index, &residue) in query.iter().enumerate() {
-        if residue.is_ascii_lowercase() {
-            start.get_or_insert(index);
-        } else if let Some(left) = start.take() {
-            frame.seg_masks.push((left, index));
-        }
-    }
-    if let Some(left) = start {
-        frame.seg_masks.push((left, query.len()));
-    }
+    push_lowercase_runs(query, &mut frame.seg_masks);
     if frame.seg_masks.is_empty() {
         return frame;
     }
@@ -90,6 +80,39 @@ fn encode_tblastn_lookup_query_with(
         frame.aa_seq[1 + left..1 + right].fill(ncbistdaa::X);
     }
     frame
+}
+
+/// The runs of lower-case letters of `query`, as half-open intervals, appended to `out`.
+fn push_lowercase_runs(query: &[u8], out: &mut Vec<(usize, usize)>) {
+    let mut start = None;
+    for (index, &residue) in query.iter().enumerate() {
+        if residue.is_ascii_lowercase() {
+            start.get_or_insert(index);
+        } else if let Some(left) = start.take() {
+            out.push((left, index));
+        }
+    }
+    if let Some(left) = start {
+        out.push((left, query.len()));
+    }
+}
+
+/// The SEG intervals of `query` and, with `mask_lowercase`, its lower-case runs (half-open,
+/// unsorted, not joined), for the masks of the BLAST XML report, which joins them as NCBI's
+/// `BlastSeqLocCombine(filter_out, 0)` does: overlapping intervals only. The search's list
+/// (`encode_tblastn_lookup_query`) also joins adjacent ones; that changes no masked letter,
+/// but NCBI's XML mask loop (`s_MaskQuerySeq`) leaves a letter unmasked where one interval
+/// ends on the second-last column of an alignment segment and the next begins on its last.
+pub(super) fn tblastn_report_mask_intervals(
+    query: &[u8],
+    seg: Option<&SegParams>,
+    mask_lowercase: bool,
+) -> Vec<(usize, usize)> {
+    let mut intervals = encode_protein_query_frame_with_seg(query, seg).seg_masks;
+    if mask_lowercase {
+        push_lowercase_runs(query, &mut intervals);
+    }
+    intervals
 }
 
 // NCBI reference: c++/include/algo/blast/core/blast_def.h:141-150

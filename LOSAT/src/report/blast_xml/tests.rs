@@ -358,3 +358,17 @@ fn reals_are_written_with_fifteen_digits() {
         assert!(text.contains(line), "{line} in {text}");
     }
 }
+
+#[test]
+fn the_translation_frame_is_the_records_not_the_searched_intervals() {
+    use super::hsp::translation_frame;
+    // plus: (start - 1) % 3 + 1
+    assert_eq!(translation_frame(true, 1, 30, 100), 1);
+    assert_eq!(translation_frame(true, 5, 31, 100), 2);
+    assert_eq!(translation_frame(true, 3, 29, 100), 3);
+    // minus: -((length - end) % 3 + 1)
+    assert_eq!(translation_frame(false, 10, 100, 100), -1);
+    assert_eq!(translation_frame(false, 10, 99, 100), -2);
+    assert_eq!(translation_frame(false, 10, 98, 100), -3);
+    assert_eq!(translation_frame(false, 10, 97, 100), -1);
+}

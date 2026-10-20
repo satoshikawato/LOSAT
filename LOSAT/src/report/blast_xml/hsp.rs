@@ -223,6 +223,30 @@ pub fn recount(
     (identity, positive)
 }
 
+/// `s_GetTranslationFrame` (blastxml_format.cpp:85-98) on the 1-based endpoints of a translated
+/// HSP's interval in a record (`start` the lower, `end` the higher) of `length` letters: the
+/// reading frame by the record's own coordinates, whatever interval was searched.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:90-98
+/// ```c++
+///     int frame;
+///
+///     if (plus_strand) {
+///         frame = (start - 1) % 3 + 1;
+///     } else {
+///         frame = -((seq_length - end) % 3 + 1);
+///     }
+///
+///     return frame;
+/// ```
+pub fn translation_frame(plus_strand: bool, start: i32, end: i32, length: i32) -> i32 {
+    if plus_strand {
+        (start - 1) % 3 + 1
+    } else {
+        -((length - end) % 3 + 1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

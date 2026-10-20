@@ -64,6 +64,7 @@
 //! (`x_pair_seed_disc.rs`, LOSAT_X_PAIRPARDISC: the two-hit stage of dc-megablast on the same
 //! strips, with its own switches).
 
+use super::DiagStruct;
 use super::{
     determine_scanning_offsets, extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi,
     mask_lookup_index, packed_kmer_at_seed_mask, scan_subject_kmers_range,
@@ -75,7 +76,6 @@ use super::{
     DiagHashTable, MbScanSubjectKind, QueryContext, QueryContextIndex, UngappedHit,
     COMPRESSION_RATIO,
 };
-use super::DiagStruct;
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};

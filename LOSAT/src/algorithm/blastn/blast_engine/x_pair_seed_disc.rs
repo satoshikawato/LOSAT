@@ -57,8 +57,7 @@
 
 use super::super::{
     extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, mask_lookup_index,
-    packed_kmer_at_seed_mask, type_of_word, BlastnTiming, DiagHashTable, DiagStruct,
-    UngappedHit,
+    packed_kmer_at_seed_mask, type_of_word, BlastnTiming, DiagHashTable, DiagStruct, UngappedHit,
 };
 use super::{
     copy_hash, part, plan_strips, pool_threads, run_strips, seed_of_pair, DiagArray, FoldCounts,
@@ -1517,7 +1516,15 @@ fn run_array(
         };
         seed_stage_array(x, disc, threads, &mut copy, &mut shadow_hits, timing, timed)
     } else {
-        seed_stage_array(x, disc, threads, &mut diag_array, ungapped_hits, timing, timed)
+        seed_stage_array(
+            x,
+            disc,
+            threads,
+            &mut diag_array,
+            ungapped_hits,
+            timing,
+            timed,
+        )
     };
     if let (Some(t_start), Some(timing)) = (t_start, timing) {
         // `[TIMING] scan_lookup`: the time of the stage minus the ungapped extensions, as the

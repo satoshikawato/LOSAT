@@ -1130,6 +1130,16 @@ Rebuilding less:
   `reported`: those with a title read; `letters`: letters compared). Evidence 2026-10-20 (perf/bp-db-tail, workstation,
   probe build): `blastp -db` UniRef50 q100 at 32 threads lists 70,701 subjects (50.8 MB of letters) for the first batch
   of 91 queries; the records added 41 MiB and the two title copies 10 MiB of anonymous memory in the main heap.
+  Measured (head de4b6401, workstation): that run on / off in one job (node 1) peak RssAnon 286 / 337 MiB (max RSS
+  282 / 327 MiB; NCBI 195 MiB), wall 538 / 543 s, the same output (= NCBI). Instructions (`perf stat` `:u`, 8 threads,
+  on / off) x0.997 OrthoFinder blastp-fast Species4 x BlastDBSpecies6, x0.9995 Swiss-Prot q100 outfmt 6, x0.9993 the
+  same with outfmt 0, x1.000 `uniref50.04` q100. Timed (same binary on / off, 8 cores of node 0 with their siblings
+  idle, warmed, order alternated): median ratio of wall time x0.992 (0.977-1.016, 8 pairs) OrthoFinder, x0.999
+  (0.980-1.008, 10) Swiss-Prot q100, x0.935 (0.878-1.034, 6) the same with outfmt 0, x1.000 (0.946-1.074, 8)
+  `uniref50.04` q100; max RSS 123 / 166 MiB Swiss-Prot q100, 139 / 182 MiB with outfmt 0. Gates: `cargo test` (87
+  binaries, 1,993 passed); ci_fast all programs with the switch, with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases, 0
+  failures each); blastp `-db` fixtures at 1 and 4 threads under the shadow (52 rows, 0 differing, the exit line
+  `identical` in every run that ends without an error).
 - `LOSAT_X_BPSUBJMETA=1` (BLASTP, speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; acts only in the `-subject` block search of `LOSAT_X_BPQBLOCK`, for
   blastp and blastp-fast) the subjects' tabular IDs and titles are made once for all blocks instead of once
   per block (`blastp/blast_engine/x_subject_meta.rs`, exactness argument in its header). Without it each

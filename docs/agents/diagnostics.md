@@ -1267,7 +1267,21 @@ Rebuilding less:
   once per window that holds its matches; `hsps`: their HSPs). The shadow's own expansions count on the
   `[TIMING] x_bppcompact: expanded_lists=` line too. Evidence 2026-10-20 (v4-D12 s3 probe, workstation): in
   `blastp -db` UniRef50 q100 at 32 threads the expansion of all 91 lists of the first query batch (194,347 HSPs of
-  168 bytes) added 31 MiB to the main heap before the redo, which ran in 10 windows.
+  168 bytes) added 31 MiB to the main heap before the redo, which ran in 10 windows. Measured (head 6ef84094,
+  workstation, on / off in one job): that run (node 1, the branch merged with `LOSAT_X_BPLISTEDLEAN`'s pull request)
+  peak RssAnon 268.0 / 286.2 MiB (max RSS 258.1 / 276.2 MiB; NCBI 195 MiB), wall 539.7 / 539.9 s, the same output (= NCBI),
+  the same 10 windows; the end-stage rise 67.9 / 86.6 MB. Less than the 31 MiB of the full expansion: with it, the
+  allocations after the redo fitted into the memory that the released lists left in the main heap. Swiss-Prot q100 at
+  8 threads, max RSS (median of 3 pairs): 119.6 / 123.6 MiB merged as above, 139.6 / 139.6 MiB with outfmt 0, and
+  166.4 / 165.4 MiB on the branch alone (without the lean titles the ASCII records made after the redo reused the
+  released lists' memory). Instructions (`perf stat` `:u`, 8 threads, on / off) x1.000011 OrthoFinder blastp-fast
+  Species4 x BlastDBSpecies6, x0.999987 Swiss-Prot q100 outfmt 6, x0.999980 the same with outfmt 0, x0.999998
+  `uniref50.04` q100. Timed (same binary on / off, 8 cores of node 0 with their siblings idle, warmed, order
+  alternated): median ratio of wall time x1.001 (0.958-1.048, 8 pairs) `uniref50.04` q100 (max RSS 49 / 53 MiB),
+  x1.000 (0.986-1.010, 10) Swiss-Prot q100, x1.000 (0.995-1.003, 8) OrthoFinder. Gates (head 1273374d): `cargo test`
+  (88 binaries, 2,018 passed); ci_fast all programs with the switch, with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases,
+  0 failures each); blastp `-db` fixtures at 1 and 4 threads under the shadow (56 rows, 0 differing, the exit line
+  `identical` in every run that ends without an error).
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; in the strict set since 2026-10-14; `=0` turns it off) the two-hit seed
   stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one

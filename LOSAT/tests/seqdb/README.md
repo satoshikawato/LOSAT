@@ -96,7 +96,7 @@ index files and in `expected/`.
 ## Mask-column writer fixtures (`mask_writer/`)
 
 `make_mask_writer_fixtures.py` (`--ncbi-bin DIR --work DIR`) builds the inputs and NCBI's outputs
-for the tests of the mask-column writer (`src/writedb/mask_data/tests.rs`). Each row of
+for the tests of the mask-column writer (`src/writedb/mask_data/tests_e2e.rs`, which reads the mask files with `process_mask_data`; the same file runs every file of `mask_parse/` end to end). Each row of
 `mask_writer/cases.tsv` is one makeblastdb 2.17.0 run (`-in` files, `-mask_data` files, `-mask_id`,
 `-mask_desc`, `-max_file_sz`); its database files are in `mask_writer/db/`, its exit status and
 standard error in `mask_writer/expected/<case>.rc` and `.stderr`, and what blastdbcmd reads back

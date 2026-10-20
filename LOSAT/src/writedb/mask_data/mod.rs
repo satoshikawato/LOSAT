@@ -4,8 +4,12 @@
 //!
 //! Line NP, M4 preparation: nothing calls this yet (`LOSAT makedb` still
 //! refuses `-mask_data`). The mask files themselves are read by
-//! `writedb::mask_info`.
+//! `writedb::mask_info`; [`process`] joins the two as makeblastdb's
+//! `x_ProcessMaskData` and documents the order in which the command line
+//! calls everything.
 //!
+//! * [`process`]: `x_ProcessMaskData`, the mask files into the registry and
+//!   the set of ranges.
 //! * [`registry`]: `CMaskInfoRegistry`, the id of each algorithm.
 //! * [`range_set`]: `CMaskedRangeSet`, the ranges of each sequence.
 //! * [`column`]: `CWriteDB_Column`, the files of the column of a volume.
@@ -17,15 +21,19 @@
 //! blobs and column description stay `None`).
 
 pub(crate) mod column;
+pub mod process;
 pub mod range_set;
 pub mod registry;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_e2e;
 
 use std::collections::BTreeMap;
 
 use column::ColumnMeta;
+pub use process::{process_mask_data, MaskDataError, MaskDataOptions};
 pub use range_set::{ranges_are_empty, MaskedRangeSet, MaskedRanges};
 pub use registry::MaskInfoRegistry;
 

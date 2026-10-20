@@ -68,6 +68,27 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   later by running it into a scratch directory and copying only their files, so that the dates
   of the other fixtures stay.
 
+Mask files (the input of `makeblastdb -mask_data`, read by `LOSAT/src/writedb/mask_info/`; the tests
+are in `mask_info/tests.rs`). `mask_parse/` has files that NCBI's tools write and files that
+exercise NCBI's reader, with `mask_parse/expected.tsv` recording what `makeblastdb` 2.17.0 does with
+each of them:
+
+- `mask_parse/{dust,seg,wm,c2m}.{asnt,asnb}`: dustmasker, segmasker, windowmasker and
+  convert2blastmask output (`-outfmt maskinfo_asn1_text` / `maskinfo_asn1_bin`) for the same input;
+  `*_ps.*` the same with `-parse_seqids` (Seq-ids of every kind: `local str`, `general`, `other`,
+  `genbank`, `pdb`, `patent`, `gi`, ...). Inputs: `mask_nucl.fna`, `mask_prot.faa`,
+  `mask_parse/{ids_nucl.fna,ids_prot.faa,lower_nucl.fna,wm_nucl.fna}`.
+- `mask_parse/h_*`: hand-written text files (comments, strings, two objects, `more TRUE` with a
+  continuation, empty `masks`, different Seq-ids in one Seq-loc, enumerations as numbers,
+  unsupported Seq-loc variants, files cut inside an object, garbage after the last object, files
+  that are neither text nor binary ASN.1, ...); `mask_parse/b_*`: damaged and hand-made binary files.
+- `mask_parse/expected.tsv`: per file the exit status and standard error of
+  `makeblastdb -in <fasta> -dbtype <type> -mask_data <file>` (no `-parse_seqids`), and the masks that
+  `blastdbcmd -outfmt '%o\t%m<algorithm>'` reads back from the database it wrote (`RUN`, `NODB`
+  and `MASK` rows; the header of the file explains them).
+- `make_mask_parse_fixtures.py` rebuilds these (`--ncbi-bin DIR --work DIR`); the tools and the
+  inputs are deterministic, so a rebuild changes nothing.
+
 `make_fixtures.py` rebuilds everything but `expected/search_path/`. NCBI BLAST+ is the comparison oracle only; the tests
 read the committed files and run no NCBI program. A rebuild changes the dates stored in the
 index files and in `expected/`.

@@ -6,6 +6,20 @@
 //! Line NP, M4 preparation: nothing calls this yet (`LOSAT makedb` still
 //! refuses `-mask_data`). `writedb::mask_data` turns these objects into the
 //! mask column of a database.
+//!
+//! [`MaskFileReader`] reads such a file as `makeblastdb` does: the format is guessed
+//! once per file (`reader.rs`, `guess.rs`), then the objects follow one another in ASN.1 text
+//! (`text.rs`) or binary (`ber.rs`); `schema.rs` has the types.
+
+mod ber;
+mod guess;
+mod reader;
+mod schema;
+#[cfg(test)]
+mod tests;
+mod text;
+
+pub use reader::{MaskFileError, MaskFileFormat, MaskFileReader};
 
 /// One `Blast-db-mask-info` object as makeblastdb reads it
 /// (makeblastdb.cpp:950-990).

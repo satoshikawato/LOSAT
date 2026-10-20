@@ -1,0 +1,490 @@
+# RUN	file	dbtype	fasta	rc	stderr
+# NODB	file
+# MASK	file	algorithm	oid	ranges
+RUN	dust.asnt	nucl	mask_nucl.fna	0	\e
+MASK	dust.asnt	11	0	199-281;
+MASK	dust.asnt	11	1	0-90;
+MASK	dust.asnt	11	2	none
+MASK	dust.asnt	11	3	300-390;
+MASK	dust.asnt	11	4	none
+MASK	dust.asnt	11	5	150-220;620-690;
+MASK	dust.asnt	11	6	none
+MASK	dust.asnt	11	7	100-186;
+RUN	dust_ps.asnt	nucl	mask_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	dust.asnb	nucl	mask_nucl.fna	0	\e
+MASK	dust.asnb	11	0	199-281;
+MASK	dust.asnb	11	1	0-90;
+MASK	dust.asnb	11	2	none
+MASK	dust.asnb	11	3	300-390;
+MASK	dust.asnb	11	4	none
+MASK	dust.asnb	11	5	150-220;620-690;
+MASK	dust.asnb	11	6	none
+MASK	dust.asnb	11	7	100-186;
+RUN	dust_ps.asnb	nucl	mask_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	seg.asnt	prot	mask_prot.faa	0	\e
+MASK	seg.asnt	21	0	80-104;
+MASK	seg.asnt	21	1	none
+MASK	seg.asnt	21	2	0-19;109-127;
+MASK	seg.asnt	21	3	none
+MASK	seg.asnt	21	4	100-123;
+RUN	seg_ps.asnt	prot	mask_prot.faa	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	seg.asnb	prot	mask_prot.faa	0	\e
+MASK	seg.asnb	21	0	80-104;
+MASK	seg.asnb	21	1	none
+MASK	seg.asnb	21	2	0-19;109-127;
+MASK	seg.asnb	21	3	none
+MASK	seg.asnb	21	4	100-123;
+RUN	seg_ps.asnb	prot	mask_prot.faa	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	wm.asnt	nucl	wm_nucl.fna	0	\e
+MASK	wm.asnt	30	0	604-1237;1544-1937;
+MASK	wm.asnt	30	1	604-1237;1544-1937;
+MASK	wm.asnt	30	2	604-1237;1544-1937;
+MASK	wm.asnt	30	3	604-1237;1544-1937;
+MASK	wm.asnt	30	4	604-1237;1544-1937;
+RUN	wm_ps.asnt	nucl	wm_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	wm.asnb	nucl	wm_nucl.fna	0	\e
+MASK	wm.asnb	30	0	604-1237;1544-1937;
+MASK	wm.asnb	30	1	604-1237;1544-1937;
+MASK	wm.asnb	30	2	604-1237;1544-1937;
+MASK	wm.asnb	30	3	604-1237;1544-1937;
+MASK	wm.asnb	30	4	604-1237;1544-1937;
+RUN	wm_ps.asnb	nucl	wm_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	c2m.asnt	nucl	lower_nucl.fna	0	\e
+MASK	c2m.asnt	100	0	30-60;100-120;
+MASK	c2m.asnt	100	1	30-60;100-120;
+MASK	c2m.asnt	100	2	30-60;100-120;
+MASK	c2m.asnt	100	3	30-60;100-120;
+MASK	c2m.asnt	100	4	30-60;100-120;
+MASK	c2m.asnt	100	5	30-60;100-120;
+MASK	c2m.asnt	100	6	30-60;100-120;
+MASK	c2m.asnt	100	7	30-60;100-120;
+RUN	c2m_ps.asnt	nucl	lower_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	c2m.asnb	nucl	lower_nucl.fna	0	\e
+MASK	c2m.asnb	100	0	30-60;100-120;
+MASK	c2m.asnb	100	1	30-60;100-120;
+MASK	c2m.asnb	100	2	30-60;100-120;
+MASK	c2m.asnb	100	3	30-60;100-120;
+MASK	c2m.asnb	100	4	30-60;100-120;
+MASK	c2m.asnb	100	5	30-60;100-120;
+MASK	c2m.asnb	100	6	30-60;100-120;
+MASK	c2m.asnb	100	7	30-60;100-120;
+RUN	c2m_ps.asnb	nucl	lower_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_ok.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_ok.asnt	31	0	none
+MASK	h_ok.asnt	31	1	none
+MASK	h_ok.asnt	31	2	5-15;
+MASK	h_ok.asnt	31	3	none
+MASK	h_ok.asnt	31	4	none
+MASK	h_ok.asnt	31	5	none
+MASK	h_ok.asnt	31	6	none
+MASK	h_ok.asnt	31	7	none
+RUN	h_comments.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_comments.asnt	31	0	none
+MASK	h_comments.asnt	31	1	none
+MASK	h_comments.asnt	31	2	5-15;
+MASK	h_comments.asnt	31	3	none
+MASK	h_comments.asnt	31	4	none
+MASK	h_comments.asnt	31	5	none
+MASK	h_comments.asnt	31	6	none
+MASK	h_comments.asnt	31	7	none
+RUN	h_comment_triple_dash.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1313: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsn::UnexpectedMember() - line 1: "": unexpected member, should be one of: "algo-id" "algo-program" "algo-options" "masks"  ( at Blast-db-mask-info.algo-id)\n\n
+RUN	h_doubled_quote.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_doubled_quote.asnt	31	0	none
+MASK	h_doubled_quote.asnt	31	1	none
+MASK	h_doubled_quote.asnt	31	2	5-15;
+MASK	h_doubled_quote.asnt	31	3	none
+MASK	h_doubled_quote.asnt	31	4	none
+MASK	h_doubled_quote.asnt	31	5	none
+MASK	h_doubled_quote.asnt	31	6	none
+MASK	h_doubled_quote.asnt	31	7	none
+RUN	h_string_two_lines.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_string_two_lines.asnt	31	0	none
+MASK	h_string_two_lines.asnt	31	1	none
+MASK	h_string_two_lines.asnt	31	2	5-15;
+MASK	h_string_two_lines.asnt	31	3	none
+MASK	h_string_two_lines.asnt	31	4	none
+MASK	h_string_two_lines.asnt	31	5	none
+MASK	h_string_two_lines.asnt	31	6	none
+MASK	h_string_two_lines.asnt	31	7	none
+RUN	h_string_nonprint.asnt	nucl	mask_nucl.fna	0	Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0x9] in string at line 1\na\tb\xe9c\nError: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0xE9] in string at line 1\na\tb\xe9c\n
+MASK	h_string_nonprint.asnt	31	0	none
+MASK	h_string_nonprint.asnt	31	1	none
+MASK	h_string_nonprint.asnt	31	2	5-15;
+MASK	h_string_nonprint.asnt	31	3	none
+MASK	h_string_nonprint.asnt	31	4	none
+MASK	h_string_nonprint.asnt	31	5	none
+MASK	h_string_nonprint.asnt	31	6	none
+MASK	h_string_nonprint.asnt	31	7	none
+RUN	h_two_objects.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_two_objects.asnt	31	0	none
+MASK	h_two_objects.asnt	31	1	none
+MASK	h_two_objects.asnt	31	2	5-15;
+MASK	h_two_objects.asnt	31	3	20-30;
+MASK	h_two_objects.asnt	31	4	none
+MASK	h_two_objects.asnt	31	5	none
+MASK	h_two_objects.asnt	31	6	none
+MASK	h_two_objects.asnt	31	7	none
+RUN	h_two_objects_headless.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_two_objects_headless.asnt	31	0	none
+MASK	h_two_objects_headless.asnt	31	1	none
+MASK	h_two_objects_headless.asnt	31	2	5-15;
+MASK	h_two_objects_headless.asnt	31	3	none
+MASK	h_two_objects_headless.asnt	31	4	none
+MASK	h_two_objects_headless.asnt	31	5	none
+MASK	h_two_objects_headless.asnt	31	6	none
+MASK	h_two_objects_headless.asnt	31	7	none
+RUN	h_more_true_continuation.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_more_true_continuation.asnt	31	0	none
+MASK	h_more_true_continuation.asnt	31	1	none
+MASK	h_more_true_continuation.asnt	31	2	5-15;
+MASK	h_more_true_continuation.asnt	31	3	20-30;
+MASK	h_more_true_continuation.asnt	31	4	none
+MASK	h_more_true_continuation.asnt	31	5	none
+MASK	h_more_true_continuation.asnt	31	6	none
+MASK	h_more_true_continuation.asnt	31	7	none
+RUN	h_more_true_two_continuations.asnt	nucl	mask_nucl.fna	1	BLAST Database creation error: Error: Masked data offsets out of bounds.\n
+RUN	h_more_true_no_continuation.asnt	nucl	mask_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+NODB	h_more_true_no_continuation.asnt
+RUN	h_more_true_continuation_header_only.asnt	nucl	mask_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+NODB	h_more_true_continuation_header_only.asnt
+RUN	h_more_true_wrong_type.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 896: Error: (CSerialException::eFormatError) ncbi::CObjectIStream::SkipFileHeader() - line 2: incompatible type Blast-db-mask-info<>Blast-mask-list ( at Blast-mask-list)\n\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_empty_masks.asnt	nucl	mask_nucl.fna	0	\e
+RUN	h_packed_two_ids.asnt	nucl	mask_nucl.fna	1	BLAST options error: Cannot get masked range Seq-id\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_packed_empty.asnt	nucl	mask_nucl.fna	1	BLAST options error: Cannot get masked range Seq-id\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_same_other_id_spacing.asnt	nucl	mask_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_different_other_ids.asnt	nucl	mask_nucl.fna	1	BLAST options error: Cannot get masked range Seq-id\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_local_and_other_id.asnt	nucl	mask_nucl.fna	1	BLAST options error: Cannot get masked range Seq-id\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_strand_plus.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_strand_plus.asnt	31	0	none
+MASK	h_strand_plus.asnt	31	1	none
+MASK	h_strand_plus.asnt	31	2	5-15;
+MASK	h_strand_plus.asnt	31	3	none
+MASK	h_strand_plus.asnt	31	4	none
+MASK	h_strand_plus.asnt	31	5	none
+MASK	h_strand_plus.asnt	31	6	none
+MASK	h_strand_plus.asnt	31	7	none
+RUN	h_strand_minus_two.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_strand_minus_two.asnt	31	0	none
+MASK	h_strand_minus_two.asnt	31	1	none
+MASK	h_strand_minus_two.asnt	31	2	20-30;5-15;
+MASK	h_strand_minus_two.asnt	31	3	none
+MASK	h_strand_minus_two.asnt	31	4	none
+MASK	h_strand_minus_two.asnt	31	5	none
+MASK	h_strand_minus_two.asnt	31	6	none
+MASK	h_strand_minus_two.asnt	31	7	none
+RUN	h_strand_number.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_strand_number.asnt	31	0	none
+MASK	h_strand_number.asnt	31	1	none
+MASK	h_strand_number.asnt	31	2	5-15;
+MASK	h_strand_number.asnt	31	3	none
+MASK	h_strand_number.asnt	31	4	none
+MASK	h_strand_number.asnt	31	5	none
+MASK	h_strand_number.asnt	31	6	none
+MASK	h_strand_number.asnt	31	7	none
+RUN	h_strand_bad_number.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/enumerated.cpp", line 156: Error: (CSerialException::eInvalidData) invalid value of enumerated type: 7\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/enumerated.cpp", line 428: Error: (CSerialException::eInvalidData) ncbi::CEnumeratedTypeInfo::ReadEnum() - invalid enum value\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eInvalidData) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading strand ( at [].[].packed-int.[].[].strand)\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eInvalidData) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading masks ( at Blast-db-mask-info.masks.masks.[].[].packed-int.[].[].strand)\n\n
+RUN	h_fuzz_from.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_fuzz_from.asnt	31	0	none
+MASK	h_fuzz_from.asnt	31	1	none
+MASK	h_fuzz_from.asnt	31	2	5-15;
+MASK	h_fuzz_from.asnt	31	3	none
+MASK	h_fuzz_from.asnt	31	4	none
+MASK	h_fuzz_from.asnt	31	5	none
+MASK	h_fuzz_from.asnt	31	6	none
+MASK	h_fuzz_from.asnt	31	7	none
+RUN	h_fuzz_wrong_order.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1037: Error: (CSerialException::eFormatError) ncbi::CObjectIStream::ExpectedMember() - line 1: member id expected ( at [].[].packed-int.[].[].fuzz-from)\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eFormatError) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading masks ( at Blast-db-mask-info.masks.masks.[].[].packed-int.[].[].fuzz-from)\n\n
+RUN	h_algo_program_number.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_algo_program_number.asnt	31	0	none
+MASK	h_algo_program_number.asnt	31	1	none
+MASK	h_algo_program_number.asnt	31	2	5-15;
+MASK	h_algo_program_number.asnt	31	3	none
+MASK	h_algo_program_number.asnt	31	4	none
+MASK	h_algo_program_number.asnt	31	5	none
+MASK	h_algo_program_number.asnt	31	6	none
+MASK	h_algo_program_number.asnt	31	7	none
+RUN	h_algo_program_dust.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_algo_program_dust.asnt	11	0	none
+MASK	h_algo_program_dust.asnt	11	1	none
+MASK	h_algo_program_dust.asnt	11	2	5-15;
+MASK	h_algo_program_dust.asnt	11	3	none
+MASK	h_algo_program_dust.asnt	11	4	none
+MASK	h_algo_program_dust.asnt	11	5	none
+MASK	h_algo_program_dust.asnt	11	6	none
+MASK	h_algo_program_dust.asnt	11	7	none
+RUN	h_algo_program_unknown_name.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/enumerated.cpp", line 133: Error: (CSerialException::eInvalidData) invalid value of enumerated type: foo\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/enumerated.cpp", line 428: Error: (CSerialException::eInvalidData) ncbi::CEnumeratedTypeInfo::ReadEnum() - invalid enum value\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eInvalidData) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading algo-program ( at Blast-db-mask-info.algo-program)\n\n
+RUN	h_algo_program_not_set.asnt	nucl	mask_nucl.fna	1	BLAST Database creation error: Invalid filtering program: 0\n
+RUN	h_algo_program_bad_number.asnt	nucl	mask_nucl.fna	1	BLAST Database creation error: Invalid filtering program: 31\n
+RUN	h_local_str_1.asnt	nucl	mask_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_int_variant.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_int_variant.asnt	31	0	none
+MASK	h_int_variant.asnt	31	1	none
+MASK	h_int_variant.asnt	31	2	5-15;
+MASK	h_int_variant.asnt	31	3	none
+MASK	h_int_variant.asnt	31	4	none
+MASK	h_int_variant.asnt	31	5	none
+MASK	h_int_variant.asnt	31	6	none
+MASK	h_int_variant.asnt	31	7	none
+RUN	h_unsupported_whole.asnt	nucl	mask_nucl.fna	1	BLAST Database creation error: Error: Masked data offsets out of bounds.\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_unsupported_pnt.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_unsupported_pnt.asnt	31	0	none
+MASK	h_unsupported_pnt.asnt	31	1	none
+MASK	h_unsupported_pnt.asnt	31	2	5-6;
+MASK	h_unsupported_pnt.asnt	31	3	none
+MASK	h_unsupported_pnt.asnt	31	4	none
+MASK	h_unsupported_pnt.asnt	31	5	none
+MASK	h_unsupported_pnt.asnt	31	6	none
+MASK	h_unsupported_pnt.asnt	31	7	none
+RUN	h_unsupported_mix.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_unsupported_mix.asnt	31	0	none
+MASK	h_unsupported_mix.asnt	31	1	none
+MASK	h_unsupported_mix.asnt	31	2	5-15;
+MASK	h_unsupported_mix.asnt	31	3	none
+MASK	h_unsupported_mix.asnt	31	4	none
+MASK	h_unsupported_mix.asnt	31	5	none
+MASK	h_unsupported_mix.asnt	31	6	none
+MASK	h_unsupported_mix.asnt	31	7	none
+RUN	h_unsupported_null.asnt	nucl	mask_nucl.fna	1	BLAST options error: Cannot get masked range Seq-id\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_unsupported_feat.asnt	nucl	mask_nucl.fna	1	BLAST options error: Cannot get masked range Seq-id\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_cut_inside_object.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1313: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsn::UnexpectedMember() - line 1: "m": unexpected member, should be one of: "algo-id" "algo-program" "algo-options" "masks"  ( at Blast-db-mask-info.algo-options)\n\n
+RUN	h_cut_after_brace.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 239: Error: (CSerialException::eEOF) ncbi::CObjectIStreamAsn::SkipWhiteSpace() - line 2: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/util/strbuffer.cpp", line 435: Error: (CEofException::eEof) ncbi::CIStreamBuffer::FillBuffer() - end of file\n ( at Blast-db-mask-info)\n\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_cut_after_header.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_cut_after_header.asnt	31	0	none
+MASK	h_cut_after_header.asnt	31	1	none
+MASK	h_cut_after_header.asnt	31	2	5-15;
+MASK	h_cut_after_header.asnt	31	3	none
+MASK	h_cut_after_header.asnt	31	4	none
+MASK	h_cut_after_header.asnt	31	5	none
+MASK	h_cut_after_header.asnt	31	6	none
+MASK	h_cut_after_header.asnt	31	7	none
+RUN	h_cut_in_type_name.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_cut_in_type_name.asnt	31	0	none
+MASK	h_cut_in_type_name.asnt	31	1	none
+MASK	h_cut_in_type_name.asnt	31	2	5-15;
+MASK	h_cut_in_type_name.asnt	31	3	none
+MASK	h_cut_in_type_name.asnt	31	4	none
+MASK	h_cut_in_type_name.asnt	31	5	none
+MASK	h_cut_in_type_name.asnt	31	6	none
+MASK	h_cut_in_type_name.asnt	31	7	none
+RUN	h_garbage_after_object.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_garbage_after_object.asnt	31	0	none
+MASK	h_garbage_after_object.asnt	31	1	none
+MASK	h_garbage_after_object.asnt	31	2	5-15;
+MASK	h_garbage_after_object.asnt	31	3	none
+MASK	h_garbage_after_object.asnt	31	4	none
+MASK	h_garbage_after_object.asnt	31	5	none
+MASK	h_garbage_after_object.asnt	31	6	none
+MASK	h_garbage_after_object.asnt	31	7	none
+RUN	h_garbage_after_object_2.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 719: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsn::ReadFileHeader() - line 2: '::=' expected ( at Blast-db-mask-info)\n\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_trailing_brace.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 719: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsn::ReadFileHeader() - line 2: '::=' expected ( at Blast-db-mask-info)\n\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_unknown_member.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1313: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsn::UnexpectedMember() - line 1: "foo": unexpected member, should be one of: "algo-id" "algo-program" "algo-options" "masks"  ( at Blast-db-mask-info.algo-id)\n\n
+RUN	h_member_order.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1037: Error: (CSerialException::eFormatError) ncbi::CObjectIStream::ExpectedMember() - line 1: member algo-id expected ( at Blast-db-mask-info.algo-program)\n\n
+RUN	h_member_duplicate.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1313: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsn::UnexpectedMember() - line 1: "algo-id": unexpected member, should be one of: "algo-id" "algo-program" "algo-options" "masks"  ( at Blast-db-mask-info.algo-id)\n\n
+RUN	h_member_missing_options.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1037: Error: (CSerialException::eFormatError) ncbi::CObjectIStream::ExpectedMember() - line 1: member algo-options expected ( at Blast-db-mask-info.masks)\n\n
+RUN	h_member_missing_more.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1037: Error: (CSerialException::eFormatError) ncbi::CObjectIStream::ExpectedMember() - line 1: member more expected ( at Blast-db-mask-info.masks)\n\n
+RUN	h_negative_from.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/util/strbuffer.cpp", line 574: Error: (CUtilException::eWrongData) ncbi::CIStreamBuffer::BadNumber() - bad number in line 1\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1393: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClassMember, Member name= from\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1396: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClass, Object type= Seq-interval\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1270: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArrayElement\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1273: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArray, Object type= \n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1498: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() -  Frame type= eFrameChoiceVariant, Member name= packed-int\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1500: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() -  Frame type= eFrameChoice, Object type= Seq-loc\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1270: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArrayElement\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1273: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArray, Object type= \n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1393: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClassMember, Member name= masks\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1396: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClass, Object type= Blast-mask-list\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1393: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClassMember, Member name= masks\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1396: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClass, Object type= Blast-db-mask-info\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 968: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::Read() -  Frame type= eFrameNamed, Object type= Blast-db-mask-info\n\n
+RUN	h_from_too_big.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/util/strbuffer.cpp", line 583: Error: (CUtilException::eWrongData) ncbi::CIStreamBuffer::NumberOverflow() - number overflow in line 1\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1393: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClassMember, Member name= from\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1396: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClass, Object type= Seq-interval\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1270: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArrayElement\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1273: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArray, Object type= \n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1498: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() -  Frame type= eFrameChoiceVariant, Member name= packed-int\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1500: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() -  Frame type= eFrameChoice, Object type= Seq-loc\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1270: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArrayElement\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1273: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArray, Object type= \n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1393: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClassMember, Member name= masks\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1396: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClass, Object type= Blast-mask-list\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1393: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClassMember, Member name= masks\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1396: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClass, Object type= Blast-db-mask-info\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 968: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::Read() -  Frame type= eFrameNamed, Object type= Blast-db-mask-info\n\n
+RUN	h_to_beyond_sequence.asnt	nucl	mask_nucl.fna	1	BLAST Database creation error: Error: Masked data offsets out of bounds.\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_from_after_to.asnt	nucl	mask_nucl.fna	1	BLAST Database creation error: Error: Masked data offsets out of bounds.\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_id_too_big.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/util/strbuffer.cpp", line 583: Error: (CUtilException::eWrongData) ncbi::CIStreamBuffer::NumberOverflow() - number overflow in line 1\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1498: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() -  Frame type= eFrameChoiceVariant, Member name= id\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1500: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() -  Frame type= eFrameChoice, Object type= Object-id\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1498: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() -  Frame type= eFrameChoiceVariant, Member name= local\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1500: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() -  Frame type= eFrameChoice, Object type= Seq-id\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1393: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClassMember, Member name= id\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1396: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClass, Object type= Seq-interval\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1270: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArrayElement\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1273: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArray, Object type= \n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1498: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() -  Frame type= eFrameChoiceVariant, Member name= packed-int\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1500: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::ReadChoiceSimple() -  Frame type= eFrameChoice, Object type= Seq-loc\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1270: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArrayElement\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1273: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadContainer() -  Frame type= eFrameArray, Object type= \n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1393: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClassMember, Member name= masks\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1396: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClass, Object type= Blast-mask-list\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1393: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClassMember, Member name= masks\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1396: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClass, Object type= Blast-db-mask-info\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 968: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::Read() -  Frame type= eFrameNamed, Object type= Blast-db-mask-info\n\n
+RUN	h_id_negative.asnt	nucl	mask_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	h_algo_id_negative.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_algo_id_negative.asnt	31	0	none
+MASK	h_algo_id_negative.asnt	31	1	none
+MASK	h_algo_id_negative.asnt	31	2	5-15;
+MASK	h_algo_id_negative.asnt	31	3	none
+MASK	h_algo_id_negative.asnt	31	4	none
+MASK	h_algo_id_negative.asnt	31	5	none
+MASK	h_algo_id_negative.asnt	31	6	none
+MASK	h_algo_id_negative.asnt	31	7	none
+RUN	h_algo_id_overflow.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/util/strbuffer.cpp", line 583: Error: (CUtilException::eWrongData) ncbi::CIStreamBuffer::NumberOverflow() - number overflow in line 1\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1393: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClassMember, Member name= algo-id\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1396: Error: (CUtilException::eWrongData) ncbi::CObjectIStreamAsn::ReadClassSequential() -  Frame type= eFrameClass, Object type= Blast-db-mask-info\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 968: Error: (CUtilException::eWrongData) ncbi::CObjectIStream::Read() -  Frame type= eFrameNamed, Object type= Blast-db-mask-info\n\n
+RUN	h_more_lowercase.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 762: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsn::ReadBool() - line 1: TRUE or FALSE expected\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eFormatError) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading more ( at Blast-db-mask-info.masks.more)\n\n
+RUN	h_wrong_type_name.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 896: Error: (CSerialException::eFormatError) ncbi::CObjectIStream::SkipFileHeader() - line 1: incompatible type Blast-mask-list<>Blast-db-mask-info ( at Blast-db-mask-info)\n\n
+RUN	h_tab_and_cr.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_tab_and_cr.asnt	31	0	none
+MASK	h_tab_and_cr.asnt	31	1	none
+MASK	h_tab_and_cr.asnt	31	2	5-15;
+MASK	h_tab_and_cr.asnt	31	3	none
+MASK	h_tab_and_cr.asnt	31	4	none
+MASK	h_tab_and_cr.asnt	31	5	none
+MASK	h_tab_and_cr.asnt	31	6	none
+MASK	h_tab_and_cr.asnt	31	7	none
+RUN	h_crlf.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_crlf.asnt	31	0	none
+MASK	h_crlf.asnt	31	1	none
+MASK	h_crlf.asnt	31	2	5-15;
+MASK	h_crlf.asnt	31	3	none
+MASK	h_crlf.asnt	31	4	none
+MASK	h_crlf.asnt	31	5	none
+MASK	h_crlf.asnt	31	6	none
+MASK	h_crlf.asnt	31	7	none
+RUN	h_bracket_member_names.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_bracket_member_names.asnt	31	0	none
+MASK	h_bracket_member_names.asnt	31	1	none
+MASK	h_bracket_member_names.asnt	31	2	5-15;
+MASK	h_bracket_member_names.asnt	31	3	none
+MASK	h_bracket_member_names.asnt	31	4	none
+MASK	h_bracket_member_names.asnt	31	5	none
+MASK	h_bracket_member_names.asnt	31	6	none
+MASK	h_bracket_member_names.asnt	31	7	none
+RUN	h_trailing_comma.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasn.cpp", line 1313: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsn::UnexpectedMember() - line 1: "": unexpected member, should be one of: "masks" "more"  ( at Blast-db-mask-info.masks.more)\n\n
+RUN	h_vertical_tab_between_tokens.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_vertical_tab_between_tokens.asnt	31	0	none
+MASK	h_vertical_tab_between_tokens.asnt	31	1	none
+MASK	h_vertical_tab_between_tokens.asnt	31	2	5-15;
+MASK	h_vertical_tab_between_tokens.asnt	31	3	none
+MASK	h_vertical_tab_between_tokens.asnt	31	4	none
+MASK	h_vertical_tab_between_tokens.asnt	31	5	none
+MASK	h_vertical_tab_between_tokens.asnt	31	6	none
+MASK	h_vertical_tab_between_tokens.asnt	31	7	none
+RUN	h_nul_in_comment.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_nul_in_comment.asnt	31	0	none
+MASK	h_nul_in_comment.asnt	31	1	none
+MASK	h_nul_in_comment.asnt	31	2	5-15;
+MASK	h_nul_in_comment.asnt	31	3	none
+MASK	h_nul_in_comment.asnt	31	4	none
+MASK	h_nul_in_comment.asnt	31	5	none
+MASK	h_nul_in_comment.asnt	31	6	none
+MASK	h_nul_in_comment.asnt	31	7	none
+RUN	h_utf8_in_options.asnt	nucl	mask_nucl.fna	0	Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0xC3] in string at line 1\n\xc3\xa9\nError: (803.7) [makeblastdb] Blast-db-mask-info.algo-options\nBad char [0xA9] in string at line 1\n\xc3\xa9\n
+MASK	h_utf8_in_options.asnt	31	0	none
+MASK	h_utf8_in_options.asnt	31	1	none
+MASK	h_utf8_in_options.asnt	31	2	5-15;
+MASK	h_utf8_in_options.asnt	31	3	none
+MASK	h_utf8_in_options.asnt	31	4	none
+MASK	h_utf8_in_options.asnt	31	5	none
+MASK	h_utf8_in_options.asnt	31	6	none
+MASK	h_utf8_in_options.asnt	31	7	none
+RUN	h_bom_before_object.asnt	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 177: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedTagClassByte() - byte 0: unexpected tag: private/constructed/15 (239), should be constructed/None (32) ( at Blast-db-mask-info)\n\n
+RUN	h_long_comment_before_object.asnt	nucl	mask_nucl.fna	0	\e
+MASK	h_long_comment_before_object.asnt	31	0	none
+MASK	h_long_comment_before_object.asnt	31	1	none
+MASK	h_long_comment_before_object.asnt	31	2	5-15;
+MASK	h_long_comment_before_object.asnt	31	3	none
+MASK	h_long_comment_before_object.asnt	31	4	none
+MASK	h_long_comment_before_object.asnt	31	5	none
+MASK	h_long_comment_before_object.asnt	31	6	none
+MASK	h_long_comment_before_object.asnt	31	7	none
+RUN	h_comment_mostly_punctuation.asnt	nucl	mask_nucl.fna	1	BLAST options error: Unknown encoding for mask data in 'h_comment_mostly_punctuation.asnt'\n
+RUN	h_not_asn_fasta.fna	nucl	mask_nucl.fna	1	BLAST options error: Unknown encoding for mask data in 'h_not_asn_fasta.fna'\n
+RUN	h_not_asn_text.txt	nucl	mask_nucl.fna	1	BLAST options error: Unknown encoding for mask data in 'h_not_asn_text.txt'\n
+RUN	h_not_asn_empty.txt	nucl	mask_nucl.fna	1	BLAST options error: Unknown encoding for mask data in 'h_not_asn_empty.txt'\n
+RUN	h_not_asn_comment_only.txt	nucl	mask_nucl.fna	1	BLAST options error: Unknown encoding for mask data in 'h_not_asn_comment_only.txt'\n
+RUN	h_not_asn_comment_only_no_newline.txt	nucl	mask_nucl.fna	1	BLAST options error: Unknown encoding for mask data in 'h_not_asn_comment_only_no_newline.txt'\n
+RUN	h_not_asn_control_one.bin	nucl	mask_nucl.fna	1	BLAST options error: Unknown encoding for mask data in 'h_not_asn_control_one.bin'\n
+RUN	h_binary_control_two.bin	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 177: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedTagClassByte() - byte 0: unexpected tag: Boolean (1), should be constructed/None (32) ( at Blast-db-mask-info)\n\n
+RUN	b_cut_10.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 606: Error: (CSerialException::eEOF) ncbi::CObjectIStream::HandleEOF() - byte 10:  Frame type= eFrameClassMember, Member name= algo-id ( at Blast-db-mask-info)\n\n
+RUN	b_cut_100.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 606: Error: (CSerialException::eEOF) ncbi::CObjectIStream::HandleEOF() - byte 100:  Frame type= eFrameClass, Object type= Seq-interval ( at [].[].int)\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eEOF) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading masks ( at Blast-db-mask-info.masks.masks.[].[].int)\n\n
+RUN	b_cut_before_last_eoc_byte.asnb	nucl	mask_nucl.fna	0	\e
+RUN	b_indefinite_never_closed.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 606: Error: (CSerialException::eEOF) ncbi::CObjectIStream::HandleEOF() - byte 305:  Frame type= eFrameClassMember, Member name= masks ( at Blast-db-mask-info)\n\n
+RUN	b_length_beyond_file.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 405: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::ReadLengthLong() - byte 21: illegal length start\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eFormatError) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading algo-options ( at Blast-db-mask-info.algo-options)\n\n
+RUN	b_length_huge.asnb	nucl	mask_nucl.fna	4	BLAST ran out of memory\n
+RUN	b_length_nine_bytes.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 401: Error: (CSerialException::eOverflow) ncbi::CObjectIStreamAsnBinary::ReadLengthLong() - byte 20: length overflow\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eOverflow) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading algo-options ( at Blast-db-mask-info.algo-options)\n\n
+RUN	b_tag_ten_bytes.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 161: Error: (CSerialException::eOverflow) ncbi::CObjectIStreamAsnBinary::PeekLongTag() - byte 2: tag number is too big: 268435455 ( at Blast-db-mask-info)\n\n
+RUN	b_tag_long_form.asnb	nucl	mask_nucl.fna	0	\e
+MASK	b_tag_long_form.asnb	11	0	199-281;
+MASK	b_tag_long_form.asnb	11	1	0-90;
+MASK	b_tag_long_form.asnb	11	2	none
+MASK	b_tag_long_form.asnb	11	3	300-390;
+MASK	b_tag_long_form.asnb	11	4	none
+MASK	b_tag_long_form.asnb	11	5	150-220;620-690;
+MASK	b_tag_long_form.asnb	11	6	none
+MASK	b_tag_long_form.asnb	11	7	100-186;
+RUN	b_trailing_zero.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 177: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedTagClassByte() - byte 0: unexpected tag: None (0), should be constructed/None (32) ( at Blast-db-mask-info)\n\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	b_trailing_sequence_tag.asnb	nucl	mask_nucl.fna	0	\e
+MASK	b_trailing_sequence_tag.asnb	11	0	199-281;
+MASK	b_trailing_sequence_tag.asnb	11	1	0-90;
+MASK	b_trailing_sequence_tag.asnb	11	2	none
+MASK	b_trailing_sequence_tag.asnb	11	3	300-390;
+MASK	b_trailing_sequence_tag.asnb	11	4	none
+MASK	b_trailing_sequence_tag.asnb	11	5	150-220;620-690;
+MASK	b_trailing_sequence_tag.asnb	11	6	none
+MASK	b_trailing_sequence_tag.asnb	11	7	100-186;
+RUN	b_trailing_sequence_start.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 606: Error: (CSerialException::eEOF) ncbi::CObjectIStream::HandleEOF() - byte 2:  Frame type= eFrameClassMember ( at Blast-db-mask-info)\n\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	b_two_objects.asnb	nucl	mask_nucl.fna	0	\e
+MASK	b_two_objects.asnb	11	0	199-281;
+MASK	b_two_objects.asnb	11	1	0-90;
+MASK	b_two_objects.asnb	11	2	none
+MASK	b_two_objects.asnb	11	3	300-390;
+MASK	b_two_objects.asnb	11	4	none
+MASK	b_two_objects.asnb	11	5	150-220;620-690;
+MASK	b_two_objects.asnb	11	6	none
+MASK	b_two_objects.asnb	11	7	100-186;
+RUN	b_definite_top_long_form.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 197: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedContinuation() - byte 307: EndOfContentsByte expected ( at Blast-db-mask-info)\n\n
+RUN	b_utf8_options.asnb	nucl	mask_nucl.fna	0	Warning: (803.10) [makeblastdb] CObjectIStreamAsnBinary: UTF8String data for VisibleString member Blast-db-mask-info.algo-options, ASN.1 specification may need an update\n
+MASK	b_utf8_options.asnb	11	0	199-281;
+MASK	b_utf8_options.asnb	11	1	0-90;
+MASK	b_utf8_options.asnb	11	2	none
+MASK	b_utf8_options.asnb	11	3	300-390;
+MASK	b_utf8_options.asnb	11	4	none
+MASK	b_utf8_options.asnb	11	5	150-220;620-690;
+MASK	b_utf8_options.asnb	11	6	none
+MASK	b_utf8_options.asnb	11	7	100-186;
+RUN	b_bad_options_tag.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 377: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedSysTagByte() - byte 18: unexpected tag: PrintableString (19), should be: VisibleString (26)\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eFormatError) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading algo-options ( at Blast-db-mask-info.algo-options)\n\n
+RUN	b_wrong_first_tag.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 216: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedTagValue() - byte 0: Unexpected tag: 17, expected: 16 ( at Blast-db-mask-info)\n\n
+RUN	b_swapped_members.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1037: Error: (CSerialException::eFormatError) ncbi::CObjectIStream::ExpectedMember() - byte 4: member algo-id expected ( at Blast-db-mask-info.algo-program)\n\n
+RUN	b_small_packed.asnb	nucl	mask_nucl.fna	0	\e
+MASK	b_small_packed.asnb	31	0	none
+MASK	b_small_packed.asnb	31	1	none
+MASK	b_small_packed.asnb	31	2	5-15;20-30;
+MASK	b_small_packed.asnb	31	3	none
+MASK	b_small_packed.asnb	31	4	none
+MASK	b_small_packed.asnb	31	5	none
+MASK	b_small_packed.asnb	31	6	none
+MASK	b_small_packed.asnb	31	7	none
+RUN	b_small_int.asnb	nucl	mask_nucl.fna	0	\e
+MASK	b_small_int.asnb	31	0	none
+MASK	b_small_int.asnb	31	1	none
+MASK	b_small_int.asnb	31	2	5-15;
+MASK	b_small_int.asnb	31	3	none
+MASK	b_small_int.asnb	31	4	none
+MASK	b_small_int.asnb	31	5	none
+MASK	b_small_int.asnb	31	6	none
+MASK	b_small_int.asnb	31	7	none
+RUN	b_small_strand.asnb	nucl	mask_nucl.fna	0	\e
+MASK	b_small_strand.asnb	31	0	none
+MASK	b_small_strand.asnb	31	1	none
+MASK	b_small_strand.asnb	31	2	5-15;
+MASK	b_small_strand.asnb	31	3	none
+MASK	b_small_strand.asnb	31	4	none
+MASK	b_small_strand.asnb	31	5	none
+MASK	b_small_strand.asnb	31	6	none
+MASK	b_small_strand.asnb	31	7	none
+RUN	b_small_strand_bad.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/enumerated.cpp", line 156: Error: (CSerialException::eInvalidData) invalid value of enumerated type: 7\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/enumerated.cpp", line 428: Error: (CSerialException::eInvalidData) ncbi::CEnumeratedTypeInfo::ReadEnum() - invalid enum value\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eInvalidData) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading strand ( at [].[].int.strand)\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eInvalidData) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading masks ( at Blast-db-mask-info.masks.masks.[].[].int.strand)\n\n
+RUN	b_small_fuzz.asnb	nucl	mask_nucl.fna	0	\e
+MASK	b_small_fuzz.asnb	31	0	none
+MASK	b_small_fuzz.asnb	31	1	none
+MASK	b_small_fuzz.asnb	31	2	5-15;
+MASK	b_small_fuzz.asnb	31	3	none
+MASK	b_small_fuzz.asnb	31	4	none
+MASK	b_small_fuzz.asnb	31	5	none
+MASK	b_small_fuzz.asnb	31	6	none
+MASK	b_small_fuzz.asnb	31	7	none
+RUN	b_small_two_ids.asnb	nucl	mask_nucl.fna	1	BLAST options error: Cannot get masked range Seq-id\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	b_small_empty.asnb	nucl	mask_nucl.fna	0	\e
+RUN	b_small_more_true.asnb	nucl	mask_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+NODB	b_small_more_true.asnb
+RUN	b_small_more_true_continuation.asnb	nucl	mask_nucl.fna	0	\e
+MASK	b_small_more_true_continuation.asnb	31	0	none
+MASK	b_small_more_true_continuation.asnb	31	1	none
+MASK	b_small_more_true_continuation.asnb	31	2	5-15;
+MASK	b_small_more_true_continuation.asnb	31	3	20-30;
+MASK	b_small_more_true_continuation.asnb	31	4	none
+MASK	b_small_more_true_continuation.asnb	31	5	none
+MASK	b_small_more_true_continuation.asnb	31	6	none
+MASK	b_small_more_true_continuation.asnb	31	7	none
+RUN	b_small_whole.asnb	nucl	mask_nucl.fna	1	BLAST Database creation error: Error: Masked data offsets out of bounds.\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	b_small_application_integer.asnb	nucl	mask_nucl.fna	0	\e
+MASK	b_small_application_integer.asnb	31	0	none
+MASK	b_small_application_integer.asnb	31	1	none
+MASK	b_small_application_integer.asnb	31	2	5-15;
+MASK	b_small_application_integer.asnb	31	3	none
+MASK	b_small_application_integer.asnb	31	4	none
+MASK	b_small_application_integer.asnb	31	5	none
+MASK	b_small_application_integer.asnb	31	6	none
+MASK	b_small_application_integer.asnb	31	7	none
+RUN	b_small_definite_members.asnb	nucl	mask_nucl.fna	0	\e
+RUN	b_small_definite_long_member.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 197: Error: (CSerialException::eFormatError) ncbi::CObjectIStreamAsnBinary::UnexpectedContinuation() - byte 8: EndOfContentsByte expected ( at Blast-db-mask-info.algo-id)\n\n
+RUN	b_small_unsigned_negative.asnb	nucl	mask_nucl.fna	1	BLAST Database creation error: Error: Masked data offsets out of bounds.\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	b_small_unsigned_5_bytes.asnb	nucl	mask_nucl.fna	1	BLAST Database creation error: Error: Masked data offsets out of bounds.\nError: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	b_small_unsigned_4_bytes_high.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistrasnb.cpp", line 537: Error: (CSerialException::eOverflow) byte 47: overflow error\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eOverflow) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading to ( at [].[].int.to)\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/member.cpp", line 752: Error: (CSerialException::eOverflow) ncbi::CMemberInfoFunctions::ReadWithSetFlagMember() - error while reading masks ( at Blast-db-mask-info.masks.masks.[].[].int.to)\n\n
+RUN	b_small_gi.asnb	nucl	mask_nucl.fna	0	Error: [makeblastdb] No sequences matched any of the masks provided.\nPlease ensure that the -parse_seqids option is used in the\nfiltering program as well as makeblastdb.\n
+RUN	b_small_missing_options.asnb	nucl	mask_nucl.fna	255	Error: NCBI C++ Exception:\n    T0 "/home/coremake/release_build/build/PrepareRelease_Linux64-Alma_JSID_01_170042_130.14.18.128_9008__PrepareRelease_Linux64-Alma_1751374548/c++/compilers/unix/../../src/serial/objistr.cpp", line 1037: Error: (CSerialException::eFormatError) ncbi::CObjectIStream::ExpectedMember() - byte 18: member algo-options expected ( at Blast-db-mask-info.masks)\n\n

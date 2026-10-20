@@ -48,7 +48,7 @@ const F_SPACE: u8 = 1 << 6;
 const F_INVALID: u8 = 1 << 7;
 
 /// C `isspace` in the "C" locale: space, `\t`, `\n`, `\v`, `\f`, `\r`.
-fn c_isspace(c: u8) -> bool {
+pub(crate) fn c_isspace(c: u8) -> bool {
     matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
 }
 
@@ -358,7 +358,7 @@ fn is_ascii_text(data: &[u8]) -> bool {
 /// `NStr::Split(data, delims, lines, NStr::fSplit_Tokenize)` with `delims` a set of single characters (`fSplit_ByPattern` is
 /// not set, so every character of the delimiter string is a delimiter): the non-empty runs of bytes between delimiters.
 /// Leading, trailing and repeated delimiters give no empty token.
-fn split_tokenize<F: Fn(u8) -> bool>(data: &[u8], is_delim: F) -> Vec<&[u8]> {
+pub(crate) fn split_tokenize<F: Fn(u8) -> bool>(data: &[u8], is_delim: F) -> Vec<&[u8]> {
     data.split(|&c| is_delim(c))
         .filter(|token| !token.is_empty())
         .collect()
@@ -566,7 +566,7 @@ fn is_all_comment(data: &[u8], buffer_size: usize) -> bool {
 /// The sample (`m_pTestBuffer`, `m_iTestDataSize` bytes), or `None` when `EnsureTestBuffer` returns false (empty stream, or
 /// an all-comment sample that ended before the buffer was full). Each pass reads the first `Multiplier * 8096` bytes of the stream again (NCBI pushes the bytes back with
 /// `CStreamUtils::Stepback`), so the sample is a prefix of the input and bytes are read once here.
-fn ensure_test_buffer<R: Read>(input: &mut R) -> Option<Vec<u8>> {
+pub(crate) fn ensure_test_buffer<R: Read>(input: &mut R) -> Option<Vec<u8>> {
     const TEST_BUFFER_GRANULARITY: usize = 8096;
     let mut data: Vec<u8> = Vec::new();
     let mut ended = false;

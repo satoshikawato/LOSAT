@@ -1075,6 +1075,51 @@ Rebuilding less:
   (panic) after printing the line that is otherwise printed at exit: `[X_SHADOW] BNDBCUT searches= blocks=
   blocks_ref= merged= identical` (`blocks`: blocks of the cut; `blocks_ref`: blocks of 1 MiB; `merged`: kept results
   compared). The preliminary stage runs twice, so its `LOSAT_TIMING` and `LOSAT_X_STATS` count double, and its results are held twice.
+- `LOSAT_X_BNFEWSUBJ=1` (BLASTN `-subject`, every task whose seed stage has strips (`LOSAT_X_PAIRPAR`,
+  `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARDISCARR`), speed; in the strict set from the pull request that added it
+  (perf/bn-few-subj, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set;
+  acts only on a pool of 2+ threads) a `-subject` search whose longest work unit is a large part of its letters searches
+  its subjects one at a time on the whole pool, and a subject's batch of chunks the same way its chunks one at a time, so
+  that the seed stage scans each chunk in strips (`blastn/blast_engine/x_few_subj.rs`, exactness argument in its
+  header). Without it a search of two subjects or more searches each subject as one task of the pool, and a subject of
+  two 5 Mb chunks or more (`MAX_DBSEQ_LEN`) its chunks as tasks, both without strips: the Sakai genome against MG1655 and
+  its 92 kb plasmid scanned MG1655 on one thread. The rule: the longest unit's letters x S^(p) > all the letters, the
+  unit a subject up to 5 Mb (subjects) or a chunk with its overlap (a batch), S^(p) per kind of table at the largest of
+  2 / 4 / 8 / 16 threads not above p: dc-megablast 1.7 / 2.5 / 3.2 / 3.4, blastn 1.7 / 2.9 / 4.1 / 4.7, any other
+  task 1.5 / 2.0 / 2.5 / 2.7 (the lowest one-thread / new-shape wall the probe below measured, floored to tenths;
+  integers in tenths). Not with `-lcase_masking` (a masked chunk has no strips) and not for `-db` (plan v4 line D). The
+  new shape is the one of a one-subject search (strips, `LOSAT_X_QGROUPPAR`, the speculative traceback), and the
+  subjects reach `sink` in OID order in both shapes. The shadows of the strips (`LOSAT_X_PAIRPARSHADOW`,
+  `LOSAT_X_PAIRPARDISCSHADOW`, `LOSAT_X_PAIRPARDISCARRSHADOW`) and of `LOSAT_X_QGROUPPAR` run on it; it has no shadow of
+  its own (it only chooses between two shapes with the same bytes). Memory: the shape holds one chunk's seed stage on
+  the whole pool; with it the one-hit strips of `LOSAT_X_PAIRPARFOLD` are 64 per thread with a look-ahead of 2 per
+  thread (1/32 of a chunk's seeds, as dc-megablast's; before 8 / 2, a quarter), which also lowers one-subject blastn
+  (Sakai against MG1655 alone at 16 threads 282 -> 213 MiB median, at 4 threads 193 -> 151; NCBI 192 MiB) at x0.95-0.99
+  of the time. Test: `LOSAT/tests/blastn_few_subj.rs`.
+  Measured on the workstation (node 1; 16 / 8 / 4 / 2 booked cores with their siblings idle, a 3 s warm-up before each
+  run, rotated order; every output equal to NCBI 2.17.0 `-subject`; line G `results/g4probe/ab.tsv` (the shape forced
+  for any 2+ subjects or chunks, exp/bn-few-subj-force 80fca36a, 3 timed pairs) and `results/g4conf2/ab.tsv` (this
+  binary, 8 timed pairs)), the Sakai genome (5.5 Mb) as the query, with the switch against `LOSAT_X_BNFEWSUBJ=0`:
+  against MG1655 + pO157 dc-megablast 1.88 -> 0.51 s at 16 threads (x0.271; NCBI 8.55 s), x0.330 / 0.485 / 0.716 at 8 /
+  4 / 2; blastn 4.66 -> 1.40 s (x0.303; NCBI 22.17 s), x0.349 / 0.476 at 8 / 4; megablast 0.34 -> 0.25 s (x0.735; NCBI
+  1.41 s), x0.911 at 2; against EDL933 (5.53 Mb, two chunks) dc-megablast x0.423 / 0.456 / 0.565 / 0.778 at 16 / 8 / 4 /
+  2, blastn x0.275 / 0.313 / 0.438 / 0.679, megablast x0.711 / 0.725 / 0.800 at 16 / 8 / 4 and x0.907 at 2 (this
+  binary); against MG1655 + EDL933 (longest
+  unit 0.49) dc-megablast x0.493 / 0.557 / 0.734 at 16 / 8 / 4, blastn x0.416 / 0.501 / 0.704, megablast x0.881 / 0.889
+  at 16 / 8 (this binary); against MG1655 in 3 records dc-megablast x0.614 / 0.706 and blastn x0.679 / 0.770 at 16 / 8; 75,000
+  reads of 150 bases against MG1655 + pO157 megablast x0.667 / 0.841 at 16 / 8; dc-megablast of 2,000 pieces of 1 kb of
+  Sakai against MG1655 + pO157 0.66 -> 0.13 s at 16 threads (x0.197; NCBI 3.07 s), x0.434 at 4 (this binary). The
+  probe's blastn and megablast cells ran the strips before the 64 / 2 change, which takes x0.95-1.00 of their time. The
+  cells it leaves
+  as they were: MG1655 in 10 records (the new shape x1.01-1.48 slower), 2,000 16S genes (x5.2 slower), MG1655 + EDL933
+  at 2 threads (x0.94-1.06) and with megablast at 4 (x0.96), MG1655 in 3 records at 2 / 4 threads (x0.86-0.96) and with megablast (x0.94-1.04). Max RSS
+  (median, MiB, with / without; NCBI): blastn against MG1655 + pO157 203 / 195 at 16 threads (192), 180 / 151 at 8,
+  150 / 125 at 4; megablast against MG1655 + EDL933 149 / 161 at 16; dc-megablast of the 2,000 pieces 66 / 64 at 16
+  (125). On node 0 (untimed, 4 cores, two runs each, `results/g4rss3/rss.tsv`) the cells with EDL933 or 3 records
+  do not rise either at 16 / 8 threads: blastn against MG1655 + EDL933 420-484 / 494-539 and 378-397 / 353-383 MiB,
+  against EDL933 616-647 / 671-703, against MG1655 in 3 records 198-199 / 220-236; dc-megablast against MG1655 +
+  EDL933 658-711 / 639-768, against EDL933 671-672 / 665-689. The cells with EDL933 are 2.5-4 times NCBI's max RSS
+  (164-286 MiB) in both shapes (outside this switch).
 - `LOSAT_X_DBIDXREAD=1` (every program's `-db`, memory; in the strict set since 2026-10-19 (perf/db-index-pread, evidence
   at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the index file of each volume
   (`.pin` / `.nin`) stays open after the volume is opened, and the reader reads the ranges of its offset arrays that it
@@ -2751,7 +2796,9 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_PAIRPARFOLD=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) blastn, where the strips paths of `LOSAT_X_PAIRPAR` (one-hit fold: megablast, blastn) and
   `LOSAT_X_PAIRPARDISC` (two-hit fold: dc-megablast) run, on a pool of 2+ threads: the diagonal-hash fold
   of the chunk is split by bucket (`bucket % P`, one partition per thread) over the owner and `threads - 1`
-  jobs of an `in_place_scope` (`blastn/blast_engine/x_pair_seed_part.rs`). Each participant scans the
+  jobs of an `in_place_scope` (`blastn/blast_engine/x_pair_seed_part.rs`). A chunk's scan is cut into 64 x
+  max(threads, 4) strips (the one-hit fold since perf/bn-few-subj, before 8 x max(threads, 4): with a long chunk
+  those strips of seeds held a quarter of its seeds; see `LOSAT_X_BNFEWSUBJ`). Each participant scans the
   next strip when it lies within `2 x threads` strips of the slowest partition, cuts its seeds by
   partition (a stable counting sort) and folds partition p of the next strip of any partition it can
   lock, into p's own table, with the folds of the strips paths (`fold`, `fold_two_hit`, a const

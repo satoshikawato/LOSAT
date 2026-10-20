@@ -1338,7 +1338,11 @@ pub(super) fn run(
     // A discontiguous megablast table: LOSAT_X_PAIRPARDISC (the diagonal hash) or
     // LOSAT_X_PAIRPARDISCARR (the diagonal array) and their shadows decide.
     if x.two_stage.disc().is_some() {
-        return disc::run(x, diag_hash, diag_array, ungapped_hits, fold_scratch);
+        // EXPERIMENT (exp/r13-wall): the seed stage's interval (`R13_PROBE=tl`).
+        let x_r13_t = crate::utils::xtiming::clock();
+        let done = disc::run(x, diag_hash, diag_array, ungapped_hits, fold_scratch);
+        crate::utils::xtiming::x_r13("seed", x_r13_t, done as u64);
+        return done;
     }
     let (on, shadow) = switches();
     if !on && !shadow {

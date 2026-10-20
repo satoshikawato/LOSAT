@@ -187,6 +187,8 @@ pub(crate) fn attach_words<W: Words>(w: &W, hashtable: &[u32], next_pos: &mut Ve
     });
     // `offsets[cells]` was the total and is no cell's end, so it stays the total.
     let t4 = Instant::now();
+    // EXPERIMENT (exp/r13-wall): the CSR build's interval (`R13_PROBE=tl`).
+    crate::utils::xtiming::x_r13("csr", Some(t0), words as u64);
     eprintln!(
         "[R11] csr words-build cells={cells} words={words} next_pos_len={n} zero_ns={} count_ns={} sum_ns={} place_ns={} build_ns={} csr_bytes={}",
         (t1 - t0).as_nanos(),

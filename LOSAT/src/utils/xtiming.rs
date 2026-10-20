@@ -117,6 +117,74 @@ fn span(phase: Phase, start: Instant, end: Instant) {
             .unwrap_or_else(|e| e.into_inner())
             .push((start, end));
     }
+    if x_r13_on() {
+        x_r13_push(PHASES[phase as usize].1, start, end, 0);
+    }
+}
+
+// EXPERIMENT (exp/r13-wall, v4-R R13; evidence only, never merged): with LOSAT_TIMING and
+// `R13_PROBE=tl`, every interval of the common line and the probe's own marks (`x_r13`) are kept
+// with the name of the thread that ran them, and `print` writes them after the common line:
+// `[R13] start <the Instant of the entry of main>`, then one `[R13] <label> <thread> <start_us>
+// <end_us> <extra>` per interval (microseconds since the entry of main), then `[R13] end <us>`.
+struct XR13 {
+    label: &'static str,
+    thread: String,
+    start: Instant,
+    end: Instant,
+    extra: u64,
+}
+
+static X_R13: Mutex<Vec<XR13>> = Mutex::new(Vec::new());
+
+fn x_r13_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        on() && std::env::var("R13_PROBE").is_ok_and(|v| v.split(',').any(|t| t.trim() == "tl"))
+    })
+}
+
+#[inline(never)]
+fn x_r13_push(label: &'static str, start: Instant, end: Instant, extra: u64) {
+    let thread = std::thread::current().name().unwrap_or("-").to_string();
+    X_R13.lock().unwrap_or_else(|e| e.into_inner()).push(XR13 {
+        label,
+        thread,
+        start,
+        end,
+        extra,
+    });
+}
+
+/// EXPERIMENT (exp/r13-wall): a probe interval from `t0` (from `clock`) to now, kept only with
+/// `R13_PROBE=tl`.
+#[inline(never)]
+pub fn x_r13(label: &'static str, t0: Option<Instant>, extra: u64) {
+    if let Some(t0) = t0 {
+        if x_r13_on() {
+            x_r13_push(label, t0, Instant::now(), extra);
+        }
+    }
+}
+
+fn x_r13_print() {
+    let Some(&start) = START.get() else {
+        return;
+    };
+    let us = |t: Instant| t.saturating_duration_since(start).as_micros();
+    let mut out = format!("[R13] start {start:?}\n");
+    for r in X_R13.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+        out.push_str(&format!(
+            "[R13] {} {} {} {} {}\n",
+            r.label,
+            r.thread,
+            us(r.start),
+            us(r.end),
+            r.extra
+        ));
+    }
+    out.push_str(&format!("[R13] end {}\n", us(Instant::now())));
+    eprint!("{out}");
 }
 
 /// The total length of the union of the intervals.
@@ -173,6 +241,9 @@ pub fn print() {
     let since = START.get().map(|t| t.elapsed());
     let search = union(&mut SEARCH_SPANS.lock().unwrap_or_else(|e| e.into_inner()));
     eprintln!("{}", line(since, search));
+    if x_r13_on() {
+        x_r13_print();
+    }
 }
 
 #[cfg(test)]

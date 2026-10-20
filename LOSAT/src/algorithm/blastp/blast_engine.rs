@@ -7442,7 +7442,24 @@ fn run_resolved_in_pool(
     //     return seqdb.GetNumSeqs();
     // }
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:917-935 (`BLAST_GapAlignSetUp`)
+    // ```c
+    //       if (total_length > 0) {
+    //           num_seqs = BlastSeqSrcGetNumSeqsStats(seq_src);
+    //           if (num_seqs <= 0)
+    //               num_seqs = BlastSeqSrcGetNumSeqs(seq_src);
+    //       } else {
+    //           /* Not a database search; each subject sequence is considered
+    //              individually */
+    //           ...
+    //           num_seqs = 1;
+    //       }
+    // ```
+    // A subject set of no letters at all (every record empty) is not a database search to
+    // NCBI: it counts one sequence, whatever the number of records (visible only with
+    // `-dbsize`, the effective search space of the XML statistics and the outfmt 0 footer).
     let num_subjects = match database {
+        None if total_db_len == 0 => 1,
         None => subjects.len().max(1),
         Some(database) => database.num_sequences() as usize,
     };

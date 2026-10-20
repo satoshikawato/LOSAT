@@ -85,7 +85,8 @@ each of them:
 - `mask_parse/expected.tsv`: per file the exit status and standard error of
   `makeblastdb -in <fasta> -dbtype <type> -mask_data <file>` (no `-parse_seqids`), and the masks that
   `blastdbcmd -outfmt '%o\t%m<algorithm>'` reads back from the database it wrote (`RUN`, `NODB`
-  and `MASK` rows; the header of the file explains them).
+  and `MASK` rows; the last field of `RUN` is the algorithm's options as `blastdbcmd -info` prints them;
+  the header of the file explains them).
 - `make_mask_parse_fixtures.py` rebuilds these (`--ncbi-bin DIR --work DIR`); the tools and the
   inputs are deterministic, so a rebuild changes nothing.
 

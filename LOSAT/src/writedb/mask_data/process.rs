@@ -87,7 +87,7 @@ pub enum MaskDataError {
     /// A failure of the mask file reader that NCBI reports in its own words, or does not
     /// report: [`MaskFileError::Malformed`] (NCBI: a `CSerialException`, status 255, or
     /// `std::bad_alloc`, status 4), [`MaskFileError::Unsupported`],
-    /// [`MaskFileError::EofInContinuation`], [`MaskFileError::Io`].
+    /// [`MaskFileError::EofInContinuation`].
     File(MaskFileError),
 }
 
@@ -165,8 +165,6 @@ impl MaskDataError {
     ///   (`MakedbError::Unsupported`, status 1).
     /// * [`MaskFileError::EofInContinuation`]: `None`, exactly as NCBI (status 0, nothing is
     ///   printed here; the destructor's message follows).
-    /// * [`MaskFileError::Io`]: a failure to read a file that exists: `WriteDbError::Io`
-    ///   (status 255), the form of LOSAT's file-system failures.
     pub fn into_makedb_error(self) -> Option<MakedbError> {
         match self {
             MaskDataError::Ncbi(error) => Some(MakedbError::Build(error)),
@@ -174,9 +172,6 @@ impl MaskDataError {
             MaskDataError::File(MaskFileError::Unsupported(what)) => Some(
                 MakedbError::Unsupported(format!("mask data that LOSAT does not read: {what}")),
             ),
-            MaskDataError::File(MaskFileError::Io { path, source }) => {
-                Some(MakedbError::Build(WriteDbError::Io { path, source }))
-            }
             MaskDataError::File(error @ MaskFileError::Malformed { .. }) => {
                 Some(MakedbError::Build(WriteDbError::Other(error.to_string())))
             }
@@ -612,26 +607,9 @@ pub fn process_mask_data(
 }
 
 /// The reader of the mask file at `path`, whose name in messages is `name`. A file that cannot
-/// be opened is "Unknown encoding" as in NCBI (see `process_mask_data`); one that fails while it
-/// is read is an I/O error of LOSAT's.
+/// be opened or read is "Unknown encoding" as in NCBI (`MaskFileReader::open_named`).
 fn open_mask_file(path: &Path, name: &Path) -> Result<MaskFileReader, MaskDataError> {
-    let mut file = match std::fs::File::open(path) {
-        Ok(file) => file,
-        Err(_) => {
-            return Err(options_error(&format!(
-                "Unknown encoding for mask data in '{}'",
-                name.display()
-            )))
-        }
-    };
-    let mut data = Vec::new();
-    std::io::Read::read_to_end(&mut file, &mut data).map_err(|source| {
-        MaskDataError::File(MaskFileError::Io {
-            path: name.to_path_buf(),
-            source,
-        })
-    })?;
-    Ok(MaskFileReader::from_bytes(name, data)?)
+    Ok(MaskFileReader::open_named(path, name)?)
 }
 
 #[cfg(test)]

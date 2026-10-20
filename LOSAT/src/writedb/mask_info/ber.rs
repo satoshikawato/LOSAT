@@ -6,7 +6,7 @@
 //! its variant `[n]` around the value, and every constructed item ends with `00 00` when
 //! its length is indefinite (`80`); a definite length is accepted as well.
 
-use super::reader::{fix_visible_chars, format_err, Fail, Input, R};
+use super::reader::{format_err, Fail, Input, R};
 use super::schema::{ChoiceDef, ClassDef, EnumDef};
 
 pub(super) struct BerIn<'a> {
@@ -442,15 +442,12 @@ impl<'a> BerIn<'a> {
     // ```
     fn expect_integer_tag(&mut self) -> R<()> {
         match self.peek(0)? {
-            TAG_INTEGER => {
+            // The application tag only sets `eReadAsBigInt`, which has no effect on the number
+            // read here (checked with the oracle on `b_small_application_integer.asnb`).
+            TAG_INTEGER | TAG_APPLICATION_INTEGER => {
                 self.tag_len = 1;
                 Ok(())
             }
-            // The tag sets `eReadAsBigInt`, which `ReadWithDefaultMemberX` takes for "not set"
-            // (member.cpp:807-812); LOSAT does not model it.
-            TAG_APPLICATION_INTEGER => Err(Fail::Unsupported(
-                "an INTEGER with the application tag (big integer)".into(),
-            )),
             got => format_err(format!("unexpected tag: {got}, should be: {TAG_INTEGER}")),
         }
     }
@@ -836,7 +833,8 @@ impl Input for BerIn<'_> {
     // ```
     // (`SERIAL_READ_ANY_VISIBLESTRING_TAG` is 1 by default: a UTF8String is accepted for a
     // VisibleString, with a warning.)
-    fn read_string(&mut self) -> R<Vec<u8>> {
+    fn read_string(&mut self) -> R<(Vec<u8>, bool)> {
+        let utf8_tag = self.peek(0)? == TAG_UTF8_STRING;
         match self.peek(0)? {
             TAG_VISIBLE_STRING | TAG_UTF8_STRING => self.tag_len = 1,
             got => {
@@ -860,10 +858,9 @@ impl Input for BerIn<'_> {
             return Err(Fail::Eof);
         }
         let length = length as usize;
-        let mut s = self.data[self.pos..self.pos + length].to_vec();
+        let s = self.data[self.pos..self.pos + length].to_vec();
         self.pos += length;
-        fix_visible_chars(&mut s);
-        Ok(s)
+        Ok((s, utf8_tag))
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasnb.cpp:2023-2039

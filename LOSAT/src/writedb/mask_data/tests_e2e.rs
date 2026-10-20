@@ -566,21 +566,17 @@ fn read_expected(parse_dir: &Path) -> BTreeMap<String, Expected> {
 /// Files that makeblastdb reads and LOSAT does not (`MaskFileError::Unsupported`): LOSAT's
 /// outcome is its own refusal (status 1, "LOSAT makedb: mask data that LOSAT does not read: ..."),
 /// whatever NCBI did with them. A new file that LOSAT refuses must be added here.
-const LOSAT_UNSUPPORTED: [&str; 8] = [
+const LOSAT_UNSUPPORTED: [&str; 10] = [
     "h_unsupported_whole.asnt",
     "h_unsupported_pnt.asnt",
     "h_unsupported_mix.asnt",
     "h_unsupported_null.asnt",
     "h_unsupported_feat.asnt",
     "b_small_whole.asnb",
-    "b_small_application_integer.asnb",
     "h_different_other_ids.asnt",
-];
-
-/// Files whose only standard error text in NCBI is the warnings of its serial reader about
-/// characters that are not printable in a `VisibleString` (`ReplaceVisibleChar`, which replaces
-/// them); LOSAT replaces them the same way and writes no warning.
-const NCBI_ONLY_READER_WARNINGS: [&str; 3] = [
+    // NCBI replaces a byte that is not printable in a `VisibleString` with '#' and logs it, and
+    // warns about a UTF8String tag for a VisibleString; those lines are its only standard error.
+    // LOSAT does not write them, so it refuses the string.
     "h_string_nonprint.asnt",
     "h_utf8_in_options.asnt",
     "b_utf8_options.asnb",
@@ -603,8 +599,6 @@ enum Class {
     NoDatabase,
     /// LOSAT refuses a file that NCBI reads.
     Unsupported,
-    /// NCBI's own warnings of the serial reader are missing from LOSAT's standard error.
-    ReaderWarnings,
     /// Status, standard error and database equal NCBI's.
     Equal,
 }
@@ -624,8 +618,6 @@ fn classify(file: &str, run: &Expected) -> Class {
         Class::NoDatabase
     } else if LOSAT_UNSUPPORTED.contains(&file) {
         Class::Unsupported
-    } else if NCBI_ONLY_READER_WARNINGS.contains(&file) {
-        Class::ReaderWarnings
     } else {
         assert!(
             !run.stderr.contains("NCBI C++ Exception")
@@ -719,21 +711,9 @@ fn every_mask_parse_file_runs_end_to_end() {
                 );
                 no_files();
             }
-            Class::ReaderWarnings | Class::Equal => {
+            Class::Equal => {
                 assert_eq!(run.status, ncbi.rc, "{file}: {stderr}");
-                if class == Class::ReaderWarnings {
-                    // Nothing but the serial reader's warnings in NCBI's standard error.
-                    assert_eq!(ncbi.rc, 0, "{file}");
-                    assert!(
-                        ncbi.stderr.starts_with("Error: (803.7) [makeblastdb] ")
-                            || ncbi.stderr.starts_with("Warning: (803.10) [makeblastdb] "),
-                        "{file}: {}",
-                        ncbi.stderr
-                    );
-                    assert_eq!(stderr, "", "{file}");
-                } else {
-                    assert_eq!(stderr, ncbi.stderr, "{file}: standard error");
-                }
+                assert_eq!(stderr, ncbi.stderr, "{file}: standard error");
                 if run.status == 0 {
                     compared += assert_database(&tmp.base("db"), protein, file, ncbi);
                     listed += ncbi.masks.values().map(BTreeMap::len).sum::<usize>();
@@ -750,13 +730,12 @@ fn every_mask_parse_file_runs_end_to_end() {
     assert_eq!(
         tally,
         [
-            ("Equal".to_string(), 67),
+            ("Equal".to_string(), 68),
             ("NoDatabase".to_string(), 3),
             ("OutOfMemory".to_string(), 1),
-            ("ReaderWarnings".to_string(), 3),
             ("Serial".to_string(), 39),
             ("UnknownEncoding".to_string(), 7),
-            ("Unsupported".to_string(), 8),
+            ("Unsupported".to_string(), 10),
         ]
     );
 }
@@ -1265,13 +1244,6 @@ fn outcomes_become_makeblastdb_s_status_and_text() {
         })),
         None
     );
-    let (status, text) = describe(MaskDataError::File(MaskFileError::Io {
-        path: path(),
-        source: io(),
-    }))
-    .unwrap();
-    assert_eq!(status, 255);
-    assert!(text.starts_with("Error: m.asnb: "), "{text}");
     // The reader's own NCBI-worded error is the same as one raised here.
     let from_reader = MaskDataError::from(MaskFileError::Ncbi(WriteDbError::Options("u".into())));
     assert!(matches!(from_reader, MaskDataError::Ncbi(_)));

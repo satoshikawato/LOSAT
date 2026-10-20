@@ -25,11 +25,13 @@ Files written into `<out>/mask_parse/`:
   b_*.asnb                 damaged binary files (made from dust.asnb)
   expected.tsv             what makeblastdb does with each file
 
-expected.tsv: lines starting with '#' are comments. `RUN <file> <dbtype> <fasta> <rc> <stderr>` is the
+expected.tsv: lines starting with '#' are comments. `RUN <file> <dbtype> <fasta> <rc> <stderr> <options>` is the
 exit status and the standard error (all of it) of
 `makeblastdb -in <fasta> -dbtype <dbtype> -out db -mask_data <file>` (no -parse_seqids; `<fasta>` is in
 LOSAT/tests/seqdb or mask_parse), run in a directory that holds the file, so that its messages
-name the file without a path. `NODB <file>` follows a RUN with status 0 that wrote no database (makeblastdb gave up
+name the file without a path. The last field of RUN is the options of the algorithm as `blastdbcmd -info`
+prints them (the fixed-width table, "default options used" for none; empty when no database was
+written or it has several algorithms). `NODB <file>` follows a RUN with status 0 that wrote no database (makeblastdb gave up
 without an error status). When the database was written, one `MASK <file> <algorithm> <oid>
 <ranges>` per algorithm that `blastdbcmd -info` lists and per sequence, from
 `blastdbcmd -outfmt '%o\t%m<algorithm>'` (the format of expected/mask_*.masks.tsv). Fields use backslash
@@ -373,9 +375,19 @@ def algorithm_ids(info):
     return [int(line.split()[0]) for line in m.group(1).splitlines() if line.strip()]
 
 
+def algorithm_options(info):
+    """The options column of the algorithm table of `blastdbcmd -info`: the third column of the fixed-width
+    table (13 + 40 characters before it, padded on the right; an empty option string is printed as
+    "default options used")."""
+    m = re.search(r"Available filtering algorithms applied to database sequences:\n\n.*?\n(.*?)\nVolumes:", info, re.S)
+    if not m:
+        return []
+    return [line[13 + 40:].rstrip(" ") for line in m.group(1).splitlines() if line.strip()]
+
+
 def expected_rows(bin_dir, work, committed, files):
     """files: [(file name, fasta, dbtype)] with the mask files in `work/mask_parse`."""
-    rows = ["# RUN\tfile\tdbtype\tfasta\trc\tstderr", "# NODB\tfile",
+    rows = ["# RUN\tfile\tdbtype\tfasta\trc\tstderr\toptions", "# NODB\tfile",
             "# MASK\tfile\talgorithm\toid\tranges"]
     runs = work / "runs"
     for name, fasta, dbtype in files:
@@ -387,13 +399,18 @@ def expected_rows(bin_dir, work, committed, files):
         result = run([bin_dir / "makeblastdb", "-in", fasta, "-dbtype", dbtype, "-out", "db",
                       "-mask_data", name], run_dir, check=False)
         stderr = result.stderr.decode("latin-1")
-        rows.append("\t".join(["RUN", name, dbtype, fasta, str(result.returncode), escape(stderr)]))
+        run_row = ["RUN", name, dbtype, fasta, str(result.returncode), escape(stderr), escape("")]
+        rows.append("\t".join(run_row))
         if result.returncode != 0:
             continue
         if not any(p.name.startswith("db.") for p in run_dir.iterdir()):
             rows.append("\t".join(["NODB", name]))
             continue
-        info = run([bin_dir / "blastdbcmd", "-db", "db", "-dbtype", dbtype, "-info"], run_dir).stdout.decode()
+        info = run([bin_dir / "blastdbcmd", "-db", "db", "-dbtype", dbtype, "-info"], run_dir).stdout.decode("latin-1")
+        options = algorithm_options(info)
+        if len(options) == 1:
+            run_row[6] = escape(options[0])
+            rows[-1] = "\t".join(run_row)
         for algo in algorithm_ids(info):
             masks = run([bin_dir / "blastdbcmd", "-db", "db", "-dbtype", dbtype, "-entry", "all",
                          "-outfmt", f"%o\t%m{algo}"], run_dir).stdout.decode()

@@ -57,29 +57,12 @@ pub enum MaskFileError {
     /// failure, so makeblastdb leaves with status 0 and no database, after the
     /// "No sequences matched any of the masks provided." message of its build object.
     EofInContinuation { path: PathBuf },
-    Io {
-        path: PathBuf,
-        source: std::io::Error,
-    },
 }
 
 impl fmt::Display for MaskFileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MaskFileError::Ncbi(e) => match e {
-                WriteDbError::Options(text) => write!(f, "BLAST options error: {text}"),
-                WriteDbError::Creation(text) => {
-                    write!(f, "BLAST Database creation error: {text}")
-                }
-                WriteDbError::Other(text) => write!(f, "Error: {text}"),
-                WriteDbError::OutOfMemory => write!(f, "BLAST ran out of memory"),
-                WriteDbError::Io { path, source } => {
-                    write!(f, "{}: {source}", path.display())
-                }
-                WriteDbError::Rename { from, to, source } => {
-                    write!(f, "{} -> {}: {source}", from.display(), to.display())
-                }
-            },
+            MaskFileError::Ncbi(e) => write!(f, "{e}"),
             MaskFileError::Malformed { path, message } => {
                 write!(f, "mask data in '{}': {message}", path.display())
             }
@@ -91,19 +74,11 @@ impl fmt::Display for MaskFileError {
                 "mask data in '{}': the file ends where the continuation of 'more TRUE' was expected",
                 path.display()
             ),
-            MaskFileError::Io { path, source } => write!(f, "{}: {source}", path.display()),
         }
     }
 }
 
-impl std::error::Error for MaskFileError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            MaskFileError::Io { source, .. } => Some(source),
-            _ => None,
-        }
-    }
-}
+impl std::error::Error for MaskFileError {}
 
 /// What a primitive or a frame reports.
 #[derive(Debug)]
@@ -144,8 +119,9 @@ pub(super) trait Input {
     fn read_u32(&mut self) -> R<u32>;
     fn read_bool(&mut self) -> R<bool>;
     fn read_null(&mut self) -> R<()>;
-    /// A `VisibleString` with `ReplaceVisibleChar` applied (`fix_visible_chars`).
-    fn read_string(&mut self) -> R<Vec<u8>>;
+    /// A `VisibleString` as it is in the file (line breaks of a text string gone), and whether a
+    /// binary file gave it the tag of a UTF8String.
+    fn read_string(&mut self) -> R<(Vec<u8>, bool)>;
     fn read_enum(&mut self, def: &'static EnumDef) -> R<i32>;
     /// Bytes read so far (for the "file is not at its end" decisions of the caller).
     fn offset(&self) -> usize;
@@ -187,8 +163,13 @@ pub(super) trait Input {
 // }
 // ```
 /// A `VisibleString` is read with the default `eFNP_ReplaceAndWarn`: every byte outside
-/// `' '..='~'` becomes `m_NonPrintSubst` (`'#'`, objistr.cpp:463); NCBI also writes a warning
-/// to its log, which LOSAT does not.
+/// `' '..='~'` becomes `m_NonPrintSubst` (`'#'`, objistr.cpp:463), and NCBI posts a diagnostic
+/// per byte (`Error: (803.7) [makeblastdb] Blast-db-mask-info.algo-options` / `Bad char [0x9]
+/// in string at line 1` / the chunk); a UTF8String tag for a VisibleString posts a warning once
+/// (`Warning: (803.10) ... UTF8String data for VisibleString member`). Both leave the status
+/// at 0. LOSAT does not write those lines, so the reader refuses such a string
+/// ([`Rd::read_str`]); this function is the value NCBI stores, which the refusal does not need
+/// but the tests compare.
 pub(super) fn fix_visible_chars(s: &mut [u8]) {
     for c in s {
         if !(b' '..=b'~').contains(c) {
@@ -449,12 +430,39 @@ impl<I: Input> Rd<I> {
         })
     }
 
+    /// A `VisibleString` member `name`. A byte outside `' '..='~'`, or the tag of a UTF8String
+    /// in a binary file, is read (NCBI stores `'#'` for the byte), but the object is then refused
+    /// as [`Fail::Unsupported`] once it has been read to its end, so that an error NCBI raises
+    /// later in the object comes first: NCBI's diagnostics for it are not reproduced.
+    fn read_str(&mut self, name: &'static str) -> R<Vec<u8>> {
+        let (mut s, utf8_tag) = self.inp.read_string()?;
+        if utf8_tag {
+            self.collected.unsupported.get_or_insert_with(|| {
+                format!("a UTF8String tag for the VisibleString member `{name}` (NCBI warns and reads it)")
+            });
+        }
+        if let Some(&byte) = s.iter().find(|c| !(b' '..=b'~').contains(c)) {
+            self.collected.unsupported.get_or_insert_with(|| {
+                format!(
+                    "byte 0x{byte:02x} in the VisibleString member `{name}` (NCBI replaces it with '#' and logs it)"
+                )
+            });
+        }
+        fix_visible_chars(&mut s);
+        Ok(s)
+    }
+
     /// Reads a value of type `ty` and appends a canonical encoding of it to `out`: two values
     /// give the same bytes exactly when they are equal as `CSerialObject::Equals` compares
     /// them, apart from members that are left out in one and stated with their `DEFAULT` in the
     /// other (those differ here). The encoding is self-delimiting (every item states its kind,
     /// a string its length, a list its count).
-    pub(super) fn read_value(&mut self, ty: &'static Ty, out: &mut Vec<u8>) -> R<()> {
+    pub(super) fn read_value(
+        &mut self,
+        ty: &'static Ty,
+        name: &'static str,
+        out: &mut Vec<u8>,
+    ) -> R<()> {
         match ty {
             Ty::Int32 => {
                 let v = self.inp.read_i32()?;
@@ -477,7 +485,7 @@ impl<I: Input> Rd<I> {
                 out.push(u8::from(v));
             }
             Ty::Str => {
-                let v = self.inp.read_string()?;
+                let v = self.read_str(name)?;
                 out.push(b's');
                 out.extend_from_slice(&(v.len() as u64).to_le_bytes());
                 out.extend_from_slice(&v);
@@ -500,7 +508,7 @@ impl<I: Input> Rd<I> {
                     }
                     out.push(1);
                     next = index + 1;
-                    s.read_value(def.members[index].ty, out)
+                    s.read_value(def.members[index].ty, def.members[index].name, out)
                 })?;
                 for _ in next..def.members.len() {
                     out.push(0);
@@ -510,7 +518,7 @@ impl<I: Input> Rd<I> {
                 out.push(b'C');
                 self.read_choice(def, |s, index| {
                     out.push(index as u8);
-                    s.read_value(def.variants[index].ty, out)
+                    s.read_value(def.variants[index].ty, def.variants[index].name, out)
                 })?;
             }
             Ty::SeqOf(element) | Ty::SetOf(element) => {
@@ -520,7 +528,7 @@ impl<I: Input> Rd<I> {
                 let mut count = 0u64;
                 self.read_container(matches!(ty, Ty::SetOf(_)), |s| {
                     count += 1;
-                    s.read_value(element, out)
+                    s.read_value(element, name, out)
                 })?;
                 out[count_at..count_at + 8].copy_from_slice(&count.to_le_bytes());
             }
@@ -544,11 +552,19 @@ impl<I: Input> Rd<I> {
                         Ok(())
                     } else {
                         canon.push(v as u8);
-                        s.read_value(object_id.variants[v].ty, &mut canon)
+                        s.read_value(
+                            object_id.variants[v].ty,
+                            object_id.variants[v].name,
+                            &mut canon,
+                        )
                     }
                 })
             } else {
-                s.read_value(SEQ_ID.variants[index].ty, &mut canon)
+                s.read_value(
+                    SEQ_ID.variants[index].ty,
+                    SEQ_ID.variants[index].name,
+                    &mut canon,
+                )
             }
         })?;
         Ok(match local {
@@ -574,7 +590,11 @@ impl<I: Input> Rd<I> {
                 _ => {
                     // fuzz-from, fuzz-to: read, not used.
                     scratch.clear();
-                    s.read_value(SEQ_INTERVAL.members[index].ty, &mut scratch)?;
+                    s.read_value(
+                        SEQ_INTERVAL.members[index].ty,
+                        SEQ_INTERVAL.members[index].name,
+                        &mut scratch,
+                    )?;
                 }
             }
             Ok(())
@@ -692,7 +712,11 @@ impl<I: Input> Rd<I> {
                 }
                 _ => {
                     let mut scratch = Vec::new();
-                    s.read_value(SEQ_LOC.variants[index].ty, &mut scratch)?;
+                    s.read_value(
+                        SEQ_LOC.variants[index].ty,
+                        SEQ_LOC.variants[index].name,
+                        &mut scratch,
+                    )?;
                     s.collected.unsupported.get_or_insert_with(|| {
                         format!(
                             "Seq-loc variant `{}` in mask data",
@@ -740,7 +764,7 @@ impl<I: Input> Rd<I> {
                 match index {
                     0 => algo_id = s.inp.read_i32()?,
                     1 => algo_program = s.inp.read_enum(&BLAST_FILTER_PROGRAM)?,
-                    2 => algo_options = s.inp.read_string()?,
+                    2 => algo_options = s.read_str("algo-options")?,
                     _ => masks = Some(s.read_mask_list_members()?),
                 }
                 Ok(())
@@ -828,6 +852,25 @@ impl<I: Input> Rd<I> {
     }
 }
 
+/// Where the reader is in its file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+    Open,
+    /// The clean end of the file.
+    Ended,
+    /// An error: every later call is an error again, never a clean end.
+    Failed,
+    /// The file ended where a continuation was expected.
+    FailedEof,
+}
+
+fn unknown_encoding(name: &Path) -> MaskFileError {
+    MaskFileError::Ncbi(WriteDbError::Options(format!(
+        "Unknown encoding for mask data in '{}'",
+        name.display()
+    )))
+}
+
 /// A mask file read from the disk.
 pub struct MaskFileReader {
     path: PathBuf,
@@ -836,7 +879,7 @@ pub struct MaskFileReader {
     /// The offset of the next object; `data.len()` once the file is over.
     offset: usize,
     /// Set by the first error or end of file (NCBI stops reading the file there).
-    finished: bool,
+    state: State,
 }
 
 impl fmt::Debug for MaskFileReader {
@@ -846,7 +889,7 @@ impl fmt::Debug for MaskFileReader {
             .field("format", &self.format)
             .field("bytes", &self.data.len())
             .field("offset", &self.offset)
-            .field("finished", &self.finished)
+            .field("state", &self.state)
             .finish()
     }
 }
@@ -872,32 +915,38 @@ impl MaskFileReader {
     //         NCBI_THROW(CInvalidDataException, eInvalidInput, string("Unknown encoding for ") + msg);
     // ```
     /// Reads the file and guesses its format. The text of the error for a file in neither
-    /// format is NCBI's.
+    /// format is NCBI's. A file that cannot be opened or read is a failed stream for the format
+    /// guess (`x_TestInput`), which answers `eUnknown`: the same error.
     pub fn open(path: &Path) -> Result<Self, MaskFileError> {
+        Self::open_named(path, path)
+    }
+
+    /// [`open`](Self::open) for a file that messages call `name` (the name on makeblastdb's
+    /// command line).
+    pub fn open_named(path: &Path, name: &Path) -> Result<Self, MaskFileError> {
         let mut data = Vec::new();
-        std::fs::File::open(path)
+        if std::fs::File::open(path)
             .and_then(|mut f| f.read_to_end(&mut data))
-            .map_err(|source| MaskFileError::Io {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        Self::from_bytes(path, data)
+            .is_err()
+        {
+            // A read that fails half way leaves the bytes read; NCBI's sample would have them.
+            // An empty or unreadable file has no sample at all.
+            return Err(unknown_encoding(name));
+        }
+        Self::from_bytes(name, data)
     }
 
     /// The reader of a file whose bytes are `data`; `path` is only used in messages.
     pub(crate) fn from_bytes(path: &Path, data: Vec<u8>) -> Result<Self, MaskFileError> {
         let Some(format) = guess_format(&data) else {
-            return Err(MaskFileError::Ncbi(WriteDbError::Options(format!(
-                "Unknown encoding for mask data in '{}'",
-                path.display()
-            ))));
+            return Err(unknown_encoding(path));
         };
         Ok(MaskFileReader {
             path: path.to_path_buf(),
             format,
             data,
             offset: 0,
-            finished: false,
+            state: State::Open,
         })
     }
 
@@ -928,8 +977,24 @@ impl MaskFileReader {
         result
     }
 
+    fn stopped(&self) -> MaskFileError {
+        if self.state == State::FailedEof {
+            return MaskFileError::EofInContinuation {
+                path: self.path.clone(),
+            };
+        }
+        MaskFileError::Malformed {
+            path: self.path.clone(),
+            message: "reader stopped after an earlier error".into(),
+        }
+    }
+
     fn fail(&mut self, fail: Fail) -> MaskFileError {
-        self.finished = true;
+        self.state = if matches!(fail, Fail::Eof) {
+            State::FailedEof
+        } else {
+            State::Failed
+        };
         match fail {
             Fail::Format(message) => MaskFileError::Malformed {
                 path: self.path.clone(),
@@ -961,13 +1026,15 @@ impl MaskFileReader {
     /// type name or the first bytes of an object) is the end, as in `x_ProcessMaskData`; a
     /// partly read object is dropped.
     pub fn next_info(&mut self) -> Result<Option<MaskInfo>, MaskFileError> {
-        if self.finished {
-            return Ok(None);
+        match self.state {
+            State::Open => {}
+            State::Ended => return Ok(None),
+            State::Failed | State::FailedEof => return Err(self.stopped()),
         }
         match self.run(|rd| rd.read_info(), |rd| rd.read_info()) {
             Ok(info) => Ok(Some(info)),
             Err(Fail::Eof) => {
-                self.finished = true;
+                self.state = State::Ended;
                 Ok(None)
             }
             Err(fail) => Err(self.fail(fail)),
@@ -982,12 +1049,16 @@ impl MaskFileReader {
     //                 s_ReadObject(mask_file, mask_file_format, masks, "mask data (continuation)");
     // ```
     /// The `Blast-mask-list` that follows an object with `more TRUE`. A file that ends there is
-    /// [`MaskFileError::EofInContinuation`].
+    /// [`MaskFileError::EofInContinuation`]. After an error every call is an error again.
     pub fn next_list(&mut self) -> Result<MaskList, MaskFileError> {
-        if self.finished {
-            return Err(MaskFileError::EofInContinuation {
-                path: self.path.clone(),
-            });
+        match self.state {
+            State::Open => {}
+            State::Ended => {
+                return Err(MaskFileError::EofInContinuation {
+                    path: self.path.clone(),
+                })
+            }
+            State::Failed | State::FailedEof => return Err(self.stopped()),
         }
         match self.run(|rd| rd.read_list(), |rd| rd.read_list()) {
             Ok(list) => Ok(list),

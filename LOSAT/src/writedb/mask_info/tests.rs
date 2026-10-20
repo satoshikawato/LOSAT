@@ -32,6 +32,8 @@ struct Run {
     rc: i32,
     stderr: String,
     no_db: bool,
+    /// The options of the algorithm as `blastdbcmd -info` prints them; empty without a database.
+    options: String,
     /// `MASK` rows: algorithm id -> oid -> ranges.
     masks: BTreeMap<u32, BTreeMap<u32, String>>,
 }
@@ -82,6 +84,7 @@ fn read_expected() -> BTreeMap<String, Run> {
                         fasta: f[3].to_string(),
                         rc: f[4].parse().unwrap(),
                         stderr: unescape(f[5]),
+                        options: unescape(f[6]),
                         no_db: false,
                         masks: BTreeMap::new(),
                     },
@@ -292,7 +295,6 @@ fn tool_output_values() {
     let dust = infos(&parse_dir().join("dust.asnt"));
     assert_eq!(dust.len(), 1);
     assert_eq!(dust[0].algo_program, 10);
-    assert_eq!(dust[0].algo_options, b"window=64; level=20; linker=1");
     assert!(!dust[0].masks.more);
     let l1 = &dust[0].masks.masks[0];
     assert_eq!(l1.id, local(1));
@@ -309,12 +311,10 @@ fn tool_output_values() {
 
     let seg = infos(&parse_dir().join("seg.asnb"));
     assert_eq!((seg[0].algo_program, seg[0].masks.masks.len()), (20, 3));
-    assert_eq!(seg[0].algo_options, b"window=12; locut=2.2; hicut=2.5");
 
     // convert2blastmask: program `other` (100), the options as given, lower-case runs 30..60, 100..120
     let c2m = infos(&parse_dir().join("c2m.asnb"));
     assert_eq!(c2m[0].algo_program, 100);
-    assert_eq!(c2m[0].algo_options, b"-x y");
     assert_eq!(c2m[0].masks.masks.len(), 8);
     assert_eq!(
         c2m[0].masks.masks[2].intervals,
@@ -446,16 +446,18 @@ fn outcome(run: &Run) -> Outcome {
 }
 
 /// Files that makeblastdb reads and LOSAT does not.
-const UNSUPPORTED: [&str; 7] = [
+const UNSUPPORTED: [&str; 9] = [
     "h_unsupported_whole.asnt",
     "h_unsupported_pnt.asnt",
     "h_unsupported_mix.asnt",
     "h_unsupported_null.asnt",
     "h_unsupported_feat.asnt",
     "b_small_whole.asnb",
-    // an INTEGER with the application tag (big integer) and two different Seq-ids that NCBI's
-    // `Equals` may find equal
-    "b_small_application_integer.asnb",
+    // NCBI replaces a byte that is not printable in a VisibleString with '#' and logs it, and
+    // warns about a UTF8String tag for a VisibleString; LOSAT does not write those lines
+    "h_string_nonprint.asnt",
+    "h_utf8_in_options.asnt",
+    "b_utf8_options.asnb",
 ];
 
 #[test]
@@ -529,7 +531,18 @@ fn unsupported_files_name_what_is_not_read() {
         ("h_unsupported_feat.asnt", "`feat`"),
         ("b_small_whole.asnb", "`whole`"),
         ("h_different_other_ids.asnt", "different Seq-ids"),
-        ("b_small_application_integer.asnb", "application tag"),
+        (
+            "h_string_nonprint.asnt",
+            "byte 0x09 in the VisibleString member `algo-options`",
+        ),
+        (
+            "h_utf8_in_options.asnt",
+            "byte 0xc3 in the VisibleString member `algo-options`",
+        ),
+        (
+            "b_utf8_options.asnb",
+            "a UTF8String tag for the VisibleString member `algo-options`",
+        ),
     ] {
         let Err(MaskFileError::Unsupported(text)) = open_all(&parse_dir().join(file)) else {
             panic!("{file}");
@@ -606,10 +619,6 @@ fn hand_written_text_values() {
         assert_eq!(read(file), ok, "{file}");
     }
     // strings
-    assert_eq!(read("h_doubled_quote.asnt")[0].algo_options, b"a\"b");
-    assert_eq!(read("h_string_two_lines.asnt")[0].algo_options, b"ab   cd");
-    assert_eq!(read("h_string_nonprint.asnt")[0].algo_options, b"a#b#c");
-    assert_eq!(read("h_utf8_in_options.asnt")[0].algo_options, b"##");
     // enumerations
     assert_eq!(read("h_algo_program_number.asnt")[0].algo_program, 30);
     assert_eq!(read("h_algo_program_dust.asnt")[0].algo_program, 10);
@@ -692,7 +701,10 @@ fn objects_continuations_and_the_end_of_the_file() {
             matches!(r.next_list(), Err(MaskFileError::EofInContinuation { .. })),
             "{file}"
         );
-        assert!(r.next_info().unwrap().is_none(), "{file}: reading stops");
+        assert!(
+            matches!(r.next_info(), Err(MaskFileError::EofInContinuation { .. })),
+            "{file}: reading stops"
+        );
     }
     // a continuation read as an object, and an object read as a continuation
     assert!(matches!(
@@ -776,11 +788,18 @@ fn files_that_are_neither_encoding() {
         let r = MaskFileReader::open(&parse_dir().join(file)).unwrap();
         assert_eq!(r.format(), MaskFileFormat::BinaryAsn, "{file}");
     }
-    // a missing file is an I/O error
-    assert!(matches!(
-        MaskFileReader::open(&parse_dir().join("no_such_file")),
-        Err(MaskFileError::Io { .. })
-    ));
+    // a file that cannot be opened (or a directory, which cannot be read) is a failed stream for
+    // the format guess: the same error
+    for path in [parse_dir().join("no_such_file"), parse_dir()] {
+        let Err(MaskFileError::Ncbi(WriteDbError::Options(text))) = MaskFileReader::open(&path)
+        else {
+            panic!("{}", path.display());
+        };
+        assert_eq!(
+            text,
+            format!("Unknown encoding for mask data in '{}'", path.display())
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1109,4 +1128,76 @@ fn visible_strings_replace_what_is_not_printable() {
     let mut s = *b"a\tb\xe9 \x7f~\x00";
     super::reader::fix_visible_chars(&mut s);
     assert_eq!(&s, b"a#b# #~#");
+}
+
+/// The options of the first object, against what `blastdbcmd -info` prints for the database that
+/// makeblastdb wrote from the file (`expected.tsv`, last field of `RUN`).
+#[test]
+fn algorithm_options_equal_what_blastdbcmd_prints() {
+    let mut compared = 0;
+    for (file, run) in read_expected() {
+        if run.options.is_empty() {
+            continue;
+        }
+        let objects = open_all(&parse_dir().join(&file));
+        if matches!(objects, Err(MaskFileError::Unsupported(_))) {
+            continue; // NCBI's text has '#' for bytes that LOSAT refuses
+        }
+        let options = String::from_utf8(objects.unwrap()[0].0.algo_options.clone()).unwrap();
+        // The table prints an empty string as "default options used".
+        let options = if options.is_empty() {
+            "default options used".to_string()
+        } else {
+            options
+        };
+        assert_eq!(options, run.options, "{file}");
+        compared += 1;
+    }
+    assert!(compared > 40, "{compared}");
+}
+
+/// After an error the reader does not go on, and does not report a clean end.
+#[test]
+fn an_error_is_final() {
+    let mut r = MaskFileReader::open(&parse_dir().join("h_cut_inside_object.asnt")).unwrap();
+    assert!(matches!(
+        r.next_info(),
+        Err(MaskFileError::Malformed { .. })
+    ));
+    for _ in 0..2 {
+        assert!(matches!(
+            r.next_info(),
+            Err(MaskFileError::Malformed { .. })
+        ));
+        assert!(matches!(
+            r.next_list(),
+            Err(MaskFileError::Malformed { .. })
+        ));
+    }
+    // a refusal as well
+    let mut r = MaskFileReader::open(&parse_dir().join("h_unsupported_whole.asnt")).unwrap();
+    assert!(matches!(r.next_info(), Err(MaskFileError::Unsupported(_))));
+    assert!(matches!(
+        r.next_info(),
+        Err(MaskFileError::Malformed { .. })
+    ));
+    // a missing continuation
+    let mut r =
+        MaskFileReader::open(&parse_dir().join("h_more_true_no_continuation.asnt")).unwrap();
+    r.next_info().unwrap().unwrap();
+    for _ in 0..2 {
+        assert!(matches!(
+            r.next_list(),
+            Err(MaskFileError::EofInContinuation { .. })
+        ));
+        assert!(matches!(
+            r.next_info(),
+            Err(MaskFileError::EofInContinuation { .. })
+        ));
+    }
+    // a clean end stays one
+    let mut r = MaskFileReader::open(&parse_dir().join("h_ok.asnt")).unwrap();
+    assert!(r.next_info().unwrap().is_some());
+    assert!(r.next_info().unwrap().is_none());
+    assert!(r.next_info().unwrap().is_none());
 }

@@ -1,7 +1,7 @@
 //! ASN.1 text (`MSerial_AsnText`): the primitives of `CObjectIStreamAsn` and of the
 //! `CIStreamBuffer` it reads from, on a byte slice that holds the rest of the file.
 
-use super::reader::{fix_visible_chars, format_err, Fail, Input, R};
+use super::reader::{format_err, Fail, Input, R};
 use super::schema::{ChoiceDef, ClassDef, EnumDef};
 
 pub(super) struct TextIn<'a> {
@@ -928,7 +928,7 @@ impl Input for TextIn<'_> {
     // ```
     // (A line end inside the string is dropped; the quote that follows the closing quote stays in
     // the string; the end of the file inside the string is `UnendedString`, an error.)
-    fn read_string(&mut self) -> R<Vec<u8>> {
+    fn read_string(&mut self) -> R<(Vec<u8>, bool)> {
         self.expect(b'"', true)?;
         let mut s = Vec::new();
         loop {
@@ -949,8 +949,7 @@ impl Input for TextIn<'_> {
                 _ => s.push(c),
             }
         }
-        fix_visible_chars(&mut s);
-        Ok(s)
+        Ok((s, false))
     }
 
     // NCBI reference (598d8ae6): c++/src/serial/objistrasn.cpp:723-737

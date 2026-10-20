@@ -112,7 +112,7 @@ fn ranges_text(result: &MaskRanges) -> Option<String> {
 }
 
 /// The databases of `expected/`: name and sequence type.
-const DATABASES: [(&str, SeqType); 9] = [
+const DATABASES: [(&str, SeqType); 11] = [
     ("mask_nucl_v4", SeqType::Nucleotide),
     ("mask_nucl_v5", SeqType::Nucleotide),
     ("mask_nucl_mv", SeqType::Nucleotide),
@@ -122,6 +122,8 @@ const DATABASES: [(&str, SeqType); 9] = [
     ("mask_nucl_opts", SeqType::Nucleotide),
     ("mask_prot_v4", SeqType::Protein),
     ("mask_remap", SeqType::Nucleotide),
+    ("mask_nucl_colon", SeqType::Nucleotide),
+    ("mask_nucl_colon_id", SeqType::Nucleotide),
 ];
 
 /// The ids that the table of `expected/<db>.algorithms.txt` lists.
@@ -903,6 +905,24 @@ fn stored_descriptions_that_cannot_be_read_are_refused() {
 }
 
 #[test]
+fn a_description_that_is_not_utf8_is_unsupported_not_damaged() {
+    // Latin-1 bytes in place of the placeholder "ZZ" (same length, so the file stays valid).
+    let (dir, name) = made_column(&[("4", "10:optsZZ")], &eight_empty_blobs());
+    let index = dir.path("mask_nucl_v4.naa");
+    let mut bytes = std::fs::read(&index).unwrap();
+    let at = bytes.windows(2).position(|w| w == b"ZZ").unwrap();
+    bytes[at..at + 2].copy_from_slice(&[0xe9, 0xe8]);
+    std::fs::write(&index, bytes).unwrap();
+    let db = open_masked(&name).unwrap();
+    let error = db.mask_algorithms().unwrap_err();
+    assert!(
+        matches!(&error, SeqDbError::Unsupported { message, .. }
+            if message.contains("not UTF-8") && message.contains("does not read it")),
+        "{error}"
+    );
+}
+
+#[test]
 fn descriptions_of_four_items_and_wide_columns() {
     let long_name = "n".repeat(45);
     let description = format!("tool\u{1}x:o1\u{1}y:{long_name}:text");
@@ -928,6 +948,25 @@ fn descriptions_of_four_items_and_wide_columns() {
              {:<13}{:<40}{:<40}\n{:<13}{:<40}{:<40}\n",
             "Algorithm ID", "Algorithm name", "Algorithm options", 3, "tool:x", "o1:y"
         )
+    );
+}
+
+#[test]
+fn a_backwards_skip_ends_the_pass_loop_at_once() {
+    // 2^31-1 entries; the first (algorithm 99, -1 pairs) moves the read offset back to
+    // itself. NCBI re-reads it for 2^31 passes and ends with no ranges; this must return
+    // without making those passes.
+    let mut blob = Vec::new();
+    for value in [0x7fff_ffffi32, 99, -1] {
+        blob.extend_from_slice(&value.to_be_bytes());
+    }
+    let mut blobs = eight_empty_blobs();
+    blobs[0] = blob;
+    let (_dir, name) = made_column(&[("4", "10:opts")], &blobs);
+    let db = open_masked(&name).unwrap();
+    assert_eq!(
+        db.mask_ranges(0, 4).unwrap(),
+        MaskRanges::Ranges(Vec::new())
     );
 }
 

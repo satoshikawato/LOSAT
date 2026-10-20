@@ -45,14 +45,17 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
 
 - `mask_nucl.fna`, `mask_prot.faa`: the FASTA files of the masked databases (no
   `-parse_seqids`: the masks name the sequences by their number, `local id N`).
-- `mask_wm.asnt`, `mask_wm_opts.asnt`: hand-written windowmasker mask files
-  (`Blast-db-mask-info` in ASN.1 text; the second states the option `-t_extend 3`). The dust
+- `mask_wm.asnt`, `mask_wm_opts.asnt`, `mask_wm_colon.asnt`: hand-written windowmasker mask files
+  (`Blast-db-mask-info` in ASN.1 text; the second states the option `-t_extend 3`, the third
+  `-x a:b`). The dust
   and seg masks come from dustmasker and segmasker and are not kept.
 - `db/mask_*`: databases written by makeblastdb 2.17.0 with mask data: `mask_nucl_v4`,
   `mask_nucl_v5` (needs its `.ndb`), `mask_nucl_mv` (an alias of two volumes), `mask_nucl_ids`
   (ids 100 and 101 from `-mask_id`, a description with `:`), `mask_nucl_z`, `mask_nucl_y`,
   `mask_nucl_opts` (ids 30 and 31), `mask_prot_v4` (seg, id 21), `mask_remap` (an alias of five
-  volumes that give the same algorithms different ids; `mask_nucl_plain` has no column).
+  volumes that give the same algorithms different ids; `mask_nucl_plain` has no column),
+  `mask_nucl_colon` (id 31, options `-x a:b`) and `mask_nucl_colon_id` (id 100, name `c:id` from
+  `-mask_id c:id`): a `:` in a printed field is stored as 0x01 and restored by NCBI.
   A column is the files `.?aa` (index), `.?ab` (big-endian data) and `.?ac` (little-endian data).
 - `expected/mask_*.algorithms.txt`: the table that NCBI prints for the algorithms of the
   database (`GetAvailableMaskAlgorithmDescriptions`, with its leading empty line).
@@ -61,7 +64,9 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
   `none`. In `mask_remap`, NCBI's rows for an algorithm in a volume that has a mask column but
   not that algorithm come from a stale cache; LOSAT answers `AlgorithmNotInVolume` there.
 - `make_mask_fixtures.py` rebuilds these (`--ncbi-bin DIR --work DIR`); a rebuild changes the
-  dates stored in the index and column files.
+  dates stored in the index and column files. The two `mask_nucl_colon*` databases were added
+  later by running it into a scratch directory and copying only their files, so that the dates
+  of the other fixtures stay.
 
 `make_fixtures.py` rebuilds everything but `expected/search_path/`. NCBI BLAST+ is the comparison oracle only; the tests
 read the committed files and run no NCBI program. A rebuild changes the dates stored in the

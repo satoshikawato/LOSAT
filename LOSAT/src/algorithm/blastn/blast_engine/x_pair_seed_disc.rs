@@ -54,17 +54,24 @@
 //! word extension, no debug, trace or window diagnostics, one subject searched by the owner
 //! of a pool of two threads or more. A contiguous table in two-hit mode stays with the
 //! reference (the parent module takes one-hit contiguous tables only).
+//!
+//! EXPERIMENT (LOSAT_X_PAIRPARDISCARR, shadow LOSAT_X_PAIRPARDISCARRSHADOW): the same scope
+//! with the diagonal array instead of the hash (a query block of at most 8000 letters) runs
+//! on the same strips, folded by the owner thread through `fold_two_hit_array`, a
+//! statement-for-statement copy of the two-hit diagonal-array branch of
+//! `process_offset_pairs` (`run_array`, `seed_stage_array`).
 
 use super::super::{
     extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, mask_lookup_index,
-    packed_kmer_at_seed_mask, type_of_word, BlastnTiming, DiagHashTable, UngappedHit,
+    packed_kmer_at_seed_mask, type_of_word, BlastnTiming, DiagHashTable, DiagStruct, UngappedHit,
 };
 use super::{
-    copy_hash, part, plan_strips, pool_threads, run_strips, seed_of_pair, FoldCounts, Inputs,
-    PartScratch, Seed, StageStats, Stash, StripJob, STASH,
+    copy_hash, part, plan_strips, pool_threads, run_strips, seed_of_pair, DiagArray, FoldCounts,
+    Inputs, PartScratch, Seed, StageStats, Stash, StripJob, STASH,
 };
 use crate::algorithm::blastn::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use crate::algorithm::blastn::lookup::DiscTemplates;
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
@@ -78,6 +85,20 @@ fn switches() -> (bool, bool) {
         (
             crate::utils::xswitch::on("LOSAT_X_PAIRPARDISC"),
             std::env::var_os("LOSAT_X_PAIRPARDISCSHADOW").is_some(),
+        )
+    })
+}
+
+/// No NCBI counterpart: reads the switches of the diagonal-array stage once
+/// (LOSAT_X_PAIRPARDISCARR, a strict-set switch since 2026-10-20: on unless it is `0`, or
+/// `LOSAT_X_DEFAULT=0` and it is not set; LOSAT_X_PAIRPARDISCARRSHADOW, off unless set to any
+/// value); they do not change any value NCBI computes.
+fn arr_switches() -> (bool, bool) {
+    static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();
+    *SWITCHES.get_or_init(|| {
+        (
+            crate::utils::xswitch::on("LOSAT_X_PAIRPARDISCARR"),
+            std::env::var_os("LOSAT_X_PAIRPARDISCARRSHADOW").is_some(),
         )
     })
 }
@@ -102,6 +123,30 @@ static X_SKIPPED: AtomicU64 = AtomicU64::new(0);
 static X_FOLD_NS: AtomicU64 = AtomicU64::new(0);
 static X_OWNER_SCAN_NS: AtomicU64 = AtomicU64::new(0);
 static X_WAIT_NS: AtomicU64 = AtomicU64::new(0);
+// (the same for the diagonal-array stage, LOSAT_X_PAIRPARDISCARR)
+static ARR_SHADOW_CHUNKS: AtomicU64 = AtomicU64::new(0);
+static ARR_SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
+static ARR_SHADOW_CELLS: AtomicU64 = AtomicU64::new(0);
+static ARR_CHUNKS: AtomicU64 = AtomicU64::new(0);
+static ARR_STRIPS: AtomicU64 = AtomicU64::new(0);
+static ARR_SEEDS: AtomicU64 = AtomicU64::new(0);
+static ARR_SKIPPED: AtomicU64 = AtomicU64::new(0);
+static ARR_FOLD_NS: AtomicU64 = AtomicU64::new(0);
+static ARR_OWNER_SCAN_NS: AtomicU64 = AtomicU64::new(0);
+static ARR_WAIT_NS: AtomicU64 = AtomicU64::new(0);
+
+/// The shadow computation of one diagonal-array chunk (LOSAT_X_PAIRPARDISCARRSHADOW): the hit
+/// list and the copies of `hit_level_array` and `hit_len_array`, compared after the reference
+/// ran (`shadow_check_array`).
+struct ArrStash {
+    hits: Vec<UngappedHit>,
+    levels: Vec<DiagStruct>,
+    lens: Vec<u8>,
+}
+
+thread_local! {
+    static ARR_STASH: RefCell<Option<ArrStash>> = const { RefCell::new(None) };
+}
 
 /// No NCBI counterpart: whether a chunk with a discontiguous table is in the scope of this
 /// module (see the module comment); the parent module's scope is the one-hit contiguous
@@ -110,6 +155,20 @@ fn in_scope(x: &Inputs<'_>) -> bool {
     x.two_stage.disc().is_some()
         && x.window_size > 0
         && !x.use_array_indexing
+        && x.scan_range == 0
+        && !x.subject_masked
+        && !x.small_na_word
+        && !x.diagnostics
+        && x.one_subject_owner
+}
+
+/// No NCBI counterpart: whether a chunk with a discontiguous table and the diagonal array (a
+/// query block of at most 8000 letters) is in the scope of the stage of LOSAT_X_PAIRPARDISCARR:
+/// the scope of `in_scope` with the array instead of the hash.
+fn in_scope_array(x: &Inputs<'_>) -> bool {
+    x.two_stage.disc().is_some()
+        && x.window_size > 0
+        && x.use_array_indexing
         && x.scan_range == 0
         && !x.subject_masked
         && !x.small_na_word
@@ -829,9 +888,15 @@ fn seed_stage(
 pub(super) fn run(
     x: &Inputs<'_>,
     diag_hash: &mut DiagHashTable,
+    diag_array: DiagArray<'_>,
     ungapped_hits: &mut Vec<UngappedHit>,
     fold_scratch: &mut PartScratch,
 ) -> bool {
+    // EXPERIMENT (LOSAT_X_PAIRPARDISCARR): a query block of at most 8000 letters has the
+    // diagonal array, which the stage below never takes.
+    if x.use_array_indexing {
+        return run_array(x, diag_array, ungapped_hits);
+    }
     let (on, shadow) = switches();
     if !on && !shadow {
         return false;
@@ -900,6 +965,667 @@ pub(super) fn run(
     true
 }
 
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:660-664,670-677
+/// ```c
+///     diag = s_off + diag_table->diag_array_length - q_off;
+///     real_diag = diag & diag_table->diag_mask;
+///     last_hit = hit_level_array[real_diag].last_hit;
+///     hit_saved = hit_level_array[real_diag].flag;
+///     s_end = s_off + word_length;
+///     s_off_pos = s_off + diag_table->offset;
+///     s_end_pos = s_end + diag_table->offset;
+///
+///     /* hit within the explored area should be rejected*/
+///     if (s_off_pos < last_hit) return 0;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:768-772
+/// ```c
+///     hit_level_array[real_diag].last_hit = s_end_pos;
+///     hit_level_array[real_diag].flag = hit_ready;
+///     if (two_hits) {
+///         diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+///     }
+/// ```
+/// EXPERIMENT (LOSAT_X_PAIRPARDISCARR), phase 2 on the owner thread: the seeds of one strip
+/// through the two-hit diagonal-array branch of `process_offset_pairs` (`run.rs`,
+/// `s_BlastnDiagTableExtendInitialHit`), statement for statement: `fold_two_hit` with the
+/// table reads and writes of the array (the diagonal masked by `diag_mask`, the bounds test
+/// against `diag_array_size`, `last_hit` and `flag` in `hit_level_array`, the length in
+/// `hit_len_array` as a byte) instead of the diagonal hash. The owner folds the strips in scan
+/// order, so the array and the hit list are the reference's whatever the number of threads.
+fn fold_two_hit_array(
+    x: &Inputs<'_>,
+    seeds: &[Seed],
+    arr: &mut DiagArray<'_>,
+    ungapped_hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    scan_pause_ns: &mut u64,
+    counts: &mut FoldCounts,
+) {
+    let two_stage = x.two_stage;
+    let lut_word_length = two_stage.lut_word_length();
+    let word_length = two_stage.word_length();
+    let s_len = x.s_len;
+    let search_seq_packed = x.search_seq_packed;
+    let diag_offset = x.diag_offset;
+    let window_size = x.window_size;
+    let scan_range = x.scan_range;
+    let two_hits = window_size > 0;
+    let timing_enabled = timing.is_some();
+    let diag_array_length = arr.length;
+    let diag_mask = arr.mask;
+    let diag_array_size = arr.size;
+    let hit_level_array: &mut [DiagStruct] = arr.levels;
+    let hit_len_array: &mut [u8] = arr.lens;
+    counts.seeds += seeds.len() as u64;
+    for seed in seeds {
+        let context_idx = seed.context as usize;
+        let ctx = &x.query_contexts[context_idx];
+        let q_idx = context_idx as u32;
+        let q_context_start = ctx.query_offset as usize;
+        let q_context_end = q_context_start + ctx.len;
+        let cutoff_score = x.cutoff_scores[context_idx];
+        let q_ext_start = seed.q as usize;
+        let s_ext_start = seed.s as usize;
+        let s_range = seed.s_range as usize;
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:663-668
+        // ```c
+        //     diag = s_off + diag_table->diag_array_length - q_off;
+        //     real_diag = diag & diag_table->diag_mask;
+        //     last_hit = hit_level_array[real_diag].last_hit;
+        //     hit_saved = hit_level_array[real_diag].flag;
+        // ```
+        let diag = (s_ext_start as isize + diag_array_length - q_ext_start as isize) & diag_mask;
+        let diag_idx = diag as usize;
+        let (last_hit, hit_saved) = if diag_idx < diag_array_size {
+            let diag_entry = &hit_level_array[diag_idx];
+            (diag_entry.last_hit, diag_entry.flag != 0)
+        } else {
+            (0, false)
+        };
+        let s_off_pos = s_ext_start + diag_offset as usize;
+        let s_off_pos_i32 = s_off_pos as i32;
+
+        // Hit within explored area should be rejected
+        if s_off_pos_i32 < last_hit {
+            counts.skipped += 1;
+            continue;
+        }
+
+        let mut q_off = q_ext_start;
+        let mut s_off = s_ext_start;
+        let mut s_end = s_ext_start + word_length;
+        let mut s_end_pos = s_end + diag_offset as usize;
+        let mut off_found = false;
+        let mut hit_ready = true;
+        let query_mask = ctx.masks.as_slice();
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:41-69 (s_MBLookup)
+        // ```c
+        //     if (! PV_TEST(pv, index, mb_lt->pv_array_bts)) {
+        //         return FALSE;
+        //     }
+        //
+        //     q_off = mb_lt->hashtable[index];
+        //     while (q_off) {
+        //         if (q_off == q_pos) return TRUE;
+        //         q_off = mb_lt->next_pos[q_off];
+        //     }
+        // ```
+        let mut is_seed_masked = |s_pos: usize, q_pos: usize| -> bool {
+            if s_pos + lut_word_length > s_len {
+                return true;
+            }
+            let kmer = mask_lookup_index(
+                packed_kmer_at_seed_mask(search_seq_packed, s_pos, lut_word_length),
+                lut_word_length,
+            );
+            if !two_stage.has_hits(kmer) {
+                return true;
+            }
+            let q_off_1 = (q_pos + 1) as u32;
+            !two_stage.contains_hit(kmer, q_off_1)
+        };
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:676-686
+        // ```c
+        //     if (two_hits && (hit_saved || s_end_pos > last_hit + window_size )) {
+        //         /* check the masks for the word; also check to see if this
+        //            first hit qualifies for a double-word */
+        //         word_type = s_TypeOfWord(query, subject, &q_off, &s_off,
+        //                                  query_mask, query_info, s_range,
+        //                                  word_length, lut_word_length, lut, TRUE, &extended);
+        //         if (!word_type) return 0;
+        //         /* update the right end*/
+        //         s_end += extended;
+        //         s_end_pos += extended;
+        // ```
+        let s_end_pos_i32 = s_end_pos as i32;
+        let window_end = last_hit + window_size as i32;
+        if two_hits && (hit_saved || s_end_pos_i32 > window_end) {
+            let (word_type, extended, q_off_adj, s_off_adj) = type_of_word(
+                q_off,
+                s_off,
+                !query_mask.is_empty(),
+                q_context_end,
+                s_range,
+                word_length,
+                lut_word_length,
+                true, // check_double = TRUE
+                &mut is_seed_masked,
+            );
+            q_off = q_off_adj;
+            s_off = s_off_adj;
+
+            // NCBI: if (!word_type) return 0;
+            if word_type == 0 {
+                continue;
+            }
+
+            // NCBI: s_end += extended; s_end_pos += extended;
+            s_end += extended;
+            s_end_pos += extended;
+
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:688-720
+            // ```c
+            //         if (word_type == 1) {
+            //             /* try off-diagonals */
+            //             Int4 orig_diag = real_diag + diag_table->diag_array_length;
+            //             Int4 s_a = s_off_pos + word_length - window_size;
+            //             Int4 s_b = s_end_pos - 2 * word_length;
+            //             Int4 delta;
+            //             if (Delta < 0) Delta = 0;
+            //             for (delta = 1; delta <= Delta ; ++delta) {
+            //                 Int4 off_diag  = (orig_diag + delta) & diag_table->diag_mask;
+            //                 Int4 off_s_end = hit_level_array[off_diag].last_hit;
+            //                 Int4 off_s_l   = diag_table->hit_len_array[off_diag];
+            //                 if ( off_s_l
+            //                  && off_s_end - delta >= s_a
+            //                  && off_s_end - off_s_l <= s_b) {
+            //                     off_found = TRUE;
+            //                     break;
+            //                 }
+            //                 off_diag  = (orig_diag - delta) & diag_table->diag_mask;
+            //                 off_s_end = hit_level_array[off_diag].last_hit;
+            //                 off_s_l   = diag_table->hit_len_array[off_diag];
+            //                 if ( off_s_l
+            //                  && off_s_end >= s_a
+            //                  && off_s_end - off_s_l + delta <= s_b) {
+            //                     off_found = TRUE;
+            //                     break;
+            //                 }
+            //             }
+            //             if (!off_found) {
+            //                 /* This is a new hit */
+            //                 hit_ready = 0;
+            //             }
+            //         }
+            // ```
+            // (`scan_range` is 0 in the scope, so `Delta` is 0 and the loop runs no
+            // iteration; the statements are kept as the reference has them.)
+            if word_type == 1 {
+                let delta_calc = window_size as isize - word_length as isize;
+                let delta_max = if delta_calc < 0 {
+                    0
+                } else {
+                    scan_range.min(delta_calc as usize) as isize
+                };
+                let s_a = s_off_pos as isize + word_length as isize - window_size as isize;
+                let s_b = s_end_pos as isize - 2 * word_length as isize;
+                let orig_diag = diag + diag_array_length;
+                for delta in 1..=delta_max {
+                    let off_diag = (orig_diag + delta) & diag_mask;
+                    let (off_s_end, off_s_l) = {
+                        let off_diag_idx = off_diag as usize;
+                        if off_diag_idx < diag_array_size {
+                            (
+                                hit_level_array[off_diag_idx].last_hit,
+                                hit_len_array[off_diag_idx],
+                            )
+                        } else {
+                            (0, 0)
+                        }
+                    };
+                    if off_s_l > 0
+                        && (off_s_end as isize - delta) >= s_a
+                        && (off_s_end as isize - off_s_l as isize) <= s_b
+                    {
+                        off_found = true;
+                        break;
+                    }
+                    let off_diag = (orig_diag - delta) & diag_mask;
+                    let (off_s_end, off_s_l) = {
+                        let off_diag_idx = off_diag as usize;
+                        if off_diag_idx < diag_array_size {
+                            (
+                                hit_level_array[off_diag_idx].last_hit,
+                                hit_len_array[off_diag_idx],
+                            )
+                        } else {
+                            (0, 0)
+                        }
+                    };
+                    if off_s_l > 0
+                        && (off_s_end as isize) >= s_a
+                        && (off_s_end as isize - off_s_l as isize + delta) <= s_b
+                    {
+                        off_found = true;
+                        break;
+                    }
+                }
+                if !off_found {
+                    hit_ready = false;
+                }
+            }
+        } else {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:722-730
+            // ```c
+            //     } else if (check_masks) {
+            //         /* check the masks for the word */
+            //         if(!s_TypeOfWord(query, subject, &q_off, &s_off,
+            //                         query_mask, query_info, s_range,
+            //                         word_length, lut_word_length, lut, FALSE, &extended)) return 0;
+            //         /* update the right end*/
+            //         s_end += extended;
+            //         s_end_pos += extended;
+            //     }
+            // ```
+            let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
+                q_off,
+                s_off,
+                !query_mask.is_empty(),
+                q_context_end,
+                s_range,
+                word_length,
+                lut_word_length,
+                false, // check_double = FALSE (not in two-hit block)
+                &mut is_seed_masked,
+            );
+            if wt == 0 {
+                continue;
+            }
+            q_off = q_off_adj;
+            s_off = s_off_adj;
+            s_end += ext;
+            s_end_pos += ext;
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:732,768-772
+        // ```c
+        //     if (hit_ready) {
+        // ...
+        //     hit_level_array[real_diag].last_hit = s_end_pos;
+        //     hit_level_array[real_diag].flag = hit_ready;
+        //     if (two_hits) {
+        //         diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+        //     }
+        // ```
+        if !hit_ready {
+            if diag_idx < diag_array_size {
+                hit_level_array[diag_idx].last_hit = s_end_pos as i32;
+                hit_level_array[diag_idx].flag = 0;
+                if two_hits {
+                    hit_len_array[diag_idx] = (s_end_pos - s_off_pos) as u8;
+                }
+            }
+            continue;
+        }
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:743-756
+        // ```c
+        //             if ( word_params->options->program_number == eBlastTypeBlastn &&
+        //                  (word_params->matrix_only_scoring || word_length < 11))
+        //             {
+        //                s_NuclUngappedExtendExact(query, subject, matrix, q_off,
+        //                                   s_off, -(cutoffs->x_dropoff), ungapped_data);
+        //             }else {
+        //                s_NuclUngappedExtend(query, subject, matrix, q_off, s_end, s_off,
+        //                                  -(cutoffs->x_dropoff), ungapped_data,
+        //                                  word_params->nucl_score_table,
+        //                                  cutoffs->reduced_nucl_cutoff_score);
+        //             }
+        // ```
+        let x_dropoff = x.x_dropoff_scores[context_idx];
+        let reduced_cutoff = x.reduced_cutoff_scores[context_idx];
+        let ungapped_start = if timing_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+        let ungapped = if word_length < 11 {
+            extend_hit_ungapped_exact_ncbi(
+                x.encoded_query_concat_blastna,
+                search_seq_packed,
+                q_off,
+                s_off,
+                s_len,
+                x_dropoff,
+                x.score_matrix,
+            )
+        } else {
+            extend_hit_ungapped_approx_ncbi(
+                x.encoded_query_concat_blastna,
+                search_seq_packed,
+                q_off,
+                s_off,
+                s_end,
+                s_len,
+                x_dropoff,
+                x.nucl_score_table,
+                reduced_cutoff,
+                x.score_matrix,
+            )
+        };
+        if let Some(ungapped_start) = ungapped_start {
+            let elapsed_ns = ungapped_start.elapsed().as_nanos() as u64;
+            if let Some(timing) = timing {
+                timing.ungapped_ns.fetch_add(elapsed_ns, Ordering::Relaxed);
+                timing.ungapped_calls.fetch_add(1, Ordering::Relaxed);
+            }
+            *scan_pause_ns = scan_pause_ns.saturating_add(elapsed_ns);
+        }
+        let ss = ungapped.s_start;
+        let ungapped_se = ungapped.s_start + ungapped.length;
+        let ungapped_score = ungapped.score;
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:762-763
+        // ```c
+        //                 s_end_pos = ungapped_data->length + ungapped_data->s_start
+        //                           + diag_table->offset;
+        // ```
+        let ungapped_s_end_pos = ungapped_se + diag_offset as usize;
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:757-772
+        // ```c
+        //             if (off_found || ungapped_data->score >= cutoffs->cutoff_score) {
+        // ...
+        //             } else {
+        //                 hit_ready = 0;
+        //             }
+        // ...
+        //     hit_level_array[real_diag].last_hit = s_end_pos;
+        //     hit_level_array[real_diag].flag = hit_ready;
+        //     if (two_hits) {
+        //         diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+        //     }
+        // ```
+        if !(off_found || ungapped_score >= cutoff_score) {
+            hit_ready = false;
+            if diag_idx < diag_array_size {
+                hit_level_array[diag_idx].last_hit = s_end_pos as i32;
+                hit_level_array[diag_idx].flag = if hit_ready { 1 } else { 0 };
+                if two_hits {
+                    hit_len_array[diag_idx] = if hit_ready {
+                        0
+                    } else {
+                        (s_end_pos - s_off_pos) as u8
+                    };
+                }
+            }
+            continue;
+        }
+
+        // NCBI checks the start against the context only for saved hits (see `fold_two_hit`).
+        debug_assert!(ungapped.q_start >= q_context_start);
+        let qs = ungapped.q_start - q_context_start;
+        let qe = qs + ungapped.length;
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:758-761
+        // ```c
+        //                 BlastUngappedData *final_data =
+        //                     (BlastUngappedData *) malloc(sizeof(BlastUngappedData));
+        //                 *final_data = *ungapped_data;
+        //                 BLAST_SaveInitialHit(init_hitlist, q_off, s_off, final_data);
+        // ```
+        ungapped_hits.push(UngappedHit {
+            context_idx: q_idx,
+            query_idx: ctx.query_idx,
+            query_frame: ctx.frame,
+            query_context_offset: ctx.query_offset,
+            seed_q_off: q_off - q_context_start,
+            seed_s_off: s_off,
+            qs,
+            qe,
+            ss,
+            se: ungapped_se,
+            score: ungapped_score,
+        });
+
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:768-772
+        // ```c
+        //     hit_level_array[real_diag].last_hit = s_end_pos;
+        //     hit_level_array[real_diag].flag = hit_ready;
+        //     if (two_hits) {
+        //         diag_table->hit_len_array[real_diag] = (hit_ready) ? 0 : s_end_pos - s_off_pos;
+        //     }
+        // ```
+        if diag_idx < diag_array_size {
+            hit_level_array[diag_idx].last_hit = ungapped_s_end_pos as i32;
+            hit_level_array[diag_idx].flag = 1;
+            if two_hits {
+                hit_len_array[diag_idx] = 0;
+            }
+        }
+    }
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
+/// ```c
+///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+///
+///         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+/// ...
+///         hits_extended += extend(offset_pairs, hitsfound, word_params,
+///                                 lookup_wrap, query, subject, matrix,
+///                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
+///     }
+/// ```
+/// EXPERIMENT (LOSAT_X_PAIRPARDISCARR): the seed stage of one chunk with the diagonal array on
+/// `threads` threads: the strips of `seed_stage` scanned by any thread, folded here in strip
+/// order into the array and `hits` (`fold_two_hit_array`).
+fn seed_stage_array(
+    x: &Inputs<'_>,
+    disc: &DiscTemplates,
+    threads: usize,
+    arr: &mut DiagArray<'_>,
+    hits: &mut Vec<UngappedHit>,
+    timing: Option<&BlastnTiming>,
+    timed: bool,
+) -> StageStats {
+    let jobs = plan_strips(
+        x.subject_seq_ranges,
+        x.s_len,
+        disc.template_length,
+        disc.template_length,
+        1,
+        STRIPS_PER_THREAD * threads.max(4),
+    );
+    let produce = |i: usize, out: &mut Vec<Seed>| scan_strip_disc(x, disc, &jobs[i], out);
+    let mut stats = StageStats {
+        strips: jobs.len(),
+        ..StageStats::default()
+    };
+    let StageStats {
+        counts,
+        scan_pause_ns,
+        fold_ns,
+        owner_scan_ns,
+        wait_ns,
+        ..
+    } = &mut stats;
+    run_strips(
+        jobs.len(),
+        threads.saturating_sub(1),
+        AHEAD_PER_THREAD * threads,
+        &produce,
+        |_, seeds| {
+            let t0 = timed.then(std::time::Instant::now);
+            fold_two_hit_array(x, seeds, arr, hits, timing, scan_pause_ns, counts);
+            if let Some(t0) = t0 {
+                *fold_ns += t0.elapsed().as_nanos() as u64;
+            }
+        },
+        owner_scan_ns,
+        wait_ns,
+        timed,
+    );
+    stats
+}
+
+/// EXPERIMENT (LOSAT_X_PAIRPARDISCARR, shadow LOSAT_X_PAIRPARDISCARRSHADOW): `run` for a chunk
+/// with the diagonal array (a query block of at most 8000 letters): the seed stage of the
+/// chunk on the strips with the owner's array fold when the switch is on and the chunk is in
+/// scope (`in_scope_array`); `true` means it has run and the reference scan is skipped. With
+/// the shadow the stage runs on copies of the two arrays and an own hit list, `false` is
+/// returned so the reference runs, and `shadow_check_array` compares them.
+fn run_array(
+    x: &Inputs<'_>,
+    mut diag_array: DiagArray<'_>,
+    ungapped_hits: &mut Vec<UngappedHit>,
+) -> bool {
+    let (on, shadow) = arr_switches();
+    if !on && !shadow {
+        return false;
+    }
+    if shadow {
+        ARR_STASH.with(|s| s.borrow_mut().take());
+    }
+    let Some(disc) = x.two_stage.disc() else {
+        return false;
+    };
+    if !in_scope_array(x) {
+        return false;
+    }
+    let threads = match pool_threads() {
+        Some(threads) => threads,
+        // the shadow also runs without a pool (strips on this thread)
+        None if shadow => 1,
+        None => return false,
+    };
+    let timing = if shadow { None } else { x.timing };
+    let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
+    let t_start = timed.then(std::time::Instant::now);
+    let mut shadow_levels: Vec<DiagStruct> = Vec::new();
+    let mut shadow_lens: Vec<u8> = Vec::new();
+    let mut shadow_hits: Vec<UngappedHit> = Vec::new();
+    let stats = if shadow {
+        shadow_levels.clone_from(diag_array.levels);
+        shadow_lens.clone_from(diag_array.lens);
+        let mut copy = DiagArray {
+            levels: &mut shadow_levels,
+            lens: &mut shadow_lens,
+            length: diag_array.length,
+            mask: diag_array.mask,
+            size: diag_array.size,
+        };
+        seed_stage_array(x, disc, threads, &mut copy, &mut shadow_hits, timing, timed)
+    } else {
+        seed_stage_array(
+            x,
+            disc,
+            threads,
+            &mut diag_array,
+            ungapped_hits,
+            timing,
+            timed,
+        )
+    };
+    if let (Some(t_start), Some(timing)) = (t_start, timing) {
+        // `[TIMING] scan_lookup`: the time of the stage minus the ungapped extensions, as the
+        // reference counts its scan.
+        let elapsed_ns = t_start.elapsed().as_nanos() as u64;
+        let scan_ns = elapsed_ns.saturating_sub(stats.scan_pause_ns);
+        timing.scan_ns.fetch_add(scan_ns, Ordering::Relaxed);
+        timing.scan_calls.fetch_add(1, Ordering::Relaxed);
+    }
+    ARR_CHUNKS.fetch_add(1, Ordering::Relaxed);
+    ARR_STRIPS.fetch_add(stats.strips as u64, Ordering::Relaxed);
+    ARR_SEEDS.fetch_add(stats.counts.seeds, Ordering::Relaxed);
+    ARR_SKIPPED.fetch_add(stats.counts.skipped, Ordering::Relaxed);
+    ARR_FOLD_NS.fetch_add(stats.fold_ns, Ordering::Relaxed);
+    ARR_OWNER_SCAN_NS.fetch_add(stats.owner_scan_ns, Ordering::Relaxed);
+    ARR_WAIT_NS.fetch_add(stats.wait_ns, Ordering::Relaxed);
+    if shadow {
+        ARR_STASH.with(|s| {
+            *s.borrow_mut() = Some(ArrStash {
+                hits: shadow_hits,
+                levels: shadow_levels,
+                lens: shadow_lens,
+            })
+        });
+        return false;
+    }
+    true
+}
+
+/// LOSAT_X_PAIRPARDISCARRSHADOW (from the parent's `shadow_check`): the hit list and the
+/// diagonal array (`hit_level_array`, `hit_len_array`) the reference built for this chunk
+/// against those of `run_array`, element by element; panics on the first difference. Nothing
+/// when no shadow computation of this chunk is waiting.
+pub(super) fn shadow_check_array(
+    ungapped_hits: &[UngappedHit],
+    hit_level_array: &[DiagStruct],
+    hit_len_array: &[u8],
+) {
+    let Some(stash) = ARR_STASH.with(|s| s.borrow_mut().take()) else {
+        return;
+    };
+    let name = "LOSAT_X_PAIRPARDISCARRSHADOW";
+    let key = |h: &UngappedHit| {
+        (
+            h.context_idx,
+            h.query_idx,
+            h.query_frame,
+            h.query_context_offset,
+            h.seed_q_off,
+            h.seed_s_off,
+            h.qs,
+            h.qe,
+            h.ss,
+            h.se,
+            h.score,
+        )
+    };
+    for (i, (r, p)) in ungapped_hits.iter().zip(&stash.hits).enumerate() {
+        assert!(
+            key(r) == key(p),
+            "{name}: ungapped hit {i} differs: reference {:?} strips {:?}",
+            key(r),
+            key(p)
+        );
+    }
+    assert_eq!(
+        ungapped_hits.len(),
+        stash.hits.len(),
+        "{name}: number of ungapped hits differs"
+    );
+    assert_eq!(
+        (hit_level_array.len(), hit_len_array.len()),
+        (stash.levels.len(), stash.lens.len()),
+        "{name}: diagonal array lengths differ"
+    );
+    for (i, (r, p)) in hit_level_array.iter().zip(&stash.levels).enumerate() {
+        assert!(
+            (r.last_hit, r.flag) == (p.last_hit, p.flag),
+            "{name}: diagonal {i} differs: reference ({}, {}) strips ({}, {})",
+            r.last_hit,
+            r.flag,
+            p.last_hit,
+            p.flag
+        );
+    }
+    if let Some(i) = (0..hit_len_array.len()).find(|&i| hit_len_array[i] != stash.lens[i]) {
+        panic!(
+            "{name}: hit length of diagonal {i} differs: reference {} strips {}",
+            hit_len_array[i], stash.lens[i]
+        );
+    }
+    ARR_SHADOW_CHUNKS.fetch_add(1, Ordering::Relaxed);
+    ARR_SHADOW_HITS.fetch_add(ungapped_hits.len() as u64, Ordering::Relaxed);
+    ARR_SHADOW_CELLS.fetch_add(hit_level_array.len() as u64, Ordering::Relaxed);
+}
+
 /// No NCBI counterpart: one chunk compared equal by the parent's `shadow_check`.
 pub(super) fn count_shadow(hits: usize, cells: u32) {
     SHADOW_CHUNKS.fetch_add(1, Ordering::Relaxed);
@@ -933,6 +1659,28 @@ pub(super) fn summary() {
             s(&X_OWNER_SCAN_NS),
             s(&X_WAIT_NS),
             part::timing_fields(part::TWO_HITS)
+        );
+    }
+    let (arr_on, arr_shadow) = arr_switches();
+    if arr_shadow {
+        eprintln!(
+            "[X_PAIRPARDISCARRSHADOW] blastn: seed chunks equal={} (ungapped hits {}, array cells {})",
+            load(&ARR_SHADOW_CHUNKS),
+            load(&ARR_SHADOW_HITS),
+            load(&ARR_SHADOW_CELLS)
+        );
+    }
+    if (arr_on || arr_shadow) && std::env::var_os("LOSAT_TIMING").is_some() {
+        let s = |c: &AtomicU64| c.load(Ordering::Relaxed) as f64 / 1e9;
+        eprintln!(
+            "[TIMING] x_pairpardiscarr_seed: chunks={} strips={} seeds={} skipped={} fold={:.3}s owner_scan={:.3}s owner_wait={:.3}s",
+            load(&ARR_CHUNKS),
+            load(&ARR_STRIPS),
+            load(&ARR_SEEDS),
+            load(&ARR_SKIPPED),
+            s(&ARR_FOLD_NS),
+            s(&ARR_OWNER_SCAN_NS),
+            s(&ARR_WAIT_NS)
         );
     }
 }
@@ -1004,6 +1752,11 @@ mod tests {
 
     fn make_case(rng: &mut Lcg, subject_len: usize) -> Case {
         let q_len = 4100 + rng.below(3000) as usize;
+        make_case_with(rng, subject_len, q_len)
+    }
+
+    /// `make_case` with a query of `q_len` bases (more than 1013: the masks).
+    fn make_case_with(rng: &mut Lcg, subject_len: usize, q_len: usize) -> Case {
         let mut query = random_dna(rng, q_len);
         // a repeat inside the query (long lookup chains)
         let motif = random_dna(rng, 40);
@@ -1430,6 +2183,184 @@ mod tests {
         }
     }
 
+    // EXPERIMENT (LOSAT_X_PAIRPARDISCARR): the two-hit stage with the diagonal array (a query
+    // of 1500 to 3899 bases, so a block of at most 7799 letters; the array has NCBI's length,
+    // the power of two just above the block plus the window) for every discontiguous template:
+    // the pairs of the reference wrapper folded in one go by `fold_two_hit_array`, against
+    // `seed_stage_array` on 1..8 threads. Hit lists and both arrays must be the same, and the
+    // serial fold must have taken every branch: the `last_hit` rejection, the first hit of a
+    // window (`hit_len_array` set), the second hit both below and above the cutoff (a saved
+    // hit leaves `flag` 1).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn disc_two_hit_array_stage_on_strips_equals_one_scan() {
+        let mut rng = Lcg(0xA22A_5EED);
+        let mut case_no = 0;
+        for word_size in [11usize, 12] {
+            for word_type in [
+                DiscWordType::Coding,
+                DiscWordType::Optimal,
+                DiscWordType::TwoTemplates,
+            ] {
+                for template_length in [16usize, 18, 21] {
+                    case_no += 1;
+                    let q_len = 1500 + rng.below(2400) as usize;
+                    let c = make_case_with(&mut rng, 30_000, q_len);
+                    let lookup = build_disc_mb_lookup(
+                        &ctx_refs(&c),
+                        &c.offsets,
+                        word_size,
+                        template_length,
+                        word_type,
+                        &c.masks,
+                        c.concat.len(),
+                    );
+                    let disc = lookup.disc().expect("a discontiguous table");
+                    let diag_offset = 37 + rng.below(1000) as isize;
+                    let window_size = 40;
+                    let x = Inputs {
+                        use_array_indexing: true,
+                        ..inputs(&c, &lookup, diag_offset, window_size)
+                    };
+                    assert!(in_scope_array(&x) && !in_scope(&x));
+                    let mut length = 1usize;
+                    while length < c.concat.len() + window_size {
+                        length <<= 1;
+                    }
+                    let mut seeds = Vec::new();
+                    scan_subject_disc_words_with_ranges(
+                        &c.packed,
+                        c.s_len,
+                        disc,
+                        &c.seq_ranges,
+                        false,
+                        |s_off, s_range, index, index2| {
+                            lookup.for_each_hit(index, |q_off_1| {
+                                if q_off_1 != 0 {
+                                    seed_of_pair(
+                                        &x,
+                                        q_off_1 as usize - 1,
+                                        s_off,
+                                        s_range,
+                                        &mut seeds,
+                                    );
+                                }
+                            });
+                            if let Some(index2) = index2 {
+                                lookup.for_each_hit2(index2, |q_off_1| {
+                                    seed_of_pair(
+                                        &x,
+                                        q_off_1 as usize - 1,
+                                        s_off,
+                                        s_range,
+                                        &mut seeds,
+                                    );
+                                });
+                            }
+                        },
+                    );
+                    let mut serial_levels = vec![DiagStruct::default(); length];
+                    let mut serial_lens = vec![0u8; length];
+                    let mut serial_hits = Vec::new();
+                    let mut counts = FoldCounts::default();
+                    let mut pause = 0u64;
+                    fold_two_hit_array(
+                        &x,
+                        &seeds,
+                        &mut DiagArray {
+                            levels: &mut serial_levels,
+                            lens: &mut serial_lens,
+                            length: length as isize,
+                            mask: length as isize - 1,
+                            size: length,
+                        },
+                        &mut serial_hits,
+                        None,
+                        &mut pause,
+                        &mut counts,
+                    );
+                    let saved = serial_levels.iter().filter(|d| d.flag != 0).count();
+                    let first_hits = serial_lens.iter().filter(|&&l| l > 0).count();
+                    assert!(
+                        serial_hits.len() > 5 && counts.skipped > 0 && saved > 0 && first_hits > 0,
+                        "case {case_no}: the test sequences give too few hits ({} hits, {} skipped, {saved} saved diagonals, {first_hits} first-hit diagonals)",
+                        serial_hits.len(),
+                        counts.skipped
+                    );
+                    let key = |h: &UngappedHit| {
+                        (
+                            h.context_idx,
+                            h.seed_q_off,
+                            h.seed_s_off,
+                            h.qs,
+                            h.qe,
+                            h.ss,
+                            h.se,
+                            h.score,
+                        )
+                    };
+                    let state = |levels: &[DiagStruct], lens: &[u8]| {
+                        (
+                            levels
+                                .iter()
+                                .map(|d| (d.last_hit, d.flag))
+                                .collect::<Vec<_>>(),
+                            lens.to_vec(),
+                        )
+                    };
+                    let serial_keys: Vec<_> = serial_hits.iter().map(key).collect();
+                    let serial_state = state(&serial_levels, &serial_lens);
+                    for threads in 1..=8usize {
+                        let pool = rayon::ThreadPoolBuilder::new()
+                            .num_threads(threads)
+                            .build()
+                            .unwrap();
+                        let (got_state, keys, stats_seeds, strips) = pool.install(|| {
+                            let mut levels = vec![DiagStruct::default(); length];
+                            let mut lens = vec![0u8; length];
+                            let mut hits = Vec::new();
+                            let stats = seed_stage_array(
+                                &x,
+                                disc,
+                                threads,
+                                &mut DiagArray {
+                                    levels: &mut levels,
+                                    lens: &mut lens,
+                                    length: length as isize,
+                                    mask: length as isize - 1,
+                                    size: length,
+                                },
+                                &mut hits,
+                                None,
+                                false,
+                            );
+                            (
+                                state(&levels, &lens),
+                                hits.iter().map(key).collect::<Vec<_>>(),
+                                stats.counts.seeds,
+                                stats.strips,
+                            )
+                        });
+                        assert!(strips > 1, "case {case_no} threads {threads}");
+                        assert_eq!(
+                            stats_seeds,
+                            seeds.len() as u64,
+                            "case {case_no} threads {threads}"
+                        );
+                        assert_eq!(keys, serial_keys, "case {case_no} threads {threads}");
+                        assert!(
+                            got_state == serial_state,
+                            "case {case_no} threads {threads}: the diagonal arrays differ"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     // The scope: a discontiguous table in two-hit mode with the diagonal hash only. A
     // contiguous table in two-hit mode (megablast or blastn with `-window_size`, which the
     // CLI rejects) is in neither this scope nor the parent's: the parent's `run` refuses it
@@ -1485,6 +2416,40 @@ mod tests {
             false,
         );
         assert!(!in_scope(&inputs(&c, &contiguous, 40, 40)));
+        // EXPERIMENT (LOSAT_X_PAIRPARDISCARR): the same scope with the diagonal array.
+        fn array(x: Inputs<'_>) -> Inputs<'_> {
+            Inputs {
+                use_array_indexing: true,
+                ..x
+            }
+        }
+        assert!(in_scope_array(&array(inputs(&c, &disc, 40, 40))));
+        assert!(!in_scope_array(&inputs(&c, &disc, 40, 40)));
+        assert!(!in_scope_array(&array(Inputs {
+            window_size: 0,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(Inputs {
+            scan_range: 1,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(Inputs {
+            subject_masked: true,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(Inputs {
+            small_na_word: true,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(Inputs {
+            diagnostics: true,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(Inputs {
+            one_subject_owner: false,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(inputs(&c, &contiguous, 40, 40))));
         // The parent's `run` in a pool of two threads (where its one-hit stage would run):
         // a contiguous table with a window is refused and nothing is touched.
         #[cfg(all(
@@ -1501,9 +2466,17 @@ mod tests {
                 let mut hits = Vec::new();
                 let x = inputs(&c, &contiguous, 40, 40);
                 let mut fold_scratch = PartScratch::default();
+                let (mut levels, mut lens) = (Vec::new(), Vec::new());
                 assert!(!super::super::run(
                     &x,
                     &mut hash,
+                    DiagArray {
+                        levels: &mut levels,
+                        lens: &mut lens,
+                        length: 0,
+                        mask: 0,
+                        size: 0,
+                    },
                     &mut hits,
                     &mut fold_scratch
                 ));

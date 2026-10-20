@@ -53,6 +53,11 @@ use super::{
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_db_cut;
+mod x_listed_lean;
+pub(super) use x_listed_lean::{
+    x_bp_listed_lean, x_bp_listed_lean_print_summary,
+    x_shadow_compare as x_listed_lean_shadow_compare, XListedLean,
+};
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
 // ```c
@@ -852,6 +857,8 @@ impl ListedSubjects {
         Ok(ListedTitles {
             listed: self,
             records,
+            titles: Vec::new(),
+            lean: false,
             replaced_title_bytes,
         })
     }
@@ -862,14 +869,35 @@ impl ListedSubjects {
 pub(super) struct ListedTitles<'a> {
     listed: &'a ListedSubjects,
     /// The stored titles (empty for a subject in no final hit list) and the stored
-    /// letters, by rank.
+    /// letters, by rank; none with LOSAT_X_BPLISTEDLEAN (`titles`).
     pub(super) records: Vec<FastaRecord>,
+    /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the stored titles by rank, where the subjects in no
+    /// final hit list share one empty title (`x_listed_lean.rs`); none without the switch
+    /// (`records`).
+    pub(super) titles: Vec<Arc<[u8]>>,
+    /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the titles are `titles`, not the records' titles.
+    lean: bool,
     /// Whether the stored title of a subject holds a byte outside ' ' ..= '~' (read as
     /// '#'), by rank (`check_reported_titles`).
     replaced_title_bytes: Vec<bool>,
 }
 
 impl ListedTitles<'_> {
+    /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): whether the titles are `titles` (no records).
+    pub(super) fn x_lean(&self) -> bool {
+        self.lean
+    }
+
+    /// The stored title of the subject of rank `rank` (empty for a subject in no final hit
+    /// list).
+    fn title(&self, rank: usize) -> &[u8] {
+        if self.lean {
+            &self.titles[rank]
+        } else {
+            &self.records[rank].title
+        }
+    }
+
     /// LOSAT's rejection of a reported subject (one with rows in the final `hit_lists`)
     /// whose stored title holds a byte outside ' ' ..= '~'
     /// (`algorithm::common::database::check_reported_title`): NCBI writes an error message
@@ -908,14 +936,21 @@ impl ListedTitles<'_> {
         hit_lists: &[Option<BlastpHitList>],
     ) -> Result<Vec<Arc<[u8]>>> {
         let reported = Self::reported(hit_lists);
-        let mut ids: Vec<Arc<[u8]>> = Vec::with_capacity(self.records.len());
-        for (rank, record) in self.records.iter().enumerate() {
+        let ranks = self.listed.ordinals.len();
+        let mut ids: Vec<Arc<[u8]>> = Vec::with_capacity(ranks);
+        // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): one empty id for every subject without rows.
+        let empty: Arc<[u8]> = Arc::from(&b""[..]);
+        for rank in 0..ranks {
             if !reported.contains(&rank) {
-                ids.push(Arc::from(&b""[..]));
+                ids.push(if self.lean {
+                    Arc::clone(&empty)
+                } else {
+                    Arc::from(&b""[..])
+                });
                 continue;
             }
             let ordinal = self.listed.ordinals[rank];
-            let id = shared::tabular_subject_id(&record.title, ordinal, true, PROGRAM)?;
+            let id = shared::tabular_subject_id(self.title(rank), ordinal, true, PROGRAM)?;
             ids.push(Arc::from(id));
         }
         Ok(ids)
@@ -941,7 +976,7 @@ impl ListedTitles<'_> {
     ) -> Result<()> {
         for &rank in shown {
             shared::check_shown_protein_title(
-                &self.records[rank].title,
+                self.title(rank),
                 self.listed.ordinals[rank],
                 PROGRAM,
             )?;
@@ -1889,6 +1924,61 @@ mod tests {
         titles.check_reported_titles(&hit_lists).unwrap();
     }
 
+    // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles are the records' titles, rank by rank,
+    // with one shared empty title for the subjects in no final hit list, and the stored residues
+    // give the records' letters (`x_listed_lean.rs`).
+    #[test]
+    fn lean_titles_are_the_records_titles_and_letters() {
+        let database = open("prot_mv");
+        let list = |oid: u32, raw_score: i32| BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![test_hsp(oid, raw_score)],
+            best_evalue: 1e-5,
+        };
+        let mut first = BlastpHitList::new(10);
+        for (oid, score) in [(7, 60), (2, 55), (9, 50)] {
+            first.update(list(oid, score));
+        }
+        let mut second = BlastpHitList::new(10);
+        second.update(list(2, 70));
+        second.update(list(0, 65));
+        let mut hit_lists = vec![Some(first), None, Some(second)];
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
+        // Ordinal ids 7 and 9 (ranks 2 and 3) stay listed but leave the final hit lists.
+        let first = hit_lists[0].as_mut().unwrap();
+        first.hsplist_array.retain(|hsp_list| hsp_list.oid == 1);
+        first.hsplist_count = first.hsplist_array.len();
+        let records = listed.read_titles(&database, &hit_lists).unwrap();
+        let lean = listed.x_read_titles_lean(&database, &hit_lists).unwrap();
+        assert!(lean.x_lean() && !records.x_lean());
+        assert!(lean.records.is_empty());
+        assert_eq!(lean.titles.len(), 4);
+        for rank in 0..4 {
+            assert_eq!(
+                lean.title(rank),
+                records.records[rank].title(),
+                "rank {rank}"
+            );
+            assert_eq!(
+                lean.replaced_title_bytes[rank],
+                records.replaced_title_bytes[rank]
+            );
+        }
+        assert_eq!(lean.title(1), b"p03 every letter of NCBIstdaa but the gap");
+        assert!(lean.title(2).is_empty() && lean.title(3).is_empty());
+        assert!(Arc::ptr_eq(&lean.titles[2], &lean.titles[3]));
+        assert_eq!(
+            lean.tabular_subject_ids(&hit_lists).unwrap(),
+            records.tabular_subject_ids(&hit_lists).unwrap()
+        );
+        lean.check_shown_titles(&[0usize, 1].into_iter().collect())
+            .unwrap();
+        lean.check_reported_titles(&hit_lists).unwrap();
+        // The shadow's comparison: titles, flags and every letter.
+        x_listed_lean_shadow_compare(&lean, &records);
+    }
+
     // blast_seqalign.cpp:1569-1582 and seqdbvol.cpp:2302-2310: NCBI opens a volume's
     // header file when the Seq-aligns of the final hit lists are made, query by query and
     // in the order of each hit list; a subject that is in no final hit list is never read.
@@ -1960,6 +2050,23 @@ mod tests {
             .downcast_ref::<NativeError>()
             .expect("NCBI's error");
         assert_eq!(native.exit, 2);
+        // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles are read in the same order, with
+        // the same error.
+        let lean_error = listed
+            .x_read_titles_lean(&database, &hit_lists)
+            .err()
+            .expect("a missing header file")
+            .downcast::<HeaderReadError>()
+            .expect("NCBI's error, with the query that reached it");
+        assert_eq!(lean_error.query, 2);
+        assert_eq!(
+            lean_error
+                .error
+                .downcast_ref::<NativeError>()
+                .unwrap()
+                .message,
+            native.message
+        );
         // The volume is recorded under its directory normalised with symbolic links
         // followed (seqdbalias.cpp:851-862, `NormalizePath(dir_name, eFollowLinks)`), so
         // the message names that directory: on macOS the temporary directory under `/var`

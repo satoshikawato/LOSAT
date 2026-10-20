@@ -48,30 +48,41 @@ fn inputs(program: &str) -> Vec<String> {
     ["-query".to_string(), query, "-subject".to_string(), subject].to_vec()
 }
 
-fn run(program: &str, extra: &[&str]) -> Output {
+/// A temporary directory of one test (removed at its end), so that tests running in
+/// parallel share no file.
+struct WorkDir(PathBuf);
+
+impl WorkDir {
+    fn new(test: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("report_counts_cli_{}_{test}", std::process::id()));
+        std::fs::create_dir_all(&path).expect("create the test directory");
+        Self(path)
+    }
+}
+
+impl Drop for WorkDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn run(work: &WorkDir, program: &str, extra: &[&str]) -> Output {
     let mut command = Command::new(losat_binary());
-    // `LOSAT_BLASTX_WORKER_LOG` stays: a build with the worker probe (`--all-features`)
-    // panics when a pool starts without it, so the caller's value is kept, or a file of the
-    // temporary directory is named.
-    const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
+    // Like the sibling tests (`blastn_qgroup_par.rs`): no `LOSAT_*` switch and none of the
+    // batch variables reaches the child. A build with the worker probe (`--all-features`)
+    // panics when a pool starts without `LOSAT_BLASTX_WORKER_LOG`, so every spawn gets a
+    // file of the test's own directory.
     for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with("LOSAT_")
-            && name != "LOSAT_X_DEFAULT"
-            && name != WORKER_LOG
+        let text = name.to_string_lossy();
+        if (text.starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT")
+            || matches!(&*text, "BATCH_SIZE" | "CHUNK_SIZE" | "OVERLAP_CHUNK_SIZE")
         {
             command.env_remove(name);
         }
     }
-    if std::env::var_os(WORKER_LOG).is_none() {
-        command.env(
-            WORKER_LOG,
-            std::env::temp_dir().join(format!(
-                "report_counts_cli_{}.worker.log",
-                std::process::id()
-            )),
-        );
-    }
     command
+        .env("LOSAT_BLASTX_WORKER_LOG", work.0.join("worker.log"))
         .arg(program)
         .args(inputs(program))
         .args(extra)
@@ -85,6 +96,7 @@ const PROGRAMS: [&str; 5] = ["blastn", "blastp", "tblastn", "blastx", "tblastx"]
 // warning for a hit list size below 5 (blast_args.cpp:2975-2977); nothing is searched.
 #[test]
 fn a_hit_list_size_of_zero_is_ncbis_error_after_the_few_matches_warning() {
+    let work = WorkDir::new("a_hit_list_size_of_zero_is_ncb");
     for program in PROGRAMS {
         for extra in [
             &[
@@ -105,7 +117,7 @@ fn a_hit_list_size_of_zero_is_ncbis_error_after_the_few_matches_warning() {
                 "9",
             ],
         ] {
-            let output = run(program, extra);
+            let output = run(&work, program, extra);
             let ignored = if extra.contains(&"-num_descriptions") && extra[1] != "0" {
                 format!("Warning: [{program}] The parameter -num_descriptions is ignored for output formats > 4 . Use -max_target_seqs to control output\n")
             } else {
@@ -129,8 +141,10 @@ fn a_hit_list_size_of_zero_is_ncbis_error_after_the_few_matches_warning() {
 // of outfmt 0 is the larger of the two counts, so -num_descriptions 3 does not warn.
 #[test]
 fn the_warnings_of_the_formatting_handler() {
+    let work = WorkDir::new("the_warnings_of_the_formatting");
     for program in PROGRAMS {
         let output = run(
+            &work,
             program,
             &[
                 "-outfmt",
@@ -149,7 +163,7 @@ fn the_warnings_of_the_formatting_handler() {
             )),
             "{program}: {stderr}"
         );
-        let output = run(program, &["-outfmt", "0", "-num_descriptions", "3"]);
+        let output = run(&work, program, &["-outfmt", "0", "-num_descriptions", "3"]);
         assert_eq!(output.status.code(), Some(0), "{program}");
         assert!(output.stderr.is_empty(), "{program}");
     }
@@ -159,9 +173,10 @@ fn the_warnings_of_the_formatting_handler() {
 // so a subject limit of N shows at most N subjects for each query.
 #[test]
 fn a_tabular_format_shows_num_alignments_subjects() {
+    let work = WorkDir::new("a_tabular_format_shows_num_ali");
     for program in PROGRAMS {
         let count = |extra: &[&str]| {
-            let output = run(program, extra);
+            let output = run(&work, program, extra);
             assert_eq!(output.status.code(), Some(0), "{program} {extra:?}");
             let mut subjects: Vec<(String, String)> = Vec::new();
             for line in String::from_utf8(output.stdout).unwrap().lines() {

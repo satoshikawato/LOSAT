@@ -114,7 +114,6 @@ use crate::blastinput::input_files::{
     check_utf8_file_name, is_blank, open_input, write_empty_subject_warnings_by_length,
 };
 use crate::blastinput::query_batch::{next_query_batch_end, BatchSizeMixer};
-use crate::blastinput::report_counts::run_report_counts;
 use crate::blastinput::seq_range::{
     cut_queries, cut_subjects, next_ranged_batch, parse_optional_range, subjects_read, Placements,
     QueryInput, RangeRole, SequenceRange,
@@ -6596,13 +6595,7 @@ fn process_options(args: &mut BlastnArgs, outputs: &mut ReportOutputs<'_>) -> Re
     }
     // The hit list size and the counts of the pairwise report, with the formatting
     // handler's warnings (`ExtractAlgorithmOptions`), once for the run.
-    let (counts, warnings) = run_report_counts(
-        "blastn",
-        &outfmts,
-        args.max_target_seqs,
-        args.num_descriptions,
-        args.num_alignments,
-    )?;
+    let (counts, warnings) = crate::algorithm::blastn::scoring::report_counts_of(args, &outfmts)?;
     args.report_counts = counts;
     outputs.diagnostics.write_all(&warnings)?;
     check_scoring_options(args)

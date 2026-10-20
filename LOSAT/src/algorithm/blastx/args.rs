@@ -716,7 +716,6 @@ pub struct ResolvedOptions {
     pub culling_limit: i32,
     pub subject_besthit: bool,
     pub hitlist_size: i32,
-    pub max_target_seqs_explicit: bool,
     pub num_descriptions: i32,
     pub num_alignments: i32,
     pub outfmt: u8,
@@ -873,15 +872,6 @@ impl BlastxArgs {
         if self.threshold.is_some_and(|x| x <= 0.0) {
             return Err(SemanticOptionsError("Non-zero threshold required").into());
         }
-        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518-1523
-        // ```c++
-        // 	if (options->expect_value <= 0.0 && options->cutoff_score <= 0)
-        // 	{
-        // 		Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
-        //          "expect value or cutoff score must be greater than zero");
-        // 		return BLASTERR_OPTION_VALUE_INVALID;
-        // 	}
-        // ```
         // The hit list size and the counts of the pairwise report
         // (`blastinput::report_counts`).
         let counts = crate::blastinput::report_counts::report_counts(
@@ -903,6 +893,15 @@ impl BlastxArgs {
         if counts.hitlist_size < 1 {
             return Err(SemanticOptionsError("No hits are being saved").into());
         }
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1518-1523
+        // ```c++
+        // 	if (options->expect_value <= 0.0 && options->cutoff_score <= 0)
+        // 	{
+        // 		Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+        //          "expect value or cutoff score must be greater than zero");
+        // 		return BLASTERR_OPTION_VALUE_INVALID;
+        // 	}
+        // ```
         if self.evalue <= 0.0 {
             return Err(SemanticOptionsError(
                 "expect value or cutoff score must be greater than zero",
@@ -1016,7 +1015,6 @@ impl BlastxArgs {
             culling_limit: self.culling_limit,
             subject_besthit: self.subject_besthit,
             hitlist_size,
-            max_target_seqs_explicit: self.max_target_seqs.is_some(),
             num_descriptions: counts.num_descriptions as i32,
             num_alignments: counts.num_alignments as i32,
             outfmt,

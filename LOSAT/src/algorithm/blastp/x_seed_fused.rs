@@ -80,9 +80,9 @@
 //!
 //! EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loop (`x_cell_per_hit`: the fused loop without
 //! LOSAT_X_BPDIAG's batches, the default where the CPU has no AVX2, i.e. aarch64 and WebAssembly)
-//! takes the two outcomes most two-hit tests end in, too far and overlap, without a branch (blastx's
-//! LOSAT_X_BXHITBF, tblastn's LOSAT_X_TBNHITBF and TBLASTX's LOSAT_X_TBXHITBF do the same in their
-//! loops):
+//! takes the two outcomes most two-hit tests end in, too far and overlap, without a branch (tblastn's
+//! LOSAT_X_TBNHITBF and TBLASTX's LOSAT_X_TBXHITBF do the same in their loops, on tables whose entries
+//! need no sign extension):
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
 //! ```c
@@ -468,6 +468,7 @@ impl<'a> XDiagTable<'a> {
         unsafe { self.entries.get_unchecked_mut(coord) }
     }
 
+    // No NCBI counterpart: a cache hint for one diagonal entry; it reads nothing and changes no value.
     /// EXPERIMENT (LOSAT_X_BPHITBF): [`XDiagTable::prefetch`] without the bound check of
     /// [`x_prefetch`] (the index is at most `mask`), for the loop of [`x_cell_per_hit_bf`].
     #[inline(always)]
@@ -568,7 +569,8 @@ pub(crate) fn x_shadow_compare(
     );
 }
 
-/// EXPERIMENT (LOSAT_X_BPSEEDSHADOW): one line at exit with what the shadow mode compared.
+/// EXPERIMENT (LOSAT_X_BPSEEDSHADOW): the line at exit with what the shadow mode compared, and with
+/// LOSAT_X_BPHITBF the line of the subjects its loop scanned.
 pub fn x_bp_seed_print_summary() {
     if x_bp_seed_shadow() {
         let subjects = X_SHADOW_SUBJECTS.load(std::sync::atomic::Ordering::Relaxed);
@@ -585,7 +587,7 @@ pub fn x_bp_seed_print_summary() {
         }
         if x_bp_hit_bf() {
             eprintln!(
-                "[X_SHADOW] BPHITBF subjects_compared={} (the per-hit loop with the branch-free test; initial HSPs and diagonal tables identical)",
+                "[X_SHADOW] BPHITBF subjects_compared={} (of the BPSEED subjects, those the per-hit loop with the branch-free test scanned)",
                 X_SHADOW_HITBF_SUBJECTS.load(std::sync::atomic::Ordering::Relaxed)
             );
         }
@@ -2034,13 +2036,20 @@ mod tests {
             ((1 << 28) - 1, 1),
             ((1 << 28) - 1, (1 << 28) - 2),
         ];
+        // A one-word window, a word size of 0 or of the window or more: no test.
+        for (window, word_size) in [(3, 3), (40, 0), (2, 3), (1, 0)] {
+            assert!(XHitBf::new(40, 300, window, word_size).is_none());
+        }
         for (window, word_size) in pairs {
-            for length in [1usize, 2, 300, 1 << 20] {
+            // The longest subject the rule allows (at the offset 0).
+            let longest = ((1i64 << 30) - 2 * i64::from(window) - 1) as usize;
+            for length in [1usize, 2, 300, 1 << 20, longest] {
                 // The most diagonal offset the rule allows for this subject, and no more.
                 let most = ((1i64 << 30) - 2 * i64::from(window) - length as i64 - 1) as i32;
                 assert!(XHitBf::new(most + 1, length, window, word_size).is_none());
                 assert!(XHitBf::new(-1, length, window, word_size).is_none());
-                for diag_offset in [0, 1, window, most / 2, most] {
+                let offsets = [0, 1, window, most / 2, most];
+                for diag_offset in offsets.into_iter().filter(|&offset| offset <= most) {
                     let bf = XHitBf::new(diag_offset, length, window, word_size).expect("in range");
                     let test = XDiagTest {
                         diag_offset,
@@ -2146,11 +2155,13 @@ mod tests {
                 let bf = XHitBf::new(diag_offset, length, window, word_size).expect("in range");
                 let (lowest, highest) = (-window, diag_offset + length as i32 - 1);
                 for (k, n) in HIT_COUNTS.into_iter().enumerate() {
+                    // The read-ahead distances of the other tests, and one equal to the cell's hits
+                    // and one past them (no hit reads ahead).
                     let test = XDiagTest {
                         diag_offset,
                         window,
                         word_size,
-                        prefetch: [0, 3, 16][k % 3],
+                        prefetch: [0, 3, 16, n, n + 1][k % 5],
                     };
                     let s0 = (next(&mut seed) % 4000) as i32;
                     // The entries a table holds (module header): flag 0 with last_hit in [-window,

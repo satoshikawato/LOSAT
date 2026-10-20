@@ -250,12 +250,13 @@ pub(super) fn render(
             //             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
             //         }
             // ```
-            // The Seq-annot of each query with alignments.
-            number @ (8 | 12) => super::seqalign::write_tblastn_seqalign(
-                if number == 8 {
-                    crate::report::serial::SerialFormat::AsnText
-                } else {
-                    crate::report::serial::SerialFormat::Json
+            // (`eAsnBinary` is the same pruning and `MSerial_AsnBinary`,
+            // blast_format.cpp:699-705.) The Seq-annot of each query with alignments.
+            number @ (8 | 9 | 12) => super::seqalign::write_tblastn_seqalign(
+                match number {
+                    8 => crate::report::serial::SerialFormat::AsnText,
+                    9 => crate::report::serial::SerialFormat::AsnBinary,
+                    _ => crate::report::serial::SerialFormat::Json,
                 },
                 &mut writer,
                 query_records,

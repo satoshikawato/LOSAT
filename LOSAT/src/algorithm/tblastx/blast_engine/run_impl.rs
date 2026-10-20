@@ -1212,12 +1212,12 @@ pub(crate) fn run_local_with(
     // `run_local`); `search` checks the formats again.
     check_report_formats(outputs)?;
     // No NCBI counterpart: ABI v1 is frozen (plan TD-1; line OF, outfmt-20261019 DECISIONS
-    // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 12) with the
+    // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 9, 12) with the
     // message that `check_report_formats` gave them before TBLASTX wrote them.
     if v1.is_some() {
         for format in &outputs.formats {
             let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
-            if matches!(number, 8 | 12) {
+            if matches!(number, 8 | 9 | 12) {
                 anyhow::bail!("output format {number} is not supported by LOSAT's TBLASTX");
             }
         }

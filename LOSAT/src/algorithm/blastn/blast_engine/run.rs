@@ -87,6 +87,7 @@ use super::super::hsp::{
     BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use super::super::lookup::x_mb_lut_keep;
 use super::super::lookup::{
     build_unmasked_ranges, encode_reverse_complement_blastna_into, DiscTemplates,
 };
@@ -7467,6 +7468,7 @@ fn run_in_pool(
             BatchStage::Search {
                 query_offsets: &query_offsets[job.searched.clone()],
             },
+            None,
         )
     };
     let qbp_input = x_qbatch_par::PlanInput {
@@ -7515,6 +7517,9 @@ fn run_in_pool(
             }),
             qbp_off,
         );
+        // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
+        // (`lookup::x_mb_lut_keep`), freed when the loop ends.
+        let x_lut_keep = x_mb_lut_keep::Keep::for_loop();
         let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(lengths.len());
         let mut unsearched = Vec::with_capacity(lengths.len());
         let mut query_masks = Vec::with_capacity(lengths.len());
@@ -7788,6 +7793,9 @@ fn run_in_pool(
             let searched = match precomputed {
                 Some(precomputed) if !qbp.shadow() => precomputed,
                 precomputed => {
+                    // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps its megablast table from batch
+                    // to batch once no slot can search a batch any more.
+                    let x_keep = x_lut_keep.as_ref().filter(|_| !qbp.may_speculate());
                     let reference = search_query_batch(
                         &args,
                         batch_records.searched(),
@@ -7799,6 +7807,7 @@ fn run_in_pool(
                         BatchStage::Search {
                             query_offsets: &query_offsets[start..end],
                         },
+                        x_keep,
                     );
                     if let Some(precomputed) = precomputed {
                         qbp.shadow_check(key, &precomputed, &reference, x_qbatch_par_compare);
@@ -8139,6 +8148,8 @@ fn run_in_pool(
             queries.done(input_end);
             input_start = input_end;
         }
+        // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop's kept table is freed with the loop.
+        drop(x_lut_keep);
 
         // EXPERIMENT (LOSAT_X_QBATCHPAR): every slot has stopped before the reports are written.
         qbp.finish();
@@ -8805,7 +8816,8 @@ fn reborrow_outputs<'o, 'r>(outputs: &'o mut BatchOutputs<'_, 'r>) -> BatchOutpu
 
 /// Searches one query batch against the subjects, with the query block, lookup table and
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
-/// `run_in_pool` reads.
+/// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
+/// megablast table is built on and goes back to (`lookup::x_mb_lut_keep`).
 fn search_query_batch(
     args: &BlastnArgs,
     query_records: &[FastaRecord],
@@ -8815,6 +8827,7 @@ fn search_query_batch(
     batching: QueryBatching,
     first_batch: bool,
     stage: BatchStage<'_>,
+    x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
 ) -> Result<QueryBatch> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
@@ -9810,6 +9823,7 @@ fn search_query_batch(
             parallel_pool,
             batching,
             first_batch,
+            x_keep,
         )?,
         _ => None,
     };
@@ -9857,6 +9871,7 @@ fn search_query_batch(
             subjects_for_lookup,
             subject_packed_cache_ref,
             approx_table_entries,
+            x_keep,
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
         tables
@@ -10803,6 +10818,13 @@ fn search_query_batch(
                             timing: timing_ref,
                         },
                         diag_hash,
+                        x_pair_seed::DiagArray {
+                            levels: &mut *hit_level_array,
+                            lens: &mut *hit_len_array,
+                            length: diag_table_length as isize,
+                            mask: diag_table_mask,
+                            size: diag_array_size,
+                        },
                         ungapped_hits,
                         &mut subject_scratch.x_pair_fold,
                     ) {
@@ -13272,9 +13294,16 @@ fn search_query_batch(
             // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
             // compare equal keep the order in which they were saved. `sort_by`
             // is stable too.
-            // Dispatch point of LOSAT_X_PAIRPARSHADOW: the hit list and the diagonal hash of
-            // the code above against those `x_pair_seed::run` computed for this chunk.
-            x_pair_seed::shadow_check(ungapped_hits, &subject_scratch.diag_hash);
+            // Dispatch point of LOSAT_X_PAIRPARSHADOW (and of the dc shadows,
+            // LOSAT_X_PAIRPARDISCSHADOW and LOSAT_X_PAIRPARDISCARRSHADOW): the hit list and the
+            // diagonal hash (or array) of the code above against those `x_pair_seed::run`
+            // computed for this chunk.
+            x_pair_seed::shadow_check(
+                ungapped_hits,
+                &subject_scratch.diag_hash,
+                &subject_scratch.hit_level_array,
+                &subject_scratch.hit_len_array,
+            );
             // EXPERIMENT (LOSAT_X_QGROUPPAR): with the stage run per query, each query's hits are
             // taken in the order saved above and sorted by the task (the comparator and the sort
             // are those below, so each query's hits come in the relative order the batch's sort
@@ -16758,6 +16787,7 @@ fn search_query_chunks(
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     batching: QueryBatching,
     first_batch: bool,
+    x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
 ) -> Result<Option<PrelimHitLists>> {
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
     // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it
@@ -16815,6 +16845,7 @@ fn search_query_chunks(
                 query_masks: &part_masks,
                 batch_eff_searchsp,
             },
+            x_keep,
         )?;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:174-178
         // ```c

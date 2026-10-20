@@ -1023,13 +1023,13 @@ pub(crate) fn write_tabular_row<W: Write>(
     )
 }
 
-/// The TBLASTX output formats (`-outfmt` 0, 6, 7, 8 and 12, `tblastx_outfmt`).
+/// The TBLASTX output formats (`-outfmt` 0, 6, 7, 8, 9 and 12, `tblastx_outfmt`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TblastxOutputFormat {
     Pairwise,
     Tabular,
     TabularWithComments,
-    /// A Seq-annot of Seq-aligns (outfmt 8, 12).
+    /// A Seq-annot of Seq-aligns (outfmt 8, 9, 12).
     Seqalign(crate::report::serial::SerialFormat),
 }
 
@@ -1053,6 +1053,7 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
         Ok(0) => TblastxOutputFormat::Pairwise,
         Ok(7) => TblastxOutputFormat::TabularWithComments,
         Ok(8) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnText),
+        Ok(9) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnBinary),
         Ok(12) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::Json),
         _ => TblastxOutputFormat::Tabular,
     }

@@ -1000,14 +1000,15 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "10", None, UNSUPPORTED),
         (ALL, "18", None, UNSUPPORTED),
         (ALL, "20", None, UNSUPPORTED),
-        // Line OF track S (structured formats): 8 and 12 in every program (OF3b), NCBI
-        // dropping a custom specification (blast_args.cpp:2844-2851); the others not yet.
+        // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c),
+        // NCBI dropping a custom specification (blast_args.cpp:2844-2851); the others not yet.
         (ALL, "8", None, Writes(AsnText)),
         (ALL, "12", None, Writes(JsonSeqalign)),
         (ALL, " 8 std", None, Writes(AsnText)),
         (ALL, "12 delim=,", None, Writes(JsonSeqalign)),
         (ALL, "5", None, UNSUPPORTED),
-        (ALL, "9", None, UNSUPPORTED),
+        (ALL, "9", None, Writes(AsnBinary)),
+        (ALL, " 9 std", None, Writes(AsnBinary)),
         (ALL, "11", None, UNSUPPORTED),
         (ALL, "13", Some("o.json"), UNSUPPORTED),
         (ALL, "14", Some("o.xml"), UNSUPPORTED),

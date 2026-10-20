@@ -22,7 +22,7 @@ use LOSAT::api::local_blast::{run_local_tblastx, FormatOutput, OutputSink, Repor
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 5] = ["0", "6", "7", "8", "12"];
+const FORMATS: [&str; 6] = ["0", "6", "7", "8", "9", "12"];
 
 /// Two queries against three subjects cut from two genomes; the first query overlaps
 /// two subjects.
@@ -709,12 +709,12 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
     //         ERR_POST(Warning << results.GetWarningStrings());
     //     }
     // ```
-    // The warnings go with the first format (outfmt 0 here); outfmt 8 and 12 write no query
+    // The warnings go with the first format (outfmt 0 here); outfmt 8, 9 and 12 write no query
     // result warnings, so their CLI runs equal `run_local` with that format alone.
     for (index, outfmt) in FORMATS.into_iter().enumerate() {
         let (cli_output, cli_stderr) = inputs.cli(outfmt, &[]);
         assert!(run.outputs[index] == cli_output, "outfmt {outfmt}");
-        if matches!(outfmt, "8" | "12") {
+        if matches!(outfmt, "8" | "9" | "12") {
             let alone = inputs.run(&[outfmt], &[], false);
             assert_eq!(
                 String::from_utf8_lossy(&alone.diagnostics),

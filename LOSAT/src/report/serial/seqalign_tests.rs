@@ -1,17 +1,17 @@
-//! The ASN.1 text (outfmt 8) and JSON (outfmt 12) documents of `write_query` against NCBI
+//! The ASN.1 text (outfmt 8), binary (outfmt 9) and JSON (outfmt 12) documents of `write_query` against NCBI
 //! BLAST+ 2.17.0's own output for the same HSPs, byte for byte.
 //!
 //! The expected files in `tests/fixtures/seqalign/` are NCBI's output, unchanged
 //! (outfmt-20261019 `ncbi-samples/out/` and the OF3 design probes `S/tmp/probes/`):
-//! - `blastn-megablast_subject_fmt{8,12}.out`: `blastn -task megablast -query fixture/qnucl.fa
-//!   -subject fixture/snucl.fa -num_threads 1 -outfmt 8|12` (one plus-strand and one
+//! - `blastn-megablast_subject_fmt{8,9,12}.out`: `blastn -task megablast -query fixture/qnucl.fa
+//!   -subject fixture/snucl.fa -num_threads 1 -outfmt 8|9|12` (one plus-strand and one
 //!   minus-strand HSP with gaps on both rows; e-value below 1e-180 written as it is here,
 //!   the second query has no hits).
-//! - `blastp_db_fmt{8,12}.out`: `blastp -query fixture/qprot.fa -db db/sprot -num_threads 1
-//!   -outfmt 8|12` (two documents, BL_ORD_ID subjects, composition adjustment, positives).
-//! - `blastp_subject_fmt{8,12}.out`: the same with `-subject fixture/sprot.fa` (local subject
+//! - `blastp_db_fmt{8,9,12}.out`: `blastp -query fixture/qprot.fa -db db/sprot -num_threads 1
+//!   -outfmt 8|9|12` (two documents, BL_ORD_ID subjects, composition adjustment, positives).
+//! - `blastp_subject_fmt{8,9,12}.out`: the same with `-subject fixture/sprot.fa` (local subject
 //!   IDs, the strands of the subject remap).
-//! - `blastp_dblong_fmt{8,12}.out`, `blastp_dbnosp_fmt{8,12}.out`: the same search against the
+//! - `blastp_dblong_fmt{8,9,12}.out`, `blastp_dbnosp_fmt{8,9,12}.out`: the same search against the
 //!   same sequences in databases made with a long `-title` (with spaces and quotes: the
 //!   ASN.1 text wraps at a space; without spaces: a hard break at column 78).
 //!
@@ -285,6 +285,10 @@ fn blastn_megablast_subject_documents_equal_ncbi() {
         fixture!("blastn-megablast_subject_fmt8.out"),
     );
     assert_same_bytes(
+        &megablast_documents(SerialFormat::AsnBinary),
+        fixture!("blastn-megablast_subject_fmt9.out"),
+    );
+    assert_same_bytes(
         &megablast_documents(SerialFormat::Json),
         fixture!("blastn-megablast_subject_fmt12.out"),
     );
@@ -295,6 +299,10 @@ fn blastp_db_documents_equal_ncbi() {
     assert_same_bytes(
         &blastp_db_documents(SerialFormat::AsnText, b"fixture/sprot.fa"),
         fixture!("blastp_db_fmt8.out"),
+    );
+    assert_same_bytes(
+        &blastp_db_documents(SerialFormat::AsnBinary, b"fixture/sprot.fa"),
+        fixture!("blastp_db_fmt9.out"),
     );
     assert_same_bytes(
         &blastp_db_documents(SerialFormat::Json, b"fixture/sprot.fa"),
@@ -309,6 +317,10 @@ fn blastp_subject_documents_equal_ncbi() {
     assert_same_bytes(
         &blastp_documents(SerialFormat::AsnText, None),
         fixture!("blastp_subject_fmt8.out"),
+    );
+    assert_same_bytes(
+        &blastp_documents(SerialFormat::AsnBinary, None),
+        fixture!("blastp_subject_fmt9.out"),
     );
     assert_same_bytes(
         &blastp_documents(SerialFormat::Json, None),
@@ -326,6 +338,10 @@ fn long_database_title_wraps_at_a_space() {
         fixture!("blastp_dblong_fmt8.out"),
     );
     assert_same_bytes(
+        &blastp_db_documents(SerialFormat::AsnBinary, title),
+        fixture!("blastp_dblong_fmt9.out"),
+    );
+    assert_same_bytes(
         &blastp_db_documents(SerialFormat::Json, title),
         fixture!("blastp_dblong_fmt12.out"),
     );
@@ -338,6 +354,10 @@ fn long_database_title_without_spaces_breaks_at_column_78() {
     assert_same_bytes(
         &blastp_db_documents(SerialFormat::AsnText, title),
         fixture!("blastp_dbnosp_fmt8.out"),
+    );
+    assert_same_bytes(
+        &blastp_db_documents(SerialFormat::AsnBinary, title),
+        fixture!("blastp_dbnosp_fmt9.out"),
     );
     assert_same_bytes(
         &blastp_db_documents(SerialFormat::Json, title),
@@ -406,7 +426,11 @@ fn score_zero_hsps_write_nothing() {
     let ops = [Sub(10)];
     let zero = hsp(0, (0, 0), (1, 1), 0, 1.0, 1.0, (10, 0, 0), &ops);
     let mut buf = b"kept".to_vec();
-    for format in [SerialFormat::AsnText, SerialFormat::Json] {
+    for format in [
+        SerialFormat::AsnText,
+        SerialFormat::AsnBinary,
+        SerialFormat::Json,
+    ] {
         assert_eq!(
             write_query(
                 format,
@@ -488,12 +512,16 @@ fn integers_are_decimal() {
 }
 
 /// LOSAT's refusals of a database for the Seq-annot formats (`check_database`): a database
-/// named `n/a` or `SRA` (any case), and for the ASN.1 text a title byte outside 0x20..0x7E.
+/// named `n/a` or `SRA` (any case), and for the ASN.1 text and binary a title byte outside 0x20..0x7E.
 #[test]
 fn databases_that_ncbi_describes_otherwise_are_refused() {
     use super::seqalign::check_database;
     for name in ["n/a", "N/A", "sra", "SRA"] {
-        for format in [SerialFormat::AsnText, SerialFormat::Json] {
+        for format in [
+            SerialFormat::AsnText,
+            SerialFormat::AsnBinary,
+            SerialFormat::Json,
+        ] {
             let error = check_database(format, name, b"title", Program::Blastn).unwrap_err();
             assert!(
                 error
@@ -505,6 +533,21 @@ fn databases_that_ncbi_describes_otherwise_are_refused() {
     }
     assert!(check_database(SerialFormat::AsnText, "db/x", b"a\tb", Program::Blastp).is_err());
     assert!(check_database(SerialFormat::AsnText, "db/x", b"\xc3\xa9", Program::Blastp).is_err());
+    assert!(check_database(SerialFormat::AsnBinary, "db/x", b"a\tb", Program::Blastp).is_err());
+    assert!(check_database(
+        SerialFormat::AsnBinary,
+        "db/x",
+        b"\xc3\xa9",
+        Program::Blastp
+    )
+    .is_err());
+    assert!(check_database(
+        SerialFormat::AsnBinary,
+        "db/x",
+        b"plain title",
+        Program::Blastp
+    )
+    .is_ok());
     for title in [&b"a\tb"[..], b"\xc3\xa9", b"plain title"] {
         assert!(check_database(SerialFormat::Json, "db/x", title, Program::Blastp).is_ok());
     }

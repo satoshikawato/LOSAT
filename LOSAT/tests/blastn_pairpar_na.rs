@@ -14,7 +14,7 @@
 //! (`tests/blastn_regression_fixtures.py`).
 //!
 //! The input is one subject (the stage takes a search of one subject by the owner of a pool of
-//! two threads or more) and 820 short queries cut from it, 19,850 letters (the stage takes the
+//! two threads or more) and 820 short queries cut from it, 19,673 letters (the stage takes the
 //! diagonal hash only, a query block longer than 8000 letters): 24-mers on both strands,
 //! queries of 18 to 30 letters, and queries with a low-complexity half that DUST masks (so
 //! `s_TypeOfWord` checks the masks).
@@ -87,7 +87,7 @@ fn query_file(name: &str, count: usize, length: impl Fn(usize) -> usize) -> Path
     file
 }
 
-/// 600 24-mers, then 200 queries of 18 to 30 letters, then 20 more 24-mers (19,850 letters).
+/// 600 24-mers, then 200 queries of 18 to 30 letters, then 20 more 24-mers (19,673 letters).
 fn queries() -> &'static PathBuf {
     static FILE: OnceLock<PathBuf> = OnceLock::new();
     FILE.get_or_init(|| {

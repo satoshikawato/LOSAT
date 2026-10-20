@@ -1,22 +1,25 @@
-//! A `-subject` search with fewer 5 Mb work units than threads, and a subject batch of fewer chunks
-//! than threads, searched one at a time on the whole pool (`LOSAT_X_BNFEWSUBJ`,
+//! A `-subject` search whose longest 5 Mb work unit is a large part of its letters, and a subject
+//! batch whose longest chunk is, searched one at a time on the whole pool (`LOSAT_X_BNFEWSUBJ`,
 //! `src/algorithm/blastn/blast_engine/x_few_subj.rs`), on whole searches.
 //!
 //! The switch is in the strict set (on unless it is `0`). It chooses between two LOSAT shapes of the
 //! search with the same result: the subjects (or the chunks of a batch) one at a time, each with the
-//! subject scan in strips (`LOSAT_X_PAIRPAR`, `LOSAT_X_PAIRPARDISC`), or the subjects (the chunks) as
+//! subject scan in strips (`LOSAT_X_PAIRPAR`, `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARDISCARR`), or the
+//! subjects (the chunks) as
 //! tasks of the pool without strips. So the property under test is that the report does not depend
 //! on it or on the thread count: the search with the switch at 2, 3 and 4 threads gives the bytes
 //! of the search at one thread and of the search without it, and the shadows of the strips
 //! (`LOSAT_X_PAIRPARSHADOW`, `LOSAT_X_PAIRPARDISCSHADOW`, which compute the stage on copies and
 //! compare the hit list and the whole diagonal hash with the reference code for every chunk) give
 //! them too and compare the chunks. With `LOSAT_TIMING` the strips report how many chunks they
-//! took, which shows which shape ran: the rule needs fewer units than threads (two subjects of one
-//! unit each: 3 threads or more), and no lowercase mask with `-lcase_masking`. That those bytes
+//! took, which shows which shape ran: the rule needs the longest unit's letters times the strips'
+//! speed-up at the thread count to be more than all the letters (two subjects of about 300 kb each:
+//! 4 threads or more; a record of 5.2 Mb, whose second chunk is short: 2 threads or more), and no
+//! lowercase mask with `-lcase_masking`. That those bytes
 //! equal NCBI's is the business of the fixtures (`tests/blastn_regression_fixtures.py`).
 //!
-//! The query is LC738874 (287 kb, longer than 8000 letters: the strips take the diagonal hash
-//! only). The subjects are LC738868 and LC738869 (two records), and one record of 5.2 Mb (LC738868,
+//! The query is LC738874 (287 kb, longer than 8000 letters: the strips take the diagonal hash),
+//! and 3,000 letters of it for the diagonal array. The subjects are LC738868 and LC738869 (two records), and one record of 5.2 Mb (LC738868,
 //! pseudo-random bases, LC738869, pseudo-random bases: two chunks of `MAX_DBSEQ_LEN`), written per
 //! call.
 
@@ -149,12 +152,13 @@ fn blastn_query(
     (output.stdout, stderr)
 }
 
-/// The chunks the strips took (`chunks=` of `[TIMING] x_pairpar_seed:` plus that of
-/// `[TIMING] x_pairpardisc_seed:`) in `stderr`.
+/// The chunks the strips took (`chunks=` of `[TIMING] x_pairpar_seed:` plus those of
+/// `[TIMING] x_pairpardisc_seed:` and `[TIMING] x_pairpardiscarr_seed:`) in `stderr`.
 fn strip_chunks(stderr: &str) -> u64 {
     [
         "[TIMING] x_pairpar_seed: chunks=",
         "[TIMING] x_pairpardisc_seed: chunks=",
+        "[TIMING] x_pairpardiscarr_seed: chunks=",
     ]
     .iter()
     .map(|prefix| {
@@ -243,14 +247,15 @@ fn check(subject: &Path, task: &str, threads_and_strips: &[(u32, bool)]) {
     assert_eq!(merges, chunks, "{task}: {stderr}");
 }
 
-// Two subjects of one unit each: the subjects one at a time from 3 threads on (fewer units than
-// threads); at 2 threads (as many units as threads) they stay tasks of the pool.
+// Two subjects of about 300 kb each (the longest unit 306,008 of 606,010 letters): the subjects one
+// at a time from 4 threads on (Ŝ(4) 2.5 for dc-megablast, 2.0 for megablast, 2.9 for blastn); at 2
+// and 3 threads (Ŝ(2) 1.7 and 1.5) they stay tasks of the pool.
 #[test]
 fn two_subjects_dc_megablast() {
     check(
         &two_subjects(),
         "dc-megablast",
-        &[(2, false), (3, true), (4, true)],
+        &[(2, false), (3, false), (4, true)],
     );
 }
 
@@ -259,7 +264,7 @@ fn two_subjects_megablast() {
     check(
         &two_subjects(),
         "megablast",
-        &[(2, false), (3, true), (4, true)],
+        &[(2, false), (3, false), (4, true)],
     );
 }
 
@@ -268,20 +273,21 @@ fn two_subjects_blastn() {
     check(&two_subjects(), "blastn", &[(2, false), (4, true)]);
 }
 
-// One subject of two chunks: the chunks one at a time from 3 threads on (fewer chunks than
-// threads); at 2 threads they stay tasks of the pool.
+// One subject of two chunks, 5 Mb and 0.2 Mb: the chunks one at a time from 2 threads on (the
+// longest chunk 0.96 of the letters).
 #[test]
 fn a_subject_of_two_chunks_dc_megablast() {
-    check(&long_subject(), "dc-megablast", &[(2, false), (4, true)]);
+    check(&long_subject(), "dc-megablast", &[(2, true), (4, true)]);
 }
 
 #[test]
 fn a_subject_of_two_chunks_megablast() {
-    check(&long_subject(), "megablast", &[(3, true)]);
+    check(&long_subject(), "megablast", &[(2, true), (3, true)]);
 }
 
 // With `-lcase_masking` the rule keeps the tasks of the pool (a masked chunk has no strips): no
-// strips with or without lowercase letters, and the one-thread report.
+// strips with or without lowercase letters, and the one-thread report; without the option the same
+// subjects take the shape at 4 threads.
 #[test]
 fn lowercase_masking_keeps_the_subject_tasks() {
     let first = letters("LC738868.fasta");
@@ -297,6 +303,43 @@ fn lowercase_masking_keeps_the_subject_tasks() {
     let (report, stderr) = blastn(&subject, &task_args, 4, &[TIMING]);
     assert!(report == expected, "the report differs at 4 threads");
     assert_eq!(strip_chunks(&stderr), 0, "{stderr}");
+    let (_, stderr) = blastn(&subject, &task_args[..2], 4, &[TIMING]);
+    assert_eq!(strip_chunks(&stderr), 2, "{stderr}");
+}
+
+// A query of at most 8000 letters with both strands has the diagonal array, whose strips are
+// LOSAT_X_PAIRPARDISCARR's: dc-megablast of 3,000 letters of LC738874 against the two subjects at 4
+// threads takes the shape too (one chunk per subject), with the one-thread report, the report
+// without the switch (no strips), and the array stage's shadow on both chunks.
+#[test]
+fn a_short_query_takes_the_shape_with_the_diagonal_array() {
+    let query = subject_file(&[(
+        "piece",
+        letters("LC738874.fasta")[100_000..103_000].to_string(),
+    )]);
+    let subject = two_subjects();
+    let task_args = ["-task", "dc-megablast"];
+    let (expected, _) = blastn_query(&query, &subject, &task_args, 1, &[]);
+    assert!(!expected.is_empty());
+    let (report, stderr) = blastn_query(&query, &subject, &task_args, 4, &[TIMING]);
+    assert!(report == expected, "the report differs at 4 threads");
+    let prefix = "[TIMING] x_pairpardiscarr_seed: chunks=2 ";
+    assert!(
+        stderr.lines().any(|line| line.starts_with(prefix)),
+        "{stderr}"
+    );
+    let (report, stderr) = blastn_query(&query, &subject, &task_args, 4, &[OFF, TIMING]);
+    assert!(report == expected, "the report differs with {OFF:?}");
+    assert_eq!(strip_chunks(&stderr), 0, "{stderr}");
+    let shadow = ("LOSAT_X_PAIRPARDISCARRSHADOW", "1");
+    let (report, stderr) = blastn_query(&query, &subject, &task_args, 4, &[shadow]);
+    assert!(report == expected, "the report differs with the shadow");
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("[X_PAIRPARDISCARRSHADOW] blastn: seed chunks equal=2 ")),
+        "{stderr}"
+    );
 }
 
 // Both shapes in one search: the 5.2 Mb record (two chunks) and LC738869, three units: at 4 threads

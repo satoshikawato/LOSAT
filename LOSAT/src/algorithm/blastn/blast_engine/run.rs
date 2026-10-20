@@ -148,8 +148,8 @@ use crate::utils::dust::MaskedInterval;
 #[path = "x_pair_seed.rs"]
 mod x_pair_seed;
 
-// EXPERIMENT (LOSAT_X_BNFEWSUBJ): a `-subject` search with fewer 5 Mb units than threads searches its
-// subjects, and a batch of fewer chunks than threads its chunks, one at a time on the whole pool, so
+// EXPERIMENT (LOSAT_X_BNFEWSUBJ): a `-subject` search whose longest 5 Mb unit is a large part of its
+// letters searches its subjects, and a batch of chunks the same way its chunks, one at a time on the whole pool, so
 // that the seed stage scans each chunk in strips (`x_pair_seed`).
 #[path = "x_few_subj.rs"]
 mod x_few_subj;
@@ -10113,12 +10113,13 @@ fn search_query_batch(
         gap_x_dropoffs(&context_karlin, config.x_drop_gapped, config.x_drop_final);
     let scan_range = config.scan_range; // For off-diagonal hit detection
     let min_diag_separation = config.min_diag_separation; // For MB_HSP_CLOSE containment check
-                                                          // EXPERIMENT (LOSAT_X_BNFEWSUBJ, x_few_subj.rs): whether the seed stage's strips would take an
-                                                          // unmasked chunk of this `-subject` search that one subject's owner searches on this thread's
-                                                          // pool, and with it whether the search takes the shape of a one-subject search (`use_parallel`
-                                                          // false: the subjects one at a time). A batch split into query chunks has no lookup table
-                                                          // here (its traceback only), so it keeps its shape; each query chunk's call decides for itself.
-                                                          // `-subject` only: a database (`-db`) keeps its shapes (plan v4 line D).
+
+    // EXPERIMENT (LOSAT_X_BNFEWSUBJ, x_few_subj.rs): whether the seed stage's strips would take an
+    // unmasked chunk of this `-subject` search that one subject's owner searches on this thread's
+    // pool, and with it whether the search takes the shape of a one-subject search (`use_parallel`
+    // false: the subjects one at a time). A batch split into query chunks has no lookup table
+    // here (its traceback only), so it keeps its shape; each query chunk's call decides for itself.
+    // `-subject` only: a database (`-db`) keeps its shapes (plan v4 line D).
     let x_strips = x_few_subj::on()
         && subjects.prepared().is_some()
         && x_pair_seed::takes_owner_chunks(
@@ -10129,16 +10130,19 @@ fn search_query_batch(
             !small_na_compressed_query.is_empty(),
             debug_mode || blastn_debug || blastn_trace_enabled || debug_window.is_some(),
         );
+    let x_kind = x_few_subj::Kind::of(
+        two_stage_lookup_ref.is_some_and(|two_stage| two_stage.disc().is_some()),
+        &args.task,
+    );
     let x_serial_subjects = subjects_parallel
         && x_strips
         && !lcase_masking
         && subjects.prepared().is_some_and(|prepared| {
             let letters = prepared.letters();
             x_few_subj::serial_subjects(
-                prepared.records.len(),
-                x_few_subj::units((0..prepared.records.len()).map(|index| letters.len(index))),
+                (0..prepared.records.len()).map(|index| letters.len(index)),
                 num_threads,
-                true,
+                x_kind,
             )
         });
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
@@ -14296,13 +14300,19 @@ fn search_query_batch(
                         // ```
                         // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-500
                         // status = s_GetNextSubjectChunk(subject, &backup, ...);
-                        // EXPERIMENT (LOSAT_X_BNFEWSUBJ): a batch of fewer chunks than threads,
-                        // which this subject's owner searches by itself, searches its chunks in
-                        // order as one-chunk batches do (strips for each chunk), with the
-                        // one-thread loop's statements below.
+                        // EXPERIMENT (LOSAT_X_BNFEWSUBJ): a batch whose longest chunk is a large
+                        // part of its letters (`x_few_subj::serial_chunks`), which this subject's
+                        // owner searches by itself, searches its chunks in order as one-chunk
+                        // batches do (strips for each chunk), with the one-thread loop's
+                        // statements below.
                         let x_serial_chunks = !use_parallel
                             && !subject_masked
-                            && x_few_subj::serial_chunks(chunk_batch.len(), num_threads, x_strips);
+                            && x_strips
+                            && x_few_subj::serial_chunks(
+                                chunk_batch.iter().map(|chunk| chunk.length),
+                                num_threads,
+                                x_kind,
+                            );
                         crate::utils::threading::report_stage(
                             "blastn",
                             "subject_chunks",

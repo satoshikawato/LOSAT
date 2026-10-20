@@ -971,6 +971,7 @@ fn fold_two_hit_r12<const PT: bool, const CNT: bool, const V: u8>(
     out: &mut part::PartOut,
     pos: &[u32],
     c: &mut x_r12_probe::Counts,
+    x_stage: u64,
 ) {
     let two_stage = x.two_stage;
     let lut_word_length = two_stage.lut_word_length();
@@ -993,6 +994,7 @@ fn fold_two_hit_r12<const PT: bool, const CNT: bool, const V: u8>(
     }
     let mut x_prev_ctx = u32::MAX;
     let x_tow = V & 1 != 0 && word_length == lut_word_length;
+    let x_side = (V & 4 != 0).then(|| x_r12_probe::side_for(diag_hash, x_stage));
     for (x_k, seed) in seeds.iter().enumerate() {
         if V & 2 != 0 {
             if let Some(ahead) = seeds.get(x_k + x_r12_probe::PFD) {
@@ -1034,7 +1036,18 @@ fn fold_two_hit_r12<const PT: bool, const CNT: bool, const V: u8>(
         let (last_hit, hit_saved) = {
             // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
             // of a bucket below the bound (the `last_hit` test and the window test).
-            let (level, _hit_len, hit_saved) = if CNT {
+            let (level, _hit_len, hit_saved) = if let Some(side) = x_side {
+                // SAFETY: the side table of this table in this stage; the fold holds the table
+                // (and so its side table) exclusively.
+                unsafe { &*side }.retrieve(
+                    diag_hash,
+                    diag as i32,
+                    &x_lv_seeds,
+                    s_ext_start + diag_offset as usize,
+                    c,
+                    CNT,
+                )
+            } else if CNT {
                 diag_hash.x_r12_ret(
                     diag as i32,
                     x_lv,
@@ -1276,17 +1289,35 @@ fn fold_two_hit_r12<const PT: bool, const CNT: bool, const V: u8>(
             if CNT {
                 diag_hash.x_r12_insert_count(diag as i32, s_off_pos as i32, diag_hash_window, c);
             }
-            part::insert::<PT>(
-                diag_hash,
-                out,
-                x_key,
-                diag as i32,
-                s_end_pos as i32,
-                (s_end_pos - s_off_pos) as i32,
-                false,
-                s_off_pos as i32,
-                diag_hash_window,
-            );
+            if let Some(side) = x_side {
+                // SAFETY: as above.
+                unsafe { &mut *side }.note(diag as i32, s_end_pos as i32, false);
+            }
+            if V & 8 != 0 {
+                part::x_r12_insert_inl::<PT>(
+                    diag_hash,
+                    out,
+                    x_key,
+                    diag as i32,
+                    s_end_pos as i32,
+                    (s_end_pos - s_off_pos) as i32,
+                    false,
+                    s_off_pos as i32,
+                    diag_hash_window,
+                );
+            } else {
+                part::insert::<PT>(
+                    diag_hash,
+                    out,
+                    x_key,
+                    diag as i32,
+                    s_end_pos as i32,
+                    (s_end_pos - s_off_pos) as i32,
+                    false,
+                    s_off_pos as i32,
+                    diag_hash_window,
+                );
+            }
             continue;
         }
 
@@ -1379,21 +1410,43 @@ fn fold_two_hit_r12<const PT: bool, const CNT: bool, const V: u8>(
             if CNT {
                 diag_hash.x_r12_insert_count(diag as i32, s_off_pos as i32, diag_hash_window, c);
             }
-            part::insert::<PT>(
-                diag_hash,
-                out,
-                x_key,
-                diag as i32,
-                s_end_pos as i32,
-                if hit_ready {
-                    0
-                } else {
-                    (s_end_pos - s_off_pos) as i32
-                },
-                hit_ready,
-                s_off_pos as i32,
-                diag_hash_window,
-            );
+            if let Some(side) = x_side {
+                // SAFETY: as above.
+                unsafe { &mut *side }.note(diag as i32, s_end_pos as i32, false);
+            }
+            if V & 8 != 0 {
+                part::x_r12_insert_inl::<PT>(
+                    diag_hash,
+                    out,
+                    x_key,
+                    diag as i32,
+                    s_end_pos as i32,
+                    if hit_ready {
+                        0
+                    } else {
+                        (s_end_pos - s_off_pos) as i32
+                    },
+                    hit_ready,
+                    s_off_pos as i32,
+                    diag_hash_window,
+                );
+            } else {
+                part::insert::<PT>(
+                    diag_hash,
+                    out,
+                    x_key,
+                    diag as i32,
+                    s_end_pos as i32,
+                    if hit_ready {
+                        0
+                    } else {
+                        (s_end_pos - s_off_pos) as i32
+                    },
+                    hit_ready,
+                    s_off_pos as i32,
+                    diag_hash_window,
+                );
+            }
             continue;
         }
 
@@ -1452,17 +1505,35 @@ fn fold_two_hit_r12<const PT: bool, const CNT: bool, const V: u8>(
         if CNT {
             diag_hash.x_r12_insert_count(diag as i32, s_off_pos as i32, diag_hash_window, c);
         }
-        part::insert::<PT>(
-            diag_hash,
-            out,
-            x_key,
-            diag as i32,
-            ungapped_s_end_pos as i32,
-            0,
-            true,
-            s_off_pos as i32,
-            diag_hash_window,
-        );
+        if let Some(side) = x_side {
+            // SAFETY: as above.
+            unsafe { &mut *side }.note(diag as i32, ungapped_s_end_pos as i32, true);
+        }
+        if V & 8 != 0 {
+            part::x_r12_insert_inl::<PT>(
+                diag_hash,
+                out,
+                x_key,
+                diag as i32,
+                ungapped_s_end_pos as i32,
+                0,
+                true,
+                s_off_pos as i32,
+                diag_hash_window,
+            );
+        } else {
+            part::insert::<PT>(
+                diag_hash,
+                out,
+                x_key,
+                diag as i32,
+                ungapped_s_end_pos as i32,
+                0,
+                true,
+                s_off_pos as i32,
+                diag_hash_window,
+            );
+        }
     }
 }
 
@@ -1495,6 +1566,9 @@ fn seed_stage(
     let r12 = x_r12_probe::probe();
     if r12.on() {
         return match (r12.cnt, r12.var()) {
+            (true, 4) => {
+                seed_stage_r12::<true, 4>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
             (true, _) => {
                 seed_stage_r12::<true, 0>(x, disc, threads, hash, hits, timing, timed, fold_part)
             }
@@ -1506,6 +1580,42 @@ fn seed_stage(
             }
             (false, 3) => {
                 seed_stage_r12::<false, 3>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 4) => {
+                seed_stage_r12::<false, 4>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 5) => {
+                seed_stage_r12::<false, 5>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 6) => {
+                seed_stage_r12::<false, 6>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 7) => {
+                seed_stage_r12::<false, 7>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 8) => {
+                seed_stage_r12::<false, 8>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 9) => {
+                seed_stage_r12::<false, 9>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 10) => {
+                seed_stage_r12::<false, 10>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 11) => {
+                seed_stage_r12::<false, 11>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 12) => {
+                seed_stage_r12::<false, 12>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 13) => {
+                seed_stage_r12::<false, 13>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 14) => {
+                seed_stage_r12::<false, 14>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 15) => {
+                seed_stage_r12::<false, 15>(x, disc, threads, hash, hits, timing, timed, fold_part)
             }
             _ => seed_stage_r12::<false, 0>(x, disc, threads, hash, hits, timing, timed, fold_part),
         };
@@ -1632,6 +1742,7 @@ fn seed_stage_r12<const CNT: bool, const V: u8>(
     timed: bool,
     fold_part: Option<part::FoldPart<'_>>,
 ) -> StageStats {
+    let x_stage = x_r12_probe::next_stage();
     let jobs = plan_strips(
         x.subject_seq_ranges,
         x.s_len,
@@ -1686,6 +1797,7 @@ fn seed_stage_r12<const CNT: bool, const V: u8>(
                 out,
                 pos,
                 &mut c,
+                x_stage,
             );
             if CNT {
                 c.flush();
@@ -1739,6 +1851,7 @@ fn seed_stage_r12<const CNT: bool, const V: u8>(
                 &mut part::PartOut::default(),
                 &[],
                 &mut c,
+                x_stage,
             );
             if CNT {
                 c.flush();

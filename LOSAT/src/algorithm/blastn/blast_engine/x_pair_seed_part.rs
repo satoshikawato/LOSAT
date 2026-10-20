@@ -211,6 +211,37 @@ pub(super) fn insert<const PT: bool>(
     }
 }
 
+/// EXPERIMENT (exp/r12-fold, v4-R R12; evidence only): `insert` with the table's insert inlined
+/// (`R12_PROBE=insi`, `x_r12_probe::x_r12_insert_inl`); the same statements.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub(super) fn x_r12_insert_inl<const PT: bool>(
+    hash: &mut DiagHashTable,
+    out: &mut PartOut,
+    key: u64,
+    diag: i32,
+    level: i32,
+    hit_len: i32,
+    hit_saved: bool,
+    s_off: i32,
+    window_size: i32,
+) {
+    if PT {
+        let occupancy = hash.occupancy;
+        hash.x_r12_insert_inl(diag, level, hit_len, hit_saved, s_off, window_size);
+        let bucket = bucket_of_diag(diag);
+        if !out.touched[bucket] {
+            out.touched[bucket] = true;
+            out.dirty.push(bucket as u16);
+        }
+        if hash.occupancy != occupancy {
+            out.appends.push((key, occupancy));
+        }
+    } else {
+        hash.x_r12_insert_inl(diag, level, hit_len, hit_saved, s_off, window_size);
+    }
+}
+
 /// The fold state of one partition (its allocations kept in the subject scratch between
 /// stages; its contents set by `rebuild` at the start of every stage).
 pub(super) struct PartState {

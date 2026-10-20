@@ -174,7 +174,7 @@ struct StripJob {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-fn pool_threads() -> Option<usize> {
+pub(super) fn pool_threads() -> Option<usize> {
     rayon::current_thread_index()?;
     let threads = rayon::current_num_threads();
     (threads > 1).then_some(threads)
@@ -184,8 +184,59 @@ fn pool_threads() -> Option<usize> {
     not(feature = "parallel"),
     all(target_arch = "wasm32", not(feature = "wasm-threads"))
 ))]
-fn pool_threads() -> Option<usize> {
+pub(super) fn pool_threads() -> Option<usize> {
     None
+}
+
+/// No NCBI counterpart (scheduling only): the part of the scope of `run` (`disc`: of
+/// `disc::in_scope`) that does not depend on the chunk: the diagonal hash, one hit for a
+/// contiguous table and two hits for a discontiguous one, `scan_range == 0`, no small-query word
+/// extension, no diagnostics.
+fn chunk_free_scope(
+    disc: bool,
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    small_na_word: bool,
+    diagnostics: bool,
+) -> bool {
+    (if disc {
+        window_size > 0
+    } else {
+        window_size == 0
+    }) && !use_array_indexing
+        && scan_range == 0
+        && !small_na_word
+        && !diagnostics
+}
+
+/// No NCBI counterpart (scheduling only): whether the strips take an unmasked chunk that the owner
+/// of the pool this thread runs in (two threads or more) searches by itself, in a search with these
+/// inputs (the names of `Inputs`; `two_stage`: the search's two-stage table, without which the
+/// stage never runs): `chunk_free_scope` with the switch of the table on (LOSAT_X_PAIRPAR, or
+/// LOSAT_X_PAIRPARDISC for a discontiguous table; not a shadow alone). LOSAT_X_BNFEWSUBJ
+/// (`x_few_subj.rs`) reads it before it gives a search the shape of a one-subject search.
+pub(super) fn takes_owner_chunks(
+    two_stage: Option<&TwoStageLookup>,
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    small_na_word: bool,
+    diagnostics: bool,
+) -> bool {
+    let Some(two_stage) = two_stage else {
+        return false;
+    };
+    let disc = two_stage.disc().is_some();
+    let on = if disc { disc::on() } else { switches().0 };
+    on && chunk_free_scope(
+        disc,
+        use_array_indexing,
+        window_size,
+        scan_range,
+        small_na_word,
+        diagnostics,
+    ) && pool_threads().is_some()
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
@@ -1331,12 +1382,14 @@ pub(super) fn run(
     if shadow {
         STASH.with(|s| s.borrow_mut().take());
     }
-    if x.use_array_indexing
-        || x.window_size != 0
-        || x.scan_range != 0
-        || x.subject_masked
-        || x.small_na_word
-        || x.diagnostics
+    if !chunk_free_scope(
+        false,
+        x.use_array_indexing,
+        x.window_size,
+        x.scan_range,
+        x.small_na_word,
+        x.diagnostics,
+    ) || x.subject_masked
         || !x.one_subject_owner
     {
         return false;

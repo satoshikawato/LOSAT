@@ -82,6 +82,12 @@ fn switches() -> (bool, bool) {
     })
 }
 
+/// No NCBI counterpart: LOSAT_X_PAIRPARDISC itself (not its shadow), for the parent's
+/// `takes_owner_chunks`.
+pub(super) fn on() -> bool {
+    switches().0
+}
+
 /// No NCBI counterpart (scheduling only): strips per thread of a chunk's scan, and strips
 /// per thread that the helpers may scan past the one the owner folds. The owner's fold is
 /// the slower side here (dc-megablast reaches the diagonal hash with most pairs), so the
@@ -108,12 +114,15 @@ static X_WAIT_NS: AtomicU64 = AtomicU64::new(0);
 /// table.
 fn in_scope(x: &Inputs<'_>) -> bool {
     x.two_stage.disc().is_some()
-        && x.window_size > 0
-        && !x.use_array_indexing
-        && x.scan_range == 0
+        && super::chunk_free_scope(
+            true,
+            x.use_array_indexing,
+            x.window_size,
+            x.scan_range,
+            x.small_na_word,
+            x.diagnostics,
+        )
         && !x.subject_masked
-        && !x.small_na_word
-        && !x.diagnostics
         && x.one_subject_owner
 }
 

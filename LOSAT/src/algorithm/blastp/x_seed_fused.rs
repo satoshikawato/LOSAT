@@ -177,6 +177,10 @@ pub(crate) enum XDiagMode {
     /// (full batches) and remmask (the last batch of fewer than eight, as a masked batch).
     #[cfg(target_arch = "x86_64")]
     Avx2DeferR2,
+    /// EXPERIMENT (F2 probe, LOSAT_X_BXDIAG=defer3): [`XDiagMode::Avx2DeferR2`] with the entries of
+    /// a cell's next batch of eight prefetched while the current batch is tested.
+    #[cfg(target_arch = "x86_64")]
+    Avx2DeferR2Pf,
 }
 
 impl XDiagMode {
@@ -191,6 +195,8 @@ impl XDiagMode {
             XDiagMode::Avx2Defer => "avx2-defer",
             #[cfg(target_arch = "x86_64")]
             XDiagMode::Avx2DeferR2 => "avx2-defer-r2",
+            #[cfg(target_arch = "x86_64")]
+            XDiagMode::Avx2DeferR2Pf => "avx2-defer-r2-pf",
         }
     }
 }
@@ -246,6 +252,9 @@ pub(crate) fn x_cell_test(requested: &str) -> XDiagMode {
                 }
                 if requested == "defer2" {
                     return XDiagMode::Avx2DeferR2;
+                }
+                if requested == "defer3" {
+                    return XDiagMode::Avx2DeferR2Pf;
                 }
                 return XDiagMode::Avx2;
             }
@@ -748,7 +757,23 @@ where
             assert!(x_avx2_available(), "the deferred AVX2 batch needs AVX2");
             // SAFETY: the CPU has AVX2 (asserted above).
             unsafe {
-                x_scan_cells_avx2_defer_r2::<BRANCH_FREE, F>(
+                x_scan_cells_avx2_defer_r2::<BRANCH_FREE, false, F>(
+                    lookup,
+                    subject,
+                    subject_length,
+                    table,
+                    test,
+                    candidate,
+                    &mut counts,
+                )
+            }
+        }
+        #[cfg(target_arch = "x86_64")]
+        XDiagMode::Avx2DeferR2Pf => {
+            assert!(x_avx2_available(), "the deferred AVX2 batch needs AVX2");
+            // SAFETY: the CPU has AVX2 (asserted above).
+            unsafe {
+                x_scan_cells_avx2_defer_r2::<BRANCH_FREE, true, F>(
                     lookup,
                     subject,
                     subject_length,
@@ -825,7 +850,7 @@ unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, F>(
 /// The CPU must have AVX2.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-unsafe fn x_scan_cells_avx2_defer_r2<const BRANCH_FREE: bool, F>(
+unsafe fn x_scan_cells_avx2_defer_r2<const BRANCH_FREE: bool, const PF: bool, F>(
     lookup: &BlastAaLookupTable,
     subject: &[u8],
     subject_length: usize,
@@ -840,7 +865,7 @@ unsafe fn x_scan_cells_avx2_defer_r2<const BRANCH_FREE: bool, F>(
     x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
         // SAFETY: the CPU has AVX2 (this function's contract).
         let candidates =
-            unsafe { x_cell_avx2_defer_r2(hits, s, table, test, candidate, &mut buffer) };
+            unsafe { x_cell_avx2_defer_r2::<PF, F>(hits, s, table, test, candidate, &mut buffer) };
         counts.add_cell(hits.len(), candidates);
     });
     X_DEFER_BUFFER.set(buffer);
@@ -1391,7 +1416,7 @@ unsafe fn x_batch_avx2_core(
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
-unsafe fn x_cell_avx2_defer_r2<F>(
+unsafe fn x_cell_avx2_defer_r2<const PF: bool, F>(
     hits: &[i32],
     s: i32,
     table: &mut XDiagTable<'_>,
@@ -1409,12 +1434,25 @@ where
     let out = buffer.as_mut_ptr();
     let mut packed = 0usize;
     let mask = table.mask;
+    let mut next = X_DIAG_LANES;
     for batch in &mut batches {
         let p = batch.as_ptr();
         let query = _mm256_loadu_si256(p.cast());
         let lane_coords: [u32; X_DIAG_LANES] = std::array::from_fn(|i| {
             (std::ptr::read_volatile(p.add(i)).wrapping_sub(s) & mask) as u32
         });
+        if PF {
+            // The entries of the next batch (or of the last, shorter one, its missing lanes
+            // repeating its last hit): a prefetch has no effect on any value.
+            if next < hits.len() {
+                for j in 0..X_DIAG_LANES {
+                    let h = *hits.get_unchecked((next + j).min(hits.len() - 1));
+                    let coord = (h.wrapping_sub(s) & mask) as usize;
+                    _mm_prefetch::<_MM_HINT_T0>(table.entries.as_ptr().add(coord).cast());
+                }
+            }
+            next += X_DIAG_LANES;
+        }
         let lanes = x_batch_avx2_core(query, lane_coords, s, table, test);
         let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
             X_PACK_LANES[lanes as usize].as_ptr().cast(),
@@ -1639,6 +1677,7 @@ mod tests {
             modes.push(XDiagMode::Avx2);
             modes.push(XDiagMode::Avx2Defer);
             modes.push(XDiagMode::Avx2DeferR2);
+            modes.push(XDiagMode::Avx2DeferR2Pf);
         } else {
             eprintln!("no AVX2 on this CPU: the AVX2 batch is not compared");
         }
@@ -1700,7 +1739,22 @@ mod tests {
                     assert!(x_avx2_available());
                     // SAFETY: the CPU has AVX2 (asserted above).
                     counted += unsafe {
-                        x_cell_avx2_defer_r2(
+                        x_cell_avx2_defer_r2::<false, _>(
+                            hits,
+                            *s,
+                            &mut table,
+                            test,
+                            &mut candidate,
+                            &mut buffer,
+                        )
+                    };
+                }
+                #[cfg(target_arch = "x86_64")]
+                XDiagMode::Avx2DeferR2Pf => {
+                    assert!(x_avx2_available());
+                    // SAFETY: the CPU has AVX2 (asserted above).
+                    counted += unsafe {
+                        x_cell_avx2_defer_r2::<true, _>(
                             hits,
                             *s,
                             &mut table,

@@ -97,7 +97,9 @@ use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
     context_ungapped_blocks, gap_x_dropoffs, karlin_error, ContextKarlin,
 };
+use super::super::seqalign::write_blastn_seqalign;
 use crate::blastinput::app::{self as app, Program};
+use crate::report::record::{QueryNames, SubjectNames};
 // EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
 use super::super::x_subject_store::{
     x_blastna_into, x_bnstore, x_read_subject_stores, SubjectLetters,
@@ -5149,6 +5151,9 @@ struct BlastnReportInputs<'a> {
     /// The tabular subject ids of a database search's reported sequences, by rank
     /// (`database::ReportedSubjects::tabular_subject_ids`); `None` for a subject set.
     database_subject_ids: Option<&'a [Arc<[u8]>]>,
+    /// The ordinal ID of each reported sequence of a database search, by rank
+    /// (`database::ReportedSubjects::ordinals`); `None` for a subject set.
+    database_ordinals: Option<&'a [u32]>,
     /// Whether the hit lists were finished after each query batch's traceback (a database
     /// search, `run_in_pool`), not by `post_process_hits_and_write`.
     finished_hit_lists: bool,
@@ -5706,20 +5711,19 @@ fn post_process_hits_and_write(
     // EXPERIMENT (LOSAT_X_RPTSTREAM): a subject set's ids made once for every batch; the
     // switch acts only when no subject's id is refused (`x_rpt_stream::SubjectCache`), so
     // they are the ids made here.
-    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> = if output_formats
-        .iter()
-        .any(|&format| format != BlastnOutputFormat::Pairwise)
-    {
-        match (report.database_subject_ids, report.subject_cache) {
-            (Some(ids), _) => std::borrow::Cow::Borrowed(ids),
-            (None, Some(cache)) => std::borrow::Cow::Borrowed(cache.ids.as_slice()),
-            (None, None) => {
-                std::borrow::Cow::Owned(tabular_subject_ids(&hit_lists, report.subjects.records())?)
+    let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> =
+        if output_formats.iter().any(|format| format.is_tabular()) {
+            match (report.database_subject_ids, report.subject_cache) {
+                (Some(ids), _) => std::borrow::Cow::Borrowed(ids),
+                (None, Some(cache)) => std::borrow::Cow::Borrowed(cache.ids.as_slice()),
+                (None, None) => std::borrow::Cow::Owned(tabular_subject_ids(
+                    &hit_lists,
+                    report.subjects.records(),
+                )?),
             }
-        }
-    } else {
-        std::borrow::Cow::Owned(Vec::new())
-    };
+        } else {
+            std::borrow::Cow::Owned(Vec::new())
+        };
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/showdefline.cpp:497-498
     // ```c++
     //     //get defline
@@ -5784,6 +5788,40 @@ fn post_process_hits_and_write(
                 probe.as_mut(),
                 format_warnings.as_mut(),
                 report.x_pairwise_pool,
+            )?;
+        } else if let BlastnOutputFormat::Seqalign(serial) = output_format {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
+            // ```c++
+            //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
+            //         if (results.HasAlignments()) {
+            //     	    CRef<CSeq_align_set> aln_set (new CSeq_align_set);
+            //             CBlastFormatUtil::PruneSeqalign(*(results.GetSeqAlign()), *aln_set, m_HitlistSize);
+            //             if(m_FormatType == CFormattingArgs::eAsnText)
+            //             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+            //             else
+            //             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+            //         }
+            // ```
+            // The Seq-annot of each query with alignments (`seqalign`).
+            let subjects = match (report.database_ordinals, report.database) {
+                (Some(ordinals), Some(database)) => SubjectNames::Database {
+                    ordinals,
+                    title: &database.definition,
+                },
+                _ => SubjectNames::Records(report.subjects.records()),
+            };
+            write_blastn_seqalign(
+                serial,
+                &hit_lists,
+                &QueryNames {
+                    records: report.queries,
+                    searched_lengths: query_lengths,
+                    placements: &report.ranges.queries.placements,
+                },
+                subjects,
+                report.ranges.subjects.placements,
+                &mut writer,
+                format_warnings.as_mut(),
             )?;
         } else {
             write_output_blastn_hitlists_to_writer(
@@ -6187,6 +6225,18 @@ fn search_cli(
         Some(name) => Some(database::BlastnDatabase::open(name, &settings)?),
         None => None,
     };
+    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // (`report::serial::seqalign::check_database`).
+    if let Some(database) = database.as_ref() {
+        for serial in output_formats.iter().filter_map(|format| format.serial()) {
+            crate::report::serial::seqalign::check_database(
+                serial,
+                database.name(),
+                &database.pairwise_database().definition,
+                Program::Blastn,
+            )?;
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:201-214
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -7943,8 +7993,13 @@ fn run_in_pool(
             // before its preamble (`QueryWarnings`): a query without letters has the message of
             // its set-up (`SetupQueries_OMF`, above), any other invalid query that of its
             // Karlin-Altschul parameters.
+            // A structured format (outfmt 8, 12) writes no result warnings
+            // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
+            let result_warnings = output_formats
+                .first()
+                .is_none_or(|format| format.writes_query_warnings());
             for (index, karlin) in batch.context_karlin.iter().step_by(2).enumerate() {
-                if karlin.is_none() {
+                if karlin.is_none() && result_warnings {
                     let query = &batch_records.searched()[index];
                     let ordinal = query_input.ordinal(start + index);
                     warnings[start + index].extend(if query.seq().is_empty() {
@@ -8599,11 +8654,7 @@ fn write_reports_untimed(
         }
     };
     let database_subject_ids = match &reported {
-        Some(reported)
-            if output_formats
-                .iter()
-                .any(|&format| format != BlastnOutputFormat::Pairwise) =>
-        {
+        Some(reported) if output_formats.iter().any(|format| format.is_tabular()) => {
             Some(reported.tabular_subject_ids()?)
         }
         _ => None,
@@ -8637,6 +8688,9 @@ fn write_reports_untimed(
         db_len_total: subjects.shown.total_letters,
         database: subjects.shown.database.as_ref(),
         database_subject_ids: database_subject_ids.as_deref(),
+        database_ordinals: reported
+            .as_ref()
+            .map(|reported| reported.ordinals.as_slice()),
         finished_hit_lists: reported.is_some(),
         epilog,
         prolog: outputs

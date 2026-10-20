@@ -414,6 +414,20 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         }
         None => None,
     };
+    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // (`report::serial::seqalign::check_database`).
+    if let (Some(database), Some(serial)) = (
+        database.as_ref(),
+        app::ReportFormat::from_number(choice.number)
+            .and_then(crate::report::serial::SerialFormat::of),
+    ) {
+        crate::report::serial::seqalign::check_database(
+            serial,
+            database.name(),
+            &database.pairwise_database().definition,
+            Program::Blastx,
+        )?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
     // ```c++
     // 	char c;
@@ -551,7 +565,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                             stores,
                             results,
                             options.gapped,
-                            options.outfmt != 0,
+                            matches!(options.outfmt, 6 | 7),
                             options.outfmt == 0,
                         );
                         super::x_timing::run(XRun::Titles, x_t);

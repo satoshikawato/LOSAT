@@ -82,7 +82,8 @@ def outfmt0_fixtures() -> list[dict]:
     import run_oracle  # noqa: E402  (the manifest reader and the oracle's arguments)
     searches: dict[tuple, dict] = {}
     for row in run_oracle.read_manifest()[2]:
-        # BLASTX joins LOSAT Web ABI v2 in SX (`losat_web2_describe("blastx")` fails).
+        # BLASTX (best_hsp.blastx and the outfmt 8/12 rows of the manifest) is not a program of ABI v2:
+        # it joins LOSAT Web ABI v2 in SX (`losat_web2_describe("blastx")` fails).
         if row["program"] not in FORMATS:
             continue
         argv = run_oracle.search_argv(row)

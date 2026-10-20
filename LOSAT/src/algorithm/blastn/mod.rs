@@ -45,6 +45,7 @@ pub(crate) mod x_query_dust_par;
 // } BlastHSPList;
 // ```
 pub mod hsp;
+pub(crate) mod seqalign;
 
 pub use args::BlastnArgs;
 pub use blast_engine::run;

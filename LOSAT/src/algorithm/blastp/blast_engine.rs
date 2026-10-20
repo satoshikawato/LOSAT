@@ -2355,10 +2355,49 @@ fn blastp_tabular_fields_require_rendered_alignment(fields: &[BlastpTabularField
     })
 }
 
+/// The report of one requested BLASTP format: one of LOSAT's text reports (outfmt 0, 6 and
+/// 7, with the custom fields of the tabular ones), or the Seq-annot of Seq-aligns of each
+/// query (outfmt 8, 12; `seqalign`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BlastpReport {
+    Text(OutputFormat),
+    Seqalign(crate::report::serial::SerialFormat),
+}
+
+impl BlastpReport {
+    /// Whether NCBI writes a query's result warnings with its report
+    /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
+    fn writes_query_warnings(self) -> bool {
+        matches!(self, BlastpReport::Text(_))
+    }
+
+    /// Whether the report is tabular (outfmt 6 and 7), which reads the tabular subject IDs.
+    fn is_tabular(self) -> bool {
+        matches!(
+            self,
+            BlastpReport::Text(OutputFormat::Tabular | OutputFormat::TabularWithComments)
+        )
+    }
+}
+
+/// The Seq-annot format of a `-outfmt` value (outfmt 8, 12), read as NCBI reads the value
+/// (`app::parse_formatting_string`, which drops a custom specification of these formats);
+/// `None` for the other formats.
+fn blastp_seqalign_format(outfmt: &str) -> Option<crate::report::serial::SerialFormat> {
+    let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
+    crate::report::serial::SerialFormat::of(crate::blastinput::app::ReportFormat::from_number(
+        choice.number,
+    )?)
+}
+
 // NCBI blast_args.cpp:2657-2660; tabular.cpp:1100-1108:
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) { x_PrintField(*iter); }
 // Validate the CLI specification before loading any input sequences.
 pub(crate) fn validate_cli_outfmt(spec: &str) -> Result<String, String> {
+    // outfmt 8 and 12 have no fields (`report_format` has accepted them for BLASTP).
+    if blastp_seqalign_format(spec).is_some() {
+        return Ok(spec.into());
+    }
     let (format, fields) = OutputFormat::parse(spec)?;
     if let Some(fields) = fields {
         if format == OutputFormat::Pairwise {
@@ -3604,22 +3643,38 @@ fn restore_displayed_o(row: Option<String>, sequence: &[u8], start: usize) -> Op
 ///                         ++num_positives;
 ///                     }
 /// ```
+///
+/// The Seq-aligns (outfmt 8, 12) show the engine's counts, NCBI's `num_ident` and
+/// `num_positives` of the search's letters (blast_seqalign.cpp:1199-1222): with
+/// `engine_counts` (`ReportNeeds::seqalign`), the counts of each HSP that the recount
+/// changes are kept there first.
 fn recount_pyrrolysine_identities(
     hit_lists: &mut [Option<BlastpHitList>],
     query_records: &[FastaRecord],
     subject_records: &[FastaRecord],
     matrix: ScoringMatrix,
+    mut engine_counts: Option<&mut super::seqalign::EngineCounts>,
 ) {
     let has_o = |sequence: &[u8]| {
         sequence
             .iter()
             .any(|residue| residue.eq_ignore_ascii_case(&b'O'))
     };
-    for hit_list in hit_lists.iter_mut().flatten() {
+    for (q_idx, hit_list) in hit_lists.iter_mut().enumerate() {
+        let Some(hit_list) = hit_list else {
+            continue;
+        };
         let count = hit_list.hsplist_count.min(hit_list.hsplist_array.len());
-        for hsp in hit_list.hsplist_array[..count]
+        for (list_index, hsp_index, hsp) in hit_list.hsplist_array[..count]
             .iter_mut()
-            .flat_map(|hsp_list| hsp_list.hsps.iter_mut())
+            .enumerate()
+            .flat_map(|(list_index, hsp_list)| {
+                hsp_list
+                    .hsps
+                    .iter_mut()
+                    .enumerate()
+                    .map(move |(hsp_index, hsp)| (list_index, hsp_index, hsp))
+            })
         {
             let (Some(query), Some(subject)) = (
                 query_records.get(hsp.q_idx as usize),
@@ -3678,9 +3733,18 @@ fn recount_pyrrolysine_identities(
                 .chain(subject_row.bytes())
                 .filter(|&b| b == b'-')
                 .count();
-            hsp.num_ident = num_ident;
-            hsp.num_positives =
+            let num_positives =
                 crate::utils::matrix::protein_display_positives(&query_row, &subject_row, matrix);
+            if let Some(saved) = engine_counts.as_deref_mut() {
+                if (num_ident, num_positives) != (hsp.num_ident, hsp.num_positives) {
+                    saved.save(
+                        (q_idx as u32, list_index as u32, hsp_index as u32),
+                        (hsp.num_ident, hsp.num_positives),
+                    );
+                }
+            }
+            hsp.num_ident = num_ident;
+            hsp.num_positives = num_positives;
             hsp.mismatch = hsp.length.saturating_sub(num_ident + gap_letters);
             hsp.identity = if hsp.length > 0 {
                 (num_ident as f64 * 100.0) / hsp.length as f64
@@ -5275,6 +5339,20 @@ fn search_cli(
         Some(name) => Some(database::BlastpDatabase::open(name, &settings)?),
         None => None,
     };
+    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // (`report::serial::seqalign::check_database`).
+    if let (Some(database), Some(serial)) = (
+        database.as_ref(),
+        crate::blastinput::app::ReportFormat::from_number(choice.number)
+            .and_then(crate::report::serial::SerialFormat::of),
+    ) {
+        crate::report::serial::seqalign::check_database(
+            serial,
+            database.name(),
+            &database.pairwise_database().definition,
+            crate::blastinput::app::Program::Blastp,
+        )?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:202-216
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -6459,6 +6537,11 @@ fn write_reports_without_queries(
         .database()
         .map(database::BlastpDatabase::pairwise_database);
     for format in outputs.formats.iter_mut() {
+        // A Seq-annot format writes nothing without a query.
+        if blastp_seqalign_format(format.outfmt).is_some() {
+            format.sink.open()?.flush()?;
+            continue;
+        }
         let (outfmt, _) = OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;
         let mut writer = format.sink.open()?;
         match outfmt {
@@ -7011,7 +7094,10 @@ fn run_resolved_in_pool(
         .formats
         .iter()
         .map(
-            |format| -> Result<(OutputFormat, Option<Vec<BlastpTabularField>>)> {
+            |format| -> Result<(BlastpReport, Option<Vec<BlastpTabularField>>)> {
+                if let Some(serial) = blastp_seqalign_format(format.outfmt) {
+                    return Ok((BlastpReport::Seqalign(serial), None));
+                }
                 let (outfmt, custom_fields) =
                     OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;
                 if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
@@ -7021,10 +7107,18 @@ fn run_resolved_in_pool(
                     .as_deref()
                     .map(parse_blastp_tabular_fields)
                     .transpose()?;
-                Ok((outfmt, custom_fields))
+                Ok((BlastpReport::Text(outfmt), custom_fields))
             },
         )
         .collect::<Result<Vec<_>>>()?;
+    // What the requested formats need beyond outfmt 0, 6 and 7, decided once for the search
+    // (`ReportNeeds`): the engine's identities and positives of the HSPs whose counts the
+    // pyrrolysine recount replaces (`EngineCounts`).
+    let needs = crate::report::record::ReportNeeds {
+        seqalign: requested_formats
+            .iter()
+            .any(|(report, _)| matches!(report, BlastpReport::Seqalign(_))),
+    };
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504
     // (`s_ReplaceLocalId`)
@@ -9241,6 +9335,7 @@ fn run_resolved_in_pool(
         evalue: args.evalue,
         build_redo_align_params: &build_redo_align_params,
         timing: timing_enabled,
+        engine_positives: needs.seqalign,
     };
     #[cfg(all(
         feature = "parallel",
@@ -9416,6 +9511,7 @@ fn run_resolved_in_pool(
                                 args.evalue,
                                 kappa_gap_scratch,
                                 &mut kappa_subject_range_cache,
+                                needs.seqalign,
                             )
                             .map(Some)
                         },
@@ -9679,6 +9775,7 @@ fn run_resolved_in_pool(
                                 args.evalue,
                                 &mut kappa_gap_scratch,
                                 &mut kappa_subject_range_cache,
+                                needs.seqalign,
                             );
                             if replayed {
                                 // An error is kept as well: the one-thread loop reports it only
@@ -9940,6 +10037,7 @@ fn run_resolved_in_pool(
                     args.evalue,
                     &mut kappa_gap_scratch,
                     &mut kappa_subject_range_cache,
+                    needs.seqalign,
                 )?;
                 let best_score = postprocessed.best_score;
                 let best_evalue = postprocessed.best_evalue;
@@ -10056,11 +10154,13 @@ fn run_resolved_in_pool(
     for hit_list in hit_lists.iter_mut().flatten() {
         hit_list_to_seqalign_order(hit_list);
     }
+    let mut engine_counts = super::seqalign::EngineCounts::default();
     recount_pyrrolysine_identities(
         &mut hit_lists,
         query_records,
         subject_records,
         args.scoring.matrix,
+        needs.seqalign.then_some(&mut engine_counts),
     );
 
     let subject_name_label = if subject_label.is_empty() {
@@ -10105,13 +10205,10 @@ fn run_resolved_in_pool(
     // Per requested output format: its tabular field list, and whether its tabular rows
     // stream directly from the hit lists (they do unless the fields need the rendered
     // alignment). Only the reporting depends on the format; the search above does not.
-    let format_plans: Vec<(OutputFormat, Option<&[BlastpTabularField]>, bool)> = requested_formats
+    let format_plans: Vec<(BlastpReport, Option<&[BlastpTabularField]>, bool)> = requested_formats
         .iter()
         .map(|(outfmt, custom_fields)| {
-            let tabular_fields: Option<&[BlastpTabularField]> = if matches!(
-                outfmt,
-                OutputFormat::Tabular | OutputFormat::TabularWithComments
-            ) {
+            let tabular_fields: Option<&[BlastpTabularField]> = if outfmt.is_tabular() {
                 Some(if let Some(fields) = custom_fields.as_ref() {
                     fields.as_slice()
                 } else {
@@ -10120,7 +10217,7 @@ fn run_resolved_in_pool(
             } else {
                 None
             };
-            let render_alignment = matches!(outfmt, OutputFormat::Pairwise)
+            let render_alignment = matches!(outfmt, BlastpReport::Text(OutputFormat::Pairwise))
                 || tabular_fields.is_some_and(blastp_tabular_fields_require_rendered_alignment);
             // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1100-1108
             // ```c
@@ -10131,10 +10228,7 @@ fn run_resolved_in_pool(
             //     x_PrintField(*iter);
             // }
             // ```
-            let stream_tabular_hit_lists = matches!(
-                outfmt,
-                OutputFormat::Tabular | OutputFormat::TabularWithComments
-            ) && !render_alignment;
+            let stream_tabular_hit_lists = outfmt.is_tabular() && !render_alignment;
             (*outfmt, tabular_fields, stream_tabular_hit_lists)
         })
         .collect();
@@ -10158,7 +10252,9 @@ fn run_resolved_in_pool(
     let needs_pairwise_hits = outputs.hits.is_some()
         || format_plans
             .iter()
-            .any(|(_, _, stream_tabular_hit_lists)| !stream_tabular_hit_lists);
+            .any(|(outfmt, _, stream_tabular_hit_lists)| {
+                matches!(outfmt, BlastpReport::Text(_)) && !stream_tabular_hit_lists
+            });
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_hspstream.c:271-327
     // ```c
     // *hsp_list_out = hit_list->hsplist_array[last_hsplist_index];
@@ -10255,6 +10351,11 @@ fn run_resolved_in_pool(
     // its first query, `read_query_batches`), then the query's own: the O characters read
     // as X, and the message of its set-up (a query without letters) or of its
     // Karlin-Altschul parameters (an invalid query with letters).
+    // A Seq-annot format writes no result warnings (`ReportFormat::writes_query_warnings`);
+    // the warnings go with the first format.
+    let result_warnings = format_plans
+        .first()
+        .is_none_or(|(outfmt, _, _)| outfmt.writes_query_warnings());
     let query_warning_lines: Vec<Vec<u8>> = query_records
         .iter()
         .enumerate()
@@ -10273,12 +10374,14 @@ fn run_resolved_in_pool(
                 .get(q_idx)
                 .cloned()
                 .unwrap_or_default();
-            lines.extend(crate::report::query_warnings::query_warning(
-                "blastp",
-                ranges.x_ordinal_base + ranges.query_input.ordinal(q_idx),
-                record,
-                &messages,
-            ));
+            if result_warnings {
+                lines.extend(crate::report::query_warnings::query_warning(
+                    "blastp",
+                    ranges.x_ordinal_base + ranges.query_input.ordinal(q_idx),
+                    record,
+                    &messages,
+                ));
+            }
             lines
         })
         .collect();
@@ -10292,7 +10395,7 @@ fn run_resolved_in_pool(
     // search's IDs made once for all blocks, with the same check (`x_tabular_subject_ids_cached`).
     let subject_ids: std::borrow::Cow<'_, [Arc<[u8]>]> = if format_plans
         .iter()
-        .any(|(outfmt, _, _)| *outfmt != OutputFormat::Pairwise)
+        .any(|(outfmt, _, _)| outfmt.is_tabular())
     {
         match (listed_titles.as_ref(), x_meta) {
             (Some(titles), _) => titles.tabular_subject_ids(&hit_lists)?.into(),
@@ -10330,7 +10433,50 @@ fn run_resolved_in_pool(
             .map(|observer| FormatProbe::new(observer, format_index));
         let mut warnings = format_warnings.take();
         let format_result: Result<()> = match outfmt {
-            OutputFormat::Pairwise => (|| -> Result<()> {
+            BlastpReport::Seqalign(serial) => (|| -> Result<()> {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
+                // ```c++
+                //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
+                //         if (results.HasAlignments()) {
+                //     	    CRef<CSeq_align_set> aln_set (new CSeq_align_set);
+                //             CBlastFormatUtil::PruneSeqalign(*(results.GetSeqAlign()), *aln_set, m_HitlistSize);
+                //             if(m_FormatType == CFormattingArgs::eAsnText)
+                //             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+                //             else
+                //             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+                //         }
+                // ```
+                // The Seq-annot of each query with alignments (`seqalign`).
+                let mut writer = format.sink.open()?;
+                let subjects = match (listed_subjects.as_ref(), pairwise_database.as_ref()) {
+                    (Some(listed), Some(database)) => {
+                        crate::report::record::SubjectNames::Database {
+                            ordinals: &listed.ordinals,
+                            title: &database.definition,
+                        }
+                    }
+                    _ => crate::report::record::SubjectNames::Records(subject_records),
+                };
+                super::seqalign::write_blastp_seqalign(
+                    serial,
+                    &hit_lists,
+                    &crate::report::record::QueryNames {
+                        records: query_records,
+                        searched_lengths: &query_lengths,
+                        placements: &ranges.query_input.placements,
+                    },
+                    subjects,
+                    ranges.subject_placements,
+                    &engine_counts,
+                    &mut writer,
+                    warnings.as_mut(),
+                )?;
+                // Flushed when written, as the other reports are (a later batch's stop
+                // messages follow it).
+                writer.flush()?;
+                Ok(())
+            })(),
+            BlastpReport::Text(OutputFormat::Pairwise) => (|| -> Result<()> {
                 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
                 // ```c
                 // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
@@ -10434,7 +10580,9 @@ fn run_resolved_in_pool(
                 )?;
                 Ok(())
             })(),
-            OutputFormat::Tabular | OutputFormat::TabularWithComments => (|| -> Result<()> {
+            BlastpReport::Text(
+                outfmt @ (OutputFormat::Tabular | OutputFormat::TabularWithComments),
+            ) => (|| -> Result<()> {
                 let fields =
                     tabular_fields.expect("tabular fields prepared for blastp tabular output");
                 let mut writer = format.sink.open()?;

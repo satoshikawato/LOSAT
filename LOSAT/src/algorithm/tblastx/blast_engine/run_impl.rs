@@ -1060,6 +1060,22 @@ fn search_cli(
         )?),
         None => None,
     };
+    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // (`report::serial::seqalign::check_database`).
+    if let Some(database) = database.as_ref() {
+        for format in &outputs.formats {
+            if let report::TblastxOutputFormat::Seqalign(serial) =
+                report::output_format(format.outfmt)
+            {
+                crate::report::serial::seqalign::check_database(
+                    serial,
+                    database.name(),
+                    &database.pairwise_database().definition,
+                    crate::blastinput::app::Program::Tblastx,
+                )?;
+            }
+        }
+    }
     let source = match &database {
         Some(database) => SubjectSource::Database(database),
         None => SubjectSource::Fasta {
@@ -1182,6 +1198,17 @@ pub(crate) fn run_local_with(
     // NCBI parses -outfmt before its option handlers read the subjects (BLASTN's
     // `run_local`); `search` checks the formats again.
     check_report_formats(outputs)?;
+    // No NCBI counterpart: ABI v1 is frozen (plan TD-1; line OF, outfmt-20261019 DECISIONS
+    // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 12) with the
+    // message that `check_report_formats` gave them before TBLASTX wrote them.
+    if v1.is_some() {
+        for format in &outputs.formats {
+            let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
+            if matches!(number, 8 | 12) {
+                anyhow::bail!("output format {number} is not supported by LOSAT's TBLASTX");
+            }
+        }
+    }
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
     let subject_range =
@@ -1651,23 +1678,71 @@ fn write_tblastx_outputs(
     if run.v1_titles && output_formats.contains(&report::TblastxOutputFormat::Pairwise) {
         check_shown_subject_titles(&hits, run.subjects)?;
     }
-    // EXPERIMENT (LOSAT_X_TBXRPTPAR): the identities over chunks of the list on the pool.
-    match run.x_pool {
-        Some(pool) => crate::algorithm::tblastx::x_rpt_par::set_displayed_identities(
-            pool,
-            &mut hits,
-            run.queries,
-            run.subject_letters,
-            &query_code,
-            &db_code,
-        ),
-        None => report::set_displayed_identities(
-            &mut hits,
-            run.queries,
-            run.subject_letters,
-            &query_code,
-            &db_code,
-        ),
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1199-1220
+    // ```c++
+    //     // Set the identity score
+    //     if (hsp->num_ident >= 0) {
+    //         static const string kNumIdent("num_ident");
+    //         scores.push_back(s_MakeScore(kNumIdent, 0.0, hsp->num_ident, true));
+    //     }
+    //     ...
+    //     if (hsp->num_positives > 0) {
+    //             static const string kNumPositives("num_positives");
+    //             scores.push_back(s_MakeScore(kNumPositives, 0.0, hsp->num_positives, true));
+    //     }
+    // ```
+    // The Seq-aligns (outfmt 8, 12) show the engine's identities and positives
+    // (`report::engine_counts`), read before the display counts replace the identities.
+    let seqalign = output_formats
+        .iter()
+        .any(|format| matches!(format, report::TblastxOutputFormat::Seqalign(_)));
+    let engine_counts = if seqalign {
+        // EXPERIMENT (LOSAT_X_TBXRPTPAR): the counts over chunks of the list on the pool.
+        match run.x_pool {
+            Some(pool) => crate::algorithm::tblastx::x_rpt_par::engine_counts(
+                pool,
+                &hits,
+                run.queries,
+                run.subject_letters,
+                &query_code,
+                &db_code,
+            ),
+            None => report::engine_counts(
+                &hits,
+                run.queries,
+                run.subject_letters,
+                &query_code,
+                &db_code,
+            ),
+        }
+    } else {
+        Vec::new()
+    };
+    // The display counts are read by the outfmt 0, 6 and 7 reports and the caller's hit
+    // records only.
+    if outputs.hits.is_some()
+        || output_formats
+            .iter()
+            .any(|format| !matches!(format, report::TblastxOutputFormat::Seqalign(_)))
+    {
+        // EXPERIMENT (LOSAT_X_TBXRPTPAR): the identities over chunks of the list on the pool.
+        match run.x_pool {
+            Some(pool) => crate::algorithm::tblastx::x_rpt_par::set_displayed_identities(
+                pool,
+                &mut hits,
+                run.queries,
+                run.subject_letters,
+                &query_code,
+                &db_code,
+            ),
+            None => report::set_displayed_identities(
+                &mut hits,
+                run.queries,
+                run.subject_letters,
+                &query_code,
+                &db_code,
+            ),
+        }
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:1411
     // ```c
@@ -1717,10 +1792,7 @@ fn write_tblastx_outputs(
     }
     // Built before any format is written, so that a report that cannot be made fails the
     // run without output (`tabular_subject_ids`).
-    let subject_ids = if output_formats
-        .iter()
-        .any(|&format| format != report::TblastxOutputFormat::Pairwise)
-    {
+    let subject_ids = if output_formats.iter().any(|format| format.is_tabular()) {
         match &run.database {
             Some(database) => database.reported.tabular_subject_ids()?,
             None => tabular_subject_ids(&hits, run.subjects)?,
@@ -1848,6 +1920,43 @@ fn write_tblastx_outputs(
                     warnings.as_mut(),
                     run.x_pairwise_pool,
                 )?;
+            }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
+            // ```c++
+            //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
+            //         if (results.HasAlignments()) {
+            //     	    CRef<CSeq_align_set> aln_set (new CSeq_align_set);
+            //             CBlastFormatUtil::PruneSeqalign(*(results.GetSeqAlign()), *aln_set, m_HitlistSize);
+            //             if(m_FormatType == CFormattingArgs::eAsnText)
+            //             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+            //             else
+            //             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+            //         }
+            // ```
+            // The Seq-annot of each query with alignments.
+            report::TblastxOutputFormat::Seqalign(serial) => {
+                crate::algorithm::tblastx::seqalign::write_tblastx_seqalign(
+                    serial,
+                    &mut writer,
+                    &hits,
+                    &engine_counts,
+                    run.queries,
+                    &run.ranges.input.placements,
+                    &match &run.database {
+                        Some(database) => {
+                            crate::algorithm::tblastx::seqalign::SeqalignSubjects::Database {
+                                ordinals: &database.reported.ordinals,
+                                title: &database.pairwise.definition,
+                            }
+                        }
+                        None => crate::algorithm::tblastx::seqalign::SeqalignSubjects::Records {
+                            records: run.subjects,
+                            placements: run.ranges.subject_placements,
+                        },
+                    },
+                    run.subject_letters,
+                    warnings.as_mut(),
+                )?
             }
             report::TblastxOutputFormat::Tabular
             | report::TblastxOutputFormat::TabularWithComments => match run.x_pool {
@@ -2220,6 +2329,29 @@ fn run_batch_loop(
     let mut done = SearchedBatches::default();
     // The warnings written before each query's report (`QueryWarnings`).
     let mut warnings: Vec<Vec<u8>> = vec![Vec::new(); query_records.len()];
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
+    // ```c++
+    //     if (m_FormatType == CFormattingArgs::eAsnText
+    //       ...
+    //       || m_FormatType == CFormattingArgs::eJsonSeqalign
+    //       || m_FormatType == CFormattingArgs::eSAM)
+    //     {
+    //         x_PrintStructuredReport(results, queries);
+    //         return;
+    //     }
+    //     ...
+    //     if (results.HasWarnings()) {
+    //         ERR_POST(Warning << results.GetWarningStrings());
+    //     }
+    // ```
+    // A structured format (outfmt 8, 12) writes none of a query's own warnings
+    // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
+    let result_warnings = outputs.formats.first().is_none_or(|format| {
+        !matches!(
+            report::output_format(format.outfmt),
+            report::TblastxOutputFormat::Seqalign(_)
+        )
+    });
     // A batch is read from the input records (`input_start..input_end`); its searched
     // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
     // whole records, and a record whose range starts past its end is skipped
@@ -2485,7 +2617,7 @@ fn run_batch_loop(
         // (above); a translated query has no Karlin-Altschul message of its own, and the
         // queries of a batch that is not searched (no valid context) all get the message of
         // the batch.
-        for (offset, query) in batch_queries.iter().enumerate() {
+        for (offset, query) in batch_queries.iter().enumerate().filter(|_| result_warnings) {
             let index = start + offset;
             let mut messages = Vec::new();
             if !batch.searched {

@@ -1,0 +1,175 @@
+//! TBLASTX's Seq-annot of Seq-aligns (outfmt 8, 12): the report records of the final HSP list
+//! (`report::record`), one query at a time, written by `report::serial::write_query`.
+//!
+//! TBLASTX is an ungapped search, so NCBI makes one `diags` Seq-align per subject of a query's
+//! final hit list (`BLASTUngappedHspListToSeqAlign`), one Std-seg per HSP with the HSP's scores,
+//! subject by subject in hit-list order, each subject's HSPs sorted by e-value. The final list
+//! (`report_order`) holds the HSPs in that order, query by query, one run of HSPs per subject
+//! (the order of the tabular rows).
+//!
+//! What NCBI's `BlastHSP` holds, from LOSAT's `TblastxHsp`:
+//! - `query.offset/end`, `query.frame`: `sort_query_offset`, `sort_query_end` (letters of the
+//!   query's frame in the searched letters, end exclusive), `query_frame`;
+//!   `subject.offset/end`, `subject.frame`: `sort_subject_offset`, `sort_subject_end`,
+//!   `subject_frame` (these are not moved by `shift_to_records`, which moves the tabular
+//!   coordinates only);
+//! - `score`, `num`, `evalue`, `bit_score`: `raw_score`, `num`, `e_value` (the sum e-value of
+//!   the linked set), `bit_score`;
+//! - `num_ident`, `num_positives`: the engine's counts (`report::engine_counts`, made before
+//!   `set_displayed_identities` replaces `num_ident` by the display count);
+//! - no composition adjustment, no edit script;
+//! - the lengths of the construction: the searched lengths of the query and the subject
+//!   (with `-query_loc` / `-subject_loc`, of the intervals), whose starts the remaps add.
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1606-1626
+//! ```c++
+//!         GetFilteredRedundantSeqids(*seqinfo_src, hsp_list->oid, seqid_list, subject_id->IsGi());
+//!         // stores a CSeq_align for each matching sequence
+//!         vector<CRef<CSeq_align > > hit_align;
+//!         if (is_gapped) {
+//!                 BLASTHspListToSeqAlign(prog,
+//!                                        hsp_list,
+//!                                        query_id,
+//!                                        subject_id,
+//!                                        query_length,
+//!                                        subj_length,
+//!                                        is_ooframe,
+//!                                        seqid_list,
+//!                                        hit_align);
+//!         } else {
+//!                 BLASTUngappedHspListToSeqAlign(prog,
+//!                                                hsp_list,
+//!                                                query_id,
+//!                                                subject_id,
+//!                                                query_length,
+//!                                                subj_length,
+//!                                                seqid_list,
+//! ```
+
+use std::io::Write;
+
+use anyhow::Result;
+
+use super::blast_engine::TblastxHsp;
+use super::report::SubjectLetters;
+use crate::blastinput::app::Program;
+use crate::blastinput::fasta_reader::FastaRecord;
+use crate::blastinput::seq_range::Placements;
+use crate::report::query_warnings::QueryWarnings;
+use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
+use crate::report::seqid::SeqId;
+use crate::report::serial::{write_query, SerialFormat};
+
+/// The subjects of a TBLASTX search as the Seq-aligns name them: the records of `-subject`
+/// (`Subject_N`) with their `-subject_loc` placements, or a database's reported sequences by
+/// rank (`ordinals`) with the database's title.
+pub(crate) enum SeqalignSubjects<'a> {
+    Records {
+        records: &'a [FastaRecord],
+        placements: &'a Placements,
+    },
+    Database {
+        ordinals: &'a [u32],
+        title: &'a [u8],
+    },
+}
+
+/// Writes the documents of every query to `writer`, each query's warnings before it. `hits`
+/// is the final list in report order and `engine` its engine counts by HSP index
+/// (`report::engine_counts`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_tblastx_seqalign(
+    format: SerialFormat,
+    writer: &mut dyn Write,
+    hits: &[TblastxHsp],
+    engine: &[(u32, u32)],
+    queries: &[FastaRecord],
+    query_placements: &Placements,
+    subjects: &SeqalignSubjects<'_>,
+    subject_letters: SubjectLetters<'_>,
+    mut warnings: Option<&mut QueryWarnings<'_>>,
+) -> Result<()> {
+    let run = RunRecord {
+        program: Program::Tblastx,
+        db_title: match subjects {
+            SeqalignSubjects::Records { .. } => None,
+            SeqalignSubjects::Database { title, .. } => Some(title),
+        },
+        gapped: false,
+    };
+    let mut subject_records: Vec<SubjectRecord<'_>> = Vec::new();
+    let mut hsp_records: Vec<HspRecord<'_>> = Vec::new();
+    let mut buf: Vec<u8> = Vec::new();
+    let mut next = 0usize;
+    for (q_idx, query) in queries.iter().enumerate() {
+        // The query's warnings come before its document (`QueryWarnings`).
+        if let Some(warnings) = warnings.as_deref_mut() {
+            warnings.before_query(q_idx, &mut *writer)?;
+        }
+        subject_records.clear();
+        hsp_records.clear();
+        let start = next;
+        while next < hits.len() && hits[next].hit.q_idx as usize == q_idx {
+            next += 1;
+        }
+        let mut last_subject: Option<u32> = None;
+        for (hsp, &(num_ident, num_positives)) in hits[start..next].iter().zip(&engine[start..next])
+        {
+            let hit = &hsp.hit;
+            if last_subject != Some(hit.s_idx) {
+                last_subject = Some(hit.s_idx);
+                let s_idx = hit.s_idx as usize;
+                subject_records.push(match subjects {
+                    SeqalignSubjects::Records {
+                        records,
+                        placements,
+                    } => SubjectRecord {
+                        id: SeqId::Local(&records[s_idx].local_id),
+                        searched_length: i32::try_from(subject_letters.length(s_idx))?,
+                        offset: i32::try_from(placements.offset(s_idx))?,
+                    },
+                    SeqalignSubjects::Database { ordinals, .. } => SubjectRecord {
+                        id: SeqId::BlOrdId(ordinals[s_idx]),
+                        searched_length: i32::try_from(subject_letters.length(s_idx))?,
+                        offset: 0,
+                    },
+                });
+            }
+            hsp_records.push(HspRecord {
+                subject: subject_records.len() as u32 - 1,
+                q_offset: i32::try_from(hit.sort_query_offset)?,
+                q_end: i32::try_from(hit.sort_query_end)?,
+                s_offset: i32::try_from(hit.sort_subject_offset)?,
+                s_end: i32::try_from(hit.sort_subject_end)?,
+                q_frame: i8::try_from(hit.query_frame)?,
+                s_frame: hsp.subject_frame,
+                score: hit.raw_score,
+                num: hsp.num,
+                evalue: hit.e_value,
+                bit_score: hit.bit_score,
+                num_ident: i32::try_from(num_ident)?,
+                num_positives: i32::try_from(num_positives)?,
+                comp_adjust: 0,
+                ops: &[],
+            });
+        }
+        let query_record = QueryRecord {
+            id: SeqId::Local(&query.local_id),
+            searched_length: i32::try_from(query.seq().len())?,
+            offset: i32::try_from(query_placements.offset(q_idx))?,
+        };
+        buf.clear();
+        if write_query(
+            format,
+            &run,
+            &query_record,
+            &subject_records,
+            &hsp_records,
+            &mut buf,
+        )? {
+            writer.write_all(&buf)?;
+        }
+    }
+    debug_assert_eq!(next, hits.len(), "the final list is in query order");
+    Ok(())
+}

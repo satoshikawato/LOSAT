@@ -1,0 +1,1907 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "tblastn",
+          data int 4
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide slices of two shrimp viruses",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 725
+        },
+        {
+          id str "blast_score",
+          value int 725
+        },
+        {
+          id str "sum_n",
+          value int 2
+        },
+        {
+          id str "sum_e",
+          value real { 510279014872148, 10, -115 }
+        },
+        {
+          id str "bit_score",
+          value real { 283877924820125, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 132
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 176
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 613465608465608, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            int {
+              from 124,
+              to 353,
+              strand unknown,
+              id local str "Query_1"
+            },
+            int {
+              from 1639,
+              to 2328,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 231
+        },
+        {
+          id str "blast_score",
+          value int 231
+        },
+        {
+          id str "sum_n",
+          value int 2
+        },
+        {
+          id str "sum_e",
+          value real { 510279014872148, 10, -115 }
+        },
+        {
+          id str "bit_score",
+          value real { 935893343169526, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 45
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 60
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 19547619047619, 10, -12 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            int {
+              from 55,
+              to 94,
+              strand unknown,
+              id local str "Query_1"
+            },
+            int {
+              from 1242,
+              to 1361,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            empty local str "Query_1",
+            int {
+              from 1362,
+              to 1460,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            int {
+              from 95,
+              to 126,
+              strand unknown,
+              id local str "Query_1"
+            },
+            int {
+              from 1461,
+              to 1556,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 257
+        },
+        {
+          id str "blast_score",
+          value int 257
+        },
+        {
+          id str "e_value",
+          value real { 805546771226063, 10, -41 }
+        },
+        {
+          id str "bit_score",
+          value real { 103604523290804, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 49
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 54
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 150502645502646, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_1",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            int {
+              from 0,
+              to 54,
+              strand unknown,
+              id local str "Query_1"
+            },
+            int {
+              from 932,
+              to 1096,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "tblastn",
+          data int 4
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide slices of two shrimp viruses",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 173
+        },
+        {
+          id str "blast_score",
+          value int 173
+        },
+        {
+          id str "e_value",
+          value real { 108905490737835, 10, -31 }
+        },
+        {
+          id str "bit_score",
+          value real { 712477589137461, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 53
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 63
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 720846994535519, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            int {
+              from 47,
+              to 140,
+              strand unknown,
+              id local str "Query_2"
+            },
+            int {
+              from 7174,
+              to 7455,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            int {
+              from 141,
+              to 143,
+              strand unknown,
+              id local str "Query_2"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            int {
+              from 144,
+              to 157,
+              strand unknown,
+              id local str "Query_2"
+            },
+            int {
+              from 7456,
+              to 7497,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            empty local str "Query_2",
+            int {
+              from 7498,
+              to 7518,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            int {
+              from 158,
+              to 164,
+              strand unknown,
+              id local str "Query_2"
+            },
+            int {
+              from 7519,
+              to 7539,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            int {
+              from 165,
+              to 165,
+              strand unknown,
+              id local str "Query_2"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_2",
+            general {
+              db "BL_ORD_ID",
+              tag id 0
+            }
+          },
+          loc {
+            int {
+              from 166,
+              to 177,
+              strand unknown,
+              id local str "Query_2"
+            },
+            int {
+              from 7540,
+              to 7575,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "tblastn",
+          data int 4
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide slices of two shrimp viruses",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 1982
+        },
+        {
+          id str "blast_score",
+          value int 1982
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 768073791748238, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 403
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 536
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 997264021887825, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 0,
+              to 47,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 2435,
+              to 2578,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            empty local str "Query_3",
+            int {
+              from 2432,
+              to 2434,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 48,
+              to 133,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 2174,
+              to 2431,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 134,
+              to 134,
+              strand unknown,
+              id local str "Query_3"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 135,
+              to 210,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 1946,
+              to 2173,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            empty local str "Query_3",
+            int {
+              from 1940,
+              to 1945,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 211,
+              to 256,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 1802,
+              to 1939,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 257,
+              to 260,
+              strand unknown,
+              id local str "Query_3"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 261,
+              to 264,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 1790,
+              to 1801,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            empty local str "Query_3",
+            int {
+              from 1775,
+              to 1789,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 265,
+              to 385,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 1412,
+              to 1774,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 386,
+              to 387,
+              strand unknown,
+              id local str "Query_3"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 388,
+              to 504,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 1061,
+              to 1411,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 505,
+              to 505,
+              strand unknown,
+              id local str "Query_3"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 506,
+              to 517,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 1025,
+              to 1060,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            empty local str "Query_3",
+            int {
+              from 1019,
+              to 1024,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 518,
+              to 554,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 908,
+              to 1018,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 555,
+              to 555,
+              strand unknown,
+              id local str "Query_3"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 556,
+              to 587,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 812,
+              to 907,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 588,
+              to 588,
+              strand unknown,
+              id local str "Query_3"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 589,
+              to 630,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 686,
+              to 811,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 631,
+              to 631,
+              strand unknown,
+              id local str "Query_3"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 632,
+              to 645,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 644,
+              to 685,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 646,
+              to 646,
+              strand unknown,
+              id local str "Query_3"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_3",
+            general {
+              db "BL_ORD_ID",
+              tag id 1
+            }
+          },
+          loc {
+            int {
+              from 647,
+              to 728,
+              strand unknown,
+              id local str "Query_3"
+            },
+            int {
+              from 398,
+              to 643,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 1
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "tblastn",
+          data int 4
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide slices of two shrimp viruses",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 3338
+        },
+        {
+          id str "blast_score",
+          value int 3338
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 129040441669217, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 639
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 639
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_4",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            int {
+              from 0,
+              to 670,
+              strand unknown,
+              id local str "Query_4"
+            },
+            int {
+              from 384,
+              to 2396,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 193
+        },
+        {
+          id str "blast_score",
+          value int 193
+        },
+        {
+          id str "e_value",
+          value real { 703654661021294, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 789517504320932, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 46
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 49
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 929284649776453, 10, -14 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_4",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            int {
+              from 0,
+              to 4,
+              strand unknown,
+              id local str "Query_4"
+            },
+            int {
+              from 2876,
+              to 2890,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_4",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            int {
+              from 5,
+              to 5,
+              strand unknown,
+              id local str "Query_4"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_4",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            int {
+              from 6,
+              to 29,
+              strand unknown,
+              id local str "Query_4"
+            },
+            int {
+              from 2804,
+              to 2875,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_4",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            empty local str "Query_4",
+            int {
+              from 2783,
+              to 2803,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_4",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            int {
+              from 30,
+              to 40,
+              strand unknown,
+              id local str "Query_4"
+            },
+            int {
+              from 2750,
+              to 2782,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_4",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            int {
+              from 41,
+              to 44,
+              strand unknown,
+              id local str "Query_4"
+            },
+            empty general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          }
+        },
+        {
+          dim 2,
+          ids {
+            local str "Query_4",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            int {
+              from 45,
+              to 58,
+              strand unknown,
+              id local str "Query_4"
+            },
+            int {
+              from 2708,
+              to 2749,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "tblastn",
+          data int 4
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide slices of two shrimp viruses",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 897
+        },
+        {
+          id str "blast_score",
+          value int 897
+        },
+        {
+          id str "e_value",
+          value real { 131565337517134, 10, -128 }
+        },
+        {
+          id str "bit_score",
+          value real { 35013225187791, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 176
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 176
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 92656862745098, 10, -12 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_5",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            int {
+              from 0,
+              to 187,
+              strand unknown,
+              id local str "Query_5"
+            },
+            int {
+              from 3202,
+              to 3765,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "tblastn",
+          data int 4
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide slices of two shrimp viruses",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 2958
+        },
+        {
+          id str "blast_score",
+          value int 2958
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 114402857784358, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 559
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 561
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 783795811518325, 10, -13 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_6",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            int {
+              from 164,
+              to 758,
+              strand unknown,
+              id local str "Query_6"
+            },
+            int {
+              from 7708,
+              to 9492,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 151
+        },
+        {
+          id str "blast_score",
+          value int 151
+        },
+        {
+          id str "e_value",
+          value real { 750913229826715, 10, -27 }
+        },
+        {
+          id str "bit_score",
+          value real { 627733682435643, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 29
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 29
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 599738219895288, 10, -14 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_6",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            int {
+              from 127,
+              to 168,
+              strand unknown,
+              id local str "Query_6"
+            },
+            int {
+              from 7409,
+              to 7534,
+              strand plus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "tblastn",
+          data int 4
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide slices of two shrimp viruses",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 1115
+        },
+        {
+          id str "blast_score",
+          value int 1115
+        },
+        {
+          id str "e_value",
+          value real { 865732664373968, 10, -158 }
+        },
+        {
+          id str "bit_score",
+          value real { 434105759427893, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 212
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 212
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs std {
+        {
+          dim 2,
+          ids {
+            local str "Query_7",
+            general {
+              db "BL_ORD_ID",
+              tag id 2
+            }
+          },
+          loc {
+            int {
+              from 0,
+              to 211,
+              strand unknown,
+              id local str "Query_7"
+            },
+            int {
+              from 17072,
+              to 17707,
+              strand minus,
+              id general {
+                db "BL_ORD_ID",
+                tag id 2
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

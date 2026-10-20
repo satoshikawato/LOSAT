@@ -267,11 +267,13 @@ pub struct HspSink<'a, 'o> {
 }
 
 /// The Dense-seg segments of an edit script as inclusive column ranges (`GetAlnStart` /
-/// `GetAlnStop`); without a script one segment over the row.
+/// `GetAlnStop`); without a script, or with an empty one, one segment over the row (the whole
+/// HSP as one substitution, as OF3's Seq-align writer does for an empty script,
+/// `collect_seq_align_data`: `GapEditScript::Sub(q_end - q_offset)`).
 fn fill_segments(segments: &mut Vec<(usize, usize)>, ops: Option<&[GapEditOp]>, width: usize) {
     segments.clear();
     match ops {
-        Some(ops) => {
+        Some(ops) if !ops.is_empty() => {
             let mut start = 0usize;
             for op in ops {
                 let length = op.num() as usize;
@@ -282,7 +284,7 @@ fn fill_segments(segments: &mut Vec<(usize, usize)>, ops: Option<&[GapEditOp]>, 
                 start += length;
             }
         }
-        None => {
+        _ => {
             if width > 0 {
                 segments.push((0, width - 1));
             }
@@ -338,5 +340,24 @@ impl HspSink<'_, '_> {
         string_member(enc, "midline", 19, &scratch.midline);
         enc.end_sequence();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod segment_tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_edit_script_is_one_segment_like_no_script() {
+        let mut segments = Vec::new();
+        for ops in [None, Some(&[][..])] {
+            fill_segments(&mut segments, ops, 7);
+            assert_eq!(segments, [(0, 6)]);
+        }
+        fill_segments(&mut segments, Some(&[][..]), 0);
+        assert!(segments.is_empty());
+        let ops = [GapEditOp::Sub(3), GapEditOp::Ins(2), GapEditOp::Sub(4)];
+        fill_segments(&mut segments, Some(&ops), 9);
+        assert_eq!(segments, [(0, 2), (3, 4), (5, 8)]);
     }
 }

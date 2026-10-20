@@ -14,7 +14,7 @@ pub mod subjects;
 pub mod writer;
 
 pub use records::{QueryMask, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats};
-pub use subjects::XmlSubjects;
+pub use subjects::{SubjectNameCache, XmlSubjects};
 pub use writer::{BlastXmlWriter, HitSink, HspSink};
 
 /// `BlastOutput_reference` of a Gapped BLAST search (every task but megablast); the

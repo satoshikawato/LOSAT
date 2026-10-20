@@ -7103,9 +7103,6 @@ fn run_resolved_in_pool(
         seqalign: requested_formats
             .iter()
             .any(|(report, _)| matches!(report, BlastpReport::Seqalign(_))),
-        blast_xml: requested_formats
-            .iter()
-            .any(|(report, _)| matches!(report, BlastpReport::Xml)),
     };
 
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:474-504

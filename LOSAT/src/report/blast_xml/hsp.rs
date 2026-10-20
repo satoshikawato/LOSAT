@@ -130,6 +130,9 @@ pub fn mask_query_row(
             ranges.push((start, stop));
         }
     }
+    // NCBI's `std::sort` with `SRangeStartSort` is not stable, so the order of two masks of one
+    // start is unspecified there; this one keeps their order. Harmless for BLASTP (the SEG
+    // masks of a query are merged first, so no two start together).
     ranges.sort_by_key(|&(start, _)| start);
     let mut mask_index = 0;
     for &(seg_start, seg_stop) in segments {
@@ -326,10 +329,11 @@ mod tests {
         // A one-column segment: mask_pos = seg_stop + 1 after the masking, so `break`.
         let segments = [(0, 3), (4, 4), (5, 7)];
         assert_eq!(masked(row, &segments, 0, &[mask(4, 6)]), "ABCDXXXH");
-        // Masks of the same start keep their relative order (a stable sort).
+        // Masks that are given out of order are sorted by their start (`SRangeStartSort`; the
+        // order of equal starts is unspecified in NCBI and not tested here).
         assert_eq!(
-            masked(row, &[(0, 7)], 0, &[mask(1, 2), mask(1, 4)]),
-            "AXXXXFGH"
+            masked(row, &[(0, 7)], 0, &[mask(5, 6), mask(1, 2)]),
+            "AXXDEXXH"
         );
     }
 }

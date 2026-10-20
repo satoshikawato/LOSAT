@@ -10,11 +10,21 @@
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-744
 //! ```c++
-//!     // The XML formatting is done per query
-//!     ...
-//!     CCmdLineBlastXMLReportData report_data(...);
-//!     BlastXML_FormatReport(...)
+//!     } else if (m_FormatType == CFormattingArgs::eXml) {
+//!         CRef<CSearchResults> res(const_cast<CSearchResults*>(&results));
+//!         res->TrimSeqAlign(m_HitlistSize);
+//!         m_AccumulatedResults.push_back(res);
+//!         ...
+//!         	CCmdLineBlastXMLReportData report_data(m_AccumulatedQueries,
+//!                                                    m_AccumulatedResults,
+//!                                                    *m_Options, m_DbName, m_DbIsAA,
+//!                                                    m_QueryGenCode, m_DbGenCode,
+//!                                                    m_IsRemoteSearch);
+//!         	BlastXML_FormatReport(xml_output, &report_data, &m_Outfile,
+//!                                   m_BlastXMLIncremental.GetPointer());
 //! ```
+//! (`PrintOneResultSet` is called once per query's result set, the accumulated lists hold that
+//! one query.)
 
 use std::io::Write;
 
@@ -23,11 +33,13 @@ use anyhow::{bail, Context, Result};
 use super::hsp::BlastpHitList;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    BlastXmlWriter, QueryMask, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats, XmlSubjects,
+    BlastXmlWriter, QueryMask, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
+    XmlSubjects,
 };
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::QueryNames;
+use crate::report::serial::seqalign::seqalign_evalue;
 
 /// What the BLASTP document needs besides the final hit lists.
 pub(crate) struct BlastpXml<'a> {
@@ -80,10 +92,13 @@ pub(crate) fn write_blastp_xml(
         &xml.messages,
         has_hits,
     )?;
+    // The names of the subjects with hits, made once each; a title NCBI cannot write is refused
+    // here, before the first byte.
+    let mut subjects = SubjectNameCache::new(&xml.subjects);
     for hit_list in hit_lists.iter().flatten() {
         for hsp_list in hit_list.hsplist_array.iter().take(hit_list.hsplist_count) {
             if let Some(hsp) = hsp_list.hsps.first() {
-                xml.subjects.names(hsp.s_idx as usize, program)?;
+                subjects.get(hsp.s_idx as usize, program)?;
             }
         }
     }
@@ -118,7 +133,7 @@ pub(crate) fn write_blastp_xml(
                     continue;
                 };
                 let s_idx = first.s_idx as usize;
-                let subject = xml.subjects.names(s_idx, program)?;
+                let subject = subjects.get(s_idx, program)?;
                 let hit = XmlHit {
                     id: &subject.id,
                     def: &subject.def,
@@ -168,18 +183,4 @@ pub(crate) fn write_blastp_xml(
         writer.write_all(&buf)?;
     }
     Ok(())
-}
-
-/// The e-value of the Seq-align: 0 below `SMALLEST_EVALUE`.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1186
-/// ```c++
-///     double evalue = (hsp->evalue < SMALLEST_EVALUE) ? 0.0 : hsp->evalue;
-/// ```
-fn seqalign_evalue(evalue: f64) -> f64 {
-    if evalue < 1.0e-180 {
-        0.0
-    } else {
-        evalue
-    }
 }

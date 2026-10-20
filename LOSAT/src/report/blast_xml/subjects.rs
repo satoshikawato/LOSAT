@@ -72,6 +72,16 @@ impl XmlSubjects<'_> {
         }
     }
 
+    /// The number of subjects that `names` can be asked for.
+    pub fn count(&self) -> usize {
+        match self {
+            XmlSubjects::Records { records, .. } => records.len(),
+            XmlSubjects::Database {
+                ordinals, records, ..
+            } => ordinals.len().min(records.len()),
+        }
+    }
+
     /// `Hit_len` of subject `s_idx`.
     pub fn length(&self, s_idx: usize) -> i32 {
         match self {
@@ -79,5 +89,33 @@ impl XmlSubjects<'_> {
                 length(s_idx) as i32
             }
         }
+    }
+}
+
+/// The names of the subjects of a report, made once per subject (the definition line of a
+/// subject is generated when it first has a hit, not again for each hit or each query that hits
+/// it).
+pub struct SubjectNameCache<'s, 'a> {
+    subjects: &'s XmlSubjects<'a>,
+    names: Vec<Option<SubjectNames>>,
+}
+
+impl<'s, 'a> SubjectNameCache<'s, 'a> {
+    pub fn new(subjects: &'s XmlSubjects<'a>) -> Self {
+        let mut names = Vec::new();
+        names.resize_with(subjects.count(), || None);
+        Self { subjects, names }
+    }
+
+    /// `XmlSubjects::names` of subject `s_idx`, made on first use.
+    pub fn get(&mut self, s_idx: usize, program: &str) -> Result<&SubjectNames> {
+        if self.names.get(s_idx).is_none_or(Option::is_none) {
+            let made = self.subjects.names(s_idx, program)?;
+            *self
+                .names
+                .get_mut(s_idx)
+                .context("HSP of an unknown subject")? = Some(made);
+        }
+        Ok(self.names[s_idx].as_ref().expect("made above"))
     }
 }

@@ -101,6 +101,21 @@ impl SerialFormat {
 /// static const TSeqPos kBlastAlignmentDim = 2;
 /// ```
 const SMALLEST_EVALUE: f64 = 1.0e-180;
+
+/// The e-value of a Seq-align score list: 0 below `SMALLEST_EVALUE` (shared with BLAST XML,
+/// which reads the same Seq-align, `s_SeqAlignSetToXMLHsps`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1186
+/// ```c++
+///     double evalue = (hsp->evalue < SMALLEST_EVALUE) ? 0.0 : hsp->evalue;
+/// ```
+pub(crate) fn seqalign_evalue(evalue: f64) -> f64 {
+    if evalue < SMALLEST_EVALUE {
+        0.0
+    } else {
+        evalue
+    }
+}
 const GAP_VALUE: i32 = -1;
 const BLAST_ALIGNMENT_DIM: i32 = 2;
 
@@ -900,11 +915,7 @@ fn write_score_list<E: Encoder>(enc: &mut E, hsp: &HspRecord<'_>, query_length: 
     if hsp.num > 1 {
         write_score_int(enc, "sum_n", hsp.num);
     }
-    let evalue = if hsp.evalue < SMALLEST_EVALUE {
-        0.0
-    } else {
-        hsp.evalue
-    };
+    let evalue = seqalign_evalue(hsp.evalue);
     if evalue >= 0.0 {
         let score_type = if hsp.num <= 1 { "e_value" } else { "sum_e" };
         write_score_real(enc, score_type, evalue);

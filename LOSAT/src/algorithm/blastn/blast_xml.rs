@@ -28,14 +28,15 @@ use std::io::Write;
 use anyhow::{Context, Result};
 
 use super::hsp::BlastnHitList;
-use super::pairwise::xml_rows;
+use super::pairwise::xml_rows_into;
 use super::x_subject_store::SubjectLetters;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    BlastXmlWriter, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats, XmlSubjects,
+    BlastXmlWriter, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats, XmlSubjects,
 };
 use crate::report::query_warnings::QueryWarnings;
+use crate::report::serial::seqalign::seqalign_evalue;
 
 /// What the BLASTN document needs besides the final hit lists.
 pub(crate) struct BlastnXml<'a> {
@@ -74,13 +75,17 @@ pub(crate) fn write_blastn_xml(
             .is_some_and(|list| list.hsplist_array.iter().any(|list| !list.hsps.is_empty()))
     };
     let texts = names::query_texts(PROGRAM, xml.queries, false, &xml.messages, has_hits)?;
+    // The names of the subjects with hits, made once each; a title NCBI cannot write is refused
+    // here, before the first byte.
+    let mut subjects = SubjectNameCache::new(&xml.subjects);
     for hit_list in hit_lists.iter().flatten() {
         for hsp_list in &hit_list.hsplist_array {
             if let Some(hsp) = hsp_list.hsps.first() {
-                xml.subjects.names(hsp.s_idx as usize, PROGRAM)?;
+                subjects.get(hsp.s_idx as usize, PROGRAM)?;
             }
         }
     }
+    let (mut query_row, mut subject_row): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut document = BlastXmlWriter::new(xml.queries_before);
     let mut buf: Vec<u8> = Vec::new();
     for (q_idx, record) in xml.queries.iter().enumerate() {
@@ -107,7 +112,7 @@ pub(crate) fn write_blastn_xml(
                     continue;
                 };
                 let s_idx = first.s_idx as usize;
-                let subject = xml.subjects.names(s_idx, PROGRAM)?;
+                let subject = subjects.get(s_idx, PROGRAM)?;
                 let hit = XmlHit {
                     id: &subject.id,
                     def: &subject.def,
@@ -116,8 +121,14 @@ pub(crate) fn write_blastn_xml(
                 };
                 sink.hit(&hit, |hsps| {
                     for hsp in &hsp_list.hsps {
-                        let (qrow, srow) = xml_rows(hsp, xml.queries, xml.letters)
-                            .context("BLASTN report rows of a final HSP")?;
+                        xml_rows_into(
+                            hsp,
+                            xml.queries,
+                            xml.letters,
+                            &mut query_row,
+                            &mut subject_row,
+                        )
+                        .context("BLASTN report rows of a final HSP")?;
                         let minus = hsp.query_frame < 0;
                         hsps.hsp(&XmlHsp {
                             score: hsp.raw_score,
@@ -129,8 +140,8 @@ pub(crate) fn write_blastn_xml(
                             hit_to: hsp.s_end as i32,
                             query_frame: 1,
                             hit_frame: if minus { -1 } else { 1 },
-                            qrow: &qrow,
-                            srow: &srow,
+                            qrow: &query_row,
+                            srow: &subject_row,
                             ops: hsp.gap_info.as_deref(),
                             query_first: hsp.q_start as i32 - 1,
                             masks: &[],
@@ -153,14 +164,4 @@ pub(crate) fn write_blastn_xml(
         writer.write_all(&buf)?;
     }
     Ok(())
-}
-
-/// The e-value of the Seq-align: 0 below `SMALLEST_EVALUE`
-/// (api/blast_seqalign.cpp:1186).
-fn seqalign_evalue(evalue: f64) -> f64 {
-    if evalue < 1.0e-180 {
-        0.0
-    } else {
-        evalue
-    }
 }

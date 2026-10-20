@@ -282,6 +282,7 @@ export LOSAT_X_BPQBLOCKFMT=1
 export LOSAT_X_BPREDOFIT=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
+export LOSAT_X_BPREDOWINEXPAND=1
 export LOSAT_X_BPSCANBF=1
 export LOSAT_X_BPSEED=1
 export LOSAT_X_BPSUBJMETA=1
@@ -1242,6 +1243,30 @@ Rebuilding less:
   difference stops the run (panic) after printing the line that is otherwise printed at exit:
   `[X_SHADOW] BPREDOPAR searches= queries= matches_compared= lists_compared= diffs=`. With `LOSAT_TIMING=1`
   the new path's `[TIMING] x_bpredopar:` line is printed as well.
+- `LOSAT_X_BPREDOWINEXPAND=1` (BLASTP, memory; in the strict set from the pull request that added it
+  (perf/bp-redo-window-expand, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is
+  not set; acts only where `LOSAT_X_BPREDOPAR` runs, not in its shadow mode, with the compact lists of
+  `LOSAT_X_BPPCOMPACT`) the redo in windows expands the compact preliminary lists as its windows reach them instead of
+  the lists of all queries before the redo (`blastp/x_redo_par.rs`, `XExpandAhead`). Before each window the lists from
+  the first one not expanded are expanded in query order, by the same `x_expand_hit_list`, until the queries expanded
+  from the window's start hold more jobs than the window's budget (or every list is expanded); a query's jobs are its
+  matches in jobs of up to four, counted from its compact list as from its expansion. A window holds at most its
+  budget and then reads the first match after it, so the window and that match lie within expanded lists (asserted
+  after each window), and the windows, the replay, the matches ended and the lists released are those of the full
+  expansion. The match counts that the early termination bound (`x_end_above`) and the choice of the path read are
+  counted from the compact lists. Where the path does not run after all (one match), every list is expanded before
+  the other paths, as without the switch. The expanded lists held at a time are those of the queries of about one
+  window, and each query's compact list is freed when it is expanded. Shadow: `LOSAT_X_BPREDOWINEXPANDSHADOW=1`
+  (implies the switch) also expands every list first, as without it, and before each window's computation compares
+  the window (its matches, the matches ended before it, its jobs, the first match after it, its jobs at risk) with the
+  one that the full expansion gives, and every list of the window's queries with its full expansion (the hit list's
+  fields, each list's subject, best E-value and HSPs, every field; floating-point values by their bits); the first
+  difference prints the line otherwise printed at exit and panics:
+  `[X_SHADOW] BPREDOWINEXPAND searches= windows= lists= hsps= identical` (`lists`: the query lists compared, a query
+  once per window that holds its matches; `hsps`: their HSPs). The shadow's own expansions count on the
+  `[TIMING] x_bppcompact: expanded_lists=` line too. Evidence 2026-10-20 (v4-D12 s3 probe, workstation): in
+  `blastp -db` UniRef50 q100 at 32 threads the expansion of all 91 lists of the first query batch (194,347 HSPs of
+  168 bytes) added 31 MiB to the main heap before the redo, which ran in 10 windows.
 - `LOSAT_X_BPSEED=1` (BLASTP, speed; in the strict set since 2026-10-14; `=0` turns it off) the two-hit seed
   stage with an amino-acid lookup table
   (`blastp/x_seed_fused.rs`, exactness argument in its header): the subject scan and the diagonal test in one

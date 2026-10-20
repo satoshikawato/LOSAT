@@ -9020,9 +9020,9 @@ fn run_resolved_in_pool(
         );
     }
     // EXPERIMENT (LOSAT_X_BPPCOMPACT): the redo reads the off path's lists. With more than one
-    // thread its parallel paths read the lists of all queries, so all are expanded here; the
-    // one-thread loop below expands each query's list when it reaches it. The shadow mode
-    // compares every list here and redoes the off path's lists.
+    // thread its parallel paths read the lists of all queries, so all are expanded here (but for
+    // LOSAT_X_BPREDOWINEXPAND below); the one-thread loop below expands each query's list when it
+    // reaches it. The shadow mode compares every list here and redoes the off path's lists.
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -9033,7 +9033,23 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_compact_expand_all = false;
-    if x_prelim_compact == XPrelimCompact::Shadow || x_compact_expand_all {
+    // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): where the redo in windows (LOSAT_X_BPREDOPAR) may run,
+    // its windows expand the compact lists as they reach them (`x_redo_par.rs`); where it does not
+    // run, every list is expanded below before the other paths.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    let x_win_expand = x_compact_expand_all
+        && x_prelim_compact == XPrelimCompact::On
+        && super::x_redo_par::x_bp_redo_par() == super::x_redo_par::XRedoPar::On
+        && super::x_redo_par::x_bp_redo_win_expand() != super::x_redo_par::XWinExpand::Off;
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    let x_win_expand = false;
+    if x_prelim_compact == XPrelimCompact::Shadow || (x_compact_expand_all && !x_win_expand) {
         x_finish_compact_lists(
             x_prelim_compact,
             &mut preliminary_hit_lists,
@@ -9353,7 +9369,7 @@ fn run_resolved_in_pool(
             args.num_threads,
             blastp_num_threads,
             subjects.len(),
-            super::x_redo_par::x_matches(&preliminary_hit_lists),
+            super::x_redo_par::x_matches(&preliminary_hit_lists, &x_compact_hit_lists),
             total_db_len,
         );
     #[cfg(all(
@@ -9379,6 +9395,15 @@ fn run_resolved_in_pool(
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let x_redo_par_run = false;
+    // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the other paths read the expanded lists of all queries.
+    if x_win_expand && !x_redo_par_run {
+        x_finish_compact_lists(
+            x_prelim_compact,
+            &mut preliminary_hit_lists,
+            &mut x_compact_hit_lists,
+            &x_split_queries,
+        );
+    }
     // EXPERIMENT (LOSAT_X_BPREDOPARSHADOW): the shadow's reference is the one-thread loop.
     #[cfg(all(
         feature = "parallel",
@@ -9396,11 +9421,13 @@ fn run_resolved_in_pool(
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         ))]
         {
-            // The parallel paths read the expanded lists of all queries (above).
-            debug_assert!(x_compact_hit_lists.iter().all(Option::is_none));
+            // The parallel paths read the expanded lists of all queries (above), or with
+            // LOSAT_X_BPREDOWINEXPAND the windows expand the compact lists as they reach them.
+            debug_assert!(x_win_expand || x_compact_hit_lists.iter().all(Option::is_none));
             let released = super::x_redo_par::x_redo_par_run(
                 &x_redo_par_search,
                 &mut preliminary_hit_lists,
+                x_win_expand.then_some(&mut x_compact_hit_lists[..]),
                 &mut redone_matches,
                 x_prelim_free || x_prelim_compact == XPrelimCompact::On,
             )?;

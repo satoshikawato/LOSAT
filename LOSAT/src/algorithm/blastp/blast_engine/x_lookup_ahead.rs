@@ -4,9 +4,12 @@
 //! start of the next block's own search.
 //!
 //! Without the switch each block's search (`run_resolved_in_pool`) encodes its queries
-//! (`blastp_query_frames`) and builds its table and contexts (`blastp_compressed_lookup`) before it
-//! scans the subjects, and its serial stages (set-up, final traceback, output) and the tail of its
-//! redo windows leave the pool's other threads idle. In the human x yeast blastp-fast job at 16
+//! (`blastp_query_frames`) and builds its table and contexts (`blastp_compressed_lookup` for
+//! blastp-fast, `blastp_aa_lookup` for exact blastp) before it scans the subjects, and its serial
+//! stages (set-up, final traceback, output) and the tail of its redo windows leave the pool's other
+//! threads idle. Exact blastp's table is built on the block's thread alone (11-15 ms per block of
+//! 50,000 letters at 16 threads on the workstation, line R `REPORT_R3.md` §5.2), while the other 15
+//! threads wait. In the human x yeast blastp-fast job at 16
 //! threads (workstation, `LOSAT_X_BPQBLOCK=50000`, with `LOSAT_X_BPLKPFLAT` and
 //! `LOSAT_X_BPSUBJRUN`) the lookup stage took 1.91 s of the 6.88 s, with 1.87 s of idle pool time in
 //! the job (perf-mb-20261014 `logs/split2_report.md`). With the switch on, block i's search starts
@@ -14,26 +17,39 @@
 //! itself built ahead), as one task spawned in a `rayon::in_place_scope` around block i's search
 //! (`XLookupAhead::run_block`); block i + 1's search then takes the values instead of computing them.
 //!
-//! Why the reports do not change: block i + 1's frames, table and contexts are functions of block
-//! i + 1's query records and the search's arguments only. The task computes them by the calls the
+//! Why the reports do not change: block i + 1's frames, table and contexts are functions of block i
+//! + 1's query records and the search's arguments only. The task computes them by the calls the
 //! block's own search makes, with the same inputs: `blastp_query_frames` of the block's records,
-//! and `blastp_compressed_lookup` with the block's batches (`QueryInput::whole` of its records cut by
-//! the search's batch size, as the block loop gives them to `run_resolved_in_pool`) and lengths, and
-//! the same pool (the flat table and the Karlin blocks do not depend on the threads that compute
-//! them, `tblastx/lookup/x_clut_par.rs` and `x_query_blocks.rs`). Nothing of block i reads them, and
-//! they read nothing that block i writes: the only shared state is the block search's spare vectors
-//! of the flat tables, whose values no build reads (`x_clut_par.rs`), and the task uses its own
-//! (the second spare, `x_query_blocks::x_bp_lookup_spares`). No floating-point operation changes
-//! order: each context's Karlin block is the same call on the same letters. The search of block
-//! i + 1 checks that the values are those of its own records (address and count of the slice).
+//! and `blastp_compressed_lookup` with the block's batches (`QueryInput::whole` of its records cut
+//! by the search's batch size, as the block loop gives them to `run_resolved_in_pool`) and lengths,
+//! and the same pool (the flat table and the Karlin blocks do not depend on the threads that
+//! compute them, `tblastx/lookup/x_clut_par.rs` and `x_query_blocks.rs`); for exact blastp the call
+//! of `blastp_aa_lookup` (`blastp_aa_lookup_ahead`: the same threshold, matrix, word length and
+//! `check_ideal`), the in-place builder of `LOSAT_X_BPLUT` on the block search's spare vectors
+//! (`tblastx/lookup/x_lut_direct.rs` `XAaSpares`: cleared and zero-filled to the table's sizes, as
+//! the C `calloc` gives them) with neighbour lists memoised under the same key (each list is a
+//! function of the word, the matrix, the threshold, the word length and the alphabet; a list
+//! memoised by another thread is the list the recursion gives again). It is a leaf task: no rayon
+//! inside, no lock but its spare's, held around a move. Nothing of block i reads them, and they
+//! read nothing that block i writes: the only shared state is the block search's spare vectors,
+//! whose values no build reads (`x_clut_par.rs`; the exact build writes every entry it keeps), and
+//! the task uses its own (the second spare, `x_query_blocks::x_bp_lookup_spares`, or the exact
+//! table's `XAaSpares::x_make_room`), and the exact build's neighbour lists, which only one build
+//! uses at a time. No floating-point operation changes order: each context's Karlin block is the
+//! same call on the same letters. The search of block i + 1 checks that the values are those of its
+//! own records (address and count of the slice).
 //!
-//! Where it acts: the block search of blastp-fast (`CompressedAaLookupTable`), with `-subject` or
-//! `-db` (the block loop and the lookup region are the same; `blast_engine/database.rs` only reads
-//! the subjects), where `LOSAT_X_BPLKPFLAT` acts on the flat table of `LOSAT_X_BPCLUT` (mode 1: a
-//! pool of more than one thread, `x_query_blocks::x_bp_lookup_spare`). Not with exact blastp (its
-//! `AaLookupTable` has no flat table), at one thread, with `LOSAT_X_BPCLUTSHADOW` (whose search uses
-//! the reference builder's table), for the search of all queries, or for the query chunks of a split
-//! batch (each builds its own table inside its block's search). The last block starts no build.
+//! Where it acts: the block search, with `-subject` or `-db` (the block loop and the lookup region
+//! are the same; `blast_engine/database.rs` only reads the subjects), on a pool of more than one
+//! thread: for blastp-fast (`CompressedAaLookupTable`) where `LOSAT_X_BPLKPFLAT` acts on the flat
+//! table of `LOSAT_X_BPCLUT` (mode 1, `x_query_blocks::x_bp_lookup_spare`), not with
+//! `LOSAT_X_BPCLUTSHADOW` (whose search uses the reference builder's table); for exact blastp
+//! (`AaLookupTable`) where its table is built in place (`LOSAT_X_BPLUT` mode 1,
+//! `x_query_blocks::x_bp_aa_spares`), not with `LOSAT_X_BPLUT=0` or `LOSAT_X_BPLUTSHADOW` (the
+//! reference builder) nor with `LOSAT_DIAGNOSTICS` (whose reference builder prints its phases,
+//! which would come earlier). Not at one thread, for the search of all queries, or for the query
+//! chunks of a split batch (each builds its own table inside its block's search). The last block
+//! starts no build.
 //!
 //! Errors and refusals: the task keeps nothing but a table. A build that fails or refuses (its
 //! `Err` is dropped), that the reference builder would make (`TooLarge`), or whose vectors lack the
@@ -53,38 +69,45 @@
 //! a panic cannot be kept: it ends the process when it happens, as a panic of any pool task does
 //! today, possibly before block i's rows are written.
 //!
-//! No deadlock: the task waits for nothing but its own nested parallel passes (the one-latch passes of
-//! the flat table and its Karlin tasks), which wait for nothing else, and block i's search waits for
-//! nothing of the task until the scope ends, after block i's search has returned. A thread that waits
-//! inside block i's nested parallel work may steal and run the task (or one of its passes) to the
-//! end, and a thread that waits inside the task's passes may run one of block i's jobs to the end;
-//! neither waits for the frame it interrupted, so both waits end (memory
-//! `rayon-waiting-helper-deadlock`: the hazard there was a spawned loop that waited for progress made
-//! elsewhere). The scope's owner, the block's thread, runs the task itself if no other thread took it.
-//! The locks the task takes (the spare's, the result's slot) are held only around a move.
+//! No deadlock: the task waits for nothing but its own nested parallel passes (the one-latch passes
+//! of the flat table and its Karlin tasks; the exact build has none), which wait for nothing else,
+//! and block i's search waits for nothing of the task until the scope ends, after block i's search
+//! has returned. A thread that waits inside block i's nested parallel work may steal and run the
+//! task (or one of its passes) to the end, and a thread that waits inside the task's passes may run
+//! one of block i's jobs to the end; neither waits for the frame it interrupted, so both waits end
+//! (memory `rayon-waiting-helper-deadlock`: the hazard there was a spawned loop that waited for
+//! progress made elsewhere). The scope's owner, the block's thread, runs the task itself if no
+//! other thread took it. The locks the task takes (the spare's, the result's slot) are held only
+//! around a move.
 //!
 //! Memory: two tables are alive at once (block i's, which its search scans, and block i + 1's), so
 //! the peak holds one more table's `starts`, `hits` and PV array (at `LOSAT_X_BPQBLOCK=50000` about
-//! 3 MiB + up to 19 MiB), plus block i + 1's query frames and contexts. All of the table's vectors are
-//! allocated by the block search's thread, never by the pool's task (a pool thread's allocations stay
-//! in its own glibc arena, which keeps them resident after they are freed): when block i's table is
-//! ready, that thread makes the second spare hold vectors with the room for the largest table so far
-//! plus a half (`XFlatSpare::x_make_room`: the second spare's own, else those block i - 1 gave back,
-//! else new ones of twice the largest table's hits), and the task's build takes them all
-//! (`XFlatArgs::x_ahead`). A build whose `hits` would not fit gives no values and the block builds
-//! its table itself, on its own thread. Untouched capacity is not resident.
+//! 3 MiB + up to 19 MiB; exact blastp: backbone 0.44 MiB, overflow about 7-8 MiB, PV 3.5 KiB), plus
+//! block i + 1's query frames and contexts. All of the table's vectors are allocated by the block
+//! search's thread, never by the pool's task (a pool thread's allocations stay in its own glibc
+//! arena, which keeps them resident after they are freed): when block i's table is ready, that
+//! thread makes the second spare hold vectors with the room for the largest table so far plus a
+//! half (`XFlatSpare::x_make_room`: the second spare's own, else those block i - 1 gave back, else
+//! new ones of twice the largest table's hits; for exact blastp `XAaSpares::x_make_room`, the same
+//! rule for the overflow entries, and each block's table is given back at the end of its search),
+//! and the task's build takes them all (`XFlatArgs::x_ahead`, `XAaSpares::x_build_ahead`). A build
+//! whose `hits` (overflow) would not fit gives no values and the block builds its table itself, on
+//! its own thread. Untouched capacity is not resident. The exact build's neighbour lists (about
+//! 1.5-1.9 MiB) are the block search's thread's, moved to `XAaSpares` once and used by every build
+//! ahead, so no pool thread keeps a set of its own.
 //!
 //! `LOSAT_X_BPLKPAHEAD` is a switch of the strict set (on by default since 2026-10-17): on unless it is `0`, or
 //! `LOSAT_X_DEFAULT=0` and it is not set.
 //!
-//! `LOSAT_X_BPLKPAHEADSHADOW=1` (shadow mode, implies the switch): each block that takes values built
-//! ahead also builds them inline as without the switch (on the block spare's vectors, which it gives
-//! back) and compares them with the values it takes: the query frames field for field, the flat
-//! tables field for field and slot for slot, and the contexts with their Karlin blocks bit for bit.
-//! The first difference prints the line that is otherwise printed at exit, with `DIFFERENT`, and
-//! stops the run (panic): `[X_SHADOW] BPLKPAHEAD blocks= prebuilt= dropped= compared= identical`
-//! (`blocks`: blocks searched where the switch acts; `prebuilt`: blocks that took values built ahead;
-//! `dropped`: builds ahead that gave no values; `compared`: blocks compared).
+//! `LOSAT_X_BPLKPAHEADSHADOW=1` (shadow mode, implies the switch): each block that takes values
+//! built ahead also builds them inline as without the switch (blastp-fast's on the block spare's
+//! vectors, which it gives back) and compares them with the values it takes: the query frames field
+//! for field, the flat tables field for field and slot for slot (exact blastp's tables every field,
+//! cell by cell), and the contexts with their Karlin blocks bit for bit. The first difference
+//! prints the line that is otherwise printed at exit, with `DIFFERENT`, and stops the run (panic):
+//! `[X_SHADOW] BPLKPAHEAD blocks= prebuilt= dropped= compared= identical` (`blocks`: blocks
+//! searched where the switch acts; `prebuilt`: blocks that took values built ahead; `dropped`:
+//! builds ahead that gave no values; `compared`: blocks compared).
 //!
 //! NCBI reference (598d8ae6): c++/src/app/blast/blastp_app.cpp:257-276
 //! ```c++
@@ -115,14 +138,18 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
-use super::{blastp_compressed_lookup, blastp_query_frames, BlastpRuntimeLookup};
+use super::{
+    blastp_aa_lookup, blastp_aa_lookup_ahead, blastp_compressed_lookup, blastp_query_frames,
+    BlastpRuntimeLookup,
+};
 use crate::algorithm::blastp::args::{BlastpLookupTableType, ResolvedBlastpArgs};
-use crate::algorithm::blastp::x_query_blocks::{x_bp_lookup_spares, XLookupFor};
+use crate::algorithm::blastp::x_query_blocks::{x_bp_aa_spares, x_bp_lookup_spares, XLookupFor};
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_assert_same_flat_tables_as, x_bpclut_mode, XFlatCompressedLookup,
 };
 use crate::algorithm::tblastx::lookup::x_pair_lut::x_assert_same_contexts_as;
 use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::algorithm::tblastx::lookup::{x_assert_same_table_as, x_same_table};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range;
@@ -195,13 +222,13 @@ fn x_key(query_records: &[FastaRecord]) -> (usize, usize) {
     (query_records.as_ptr() as usize, query_records.len())
 }
 
-/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): a block's query frames, flat lookup table and query contexts,
-/// built ahead of its search (`x_build_ahead`).
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): a block's query frames, lookup table (blastp-fast's flat table
+/// or exact blastp's table) and query contexts, built ahead of its search (`x_build_ahead`).
 pub(super) struct XAheadLookup {
     /// The block's query records (`x_key`).
     key: (usize, usize),
     query_frames: Vec<Vec<QueryFrame>>,
-    table: XFlatCompressedLookup,
+    table: BlastpRuntimeLookup,
     contexts: Vec<QueryContext>,
 }
 
@@ -268,9 +295,10 @@ impl XAheadBlock<'_> {
 /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the lookup table and contexts of the lookup region from values
 /// built ahead (`prebuilt`, whose query frames the search took as `query_frames`). In the shadow mode
 /// the values are built again inline, as the search builds them without the switch
-/// (`blastp_query_frames` of `query_records`, `blastp_compressed_lookup` with the search's
-/// `query_batches` and `query_lengths` and the block spare's vectors, given back after), and compared
-/// with the values taken (module header); the first difference stops the run.
+/// (`blastp_query_frames` of `query_records`; blastp-fast: `blastp_compressed_lookup` with the
+/// search's `query_batches` and `query_lengths` and the block spare's vectors, given back after;
+/// exact blastp: `blastp_aa_lookup`), and compared with the values taken (module header); the first
+/// difference stops the run.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn x_use_prebuilt(
     prebuilt: XAheadLookup,
@@ -289,39 +317,60 @@ pub(super) fn x_use_prebuilt(
         if let Some(difference) = x_frames_difference(query_frames, &inline_frames) {
             x_shadow_difference(&difference);
         }
-        let (inline_lookup, inline_contexts) = match blastp_compressed_lookup(
-            args,
-            &inline_frames,
-            query_batches,
-            query_lengths,
-            pool,
-            XLookupFor::Search,
-        ) {
-            Ok(built) => built,
-            Err(error) => x_shadow_difference(&format!(
-                "values were built ahead where the block's own build fails: {error:#}"
-            )),
+        let inline_contexts = match &table {
+            BlastpRuntimeLookup::CompressedFlat(table) => {
+                let (inline_lookup, inline_contexts) = match blastp_compressed_lookup(
+                    args,
+                    &inline_frames,
+                    query_batches,
+                    query_lengths,
+                    pool,
+                    XLookupFor::Search,
+                ) {
+                    Ok(built) => built,
+                    Err(error) => x_shadow_difference(&format!(
+                        "values were built ahead where the block's own build fails: {error:#}"
+                    )),
+                };
+                let BlastpRuntimeLookup::CompressedFlat(inline_table) = inline_lookup else {
+                    x_shadow_difference("the block's own build makes no flat table");
+                };
+                if !x_same_flat_tables(table, &inline_table) {
+                    eprintln!("{}", x_summary_line("DIFFERENT"));
+                    x_assert_same_flat_tables_as("LOSAT_X_BPLKPAHEADSHADOW:", table, &inline_table);
+                    panic!("LOSAT_X_BPLKPAHEADSHADOW: the tables differ");
+                }
+                // The inline table's vectors go back to the block spare, as its search would give
+                // them.
+                if let Some((block, _)) = x_bp_lookup_spares(pool) {
+                    block.give(inline_table);
+                }
+                inline_contexts
+            }
+            BlastpRuntimeLookup::Aa(table) => {
+                let (inline_lookup, inline_contexts) = blastp_aa_lookup(args, &inline_frames);
+                let BlastpRuntimeLookup::Aa(inline_table) = inline_lookup else {
+                    x_shadow_difference("the block's own build makes no exact table");
+                };
+                if !x_same_table(table, &inline_table) {
+                    eprintln!("{}", x_summary_line("DIFFERENT"));
+                    x_assert_same_table_as("LOSAT_X_BPLKPAHEADSHADOW:", table, &inline_table);
+                    panic!("LOSAT_X_BPLKPAHEADSHADOW: the tables differ");
+                }
+                inline_contexts
+            }
+            BlastpRuntimeLookup::Compressed(_) => {
+                x_shadow_difference("values were built ahead with a table it does not build")
+            }
         };
-        let BlastpRuntimeLookup::CompressedFlat(inline_table) = inline_lookup else {
-            x_shadow_difference("the block's own build makes no flat table");
-        };
-        if !x_same_flat_tables(&table, &inline_table) {
-            eprintln!("{}", x_summary_line("DIFFERENT"));
-            x_assert_same_flat_tables_as("LOSAT_X_BPLKPAHEADSHADOW:", &table, &inline_table);
-            panic!("LOSAT_X_BPLKPAHEADSHADOW: the tables differ");
-        }
         if !x_same_contexts(&contexts, &inline_contexts) {
             eprintln!("{}", x_summary_line("DIFFERENT"));
             x_assert_same_contexts_as("LOSAT_X_BPLKPAHEADSHADOW:", &contexts, &inline_contexts);
             panic!("LOSAT_X_BPLKPAHEADSHADOW: the contexts differ");
         }
-        // The inline table's vectors go back to the block spare, as its search would give them.
-        if let Some((block, _)) = x_bp_lookup_spares(pool) {
-            block.give(inline_table);
-        }
         X_COMPARED.fetch_add(1, Ordering::Relaxed);
     }
-    (BlastpRuntimeLookup::CompressedFlat(table), contexts)
+    (table, contexts)
 }
 
 // No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
@@ -462,36 +511,56 @@ fn x_run_with_build_ahead<V: Send, R>(
 
 // No NCBI counterpart: the floor of the room for the next table's hits (module header); untouched
 // capacity is not resident. It changes no value NCBI computes.
-/// The fewest hits the second spare has room for: 2^18 (1 MiB).
+/// The fewest hits (exact blastp: overflow entries) the second spare has room for: 2^18 (1 MiB).
 const X_MIN_HITS_ROOM: usize = 1 << 18;
 
 // No NCBI counterpart: which thread allocates the next table's vectors (module header); it changes
 // no value NCBI computes.
-/// On the block's thread, when its table `lookup` is ready: makes the second spare hold vectors with
-/// the room for the next block's table (the largest table so far, `largest_hits`, plus a half; at
-/// least `X_MIN_HITS_ROOM`), allocating here what is short (twice the largest). `false` where the
-/// block's table is not a flat one (no build ahead then).
+/// On the block's thread, when its table `lookup` is ready: makes the second spare (exact blastp:
+/// `XAaSpares`) hold vectors with the room for the next block's table (the largest table so far,
+/// `largest_hits` (exact blastp: overflow entries), plus a half; at least `X_MIN_HITS_ROOM`),
+/// allocating here what is short (twice the largest). `false` where the block's table is neither a
+/// flat one nor an exact one with its spares (no build ahead then).
 fn x_make_room(
     pool: &SearchPool<'_>,
     lookup: &BlastpRuntimeLookup,
     largest_hits: &Cell<usize>,
 ) -> bool {
-    let BlastpRuntimeLookup::CompressedFlat(table) = lookup else {
-        return false;
-    };
-    let Some((block, ahead)) = x_bp_lookup_spares(pool) else {
-        return false;
-    };
-    let largest = largest_hits.get().max(table.hits.len());
-    largest_hits.set(largest);
-    let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
-    ahead.x_make_room(
-        block,
-        table.starts.len().saturating_sub(1),
-        room,
-        (2 * largest).max(room),
-    );
-    true
+    match lookup {
+        BlastpRuntimeLookup::CompressedFlat(table) => {
+            let Some((block, ahead)) = x_bp_lookup_spares(pool) else {
+                return false;
+            };
+            let largest = largest_hits.get().max(table.hits.len());
+            largest_hits.set(largest);
+            let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
+            ahead.x_make_room(
+                block,
+                table.starts.len().saturating_sub(1),
+                room,
+                (2 * largest).max(room),
+            );
+            true
+        }
+        // Exact blastp: the same rule for the overflow entries; the backbone and the pv array have
+        // the sizes of the block's own table (fixed by the word length and the alphabet).
+        BlastpRuntimeLookup::Aa(table) => {
+            let Some(spares) = x_bp_aa_spares(pool) else {
+                return false;
+            };
+            let largest = largest_hits.get().max(table.overflow.len());
+            largest_hits.set(largest);
+            let room = (largest + largest / 2).max(X_MIN_HITS_ROOM);
+            spares.x_make_room(
+                table.backbone.len(),
+                table.pv.len(),
+                room,
+                (2 * largest).max(room),
+            );
+            true
+        }
+        BlastpRuntimeLookup::Compressed(_) => false,
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_aux_priv.cpp:206-215 (module header)
@@ -500,10 +569,11 @@ fn x_make_room(
 //             CSetupFactory::CreateLookupTable(query_data, opts_memento.get(),
 //                                              sbp, lookup_segments_wrap,
 // ```
-/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the query frames, flat table and contexts of a block of
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the query frames, table and contexts of a block of
 /// `query_records`, as its search builds them (module header: the same calls with the same inputs;
 /// `batch_size` is the search's query batch size), its table on the second spare's vectors
-/// (`XLookupFor::Ahead`). `None` where the build fails, refuses or makes no flat table.
+/// (`XLookupFor::Ahead`; exact blastp: `XAaSpares`). `None` where the build fails, refuses or makes
+/// no flat table (exact blastp: makes no table on the spare's vectors).
 fn x_build_ahead(
     args: &ResolvedBlastpArgs,
     query_records: &[FastaRecord],
@@ -511,22 +581,31 @@ fn x_build_ahead(
     pool: &SearchPool<'_>,
 ) -> Option<XAheadLookup> {
     let query_frames = blastp_query_frames(args, query_records);
-    let query_lengths: Vec<usize> = query_records
-        .iter()
-        .map(|record| record.seq().len())
-        .collect();
-    let query_batches = seq_range::QueryInput::whole(query_records).batches(batch_size);
-    let (lookup, contexts) = blastp_compressed_lookup(
-        args,
-        &query_frames,
-        &query_batches,
-        &query_lengths,
-        pool,
-        XLookupFor::Ahead,
-    )
-    .ok()?;
-    let BlastpRuntimeLookup::CompressedFlat(table) = lookup else {
-        return None;
+    let (table, contexts) = match args.lookup_table_type {
+        // Exact blastp: `blastp_aa_lookup`'s call on the block search's spare vectors.
+        BlastpLookupTableType::AaLookupTable => {
+            blastp_aa_lookup_ahead(args, &query_frames, x_bp_aa_spares(pool)?)?
+        }
+        BlastpLookupTableType::CompressedAaLookupTable => {
+            let query_lengths: Vec<usize> = query_records
+                .iter()
+                .map(|record| record.seq().len())
+                .collect();
+            let query_batches = seq_range::QueryInput::whole(query_records).batches(batch_size);
+            let (lookup, contexts) = blastp_compressed_lookup(
+                args,
+                &query_frames,
+                &query_batches,
+                &query_lengths,
+                pool,
+                XLookupFor::Ahead,
+            )
+            .ok()?;
+            if !matches!(lookup, BlastpRuntimeLookup::CompressedFlat(_)) {
+                return None;
+            }
+            (lookup, contexts)
+        }
     };
     Some(XAheadLookup {
         key: x_key(query_records),
@@ -562,9 +641,12 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
         )) && x_bp_lkp_ahead() != XLkpAhead::Off
-            && args.lookup_table_type == BlastpLookupTableType::CompressedAaLookupTable
-            && x_bpclut_mode() == 1
-            && x_bp_lookup_spares(pool).is_some();
+            && match args.lookup_table_type {
+                BlastpLookupTableType::CompressedAaLookupTable => {
+                    x_bpclut_mode() == 1 && x_bp_lookup_spares(pool).is_some()
+                }
+                BlastpLookupTableType::AaLookupTable => x_bp_aa_spares(pool).is_some(),
+            };
         Self {
             args,
             pool,
@@ -601,6 +683,17 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
             });
         }
         X_BLOCKS.fetch_add(1, Ordering::Relaxed);
+        // Exact blastp: where this block's thread may build its table itself (nothing built ahead
+        // for it) and at the last block (after which that thread may search again), the neighbour
+        // lists kept for the builds ahead go back to it; at the last block (no build ahead follows)
+        // the spare vectors are dropped.
+        if prebuilt.is_none() || next.is_none() {
+            if let (BlastpLookupTableType::AaLookupTable, Some(spares)) =
+                (self.args.lookup_table_type, x_bp_aa_spares(self.pool))
+            {
+                spares.x_home(next.is_none());
+            }
+        }
         #[cfg(all(
             feature = "parallel",
             any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -957,7 +1050,7 @@ mod tests {
         let values = |key| XAheadLookup {
             key,
             query_frames: Vec::new(),
-            table: table(Vec::new()),
+            table: BlastpRuntimeLookup::CompressedFlat(table(Vec::new())),
             contexts: Vec::new(),
         };
         let mut block = XAheadBlock {

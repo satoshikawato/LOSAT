@@ -139,6 +139,17 @@ Run from `LOSAT/`:
     rm tests/db_search/bslice.pjs
     cp tests/db_search/bslice.pin tests/db_search/bnophr.pin; cp tests/db_search/bslice.psq tests/db_search/bnophr.psq
 
+`bxbest` (row `db.blastx.best_hsp.0`) is the database of `tests/fasta/outfmt0/bx_best_hsp_subject.faa`, the Ensembl
+R64-1-1 peptide YOL075C, searched with `tests/fasta/outfmt0/bx_best_hsp_query.fna`, the Ensembl BDGP6.54 cDNA
+FBtr0100310 (both copied unchanged from the release files; the same pair is the `-subject` fixture `best_hsp.blastx` of
+`LOSAT/tests/outfmt0_manifest.tsv`). The subject's first HSP by E-value is a sum-statistics pair of 119 and 45.4 bits
+(Expect(2) = 8e-38) and its third has 131 bits (5e-35), so the description table shows 131 and 5e-35. Version 4, no
+`-parse_seqids`, `.pjs` deleted; run from `LOSAT/`:
+
+    makeblastdb -in tests/fasta/outfmt0/bx_best_hsp_subject.faa -dbtype prot -out tests/db_search/bxbest \
+        -title "BLASTX best HSP: yeast YOL075C" -blastdb_version 4
+    rm tests/db_search/bxbest.pjs
+
 Nucleotide-versus-nucleotide translated inputs (TBLASTX rows, `db.tblastx.*`), written by `make_tblastx_inputs.py`
 (run from `LOSAT/`; slices of `tests/fasta/MelaMJNV.fasta`, `LvMJNV.fasta` and `PemoMJNVA.fasta`; mutations and
 ambiguity codes come from a seeded generator). TBLASTX is slow, so the database holds 14 kb and the queries 5 kb:

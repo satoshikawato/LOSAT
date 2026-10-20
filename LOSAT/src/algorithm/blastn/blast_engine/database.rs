@@ -64,6 +64,16 @@ const BLOCK_BYTES: u64 = 1 << 20;
 ))]
 const BLOCKS_PER_THREAD: usize = 8;
 
+// EXPERIMENT (LOSAT_X_BNDBCUT / LOSAT_X_BNDBCUTSHADOW): the blocks of the preliminary stage cut
+// by the database size and the thread count (a child module, so that it uses the private
+// driver of this file).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[path = "x_db_cut.rs"]
+mod x_db_cut;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:75-78
 // ```c
 // const char BLASTNA_TO_IUPACNA[BLASTNA_SIZE] = {
@@ -237,6 +247,13 @@ fn block_subject(block: &SequenceBlock, i: usize) -> Result<BlastnSubjectRef<'_>
 /// size, not by the database. A block that cannot be read does not stop the other blocks
 /// of its round; the round's first error in ordinal order is returned, the error of the
 /// one-thread order (the blocks are cut alike).
+///
+/// EXPERIMENT (LOSAT_X_BNDBCUT): with more than one thread the blocks are cut by the
+/// database size and the thread count, and a failed search returns the one-thread order's
+/// error (`x_db_cut.rs`, exactness argument in its header). `x_extends` is the count of
+/// good initial extensions that `search` adds to (it sizes the next query batch); the
+/// shadow mode of the switch, which runs `search` twice, leaves it as one search leaves it.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn search_blocks<T, R, I, K, M>(
     database: &BlastnDatabase,
     pool: &SearchPool<'_>,
@@ -244,9 +261,10 @@ pub(super) fn search_blocks<T, R, I, K, M>(
     new_scratch: &I,
     search: &K,
     merge: &mut M,
+    x_extends: &std::sync::atomic::AtomicU64,
 ) -> Result<()>
 where
-    R: Send,
+    R: Send + std::fmt::Debug,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R),
@@ -261,6 +279,32 @@ where
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
     let blocks_per_thread = 1;
+    // EXPERIMENT (LOSAT_X_BNDBCUT / LOSAT_X_BNDBCUTSHADOW): `x_db_cut.rs`.
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    {
+        let mode = x_db_cut::x_bn_db_cut();
+        if mode != x_db_cut::XDbCut::Off {
+            return x_db_cut::x_search_blocks_cut(
+                mode,
+                database,
+                pool,
+                parallel,
+                blocks_per_thread,
+                new_scratch,
+                search,
+                merge,
+                x_extends,
+            );
+        }
+    }
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    let _ = x_extends;
     search_blocks_of(
         database,
         pool,
@@ -271,6 +315,16 @@ where
         search,
         merge,
     )
+}
+
+// No NCBI counterpart: prints counters and changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BNDBCUTSHADOW): the shadow mode's line at exit.
+pub(super) fn x_db_cut_print_summary() {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    x_db_cut::x_bn_db_cut_print_summary();
 }
 
 /// `search_blocks` with blocks of at most `block_bytes` and rounds of `blocks_per_thread`

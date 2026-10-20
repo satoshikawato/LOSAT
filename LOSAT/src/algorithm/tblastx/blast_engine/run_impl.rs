@@ -81,7 +81,10 @@ pub use x_query_frames::print_summary as x_query_frames_print_summary;
 // when they are free (blast_engine.c:1411-1413), which is what the module does.
 #[path = "../x_subject_next.rs"]
 #[cfg_attr(
-    not(all(feature = "parallel", not(target_arch = "wasm32"))),
+    not(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    )),
     allow(dead_code)
 )]
 mod x_subject_next;
@@ -6413,43 +6416,81 @@ fn search_query_batch(
         // }
         // ```
         let parallel_pool = parallel_pool;
-        let subject_hit_batches: Vec<(usize, Vec<TblastxHsp>)> = parallel_pool.install(|| {
-            (0..subjects.count())
-                .into_par_iter()
-                .map_init(
-                    || WorkerState {
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+        // EXPERIMENT (LOSAT_X_TBXNEXT): as in native builds below, each thread of the pool takes
+        // the next subject when it is free, with one worker state per thread made when it takes
+        // its first subject (tblastx/x_subject_next.rs). Same `process_subject`; each subject's
+        // hits are kept with its index, and the sort by index below restores the order of
+        // rayon's pieces.
+        let subject_hit_batches: Vec<(usize, Vec<TblastxHsp>)> = if x_subject_next::on() {
+            let batches = std::sync::Mutex::new(Vec::new());
+            parallel_pool.install(|| {
+                x_subject_next::for_each_subject(
+                    subjects.count(),
+                    &|| WorkerState {
+                        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1411-1413
                         // ```c
-                        // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
-                        //        != BLAST_SEQSRC_EOF) {
-                        //    ...
-                        //    status = s_BlastSearchEngineCore(...);
-                        // }
+                        //     /* iterate over all subject sequences */
+                        //     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+                        //            != BLAST_SEQSRC_EOF) {
                         // ```
+                        // The state of one thread's iterations of this loop (as below).
                         tx: None,
                         hits: Vec::new(),
                         offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
                         diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
-                        // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-63
-                        // ```c
-                        // diag_table->diag_array_length = diag_array_length;
-                        // diag_table->diag_mask = diag_array_length-1;
-                        // diag_table->offset = window_size;
-                        // ```
+                        // NCBI: diag_table->offset = window_size;
+                        // Source: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:63
                         diag_offset: window,
                     },
-                    |st, s_idx| {
+                    &|st: &mut WorkerState, s_idx| {
                         process_subject(st, s_idx);
-                        if st.hits.is_empty() {
-                            None
-                        } else {
-                            Some((s_idx, std::mem::take(&mut st.hits)))
+                        if !st.hits.is_empty() {
+                            let hits = std::mem::take(&mut st.hits);
+                            batches.lock().unwrap().push((s_idx, hits));
                         }
                     },
-                )
-                .filter_map(|batch| batch)
-                .collect()
-        });
+                );
+            });
+            batches.into_inner().unwrap()
+        } else {
+            parallel_pool.install(|| {
+                (0..subjects.count())
+                    .into_par_iter()
+                    .map_init(
+                        || WorkerState {
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1411-1475
+                            // ```c
+                            // while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+                            //        != BLAST_SEQSRC_EOF) {
+                            //    ...
+                            //    status = s_BlastSearchEngineCore(...);
+                            // }
+                            // ```
+                            tx: None,
+                            hits: Vec::new(),
+                            offset_pairs: vec![OffsetPair::default(); offset_pairs_len],
+                            diag_array: vec![DiagStruct::default(); x_worker_diag_cells],
+                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-63
+                            // ```c
+                            // diag_table->diag_array_length = diag_array_length;
+                            // diag_table->diag_mask = diag_array_length-1;
+                            // diag_table->offset = window_size;
+                            // ```
+                            diag_offset: window,
+                        },
+                        |st, s_idx| {
+                            process_subject(st, s_idx);
+                            if st.hits.is_empty() {
+                                None
+                            } else {
+                                Some((s_idx, std::mem::take(&mut st.hits)))
+                            }
+                        },
+                    )
+                    .filter_map(|batch| batch)
+                    .collect()
+            })
+        };
         threaded_wasi_subject_hit_batches = Some(subject_hit_batches);
     } else {
         single_state = Some(for_each_subjects(

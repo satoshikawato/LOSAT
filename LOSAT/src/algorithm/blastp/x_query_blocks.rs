@@ -241,7 +241,7 @@ use super::encoding::EncodedProtein;
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
     x_bpclut_mode, x_bplkpflat_mode, x_pool_builds, XFlatArgs, XFlatSpare, XLkpFlat,
 };
-use crate::algorithm::tblastx::lookup::QueryContext;
+use crate::algorithm::tblastx::lookup::{QueryContext, XAaSpares};
 use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::api::local_blast::OutputSink;
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -459,7 +459,8 @@ impl Write for XBlockSink<'_> {
 // subject's record only, so one encoding serves every block. Reuse only.
 /// EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks (attached to the search's
 /// pool, `SearchPool::x_with_ext`), with the records they encode; and the vectors of the last
-/// block's flat lookup table, for the next block's build (LOSAT_X_BPLKPFLAT, `x_bp_lookup_spare`).
+/// block's flat lookup table, for the next block's build (LOSAT_X_BPLKPFLAT, `x_bp_lookup_spare`),
+/// and those of exact blastp's tables built ahead (LOSAT_X_BPLKPAHEAD, `x_bp_aa_spares`).
 pub(crate) struct XBlockSubjects {
     /// The address and count of the records encoded.
     records: (usize, usize),
@@ -471,6 +472,9 @@ pub(crate) struct XBlockSubjects {
     /// allocated or moved here by the block search's thread for the build of that table ahead of its
     /// block (`blast_engine/x_lookup_ahead.rs`, `x_bp_lookup_spares`).
     x_lookup_ahead: XFlatSpare,
+    /// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the vectors and neighbour lists of exact blastp's tables
+    /// built ahead of their blocks (`x_bp_aa_spares`).
+    x_aa_spares: XAaSpares,
 }
 
 impl XBlockSubjects {
@@ -483,6 +487,7 @@ impl XBlockSubjects {
             encoded,
             x_lookup_spare: XFlatSpare::default(),
             x_lookup_ahead: XFlatSpare::default(),
+            x_aa_spares: XAaSpares::default(),
         }
     }
 }
@@ -580,6 +585,21 @@ pub(crate) fn x_bp_lookup_spares<'p>(
     x_bp_lookup_spare(pool)?;
     pool.x_ext::<XBlockSubjects>()
         .map(|subjects| (&subjects.x_lookup_spare, &subjects.x_lookup_ahead))
+}
+
+// No NCBI counterpart: where LOSAT_X_BPLKPAHEAD acts for exact blastp, and buffer reuse between its
+// tables (`XAaSpares`); it reads switches and changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): the block search's spares of exact blastp's tables
+/// (`XAaSpares`), where the switch builds them ahead of their blocks
+/// (`blast_engine/x_lookup_ahead.rs`): the switch is on, the table is built in place
+/// (`XAaSpares::x_applies`), and the pool has more than one thread (`x_pool_builds`).
+pub(crate) fn x_bp_aa_spares<'p>(pool: &SearchPool<'p>) -> Option<&'p XAaSpares> {
+    use super::blast_engine::x_lookup_ahead::{x_bp_lkp_ahead, XLkpAhead};
+    if x_bp_lkp_ahead() == XLkpAhead::Off || !XAaSpares::x_applies() || !x_pool_builds(pool) {
+        return None;
+    }
+    pool.x_ext::<XBlockSubjects>()
+        .map(|subjects| &subjects.x_aa_spares)
 }
 
 /// EXPERIMENT (LOSAT_X_BPLKPFLAT, LOSAT_X_BPLKPAHEAD): which build of a block search the lookup query

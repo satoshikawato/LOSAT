@@ -6900,6 +6900,52 @@ fn blastp_query_frames_marked(
         .collect()
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245
+// ```c
+//     lookup->threshold = (Int4)opt->threshold;
+// ```
+/// The lookup table of exact blastp (`AaLookupTable`) and the query contexts of `query_frames`, as
+/// the lookup region of `run_resolved_in_pool` builds them. The threshold takes the x86-64
+/// conversion: `INT_MIN` for a threshold beyond `Int4` (every word). EXPERIMENT (LOSAT_X_BPLUT /
+/// LOSAT_X_BPLUTSHADOW): the same table filled in place, without the reference builder's chains
+/// (lookup/x_lut_direct.rs). The build of the next block's table ahead of that block
+/// (LOSAT_X_BPLKPAHEAD, `x_lookup_ahead.rs`) makes the same call with the same arguments
+/// (`blastp_aa_lookup_ahead`).
+fn blastp_aa_lookup(
+    args: &ResolvedBlastpArgs,
+    query_frames: &[Vec<QueryFrame>],
+) -> (BlastpRuntimeLookup, Vec<QueryContext>) {
+    let (lookup, contexts) = x_bp_build_ncbi_lookup(
+        query_frames,
+        crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+        &lookup_protein_params_ungapped(args.scoring.matrix),
+        false,
+    );
+    (BlastpRuntimeLookup::Aa(lookup), contexts)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_aalookup.c:245
+// ```c
+//     lookup->threshold = (Int4)opt->threshold;
+// ```
+/// EXPERIMENT (LOSAT_X_BPLKPAHEAD): `blastp_aa_lookup`'s table and contexts (the same arguments),
+/// built on the vectors and with the neighbour lists that `spares` keeps
+/// (`XAaSpares::x_build_ahead`, where `XAaSpares::x_applies`); `None` where no table was made (the
+/// block then builds its own).
+fn blastp_aa_lookup_ahead(
+    args: &ResolvedBlastpArgs,
+    query_frames: &[Vec<QueryFrame>],
+    spares: &crate::algorithm::tblastx::lookup::XAaSpares,
+) -> Option<(BlastpRuntimeLookup, Vec<QueryContext>)> {
+    let (lookup, contexts) = spares.x_build_ahead(
+        query_frames,
+        crate::core::blast_util::ncbi_int4_from_double(args.threshold),
+        &lookup_protein_params_ungapped(args.scoring.matrix),
+        false,
+    )?;
+    Some((BlastpRuntimeLookup::Aa(lookup), contexts))
+}
+
 // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
 // ```c
 // s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
@@ -7168,7 +7214,6 @@ fn run_resolved_in_pool(
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, subject_encoding_start);
 
     let lookup_start = blastp_timing_start(timing_enabled);
-    let lookup_ideal_params = lookup_protein_params_ungapped(args.scoring.matrix);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:2833-2852
     // ```c
     // Blast_ScoreBlkKbpIdealCalc(BlastScoreBlk* sbp)
@@ -7212,22 +7257,21 @@ fn run_resolved_in_pool(
     //     program == eBlastTypeRpsTblastn);
     // ```
     let (lookup, mut contexts) = match args.lookup_table_type {
-        BlastpLookupTableType::AaLookupTable => {
-            // NCBI reference: c++/src/algo/blast/core/blast_aalookup.c:245
-            // ```c
-            //     lookup->threshold = (Int4)opt->threshold;
-            // ```
-            // The x86-64 conversion: `INT_MIN` for a threshold beyond `Int4` (every word).
-            // EXPERIMENT (LOSAT_X_BPLUT / LOSAT_X_BPLUTSHADOW): the same table
-            // filled in place, without the reference builder's chains (lookup/x_lut_direct.rs).
-            let (lookup, contexts) = x_bp_build_ncbi_lookup(
+        // `blastp_aa_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
+        // ahead of this block by the same call on the block search's spare vectors
+        // (`blast_engine/x_lookup_ahead.rs`; its shadow builds them again here and compares).
+        BlastpLookupTableType::AaLookupTable => match x_prebuilt.take() {
+            Some(prebuilt) => x_lookup_ahead::x_use_prebuilt(
+                prebuilt,
+                &args,
+                query_records,
                 &query_frames,
-                crate::core::blast_util::ncbi_int4_from_double(args.threshold),
-                &lookup_ideal_params,
-                false,
-            );
-            (BlastpRuntimeLookup::Aa(lookup), contexts)
-        }
+                &query_batches,
+                &query_lengths,
+                blastp_parallel_pool,
+            ),
+            None => blastp_aa_lookup(&args, &query_frames),
+        },
         // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_aalookup.c:1349-1352
         // ```c
         // s_CompressedAddNeighboringWords(lookup, new_alphabet->matrix->data,
@@ -10651,12 +10695,21 @@ fn run_resolved_in_pool(
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, output_format_start);
     output_result?;
     // EXPERIMENT (LOSAT_X_BPLKPFLAT): the flat table's vectors kept for the next block's build
-    // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed.
-    if let (Some(spare), BlastpRuntimeLookup::CompressedFlat(table)) = (
-        super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool),
-        lookup,
-    ) {
-        spare.give(table);
+    // (`x_query_blocks::x_bp_lookup_spare`) instead of being freed. EXPERIMENT
+    // (LOSAT_X_BPLKPAHEAD): exact blastp's, for the build of a later block's table ahead of it
+    // (`x_query_blocks::x_bp_aa_spares`).
+    match lookup {
+        BlastpRuntimeLookup::CompressedFlat(table) => {
+            if let Some(spare) = super::x_query_blocks::x_bp_lookup_spare(blastp_parallel_pool) {
+                spare.give(table);
+            }
+        }
+        BlastpRuntimeLookup::Aa(table) => {
+            if let Some(spares) = super::x_query_blocks::x_bp_aa_spares(blastp_parallel_pool) {
+                spares.give(table);
+            }
+        }
+        BlastpRuntimeLookup::Compressed(_) => {}
     }
 
     if let Some(timing) = timing.as_ref() {

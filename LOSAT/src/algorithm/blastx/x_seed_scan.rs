@@ -81,9 +81,13 @@
 //! cleared cell holds `-window`), so `d2` is twice the reference's `diff = s - (last_hit -
 //! diag_offset)` whenever that fits in an `i32`. `x_hitbf_fits` (checked once per subject) makes it
 //! fit: with `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (`length` the subject's
-//! letters), every flag-0 `last_hit` the table holds is in `[-window, diag_offset + length)` (the
-//! cleared value, 0 in a new table, or an `s + diag_offset` of this subject or of an earlier one,
-//! whose offsets are lower), `s + diag_offset` is in `[diag_offset, diag_offset + length)`, so `diff`
+//! letters), every flag-0 `last_hit` the table holds is in `[-window, diag_offset + length)`: the
+//! cleared value, 0 in a new table, or an `s + diag_offset` of this subject or of an earlier one.
+//! Every store with flag 0 is such an `s + diag_offset` (the extension's `s_last_off - (wordsize - 1)
+//! + diag_offset` is stored with flag 1, and the flag goes back to 0 only with a store of `s +
+//! diag_offset`); the offset only grows between clears (`Diagonals::finish_subject`), so an earlier
+//! subject's stores are below this subject's offset, and none of them wrapped in the 31-bit field, as
+//! they were below 2^30. `s + diag_offset` is in `[diag_offset, diag_offset + length)`, so `diff`
 //! is in `(-length, diag_offset + length + window)` and `2 diff` in `(-2^31, 2^31)`. Then too far
 //! (`diff >= window`) is `d2 >= 2 window`, and a candidate (`wordsize <= diff < window`) is
 //! `(d2 - 2 wordsize) as u32 < 2 (window - wordsize)`, one unsigned compare: below `2 wordsize`
@@ -337,32 +341,12 @@ fn x_hitbf_acts(
         )
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
-// ```c
-//         wordsize = lookup->word_length;
-//     }
-//
-//     scan_range[0] = 0;
-//     scan_range[1] = subject->seq_ranges[0].left;
-//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
-//
-//     if (scan_range[2] < scan_range[1])
-//         scan_range[2] = scan_range[1];
-//
-//     while (scan_range[1] <= scan_range[2]) {
-//         /* scan the subject sequence for hits */
-//         hits = scansub(lookup_wrap, subject,
-//                                   offset_pairs, array_size, scan_range);
-// ...
-//         for (i = 0; i < hits; ++i) {
-//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ```
-// `Lookup::scan` (its range set-up and loop) and `word_finder_plain` (the statements per pair)
-// in one function; the pairs are read from the scanner's buffer. EXPERIMENT (LOSAT_X_BXSCANBF):
-// `branch_free` scans the standard table with `x_scan_one_range_bf` (module header).
+// No NCBI counterpart: chooses the instance of LOSAT's direct loop (`x_word_finder_direct_with`, which
+// ports the NCBI code); both give the reference's hits and table.
+// The direct loop: `Lookup::scan` and `word_finder_plain` in one function (`x_word_finder_direct_with`).
+// EXPERIMENT (LOSAT_X_BXSCANBF): `branch_free` scans the standard table with `x_scan_one_range_bf`.
 // EXPERIMENT (LOSAT_X_BXHITBF): with `hit_bf`, where `x_hitbf_fits` holds for the subject, the
-// loop is `x_word_finder_direct_bf` (module header).
+// instance with the branch-free two-hit test, `x_word_finder_direct_bf` (module header).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 fn x_word_finder_direct(
@@ -422,9 +406,33 @@ fn x_word_finder_direct_bf(
     )
 }
 
-// The body of `x_word_finder_direct` (the NCBI references above); `HIT_BF` takes the branch-free
-// two-hit test (`x_hit_bf`) before the statements of `word_finder_plain`, and the caller has checked
-// `x_hitbf_fits`.
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
+// ```c
+//         wordsize = lookup->word_length;
+//     }
+//
+//     scan_range[0] = 0;
+//     scan_range[1] = subject->seq_ranges[0].left;
+//     scan_range[2] = subject->seq_ranges[0].right - wordsize;
+//
+//     if (scan_range[2] < scan_range[1])
+//         scan_range[2] = scan_range[1];
+//
+//     while (scan_range[1] <= scan_range[2]) {
+//         /* scan the subject sequence for hits */
+//         hits = scansub(lookup_wrap, subject,
+//                                   offset_pairs, array_size, scan_range);
+// ...
+//         for (i = 0; i < hits; ++i) {
+//             Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
+//             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
+// ```
+// `Lookup::scan` (its range set-up and loop) and `word_finder_plain` (the statements per pair)
+// in one function; the pairs are read from the scanner's buffer. EXPERIMENT (LOSAT_X_BXSCANBF):
+// `branch_free` scans the standard table with `x_scan_one_range_bf` (module header).
+// EXPERIMENT (LOSAT_X_BXHITBF): with `HIT_BF` (only where the caller found `x_hitbf_fits` to hold)
+// each hit first goes through the branch-free two-hit test (`x_hit_bf`), and only a flag-1 cell or a
+// candidate reaches the statements of `word_finder_plain`.
 #[inline(always)]
 fn x_word_finder_direct_with<const HIT_BF: bool>(
     batch: &PreparedQueryBatch,
@@ -893,6 +901,56 @@ mod tests {
                         d.offset == reference.offset && d.entries == reference.entries,
                         "window={window} state={state} scan_bf={branch_free} hit_bf={hit_bf}"
                     );
+                }
+            }
+            // EXPERIMENT (LOSAT_X_BXHITBF): the edge of the branch-free test's range. At the most
+            // offset `x_hitbf_fits` allows for this subject (cleared cells) the test acts, and one
+            // more it does not; the loops agree at both.
+            if window > options.word_size {
+                let most = (1 << 30) - 1 - (subject.len() as i32 - 1) - 2 * window;
+                for (offset, acts) in [(most, true), (most + 1, false)] {
+                    for d in tables.iter_mut().chain([&mut reference]) {
+                        d.offset = offset;
+                        d.entries.fill(DiagStruct::clear(window));
+                    }
+                    assert_eq!(
+                        x_hitbf_acts(true, &options, &subject, &reference),
+                        acts,
+                        "window={window} offset={offset}"
+                    );
+                    let plain = word_finder_plain(
+                        &batch,
+                        &params,
+                        &options,
+                        &subject,
+                        &lookup,
+                        &mut reference,
+                        |_| {},
+                    )
+                    .unwrap();
+                    // Only differences of offsets count below 2^30: the NCBI rows of a new table.
+                    assert_eq!(plain, initial, "window={window} offset={offset}");
+                    for (&(branch_free, hit_bf), d) in ARMS.iter().zip(&mut tables) {
+                        let hits = x_word_finder_direct(
+                            &batch,
+                            &params,
+                            &options,
+                            &subject,
+                            &lookup,
+                            d,
+                            branch_free,
+                            hit_bf,
+                        )
+                        .unwrap();
+                        let what = format!(
+                            "window={window} offset={offset} scan_bf={branch_free} hit_bf={hit_bf}"
+                        );
+                        assert_eq!(hits, plain, "{what}");
+                        assert!(
+                            d.offset == reference.offset && d.entries == reference.entries,
+                            "{what}"
+                        );
+                    }
                 }
             }
             // A subject of one residue (shorter than a word less one letter) and one of two: with a

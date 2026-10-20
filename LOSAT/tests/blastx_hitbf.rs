@@ -189,7 +189,10 @@ impl Run {
         let prefix = format!("[X_SHADOW] {switch} ");
         let line = self.stderr.lines().find(|line| line.starts_with(&prefix))?;
         let key = format!(" {name}=");
-        let at = line.find(&key).unwrap_or_else(|| panic!("no {name} in {line}")) + key.len();
+        let at = line
+            .find(&key)
+            .unwrap_or_else(|| panic!("no {name} in {line}"))
+            + key.len();
         Some(
             line[at..]
                 .split(|c: char| !c.is_ascii_digit())
@@ -297,7 +300,10 @@ fn the_shadow_compares_the_branch_free_loop_on_every_subject_in_its_range() {
         // Without the switch the shadow compares the loop without the test and has no BXHITBF line.
         let off = blastx(&args, &[DIRECT, SHADOW, OFF]);
         assert_eq!(off.code, Some(0), "window={window}: {}", off.stderr);
-        assert!(off.stdout == reference.stdout, "window={window}: off differs");
+        assert!(
+            off.stdout == reference.stdout,
+            "window={window}: off differs"
+        );
         assert_eq!(off.shadow("BXSCAN", "subjects_compared"), Some(scanned));
         assert_eq!(off.shadow("BXHITBF", "subjects_compared"), None);
     }

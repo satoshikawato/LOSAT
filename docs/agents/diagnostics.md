@@ -2444,6 +2444,25 @@ Scheduling (each value computed by one thread with the original function; order 
   (`-subject`) at 16 threads -73.8 / -71.0 / -62.3 % wall, at 4 threads -62.4 / -61.6 %; megablast and blastn: it
   does not act. Max RSS +10-72 MiB, below NCBI `-db` in every cell (494 vs 700 MiB at 16 threads on the 31,168
   cDNAs). Its helpers only yield on wasm32 (`std::thread::sleep` panics under the browser's WASI shim).
+- `LOSAT_X_PAIRPARDISCARR=1` (in the strict set since 2026-10-20 (perf/dc-seed-batch, evidence at the end of this
+  entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; it does not depend on `LOSAT_X_PAIRPARDISC`)
+  blastn `-task dc-megablast`, one query-subject pair on a pool of 2+ threads: the two-hit seed stage of a subject
+  chunk whose query block has NCBI's diagonal array instead of the hash (`kQueryLenForHashTable`: at most 8000
+  letters with both strands, so a query of at most about 4000 bases; `LOSAT_X_PAIRPARDISC` takes the hash only).
+  Same scope otherwise (`scan_range` 0, unmasked subject, one subject, no debug or trace). The pool threads scan
+  the strips of `LOSAT_X_PAIRPARDISC` (same kernel, same strips), and the owner thread folds the pairs in scan
+  order through a statement-for-statement copy of the two-hit diagonal-array branch of `process_offset_pairs`
+  (`s_BlastnDiagTableExtendInitialHit`: the diagonal masked by `diag_mask`, `last_hit` and `flag` in
+  `hit_level_array`, the hit length as a byte in `hit_len_array`; `fold_two_hit_array` in
+  `blastn/blast_engine/x_pair_seed_disc.rs`). The array of such a block is small (a few thousand diagonals) and the
+  pairs few, so the owner's fold costs little; the stage replaces the one-thread scan of the whole subject, which
+  NCBI's `CBatchSizeMixer` brings once per small batch (a batch of one short cDNA after a large batch).
+  Anything else runs the original code. Shadow: `LOSAT_X_PAIRPARDISCARRSHADOW=1` (per chunk the hit list and both
+  arrays compared with the original code; one `[X_PAIRPARDISCARRSHADOW]` summary line on stderr at the end, with
+  the number of chunks, hits and array cells compared). With `LOSAT_TIMING` a `[TIMING] x_pairpardiscarr_seed` line
+  gives the chunks, strips, seeds and the owner's fold, scan and wait time. Test:
+  `LOSAT/tests/blastn_pairpar_disc_arr.rs`.
+  Default ON since 2026-10-20 (perf/dc-seed-batch): EVIDENCE.
 - `LOSAT_X_QDUSTPAR=1` (BLASTN, all tasks with DUST on, which is the default of megablast, dc-megablast and
   blastn, and blastn-short with `-dust yes`; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the DUST masks
   of a query batch are made on the search pool instead of one query after the other

@@ -1951,8 +1951,44 @@ pub(super) fn x_r15_csr_par(
     let mut block_totals = vec![0u32; blocks];
     let totals = Shared::new(&mut block_totals);
     sum_ns += t_sum.elapsed().as_nanos();
+    let pvbf = super::x_r11_csr::mode().pvbf;
     timed(&mut sum_ns, &|o| {
         for b in own(o) {
+            if pvbf {
+                // R15 `pvbf`: the block's counts become its running sums from 0 (the second
+                // owner pass adds the block's base), and its PV words and helper counters are made
+                // in registers, stored once per word / counter: no branch per cell.
+                let pv_last = (1usize << ph.bts) - 1;
+                let (mut word, mut hacc, mut end) = (0u32, 0u32, 0u32);
+                let r = cells_of(b);
+                let last = r.end - 1;
+                for c in r {
+                    // SAFETY: as below (the cells, PV words and counters of `o`'s blocks).
+                    unsafe {
+                        let cnt = offsets.get(c);
+                        let nz = (cnt != 0) as u32;
+                        word |= nz << (c & PV_ARRAY_MASK);
+                        hacc = hacc.wrapping_add(cnt.wrapping_sub(nz));
+                        end = end.wrapping_add(cnt);
+                        offsets.set(c, end);
+                        if c & pv_last == pv_last || c == last {
+                            let i = c >> ph.bts;
+                            if i < spv_s.len {
+                                spv_s.set(i, spv_s.get(i) | word);
+                            }
+                            word = 0;
+                        }
+                        if c & 2047 == 2047 || c == last {
+                            let h = c >> K_COMPRESSION_FACTOR_SHIFT;
+                            shp_s.set(h, shp_s.get(h).wrapping_add(hacc));
+                            hacc = 0;
+                        }
+                    }
+                }
+                // SAFETY: entry `b` is owner `o`'s.
+                unsafe { totals.set(b, end) };
+                continue;
+            }
             let mut sum = 0u32;
             for c in cells_of(b) {
                 // SAFETY: the cells of `o`'s blocks are this job's, and so are the scratch
@@ -1995,6 +2031,14 @@ pub(super) fn x_r15_csr_par(
             // SAFETY: entry `b` and the cells of `o`'s blocks are this job's; no job writes the
             // entries during this phase.
             unsafe {
+                if pvbf {
+                    // R15 `pvbf`: the cells hold the block's running sums; add its base.
+                    let base = totals.get(b);
+                    for c in cells_of(b) {
+                        offsets.set(c, offsets.get(c) + base);
+                    }
+                    continue;
+                }
                 let mut end = totals.get(b);
                 for c in cells_of(b) {
                     end += offsets.get(c);

@@ -42,6 +42,8 @@ pub(crate) struct Mode {
     pub(crate) par: bool,
     /// Compare the words build with the chain walk.
     pub(crate) check: bool,
+    /// R15 `pvbf`: the sum pass makes the PV bits and helper counters without a branch per cell.
+    pub(crate) pvbf: bool,
 }
 
 pub(crate) fn mode() -> Mode {
@@ -59,6 +61,7 @@ pub(crate) fn mode() -> Mode {
                     "csrw" => m.words = true,
                     "csrp" => m.par = true,
                     "csrchk" => m.check = true,
+                    "pvbf" => m.pvbf = true,
                     _ => {}
                 }
             }
@@ -203,6 +206,54 @@ impl PvScratch {
         self.helper[c >> 11] += n - 1;
     }
 
+    /// R15 `pvbf`: cells `c0 .. c1` (`c0` a multiple of `2^bts` and of 2048): `at(c)` gives the cell's count and where to
+    /// write its inclusive running sum (`base` + the counts up to it; the slot may hold the count itself). The PV word and
+    /// the helper counter are kept in registers and stored when their last cell is done, so the loop has no
+    /// data-dependent branch (the stores are taken once per `2^bts` / 2048 cells). Returns the running sum after `c1`.
+    #[inline(always)]
+    pub(crate) fn range_bf(
+        &mut self,
+        c0: usize,
+        c1: usize,
+        bts: usize,
+        at: impl FnMut(usize) -> (u32, *mut u32),
+    ) -> u32 {
+        self.range_bf_from(0, c0, c1, bts, at)
+    }
+
+    #[inline(always)]
+    pub(crate) fn range_bf_from(
+        &mut self,
+        base: u32,
+        c0: usize,
+        c1: usize,
+        bts: usize,
+        mut at: impl FnMut(usize) -> (u32, *mut u32),
+    ) -> u32 {
+        let pv_last = (1usize << bts) - 1;
+        let (mut word, mut hacc, mut end) = (0u32, 0u32, base);
+        for c in c0..c1 {
+            let (cnt, slot) = at(c);
+            let nz = (cnt != 0) as u32;
+            word |= nz << (c & 31);
+            hacc = hacc.wrapping_add(cnt.wrapping_sub(nz));
+            end = end.wrapping_add(cnt);
+            // SAFETY: `at` returns a valid slot of the counts array for cell `c`.
+            unsafe { *slot = end };
+            if c & pv_last == pv_last || c + 1 == c1 {
+                if let Some(w) = self.pv.get_mut(c >> bts) {
+                    *w |= word;
+                }
+                word = 0;
+            }
+            if c & 2047 == 2047 || c + 1 == c1 {
+                self.helper[c >> 11] = self.helper[c >> 11].wrapping_add(hacc);
+                hacc = 0;
+            }
+        }
+        end
+    }
+
     /// Panics unless the arrays are the fill's.
     pub(crate) fn check(&self, ph: &PvHelper<'_>) {
         assert!(
@@ -275,15 +326,23 @@ pub(crate) fn attach_words<W: Words>(
     let t2 = Instant::now();
     let mut scratch = ph.as_ref().map(PvScratch::new);
     let mut end = 0u32;
-    for c in 0..cells {
-        let cnt = head[c + k];
-        if cnt != 0 {
-            if let (Some(s), Some(ph)) = (scratch.as_mut(), ph.as_ref()) {
-                s.cell(c, cnt, ph.bts);
+    if let (true, Some(s), Some(ph)) = (mode().pvbf, scratch.as_mut(), ph.as_ref()) {
+        // R15 `pvbf`: the same prefix sum, PV bits and helper counters without a branch per cell.
+        end = s.range_bf(0, cells, ph.bts, |c| {
+            let cnt = head[c + k];
+            (cnt, &mut head[c + k] as *mut u32)
+        });
+    } else {
+        for c in 0..cells {
+            let cnt = head[c + k];
+            if cnt != 0 {
+                if let (Some(s), Some(ph)) = (scratch.as_mut(), ph.as_ref()) {
+                    s.cell(c, cnt, ph.bts);
+                }
             }
+            end += cnt;
+            head[c + k] = end;
         }
-        end += cnt;
-        head[c + k] = end;
     }
     if !asc {
         head[cells] = end;

@@ -75,6 +75,7 @@ use super::{
     DiagHashTable, MbScanSubjectKind, QueryContext, QueryContextIndex, UngappedHit,
     COMPRESSION_RATIO,
 };
+use super::DiagStruct;
 use crate::algorithm::blastn::lookup::TwoStageLookup;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -140,6 +141,18 @@ pub(super) struct Inputs<'a> {
     pub(super) diagnostics: bool,
     pub(super) one_subject_owner: bool,
     pub(super) timing: Option<&'a BlastnTiming>,
+}
+
+/// The diagonal array of `collect_prelim_hits_for_chunk` (a query block of at most 8000
+/// letters: `hit_level_array`, `hit_len_array`, `diag_array_length`, `diag_mask` and
+/// `diag_array_size`, the same names there), for the two-hit stage of LOSAT_X_PAIRPARDISCARR
+/// (child module `disc`). With the diagonal hash the arrays are empty and nothing reads them.
+pub(super) struct DiagArray<'a> {
+    pub(super) levels: &'a mut Vec<DiagStruct>,
+    pub(super) lens: &'a mut Vec<u8>,
+    pub(super) length: isize,
+    pub(super) mask: isize,
+    pub(super) size: usize,
 }
 
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:135-149
@@ -1317,12 +1330,14 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
 pub(super) fn run(
     x: &Inputs<'_>,
     diag_hash: &mut DiagHashTable,
+    diag_array: DiagArray<'_>,
     ungapped_hits: &mut Vec<UngappedHit>,
     fold_scratch: &mut PartScratch,
 ) -> bool {
-    // A discontiguous megablast table: LOSAT_X_PAIRPARDISC and its shadow decide.
+    // A discontiguous megablast table: LOSAT_X_PAIRPARDISC (the diagonal hash) or
+    // LOSAT_X_PAIRPARDISCARR (the diagonal array) and their shadows decide.
     if x.two_stage.disc().is_some() {
-        return disc::run(x, diag_hash, ungapped_hits, fold_scratch);
+        return disc::run(x, diag_hash, diag_array, ungapped_hits, fold_scratch);
     }
     let (on, shadow) = switches();
     if !on && !shadow {
@@ -1402,8 +1417,15 @@ pub(super) fn run(
 /// ```
 /// LOSAT_X_PAIRPARSHADOW (and LOSAT_X_PAIRPARDISCSHADOW), before the sort above: the hit
 /// list and the diagonal hash the reference built for this chunk against the ones of `run`,
-/// element by element; panics on the first difference.
-pub(super) fn shadow_check(ungapped_hits: &[UngappedHit], diag_hash: &DiagHashTable) {
+/// element by element; panics on the first difference. LOSAT_X_PAIRPARDISCARRSHADOW: the hit
+/// list and the diagonal array (`disc::shadow_check_array`).
+pub(super) fn shadow_check(
+    ungapped_hits: &[UngappedHit],
+    diag_hash: &DiagHashTable,
+    hit_level_array: &[DiagStruct],
+    hit_len_array: &[u8],
+) {
+    disc::shadow_check_array(ungapped_hits, hit_level_array, hit_len_array);
     let Some(stash) = STASH.with(|s| s.borrow_mut().take()) else {
         return;
     };

@@ -10775,6 +10775,13 @@ fn search_query_batch(
                             timing: timing_ref,
                         },
                         diag_hash,
+                        x_pair_seed::DiagArray {
+                            levels: &mut *hit_level_array,
+                            lens: &mut *hit_len_array,
+                            length: diag_table_length as isize,
+                            mask: diag_table_mask,
+                            size: diag_array_size,
+                        },
                         ungapped_hits,
                         &mut subject_scratch.x_pair_fold,
                     ) {
@@ -13246,7 +13253,12 @@ fn search_query_batch(
             // is stable too.
             // Dispatch point of LOSAT_X_PAIRPARSHADOW: the hit list and the diagonal hash of
             // the code above against those `x_pair_seed::run` computed for this chunk.
-            x_pair_seed::shadow_check(ungapped_hits, &subject_scratch.diag_hash);
+            x_pair_seed::shadow_check(
+                ungapped_hits,
+                &subject_scratch.diag_hash,
+                &subject_scratch.hit_level_array,
+                &subject_scratch.hit_len_array,
+            );
             // EXPERIMENT (LOSAT_X_QGROUPPAR): with the stage run per query, each query's hits are
             // taken in the order saved above and sorted by the task (the comparator and the sort
             // are those below, so each query's hits come in the relative order the batch's sort

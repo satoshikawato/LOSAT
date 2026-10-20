@@ -1,6 +1,7 @@
 //! EXPERIMENT (LOSAT_X_PAIRPARNA, shadow LOSAT_X_PAIRPARNASHADOW): the one-hit seed stage of
-//! one subject chunk searched with a table that is not two-stage (the direct and Na tables of
-//! words 7 to 10, `-task blastn-short`), with the subject scan cut into strips that the
+//! one subject chunk searched with a table that is not two-stage (a lookup width equal to the
+//! word size: `-task blastn-short`'s word 7, and word sizes 4 to 8 with a large enough query,
+//! `coordination.rs` `finalize_task_config`), with the subject scan cut into strips that the
 //! threads of the search pool scan, and the diagonal-hash fold done in the original pair
 //! order (by the owner, or split by diagonal-hash bucket over the pool with
 //! LOSAT_X_PAIRPARFOLD, `x_pair_seed_part.rs`). The scheduling (`plan_strips`, `run_strips`,
@@ -93,7 +94,7 @@ fn switches() -> (bool, bool) {
 }
 
 /// No NCBI counterpart (scheduling only): the strips per thread asked of `plan_strips` (its
-/// 512-offset minimum decides for any subject over 512 x this x threads offsets), and the
+/// 512-offset minimum decides for a subject of up to 512 x this x threads offsets), and the
 /// strips per thread that the helpers may scan past the slowest fold.
 const STRIPS_PER_THREAD: usize = 512;
 const AHEAD_PER_THREAD: usize = 2;
@@ -578,9 +579,12 @@ fn fold_na<const PT: bool>(
 /// `word_length == lut_word_length`) cut into strips scanned by any thread, folded here in
 /// strip order into `hash` and `hits`. With `fold_part` (LOSAT_X_PAIRPARFOLD,
 /// `x_pair_seed_part.rs`) the fold is split by diagonal-hash bucket over the threads instead.
+/// `target_strips` is `plan_strips`'s target (`STRIPS_PER_THREAD` per thread in `run`).
+#[allow(clippy::too_many_arguments)]
 fn seed_stage(
     x: &NaInputs<'_>,
     threads: usize,
+    target_strips: usize,
     hash: &mut DiagHashTable,
     hits: &mut Vec<UngappedHit>,
     timing: Option<&BlastnTiming>,
@@ -593,7 +597,7 @@ fn seed_stage(
         x.word_length,
         x.word_length,
         x.scan_step,
-        STRIPS_PER_THREAD * threads.max(4),
+        target_strips,
     );
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip_na(x, &jobs[i], out);
     if let Some(fold_part) = fold_part {
@@ -731,7 +735,16 @@ pub(in super::super) fn run(
             Some(hash) => (hash, &mut shadow_hits),
             None => (diag_hash, ungapped_hits),
         };
-        seed_stage(x, threads, hash, hits, timing, timed, fold_part)
+        seed_stage(
+            x,
+            threads,
+            STRIPS_PER_THREAD * threads.max(4),
+            hash,
+            hits,
+            timing,
+            timed,
+            fold_part,
+        )
     };
     if let (Some(t_start), Some(timing)) = (t_start, timing) {
         // `[TIMING] scan_lookup`: the time of the stage minus the ungapped extensions, as
@@ -797,5 +810,299 @@ pub(super) fn summary() {
             s(&X_WAIT_NS),
             part::timing_fields(part::NA_ONE_HIT)
         );
+    }
+}
+
+// (every test runs stages in a pool of its own)
+#[cfg(all(
+    test,
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+mod tests {
+    use super::super::super::{
+        build_blastna_matrix, build_nucl_score_table, diag_hash_insert_window,
+        scan_subject_kmers_with_ranges, select_mb_scan_kind, DIAGHASH_NUM_BUCKETS,
+    };
+    use super::*;
+    use crate::algorithm::blastn::lookup::{build_pv_direct_lookup, reverse_complement};
+    use crate::core::blast_encoding::{encode_iupac_to_blastna, encode_subject_ncbi2na_packed};
+    use crate::utils::dust::MaskedInterval;
+
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            self.0 >> 33
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    fn random_dna(rng: &mut Lcg, len: usize) -> Vec<u8> {
+        (0..len).map(|_| b"ACGT"[rng.below(4) as usize]).collect()
+    }
+
+    type HashState = (Vec<u32>, Vec<(i32, i32, bool, i32, u32)>, u32, u32, i32);
+
+    fn hash_state(h: &DiagHashTable) -> HashState {
+        (
+            h.backbone.clone(),
+            h.chain[..h.occupancy as usize]
+                .iter()
+                .map(|c| (c.diag, c.level, c.hit_saved, c.hit_len, c.next))
+                .collect(),
+            h.occupancy,
+            h.capacity,
+            h.offset,
+        )
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
+    // ```c
+    //     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
+    //
+    //         hitsfound = scansub(lookup_wrap, subject, offset_pairs, max_hits, &scan_range[1]);
+    // ```
+    // The whole stage on random sequences (the subject made of mutated copies of query pieces
+    // on both strands, query masks on one context, so `s_TypeOfWord` checks words there) for
+    // the direct table at word sizes 6, 7 and 8: the pairs of the reference wrapper
+    // `scan_subject_kmers_with_ranges` folded in one go, against `seed_stage` on 1..6 threads
+    // with the owner's fold and (2 threads or more) the partitioned fold, for the strip target
+    // of `run` and for two small targets whose strips start at offsets that are not a
+    // multiple of 4 (`plan_strips`: per = max(ceil(grid points / target), 512)). Hit lists and
+    // diagonal hashes must be the same.
+    #[test]
+    fn seed_stage_on_strips_equals_one_scan() {
+        let mut rng = Lcg(0x0B13_5EED);
+        for word_length in [6usize, 7, 8] {
+            let q_len = 3000 + rng.below(3000) as usize;
+            let mut query = random_dna(&mut rng, q_len);
+            // a repeat inside the query (long lookup lists)
+            let motif = random_dna(&mut rng, 40);
+            for k in 0..20 {
+                let at = (k * 97) % (q_len - 40);
+                query[at..at + 40].copy_from_slice(&motif);
+            }
+            let minus = reverse_complement(&query);
+            let mut subject = Vec::new();
+            while subject.len() < 40_000 {
+                if rng.below(3) == 0 {
+                    let len = 50 + rng.below(400) as usize;
+                    subject.extend(random_dna(&mut rng, len));
+                } else {
+                    let src = if rng.below(2) == 0 { &query } else { &minus };
+                    let len = 30 + rng.below(1500) as usize;
+                    let at = rng.below((q_len - len.min(q_len - 1)) as u64) as usize;
+                    let end = (at + len).min(q_len);
+                    for &b in &src[at..end] {
+                        let r = rng.below(100);
+                        if r < 3 {
+                            subject.push(b"ACGT"[rng.below(4) as usize]);
+                        } else if r < 4 {
+                            // an indel
+                        } else {
+                            subject.push(b);
+                        }
+                    }
+                }
+            }
+            let s_len = subject.len();
+            let packed = encode_subject_ncbi2na_packed(&subject);
+            let ctx_seqs = vec![
+                encode_iupac_to_blastna(&query),
+                encode_iupac_to_blastna(&minus),
+            ];
+            let offsets = vec![0i32, q_len as i32 + 1];
+            let masks = vec![
+                vec![
+                    MaskedInterval {
+                        start: 100,
+                        end: 180,
+                    },
+                    MaskedInterval {
+                        start: 1000,
+                        end: 1013,
+                    },
+                ],
+                Vec::new(),
+            ];
+            let ctx_refs: Vec<&[u8]> = ctx_seqs.iter().map(Vec::as_slice).collect();
+            let lookup = build_pv_direct_lookup(
+                &ctx_refs,
+                &offsets,
+                word_length,
+                word_length,
+                &masks,
+                None,
+                0,
+                2 * q_len,
+                false,
+            );
+            let contexts: Vec<QueryContext> = (0..2)
+                .map(|c| QueryContext {
+                    query_idx: 0,
+                    frame: if c == 0 { 1 } else { -1 },
+                    query_offset: offsets[c],
+                    len: ctx_seqs[c].len(),
+                    masks: masks[c].clone(),
+                })
+                .collect();
+            let index = QueryContextIndex::new(&contexts);
+            let score_matrix = build_blastna_matrix(1, -3);
+            let nucl_score_table = build_nucl_score_table(1, -3);
+            let seq_ranges = [(0i32, s_len as i32)];
+            let diag_offset = 37 + rng.below(1000) as isize;
+            let x = NaInputs {
+                pv_direct_lookup: Some(&lookup),
+                na_lookup: None,
+                use_direct_lookup: true,
+                word_length,
+                search_seq_packed: &packed,
+                s_len,
+                subject_seq_ranges: &seq_ranges,
+                subject_masked: false,
+                scan_step: 1,
+                query_context_index: &index,
+                query_contexts: &contexts,
+                encoded_queries_blastna: &ctx_refs,
+                cutoff_scores: &[16, 16],
+                x_dropoff_scores: &[20, 20],
+                reduced_cutoff_scores: &[16, 16],
+                score_matrix: &score_matrix,
+                nucl_score_table: &nucl_score_table,
+                diag_offset,
+                diag_hash_window: diag_hash_insert_window(0, 0, word_length),
+                use_array_indexing: false,
+                window_size: 0,
+                scan_range: 0,
+                diagnostics: false,
+                one_subject_owner: true,
+                timing: None,
+            };
+            let new_hash = || {
+                let mut h = DiagHashTable::new(0);
+                h.offset = diag_offset as i32;
+                h
+            };
+            // the reference wrapper visits the pairs in one scan
+            let mut seeds = Vec::new();
+            scan_subject_kmers_with_ranges(
+                &packed,
+                s_len,
+                word_length,
+                word_length,
+                1,
+                &seq_ranges,
+                false,
+                select_mb_scan_kind(word_length, 1, false),
+                |kmer_start, s_range, kmer| {
+                    for &q_off_1 in x.hits(kmer) {
+                        if q_off_1 == 0 {
+                            continue;
+                        }
+                        let q_off0 = q_off_1 as usize - 1;
+                        seeds.push(Seed {
+                            context: index.context_for_offset(q_off0) as u32,
+                            q: q_off0 as u32,
+                            s: kmer_start as u32,
+                            s_range: s_range as u32,
+                        });
+                    }
+                },
+            );
+            let mut serial_hash = new_hash();
+            let mut serial_hits = Vec::new();
+            let mut counts = FoldCounts::default();
+            let mut pause = 0u64;
+            fold_na::<false>(
+                &x,
+                &seeds,
+                &mut serial_hash,
+                &mut serial_hits,
+                None,
+                &mut pause,
+                &mut counts,
+                &mut part::PartOut::default(),
+                &[],
+            );
+            let below_cutoff = seeds.len() as u64 - counts.skipped - serial_hits.len() as u64;
+            assert!(
+                serial_hits.len() > 5 && counts.skipped > 0 && below_cutoff > 0,
+                "word {word_length}: the test sequences give too few cases ({} hits, {} skipped, {} other)",
+                serial_hits.len(),
+                counts.skipped,
+                below_cutoff
+            );
+            let key = |h: &UngappedHit| {
+                (
+                    h.context_idx,
+                    h.query_idx,
+                    h.query_frame,
+                    h.query_context_offset,
+                    h.seed_q_off,
+                    h.seed_s_off,
+                    h.qs,
+                    h.qe,
+                    h.ss,
+                    h.se,
+                    h.score,
+                )
+            };
+            let serial_keys: Vec<_> = serial_hits.iter().map(key).collect();
+            let grid = s_len - word_length + 1;
+            // two small targets whose strips (but the first) start off a multiple of 4
+            let odd_targets: Vec<usize> = (2..64)
+                .filter(|&t| grid.div_ceil(t) > 512 && grid.div_ceil(t) % 4 != 0)
+                .take(2)
+                .collect();
+            assert_eq!(odd_targets.len(), 2, "word {word_length}: grid {grid}");
+            for threads in 1..=6usize {
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build()
+                    .unwrap();
+                for target in [
+                    STRIPS_PER_THREAD * threads.max(4),
+                    odd_targets[0],
+                    odd_targets[1],
+                ] {
+                    let per = grid.div_ceil(target).max(512);
+                    for partitioned in [false, true] {
+                        if partitioned && threads < 2 {
+                            continue;
+                        }
+                        let at =
+                            format!("word {word_length} threads {threads} target {target} partitioned {partitioned}");
+                        let (state, keys, stats_seeds, strips) = pool.install(|| {
+                            let mut hash = new_hash();
+                            let mut hits = Vec::new();
+                            let mut scratch = PartScratch::default();
+                            let fold_part = partitioned.then(|| part::FoldPart {
+                                scratch: &mut scratch,
+                                parts: threads.min(DIAGHASH_NUM_BUCKETS),
+                            });
+                            let stats = seed_stage(
+                                &x, threads, target, &mut hash, &mut hits, None, false, fold_part,
+                            );
+                            (
+                                hash_state(&hash),
+                                hits.iter().map(key).collect::<Vec<_>>(),
+                                stats.counts.seeds,
+                                stats.strips,
+                            )
+                        });
+                        assert_eq!(stats_seeds, seeds.len() as u64, "{at}");
+                        assert_eq!(strips, grid.div_ceil(per), "{at}");
+                        assert_eq!(keys, serial_keys, "{at}");
+                        assert_eq!(state, hash_state(&serial_hash), "{at}");
+                    }
+                }
+            }
+        }
     }
 }

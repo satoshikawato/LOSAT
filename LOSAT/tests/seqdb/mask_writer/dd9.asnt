@@ -1,0 +1,17 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program dust,
+  algo-options "-x 9",
+  masks {
+    masks {
+      packed-int {
+          {
+            from 9,
+            to 14,
+            id local id 6
+          }
+      }
+    },
+    more FALSE
+  }
+}

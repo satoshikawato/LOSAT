@@ -1,0 +1,13 @@
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+10           dust                                    default options used                    
+20           seg                                     default options used                    
+30           windowmasker                            default options used                    
+31           windowmasker                            -x 1                                    
+32           windowmasker                            -x 2                                    
+40           repeat                                  default options used                    
+41           repeat                                  -x 1                                    
+100          oth_d.asnt                              default options used                    
+101          oth_o.asnt                              -x:1                                    

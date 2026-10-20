@@ -15,15 +15,15 @@ use crate::seqdb::SeqType;
 mod makeblastdb_app_cases;
 use makeblastdb_app_cases::APP_CASES;
 
-fn seqdb_fixtures() -> PathBuf {
+pub(super) fn seqdb_fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb")
 }
 
 /// A directory of this test run, removed when the value is dropped.
-struct TempDir(PathBuf);
+pub(super) struct TempDir(pub(super) PathBuf);
 
 impl TempDir {
-    fn new(label: &str) -> Self {
+    pub(super) fn new(label: &str) -> Self {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -37,7 +37,7 @@ impl TempDir {
         Self(dir)
     }
 
-    fn base(&self, name: &str) -> String {
+    pub(super) fn base(&self, name: &str) -> String {
         self.0.join(name).to_string_lossy().into_owned()
     }
 }
@@ -49,7 +49,7 @@ impl Drop for TempDir {
 }
 
 /// The creation date stored in an index file of makeblastdb.
-fn stored_date(index_file: &Path, seqtype: SeqType) -> String {
+pub(super) fn stored_date(index_file: &Path, seqtype: SeqType) -> String {
     let bytes = std::fs::read(index_file).unwrap();
     let index = crate::seqdb::index::IndexFile::parse(&bytes, seqtype, index_file).unwrap();
     let date: Vec<u8> = index.date.iter().copied().take_while(|&b| b != 0).collect();
@@ -58,7 +58,7 @@ fn stored_date(index_file: &Path, seqtype: SeqType) -> String {
 
 /// The local time that `LocalTime::index_date` formats as `date`
 /// ("Oct 12, 2026  3:22 PM").
-fn time_of(date: &str) -> LocalTime {
+pub(super) fn time_of(date: &str) -> LocalTime {
     let months = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
@@ -80,7 +80,7 @@ fn time_of(date: &str) -> LocalTime {
     time
 }
 
-fn files_named(dir: &Path, prefix: &str) -> Vec<String> {
+pub(super) fn files_named(dir: &Path, prefix: &str) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())

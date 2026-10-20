@@ -258,6 +258,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastp::x_bp_redo_par_print_summary();
     LOSAT::algorithm::blastp::x_bp_subj_run_print_summary();
     LOSAT::algorithm::blastp::x_bp_db_cut_print_summary();
+    LOSAT::algorithm::blastp::x_bp_listed_lean_print_summary();
     LOSAT::algorithm::blastp::x_bp_subj_meta_print_summary();
     LOSAT::algorithm::blastx::seed::x_seed_scan::print_shadow_stats();
     LOSAT::algorithm::blastp::x_ungapped_fast::print_shadow_stats();

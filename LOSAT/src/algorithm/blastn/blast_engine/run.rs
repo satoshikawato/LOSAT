@@ -13251,8 +13251,10 @@ fn search_query_batch(
             // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
             // compare equal keep the order in which they were saved. `sort_by`
             // is stable too.
-            // Dispatch point of LOSAT_X_PAIRPARSHADOW: the hit list and the diagonal hash of
-            // the code above against those `x_pair_seed::run` computed for this chunk.
+            // Dispatch point of LOSAT_X_PAIRPARSHADOW (and of the dc shadows,
+            // LOSAT_X_PAIRPARDISCSHADOW and LOSAT_X_PAIRPARDISCARRSHADOW): the hit list and the
+            // diagonal hash (or array) of the code above against those `x_pair_seed::run`
+            // computed for this chunk.
             x_pair_seed::shadow_check(
                 ungapped_hits,
                 &subject_scratch.diag_hash,

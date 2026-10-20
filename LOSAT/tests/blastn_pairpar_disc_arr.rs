@@ -33,9 +33,19 @@ fn fasta(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// A query file of this test, removed when dropped.
+struct QueryFile(PathBuf);
+
+impl Drop for QueryFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// A query file of this test (one per test and process: the tests of this file run in
-/// parallel) with the pieces `(start, length)` of LC738874 as records `q<start>`.
-fn query_file(test: &str, pieces: &[(usize, usize)]) -> PathBuf {
+/// parallel) in Cargo's temporary directory for integration tests, with the pieces
+/// `(start, length)` of LC738874 as records `q<start>`.
+fn query_file(test: &str, pieces: &[(usize, usize)]) -> QueryFile {
     let text = std::fs::read_to_string(fasta("LC738874.fasta")).expect("read LC738874");
     let seq: String = text
         .lines()
@@ -50,12 +60,12 @@ fn query_file(test: &str, pieces: &[(usize, usize)]) -> PathBuf {
             out.push('\n');
         }
     }
-    let path = std::env::temp_dir().join(format!(
-        "losat_blastn_pairpar_disc_arr_{}_{test}.fa",
+    let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "blastn_pairpar_disc_arr_{}_{test}.fa",
         std::process::id()
     ));
     std::fs::write(&path, out).expect("write the query file");
-    path
+    QueryFile(path)
 }
 
 /// One search of `query` against LC738868, `-outfmt 6` on standard output, with every `LOSAT_*`
@@ -150,9 +160,9 @@ fn check_template(query: &Path, template: &[&str]) {
 #[test]
 fn the_stage_runs_by_default_and_not_when_switched_off() {
     let query = query_file("runs", &[(180_000, 3900)]);
-    let (expected, _) = blastn(&query, &[], 1, &[SWITCH_OFF]);
+    let (expected, _) = blastn(&query.0, &[], 1, &[SWITCH_OFF]);
     assert!(!expected.is_empty());
-    let (report, stderr) = blastn(&query, &[], 4, &[("LOSAT_TIMING", "1")]);
+    let (report, stderr) = blastn(&query.0, &[], 4, &[("LOSAT_TIMING", "1")]);
     assert!(report == expected, "the report differs by default");
     let (chunks, seeds) = stage_counts(&stderr);
     assert!(chunks > 0 && seeds > 0, "the stage took nothing:\n{stderr}");
@@ -160,14 +170,13 @@ fn the_stage_runs_by_default_and_not_when_switched_off() {
         &[SWITCH_OFF, ("LOSAT_TIMING", "1")][..],
         &[("LOSAT_X_DEFAULT", "0"), ("LOSAT_TIMING", "1")][..],
     ] {
-        let (report, stderr) = blastn(&query, &[], 4, off);
+        let (report, stderr) = blastn(&query.0, &[], 4, off);
         assert!(report == expected, "the report differs with {off:?}");
         assert!(
             !stderr.contains("[TIMING] x_pairpardiscarr_seed:"),
             "{off:?}:\n{stderr}"
         );
     }
-    let _ = std::fs::remove_file(&query);
 }
 
 // The default template of dc-megablast (word size 11, coding, length 18), word size 12, the
@@ -176,9 +185,9 @@ fn the_stage_runs_by_default_and_not_when_switched_off() {
 #[test]
 fn templates_give_the_same_report() {
     let query = query_file("templates", &[(180_000, 3900)]);
-    check_template(&query, &[]);
+    check_template(&query.0, &[]);
     check_template(
-        &query,
+        &query.0,
         &[
             "-word_size",
             "12",
@@ -189,7 +198,7 @@ fn templates_give_the_same_report() {
         ],
     );
     check_template(
-        &query,
+        &query.0,
         &[
             "-word_size",
             "11",
@@ -200,7 +209,7 @@ fn templates_give_the_same_report() {
         ],
     );
     check_template(
-        &query,
+        &query.0,
         &[
             "-word_size",
             "11",
@@ -210,7 +219,6 @@ fn templates_give_the_same_report() {
             "18",
         ],
     );
-    let _ = std::fs::remove_file(&query);
 }
 
 // Two queries in one array: four contexts, each with its own cutoffs and masks, folded into one
@@ -218,8 +226,7 @@ fn templates_give_the_same_report() {
 #[test]
 fn two_queries_in_one_array_give_the_same_report() {
     let query = query_file("two", &[(165_000, 1900), (45_000, 1900)]);
-    check_template(&query, &[]);
-    let _ = std::fs::remove_file(&query);
+    check_template(&query.0, &[]);
 }
 
 // A query block longer than 8000 letters keeps the diagonal hash: the stage takes no chunk (the
@@ -227,8 +234,8 @@ fn two_queries_in_one_array_give_the_same_report() {
 #[test]
 fn the_diagonal_hash_is_not_taken() {
     let query = query_file("hash", &[(180_000, 4100)]);
-    let (expected, _) = blastn(&query, &[], 1, &[SWITCH_OFF]);
-    let (report, stderr) = blastn(&query, &[], 4, &[SHADOW, ("LOSAT_TIMING", "1")]);
+    let (expected, _) = blastn(&query.0, &[], 1, &[SWITCH_OFF]);
+    let (report, stderr) = blastn(&query.0, &[], 4, &[SHADOW, ("LOSAT_TIMING", "1")]);
     assert!(report == expected);
     assert!(
         stderr.contains(
@@ -236,8 +243,7 @@ fn the_diagonal_hash_is_not_taken() {
         ),
         "{stderr}"
     );
-    let (report, stderr) = blastn(&query, &[], 4, &[("LOSAT_TIMING", "1")]);
+    let (report, stderr) = blastn(&query.0, &[], 4, &[("LOSAT_TIMING", "1")]);
     assert!(report == expected);
     assert_eq!(stage_counts(&stderr).0, 0, "{stderr}");
-    let _ = std::fs::remove_file(&query);
 }

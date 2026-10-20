@@ -62,7 +62,7 @@
 //! window diagnostics, one subject searched by the owner of a pool of two threads or more.
 //! A chunk with a discontiguous megablast table goes to the child module `disc`
 //! (`x_pair_seed_disc.rs`, LOSAT_X_PAIRPARDISC: the two-hit stage of dc-megablast on the same
-//! strips, with its own switches).
+//! strips, with its own switches; LOSAT_X_PAIRPARDISCARR: the same with the diagonal array).
 
 use super::DiagStruct;
 use super::{
@@ -144,9 +144,10 @@ pub(super) struct Inputs<'a> {
 }
 
 /// The diagonal array of `collect_prelim_hits_for_chunk` (a query block of at most 8000
-/// letters: `hit_level_array`, `hit_len_array`, `diag_array_length`, `diag_mask` and
-/// `diag_array_size`, the same names there), for the two-hit stage of LOSAT_X_PAIRPARDISCARR
-/// (child module `disc`). With the diagonal hash the arrays are empty and nothing reads them.
+/// letters): `hit_level_array`, `hit_len_array`, `diag_table_length` (NCBI's
+/// `diag_array_length`), `diag_table_mask` (`diag_mask`) and `diag_array_size`, the names
+/// there, for the two-hit stage of LOSAT_X_PAIRPARDISCARR (child module `disc`). With the
+/// diagonal hash the arrays are empty and nothing reads them.
 pub(super) struct DiagArray<'a> {
     pub(super) levels: &'a mut Vec<DiagStruct>,
     pub(super) lens: &'a mut Vec<u8>,

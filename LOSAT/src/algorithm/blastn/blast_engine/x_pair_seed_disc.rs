@@ -54,6 +54,12 @@
 //! word extension, no debug, trace or window diagnostics, one subject searched by the owner
 //! of a pool of two threads or more. A contiguous table in two-hit mode stays with the
 //! reference (the parent module takes one-hit contiguous tables only).
+//!
+//! EXPERIMENT (LOSAT_X_PAIRPARDISCARR, shadow LOSAT_X_PAIRPARDISCARRSHADOW): the same scope
+//! with the diagonal array instead of the hash (a query block of at most 8000 letters) runs
+//! on the same strips, folded by the owner thread through `fold_two_hit_array`, a
+//! statement-for-statement copy of the two-hit diagonal-array branch of
+//! `process_offset_pairs` (`run_array`, `seed_stage_array`).
 
 use super::super::{
     extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi, mask_lookup_index,
@@ -987,7 +993,6 @@ pub(super) fn run(
 /// against `diag_array_size`, `last_hit` and `flag` in `hit_level_array`, the length in
 /// `hit_len_array` as a byte) instead of the diagonal hash. The owner folds the strips in scan
 /// order, so the array and the hit list are the reference's whatever the number of threads.
-#[allow(clippy::too_many_arguments)]
 fn fold_two_hit_array(
     x: &Inputs<'_>,
     seeds: &[Seed],
@@ -1747,6 +1752,11 @@ mod tests {
 
     fn make_case(rng: &mut Lcg, subject_len: usize) -> Case {
         let q_len = 4100 + rng.below(3000) as usize;
+        make_case_with(rng, subject_len, q_len)
+    }
+
+    /// `make_case` with a query of `q_len` bases (more than 1013: the masks).
+    fn make_case_with(rng: &mut Lcg, subject_len: usize, q_len: usize) -> Case {
         let mut query = random_dna(rng, q_len);
         // a repeat inside the query (long lookup chains)
         let motif = random_dna(rng, 40);
@@ -2173,6 +2183,184 @@ mod tests {
         }
     }
 
+    // EXPERIMENT (LOSAT_X_PAIRPARDISCARR): the two-hit stage with the diagonal array (a query
+    // of 1500 to 3899 bases, so a block of at most 7799 letters; the array has NCBI's length,
+    // the power of two just above the block plus the window) for every discontiguous template:
+    // the pairs of the reference wrapper folded in one go by `fold_two_hit_array`, against
+    // `seed_stage_array` on 1..8 threads. Hit lists and both arrays must be the same, and the
+    // serial fold must have taken every branch: the `last_hit` rejection, the first hit of a
+    // window (`hit_len_array` set), the second hit both below and above the cutoff (a saved
+    // hit leaves `flag` 1).
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    #[test]
+    fn disc_two_hit_array_stage_on_strips_equals_one_scan() {
+        let mut rng = Lcg(0xA22A_5EED);
+        let mut case_no = 0;
+        for word_size in [11usize, 12] {
+            for word_type in [
+                DiscWordType::Coding,
+                DiscWordType::Optimal,
+                DiscWordType::TwoTemplates,
+            ] {
+                for template_length in [16usize, 18, 21] {
+                    case_no += 1;
+                    let q_len = 1500 + rng.below(2400) as usize;
+                    let c = make_case_with(&mut rng, 30_000, q_len);
+                    let lookup = build_disc_mb_lookup(
+                        &ctx_refs(&c),
+                        &c.offsets,
+                        word_size,
+                        template_length,
+                        word_type,
+                        &c.masks,
+                        c.concat.len(),
+                    );
+                    let disc = lookup.disc().expect("a discontiguous table");
+                    let diag_offset = 37 + rng.below(1000) as isize;
+                    let window_size = 40;
+                    let x = Inputs {
+                        use_array_indexing: true,
+                        ..inputs(&c, &lookup, diag_offset, window_size)
+                    };
+                    assert!(in_scope_array(&x) && !in_scope(&x));
+                    let mut length = 1usize;
+                    while length < c.concat.len() + window_size {
+                        length <<= 1;
+                    }
+                    let mut seeds = Vec::new();
+                    scan_subject_disc_words_with_ranges(
+                        &c.packed,
+                        c.s_len,
+                        disc,
+                        &c.seq_ranges,
+                        false,
+                        |s_off, s_range, index, index2| {
+                            lookup.for_each_hit(index, |q_off_1| {
+                                if q_off_1 != 0 {
+                                    seed_of_pair(
+                                        &x,
+                                        q_off_1 as usize - 1,
+                                        s_off,
+                                        s_range,
+                                        &mut seeds,
+                                    );
+                                }
+                            });
+                            if let Some(index2) = index2 {
+                                lookup.for_each_hit2(index2, |q_off_1| {
+                                    seed_of_pair(
+                                        &x,
+                                        q_off_1 as usize - 1,
+                                        s_off,
+                                        s_range,
+                                        &mut seeds,
+                                    );
+                                });
+                            }
+                        },
+                    );
+                    let mut serial_levels = vec![DiagStruct::default(); length];
+                    let mut serial_lens = vec![0u8; length];
+                    let mut serial_hits = Vec::new();
+                    let mut counts = FoldCounts::default();
+                    let mut pause = 0u64;
+                    fold_two_hit_array(
+                        &x,
+                        &seeds,
+                        &mut DiagArray {
+                            levels: &mut serial_levels,
+                            lens: &mut serial_lens,
+                            length: length as isize,
+                            mask: length as isize - 1,
+                            size: length,
+                        },
+                        &mut serial_hits,
+                        None,
+                        &mut pause,
+                        &mut counts,
+                    );
+                    let saved = serial_levels.iter().filter(|d| d.flag != 0).count();
+                    let first_hits = serial_lens.iter().filter(|&&l| l > 0).count();
+                    assert!(
+                        serial_hits.len() > 5 && counts.skipped > 0 && saved > 0 && first_hits > 0,
+                        "case {case_no}: the test sequences give too few hits ({} hits, {} skipped, {saved} saved diagonals, {first_hits} first-hit diagonals)",
+                        serial_hits.len(),
+                        counts.skipped
+                    );
+                    let key = |h: &UngappedHit| {
+                        (
+                            h.context_idx,
+                            h.seed_q_off,
+                            h.seed_s_off,
+                            h.qs,
+                            h.qe,
+                            h.ss,
+                            h.se,
+                            h.score,
+                        )
+                    };
+                    let state = |levels: &[DiagStruct], lens: &[u8]| {
+                        (
+                            levels
+                                .iter()
+                                .map(|d| (d.last_hit, d.flag))
+                                .collect::<Vec<_>>(),
+                            lens.to_vec(),
+                        )
+                    };
+                    let serial_keys: Vec<_> = serial_hits.iter().map(key).collect();
+                    let serial_state = state(&serial_levels, &serial_lens);
+                    for threads in 1..=8usize {
+                        let pool = rayon::ThreadPoolBuilder::new()
+                            .num_threads(threads)
+                            .build()
+                            .unwrap();
+                        let (got_state, keys, stats_seeds, strips) = pool.install(|| {
+                            let mut levels = vec![DiagStruct::default(); length];
+                            let mut lens = vec![0u8; length];
+                            let mut hits = Vec::new();
+                            let stats = seed_stage_array(
+                                &x,
+                                disc,
+                                threads,
+                                &mut DiagArray {
+                                    levels: &mut levels,
+                                    lens: &mut lens,
+                                    length: length as isize,
+                                    mask: length as isize - 1,
+                                    size: length,
+                                },
+                                &mut hits,
+                                None,
+                                false,
+                            );
+                            (
+                                state(&levels, &lens),
+                                hits.iter().map(key).collect::<Vec<_>>(),
+                                stats.counts.seeds,
+                                stats.strips,
+                            )
+                        });
+                        assert!(strips > 1, "case {case_no} threads {threads}");
+                        assert_eq!(
+                            stats_seeds,
+                            seeds.len() as u64,
+                            "case {case_no} threads {threads}"
+                        );
+                        assert_eq!(keys, serial_keys, "case {case_no} threads {threads}");
+                        assert!(
+                            got_state == serial_state,
+                            "case {case_no} threads {threads}: the diagonal arrays differ"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     // The scope: a discontiguous table in two-hit mode with the diagonal hash only. A
     // contiguous table in two-hit mode (megablast or blastn with `-window_size`, which the
     // CLI rejects) is in neither this scope nor the parent's: the parent's `run` refuses it
@@ -2228,6 +2416,40 @@ mod tests {
             false,
         );
         assert!(!in_scope(&inputs(&c, &contiguous, 40, 40)));
+        // EXPERIMENT (LOSAT_X_PAIRPARDISCARR): the same scope with the diagonal array.
+        fn array(x: Inputs<'_>) -> Inputs<'_> {
+            Inputs {
+                use_array_indexing: true,
+                ..x
+            }
+        }
+        assert!(in_scope_array(&array(inputs(&c, &disc, 40, 40))));
+        assert!(!in_scope_array(&inputs(&c, &disc, 40, 40)));
+        assert!(!in_scope_array(&array(Inputs {
+            window_size: 0,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(Inputs {
+            scan_range: 1,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(Inputs {
+            subject_masked: true,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(Inputs {
+            small_na_word: true,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(Inputs {
+            diagnostics: true,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(Inputs {
+            one_subject_owner: false,
+            ..inputs(&c, &disc, 40, 40)
+        })));
+        assert!(!in_scope_array(&array(inputs(&c, &contiguous, 40, 40))));
         // The parent's `run` in a pool of two threads (where its one-hit stage would run):
         // a contiguous table with a window is refused and nothing is touched.
         #[cfg(all(

@@ -194,6 +194,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                         srow: b"WENYCW",
                         ops: None,
                         query_first: 32,
+                        query_step: 1,
                         masks: &[],
                     })?;
                     hsps.hsp(&XmlHsp {
@@ -210,6 +211,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                         srow: b"MWMEHSVLK",
                         ops: None,
                         query_first: 23,
+                        query_step: 1,
                         masks: &[],
                     })
                 },

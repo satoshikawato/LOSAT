@@ -79,15 +79,21 @@ pub fn round6(value: f64) -> f64 {
 /// the last column.
 ///
 /// `row` is the unmasked query row, `segments` the Dense-seg segments as inclusive column
-/// ranges (`GetAlnStart` / `GetAlnStop`), `first` the 0-based record position of the row's
-/// first residue (query residues rise by one per residue: the protein and plus-strand rows),
-/// `masks` the query's masked regions in record coordinates. The masked row is written to
-/// `out`; `columns` is scratch.
+/// ranges (`GetAlnStart` / `GetAlnStop`), `masks` the query's masked regions in record
+/// coordinates. `first` and `step` place the row's residues in the record: residue `j` (the
+/// `j`-th letter of the row that is not a gap) lies at `first + j` for `step` 1 (a protein or
+/// plus-strand nucleotide row); at the nucleotides `first + 3j ..= first + 3j + 2` for `step`
+/// 3 (a translated query, plus frame); at `first - 3j - 2 ..= first - 3j` for `step` -3 (minus
+/// frame, the row runs from the high end: `first` is the highest nucleotide). A position
+/// maps to the column of the residue that holds it
+/// (`delta = (seq_pos - start) / GetWidth(row)`, alnmap.cpp:593-595), and to -1 outside the
+/// row's residues. The masked row is written to `out`; `columns` is scratch.
 #[allow(clippy::too_many_arguments)]
 pub fn mask_query_row(
     row: &[u8],
     segments: &[(usize, usize)],
     first: i32,
+    step: i32,
     masks: &[QueryMask],
     query_frame: i32,
     mask_char: u8,
@@ -107,12 +113,17 @@ pub fn mask_query_row(
             .filter(|&(_, &letter)| letter != b'-')
             .map(|(column, _)| column),
     );
+    let width = i64::from(step.abs().max(1));
     let aln_pos = |position: i32| -> i32 {
-        let index = i64::from(position) - i64::from(first);
-        if index < 0 || index >= columns.len() as i64 {
+        let distance = if step < 0 {
+            i64::from(first) - i64::from(position)
+        } else {
+            i64::from(position) - i64::from(first)
+        };
+        if distance < 0 || distance / width >= columns.len() as i64 {
             -1
         } else {
-            columns[index as usize] as i32
+            columns[(distance / width) as usize] as i32
         }
     };
     let aln_stop = row.len() as i32 - 1;
@@ -222,7 +233,17 @@ mod tests {
 
     fn masked(row: &[u8], segments: &[(usize, usize)], first: i32, masks: &[QueryMask]) -> String {
         let (mut out, mut columns) = (Vec::new(), Vec::new());
-        mask_query_row(row, segments, first, masks, 0, b'X', &mut out, &mut columns);
+        mask_query_row(
+            row,
+            segments,
+            first,
+            1,
+            masks,
+            0,
+            b'X',
+            &mut out,
+            &mut columns,
+        );
         String::from_utf8(out).expect("ASCII")
     }
 
@@ -293,6 +314,7 @@ mod tests {
             b"ACDEF",
             &[(0, 4)],
             10,
+            1,
             &masks,
             0,
             b'X',
@@ -304,6 +326,7 @@ mod tests {
             b"ACDEF",
             &[(0, 4)],
             10,
+            1,
             &masks,
             1,
             b'N',
@@ -335,5 +358,47 @@ mod tests {
             masked(row, &[(0, 7)], 0, &[mask(5, 6), mask(1, 2)]),
             "AXXDEXXH"
         );
+    }
+
+    /// A translated query row: nucleotide masks reach the columns of the residues that hold
+    /// them (`GetAlnPosFromSeqPos`: `(seq_pos - start) / width`), the minus frame's row runs
+    /// from the highest nucleotide, and a mask whose first column in alignment order lies
+    /// before the HSP is dropped.
+    #[test]
+    fn nucleotide_masks_of_a_translated_row_reach_the_columns_of_their_codons() {
+        let frame = |frame: i32, from: i32, to: i32| QueryMask { from, to, frame };
+        let run = |row: &[u8], first: i32, step: i32, query_frame: i32, masks: &[QueryMask]| {
+            let (mut out, mut columns) = (Vec::new(), Vec::new());
+            let segments = [(0, row.len() - 1)];
+            mask_query_row(
+                row,
+                &segments,
+                first,
+                step,
+                masks,
+                query_frame,
+                b'X',
+                &mut out,
+                &mut columns,
+            );
+            String::from_utf8(out).unwrap()
+        };
+        // Plus frame: residue j holds the nucleotides 30 + 3j ..= 32 + 3j.
+        assert_eq!(run(b"ABCDE", 30, 3, 1, &[frame(1, 36, 41)]), "ABXXE");
+        // a mask inside a codon masks that codon's residue
+        assert_eq!(run(b"ABCDE", 30, 3, 1, &[frame(1, 37, 37)]), "ABXDE");
+        // starting before the HSP: dropped whole; running past its end: cut at the last column
+        assert_eq!(run(b"ABCDE", 30, 3, 1, &[frame(1, 28, 36)]), "ABCDE");
+        assert_eq!(run(b"ABCDE", 30, 3, 1, &[frame(1, 40, 90)]), "ABCXX");
+        // another frame's mask is not applied
+        assert_eq!(run(b"ABCDE", 30, 3, 1, &[frame(2, 36, 41)]), "ABCDE");
+        // Minus frame: the row runs from the highest nucleotide 47 down; residue j holds
+        // 45 - 3j ..= 47 - 3j.
+        assert_eq!(run(b"ABCDE", 47, -3, -1, &[frame(-1, 36, 41)]), "ABXXE");
+        assert_eq!(run(b"ABCDE", 47, -3, -1, &[frame(-1, 30, 41)]), "ABXXX");
+        // reaching past the row's high end is the dropped leading mask of the alignment order
+        assert_eq!(run(b"ABCDE", 47, -3, -1, &[frame(-1, 40, 50)]), "ABCDE");
+        // a gap column in the row keeps its '-'
+        assert_eq!(run(b"AB-DE", 30, 3, 1, &[frame(1, 33, 41)]), "AX-XX");
     }
 }

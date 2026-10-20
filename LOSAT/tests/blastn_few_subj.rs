@@ -2,26 +2,26 @@
 //! batch whose longest chunk is, searched one at a time on the whole pool (`LOSAT_X_BNFEWSUBJ`,
 //! `src/algorithm/blastn/blast_engine/x_few_subj.rs`), on whole searches.
 //!
-//! The switch is in the strict set (on unless it is `0`). It chooses between two LOSAT shapes of the
-//! search with the same result: the subjects (or the chunks of a batch) one at a time, each with the
-//! subject scan in strips (`LOSAT_X_PAIRPAR`, `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARDISCARR`), or the
-//! subjects (the chunks) as
-//! tasks of the pool without strips. So the property under test is that the report does not depend
-//! on it or on the thread count: the search with the switch at 2, 3 and 4 threads gives the bytes
-//! of the search at one thread and of the search without it, and the shadows of the strips
-//! (`LOSAT_X_PAIRPARSHADOW`, `LOSAT_X_PAIRPARDISCSHADOW`, which compute the stage on copies and
-//! compare the hit list and the whole diagonal hash with the reference code for every chunk) give
-//! them too and compare the chunks. With `LOSAT_TIMING` the strips report how many chunks they
-//! took, which shows which shape ran: the rule needs the longest unit's letters times the strips'
-//! speed-up at the thread count to be more than all the letters (two subjects of about 300 kb each:
-//! 4 threads or more; a record of 5.2 Mb, whose second chunk is short: 2 threads or more), and no
-//! lowercase mask with `-lcase_masking`. That those bytes
-//! equal NCBI's is the business of the fixtures (`tests/blastn_regression_fixtures.py`).
+//! The switch is in the strict set (on unless it is `0`). It chooses between two LOSAT shapes of
+//! the search with the same result: the subjects (or the chunks of a batch) one at a time, each
+//! with the subject scan in strips (`LOSAT_X_PAIRPAR`, `LOSAT_X_PAIRPARDISC`,
+//! `LOSAT_X_PAIRPARDISCARR`), or the subjects (the chunks) as tasks of the pool without strips. So
+//! the property under test is that the report does not depend on it or on the thread count: the
+//! search with the switch at 2, 3 and 4 threads gives the bytes of the search at one thread and of
+//! the search without it, and the shadows of the strips (`LOSAT_X_PAIRPARSHADOW`,
+//! `LOSAT_X_PAIRPARDISCSHADOW`, which compute the stage on copies and compare the hit list and the
+//! whole diagonal hash with the reference code for every chunk) give them too and compare the
+//! chunks. With `LOSAT_TIMING` the strips report how many chunks they took, which shows which
+//! shape ran: the rule needs the longest unit's letters times the strips' speed-up at the thread
+//! count to be more than all the letters (two subjects of about 300 kb each: 4 threads or more; a
+//! record of 5.2 Mb, whose second chunk is short: 2 threads or more), and no lowercase mask with
+//! `-lcase_masking`. That those bytes equal NCBI's is the business of the fixtures
+//! (`tests/blastn_regression_fixtures.py`).
 //!
 //! The query is LC738874 (287 kb, longer than 8000 letters: the strips take the diagonal hash),
-//! and 3,000 letters of it for the diagonal array. The subjects are LC738868 and LC738869 (two records), and one record of 5.2 Mb (LC738868,
-//! pseudo-random bases, LC738869, pseudo-random bases: two chunks of `MAX_DBSEQ_LEN`), written per
-//! call.
+//! and 3,000 letters of it for the diagonal array. The subjects are LC738868 and LC738869 (two
+//! records), and one record of 5.2 Mb (LC738868, pseudo-random bases, LC738869, pseudo-random
+//! bases: two chunks of `MAX_DBSEQ_LEN`), written per call.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

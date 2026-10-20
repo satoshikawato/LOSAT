@@ -1087,15 +1087,17 @@ Rebuilding less:
   unit a subject up to 5 Mb (subjects) or a chunk with its overlap (a batch), S^(p) per kind of table at the largest of
   2 / 4 / 8 / 16 threads not above p: dc-megablast 1.7 / 2.5 / 3.2 / 3.4, blastn 1.7 / 2.9 / 4.1 / 4.7, any other
   task 1.5 / 2.0 / 2.5 / 2.7 (the lowest one-thread / new-shape wall the probe below measured, floored to tenths;
-  integers in tenths). Not with `-lcase_masking` (a masked chunk has no strips) and not for `-db` (plan v4 line D). The
+  integers in tenths). The subjects keep their tasks with `-lcase_masking` (a masked chunk has no strips), and a
+  batch's chunks keep theirs when the subject has lowercase letters under it; never for `-db` (plan v4 line D). The
   new shape is the one of a one-subject search (strips, `LOSAT_X_QGROUPPAR`, the speculative traceback), and the
   subjects reach `sink` in OID order in both shapes. The shadows of the strips (`LOSAT_X_PAIRPARSHADOW`,
   `LOSAT_X_PAIRPARDISCSHADOW`, `LOSAT_X_PAIRPARDISCARRSHADOW`) and of `LOSAT_X_QGROUPPAR` run on it; it has no shadow of
   its own (it only chooses between two shapes with the same bytes). Memory: the shape holds one chunk's seed stage on
-  the whole pool; with it the one-hit strips of `LOSAT_X_PAIRPARFOLD` are 64 per thread with a look-ahead of 2 per
-  thread (1/32 of a chunk's seeds, as dc-megablast's; before 8 / 2, a quarter), which also lowers one-subject blastn
-  (Sakai against MG1655 alone at 16 threads 282 -> 213 MiB median, at 4 threads 193 -> 151; NCBI 192 MiB) at x0.95-0.99
-  of the time. Test: `LOSAT/tests/blastn_few_subj.rs`.
+  the whole pool. The pull request that added the switch also cut the one-hit strips of `LOSAT_X_PAIRPARFOLD` to 64
+  per thread with a look-ahead of 2 per thread (about 1/32 of a chunk's seeds, as dc-megablast's; before 8 / 2, a
+  quarter), for every search and not under this switch (`=0` keeps them). That also lowers one-subject blastn (Sakai
+  against MG1655 alone at 16 threads 282 -> 213 MiB median, at 4 threads 193 -> 151; NCBI 192 MiB) at x0.95-1.00 of
+  the time. Test: `LOSAT/tests/blastn_few_subj.rs`.
   Measured on the workstation (node 1; 16 / 8 / 4 / 2 booked cores with their siblings idle, a 3 s warm-up before each
   run, rotated order; every output equal to NCBI 2.17.0 `-subject`; line G `results/g4probe/ab.tsv` (the shape forced
   for any 2+ subjects or chunks, exp/bn-few-subj-force 80fca36a, 3 timed pairs) and `results/g4conf2/ab.tsv` (this
@@ -1115,11 +1117,13 @@ Rebuilding less:
   at 2 threads (x0.94-1.06) and with megablast at 4 (x0.96), MG1655 in 3 records at 2 / 4 threads (x0.86-0.96) and with megablast (x0.94-1.04). Max RSS
   (median, MiB, with / without; NCBI): blastn against MG1655 + pO157 203 / 195 at 16 threads (192), 180 / 151 at 8,
   150 / 125 at 4; megablast against MG1655 + EDL933 149 / 161 at 16; dc-megablast of the 2,000 pieces 66 / 64 at 16
-  (125). On node 0 (untimed, 4 cores, two runs each, `results/g4rss3/rss.tsv`) the cells with EDL933 or 3 records
-  do not rise either at 16 / 8 threads: blastn against MG1655 + EDL933 420-484 / 494-539 and 378-397 / 353-383 MiB,
-  against EDL933 616-647 / 671-703, against MG1655 in 3 records 198-199 / 220-236; dc-megablast against MG1655 +
-  EDL933 658-711 / 639-768, against EDL933 671-672 / 665-689. The cells with EDL933 are 2.5-4 times NCBI's max RSS
-  (164-286 MiB) in both shapes (outside this switch).
+  (125). On node 0 (untimed, 4 cores for 16 / 8 threads, two runs each, `results/g4rss3/rss.tsv`; these read the old
+  shape about 20 % below the probe's 16 cores) the cells with EDL933 or 3 records, at 16 threads: blastn against
+  MG1655 + EDL933 420-484 / 494-539 MiB, against EDL933 616-647 / 671-703, against MG1655 in 3 records 198-199 /
+  220-236; dc-megablast against MG1655 + EDL933 658-711 / 639-768, against EDL933 671-672 / 665-689; at 8 threads the
+  new shape's runs are within or above the old one's (blastn against MG1655 + EDL933 378-397 / 353-383,
+  dc-megablast against EDL933 449-477 / 418-460). With EDL933, blastn and dc-megablast take 2.3-4.4 times NCBI's max
+  RSS (164-286 MiB) in both shapes (outside this switch); megablast stays below NCBI's.
 - `LOSAT_X_DBIDXREAD=1` (every program's `-db`, memory; in the strict set since 2026-10-19 (perf/db-index-pread, evidence
   at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the index file of each volume
   (`.pin` / `.nin`) stays open after the volume is opened, and the reader reads the ranges of its offset arrays that it
@@ -2038,8 +2042,9 @@ Scheduling (each value computed by one thread with the original function; order 
   its blocks of `2^max(11, pv_array_bts)` cells, so each cell gets its words in the original order
   (`blastn/x_mb_lookup_par.rs`; not with database word counts or `BLEMIR_DEBUG`). (2) The one-hit
   seed stage of a subject chunk with the diagonal hash (query block over 8000 letters,
-  `window_size` 0, `scan_range` 0, contiguous megablast table, unmasked subject, one subject, no
-  small-query word extension, no debug or trace): the subject scan grid is cut into strips that
+  `window_size` 0, `scan_range` 0, contiguous megablast table, unmasked subject, one subject at a time on the owner
+  (several one at a time under `LOSAT_X_BNFEWSUBJ`), no small-query word extension, no debug or trace): the subject
+  scan grid is cut into strips that
   the pool threads scan (lookup chains and word extension), and the owner thread folds the strips
   in scan order through a copy of the diagonal-hash code (`blastn/blast_engine/x_pair_seed.rs`).
   Anything else runs the original code. Shadow: `LOSAT_X_PAIRPARSHADOW=1` (lookup tables and, per
@@ -2695,7 +2700,8 @@ Scheduling (each value computed by one thread with the original function; order 
   alternating rounds): dc-megablast of 1,775 cDNAs against 3 Mb x0.966 / x0.941 at 4 / 16 threads, of 3,492 x0.963 /
   x0.922, of 31,168 x0.949 / x0.974; max RSS within 3 MiB.
 - `LOSAT_X_QGROUPPAR=1` (in the strict set since 2026-10-19 (perf/bn-query-groups, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set)
-  BLASTN, every task, one subject searched on one thread with two or more threads in the pool: the preliminary gapped
+  BLASTN, every task, one subject at a time searched on one thread with two or more threads in the pool (one subject,
+  or several one at a time under `LOSAT_X_BNFEWSUBJ`): the preliminary gapped
   loop of a subject chunk and the traceback of the subject run per query on the search pool instead of on the thread
   that owns the subject over all queries in one order (`blastn/blast_engine/x_qgroup_par.rs`, dispatched in
   `search_query_batch`). NCBI runs both loops of a subject on one thread with one interval tree

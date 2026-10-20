@@ -148,9 +148,9 @@ use crate::utils::dust::MaskedInterval;
 #[path = "x_pair_seed.rs"]
 mod x_pair_seed;
 
-// EXPERIMENT (LOSAT_X_BNFEWSUBJ): a `-subject` search whose longest 5 Mb unit is a large part of its
-// letters searches its subjects, and a batch of chunks the same way its chunks, one at a time on the whole pool, so
-// that the seed stage scans each chunk in strips (`x_pair_seed`).
+// EXPERIMENT (LOSAT_X_BNFEWSUBJ): a `-subject` search whose longest 5 Mb unit is a large part of
+// its letters searches its subjects, and a batch of chunks the same way its chunks, one at a time
+// on the whole pool, so that the seed stage scans each chunk in strips (`x_pair_seed`).
 #[path = "x_few_subj.rs"]
 mod x_few_subj;
 
@@ -10156,8 +10156,8 @@ fn search_query_batch(
     let subject_besthit = args.subject_besthit;
     // EXPERIMENT (LOSAT_X_QGROUPPAR): whether the gapped stages of a subject searched on this
     // thread may run per query on the pool (x_qgroup_par.rs). Not on the diagnostic paths, which
-    // print in the loop's order, and not with several subjects (`use_parallel`: the pool searches
-    // subjects then).
+    // print in the loop's order, and not while the pool searches subjects in parallel
+    // (`use_parallel`; several subjects one at a time under LOSAT_X_BNFEWSUBJ take it).
     let x_qgroup_batch = x_qgroup_par::on()
         && !use_parallel
         && parallel_pool.enabled()

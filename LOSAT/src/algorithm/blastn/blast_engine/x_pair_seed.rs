@@ -59,7 +59,8 @@
 //! Scope (anything else returns `false`, and the reference code runs): the diagonal hash
 //! (query longer than 8000), `window_size == 0` (one hit), `scan_range == 0`, a contiguous
 //! megablast table, an unmasked subject, no small-query word extension, no debug, trace or
-//! window diagnostics, one subject searched by the owner of a pool of two threads or more.
+//! window diagnostics, a subject searched by the owner of a pool of two threads or more by itself
+//! (one subject, or several one at a time under LOSAT_X_BNFEWSUBJ).
 //! A chunk with a discontiguous megablast table goes to the child module `disc`
 //! (`x_pair_seed_disc.rs`, LOSAT_X_PAIRPARDISC: the two-hit stage of dc-megablast on the same
 //! strips, with its own switches; LOSAT_X_PAIRPARDISCARR: the same with the diagonal array).
@@ -188,7 +189,7 @@ struct StripJob {
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
-pub(super) fn pool_threads() -> Option<usize> {
+fn pool_threads() -> Option<usize> {
     rayon::current_thread_index()?;
     let threads = rayon::current_num_threads();
     (threads > 1).then_some(threads)
@@ -198,7 +199,7 @@ pub(super) fn pool_threads() -> Option<usize> {
     not(feature = "parallel"),
     all(target_arch = "wasm32", not(feature = "wasm-threads"))
 ))]
-pub(super) fn pool_threads() -> Option<usize> {
+fn pool_threads() -> Option<usize> {
     None
 }
 

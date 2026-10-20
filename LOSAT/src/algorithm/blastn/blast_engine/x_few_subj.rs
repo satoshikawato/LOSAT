@@ -27,11 +27,11 @@
 //! Without the switch, a search of two subjects or more at two threads or more searches each
 //! subject as one task of the pool (`use_parallel`, `search_subjects`), and a subject of two
 //! chunks or more (`MAX_DBSEQ_LEN`) searches the chunks of each batch as tasks of the pool
-//! (`reuse_prelim_hits` false). The strips of the seed stage run only for a chunk that one subject's
-//! owner searches by itself (`one_subject_owner`), so neither shape has them: the Sakai genome
-//! against MG1655 and its 92 kb plasmid used two of 16 threads for MG1655's scan (dc-megablast
-//! 2.22 s against 0.53 s with MG1655 alone), and against EDL933 (5.53 Mb, two chunks) two threads too
-//! (line G `PROBE_1.md` #4).
+//! (`reuse_prelim_hits` false). The strips of the seed stage run only for a chunk that one
+//! subject's owner searches by itself (`one_subject_owner`), so neither shape has them: the Sakai
+//! genome against MG1655 and its 92 kb plasmid used two of 16 threads for MG1655's scan
+//! (dc-megablast 2.22 s against 0.53 s with MG1655 alone), and against EDL933 (5.53 Mb, two
+//! chunks) two threads too (line G `PROBE_1.md` #4).
 //!
 //! With the switch on, a search whose strips would run (`x_pair_seed::takes_owner_chunks`, on a
 //! thread of the search pool) takes the shape of a one-subject search when the rule below says so
@@ -41,15 +41,17 @@
 //! (`serial_chunks`) searches its chunks in order with `reuse_prelim_hits`, the statements of the
 //! one-chunk batch and of the one-thread loop.
 //!
-//! Why the reports do not change: both shapes are ones LOSAT already runs with the same bytes as one
-//! thread. A search of one subject at two threads or more is the first (the subject loop of
-//! `search_subjects` is the same code for any number of subjects, and `sink` receives the subjects
-//! in OID order in both shapes: the parallel one collects them and then hands them over in order).
-//! A subject's result is a function of the subject and of the search's fixed inputs: the scratch
-//! that the loop carries from one subject to the next is reset per chunk, as the one-thread loop
-//! relies on. The chunks of a batch searched in order are the one-thread loop's statements (search
-//! with `reuse_prelim_hits`, merge, `-subject_besthit`, buffer back), and the parallel batch merges
-//! its chunks' lists in the same order. The parts that come on with the shape (strips, per-query
+//! Why the reports do not change: both shapes are ones LOSAT already runs with the same bytes as
+//! one thread. The subjects one at a time on the calling thread are the one-thread loop: the
+//! subject loop of `search_subjects` is the same code for any number of subjects and threads, it
+//! starts from one scratch (`new_state`) and searches the subjects in OID order, so every subject
+//! meets the scratch history it meets at one thread (the diagonal hash, kept across chunks with an
+//! advancing offset, included); only the stages inside a chunk use the pool, each with its own
+//! exactness argument and shadow. `sink` receives the subjects in OID order in both shapes (the
+//! parallel one hands them over in order: collected, or streamed with LOSAT_X_BNSTREAM). The
+//! chunks of a batch searched in order are the one-thread loop's statements (search with
+//! `reuse_prelim_hits`, merge, `-subject_besthit`, buffer back), and the parallel batch merges its
+//! chunks' lists in the same order. The parts that come on with the shape (strips, per-query
 //! gapped stages, speculative traceback) have their own shadows and gates.
 //!
 //! The rule (scheduling only; no NCBI counterpart): the subject tasks take at least the time of
@@ -57,14 +59,14 @@
 //! subject's batch are tasks of the pool too), and the one-subject shape about the time of all the
 //! letters over the strips' speed-up S(p) at p threads. The shape changes when the longest unit's
 //! letters times Ŝ(p) are more than all the letters (`serial`), and a batch of chunks the same way
-//! with its chunks. Ŝ(p) (`SPEEDUP_TENTHS`) is the lowest S(p) = one-thread wall / wall of the shape
-//! that line G's probe measured for the kind of table, at the largest of 2, 4, 8 and 16 threads not
-//! above p, floored to tenths (workstation, node 1, 2026-10-20: Sakai against MG1655 + pO157,
-//! EDL933, MG1655 + EDL933, and MG1655 in 3 and in 10 parts; dc-megablast 1.75 / 2.56 / 3.24 / 3.40
-//! with EDL933, blastn 1.74 / 2.94 / 4.18 / 4.75, megablast 1.51 / 2.06 / 2.55 / 2.74). Every cell
-//! of the probe that the rule changes was faster in the new shape; MG1655 in 10 parts, where the
-//! subject tasks fill the pool (x1.03-1.48 slower in the new shape), and 2,000 16S genes (x5.2
-//! slower) keep theirs.
+//! with its chunks. Ŝ(p) (`SPEEDUP_TENTHS`) is the lowest S(p) = one-thread wall / wall of the
+//! shape that line G's probe measured for the kind of table, at the largest of 2, 4, 8 and 16
+//! threads not above p, floored to tenths (workstation, node 1, 2026-10-20: Sakai against MG1655 +
+//! pO157, EDL933, MG1655 + EDL933, and MG1655 in 3 and in 10 parts; dc-megablast 1.75 / 2.56 /
+//! 3.24 / 3.40 with EDL933, blastn 1.74 / 2.94 / 4.18 / 4.75, megablast 1.51 / 2.06 / 2.55 / 2.74).
+//! Every cell of the probe that the rule changes was faster in the new shape; MG1655 in 10 parts,
+//! where the subject tasks fill the pool (x1.01-1.48 slower in the new shape), and 2,000 16S genes
+//! (x5.2 slower) keep theirs.
 
 use std::sync::OnceLock;
 

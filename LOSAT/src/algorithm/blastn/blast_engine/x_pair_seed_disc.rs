@@ -51,8 +51,9 @@
 //! Scope (anything else returns `false`, and the reference code runs): a discontiguous
 //! megablast table (one or two templates), `window_size > 0` (two hits), the diagonal hash
 //! (query block longer than 8000), `scan_range == 0`, an unmasked subject, no small-query
-//! word extension, no debug, trace or window diagnostics, one subject searched by the owner
-//! of a pool of two threads or more. A contiguous table in two-hit mode stays with the
+//! word extension, no debug, trace or window diagnostics, a subject searched by the owner of a
+//! pool of two threads or more by itself (one subject, or several one at a time under
+//! LOSAT_X_BNFEWSUBJ). A contiguous table in two-hit mode stays with the
 //! reference (the parent module takes one-hit contiguous tables only).
 //!
 //! EXPERIMENT (LOSAT_X_PAIRPARDISCARR, shadow LOSAT_X_PAIRPARDISCARRSHADOW): the same scope
@@ -182,12 +183,16 @@ fn in_scope(x: &Inputs<'_>) -> bool {
 /// the scope of `in_scope` with the array instead of the hash.
 fn in_scope_array(x: &Inputs<'_>) -> bool {
     x.two_stage.disc().is_some()
-        && x.window_size > 0
         && x.use_array_indexing
-        && x.scan_range == 0
+        && super::chunk_free_scope(
+            true,
+            false,
+            x.window_size,
+            x.scan_range,
+            x.small_na_word,
+            x.diagnostics,
+        )
         && !x.subject_masked
-        && !x.small_na_word
-        && !x.diagnostics
         && x.one_subject_owner
 }
 

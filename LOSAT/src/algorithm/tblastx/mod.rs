@@ -9,6 +9,7 @@ pub mod blast_aascan;
 pub mod blast_engine;
 pub mod blast_extend;
 pub mod blast_gapalign;
+mod blast_xml;
 pub mod chaining;
 pub mod constants;
 mod database;

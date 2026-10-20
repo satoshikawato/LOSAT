@@ -117,7 +117,10 @@ fn report_error(error: anyhow::Error) -> anyhow::Error {
     // {
     //     m_Outfile.exceptions(NcbiBadbit);
     // ```
-    if error.downcast_ref::<report::TabularFlushError>().is_some() {
+    if error.is::<super::blast_xml::XmlRefusal>() {
+        // LOSAT's refusal of a title NCBI's XML cannot write, not an error of NCBI's engine.
+        error
+    } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
     } else if let Some(e) = error.downcast_ref::<io::Error>() {
         output_error(io::Error::new(e.kind(), e.to_string()))
@@ -428,6 +431,11 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             Program::Blastx,
         )?;
     }
+    // LOSAT's refusal of a database name that BLAST XML (outfmt 5) cannot write, before the
+    // search (`blast_xml::check_database_name`).
+    if let (Some(database), 5) = (database.as_ref(), choice.number) {
+        super::blast_xml::check_database_name(database.name())?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
     // ```c++
     // 	char c;
@@ -553,7 +561,8 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     let render_batch = |writer: &mut BufWriter<Box<dyn Write>>,
                         diagnostics: &mut dyn Write,
                         queries: &[FastaRecord],
-                        results: &mut Vec<BatchResults>|
+                        results: &mut Vec<BatchResults>,
+                        queries_before: usize|
      -> Result<()> {
         match (&database, &pairwise_database) {
             (Some(database), Some(pairwise)) => {
@@ -588,6 +597,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         reported: &reported,
                     },
                     results,
+                    queries_before,
                 )
                 .map_err(report_error)
             }
@@ -599,6 +609,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                 &subjects,
                 &shown_run,
                 results,
+                queries_before,
             )
             .map_err(report_error),
         }
@@ -736,6 +747,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                                 &mut **diagnostics.borrow_mut(),
                                 queries,
                                 &mut results,
+                                processed,
                             )?;
                             writer.flush().map_err(output_error)?;
                             processed += queries.len();
@@ -843,6 +855,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                                     &mut **diagnostics.borrow_mut(),
                                     queries,
                                     &mut results,
+                                    processed,
                                 )?;
                                 writer.flush().map_err(output_error)?;
                                 processed += queries.len();
@@ -944,6 +957,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         &mut **diagnostics.borrow_mut(),
                         queries,
                         &mut results,
+                        processed,
                     )?;
                     writer.flush().map_err(output_error)?;
                     super::x_timing::run(XRun::Render, x_t);

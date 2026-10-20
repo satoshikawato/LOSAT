@@ -150,7 +150,7 @@ pub(crate) fn query_endpoints(length: usize, frame: i8, start: i32, end: i32) ->
 //                                                seqid_list,
 // ```
 // This is Seq-align construction, after runtime search/pruning and e-value
-fn has_seqalign(hsp: &Hsp, gapped: bool) -> bool {
+pub(super) fn has_seqalign(hsp: &Hsp, gapped: bool) -> bool {
     !gapped || hsp.hsp.score != 0
 }
 
@@ -1172,6 +1172,7 @@ pub fn render(
         subjects,
         &shown,
         batches,
+        0,
     )?;
     write_epilog(writer, options, subjects, &shown, queries.len())
 }
@@ -1192,6 +1193,7 @@ pub fn render_queries(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     batches: &mut [BatchResults],
+    queries_before: usize,
 ) -> Result<()> {
     for batch in batches.iter_mut() {
         for lists in &mut batch.queries {
@@ -1202,6 +1204,30 @@ pub fn render_queries(
     }
     if options.outfmt == 0 {
         return write_pairwise(writer, stderr, options, queries, subjects, shown, batches);
+    }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
+    // ```c++
+    //     if (m_FormatType == CFormattingArgs::eAsnText
+    //       || m_FormatType == CFormattingArgs::eAsnBinary
+    //       || m_FormatType == CFormattingArgs::eXml
+    //       ...
+    //     {
+    //         x_PrintStructuredReport(results, queries);
+    //         return;
+    //     }
+    // ```
+    // BLAST XML (outfmt 5): the Iterations of the batch's queries; the header comes with the
+    // first query of the run and the end of the document with the epilog.
+    if options.outfmt == 5 {
+        return super::blast_xml::write_blastx_xml(
+            writer,
+            options,
+            queries,
+            subjects,
+            shown,
+            batches,
+            queries_before,
+        );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
     // ```c++
@@ -1783,6 +1809,13 @@ pub(crate) fn write_epilog(
             },
             shown.pairwise_database(),
         )?;
+    } else if options.outfmt == 5 {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243
+        // ```c++
+        //     if (m_FormatType == CFormattingArgs::eXml) {
+        //         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
+        // ```
+        super::blast_xml::write_xml_epilog(writer, queries)?;
     } else if options.outfmt == 7 {
         writeln!(writer, "# BLAST processed {queries} queries")?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236

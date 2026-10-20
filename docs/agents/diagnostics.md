@@ -291,6 +291,7 @@ export LOSAT_X_BXBATCH=1
 export LOSAT_X_BXCHUNK=64
 export LOSAT_X_BXDIAG=1
 export LOSAT_X_BXFLOW=1
+export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXLAZYCTX=1
 export LOSAT_X_BXLEAN=1
 export LOSAT_X_BXLUT=1
@@ -3870,6 +3871,42 @@ Scheduling (each value computed by one thread with the original function; order 
   NCBI `-db` 32.01 / 32.34 s beside 21.10 / 21.21 s (0.66); one 2.1-kb cDNA 125.24 / 129.20 s against 140.98 /
   144.30 s (x0.89), NCBI 146.17 / 145.90 s beside 124.73 / 124.64 s (0.85); 800 cDNAs x yeast 87.18 / 87.26 s against
   87.76 / 88.12 s (x0.99-1.00).
+- `LOSAT_X_BXHITBF=1` (BLASTX, speed; in the strict set from the pull request that added it, 2026-10-20; `=0`
+  turns it off) the direct seed loop of `LOSAT_X_BXSCAN` (`blastx/x_seed_scan.rs`, exactness argument in its
+  header) takes the two outcomes most hits of a flag-0 cell end in, too far (`diff >= window`: `last_hit = s +
+  diag_offset`) and overlap (`diff < wordsize`: nothing), without a branch, as `LOSAT_X_TBNHITBF` does for
+  tblastn: with the packed cell `raw`, `d2 = 2 (s + diag_offset) - (raw << 1)` is twice the reference's `diff`
+  (the shift brings the 31-bit field's sign; a cleared cell holds `-window`), a candidate is `(d2 - 2 wordsize)
+  as u32 < 2 (window - wordsize)`, and the cell's next value is selected. A flag-1 cell or a candidate goes on
+  to the reference's statements. Acts per subject where `1 <= wordsize < window`, `0 <= diag_offset` and
+  `diag_offset + length + 2 window < 2^30` (otherwise the loop without the test runs: the one-hit search,
+  and offsets near 2^30 at a `-window_size` near 2^29). The direct loop scans every subject where the CPU
+  has no AVX2 (aarch64, WebAssembly: `LOSAT_X_BXDIAG` is off there), and on x86-64 the query batches whose
+  lookup table has fewer hits per used cell than `LOSAT_X_BXDIAGMIN` (short queries); the fused loop of
+  `LOSAT_X_BXDIAG` keeps its own tests. With `LOSAT_X_BXDIAG=0` 79-81 % of the hits of the three cases
+  below are too far, 14.5-17.4 % overlap, 1.2-1.4 % meet a flag-1 cell and 2.1-2.8 % are candidates
+  (v4-A10 probe bx1). Shadow: `LOSAT_X_BXSCANSHADOW=1` compares the direct loop that runs, this one where it
+  acts, with `word_finder_plain` on every subject the direct loop scans, and prints `[X_SHADOW] BXHITBF
+  subjects_compared=N` beside BXSCAN's line (N: the subjects this loop scanned).
+  Measured 2026-10-20 on the workstation (node 0: one physical core for 1 thread, 8 physical cores for 8
+  threads, HT siblings idle, the booked cores warmed 3 s before every run, arm order reversed every other
+  round, one warm-up round + 6 rounds (4 for the last two cases), medians of the per-round ratios against
+  dev 7e73ec9c, the binary before the switch; every report identical between the arms, max RSS equal; a gate
+  ran on other node-0 cores meanwhile). With `LOSAT_X_BXDIAG=0` (the direct loop on every subject, as
+  without AVX2): AP027131 x AP027133 proteins (`-subject`, `-query_gencode 4`) 1 thread x0.912 (4.62 ->
+  4.22 s) and 8 threads x0.949; 50 fly cDNAs x the yeast proteome (`-db`, `-evalue 1e-5`) x0.812 (4.06 ->
+  3.30 s) and x0.824; one 2.1-kb fly cDNA x the fly proteome (`-db`, `-evalue 1e-5`) x0.812 and x0.886.
+  By default with AVX2 the fused loop takes these three (x1.00-1.01, instructions x1.000). Where the direct
+  loop takes a table by default: a 300-nt fly cDNA piece x UniRef50 2026_03 volume 00 (`-db`, 1.76 hits per
+  used cell; no row at `-evalue 1e-5`) x0.839 (20.19 -> 17.19 s) and x0.887 at 8 threads (4.18 -> 3.73 s);
+  the first 1,000 nt of the 2.1-kb cDNA x the fly proteome x0.833 and x0.916. Cycles x0.81-0.92,
+  instructions x0.90-0.96, mispredicted branches x0.38-0.73. With `=0` the instruction counts equal those of
+  the binary before the switch (x1.000), cycles x0.997-1.005. On WebAssembly (the serial WASI command,
+  wasm32-wasip1, under Node 26 in one process: the module compiled once, a new instance per search, the
+  default and `=0` alternating, one warm-up round + 8 rounds; the development machine's i9 at load 16-59, so
+  the spread is wide): AP027131 x AP027133 x0.907 (6.11 -> 5.20 s, 7 of 8 rounds below 1), 50 cDNAs x the
+  yeast proteome (`-subject`) x0.848 (CPU time x0.789, 8 of 8), the same output bytes. (blastx is not in
+  LOSAT Web's ABI v2 yet.)
 
 Counters and tests: `LOSAT_X_STATS=1` (counters on stderr; DP and Newton counts need the
 `xstats` cargo feature), `LOSAT_X_ADJMEMO_STATS=1` (distinct composition-adjustment inputs),

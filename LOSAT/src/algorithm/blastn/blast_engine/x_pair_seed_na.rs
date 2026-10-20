@@ -72,8 +72,8 @@ use super::super::{
     QueryContextIndex, UngappedHit,
 };
 use super::{
-    copy_hash, part, plan_strips, pool_threads, run_strips, scan_kernel, FoldCounts,
-    PartScratch, Seed, StageStats, Stash, StashPath, StripJob, STASH,
+    copy_hash, part, plan_strips, pool_threads, run_strips, scan_kernel, FoldCounts, PartScratch,
+    Seed, StageStats, Stash, StashPath, StripJob, STASH,
 };
 use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup};
 use std::sync::atomic::{AtomicU64, Ordering};

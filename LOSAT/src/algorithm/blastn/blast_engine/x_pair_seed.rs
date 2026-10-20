@@ -342,46 +342,21 @@ fn scan_kernel<F: FnMut(usize, u64)>(
             end,
             on_kmer,
         ),
-        Some(MbScanSubjectKind::Scan9_1) => scan_subject_kmers_range_mb_9_1(
-            packed,
-            subject_len,
-            scan_step,
-            start,
-            end,
-            on_kmer,
-        ),
-        Some(MbScanSubjectKind::Scan9_2) => scan_subject_kmers_range_mb_9_2(
-            packed,
-            subject_len,
-            scan_step,
-            start,
-            end,
-            on_kmer,
-        ),
-        Some(MbScanSubjectKind::Scan10_1) => scan_subject_kmers_range_mb_10_1(
-            packed,
-            subject_len,
-            scan_step,
-            start,
-            end,
-            on_kmer,
-        ),
-        Some(MbScanSubjectKind::Scan10_2) => scan_subject_kmers_range_mb_10_2(
-            packed,
-            subject_len,
-            scan_step,
-            start,
-            end,
-            on_kmer,
-        ),
-        Some(MbScanSubjectKind::Scan10_3) => scan_subject_kmers_range_mb_10_3(
-            packed,
-            subject_len,
-            scan_step,
-            start,
-            end,
-            on_kmer,
-        ),
+        Some(MbScanSubjectKind::Scan9_1) => {
+            scan_subject_kmers_range_mb_9_1(packed, subject_len, scan_step, start, end, on_kmer)
+        }
+        Some(MbScanSubjectKind::Scan9_2) => {
+            scan_subject_kmers_range_mb_9_2(packed, subject_len, scan_step, start, end, on_kmer)
+        }
+        Some(MbScanSubjectKind::Scan10_1) => {
+            scan_subject_kmers_range_mb_10_1(packed, subject_len, scan_step, start, end, on_kmer)
+        }
+        Some(MbScanSubjectKind::Scan10_2) => {
+            scan_subject_kmers_range_mb_10_2(packed, subject_len, scan_step, start, end, on_kmer)
+        }
+        Some(MbScanSubjectKind::Scan10_3) => {
+            scan_subject_kmers_range_mb_10_3(packed, subject_len, scan_step, start, end, on_kmer)
+        }
         Some(MbScanSubjectKind::Scan11_1Mod4) => scan_subject_kmers_range_mb_11_1mod4(
             packed,
             subject_len,

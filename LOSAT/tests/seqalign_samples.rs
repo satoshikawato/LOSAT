@@ -1,6 +1,6 @@
 #![allow(warnings, clippy::all)]
 
-//! outfmt 8 (ASN.1 text) and 12 (JSON) of the LOSAT CLI against NCBI BLAST+ 2.17.0's output
+//! outfmt 8 (ASN.1 text), 9 (ASN.1 binary) and 12 (JSON) of the LOSAT CLI against NCBI BLAST+ 2.17.0's output
 //! for the same `-subject` searches, byte for byte, at one and four threads: BLASTN's three
 //! tasks (megablast, blastn, dc-megablast), BLASTP, BLASTX (gapped and `-ungapped`), TBLASTN
 //! (with and without `-subject_loc`) and TBLASTX on the outfmt sample inputs
@@ -9,13 +9,13 @@
 //! The translated searches' files: `ncbi-samples/out/<name>.out` of `blastx -query
 //! fixture/qnucl.fa -subject fixture/sprot.fa`, `tblastn -query fixture/qprot.fa -subject
 //! fixture/snucl.fa` and `tblastx -query fixture/qnucl.fa -subject fixture/snucl.fa`
-//! (`-num_threads 1 -outfmt 8|12`), and the OF3 design probes (`S/tmp/probes/<name>.out`) with
+//! (`-num_threads 1 -outfmt 8|9|12`), and the OF3 design probes (`S/tmp/probes/<name>.out`) with
 //! `-ungapped -comp_based_stats 0` (BLASTX) and `-subject_loc 31-400` (TBLASTN). TBLASTX's
 //! JSON (149 KB) is left to outfmt-20261019 `S/scripts/compare_samples_of3b2.py`.
 //!
 //! The expected files are NCBI's output, unchanged (`ncbi-samples/out/<name>.out` of
 //! `blastn -task <task> -query fixture/qnucl.fa -subject fixture/snucl.fa -num_threads 1
-//! -outfmt 8|12` and `blastp -query fixture/qprot.fa -subject fixture/sprot.fa ...`); NCBI
+//! -outfmt 8|9|12` and `blastp -query fixture/qprot.fa -subject fixture/sprot.fa ...`); NCBI
 //! writes nothing to standard error and exits with 0. A `-subject` search's documents name no
 //! path, so the searches run from the fixture folder with its own file names. (The `-db`
 //! searches are compared by outfmt-20261019 `S/scripts/compare_samples_of3b1.py`; their frozen
@@ -103,7 +103,7 @@ fn subject_searches_write_ncbis_seq_annots() {
         ),
     ];
     for (name, argv) in searches {
-        for outfmt in ["8", "12"] {
+        for outfmt in ["8", "9", "12"] {
             let expected = std::fs::read(fixtures().join(format!("{name}_fmt{outfmt}.out")))
                 .expect("NCBI's output");
             for threads in ["1", "4"] {
@@ -133,7 +133,7 @@ fn subject_searches_write_ncbis_seq_annots() {
 /// 0 bytes to both streams and exits with 0 for this search (outfmt-20261019 S, 2026-10-19).
 #[test]
 fn a_search_without_hits_writes_nothing() {
-    for outfmt in ["8", "12"] {
+    for outfmt in ["8", "9", "12"] {
         let output = losat()
             .args([
                 "blastp",
@@ -165,7 +165,7 @@ fn translated_subject_searches_write_ncbis_seq_annots() {
         (
             "blastx_subject",
             &["blastx", "-query", "in/qnucl.fa", "-subject", "in/sprot.fa"],
-            &["8", "12"],
+            &["8", "9", "12"],
         ),
         (
             "blastx_subject_ungapped",
@@ -190,7 +190,7 @@ fn translated_subject_searches_write_ncbis_seq_annots() {
                 "-subject",
                 "in/snucl.fa",
             ],
-            &["8", "12"],
+            &["8", "9", "12"],
         ),
         (
             "tblastn_subject_sloc",
@@ -214,7 +214,7 @@ fn translated_subject_searches_write_ncbis_seq_annots() {
                 "-subject",
                 "in/snucl.fa",
             ],
-            &["8"],
+            &["8", "9"],
         ),
     ];
     for (name, argv, formats) in searches {

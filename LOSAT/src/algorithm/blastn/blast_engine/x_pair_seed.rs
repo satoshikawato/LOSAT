@@ -62,8 +62,9 @@
 //! window diagnostics, one subject searched by the owner of a pool of two threads or more.
 //! A chunk with a discontiguous megablast table goes to the child module `disc`
 //! (`x_pair_seed_disc.rs`, LOSAT_X_PAIRPARDISC: the two-hit stage of dc-megablast on the same
-//! strips, with its own switches).
+//! strips, with its own switches; LOSAT_X_PAIRPARDISCARR: the same with the diagonal array).
 
+use super::DiagStruct;
 use super::{
     determine_scanning_offsets, extend_hit_ungapped_approx_ncbi, extend_hit_ungapped_exact_ncbi,
     mask_lookup_index, packed_kmer_at_seed_mask, scan_subject_kmers_range,
@@ -142,6 +143,19 @@ pub(super) struct Inputs<'a> {
     pub(super) timing: Option<&'a BlastnTiming>,
 }
 
+/// The diagonal array of `collect_prelim_hits_for_chunk` (a query block of at most 8000
+/// letters): `hit_level_array`, `hit_len_array`, `diag_table_length` (NCBI's
+/// `diag_array_length`), `diag_table_mask` (`diag_mask`) and `diag_array_size`, the names
+/// there, for the two-hit stage of LOSAT_X_PAIRPARDISCARR (child module `disc`). With the
+/// diagonal hash the arrays are empty and nothing reads them.
+pub(super) struct DiagArray<'a> {
+    pub(super) levels: &'a mut Vec<DiagStruct>,
+    pub(super) lens: &'a mut Vec<u8>,
+    pub(super) length: isize,
+    pub(super) mask: isize,
+    pub(super) size: usize,
+}
+
 /// NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_def.h:135-149
 /// ```c
 /// typedef union BlastOffsetPair {
@@ -214,8 +228,10 @@ fn chunk_free_scope(
 /// of the pool this thread runs in (two threads or more) searches by itself, in a search with these
 /// inputs (the names of `Inputs`; `two_stage`: the search's two-stage table, without which the
 /// stage never runs): `chunk_free_scope` with the switch of the table on (LOSAT_X_PAIRPAR, or
-/// LOSAT_X_PAIRPARDISC for a discontiguous table; not a shadow alone). LOSAT_X_BNFEWSUBJ
-/// (`x_few_subj.rs`) reads it before it gives a search the shape of a one-subject search.
+/// LOSAT_X_PAIRPARDISC for a discontiguous table; not a shadow alone), or for a discontiguous
+/// table with the diagonal array the scope of `disc::in_scope_array` with LOSAT_X_PAIRPARDISCARR
+/// on. LOSAT_X_BNFEWSUBJ (`x_few_subj.rs`) reads it before it gives a search the shape of a
+/// one-subject search.
 pub(super) fn takes_owner_chunks(
     two_stage: Option<&TwoStageLookup>,
     use_array_indexing: bool,
@@ -228,10 +244,18 @@ pub(super) fn takes_owner_chunks(
         return false;
     };
     let disc = two_stage.disc().is_some();
-    let on = if disc { disc::on() } else { switches().0 };
+    // LOSAT_X_PAIRPARDISCARR: the array's stage has the hash stage's scope with the array.
+    let disc_array = disc && use_array_indexing;
+    let on = if disc_array {
+        disc::arr_on()
+    } else if disc {
+        disc::on()
+    } else {
+        switches().0
+    };
     on && chunk_free_scope(
         disc,
-        use_array_indexing,
+        use_array_indexing && !disc_array,
         window_size,
         scan_range,
         small_na_word,
@@ -1368,12 +1392,14 @@ fn copy_hash(h: &DiagHashTable) -> DiagHashTable {
 pub(super) fn run(
     x: &Inputs<'_>,
     diag_hash: &mut DiagHashTable,
+    diag_array: DiagArray<'_>,
     ungapped_hits: &mut Vec<UngappedHit>,
     fold_scratch: &mut PartScratch,
 ) -> bool {
-    // A discontiguous megablast table: LOSAT_X_PAIRPARDISC and its shadow decide.
+    // A discontiguous megablast table: LOSAT_X_PAIRPARDISC (the diagonal hash) or
+    // LOSAT_X_PAIRPARDISCARR (the diagonal array) and their shadows decide.
     if x.two_stage.disc().is_some() {
-        return disc::run(x, diag_hash, ungapped_hits, fold_scratch);
+        return disc::run(x, diag_hash, diag_array, ungapped_hits, fold_scratch);
     }
     let (on, shadow) = switches();
     if !on && !shadow {
@@ -1455,8 +1481,15 @@ pub(super) fn run(
 /// ```
 /// LOSAT_X_PAIRPARSHADOW (and LOSAT_X_PAIRPARDISCSHADOW), before the sort above: the hit
 /// list and the diagonal hash the reference built for this chunk against the ones of `run`,
-/// element by element; panics on the first difference.
-pub(super) fn shadow_check(ungapped_hits: &[UngappedHit], diag_hash: &DiagHashTable) {
+/// element by element; panics on the first difference. LOSAT_X_PAIRPARDISCARRSHADOW: the hit
+/// list and the diagonal array (`disc::shadow_check_array`).
+pub(super) fn shadow_check(
+    ungapped_hits: &[UngappedHit],
+    diag_hash: &DiagHashTable,
+    hit_level_array: &[DiagStruct],
+    hit_len_array: &[u8],
+) {
+    disc::shadow_check_array(ungapped_hits, hit_level_array, hit_len_array);
     let Some(stash) = STASH.with(|s| s.borrow_mut().take()) else {
         return;
     };

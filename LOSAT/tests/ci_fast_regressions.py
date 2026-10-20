@@ -8,7 +8,7 @@ docs/evidence/losat_web_e1a/capture_outputs.py and checks, per case:
 - the frozen expected hash (Gate A, TLOSAN Stage G), with the known mismatches of
   frozen_mismatch_allowlist.json (a stale entry fails);
 the -subject fixtures of outfmt0_manifest.tsv (docs/evidence/losat_web_e2a/check_losat.py: outfmt 0/6/7
-and the 8/12 rows sa.*) of the selected programs at 1 and 4 threads, for BLASTN the frozen NCBI outputs of
+and the 8/9/12 rows sa.*) of the selected programs at 1 and 4 threads, for BLASTN the frozen NCBI outputs of
 blastn_regression_fixtures.py (preliminary hit lists, batches, split, ambiguity,
 lowercase masking) and for TBLASTX those of tblastx_regression_fixtures.py (query
 batches, warnings, hit lists, ambiguity, empty inputs, failed writes); for each

@@ -56,6 +56,8 @@ fn db_gencode_controls_local_subject_search_translation() {
         query_gencode: 4,
         db_gencode: 4,
         max_target_seqs: None,
+        max_hsps: None,
+        qcov_hsp_perc: None,
         seg: "no".to_string(),
         window_size: 40,
         outfmt: "6".to_string(),

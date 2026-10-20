@@ -212,6 +212,73 @@ impl KappaResultHitList {
     // Int4 hsplist_count, hsplist_max;
     // double worst_evalue; Int4 low_score; Boolean heapified;
     // BlastHSPList** hsplist_array;
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:845-865
+    // ```c
+    //    for (subject_index = 0;
+    //         subject_index < hit_list->hsplist_count; ++subject_index) {
+    //    	  	  BlastHSPList * hsp_list = hit_list->hsplist_array[subject_index];
+    //    	  	  if(hit_options->max_hsps_per_subject) {
+    //    	  		  Blast_TrimHSPListByMaxHsps(hsp_list, hit_options);
+    //    	  	  }
+    //    	  	  if(hit_options->query_cov_hsp_perc) {
+    //    	  		  Blast_HSPListReapByQueryCoverage(hsp_list, hit_options, query_info, program_number);
+    //    	  		  if(hsp_list->hspcnt == 0){
+    //    	  			hit_list->hsplist_array[subject_index] =  Blast_HSPListFree(hsp_list);
+    //    	  		  }
+    //    	  	  }
+    //    ...
+    //    }
+    //    if(hit_options->query_cov_hsp_perc) {
+    //         Blast_HitListPurgeNullHSPLists(hit_list);
+    //    }
+    // ```
+    /// `s_FilterBlastResults` of `-max_hsps` (`max_hsps`, 0 keeps every HSP) and
+    /// `-qcov_hsp_perc` (`query_cov_hsp_perc`, 0 removes none) on the final hit list of a
+    /// query of `query_length` residues: each list cut to its first HSPs, then its HSPs below
+    /// the coverage removed (its best e-value set again when one is), and the lists left
+    /// empty removed. The payloads follow their HSPs.
+    pub(super) fn filter_results(
+        &mut self,
+        max_hsps: usize,
+        query_cov_hsp_perc: f64,
+        query_length: usize,
+    ) {
+        use crate::core::blast_hits::{reap_by_query_coverage, trim_by_max_hsps};
+        let extent = |linked: &LinkedHsp| {
+            (
+                i64::from(linked.hsp.q_start),
+                i64::from(linked.hsp.q_end),
+                query_length as i64,
+            )
+        };
+        for list in &mut self.lists {
+            trim_by_max_hsps(&mut list.hsps.hsps, max_hsps);
+            trim_by_max_hsps(&mut list.payloads, max_hsps);
+            let removed = if query_cov_hsp_perc <= 0.0 {
+                false
+            } else if list.payloads.is_empty() {
+                reap_by_query_coverage(&mut list.hsps.hsps, query_cov_hsp_perc, extent)
+            } else {
+                let mut paired: Vec<_> = std::mem::take(&mut list.hsps.hsps)
+                    .into_iter()
+                    .zip(std::mem::take(&mut list.payloads))
+                    .collect();
+                let removed =
+                    reap_by_query_coverage(&mut paired, query_cov_hsp_perc, |(linked, _)| {
+                        extent(linked)
+                    });
+                (list.hsps.hsps, list.payloads) = paired.into_iter().unzip();
+                removed
+            };
+            if removed {
+                refresh_best_evalue(&mut list.hsps);
+            }
+        }
+        if query_cov_hsp_perc > 0.0 {
+            self.lists.retain(|list| !list.hsps.hsps.is_empty());
+        }
+    }
+
     pub(super) fn lists(&self) -> &[KappaResultList] {
         &self.lists
     }

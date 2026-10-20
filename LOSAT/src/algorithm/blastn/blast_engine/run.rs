@@ -82,10 +82,12 @@ use super::super::filtering::{
 };
 use super::super::hsp::{
     evalue_comp, get_prelim_hitlist_size, score_compare_hsps, sort_hsplist_by_evalue,
-    sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists_to_writer, BlastnHitList,
-    BlastnHsp, BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
+    sort_hsps_by_score, trim_by_max_hsps, update_best_evalue,
+    write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
+    BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use super::super::lookup::x_mb_lut_keep;
 use super::super::lookup::{
     build_unmasked_ranges, encode_reverse_complement_blastna_into, DiscTemplates,
 };
@@ -99,6 +101,7 @@ use super::super::scoring::{
 };
 use super::super::seqalign::write_blastn_seqalign;
 use crate::blastinput::app::{self as app, Program};
+use crate::core::blast_hits::reap_by_query_coverage;
 use crate::report::record::{QueryNames, SubjectNames};
 // EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
 use super::super::x_subject_store::{
@@ -5390,15 +5393,18 @@ fn tabular_subject_ids(
 }
 
 /// The end of the traceback for the final hit list of one query (`hit_list`, of a query of
-/// `query_len` letters): the HSP lists cut to `max_hsps_per_subject` and their subject
-/// best hits (`-subject_besthit`), the lists sorted by e-value and cut to `hitlist_size`,
-/// and the HSPs of each list sorted for the Seq-aligns (`post_process_hits_and_write`;
-/// a database search does it after each query batch's traceback, `run_in_pool`).
+/// `query_len` letters, the length of each of its contexts): the HSP lists cut to
+/// `max_hsps_per_subject`, their HSPs below `query_cov_hsp_perc` percent of the query
+/// removed (`-qcov_hsp_perc`; a list left empty is removed) and their subject best hits
+/// (`-subject_besthit`), the lists sorted by e-value and cut to `hitlist_size`, and the HSPs
+/// of each list sorted for the Seq-aligns (`post_process_hits_and_write`; a database search
+/// does it after each query batch's traceback, `run_in_pool`).
 fn finish_query_hit_list(
     hit_list: &mut BlastnHitList,
     query_len: usize,
     hitlist_size: usize,
     max_hsps_per_subject: usize,
+    query_cov_hsp_perc: f64,
     subject_besthit: bool,
 ) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:836-867
@@ -5408,6 +5414,12 @@ fn finish_query_hit_list(
     //     if (hit_options->max_hsps_per_subject) {
     //         Blast_TrimHSPListByMaxHsps(hsp_list, hit_options);
     //     }
+    //     if(hit_options->query_cov_hsp_perc) {
+    //         Blast_HSPListReapByQueryCoverage(hsp_list, hit_options, query_info, program_number);
+    //         if(hsp_list->hspcnt == 0){
+    //             hit_list->hsplist_array[subject_index] =  Blast_HSPListFree(hsp_list);
+    //         }
+    //     }
     //     if ((hit_options->hsp_filt_opt != NULL) &&
     //         (hit_options->hsp_filt_opt->subject_besthit_opts != NULL)) {
     //         Blast_HSPListSubjectBestHit(program_number,
@@ -5415,14 +5427,38 @@ fn finish_query_hit_list(
     //             query_info, hsp_list);
     //     }
     // }
+    // if(hit_options->query_cov_hsp_perc) {
+    //     Blast_HitListPurgeNullHSPLists(hit_list);
+    // }
     // ```
     for hsp_list in &mut hit_list.hsplist_array {
         if max_hsps_per_subject > 0 {
             trim_by_max_hsps(hsp_list, max_hsps_per_subject);
         }
+        // Both contexts of a query have its length, and the offsets are those of the HSP's
+        // own context.
+        if query_cov_hsp_perc > 0.0
+            && reap_by_query_coverage(&mut hsp_list.hsps, query_cov_hsp_perc, |hsp| {
+                (
+                    hsp.internal_q_offset_0 as i64,
+                    hsp.internal_q_end_0 as i64,
+                    query_len as i64,
+                )
+            })
+        {
+            update_best_evalue(hsp_list);
+        }
+        // NCBI calls Blast_HSPListSubjectBestHit on a list the coverage left empty after
+        // freeing it (blast_traceback.c:853-861); LOSAT reads it as the empty list it was.
         if subject_besthit {
             subject_best_hit(&mut hsp_list.hsps, query_len);
         }
+    }
+    if query_cov_hsp_perc > 0.0 {
+        hit_list
+            .hsplist_array
+            .retain(|hsp_list| !hsp_list.hsps.is_empty());
+        hit_list.hsplist_count = hit_list.hsplist_array.len();
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3383-3400
     // ```c
@@ -5500,6 +5536,7 @@ fn post_process_hits_and_write(
     mut hit_lists: Vec<Option<BlastnHitList>>,
     hitlist_size: usize,
     max_hsps_per_subject: usize,
+    query_cov_hsp_perc: f64,
     subject_besthit: bool,
     query_lengths: &[usize],
     outputs: &mut ReportOutputs<'_>,
@@ -5567,6 +5604,7 @@ fn post_process_hits_and_write(
                 query_lengths.get(q_idx).copied().unwrap_or_default(),
                 hitlist_size,
                 max_hsps_per_subject,
+                query_cov_hsp_perc,
                 subject_besthit,
             );
             drop_hsps_of_score_zero(hit_list);
@@ -7439,6 +7477,7 @@ fn run_in_pool(
             BatchStage::Search {
                 query_offsets: &query_offsets[job.searched.clone()],
             },
+            None,
         )
     };
     let qbp_input = x_qbatch_par::PlanInput {
@@ -7487,6 +7526,9 @@ fn run_in_pool(
             }),
             qbp_off,
         );
+        // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
+        // (`lookup::x_mb_lut_keep`), freed when the loop ends.
+        let x_lut_keep = x_mb_lut_keep::Keep::for_loop();
         let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(lengths.len());
         let mut unsearched = Vec::with_capacity(lengths.len());
         let mut query_masks = Vec::with_capacity(lengths.len());
@@ -7760,6 +7802,9 @@ fn run_in_pool(
             let searched = match precomputed {
                 Some(precomputed) if !qbp.shadow() => precomputed,
                 precomputed => {
+                    // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps its megablast table from batch
+                    // to batch once no slot can search a batch any more.
+                    let x_keep = x_lut_keep.as_ref().filter(|_| !qbp.may_speculate());
                     let reference = search_query_batch(
                         &args,
                         batch_records.searched(),
@@ -7771,6 +7816,7 @@ fn run_in_pool(
                         BatchStage::Search {
                             query_offsets: &query_offsets[start..end],
                         },
+                        x_keep,
                     );
                     if let Some(precomputed) = precomputed {
                         qbp.shadow_check(key, &precomputed, &reference, x_qbatch_par_compare);
@@ -7903,6 +7949,7 @@ fn run_in_pool(
                             lengths[start + q_idx],
                             hitlist_size,
                             args.max_hsps_per_subject.unwrap_or(0),
+                            args.qcov_hsp_perc.unwrap_or(0.0),
                             args.subject_besthit,
                         );
                     }
@@ -8113,6 +8160,8 @@ fn run_in_pool(
             queries.done(input_end);
             input_start = input_end;
         }
+        // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop's kept table is freed with the loop.
+        drop(x_lut_keep);
 
         // EXPERIMENT (LOSAT_X_QBATCHPAR): every slot has stopped before the reports are written.
         qbp.finish();
@@ -8746,6 +8795,7 @@ fn write_reports_untimed(
         hit_lists,
         hitlist_size,
         args.max_hsps_per_subject.unwrap_or(0),
+        args.qcov_hsp_perc.unwrap_or(0.0),
         args.subject_besthit,
         results.lengths,
         outputs,
@@ -8780,7 +8830,8 @@ fn reborrow_outputs<'o, 'r>(outputs: &'o mut BatchOutputs<'_, 'r>) -> BatchOutpu
 
 /// Searches one query batch against the subjects, with the query block, lookup table and
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
-/// `run_in_pool` reads.
+/// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
+/// megablast table is built on and goes back to (`lookup::x_mb_lut_keep`).
 fn search_query_batch(
     args: &BlastnArgs,
     query_records: &[FastaRecord],
@@ -8790,6 +8841,7 @@ fn search_query_batch(
     batching: QueryBatching,
     first_batch: bool,
     stage: BatchStage<'_>,
+    x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
 ) -> Result<QueryBatch> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
@@ -9780,6 +9832,7 @@ fn search_query_batch(
             parallel_pool,
             batching,
             first_batch,
+            x_keep,
         )?,
         _ => None,
     };
@@ -9827,6 +9880,7 @@ fn search_query_batch(
             subjects_for_lookup,
             subject_packed_cache_ref,
             approx_table_entries,
+            x_keep,
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
         tables
@@ -10809,6 +10863,13 @@ fn search_query_batch(
                             timing: timing_ref,
                         },
                         diag_hash,
+                        x_pair_seed::DiagArray {
+                            levels: &mut *hit_level_array,
+                            lens: &mut *hit_len_array,
+                            length: diag_table_length as isize,
+                            mask: diag_table_mask,
+                            size: diag_array_size,
+                        },
                         ungapped_hits,
                         &mut subject_scratch.x_pair_fold,
                     ) {
@@ -13278,9 +13339,16 @@ fn search_query_batch(
             // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
             // compare equal keep the order in which they were saved. `sort_by`
             // is stable too.
-            // Dispatch point of LOSAT_X_PAIRPARSHADOW: the hit list and the diagonal hash of
-            // the code above against those `x_pair_seed::run` computed for this chunk.
-            x_pair_seed::shadow_check(ungapped_hits, &subject_scratch.diag_hash);
+            // Dispatch point of LOSAT_X_PAIRPARSHADOW (and of the dc shadows,
+            // LOSAT_X_PAIRPARDISCSHADOW and LOSAT_X_PAIRPARDISCARRSHADOW): the hit list and the
+            // diagonal hash (or array) of the code above against those `x_pair_seed::run`
+            // computed for this chunk.
+            x_pair_seed::shadow_check(
+                ungapped_hits,
+                &subject_scratch.diag_hash,
+                &subject_scratch.hit_level_array,
+                &subject_scratch.hit_len_array,
+            );
             // EXPERIMENT (LOSAT_X_QGROUPPAR): with the stage run per query, each query's hits are
             // taken in the order saved above and sorted by the task (the comparator and the sort
             // are those below, so each query's hits come in the relative order the batch's sort
@@ -16780,6 +16848,7 @@ fn search_query_chunks(
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     batching: QueryBatching,
     first_batch: bool,
+    x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
 ) -> Result<Option<PrelimHitLists>> {
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
     // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it
@@ -16837,6 +16906,7 @@ fn search_query_chunks(
                 query_masks: &part_masks,
                 batch_eff_searchsp,
             },
+            x_keep,
         )?;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:174-178
         // ```c

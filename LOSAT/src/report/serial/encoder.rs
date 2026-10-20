@@ -1,5 +1,5 @@
 //! The object-stream calls that NCBI's serial writers make, shared by the encoders of the
-//! serialized formats (ASN.1 text `asn_text`, JSON `json`, and later ASN.1 binary), so that
+//! serialized formats (ASN.1 text `asn_text`, JSON `json`, ASN.1 binary `asn_ber`), so that
 //! every type writer (`seqalign`, `report::seqid`) is written once.
 //!
 //! NCBI's generated type info writes an object as a sequence of `CObjectOStream` calls:
@@ -41,16 +41,22 @@ pub enum SerialError {
     /// `CObjectOStreamJson::WriteDouble2` on a NaN or an infinity
     /// (`real::JsonDoubleError`).
     JsonDouble(super::real::JsonDoubleError),
-    /// A VisibleString byte outside 0x20..0x7E in the ASN.1 text stream, which NCBI replaces
+    /// A VisibleString byte outside 0x20..0x7E in the ASN.1 text or binary stream, which NCBI replaces
     /// by `#` with an error message (`eFNP_ReplaceAndWarn`); the callers refuse such strings
     /// before the search, so this does not occur.
     NonVisibleChar(u8),
+    /// A NaN or an infinity in the ASN.1 binary stream, which NCBI marks with its own form
+    /// byte and LOSAT does not write (no BLAST report has one).
+    NonFiniteReal,
 }
 
 impl std::fmt::Display for SerialError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SerialError::JsonDouble(error) => f.write_str(error.message()),
+            SerialError::NonFiniteReal => f.write_str(
+                "a NaN or an infinite real number in an ASN.1 binary stream is not supported by LOSAT",
+            ),
             SerialError::NonVisibleChar(byte) => write!(
                 f,
                 "a character 0x{byte:02x} outside the visible ASCII range in an ASN.1 VisibleString is not supported by LOSAT"

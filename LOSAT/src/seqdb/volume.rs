@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use super::column::{self, Column, MASK_DATA_TITLE};
 use super::file::DbFile;
 use super::header::{decode_defline_set, Defline};
 use super::index::{self, IndexFile};
@@ -16,6 +17,8 @@ pub struct Volume {
     index: IndexFile,
     seq: OnceLock<DbFile>,
     hdr: OnceLock<DbFile>,
+    /// The column files (`.?xa`...), opened on first use (`m_HaveColumns`).
+    columns: OnceLock<Vec<Column>>,
 }
 
 /// File name of `base` with the three-letter extension `{p|n}{ext}`.
@@ -52,6 +55,23 @@ impl Volume {
         seqtype: SeqType,
         mode: XDbIdxRead,
     ) -> Result<Self, SeqDbError> {
+        Self::open_with(base, seqtype, mode, false)
+    }
+
+    /// Like [`Volume::open`], but a volume with column files (the mask data of
+    /// `makeblastdb -mask_data`) is kept instead of rejected; its columns are read by
+    /// [`Volume::columns`].
+    pub(super) fn open_keeping_columns(base: &Path, seqtype: SeqType) -> Result<Self, SeqDbError> {
+        Self::open_with(base, seqtype, super::x_dbidxread(), true)
+    }
+
+    /// `open_as`; `keep_columns` says whether column files are read (true) or rejected.
+    fn open_with(
+        base: &Path,
+        seqtype: SeqType,
+        mode: XDbIdxRead,
+        keep_columns: bool,
+    ) -> Result<Self, SeqDbError> {
         let index_path = with_extension(base, seqtype, "in");
         let index_file = DbFile::open(&index_path)?;
         let index = match mode {
@@ -64,9 +84,30 @@ impl Volume {
             index,
             seq: OnceLock::new(),
             hdr: OnceLock::new(),
+            columns: OnceLock::new(),
         };
-        volume.reject_column_files()?;
+        if !keep_columns {
+            volume.reject_column_files()?;
+        }
         Ok(volume)
+    }
+
+    /// The columns of the volume, opened on first use (`CSeqDBVol::x_OpenAllColumns`); none
+    /// for a volume without column files. A failed open is repeated by the next call.
+    pub fn columns(&self) -> Result<&[Column], SeqDbError> {
+        if let Some(columns) = self.columns.get() {
+            return Ok(columns);
+        }
+        let columns = column::open_all(&self.base, self.index.seqtype, self.index.num_oids)?;
+        Ok(self.columns.get_or_init(|| columns))
+    }
+
+    /// The column titled `BlastDb/MaskData` (`CSeqDBVol::GetColumnId`), if the volume has one.
+    pub fn mask_column(&self) -> Result<Option<&Column>, SeqDbError> {
+        Ok(self
+            .columns()?
+            .iter()
+            .find(|column| column.title() == MASK_DATA_TITLE))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:3333-3343

@@ -152,6 +152,10 @@ mod x_pair_seed;
 #[path = "x_r4_probe.rs"]
 mod x_r4_probe;
 
+// EXPERIMENT (exp/r12-fold, v4-R R12; evidence only): the R12_PROBE arms of the dc-megablast fold.
+#[path = "x_r12_probe.rs"]
+mod x_r12_probe;
+
 // EXPERIMENT (LOSAT_X_BNSTREAM): the subjects of a subject set searched by the pool threads in
 // OID order with a bounded window of results that the owner hands over in OID order.
 #[path = "x_bnstream.rs"]

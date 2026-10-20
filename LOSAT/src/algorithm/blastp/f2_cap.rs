@@ -114,6 +114,14 @@ fn finish(st: &mut State, cfg: &Config) {
         ctx.extend_from_slice(&[st.frame_bases[i], st.x_drops[i], st.cutoffs[i]]);
     }
     write_file(&cfg.dir, "ctx.bin", as_bytes(&ctx));
+    // The BLOSUM62 scores of the 32 x 32 residue codes (BLAST_SCORE_MIN for the sentinel row/column).
+    let mut sc: Vec<i32> = Vec::with_capacity(32 * 32);
+    for a in 0..32u8 {
+        for b in 0..32u8 {
+            sc.push(crate::utils::matrix::blosum62_score_ncbistdaa_direct(a, b));
+        }
+    }
+    write_file(&cfg.dir, "score32.bin", as_bytes(&sc));
     write_file(&cfg.dir, "subjects.bin", &st.subjects);
     write_file(&cfg.dir, "subjects.idx", &st.index);
     write_file(&cfg.dir, "cands.bin", &st.cands);

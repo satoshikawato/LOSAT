@@ -272,6 +272,7 @@ export LOSAT_X_BPDBCUT=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
 export LOSAT_X_BPGAP=1
+export LOSAT_X_BPLISTEDLEAN=1
 export LOSAT_X_BPLKPAHEAD=1
 export LOSAT_X_BPLKPFLAT=1
 export LOSAT_X_BPLUT=1
@@ -1114,6 +1115,34 @@ Rebuilding less:
   16S q100, x0.971 (0.940-1.003, 4) `uniref50.04` q100 (max RSS 53-56 against 104 MiB). Gates: ci_fast all programs
   with the switch, with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases, 0 failures each); `-db` fixtures of every program
   at 1 and 4 threads under the shadow (0 differing, the exit line `identical` in every run that ends without an error).
+- `LOSAT_X_BPLISTEDLEAN=1` (BLASTP `-db`, memory; in the strict set from the pull request that added it (perf/bp-db-tail,
+  evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; acts for every task
+  with `-db`, in the search of all queries and in the blocks of `LOSAT_X_BPQBLOCK`, not with ABI v1's titles) the reports of a `-db` search read the letters of
+  the listed subjects (every subject of the preliminary hit lists, `ListedSubjects`) from their stored residues and hold
+  the titles of the reported subjects only (`blastp/blast_engine/database/x_listed_lean.rs`). Without it
+  `ListedSubjects::read_titles` makes one record per listed subject, with its letters in ASCII and its title (empty for a
+  subject in no final hit list), and outfmt 0 and the `stitle` field each copy every title into an `Arc`. With it the
+  same titles are read in the same order with the same errors into one `Arc` per reported subject (the others share one
+  empty title), outfmt 0 and `stitle` borrow them, and the two readers of letters (the recount of the HSPs with
+  pyrrolysine, `recount_pyrrolysine_identities`, and the O of rendered rows, `restore_displayed_o`) read a stored residue
+  as `ncbistdaa_to_ascii` gives it, which is how the records' letters are made (`blast_engine.rs` `ShownSubjects`), so
+  reports and errors do not change. Shadow: `LOSAT_X_BPLISTEDLEANSHADOW=1` (implies the switch) makes the records too,
+  first, and compares them with the lean titles rank by rank (every title, every flag of replaced title bytes, every
+  letter against its stored residue); the first difference prints the line otherwise printed at exit and panics:
+  `[X_SHADOW] BPLISTEDLEAN searches= ranks= reported= letters= identical` (`ranks`: listed subjects compared;
+  `reported`: those with a title read; `letters`: letters compared). Evidence 2026-10-20 (perf/bp-db-tail, workstation,
+  probe build): `blastp -db` UniRef50 q100 at 32 threads lists 70,701 subjects (50.8 MB of letters) for the first batch
+  of 91 queries; the records added 41 MiB and the two title copies 10 MiB of anonymous memory in the main heap.
+  Measured (head de4b6401, workstation): that run on / off in one job (node 1) peak RssAnon 286 / 337 MiB (max RSS
+  282 / 327 MiB; NCBI 195 MiB), wall 538 / 543 s, the same output (= NCBI). Instructions (`perf stat` `:u`, 8 threads,
+  on / off) x0.997 OrthoFinder blastp-fast Species4 x BlastDBSpecies6, x0.9995 Swiss-Prot q100 outfmt 6, x0.9993 the
+  same with outfmt 0, x1.000 `uniref50.04` q100. Timed (same binary on / off, 8 cores of node 0 with their siblings
+  idle, warmed, order alternated): median ratio of wall time x0.992 (0.977-1.016, 8 pairs) OrthoFinder, x0.999
+  (0.980-1.008, 10) Swiss-Prot q100, x0.935 (0.878-1.034, 6) the same with outfmt 0, x1.000 (0.946-1.074, 8)
+  `uniref50.04` q100; max RSS 123 / 166 MiB Swiss-Prot q100, 139 / 182 MiB with outfmt 0. Gates: `cargo test` (87
+  binaries, 1,993 passed); ci_fast all programs with the switch, with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases, 0
+  failures each); blastp `-db` fixtures at 1 and 4 threads under the shadow (52 rows, 0 differing, the exit line
+  `identical` in every run that ends without an error).
 - `LOSAT_X_BPSUBJMETA=1` (BLASTP, speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; acts only in the `-subject` block search of `LOSAT_X_BPQBLOCK`, for
   blastp and blastp-fast) the subjects' tabular IDs and titles are made once for all blocks instead of once
   per block (`blastp/blast_engine/x_subject_meta.rs`, exactness argument in its header). Without it each

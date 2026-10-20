@@ -1301,6 +1301,9 @@ fn build_subject_range_data(
             .unwrap_or_else(|| build_subject_range_data_direct(matching_seq, subject_range));
         let seg_params = blastp_subject_seg_params();
         let masker = SegMasker::with_params(&seg_params);
+        // No NCBI counterpart: SEG counters (xstats feature).
+        crate::utils::xstats::add(&crate::utils::xstats::SEG_CALLS, 1);
+        crate::utils::xstats::add(&crate::utils::xstats::SEG_RESIDUES, subject.length.max(0) as u64);
         record_blastp_kappa_range_event(&BLASTP_KAPPA_SUBJECT_SEG_CALLS);
         record_blastp_kappa_range_counter(
             &BLASTP_KAPPA_SUBJECT_SEG_RANGE_BYTES,
@@ -2020,6 +2023,9 @@ pub(crate) fn postprocess_preliminary_hits(
         });
     }
 
+    // No NCBI counterpart: redo counters (xstats feature).
+    crate::utils::xstats::add(&crate::utils::xstats::F1_RD_PAIRS, 1);
+    crate::utils::xstats::add(&crate::utils::xstats::F1_RD_HSPS, preliminary_hits.len() as u64);
     let incoming_aligns =
         build_incoming_alignment_list(&preliminary_hits, redo_align_params.score_divisor);
     let matching_seq = BlastCompoMatchingSequence::new(preliminary_hits[0].s_idx as i32, subject);

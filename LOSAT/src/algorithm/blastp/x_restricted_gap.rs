@@ -299,6 +299,10 @@ pub(super) fn restricted_gapped_align_protein_x(
     reverse: bool,
     scratch: &mut GapAlignScratch,
 ) -> (usize, usize, i32) {
+    // No NCBI counterpart: restricted DP call counter (xstats feature).
+    if len1 != 0 && len2 != 0 {
+        crate::utils::xstats::add(&crate::utils::xstats::F1_PG_RS_CALLS, 1);
+    }
     let mode = x_bpgap();
     if mode != XBpGap::Reference {
         // Without AVX2 the reference function runs: the scalar rows on the same arrays were
@@ -629,7 +633,15 @@ fn restricted_rows<const AVX2: bool>(
         b_offset: 0,
     };
 
+    // No NCBI counterpart: rows and cells of a call that the fast path keeps (xstats feature).
+    #[cfg(feature = "xstats")]
+    let (mut x_rows, mut x_cells) = (0u64, 0u64);
     for a_index in 1..=len1 {
+        #[cfg(feature = "xstats")]
+        {
+            x_rows += 1;
+            x_cells += (band.b_size - band.first) as u64;
+        }
         let qc = if reverse {
             blastp_query_residue::<true>(query, query_base, len1, a_index)
         } else {
@@ -717,6 +729,11 @@ fn restricted_rows<const AVX2: bool>(
         }
     }
 
+    #[cfg(feature = "xstats")]
+    {
+        crate::utils::xstats::add(&crate::utils::xstats::F1_PG_RS_ROWS, x_rows);
+        crate::utils::xstats::add(&crate::utils::xstats::F1_PG_RS_CELLS, x_cells);
+    }
     Some((band.a_offset, band.b_offset, band.best))
 }
 

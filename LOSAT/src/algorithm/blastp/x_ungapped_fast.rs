@@ -150,6 +150,8 @@ struct Walk {
     len: i32,
     end: usize,
     codes: u8,
+    /// Letters read (xstats feature counts them; unused otherwise).
+    steps: usize,
 }
 
 /// One walk of `s_BlastAaExtendRight` (`RIGHT`) or `s_BlastAaExtendLeft` over `n` steps: step `i`
@@ -199,6 +201,7 @@ unsafe fn walk<const RIGHT: bool>(
         len: best_len,
         end: i,
         codes,
+        steps: if i < n { i + 1 } else { n },
     }
 }
 
@@ -212,11 +215,11 @@ fn extend_left(
     s_off: i32,
     dropoff: i32,
     maxscore: i32,
-) -> (i32, i32, u8) {
+) -> (i32, i32, u8, usize) {
     let n = s_off.min(q_off);
     if n < 0 {
         // NCBI reference: aa_ungapped.c:853-883, `best_i = n + 1` with no step taken.
-        return (maxscore, 0, 0);
+        return (maxscore, 0, 0, 0);
     }
     // n + 1 steps down from (q_off, s_off); both offsets are >= n.
     assert!((q_off as usize) < query.len() && (s_off as usize) < subject.len());
@@ -231,7 +234,7 @@ fn extend_left(
             maxscore,
         )
     };
-    (w.best, w.len, w.codes)
+    (w.best, w.len, w.codes, w.steps)
 }
 
 /// `s_BlastAaExtendRight(.., s_off, q_off, ..)`: (score, length, s_last_off, codes read).
@@ -244,11 +247,11 @@ fn extend_right(
     s_off: i32,
     dropoff: i32,
     maxscore: i32,
-) -> (i32, i32, i32, u8) {
+) -> (i32, i32, i32, u8, usize) {
     let n = (subject.len() as i32 - s_off).min(query.len() as i32 - q_off);
     if n <= 0 {
         // NCBI reference: aa_ungapped.c:804-835, the loop does not run: i = 0.
-        return (maxscore, 0, s_off, 0);
+        return (maxscore, 0, s_off, 0, 0);
     }
     // n steps up from (q_off, s_off); n is the room left in both slices. A negative offset was
     // an index panic in the reference.
@@ -264,7 +267,7 @@ fn extend_right(
             maxscore,
         )
     };
-    (w.best, w.len, s_off + w.end as i32, w.codes)
+    (w.best, w.len, s_off + w.end as i32, w.codes, w.steps)
 }
 
 /// Whether the fast path covers these parameters.
@@ -319,7 +322,7 @@ pub(crate) fn two_hit(
     q_right_off += right_d;
     s_right_off += right_d;
 
-    let (left_score, left_d, c) = extend_left(
+    let (left_score, left_d, c, left_steps) = extend_left(
         tab,
         query,
         subject,
@@ -334,9 +337,11 @@ pub(crate) fn two_hit(
     let mut s_last_off = s_right_off;
     let mut right_score = 0i32;
     let mut right_d = 0i32;
+    #[cfg(feature = "xstats")]
+    let mut right_steps = None;
     if left_d >= (s_right_off - s_left_off) {
         right_extend = true;
-        let (rs, rd, last, c) = extend_right(
+        let (rs, rd, last, c, steps) = extend_right(
             tab,
             query,
             subject,
@@ -347,10 +352,30 @@ pub(crate) fn two_hit(
         );
         (right_score, right_d, s_last_off) = (rs, rd, last);
         codes |= c;
+        #[cfg(feature = "xstats")]
+        {
+            right_steps = Some(steps);
+        }
+        #[cfg(not(feature = "xstats"))]
+        let _ = steps;
     }
     if codes >= CODES as u8 {
         return None;
     }
+    // No NCBI counterpart: ungapped extension counters, only for a call that the fast path
+    // keeps (xstats feature).
+    #[cfg(feature = "xstats")]
+    {
+        use crate::utils::xstats::*;
+        f1_tl(F1T_UNG_CALLS, 1);
+        f1_tl(F1T_UNG_LEFT_CELLS, left_steps as u64);
+        if let Some(steps) = right_steps {
+            f1_tl(F1T_UNG_RIGHT_CALLS, 1);
+            f1_tl(F1T_UNG_RIGHT_CELLS, steps as u64);
+        }
+    }
+    #[cfg(not(feature = "xstats"))]
+    let _ = left_steps;
 
     Some(Some(BlastpTwoHitUngappedResult {
         ungapped_data: BlastpUngappedData {
@@ -412,7 +437,7 @@ pub(crate) fn one_hit(
     let s_left_off = q_left_off + (s_off - q_off);
     let s_right_off = q_right_off + (s_off - q_off);
 
-    let (left_score, left_disp, c) = extend_left(
+    let (left_score, left_disp, c, _) = extend_left(
         tab,
         query,
         subject,
@@ -422,7 +447,7 @@ pub(crate) fn one_hit(
         score,
     );
     codes |= c;
-    let (total_score, right_disp, s_last_off, c) = extend_right(
+    let (total_score, right_disp, s_last_off, c, _) = extend_right(
         tab,
         query,
         subject,

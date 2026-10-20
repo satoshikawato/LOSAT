@@ -7812,6 +7812,8 @@ fn run_resolved_in_pool(
                 // }
                 // ```
                 if ungapped_hit.ungapped_data.score >= cutoff {
+                    // No NCBI counterpart: ungapped save counter (xstats feature).
+                    crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_UNG_SAVED, 1);
                     blastp_save_init_hsp(
                         &mut init_hsps,
                         ungapped_hit.ungapped_data.q_start,
@@ -7897,6 +7899,19 @@ fn run_resolved_in_pool(
             (fused_diag, fused_hsps, hsps_before)
         });
         if !x_fused || x_fused_results.is_some() {
+            // No NCBI counterpart: scan and two-hit counters of the reference loop (xstats feature).
+            // The subject positions looked up; the cells and the hits are counted per hit below.
+            #[cfg(feature = "xstats")]
+            crate::utils::xstats::add(
+                &crate::utils::xstats::F1_SCAN_POS,
+                if args.window_size == 0 {
+                    subject.aa_len.saturating_sub(word_size as usize - 1) as u64
+                } else {
+                    subject.aa_len.saturating_sub(word_size as usize - 1).max(1) as u64
+                },
+            );
+            #[cfg(feature = "xstats")]
+            let mut x_last_s_off = u32::MAX;
             blastp_for_each_offset_pair(
                 &lookup,
                 subject_sequence,
@@ -7912,6 +7927,15 @@ fn run_resolved_in_pool(
                         .expect("NCBI BLAST query offset must fit in Int4");
                     let subject_offset = i32::try_from(pair.s_off)
                         .expect("NCBI BLAST subject offset must fit in Int4");
+                    #[cfg(feature = "xstats")]
+                    {
+                        use crate::utils::xstats::*;
+                        f1_tl(F1T_HITS, 1);
+                        if pair.s_off != x_last_s_off {
+                            x_last_s_off = pair.s_off;
+                            f1_tl(F1T_SCAN_CELLS, 1);
+                        }
+                    }
                     if args.window_size == 0 {
                         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/aa_ungapped.c:776-779
                         // ```c
@@ -8044,8 +8068,10 @@ fn run_resolved_in_pool(
                         // ```
                         let subject_plus_offset = subject_offset + subject_diag_offset;
                         if subject_plus_offset < diag_entry.last_hit() {
+                            crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_MASKED, 1);
                             return;
                         }
+                        crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_FLAGRESET, 1);
                         diag_entry.set_last_hit(subject_plus_offset);
                         diag_entry.set_flag(0);
                         return;
@@ -8054,10 +8080,12 @@ fn run_resolved_in_pool(
                     let last_hit = diag_entry.last_hit() - subject_diag_offset;
                     let diff = subject_offset - last_hit;
                     if diff >= window {
+                        crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_TOOFAR, 1);
                         diag_entry.set_last_hit(subject_offset + subject_diag_offset);
                         return;
                     }
                     if diff < word_size {
+                        crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_OVERLAP, 1);
                         return;
                     }
 
@@ -8085,9 +8113,11 @@ fn run_resolved_in_pool(
                     // }
                     // ```
                     if query_offset - diff < ctx.frame_base {
+                        crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_CTXREJECT, 1);
                         diag_entry.set_last_hit(subject_offset + subject_diag_offset);
                         return;
                     }
+                    crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_EXTEND, 1);
 
                     let x_drop = x_dropoff_per_context[ctx_idx];
                     let cutoff = word_cutoff_scores[ctx_idx];
@@ -8131,6 +8161,7 @@ fn run_resolved_in_pool(
                     // }
                     // ```
                     if ungapped_hit.ungapped_data.score >= cutoff {
+                        crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_UNG_SAVED, 1);
                         blastp_save_init_hsp(
                             &mut init_hsps,
                             ungapped_hit.ungapped_data.q_start,
@@ -8173,6 +8204,9 @@ fn run_resolved_in_pool(
             );
         }
 
+        // No NCBI counterpart: the per-thread scan and extension counters go to the global ones once
+        // per subject (xstats feature).
+        crate::utils::xstats::f1_flush();
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:152-169
         // ```c
         // if (ewp->diag_table->offset >= INT4_MAX / 4) {
@@ -8364,6 +8398,8 @@ fn run_resolved_in_pool(
                 query_context_offset: ctx.frame_base,
                 subject_frame_sign: 0,
             };
+            // No NCBI counterpart: prelim gapped counters (xstats feature).
+            crate::utils::xstats::add(&crate::utils::xstats::F1_PG_INIT, 1);
             let tree_contains = interval_tree.contains_hsp(&ungapped_tree_hsp, ctx.frame_base, 0);
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3919
             // ```c
@@ -8405,6 +8441,7 @@ fn run_resolved_in_pool(
                 }
             }
             if tree_contains {
+                crate::utils::xstats::add(&crate::utils::xstats::F1_PG_CONTAINED, 1);
                 hit_index = blastp_advance_preliminary_hit_index(
                     hit_index,
                     redo_index,
@@ -8423,6 +8460,7 @@ fn run_resolved_in_pool(
             } else {
                 BlastpGappedAlignmentMode::Exact
             };
+            crate::utils::xstats::add(&crate::utils::xstats::F1_PG_EXT, 1);
             let preliminary_hsp = extend_preliminary_blastp_hit(
                 &mut init_hsp,
                 s_idx as u32,
@@ -8474,6 +8512,7 @@ fn run_resolved_in_pool(
                 cutoff,
                 restricted_cutoff,
             ) {
+                crate::utils::xstats::add(&crate::utils::xstats::F1_PG_RS_REDO, 1);
                 if let Some(restricted_slot) = restricted_align_array.get_mut(query_index) {
                     *restricted_slot = false;
                 }

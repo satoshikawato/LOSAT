@@ -1134,6 +1134,10 @@ fn align_ex_protein_score_only(
     reverse: bool,
     scratch: &mut GapAlignScratch,
 ) -> (usize, usize, i32) {
+    // No NCBI counterpart: score-only DP call counter (xstats feature).
+    if len1 != 0 && len2 != 0 {
+        crate::utils::xstats::add(&crate::utils::xstats::F1_PG_SO_CALLS, 1);
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:841-866
     // ```c
     // if(reverse_sequence)
@@ -1248,6 +1252,7 @@ fn align_ex_protein_score_only(
                 );
             }
             crate::utils::xstats::add(&crate::utils::xstats::DP_FAST_CALLS, 1);
+            crate::utils::xstats::add(&crate::utils::xstats::F1_PG_SO_SIMD_CELLS, r.cells);
             return out;
         }
         crate::utils::xstats::add(&crate::utils::xstats::DP_FALLBACK_CALLS, 1);
@@ -1759,6 +1764,12 @@ fn restricted_gapped_align_protein_impl<const BLOSUM62: bool, const REVERSE: boo
         let mut score_val = GAP_MININT;
         let mut score_gap_row = GAP_MININT;
         let mut last_b_index = first_b_index;
+        // No NCBI counterpart: row and cell counters (xstats feature).
+        crate::utils::xstats::add(&crate::utils::xstats::F1_PG_RS_ROWS, 1);
+        crate::utils::xstats::add(
+            &crate::utils::xstats::F1_PG_RS_CELLS,
+            (b_size - first_b_index) as u64,
+        );
 
         if a_index % RESTRICT_SIZE != 0 {
             for b_index in first_b_index..b_size {
@@ -1936,6 +1947,10 @@ fn align_ex_protein(
     fence_hit: &mut bool,
     read_end_sentinel: bool,
 ) -> (usize, usize, i32, Vec<GapEditOp>) {
+    // No NCBI counterpart: traceback DP call counter (xstats feature).
+    if len1 != 0 && len2 != 0 {
+        crate::utils::xstats::add(&crate::utils::xstats::F1_TB_CALLS, 1);
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:543-578
     // ```c
     // if(reverse_sequence)
@@ -2090,6 +2105,7 @@ fn align_ex_protein(
                 *fence_hit = true;
             }
             crate::utils::xstats::add(&crate::utils::xstats::DP_FAST_CALLS, 1);
+            crate::utils::xstats::add(&crate::utils::xstats::F1_TB_SIMD_CELLS, r.cells);
             return (r.a_offset, r.b_offset, r.score, ops);
         }
         crate::utils::xstats::add(&crate::utils::xstats::DP_FALLBACK_CALLS, 1);

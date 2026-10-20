@@ -110,8 +110,15 @@ fn extend_right<const BLOSUM62: bool>(
     let mut score = maxscore;
     let mut best_score = maxscore;
     let mut i = 0i32;
+    // No NCBI counterpart: letters read by the walk (xstats feature).
+    #[cfg(feature = "xstats")]
+    let mut x_steps = 0u64;
 
     while i < n {
+        #[cfg(feature = "xstats")]
+        {
+            x_steps += 1;
+        }
         score += residue_score::<BLOSUM62>(matrix, query, subject, q_off + i, s_off + i);
 
         if score > best_score {
@@ -125,6 +132,8 @@ fn extend_right<const BLOSUM62: bool>(
         i += 1;
     }
 
+    #[cfg(feature = "xstats")]
+    crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_UNG_RIGHT_CELLS, x_steps);
     (best_score, best_i + 1, s_off + i)
 }
 
@@ -170,8 +179,15 @@ fn extend_left<const BLOSUM62: bool>(
         let q_base = q_off - n;
         let s_base = s_off - n;
         let mut i = n;
+        // No NCBI counterpart: letters read by the walk (xstats feature).
+        #[cfg(feature = "xstats")]
+        let mut x_steps = 0u64;
 
         loop {
+            #[cfg(feature = "xstats")]
+            {
+                x_steps += 1;
+            }
             score += residue_score::<BLOSUM62>(matrix, query, subject, q_base + i, s_base + i);
 
             if score > best_score {
@@ -187,6 +203,8 @@ fn extend_left<const BLOSUM62: bool>(
             }
             i -= 1;
         }
+        #[cfg(feature = "xstats")]
+        crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_UNG_LEFT_CELLS, x_steps);
     }
 
     (best_score, n - best_i + 1)
@@ -532,6 +550,8 @@ fn extend_two_hit_impl<const BLOSUM62: bool>(
         return None;
     }
 
+    // No NCBI counterpart: ungapped extension counter (xstats feature).
+    crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_UNG_CALLS, 1);
     let mut q_right_off = q_right_off as i32;
     let s_left_off = s_left_off as i32;
     let mut s_right_off = s_right_off as i32;
@@ -570,6 +590,7 @@ fn extend_two_hit_impl<const BLOSUM62: bool>(
 
     if left_d >= (s_right_off - s_left_off) {
         right_extend = true;
+        crate::utils::xstats::f1_tl(crate::utils::xstats::F1T_UNG_RIGHT_CALLS, 1);
         (right_score, right_d, s_last_off) = extend_right::<BLOSUM62>(
             matrix,
             query,

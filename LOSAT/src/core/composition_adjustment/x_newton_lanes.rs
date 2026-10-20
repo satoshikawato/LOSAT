@@ -1255,6 +1255,7 @@ fn solve_lanes_body<V: LaneVec>(
                 }
                 // No NCBI counterpart: iteration counter; it does not change any value NCBI computes.
                 crate::utils::xstats::add(&crate::utils::xstats::NEWTON_ITERS, its[l] as u64);
+                crate::utils::xstats::add(&crate::utils::xstats::COMPO_ADJ_CALLS, 1);
                 slot[l] = NO_PROBLEM;
             } else {
                 step[l] = true;

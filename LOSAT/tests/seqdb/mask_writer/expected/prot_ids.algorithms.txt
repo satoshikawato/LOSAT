@@ -1,0 +1,6 @@
+
+Available filtering algorithms applied to database sequences:
+
+Algorithm ID Algorithm name                          Algorithm options                       
+100          s1                                      window=12; locut=2.2; hicut=2.5         
+101          s2                                      -window 5                               

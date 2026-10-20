@@ -1,0 +1,35 @@
+merge	nucl	mask_nucl.fna	merge.asnt	-	-	-	mask writer fixture
+merge_small	nucl	mask_nucl.fna	merge.asnt	-	-	150B	mask writer fixture
+alone	nucl	mask_nucl.fna	alone.asnt	-	-	-	mask writer fixture
+objs	nucl	mask_nucl.fna	objs.asnt	-	-	-	mask writer fixture
+strand	nucl	mask_nucl.fna	strand.asnt	-	-	-	mask writer fixture
+nomatch	nucl	mask_nucl.fna	nomatch.asnt	-	-	-	mask writer fixture
+oob_end	nucl	mask_nucl.fna	oob_end.asnt	-	-	-	mask writer fixture
+oob_later	nucl	mask_nucl.fna	oob_later.asnt	-	-	-	mask writer fixture
+oob_multi	nucl	mask_nucl.fna	oob_end.asnt	-	-	400B	mask writer fixture
+last_base	nucl	mask_nucl.fna	last_base.asnt	-	-	-	mask writer fixture
+oob_reversed	nucl	mask_nucl.fna	oob_reversed.asnt	-	-	-	mask writer fixture
+empty_range	nucl	mask_nucl.fna	empty_range.asnt	-	-	-	mask writer fixture
+ids_dust	nucl	mask_nucl.fna	dd0.asnt,dd1.asnt,dd2.asnt	-	-	-	mask writer fixture
+ids_dust_nine	nucl	mask_nucl.fna	dd0.asnt,dd1.asnt,dd2.asnt,dd3.asnt,dd4.asnt,dd5.asnt,dd6.asnt,dd7.asnt,dd8.asnt,dd9.asnt	-	-	-	mask writer fixture
+ids_dust_toomany	nucl	mask_nucl.fna	dd0.asnt,dd1.asnt,dd2.asnt,dd3.asnt,dd4.asnt,dd5.asnt,dd6.asnt,dd7.asnt,dd8.asnt,dd9.asnt,dd10.asnt	-	-	-	mask writer fixture
+ids_mix	nucl	mask_nucl.fna	wm_o1.asnt,dd0.asnt,seg_d.asnt,rep_d.asnt,rep_o.asnt,oth_d.asnt,oth_o.asnt,wm_d.asnt,wm_o2.asnt	-	-	-	mask writer fixture
+ids_user	nucl	mask_nucl.fna	wm_d.asnt,dd0.asnt,seg_d.asnt	alpha,beta:2,gamma	first,second: desc,third	-	mask writer fixture
+dup	nucl	mask_nucl.fna	wm_d.asnt,wm_d.asnt	-	-	-	mask writer fixture
+dup_id	nucl	mask_nucl.fna	wm_d.asnt,dd0.asnt	a,a	-	-	mask writer fixture
+dup_default	nucl	mask_nucl.fna	wm_d.asnt,wm_d2.asnt	-	-	-	mask writer fixture
+invalid55	nucl	mask_nucl.fna	p55.asnt	-	-	-	mask writer fixture
+invalid_notset	nucl	mask_nucl.fna	pnotset.asnt	-	-	-	mask writer fixture
+invalid_max	nucl	mask_nucl.fna	pmax.asnt	-	-	-	mask writer fixture
+none	nucl	mask_nucl.fna	none.asnt	-	-	-	mask writer fixture
+none_then_masks	nucl	mask_nucl.fna	none.asnt,wm_d.asnt	-	-	-	mask writer fixture
+two_in	nucl	in_a.fna in_b.fna	two_in.asnt	-	-	-	mask writer fixture
+vol_first	nucl	mask_nucl.fna	vol_first.asnt	-	-	400B	mask writer fixture
+vol_last	nucl	mask_nucl.fna	vol_last.asnt	-	-	400B	mask writer fixture
+vol_mid	nucl	mask_nucl.fna	vol_mid.asnt	-	-	400B	mask writer fixture
+col_roll	nucl	in_col.fna	col_roll.asnt	-	-	400B	mask writer fixture
+many_volumes	nucl	in_many.fna	many.asnt	-	-	100B	mask writer fixture
+prot_two	prot	mask_prot.faa	seg.asnt,seg_o.asnt	-	-	-	mask writer fixture
+prot_ids	prot	mask_prot.faa	seg.asnt,seg_o.asnt	s1,s2	x,y	-	mask writer fixture
+nucl_dust_wm	nucl	mask_nucl.fna	dust.asnt,wm.asnt	-	-	-	mask writer fixture
+plain	nucl	mask_nucl.fna	-	-	-	-	mask writer fixture

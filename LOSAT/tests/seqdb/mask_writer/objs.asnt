@@ -1,0 +1,54 @@
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program windowmasker,
+  algo-options "",
+  masks {
+    masks {
+      packed-int {
+          {
+            from 300,
+            to 309,
+            id local id 1
+          },
+          {
+            from 0,
+            to 9,
+            id local id 1
+          }
+      },
+      int {
+        from 3,
+        to 4,
+        id local id 2
+      }
+    },
+    more FALSE
+  }
+}
+Blast-db-mask-info ::= {
+  algo-id 0,
+  algo-program windowmasker,
+  algo-options "-ignored 2",
+  masks {
+    masks {
+      packed-int {
+          {
+            from 5,
+            to 20,
+            id local id 1
+          },
+          {
+            from 310,
+            to 320,
+            id local id 1
+          }
+      },
+      int {
+        from 0,
+        to 39,
+        id local id 3
+      }
+    },
+    more FALSE
+  }
+}

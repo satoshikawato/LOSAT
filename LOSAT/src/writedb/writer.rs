@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use super::bioseq::Bioseq;
 use super::convert::{seq_data_to_binary, BinarySequence};
 use super::header::{defline_set, BadTitleChar};
+use super::mask_data::{MaskWriter, MaskedRanges};
 use super::volume::Volume;
 use super::WriteDbError;
 
@@ -27,6 +28,10 @@ pub struct WriteDb {
     pending: Option<Bioseq>,
     /// What NCBI's serializer posts to the diagnostic stream, in order.
     diagnostics: Vec<u8>,
+    /// The mask data: the registered algorithms, the mask column and the
+    /// blobs of the sequence being written. Empty for a database without
+    /// mask data.
+    mask: MaskWriter,
 }
 
 // NCBI reference (598d8ae6): c++/src/serial/objistr.cpp:1864-1885
@@ -88,6 +93,7 @@ impl WriteDb {
             closed: false,
             pending: None,
             diagnostics: Vec::new(),
+            mask: MaskWriter::default(),
         }
     }
 
@@ -157,6 +163,8 @@ impl WriteDb {
     /// keeps this one.
     pub fn add_sequence(&mut self, bioseq: Bioseq) -> Result<(), WriteDbError> {
         self.publish()?;
+        // `x_ResetSequenceData`: the blobs of the previous sequence go.
+        self.mask.reset_sequence();
         if bioseq.is_aa != self.protein {
             let name = |protein: bool| if protein { "protein" } else { "nucleotide" };
             return Err(WriteDbError::Creation(format!(
@@ -275,24 +283,34 @@ impl WriteDb {
 
         let mut done = false;
         if let Some(volume) = self.volumes.last_mut() {
-            done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr)?;
+            done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr, self.mask.blobs())?;
         }
         if !done {
             let index = self.volumes.len() as u32;
             if let Some(volume) = self.volumes.last_mut() {
                 volume.close()?;
             }
-            self.volumes.push(Volume::create(
+            // The date of the column is read before the volume's files are
+            // created, so that a clock that cannot be read leaves none.
+            let column_date = match self.mask.column_meta() {
+                Some(_) => Some(self.mask.column_date(index as usize)?),
+                None => None,
+            };
+            let mut volume = Volume::create(
                 &self.dbname,
                 self.protein,
                 &self.title,
                 &self.date,
                 index,
                 self.max_file_size,
-            )?);
+            )?;
+            if let (Some(meta), Some(date)) = (self.mask.column_meta(), &column_date) {
+                volume.create_mask_column(meta, date, self.max_file_size)?;
+            }
+            self.volumes.push(volume);
             binhdr = self.cook_header(&bioseq.title);
             let volume = self.volumes.last_mut().expect("a volume was pushed");
-            done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr)?;
+            done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr, self.mask.blobs())?;
             if !done {
                 return Err(WriteDbError::Creation(
                     "Cannot write sequence to volume.".to_string(),
@@ -403,6 +421,58 @@ impl WriteDb {
             self.make_alias()?;
         }
         Ok(())
+    }
+
+    /// `RegisterMaskAlgorithm(program, options, name)`: registers a masking
+    /// algorithm of the filtering program `program` (a `Blast-filter-program`
+    /// number) and returns its id. `name` is the name of the mask file for
+    /// makeblastdb. The first registration creates the mask column.
+    pub fn register_mask_algorithm(
+        &mut self,
+        program: i32,
+        options: &[u8],
+        name: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.mask
+            .register_program(program, options, name, !self.volumes.is_empty())
+    }
+
+    /// `RegisterMaskAlgorithm(id, description, options)`: the form of
+    /// `makeblastdb -mask_id`.
+    pub fn register_mask_algorithm_id(
+        &mut self,
+        id: &[u8],
+        description: &[u8],
+        options: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.mask
+            .register_id(id, description, options, !self.volumes.is_empty())
+    }
+
+    /// `SetMaskData`: the masked ranges of the sequence added last (its
+    /// mask blobs are written with it when it is published). The ranges are
+    /// those `MaskedRangeSet::get_ranges` gives.
+    pub fn set_mask_data(&mut self, ranges: &[MaskedRanges]) -> Result<(), WriteDbError> {
+        // `x_ComputeSeqLength` of a sequence from a `CBioseq` is the length
+        // of its Seq-inst.
+        let seq_length = self
+            .pending
+            .as_ref()
+            .and_then(|bioseq| u32::try_from(bioseq.length).ok());
+        self.mask
+            .set_mask_data(ranges, seq_length, !self.volumes.is_empty())
+    }
+
+    /// Test hook: the date that the mask column of volume `index` stores
+    /// instead of the time of its creation.
+    pub fn set_column_date(&mut self, index: usize, date: &[u8]) {
+        self.mask.set_column_date(index, date);
+    }
+
+    /// The date for a mask column when the clock cannot be read (the time
+    /// of the build).
+    pub fn set_column_date_fallback(&mut self, date: &[u8]) {
+        self.mask.set_date_fallback(date);
     }
 
     fn alias_name(&self) -> String {

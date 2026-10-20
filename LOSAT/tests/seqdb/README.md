@@ -71,3 +71,16 @@ tests are in `LOSAT/src/seqdb/mask_tests.rs`:
 `make_fixtures.py` rebuilds everything but `expected/search_path/`. NCBI BLAST+ is the comparison oracle only; the tests
 read the committed files and run no NCBI program. A rebuild changes the dates stored in the
 index files and in `expected/`.
+
+## Mask-column writer fixtures (`mask_writer/`)
+
+`make_mask_writer_fixtures.py` (`--ncbi-bin DIR --work DIR`) builds the inputs and NCBI's outputs
+for the tests of the mask-column writer (`src/writedb/mask_data/tests.rs`). Each row of
+`mask_writer/cases.tsv` is one makeblastdb 2.17.0 run (`-in` files, `-mask_data` files, `-mask_id`,
+`-mask_desc`, `-max_file_sz`); its database files are in `mask_writer/db/`, its exit status and
+standard error in `mask_writer/expected/<case>.rc` and `.stderr`, and what blastdbcmd reads back
+in `expected/<case>.algorithms.txt` and `.masks.tsv` (as for the reader fixtures above). The
+mask files are ASN.1 text: hand-written ones (`*.asnt`) and `dust.asnt` / `seg.asnt` from
+dustmasker / segmasker. The cases cover the combination of several Seq-locs of one sequence, the
+ids of algorithms, masks that match no sequence, ranges past the end of a sequence, and volumes
+without a masked sequence. A rebuild changes the dates stored in the index and column files.

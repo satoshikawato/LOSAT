@@ -8,6 +8,8 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use super::fasta_source::{FastaBioseqSource, Warn};
+use super::mask_data::{ranges_are_empty, MaskedRangeSet};
+use super::mask_info::MaskSeqId;
 use super::time::LocalTime;
 use super::writer::WriteDb;
 use super::WriteDbError;
@@ -19,6 +21,11 @@ pub struct BuildDatabase<'a> {
     log: &'a mut dyn Write,
     output_db: WriteDb,
     output_dbname: String,
+    /// `m_MaskData`: the masked ranges of the sequences, when makeblastdb
+    /// read mask data (`SetMaskDataSource`).
+    mask_data: Option<MaskedRangeSet>,
+    /// `m_FoundMatchingMasks`.
+    found_matching_masks: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/corelib/ncbifile.cpp:852-927
@@ -725,11 +732,15 @@ impl<'a> BuildDatabase<'a> {
             now.index_date().as_bytes(),
             1000 * 1000 * 1000,
         );
+        let mut output_db = output_db;
+        output_db.set_column_date_fallback(now.log_time().as_bytes());
         Ok(Self {
             is_protein,
             log,
             output_db,
             output_dbname,
+            mask_data: None,
+            found_matching_masks: false,
         })
     }
 
@@ -746,6 +757,114 @@ impl<'a> BuildDatabase<'a> {
     /// `SetMaxFileSize`.
     pub fn set_max_file_size(&mut self, max_file_size: u64) {
         self.output_db.set_max_file_size(max_file_size);
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1583-1594
+    // ```c++
+    // int
+    // CBuildDatabase::RegisterMaskingAlgorithm(EBlast_filter_program program,
+    //                                          const string        & options,
+    //                                          const string        & name)
+    // {
+    //     return m_OutputDb->RegisterMaskAlgorithm(program, options, name);
+    // }
+    // ```
+    /// `RegisterMaskingAlgorithm(program, options, name)`: see
+    /// [`WriteDb::register_mask_algorithm`].
+    pub fn register_masking_algorithm(
+        &mut self,
+        program: i32,
+        options: &[u8],
+        name: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.output_db
+            .register_mask_algorithm(program, options, name)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1596-1607
+    // ```c++
+    // int
+    // CBuildDatabase::RegisterMaskingAlgorithm(const string        & program,
+    //                                          const string        & description,
+    //                                          const string        & options)
+    // {
+    //     return m_OutputDb->RegisterMaskAlgorithm(program, description, options);
+    // }
+    // ```
+    // The first argument of this overload is the id of `-mask_id` (the call
+    // in makeblastdb.cpp:966 passes `id_list[i], desc_list[i], opts`).
+    /// `RegisterMaskingAlgorithm(id, description, options)`: see
+    /// [`WriteDb::register_mask_algorithm_id`].
+    pub fn register_masking_algorithm_id(
+        &mut self,
+        id: &[u8],
+        description: &[u8],
+        options: &[u8],
+    ) -> Result<i32, WriteDbError> {
+        self.output_db
+            .register_mask_algorithm_id(id, description, options)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1609-1612
+    // ```c++
+    // void CBuildDatabase::SetMaskDataSource(IMaskDataSource & ranges)
+    // {
+    //     m_MaskData.Reset(& ranges);
+    // }
+    // ```
+    /// `SetMaskDataSource`: the masked ranges of the sequences. makeblastdb
+    /// calls it when the first mask file with masks has been read, and
+    /// keeps adding to the set after that, so the caller hands the finished
+    /// set over before the first sequence is added.
+    pub fn set_mask_data_source(&mut self, ranges: MaskedRangeSet) {
+        self.mask_data = Some(ranges);
+    }
+
+    /// The set that `set_mask_data_source` handed over, to add to. makeblastdb
+    /// creates the set when it reads the first mask list that is not empty,
+    /// hands it over at once and goes on inserting; a caller that follows it
+    /// calls `set_mask_data_source(MaskedRangeSet::new())` at that point and
+    /// inserts through this.
+    pub fn mask_data_source_mut(&mut self) -> Option<&mut MaskedRangeSet> {
+        self.mask_data.as_mut()
+    }
+
+    /// `m_FoundMatchingMasks`: whether a sequence has been given mask data.
+    pub fn found_matching_masks(&self) -> bool {
+        self.found_matching_masks
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1204-1210
+    // ```c++
+    // CBuildDatabase::~CBuildDatabase()
+    // {
+    //     if (m_MaskData.NotEmpty() && !m_FoundMatchingMasks) {
+    //         ERR_POST(Error << "No sequences matched any of the masks provided.\n"
+    //                        << "Please ensure that the -parse_seqids option is used "
+    //                        << "in the\nfiltering program as well as makeblastdb.");
+    //     }
+    // ```
+    // The message is posted when the `CBuildDatabase` is destroyed: in
+    // makeblastdb, when the application object goes (`m_DB` is a member), so
+    // after the log of `EndBuild`, after the exception message of a failed
+    // build and after the metadata file. The caller of LOSAT's build calls
+    // this at that point.
+    /// The destructor's diagnostic: `warn` gets the message (without its
+    /// final newline) when mask data were read and no sequence matched.
+    pub fn post_destruction_diagnostics(&self, warn: Warn<'_>) {
+        if self.mask_data.is_some() && !self.found_matching_masks {
+            warn(
+                b"Error: [makeblastdb] No sequences matched any of the masks provided.\n\
+                  Please ensure that the -parse_seqids option is used in the\n\
+                  filtering program as well as makeblastdb.",
+            );
+        }
+    }
+
+    /// Test hook: see [`WriteDb::set_column_date`].
+    #[cfg(test)]
+    pub(crate) fn set_column_date(&mut self, index: usize, date: &[u8]) {
+        self.output_db.set_column_date(index, date);
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:859-876
@@ -830,8 +949,17 @@ impl<'a> BuildDatabase<'a> {
             if bioseq.length != 0 {
                 self.output_db.extract_bioseq_deflines(&bioseq);
                 if bioseq.seq_data.is_some() {
+                    // The masks are looked up by the number of the
+                    // sequence; one that is no `local id` of 31 bits
+                    // matches none.
+                    let mask_id = self
+                        .mask_data
+                        .is_some()
+                        .then(|| bioseq.local_id.parse::<i32>().ok())
+                        .flatten();
                     self.output_db.add_sequence(bioseq)?;
                     added = true;
+                    self.add_masks_for_seq_id(mask_id)?;
                 }
             }
             // The serializer posts its diagnostics while the sequence is
@@ -856,6 +984,50 @@ impl<'a> BuildDatabase<'a> {
             );
         }
         Ok(found)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:446-466
+    // ```c++
+    // void
+    // CBuildDatabase::x_AddMasksForSeqId(const list< CRef<CSeq_id> >& ids)
+    // {
+    //     if (m_MaskData.Empty()) {
+    //         return;
+    //     }
+    //
+    //     const CMaskedRangesVector& rng = m_MaskData->GetRanges(ids);
+    //     if (rng.empty()) {
+    //         return;
+    //     }
+    //
+    //     vector <TGi> gis;
+    //     ITERATE(list< CRef<CSeq_id> >, id, ids) {
+    //         if ((*id)->IsGi()) {
+    //             gis.push_back((*id)->GetGi());
+    //         }
+    //     }
+    //     m_OutputDb->SetMaskData(rng, gis);
+    //     m_FoundMatchingMasks = true;
+    // }
+    // ```
+    // The Seq-ids of a sequence without `-parse_seqids` are its `local id`
+    // (`mask_id`, `None` when it has no 31-bit one: it matches nothing, but
+    // the other Seq-ids of masks are compared the same way).
+    fn add_masks_for_seq_id(&mut self, mask_id: Option<i32>) -> Result<(), WriteDbError> {
+        let Some(mask_data) = self.mask_data.as_mut() else {
+            return Ok(());
+        };
+        let ids: &[MaskSeqId] = match mask_id {
+            Some(n) => &[MaskSeqId::LocalId(n)],
+            None => &[],
+        };
+        let ranges = mask_data.get_ranges(ids)?;
+        if ranges_are_empty(ranges) {
+            return Ok(());
+        }
+        self.output_db.set_mask_data(ranges)?;
+        self.found_matching_masks = true;
+        Ok(())
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_writer/build_db.cpp:1403-1420

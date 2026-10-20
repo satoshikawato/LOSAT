@@ -8,9 +8,11 @@
 //! (`.phr` / `.nhr`), and an alias file (`.pal` / `.nal`) when the database
 //! has more than one volume.
 //!
-//! Not written: parsed Seq-ids and their ISAM files (`-parse_seqids`), mask
-//! data, taxonomy data, the LMDB files of version 5, and the JSON metadata
-//! file (`.pjs` / `.njs`).
+//! Not written: parsed Seq-ids and their ISAM files (`-parse_seqids`),
+//! taxonomy data, the LMDB files of version 5, and the JSON metadata file
+//! (`.pjs` / `.njs`). Mask data (`-mask_data`: the mask column files `.?aa`,
+//! `.?ab`, `.?ac`) can be written by the library (`mask_data`), but
+//! `LOSAT makedb` does not offer the option yet.
 
 pub mod bioseq;
 pub mod build_db;

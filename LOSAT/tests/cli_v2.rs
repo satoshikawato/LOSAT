@@ -862,10 +862,10 @@ const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 const CUSTOM: &[&str] = &["blastp", "blastx"];
 const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
-/// The programs that write BLAST XML (outfmt 5): OF4a, BLASTX with OF4b part 1; TBLASTN and
-/// TBLASTX follow.
-const XML: &[&str] = &["blastn", "blastp", "blastx"];
-const NO_XML: &[&str] = &["tblastn", "tblastx"];
+/// The programs that write BLAST XML (outfmt 5): OF4a, BLASTX with OF4b part 1, TBLASTN with
+/// OF4b part 3; TBLASTX follows.
+const XML: &[&str] = &["blastn", "blastp", "blastx", "tblastn"];
+const NO_XML: &[&str] = &["tblastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
     "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
@@ -943,7 +943,7 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "18", None, UNSUPPORTED),
         (ALL, "20", None, UNSUPPORTED),
         // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c), 5 in
-        // BLASTN and BLASTP (OF4a) and BLASTX (OF4b), NCBI dropping a custom specification
+        // BLASTN and BLASTP (OF4a), BLASTX and TBLASTN (OF4b), NCBI dropping a custom specification
         // (blast_args.cpp:2844-2851); the others not yet.
         (ALL, "8", None, Writes(AsnText)),
         (ALL, "12", None, Writes(JsonSeqalign)),

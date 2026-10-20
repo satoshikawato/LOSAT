@@ -451,6 +451,12 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     // document in memory until its epilog (`blast_xml::HeldOutput`). Only with outfmt 5; the
     // other formats read the file once.
     if let Some(held) = &held {
+        // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
+        // FIFO) cannot be read a second time: the read before the search would take every
+        // byte (DECISIONS 22). Refused as `-query -` is (`args.rs`), before the search.
+        if !query_file.metadata().is_ok_and(|m| m.is_file()) {
+            bail!("unsupported BLASTX query input for -outfmt 5: use a regular file");
+        }
         let query_file = File::open(&args.query).map_err(|_| inaccessible("query", &args.query))?;
         let messages_may_be_refused =
             super::blast_xml::prescan_queries(query_file, args.lcase_masking)?;

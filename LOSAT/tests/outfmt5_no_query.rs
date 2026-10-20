@@ -76,3 +76,52 @@ fn an_empty_query_input_writes_one_newline() {
     }
     std::fs::remove_dir_all(dir).ok();
 }
+
+/// TBLASTN and TBLASTX (OF4b): the same newline, also with a matrix name TBLASTN runs and the
+/// XML formatting table does not know (`-matrix blosum62`, NCBI's lookup of the run ignores
+/// case, the XML writer's `strcmp` does not; with no formatted query NCBI never reads the
+/// table).
+#[test]
+fn an_empty_query_pipe_writes_one_newline_for_tblastn_and_tblastx() {
+    let dir = std::env::temp_dir().join(format!("losat_outfmt5_noquery_tx_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let subject_path = dir.join("subject.fa");
+    std::fs::write(&subject_path, NUCLEOTIDE_SUBJECT).expect("write subject");
+    let cases: [(&str, &[&str]); 4] = [
+        ("tblastn", &[]),
+        ("tblastn", &["-matrix", "blosum62"]),
+        (
+            "tblastn",
+            &[
+                "-matrix",
+                "BLOSUM45",
+                "-word_size",
+                "2",
+                "-comp_based_stats",
+                "0",
+            ],
+        ),
+        ("tblastx", &[]),
+    ];
+    for (program, extra) in cases {
+        for threads in ["1", "4"] {
+            let mut args = vec![
+                program,
+                "-query",
+                "-",
+                "-subject",
+                subject_path.to_str().unwrap(),
+                "-outfmt",
+                "5",
+                "-num_threads",
+                threads,
+            ];
+            args.extend_from_slice(extra);
+            let output = run_with_empty_stdin(&args);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(output.status.code(), Some(0), "{args:?}: {stderr}");
+            assert_eq!(output.stdout, b"\n", "{args:?}");
+        }
+    }
+    std::fs::remove_dir_all(dir).ok();
+}

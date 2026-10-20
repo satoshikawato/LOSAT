@@ -57,7 +57,17 @@ fn encode_tblastn_lookup_query_with(
     if !mask_lowercase {
         return frame;
     }
-    push_lowercase_runs(query, &mut frame.seg_masks);
+    let mut start = None;
+    for (index, &residue) in query.iter().enumerate() {
+        if residue.is_ascii_lowercase() {
+            start.get_or_insert(index);
+        } else if let Some(left) = start.take() {
+            frame.seg_masks.push((left, index));
+        }
+    }
+    if let Some(left) = start {
+        frame.seg_masks.push((left, query.len()));
+    }
     if frame.seg_masks.is_empty() {
         return frame;
     }

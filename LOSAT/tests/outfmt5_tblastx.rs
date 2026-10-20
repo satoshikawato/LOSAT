@@ -339,9 +339,10 @@ fn a_refusal_in_a_later_batch_writes_nothing() {
 }
 
 #[test]
-fn an_empty_query_input_writes_nothing() {
-    // NCBI's tblastx stops at "Query is Empty!" before the formatter writes anything (no
-    // header, no epilog): 0 bytes and exit status 0.
+fn an_empty_seekable_query_input_writes_nothing() {
+    // `-query -` with standard input on /dev/null (seekable): NCBI's tblastx stops at "Query is
+    // Empty!" before the formatter writes anything (no header, no epilog): 0 bytes and exit
+    // status 0. An empty pipe is another path (one newline): `outfmt5_no_query.rs`.
     let dir = temp_dir("empty");
     let subject = dir.join("s.fa");
     fasta(
@@ -442,7 +443,7 @@ fn a_failing_batch_ends_the_run_after_the_earlier_iterations_without_the_trailer
         // The same document without its trailer.
         let trailer = "\n</BlastOutput_iterations>\n</BlastOutput>\n\n";
         assert_eq!(partial, complete.strip_suffix(trailer).expect("trailer"));
-        // A reader error in the first batch (BATCH_SIZE 1000: q1, q2 and the bad record share
+        // A reader error in the first batch (BATCH_SIZE 5000: q1, q2 and the bad record share
         // the batch) writes nothing.
         let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
         for (name, _) in std::env::vars_os() {

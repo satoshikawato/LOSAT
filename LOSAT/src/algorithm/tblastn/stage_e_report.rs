@@ -148,7 +148,7 @@ pub(super) fn render(
     }
     let hitlists: &[KappaResultHitList] = hitlists;
     // BLAST XML (outfmt 5): its texts are made, and what NCBI cannot write is refused, before
-    // any format opens its output (`-out` is not created).
+    // any format writes (`-out` is already created, empty, as NCBI's).
     let xml = if outputs
         .formats
         .iter()
@@ -1098,42 +1098,6 @@ fn write_pairwise(
 #[allow(clippy::too_many_arguments)]
 fn aligned_sequences(
     query: &[u8],
-    subject: SubjectNt<'_>,
-    window_buffer: &mut Vec<u8>,
-    code: &GeneticCode,
-    target: &mut TargetTranslation<'_>,
-    frame: i8,
-    q_start: i32,
-    s_start: i32,
-    s_end: i32,
-    script: &[GapEditOp],
-    report_masks: &[(usize, usize)],
-) -> Result<(String, String)> {
-    let mut query_string = String::new();
-    let mut subject_string = String::new();
-    aligned_sequences_into(
-        query,
-        subject,
-        window_buffer,
-        code,
-        target,
-        frame,
-        q_start,
-        s_start,
-        s_end,
-        script,
-        report_masks,
-        &mut query_string,
-        &mut subject_string,
-    )?;
-    Ok((query_string, subject_string))
-}
-
-/// `aligned_sequences` into two strings the caller keeps (cleared first), for the outfmt 5
-/// rows, which are made for one HSP at a time.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn aligned_sequences_into(
-    query: &[u8],
     // EXPERIMENT (LOSAT_X_TBNSTORE): the letters, or a packed subject.
     subject: SubjectNt<'_>,
     window_buffer: &mut Vec<u8>,
@@ -1145,12 +1109,8 @@ pub(super) fn aligned_sequences_into(
     s_end: i32,
     script: &[GapEditOp],
     report_masks: &[(usize, usize)],
-    query_string: &mut String,
-    subject_string: &mut String,
-) -> Result<()> {
+) -> Result<(String, String)> {
     ensure!(!script.is_empty(), "TBLASTN report HSP has no edit script");
-    query_string.clear();
-    subject_string.clear();
     let (translated, _, base) = target.get(frame, s_start, s_end)?;
     let mut q = usize::try_from(q_start)?;
     let mut s = super::search_gapped::window_index(s_start, base)
@@ -1203,6 +1163,8 @@ pub(super) fn aligned_sequences_into(
         )
     };
     const NCBISTDAA_TO_AA: &[u8; 28] = b"-ABCDEFGHIKLMNPQRSTVWXYZU*OJ";
+    let mut query_string = String::new();
+    let mut subject_string = String::new();
     for &op in script {
         for _ in 0..op.num() {
             match op {
@@ -1305,5 +1267,41 @@ pub(super) fn aligned_sequences_into(
             }
         }
     }
+    Ok((query_string, subject_string))
+}
+
+/// `aligned_sequences` into two strings the caller keeps, for the outfmt 5 rows, which are
+/// made for one HSP at a time. It calls `aligned_sequences` as it is (the rows of 0/6/7 are
+/// made by that function alone, unchanged since the base of OF4b, DECISIONS 23) and moves its
+/// strings into the caller's.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn aligned_sequences_into(
+    query: &[u8],
+    subject: SubjectNt<'_>,
+    window_buffer: &mut Vec<u8>,
+    code: &GeneticCode,
+    target: &mut TargetTranslation<'_>,
+    frame: i8,
+    q_start: i32,
+    s_start: i32,
+    s_end: i32,
+    script: &[GapEditOp],
+    report_masks: &[(usize, usize)],
+    query_string: &mut String,
+    subject_string: &mut String,
+) -> Result<()> {
+    (*query_string, *subject_string) = aligned_sequences(
+        query,
+        subject,
+        window_buffer,
+        code,
+        target,
+        frame,
+        q_start,
+        s_start,
+        s_end,
+        script,
+        report_masks,
+    )?;
     Ok(())
 }

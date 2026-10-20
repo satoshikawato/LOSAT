@@ -453,12 +453,249 @@ fn a_bad_subject_title_without_a_hit_gives_the_whole_document() {
     for (variant, output, file) in &results {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(0), "{variant}: {stderr}");
-        if file.is_empty() {
+        if variant.ends_with(", stdout") {
             assert_eq!(&output.stdout, reference, "{variant}");
         } else {
             assert!(output.stdout.is_empty(), "{variant}");
             assert_eq!(file, reference, "{variant}: the -out file");
         }
+    }
+    fs::remove_dir_all(dir).ok();
+}
+
+// A query that is not a regular file (OF4b review finding 1, DECISIONS 22): the pre-scan of the
+// query titles (DECISIONS 21) reads the file a second time, which a pipe cannot give, so
+// outfmt 5 refuses such a query input before the search, with nothing written. The other
+// formats read the input once and keep working.
+
+/// What the refusal says (`native.rs`).
+#[cfg(unix)]
+const NOT_REGULAR: &str = "unsupported BLASTX query input for -outfmt 5: use a regular file";
+
+#[cfg(unix)]
+fn one_query_files(dir: &Path) -> (Vec<u8>, PathBuf) {
+    let subject = dir.join("s.fa");
+    let query = format!(
+        "{}{}",
+        back_translate(PROTEIN),
+        "ACGTTGCAAGCTTGCA".repeat(20)
+    );
+    fasta(&subject, &[(b"s1 subject", PROTEIN.as_bytes())]);
+    (format!(">q1 plain\n{query}\n").into_bytes(), subject)
+}
+
+/// `blastx` reading the query from a named pipe that a writer thread fills.
+#[cfg(unix)]
+fn run_fifo(dir: &Path, text: &[u8], subject: &Path, format: &str, out: Option<&Path>) -> Output {
+    use std::io::Write;
+    let fifo = dir.join(format!("query_{format}.fifo"));
+    let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+    assert!(made.success());
+    let writer = {
+        let (fifo, text) = (fifo.clone(), text.to_vec());
+        // The open waits for the reader; the write may fail once a refusing run has gone.
+        std::thread::spawn(move || {
+            if let Ok(mut file) = fs::OpenOptions::new().write(true).open(fifo) {
+                let _ = file.write_all(&text);
+            }
+        })
+    };
+    let mut args = vec![
+        "blastx",
+        "-query",
+        fifo.to_str().unwrap(),
+        "-subject",
+        subject.to_str().unwrap(),
+        "-outfmt",
+        format,
+        "-evalue",
+        "1e-10",
+    ];
+    if let Some(out) = out {
+        args.extend_from_slice(&["-out", out.to_str().unwrap()]);
+    }
+    let output = run_str(&args);
+    writer.join().expect("writer thread");
+    fs::remove_file(&fifo).ok();
+    output
+}
+
+/// `blastx -query /dev/stdin` with a pipe on standard input.
+#[cfg(unix)]
+fn run_dev_stdin(text: &[u8], subject: &Path, format: &str) -> Output {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
+            command.env_remove(name);
+        }
+    }
+    command.env(
+        "LOSAT_BLASTX_WORKER_LOG",
+        std::env::temp_dir().join("losat_outfmt5_worker.log"),
+    );
+    let mut child = command
+        .args([
+            "blastx",
+            "-query",
+            "/dev/stdin",
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            format,
+            "-evalue",
+            "1e-10",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run LOSAT");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let text = text.to_vec();
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(&text);
+    });
+    let output = child.wait_with_output().expect("wait");
+    writer.join().expect("writer thread");
+    output
+}
+
+#[cfg(unix)]
+fn refused_not_regular(output: &Output, label: &str) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{label}: {stderr}");
+    assert!(output.stdout.is_empty(), "{label}: nothing is written");
+    assert!(stderr.contains(NOT_REGULAR), "{label}: {stderr}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_named_pipe_query_is_refused_for_outfmt_5_and_works_for_outfmt_6() {
+    let dir = temp_dir("fifo_query");
+    let (text, subject) = one_query_files(&dir);
+    refused_not_regular(&run_fifo(&dir, &text, &subject, "5", None), "stdout");
+    let out = dir.join("out.xml");
+    let output = run_fifo(&dir, &text, &subject, "5", Some(&out));
+    refused_not_regular(&output, "-out");
+    assert_eq!(fs::read(&out).expect("the -out file is made"), b"", "-out");
+    // The other formats read the pipe once, as NCBI does.
+    let tabular = run_fifo(&dir, &text, &subject, "6", None);
+    assert_eq!(tabular.status.code(), Some(0));
+    let rows = String::from_utf8(tabular.stdout).unwrap();
+    assert!(rows.starts_with("q1\ts1\t"), "{rows}");
+    // The same query as a regular file gives the document.
+    let query = dir.join("q.fa");
+    fs::write(&query, &text).unwrap();
+    let document = run_str(&[
+        "blastx",
+        "-query",
+        query.to_str().unwrap(),
+        "-subject",
+        subject.to_str().unwrap(),
+        "-outfmt",
+        "5",
+        "-evalue",
+        "1e-10",
+    ]);
+    assert_eq!(document.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&document.stdout).contains("<Hit_def>s1 subject</Hit_def>"));
+    fs::remove_dir_all(dir).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn dev_stdin_from_a_pipe_is_refused_for_outfmt_5_and_works_for_outfmt_6() {
+    let dir = temp_dir("dev_stdin_query");
+    let (text, subject) = one_query_files(&dir);
+    refused_not_regular(&run_dev_stdin(&text, &subject, "5"), "/dev/stdin");
+    let tabular = run_dev_stdin(&text, &subject, "6");
+    assert_eq!(tabular.status.code(), Some(0));
+    let rows = String::from_utf8(tabular.stdout).unwrap();
+    assert!(rows.starts_with("q1\ts1\t"), "{rows}");
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_held_document_is_written_when_the_run_ends_with_a_reader_error() {
+    // OF4b review finding 11: the hold (DECISIONS 21) ends a run that fails for any reason but
+    // a refusal as the run without a hold does: the Iterations of the batches before the failed
+    // one are written, the document has no trailer, rc 1 and the same message. The hold is on
+    // when some `-subject` title could still be refused (s2, which no query hits).
+    let dir = temp_dir("held_reader_error");
+    let query = dir.join("q.fa");
+    many_queries(&query, None);
+    let mut text = fs::read(&query).unwrap();
+    // 30 queries of about 1,400 letters: eight to a batch. The bad record is the 31st.
+    text.extend_from_slice(b">q31 bad\nACGT%%%%\n");
+    fs::write(&query, &text).unwrap();
+    let subject = dir.join("s.fa");
+    let mut results: Vec<(String, Vec<u8>, Vec<u8>)> = Vec::new();
+    for (label, s2_title) in [
+        ("held", "s2 caf\u{e9}".as_bytes()),
+        ("not held", b"s2 plain".as_slice()),
+    ] {
+        fasta(
+            &subject,
+            &[
+                (b"s1 subject", PROTEIN.as_bytes()),
+                (s2_title, OTHER_PROTEIN_LONG.as_bytes()),
+            ],
+        );
+        for threads in ["1", "4"] {
+            for to_file in [false, true] {
+                let out = dir.join(format!("out_{label}_{threads}.xml"));
+                let mut args = vec![
+                    "blastx",
+                    "-query",
+                    query.to_str().unwrap(),
+                    "-subject",
+                    subject.to_str().unwrap(),
+                    "-outfmt",
+                    "5",
+                    "-num_threads",
+                    threads,
+                    "-evalue",
+                    "1e-10",
+                ];
+                if to_file {
+                    args.extend_from_slice(&["-out", out.to_str().unwrap()]);
+                }
+                let output = run_str(&args);
+                let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+                assert_eq!(output.status.code(), Some(1), "{label} {threads}: {stderr}");
+                assert!(
+                    stderr.contains("CFastaReader"),
+                    "{label} {threads}: {stderr}"
+                );
+                let written = if to_file {
+                    assert!(output.stdout.is_empty(), "{label} {threads}");
+                    fs::read(&out).unwrap()
+                } else {
+                    output.stdout
+                };
+                results.push((
+                    format!(
+                        "{label}, {threads} threads, {}",
+                        if to_file { "-out" } else { "stdout" }
+                    ),
+                    written,
+                    output.stderr,
+                ));
+            }
+        }
+    }
+    let (held, plain) = results.split_at(results.len() / 2);
+    for ((label, written, stderr), (_, expected, expected_stderr)) in held.iter().zip(plain) {
+        let text = String::from_utf8_lossy(written);
+        assert!(text.matches("<Iteration>").count() >= 1, "{label}: {text}");
+        assert!(!text.contains("</BlastOutput>"), "{label}: no trailer");
+        assert_eq!(
+            written, expected,
+            "{label}: what the run without a hold writes"
+        );
+        assert_eq!(stderr, expected_stderr, "{label}");
     }
     fs::remove_dir_all(dir).ok();
 }

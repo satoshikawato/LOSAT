@@ -60,12 +60,6 @@ const MATRIX: &str = "BLOSUM62";
 const GAP_OPEN: i32 = 11;
 const GAP_EXTEND: i32 = 1;
 
-/// Refuses a `-db` name that NCBI's XML stream cannot write (a byte outside US-ASCII); the run
-/// checks it before the search.
-pub(super) fn check_database_name(name: &str) -> Result<()> {
-    names::check_text(name.as_bytes()).map_err(|refusal| refusal.error(PROGRAM, "a database name"))
-}
-
 /// The messages of a query's result (the warnings the other formats write to standard error,
 /// `report::query_warning`): the Karlin-Altschul message of a batch NCBI did not search (a
 /// translated query posts it only when no context of the batch is valid) and the message of a
@@ -144,7 +138,7 @@ pub(crate) fn write_tblastx_xml(
         ),
         None => ("", 0, 0),
     };
-    check_database_name(db_name)?;
+    names::check_database_name(PROGRAM, db_name)?;
     let positives = FormattingMatrix::new(MATRIX).context("no formatting matrix for BLOSUM62")?;
     let filter = filter::filter_string(None, args.seg_spec()?.filter_options(), None, false);
     let xml_run = XmlRun {
@@ -247,7 +241,6 @@ pub(crate) fn write_tblastx_xml(
                 &mut masks,
             );
         }
-        let start = buf.len();
         let written = document.query(&xml_run, &xml_query, &mut buf, |sink| {
             let mut first = 0usize;
             while first < query_hits.len() {
@@ -324,10 +317,8 @@ pub(crate) fn write_tblastx_xml(
             }
             Ok(())
         });
-        if let Err(error) = written {
-            buf.truncate(start);
-            return Err(error);
-        }
+        // A failed query leaves its partial bytes in `buf`, which the error return drops.
+        written?;
         writer.write_all(&buf)?;
         buf.clear();
     }

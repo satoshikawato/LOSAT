@@ -1077,14 +1077,14 @@ fn search_cli(
         }
     }
     // The BLAST XML (outfmt 5) cannot write a `-db` name outside US-ASCII: refused before the
-    // search (`blast_xml::check_database_name`).
+    // search (`names::check_database_name`).
     if let Some(database) = database.as_ref() {
         if outputs
             .formats
             .iter()
             .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Xml)
         {
-            super::super::blast_xml::check_database_name(database.name())?;
+            crate::report::blast_xml::names::check_database_name("TBLASTX", database.name())?;
         }
     }
     let source = match &database {

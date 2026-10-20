@@ -347,7 +347,7 @@ pub(crate) fn display_codon(masks: [u8; 3], code: &crate::utils::genetic_code::G
 //                 sm_RvCmpState [st] = 256 * p + 16 * q + r + 1;
 //             }
 // ```
-fn display_query_residue(
+pub(super) fn display_query_residue(
     sequence: &[u8],
     frame: i8,
     offset: usize,

@@ -34,6 +34,32 @@ pub struct SubjectNames {
     pub accession: Vec<u8>,
 }
 
+impl SubjectNames {
+    /// The names of a `-subject` record `id` with the FASTA title `title` (`Subject_N` and the
+    /// generated definition line). `protein`: the record is a protein.
+    pub fn of_record(id: &[u8], title: &[u8], protein: bool) -> Result<Self, Refusal> {
+        let (xml_id, def) = names::xml_subject_names(id, title, protein)?;
+        Ok(SubjectNames {
+            id: xml_id,
+            def,
+            accession: id.to_vec(),
+        })
+    }
+
+    /// The names of the database sequence `ordinal` with the stored title `title`
+    /// (`gnl|BL_ORD_ID|n`, the title as stored).
+    pub fn of_database_sequence(
+        ordinal: impl std::fmt::Display,
+        title: &[u8],
+    ) -> Result<Self, Refusal> {
+        Ok(SubjectNames {
+            id: format!("gnl|BL_ORD_ID|{ordinal}").into_bytes(),
+            def: names::xml_db_def(title)?,
+            accession: ordinal.to_string().into_bytes(),
+        })
+    }
+}
+
 impl XmlSubjects<'_> {
     /// The names of subject `s_idx`; `program` (`BLASTP`) names the program in the refusal of
     /// a title that NCBI cannot write.
@@ -43,14 +69,8 @@ impl XmlSubjects<'_> {
                 records, protein, ..
             } => {
                 let record = records.get(s_idx).context("HSP of an unknown subject")?;
-                let (id, def) =
-                    names::xml_subject_names(record.local_id.as_bytes(), &record.title, *protein)
-                        .map_err(|refusal| refusal.error(program, "a subject title"))?;
-                Ok(SubjectNames {
-                    id,
-                    def,
-                    accession: record.local_id.as_bytes().to_vec(),
-                })
+                SubjectNames::of_record(record.local_id.as_bytes(), &record.title, *protein)
+                    .map_err(|refusal| refusal.error(program, "a subject title"))
             }
             XmlSubjects::Database {
                 ordinals, records, ..
@@ -61,13 +81,8 @@ impl XmlSubjects<'_> {
                 let record = records
                     .get(s_idx)
                     .context("HSP of an unknown database sequence")?;
-                let def = names::xml_db_def(&record.title)
-                    .map_err(|refusal: Refusal| refusal.error(program, "a database title"))?;
-                Ok(SubjectNames {
-                    id: format!("gnl|BL_ORD_ID|{ordinal}").into_bytes(),
-                    def,
-                    accession: ordinal.to_string().into_bytes(),
-                })
+                SubjectNames::of_database_sequence(ordinal, &record.title)
+                    .map_err(|refusal: Refusal| refusal.error(program, "a database title"))
             }
         }
     }

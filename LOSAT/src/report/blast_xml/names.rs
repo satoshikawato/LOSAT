@@ -53,6 +53,12 @@ pub fn check_text(text: &[u8]) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// Refuses a `-db` name that NCBI's XML stream cannot write (a byte outside US-ASCII); each
+/// program checks it before its search.
+pub fn check_database_name(program: &str, name: &str) -> anyhow::Result<()> {
+    check_text(name.as_bytes()).map_err(|refusal| refusal.error(program, "a database name"))
+}
+
 /// `CDeflineGenerator().GenerateDefline(bh)` of a record with the FASTA title `title` (no
 /// flags), checked for what the XML stream can write.
 fn generated(title: &[u8], protein: bool) -> Result<Vec<u8>, Refusal> {

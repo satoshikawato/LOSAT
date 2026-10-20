@@ -256,11 +256,30 @@ fn a_database_name_outside_us_ascii_is_refused() {
     fs::remove_dir_all(dir).ok();
 }
 
-/// 120 queries of 130 letters (a query batch holds 20,000 letters, so several batches).
+/// TBLASTN's query batch size in letters (`args.rs` `query_batch_size("TBLASTN", 20000)`).
+const BATCH_LETTERS: usize = 20000;
+
+/// Queries in the file of `many_queries`: 150 of `PROTEIN.len()` (140) letters are 21,000
+/// letters, so the first batch (it takes queries until 20,000 letters are read) holds 143
+/// and the second the other 7.
+const QUERIES: usize = 150;
+
+/// The query batches of `many_queries` as the search makes them (`query_batch::query_batches`).
+fn query_batches() -> Vec<std::ops::Range<usize>> {
+    LOSAT::blastinput::query_batch::query_batches(&[PROTEIN.len(); QUERIES], BATCH_LETTERS)
+}
+
+/// 150 queries of `PROTEIN.len()` letters: more than a query batch holds, so two batches
+/// (`query_batches`, asserted here).
 fn many_queries(path: &Path, bad_title: Option<(usize, &[u8])>) {
-    let titles: Vec<String> = (0..120).map(|n| format!("q{n} plain")).collect();
+    let batches = query_batches();
+    assert!(batches.len() >= 2, "{batches:?}");
+    if let Some((index, _)) = bad_title {
+        assert!(index >= batches[0].end, "the title is in a later batch");
+    }
+    let titles: Vec<String> = (0..QUERIES).map(|n| format!("q{n} plain")).collect();
     let mut records: Vec<(&[u8], &[u8])> = Vec::new();
-    for n in 0..120 {
+    for n in 0..QUERIES {
         records.push((titles[n].as_bytes(), PROTEIN.as_bytes()));
     }
     if let Some((index, title)) = bad_title {
@@ -295,13 +314,13 @@ fn several_batches_make_one_document_with_global_iteration_numbers() {
         let text = String::from_utf8(output.stdout).expect("ASCII");
         assert_eq!(text.matches("<?xml").count(), 1);
         assert_eq!(text.matches("<BlastOutput_program>").count(), 1);
-        assert_eq!(text.matches("<Iteration>").count(), 120);
+        assert_eq!(text.matches("<Iteration>").count(), QUERIES);
         let numbers: Vec<u32> = text
             .split("<Iteration_iter-num>")
             .skip(1)
             .map(|rest| rest.split('<').next().unwrap().parse().unwrap())
             .collect();
-        assert_eq!(numbers, (1..=120).collect::<Vec<u32>>());
+        assert_eq!(numbers, (1..=QUERIES as u32).collect::<Vec<u32>>());
         assert!(text.ends_with("</Iteration>\n</BlastOutput_iterations>\n</BlastOutput>\n\n"));
     }
     fs::remove_dir_all(dir).ok();
@@ -313,7 +332,7 @@ fn a_refusal_in_a_later_batch_writes_nothing() {
     // before its first byte.
     let dir = temp_dir("later");
     let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
-    many_queries(&query, Some((110, "q110 caf\u{e9}".as_bytes())));
+    many_queries(&query, Some((148, "q148 caf\u{e9}".as_bytes())));
     fasta(
         &subject,
         &[(b"s1 subject", back_translate(PROTEIN).as_bytes())],
@@ -336,9 +355,10 @@ fn a_refusal_in_a_later_batch_writes_nothing() {
 }
 
 #[test]
-fn an_empty_query_input_writes_nothing() {
-    // NCBI's tblastn stops at "Query is Empty!" before the formatter writes anything (no
-    // header, no epilog): 0 bytes and exit status 0.
+fn an_empty_seekable_query_input_writes_nothing() {
+    // `-query -` with standard input on /dev/null (seekable): NCBI's tblastn stops at "Query is
+    // Empty!" before the formatter writes anything (no header, no epilog): 0 bytes and exit
+    // status 0. An empty pipe is another path (one newline): `outfmt5_no_query.rs`.
     let dir = temp_dir("empty");
     let subject = dir.join("s.fa");
     fasta(

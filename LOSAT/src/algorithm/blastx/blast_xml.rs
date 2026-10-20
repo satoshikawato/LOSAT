@@ -40,15 +40,21 @@
 //!   drops it, with nothing written.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::Write;
 use std::rc::Rc;
 
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 
 use super::args::ResolvedOptions;
 use super::input::FastaRecord;
-use super::report::{alignment, has_seqalign, reported, ShownSubjects};
+use super::report::{
+    display_query_residue, has_seqalign, query_endpoints, reported, ShownSubjects,
+};
+use super::results::Hsp;
 use super::runtime::BatchResults;
+use crate::common::GapEditOp;
+use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
 use crate::report::blast_xml::subjects::SubjectNames;
@@ -77,29 +83,6 @@ impl std::error::Error for XmlRefusal {}
 
 fn refuse(refusal: names::Refusal, what: &str) -> anyhow::Error {
     XmlRefusal(refusal.error(PROGRAM, what).to_string()).into()
-}
-
-/// `s_GetTranslationFrame` (blastxml_format.cpp:85-98) on the 1-based endpoints of the HSP's
-/// query interval (`start` the lower, `end` the higher) in a record of `length` letters.
-///
-/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:90-98
-/// ```c++
-///     int frame;
-///
-///     if (plus_strand) {
-///         frame = (start - 1) % 3 + 1;
-///     } else {
-///         frame = -((seq_length - end) % 3 + 1);
-///     }
-///
-///     return frame;
-/// ```
-fn translation_frame(plus_strand: bool, start: i32, end: i32, length: i32) -> i32 {
-    if plus_strand {
-        (start - 1) % 3 + 1
-    } else {
-        -((length - end) % 3 + 1)
-    }
 }
 
 /// The masked regions of a query as NCBI hands them to the XML writer
@@ -174,30 +157,70 @@ fn subject_names(
     oid: usize,
 ) -> Result<SubjectNames> {
     match shown {
-        ShownSubjects::Fasta { .. } => {
-            let (id, def) = names::xml_subject_names(
-                subject.internal_id.as_bytes(),
-                subject.title.as_bytes(),
-                true,
-            )
-            .map_err(|refusal| refuse(refusal, "a subject title"))?;
-            Ok(SubjectNames {
-                id,
-                def,
-                accession: subject.internal_id.as_bytes().to_vec(),
-            })
-        }
-        ShownSubjects::Database { reported, .. } => {
-            let ordinal = reported.ordinal(oid);
-            let def = names::xml_db_def(&reported.stored_titles()[oid])
-                .map_err(|refusal| refuse(refusal, "a database title"))?;
-            Ok(SubjectNames {
-                id: format!("gnl|BL_ORD_ID|{ordinal}").into_bytes(),
-                def,
-                accession: ordinal.to_string().into_bytes(),
-            })
+        ShownSubjects::Fasta { .. } => SubjectNames::of_record(
+            subject.internal_id.as_bytes(),
+            subject.title.as_bytes(),
+            true,
+        )
+        .map_err(|refusal| refuse(refusal, "a subject title")),
+        ShownSubjects::Database { reported, .. } => SubjectNames::of_database_sequence(
+            reported.ordinal(oid),
+            &reported.stored_titles()[oid],
+        )
+        .map_err(|refusal| refuse(refusal, "a database title")),
+    }
+}
+
+/// The rows of an HSP's alignment into `qrow` and `srow` (cleared first): the letters
+/// `report::alignment` shows in outfmt 0 (the query's codons translated, the subject's
+/// residues, `-` for a gap), without the rest of what it builds (the masked row, the midline
+/// counts), which the XML counts again from the rows itself. Returns the HSP's endpoints
+/// `(query_from, query_to)` as the Seq-align has them, lower first.
+fn xml_rows(
+    hsp: &Hsp,
+    subject: &FastaRecord,
+    query: &FastaRecord,
+    code: &crate::utils::genetic_code::GeneticCode,
+    qrow: &mut Vec<u8>,
+    srow: &mut Vec<u8>,
+) -> Result<(i32, i32)> {
+    let raw = &hsp.hsp;
+    qrow.clear();
+    srow.clear();
+    let (mut qi, mut si) = (usize::try_from(raw.q_start)?, usize::try_from(raw.s_start)?);
+    let whole = [GapEditOp::Sub(u32::try_from(raw.q_end - raw.q_start)?)];
+    let script: &[GapEditOp] = if hsp.edit_script.is_empty() {
+        &whole
+    } else {
+        &hsp.edit_script
+    };
+    for &op in script {
+        let (count, consume_q, consume_s) = match op {
+            GapEditOp::Sub(n) => (n, true, true),
+            GapEditOp::Ins(n) => (n, true, false),
+            GapEditOp::Del(n) => (n, false, true),
+        };
+        for _ in 0..count {
+            qrow.push(if consume_q {
+                display_query_residue(&query.sequence, raw.frame, qi, code)
+            } else {
+                b'-'
+            });
+            srow.push(if consume_s {
+                subject.sequence[si]
+            } else {
+                b'-'
+            });
+            qi += usize::from(consume_q);
+            si += usize::from(consume_s);
         }
     }
+    ensure!(
+        qi == raw.q_end as usize && si == raw.s_end as usize,
+        "BLASTX edit script does not reach final endpoints"
+    );
+    let (qstart, qend) = query_endpoints(query.sequence.len(), raw.frame, raw.q_start, raw.q_end);
+    Ok((qstart.min(qend), qstart.max(qend)))
 }
 
 /// The output of a run with outfmt 5: it passes the bytes on, or, once `hold` is called, keeps
@@ -339,7 +362,7 @@ pub(super) fn subjects_may_be_refused(subjects: &[FastaRecord]) -> bool {
 /// Refuses a `-db` name that NCBI's XML stream cannot write (a byte outside US-ASCII); the
 /// run checks it before the search, as the Seq-annot formats check theirs.
 pub(super) fn check_database_name(name: &str) -> Result<()> {
-    names::check_text(name.as_bytes()).map_err(|refusal| refuse(refusal, "a database name"))
+    names::check_database_name(PROGRAM, name).map_err(|error| XmlRefusal(error.to_string()).into())
 }
 
 /// Writes the documents of every query of `batches` (one query batch) to `writer`: the
@@ -402,17 +425,17 @@ pub(super) fn write_blastx_xml(
     // The definition line and message of every query, and the names of the subjects with hits,
     // made (and refused) before the first byte.
     let mut texts: Vec<QueryText> = Vec::new();
-    let mut subject_cache: Vec<Option<SubjectNames>> = Vec::new();
-    subject_cache.resize_with(subjects.len(), || None);
+    let mut subject_cache: HashMap<usize, SubjectNames> = HashMap::new();
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
             texts.push(query_text(query, batch.search_skipped, has_hits)?);
             for list in lists.iter().filter(|list| reported(list, options.gapped)) {
-                if subject_cache[list.oid].is_none() {
-                    subject_cache[list.oid] =
-                        Some(subject_names(shown, &subjects[list.oid], list.oid)?);
+                if let std::collections::hash_map::Entry::Vacant(slot) =
+                    subject_cache.entry(list.oid)
+                {
+                    slot.insert(subject_names(shown, &subjects[list.oid], list.oid)?);
                 }
             }
         }
@@ -420,6 +443,8 @@ pub(super) fn write_blastx_xml(
     let code = crate::utils::genetic_code::GeneticCode::from_id(options.query_gencode);
     let mut document = BlastXmlWriter::new(queries_before);
     let mut buf: Vec<u8> = Vec::new();
+    // The rows of one HSP at a time, reused.
+    let (mut qrow, mut srow): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut texts = texts.iter();
     for batch in batches {
         for (qidx, lists) in batch.queries.iter().enumerate() {
@@ -434,12 +459,11 @@ pub(super) fn write_blastx_xml(
                 stats: query_stats(batch, qidx, options.gapped, &gapped_karlin),
                 message: text.message.as_deref(),
             };
-            let start = buf.len();
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 for list in lists.iter().filter(|list| reported(list, options.gapped)) {
                     let subject = &subjects[list.oid];
-                    let names = subject_cache[list.oid]
-                        .as_ref()
+                    let names = subject_cache
+                        .get(&list.oid)
                         .context("names of a subject with hits")?;
                     let hit = XmlHit {
                         id: &names.id,
@@ -453,20 +477,19 @@ pub(super) fn write_blastx_xml(
                             .iter()
                             .filter(|hsp| has_seqalign(hsp, options.gapped))
                         {
-                            let rows = alignment(batch, hsp, subject, query, &code)?;
                             // The Seq-align's endpoints, lower first: the minus frame's
                             // outfmt 6 order is not the XML's.
                             let (query_from, query_to) =
-                                (rows.qstart.min(rows.qend), rows.qstart.max(rows.qend));
-                            let plus = rows.frame > 0;
+                                xml_rows(hsp, subject, query, &code, &mut qrow, &mut srow)?;
+                            let plus = hsp.hsp.frame > 0;
                             hsps.hsp(&XmlHsp {
                                 score: hsp.hsp.score,
                                 bit_score: hsp.bit_score,
                                 evalue: seqalign_evalue(hsp.evalue),
                                 query_from,
                                 query_to,
-                                hit_from: rows.sstart,
-                                hit_to: rows.send,
+                                hit_from: hsp.hsp.s_start + 1,
+                                hit_to: hsp.hsp.s_end,
                                 query_frame: translation_frame(
                                     plus,
                                     query_from,
@@ -474,8 +497,8 @@ pub(super) fn write_blastx_xml(
                                     length as i32,
                                 ),
                                 hit_frame: 0,
-                                qrow: rows.qseq.as_bytes(),
-                                srow: rows.sseq.as_bytes(),
+                                qrow: &qrow,
+                                srow: &srow,
                                 ops: Some(&hsp.edit_script),
                                 // The first residue of the row: the lowest nucleotide of the
                                 // interval on the plus strand, the highest on the minus
@@ -490,10 +513,8 @@ pub(super) fn write_blastx_xml(
                 }
                 Ok(())
             });
-            if let Err(error) = written {
-                buf.truncate(start);
-                return Err(error);
-            }
+            // A failed query leaves its partial bytes in `buf`, which the error return drops.
+            written?;
             writer.write_all(&buf)?;
             buf.clear();
         }

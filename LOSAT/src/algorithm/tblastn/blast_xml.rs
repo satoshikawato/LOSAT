@@ -70,18 +70,13 @@ pub(super) struct XmlValues {
     pub soft_masking: bool,
 }
 
-/// Refuses a `-db` name that NCBI's XML stream cannot write (a byte outside US-ASCII); the
-/// run checks it before the search.
-pub(super) fn check_database_name(name: &str) -> Result<()> {
-    names::check_text(name.as_bytes()).map_err(|refusal| refusal.error(PROGRAM, "a database name"))
-}
-
 /// The document's texts, made (and refused) before the first byte of any format is written:
 /// the definition line and message of every query, the names of the subjects with hits, the
 /// statistics of every query.
 pub(super) struct PreparedXml {
     values: XmlValues,
-    /// `None` only for a run without a query.
+    /// `None` for a matrix name the formatting table does not know (with a query that is an
+    /// error; `prepare`): only a run without a query reaches `write` with it.
     positives: Option<FormattingMatrix>,
     filter: Vec<u8>,
     matrix_name: String,
@@ -132,7 +127,7 @@ pub(super) fn prepare(
             && parameters.lengths.len() >= query_records.len(),
         "TBLASTN query statistics count mismatch"
     );
-    // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:218-232
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:213-218
     // ```c++
     //     else {
     //         string prog_name = Blast_ProgramNameFromType(
@@ -212,22 +207,10 @@ pub(super) fn prepare(
             .get(oid)
             .context("TBLASTN subject OID out of range")?;
         subject_names[oid] = Some(match shown.ordinal(oid) {
-            None => {
-                let (id, def) =
-                    names::xml_subject_names(record.local_id.as_bytes(), record.title(), false)
-                        .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?;
-                SubjectNames {
-                    id,
-                    def,
-                    accession: record.local_id.as_bytes().to_vec(),
-                }
-            }
-            Some(ordinal) => SubjectNames {
-                id: format!("gnl|BL_ORD_ID|{ordinal}").into_bytes(),
-                def: names::xml_db_def(record.title())
-                    .map_err(|refusal| refusal.error(PROGRAM, "a database title"))?,
-                accession: ordinal.to_string().into_bytes(),
-            },
+            None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false)
+                .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?,
+            Some(ordinal) => SubjectNames::of_database_sequence(ordinal, record.title())
+                .map_err(|refusal| refusal.error(PROGRAM, "a database title"))?,
         });
         // The whole record (`-subject_loc` searches part of it).
         subject_lengths[oid] =
@@ -309,7 +292,14 @@ impl PreparedXml {
         mut warnings: Option<&mut QueryWarnings<'_>>,
     ) -> Result<()> {
         let Some(positives) = &self.positives else {
-            // A run without a query and a matrix the formatting table does not know.
+            // A run without a query (with one, `prepare` refuses) and a matrix the formatting
+            // table does not know (`-matrix blosum62`: TBLASTN runs it, the table does not):
+            // NCBI never builds the table and writes the epilog's end of line alone.
+            if ranges.epilog {
+                let mut buf = Vec::new();
+                BlastXmlWriter::new(0).finish(&mut buf);
+                writer.write_all(&buf)?;
+            }
             return Ok(());
         };
         let run = XmlRun {
@@ -365,7 +355,6 @@ impl PreparedXml {
                     &mut masks,
                 );
             }
-            let start = buf.len();
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 for list in hitlist.lists() {
                     if list.hsps.hsps.is_empty() {
@@ -458,10 +447,8 @@ impl PreparedXml {
                 }
                 Ok(())
             });
-            if let Err(error) = written {
-                buf.truncate(start);
-                return Err(error);
-            }
+            // A failed query leaves its partial bytes in `buf`, which the error return drops.
+            written?;
             writer.write_all(&buf)?;
             buf.clear();
         }

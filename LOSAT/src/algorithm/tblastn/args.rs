@@ -1361,7 +1361,7 @@ fn search(
             .iter()
             .any(|format| super::stage_e_report::format_number(format.outfmt) == 5)
         {
-            super::blast_xml::check_database_name(database.name())?;
+            crate::report::blast_xml::names::check_database_name("TBLASTN", database.name())?;
         }
     }
     let subject_path = match database {

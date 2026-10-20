@@ -144,17 +144,14 @@ fn displayed_rows(
     query_code: &GeneticCode,
     db_code: &GeneticCode,
 ) -> (Vec<u8>, Vec<u8>) {
-    let (mut query_row, mut subject_row) = (Vec::new(), Vec::new());
-    displayed_rows_into(
-        hsp,
-        query,
-        subject,
-        subject_first,
-        query_code,
-        db_code,
-        &mut query_row,
-        &mut subject_row,
-    );
+    let hit = &hsp.hit;
+    let query_frame = hit.query_frame as i8;
+    let query_row = (hit.sort_query_offset..hit.sort_query_end)
+        .map(|offset| display_residue(query, query_frame, offset, query_code))
+        .collect();
+    let subject_row = (hit.sort_subject_offset..hit.sort_subject_end)
+        .map(|offset| display_residue(subject, hsp.subject_frame, offset - subject_first, db_code))
+        .collect();
     (query_row, subject_row)
 }
 

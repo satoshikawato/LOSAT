@@ -192,7 +192,7 @@ pub(crate) fn write_tblastx_xml(
     let subjects = match &run.database {
         Some(database) => XmlSubjects::Database {
             ordinals: &database.reported.ordinals,
-            records: run.subjects,
+            titles: crate::report::blast_xml::XmlTitles::Records(run.subjects),
             length: &subject_length,
         },
         None => XmlSubjects::Records {

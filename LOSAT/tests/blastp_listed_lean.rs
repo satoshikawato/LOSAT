@@ -6,7 +6,8 @@
 //! of the reported subjects only and read the letters of the listed subjects from their stored
 //! residues, instead of one record (ASCII letters and title) per listed subject. These tests
 //! compare the reports with the switch off and on (one search of all queries and the block search
-//! of `LOSAT_X_BPQBLOCK`; pairwise, tabular with `stitle` and the rendered rows, and Seq-align text)
+//! of `LOSAT_X_BPQBLOCK`; pairwise, tabular with `stitle` and the rendered rows, Seq-align text and
+//! XML)
 //! and run its shadow mode (`LOSAT_X_BPLISTEDLEANSHADOW`), which makes the records too and compares
 //! them with the lean titles rank by rank; its line at exit shows that the path ran. A difference
 //! stops the run.
@@ -161,6 +162,7 @@ fn lean_reports_are_the_records_reports() {
             None,
         ),
         ("8", 1, Some("0")),
+        ("5", 2, None),
     ] {
         let base: Vec<(&str, &str)> = block.map(|b| ("LOSAT_X_BPQBLOCK", b)).into_iter().collect();
         let with = |extra: (&'static str, &'static str)| {

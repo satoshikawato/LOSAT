@@ -1,6 +1,8 @@
 //! How a program's final hit lists name and measure their subjects in the XML (`Hit_id`,
 //! `Hit_def`, `Hit_accession`, `Hit_len`; DESIGN_OF4 2.3).
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -19,12 +21,38 @@ pub enum XmlSubjects<'a> {
         protein: bool,
     },
     /// A database: the sequences with hits by rank (`ordinals[rank]` the ordinal id, the
-    /// stored title `records[rank].title`, `length(rank)` the sequence length).
+    /// stored title `titles.get(rank)`, `length(rank)` the sequence length).
     Database {
         ordinals: &'a [u32],
-        records: &'a [FastaRecord],
+        titles: XmlTitles<'a>,
         length: &'a dyn Fn(usize) -> usize,
     },
+}
+
+/// The stored titles of a database's sequences by rank.
+#[derive(Clone, Copy)]
+pub enum XmlTitles<'a> {
+    /// The records of the listed sequences (`records[rank].title`).
+    Records(&'a [FastaRecord]),
+    /// The titles alone (blastp's `LOSAT_X_BPLISTEDLEAN`: the sequences in no final hit list
+    /// share one empty title).
+    Shared(&'a [Arc<[u8]>]),
+}
+
+impl<'a> XmlTitles<'a> {
+    fn get(self, rank: usize) -> Option<&'a [u8]> {
+        match self {
+            XmlTitles::Records(records) => records.get(rank).map(|record| &record.title[..]),
+            XmlTitles::Shared(titles) => titles.get(rank).map(|title| &title[..]),
+        }
+    }
+
+    fn len(self) -> usize {
+        match self {
+            XmlTitles::Records(records) => records.len(),
+            XmlTitles::Shared(titles) => titles.len(),
+        }
+    }
 }
 
 /// The names of a `Hit`.
@@ -73,15 +101,15 @@ impl XmlSubjects<'_> {
                     .map_err(|refusal| refusal.error(program, "a subject title"))
             }
             XmlSubjects::Database {
-                ordinals, records, ..
+                ordinals, titles, ..
             } => {
                 let ordinal = *ordinals
                     .get(s_idx)
                     .context("HSP of an unknown database sequence")?;
-                let record = records
+                let title = titles
                     .get(s_idx)
                     .context("HSP of an unknown database sequence")?;
-                SubjectNames::of_database_sequence(ordinal, &record.title)
+                SubjectNames::of_database_sequence(ordinal, title)
                     .map_err(|refusal: Refusal| refusal.error(program, "a database title"))
             }
         }
@@ -92,8 +120,8 @@ impl XmlSubjects<'_> {
         match self {
             XmlSubjects::Records { records, .. } => records.len(),
             XmlSubjects::Database {
-                ordinals, records, ..
-            } => ordinals.len().min(records.len()),
+                ordinals, titles, ..
+            } => ordinals.len().min(titles.len()),
         }
     }
 

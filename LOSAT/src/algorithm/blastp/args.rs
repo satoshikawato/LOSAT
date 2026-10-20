@@ -287,8 +287,13 @@ pub struct BlastpArgs {
     pub out: Option<PathBuf>,
     // An omitted value keeps the default hit list size (500) and NCBI's numbers of
     // descriptions and alignments of the pairwise report (500, 250).
-    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]")]
+    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
+    // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
+    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
+    pub num_descriptions: Option<usize>,
+    #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
+    pub num_alignments: Option<usize>,
     #[arg(long = "max_hsps", value_parser = blastn_count)]
     pub max_hsps_per_subject: Option<usize>,
     // NCBI blast_args.cpp:196-201,313-315: no filter when omitted or 0.
@@ -504,11 +509,16 @@ pub struct ResolvedBlastpArgs {
     pub lookup_table_type: BlastpLookupTableType,
     pub num_threads: usize,
     pub out: Option<PathBuf>,
-    /// The hit list size: the -max_target_seqs value, or 500.
+    /// The hit list size (`ReportCounts::hitlist_size`): the -max_target_seqs value, the
+    /// larger of the numbers of descriptions and alignments of the pairwise report when
+    /// one of them is given, the -num_alignments value of a tabular format, or 500.
     pub max_target_seqs: usize,
-    /// The -max_target_seqs value, which also sets the numbers of descriptions and
-    /// alignments of the pairwise report.
-    pub max_target_seqs_given: Option<usize>,
+    /// The numbers of descriptions and alignments of the pairwise report: the
+    /// -max_target_seqs value, -num_descriptions and -num_alignments, or 500 and 250.
+    pub num_descriptions: usize,
+    pub num_alignments: usize,
+    /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
+    pub max_target_seqs_given: bool,
     pub max_hsps_per_subject: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
     pub query_cov_hsp_perc: f64,
@@ -714,11 +724,16 @@ impl BlastpArgs {
             &choice,
             crate::blastinput::app::Program::Blastp,
         )?;
-        if self.max_target_seqs.is_some_and(|size| size < 5) {
-            diagnostics.write_all(&crate::report::query_warnings::few_matches_warning(
-                "blastp",
-            ))?;
-        }
+        // The hit list size and the counts of the pairwise report
+        // (`blastinput::report_counts`), with the handler's warnings.
+        let (counts, warnings) = crate::blastinput::report_counts::run_report_counts(
+            "blastp",
+            &[choice.number],
+            self.max_target_seqs,
+            self.num_descriptions,
+            self.num_alignments,
+        )?;
+        diagnostics.write_all(&warnings)?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
         // composition-based statistics handler; `blastinput/app.rs`)
         // ```c
@@ -746,6 +761,7 @@ impl BlastpArgs {
             word_size: options.word_size,
             compressed_lookup: options.lookup_table_type
                 == BlastpLookupTableType::CompressedAaLookupTable,
+            hitlist_size: counts.hitlist_size,
             evalue: options.evalue,
         })?;
         let matrix = options
@@ -786,8 +802,10 @@ impl BlastpArgs {
             lookup_table_type: options.lookup_table_type,
             num_threads: self.num_threads,
             out: self.out.clone(),
-            max_target_seqs: self.max_target_seqs.unwrap_or(500),
-            max_target_seqs_given: self.max_target_seqs,
+            max_target_seqs: counts.hitlist_size,
+            num_descriptions: counts.num_descriptions,
+            num_alignments: counts.num_alignments,
+            max_target_seqs_given: self.max_target_seqs.is_some(),
             // NCBI blast_args.cpp:317-318: if (args[kArgMaxHSPsPerSubject])
             // opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger());
             max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
@@ -916,6 +934,47 @@ mod tests {
         assert!(!resolved.use_sw_tback);
         assert!(!resolved.chaining);
         assert_eq!(resolved.outfmt, "0");
+    }
+
+    // NCBI blast_args.cpp:2894-2973 (`blastinput::report_counts`): the hit list size and the
+    // counts of outfmt 0 from -num_descriptions / -num_alignments; "No hits are being saved".
+    #[test]
+    fn num_descriptions_and_num_alignments_set_the_counts() {
+        let resolve = |extra: &[&str]| {
+            let mut argv = vec!["losat", "blastp", "-query", "q.faa", "-subject", "s.faa"];
+            argv.extend_from_slice(extra);
+            let cli = parse_cli(argv);
+            let TestCommand::Blastp(args) = cli.command;
+            args.resolve()
+        };
+        let counts = |extra: &[&str]| {
+            let resolved = resolve(extra).unwrap();
+            (
+                resolved.max_target_seqs,
+                resolved.num_descriptions,
+                resolved.num_alignments,
+            )
+        };
+        assert_eq!(counts(&[]), (500, 500, 250));
+        assert_eq!(counts(&["-num_descriptions", "3"]), (250, 3, 250));
+        assert_eq!(counts(&["-num_alignments", "2"]), (500, 500, 2));
+        assert_eq!(
+            counts(&["-num_descriptions", "2", "-num_alignments", "4"]),
+            (4, 2, 4)
+        );
+        assert_eq!(counts(&["-max_target_seqs", "7"]), (7, 7, 7));
+        assert_eq!(counts(&["-outfmt", "6", "-num_alignments", "2"]), (2, 2, 2));
+        assert_eq!(
+            counts(&["-outfmt", "6", "-num_descriptions", "2"]),
+            (500, 500, 500)
+        );
+        let error = resolve(&["-num_descriptions", "0", "-num_alignments", "0"]).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+        );
+        assert!(resolve(&["-outfmt", "7", "-num_alignments", "0"]).is_err());
+        assert!(resolve(&["-num_descriptions", "0"]).is_ok());
     }
 
     #[test]

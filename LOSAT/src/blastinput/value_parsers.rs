@@ -465,6 +465,32 @@ pub fn nonnegative_ncbi_integer(value: &str) -> Result<i32, String> {
     ncbi_integer_at_least(value, 0)
 }
 
+/// A `-num_descriptions` or `-num_alignments` value: 0 or more, an `Int4` in NCBI's
+/// integer forms (the sign and hexadecimal forms of `nonnegative_ncbi_integer`).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:2665-2685
+/// ```c
+///     arg_desc.AddOptionalKey(kArgNumDescriptions, "int_value",
+///                  "Number of database sequences to show one-line "
+///                  "descriptions for\n"
+///    		     "Not applicable for outfmt > 4\n"
+///    			 "Default = `"+ NStr::IntToString(m_DfltNumDescriptions)+ "'",
+///                  CArgDescriptions::eInteger);
+///     arg_desc.SetConstraint(kArgNumDescriptions,
+///                            new CArgAllowValuesGreaterThanOrEqual(0));
+///
+///     // number of alignments per DB sequence
+///     arg_desc.AddOptionalKey(kArgNumAlignments, "int_value",
+///                  "Number of database sequences to show alignments for\n"
+///                  "Default = `" + NStr::IntToString(m_DfltNumAlignments) + "'",
+///                  CArgDescriptions::eInteger );
+///     arg_desc.SetConstraint(kArgNumAlignments,
+///                            new CArgAllowValuesGreaterThanOrEqual(0));
+/// ```
+pub fn report_count(value: &str) -> Result<usize, String> {
+    nonnegative_ncbi_integer(value).map(|n| n as usize)
+}
+
 /// A BLASTN task: NCBI's blastn tasks (case-sensitive), of which LOSAT implements
 /// megablast, blastn, dc-megablast and blastn-short and rejects rmblastn (matrix scoring
 /// and masklevel) explicitly.

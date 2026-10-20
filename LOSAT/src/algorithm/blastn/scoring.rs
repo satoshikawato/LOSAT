@@ -144,6 +144,10 @@ pub fn check_scoring_options(args: &BlastnArgs) -> anyhow::Result<()> {
         "Invalid discontiguous template parameters: word size must be either 11 or 12".to_string()
     } else if template_length > 0 && !mb_lookup_options {
         "Invalid lookup table type for discontiguous Mega BLAST".to_string()
+    } else if args.report_counts.hitlist_size < 1 {
+        // NCBI blast_options.c:1511-1517, `BlastHitSavingOptionsValidate`, whose hit list
+        // check comes before the e-value's (`ReportCounts::validate`).
+        "No hits are being saved".to_string()
     } else if super::coordination::determine_evalue(args) <= 0.0 {
         "expect value or cutoff score must be greater than zero".to_string()
     } else if spec.gap_open == 0 && spec.gap_extend == 0 && !greedy {
@@ -176,10 +180,15 @@ pub fn check_losat_limits(args: &BlastnArgs) -> anyhow::Result<()> {
             spec.reward
         );
     }
-    let hitlist_size = args.max_target_seqs.unwrap_or(args.hitlist_size);
+    let hitlist_size = args.report_counts.hitlist_size;
     if super::hsp::get_prelim_hitlist_size(hitlist_size, false, true) < 1 {
+        let what = if args.max_target_seqs.is_some() {
+            format!("a -max_target_seqs of {hitlist_size}")
+        } else {
+            format!("a hit list size of {hitlist_size} (-num_descriptions / -num_alignments)")
+        };
         anyhow::bail!(
-            "a -max_target_seqs of {hitlist_size}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN"
+            "{what}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTN"
         );
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_stat.c:1506-1520

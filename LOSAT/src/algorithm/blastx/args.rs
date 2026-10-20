@@ -1,6 +1,6 @@
 //! BLASTX options and native serial local-subject search/report dispatch.
 use crate::blastinput::value_parsers::{
-    blastx_query_coverage, genetic_code, ncbi_int8, nonnegative_f64,
+    blastx_query_coverage, genetic_code, ncbi_int8, nonnegative_f64, report_count,
 };
 use anyhow::{bail, Result};
 use clap::Args;
@@ -283,8 +283,13 @@ pub struct BlastxArgs {
     //     						"Default = `" + NStr::IntToString(BLAST_HITLIST_SIZE) + "'",
     //                             CArgDescriptions::eInteger);
     // ```
-    #[arg(long, value_parser = positive)]
+    #[arg(long, value_parser = positive, conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<i32>,
+    // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
+    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
+    pub num_descriptions: Option<usize>,
+    #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
+    pub num_alignments: Option<usize>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3158-3161
     // ```c++
     //     arg_desc.AddDefaultKey(kArgNumThreads, "int_value",
@@ -877,6 +882,27 @@ impl BlastxArgs {
         // 		return BLASTERR_OPTION_VALUE_INVALID;
         // 	}
         // ```
+        // The hit list size and the counts of the pairwise report
+        // (`blastinput::report_counts`).
+        let counts = crate::blastinput::report_counts::report_counts(
+            i32::from(outfmt),
+            self.max_target_seqs.map(|n| n as usize),
+            self.num_descriptions,
+            self.num_alignments,
+        );
+        // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_options.c:1511-1517
+        // (the hit list size is checked before the e-value)
+        // ```c++
+        // 	if (options->hitlist_size < 1)
+        // 	{
+        // 		Blast_MessageWrite(blast_msg, eBlastSevError, kBlastMessageNoContext,
+        //                          "No hits are being saved");
+        // 		return BLASTERR_OPTION_VALUE_INVALID;
+        // 	}
+        // ```
+        if counts.hitlist_size < 1 {
+            return Err(SemanticOptionsError("No hits are being saved").into());
+        }
         if self.evalue <= 0.0 {
             return Err(SemanticOptionsError(
                 "expect value or cutoff score must be greater than zero",
@@ -884,7 +910,8 @@ impl BlastxArgs {
             .into());
         }
         let word_size = self.word_size.unwrap_or(3);
-        let hitlist_size = self.max_target_seqs.unwrap_or(500);
+        // The counts are at most `i32::MAX` (the options are `Int4`).
+        let hitlist_size = counts.hitlist_size as i32;
         let mut fields = Vec::new();
         let spec: Vec<_> = spec.collect();
         if outfmt != 0 {
@@ -990,12 +1017,8 @@ impl BlastxArgs {
             subject_besthit: self.subject_besthit,
             hitlist_size,
             max_target_seqs_explicit: self.max_target_seqs.is_some(),
-            num_descriptions: hitlist_size,
-            num_alignments: if outfmt == 0 && self.max_target_seqs.is_none() {
-                250
-            } else {
-                hitlist_size
-            },
+            num_descriptions: counts.num_descriptions as i32,
+            num_alignments: counts.num_alignments as i32,
             outfmt,
             fields,
             num_threads: self.num_threads,
@@ -1170,6 +1193,30 @@ mod tests {
             ),
             (500, 500, 500)
         );
+    }
+
+    // NCBI blast_args.cpp:2894-2973 (`blastinput::report_counts`).
+    #[test]
+    fn num_descriptions_and_num_alignments_set_the_counts() {
+        let counts = |extra: &[&str]| {
+            let resolved = parse(extra).resolve().unwrap();
+            (
+                resolved.hitlist_size,
+                resolved.num_descriptions,
+                resolved.num_alignments,
+            )
+        };
+        assert_eq!(counts(&["-num_descriptions", "3"]), (250, 3, 250));
+        assert_eq!(counts(&["-num_alignments", "2"]), (500, 500, 2));
+        assert_eq!(counts(&["-outfmt", "6", "-num_alignments", "2"]), (2, 2, 2));
+        assert_eq!(
+            counts(&["-outfmt", "6", "-num_descriptions", "2"]),
+            (500, 500, 500)
+        );
+        let error = parse(&["-num_descriptions", "0", "-num_alignments", "0"])
+            .resolve()
+            .unwrap_err();
+        assert_eq!(error.to_string(), "No hits are being saved");
     }
 
     // NCBI blast_args.cpp:2801-2855: BLASTX reads -outfmt as NCBI (a specification counts

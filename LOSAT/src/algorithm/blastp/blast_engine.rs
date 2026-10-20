@@ -2146,8 +2146,14 @@ fn validate_requested_blastp_support(args: &ResolvedBlastpArgs) -> Result<()> {
         true,
     ) < 1
     {
+        if args.max_target_seqs_given {
+            bail!(
+                "a -max_target_seqs of {}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTP",
+                args.max_target_seqs
+            );
+        }
         bail!(
-            "a -max_target_seqs of {}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTP",
+            "a hit list size of {} (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's BLASTP",
             args.max_target_seqs
         );
     }
@@ -5742,19 +5748,41 @@ fn resolve_for_formats(
             requested.resolve()?
         });
     }
+    // The numbers of descriptions and alignments belong to the format (only the pairwise
+    // format reads them); the hit list size is the search's and must be one.
+    let counts: Vec<crate::blastinput::report_counts::ReportCounts> = resolved_formats
+        .iter()
+        .map(|resolved| crate::blastinput::report_counts::ReportCounts {
+            hitlist_size: resolved.max_target_seqs,
+            num_descriptions: resolved.num_descriptions,
+            num_alignments: resolved.num_alignments,
+        })
+        .collect();
+    let numbers: Vec<i32> = outputs
+        .formats
+        .iter()
+        .map(|format| {
+            crate::blastinput::app::parse_formatting_string(format.outfmt).map(|c| c.number)
+        })
+        .collect::<Result<_>>()?;
+    let shared = crate::blastinput::report_counts::common_report_counts(&numbers, &counts)?;
     let search_options = |resolved: &ResolvedBlastpArgs| {
         let mut options = resolved.clone();
         options.outfmt.clear();
+        options.num_descriptions = 0;
+        options.num_alignments = 0;
         format!("{options:?}")
     };
     let mut resolved_formats = resolved_formats.into_iter();
-    let first = resolved_formats
+    let mut first = resolved_formats
         .next()
         .ok_or_else(|| anyhow::anyhow!("no output format was requested"))?;
     let first_options = search_options(&first);
     if resolved_formats.any(|resolved| search_options(&resolved) != first_options) {
         bail!("the requested output formats resolve to different search options");
     }
+    first.num_descriptions = shared.num_descriptions;
+    first.num_alignments = shared.num_alignments;
     Ok(first)
 }
 
@@ -6560,8 +6588,8 @@ fn write_reports_without_queries(
                     gapped_karlin: lookup_protein_params(&args.scoring),
                     gumbel: lookup_protein_gumbel_params(&args.scoring, total_db_len as i64)
                         .context("missing NCBI gumbel parameters for supported blastp scoring")?,
-                    num_descriptions: args.max_target_seqs_given.unwrap_or(500),
-                    num_alignments: args.max_target_seqs_given.unwrap_or(250),
+                    num_descriptions: args.num_descriptions,
+                    num_alignments: args.num_alignments,
                 };
                 let config = PairwiseConfig {
                     line_length: 60,
@@ -10561,9 +10589,10 @@ fn run_resolved_in_pool(
                     gapped_karlin: gapped_params,
                     gumbel: gapped_gumbel,
                     // NCBI blast_args.cpp:2910-2927: 500 descriptions and 250 alignments,
-                    // or -max_target_seqs of each when it is given.
-                    num_descriptions: args.max_target_seqs_given.unwrap_or(500),
-                    num_alignments: args.max_target_seqs_given.unwrap_or(250),
+                    // or the -num_descriptions / -num_alignments / -max_target_seqs values
+                    // (`ReportCounts`).
+                    num_descriptions: args.num_descriptions,
+                    num_alignments: args.num_alignments,
                 };
                 let pairwise_hits = pairwise_hits
                     .as_ref()
@@ -10894,6 +10923,8 @@ mod tests {
             num_threads: 1,
             out: None,
             max_target_seqs: None,
+            num_descriptions: None,
+            num_alignments: None,
             max_hsps_per_subject: None,
             qcov_hsp_perc: None,
             ungapped: false,

@@ -196,8 +196,13 @@ pub struct TblastnArgs {
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
     pub window_size: Option<i32>,
     // An omitted value keeps the default hit list size (500).
-    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]")]
+    #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]", conflicts_with_all = ["num_descriptions", "num_alignments"])]
     pub max_target_seqs: Option<usize>,
+    // NCBI blast_args.cpp:2665-2685,2732-2738: 0 or more; -max_target_seqs excludes both.
+    #[arg(long = "num_descriptions", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show one-line descriptions for. Not applicable for outfmt > 4 [default: 500]")]
+    pub num_descriptions: Option<usize>,
+    #[arg(long = "num_alignments", value_name = "int_value", value_parser = report_count, help = "Number of database sequences to show alignments for [default: 250]")]
+    pub num_alignments: Option<usize>,
     // NCBI blast_args.cpp:196-206: -qcov_hsp_perc in 0..100, -max_hsps >= 1.
     #[arg(long = "max_hsps", value_parser = blastn_count, help = "Set maximum number of HSPs per subject sequence to save for each query")]
     pub max_hsps: Option<usize>,
@@ -244,10 +249,16 @@ pub struct ResolvedTblastnArgs {
     pub matrix_name: String,
     pub threshold: f64,
     pub window_size: i32,
+    /// The hit list size (`ReportCounts::hitlist_size`): the -max_target_seqs value, the
+    /// larger of the numbers of descriptions and alignments of the pairwise report when
+    /// one of them is given, the -num_alignments value of a tabular format, or 500.
     pub hitlist_size: usize,
-    /// The -max_target_seqs value, which also sets the numbers of descriptions and
-    /// alignments of the pairwise report (500 and 250 when it is not given).
-    pub max_target_seqs_given: Option<usize>,
+    /// The numbers of descriptions and alignments of the pairwise report: the
+    /// -max_target_seqs value, -num_descriptions and -num_alignments, or 500 and 250.
+    pub num_descriptions: usize,
+    pub num_alignments: usize,
+    /// Whether -max_target_seqs was given (the text of LOSAT's limit on the hit list size).
+    pub max_target_seqs_given: bool,
     /// The -max_hsps value, or 0 (every HSP).
     pub max_hsps: usize,
     /// The -qcov_hsp_perc value, or 0 (no filter).
@@ -281,6 +292,15 @@ impl TblastnArgs {
         self.check_options(&mut std::io::sink())
     }
 
+    /// `check_options` for the output formats of a `run_local` call (their numbers).
+    pub fn check_options_for_formats(
+        &self,
+        outfmts: &[i32],
+        diagnostics: &mut dyn Write,
+    ) -> Result<ResolvedTblastnArgs> {
+        self.check_options_with(Some(outfmts), diagnostics)
+    }
+
     /// NCBI's `CBlastAppArgs::SetOptions` for tblastn after the files are opened: the task's
     /// options, each argument handler in the order of `CTblastnAppArgs` (with the warnings
     /// that they post to `diagnostics`), and `Validate`, with NCBI's errors.
@@ -298,6 +318,14 @@ impl TblastnArgs {
     ///     }
     /// ```
     pub fn check_options(&self, diagnostics: &mut dyn Write) -> Result<ResolvedTblastnArgs> {
+        self.check_options_with(None, diagnostics)
+    }
+
+    fn check_options_with(
+        &self,
+        outfmts: Option<&[i32]>,
+        diagnostics: &mut dyn Write,
+    ) -> Result<ResolvedTblastnArgs> {
         use crate::blastinput::app::{
             formatting_handler_check, parse_comp_based_stats, parse_formatting_string,
             parse_seg_option,
@@ -490,11 +518,18 @@ impl TblastnArgs {
         // ```
         let choice = parse_formatting_string(&self.outfmt)?;
         formatting_handler_check(&choice, crate::blastinput::app::Program::Tblastn)?;
-        if self.max_target_seqs.is_some_and(|size| size < 5) {
-            diagnostics.write_all(&crate::report::query_warnings::few_matches_warning(
-                "tblastn",
-            ))?;
-        }
+        // The hit list size and the counts of the pairwise report
+        // (`blastinput::report_counts`), with the handler's warnings. The formats of a
+        // `run_local` call are those of `outfmts`; the command line has the one `-outfmt`.
+        let own_outfmt = [choice.number];
+        let (counts, warnings) = crate::blastinput::report_counts::run_report_counts(
+            "tblastn",
+            outfmts.unwrap_or(&own_outfmt),
+            self.max_target_seqs,
+            self.num_descriptions,
+            self.num_alignments,
+        )?;
+        diagnostics.write_all(&warnings)?;
         // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:893-903 (the
         // composition-based statistics handler; `blastinput/app.rs`)
         // ```c
@@ -517,6 +552,7 @@ impl TblastnArgs {
             threshold,
             word_size,
             compressed_lookup,
+            hitlist_size: counts.hitlist_size,
             evalue,
         })?;
         Ok(ResolvedTblastnArgs {
@@ -538,8 +574,10 @@ impl TblastnArgs {
             matrix_name,
             threshold,
             window_size,
-            hitlist_size: self.max_target_seqs.unwrap_or(500),
-            max_target_seqs_given: self.max_target_seqs,
+            hitlist_size: counts.hitlist_size,
+            num_descriptions: counts.num_descriptions,
+            num_alignments: counts.num_alignments,
+            max_target_seqs_given: self.max_target_seqs.is_some(),
             // NCBI blast_args.cpp:313-319: SetQueryCovHspPerc, SetMaxHspsPerSubject.
             max_hsps: self.max_hsps.unwrap_or(0),
             query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
@@ -634,8 +672,14 @@ fn search_settings(args: &ResolvedTblastnArgs) -> Result<SearchSettings> {
         true,
     ) < 1
     {
+        if args.max_target_seqs_given {
+            anyhow::bail!(
+                "a -max_target_seqs of {}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's TBLASTN",
+                args.hitlist_size
+            );
+        }
         anyhow::bail!(
-            "a -max_target_seqs of {}, whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's TBLASTN",
+            "a hit list size of {} (-num_descriptions / -num_alignments), whose preliminary hit list size overflows NCBI BLAST+'s 32-bit int (NCBI crashes), is not supported by LOSAT's TBLASTN",
             args.hitlist_size
         );
     }
@@ -1207,12 +1251,14 @@ pub fn run_local(
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
     }
+    let mut outfmts = Vec::with_capacity(outputs.formats.len());
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
         if app::report_format(&choice, app::Program::Tblastn, None)?.is_none() {
             app::formatting_handler_check(&choice, app::Program::Tblastn)?;
             app::xinclude_check(&choice)?;
         }
+        outfmts.push(choice.number);
     }
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
@@ -1230,7 +1276,7 @@ pub fn run_local(
     if subject_records.is_empty() {
         return Err(app::empty_subjects_error());
     }
-    let resolved = args.check_options(outputs.diagnostics)?;
+    let resolved = args.check_options_for_formats(&outfmts, outputs.diagnostics)?;
     if query_records.is_empty() {
         outputs
             .diagnostics
@@ -1791,7 +1837,11 @@ fn search(
             &query_batch_skipped,
             scoring,
             &resolved.matrix_name,
-            resolved.max_target_seqs_given,
+            crate::blastinput::report_counts::ReportCounts {
+                hitlist_size: resolved.hitlist_size,
+                num_descriptions: resolved.num_descriptions,
+                num_alignments: resolved.num_alignments,
+            },
             resolved.db_gencode,
             seg.as_ref(),
             resolved.lcase_masking,
@@ -1856,6 +1906,28 @@ mod tests {
         check_options(&parse(extra).unwrap())
             .unwrap_err()
             .to_string()
+    }
+
+    // NCBI blast_args.cpp:2894-2973 (`blastinput::report_counts`).
+    #[test]
+    fn num_descriptions_and_num_alignments_set_the_counts() {
+        let counts = |extra: &[&str]| {
+            let resolved = parse(extra).unwrap().resolve().unwrap();
+            (
+                resolved.hitlist_size,
+                resolved.num_descriptions,
+                resolved.num_alignments,
+            )
+        };
+        assert_eq!(counts(&[]), (500, 500, 250));
+        assert_eq!(counts(&["-num_descriptions", "3"]), (250, 3, 250));
+        assert_eq!(counts(&["-num_alignments", "2"]), (500, 500, 2));
+        assert_eq!(counts(&["-max_target_seqs", "7"]), (7, 7, 7));
+        assert_eq!(counts(&["-outfmt", "6", "-num_alignments", "2"]), (2, 2, 2));
+        assert_eq!(
+            error(&["-num_descriptions", "0", "-num_alignments", "0"]),
+            "BLAST query/options error: No hits are being saved\nPlease refer to the BLAST+ user manual.\n"
+        );
     }
 
     // NCBI tblastn_options.cpp:54-85 and blast_prot_options.cpp:85-141:

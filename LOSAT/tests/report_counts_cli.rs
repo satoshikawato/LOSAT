@@ -50,10 +50,26 @@ fn inputs(program: &str) -> Vec<String> {
 
 fn run(program: &str, extra: &[&str]) -> Output {
     let mut command = Command::new(losat_binary());
+    // `LOSAT_BLASTX_WORKER_LOG` stays: a build with the worker probe (`--all-features`)
+    // panics when a pool starts without it, so the caller's value is kept, or a file of the
+    // temporary directory is named.
+    const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
     for (name, _) in std::env::vars_os() {
-        if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
+        if name.to_string_lossy().starts_with("LOSAT_")
+            && name != "LOSAT_X_DEFAULT"
+            && name != WORKER_LOG
+        {
             command.env_remove(name);
         }
+    }
+    if std::env::var_os(WORKER_LOG).is_none() {
+        command.env(
+            WORKER_LOG,
+            std::env::temp_dir().join(format!(
+                "report_counts_cli_{}.worker.log",
+                std::process::id()
+            )),
+        );
     }
     command
         .arg(program)

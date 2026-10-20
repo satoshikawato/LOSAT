@@ -2255,6 +2255,17 @@ fn write_description_table<W: Write>(
     show_sum_n: bool,
     mut label_of: impl FnMut(u32) -> Vec<u8>,
 ) -> io::Result<()> {
+    // NCBI reference: c++/src/algo/blast/format/blast_format.cpp:513-514
+    // ```c++
+    //     if (num_descriptions_to_show == 0)
+    //         flags |= CShowBlastDefline::eNoShowHeader;
+    // ```
+    // c++/src/objtools/align_format/showdefline.cpp:757,848: with `-num_descriptions 0`
+    // the header block (the two header lines and the blank line) and the rows are not written;
+    // the blank line that closes the table is (`out << "\n"` at blast_format.cpp:613).
+    if described.is_empty() {
+        return writeln!(writer);
+    }
     let rows: Vec<(u32, &PairwiseHit, f64, i32)> = described
         .iter()
         .filter_map(|s_idx| {

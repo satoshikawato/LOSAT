@@ -80,7 +80,8 @@ pub(super) fn units(lengths: impl Iterator<Item = usize>) -> usize {
 /// strips would take an unmasked chunk of the search on this thread), two subjects or more, and
 /// fewer units than threads.
 pub(super) fn serial_subjects(subjects: usize, units: usize, threads: usize, strips: bool) -> bool {
-    on() && strips && subjects >= 2 && units < threads
+    let _ = (units, threads);
+    on() && strips && subjects >= 2
 }
 
 // No NCBI counterpart: the shape of the search (scheduling); it changes no value NCBI computes.
@@ -89,7 +90,8 @@ pub(super) fn serial_subjects(subjects: usize, units: usize, threads: usize, str
 /// `serial_subjects`, and the subject has no lowercase mask), two chunks or more, and fewer chunks
 /// than threads.
 pub(super) fn serial_chunks(chunks: usize, threads: usize, strips: bool) -> bool {
-    on() && strips && chunks >= 2 && chunks < threads
+    let _ = threads;
+    on() && strips && chunks >= 2
 }
 
 #[cfg(test)]

@@ -2362,12 +2362,13 @@ fn blastp_tabular_fields_require_rendered_alignment(fields: &[BlastpTabularField
 }
 
 /// The report of one requested BLASTP format: one of LOSAT's text reports (outfmt 0, 6 and
-/// 7, with the custom fields of the tabular ones), or the Seq-annot of Seq-aligns of each
-/// query (outfmt 8, 12; `seqalign`).
+/// 7, with the custom fields of the tabular ones), the Seq-annot of Seq-aligns of each
+/// query (outfmt 8, 9, 12; `seqalign`), or BLAST XML (outfmt 5; `blast_xml`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BlastpReport {
     Text(OutputFormat),
     Seqalign(crate::report::serial::SerialFormat),
+    Xml,
 }
 
 impl BlastpReport {
@@ -2396,12 +2397,20 @@ fn blastp_seqalign_format(outfmt: &str) -> Option<crate::report::serial::SerialF
     )?)
 }
 
+/// Whether a `-outfmt` value is BLAST XML (outfmt 5), read as NCBI reads it.
+fn blastp_is_xml(outfmt: &str) -> bool {
+    crate::blastinput::app::parse_formatting_string(outfmt).is_ok_and(|choice| {
+        crate::blastinput::app::ReportFormat::from_number(choice.number)
+            == Some(crate::blastinput::app::ReportFormat::Xml)
+    })
+}
+
 // NCBI blast_args.cpp:2657-2660; tabular.cpp:1100-1108:
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) { x_PrintField(*iter); }
 // Validate the CLI specification before loading any input sequences.
 pub(crate) fn validate_cli_outfmt(spec: &str) -> Result<String, String> {
-    // outfmt 8 and 12 have no fields (`report_format` has accepted them for BLASTP).
-    if blastp_seqalign_format(spec).is_some() {
+    // outfmt 5, 8, 9 and 12 have no fields (`report_format` has accepted them for BLASTP).
+    if blastp_seqalign_format(spec).is_some() || blastp_is_xml(spec) {
         return Ok(spec.into());
     }
     let (format, fields) = OutputFormat::parse(spec)?;
@@ -3478,31 +3487,7 @@ fn masked_query_rows(
     query_frames: &[Vec<QueryFrame>],
     offsets: &seq_range::Placements,
 ) -> Option<Vec<PairwiseHit>> {
-    let masks: Vec<Vec<(i32, i32)>> = query_frames
-        .iter()
-        .map(|frames| {
-            let Some(frame) = frames.first() else {
-                return Vec::new();
-            };
-            let ranges = frame
-                .seg_masks
-                .iter()
-                .map(|&(start, end)| (start as i32, end as i32 - 1))
-                .collect();
-            crate::algorithm::blastx::query_setup::combine_masks(ranges)
-                .into_iter()
-                .filter(|&(from, to)| from <= to && !(from == 0 && to == frame.aa_len as i32 - 1))
-                .collect()
-        })
-        .enumerate()
-        .map(|(q_idx, masks): (usize, Vec<(i32, i32)>)| {
-            let offset = offsets.offset(q_idx) as i32;
-            masks
-                .into_iter()
-                .map(|(from, to)| (from + offset, to + offset))
-                .collect()
-        })
-        .collect();
+    let masks = query_record_masks(query_frames, offsets);
     if masks.iter().all(Vec::is_empty) {
         return None;
     }
@@ -3547,6 +3532,41 @@ fn masked_query_rows(
             })
             .collect(),
     )
+}
+
+/// The masked regions of each query as NCBI's `TMaskedQueryRegions` holds them (`Map`,
+/// api/blast_aux.cpp:825-842): the SEG masks merged, a mask that covers the whole query
+/// dropped, and the rest moved into the query's record by the start of its interval; inclusive
+/// 0-based positions.
+fn query_record_masks(
+    query_frames: &[Vec<QueryFrame>],
+    offsets: &seq_range::Placements,
+) -> Vec<Vec<(i32, i32)>> {
+    query_frames
+        .iter()
+        .map(|frames| {
+            let Some(frame) = frames.first() else {
+                return Vec::new();
+            };
+            let ranges = frame
+                .seg_masks
+                .iter()
+                .map(|&(start, end)| (start as i32, end as i32 - 1))
+                .collect();
+            crate::algorithm::blastx::query_setup::combine_masks(ranges)
+                .into_iter()
+                .filter(|&(from, to)| from <= to && !(from == 0 && to == frame.aa_len as i32 - 1))
+                .collect()
+        })
+        .enumerate()
+        .map(|(q_idx, masks): (usize, Vec<(i32, i32)>)| {
+            let offset = offsets.offset(q_idx) as i32;
+            masks
+                .into_iter()
+                .map(|(from, to)| (from + offset, to + offset))
+                .collect()
+        })
+        .collect()
 }
 
 /// Moves a hit's reported coordinates from the searched letters to the records, by the
@@ -6622,9 +6642,17 @@ fn write_reports_without_queries(
         .database()
         .map(database::BlastpDatabase::pairwise_database);
     for format in outputs.formats.iter_mut() {
-        // A Seq-annot format writes nothing without a query.
+        // A Seq-annot format writes nothing without a query. BLAST XML writes the epilog's end
+        // of line alone: `m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl`, with the
+        // end of the document empty (blast_format.cpp:2242-2243).
         if blastp_seqalign_format(format.outfmt).is_some() {
             format.sink.open()?.flush()?;
+            continue;
+        }
+        if blastp_is_xml(format.outfmt) {
+            let mut writer = format.sink.open()?;
+            writer.write_all(b"\n")?;
+            writer.flush()?;
             continue;
         }
         let (outfmt, _) = OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;
@@ -7183,6 +7211,9 @@ fn run_resolved_in_pool(
                 if let Some(serial) = blastp_seqalign_format(format.outfmt) {
                     return Ok((BlastpReport::Seqalign(serial), None));
                 }
+                if blastp_is_xml(format.outfmt) {
+                    return Ok((BlastpReport::Xml, None));
+                }
                 let (outfmt, custom_fields) =
                     OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;
                 if outfmt == OutputFormat::Pairwise && custom_fields.is_some() {
@@ -7537,7 +7568,24 @@ fn run_resolved_in_pool(
     //     return seqdb.GetNumSeqs();
     // }
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_setup.c:917-935 (`BLAST_GapAlignSetUp`)
+    // ```c
+    //       if (total_length > 0) {
+    //           num_seqs = BlastSeqSrcGetNumSeqsStats(seq_src);
+    //           if (num_seqs <= 0)
+    //               num_seqs = BlastSeqSrcGetNumSeqs(seq_src);
+    //       } else {
+    //           /* Not a database search; each subject sequence is considered
+    //              individually */
+    //           ...
+    //           num_seqs = 1;
+    //       }
+    // ```
+    // A subject set of no letters at all (every record empty) is not a database search to
+    // NCBI: it counts one sequence, whatever the number of records (visible only with
+    // `-dbsize`, the effective search space of the XML statistics and the outfmt 0 footer).
     let num_subjects = match database {
+        None if total_db_len == 0 => 1,
         None => subjects.len().max(1),
         Some(database) => database.num_sequences() as usize,
     };
@@ -10614,6 +10662,203 @@ fn run_resolved_in_pool(
                 )?;
                 // Flushed when written, as the other reports are (a later batch's stop
                 // messages follow it).
+                writer.flush()?;
+                Ok(())
+            })(),
+            BlastpReport::Xml => (|| -> Result<()> {
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
+                // ```c++
+                //     if (m_FormatType == CFormattingArgs::eAsnText
+                //       || m_FormatType == CFormattingArgs::eAsnBinary
+                //       || m_FormatType == CFormattingArgs::eXml
+                //       ...
+                //     {
+                //         x_PrintStructuredReport(results, queries);
+                //         return;
+                //     }
+                // ```
+                // The CBlastOutput document of the queries (`blast_xml`). NCBI makes its score
+                // matrix table from the matrix name as typed, and fails for a name that is not
+                // spelled as one of its own.
+                //
+                // NCBI reference (598d8ae6): c++/src/algo/blast/format/data4xmlformat.cpp:218-232
+                // ```c++
+                //     else {
+                //         string prog_name = Blast_ProgramNameFromType(
+                //                                            m_Options.GetProgramType());
+                //         if (prog_name != "blastn" && prog_name != "megablast") {
+                //             NCBI_THROW(blast::CBlastException, eInvalidArgument,
+                //                         "unsupported score matrix");
+                // ```
+                let positives = match crate::report::blast_xml::matrix::FormattingMatrix::new(
+                    &args.matrix_name,
+                ) {
+                    Some(matrix) => matrix,
+                    None if query_records.is_empty() => {
+                        let mut writer = format.sink.open()?;
+                        writer.flush()?;
+                        return Ok(());
+                    }
+                    None => {
+                        return Err(crate::cli::NativeError {
+                            exit: 3,
+                            message: "BLAST engine error: unsupported score matrix\n".to_string(),
+                        }
+                        .into())
+                    }
+                };
+                let mut writer = format.sink.open()?;
+                let xml_stats: Vec<crate::report::blast_xml::XmlStats> = (0..query_records.len())
+                    .map(|q_idx| {
+                        if !query_valid[q_idx] {
+                            return crate::report::blast_xml::XmlStats::NONE;
+                        }
+                        crate::report::blast_xml::XmlStats {
+                            hsp_len: search_spaces[q_idx].length_adjustment as i32,
+                            eff_space: exact_search_spaces[q_idx]
+                                .unwrap_or(search_spaces[q_idx].effective_space.round() as i64),
+                            kappa: gapped_params.k,
+                            lambda: gapped_params.lambda,
+                            entropy: gapped_params.h,
+                        }
+                    })
+                    .collect();
+                // The messages of each query's result: the same ones the warnings of the other
+                // formats write (`query_warning_lines`).
+                let xml_messages: Vec<Vec<String>> = query_records
+                    .iter()
+                    .enumerate()
+                    .map(|(q_idx, record)| {
+                        let mut messages = Vec::new();
+                        messages.extend(crate::report::query_warnings::replaced_o_message(
+                            record.seq(),
+                        ));
+                        if record.seq().is_empty() {
+                            messages.push(NO_DATA_MESSAGE.to_string());
+                        } else if !query_valid[q_idx] {
+                            messages.push(
+                                crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string(),
+                            );
+                        }
+                        messages
+                    })
+                    .collect();
+                let xml_masks: Vec<Vec<crate::report::blast_xml::QueryMask>> =
+                    query_record_masks(&query_frames, &ranges.query_input.placements)
+                        .into_iter()
+                        .map(|masks| {
+                            masks
+                                .into_iter()
+                                .map(|(from, to)| crate::report::blast_xml::QueryMask {
+                                    from,
+                                    to,
+                                    frame: 0,
+                                })
+                                .collect()
+                        })
+                        .collect();
+                let database_length = |rank: usize| subjects[rank].aa_len;
+                // The length of each record itself (`-subject_loc` searches part of it).
+                let record_length = |s_idx: usize| {
+                    ranges
+                        .subject_placements
+                        .length(s_idx, subject_records[s_idx].seq().len())
+                };
+                let xml_subjects = match (listed_subjects.as_ref(), listed_titles.as_ref()) {
+                    (Some(listed), Some(titles)) => {
+                        crate::report::blast_xml::XmlSubjects::Database {
+                            ordinals: &listed.ordinals,
+                            records: &titles.records,
+                            length: &database_length,
+                        }
+                    }
+                    _ => crate::report::blast_xml::XmlSubjects::Records {
+                        protein: true,
+                        records: subject_records,
+                        length: &record_length,
+                    },
+                };
+                let query_names = crate::report::record::QueryNames {
+                    records: query_records,
+                    searched_lengths: &query_lengths,
+                    placements: &ranges.query_input.placements,
+                };
+                let db_name = database.map(|database| database.name().to_string());
+                let version = format!("BLASTP {NCBI_BLASTP_VERSION}");
+                let filter = crate::report::blast_xml::filter::filter_string(
+                    None,
+                    args.seg.filter_options(),
+                    None,
+                    false,
+                );
+                let xml = super::blast_xml::BlastpXml {
+                    run: crate::report::blast_xml::XmlRun {
+                        program: "blastp",
+                        version: &version,
+                        reference: crate::report::blast_xml::REFERENCE_GAPPED_BLAST,
+                        db_name: db_name.as_deref().unwrap_or("").as_bytes(),
+                        matrix: Some(&args.matrix_name),
+                        expect: args.evalue,
+                        gap_open: args.scoring.gap_open,
+                        gap_extend: args.scoring.gap_extend,
+                        reward_penalty: None,
+                        filter: &filter,
+                        db_num: if database.is_some() {
+                            shown_num_sequences as i32
+                        } else {
+                            0
+                        },
+                        db_len: if database.is_some() {
+                            total_db_len as i64
+                        } else {
+                            0
+                        },
+                        positives: Some(&positives),
+                        mask_char: b'X',
+                    },
+                    queries: &query_names,
+                    stats: xml_stats,
+                    messages: xml_messages,
+                    subjects: xml_subjects,
+                    masks: xml_masks,
+                    program: "BLASTP",
+                    queries_before: reports.x_queries_before,
+                    epilog: reports.epilog,
+                };
+                // The rows of a query's HSPs are made from the searched letters: the final
+                // hits move back from the records by the intervals' starts, as they moved.
+                let mut xml_rows = |q_idx: usize| -> Result<Vec<PairwiseHit>> {
+                    let mut hits =
+                        crate::algorithm::blastp::hsp::collect_hits_and_methods_from_hit_lists(
+                            std::slice::from_ref(&hit_lists[q_idx]),
+                        );
+                    let q_shift = ranges.query_input.placements.offset(q_idx);
+                    for (hit, _) in hits.iter_mut() {
+                        let s_shift = ranges.subject_placements.offset(hit.s_idx as usize);
+                        hit.q_start -= q_shift;
+                        hit.q_end -= q_shift;
+                        hit.s_start -= s_shift;
+                        hit.s_end -= s_shift;
+                    }
+                    build_pairwise_hits(
+                        hits,
+                        &contexts,
+                        subjects,
+                        args.scoring.matrix,
+                        true,
+                        query_records,
+                        subject_records,
+                        crate::report::x_pairwise_par::pool(blastp_parallel_pool),
+                    )
+                };
+                super::blast_xml::write_blastp_xml(
+                    &xml,
+                    &hit_lists,
+                    &mut xml_rows,
+                    &mut writer,
+                    warnings.as_mut(),
+                )?;
+                // Flushed when written, as the other reports are.
                 writer.flush()?;
                 Ok(())
             })(),

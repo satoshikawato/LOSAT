@@ -1,3 +1,4 @@
+pub mod blast_xml;
 pub mod defline;
 pub mod outfmt6;
 pub mod pairwise;

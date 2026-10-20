@@ -16,7 +16,7 @@ use crate::utils::dust::MaskedInterval;
 
 use super::alignment::build_blastna_matrix;
 use super::hsp::{BlastnHitList, BlastnHsp, BlastnHspList};
-use super::lookup::reverse_complement;
+use super::lookup::{reverse_complement, reverse_complement_in_place};
 use super::x_subject_store::SubjectLetters;
 
 /// The regions that the report prints in lowercase.
@@ -110,6 +110,35 @@ pub(crate) fn pairwise_hits(
         rows.list(hsp_list, &mut hits)?;
     }
     Ok(hits)
+}
+
+/// The displayed rows of one HSP (the query on its plus strand, the subject reverse-complemented
+/// with it for a minus-strand HSP, upper case, no masking) for BLAST XML, which recounts its
+/// identities from them (`algorithm::blastn::blast_xml`). The same function of the HSP as the
+/// outfmt 0 rows, without a `PairwiseHit`, written into two buffers that the caller reuses.
+pub(crate) fn xml_rows_into(
+    hsp: &BlastnHsp,
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+    query_row: &mut Vec<u8>,
+    subject_row: &mut Vec<u8>,
+) -> Result<()> {
+    let query = queries
+        .get(hsp.q_idx as usize)
+        .context("BLASTN HSP of an unknown query")?;
+    let s_idx = hsp.s_idx as usize;
+    subjects
+        .records()
+        .get(s_idx)
+        .context("BLASTN HSP of an unknown subject")?;
+    displayed_rows_into(
+        hsp,
+        query.seq(),
+        subjects.len(s_idx),
+        |from, to| subjects.upper_letters(s_idx, from, to),
+        query_row,
+        subject_row,
+    )
 }
 
 /// What the displayed rows of an HSP read besides the HSP (`pairwise_hits`).
@@ -217,6 +246,63 @@ fn displayed_rows(
     subject_length: usize,
     subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
+    let (mut query_row, mut subject_row) = (Vec::new(), Vec::new());
+    context_rows_into(
+        hsp,
+        query,
+        subject_length,
+        subject_letters,
+        &mut query_row,
+        &mut subject_row,
+    )?;
+    // The rows live in a `PairwiseHit` until the query is written: a minus-strand HSP's are
+    // the exact-size reverse complements, not the grown buffers (outfmt 0's max RSS).
+    if hsp.query_frame < 0 {
+        return Ok((
+            reverse_complement(&query_row),
+            reverse_complement(&subject_row),
+        ));
+    }
+    Ok((query_row, subject_row))
+}
+
+/// `displayed_rows` into `query_row` and `subject_row` (cleared first; their capacity is kept),
+/// reversed in place for a minus-strand HSP.
+fn displayed_rows_into(
+    hsp: &BlastnHsp,
+    query: &[u8],
+    subject_length: usize,
+    subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
+    query_row: &mut Vec<u8>,
+    subject_row: &mut Vec<u8>,
+) -> Result<()> {
+    context_rows_into(
+        hsp,
+        query,
+        subject_length,
+        subject_letters,
+        query_row,
+        subject_row,
+    )?;
+    if hsp.query_frame < 0 {
+        reverse_complement_in_place(query_row);
+        reverse_complement_in_place(subject_row);
+    }
+    Ok(())
+}
+
+/// The two rows in the direction of the HSP's query context (cleared first; their capacity is
+/// kept): a minus-strand HSP's rows are still to be reverse-complemented.
+fn context_rows_into(
+    hsp: &BlastnHsp,
+    query: &[u8],
+    subject_length: usize,
+    subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
+    query_row: &mut Vec<u8>,
+    subject_row: &mut Vec<u8>,
+) -> Result<()> {
+    query_row.clear();
+    subject_row.clear();
     let (qs, qe) = (hsp.internal_q_offset_0, hsp.internal_q_end_0);
     let (ss, se) = (hsp.internal_s_offset_0, hsp.internal_s_end_0);
     ensure!(
@@ -233,7 +319,6 @@ fn displayed_rows(
     let ops = hsp.gap_info.as_deref().unwrap_or(&ungapped);
     // Offsets into the two segments.
     let (mut q, mut s) = (0, 0);
-    let (mut query_row, mut subject_row) = (Vec::new(), Vec::new());
     for op in ops {
         let n = op.num() as usize;
         let (take_query, take_subject) = match op {
@@ -266,11 +351,7 @@ fn displayed_rows(
         q == context.len() && s == subject.len(),
         "BLASTN edit script does not span its HSP"
     );
-    if hsp.query_frame < 0 {
-        query_row = reverse_complement(&query_row);
-        subject_row = reverse_complement(&subject_row);
-    }
-    Ok((query_row, subject_row))
+    Ok(())
 }
 
 // NCBI reference: c++/src/algo/blast/api/blast_aux.cpp:878-892
@@ -597,6 +678,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!((q.as_slice(), s.as_slice()), (&b"CCGGT"[..], &b"CCGG-"[..]));
+    }
+
+    // The XML rows are written into buffers that the caller reuses: stale contents are cleared
+    // and the minus-strand reversal in place gives the rows of `displayed_rows`.
+    #[test]
+    fn rows_into_reused_buffers_equal_displayed_rows() {
+        let query = record(b"AACCGGTT");
+        let subject = record(b"CCGGT");
+        let (mut q, mut s) = (b"stale row".to_vec(), b"x".to_vec());
+        for (frame, window, ops) in [
+            (-1, (1, 6), vec![GapEditOp::Ins(1), GapEditOp::Sub(4)]),
+            (1, (0, 5), vec![GapEditOp::Sub(5)]),
+        ] {
+            let hsp = hsp(frame, window, (0, 4 + usize::from(frame > 0)), Some(ops));
+            let letters = |from: usize, to: usize| subject.seq()[from..to].to_ascii_uppercase();
+            let once = displayed_rows(&hsp, query.seq(), subject.seq().len(), letters).unwrap();
+            displayed_rows_into(
+                &hsp,
+                query.seq(),
+                subject.seq().len(),
+                letters,
+                &mut q,
+                &mut s,
+            )
+            .unwrap();
+            assert_eq!((q.clone(), s.clone()), once);
+        }
     }
 
     #[test]

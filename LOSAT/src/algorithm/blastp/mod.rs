@@ -22,6 +22,7 @@ pub mod x_ungapped_fast;
 // max_offset = BlastGetStartForGappedAlignment(...);
 // status = s_BlastProtGappedAlignment(...);
 // BLASTP and TBLASTN use the same protein gapped-score path.
+mod blast_xml;
 pub(crate) mod gapalign;
 mod hsp;
 mod query_split;

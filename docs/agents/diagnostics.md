@@ -2535,7 +2535,18 @@ Scheduling (each value computed by one thread with the original function; order 
   `[X_PAIRPARNASHADOW]` summary line on stderr at the end, with the number of chunks compared). With `LOSAT_TIMING` a
   `[TIMING] x_pairparna_seed` line gives the strips, seeds and the fold, scan and wait time. Tests:
   `LOSAT/tests/blastn_pairpar_na.rs`, `x_pair_seed_na.rs` `seed_stage_on_strips_equals_one_scan`.
-  Default ON since 2026-10-20 (perf/bn-short-strip): EVIDENCE.
+  Default ON since 2026-10-20 (perf/bn-short-strip; workstation (2x Xeon Gold 6338, node 1 booked through its FIFO,
+  16 physical cores with the siblings idle, `numactl --membind 1`, rotated rounds, every output the same bytes in every
+  arm; v4-B `results/b13ab`); a ratio is the median of the per-round with / without, a718932f (the switch opt-in, same
+  code paths) built on that machine): blastn-short of 30,000 24-mers (taken at even steps from the subject) against
+  3 Mb of D. melanogaster chromosome 2L (`-subject`, `-evalue 0.001`, outfmt 6) x0.510 / 0.284 / 0.189 / 0.094 at 2 /
+  4 / 8 / 16 threads (30.3 -> 2.97 s at 16 threads, where NCBI 2.17.0 `-db` takes 29.4-29.8 s on one core), x1.001 at
+  one thread (the stage needs a pool); 30,000 queries of 18-30 nt x0.110 at 16 threads (34.3 -> 3.78 s); outfmt 0
+  x0.140 at 16 threads. Max RSS 191-197 -> 238 / 270 / 275 / 304-311 MiB at 2 / 4 / 8 / 16 threads (the seeds of the
+  strips in flight and one table per partition), below NCBI's 392 / 414 MiB at 1 / 16 threads. `-task blastn` (the
+  megablast table, where the switch does not act) at 2 threads: same instructions (7.50 / 7.51 G) and cycles. At 8 and
+  16 threads the threads spend 1.2-1.8x the user time of the serial scan, mostly waiting for the slowest partition
+  (cycles up at equal instructions, sys 2-5 s).
 - `LOSAT_X_QDUSTPAR=1` (BLASTN, all tasks with DUST on, which is the default of megablast, dc-megablast and
   blastn, and blastn-short with `-dust yes`; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the DUST masks
   of a query batch are made on the search pool instead of one query after the other

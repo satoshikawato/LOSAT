@@ -111,6 +111,9 @@ pub(crate) fn attach(hashtable: &[u32], next_pos: &mut Vec<u32>) {
         offsets[cells].write(words as u32);
     }
     let t2 = Instant::now();
+    // EXPERIMENT (exp/r14-wall): the chain-walk CSR build's interval (`R13_PROBE=tl`; the
+    // contiguous blastn tables are built here).
+    crate::utils::xtiming::x_r13("csr", Some(t0), words as u64);
     eprintln!(
         "[R11] csr cells={cells} words={words} next_pos_len={n} reserve_ns={} build_ns={} csr_bytes={}",
         (t1 - t0).as_nanos(),

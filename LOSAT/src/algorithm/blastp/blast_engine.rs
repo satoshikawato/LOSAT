@@ -6557,9 +6557,17 @@ fn write_reports_without_queries(
         .database()
         .map(database::BlastpDatabase::pairwise_database);
     for format in outputs.formats.iter_mut() {
-        // A Seq-annot format and BLAST XML write nothing without a query.
-        if blastp_seqalign_format(format.outfmt).is_some() || blastp_is_xml(format.outfmt) {
+        // A Seq-annot format writes nothing without a query. BLAST XML writes the epilog's end
+        // of line alone: `m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl`, with the
+        // end of the document empty (blast_format.cpp:2242-2243).
+        if blastp_seqalign_format(format.outfmt).is_some() {
             format.sink.open()?.flush()?;
+            continue;
+        }
+        if blastp_is_xml(format.outfmt) {
+            let mut writer = format.sink.open()?;
+            writer.write_all(b"\n")?;
+            writer.flush()?;
             continue;
         }
         let (outfmt, _) = OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;

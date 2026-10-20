@@ -250,10 +250,11 @@ fn a_later_call_continues_the_document() {
     assert!(!text.contains("<BlastOutput>"));
     writer.finish(&mut out);
     assert!(out.ends_with(TRAILER.as_bytes()));
-    // an epilog call for a run with no query writes nothing
+    // an epilog call for a run with no query writes the epilog's end of line alone
+    // (blast_format.cpp:2242-2243)
     let mut none = Vec::new();
     BlastXmlWriter::new(0).finish(&mut none);
-    assert!(none.is_empty());
+    assert_eq!(none, b"\n");
 }
 
 #[test]

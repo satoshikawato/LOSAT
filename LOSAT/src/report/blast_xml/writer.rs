@@ -185,10 +185,21 @@ impl BlastXmlWriter {
     }
 
     /// Appends the end of the document if any query was formatted:
-    /// `\n</BlastOutput_iterations>\n</BlastOutput>\n` and the epilog's end of line.
+    /// `\n</BlastOutput_iterations>\n</BlastOutput>\n` and the epilog's end of line. With no
+    /// query formatted the end of the document is empty and only the epilog's end of line
+    /// remains.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2242-2243
+    /// ```c++
+    ///     if (m_FormatType == CFormattingArgs::eXml) {
+    ///         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
+    /// ```
+    /// (`m_SerialXmlEnd` is set by the first formatted query, blastxml_format.cpp:755-763.)
     pub fn finish(&self, out: &mut Vec<u8>) {
         if self.iterations > 0 {
             out.extend_from_slice(b"\n</BlastOutput_iterations>\n</BlastOutput>\n\n");
+        } else {
+            out.push(b'\n');
         }
     }
 }

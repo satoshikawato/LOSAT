@@ -6,9 +6,9 @@
 //! (every subject of the preliminary hit lists): its letters in ASCII and its stored title, empty
 //! for a subject in no final hit list. The reports then copy every title into an `Arc` twice, once
 //! for outfmt 0 (`subject_titles`) and once for the `stitle` field (`ListedTitles::stitles`). With
-//! the UniRef50 database, 100 queries at 32 threads list 70,701 subjects of 50.8 MB of letters:
-//! the records added 41 MiB and the two title copies 10 MiB of anonymous memory on top of the
-//! listed sequences (`ListedSubjects::encoded`, which the redo reads and the reports keep), all in
+//! the UniRef50 database, the first query batch (91 queries) of 100 at 32 threads lists 70,701
+//! subjects of 50.8 MB of letters: the records added 41 MiB and the two title copies 10 MiB of
+//! anonymous memory on top of the listed sequences (`ListedSubjects::encoded`, which the redo reads and the reports keep), all in
 //! the main heap in about 0.2 s (v4-D12 s3 probe, workstation).
 //!
 //! With the switch on, `ListedSubjects::x_read_titles_lean` reads the same titles, in the same
@@ -27,8 +27,9 @@
 //! `read_titles`).
 //!
 //! `LOSAT_X_BPLISTEDLEAN` is a switch of the strict set: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set. It acts for every task of BLASTP with `-db` (the search
-//! of all queries; ABI v1's titles keep the records).
+//! `LOSAT_X_DEFAULT=0` and it is not set. It acts for every task of BLASTP with `-db`, in the
+//! search of all queries and in the blocks of `LOSAT_X_BPQBLOCK` (not with ABI v1's titles, which
+//! read the records).
 //!
 //! `LOSAT_X_BPLISTEDLEANSHADOW=1` (shadow mode, implies the switch): `read_titles` runs too, first,
 //! and its records are compared with the lean titles rank by rank: every title, every flag of
@@ -43,8 +44,8 @@ use std::sync::{Arc, OnceLock};
 use anyhow::Result;
 
 use super::{
-    ncbistdaa_to_ascii, shared, BlastpDatabase, BlastpHitList, ListedSubjects, ListedTitles,
-    PROGRAM,
+    ncbistdaa_to_ascii, shared, BlastpDatabase, BlastpHitList, ListedShown, ListedSubjects,
+    ListedTitles, PROGRAM,
 };
 
 /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): how the reports of a `-db` search hold the listed subjects.
@@ -77,6 +78,10 @@ pub(in crate::algorithm::blastp::blast_engine) fn x_bp_listed_lean() -> XListedL
 }
 
 impl ListedSubjects {
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1569-1582 and
+    // c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2302-2310, quoted above `read_titles`:
+    // NCBI reads the definition lines of the final hit lists, query by query, in the order of each
+    // hit list; these are the same reads.
     /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): `read_titles` without the records: the definition lines
     /// of the subjects of the final hit lists (`hit_lists`), read in the same order with the same
     /// errors, one `Arc` each; the other subjects share one empty title.
@@ -112,9 +117,7 @@ impl ListedSubjects {
         }
         Ok(ListedTitles {
             listed: self,
-            records: Vec::new(),
-            titles,
-            lean: true,
+            shown: ListedShown::Lean(titles),
             replaced_title_bytes,
         })
     }
@@ -162,18 +165,22 @@ pub(in crate::algorithm::blastp::blast_engine) fn x_shadow_compare(
 ) {
     X_SEARCHES.fetch_add(1, Ordering::Relaxed);
     let listed = lean.listed;
-    if lean.titles.len() != listed.ordinals.len() || records.records.len() != listed.ordinals.len()
-    {
+    let (ListedShown::Lean(titles), ListedShown::Records(records_of)) =
+        (&lean.shown, &records.shown)
+    else {
+        x_shadow_difference("the lean titles against the records: wrong kinds".to_string());
+    };
+    if titles.len() != listed.ordinals.len() || records_of.len() != listed.ordinals.len() {
         x_shadow_difference(format!(
             "ranks: lean titles {} / records {} / listed {}",
-            lean.titles.len(),
-            records.records.len(),
+            titles.len(),
+            records_of.len(),
             listed.ordinals.len()
         ));
     }
-    for (rank, record) in records.records.iter().enumerate() {
+    for (rank, record) in records_of.iter().enumerate() {
         let ordinal = listed.ordinals[rank];
-        if lean.titles[rank][..] != record.title[..] {
+        if titles[rank][..] != record.title[..] {
             x_shadow_difference(format!("rank {rank} (ordinal {ordinal}): title"));
         }
         if lean.replaced_title_bytes[rank] != records.replaced_title_bytes[rank] {
@@ -194,5 +201,5 @@ pub(in crate::algorithm::blastp::blast_engine) fn x_shadow_compare(
         }
         X_LETTERS.fetch_add(letters.len() as u64, Ordering::Relaxed);
     }
-    X_RANKS.fetch_add(records.records.len() as u64, Ordering::Relaxed);
+    X_RANKS.fetch_add(records_of.len() as u64, Ordering::Relaxed);
 }

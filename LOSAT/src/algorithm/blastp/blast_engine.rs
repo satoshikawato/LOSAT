@@ -3593,15 +3593,12 @@ fn shift_hsp_to_records(hsp: &mut BlastpHsp, ranges: &BlastpRanges<'_>) {
     }
 }
 
-// NCBI reference: c++/src/objtools/alnmgr/alnvec.cpp:116-121
-// ```c++
-//         CBioseq_Handle h = GetBioseqHandle(row);
-//         CSeqVector vec = h.GetSeqVector
-//             (CBioseq_Handle::eCoding_Iupac,
-//              IsPositiveStrand(row) ?
-//              CBioseq_Handle::eStrand_Plus :
-//              CBioseq_Handle::eStrand_Minus);
-// ```
+/// The stored residue of pyrrolysine (O): the only code that `ncbistdaa_to_ascii` shows as O
+/// (`NCBISTDAA_TO_AMINOACID`, blast_encoding.c:115-121, quoted above it).
+const STORED_O: u8 = 26;
+
+// No NCBI counterpart: how LOSAT's reports reach the letters they read; NCBI reads each
+// sequence from its Bioseq (alnvec.cpp:116-121, quoted above `restore_displayed_o`).
 /// The letters of one sequence as the reports read them (ASCII, as read).
 #[derive(Clone, Copy)]
 enum ShownLetters<'a> {
@@ -3620,9 +3617,7 @@ impl ShownLetters<'_> {
             Self::Ascii(letters) => letters
                 .iter()
                 .any(|letter| letter.eq_ignore_ascii_case(&b'O')),
-            Self::Stored(residues) => residues
-                .iter()
-                .any(|&residue| ncbistdaa_to_ascii(residue).eq_ignore_ascii_case(&'O')),
+            Self::Stored(residues) => residues.contains(&STORED_O),
         }
     }
 
@@ -3637,6 +3632,7 @@ impl ShownLetters<'_> {
     }
 }
 
+// No NCBI counterpart: how LOSAT's reports reach the subjects' letters and titles.
 /// The subjects whose letters and titles the reports read, by subject index.
 #[derive(Clone, Copy)]
 enum ShownSubjects<'a> {
@@ -3674,6 +3670,15 @@ impl<'a> ShownSubjects<'a> {
     }
 }
 
+// NCBI reference: c++/src/objtools/alnmgr/alnvec.cpp:116-121
+// ```c++
+//         CBioseq_Handle h = GetBioseqHandle(row);
+//         CSeqVector vec = h.GetSeqVector
+//             (CBioseq_Handle::eCoding_Iupac,
+//              IsPositiveStrand(row) ?
+//              CBioseq_Handle::eStrand_Plus :
+//              CBioseq_Handle::eStrand_Minus);
+// ```
 /// The displayed row of an alignment from `start` (0-based) of `sequence`: the reports read
 /// the input sequence, so a pyrrolysine (O) that the search read as X is shown as O.
 fn restore_displayed_o(
@@ -10233,25 +10238,23 @@ fn run_resolved_in_pool(
         &[FastaRecord],
         std::borrow::Cow<'_, [Arc<[u8]>]>,
         ShownSubjects<'_>,
-    ) = match listed_titles.as_ref() {
-        Some(titles) if titles.x_lean() => (
+    ) = match listed_titles.as_ref().map(|titles| &titles.shown) {
+        // A database's subjects have no records with the switch: every reader of a listed
+        // subject takes `shown_subjects`, the titles by rank or the stored residues.
+        Some(database::ListedShown::Lean(titles)) => (
             &[],
-            std::borrow::Cow::Borrowed(&titles.titles[..]),
-            ShownSubjects::Listed {
-                subjects,
-                titles: &titles.titles,
-            },
+            std::borrow::Cow::Borrowed(&titles[..]),
+            ShownSubjects::Listed { subjects, titles },
         ),
-        Some(titles) => (
-            &titles.records,
+        Some(database::ListedShown::Records(records)) => (
+            records,
             std::borrow::Cow::Owned(
-                titles
-                    .records
+                records
                     .iter()
                     .map(|record| Arc::from(record.title()))
                     .collect(),
             ),
-            ShownSubjects::Records(&titles.records),
+            ShownSubjects::Records(records),
         ),
         None => (
             subject_records,
@@ -10522,8 +10525,10 @@ fn run_resolved_in_pool(
     // line (`N/A`, `blastp_subject_stitle`).
     // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the titles that outfmt 0 borrows too.
     let subject_stitles: std::borrow::Cow<'_, [Arc<[u8]>]> = match listed_titles.as_ref() {
-        Some(titles) if titles.x_lean() => std::borrow::Cow::Borrowed(&titles.titles[..]),
-        Some(titles) => titles.stitles().into(),
+        Some(titles) => match &titles.shown {
+            database::ListedShown::Lean(titles) => std::borrow::Cow::Borrowed(&titles[..]),
+            database::ListedShown::Records(_) => titles.stitles().into(),
+        },
         None => Vec::new().into(),
     };
     let pairwise_database = database.map(database::BlastpDatabase::pairwise_database);
@@ -10859,6 +10864,11 @@ mod tests {
             assert_eq!(stored.get(index), record.get(index), "index {index}");
         }
         assert!(stored.has_o() && record.has_o());
+        // `STORED_O` is the one code shown as O.
+        let shown_as_o: Vec<u8> = (0..=u8::MAX)
+            .filter(|&residue| ncbistdaa_to_ascii(residue).eq_ignore_ascii_case(&'O'))
+            .collect();
+        assert_eq!(shown_as_o, [STORED_O]);
         let without_o: Vec<u8> = residues.iter().copied().filter(|&r| r != 26).collect();
         assert!(!ShownLetters::Stored(&without_o).has_o());
         // The row of residues 25..=27 as the search shows O (`X` where the record has O).

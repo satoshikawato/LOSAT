@@ -1114,7 +1114,7 @@ Rebuilding less:
   at 1 and 4 threads under the shadow (0 differing, the exit line `identical` in every run that ends without an error).
 - `LOSAT_X_BPLISTEDLEAN=1` (BLASTP `-db`, memory; in the strict set from the pull request that added it (perf/bp-db-tail,
   evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; acts for every task
-  with `-db` in the search of all queries, not with ABI v1's titles) the reports of a `-db` search read the letters of
+  with `-db`, in the search of all queries and in the blocks of `LOSAT_X_BPQBLOCK`, not with ABI v1's titles) the reports of a `-db` search read the letters of
   the listed subjects (every subject of the preliminary hit lists, `ListedSubjects`) from their stored residues and hold
   the titles of the reported subjects only (`blastp/blast_engine/database/x_listed_lean.rs`). Without it
   `ListedSubjects::read_titles` makes one record per listed subject, with its letters in ASCII and its title (empty for a

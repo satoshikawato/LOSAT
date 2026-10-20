@@ -856,9 +856,7 @@ impl ListedSubjects {
         }
         Ok(ListedTitles {
             listed: self,
-            records,
-            titles: Vec::new(),
-            lean: false,
+            shown: ListedShown::Records(records),
             replaced_title_bytes,
         })
     }
@@ -868,33 +866,39 @@ impl ListedSubjects {
 /// (`ListedSubjects::read_titles`).
 pub(super) struct ListedTitles<'a> {
     listed: &'a ListedSubjects,
-    /// The stored titles (empty for a subject in no final hit list) and the stored
-    /// letters, by rank; none with LOSAT_X_BPLISTEDLEAN (`titles`).
-    pub(super) records: Vec<FastaRecord>,
-    /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the stored titles by rank, where the subjects in no
-    /// final hit list share one empty title (`x_listed_lean.rs`); none without the switch
-    /// (`records`).
-    pub(super) titles: Vec<Arc<[u8]>>,
-    /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the titles are `titles`, not the records' titles.
-    lean: bool,
+    /// The titles (and letters) as the reports read them, by rank.
+    pub(super) shown: ListedShown,
     /// Whether the stored title of a subject holds a byte outside ' ' ..= '~' (read as
     /// '#'), by rank (`check_reported_titles`).
     replaced_title_bytes: Vec<bool>,
 }
 
-impl ListedTitles<'_> {
-    /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): whether the titles are `titles` (no records).
-    pub(super) fn x_lean(&self) -> bool {
-        self.lean
-    }
+/// The titles (and letters) of the listed subjects as the reports read them, by rank.
+pub(super) enum ListedShown {
+    /// The stored titles (empty for a subject in no final hit list) and the stored letters.
+    Records(Vec<FastaRecord>),
+    /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the stored titles, where the subjects in no final hit
+    /// list share one empty title; the letters are the stored residues
+    /// (`ListedSubjects::encoded`, `x_listed_lean.rs`).
+    Lean(Vec<Arc<[u8]>>),
+}
 
+impl ListedTitles<'_> {
     /// The stored title of the subject of rank `rank` (empty for a subject in no final hit
     /// list).
     fn title(&self, rank: usize) -> &[u8] {
-        if self.lean {
-            &self.titles[rank]
-        } else {
-            &self.records[rank].title
+        match &self.shown {
+            ListedShown::Records(records) => &records[rank].title,
+            ListedShown::Lean(titles) => &titles[rank],
+        }
+    }
+
+    /// The records of `read_titles`.
+    #[cfg(test)]
+    fn records(&self) -> &[FastaRecord] {
+        match &self.shown {
+            ListedShown::Records(records) => records,
+            ListedShown::Lean(_) => panic!("lean titles have no records"),
         }
     }
 
@@ -942,10 +946,9 @@ impl ListedTitles<'_> {
         let empty: Arc<[u8]> = Arc::from(&b""[..]);
         for rank in 0..ranks {
             if !reported.contains(&rank) {
-                ids.push(if self.lean {
-                    Arc::clone(&empty)
-                } else {
-                    Arc::from(&b""[..])
+                ids.push(match self.shown {
+                    ListedShown::Lean(_) => Arc::clone(&empty),
+                    ListedShown::Records(_) => Arc::from(&b""[..]),
                 });
                 continue;
             }
@@ -959,10 +962,13 @@ impl ListedTitles<'_> {
     /// The `stitle` text of every listed subject, by rank: the stored title (an empty
     /// one is written `N/A`, `blastp_subject_stitle`).
     pub(super) fn stitles(&self) -> Vec<Arc<[u8]>> {
-        self.records
-            .iter()
-            .map(|record| Arc::from(record.title()))
-            .collect()
+        match &self.shown {
+            ListedShown::Records(records) => records
+                .iter()
+                .map(|record| Arc::from(record.title()))
+                .collect(),
+            ListedShown::Lean(titles) => titles.clone(),
+        }
     }
 
     /// LOSAT's rejection of the outfmt 0 titles that it does not write as NCBI, of the
@@ -991,7 +997,8 @@ impl ListedTitles<'_> {
 // first block, which reads the whole database as every batch does), the failures of a database
 // search that depend on its hits are those of the definition lines of the reported subjects:
 // NCBI's reader error (`HeaderReadError`, the batch of the query that reaches it fails after the
-// reports of the batches before) and LOSAT's refusals (`ListedSubjects::read_titles`,
+// reports of the batches before) and LOSAT's refusals (`ListedSubjects::read_titles` and
+// `ListedSubjects::x_read_titles_lean`,
 // `ListedTitles::check_reported_titles`, `ListedTitles::tabular_subject_ids`, and for outfmt 0
 // `ListedTitles::check_shown_titles`). When every definition line of the database reads and none
 // of them is refused, none of these failures can happen in any batch.
@@ -1890,11 +1897,11 @@ mod tests {
         assert_eq!(renamed, [(0, vec![0, 0]), (1, vec![1, 1])]);
         // p03: every letter; the redo and the report read the stored letters (O is O).
         assert_eq!(
-            titles.records[1].title(),
+            titles.records()[1].title(),
             b"p03 every letter of NCBIstdaa but the gap"
         );
         assert_eq!(
-            titles.records[1].seq(),
+            titles.records()[1].seq(),
             b"ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT"
         );
         let redone: String = listed.encoded[1].aa_seq[1..=listed.encoded[1].aa_len]
@@ -1904,7 +1911,7 @@ mod tests {
         assert_eq!(redone, "ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT");
         assert_eq!(listed.encoded[1].aa_seq.len(), 35);
         assert_eq!(
-            titles.records[2].seq(),
+            titles.records()[2].seq(),
             b"MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ"
         );
         assert_eq!(listed.encoded[3].aa_len, 300);
@@ -1951,13 +1958,15 @@ mod tests {
         first.hsplist_count = first.hsplist_array.len();
         let records = listed.read_titles(&database, &hit_lists).unwrap();
         let lean = listed.x_read_titles_lean(&database, &hit_lists).unwrap();
-        assert!(lean.x_lean() && !records.x_lean());
-        assert!(lean.records.is_empty());
-        assert_eq!(lean.titles.len(), 4);
+        let ListedShown::Lean(lean_titles) = &lean.shown else {
+            panic!("lean titles");
+        };
+        assert!(matches!(records.shown, ListedShown::Records(_)));
+        assert_eq!(lean_titles.len(), 4);
         for rank in 0..4 {
             assert_eq!(
                 lean.title(rank),
-                records.records[rank].title(),
+                records.records()[rank].title(),
                 "rank {rank}"
             );
             assert_eq!(
@@ -1967,7 +1976,7 @@ mod tests {
         }
         assert_eq!(lean.title(1), b"p03 every letter of NCBIstdaa but the gap");
         assert!(lean.title(2).is_empty() && lean.title(3).is_empty());
-        assert!(Arc::ptr_eq(&lean.titles[2], &lean.titles[3]));
+        assert!(Arc::ptr_eq(&lean_titles[2], &lean_titles[3]));
         assert_eq!(
             lean.tabular_subject_ids(&hit_lists).unwrap(),
             records.tabular_subject_ids(&hit_lists).unwrap()
@@ -1975,6 +1984,7 @@ mod tests {
         lean.check_shown_titles(&[0usize, 1].into_iter().collect())
             .unwrap();
         lean.check_reported_titles(&hit_lists).unwrap();
+        assert_eq!(lean.stitles(), records.stitles());
         // The shadow's comparison: titles, flags and every letter.
         x_listed_lean_shadow_compare(&lean, &records);
     }
@@ -2024,11 +2034,15 @@ mod tests {
         assert_eq!(listed.ordinals, [1, 3]);
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
         assert_eq!(
-            titles.records[1].title(),
+            titles.records()[1].title(),
             b"p04 lower case and ambiguity codes"
         );
-        assert_eq!(titles.records[0].title(), b"");
-        assert_eq!(titles.records[0].seq(), b"I");
+        assert_eq!(titles.records()[0].title(), b"");
+        assert_eq!(titles.records()[0].seq(), b"I");
+        // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles do not read it either.
+        let lean = listed.x_read_titles_lean(&database, &hit_lists).unwrap();
+        assert_eq!(lean.title(1), b"p04 lower case and ambiguity codes");
+        assert_eq!(lean.title(0), b"");
         // Query 2 reports ordinal id 9 (volume 05) before ordinal id 0 (volume 00): the
         // first header file read is that of volume 05, in query 2's batch.
         let mut hit_lists = vec![
@@ -2128,7 +2142,7 @@ mod tests {
         let mut hit_lists = vec![Some(bad)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
-        assert_eq!(titles.records[1].title(), b"p10 l#st protein");
+        assert_eq!(titles.records()[1].title(), b"p10 l#st protein");
         let error = titles.check_reported_titles(&hit_lists).unwrap_err();
         assert!(
             format!("{error:#}").starts_with(
@@ -2136,6 +2150,12 @@ mod tests {
             ),
             "{error:#}"
         );
+        // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles hold the same title and flag, and
+        // give the same refusal.
+        let lean = listed.x_read_titles_lean(&database, &hit_lists).unwrap();
+        assert_eq!(lean.title(1), b"p10 l#st protein");
+        let lean_error = lean.check_reported_titles(&hit_lists).unwrap_err();
+        assert_eq!(format!("{lean_error:#}"), format!("{error:#}"));
         drop(database);
         std::fs::remove_dir_all(&dir).unwrap();
     }

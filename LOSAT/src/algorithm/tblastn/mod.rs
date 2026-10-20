@@ -7,6 +7,8 @@ mod args;
 mod search_seed;
 // EXPERIMENT (LOSAT_X_TBNSCANBF): the lookup scan without a branch on the presence vector.
 pub(crate) mod x_scan_bf;
+// PROBE (line F s3 p3): arms of the tblastn lookup scan (LOSAT_X_F2SCAN); not for merging.
+mod x_f2_scan;
 // NCBI c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
 // translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);

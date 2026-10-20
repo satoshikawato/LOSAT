@@ -78,6 +78,7 @@ pub(super) fn x_count_unit(bf: bool, calls: u64) {
 /// search scanned units of the unit path.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
+    super::x_f2_scan::print_summary();
     let units = UNITS.each_ref().map(|units| units.load(Ordering::Relaxed));
     let calls = CALLS.each_ref().map(|calls| calls.load(Ordering::Relaxed));
     if x_stats() && units[0] + units[1] > 0 {

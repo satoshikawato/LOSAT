@@ -553,6 +553,8 @@ pub(super) struct XScanPlan {
     pub lookup: std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>,
     pub subject: std::sync::Arc<XSubjectPlan>,
     pub pair_capacity: usize,
+    /// PROBE (LOSAT_X_F2SCAN): the one-byte-per-word presence table of arms 1 and 2; empty otherwise.
+    pub pvb: Vec<u8>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
@@ -1009,10 +1011,12 @@ pub(super) fn x_scan_plan(
     };
     let pair_capacity = (lookup.longest_chain.max(1) as usize) * 1024;
     i32::try_from(pair_capacity).expect("NCBI offset array fits Int4");
+    let pvb = super::x_f2_scan::x_f2_build_pvb(&lookup);
     Ok(Some(XScanPlan {
         lookup,
         subject: subject_plan,
         pair_capacity,
+        pvb,
     }))
 }
 
@@ -1039,6 +1043,10 @@ pub(super) fn x_scan_unit(
     pairs: &mut Vec<BlastOffsetPair>,
     mut on_pairs: impl FnMut(&[BlastOffsetPair]),
 ) {
+    // PROBE (LOSAT_X_F2SCAN / LOSAT_X_F2CHECK): the probe arms and their checks.
+    if super::x_f2_scan::x_f2_active() {
+        return super::x_f2_scan::x_scan_unit_f2(plan, unit, pairs, on_pairs);
+    }
     let (frame_index, chunk, ranges) = &plan.subject.units[unit];
     let frame = &plan.subject.frames[*frame_index];
     // EXPERIMENT (LOSAT_X_TBNSCANBF): the branch-free scan writes up to X_SCAN_BF_SLACK entries

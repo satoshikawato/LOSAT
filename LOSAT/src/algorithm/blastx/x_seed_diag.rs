@@ -559,6 +559,9 @@ mod tests {
         let auto = x_cell_test("");
         if auto != XDiagMode::PerHit {
             modes.push(auto);
+            // F2 probe arms.
+            modes.push(x_cell_test("defer"));
+            modes.push(x_cell_test("defer2"));
         }
         modes
             .into_iter()

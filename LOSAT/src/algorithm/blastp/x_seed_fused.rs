@@ -173,6 +173,10 @@ pub(crate) enum XDiagMode {
     /// cell's batches of eight called after its last one ([`x_cell_avx2_defer`]).
     #[cfg(target_arch = "x86_64")]
     Avx2Defer,
+    /// EXPERIMENT (F2 probe, LOSAT_X_BXDIAG=defer2): [`XDiagMode::Avx2Defer`] with R2's scalaraddr
+    /// (full batches) and remmask (the last batch of fewer than eight, as a masked batch).
+    #[cfg(target_arch = "x86_64")]
+    Avx2DeferR2,
 }
 
 impl XDiagMode {
@@ -185,6 +189,8 @@ impl XDiagMode {
             XDiagMode::Avx2 => "avx2",
             #[cfg(target_arch = "x86_64")]
             XDiagMode::Avx2Defer => "avx2-defer",
+            #[cfg(target_arch = "x86_64")]
+            XDiagMode::Avx2DeferR2 => "avx2-defer-r2",
         }
     }
 }
@@ -234,6 +240,13 @@ pub(crate) fn x_cell_test(requested: &str) -> XDiagMode {
         _ => {
             #[cfg(target_arch = "x86_64")]
             if x_avx2_available() {
+                // F2 probe arms (measurement only).
+                if requested == "defer" {
+                    return XDiagMode::Avx2Defer;
+                }
+                if requested == "defer2" {
+                    return XDiagMode::Avx2DeferR2;
+                }
                 return XDiagMode::Avx2;
             }
             XDiagMode::PerHit
@@ -730,6 +743,22 @@ where
                 )
             }
         }
+        #[cfg(target_arch = "x86_64")]
+        XDiagMode::Avx2DeferR2 => {
+            assert!(x_avx2_available(), "the deferred AVX2 batch needs AVX2");
+            // SAFETY: the CPU has AVX2 (asserted above).
+            unsafe {
+                x_scan_cells_avx2_defer_r2::<BRANCH_FREE, F>(
+                    lookup,
+                    subject,
+                    subject_length,
+                    table,
+                    test,
+                    candidate,
+                    &mut counts,
+                )
+            }
+        }
     }
     counts
 }
@@ -785,6 +814,33 @@ unsafe fn x_scan_cells_avx2_defer<const BRANCH_FREE: bool, F>(
     x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
         // SAFETY: the CPU has AVX2 (this function's contract).
         let candidates = unsafe { x_cell_avx2_defer(hits, s, table, test, candidate, &mut buffer) };
+        counts.add_cell(hits.len(), candidates);
+    });
+    X_DEFER_BUFFER.set(buffer);
+}
+
+/// EXPERIMENT (F2 probe): [`x_scan_cells_avx2_defer`] with [`x_cell_avx2_defer_r2`].
+///
+/// # Safety
+/// The CPU must have AVX2.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn x_scan_cells_avx2_defer_r2<const BRANCH_FREE: bool, F>(
+    lookup: &BlastAaLookupTable,
+    subject: &[u8],
+    subject_length: usize,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    counts: &mut XDiagCounts,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let mut buffer = X_DEFER_BUFFER.take();
+    x_scan_cells_with::<BRANCH_FREE, _>(lookup, subject, subject_length, |s, hits| {
+        // SAFETY: the CPU has AVX2 (this function's contract).
+        let candidates =
+            unsafe { x_cell_avx2_defer_r2(hits, s, table, test, candidate, &mut buffer) };
         counts.add_cell(hits.len(), candidates);
     });
     X_DEFER_BUFFER.set(buffer);
@@ -1278,6 +1334,128 @@ where
     candidates
 }
 
+/// EXPERIMENT (F2 probe): the test of [`x_batch_avx2`] on the register `query` whose lane
+/// coordinates `lane_coords` were computed by the caller; stores the entries and returns the
+/// candidate lanes (bit `i` = lane `i`). Lanes may repeat a hit (the masked batch): a repeated lane
+/// reads the same old value and stores the same new one.
+///
+/// # Safety
+/// The CPU must have AVX2; every coordinate is at most `table.mask`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_batch_avx2_core(
+    query: std::arch::x86_64::__m256i,
+    lane_coords: [u32; X_DIAG_LANES],
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+) -> u32 {
+    use std::arch::x86_64::*;
+    let subject_plus_offset = s.wrapping_add(test.diag_offset);
+    let written = (subject_plus_offset as u32) & X_LAST_HIT_MASK;
+    let e = |i: usize| table.entries.get_unchecked(lane_coords[i] as usize).raw_bits() as i32;
+    let old = _mm256_setr_epi32(e(0), e(1), e(2), e(3), e(4), e(5), e(6), e(7));
+    let _ = query;
+    let flag = _mm256_srai_epi32::<31>(old);
+    let last = _mm256_srai_epi32::<1>(_mm256_slli_epi32::<1>(old));
+    let diff = _mm256_sub_epi32(
+        _mm256_set1_epi32(s),
+        _mm256_sub_epi32(last, _mm256_set1_epi32(test.diag_offset)),
+    );
+    let sum_below_last = _mm256_cmpgt_epi32(last, _mm256_set1_epi32(subject_plus_offset));
+    let in_window = _mm256_cmpgt_epi32(_mm256_set1_epi32(test.window), diff);
+    let keep = _mm256_blendv_epi8(in_window, sum_below_last, flag);
+    let below_word = _mm256_cmpgt_epi32(_mm256_set1_epi32(test.word_size), diff);
+    let candidates = _mm256_andnot_si256(_mm256_or_si256(flag, below_word), in_window);
+    let new = _mm256_blendv_epi8(_mm256_set1_epi32(written as i32), old, keep);
+    let mut lane_new = [0u32; X_DIAG_LANES];
+    _mm256_storeu_si256(lane_new.as_mut_ptr().cast(), new);
+    for (&coord, &raw) in lane_coords.iter().zip(&lane_new) {
+        table
+            .entries
+            .get_unchecked_mut(coord as usize)
+            .set_raw_bits(raw);
+    }
+    _mm256_movemask_ps(_mm256_castsi256_ps(candidates)) as u32
+}
+
+/// EXPERIMENT (F2 probe): [`x_cell_avx2_defer`] with R2's two exact hands: the lane coordinates of
+/// a full batch come from scalar loads of the hits (not extracted from the vector), and the last
+/// batch of fewer than eight hits is one masked batch (its missing lanes repeat the first hit)
+/// whose candidates go into the same buffer. The calls come in the same order as in
+/// [`x_cell_avx2_defer`]: the batches in order, the last one after them.
+///
+/// # Safety
+/// The CPU must have AVX2.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn x_cell_avx2_defer_r2<F>(
+    hits: &[i32],
+    s: i32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    candidate: &mut F,
+    buffer: &mut Vec<i32>,
+) -> u32
+where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    use std::arch::x86_64::*;
+    let mut batches = hits.chunks_exact(X_DIAG_LANES);
+    buffer.clear();
+    buffer.reserve(hits.len() + X_DIAG_LANES);
+    let out = buffer.as_mut_ptr();
+    let mut packed = 0usize;
+    let mask = table.mask;
+    for batch in &mut batches {
+        let p = batch.as_ptr();
+        let query = _mm256_loadu_si256(p.cast());
+        let lane_coords: [u32; X_DIAG_LANES] = std::array::from_fn(|i| {
+            (std::ptr::read_volatile(p.add(i)).wrapping_sub(s) & mask) as u32
+        });
+        let lanes = x_batch_avx2_core(query, lane_coords, s, table, test);
+        let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
+            X_PACK_LANES[lanes as usize].as_ptr().cast(),
+        ));
+        _mm256_storeu_si256(
+            out.add(packed).cast(),
+            _mm256_permutevar8x32_epi32(query, order),
+        );
+        packed += lanes.count_ones() as usize;
+    }
+    let rest = batches.remainder();
+    if !rest.is_empty() {
+        let n = rest.len();
+        let lane_ix = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+        let in_rest = _mm256_cmpgt_epi32(_mm256_set1_epi32(n as i32), lane_ix);
+        let loaded = _mm256_maskload_epi32(rest.as_ptr(), in_rest);
+        let query = _mm256_blendv_epi8(_mm256_set1_epi32(rest[0]), loaded, in_rest);
+        let mut qs = [0i32; X_DIAG_LANES];
+        _mm256_storeu_si256(qs.as_mut_ptr().cast(), query);
+        let lane_coords: [u32; X_DIAG_LANES] =
+            std::array::from_fn(|i| (qs[i].wrapping_sub(s) & mask) as u32);
+        let lanes = x_batch_avx2_core(query, lane_coords, s, table, test) & ((1u32 << n) - 1);
+        let order = _mm256_cvtepu8_epi32(_mm_loadl_epi64(
+            X_PACK_LANES[lanes as usize].as_ptr().cast(),
+        ));
+        _mm256_storeu_si256(
+            out.add(packed).cast(),
+            _mm256_permutevar8x32_epi32(query, order),
+        );
+        packed += lanes.count_ones() as usize;
+    }
+    buffer.set_len(packed);
+    for &query_offset in buffer.iter() {
+        let entry = table.entry(query_offset, s);
+        let last_hit = entry.last_hit().wrapping_sub(test.diag_offset);
+        let diff = s.wrapping_sub(last_hit);
+        candidate(query_offset, s, last_hit, diff, entry);
+    }
+    packed as u32
+}
+
 /// EXPERIMENT (LOSAT_X_BPDIAG): the cell's hits in batches of eight by [`x_test_batch_avx2`], the
 /// last batch of fewer than eight by [`x_test_batch_scalar`]; returns the number of candidates.
 /// No entry is read ahead (see [`x_cell_scalar`]).
@@ -1460,6 +1638,7 @@ mod tests {
         if x_avx2_available() {
             modes.push(XDiagMode::Avx2);
             modes.push(XDiagMode::Avx2Defer);
+            modes.push(XDiagMode::Avx2DeferR2);
         } else {
             eprintln!("no AVX2 on this CPU: the AVX2 batch is not compared");
         }
@@ -1514,6 +1693,21 @@ mod tests {
                     // SAFETY: the CPU has AVX2 (asserted above).
                     counted += unsafe {
                         x_cell_avx2_defer(hits, *s, &mut table, test, &mut candidate, &mut buffer)
+                    };
+                }
+                #[cfg(target_arch = "x86_64")]
+                XDiagMode::Avx2DeferR2 => {
+                    assert!(x_avx2_available());
+                    // SAFETY: the CPU has AVX2 (asserted above).
+                    counted += unsafe {
+                        x_cell_avx2_defer_r2(
+                            hits,
+                            *s,
+                            &mut table,
+                            test,
+                            &mut candidate,
+                            &mut buffer,
+                        )
                     };
                 }
             }

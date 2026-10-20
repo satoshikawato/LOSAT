@@ -291,6 +291,9 @@ pub struct BlastpArgs {
     pub max_target_seqs: Option<usize>,
     #[arg(long = "max_hsps", value_parser = blastn_count)]
     pub max_hsps_per_subject: Option<usize>,
+    // NCBI blast_args.cpp:196-201,313-315: no filter when omitted or 0.
+    #[arg(long = "qcov_hsp_perc", value_parser = blastp_query_coverage, help = "Percent query coverage per hsp")]
+    pub qcov_hsp_perc: Option<f64>,
     #[arg(long)]
     pub ungapped: bool,
     #[arg(long, value_parser = nonnegative_ncbi_integer, help = "Multiple hits window size, use 0 to specify 1-hit algorithm [default: 40, or the matrix's suggestion]")]
@@ -507,6 +510,8 @@ pub struct ResolvedBlastpArgs {
     /// alignments of the pairwise report.
     pub max_target_seqs_given: Option<usize>,
     pub max_hsps_per_subject: usize,
+    /// The -qcov_hsp_perc value, or 0 (no filter).
+    pub query_cov_hsp_perc: f64,
     pub ungapped: bool,
     pub window_size: usize,
     /// The matrix as the command line names it (NCBI keeps the spelling); `scoring.matrix`
@@ -786,6 +791,9 @@ impl BlastpArgs {
             // NCBI blast_args.cpp:317-318: if (args[kArgMaxHSPsPerSubject])
             // opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger());
             max_hsps_per_subject: self.max_hsps_per_subject.unwrap_or(0),
+            // NCBI blast_args.cpp:313-315: if (args[kArgQueryCovHspPerc])
+            // opt.SetQueryCovHspPerc(args[kArgQueryCovHspPerc].AsDouble());
+            query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             ungapped: self.ungapped,
             window_size: usize::try_from(options.window_size).unwrap_or(0),
             matrix_name: options.matrix_name,

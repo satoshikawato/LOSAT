@@ -9122,11 +9122,14 @@ fn search_query_batch(
     // Diagnostic (LOSAT_TIMING): the batch's DUST for the common line (utils/xtiming.rs); a
     // chunk takes the batch's masks. No NCBI counterpart.
     let t_seg = crate::utils::xtiming::clock();
+    // EXPERIMENT (exp/r13-wall): the batch's set-up between the marked phases (prep0..prep3).
+    crate::utils::xtiming::x_r13("prep0", t_total, 0);
     let masks = match stage {
         BatchStage::Search { .. } => query_masks(args, queries, parallel_pool),
         BatchStage::ChunkPrelim { query_masks, .. } => query_masks.to_vec(),
     };
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Seg, t_seg);
+    let x_r13_p1 = crate::utils::xtiming::clock();
     let seq_data = prepare_sequence_data(queries, query_ids, masks, subject_metadata);
 
     // NCBI reference: ncbi-blast/c++/src/objtools/align_format/tabular.cpp:1264-1284
@@ -9300,6 +9303,7 @@ fn search_query_batch(
     // the same (`x_query_prep_par.rs`).
     // Diagnostic (LOSAT_TIMING): the batch's query encoding for the common line
     // (utils/xtiming.rs). No NCBI counterpart.
+    crate::utils::xtiming::x_r13("prep1", x_r13_p1, 0);
     let t_encode = crate::utils::xtiming::clock();
     let encoded_query_buffer = x_query_prep_par::query_buffer(
         &query_letters,
@@ -9308,6 +9312,7 @@ fn search_query_batch(
         parallel_pool,
     );
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Encode, t_encode);
+    let x_r13_p2 = crate::utils::xtiming::clock();
     let encoded_query_concat_blastna_with_sentinels: &[u8] = &encoded_query_buffer;
     let encoded_query_concat_blastna: &[u8] = &encoded_query_buffer[1..query_concat_length + 1];
     let encoded_queries_blastna: Vec<&[u8]> = query_contexts
@@ -9870,6 +9875,7 @@ fn search_query_batch(
     //     // 5. Create the lookup table
     //     if ( !retval->m_QuerySplitter->IsQuerySplit() ) {
     // ```
+    crate::utils::xtiming::x_r13("prep2", x_r13_p2, 0);
     let (lookup_tables, scan_step) = if split_prelim_lists.is_some() {
         (
             LookupTables {
@@ -9897,6 +9903,7 @@ fn search_query_batch(
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
         tables
     };
+    let x_r13_p3 = crate::utils::xtiming::clock();
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:991-1041
     // ```c
@@ -9954,6 +9961,7 @@ fn search_query_batch(
     } else {
         None
     };
+    crate::utils::xtiming::x_r13("prep3", x_r13_p3, 0);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:1407-1409
     // ```c
     // db_length = BlastSeqSrcGetTotLen(seq_src);

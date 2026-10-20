@@ -65,11 +65,18 @@ pub(super) fn x_f2_build_pvb(lookup: &BlastAaLookupTable) -> Vec<u8> {
             )
         });
     }
-    if x_f2_arm() == 0 || !w3c5(lookup) || lookup.pv.len() < ((MASK + 1) >> PV_ARRAY_BTS) {
+    if x_f2_arm() == 0 || !w3c5(lookup) {
         return Vec::new();
     }
+    // The table has `backbone_size` (28,540 for 27 letters) cells and `pv` one bit for each; the
+    // indexes the scan can make are below it, the rest of the 15-bit space reads 0.
     (0..=MASK)
-        .map(|ix| ((lookup.pv[ix >> PV_ARRAY_BTS] >> (ix & 31)) & 1) as u8)
+        .map(|ix| {
+            lookup
+                .pv
+                .get(ix >> PV_ARRAY_BTS)
+                .map_or(0, |word| ((word >> (ix & 31)) & 1) as u8)
+        })
         .collect()
 }
 

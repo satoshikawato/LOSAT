@@ -125,13 +125,14 @@
 //! window holds, or every list is expanded (`XExpandAhead`). A query's jobs are its matches in
 //! jobs of up to four, counted from its compact list as from its expansion (the lists with HSPs;
 //! `x_end_above` and the path's choice read the same counts), and a window holds at most its job
-//! budget and then reads the first match after it, so the window and that match lie within
-//! expanded lists (asserted after each window). The windows, the replay and the lists released are
+//! budget and then reads the next job (one query's), so the window and the first match after it
+//! lie within expanded lists (asserted after each window). The windows, the replay and the lists released are
 //! therefore those of the full expansion, and the expanded lists held at a time are those of the
 //! queries of about one window instead of all queries.
-//! `LOSAT_X_BPREDOWINEXPANDSHADOW=1` (implies the switch) also expands every list first, as without
-//! it, and before each window's computation compares the window with the one that the full
-//! expansion gives and every list of the window's queries with its full expansion (the hit list's
+//! `LOSAT_X_BPREDOWINEXPANDSHADOW=1` (implies the switch) runs the redo on the lists expanded ahead
+//! and keeps a copy of every list as the full expansion makes it (about twice the memory); it
+//! compares the matches per query with the copy's, and before each window's computation the
+//! window with the one that the full expansion gives and every list of the window's queries with its full expansion (the hit list's
 //! fields and each list's subject, best E-value and HSPs, every field; floating-point values by
 //! their bits). The first difference prints the line otherwise printed at exit and panics:
 //! `[X_SHADOW] BPREDOWINEXPAND searches= windows= lists= hsps= identical` (`lists`: the query lists
@@ -649,8 +650,17 @@ impl<'a> XExpandAhead<'a> {
         }
     }
 
-    /// Before the windows: the jobs of each query from its matches (`x_query_matches`).
+    /// Before the windows: the jobs of each query from its matches (`x_query_matches`); in the
+    /// shadow mode they must be those of the full expansion.
     fn start(&mut self, matches: &[usize]) {
+        if let Some(reference) = self.reference.as_ref() {
+            let full = x_query_matches(reference, &[]);
+            if full != matches {
+                x_win_expand_difference(format!(
+                    "matches per query {matches:?} / the full expansion's {full:?}"
+                ));
+            }
+        }
         self.jobs = matches
             .iter()
             .map(|&count| count.div_ceil(X_JOB_MATCHES))
@@ -2548,14 +2558,15 @@ mod tests {
 
     /// The driver on `lists` expanded before the windows and on their compact lists expanded ahead
     /// of the windows (`shadow`: the shadow mode's checks too): the same windows, counts, matches
-    /// computed and heaps. Returns, per window of the second run, which lists were there.
+    /// computed and heaps. Returns, per window of the second run, which lists were there, and its
+    /// counts.
     fn same_windows_expanding_ahead(
         lists: &[Option<BlastpHitList>],
         heap_threshold: usize,
         batches: &[Range<usize>],
         limits: XWindowLimits,
         shadow: bool,
-    ) -> Vec<Vec<bool>> {
+    ) -> (Vec<Vec<bool>>, XCounts) {
         let count = lists.len();
         let mut full_lists = lists.to_vec();
         let mut full_heaps = heaps_of(count, heap_threshold);
@@ -2613,7 +2624,7 @@ mod tests {
             ahead_lists.iter().all(Option::is_none),
             "every list released"
         );
-        present
+        (present, counts)
     }
 
     /// Before each window the compact lists are expanded in query order until the queries from
@@ -2638,7 +2649,7 @@ mod tests {
             at_risk_jobs: 1,
         };
         for shadow in [false, true] {
-            let present = same_windows_expanding_ahead(&lists, 100, &alone(7), limits, shadow);
+            let (present, _) = same_windows_expanding_ahead(&lists, 100, &alone(7), limits, shadow);
             let (yes, no) = (true, false);
             assert_eq!(
                 present,
@@ -2670,12 +2681,21 @@ mod tests {
                 .collect(),
         );
         let lists = vec![weak(200), weak(200), strong];
+        // Windows of 256 jobs (all 200 expanded before the first) and of 8 jobs, where each query's
+        // list is expanded when the windows reach it and the caps on jobs at risk end windows.
         for (batches, limits) in [
             (
                 alone(3),
                 XWindowLimits {
                     jobs: X_WINDOW_JOBS_PER_THREAD * THREADS,
                     at_risk_jobs: THREADS,
+                },
+            ),
+            (
+                alone(3),
+                XWindowLimits {
+                    jobs: 8,
+                    at_risk_jobs: 1,
                 },
             ),
             (
@@ -2687,7 +2707,14 @@ mod tests {
             ),
         ] {
             for shadow in [false, true] {
-                same_windows_expanding_ahead(&lists, 1, &batches, limits, shadow);
+                let (present, counts) =
+                    same_windows_expanding_ahead(&lists, 1, &batches, limits, shadow);
+                if limits.jobs == 8 && batches[2] == (2..3) {
+                    // Query 0's list alone at the first window; query 2's matches ended before
+                    // their window and at their replay.
+                    assert_eq!(present[0], [true, false, false]);
+                    assert!(counts.skipped > 0 && counts.wasted > 0, "{counts:?}");
+                }
             }
         }
     }

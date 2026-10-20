@@ -548,7 +548,17 @@ fn win_expand_shadow_counts(stderr: &str) -> [u64; 4] {
     counts
 }
 
-/// The reports, the lists freed and the windows (with the matches the test ended in them) of the
+/// The lists `LOSAT_X_BPPCOMPACT` expanded in a run (`[TIMING] x_bppcompact: expanded_lists=`,
+/// summed).
+fn expanded_lists(stderr: &str) -> usize {
+    stderr
+        .lines()
+        .filter_map(|line| line.strip_prefix("[TIMING] x_bppcompact: expanded_lists="))
+        .map(|count| count.trim().parse::<usize>().expect("a count"))
+        .sum()
+}
+
+/// The reports, the lists expanded and freed and the windows (with the matches the test ended in them) of the
 /// windows that expand the lists as they reach them equal those with every list expanded first,
 /// in small windows that end inside queries and in the default windows of the default blocks; the
 /// shadow mode compares every window.
@@ -603,6 +613,13 @@ fn windows_that_expand_the_compact_lists_as_they_reach_them_give_the_full_expans
                 );
                 assert_eq!(windows(run), windows(&off), "{what}: windows ({name})");
             }
+            // Each compact list is expanded once (the shadow mode also expands its reference).
+            assert_eq!(
+                expanded_lists(&on.stderr),
+                expanded_lists(&off.stderr),
+                "{what}: lists expanded"
+            );
+            assert!(expanded_lists(&off.stderr) > 0, "{what}: {}", off.stderr);
             let [searches, compared, lists, hsps] = win_expand_shadow_counts(&shadow.stderr);
             assert_eq!(
                 (searches, compared),

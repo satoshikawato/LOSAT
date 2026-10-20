@@ -9369,7 +9369,15 @@ fn run_resolved_in_pool(
             args.num_threads,
             blastp_num_threads,
             subjects.len(),
-            super::x_redo_par::x_matches(&preliminary_hit_lists, &x_compact_hit_lists),
+            // EXPERIMENT (LOSAT_X_BPREDOWINEXPAND): the compact lists count while not expanded.
+            super::x_redo_par::x_matches(
+                &preliminary_hit_lists,
+                if x_win_expand {
+                    &x_compact_hit_lists
+                } else {
+                    &[]
+                },
+            ),
             total_db_len,
         );
     #[cfg(all(

@@ -1251,14 +1251,15 @@ Rebuilding less:
   the first one not expanded are expanded in query order, by the same `x_expand_hit_list`, until the queries expanded
   from the window's start hold more jobs than the window's budget (or every list is expanded); a query's jobs are its
   matches in jobs of up to four, counted from its compact list as from its expansion. A window holds at most its
-  budget and then reads the first match after it, so the window and that match lie within expanded lists (asserted
-  after each window), and the windows, the replay, the matches ended and the lists released are those of the full
+  budget and then reads the next job (one query's), so the window and the first match after it lie within expanded
+  lists (asserted after each window), and the windows, the replay, the matches ended and the lists released are those of the full
   expansion. The match counts that the early termination bound (`x_end_above`) and the choice of the path read are
-  counted from the compact lists. Where the path does not run after all (one match), every list is expanded before
+  counted from the compact lists. Where the path does not run after all (fewer than two matches), every list is expanded before
   the other paths, as without the switch. The expanded lists held at a time are those of the queries of about one
   window, and each query's compact list is freed when it is expanded. Shadow: `LOSAT_X_BPREDOWINEXPANDSHADOW=1`
-  (implies the switch) also expands every list first, as without it, and before each window's computation compares
-  the window (its matches, the matches ended before it, its jobs, the first match after it, its jobs at risk) with the
+  (implies the switch) runs the redo on the lists expanded ahead and keeps a copy of every list as the full expansion
+  makes it (about twice the memory of the lists); it compares the matches per query with the copy's, and before each
+  window's computation the window (its matches, the matches ended before it, its jobs, the first match after it, its jobs at risk) with the
   one that the full expansion gives, and every list of the window's queries with its full expansion (the hit list's
   fields, each list's subject, best E-value and HSPs, every field; floating-point values by their bits); the first
   difference prints the line otherwise printed at exit and panics:

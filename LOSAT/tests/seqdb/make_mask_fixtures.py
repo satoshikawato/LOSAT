@@ -119,6 +119,9 @@ def main():
     # The same masks for a second database, with other options (another algorithm id).
     hand_mask(work / "wm_opts.asnt", "windowmasker", "-t_extend 3", [(3, [(5, 14)]), (6, [(0, 99)])])
 
+    # A ':' in the options (stored as 0x01 in the description) for the two ways a description is built.
+    hand_mask(work / "wm_colon.asnt", "windowmasker", "-x a:b", [(1, [(0, 9), (300, 309)]), (4, [(10, 19)])])
+
     def makedb(name, fasta, dbtype, version, *extra):
         result = run([bin_dir / "makeblastdb", "-in", fasta, "-dbtype", dbtype, "-out", name,
                       "-blastdb_version", str(version), *extra], work)
@@ -138,6 +141,9 @@ def main():
     makedb("mask_nucl_z", "mask_nucl.fna", "nucl", 4, "-mask_data", "wm_opts.asnt", "-mask_id", "wmZ")
     makedb("mask_nucl_y", "mask_nucl.fna", "nucl", 4, "-mask_data", "wm_opts.asnt", "-mask_id", "wmY")
     makedb("mask_nucl_opts", "mask_nucl.fna", "nucl", 4, "-mask_data", "wm_opts.asnt,wm.asnt")
+    makedb("mask_nucl_colon", "mask_nucl.fna", "nucl", 4, "-mask_data", "wm_colon.asnt")
+    makedb("mask_nucl_colon_id", "mask_nucl.fna", "nucl", 4, "-mask_data", "wm_colon.asnt",
+           "-mask_id", "c:id")
     makedb("mask_prot_v4", "mask_prot.faa", "prot", 4, "-mask_data", "seg.asnb")
     makedb("mask_nucl_plain", "mask_nucl.fna", "nucl", 4)
     (work / "mask_remap.nal").write_bytes(
@@ -146,7 +152,8 @@ def main():
 
     dbs = [("mask_nucl_v4", "nucl"), ("mask_nucl_v5", "nucl"), ("mask_nucl_mv", "nucl"),
            ("mask_nucl_ids", "nucl"), ("mask_nucl_z", "nucl"), ("mask_nucl_y", "nucl"),
-           ("mask_nucl_opts", "nucl"), ("mask_prot_v4", "prot"), ("mask_remap", "nucl")]
+           ("mask_nucl_opts", "nucl"), ("mask_prot_v4", "prot"), ("mask_remap", "nucl"),
+           ("mask_nucl_colon", "nucl"), ("mask_nucl_colon_id", "nucl")]
     expected = out / "expected"
     db_out = out / "db"
     for name, dbtype in dbs:
@@ -172,7 +179,7 @@ def main():
             shutil.copyfile(path, db_out / path.name)
     shutil.copyfile(work / "mask_nucl.fna", out / "mask_nucl.fna")
     shutil.copyfile(work / "mask_prot.faa", out / "mask_prot.faa")
-    for f in ("wm.asnt", "wm_opts.asnt"):
+    for f in ("wm.asnt", "wm_opts.asnt", "wm_colon.asnt"):
         shutil.copyfile(work / f, out / f"mask_{f}")
 
 

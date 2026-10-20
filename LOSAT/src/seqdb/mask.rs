@@ -10,7 +10,7 @@
 //! Nothing in LOSAT's searches calls this yet; a database is opened with
 //! [`SeqDb::open_with_masks`] to read it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::column::Blob;
@@ -260,22 +260,34 @@ fn filter_program_name(value: i32) -> Option<&'static str> {
 /// `s_CheckUniqueValues`: the first value (in key order) whose description repeats an
 /// earlier one.
 fn first_duplicate<'a>(metadata: &[(&str, &'a str)]) -> Option<&'a str> {
-    let mut seen: Vec<&str> = Vec::new();
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
     for &(_, value) in metadata {
         let items = ncbi_split(value);
         let description = if items.len() == 4 { items[2] } else { value };
-        if seen.contains(&description) {
+        if !seen.insert(description) {
             return Some(value);
         }
-        seen.push(description);
     }
     None
 }
 
-fn utf8<'a>(bytes: &'a [u8], path: &Path, what: &str) -> Result<&'a str, SeqDbError> {
+/// A metadata key as text. A key that is not UTF-8 cannot be an integer, so NCBI's
+/// `StringToInt` fails on it as well: a damaged file.
+fn utf8_key<'a>(bytes: &'a [u8], path: &Path) -> Result<&'a str, SeqDbError> {
     std::str::from_utf8(bytes).map_err(|_| SeqDbError::Format {
         path: path.to_path_buf(),
-        message: format!("a {what} of the mask column is not UTF-8 text"),
+        message: "a metadata key of the mask column is not UTF-8 text".to_string(),
+    })
+}
+
+/// A metadata value (the stored algorithm description) as text. NCBI keeps any bytes
+/// (`-mask_desc` and `-mask_id` typed in Latin-1, say), so this is a limit of LOSAT, not a
+/// damaged file.
+fn utf8_value<'a>(bytes: &'a [u8], path: &Path) -> Result<&'a str, SeqDbError> {
+    std::str::from_utf8(bytes).map_err(|_| SeqDbError::Unsupported {
+        path: path.to_path_buf(),
+        message: "a stored mask algorithm description is not UTF-8 text and LOSAT does not read it"
+            .to_string(),
     })
 }
 
@@ -487,10 +499,7 @@ impl MaskAlgorithms {
             let path = column.index_path();
             let mut metadata: Vec<(&str, &str)> = Vec::new();
             for (key, value) in column.metadata() {
-                metadata.push((
-                    utf8(key, path, "metadata key")?,
-                    utf8(value, path, "metadata value")?,
-                ));
+                metadata.push((utf8_key(key, path)?, utf8_value(value, path)?));
             }
 
             // Check for identical algorithm descriptions (should not happen.)
@@ -851,7 +860,15 @@ fn read_ranges(blob: &[u8], vol_algo: i32, path: &Path) -> Result<Vec<(u32, u32)
     let mut blob = Blob::new(blob, 0);
     let mut ranges = Vec::new();
     let num_ranges = blob.read_i32().map_err(format)?;
+    // A skipped entry with a negative `num_pairs` moves the read offset backwards, and NCBI
+    // then reads the same entries again for up to 2^31 passes. A pass that starts at an
+    // offset where an earlier pass started cannot match or fail differently (that pass
+    // would have returned), so the loop ends there with no ranges, as NCBI's does.
+    let mut pass_starts = std::collections::HashSet::new();
     for _ in 0..num_ranges.max(0) {
+        if !pass_starts.insert(blob.read_offset()) {
+            break;
+        }
         let algo = blob.read_i32().map_err(format)?;
         let num_pairs = blob.read_i32().map_err(format)?;
         if algo == vol_algo {

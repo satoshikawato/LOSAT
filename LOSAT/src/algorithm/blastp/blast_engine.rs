@@ -961,6 +961,76 @@ fn blastp_local_scaling_factor(mode: BlastpCompositionMode, matrix: ScoringMatri
 //                               inclusion_ethresh);
 // }
 // ```
+// PROBE (v4-D12 s3, no PR): LOSAT_X_MEMPROBE=1.
+fn x_memprobe_kb() -> (u64, u64) {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let anon = status
+        .lines()
+        .find(|l| l.starts_with("RssAnon:"))
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let smaps = std::fs::read_to_string("/proc/self/smaps").unwrap_or_default();
+    let mut heap = 0u64;
+    let mut in_heap = false;
+    for line in smaps.lines() {
+        let head = line.split_whitespace().next().unwrap_or("");
+        if head.contains('-') && !head.ends_with(':') {
+            in_heap = line.ends_with("[heap]");
+        } else if in_heap && head == "Anonymous:" {
+            heap += line.split_whitespace().nth(1).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        }
+    }
+    (anon, heap)
+}
+fn x_memprobe(label: &str, extra: String) {
+    if std::env::var_os("LOSAT_X_MEMPROBE").is_none() {
+        return;
+    }
+    static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let t0 = *T0.get_or_init(std::time::Instant::now);
+    let (anon, heap) = x_memprobe_kb();
+    eprintln!(
+        "XMEMPROBE t={:.3} {label} anon_kb={anon} heap_kb={heap} {extra}",
+        t0.elapsed().as_secs_f64()
+    );
+}
+fn x_memprobe_lists<H>(lists: &[Option<BlastpHitList<H>>]) -> String {
+    let (mut l, mut lc, mut h, mut hc) = (0usize, 0usize, 0usize, 0usize);
+    for list in lists.iter().flatten() {
+        l += list.hsplist_array.len();
+        lc += list.hsplist_array.capacity();
+        for hl in &list.hsplist_array {
+            h += hl.hsps.len();
+            hc += hl.hsps.capacity();
+        }
+    }
+    let bytes = lc * std::mem::size_of::<super::hsp::BlastpHspList<H>>() + hc * std::mem::size_of::<H>();
+    format!(
+        "lists={} hsplists={l}/{lc} hsps={h}/{hc} hsp_size={} hsplist_size={} bytes={bytes}",
+        lists.iter().flatten().count(),
+        std::mem::size_of::<H>(),
+        std::mem::size_of::<super::hsp::BlastpHspList<H>>()
+    )
+}
+fn x_memprobe_heaps(heaps: &[BlastCompoHeap]) -> String {
+    let (mut recs, mut cap, mut h, mut hc) = (0usize, 0usize, 0usize, 0usize);
+    for heap in heaps {
+        for arr in [heap.array.as_ref(), heap.heap_array.as_ref()].into_iter().flatten() {
+            recs += arr.len();
+            cap += arr.capacity();
+            for r in arr {
+                if let Some(hl) = r.hsplist.as_ref() {
+                    h += hl.hsps.len();
+                    hc += hl.hsps.capacity();
+                }
+            }
+        }
+    }
+    let bytes = cap * std::mem::size_of::<super::hsp::BlastCompoHeapRecord>() + hc * std::mem::size_of::<BlastpHsp>();
+    format!("heap_records={recs}/{cap} hsps={h}/{hc} rec_size={} bytes={bytes}", std::mem::size_of::<super::hsp::BlastCompoHeapRecord>())
+}
+
 fn build_redone_match_heaps(num_queries: usize, hitlist_size: usize) -> Vec<BlastCompoHeap> {
     (0..num_queries)
         .map(|_| BlastCompoHeap::new(hitlist_size, PSI_INCLUSION_ETHRESH))
@@ -8987,6 +9057,7 @@ fn run_resolved_in_pool(
     // and stand for the subject set in the redo; the hit lists name them by their rank
     // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
     // definition lines are read after the redo (`ListedSubjects::read_titles`).
+    x_memprobe("before_listed", format!("full[{}] compact[{}]", x_memprobe_lists(&preliminary_hit_lists), x_memprobe_lists(&x_compact_hit_lists)));
     let t_search = crate::utils::xtiming::clock();
     let listed_subjects = match database {
         Some(database) => Some(database::ListedSubjects::read(
@@ -9000,6 +9071,10 @@ fn run_resolved_in_pool(
         Some(listed) => &listed.encoded,
         None => &subjects,
     };
+    if let Some(listed) = listed_subjects.as_ref() {
+        let cap: usize = listed.encoded.iter().map(|e| e.aa_seq.capacity()).sum();
+        x_memprobe("after_listed", format!("listed={} aa_cap_bytes={cap} vec_bytes={}", listed.encoded.len(), listed.encoded.capacity() * std::mem::size_of::<EncodedProtein>()));
+    }
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
     for hit_list_opt in &mut preliminary_hit_lists {
@@ -9040,6 +9115,7 @@ fn run_resolved_in_pool(
             &x_split_queries,
         );
     }
+    x_memprobe("after_expand", format!("full[{}] compact[{}]", x_memprobe_lists(&preliminary_hit_lists), x_memprobe_lists(&x_compact_hit_lists)));
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3329-3334
     // ```c
@@ -10079,6 +10155,7 @@ fn run_resolved_in_pool(
             x_expanded_lists() - x_expanded_at_start
         );
     }
+    x_memprobe("after_redo", format!("full[{}] heaps[{}]", x_memprobe_lists(&preliminary_hit_lists), x_memprobe_heaps(&redone_matches)));
     let mut hit_lists = fill_results_from_compo_heaps(args.max_target_seqs, &mut redone_matches);
     if let Some(timing) = timing.as_ref() {
         BlastpTiming::record_call(
@@ -10088,6 +10165,7 @@ fn run_resolved_in_pool(
         );
     }
 
+    x_memprobe("after_fill", format!("final[{}] heaps[{}]", x_memprobe_lists(&hit_lists), x_memprobe_heaps(&redone_matches)));
     let final_traceback_start = blastp_timing_start(timing_enabled);
     for hit_list_opt in &mut hit_lists {
         if let Some(hit_list) = hit_list_opt.as_mut() {
@@ -10149,6 +10227,12 @@ fn run_resolved_in_pool(
                 std::borrow::Cow::Borrowed(&subject_titles[..]),
             ),
         };
+    if let Some(t) = listed_titles.as_ref() {
+        let seqb: usize = t.records.iter().map(|r| r.seq().len()).sum();
+        let titb: usize = t.records.iter().map(|r| r.title().len()).sum();
+        let idb: usize = t.records.iter().map(|r| r.shown_id().len()).sum();
+        x_memprobe("after_titles", format!("records={} seq_bytes={seqb} title_bytes={titb} id_bytes={idb} record_size={} final[{}]", t.records.len(), std::mem::size_of::<FastaRecord>(), x_memprobe_lists(&hit_lists)));
+    }
     // The reports are made from the Seq-aligns of the final hit lists, in the order and with
     // the HSPs that BlastHitList2SeqAlign_OMF gives them (`hit_list_to_seqalign_order`).
     for hit_list in hit_lists.iter_mut().flatten() {
@@ -10419,6 +10503,7 @@ fn run_resolved_in_pool(
         before: &query_warning_lines,
         sink: &mut *outputs.diagnostics,
     });
+    x_memprobe("before_formats", format!("stitles={}", subject_stitles.len()));
     // Each requested format prints the same final result without searching again.
     let mut output_result: Result<()> = Ok(());
     let observer = &mut outputs.observer;
@@ -10690,6 +10775,7 @@ fn run_resolved_in_pool(
             output_format_start,
         );
     }
+    x_memprobe("after_formats", String::new());
     // Diagnostic (LOSAT_TIMING): the same interval for the common line (utils/xtiming.rs): the
     // formatting and writing of every report, after the search. No NCBI counterpart.
     crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, output_format_start);

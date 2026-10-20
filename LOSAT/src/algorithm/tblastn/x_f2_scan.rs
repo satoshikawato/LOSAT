@@ -15,6 +15,9 @@
 //!      one-byte table (`numtab`, 32 KB, 255 = read the cell) instead of the 16-byte backbone cell
 //!      (456 KB, L2), so the running total of hits does not wait for the cell; the cell is read only
 //!      to copy the hits.
+//!   5  V2's candidate stage, and the copy stage writes the hits of a cell of up to three hits with
+//!      two 16-byte stores (four pairs, the fourth not part of the result: the offset array has
+//!      four entries after `array_size`) instead of six 4-byte stores.
 //! `LOSAT_X_F2CHECK` (set) counts words, candidates and hits of every call and sums a hash of every
 //! call's offset pairs and `s_range[1]`; `main` prints them as `[X_STATS] F2SCAN ...`.
 
@@ -33,7 +36,7 @@ pub(super) fn x_f2_arm() -> u8 {
         std::env::var("LOSAT_X_F2SCAN")
             .ok()
             .and_then(|v| v.parse::<u8>().ok())
-            .filter(|v| *v <= 4)
+            .filter(|v| *v <= 5)
             .unwrap_or(0)
     })
 }
@@ -138,7 +141,7 @@ pub(super) fn x_scan_unit_f2(
     let check = x_f2_check();
     let (frame_index, chunk, ranges) = &plan.subject.units[unit];
     let frame = &plan.subject.frames[*frame_index];
-    let pairs_len = plan.pair_capacity + X_SCAN_BF_SLACK;
+    let pairs_len = plan.pair_capacity + X_SCAN_BF_SLACK + 1;
     if pairs.len() < pairs_len {
         pairs.resize(pairs_len, BlastOffsetPair::default());
     }
@@ -233,7 +236,8 @@ fn x_scan_range_f2(
         1 => scan::<1>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
         2 if avx2 => scan::<2>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
         4 if avx2 => scan::<4>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
-        2 | 4 => scan::<1>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        5 if avx2 => scan::<5>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        2 | 4 | 5 => scan::<1>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
         _ => scan::<3>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
     }
 }
@@ -273,6 +277,58 @@ unsafe fn copy_cell(
         }
     }
     Some(totalhits + numhits)
+}
+
+/// Arm 5: `copy_cell` with the hits of a cell of up to three written as four pairs by two 16-byte
+/// stores (the offset array has one entry more than `x_scan_one_range_bf` needs).
+#[cfg(target_arch = "x86_64")]
+#[inline(always)]
+unsafe fn copy_cell_vec(
+    backbone: *const crate::algorithm::tblastx::lookup::BackboneCell,
+    overflow: *const i32,
+    dest: *mut BlastOffsetPair,
+    ix: usize,
+    s_off: u32,
+    totalhits: i32,
+    array_size: i32,
+) -> Option<i32> {
+    use std::arch::x86_64::*;
+    let cell = backbone.add(ix);
+    let numhits = (*cell).num_used;
+    if numhits > array_size - totalhits {
+        return None;
+    }
+    let d = dest.add(totalhits as usize);
+    if numhits as usize <= AA_HITS_PER_CELL {
+        // cell = [num_used, e0, e1, e2]
+        let v = _mm_loadu_si128(cell as *const __m128i);
+        let e = _mm_srli_si128::<4>(v);
+        let s = _mm_set1_epi32(s_off as i32);
+        _mm_storeu_si128(d as *mut __m128i, _mm_unpacklo_epi32(e, s));
+        _mm_storeu_si128(d.add(2) as *mut __m128i, _mm_unpackhi_epi32(e, s));
+    } else {
+        let src = overflow.add((*cell).entries[0] as usize);
+        for i in 0..numhits as usize {
+            *d.add(i) = BlastOffsetPair {
+                q_off: *src.add(i) as u32,
+                s_off,
+            };
+        }
+    }
+    Some(totalhits + numhits)
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+unsafe fn copy_cell_vec(
+    backbone: *const crate::algorithm::tblastx::lookup::BackboneCell,
+    overflow: *const i32,
+    dest: *mut BlastOffsetPair,
+    ix: usize,
+    s_off: u32,
+    totalhits: i32,
+    array_size: i32,
+) -> Option<i32> {
+    copy_cell(backbone, overflow, dest, ix, s_off, totalhits, array_size)
 }
 
 /// Arm 4: `copy_cell` with the hit count read from `numtab` (255 = the cell's `num_used`).
@@ -355,7 +411,7 @@ fn scan<const ARM: u8>(
     while block_first <= s_last {
         let block_last = s_last.min(block_first + X_BLOCK - 1);
         let block = (block_first, block_last);
-        if ARM == 2 || ARM == 4 {
+        if ARM == 2 || ARM == 4 || ARM == 5 {
             #[cfg(target_arch = "x86_64")]
             {
                 // SAFETY: AVX2 was detected by the caller.
@@ -367,7 +423,9 @@ fn scan<const ARM: u8>(
                     let ix = ixbuf[k] as usize;
                     // SAFETY: as in `x_scan_one_range_bf`.
                     match unsafe {
-                        if ARM == 4 {
+                        if ARM == 5 {
+                            copy_cell_vec(backbone, overflow, dest, ix, s_off, totalhits, array_size)
+                        } else if ARM == 4 {
                             copy_cell_numtab(
                                 backbone, overflow, numtab, dest, ix, s_off, totalhits, array_size,
                             )

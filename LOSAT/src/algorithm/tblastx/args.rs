@@ -117,6 +117,24 @@ pub struct TblastxArgs {
     // shows 250 alignments, so the option has no clap default.
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep (default: 500)")]
     pub max_target_seqs: Option<usize>,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:196-206
+    // ```c
+    //         arg_desc.AddOptionalKey(kArgQueryCovHspPerc, "float_value",
+    //                             "Percent query coverage per hsp",
+    //                             CArgDescriptions::eDouble);
+    //         arg_desc.SetConstraint(kArgQueryCovHspPerc,
+    //                            new CArgAllow_Doubles(0.0, 100.0));
+    //
+    //         arg_desc.AddOptionalKey(kArgMaxHSPsPerSubject, "int_value",
+    //                            "Set maximum number of HSPs per subject sequence to save for each query",
+    //                            CArgDescriptions::eInteger);
+    //         arg_desc.SetConstraint(kArgMaxHSPsPerSubject,
+    //                            new CArgAllowValuesGreaterThanOrEqual(1));
+    // ```
+    #[arg(long = "max_hsps", value_parser = blastn_count, help = "Set maximum number of HSPs per subject sequence to save for each query")]
+    pub max_hsps: Option<usize>,
+    #[arg(long = "qcov_hsp_perc", value_parser = tblastx_query_coverage, help = "Percent query coverage per hsp")]
+    pub qcov_hsp_perc: Option<f64>,
     // NCBI low-complexity filtering selection:
     // - dust is used only for blastn (and mapping)
     // - otherwise seg is used

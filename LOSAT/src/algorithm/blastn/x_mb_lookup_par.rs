@@ -892,20 +892,23 @@ pub(super) fn plan(table_size: usize, pv_array_bts: usize, parts: usize) -> (usi
 /// Fills the tables as the word loop of `build_mb_lookup` does, with `parts` workers on the
 /// search pool (or one after another, `in_pool == false`, for the shadow without a pool).
 /// Returns what the fill did (the private copies of LOSAT_X_MBLUTPAD, the read-once fill of
-/// LOSAT_X_MBLUTONCE).
+/// LOSAT_X_MBLUTONCE). `resident`: `hashtable` is a kept table whose pages are mapped
+/// (LOSAT_X_MBLUTKEEP), on which the read-once fill skips its prefault round.
 pub(super) fn fill(
     parts: usize,
     words: &Words<'_>,
     tables: Tables<'_>,
     in_pool: bool,
+    resident: bool,
 ) -> FillStats {
     let (_, _, pad, once) = switches();
-    fill_mode(pad, once, true, parts, words, tables, in_pool)
+    fill_mode(pad, once, true, parts, words, tables, in_pool, resident)
 }
 
 /// No NCBI counterpart: `fill` with LOSAT_X_MBLUTPAD given as `pad` and LOSAT_X_MBLUTONCE as
 /// `once` (the tests take each). `timed`: a build of the search (not the shadow's second build),
-/// whose read-once phases LOSAT_TIMING's `[TIMING] x_mb_lookup_once` line counts.
+/// whose read-once phases LOSAT_TIMING's `[TIMING] x_mb_lookup_once` line counts. `resident`:
+/// as `fill`'s.
 fn fill_mode(
     pad: bool,
     once: bool,
@@ -914,12 +917,13 @@ fn fill_mode(
     words: &Words<'_>,
     tables: Tables<'_>,
     in_pool: bool,
+    resident: bool,
 ) -> FillStats {
     // Dispatch point of LOSAT_X_MBLUTONCE (first): each query position read once, the words
     // handed to the owners of their cells (`x_mb_lookup_once.rs`, which always counts into the
     // private copies of LOSAT_X_MBLUTPAD); off, the fill of this module.
     if once {
-        let _stats = super::x_mb_lookup_once::fill(parts, words, tables, in_pool, timed);
+        let _stats = super::x_mb_lookup_once::fill(parts, words, tables, in_pool, timed, resident);
         return FillStats {
             padded: false,
             once: true,
@@ -1097,6 +1101,7 @@ fn shadow_check_mode(
             helper_array: &mut x_helper_array,
         },
         in_pool,
+        false,
     );
     let mut x_longest_chain = 2usize;
     for &value in &x_helper_array {
@@ -1216,7 +1221,7 @@ pub(super) mod tests {
     /// loop's statements, part by part; checked against the loop below), for the tests of
     /// `x_mb_lookup_once.rs`.
     pub(crate) fn fill_old(parts: usize, words: &Words<'_>, tables: Tables<'_>) {
-        fill_mode(false, false, false, parts, words, tables, false);
+        fill_mode(false, false, false, parts, words, tables, false, false);
     }
 
     #[test]
@@ -1268,6 +1273,7 @@ pub(super) mod tests {
                         pv_array_bts: mb.pv_array_bts,
                         helper_array: &mut helper_array,
                     },
+                    false,
                     false,
                 );
                 let mut longest_chain = 2usize;
@@ -1339,6 +1345,7 @@ pub(super) mod tests {
                             helper_array: &mut helper_array,
                         },
                         true,
+                        false,
                     );
                     (hashtable, next_pos, pv_array)
                 });
@@ -1392,6 +1399,7 @@ pub(super) mod tests {
                 helper_array: &mut b.helper_array,
             },
             in_pool,
+            false,
         );
         b
     }

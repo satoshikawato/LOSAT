@@ -125,10 +125,11 @@ def cases(program: str, tables: dict[str, list[tuple[int, int]]]) -> dict[str, l
     sets["ints"] = [["-max_target_seqs", value] for value in
                     ("1", "4", "5", "0x10", "010", "+5", "-1", "0", "2147483647", "1e1", "5.0", "0x")]
     sets["ints"] += [["-num_threads", value] for value in ("0", "0x1", "+1", "-1")]
-    if program != "tblastx":
-        sets["ints"] += [["-max_hsps", value] for value in ("1", "2", "0", "0x2", "-1", "+1")]
-    else:
-        sets["ints"] += [["-max_hsps", "1"]]
+    sets["ints"] += [["-max_hsps", value] for value in ("1", "2", "0", "0x2", "-1", "+1")]
+    # -max_hsps and -qcov_hsp_perc filter the final HSP lists (blast_traceback.c:837-867).
+    sets["filter"] = [["-qcov_hsp_perc", value] for value in
+                      ("0", "10", "50", "50.5", "99", "100", "1e1", "+50", "101", "-1", "nan", "inf", "0x10", "")]
+    sets["filter"] += [["-max_hsps", "1", "-qcov_hsp_perc", "30"], ["-max_target_seqs", "1", "-qcov_hsp_perc", "50"]]
     sets["outfmt"] = [["-outfmt", value] for value in
                       ("6", "06", "+6", " 6", "6 ", "6 std", "7 std qseqid", "0x6", "6.0", "5", "13", "18",
                        "abc", "", " ", "0 std", "10", "17", "-1", "7 qseqid")]

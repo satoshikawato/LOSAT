@@ -544,9 +544,19 @@ fn numeric_values_are_validated_before_io() {
             }
         }
     }
-    for program in ["blastn", "blastp"] {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
         assert!(parse(program, &["-outfmt", "6", "-max_hsps", "0"]).is_err());
         parse(program, &["-outfmt", "6", "-max_hsps", "1"]).unwrap();
+        // NCBI blast_args.cpp:196-201: -qcov_hsp_perc is a real number in 0..100.
+        for value in ["0", "50.5", "1e1", "100"] {
+            parse(program, &["-outfmt", "6", "-qcov_hsp_perc", value]).unwrap();
+        }
+        for value in ["-1", "100.5", "inf", "nan", "abc"] {
+            assert!(
+                parse(program, &["-outfmt", "6", "-qcov_hsp_perc", value]).is_err(),
+                "{program} -qcov_hsp_perc {value}"
+            );
+        }
     }
     // NCBI tblastx runs word sizes 2 to 4 (blast_options.c:1342-1364), which LOSAT's
     // TBLASTX rejects where the search starts; 5 or more is NCBI's error.
@@ -938,14 +948,15 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "10", None, UNSUPPORTED),
         (ALL, "18", None, UNSUPPORTED),
         (ALL, "20", None, UNSUPPORTED),
-        // Line OF track S (structured formats): 8 and 12 in every program (OF3b), NCBI
-        // dropping a custom specification (blast_args.cpp:2844-2851); the others not yet.
+        // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c),
+        // NCBI dropping a custom specification (blast_args.cpp:2844-2851); the others not yet.
         (ALL, "8", None, Writes(AsnText)),
         (ALL, "12", None, Writes(JsonSeqalign)),
         (ALL, " 8 std", None, Writes(AsnText)),
         (ALL, "12 delim=,", None, Writes(JsonSeqalign)),
         (ALL, "5", None, UNSUPPORTED),
-        (ALL, "9", None, UNSUPPORTED),
+        (ALL, "9", None, Writes(AsnBinary)),
+        (ALL, " 9 std", None, Writes(AsnBinary)),
         (ALL, "11", None, UNSUPPORTED),
         (ALL, "13", Some("o.json"), UNSUPPORTED),
         (ALL, "14", Some("o.xml"), UNSUPPORTED),

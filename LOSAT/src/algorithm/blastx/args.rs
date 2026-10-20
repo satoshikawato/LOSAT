@@ -1,5 +1,7 @@
 //! BLASTX options and native serial local-subject search/report dispatch.
-use crate::blastinput::value_parsers::{genetic_code, ncbi_int8, nonnegative_f64};
+use crate::blastinput::value_parsers::{
+    blastx_query_coverage, genetic_code, ncbi_int8, nonnegative_f64,
+};
 use anyhow::{bail, Result};
 use clap::Args;
 use std::path::PathBuf;
@@ -124,6 +126,16 @@ pub struct BlastxArgs {
     // ```
     #[arg(long, value_parser = positive)]
     pub max_hsps: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-201
+    // ```c++
+    //         arg_desc.AddOptionalKey(kArgQueryCovHspPerc, "float_value",
+    //                             "Percent query coverage per hsp",
+    //                             CArgDescriptions::eDouble);
+    //         arg_desc.SetConstraint(kArgQueryCovHspPerc,
+    //                            new CArgAllow_Doubles(0.0, 100.0));
+    // ```
+    #[arg(long, value_parser = blastx_query_coverage, help = "Percent query coverage per hsp")]
+    pub qcov_hsp_perc: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:241-243
     // ```c++
     //         arg_desc.AddOptionalKey(kArgSumStats, "bool_value",
@@ -694,6 +706,8 @@ pub struct ResolvedOptions {
     pub sum_stats: bool,
     pub max_intron_length: i32,
     pub max_hsps: i32,
+    /// The -qcov_hsp_perc value, or 0 (no filter).
+    pub query_cov_hsp_perc: f64,
     pub culling_limit: i32,
     pub subject_besthit: bool,
     pub hitlist_size: i32,
@@ -971,6 +985,7 @@ impl BlastxArgs {
             sum_stats: self.sum_stats.unwrap_or(true),
             max_intron_length: self.max_intron_length,
             max_hsps: self.max_hsps.unwrap_or(0),
+            query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit,
             subject_besthit: self.subject_besthit,
             hitlist_size,

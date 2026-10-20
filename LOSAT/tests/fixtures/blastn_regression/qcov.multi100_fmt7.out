@@ -1,0 +1,16 @@
+# BLASTN 2.17.0+
+# Query: mq1 query matching several subjects
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/multi_subject.fasta)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 2 hits found
+mq1	msA	99.167	600	5	0	1	600	51	650	0.0	1060
+mq1	msB	94.333	600	34	0	1	600	630	31	0.0	930
+# BLASTN 2.17.0+
+# Query: mq2 query with no significant hit
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/multi_subject.fasta)
+# 0 hits found
+# BLASTN 2.17.0+
+# Query: mq3 query matching msF on the minus strand
+# Database: User specified sequence set (Input: tests/fasta/outfmt0/multi_subject.fasta)
+# 0 hits found
+# BLAST processed 3 queries

@@ -356,7 +356,7 @@ impl Program {
             // Line OF track S (structured formats).
             Xml => false,
             AsnText => true,
-            AsnBinary => false,
+            AsnBinary => true,
             ArchiveFormat => false,
             JsonSeqalign => true,
             Json => false,
@@ -1083,8 +1083,8 @@ mod tests {
         );
     }
 
-    // The one table of the formats LOSAT writes (`Program::writes`): 0, 6, 7, 8 and 12 in
-    // every program (8 and 12: line OF track S, OF3b).
+    // The one table of the formats LOSAT writes (`Program::writes`): 0, 6, 7, 8, 9 and 12 in
+    // every program (8 and 12: line OF track S, OF3b; 9: OF3c).
     #[test]
     fn every_program_writes_its_formats_only() {
         for program in PROGRAMS {
@@ -1093,7 +1093,7 @@ mod tests {
                 .filter(|&format| program.writes(format))
                 .map(ReportFormat::number)
                 .collect();
-            assert_eq!(written, [0, 6, 7, 8, 12], "{program:?}");
+            assert_eq!(written, [0, 6, 7, 8, 9, 12], "{program:?}");
         }
         assert_eq!(
             PROGRAMS.map(Program::name),

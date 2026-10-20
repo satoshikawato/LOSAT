@@ -1199,12 +1199,12 @@ pub(crate) fn run_local_with(
     // `run_local`); `search` checks the formats again.
     check_report_formats(outputs)?;
     // No NCBI counterpart: ABI v1 is frozen (plan TD-1; line OF, outfmt-20261019 DECISIONS
-    // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 12) with the
+    // 10): it adds no format, so it refuses the Seq-annot formats (outfmt 8, 9, 12) with the
     // message that `check_report_formats` gave them before TBLASTX wrote them.
     if v1.is_some() {
         for format in &outputs.formats {
             let number = crate::blastinput::app::parse_formatting_string(format.outfmt)?.number;
-            if matches!(number, 8 | 12) {
+            if matches!(number, 8 | 9 | 12) {
                 anyhow::bail!("output format {number} is not supported by LOSAT's TBLASTX");
             }
         }
@@ -1557,11 +1557,37 @@ fn report_order(
     // A culling limit above 0 installs NCBI's culling writer and pipe
     // (`report::culled_hit_order`).
     let hitlist_size = args.max_target_seqs.unwrap_or(500);
-    if args.culling_limit > 0 {
-        let query_lengths: Vec<usize> = queries.iter().map(|query| query.seq().len()).collect();
-        report::culled_hit_order(hits, hitlist_size, args.culling_limit, &query_lengths)
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:313-319
+    // ```c
+    //     if (args.Exist(kArgQueryCovHspPerc) && args[kArgQueryCovHspPerc]) {
+    //         opt.SetQueryCovHspPerc(args[kArgQueryCovHspPerc].AsDouble());
+    //     }
+    //
+    //     if (args.Exist(kArgMaxHSPsPerSubject) && args[kArgMaxHSPsPerSubject]) {
+    //         opt.SetMaxHspsPerSubject(args[kArgMaxHSPsPerSubject].AsInteger());
+    //     }
+    // ```
+    let query_cov_hsp_perc = args.qcov_hsp_perc.unwrap_or(0.0);
+    let query_lengths: Vec<usize> = if args.culling_limit > 0 || query_cov_hsp_perc > 0.0 {
+        queries.iter().map(|query| query.seq().len()).collect()
     } else {
-        report::final_hit_order(hits, hitlist_size)
+        Vec::new()
+    };
+    let filters = report::HitFilters {
+        max_hsps: args.max_hsps.unwrap_or(0),
+        query_cov_hsp_perc,
+        query_lengths: &query_lengths,
+    };
+    if args.culling_limit > 0 {
+        report::culled_hit_order(
+            hits,
+            hitlist_size,
+            args.culling_limit,
+            &query_lengths,
+            &filters,
+        )
+    } else {
+        report::final_hit_order(hits, hitlist_size, &filters)
     }
 }
 

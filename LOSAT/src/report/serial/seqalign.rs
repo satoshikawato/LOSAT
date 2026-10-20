@@ -55,6 +55,7 @@ use crate::common::GapEditOp;
 use crate::report::record::{HspRecord, QueryRecord, RunRecord, SubjectRecord};
 use crate::report::seqid::SeqId;
 
+use super::asn_ber::AsnBinaryEncoder;
 use super::asn_text::AsnTextEncoder;
 use super::encoder::{Encoder, SerialError};
 use super::json::JsonEncoder;
@@ -64,6 +65,8 @@ use super::json::JsonEncoder;
 pub enum SerialFormat {
     /// outfmt 8: `MSerial_AsnText`.
     AsnText,
+    /// outfmt 9: `MSerial_AsnBinary`.
+    AsnBinary,
     /// outfmt 12: `MSerial_Json`.
     Json,
 }
@@ -75,6 +78,7 @@ impl SerialFormat {
         use crate::blastinput::app::ReportFormat;
         match format {
             ReportFormat::AsnText => Some(SerialFormat::AsnText),
+            ReportFormat::AsnBinary => Some(SerialFormat::AsnBinary),
             ReportFormat::JsonSeqalign => Some(SerialFormat::Json),
             _ => None,
         }
@@ -739,6 +743,7 @@ pub fn check_database(
 ) -> anyhow::Result<()> {
     let number = match format {
         SerialFormat::AsnText => 8,
+        SerialFormat::AsnBinary => 9,
         SerialFormat::Json => 12,
     };
     if name.eq_ignore_ascii_case("n/a") || name.eq_ignore_ascii_case("SRA") {
@@ -747,9 +752,11 @@ pub fn check_database(
             program.name()
         );
     }
-    if format == SerialFormat::AsnText && title.iter().any(|byte| !(0x20..=0x7e).contains(byte)) {
+    if matches!(format, SerialFormat::AsnText | SerialFormat::AsnBinary)
+        && title.iter().any(|byte| !(0x20..=0x7e).contains(byte))
+    {
         anyhow::bail!(
-            "a database title with a character outside the visible ASCII range (which NCBI BLAST+ replaces by '#' with an error message in output format 8) is not supported by LOSAT's {}",
+            "a database title with a character outside the visible ASCII range (which NCBI BLAST+ replaces by '#' with an error message in output format {number}) is not supported by LOSAT's {}",
             program.name()
         );
     }
@@ -1804,6 +1811,11 @@ pub fn write_query(
     let error = match format {
         SerialFormat::AsnText => {
             let mut enc = AsnTextEncoder::new(buf);
+            write_seq_annot(&mut enc, run, query, subjects, hsps);
+            enc.error()
+        }
+        SerialFormat::AsnBinary => {
+            let mut enc = AsnBinaryEncoder::new(buf);
             write_seq_annot(&mut enc, run, query, subjects, hsps);
             enc.error()
         }

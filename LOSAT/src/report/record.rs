@@ -55,7 +55,7 @@ use super::seqid::SeqId;
 /// reads it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ReportNeeds {
-    /// A Seq-annot of Seq-aligns is written (outfmt 8, 12): the reports build
+    /// A Seq-annot of Seq-aligns is written (outfmt 8, 9, 12): the reports build
     /// `HspRecord`s, and a database's name and title are checked
     /// (`report::serial::seqalign::check_database`).
     pub seqalign: bool,

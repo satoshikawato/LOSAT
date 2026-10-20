@@ -341,8 +341,8 @@ impl ColumnIndex {
                 out.extend_from_slice(&offset.to_be_bytes());
             }
             self.file.write(&out)?;
-            self.offsets = Vec::new();
         }
+        self.offsets = Vec::new();
         self.file.close()
     }
 }

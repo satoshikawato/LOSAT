@@ -296,7 +296,7 @@ impl WriteDb {
                 Some(_) => Some(self.mask.column_date(index as usize)?),
                 None => None,
             };
-            let mut volume = Volume::create(
+            let volume = Volume::create(
                 &self.dbname,
                 self.protein,
                 &self.title,
@@ -304,10 +304,14 @@ impl WriteDb {
                 index,
                 self.max_file_size,
             )?;
-            if let (Some(meta), Some(date)) = (self.mask.column_meta(), &column_date) {
-                volume.create_mask_column(meta, date, self.max_file_size)?;
-            }
+            // The volume is kept before its column is made, so that the
+            // files of the failed build are listed whatever happens next.
             self.volumes.push(volume);
+            if let (Some(meta), Some(date)) = (self.mask.column_meta(), &column_date) {
+                if let Some(volume) = self.volumes.last_mut() {
+                    volume.create_mask_column(meta, date, self.max_file_size)?;
+                }
+            }
             binhdr = self.cook_header(&bioseq.title);
             let volume = self.volumes.last_mut().expect("a volume was pushed");
             done = volume.write_sequence(&binary.seq, &binary.ambig, &binhdr, self.mask.blobs())?;

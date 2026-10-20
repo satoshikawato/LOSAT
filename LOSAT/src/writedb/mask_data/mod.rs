@@ -23,6 +23,8 @@ pub mod registry;
 #[cfg(test)]
 mod tests;
 
+use std::collections::BTreeMap;
+
 use column::ColumnMeta;
 pub use range_set::{ranges_are_empty, MaskedRangeSet, MaskedRanges};
 pub use registry::MaskInfoRegistry;
@@ -57,7 +59,7 @@ pub(crate) struct MaskWriter {
     blobs: Option<(Vec<u8>, Vec<u8>)>,
     /// The creation dates of the column index files by volume, set by a test
     /// (`set_column_date`); a volume without one reads the clock.
-    dates: Vec<Option<Vec<u8>>>,
+    dates: BTreeMap<usize, Vec<u8>>,
     /// The date of a column when the clock cannot be read.
     date_fallback: Option<Vec<u8>>,
 }
@@ -401,10 +403,7 @@ impl MaskWriter {
 
     /// Test hook: the creation date of the mask column of volume `index`.
     pub(crate) fn set_column_date(&mut self, index: usize, date: &[u8]) {
-        if self.dates.len() <= index {
-            self.dates.resize(index + 1, None);
-        }
-        self.dates[index] = Some(date.to_vec());
+        self.dates.insert(index, date.to_vec());
     }
 
     /// The date of the build, for a clock that cannot be read.
@@ -419,7 +418,7 @@ impl MaskWriter {
     /// The date stored in the index file of the column of volume `index`:
     /// the one a test set, or `CTime(CTime::eCurrent).AsString()`.
     pub(crate) fn column_date(&self, index: usize) -> Result<Vec<u8>, WriteDbError> {
-        if let Some(Some(date)) = self.dates.get(index) {
+        if let Some(date) = self.dates.get(&index) {
             return Ok(date.clone());
         }
         if let Some(now) = super::time::LocalTime::now() {

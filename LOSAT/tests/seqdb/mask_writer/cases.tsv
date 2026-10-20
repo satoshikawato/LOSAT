@@ -21,6 +21,7 @@ dup_default	nucl	mask_nucl.fna	wm_d.asnt,wm_d2.asnt	-	-	-	mask writer fixture
 invalid55	nucl	mask_nucl.fna	p55.asnt	-	-	-	mask writer fixture
 invalid_notset	nucl	mask_nucl.fna	pnotset.asnt	-	-	-	mask writer fixture
 invalid_max	nucl	mask_nucl.fna	pmax.asnt	-	-	-	mask writer fixture
+other_id	nucl	mask_nucl.fna	other_id.asnt	-	-	-	mask writer fixture
 none	nucl	mask_nucl.fna	none.asnt	-	-	-	mask writer fixture
 none_then_masks	nucl	mask_nucl.fna	none.asnt,wm_d.asnt	-	-	-	mask writer fixture
 two_in	nucl	in_a.fna in_b.fna	two_in.asnt	-	-	-	mask writer fixture

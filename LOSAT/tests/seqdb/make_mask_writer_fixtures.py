@@ -63,6 +63,13 @@ def single(lid, a, b, strand=None):
     return f"      int {{\n        from {a},\n        to {b},\n{st}        id local id {lid}\n      }}"
 
 
+def by_name(name, ranges):
+    """A packed-int Seq-loc of a Seq-id that is not `local id N` (`local str`)."""
+    ints = ",\n".join(f"          {{\n            from {a},\n            to {b},\n"
+                      f"            id local str \"{name}\"\n          }}" for a, b in ranges)
+    return "      packed-int {\n" + ints + "\n      }"
+
+
 def mask_object(program, options, locs):
     """One Blast-db-mask-info in ASN.1 text; `locs` are strings made by packed() / single()."""
     body = ",\n".join(locs)
@@ -185,6 +192,11 @@ def main():
     write("p55.asnt", mask_object("55", "", [packed(1, [(0, 9)])]))
     write("pnotset.asnt", mask_object("not-set", "", [packed(1, [(0, 9)])]))
     write("pmax.asnt", mask_object("max", "", [packed(1, [(0, 9)])]))
+    # Seq-locs of a Seq-id no sequence has are combined too (NCBI refuses nothing): the run
+    # builds, with the mask of sequence 1 only.
+    write("other_id.asnt", mask_object(wm, "", [
+        packed(1, [(0, 9)]), by_name("zz", [(6, 5)]), by_name("zz", [(20, 25)]),
+        packed(900, [(6, 5)]), packed(900, [(20, 25)])]))
     # A file without masks: the algorithm is registered, no sequence gets mask data.
     write("none.asnt", mask_object(wm, "-e", []))
     # Two input files: the masks name sequences 1 and 2 of each.
@@ -230,6 +242,7 @@ def main():
         ("invalid55", "nucl", "mask_nucl.fna", "p55.asnt", "-", "-", "-"),
         ("invalid_notset", "nucl", "mask_nucl.fna", "pnotset.asnt", "-", "-", "-"),
         ("invalid_max", "nucl", "mask_nucl.fna", "pmax.asnt", "-", "-", "-"),
+        ("other_id", "nucl", "mask_nucl.fna", "other_id.asnt", "-", "-", "-"),
         ("none", "nucl", "mask_nucl.fna", "none.asnt", "-", "-", "-"),
         ("none_then_masks", "nucl", "mask_nucl.fna", "none.asnt,wm_d.asnt", "-", "-", "-"),
         ("two_in", "nucl", "in_a.fna in_b.fna", "two_in.asnt", "-", "-", "-"),

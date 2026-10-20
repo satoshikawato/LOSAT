@@ -248,7 +248,9 @@ impl WriteDbFile {
     /// the files it created when one of its files cannot be created.
     pub(crate) fn discard(&mut self) {
         self.abandon();
-        let _ = std::fs::remove_file(&self.fname);
+        if self.created {
+            let _ = std::fs::remove_file(&self.fname);
+        }
     }
 
     // The error names both paths: the system's message does not say which

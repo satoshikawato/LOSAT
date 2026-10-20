@@ -69,11 +69,21 @@ pub struct MaskedRangeSet {
     ranges: Vec<MaskedRanges>,
     /// `m_Values`, by algorithm id: the Seq-loc of each sequence as the
     /// intervals `CSeq_loc_CI` visits in it.
-    values: BTreeMap<i32, HashMap<MaskSeqId, Vec<MaskInterval>>>,
+    values: BTreeMap<i32, HashMap<MaskSeqId, Stored>>,
 }
 
-fn unsupported(message: &str) -> WriteDbError {
-    WriteDbError::Other(format!("{message}; LOSAT does not support this mask"))
+/// The Seq-loc of an (algorithm, sequence): the intervals NCBI holds, or the
+/// error of a combination that LOSAT does not port. NCBI combines Seq-locs
+/// for every Seq-id, including ones no sequence has, and finishes the run;
+/// the error is therefore raised only when the sequence is looked up.
+#[derive(Debug)]
+enum Stored {
+    Intervals(Vec<MaskInterval>),
+    Unsupported(String),
+}
+
+fn unsupported(message: &str) -> String {
+    format!("{message}; LOSAT does not support this mask")
 }
 
 // NCBI reference (598d8ae6): c++/include/util/range.hpp:142-145
@@ -344,10 +354,7 @@ fn is_reverse(strand: Option<u8>) -> bool {
 /// `CSeq_loc::Add(other, fMerge_All | fSort)` on the intervals of two
 /// Seq-locs of one Seq-id: the intervals of the result in the order
 /// `CSeq_loc_CI` visits them.
-fn add_locs(
-    first: &[MaskInterval],
-    second: &[MaskInterval],
-) -> Result<Vec<MaskInterval>, WriteDbError> {
+fn add_locs(first: &[MaskInterval], second: &[MaskInterval]) -> Result<Vec<MaskInterval>, String> {
     let mut plus: Vec<(u32, u32)> = Vec::new();
     let mut minus: Vec<(u32, u32)> = Vec::new();
     for iv in first.iter().chain(second) {
@@ -459,9 +466,9 @@ impl MaskedRangeSet {
         loc: &MaskLoc,
     ) -> Result<(), WriteDbError> {
         if algo_id < 0 {
-            return Err(unsupported(&format!(
+            return Err(WriteDbError::Other(unsupported(&format!(
                 "the algorithm id {algo_id} is negative"
-            )));
+            ))));
         }
         let by_id = self.values.entry(algo_id).or_default();
         if by_id.is_empty() {
@@ -472,11 +479,19 @@ impl MaskedRangeSet {
         }
         match by_id.get_mut(id) {
             None => {
-                by_id.insert(id.clone(), loc.intervals.clone());
+                by_id.insert(id.clone(), Stored::Intervals(loc.intervals.clone()));
             }
-            Some(stored) => {
-                *stored = add_locs(stored, &loc.intervals)?;
+            Some(entry @ Stored::Intervals(_)) => {
+                let Stored::Intervals(stored) = &*entry else {
+                    return Ok(());
+                };
+                *entry = match add_locs(stored, &loc.intervals) {
+                    Ok(combined) => Stored::Intervals(combined),
+                    Err(message) => Stored::Unsupported(message),
+                };
             }
+            // Every later Seq-loc of it is combined with the refused one.
+            Some(Stored::Unsupported(_)) => {}
         }
         Ok(())
     }
@@ -532,9 +547,15 @@ impl MaskedRangeSet {
             let mut oid_ranges: Option<Cow<'_, [MaskInterval]>> = None;
             for id in ids {
                 if let Some(stored) = by_id.get(id) {
+                    let stored = match stored {
+                        Stored::Intervals(intervals) => intervals,
+                        Stored::Unsupported(message) => {
+                            return Err(WriteDbError::Other(message.clone()));
+                        }
+                    };
                     oid_ranges = Some(match oid_ranges {
                         None => Cow::Borrowed(stored.as_slice()),
-                        Some(l1) => Cow::Owned(add_locs(&l1, stored)?),
+                        Some(l1) => Cow::Owned(add_locs(&l1, stored).map_err(WriteDbError::Other)?),
                     });
                 }
             }

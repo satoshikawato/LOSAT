@@ -207,13 +207,20 @@ fn strand_number(node: &Node) -> u8 {
 }
 
 fn interval_of(fields: &[Node]) -> (MaskInterval, MaskSeqId) {
-    let local = field(fields, "id").and_then(|id| match id {
-        Node::Named(kind, Some(inner)) if kind == "local" => {
-            field(std::slice::from_ref(&**inner), "id")
+    // `id local id N` names a sequence of the database; `id local str "x"`
+    // is a Seq-id that no sequence of a database without -parse_seqids has.
+    let id = match field(fields, "id") {
+        Some(Node::Named(kind, Some(inner))) if kind == "local" => {
+            if let Some(n) = field(std::slice::from_ref(&**inner), "id") {
+                MaskSeqId::LocalId(int(n) as i32)
+            } else if let Some(Node::Str(text)) = field(std::slice::from_ref(&**inner), "str") {
+                MaskSeqId::Other(text.clone().into_bytes())
+            } else {
+                panic!("local id: {inner:?}");
+            }
         }
-        _ => None,
-    });
-    let id = MaskSeqId::LocalId(int(local.expect("local id")) as i32);
+        other => panic!("id: {other:?}"),
+    };
     let interval = MaskInterval {
         from: int(field(fields, "from").unwrap()) as u32,
         to: int(field(fields, "to").unwrap()) as u32,
@@ -509,6 +516,34 @@ fn combinations_with_empty_or_whole_ranges_are_refused() {
     assert!(set
         .insert(-1, &MaskSeqId::LocalId(1), &loc(1, &[(1, 2)]))
         .is_err());
+}
+
+/// NCBI combines the Seq-locs of any Seq-id and only looks up those of the
+/// sequences it writes, so a combination LOSAT refuses is an error only for a
+/// sequence that is looked up.
+#[test]
+fn a_refused_combination_is_an_error_only_when_it_is_looked_up() {
+    let mut set = MaskedRangeSet::new();
+    let other = MaskSeqId::Other(b"x".to_vec());
+    let far = MaskSeqId::LocalId(1_000_000);
+    let near = MaskSeqId::LocalId(2);
+    for id in [&other, &far, &near] {
+        set.insert(30, id, &loc(2, &[(6, 5)])).unwrap();
+        set.insert(30, id, &loc(2, &[(20, 25)])).unwrap();
+        // More Seq-locs after the refused one change nothing.
+        set.insert(30, id, &loc(2, &[(1, 2)])).unwrap();
+    }
+    set.insert(31, &MaskSeqId::LocalId(1), &loc(1, &[(0, 9)]))
+        .unwrap();
+    // Sequence 1 has no refused combination (algorithm 30 has no Seq-loc of it).
+    let ranges = set.get_ranges(&[MaskSeqId::LocalId(1)]).unwrap();
+    assert_eq!(ranges[1].offsets, [(0, 10)]);
+    // A sequence with one does.
+    let error = set.get_ranges(&[near]).unwrap_err();
+    assert!(
+        error.to_string().contains("LOSAT does not support"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -1248,8 +1283,7 @@ fn the_writer_matches_makeblastdb_on_the_cases_of_the_writer_fixtures() {
     );
 }
 
-/// Databases built without mask data have no column objects, files or
-/// state: the file list is the one of the writer before mask data existed.
+/// A database built without mask data lists and writes no column files.
 #[test]
 fn a_database_without_mask_data_has_no_column_files() {
     let tmp = TempDir::new("mask-plain");

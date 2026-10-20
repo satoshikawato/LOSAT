@@ -32,11 +32,11 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 
 | Program | Supported Tasks | Output Formats (`-outfmt`) | Description |
 |:---|:---|:---|:---|
-| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0`, `6`, `7`, `8`, `12` (see [Output formats](#output-formats)) | Nucleotide vs. nucleotide alignment |
-| **`blastx`** | `blastx`; native and Wasm entry points | `0`, `6`, `7`, `8`, `12` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
-| **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0`, `6`, `7`, `8`, `12` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
-| **`tblastx`** | `tblastx` | `0`, `6`, `7`, `8`, `12` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
-| **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0`, `6`, `7`, `8`, `12` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
+| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Nucleotide vs. nucleotide alignment |
+| **`blastx`** | `blastx`; native and Wasm entry points | `0`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
+| **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
+| **`tblastx`** | `tblastx` | `0`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
+| **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
 
 > **Note**: Tabular output (`-outfmt 6` and `7`) writes the 12 standard BLAST fields:  
 > `qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`.  
@@ -59,7 +59,7 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `6` | Tabular | all five | all five programs |
 | `7` | Tabular with comment lines | all five | all five programs |
 | `8` | Seqalign (Text ASN.1) | all five | all five programs |
-| `9` | Seqalign (Binary ASN.1) | all five | not yet |
+| `9` | Seqalign (Binary ASN.1) | all five | all five programs |
 | `10` | Comma-separated values | all five | not yet |
 | `11` | BLAST archive (ASN.1) | all five | not yet |
 | `12` | Seqalign (JSON) | all five | all five programs |
@@ -216,7 +216,7 @@ LOSAT blastx \
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp`, `blastp-fast` or `blastp-short` (for `blastp`); `blastx` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`) |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `12`=Seq-align (JSON); custom tabular fields in BLASTP and BLASTX only |
+| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `12`=Seq-align (JSON); custom tabular fields in BLASTP and BLASTX only |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |

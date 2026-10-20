@@ -68,6 +68,7 @@ DC = f"{DCQ} -task dc-megablast"
 DVQ = f"-query {O}/dc_div_query.fasta -subject {O}/dc_div_subject.fasta"
 DV = f"{DVQ} -task dc-megablast"
 SH = f"-query {O}/short_query.fasta -subject {O}/short_subject.fasta -task blastn-short"
+MW = f"-query {O}/multi_query.fasta -subject {O}/multi_subject.fasta -task blastn -word_size 7 -evalue 1000"
 # (case_id, NCBI argv after `blastn`, extra LOSAT-only arguments[, environment[, NCBI environment]])
 _CASES = [
     ("prelim.default", f"{P} -outfmt 6", ""),
@@ -90,6 +91,16 @@ _CASES = [
     ("batches.task_blastn", f"{B} -task blastn -outfmt 6", ""),
     ("batches.word7", f"{B} -task blastn -word_size 7 -outfmt 6", ""),
     ("batches.besthit", f"{B} -subject_besthit -outfmt 6", ""),
+    # -qcov_hsp_perc (blast_traceback.c:837-867): after -max_hsps and before -subject_besthit,
+    # each HSP's query extent over its context's length (the -query_loc range); a subject left
+    # without HSPs is removed and the hit list is sorted by best e-value again.
+    ("qcov.multi30", f"{MW} -qcov_hsp_perc 30 -outfmt 6", ""),
+    ("qcov.multi100_fmt7", f"{MW} -qcov_hsp_perc 100 -outfmt 7", ""),
+    ("qcov.multi_maxhsps1_besthit", f"{MW} -max_hsps 1 -qcov_hsp_perc 30 -subject_besthit -outfmt 6", ""),
+    ("qcov.megablast50_fmt0", f"-query {O}/multi_query.fasta -subject {O}/multi_subject.fasta -qcov_hsp_perc 50"
+                              " -outfmt 0", ""),
+    ("qcov.loc10", f"{P} -task blastn -query_loc 1001-2000 -qcov_hsp_perc 10 -outfmt 6", ""),
+    ("qcov.none_fmt7", f"{P} -task blastn -qcov_hsp_perc 10 -outfmt 7", ""),
     ("batches.fmt7", f"{B} -task blastn -outfmt 7", ""),
     ("batches.fmt0", f"{B} -outfmt 0", ""),
     ("batches.threads4", f"{B} -task blastn -outfmt 6", "-num_threads 4"),

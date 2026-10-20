@@ -9,6 +9,7 @@ use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::{record_frame, Placements};
 use crate::config::ScoringMatrix;
+use crate::core::blast_hits::trim_by_max_hsps;
 use crate::report::outfmt6::{write_hit_fields_bytes, OutputConfig};
 use crate::report::pairwise::PairwiseHit;
 use crate::sequence::packed_subject::PackedNucleotide;
@@ -1246,6 +1247,72 @@ impl crate::algorithm::blastn::hsp::HitListEntry for TblastxHspList {
     }
 }
 
+/// The filters of NCBI's `s_FilterBlastResults` that TBLASTX has: `-max_hsps` (`max_hsps`,
+/// 0 when omitted) and `-qcov_hsp_perc` (`query_cov_hsp_perc`, 0 when omitted), with the
+/// nucleotide lengths of the queries (`query_lengths`, read for the coverage only).
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1533-1538
+/// ```c
+///                } else {
+///         	   status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
+///                }
+///
+///                Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_traceback.c:1763-1766
+/// ```c
+///     if(hit_params->options->query_cov_hsp_perc > 0 || hit_params->options->max_hsps_per_subject > 0 ||
+///        (hit_params->options->hsp_filt_opt != NULL && hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
+///     	s_FilterBlastResults(results, hit_params->options, query_info, program_number);
+///     }
+/// ```
+/// TBLASTX is ungapped, so the preliminary stage removes the HSPs below the query coverage
+/// after the e-value reap, before the hit list (or the culling writer) receives a subject's
+/// HSPs, and a subject left without HSPs never reaches it. After the traceback (and the
+/// culling pipe) `s_FilterBlastResults` cuts each list to `-max_hsps` in its order (score
+/// order, or e-value order once the hit list has filled), without setting its best e-value
+/// again; its coverage reap then finds nothing to remove, because NCBI never splits the query
+/// of an ungapped search (split_query_cxx.cpp:60-61), so both reaps read the same context
+/// lengths.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct HitFilters<'a> {
+    pub max_hsps: usize,
+    pub query_cov_hsp_perc: f64,
+    pub query_lengths: &'a [usize],
+}
+
+impl HitFilters<'_> {
+    /// The lengths of the contexts (frames) of query `q_idx`, read only by the coverage.
+    fn context_lengths(&self, q_idx: u32) -> [i32; 6] {
+        if self.query_cov_hsp_perc > 0.0 {
+            super::hsp_culling::tblastx_context_lengths(self.query_lengths[q_idx as usize])
+        } else {
+            [0; 6]
+        }
+    }
+
+    /// `Blast_HSPListReapByQueryCoverage` on one subject's HSPs; returns whether none is
+    /// left (NCBI's collector and culling writer skip an empty list).
+    fn reap_by_query_coverage(
+        &self,
+        hsps: &mut Vec<TblastxHsp>,
+        context_lengths: &[i32; 6],
+    ) -> bool {
+        if self.query_cov_hsp_perc <= 0.0 {
+            return false;
+        }
+        crate::core::blast_hits::reap_by_query_coverage(hsps, self.query_cov_hsp_perc, |hsp| {
+            let context = super::hsp_culling::tblastx_context(hsp.hit.query_frame);
+            (
+                hsp.hit.sort_query_offset as i64,
+                hsp.hit.sort_query_end as i64,
+                i64::from(context_lengths[context]),
+            )
+        });
+        hsps.is_empty()
+    }
+}
+
 /// The final HSP list of a run in NCBI's order, which every format prints: per query (in
 /// input order) the subjects that the hit list keeps, best first, and each subject's
 /// HSPs in the order of its Seq-align.
@@ -1288,7 +1355,14 @@ impl crate::algorithm::blastn::hsp::HitListEntry for TblastxHspList {
 /// preliminary hit list of tblastx has the final size (`GetPrelimHitlistSize` without
 /// gapping or composition-based statistics, blast_hits.c:44-71), and the traceback of an
 /// ungapped search keeps it (`s_BlastPruneExtraHits` removes nothing).
-pub(crate) fn final_hit_order(hits: Vec<TblastxHsp>, hitlist_size: usize) -> Vec<TblastxHsp> {
+///
+/// `filters` (`-qcov_hsp_perc`, `-max_hsps`) apply where NCBI applies them
+/// (`HitFilters`).
+pub(crate) fn final_hit_order(
+    hits: Vec<TblastxHsp>,
+    hitlist_size: usize,
+    filters: &HitFilters<'_>,
+) -> Vec<TblastxHsp> {
     use crate::algorithm::blastn::hsp::HitList;
     let mut lists: std::collections::BTreeMap<(u32, u32), Vec<TblastxHsp>> =
         std::collections::BTreeMap::new();
@@ -1301,14 +1375,23 @@ pub(crate) fn final_hit_order(hits: Vec<TblastxHsp>, hitlist_size: usize) -> Vec
     let mut ordered = Vec::new();
     let mut lists = lists.into_iter().peekable();
     while let Some(&((q_idx, _), _)) = lists.peek() {
+        let context_lengths = filters.context_lengths(q_idx);
         let mut hit_list: HitList<TblastxHspList> = HitList::new(hitlist_size);
         while let Some(((_, oid), mut hsps)) = lists.next_if(|((q, _), _)| *q == q_idx) {
             hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
+            if filters.reap_by_query_coverage(&mut hsps, &context_lengths) {
+                continue;
+            }
             hit_list.update(TblastxHspList {
                 oid,
                 hsps,
                 best_evalue: 0.0,
             });
+        }
+        if filters.max_hsps > 0 {
+            for list in &mut hit_list.hsplist_array {
+                trim_by_max_hsps(&mut list.hsps, filters.max_hsps);
+            }
         }
         hit_list.sort_by_evalue();
         for mut list in hit_list.hsplist_array {
@@ -1405,6 +1488,7 @@ pub(crate) fn culled_hit_order(
     hitlist_size: usize,
     culling_limit: i32,
     query_lengths: &[usize],
+    filters: &HitFilters<'_>,
 ) -> Vec<TblastxHsp> {
     use super::hsp_culling::{tblastx_context_lengths, CullingWriter};
     use crate::algorithm::blastn::hsp::{HitList, HitListEntry};
@@ -1429,6 +1513,9 @@ pub(crate) fn culled_hit_order(
         let mut writer = CullingWriter::new(prelim_max, context_lengths);
         for (oid, mut hsps) in subjects {
             hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
+            if filters.reap_by_query_coverage(&mut hsps, &context_lengths) {
+                continue;
+            }
             writer.run(hsps, oid);
         }
         let mut culled = writer.finalize();
@@ -1462,6 +1549,7 @@ pub(crate) fn culled_hit_order(
                 best_evalue: 0.0,
             };
             list.update_best_evalue();
+            trim_by_max_hsps(&mut list.hsps, filters.max_hsps);
             final_lists.hsplist_array.push(list);
         }
         final_lists.hsplist_count = final_lists.hsplist_array.len();
@@ -1645,7 +1733,7 @@ mod tests {
             hsp(0, 1, 110, 1e-5, 0),
         ];
         let order = |size| -> Vec<(u32, i32)> {
-            final_hit_order(hits.clone(), size)
+            final_hit_order(hits.clone(), size, &HitFilters::default())
                 .iter()
                 .map(|hsp| (hsp.hit.s_idx, hsp.hit.raw_score))
                 .collect()

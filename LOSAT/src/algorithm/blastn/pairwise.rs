@@ -247,7 +247,7 @@ fn displayed_rows(
     subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
     let (mut query_row, mut subject_row) = (Vec::new(), Vec::new());
-    displayed_rows_into(
+    context_rows_into(
         hsp,
         query,
         subject_length,
@@ -255,11 +255,45 @@ fn displayed_rows(
         &mut query_row,
         &mut subject_row,
     )?;
+    // The rows live in a `PairwiseHit` until the query is written: a minus-strand HSP's are
+    // the exact-size reverse complements, not the grown buffers (outfmt 0's max RSS).
+    if hsp.query_frame < 0 {
+        return Ok((
+            reverse_complement(&query_row),
+            reverse_complement(&subject_row),
+        ));
+    }
     Ok((query_row, subject_row))
 }
 
-/// `displayed_rows` into `query_row` and `subject_row` (cleared first; their capacity is kept).
+/// `displayed_rows` into `query_row` and `subject_row` (cleared first; their capacity is kept),
+/// reversed in place for a minus-strand HSP.
 fn displayed_rows_into(
+    hsp: &BlastnHsp,
+    query: &[u8],
+    subject_length: usize,
+    subject_letters: impl FnOnce(usize, usize) -> Vec<u8>,
+    query_row: &mut Vec<u8>,
+    subject_row: &mut Vec<u8>,
+) -> Result<()> {
+    context_rows_into(
+        hsp,
+        query,
+        subject_length,
+        subject_letters,
+        query_row,
+        subject_row,
+    )?;
+    if hsp.query_frame < 0 {
+        reverse_complement_in_place(query_row);
+        reverse_complement_in_place(subject_row);
+    }
+    Ok(())
+}
+
+/// The two rows in the direction of the HSP's query context (cleared first; their capacity is
+/// kept): a minus-strand HSP's rows are still to be reverse-complemented.
+fn context_rows_into(
     hsp: &BlastnHsp,
     query: &[u8],
     subject_length: usize,
@@ -317,10 +351,6 @@ fn displayed_rows_into(
         q == context.len() && s == subject.len(),
         "BLASTN edit script does not span its HSP"
     );
-    if hsp.query_frame < 0 {
-        reverse_complement_in_place(query_row);
-        reverse_complement_in_place(subject_row);
-    }
     Ok(())
 }
 

@@ -198,6 +198,11 @@ pub struct TblastnArgs {
     // An omitted value keeps the default hit list size (500).
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]")]
     pub max_target_seqs: Option<usize>,
+    // NCBI blast_args.cpp:196-206: -qcov_hsp_perc in 0..100, -max_hsps >= 1.
+    #[arg(long = "max_hsps", value_parser = blastn_count, help = "Set maximum number of HSPs per subject sequence to save for each query")]
+    pub max_hsps: Option<usize>,
+    #[arg(long = "qcov_hsp_perc", value_parser = tblastn_query_coverage, help = "Percent query coverage per hsp")]
+    pub qcov_hsp_perc: Option<f64>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
     #[arg(long)]
@@ -243,6 +248,10 @@ pub struct ResolvedTblastnArgs {
     /// The -max_target_seqs value, which also sets the numbers of descriptions and
     /// alignments of the pairwise report (500 and 250 when it is not given).
     pub max_target_seqs_given: Option<usize>,
+    /// The -max_hsps value, or 0 (every HSP).
+    pub max_hsps: usize,
+    /// The -qcov_hsp_perc value, or 0 (no filter).
+    pub query_cov_hsp_perc: f64,
     pub composition_mode: crate::blastinput::app::CompositionMode,
     /// The `-comp_based_stats` value as typed.
     pub comp_based_stats: String,
@@ -531,6 +540,9 @@ impl TblastnArgs {
             window_size,
             hitlist_size: self.max_target_seqs.unwrap_or(500),
             max_target_seqs_given: self.max_target_seqs,
+            // NCBI blast_args.cpp:313-319: SetQueryCovHspPerc, SetMaxHspsPerSubject.
+            max_hsps: self.max_hsps.unwrap_or(0),
+            query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             composition_mode,
             comp_based_stats: self.comp_based_stats.clone(),
             num_threads: self.num_threads,
@@ -1592,6 +1604,33 @@ fn search(
             //                                                   seqinfo_src,
             //                                                   search_msgs));
             // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1777
+            // ```c++
+            //     if(hit_params->options->query_cov_hsp_perc > 0 || hit_params->options->max_hsps_per_subject > 0 ||
+            //        (hit_params->options->hsp_filt_opt != NULL && hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
+            //     	s_FilterBlastResults(results, hit_params->options, query_info, program_number);
+            //     }
+            //
+            //     /* Re-sort the hit lists according to their best e-values, because they
+            //        could have changed. Only do this for a database search. */
+            //     if (BlastSeqSrcGetTotLen(seq_src) > 0) {
+            //         Blast_HSPResultsSortByEvalue(results);
+            //     }
+            // ```
+            // `-max_hsps` and `-qcov_hsp_perc` filter the batch's final hit lists (each query's
+            // context is its searched letters), which the search has sorted by e-value; the
+            // sort is a total order (best e-value, first score, OID), so sorting again after
+            // the filter gives NCBI's order. A search with hits has subject letters.
+            if resolved.max_hsps > 0 || resolved.query_cov_hsp_perc > 0.0 {
+                for (hitlist, query) in batch_results.iter_mut().zip(&query_seqs[range.clone()]) {
+                    hitlist.filter_results(
+                        resolved.max_hsps,
+                        resolved.query_cov_hsp_perc,
+                        query.len(),
+                    );
+                    hitlist.sort_by_evalue_for_positive_totlen();
+                }
+            }
             // `-db`: the definition lines of the batch's final hit lists are read where NCBI
             // makes the batch's Seq-aligns (`database::read_titles`); a header file that NCBI
             // cannot read fails this batch, after the reports of the batches before.
@@ -1945,9 +1984,23 @@ mod tests {
             &parse(&["-comp_based_stats", "0", "-max_target_seqs", "1073741824"]).unwrap(),
         )
         .unwrap();
+        // NCBI blast_args.cpp:313-319: -qcov_hsp_perc and -max_hsps.
+        let resolved = parse(&["-max_hsps", "2", "-qcov_hsp_perc", "50.5"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!((resolved.max_hsps, resolved.query_cov_hsp_perc), (2, 50.5));
+        let resolved = parse(&[]).unwrap().resolve().unwrap();
+        assert_eq!((resolved.max_hsps, resolved.query_cov_hsp_perc), (0, 0.0));
         for extra in [
-            &["-max_hsps", "2"][..],
-            &["-db_soft_mask", "1"],
+            &["-max_hsps", "0"][..],
+            &["-qcov_hsp_perc", "100.5"],
+            &["-qcov_hsp_perc", "nan"],
+        ] {
+            assert!(parse(extra).is_err(), "{extra:?}");
+        }
+        for extra in [
+            &["-db_soft_mask", "1"][..],
             &["-remote"],
             &["-in_pssm", "p.asn"],
             &["-use_sw_tback"],

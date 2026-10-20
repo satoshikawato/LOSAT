@@ -726,11 +726,9 @@ pub fn update_best_evalue(list: &mut BlastnHspList) {
 //    hsp_list->hspcnt = hsp_max;
 // }
 // ```
+// The filter of every program (`core::blast_hits::trim_by_max_hsps`).
 pub fn trim_by_max_hsps(list: &mut BlastnHspList, max_hsps_per_subject: usize) {
-    if max_hsps_per_subject == 0 || list.hsps.len() <= max_hsps_per_subject {
-        return;
-    }
-    list.hsps.truncate(max_hsps_per_subject);
+    crate::core::blast_hits::trim_by_max_hsps(&mut list.hsps, max_hsps_per_subject);
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3077-3106

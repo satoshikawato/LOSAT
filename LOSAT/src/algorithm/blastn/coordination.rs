@@ -16,7 +16,7 @@ use super::constants::{
 use super::disc_lookup::DiscWordType;
 use super::lookup::{
     build_db_word_counts, build_disc_mb_lookup, build_na_lookup, build_pv_direct_lookup,
-    build_two_stage_lookup, NaLookupTable, PvDirectLookup, TwoStageLookup,
+    build_two_stage_lookup_kept, x_mb_lut_keep, NaLookupTable, PvDirectLookup, TwoStageLookup,
 };
 use crate::blastinput::fasta_reader::{FastaRecord, InputRecord};
 use crate::utils::dust::MaskedInterval;
@@ -959,7 +959,8 @@ pub fn apply_dust_masking<R: InputRecord>(
     }
 }
 
-/// Build lookup tables based on configuration
+/// Build lookup tables based on configuration. `x_keep`: the batch loop's keep of
+/// LOSAT_X_MBLUTKEEP for the megablast table (`lookup::x_mb_lut_keep`), `None` elsewhere.
 pub fn build_lookup_tables<R: InputRecord>(
     config: &TaskConfig,
     args: &BlastnArgs,
@@ -969,6 +970,7 @@ pub fn build_lookup_tables<R: InputRecord>(
     subjects: &[R],
     subjects_packed: Option<&[Vec<u8>]>,
     approx_table_entries: usize,
+    x_keep: Option<&std::sync::Arc<x_mb_lut_keep::Keep>>,
 ) -> (LookupTables, usize) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nalookup.c:1231-1344
     // ```c
@@ -1069,7 +1071,7 @@ pub fn build_lookup_tables<R: InputRecord>(
             approx_table_entries,
         ))
     } else if config.use_two_stage {
-        Some(build_two_stage_lookup(
+        Some(build_two_stage_lookup_kept(
             queries_blastna,
             query_offsets,
             config.effective_word_size,
@@ -1079,6 +1081,7 @@ pub fn build_lookup_tables<R: InputRecord>(
             args.max_db_word_count,
             approx_table_entries,
             !config.mb_lookup,
+            x_keep,
         ))
     } else {
         None

@@ -82,10 +82,12 @@ use super::super::filtering::{
 };
 use super::super::hsp::{
     evalue_comp, get_prelim_hitlist_size, score_compare_hsps, sort_hsplist_by_evalue,
-    sort_hsps_by_score, trim_by_max_hsps, write_output_blastn_hitlists_to_writer, BlastnHitList,
-    BlastnHsp, BlastnHspList, BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
+    sort_hsps_by_score, trim_by_max_hsps, update_best_evalue,
+    write_output_blastn_hitlists_to_writer, BlastnHitList, BlastnHsp, BlastnHspList,
+    BlastnOutputFormat, HitList, HitListEntry, NCBI_BLASTN_VERSION,
 };
 use super::super::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
+use super::super::lookup::x_mb_lut_keep;
 use super::super::lookup::{
     build_unmasked_ranges, encode_reverse_complement_blastna_into, DiscTemplates,
 };
@@ -99,6 +101,7 @@ use super::super::scoring::{
 };
 use super::super::seqalign::write_blastn_seqalign;
 use crate::blastinput::app::{self as app, Program};
+use crate::core::blast_hits::reap_by_query_coverage;
 use crate::report::record::{QueryNames, SubjectNames};
 // EXPERIMENT (LOSAT_X_BNSTORE): the subjects' letters read from the records or from packed subjects.
 use super::super::x_subject_store::{
@@ -144,6 +147,12 @@ use crate::utils::dust::MaskedInterval;
 // the private types and kernels of this file without changing them).
 #[path = "x_pair_seed.rs"]
 mod x_pair_seed;
+
+// EXPERIMENT (LOSAT_X_BNFEWSUBJ): a `-subject` search whose longest 5 Mb unit is a large part of
+// its letters searches its subjects, and a batch of chunks the same way its chunks, one at a time
+// on the whole pool, so that the seed stage scans each chunk in strips (`x_pair_seed`).
+#[path = "x_few_subj.rs"]
+mod x_few_subj;
 
 // EXPERIMENT (LOSAT_X_BNSTREAM): the subjects of a subject set searched by the pool threads in
 // OID order with a bounded window of results that the owner hands over in OID order.
@@ -5428,15 +5437,18 @@ fn tabular_subject_ids(
 }
 
 /// The end of the traceback for the final hit list of one query (`hit_list`, of a query of
-/// `query_len` letters): the HSP lists cut to `max_hsps_per_subject` and their subject
-/// best hits (`-subject_besthit`), the lists sorted by e-value and cut to `hitlist_size`,
-/// and the HSPs of each list sorted for the Seq-aligns (`post_process_hits_and_write`;
-/// a database search does it after each query batch's traceback, `run_in_pool`).
+/// `query_len` letters, the length of each of its contexts): the HSP lists cut to
+/// `max_hsps_per_subject`, their HSPs below `query_cov_hsp_perc` percent of the query
+/// removed (`-qcov_hsp_perc`; a list left empty is removed) and their subject best hits
+/// (`-subject_besthit`), the lists sorted by e-value and cut to `hitlist_size`, and the HSPs
+/// of each list sorted for the Seq-aligns (`post_process_hits_and_write`; a database search
+/// does it after each query batch's traceback, `run_in_pool`).
 fn finish_query_hit_list(
     hit_list: &mut BlastnHitList,
     query_len: usize,
     hitlist_size: usize,
     max_hsps_per_subject: usize,
+    query_cov_hsp_perc: f64,
     subject_besthit: bool,
 ) {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:836-867
@@ -5446,6 +5458,12 @@ fn finish_query_hit_list(
     //     if (hit_options->max_hsps_per_subject) {
     //         Blast_TrimHSPListByMaxHsps(hsp_list, hit_options);
     //     }
+    //     if(hit_options->query_cov_hsp_perc) {
+    //         Blast_HSPListReapByQueryCoverage(hsp_list, hit_options, query_info, program_number);
+    //         if(hsp_list->hspcnt == 0){
+    //             hit_list->hsplist_array[subject_index] =  Blast_HSPListFree(hsp_list);
+    //         }
+    //     }
     //     if ((hit_options->hsp_filt_opt != NULL) &&
     //         (hit_options->hsp_filt_opt->subject_besthit_opts != NULL)) {
     //         Blast_HSPListSubjectBestHit(program_number,
@@ -5453,14 +5471,38 @@ fn finish_query_hit_list(
     //             query_info, hsp_list);
     //     }
     // }
+    // if(hit_options->query_cov_hsp_perc) {
+    //     Blast_HitListPurgeNullHSPLists(hit_list);
+    // }
     // ```
     for hsp_list in &mut hit_list.hsplist_array {
         if max_hsps_per_subject > 0 {
             trim_by_max_hsps(hsp_list, max_hsps_per_subject);
         }
+        // Both contexts of a query have its length, and the offsets are those of the HSP's
+        // own context.
+        if query_cov_hsp_perc > 0.0
+            && reap_by_query_coverage(&mut hsp_list.hsps, query_cov_hsp_perc, |hsp| {
+                (
+                    hsp.internal_q_offset_0 as i64,
+                    hsp.internal_q_end_0 as i64,
+                    query_len as i64,
+                )
+            })
+        {
+            update_best_evalue(hsp_list);
+        }
+        // NCBI calls Blast_HSPListSubjectBestHit on a list the coverage left empty after
+        // freeing it (blast_traceback.c:853-861); LOSAT reads it as the empty list it was.
         if subject_besthit {
             subject_best_hit(&mut hsp_list.hsps, query_len);
         }
+    }
+    if query_cov_hsp_perc > 0.0 {
+        hit_list
+            .hsplist_array
+            .retain(|hsp_list| !hsp_list.hsps.is_empty());
+        hit_list.hsplist_count = hit_list.hsplist_array.len();
     }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:3383-3400
     // ```c
@@ -5538,6 +5580,7 @@ fn post_process_hits_and_write(
     mut hit_lists: Vec<Option<BlastnHitList>>,
     hitlist_size: usize,
     max_hsps_per_subject: usize,
+    query_cov_hsp_perc: f64,
     subject_besthit: bool,
     query_lengths: &[usize],
     outputs: &mut ReportOutputs<'_>,
@@ -5605,6 +5648,7 @@ fn post_process_hits_and_write(
                 query_lengths.get(q_idx).copied().unwrap_or_default(),
                 hitlist_size,
                 max_hsps_per_subject,
+                query_cov_hsp_perc,
                 subject_besthit,
             );
             drop_hsps_of_score_zero(hit_list);
@@ -7578,6 +7622,7 @@ fn run_in_pool(
             BatchStage::Search {
                 query_offsets: &query_offsets[job.searched.clone()],
             },
+            None,
         )
     };
     let qbp_input = x_qbatch_par::PlanInput {
@@ -7626,6 +7671,9 @@ fn run_in_pool(
             }),
             qbp_off,
         );
+        // EXPERIMENT (LOSAT_X_MBLUTKEEP): the megablast table this loop keeps between its batches
+        // (`lookup::x_mb_lut_keep`), freed when the loop ends.
+        let x_lut_keep = x_mb_lut_keep::Keep::for_loop();
         let mut hit_lists: Vec<Option<BlastnHitList>> = Vec::with_capacity(lengths.len());
         let mut unsearched = Vec::with_capacity(lengths.len());
         let mut query_masks = Vec::with_capacity(lengths.len());
@@ -7899,6 +7947,9 @@ fn run_in_pool(
             let searched = match precomputed {
                 Some(precomputed) if !qbp.shadow() => precomputed,
                 precomputed => {
+                    // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop keeps its megablast table from batch
+                    // to batch once no slot can search a batch any more.
+                    let x_keep = x_lut_keep.as_ref().filter(|_| !qbp.may_speculate());
                     let reference = search_query_batch(
                         &args,
                         batch_records.searched(),
@@ -7910,6 +7961,7 @@ fn run_in_pool(
                         BatchStage::Search {
                             query_offsets: &query_offsets[start..end],
                         },
+                        x_keep,
                     );
                     if let Some(precomputed) = precomputed {
                         qbp.shadow_check(key, &precomputed, &reference, x_qbatch_par_compare);
@@ -8042,6 +8094,7 @@ fn run_in_pool(
                             lengths[start + q_idx],
                             hitlist_size,
                             args.max_hsps_per_subject.unwrap_or(0),
+                            args.qcov_hsp_perc.unwrap_or(0.0),
                             args.subject_besthit,
                         );
                     }
@@ -8252,6 +8305,8 @@ fn run_in_pool(
             queries.done(input_end);
             input_start = input_end;
         }
+        // EXPERIMENT (LOSAT_X_MBLUTKEEP): the loop's kept table is freed with the loop.
+        drop(x_lut_keep);
 
         // EXPERIMENT (LOSAT_X_QBATCHPAR): every slot has stopped before the reports are written.
         qbp.finish();
@@ -8895,6 +8950,7 @@ fn write_reports_untimed(
         hit_lists,
         hitlist_size,
         args.max_hsps_per_subject.unwrap_or(0),
+        args.qcov_hsp_perc.unwrap_or(0.0),
         args.subject_besthit,
         results.lengths,
         outputs,
@@ -8972,7 +9028,8 @@ fn context_lengths(
 
 /// Searches one query batch against the subjects, with the query block, lookup table and
 /// diagonal table of the batch, as NCBI's `CLocalBlast` does for each batch that
-/// `run_in_pool` reads.
+/// `run_in_pool` reads. `x_keep`: the batch loop's keep of LOSAT_X_MBLUTKEEP, which the batch's
+/// megablast table is built on and goes back to (`lookup::x_mb_lut_keep`).
 fn search_query_batch(
     args: &BlastnArgs,
     query_records: &[FastaRecord],
@@ -8982,6 +9039,7 @@ fn search_query_batch(
     batching: QueryBatching,
     first_batch: bool,
     stage: BatchStage<'_>,
+    x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
 ) -> Result<QueryBatch> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/blastinput/blast_args.hpp:1290-1296
     // ```c
@@ -9216,13 +9274,8 @@ fn search_query_batch(
     // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
     // TBlastThreads the_threads(GetNumberOfThreads());
     // (*thread)->Run(); (*thread)->Join(&result);
-    let use_parallel = requested_parallel && subject_metadata.db_num_seqs > 1;
-    crate::utils::threading::report_stage(
-        "blastn",
-        "subjects",
-        subject_metadata.db_num_seqs,
-        use_parallel,
-    );
+    // The subjects as tasks of the pool; `use_parallel` below, after LOSAT_X_BNFEWSUBJ's rule.
+    let subjects_parallel = requested_parallel && subject_metadata.db_num_seqs > 1;
 
     // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:836-847
     // ```c
@@ -9957,6 +10010,7 @@ fn search_query_batch(
             parallel_pool,
             batching,
             first_batch,
+            x_keep,
         )?,
         _ => None,
     };
@@ -10004,6 +10058,7 @@ fn search_query_batch(
             subjects_for_lookup,
             subject_packed_cache_ref,
             approx_table_entries,
+            x_keep,
         );
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::BuildLookup, t_build_lookup);
         tables
@@ -10071,7 +10126,7 @@ fn search_query_batch(
     // itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
     // ```
     let subject_count = seq_data.db_num_seqs as u64;
-    let progress_bar = if use_parallel {
+    let progress_bar = if subjects_parallel {
         let bar = ProgressBar::new(subject_count);
         bar.set_style(
             ProgressStyle::default_bar()
@@ -10236,14 +10291,51 @@ fn search_query_batch(
         gap_x_dropoffs(&context_karlin, config.x_drop_gapped, config.x_drop_final);
     let scan_range = config.scan_range; // For off-diagonal hit detection
     let min_diag_separation = config.min_diag_separation; // For MB_HSP_CLOSE containment check
+
+    // EXPERIMENT (LOSAT_X_BNFEWSUBJ, x_few_subj.rs): whether the seed stage's strips would take an
+    // unmasked chunk of this `-subject` search that one subject's owner searches on this thread's
+    // pool, and with it whether the search takes the shape of a one-subject search (`use_parallel`
+    // false: the subjects one at a time). A batch split into query chunks has no lookup table
+    // here (its traceback only), so it keeps its shape; each query chunk's call decides for itself.
+    // `-subject` only: a database (`-db`) keeps its shapes (plan v4 line D).
+    let x_strips = x_few_subj::on()
+        && subjects.prepared().is_some()
+        && x_pair_seed::takes_owner_chunks(
+            two_stage_lookup_ref,
+            query_concat_length <= 8000,
+            window_size,
+            scan_range,
+            !small_na_compressed_query.is_empty(),
+            debug_mode || blastn_debug || blastn_trace_enabled || debug_window.is_some(),
+        );
+    let x_kind = x_few_subj::Kind::of(
+        two_stage_lookup_ref.is_some_and(|two_stage| two_stage.disc().is_some()),
+        &args.task,
+    );
+    let x_serial_subjects = subjects_parallel
+        && x_strips
+        && !lcase_masking
+        && subjects.prepared().is_some_and(|prepared| {
+            let letters = prepared.letters();
+            x_few_subj::serial_subjects(
+                (0..prepared.records.len()).map(|index| letters.len(index)),
+                num_threads,
+                x_kind,
+            )
+        });
+    // NCBI reference: c++/src/algo/blast/api/prelim_stage.cpp:145-188
+    // TBlastThreads the_threads(GetNumberOfThreads());
+    // (*thread)->Run(); (*thread)->Join(&result);
+    let use_parallel = subjects_parallel && !x_serial_subjects;
+    crate::utils::threading::report_stage("blastn", "subjects", seq_data.db_num_seqs, use_parallel);
     let db_len_total = seq_data.db_len_total;
     let db_num_seqs = seq_data.db_num_seqs;
     let evalue_threshold = super::super::coordination::determine_evalue(&args);
     let subject_besthit = args.subject_besthit;
     // EXPERIMENT (LOSAT_X_QGROUPPAR): whether the gapped stages of a subject searched on this
     // thread may run per query on the pool (x_qgroup_par.rs). Not on the diagnostic paths, which
-    // print in the loop's order, and not with several subjects (`use_parallel`: the pool searches
-    // subjects then).
+    // print in the loop's order, and not while the pool searches subjects in parallel
+    // (`use_parallel`; several subjects one at a time under LOSAT_X_BNFEWSUBJ take it).
     let x_qgroup_batch = x_qgroup_par::on()
         && !use_parallel
         && parallel_pool.enabled()
@@ -10953,6 +11045,13 @@ fn search_query_batch(
                             timing: timing_ref,
                         },
                         diag_hash,
+                        x_pair_seed::DiagArray {
+                            levels: &mut *hit_level_array,
+                            lens: &mut *hit_len_array,
+                            length: diag_table_length as isize,
+                            mask: diag_table_mask,
+                            size: diag_array_size,
+                        },
                         ungapped_hits,
                         &mut subject_scratch.x_pair_fold,
                     ) {
@@ -13422,9 +13521,16 @@ fn search_query_batch(
             // The oracle's qsort (glibc 2.39) is a stable merge sort: hits that
             // compare equal keep the order in which they were saved. `sort_by`
             // is stable too.
-            // Dispatch point of LOSAT_X_PAIRPARSHADOW: the hit list and the diagonal hash of
-            // the code above against those `x_pair_seed::run` computed for this chunk.
-            x_pair_seed::shadow_check(ungapped_hits, &subject_scratch.diag_hash);
+            // Dispatch point of LOSAT_X_PAIRPARSHADOW (and of the dc shadows,
+            // LOSAT_X_PAIRPARDISCSHADOW and LOSAT_X_PAIRPARDISCARRSHADOW): the hit list and the
+            // diagonal hash (or array) of the code above against those `x_pair_seed::run`
+            // computed for this chunk.
+            x_pair_seed::shadow_check(
+                ungapped_hits,
+                &subject_scratch.diag_hash,
+                &subject_scratch.hit_level_array,
+                &subject_scratch.hit_len_array,
+            );
             // EXPERIMENT (LOSAT_X_QGROUPPAR): with the stage run per query, each query's hits are
             // taken in the order saved above and sorted by the task (the comparator and the sort
             // are those below, so each query's hits come in the relative order the batch's sort
@@ -14372,42 +14478,64 @@ fn search_query_batch(
                         // ```
                         // NCBI reference: c++/src/algo/blast/core/blast_engine.c:478-500
                         // status = s_GetNextSubjectChunk(subject, &backup, ...);
+                        // EXPERIMENT (LOSAT_X_BNFEWSUBJ): a batch whose longest chunk is a large
+                        // part of its letters (`x_few_subj::serial_chunks`), which this subject's
+                        // owner searches by itself, searches its chunks in order as one-chunk
+                        // batches do (strips for each chunk), with the one-thread loop's
+                        // statements below.
+                        let x_serial_chunks = !use_parallel
+                            && !subject_masked
+                            && x_strips
+                            && x_few_subj::serial_chunks(
+                                chunk_batch.iter().map(|chunk| chunk.length),
+                                num_threads,
+                                x_kind,
+                            );
                         crate::utils::threading::report_stage(
                             "blastn",
                             "subject_chunks",
                             chunk_batch.len(),
-                            chunk_batch.len() > 1,
+                            chunk_batch.len() > 1 && !x_serial_chunks,
                         );
                         let soft_ranges = split_state.soft_ranges.as_slice();
-                        if chunk_batch.len() == 1 {
-                            let chunk = &chunk_batch[0];
-                            let hits = collect_prelim_hits_for_chunk(
-                                chunk,
-                                soft_ranges,
-                                gap_scratch,
-                                subject_scratch,
-                                true,
-                            );
-                            let hits = merge_prelim_hit_lists(
-                                &mut combined_prelim_hits,
-                                hits,
-                                HspListSplit::Subject {
-                                    offset: chunk.offset,
-                                },
-                                chunk.overlap,
-                                true,
-                            );
-                            if subject_besthit {
-                                prelim_subject_best_hit(&mut combined_prelim_hits, &query_lengths);
+                        if chunk_batch.len() == 1 || x_serial_chunks {
+                            for (x_index, chunk) in chunk_batch.iter().enumerate() {
+                                // Cancellation between chunks of 5 Mb, as the loop above checks
+                                // between batches (LOSAT_X_QBATCHPAR).
+                                if x_index > 0 && x_cancelled() {
+                                    break;
+                                }
+                                let hits = collect_prelim_hits_for_chunk(
+                                    chunk,
+                                    soft_ranges,
+                                    gap_scratch,
+                                    subject_scratch,
+                                    true,
+                                );
+                                let hits = merge_prelim_hit_lists(
+                                    &mut combined_prelim_hits,
+                                    hits,
+                                    HspListSplit::Subject {
+                                        offset: chunk.offset,
+                                    },
+                                    chunk.overlap,
+                                    true,
+                                );
+                                if subject_besthit {
+                                    prelim_subject_best_hit(
+                                        &mut combined_prelim_hits,
+                                        &query_lengths,
+                                    );
+                                }
+                                // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
+                                // ```c
+                                // /* Delete if not done in last loop iteration to prevent memory leak. */
+                                // hsp_list = Blast_HSPListFree(hsp_list);
+                                //
+                                // BlastInitHitListReset(init_hitlist);
+                                // ```
+                                subject_scratch.prelim_hits = hits;
                             }
-                            // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_engine.c:488-491
-                            // ```c
-                            // /* Delete if not done in last loop iteration to prevent memory leak. */
-                            // hsp_list = Blast_HSPListFree(hsp_list);
-                            //
-                            // BlastInitHitListReset(init_hitlist);
-                            // ```
-                            subject_scratch.prelim_hits = hits;
                         } else {
                             let mut chunk_results: Vec<(usize, usize, Vec<PrelimHit>)> =
                                 Vec::with_capacity(chunk_batch.len());
@@ -16908,6 +17036,7 @@ fn search_query_chunks(
     parallel_pool: &crate::utils::threading::SearchPool<'_>,
     batching: QueryBatching,
     first_batch: bool,
+    x_keep: Option<&Arc<x_mb_lut_keep::Keep>>,
 ) -> Result<Option<PrelimHitLists>> {
     let lengths: Vec<usize> = queries.iter().map(|record| record.seq().len()).collect();
     // A negative CHUNK_SIZE splits a batch only with a negative OVERLAP_CHUNK_SIZE below it
@@ -16965,6 +17094,7 @@ fn search_query_chunks(
                 query_masks: &part_masks,
                 batch_eff_searchsp,
             },
+            x_keep,
         )?;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:174-178
         // ```c

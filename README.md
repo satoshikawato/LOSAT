@@ -220,6 +220,7 @@ LOSAT blastx \
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |
+| `-qcov_hsp_perc <real>` | Float | `0` (no filter) | Percent query coverage per HSP: HSPs that cover less of the query (of the query frame in BLASTX/TBLASTX) are removed |
 | `-dust <args>` | String | `20 64 1` | DUST low-complexity filter for BLASTN (`yes`, `no`, or `"level window linker"`) |
 | `-seg <args>` | String | `no` (blastp)<br>`12 2.2 2.5` (blastx/tblastx/tblastn) | SEG low-complexity filter for BLASTX/BLASTP/TBLASTX/TBLASTN (`yes`, `no`, or `"window locut hicut"`) |
 | `-query_gencode <int>` | Integer | `1` | Genetic code for query translation (BLASTX/TBLASTX) |

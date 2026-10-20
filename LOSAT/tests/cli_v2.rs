@@ -544,9 +544,19 @@ fn numeric_values_are_validated_before_io() {
             }
         }
     }
-    for program in ["blastn", "blastp"] {
+    for program in ["blastn", "blastp", "blastx", "tblastn", "tblastx"] {
         assert!(parse(program, &["-outfmt", "6", "-max_hsps", "0"]).is_err());
         parse(program, &["-outfmt", "6", "-max_hsps", "1"]).unwrap();
+        // NCBI blast_args.cpp:196-201: -qcov_hsp_perc is a real number in 0..100.
+        for value in ["0", "50.5", "1e1", "100"] {
+            parse(program, &["-outfmt", "6", "-qcov_hsp_perc", value]).unwrap();
+        }
+        for value in ["-1", "100.5", "inf", "nan", "abc"] {
+            assert!(
+                parse(program, &["-outfmt", "6", "-qcov_hsp_perc", value]).is_err(),
+                "{program} -qcov_hsp_perc {value}"
+            );
+        }
     }
     // NCBI tblastx runs word sizes 2 to 4 (blast_options.c:1342-1364), which LOSAT's
     // TBLASTX rejects where the search starts; 5 or more is NCBI's error.

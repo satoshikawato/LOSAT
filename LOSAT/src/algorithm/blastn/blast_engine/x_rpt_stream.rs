@@ -32,8 +32,9 @@
 //!
 //! Why the bytes are those of the reports written after the loop:
 //! - every report of a query depends only on that query's final list and on fixed inputs: the
-//!   lists are finished per query (`finish_query_hit_list`: `-max_hsps`, `-subject_besthit`, the
-//!   sort, `-max_target_seqs`; the HSPs of score 0), the coordinates move by the query's and the
+//!   lists are finished per query (`finish_query_hit_list`: `-max_hsps`, `-qcov_hsp_perc`,
+//!   `-subject_besthit`, the sort, `-max_target_seqs`; the HSPs of score 0), the coordinates move
+//!   by the query's and the
 //!   subject's own range start (`shift_to_records`), and the rows, outfmt 7 headers and outfmt 0
 //!   sections are written query by query from the query's list, record, masks, blocks and search
 //!   space, the subject records and the options. BLASTN has no culling and no cross-query sort.

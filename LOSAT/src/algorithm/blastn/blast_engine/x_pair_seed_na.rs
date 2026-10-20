@@ -62,9 +62,11 @@
 //!
 //! Strip size: a lookup hit is a seed here (no word extension filters it), about 100 per
 //! subject offset for 30,000 24-mers against a 3 Mb genome (297.7 M pairs), so the strips are
-//! the parent's smallest (`plan_strips`'s 512 offsets, about 51 k seeds or 0.8 MB on that
-//! input) and the helpers may scan at most `AHEAD_PER_THREAD` strips per thread past the
-//! slowest fold.
+//! small: `STRIPS_PER_THREAD` x max(threads, 4) strips, of at least 512 offsets
+//! (`plan_strips`), and the helpers may scan at most `AHEAD_PER_THREAD` strips per thread past
+//! the slowest fold. On that input a strip has 512 offsets (about 51 k seeds, 0.8 MB) from 12
+//! threads on and 1,465 offsets (about 2.3 MB) at 4 threads; the seeds in flight stay at about
+//! (`AHEAD_PER_THREAD` + 1) x threads strips.
 
 use super::super::x_diag_lv;
 use super::super::{

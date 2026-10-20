@@ -18,8 +18,9 @@
 //! The input is one subject (the stage takes a search of one subject by the owner of a pool of
 //! two threads or more) and 820 short queries cut from it, 19,673 letters (the stage takes the
 //! diagonal hash only, a query block longer than 8000 letters): 24-mers on both strands,
-//! queries of 18 to 30 letters, and queries with a low-complexity half that DUST masks (so
-//! `s_TypeOfWord` checks the masks).
+//! queries of 18 to 30 letters, and every fortieth query with its first ten letters in lower
+//! case, which `-lcase_masking` masks (so `s_TypeOfWord` checks the masks of those contexts;
+//! blastn-short has no DUST filter by default).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -63,7 +64,7 @@ fn subject_letters() -> Vec<u8> {
 
 /// A query file written once per test binary: `count` queries cut from the subject at evenly
 /// spaced offsets, of the lengths `length(i)`, every third one reverse-complemented, and every
-/// fortieth with its first half replaced by a dinucleotide repeat (DUST masks it).
+/// fortieth with its first ten letters in lower case.
 fn query_file(name: &str, count: usize, length: impl Fn(usize) -> usize) -> PathBuf {
     let subject = subject_letters();
     let step = (subject.len() - 40) / count;
@@ -75,9 +76,7 @@ fn query_file(name: &str, count: usize, length: impl Fn(usize) -> usize) -> Path
             seq = reverse_complement(&seq);
         }
         if i % 40 == 7 {
-            for (k, b) in seq.iter_mut().take(len / 2).enumerate() {
-                *b = if k % 2 == 0 { b'A' } else { b'T' };
-            }
+            seq[..10].make_ascii_lowercase();
         }
         text.push_str(&format!(
             ">{name}_{i}\n{}\n",
@@ -164,8 +163,9 @@ fn stage_chunks(stderr: &str) -> u64 {
 /// For one word size: the search without a variable at one thread, then with the switch at 1,
 /// 2 and 4 threads, without a variable, with the owner's fold (`LOSAT_X_PAIRPARFOLD=0`), with
 /// the switch at `0` and with `LOSAT_X_DEFAULT=0` at 4 threads (the same bytes, nothing on
-/// standard error), then the shadow at 4 threads and at 1 thread (the same bytes, and its
-/// summary line with at least one chunk compared).
+/// standard error), then the shadow at 4 threads, at 4 threads with `LOSAT_X_DIAGLV=0` (the
+/// diagonal-hash retrieve without level bounds) and at 1 thread (the same bytes, and its summary
+/// line with at least one chunk compared).
 fn check(task_args: &[&str]) {
     let query = queries();
     let (expected, expected_stderr) = blastn(query, task_args, 1, &[]);
@@ -188,11 +188,12 @@ fn check(task_args: &[&str]) {
         );
         assert_eq!(stderr, "", "{task_args:?} threads {threads} {switches:?}");
     }
-    for threads in [4, 1] {
-        let (report, stderr) = blastn(query, task_args, threads, &[SHADOW]);
+    let no_levels = [SHADOW, ("LOSAT_X_DIAGLV", "0")];
+    for (threads, switches) in [(4, &[SHADOW][..]), (4, &no_levels[..]), (1, &[SHADOW][..])] {
+        let (report, stderr) = blastn(query, task_args, threads, switches);
         assert!(
             report == expected,
-            "{task_args:?} threads {threads}: the report differs with {SHADOW:?}"
+            "{task_args:?} threads {threads}: the report differs with {switches:?}"
         );
         let line = stderr
             .lines()
@@ -209,6 +210,37 @@ fn check(task_args: &[&str]) {
 #[test]
 fn blastn_short_gives_the_same_report() {
     check(&["-task", "blastn-short"]);
+}
+
+// `-lcase_masking`: the lower-case letters of every fortieth query are masked (the report
+// differs from the one without masks), and the contexts with masks check them in
+// `s_TypeOfWord`.
+#[test]
+fn masked_queries_give_the_same_report() {
+    let (unmasked, _) = blastn(queries(), &["-task", "blastn-short"], 1, &[]);
+    let masked_args = ["-task", "blastn-short", "-lcase_masking"];
+    let (masked, _) = blastn(queries(), &masked_args, 1, &[]);
+    assert!(masked != unmasked, "-lcase_masking masks nothing");
+    check(&masked_args);
+}
+
+// Word size 5 (its own table width, more pairs per subject offset): the default at 4 threads
+// and the shadow give the report of one thread.
+#[test]
+fn word_size_5_gives_the_same_report() {
+    let task_args = ["-task", "blastn-short", "-word_size", "5"];
+    let (expected, _) = blastn(queries(), &task_args, 1, &[]);
+    assert!(!expected.is_empty(), "no hits");
+    let (report, stderr) = blastn(queries(), &task_args, 4, &[]);
+    assert!(report == expected, "the report differs at 4 threads");
+    assert_eq!(stderr, "");
+    let (report, stderr) = blastn(queries(), &task_args, 4, &[SHADOW]);
+    assert!(report == expected, "the report differs with {SHADOW:?}");
+    assert!(
+        stderr.starts_with("[X_PAIRPARNASHADOW] blastn: seed chunks equal=")
+            && !stderr.starts_with("[X_PAIRPARNASHADOW] blastn: seed chunks equal=0 "),
+        "{stderr}"
+    );
 }
 
 // Word sizes 6 and 8 with `-task blastn-short`: a direct table whose lookup width is the word

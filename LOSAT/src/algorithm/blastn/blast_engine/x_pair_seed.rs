@@ -63,7 +63,7 @@
 //! A chunk with a discontiguous megablast table goes to the child module `disc`
 //! (`x_pair_seed_disc.rs`, LOSAT_X_PAIRPARDISC: the two-hit stage of dc-megablast on the same
 //! strips, with its own switches). A chunk searched with a table that is not two-stage (the
-//! direct and Na tables of words 7 to 10, `-task blastn-short`) goes to the child module `na`
+//! direct table of word sizes 4 to 8, `-task blastn-short`) goes to the child module `na`
 //! (`x_pair_seed_na.rs`, LOSAT_X_PAIRPARNA, called by `run.rs` as `run_na`).
 
 use super::{

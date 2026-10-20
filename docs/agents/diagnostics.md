@@ -2447,17 +2447,19 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_PAIRPARNA=1` (in the strict set since 2026-10-20 (perf/bn-short-strip, evidence at the end of this entry): on
   unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; it does not depend on `LOSAT_X_PAIRPAR`) blastn with a lookup
   table that is not two-stage (the lookup width is the word size: `-task blastn-short`'s word 7, and word sizes 4 to 8
-  when the table has enough entries), one query-subject pair on a pool of 2+ threads: the one-hit seed stage of a subject
-  chunk with the diagonal hash (query block over 8000 letters, `window_size` and `scan_range` 0, unmasked subject, one
-  subject, no debug or trace). The pool threads scan strips of 512 subject offsets with the scan kernel of the reference
+  when the table has enough entries), one subject of up to 5 Mb (a longer one is searched in chunks in parallel already)
+  and a query block on a pool of 2+ threads: the one-hit seed stage of the chunk with the diagonal hash (query block over 8000
+  letters, both strands counted, so about 4000 query letters; `window_size` and `scan_range` 0, unmasked subject, no
+  debug or trace). The pool threads scan strips (512 x max(threads, 4) of them, at least 512 subject offsets each: 512
+  offsets on 3 Mb from 12 threads on) with the scan kernel of the reference
   (`run.rs`, the branch after `if two_stage_lookup_ref.is_none()`), each lookup hit becoming a seed with the context of
   its query offset, and the pairs are folded in scan order through a copy of the reference's one-hit diagonal-hash code
   (`last_hit` test, `s_TypeOfWord`, the ungapped extension on the context's query slice, the cutoff, every insert;
   `blastn/blast_engine/x_pair_seed_na.rs`); with `LOSAT_X_PAIRPARFOLD` (default) the fold is split by diagonal-hash
   bucket over the threads, without it the owner folds. Every lookup hit is a seed here (about 100 per subject offset for
   30,000 24-mers against 3 Mb), so the helpers scan at most two strips per thread ahead of the slowest fold. Anything
-  else (the diagonal array of a query block up to 8000 letters, one thread, several subjects searched in parallel) runs
-  the original code. Before it, blastn-short against one subject ran on one core at any thread count. Shadow:
+  else (the diagonal array of a query block up to 8000 letters, such as a few primers; one thread; several subjects or
+  subject chunks searched in parallel) runs the original code. Before it, blastn-short against one subject ran on one core at any thread count. Shadow:
   `LOSAT_X_PAIRPARNASHADOW=1` (per chunk the hit list and the whole diagonal hash compared with the original code; one
   `[X_PAIRPARNASHADOW]` summary line on stderr at the end, with the number of chunks compared). With `LOSAT_TIMING` a
   `[TIMING] x_pairparna_seed` line gives the strips, seeds and the fold, scan and wait time. Tests:

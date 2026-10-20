@@ -48,6 +48,61 @@
 //! reads the same pairs; it writes up to `X_SCAN_BF_SLACK` pairs past `array_size`, which the
 //! per-thread buffer then holds and nothing reads. With LOSAT_X_BXDIAG the fused loop takes the
 //! same candidate loop (`x_seed_diag.rs`). The compressed lookup table keeps its scan.
+//!
+//! EXPERIMENT (LOSAT_X_BXHITBF): the direct loop takes the two outcomes most two-hit tests end in,
+//! too far and overlap, without a branch (tblastn's LOSAT_X_TBNHITBF and TBLASTX's
+//! LOSAT_X_TBXHITBF do the same in their loops):
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
+//! ```c
+//!                 if (diff >= window) {
+//!                     /* We are beyond the window for this diagonal; start a
+//!                        new hit */
+//!                     diag_array[diag_coord].last_hit =
+//!                         subject_offset + diag_offset;
+//!                     continue;
+//!                 }
+//!
+//!                 /* If the difference is less than the wordsize (i.e. last
+//!                    hit and this hit overlap), give up */
+//!
+//!                 if (diff < wordsize) {
+//!                     continue;
+//!                 }
+//! ```
+//! Where the direct loop scans every subject (`LOSAT_X_BXDIAG=0`, and the default without AVX2:
+//! aarch64, WebAssembly) 79-81 % of the hits of the three blastx cases of v4-A10 probe bx1 are too
+//! far and 14.5-17.4 % overlap, which of the two is hard to predict, and 1.2-1.4 % meet a flag-1
+//! cell and 2.1-2.8 % are candidates for the extension.
+//!
+//! `x_hit_bf` reads the packed cell `raw` (`last_hit` in bits 0-30, the flag in bit 31) and works
+//! with twice the values: `d2 = 2 (s + diag_offset) - (raw << 1)`, in wrapping `u32` arithmetic read
+//! as `i32`. For a flag-0 cell `raw << 1` is twice the 31-bit field's signed value modulo 2^32 (a
+//! cleared cell holds `-window`), so `d2` is twice the reference's `diff = s - (last_hit -
+//! diag_offset)` whenever that fits in an `i32`. `x_hitbf_fits` (checked once per subject) makes it
+//! fit: with `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (`length` the subject's
+//! letters), every flag-0 `last_hit` the table holds is in `[-window, diag_offset + length)` (the
+//! cleared value, 0 in a new table, or an `s + diag_offset` of this subject or of an earlier one,
+//! whose offsets are lower), `s + diag_offset` is in `[diag_offset, diag_offset + length)`, so `diff`
+//! is in `(-length, diag_offset + length + window)` and `2 diff` in `(-2^31, 2^31)`. Then too far
+//! (`diff >= window`) is `d2 >= 2 window`, and a candidate (`wordsize <= diff < window`) is
+//! `(d2 - 2 wordsize) as u32 < 2 (window - wordsize)`, one unsigned compare: below `2 wordsize`
+//! the difference is negative (it does not wrap, as `2 length + 2 wordsize < 2^31`), so at least
+//! 2^31 as a `u32`. The rule also asks `1 <= wordsize < window`, a two-hit search (the one-hit
+//! search, window 0, keeps the statements). A flag-1 cell (`raw as i32 < 0`) or a candidate goes
+//! on to the statements of `word_finder_plain`, unchanged; any other hit stores `s + diag_offset`
+//! (too far; the flag stays 0) or what it read (overlap), selected without a branch. So the table
+//! holds after each hit what the statements leave there, the statements see the same table for
+//! every hit they run, and the init HSPs are the same, in the same order. (The context lookup the
+//! statements make before the diagonal test without LOSAT_X_BXLAZYCTX only reads.)
+//!
+//! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
+//! `LOSAT_X_BXHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. The loop with the test is its own
+//! function (`x_word_finder_direct_bf`, never inlined), so the loop without it keeps its code. The
+//! fused loop of LOSAT_X_BXDIAG keeps its own tests. With `LOSAT_X_BXSCANSHADOW` the direct loop that
+//! runs, this one where the switch acts, is compared with `word_finder_plain` on a copy of the table
+//! for every subject the direct loop scans, and `main` prints `[X_SHADOW] BXHITBF subjects_compared=N`
+//! at exit beside BXSCAN's line, N the subjects this loop scanned.
 
 use super::*;
 use crate::algorithm::tblastn::x_scan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
@@ -80,8 +135,53 @@ pub(crate) fn x_bxscan_bf() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXSCANBF"))
 }
 
+// No NCBI counterpart: reads the LOSAT_X_BXHITBF switch once; it does not change any value NCBI
+// computes.
+/// EXPERIMENT (LOSAT_X_BXHITBF): whether the direct loop takes the too-far and overlap outcomes
+/// without a branch where [`x_hitbf_fits`] holds (module header); a switch of the strict set, on
+/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+pub(crate) fn x_bxhitbf() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXHITBF"))
+}
+
+// No NCBI counterpart: the range in which LOSAT's branch-free test gives the reference's outcomes;
+// it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXHITBF): whether [`x_hit_bf`] gives the reference's outcomes for a subject
+/// of `length` letters scanned at the diagonal offset `offset` (module header): `1 <= word <
+/// window`, `0 <= offset` and `offset + length + 2 window < 2^30`.
+fn x_hitbf_fits(offset: i32, length: usize, window: i32, word: i32) -> bool {
+    let room = (1i64 << 30) - i64::from(offset) - 2 * i64::from(window);
+    1 <= word && word < window && 0 <= offset && i64::try_from(length).is_ok_and(|n| n < room)
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-551 (module header).
+/// EXPERIMENT (LOSAT_X_BXHITBF): the two-hit test of one hit on `cell`, with `here = s +
+/// diag_offset`, `word2 = 2 wordsize`, `span2 = 2 (window - wordsize)` and `window2 = 2 window`:
+/// when the cell's flag is 0 and the hit is too far or overlaps, stores what the reference stores
+/// and returns `true`; otherwise (a flag-1 cell or a candidate) leaves the cell and returns
+/// `false`. Exact where [`x_hitbf_fits`] holds for the subject (module header).
+#[inline(always)]
+fn x_hit_bf(cell: &mut DiagStruct, here: u32, word2: i32, span2: u32, window2: i32) -> bool {
+    let raw = cell.raw_bits();
+    let d2 = here.wrapping_mul(2).wrapping_sub(raw << 1) as i32;
+    let candidate = (d2.wrapping_sub(word2) as u32) < span2;
+    // `|`, not `||`: both tests are taken without a branch.
+    if ((raw as i32) < 0) | candidate {
+        return false;
+    }
+    cell.set_raw_bits(if d2 >= window2 { here } else { raw });
+    true
+}
+
 /// EXPERIMENT (LOSAT_X_BXSCANSHADOW): subjects compared so far.
 pub(crate) static X_SHADOW_SUBJECTS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// EXPERIMENT (LOSAT_X_BXSCANSHADOW with LOSAT_X_BXHITBF): of those, the subjects the branch-free
+/// direct loop scanned.
+pub(crate) static X_SHADOW_HITBF_SUBJECTS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
 /// EXPERIMENT (LOSAT_X_BXLUTSHADOW / LOSAT_X_BXSCANSHADOW / LOSAT_X_BXSEGMEMOSHADOW): the
@@ -101,6 +201,12 @@ pub fn print_shadow_stats() {
             "[X_SHADOW] BXSCAN subjects_compared={} (hit lists and diagonal tables identical)",
             X_SHADOW_SUBJECTS.load(Ordering::Relaxed)
         );
+        if x_bxhitbf() {
+            eprintln!(
+                "[X_SHADOW] BXHITBF subjects_compared={} (the branch-free direct loop; hit lists and diagonal tables identical)",
+                X_SHADOW_HITBF_SUBJECTS.load(Ordering::Relaxed)
+            );
+        }
     }
     if super::super::x_seg_memo::x_bxsegmemo_mode() == 2 {
         eprintln!(
@@ -175,6 +281,9 @@ pub(crate) fn x_word_finder_scan(
             &mut copy,
             |_| {},
         )?;
+        if x_hitbf_acts(x_bxhitbf(), options, subject, diagonals) {
+            X_SHADOW_HITBF_SUBJECTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         let direct = x_word_finder_direct(
             batch,
             parameters,
@@ -183,6 +292,7 @@ pub(crate) fn x_word_finder_scan(
             lookup,
             diagonals,
             x_bxscan_bf(),
+            x_bxhitbf(),
         )?;
         assert!(
             copy.offset == diagonals.offset && copy.entries == diagonals.entries,
@@ -205,7 +315,26 @@ pub(crate) fn x_word_finder_scan(
         lookup,
         diagonals,
         x_bxscan_bf(),
+        x_bxhitbf(),
     )
+}
+
+// No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's hits and table.
+/// EXPERIMENT (LOSAT_X_BXHITBF): whether the direct loop for `subject` is the branch-free one:
+/// `hit_bf` (the switch) and [`x_hitbf_fits`] at the table's offset before the subject.
+fn x_hitbf_acts(
+    hit_bf: bool,
+    options: &ResolvedOptions,
+    subject: &[u8],
+    diagonals: &Diagonals,
+) -> bool {
+    hit_bf
+        && x_hitbf_fits(
+            diagonals.offset,
+            subject.len().saturating_sub(1),
+            options.window_size,
+            options.word_size,
+        )
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:492-511
@@ -232,7 +361,72 @@ pub(crate) fn x_word_finder_scan(
 // `Lookup::scan` (its range set-up and loop) and `word_finder_plain` (the statements per pair)
 // in one function; the pairs are read from the scanner's buffer. EXPERIMENT (LOSAT_X_BXSCANBF):
 // `branch_free` scans the standard table with `x_scan_one_range_bf` (module header).
+// EXPERIMENT (LOSAT_X_BXHITBF): with `hit_bf`, where `x_hitbf_fits` holds for the subject, the
+// loop is `x_word_finder_direct_bf` (module header).
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn x_word_finder_direct(
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &Lookup,
+    diagonals: &mut Diagonals,
+    branch_free: bool,
+    hit_bf: bool,
+) -> Result<Vec<InitHsp>> {
+    if x_hitbf_acts(hit_bf, options, subject, diagonals) {
+        return x_word_finder_direct_bf(
+            batch,
+            parameters,
+            options,
+            subject,
+            lookup,
+            diagonals,
+            branch_free,
+        );
+    }
+    x_word_finder_direct_with::<false>(
+        batch,
+        parameters,
+        options,
+        subject,
+        lookup,
+        diagonals,
+        branch_free,
+    )
+}
+
+// No NCBI counterpart: an instance of `x_word_finder_direct_with`, kept out of line; it does not
+// change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BXHITBF): the direct loop with the branch-free two-hit test, in a function
+/// of its own so that the loop without the test keeps its code (module header).
+#[inline(never)]
+fn x_word_finder_direct_bf(
+    batch: &PreparedQueryBatch,
+    parameters: &[ContextParameters],
+    options: &ResolvedOptions,
+    subject: &[u8],
+    lookup: &Lookup,
+    diagonals: &mut Diagonals,
+    branch_free: bool,
+) -> Result<Vec<InitHsp>> {
+    x_word_finder_direct_with::<true>(
+        batch,
+        parameters,
+        options,
+        subject,
+        lookup,
+        diagonals,
+        branch_free,
+    )
+}
+
+// The body of `x_word_finder_direct` (the NCBI references above); `HIT_BF` takes the branch-free
+// two-hit test (`x_hit_bf`) before the statements of `word_finder_plain`, and the caller has checked
+// `x_hitbf_fits`.
+#[inline(always)]
+fn x_word_finder_direct_with<const HIT_BF: bool>(
     batch: &PreparedQueryBatch,
     parameters: &[ContextParameters],
     options: &ResolvedOptions,
@@ -270,6 +464,12 @@ fn x_word_finder_direct(
     // EXPERIMENT (LOSAT_X_BXSCANBF): room for the pairs the branch-free scan writes past
     // `array_size` (never read).
     let room = capacity + if branch_free { X_SCAN_BF_SLACK } else { 0 };
+    // EXPERIMENT (LOSAT_X_BXHITBF): the constants of `x_hit_bf` (in range: the caller checked
+    // x_hitbf_fits, so 2 window < 2^30).
+    let offset = diagonals.offset;
+    let word2 = word.wrapping_mul(2);
+    let span2 = window.wrapping_sub(word).wrapping_mul(2) as u32;
+    let window2 = window.wrapping_mul(2);
     X_PAIRS.with(|buffer| {
         let mut buffer = buffer.borrow_mut();
         if buffer.len() < room {
@@ -291,6 +491,22 @@ fn x_word_finder_direct(
             };
             for pair in &pairs[..n as usize] {
                 let (q, s) = (pair.q_off as i32, pair.s_off as i32);
+                // EXPERIMENT (LOSAT_X_BXHITBF): a flag-0 cell's too-far and overlap outcomes
+                // without a branch; a flag-1 cell or a candidate goes on to the statements below.
+                if HIT_BF {
+                    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:516
+                    // ```c
+                    //             diag_coord = (query_offset - subject_offset) & diag_mask;
+                    // ```
+                    let index = ((q - s) & mask) as usize;
+                    debug_assert!(index < diagonals.entries.len());
+                    // SAFETY: 0 <= index <= mask = entries.len() - 1 (a power of two less one,
+                    // `Diagonals::new`).
+                    let cell = unsafe { diagonals.entries.get_unchecked_mut(index) };
+                    if x_hit_bf(cell, s.wrapping_add(offset) as u32, word2, span2, window2) {
+                        continue;
+                    }
+                }
                 // From here to the end of the loop body: the statements of word_finder_plain.
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:560,783-784
                 // ```c
@@ -540,6 +756,9 @@ mod tests {
         entry
     }
 
+    /// The direct loop's arms: (the branch-free scan, the branch-free two-hit test).
+    const ARMS: [(bool, bool); 4] = [(false, false), (true, false), (false, true), (true, true)];
+
     #[test]
     fn direct_scan_loop_matches_ncbi_hits_and_reference_diagonal_table() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/blastx_f_diagonal");
@@ -620,13 +839,13 @@ mod tests {
                     }
                 })
                 .collect::<Vec<_>>();
-            let mut direct = Diagonals::new(length, window).unwrap();
             let mut reference = Diagonals::new(length, window).unwrap();
-            // EXPERIMENT (LOSAT_X_BXSCANBF): the direct loop with the branch-free scan, on its own
-            // table, compared alike.
-            let mut branch_free = Diagonals::new(length, window).unwrap();
+            // EXPERIMENT (LOSAT_X_BXSCANBF, LOSAT_X_BXHITBF): the direct loop with and without the
+            // branch-free scan and the branch-free two-hit test, each on its own table, compared
+            // alike.
+            let mut tables = ARMS.map(|_| Diagonals::new(length, window).unwrap());
             for state in 0..4 {
-                for d in [&mut direct, &mut reference, &mut branch_free] {
+                for d in tables.iter_mut().chain([&mut reference]) {
                     if state == 2 {
                         d.offset = 536_870_910;
                         d.entries.fill(entry(123));
@@ -637,26 +856,12 @@ mod tests {
                         d.finish_subject(83).unwrap();
                     }
                 }
-                let hits = x_word_finder_direct(
-                    &batch,
-                    &params,
-                    &options,
-                    &subject,
-                    &lookup,
-                    &mut direct,
-                    false,
-                )
-                .unwrap();
-                let hits_bf = x_word_finder_direct(
-                    &batch,
-                    &params,
-                    &options,
-                    &subject,
-                    &lookup,
-                    &mut branch_free,
-                    true,
-                )
-                .unwrap();
+                // The branch-free test acts on every two-hit window above the word size here.
+                assert_eq!(
+                    x_hitbf_acts(true, &options, &subject, &reference),
+                    window > options.word_size,
+                    "window={window} state={state}"
+                );
                 let plain = word_finder_plain(
                     &batch,
                     &params,
@@ -667,55 +872,68 @@ mod tests {
                     |_| {},
                 )
                 .unwrap();
-                assert_eq!(hits, initial, "window={window} state={state}");
-                assert_eq!(hits, plain, "window={window} state={state}");
-                assert_eq!(hits_bf, plain, "window={window} state={state} branch-free");
-                for d in [&direct, &branch_free] {
+                assert_eq!(plain, initial, "window={window} state={state}");
+                for (&(branch_free, hit_bf), d) in ARMS.iter().zip(&mut tables) {
+                    let hits = x_word_finder_direct(
+                        &batch,
+                        &params,
+                        &options,
+                        &subject,
+                        &lookup,
+                        d,
+                        branch_free,
+                        hit_bf,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        hits, plain,
+                        "window={window} state={state} scan_bf={branch_free} hit_bf={hit_bf}"
+                    );
                     assert!(
                         d.offset == reference.offset && d.entries == reference.entries,
-                        "window={window} state={state}"
+                        "window={window} state={state} scan_bf={branch_free} hit_bf={hit_bf}"
                     );
                 }
             }
             // A subject of one residue (shorter than a word less one letter) and one of two: with a
             // two-hit window the one scan position reads a word from position 0, which runs past
-            // the sentinel of the one-residue subject. The three loops scan it from a padded copy
+            // the sentinel of the one-residue subject. The loops scan it from a padded copy
             // (seed.rs `x_scan_bytes`; the slices here hold exactly the residues and the
             // sentinel, so an unchecked read past them trips the debug checks), and they agree.
             for n in [1, 2] {
                 let short = subject[..n].iter().copied().chain([0]).collect::<Vec<u8>>();
-                let mut loops = [(); 3].map(|_| Diagonals::new(length, window).unwrap());
-                let [direct, branch_free, reference] = &mut loops;
-                let hits =
-                    x_word_finder_direct(&batch, &params, &options, &short, &lookup, direct, false)
-                        .unwrap();
-                let hits_bf = x_word_finder_direct(
-                    &batch,
-                    &params,
-                    &options,
-                    &short,
-                    &lookup,
-                    branch_free,
-                    true,
-                )
-                .unwrap();
+                let mut reference = Diagonals::new(length, window).unwrap();
                 let plain = word_finder_plain(
                     &batch,
                     &params,
                     &options,
                     &short,
                     &lookup,
-                    reference,
+                    &mut reference,
                     |_| {},
                 )
                 .unwrap();
                 assert!(plain.is_empty(), "window={window} {n} residues: {plain:?}");
-                assert_eq!(hits, plain, "window={window} {n} residues");
-                assert_eq!(hits_bf, plain, "window={window} {n} residues, branch-free");
-                for d in [&*direct, &*branch_free] {
+                for (branch_free, hit_bf) in ARMS {
+                    let mut d = Diagonals::new(length, window).unwrap();
+                    let hits = x_word_finder_direct(
+                        &batch,
+                        &params,
+                        &options,
+                        &short,
+                        &lookup,
+                        &mut d,
+                        branch_free,
+                        hit_bf,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        hits, plain,
+                        "window={window} {n} residues, scan_bf={branch_free} hit_bf={hit_bf}"
+                    );
                     assert!(
                         d.offset == reference.offset && d.entries == reference.entries,
-                        "window={window} {n} residues"
+                        "window={window} {n} residues, scan_bf={branch_free} hit_bf={hit_bf}"
                     );
                 }
             }
@@ -727,34 +945,16 @@ mod tests {
             // } DiagStruct;
             // ```
             // An offset just below 2^30 (NCBI reaches such offsets at a -window_size near 2^29,
-            // from the second subject on): the stores past 2^30 wrap in the 31-bit field, and both
+            // from the second subject on): the stores past 2^30 wrap in the 31-bit field, and the
             // loops read the wrapped values back alike. tests/blastx_diag_bitfield.rs compares the
             // rows with NCBI 2.17.0 at such a window. (The offset is past INT4_MAX / 4, so the
-            // tables are cleared at the end of the subject.)
-            for d in [&mut direct, &mut reference, &mut branch_free] {
+            // tables are cleared at the end of the subject.) The offset is outside the range of
+            // the branch-free test, so its arms run the loop without it.
+            for d in tables.iter_mut().chain([&mut reference]) {
                 d.offset = (1 << 30) - 64;
                 d.entries.fill(DiagStruct::clear(window));
             }
-            let hits = x_word_finder_direct(
-                &batch,
-                &params,
-                &options,
-                &subject,
-                &lookup,
-                &mut direct,
-                false,
-            )
-            .unwrap();
-            let hits_bf = x_word_finder_direct(
-                &batch,
-                &params,
-                &options,
-                &subject,
-                &lookup,
-                &mut branch_free,
-                true,
-            )
-            .unwrap();
+            assert!(!x_hitbf_acts(true, &options, &subject, &reference));
             let plain = word_finder_plain(
                 &batch,
                 &params,
@@ -765,20 +965,161 @@ mod tests {
                 |_| {},
             )
             .unwrap();
-            assert_eq!(hits, plain, "window={window} wrapped");
-            assert_eq!(hits_bf, plain, "window={window} wrapped branch-free");
-            for d in [&direct, &branch_free] {
+            for (&(branch_free, hit_bf), d) in ARMS.iter().zip(&mut tables) {
+                let hits = x_word_finder_direct(
+                    &batch,
+                    &params,
+                    &options,
+                    &subject,
+                    &lookup,
+                    d,
+                    branch_free,
+                    hit_bf,
+                )
+                .unwrap();
+                assert_eq!(
+                    hits, plain,
+                    "window={window} wrapped, scan_bf={branch_free} hit_bf={hit_bf}"
+                );
                 assert!(
                     d.offset == reference.offset && d.entries == reference.entries,
-                    "window={window} wrapped"
+                    "window={window} wrapped, scan_bf={branch_free} hit_bf={hit_bf}"
                 );
             }
             if !initial.is_empty() {
                 assert_ne!(
-                    hits, initial,
+                    plain, initial,
                     "window={window}: the wrapped stores change the seeds"
                 );
             }
         }
+    }
+
+    /// The statements of `word_finder_plain` up to the two `continue`s of a flag-0 cell
+    /// (aa_ungapped.c:519-551): the cell after a hit that is too far or overlaps, or `None` for a
+    /// flag-1 cell or a candidate for the extension.
+    fn two_hit_reference(
+        cell: DiagStruct,
+        s: i32,
+        offset: i32,
+        window: i32,
+        word: i32,
+    ) -> Option<DiagStruct> {
+        if cell.flag() != 0 {
+            return None;
+        }
+        let diff = s.wrapping_sub(cell.last_hit().wrapping_sub(offset));
+        if diff >= window {
+            let mut next = cell;
+            next.set_last_hit(s.wrapping_add(offset));
+            return Some(next);
+        }
+        (diff < word).then_some(cell)
+    }
+
+    /// `x_hit_bf` on a copy of `cell`: the cell after it and whether it took the hit.
+    fn bf_outcome(
+        cell: DiagStruct,
+        s: i32,
+        offset: i32,
+        window: i32,
+        word: i32,
+    ) -> (DiagStruct, bool) {
+        let mut next = cell;
+        let taken = x_hit_bf(
+            &mut next,
+            (s + offset) as u32,
+            2 * word,
+            (2 * (window - word)) as u32,
+            2 * window,
+        );
+        (next, taken)
+    }
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-551 (module header).
+    // EXPERIMENT (LOSAT_X_BXHITBF): the branch-free test against the reference statements at the
+    // edges of its range: offsets from 0 to the most `x_hitbf_fits` allows for the subject's length
+    // (and that it allows no more), word sizes from 1 to window - 1, windows from 2 to 2^28 - 1,
+    // subject positions at both ends, and cells around the outcomes' edges (diff = wordsize - 1,
+    // wordsize, window - 1, window), the cleared cell (`-window`), a new table's 0, the lowest and
+    // highest `last_hit` a flag-0 cell can hold, and flag-1 cells. Past the range a cleared cell
+    // can be read wrong, which is why the range is checked.
+    #[test]
+    fn the_branch_free_test_gives_the_reference_outcomes_in_its_range() {
+        // too far, overlap, candidate, flag 1
+        let mut outcomes = [0u64; 4];
+        for window in [2, 3, 4, 40, 41, 1000, (1 << 28) - 1] {
+            let mut words = vec![1, 2, 3, window / 2, window - 1];
+            words.retain(|&w| 1 <= w && w < window);
+            words.sort_unstable();
+            words.dedup();
+            for word in words {
+                for length in [1usize, 2, 100, 1 << 20] {
+                    let most = (1i64 << 30) - 1 - length as i64 - 2 * i64::from(window);
+                    let most = i32::try_from(most).unwrap();
+                    assert!(x_hitbf_fits(most, length, window, word));
+                    assert!(!x_hitbf_fits(most + 1, length, window, word));
+                    assert!(!x_hitbf_fits(-1, length, window, word));
+                    for offset in [0, most / 2, most] {
+                        let high = offset + length as i32;
+                        for s in [0, 1, length as i32 / 2, length as i32 - 1] {
+                            if !(0..length as i32).contains(&s) {
+                                continue;
+                            }
+                            let here = s + offset;
+                            let mut last_hits = vec![-window, 0, high - 1, offset, here + 1];
+                            for d in [word - 1, word, window - 1, window, window + 1, 0] {
+                                last_hits.push(here - d);
+                            }
+                            for last_hit in last_hits {
+                                for flag in [0, 1] {
+                                    // A flag-0 cell holds a last_hit in [-window, high).
+                                    if flag == 0 && !(-window..high).contains(&last_hit) {
+                                        continue;
+                                    }
+                                    let mut cell = DiagStruct::default();
+                                    cell.set_last_hit(last_hit);
+                                    cell.set_flag(flag);
+                                    let (next, taken) = bf_outcome(cell, s, offset, window, word);
+                                    let what = format!(
+                                        "window={window} word={word} length={length} offset={offset} s={s} last_hit={last_hit} flag={flag}"
+                                    );
+                                    match two_hit_reference(cell, s, offset, window, word) {
+                                        Some(expected) => {
+                                            assert!(taken, "{what}");
+                                            assert_eq!(next, expected, "{what}");
+                                            outcomes[usize::from(next == cell)] += 1;
+                                        }
+                                        None => {
+                                            assert!(!taken, "{what}");
+                                            assert_eq!(next, cell, "{what}");
+                                            outcomes[2 + flag as usize] += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(outcomes.iter().all(|&n| n > 0), "{outcomes:?}");
+        assert!(!x_hitbf_fits(0, 10, 3, 3));
+        assert!(!x_hitbf_fits(0, 10, 3, 0));
+        assert!(!x_hitbf_fits(0, 10, 0, 3));
+        assert!(x_hitbf_fits(0, 10, 3, 2));
+        // Just past the range: a cleared cell at the end of a subject is too far for the
+        // reference (diff = 2^30 + 499), but twice that wraps in an i32 and the branch-free test
+        // reads it as an overlap.
+        let (window, word, length) = (1000, 3, 1000usize);
+        let offset = (1 << 30) - 1500;
+        assert!(!x_hitbf_fits(offset, length, window, word));
+        let cleared = DiagStruct::clear(window);
+        let expected = two_hit_reference(cleared, 999, offset, window, word).unwrap();
+        assert_ne!(expected, cleared);
+        assert_ne!(
+            bf_outcome(cleared, 999, offset, window, word),
+            (expected, true)
+        );
     }
 }

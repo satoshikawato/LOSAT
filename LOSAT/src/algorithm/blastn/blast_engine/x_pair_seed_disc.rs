@@ -901,7 +901,7 @@ fn fold_two_hit<const PT: bool>(
 /// EXPERIMENT (exp/r12-fold, v4-R R12; evidence only): a copy of `fold_two_hit` for the R12_PROBE
 /// arms; with `CNT` it counts its work into `c` (`x_r12_probe::Counts`).
 #[allow(clippy::too_many_arguments)]
-fn fold_two_hit_r12<const PT: bool, const CNT: bool>(
+fn fold_two_hit_r12<const PT: bool, const CNT: bool, const V: u8>(
     x: &Inputs<'_>,
     seeds: &[Seed],
     diag_hash: &mut DiagHashTable,
@@ -933,7 +933,13 @@ fn fold_two_hit_r12<const PT: bool, const CNT: bool>(
         c.seeds += seeds.len() as u64;
     }
     let mut x_prev_ctx = u32::MAX;
+    let x_tow = V & 1 != 0 && word_length == lut_word_length;
     for (x_k, seed) in seeds.iter().enumerate() {
+        if V & 2 != 0 {
+            if let Some(ahead) = seeds.get(x_k + x_r12_probe::PFD) {
+                diag_hash.x_r12_prefetch((ahead.s as isize - ahead.q as isize) as i32);
+            }
+        }
         // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the seed's place in the stage.
         let x_key = if PT { out.key(pos, x_k) } else { 0 };
         let context_idx = seed.context as usize;
@@ -1055,17 +1061,21 @@ fn fold_two_hit_r12<const PT: bool, const CNT: bool>(
             if CNT {
                 c.first += 1;
             }
-            let (word_type, extended, q_off_adj, s_off_adj) = type_of_word(
-                q_off,
-                s_off,
-                !query_mask.is_empty(),
-                q_context_end,
-                s_range,
-                word_length,
-                lut_word_length,
-                true, // check_double = TRUE
-                &mut is_seed_masked,
-            );
+            let (word_type, extended, q_off_adj, s_off_adj) = if x_tow {
+                (1, 0, q_off, s_off)
+            } else {
+                type_of_word(
+                    q_off,
+                    s_off,
+                    !query_mask.is_empty(),
+                    q_context_end,
+                    s_range,
+                    word_length,
+                    lut_word_length,
+                    true, // check_double = TRUE
+                    &mut is_seed_masked,
+                )
+            };
             q_off = q_off_adj;
             s_off = s_off_adj;
 
@@ -1171,17 +1181,21 @@ fn fold_two_hit_r12<const PT: bool, const CNT: bool>(
             //         s_end_pos += extended;
             //     }
             // ```
-            let (wt, ext, q_off_adj, s_off_adj) = type_of_word(
-                q_off,
-                s_off,
-                !query_mask.is_empty(),
-                q_context_end,
-                s_range,
-                word_length,
-                lut_word_length,
-                false, // check_double = FALSE (not in two-hit block)
-                &mut is_seed_masked,
-            );
+            let (wt, ext, q_off_adj, s_off_adj) = if x_tow {
+                (1, 0, q_off, s_off)
+            } else {
+                type_of_word(
+                    q_off,
+                    s_off,
+                    !query_mask.is_empty(),
+                    q_context_end,
+                    s_range,
+                    word_length,
+                    lut_word_length,
+                    false, // check_double = FALSE (not in two-hit block)
+                    &mut is_seed_masked,
+                )
+            };
             if wt == 0 {
                 continue;
             }
@@ -1421,10 +1435,20 @@ fn seed_stage(
     // EXPERIMENT (exp/r12-fold, v4-R R12): the R12_PROBE arms of the fold.
     let r12 = x_r12_probe::probe();
     if r12.on() {
-        return if r12.cnt {
-            seed_stage_r12::<true>(x, disc, threads, hash, hits, timing, timed, fold_part)
-        } else {
-            seed_stage_r12::<false>(x, disc, threads, hash, hits, timing, timed, fold_part)
+        return match (r12.cnt, r12.var()) {
+            (true, _) => {
+                seed_stage_r12::<true, 0>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 1) => {
+                seed_stage_r12::<false, 1>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 2) => {
+                seed_stage_r12::<false, 2>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            (false, 3) => {
+                seed_stage_r12::<false, 3>(x, disc, threads, hash, hits, timing, timed, fold_part)
+            }
+            _ => seed_stage_r12::<false, 0>(x, disc, threads, hash, hits, timing, timed, fold_part),
         };
     }
     let jobs = plan_strips(
@@ -1539,7 +1563,7 @@ fn seed_stage(
 /// EXPERIMENT (exp/r12-fold, v4-R R12; evidence only): `seed_stage` with the fold of the R12_PROBE
 /// arms (`fold_two_hit_r12`); the same strips, scans and partitions.
 #[allow(clippy::too_many_arguments)]
-fn seed_stage_r12<const CNT: bool>(
+fn seed_stage_r12<const CNT: bool, const V: u8>(
     x: &Inputs<'_>,
     disc: &DiscTemplates,
     threads: usize,
@@ -1592,7 +1616,7 @@ fn seed_stage_r12<const CNT: bool>(
                 ..
             } = st;
             let mut c = x_r12_probe::Counts::default();
-            fold_two_hit_r12::<true, CNT>(
+            fold_two_hit_r12::<true, CNT, V>(
                 x,
                 seeds,
                 hash,
@@ -1645,7 +1669,7 @@ fn seed_stage_r12<const CNT: bool>(
         |_, seeds| {
             let t0 = timed.then(std::time::Instant::now);
             let mut c = x_r12_probe::Counts::default();
-            fold_two_hit_r12::<false, CNT>(
+            fold_two_hit_r12::<false, CNT, V>(
                 x,
                 seeds,
                 hash,

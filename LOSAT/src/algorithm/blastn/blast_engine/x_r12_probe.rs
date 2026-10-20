@@ -7,6 +7,10 @@
 //!   with a counter.
 //! - `copy`: the fold runs as the same copy without the counters (the control of the arms that
 //!   change the copy).
+//! - `tow` (with `copy`): when `word_length == lut_word_length` (dc-megablast) the copy does not call
+//!   `type_of_word`, whose first statement returns `(1, 0, q_off, s_off)` then.
+//! - `pfd` (with `copy`): before seed `k`, the copy prefetches the head cell of the chain of seed
+//!   `k + 16`'s bucket (read only).
 //!
 //! Unset or empty = the dev code paths.
 use super::{DiagHashTable, DIAGHASH_NUM_BUCKETS};
@@ -17,12 +21,19 @@ use std::sync::OnceLock;
 pub(super) struct Probe {
     pub(super) cnt: bool,
     pub(super) copy: bool,
+    pub(super) tow: bool,
+    pub(super) pfd: bool,
 }
 
 impl Probe {
     #[inline(always)]
     pub(super) fn on(&self) -> bool {
         self.cnt || self.copy
+    }
+
+    /// The variant bits of the copy: 1 `tow`, 2 `pfd`.
+    pub(super) fn var(&self) -> u8 {
+        u8::from(self.tow) | (u8::from(self.pfd) << 1)
     }
 }
 
@@ -36,8 +47,17 @@ pub(super) fn probe() -> Probe {
                     "" => {}
                     "cnt" => p.cnt = true,
                     "copy" => p.copy = true,
+                    "tow" => p.tow = true,
+                    "pfd" => p.pfd = true,
                     _ => panic!("R12_PROBE: unknown item {t}"),
                 }
+            }
+            assert!(
+                !(p.cnt && (p.tow || p.pfd)),
+                "R12_PROBE: cnt runs the plain copy (no tow / pfd)"
+            );
+            if p.tow || p.pfd {
+                p.copy = true;
             }
             eprintln!("[R12_PROBE] {p:?}");
         }
@@ -254,5 +274,21 @@ impl DiagHashTable {
             }
         }
         self.x_r12_retrieve(diag, c)
+    }
+}
+
+/// Seeds ahead of the `pfd` prefetch.
+pub(super) const PFD: usize = 16;
+
+impl DiagHashTable {
+    /// `pfd`: prefetch the head cell of the chain of `diag`'s bucket (reads the backbone only).
+    #[inline(always)]
+    pub(super) fn x_r12_prefetch(&self, diag: i32) {
+        let bucket =
+            ((diag as u32).wrapping_mul(0x9E370001) % DIAGHASH_NUM_BUCKETS as u32) as usize;
+        let index = self.backbone[bucket] as usize;
+        if index != 0 && index < self.chain.len() {
+            super::x_r4_probe::prefetch(self.chain.as_ptr().wrapping_add(index));
+        }
     }
 }

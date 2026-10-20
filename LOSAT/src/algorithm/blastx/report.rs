@@ -1203,6 +1203,44 @@ pub fn render_queries(
     if options.outfmt == 0 {
         return write_pairwise(writer, stderr, options, queries, subjects, shown, batches);
     }
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
+    // ```c++
+    //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
+    //         if (results.HasAlignments()) {
+    //     	    CRef<CSeq_align_set> aln_set (new CSeq_align_set);
+    //             CBlastFormatUtil::PruneSeqalign(*(results.GetSeqAlign()), *aln_set, m_HitlistSize);
+    //             if(m_FormatType == CFormattingArgs::eAsnText)
+    //             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+    //             else
+    //             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+    //         }
+    // ```
+    // The Seq-annot of each query with alignments (outfmt 8, 12); the structured report
+    // returns before the query's warnings (blast_format.cpp:1431-1452,
+    // `ReportFormat::writes_query_warnings`).
+    if let Some(serial) =
+        crate::blastinput::app::ReportFormat::from_number(i32::from(options.outfmt))
+            .and_then(crate::report::serial::SerialFormat::of)
+    {
+        let names = match shown {
+            ShownSubjects::Fasta { .. } => super::seqalign::SeqalignSubjects::Records,
+            ShownSubjects::Database {
+                pairwise, reported, ..
+            } => super::seqalign::SeqalignSubjects::Database {
+                reported,
+                title: &pairwise.definition,
+            },
+        };
+        return super::seqalign::write_blastx_seqalign(
+            serial,
+            writer,
+            options.gapped,
+            queries,
+            subjects,
+            &names,
+            batches,
+        );
+    }
     // NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:982-986
     // ```c++
     //         alnVec->SetGapChar('-');

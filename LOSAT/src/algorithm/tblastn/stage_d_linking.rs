@@ -1435,6 +1435,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 &mut scratch,
                 &mut workspace,
+                &mut None,
             )
             .unwrap();
             let mut alignments = Vec::new();

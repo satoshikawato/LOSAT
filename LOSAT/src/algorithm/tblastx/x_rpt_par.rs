@@ -22,6 +22,8 @@
 //!    warnings before each query, the outfmt 7 headers and the last line stay on the loop's
 //!    thread, in the serial order. With the Web adapter's format observer (`FormatProbe`, which
 //!    flushes around every row) the rows are written by the serial function.
+//! With a Seq-align format requested (outfmt 8, 12), the engine counts of the Seq-aligns
+//! (`report::engine_counts`) run over chunks of the final list on the pool as item 1 does.
 //! The final order (`report_order`), the outfmt 0 text (`write_tblastx_pairwise_report`) and the
 //! writes stay on the loop's thread.
 //!
@@ -143,6 +145,30 @@ pub(crate) fn set_displayed_identities(
         }
         SHADOW_HSPS.fetch_add(hits.len() as u64, Ordering::Relaxed);
     }
+}
+
+/// `report::engine_counts` (the Seq-aligns' engine counts, outfmt 8 and 12 only) over chunks of
+/// `hits` on `pool`, as item 1: each chunk counted by the serial function, the chunks' counts
+/// joined in the list's order.
+pub(crate) fn engine_counts(
+    pool: &SearchPool<'_>,
+    hits: &[TblastxHsp],
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+) -> Vec<(u32, u32)> {
+    let counts = engine_counts_on(pool, hits, queries, subjects, query_code, db_code);
+    if mode() == 2 {
+        let serial = report::engine_counts(hits, queries, subjects, query_code, db_code);
+        if let Some(index) = (0..hits.len()).find(|&index| counts[index] != serial[index]) {
+            different(&format!(
+                "HSP {index}: engine counts {:?} / {:?}",
+                counts[index], serial[index]
+            ));
+        }
+    }
+    counts
 }
 
 /// The outfmt 0 rows of `hits` (`report::pairwise_hits`) as an indexed map on `pool` (item 2).
@@ -345,6 +371,41 @@ fn identities_on(
     db_code: &GeneticCode,
 ) {
     report::set_displayed_identities(hits, queries, subjects, query_code, db_code)
+}
+
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn engine_counts_on(
+    pool: &SearchPool<'_>,
+    hits: &[TblastxHsp],
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+) -> Vec<(u32, u32)> {
+    let chunks: Vec<Vec<(u32, u32)>> = pool.install(|| {
+        hits.par_chunks(CHUNK)
+            .map(|chunk| report::engine_counts(chunk, queries, subjects, query_code, db_code))
+            .collect()
+    });
+    chunks.concat()
+}
+
+#[cfg(not(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+)))]
+fn engine_counts_on(
+    _pool: &SearchPool<'_>,
+    hits: &[TblastxHsp],
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+) -> Vec<(u32, u32)> {
+    report::engine_counts(hits, queries, subjects, query_code, db_code)
 }
 
 #[cfg(all(

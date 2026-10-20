@@ -1,0 +1,282 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 333
+        },
+        {
+          id str "blast_score",
+          value int 333
+        },
+        {
+          id str "e_value",
+          value real { 243354495905317, 10, -193 }
+        },
+        {
+          id str "bit_score",
+          value real { 61605462846223, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 341
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 346341341341341, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 5,
+        ids {
+          local str "Query_1",
+          local str "Subject_1"
+        },
+        starts {
+          1786,
+          5232,
+          -1,
+          5446,
+          1667,
+          5448,
+          -1,
+          5567,
+          1659,
+          5568
+        },
+        lens {
+          214,
+          2,
+          119,
+          1,
+          8
+        },
+        strands {
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus,
+          minus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 570
+        },
+        {
+          id str "blast_score",
+          value int 570
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 105371059606631, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 572
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 578573573573574, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_4",
+          local str "Subject_1"
+        },
+        starts {
+          1427,
+          3946
+        },
+        lens {
+          573
+        },
+        strands {
+          minus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 427
+        },
+        {
+          id str "blast_score",
+          value int 427
+        },
+        {
+          id str "e_value",
+          value real { 0, 10, 0 }
+        },
+        {
+          id str "bit_score",
+          value real { 78963969578199, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 427
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 432427427427427, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_4",
+          local str "Subject_1"
+        },
+        starts {
+          1001,
+          4804
+        },
+        lens {
+          427
+        },
+        strands {
+          minus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 45
+        },
+        {
+          id str "blast_score",
+          value int 45
+        },
+        {
+          id str "e_value",
+          value real { 305180782987807, 10, -33 }
+        },
+        {
+          id str "bit_score",
+          value real { 84219528588922, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 49
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 560510510510511, 10, -14 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_4",
+          local str "Subject_1"
+        },
+        starts {
+          1377,
+          4717
+        },
+        lens {
+          51
+        },
+        strands {
+          minus,
+          plus
+        }
+      }
+    }
+  }
+}

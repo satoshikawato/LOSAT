@@ -25,6 +25,7 @@ pub mod x_ungapped_fast;
 pub(crate) mod gapalign;
 mod hsp;
 mod query_split;
+mod seqalign;
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the queries searched in blocks of whole query batches.
 mod x_query_blocks;
 // EXPERIMENT (LOSAT_X_BPREDOFIT): redone HSP lists without spare room.

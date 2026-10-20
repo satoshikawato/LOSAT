@@ -126,6 +126,7 @@ use std::sync::OnceLock;
 /// set and joined the set together once they were verified and timed with them on and off.
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
+    "LOSAT_X_BNDBCUT",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
     "LOSAT_X_BPCLUT",

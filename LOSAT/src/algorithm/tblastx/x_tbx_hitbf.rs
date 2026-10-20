@@ -1,6 +1,7 @@
 //! EXPERIMENT (LOSAT_X_TBXHITBF / LOSAT_X_TBXHITBFSHADOW): the hit loop of a unit of the unit path
-//! (x_pair_par.rs `scan_unit`, x_tbx_extbatch.rs `scan_unit_batched`) with the too-far and overlap
-//! outcomes of the two-hit test taken without a branch. A child module of x_pair_par.rs.
+//! (x_pair_par.rs `scan_unit`, x_tbx_extbatch.rs `scan_unit_batched`, and the scan in slices of
+//! LOSAT_X_TBXQSLICE, x_tbx_qslice.rs `scan_unit_sliced`) with the too-far and overlap outcomes of
+//! the two-hit test taken without a branch. A child module of x_pair_par.rs.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:518-552
 //! ```c
@@ -60,9 +61,13 @@
 //! cell value across such a call (the batched body writes other cells too: it resolves held-back
 //! extensions, x_tbx_extbatch.rs). So every cell goes through the reference's states in scan order,
 //! every call of the per-hit body sees the table the loop before the switch gives it, and the init
-//! HSPs are saved by the same calls in the same order. A unit outside `fits` runs the reference loop, which keeps the 31-bit field's
-//! truncation (memory `losat-no-ncbi-bug-reproduction`, 2026-10-12); the batch guard `last_hit_fits`
-//! already keeps the units of the unit path inside it.
+//! HSPs are saved by the same calls in the same order. The scan in slices (x_tbx_qslice.rs) runs the
+//! slices of a unit one after the other on the unit's one table, set up as `scan_unit` sets it up
+//! (the group's bounds: the same `lo` and width) and not cleared between slices; its hits are those
+//! of the unit's chunk, so the above holds for them in the order the slices give them, against the
+//! scan in slices with the reference loop. A unit outside `fits` runs the reference loop, which
+//! keeps the 31-bit field's truncation (memory `losat-no-ncbi-bug-reproduction`, 2026-10-12); the
+//! batch guard `last_hit_fits` already keeps the units of the unit path inside it.
 //!
 //! The rule: the switch is in the strict set (on unless `LOSAT_X_TBXHITBF` is `0`, or
 //! `LOSAT_X_DEFAULT=0` and it is not set); the probes of LOSAT_TIMING / LOSAT_X_STATS run the
@@ -71,6 +76,7 @@
 //! the first difference of the saved records or of the final table.
 
 use super::x_tbx_extbatch::{XShadowList, XShadowRef};
+use super::x_tbx_qslice::XSliced;
 use super::*;
 
 // No NCBI counterpart: counters of LOSAT_X_TBXHITBFSHADOW (units compared, records compared, units
@@ -419,6 +425,85 @@ impl XPairPar {
             &scratch.diag,
             &reference_diag,
         );
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXHITBF): dispatch of the scan in slices (LOSAT_X_TBXQSLICE) by the
+    // switch and `fits`.
+    /// `scan_unit_sliced` (batched extensions with `B`, the prefetch with `PF`), or its
+    /// branch-free hit loop (LOSAT_X_TBXHITBFSHADOW: both, compared). Returns the number of slices
+    /// scanned.
+    #[inline(always)]
+    pub(super) fn scan_unit_sliced_or_bf<S: XShadowList, const B: bool, const PF: bool>(
+        &self,
+        group: &XSliced,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+    ) -> u64 {
+        let m = unit_mode(mode(), unit.chunk.length, inp.window, inp.wordsize);
+        self.scan_unit_sliced_mode::<S, B, PF>(m, group, unit, inp, scratch, init_hsps)
+    }
+
+    /// `scan_unit_sliced_or_bf` in mode `m` (as `scan_unit_mode`).
+    #[inline(always)]
+    pub(super) fn scan_unit_sliced_mode<S: XShadowList, const B: bool, const PF: bool>(
+        &self,
+        m: u8,
+        group: &XSliced,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+    ) -> u64 {
+        match m {
+            0 => self.scan_unit_sliced::<S, B, PF>(group, unit, inp, scratch, init_hsps),
+            1 => self.scan_unit_sliced_bf::<S, B, PF>(group, unit, inp, scratch, init_hsps),
+            _ => self.scan_unit_sliced_bf_shadow::<S, B, PF>(group, unit, inp, scratch, init_hsps),
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXHITBF): its own function, as `scan_unit_bf`.
+    /// `scan_unit_sliced` with the branch-free hit loop.
+    #[inline(never)]
+    fn scan_unit_sliced_bf<S: XInitSink, const B: bool, const PF: bool>(
+        &self,
+        group: &XSliced,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+    ) -> u64 {
+        self.scan_unit_sliced_hits::<S, B, PF, true>(group, unit, inp, scratch, init_hsps)
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXHITBFSHADOW): the scan in slices with the loop before the switch,
+    // then with the branch-free loop, each on a fresh table, compared (the records in scan order).
+    /// The branch-free scan in slices of one unit, compared with `scan_unit_sliced`.
+    #[cold]
+    #[inline(never)]
+    fn scan_unit_sliced_bf_shadow<S: XShadowList, const B: bool, const PF: bool>(
+        &self,
+        group: &XSliced,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+    ) -> u64 {
+        let mut reference = S::default();
+        self.scan_unit_sliced::<S, B, PF>(group, unit, inp, scratch, &mut reference);
+        let reference_diag = scratch.diag.clone();
+        let scans = self.scan_unit_sliced_bf::<S, B, PF>(group, unit, inp, scratch, init_hsps);
+        shadow_compare(
+            "scan_unit_sliced",
+            inp,
+            unit,
+            init_hsps,
+            &reference,
+            &scratch.diag,
+            &reference_diag,
+        );
+        scans
     }
 }
 

@@ -7846,9 +7846,101 @@ fn run_resolved_in_pool(
             match &lookup {
                 BlastpRuntimeLookup::Aa(aa_lookup) => {
                     if super::f2_cap::enabled() {
-                        // F2 PROBE: the capture calls x_scan_two_hit with a closure of its own type.
+                        // F2 PROBE (P2): the capture calls x_scan_two_hit with a closure of its own
+                        // type: the body of `x_candidate` plus a record of what it reads and writes.
+                        // (A copy of the body; the output is compared with the default's.)
+                        super::f2_cap::set_block(
+                            &concatenated_query,
+                            &contexts.iter().map(|c| c.frame_base).collect::<Vec<i32>>(),
+                            &x_dropoff_per_context,
+                            &word_cutoff_scores,
+                            args.word_size,
+                            word_size,
+                        );
+                        let init_hsps_ref = &mut init_hsps;
+                        let x_candidate_cap = |query_offset: i32,
+                                               subject_offset: i32,
+                                               last_hit: i32,
+                                               diff: i32,
+                                               diag_entry: &mut DiagStruct|
+                         -> [i32; 8] {
+                            let ctx_idx = x_context_table
+                                .as_ref()
+                                .and_then(|table| table.get(query_offset))
+                                .unwrap_or_else(|| {
+                                    blastp_context_idx_for_query_offset_with_bounds(
+                                        &contexts,
+                                        context_lookup_bounds,
+                                        query_offset,
+                                    )
+                                });
+                            let ctx = &contexts[ctx_idx];
+                            if query_offset - diff < ctx.frame_base {
+                                diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                                return [ctx_idx as i32, 0, 0, 0, 0, 0, 0, 0];
+                            }
+                            let x_drop = x_dropoff_per_context[ctx_idx];
+                            let cutoff = word_cutoff_scores[ctx_idx];
+                            let Some(ungapped_hit) = extend_two_hit_blosum62(
+                                &concatenated_query,
+                                subject_raw,
+                                usize::try_from(last_hit + word_size)
+                                    .expect("NCBI BLAST two-hit seed boundary must be non-negative"),
+                                usize::try_from(subject_offset)
+                                    .expect("NCBI BLAST two-hit subject offset must be non-negative"),
+                                usize::try_from(query_offset)
+                                    .expect("NCBI BLAST two-hit query offset must be non-negative"),
+                                x_drop,
+                                args.word_size,
+                            ) else {
+                                return [ctx_idx as i32, 1, 0, 0, 0, 0, 0, 0];
+                            };
+                            let mut saved = 0;
+                            if ungapped_hit.ungapped_data.score >= cutoff {
+                                let before = init_hsps_ref.len();
+                                blastp_save_init_hsp(
+                                    init_hsps_ref,
+                                    ungapped_hit.ungapped_data.q_start,
+                                    ungapped_hit.ungapped_data.s_start,
+                                    query_offset,
+                                    subject_offset,
+                                    ungapped_hit.ungapped_data.length,
+                                    ungapped_hit.ungapped_data.score,
+                                );
+                                let h = init_hsps_ref.last().expect("init hsp");
+                                assert!(
+                                    init_hsps_ref.len() == before + 1
+                                        && h.q_seed_absolute == query_offset
+                                        && h.s_seed == subject_offset
+                                        && h.ungapped_data.q_start == ungapped_hit.ungapped_data.q_start
+                                        && h.ungapped_data.s_start == ungapped_hit.ungapped_data.s_start
+                                        && h.ungapped_data.length == ungapped_hit.ungapped_data.length
+                                        && h.ungapped_data.score == ungapped_hit.ungapped_data.score
+                                );
+                                saved = 1;
+                            }
+                            if ungapped_hit.right_extend {
+                                diag_entry.set_flag(1);
+                                diag_entry.set_last_hit(
+                                    ungapped_hit.s_last_off - (word_size - 1) + subject_diag_offset,
+                                );
+                            } else {
+                                diag_entry.set_last_hit(subject_offset + subject_diag_offset);
+                            }
+                            [
+                                ctx_idx as i32,
+                                2 | (i32::from(ungapped_hit.right_extend) << 2) | (saved << 3),
+                                ungapped_hit.ungapped_data.q_start,
+                                ungapped_hit.ungapped_data.s_start,
+                                ungapped_hit.ungapped_data.length,
+                                ungapped_hit.ungapped_data.score,
+                                ungapped_hit.s_last_off,
+                                0,
+                            ]
+                        };
                         super::f2_cap::scan(
                             aa_lookup,
+                            subject.aa_seq,
                             subject_sequence,
                             subject.aa_len,
                             &mut scratch.diag_array,
@@ -7856,7 +7948,7 @@ fn run_resolved_in_pool(
                             subject_diag_offset,
                             window,
                             word_size,
-                            x_candidate,
+                            x_candidate_cap,
                         )
                     } else {
                         super::x_seed_fused::x_scan_two_hit(

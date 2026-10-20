@@ -1805,6 +1805,255 @@ fn fill_with<P: Fn(u8) + Sync>(
     stats
 }
 
+/// EXPERIMENT (exp/r15-csr, v4-R R15; evidence only, `R4_PROBE=csrw,csrp`, see `x_r11_csr.rs`):
+/// the dc table's CSR (`offsets`, `qs` in `next_pos`'s spare capacity) built from the words on the
+/// search pool; one template. The words are read by the fill's own reader (`Fill::read::<false>`,
+/// built for reading only: its tables, counters and prefault state are empty, none of which
+/// `read::<false>` touches), into the same `parts x parts` buckets (reader `a`, owner of the
+/// cell's block), once to count and once to place, chunk by chunk (`CHUNK_POSITIONS`, the same
+/// spans as `fill_with`); each owner counts, sums and places only the cells of its own blocks:
+/// - zero: owner `o` zeroes `offsets` for the cells of its blocks (`offsets[cells]` by the caller);
+/// - count: per chunk, readers, then owner `o`, for `a` in `0..parts`, for each entry of bucket
+///   `(a, o)`: `offsets[ecode] += 1`;
+/// - sum: owner `o` adds up the counts of each of its blocks (and makes the scratch presence-vector
+///   words and counters of that block: a block owns whole words and whole counters); the calling
+///   thread takes the exclusive prefix over the blocks in cell order; owner `o` then turns the
+///   counts of its blocks into the ends of the runs;
+/// - place: per chunk, readers, then owner `o`, for `a` in `0..parts`, in order: `p = offsets[ecode]
+///   - 1; offsets[ecode] = p; qs[p] = index`. A cell receives its words in the fill's order
+///   (chunks in order, readers in order, a bucket in reading order), so a run lists them in the
+///   reverse of the fill's order, which is the chain's order (as `attach_words`).
+/// Prints `[R11] csr words-build-par ...`; with `csrchk` compares with the chain walk and the
+/// scratch presence vector / counters with the fill's.
+pub(super) fn x_r15_csr_par(
+    parts: usize,
+    words: &DiscWords<'_>,
+    hashtable: &[u32],
+    next_pos: &mut Vec<u32>,
+    ph: super::x_r11_csr::PvHelper<'_>,
+) {
+    use std::time::Instant;
+    assert!(!words.two_templates, "R15 csrp: one template only");
+    let t0 = Instant::now();
+    let cells = hashtable.len();
+    let n = next_pos.len();
+    let need = cells + 1 + n;
+    next_pos.reserve_exact(need);
+    let (block_shift, owner) = plan(cells, ph.bts, parts);
+    let parts = parts.clamp(1, 255);
+    let blocks = owner.len();
+    assert!(block_shift >= K_COMPRESSION_FACTOR_SHIFT && block_shift >= ph.bts);
+    // SAFETY: `n .. n + need` is the reserved capacity of `next_pos`, apart from the vector's own
+    // elements; `offsets` (`cells + 1` words) is zeroed before it is read, `qs` (`n` words, at
+    // most `n - 1` are words) is only written (each place once) before `view` reads it.
+    let (offsets, qs) = unsafe {
+        let base = next_pos.as_mut_ptr().add(n);
+        (
+            Shared {
+                ptr: base,
+                len: cells + 1,
+            },
+            Shared {
+                ptr: base.add(cells + 1),
+                len: n,
+            },
+        )
+    };
+    // The reading-only `Fill`: `read::<false>` uses only the words, the segments, the owners,
+    // the buckets and `pv_array_bts`.
+    let (segs, total) = segments(words);
+    let mut first: Vec<Bucket> = (0..parts * parts).map(|_| Bucket::default()).collect();
+    let mut second: Vec<Bucket> = Vec::new();
+    let mut counters = [OwnerCounters::new(0, parts), OwnerCounters::new(0, parts)];
+    let mut marks = [0, 1, 2].map(|_| PageBits::new(0, parts));
+    let mut touch = [0, 1, 2].map(|_| PageBits::new(0, 1));
+    let mut jobs: Vec<FaultJob> = Vec::new();
+    let fill = Fill {
+        words,
+        segments: &segs,
+        owner: &owner,
+        block_shift,
+        parts,
+        keep: bucket_keep(CHUNK_POSITIONS, parts),
+        tables: SharedTables::new(&mut [], &mut [], &mut [], &mut [], &mut [], ph.bts),
+        first: SharedBuckets::new(&mut first, parts),
+        second: SharedBuckets::new(&mut second, parts),
+        counters: [counters[0].shared(), counters[1].shared()],
+        faults: Faults {
+            offsets: [0; 3],
+            lens: [0; 3],
+            marks: [marks[0].shared(), marks[1].shared(), marks[2].shared()],
+            touch: [touch[0].shared(), touch[1].shared(), touch[2].shared()],
+            jobs: SharedJobs {
+                ptr: jobs.as_mut_ptr(),
+                len: 0,
+            },
+        },
+        #[cfg(test)]
+        unmarked_reads: AtomicUsize::new(0),
+    };
+    let cells_of = |b: usize| (b << block_shift)..((b + 1) << block_shift).min(cells);
+    let owner_of = &owner[..];
+    let own = |o: usize| (0..blocks).filter(move |&b| owner_of[b] as usize == o);
+    let timed = |acc: &mut u128, job: &(dyn Fn(usize) + Sync)| {
+        let t = Instant::now();
+        run_jobs(parts, true, job);
+        *acc += t.elapsed().as_nanos();
+    };
+    let (mut zero_ns, mut count_read_ns, mut count_ns, mut sum_ns) = (0u128, 0u128, 0u128, 0u128);
+    let (mut place_read_ns, mut place_ns) = (0u128, 0u128);
+    // Zero.
+    timed(&mut zero_ns, &|o| {
+        // The whole `Shared` (Sync), not its pointer field.
+        let offsets = offsets;
+        for b in own(o) {
+            let r = cells_of(b);
+            // SAFETY: the cells of `o`'s blocks of `offsets` are this job's; `r.end <= cells`.
+            unsafe { std::ptr::write_bytes(offsets.ptr.add(r.start), 0, r.len()) };
+        }
+    });
+    // SAFETY: no job is running; `offsets[cells]` is no cell's.
+    unsafe { offsets.set(cells, 0) };
+    // Count.
+    let mut start = 0usize;
+    while start < total {
+        let end = total.min(start.saturating_add(CHUNK_POSITIONS));
+        let span = |a: usize| {
+            (
+                start + (end - start) * a / parts,
+                start + (end - start) * (a + 1) / parts,
+            )
+        };
+        timed(&mut count_read_ns, &|a| {
+            let (s0, s1) = span(a);
+            // SAFETY: job `a` uses only the buckets `(a, *)`.
+            unsafe { fill.read::<false>(a, s0, s1, [false; 3]) }
+        });
+        timed(&mut count_ns, &|o| {
+            for a in 0..parts {
+                // SAFETY: owner `o` uses only the buckets `(*, o)`; every `ecode` lies in a block
+                // of `o` (the reader's bucket choice), so `offsets[ecode]` is this job's.
+                unsafe {
+                    for e in fill.first.at(a, o).iter() {
+                        let c = e.value as usize;
+                        offsets.set(c, offsets.get(c) + 1);
+                    }
+                }
+            }
+        });
+        start = end;
+    }
+    // Sum (and the presence vector and counters from the counts, in scratch arrays).
+    let t_sum = Instant::now();
+    let mut spv = vec![0u32; ph.pv.len()];
+    let mut shp = vec![0u32; ph.helper.len()];
+    let (spv_s, shp_s) = (Shared::new(&mut spv), Shared::new(&mut shp));
+    let mut block_totals = vec![0u32; blocks];
+    let totals = Shared::new(&mut block_totals);
+    sum_ns += t_sum.elapsed().as_nanos();
+    timed(&mut sum_ns, &|o| {
+        for b in own(o) {
+            let mut sum = 0u32;
+            for c in cells_of(b) {
+                // SAFETY: the cells of `o`'s blocks are this job's, and so are the scratch
+                // presence-vector words (`c >> bts`) and counters (`c >> 11`) of its blocks (a
+                // block holds whole words and whole counters: `block_shift >= bts, 11`).
+                unsafe {
+                    let cnt = offsets.get(c);
+                    if cnt != 0 {
+                        let i = c >> ph.bts;
+                        if i < spv_s.len {
+                            spv_s.set(i, spv_s.get(i) | (1u32 << (c & PV_ARRAY_MASK)));
+                        }
+                        let h = c >> K_COMPRESSION_FACTOR_SHIFT;
+                        assert!(h < shp_s.len);
+                        shp_s.set(h, shp_s.get(h) + (cnt - 1));
+                        sum += cnt;
+                    }
+                }
+            }
+            // SAFETY: entry `b` is owner `o`'s.
+            unsafe { totals.set(b, sum) };
+        }
+    });
+    let t_prefix = Instant::now();
+    let mut run = 0u64;
+    for t in block_totals.iter_mut() {
+        let sum = *t;
+        *t = run as u32;
+        run += sum as u64;
+    }
+    let words_total = run as usize;
+    // At most one word per query offset (`next_pos[0]` is never a word).
+    assert!(
+        words_total < n.max(1),
+        "R15 csrp: more words than query offsets"
+    );
+    sum_ns += t_prefix.elapsed().as_nanos();
+    timed(&mut sum_ns, &|o| {
+        for b in own(o) {
+            // SAFETY: entry `b` and the cells of `o`'s blocks are this job's; no job writes the
+            // entries during this phase.
+            unsafe {
+                let mut end = totals.get(b);
+                for c in cells_of(b) {
+                    end += offsets.get(c);
+                    offsets.set(c, end);
+                }
+            }
+        }
+    });
+    // SAFETY: no job is running; `offsets[cells]` is no cell's end and stays the total.
+    unsafe { offsets.set(cells, words_total as u32) };
+    // Place.
+    let mut start = 0usize;
+    while start < total {
+        let end = total.min(start.saturating_add(CHUNK_POSITIONS));
+        let span = |a: usize| {
+            (
+                start + (end - start) * a / parts,
+                start + (end - start) * (a + 1) / parts,
+            )
+        };
+        timed(&mut place_read_ns, &|a| {
+            let (s0, s1) = span(a);
+            // SAFETY: job `a` uses only the buckets `(a, *)`.
+            unsafe { fill.read::<false>(a, s0, s1, [false; 3]) }
+        });
+        timed(&mut place_ns, &|o| {
+            for a in 0..parts {
+                // SAFETY: as the count pass; the run of the cell is the cell's own part of `qs`
+                // (`offsets[ecode] - 1 < words_total <= n - 1`, one place per word).
+                unsafe {
+                    for e in fill.first.at(a, o).iter() {
+                        let c = e.value as usize;
+                        let p = offsets.get(c) - 1;
+                        offsets.set(c, p);
+                        qs.set(p as usize, e.index);
+                    }
+                }
+            }
+        });
+        start = end;
+    }
+    let t2 = Instant::now();
+    // EXPERIMENT (exp/r13-wall): the CSR build's interval (`R13_PROBE=tl`).
+    crate::utils::xtiming::x_r13("csr", Some(t0), words_total as u64);
+    eprintln!(
+        "[R11] csr words-build-par cells={cells} words={words_total} parts={parts} zero_ns={zero_ns} count_read_ns={count_read_ns} count_ns={count_ns} sum_ns={sum_ns} place_read_ns={place_read_ns} place_ns={place_ns} build_ns={} csr_bytes={}",
+        (t2 - t0).as_nanos(),
+        (cells + 1 + words_total) * 4,
+    );
+    if super::x_r11_csr::mode().check {
+        super::x_r11_csr::check_against_chains(hashtable, next_pos, words_total);
+        super::x_r11_csr::PvScratch {
+            pv: spv,
+            helper: shp,
+        }
+        .check(&ph);
+    }
+}
+
 /// Tests only (`FillStats::first_pages`, `check_prefault`): the pages of `v` that hold an element
 /// other than 0 (a fast test per page: most pages are all zero or all written).
 #[cfg(test)]

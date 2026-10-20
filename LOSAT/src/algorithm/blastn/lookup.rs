@@ -2054,7 +2054,31 @@ fn build_mb_lookup(
 
     // EXPERIMENT (exp/r11-csr): the chains as CSR in `next_pos`'s spare capacity.
     if x_r11_csr::mode().build {
-        x_r11_csr::attach(&hashtable, &mut next_pos);
+        if x_r11_csr::mode().words {
+            // EXPERIMENT (exp/r15-csr): the words build on the contiguous tables too.
+            x_r11_csr::attach_words(
+                &XR15MbWords {
+                    queries_blastna,
+                    query_offsets,
+                    query_masks,
+                    word_length,
+                    lut_word_length,
+                    kmer_mask,
+                    db_word_counts,
+                    max_db_word_count,
+                    ascending_cells,
+                },
+                &hashtable,
+                &mut next_pos,
+                Some(x_r11_csr::PvHelper {
+                    pv: &pv_array,
+                    bts: pv_array_bts,
+                    helper: &helper_array,
+                }),
+            );
+        } else {
+            x_r11_csr::attach(&hashtable, &mut next_pos);
+        }
     }
 
     MbLookupTable {
@@ -2364,6 +2388,75 @@ impl x_r11_csr::Words for XR11DiscWords<'_> {
     }
 }
 
+/// EXPERIMENT (exp/r15-csr, v4-R R15): the words of `build_mb_lookup`'s fill, in the order of its
+/// serial loop (the `else` branch, without the updates): `(cell, 1-based query offset)`.
+struct XR15MbWords<'a> {
+    queries_blastna: &'a [&'a [u8]],
+    query_offsets: &'a [i32],
+    query_masks: &'a [Vec<MaskedInterval>],
+    word_length: usize,
+    lut_word_length: usize,
+    kmer_mask: u64,
+    db_word_counts: Option<&'a [u8]>,
+    max_db_word_count: u8,
+    ascending_cells: bool,
+}
+
+impl x_r11_csr::Words for XR15MbWords<'_> {
+    fn ascending(&self) -> bool {
+        self.ascending_cells
+    }
+
+    fn each(&self, f: &mut impl FnMut(usize, u32)) {
+        let lut_word_length = self.lut_word_length;
+        for (q_idx, seq_blastna) in self.queries_blastna.iter().enumerate() {
+            let seq = seq_blastna;
+            if seq.len() < lut_word_length {
+                continue;
+            }
+            let masks = self
+                .query_masks
+                .get(q_idx)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            let ranges = build_unmasked_ranges(seq.len(), masks);
+            let query_offset = self.query_offsets[q_idx].max(0) as usize;
+            for (range_start, range_end) in ranges {
+                let range_len = range_end.saturating_sub(range_start);
+                if self.word_length > range_len {
+                    continue;
+                }
+                let mut current_kmer: u64 = 0;
+                let mut valid_bases = 0usize;
+                for pos in range_start..range_end {
+                    let base = seq[pos];
+                    if (base & BLAST2NA_MASK) != 0 {
+                        current_kmer = 0;
+                        valid_bases = 0;
+                        continue;
+                    }
+                    current_kmer = ((current_kmer << 2) | base as u64) & self.kmer_mask;
+                    valid_bases += 1;
+                    if valid_bases < lut_word_length {
+                        continue;
+                    }
+                    if let Some(counts_filter) = self.db_word_counts {
+                        if db_word_count_exceeds(
+                            counts_filter,
+                            current_kmer,
+                            self.max_db_word_count,
+                        ) {
+                            continue;
+                        }
+                    }
+                    let q_off_1 = (query_offset + (pos + 1 - lut_word_length) + 1) as u32;
+                    f(current_kmer as usize, q_off_1);
+                }
+            }
+        }
+    }
+}
+
 /// The estimate of the longest chain of both templates' tables, from the compressed counters.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:808-824
@@ -2667,7 +2760,23 @@ pub fn build_disc_mb_lookup(
     // EXPERIMENT (exp/r11-csr): the first template's chains as CSR (one template only).
     if x_r11_csr::mode().build && !two_templates {
         if x_r11_csr::mode().words {
-            x_r11_csr::attach_words(&XR11DiscWords(&words), &hashtable, &mut next_pos);
+            let ph = x_r11_csr::PvHelper {
+                pv: &pv_array,
+                bts: pv_array_bts,
+                helper: &helper_array,
+            };
+            match x_disc_lookup_par::parts().filter(|_| x_r11_csr::mode().par) {
+                // EXPERIMENT (exp/r15-csr): the words build on the search pool.
+                Some(p) => {
+                    x_disc_lookup_par::x_r15_csr_par(p, &words, &hashtable, &mut next_pos, ph)
+                }
+                None => x_r11_csr::attach_words(
+                    &XR11DiscWords(&words),
+                    &hashtable,
+                    &mut next_pos,
+                    Some(ph),
+                ),
+            }
         } else {
             x_r11_csr::attach(&hashtable, &mut next_pos);
         }

@@ -814,13 +814,15 @@ fn merge(
     }
 }
 
-// No NCBI counterpart: the counters of the summary fields, per fold (0: one hit, 1: two hits).
+// No NCBI counterpart: the counters of the summary fields, per fold (0: one hit, 1: two hits,
+// 2: one hit of a direct or Na table, the child module `na`).
 pub(super) const ONE_HIT: usize = 0;
 pub(super) const TWO_HITS: usize = 1;
-static MERGES: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-static PARTS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-static MERGE_NS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-static LEFT: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+pub(super) const NA_ONE_HIT: usize = 2;
+static MERGES: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+static PARTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+static MERGE_NS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+static LEFT: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
 /// No NCBI counterpart: counts one partitioned stage of `kind` (once per stage).
 pub(super) fn record(kind: usize, parts: usize, stats: &PartStats) {

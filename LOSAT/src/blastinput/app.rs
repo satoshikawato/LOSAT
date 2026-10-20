@@ -252,6 +252,43 @@ impl ReportFormat {
     pub fn number(self) -> i32 {
         self as i32
     }
+
+    /// Whether NCBI writes a query's result warnings (an invalid query, O replaced by X,
+    /// ...) with the query's report: not for the structured formats, whose report returns
+    /// before them. (The reader's warnings of a query batch are written when it is read,
+    /// whatever the format.)
+    ///
+    /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
+    /// ```c++
+    ///     if (m_FormatType == CFormattingArgs::eAsnText
+    ///       || m_FormatType == CFormattingArgs::eAsnBinary
+    ///       || m_FormatType == CFormattingArgs::eXml
+    ///       || m_FormatType == CFormattingArgs::eXml2
+    ///       || m_FormatType == CFormattingArgs::eJson
+    ///       || m_FormatType == CFormattingArgs::eXml2_S
+    ///       || m_FormatType == CFormattingArgs::eJson_S
+    ///       || m_FormatType == CFormattingArgs::eJsonSeqalign
+    ///       || m_FormatType == CFormattingArgs::eSAM)
+    ///     {
+    ///         x_PrintStructuredReport(results, queries);
+    ///         return;
+    ///     }
+    ///
+    ///     if (results.HasErrors()) {
+    ///         ERR_POST(Error << results.GetErrorStrings());
+    ///         return; // errors are deemed fatal
+    ///     }
+    ///     if (results.HasWarnings()) {
+    ///         ERR_POST(Warning << results.GetWarningStrings());
+    ///     }
+    /// ```
+    pub fn writes_query_warnings(self) -> bool {
+        use ReportFormat::*;
+        !matches!(
+            self,
+            AsnText | AsnBinary | Xml | Xml2 | Json | Xml2S | JsonS | JsonSeqalign | Sam
+        )
+    }
 }
 
 /// LOSAT's search programs, for what depends on the program in the reading of `-outfmt`.
@@ -316,12 +353,12 @@ impl Program {
             CommaSeparatedValues => false,
             TaxFormat => false,
             CommaSeparatedValuesWithHeader => false,
-            // Line OF track S (structured formats): none yet.
+            // Line OF track S (structured formats).
             Xml => false,
-            AsnText => false,
+            AsnText => true,
             AsnBinary => false,
             ArchiveFormat => false,
-            JsonSeqalign => false,
+            JsonSeqalign => true,
             Json => false,
             Xml2 => false,
             JsonS => false,
@@ -1046,17 +1083,17 @@ mod tests {
         );
     }
 
-    // The one table of the formats LOSAT writes (`Program::writes`): 0, 6 and 7 in every
-    // program, no other format yet.
+    // The one table of the formats LOSAT writes (`Program::writes`): 0, 6, 7, 8 and 12 in
+    // every program (8 and 12: line OF track S, OF3b).
     #[test]
-    fn every_program_writes_the_pairwise_and_tabular_formats_only() {
+    fn every_program_writes_its_formats_only() {
         for program in PROGRAMS {
             let written: Vec<i32> = (0..END_VALUE)
                 .filter_map(ReportFormat::from_number)
                 .filter(|&format| program.writes(format))
                 .map(ReportFormat::number)
                 .collect();
-            assert_eq!(written, [0, 6, 7], "{program:?}");
+            assert_eq!(written, [0, 6, 7, 8, 12], "{program:?}");
         }
         assert_eq!(
             PROGRAMS.map(Program::name),
@@ -1070,6 +1107,18 @@ mod tests {
             PROGRAMS.map(Program::custom_fields),
             [false, true, true, false, false]
         );
+    }
+
+    // NCBI blast_format.cpp:1431-1452: the structured reports return before the result
+    // warnings.
+    #[test]
+    fn structured_formats_write_no_query_warnings() {
+        let silent: Vec<i32> = (0..END_VALUE)
+            .filter_map(ReportFormat::from_number)
+            .filter(|format| !format.writes_query_warnings())
+            .map(ReportFormat::number)
+            .collect();
+        assert_eq!(silent, [5, 8, 9, 12, 13, 14, 15, 16, 17]);
     }
 
     #[test]
@@ -1099,7 +1148,14 @@ mod tests {
                 None
             );
             // Formats that NCBI writes and LOSAT does not, before the inputs are read.
-            for number in (1..=5).chain(8..=16).chain([18, 20]) {
+            for number in (1..=16)
+                .filter(|&number| !matches!(number, PAIRWISE | TABULAR | TABULAR_WITH_COMMENTS))
+                .filter(|&number| {
+                    let format = ReportFormat::from_number(number).unwrap();
+                    !program.writes(format)
+                })
+                .chain([18, 20])
+            {
                 assert_eq!(
                     report_format(&choice(number), program, file)
                         .unwrap_err()

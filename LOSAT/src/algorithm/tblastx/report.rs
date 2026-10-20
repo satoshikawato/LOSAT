@@ -178,6 +178,31 @@ impl SubjectLetters<'_> {
         }
     }
 
+    /// The engine counts of `hsp` (`hsp_engine_counts`) against its subject; `window` is the
+    /// buffer of a stored subject's letters.
+    fn engine_counts(
+        &self,
+        hsp: &TblastxHsp,
+        query: &[u8],
+        query_code: &GeneticCode,
+        db_code: &GeneticCode,
+        window: &mut Vec<u8>,
+    ) -> (usize, usize) {
+        let s_idx = hsp.hit.s_idx as usize;
+        match self {
+            Self::Records(records) => {
+                hsp_engine_counts(hsp, query, records[s_idx].seq(), 0, query_code, db_code)
+            }
+            Self::Stored { stores, ordinals } => {
+                let store = &stores[ordinals[s_idx] as usize];
+                let (from, to) = (hsp.hit.sort_subject_offset, hsp.hit.sort_subject_end);
+                let (start, length) = codon_window(store.len(), hsp.subject_frame, from, to);
+                store.letters_into(start, start + length, window);
+                hsp_engine_counts(hsp, query, window, from, query_code, db_code)
+            }
+        }
+    }
+
     /// The displayed rows of `hsp` (`displayed_rows`) against its subject; `window` is the
     /// buffer of a stored subject's letters.
     fn rows(
@@ -303,6 +328,118 @@ pub(crate) fn set_displayed_identities(
             0.0
         };
     }
+}
+
+/// NCBI's engine identities and positives (identities included) of an HSP, which its
+/// Seq-aligns show (`num_ident`, `num_positives`): counted on the residues the search
+/// translated (`translation::frame_residue`: the unmasked query frame with `-query_gencode`,
+/// the subject frame with `-db_gencode`, as the re-evaluation's buffers, not the display's
+/// table), a pair that is not an identity being positive by the search matrix. `subject`
+/// holds the subject's letters from the codon of residue `subject_first` on (as
+/// `displayed_rows`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2708-2717
+/// ```c
+///       if (!delete_hsp) {
+///           const Uint1* query_nomask = query_blk->sequence_nomask +
+///               query_info->contexts[context].query_offset;
+///           Int4 align_length = 0;
+///           Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
+///                    							    subject_start,
+///                                					hsp,
+///                                					score_params->options,
+///                                					&align_length,
+///                                					sbp);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:770-792
+/// ```c
+///    if(NULL != sbp)
+///    {
+/// 	   if(sbp->protein_alphabet)
+/// 		   matrix = sbp->matrix->data;
+///    }
+///
+///    if (!hsp->gap_info) {
+///       /* Ungapped case. Check that lengths are the same in query and subject,
+///          then count number of matches. */
+///       if (q_length != s_length)
+///          return -1;
+///       align_length = q_length;
+///       for (i=0; i<align_length; i++) {
+///          if (*q == *s)
+///             num_ident++;
+///          else if (NULL != matrix) {
+///         	 if (matrix[*q][*s] > 0)
+///         		 num_pos ++;
+///             }
+///          q++;
+///          s++;
+///       }
+///    	}
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:831-832
+/// ```c
+///    if(NULL != matrix)
+/// 	   *num_pos_ptr = num_pos + num_ident;
+/// ```
+fn hsp_engine_counts(
+    hsp: &TblastxHsp,
+    query: &[u8],
+    subject: &[u8],
+    subject_first: usize,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+) -> (usize, usize) {
+    use super::translation::frame_residue;
+    let hit = &hsp.hit;
+    let query_frame = hit.query_frame as i8;
+    let mut identities = 0;
+    let mut positives = 0;
+    for (q_offset, s_offset) in (hit.sort_query_offset..hit.sort_query_end)
+        .zip(hit.sort_subject_offset..hit.sort_subject_end)
+    {
+        let q = frame_residue(query, query_frame, q_offset, query_code);
+        let s = frame_residue(
+            subject,
+            hsp.subject_frame,
+            s_offset - subject_first,
+            db_code,
+        );
+        if q == s {
+            identities += 1;
+        } else if crate::utils::matrix::blosum62_score(q, s) > 0 {
+            positives += 1;
+        }
+    }
+    (identities, identities + positives)
+}
+
+/// The engine counts of the Seq-aligns of `hits` (outfmt 8, 12), by HSP index: the engine's
+/// `num_ident` (the search's count, which `set_displayed_identities` replaces by the display
+/// count; read before it) and its `num_positives`, which the search does not count
+/// (`hsp_engine_counts`: the same letters give the same identities, checked in debug builds).
+/// Made only when a Seq-align format is requested.
+pub(crate) fn engine_counts(
+    hits: &[TblastxHsp],
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+) -> Vec<(u32, u32)> {
+    let mut window = Vec::new();
+    hits.iter()
+        .map(|hsp| {
+            let (identities, positives) = subjects.engine_counts(
+                hsp,
+                queries[hsp.hit.q_idx as usize].seq(),
+                query_code,
+                db_code,
+                &mut window,
+            );
+            debug_assert_eq!(identities, hsp.hit.num_ident, "engine identities");
+            (hsp.hit.num_ident as u32, positives as u32)
+        })
+        .collect()
 }
 
 /// The SEG masks of a query in nucleotide coordinates, by frame.
@@ -885,12 +1022,21 @@ pub(crate) fn write_tabular_row<W: Write>(
     )
 }
 
-/// The TBLASTX output formats (`-outfmt` 0, 6 and 7, `tblastx_outfmt`).
+/// The TBLASTX output formats (`-outfmt` 0, 6, 7, 8 and 12, `tblastx_outfmt`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TblastxOutputFormat {
     Pairwise,
     Tabular,
     TabularWithComments,
+    /// A Seq-annot of Seq-aligns (outfmt 8, 12).
+    Seqalign(crate::report::serial::SerialFormat),
+}
+
+impl TblastxOutputFormat {
+    /// Whether the format is a table (outfmt 6, 7).
+    pub(crate) fn is_tabular(self) -> bool {
+        matches!(self, Self::Tabular | Self::TabularWithComments)
+    }
 }
 
 /// The format of a validated `-outfmt` value (`tblastx_outfmt`).
@@ -905,6 +1051,8 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
     match crate::blastinput::app::parse_formatting_string(outfmt).map(|choice| choice.number) {
         Ok(0) => TblastxOutputFormat::Pairwise,
         Ok(7) => TblastxOutputFormat::TabularWithComments,
+        Ok(8) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnText),
+        Ok(12) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::Json),
         _ => TblastxOutputFormat::Tabular,
     }
 }

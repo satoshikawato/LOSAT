@@ -20,7 +20,10 @@ pub mod lookup;
 pub mod ncbi_cutoffs;
 pub mod reevaluate;
 pub(crate) mod report;
+// NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
+// Seq-aligns of each query's final hit list (outfmt 8, 12).
 mod scan;
+pub(crate) mod seqalign;
 pub mod stage_dump;
 pub(crate) mod subjects;
 pub mod sum_stats_linking;

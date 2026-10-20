@@ -21,12 +21,12 @@ use crate::core::composition_adjustment::adjust_scores::{
     BlastCompositionWorkspace,
 };
 use crate::core::composition_adjustment::redo_alignment::{
-    blast_compo_alignment_new, blast_redo_one_match_with_workspace, build_query_word_hashes,
-    preliminary_test_near_identical, test_near_identical, windows_from_protein_aligns,
-    x_compo_reuse, x_whole_subject_composition, BlastCompoAlignment, BlastCompoAlignmentContext,
-    BlastCompoMatchingSequence, BlastCompoQueryInfo, BlastCompoSequenceData,
-    BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoRangeResult, EMatrixAdjustRule,
-    XSubjectComposition,
+    blast_compo_alignment_new, blast_redo_one_match_with_workspace_queries_and_matrix,
+    build_query_word_hashes, preliminary_test_near_identical, test_near_identical,
+    windows_from_protein_aligns, x_compo_reuse, x_whole_subject_composition, BlastCompoAlignment,
+    BlastCompoAlignmentContext, BlastCompoMatchingSequence, BlastCompoQueryInfo,
+    BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoRangeResult,
+    EMatrixAdjustRule, XSubjectComposition,
 };
 use crate::stats::{blast_spouge_stoe, BlastGumbelBlk, KarlinParams};
 use crate::utils::matrix::{blosum62_score_ncbistdaa_direct, ncbistdaa, protein_score};
@@ -1575,6 +1575,139 @@ fn recompute_num_identities(
     }
 }
 
+/// NCBI's engine positives of the HSPs of one match (`BlastHSP::num_positives`, which the
+/// Seq-aligns show): `s_ComputeNumIdentities` counts them after the redo with the score block
+/// whose matrix the match's composition adjustments have overwritten (`Blast_AdjustScores`
+/// writes its `matrix` argument, the thread-local `sbp->matrix->data`), so a pair is positive
+/// by `adjusted`, the matrix of the match's last adjustment. `recompute_num_identities` counts
+/// them with the search matrix for the other reports; this replaces only `num_positives`, and
+/// leaves an HSP whose letters it cannot read as it was. With the Seq-aligns only
+/// (`postprocess_preliminary_hits`' `engine_positives`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3500-3502,3625-3635
+/// ```c
+///                 sbp                  = sbp_tld[tid];
+///                 redo_align_params    = redo_align_params_tld[tid];
+///                 matrix               = matrix_tld[tid];
+/// ...
+///                                 Blast_RedoOneMatch(
+///                                         alignments,             // thread-local
+///                                         ...
+///                                         matrix,                 // thread-local
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1240-1241
+/// ```c
+///                     adjust_search_failed =
+///                             Blast_AdjustScores(matrix, query_composition,
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3691-3701
+/// ```c
+///                     s_ComputeNumIdentities(
+///                             queryBlk,
+///                             queryInfo,
+///                             subjectBlk,
+///                             seqSrc,
+///                             hsp_list,
+///                             scoringParams->options,
+///                             genetic_code_string,
+///                             sbp,
+///                             ranges
+///                     );
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:770-833
+/// ```c
+///    if(NULL != sbp)
+///    {
+/// 	   if(sbp->protein_alphabet)
+/// 		   matrix = sbp->matrix->data;
+///    }
+///
+///    if (!hsp->gap_info) {
+///       ...
+///       for (i=0; i<align_length; i++) {
+///          if (*q == *s)
+///             num_ident++;
+///          else if (NULL != matrix) {
+///         	 if (matrix[*q][*s] > 0)
+///         		 num_pos ++;
+///              }
+///          q++;
+///          s++;
+///       }
+///    	}
+///     else {
+///       ...
+///          case eGapAlignSub:
+///             for (i=0; i<esp->num[index]; i++) {
+///                if (*q == *s) {
+///                   num_ident++;
+///                }
+///                else if (NULL != matrix) {
+///             	   if (matrix[*q][*s] > 0)
+///             		   num_pos ++;
+///                }
+///                q++;
+///                s++;
+///             }
+///             break;
+///          case eGapAlignDel:
+///             s += esp->num[index];
+///             break;
+///          case eGapAlignIns:
+///             q += esp->num[index];
+///             break;
+///       ...
+///    if(NULL != matrix)
+/// 	   *num_pos_ptr = num_pos + num_ident;
+/// ```
+fn recount_engine_positives(
+    query_nomask: &[u8],
+    subject: &[u8],
+    hsps: &mut [BlastpHsp],
+    adjusted: &AdjustedProteinMatrix,
+) {
+    for hsp in hsps {
+        let Some(q_offset) = hsp.q_start.checked_sub(1) else {
+            continue;
+        };
+        let Some(s_offset) = hsp.s_start.min(hsp.s_end).checked_sub(1) else {
+            continue;
+        };
+        let implicit = [GapEditOp::Sub(hsp.q_end.saturating_sub(q_offset) as u32)];
+        let ops = hsp.gap_info.as_deref().unwrap_or(&implicit);
+        let (mut q_index, mut s_index) = (q_offset, s_offset);
+        let mut num_positives = 0usize;
+        let mut valid = true;
+        for op in ops {
+            match *op {
+                GapEditOp::Sub(n) => {
+                    for _ in 0..n as usize {
+                        let (Some(&q), Some(&s)) =
+                            (query_nomask.get(q_index), subject.get(s_index))
+                        else {
+                            valid = false;
+                            break;
+                        };
+                        if q == s || adjusted.is_positive(q, s) {
+                            num_positives += 1;
+                        }
+                        q_index += 1;
+                        s_index += 1;
+                    }
+                }
+                GapEditOp::Del(n) => s_index += n as usize,
+                GapEditOp::Ins(n) => q_index += n as usize,
+            }
+            if !valid {
+                break;
+            }
+        }
+        if valid {
+            hsp.num_positives = num_positives;
+        }
+    }
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_hits.c:746-824
 // ```c
 // static Int2
@@ -1875,6 +2008,9 @@ pub(crate) fn postprocess_preliminary_hits(
     // ```
     gap_scratch: &mut GapAlignScratch,
     subject_range_cache: &mut BlastpKappaSubjectRangeCache,
+    // The Seq-aligns (outfmt 8, 12) are requested (`ReportNeeds::seqalign`): the HSPs get
+    // NCBI's engine positives (`recount_engine_positives`).
+    engine_positives: bool,
 ) -> Result<BlastpPostprocessResult> {
     if preliminary_hits.is_empty() {
         return Ok(BlastpPostprocessResult {
@@ -1949,11 +2085,15 @@ pub(crate) fn postprocess_preliminary_hits(
     // compositionTestIndex,   // thread-local
     // &LambdaRatio            // local
     // ```
-    let distinct_alignments = blast_redo_one_match_with_workspace(
+    // The matrix that the match's adjustments leave (NCBI's thread-local `sbp->matrix->data`,
+    // which `Blast_AdjustScores` overwrites), read by `recount_engine_positives`; the call is
+    // that of `blast_redo_one_match_with_workspace`, which starts every match with none.
+    let mut matrix_state: Option<AdjustedProteinMatrix> = None;
+    let distinct_alignments = blast_redo_one_match_with_workspace_queries_and_matrix(
         &incoming_aligns,
         redo_align_params,
         &matching_seq,
-        &query_workspace.redo_query_info,
+        std::slice::from_ref(&query_workspace.redo_query_info),
         // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:2120-2128
         // ```c
         // if (sbp->kbp_gap[i] != NULL) {
@@ -1964,6 +2104,7 @@ pub(crate) fn postprocess_preliminary_hits(
         redo_karlin_params.lambda,
         &BLASTP_REDO_ALIGN_CALLBACKS,
         composition_workspace,
+        &mut matrix_state,
     );
     redo_align_params
         .gapping_params
@@ -2059,6 +2200,11 @@ pub(crate) fn postprocess_preliminary_hits(
         redo_align_params.score_divisor,
     );
     recompute_num_identities(query_nomask, subject, &mut hsp_list.hsps, matrix);
+    if engine_positives {
+        if let Some(adjusted) = matrix_state.as_ref() {
+            recount_engine_positives(query_nomask, subject, &mut hsp_list.hsps, adjusted);
+        }
+    }
     if let Some(target) = blastp_trace_hsp_target() {
         for (index, hsp) in hsp_list.hsps.iter().enumerate() {
             if blastp_trace_matches_hsp(target, hsp) {

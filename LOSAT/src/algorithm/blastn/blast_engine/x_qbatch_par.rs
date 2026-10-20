@@ -1212,6 +1212,14 @@ where
             .unwrap_or(self.profile.allowance_mib * (self.threads as u64).saturating_sub(1))
     }
 
+    // No NCBI counterpart: tells the report writer whether the search's pool is idle; it does not
+    // change any value NCBI computes.
+    /// EXPERIMENT (LOSAT_X_PAIRWISEPAR): whether no slot's thread exists (none started, or all
+    /// joined by `finish`), so that the search's pool is idle between the loop's searches.
+    pub(super) fn x_slots_idle(&self) -> bool {
+        self.slots.is_empty()
+    }
+
     /// The result of batch `key` if a slot searched it (waiting for it if a slot is searching
     /// it or will); `None` when the loop searches it itself, on the whole pool: then no slot is
     /// running and none can start. The first batch is never searched ahead.

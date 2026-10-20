@@ -30,6 +30,9 @@ pub enum BlastnOutputFormat {
     Pairwise,
     Tabular,
     TabularWithComments,
+    /// The Seq-annot of Seq-aligns of each query: outfmt 8 (ASN.1 text) or 12 (JSON)
+    /// (`report::serial::write_query`, through `algorithm::blastn::seqalign`).
+    Seqalign(crate::report::serial::SerialFormat),
 }
 
 impl BlastnOutputFormat {
@@ -47,16 +50,55 @@ impl BlastnOutputFormat {
     ///         /// Tabular output with comments
     ///         eTabularWithComments,
     /// ```
+    /// NCBI reference (598d8ae6): c++/include/algo/blast/blastinput/blast_args.hpp:1041-1050
+    /// ```c
+    ///         /// ASN.1 text output
+    ///         eAsnText,
+    ///         /// ASN.1 binary output
+    ///         eAsnBinary,
+    ///         /// Comma-separated values
+    ///         eCommaSeparatedValues,
+    ///         /// BLAST archive format
+    ///         eArchiveFormat,
+    ///         /// JSON seq-align
+    ///         eJsonSeqalign,
+    /// ```
     pub(crate) fn of(format: ReportFormat) -> anyhow::Result<Self> {
         match format {
             ReportFormat::Pairwise => Ok(BlastnOutputFormat::Pairwise),
             ReportFormat::Tabular => Ok(BlastnOutputFormat::Tabular),
             ReportFormat::TabularWithComments => Ok(BlastnOutputFormat::TabularWithComments),
-            other => anyhow::bail!(
-                "output format {} is not supported by LOSAT's BLASTN",
-                other.number()
-            ),
+            other => match crate::report::serial::SerialFormat::of(other) {
+                Some(serial) => Ok(BlastnOutputFormat::Seqalign(serial)),
+                None => anyhow::bail!(
+                    "output format {} is not supported by LOSAT's BLASTN",
+                    other.number()
+                ),
+            },
         }
+    }
+
+    /// The Seq-annot format of outfmt 8 and 12.
+    pub(crate) fn serial(self) -> Option<crate::report::serial::SerialFormat> {
+        match self {
+            BlastnOutputFormat::Seqalign(serial) => Some(serial),
+            _ => None,
+        }
+    }
+
+    /// Whether NCBI writes a query's result warnings with its report
+    /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
+    pub(crate) fn writes_query_warnings(self) -> bool {
+        !matches!(self, BlastnOutputFormat::Seqalign(_))
+    }
+
+    /// Whether the format is one of the tabular formats (outfmt 6 and 7), which read the
+    /// tabular subject IDs.
+    pub(crate) fn is_tabular(self) -> bool {
+        matches!(
+            self,
+            BlastnOutputFormat::Tabular | BlastnOutputFormat::TabularWithComments
+        )
     }
 }
 

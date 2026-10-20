@@ -1,0 +1,817 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide in volumes",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 40
+        },
+        {
+          id str "blast_score",
+          value int 40
+        },
+        {
+          id str "e_value",
+          value real { 644765338412401, 10, -33 }
+        },
+        {
+          id str "bit_score",
+          value real { 749862803272326, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 40
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          general {
+            db "BL_ORD_ID",
+            tag id 0
+          }
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          40
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide in volumes",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 41
+        },
+        {
+          id str "blast_score",
+          value int 41
+        },
+        {
+          id str "e_value",
+          value real { 184870964559161, 10, -33 }
+        },
+        {
+          id str "bit_score",
+          value real { 768329299795705, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 41
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_2",
+          general {
+            db "BL_ORD_ID",
+            tag id 1
+          }
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          41
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide in volumes",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 42
+        },
+        {
+          id str "blast_score",
+          value int 42
+        },
+        {
+          id str "e_value",
+          value real { 529586307036077, 10, -34 }
+        },
+        {
+          id str "bit_score",
+          value real { 786795796319084, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 42
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_3",
+          general {
+            db "BL_ORD_ID",
+            tag id 2
+          }
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          42
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide in volumes",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 43
+        },
+        {
+          id str "blast_score",
+          value int 43
+        },
+        {
+          id str "e_value",
+          value real { 15157547502309, 10, -33 }
+        },
+        {
+          id str "bit_score",
+          value real { 805262292842463, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 43
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_4",
+          general {
+            db "BL_ORD_ID",
+            tag id 3
+          }
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          43
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide in volumes",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 60
+        },
+        {
+          id str "blast_score",
+          value int 60
+        },
+        {
+          id str "e_value",
+          value real { 982333338543532, 10, -44 }
+        },
+        {
+          id str "bit_score",
+          value real { 11191927337399, 10, -11 }
+        },
+        {
+          id str "num_ident",
+          value int 74
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_5",
+          general {
+            db "BL_ORD_ID",
+            tag id 4
+          }
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          74
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide in volumes",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 50
+        },
+        {
+          id str "blast_score",
+          value int 50
+        },
+        {
+          id str "e_value",
+          value real { 576258875839469, 10, -38 }
+        },
+        {
+          id str "bit_score",
+          value real { 934527768506114, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 50
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 432350427350427, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_9",
+          general {
+            db "BL_ORD_ID",
+            tag id 8
+          }
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          50
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 31
+        },
+        {
+          id str "blast_score",
+          value int 31
+        },
+        {
+          id str "e_value",
+          value real { 210212930971207, 10, -27 }
+        },
+        {
+          id str "bit_score",
+          value real { 583664334561918, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 31
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 269957264957265, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_9",
+          general {
+            db "BL_ORD_ID",
+            tag id 8
+          }
+        },
+        starts {
+          86,
+          86
+        },
+        lens {
+          31
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide in volumes",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 39
+        },
+        {
+          id str "blast_score",
+          value int 39
+        },
+        {
+          id str "e_value",
+          value real { 270997195813819, 10, -32 }
+        },
+        {
+          id str "bit_score",
+          value real { 731396306748948, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 47
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_10",
+          general {
+            db "BL_ORD_ID",
+            tag id 9
+          }
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          47
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide in volumes",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 259
+        },
+        {
+          id str "blast_score",
+          value int 259
+        },
+        {
+          id str "e_value",
+          value real { 863032828959127, 10, -154 }
+        },
+        {
+          id str "bit_score",
+          value real { 479402554189227, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 259
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 1, 10, 2 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_11",
+          general {
+            db "BL_ORD_ID",
+            tag id 10
+          }
+        },
+        starts {
+          0,
+          0
+        },
+        lens {
+          259
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastn",
+          data int 1
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "nucleotide in volumes",
+          data bool TRUE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 62
+        },
+        {
+          id str "blast_score",
+          value int 62
+        },
+        {
+          id str "e_value",
+          value real { 642560970318449, 10, -45 }
+        },
+        {
+          id str "bit_score",
+          value real { 115612572678666, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 62
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 97375, 10, -3 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_12",
+          general {
+            db "BL_ORD_ID",
+            tag id 11
+          }
+        },
+        starts {
+          1,
+          1
+        },
+        lens {
+          62
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}

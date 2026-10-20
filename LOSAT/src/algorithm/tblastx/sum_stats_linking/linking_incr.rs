@@ -514,6 +514,14 @@ impl IncrOptions {
     }
 }
 
+// No NCBI counterpart: EXPERIMENT switch LOSAT_X_LINKSWEEPSTOP=1 (exp/f2-tbx-link): the index-1 sweep
+// stops filling the Fenwick tree once no queued HSP is left to visit (its answers are read only for
+// queued HSPs; the tree is cleared at the start of every sweep).
+fn sweep_stop() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var_os("LOSAT_X_LINKSWEEPSTOP").is_some_and(|v| v == "1"))
+}
+
 // No NCBI counterpart: counters of what the kernel did; they do not change any value NCBI computes.
 /// What one call did. Tests assert on it; `LOSAT_LINK_STATS=1` prints it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -545,6 +553,14 @@ pub(super) struct IncrStats {
     /// Largest number of HSPs of a pass value (exact, before NCBI's Int2).
     pub max_num: i64,
     pub max_pass_sum: i64,
+    /// EXPERIMENT (LOSAT_X_LINKSWEEPSTOP): HSPs inserted into the Fenwick tree by the sweeps, those
+    /// inserted while no HSP was queued any more (`ins_idle`), the steps of the insertions and the
+    /// steps of those, and the HSPs the sweeps read after the last queued one (`swept_idle`).
+    pub ins: u64,
+    pub ins_idle: u64,
+    pub fsteps: u64,
+    pub fsteps_idle: u64,
+    pub swept_idle: u64,
 }
 
 impl IncrStats {
@@ -568,6 +584,11 @@ impl IncrStats {
         self.clamped += o.clamped;
         self.max_num = self.max_num.max(o.max_num);
         self.max_pass_sum = self.max_pass_sum.max(o.max_pass_sum);
+        self.ins += o.ins;
+        self.ins_idle += o.ins_idle;
+        self.fsteps += o.fsteps;
+        self.fsteps_idle += o.fsteps_idle;
+        self.swept_idle += o.swept_idle;
     }
 }
 
@@ -698,7 +719,7 @@ pub(super) fn link_hsp_group_incr_slice(
     );
     if let Some(started) = started {
         eprintln!(
-            "[LINK_INCR_STATS] n={} us={} bound={} max_pass_sum={} max_num={} rounds={} passes={} removed={} visited0={} kept0={} searched0={} visited1={} kept1={} searched1={} same0={} same1={} swept={} fallbacks={} verified_passes={} wide={} clamped={}",
+            "[LINK_INCR_STATS] n={} us={} bound={} max_pass_sum={} max_num={} rounds={} passes={} removed={} visited0={} kept0={} searched0={} visited1={} kept1={} searched1={} same0={} same1={} swept={} fallbacks={} verified_passes={} wide={} clamped={} ins={} ins_idle={} fsteps={} fsteps_idle={} swept_idle={}",
             n,
             started.elapsed().as_micros(),
             bound,
@@ -719,7 +740,12 @@ pub(super) fn link_hsp_group_incr_slice(
             stats.fallbacks,
             stats.verified_passes,
             stats.wide_groups,
-            stats.clamped
+            stats.clamped,
+            stats.ins,
+            stats.ins_idle,
+            stats.fsteps,
+            stats.fsteps_idle,
+            stats.swept_idle
         );
     }
 }
@@ -1493,13 +1519,18 @@ impl<K: LinkKey> LinkRounds<'_, K> {
             // q_end_trim order (link_hsps.c:771-896).
             for m in usize::from(ignore_small_gaps)..2 {
                 let sweep = m == 1;
+                let mut pending = 0usize;
                 if sweep {
+                    // Queued HSPs of the sweep not visited yet (all of them are at or after the
+                    // next position of the sweep order); the pass queued exactly the seeds.
+                    pending = seeds[1].len();
                     seeds[1].clear();
                     for f in fen.iter_mut() {
                         *f = K::default();
                     }
                 }
                 let ilen = iorder.len();
+                let stop = sweep && sweep_stop();
                 let mut p = 0usize;
                 let mut qw = 0usize;
                 let mut qi = 0usize;
@@ -1521,7 +1552,7 @@ impl<K: LinkKey> LinkRounds<'_, K> {
                             qorder[qw] = i as u32;
                             qw += 1;
                             let h_qe = qe[i];
-                            while p < ilen {
+                            while p < ilen && !(stop && pending == 0) {
                                 let j = iorder[p] as usize;
                                 if qo[j] <= h_qe {
                                     break;
@@ -1530,7 +1561,11 @@ impl<K: LinkKey> LinkRounds<'_, K> {
                                 if alive[j] {
                                     let k = K::new(sum[1][j], j);
                                     let mut f = rr[j] as usize;
+                                    stats.ins += 1;
+                                    stats.ins_idle += u64::from(pending == 0);
                                     while f <= msz {
+                                        stats.fsteps += 1;
+                                        stats.fsteps_idle += u64::from(pending == 0);
                                         if fen[f] >= k {
                                             break;
                                         }
@@ -1541,6 +1576,9 @@ impl<K: LinkKey> LinkRounds<'_, K> {
                             }
                             if !first_pass {
                                 stats.swept += 1;
+                            }
+                            if pending == 0 {
+                                stats.swept_idle += 1;
                             }
                             if queued[1][i] {
                                 found = i as u32;
@@ -1558,6 +1596,9 @@ impl<K: LinkKey> LinkRounds<'_, K> {
                         }
                     };
                     queued[m][x] = false;
+                    if sweep {
+                        pending -= 1;
+                    }
                     if !alive[x] || score[x] <= c[m] {
                         continue;
                     }
@@ -1734,6 +1775,8 @@ impl<K: LinkKey> LinkRounds<'_, K> {
                                 queued[m][cu] = true;
                                 if !sweep {
                                     heap.push(Reverse(ch));
+                                } else {
+                                    pending += 1;
                                 }
                             }
                             ch = children[m].next[cu];

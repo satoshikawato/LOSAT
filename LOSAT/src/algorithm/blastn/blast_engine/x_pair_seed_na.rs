@@ -80,14 +80,14 @@ use crate::algorithm::blastn::lookup::{NaLookupTable, PvDirectLookup};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-/// No NCBI counterpart: reads the switches once (LOSAT_X_PAIRPARNA, on only when set to a
-/// value other than `0` for now; LOSAT_X_PAIRPARNASHADOW, off unless set to any value); they
-/// do not change any value NCBI computes.
+/// No NCBI counterpart: reads the switches once (LOSAT_X_PAIRPARNA, a strict-set switch: on
+/// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; LOSAT_X_PAIRPARNASHADOW, off
+/// unless set to any value); they do not change any value NCBI computes.
 fn switches() -> (bool, bool) {
     static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();
     *SWITCHES.get_or_init(|| {
         (
-            std::env::var_os("LOSAT_X_PAIRPARNA").is_some_and(|v| v != "0"),
+            crate::utils::xswitch::on("LOSAT_X_PAIRPARNA"),
             std::env::var_os("LOSAT_X_PAIRPARNASHADOW").is_some(),
         )
     })

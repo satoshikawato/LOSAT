@@ -682,6 +682,15 @@ mod tests {
             error.contains("whose preliminary hit list size overflows"),
             "{error}"
         );
+        // `-max_target_seqs` keeps its own wording (the default path, before O1b).
+        let error = check_scoring(&args(&["-max_target_seqs", "2147483598"]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("a -max_target_seqs of 2147483598")
+                && error.contains("whose preliminary hit list size overflows"),
+            "{error}"
+        );
         // The same options set on the args by a run give the same refusals.
         let mut run_args = args(&["-num_descriptions", "0", "-num_alignments", "0"]);
         run_args.report_counts = report_counts_of(&run_args, &[0]).unwrap().0;

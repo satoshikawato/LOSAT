@@ -417,16 +417,15 @@ fn formats_needing_different_hit_list_sizes_are_refused() {
             &["-num_descriptions", "3", "-num_alignments", "2"][..],
         ),
     ] {
-        let (result, sinks, diagnostics) = attempt(formats, extra);
+        let (result, sinks, _) = attempt(formats, extra);
         let error = format!("{:#}", result.expect_err("different hit list sizes"));
         assert!(
             error.contains("need different hit list sizes"),
             "{formats:?} {extra:?}: {error}"
         );
         // The option warnings of the first format may precede the refusal (BLASTP's
-        // `check_options`, as the CLI writes a warning before an options error); no report
-        // bytes are written.
-        let _ = diagnostics;
+        // `check_options`, as the CLI writes a warning before an options error), so the
+        // diagnostics are not checked; no report bytes are written.
         assert!(
             sinks.iter().all(Vec::is_empty),
             "{formats:?} {extra:?}: nothing is written"

@@ -5955,7 +5955,7 @@ fn post_process_hits_and_write(
             let xml_subjects = match report.database_ordinals {
                 Some(ordinals) if is_database => crate::report::blast_xml::XmlSubjects::Database {
                     ordinals,
-                    records: subject_records,
+                    titles: crate::report::blast_xml::XmlTitles::Records(subject_records),
                     length: &database_length,
                 },
                 _ => crate::report::blast_xml::XmlSubjects::Records {

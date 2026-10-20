@@ -10765,13 +10765,13 @@ fn run_resolved_in_pool(
                         .length(s_idx, subject_records[s_idx].seq().len())
                 };
                 let xml_subjects = match (listed_subjects.as_ref(), listed_titles.as_ref()) {
-                    (Some(listed), Some(titles)) => {
-                        crate::report::blast_xml::XmlSubjects::Database {
-                            ordinals: &listed.ordinals,
-                            records: &titles.records,
-                            length: &database_length,
-                        }
-                    }
+                    // The stored titles by rank, of the records or of LOSAT_X_BPLISTEDLEAN
+                    // (`subject_titles`, above).
+                    (Some(listed), Some(_)) => crate::report::blast_xml::XmlSubjects::Database {
+                        ordinals: &listed.ordinals,
+                        titles: crate::report::blast_xml::XmlTitles::Shared(&subject_titles),
+                        length: &database_length,
+                    },
                     _ => crate::report::blast_xml::XmlSubjects::Records {
                         protein: true,
                         records: subject_records,
@@ -10847,7 +10847,7 @@ fn run_resolved_in_pool(
                         args.scoring.matrix,
                         true,
                         query_records,
-                        subject_records,
+                        shown_subjects,
                         crate::report::x_pairwise_par::pool(blastp_parallel_pool),
                     )
                 };

@@ -7758,7 +7758,10 @@ fn run_in_pool(
                 input_end,
                 batch_size: batching.batch_size,
             };
+            // EXPERIMENT (exp/r13-wall): the loop's wait for the batch (`R13_PROBE=tl`).
+            let x_r13_take = crate::utils::xtiming::clock();
             let precomputed = qbp.take(key);
+            crate::utils::xtiming::x_r13("take", x_r13_take, input_start as u64);
             let searched = match precomputed {
                 Some(precomputed) if !qbp.shadow() => precomputed,
                 precomputed => {
@@ -8071,6 +8074,7 @@ fn run_in_pool(
                 // EXPERIMENT (LOSAT_X_PAIRWISEPAR): the pool formats the batch's outfmt 0 report while
                 // it is idle (no thread of a LOSAT_X_QBATCHPAR slot exists).
                 let x_pool = qbp.x_slots_idle().then_some(parallel_pool);
+                let x_r13_rpt = crate::utils::xtiming::clock();
                 stream.write(outputs, count, false, |outputs, written| {
                     write_reports(
                         &args,
@@ -8097,6 +8101,7 @@ fn run_in_pool(
                         x_pool,
                     )
                 })?;
+                crate::utils::xtiming::x_r13("rpt", x_r13_rpt, input_start as u64);
                 // The written queries' warnings are not read again (the error paths write those
                 // of the current batch; the shadow keeps them all).
                 if !shadow {
@@ -16728,6 +16733,9 @@ fn search_query_batch(
     if let BatchStage::ChunkPrelim { .. } = stage {
         return Ok(batch_result(Vec::new(), prelim_lists));
     }
+    // EXPERIMENT (exp/r13-wall): the preliminary stage's and the traceback's intervals.
+    crate::utils::xtiming::x_r13("prelim", t_search_start, queries_ref.len() as u64);
+    let x_r13_tb = crate::utils::xtiming::clock();
     let hit_lists = match subjects {
         SubjectSource::Prepared(_) => {
             let kept = prelim_hits_by_subject(prelim_lists, subject_records_ref.len());
@@ -16787,6 +16795,7 @@ fn search_query_batch(
             hit_lists
         }
     };
+    crate::utils::xtiming::x_r13("tb", x_r13_tb, 0);
 
     if let Some(bar) = progress_bar.as_ref() {
         bar.finish();
@@ -16794,10 +16803,13 @@ fn search_query_batch(
     if x_cancelled() {
         return Err(x_qbatch_par::Cancelled.into());
     }
+    let x_r13_post = crate::utils::xtiming::clock();
     let mut batch = batch_result(hit_lists, Vec::new());
     if let Some(timing) = timing.as_ref() {
         batch.timing = blastn_timing_text(timing.as_ref(), t_search_start, t_total);
     }
+    crate::utils::xtiming::x_r13("post", x_r13_post, 0);
+    crate::utils::xtiming::x_r13("batch", t_total, queries_ref.len() as u64);
     Ok(batch)
 }
 

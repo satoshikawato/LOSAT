@@ -1716,7 +1716,10 @@ fn slot_loop<T, F>(
             }
         };
         sink.lock().unwrap_or_else(PoisonError::into_inner).clear();
+        // EXPERIMENT (exp/r13-wall): the slot's batch interval (`R13_PROBE=tl`).
+        let x_r13_job = crate::utils::xtiming::clock();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| search(&job, pool)));
+        crate::utils::xtiming::x_r13("slotjob", x_r13_job, job.key.input_start as u64);
         let panicked = result.is_err();
         let outcome = match result {
             Ok(value) => Outcome::Value(value),

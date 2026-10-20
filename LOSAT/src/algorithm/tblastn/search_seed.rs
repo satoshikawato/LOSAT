@@ -555,6 +555,8 @@ pub(super) struct XScanPlan {
     pub pair_capacity: usize,
     /// PROBE (LOSAT_X_F2SCAN): the one-byte-per-word presence table of arms 1 and 2; empty otherwise.
     pub pvb: Vec<u8>,
+    /// PROBE (LOSAT_X_F2SCAN=4): the hit-count table; empty otherwise.
+    pub numtab: Vec<u8>,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
@@ -1012,11 +1014,13 @@ pub(super) fn x_scan_plan(
     let pair_capacity = (lookup.longest_chain.max(1) as usize) * 1024;
     i32::try_from(pair_capacity).expect("NCBI offset array fits Int4");
     let pvb = super::x_f2_scan::x_f2_build_pvb(&lookup);
+    let numtab = super::x_f2_scan::x_f2_build_numtab(&lookup);
     Ok(Some(XScanPlan {
         lookup,
         subject: subject_plan,
         pair_capacity,
         pvb,
+        numtab,
     }))
 }
 

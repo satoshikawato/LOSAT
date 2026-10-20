@@ -11,6 +11,10 @@
 //!   3  the base loop (`x_candidates_w3c5` as it is) in this file's block structure, with the
 //!      candidate loop in a function of its own: the control for the structure, and the way to
 //!      split the base's cycles into candidate loop and copy loop.
+//!   4  V2's candidate stage, and the copy stage reads each candidate word's hit count from a
+//!      one-byte table (`numtab`, 32 KB, 255 = read the cell) instead of the 16-byte backbone cell
+//!      (456 KB, L2), so the running total of hits does not wait for the cell; the cell is read only
+//!      to copy the hits.
 //! `LOSAT_X_F2CHECK` (set) counts words, candidates and hits of every call and sums a hash of every
 //! call's offset pairs and `s_range[1]`; `main` prints them as `[X_STATS] F2SCAN ...`.
 
@@ -29,7 +33,7 @@ pub(super) fn x_f2_arm() -> u8 {
         std::env::var("LOSAT_X_F2SCAN")
             .ok()
             .and_then(|v| v.parse::<u8>().ok())
-            .filter(|v| *v <= 3)
+            .filter(|v| *v <= 4)
             .unwrap_or(0)
     })
 }
@@ -76,6 +80,21 @@ pub(super) fn x_f2_build_pvb(lookup: &BlastAaLookupTable) -> Vec<u8> {
                 .pv
                 .get(ix >> PV_ARRAY_BTS)
                 .map_or(0, |word| ((word >> (ix & 31)) & 1) as u8)
+        })
+        .collect()
+}
+
+/// The hit-count table of arm 4 (`min(num_used, 255)` per index); empty otherwise.
+pub(super) fn x_f2_build_numtab(lookup: &BlastAaLookupTable) -> Vec<u8> {
+    if x_f2_arm() != 4 || !w3c5(lookup) {
+        return Vec::new();
+    }
+    (0..=MASK)
+        .map(|ix| {
+            lookup
+                .backbone
+                .get(ix)
+                .map_or(0, |cell| cell.num_used.clamp(0, 255) as u8)
         })
         .collect()
 }
@@ -138,6 +157,7 @@ pub(super) fn x_scan_unit_f2(
                 arm,
                 &plan.lookup,
                 &plan.pvb,
+                &plan.numtab,
                 &frame.aa_seq[1 + chunk.offset..],
                 pairs,
                 pair_capacity,
@@ -192,12 +212,17 @@ fn x_scan_range_f2(
     arm: u8,
     lookup: &BlastAaLookupTable,
     pvb: &[u8],
+    numtab: &[u8],
     subject: &[u8],
     offset_pairs: &mut [BlastOffsetPair],
     array_size: i32,
     s_range: &mut [i32; 3],
 ) -> i32 {
-    if arm == 0 || !w3c5(lookup) || (arm != 3 && pvb.len() != MASK + 1) {
+    if arm == 0
+        || !w3c5(lookup)
+        || (arm != 3 && pvb.len() != MASK + 1)
+        || (arm == 4 && numtab.len() != MASK + 1)
+    {
         return x_scan_one_range_bf(lookup, subject, offset_pairs, array_size, s_range);
     }
     #[cfg(target_arch = "x86_64")]
@@ -205,10 +230,11 @@ fn x_scan_range_f2(
     #[cfg(not(target_arch = "x86_64"))]
     let avx2 = false;
     match arm {
-        1 => scan::<1>(lookup, pvb, subject, offset_pairs, array_size, s_range),
-        2 if avx2 => scan::<2>(lookup, pvb, subject, offset_pairs, array_size, s_range),
-        2 => scan::<1>(lookup, pvb, subject, offset_pairs, array_size, s_range),
-        _ => scan::<3>(lookup, pvb, subject, offset_pairs, array_size, s_range),
+        1 => scan::<1>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        2 if avx2 => scan::<2>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        4 if avx2 => scan::<4>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        2 | 4 => scan::<1>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        _ => scan::<3>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
     }
 }
 
@@ -249,9 +275,51 @@ unsafe fn copy_cell(
     Some(totalhits + numhits)
 }
 
+/// Arm 4: `copy_cell` with the hit count read from `numtab` (255 = the cell's `num_used`).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn copy_cell_numtab(
+    backbone: *const crate::algorithm::tblastx::lookup::BackboneCell,
+    overflow: *const i32,
+    numtab: *const u8,
+    dest: *mut BlastOffsetPair,
+    ix: usize,
+    s_off: u32,
+    totalhits: i32,
+    array_size: i32,
+) -> Option<i32> {
+    let small = *numtab.add(ix) as i32;
+    if small == 255 {
+        return copy_cell(backbone, overflow, dest, ix, s_off, totalhits, array_size);
+    }
+    if small > array_size - totalhits {
+        return None;
+    }
+    let cell = &*backbone.add(ix);
+    let d = dest.add(totalhits as usize);
+    if small as usize <= AA_HITS_PER_CELL {
+        for i in 0..AA_HITS_PER_CELL {
+            *d.add(i) = BlastOffsetPair {
+                q_off: cell.entries[i] as u32,
+                s_off,
+            };
+        }
+    } else {
+        let src = overflow.add(cell.entries[0] as usize);
+        for i in 0..small as usize {
+            *d.add(i) = BlastOffsetPair {
+                q_off: *src.add(i) as u32,
+                s_off,
+            };
+        }
+    }
+    Some(totalhits + small)
+}
+
 fn scan<const ARM: u8>(
     lookup: &BlastAaLookupTable,
     pvb: &[u8],
+    numtab: &[u8],
     subject: &[u8],
     offset_pairs: &mut [BlastOffsetPair],
     array_size: i32,
@@ -267,6 +335,7 @@ fn scan<const ARM: u8>(
     );
     let pv = lookup.pv.as_ptr();
     let pvb = pvb.as_ptr();
+    let numtab = numtab.as_ptr();
     let backbone = lookup.backbone.as_ptr();
     let overflow = lookup.overflow.as_ptr();
     let dest = offset_pairs.as_mut_ptr();
@@ -286,7 +355,7 @@ fn scan<const ARM: u8>(
     while block_first <= s_last {
         let block_last = s_last.min(block_first + X_BLOCK - 1);
         let block = (block_first, block_last);
-        if ARM == 2 {
+        if ARM == 2 || ARM == 4 {
             #[cfg(target_arch = "x86_64")]
             {
                 // SAFETY: AVX2 was detected by the caller.
@@ -298,7 +367,13 @@ fn scan<const ARM: u8>(
                     let ix = ixbuf[k] as usize;
                     // SAFETY: as in `x_scan_one_range_bf`.
                     match unsafe {
-                        copy_cell(backbone, overflow, dest, ix, s_off, totalhits, array_size)
+                        if ARM == 4 {
+                            copy_cell_numtab(
+                                backbone, overflow, numtab, dest, ix, s_off, totalhits, array_size,
+                            )
+                        } else {
+                            copy_cell(backbone, overflow, dest, ix, s_off, totalhits, array_size)
+                        }
                     } {
                         Some(total) => totalhits = total,
                         None => {

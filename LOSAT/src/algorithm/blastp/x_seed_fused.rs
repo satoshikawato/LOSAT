@@ -77,6 +77,71 @@
 //! are the presence-test loop's, so every outcome above is unchanged. blastp's own loop
 //! (`x_scan_two_hit`) takes the same cells under its own switch, LOSAT_X_BPSCANBF (a switch of the
 //! strict set; [`x_bp_scan_bf`]).
+//!
+//! EXPERIMENT (LOSAT_X_BPHITBF): the per-hit loops take the two outcomes most two-hit tests end in,
+//! too far and overlap, without a branch (blastx's LOSAT_X_BXHITBF, tblastn's LOSAT_X_TBNHITBF and
+//! TBLASTX's LOSAT_X_TBXHITBF do the same in their loops). The per-hit loops are `x_cell_per_hit`
+//! (the fused loop without LOSAT_X_BPDIAG's batches: the default where the CPU has no AVX2, i.e.
+//! aarch64 and WebAssembly) and blastp-fast's loops on the compressed table
+//! (`x_seed_fused_compressed.rs`) and on its flat build (`x_seed_fused_clut.rs`), which have no
+//! batch:
+//!
+//! NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:538-551
+//! ```c
+//!                 if (diff >= window) {
+//!                     /* We are beyond the window for this diagonal; start a
+//!                        new hit */
+//!                     diag_array[diag_coord].last_hit =
+//!                         subject_offset + diag_offset;
+//!                     continue;
+//!                 }
+//!
+//!                 /* If the difference is less than the wordsize (i.e. last
+//!                    hit and this hit overlap), give up */
+//!
+//!                 if (diff < wordsize) {
+//!                     continue;
+//!                 }
+//! ```
+//! With the per-hit loop on every subject (`LOSAT_X_BPDIAG=0`) 72-74 % of the hits of the two blastp
+//! cases of v4-A10 probe bp1 are too far and 18.6-18.8 % overlap, which of the two is hard to
+//! predict, and 2.5-3.7 % meet a flag-1 entry and 4.7-5.3 % are candidates for the extension.
+//!
+//! `XHitBf::test` reads the packed entry `raw` (`last_hit` in bits 0-30, the flag in bit 31) and
+//! works with twice the values: `d2 = 2 (s + diag_offset) - (raw << 1)`, in wrapping `u32`
+//! arithmetic read as `i32`. For a flag-0 entry `raw << 1` is twice the 31-bit field's signed value
+//! modulo 2^32 (a cleared entry holds `-window`), so `d2` is twice the reference's `diff = s -
+//! (last_hit - diag_offset)` whenever that fits in an `i32`. `XHitBf::new` (once per subject) makes
+//! it fit: with `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (`length` the
+//! subject's letters), every flag-0 `last_hit` the table holds is in `[-window, diag_offset +
+//! length)`: the cleared value (`DiagStruct::clear`, when the offset passes `INT4_MAX / 4`), 0 in a
+//! new or refilled table, or an `s + diag_offset` of this subject or of an earlier one. Every store
+//! with flag 0 is such an `s + diag_offset` (the test's, and the extension's for a hit outside its
+//! context or one that does not extend to the right; the extension's `s_last_off - (wordsize - 1) +
+//! diag_offset` is stored with flag 1, and the flag goes back to 0 only with a store of `s +
+//! diag_offset`). The offset only grows between clears (`BlastpSubjectScratch::finish_subject`; a
+//! subject searched on its own starts at the serial run's offset on a refilled table,
+//! `prepare_independent_subject`), so an earlier subject's stores are below this subject's offset,
+//! and none of them wrapped in the 31-bit field, as they were below 2^30. `s + diag_offset` is in
+//! `[diag_offset, diag_offset + length)`, so `diff` is in `(-length, diag_offset + length + window)`
+//! and `2 diff` in `(-2^31, 2^31)`. Then too far (`diff >= window`) is `d2 >= 2 window`, and a
+//! candidate (`wordsize <= diff < window`) is `(d2 - 2 wordsize) as u32 < 2 (window - wordsize)`,
+//! one unsigned compare: below `2 wordsize` the difference is negative (it does not wrap, as `2
+//! length + 2 wordsize < 2^31`), so at least 2^31 as a `u32`. The rule also asks `1 <= wordsize <
+//! window`, a two-hit search. A flag-1 entry (`raw as i32 < 0`) or a candidate goes on to
+//! [`x_test_hit`], unchanged; any other hit stores `s + diag_offset` (too far; the flag stays 0) or
+//! what it read (overlap), selected without a branch. So the table holds after each hit what
+//! `x_test_hit` leaves there, the extension is called for the same hits with the same values and
+//! entries, and the initial HSPs are the same, in the same order.
+//!
+//! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
+//! `LOSAT_X_BPHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. Each loop with the test is its own
+//! function, never inlined and with a closure of its own type (`x_scan_two_hit_hitbf`,
+//! `x_scan_two_hit_compressed_hitbf`, `x_scan_two_hit_compressed_flat_hitbf`), so the loops without
+//! it keep their code; the AVX2 and scalar batches keep their own tests. With `LOSAT_X_BPSEEDSHADOW`
+//! the loop that runs, this one where the switch acts, is compared with the reference for every
+//! subject, and `main` prints `[X_SHADOW] BPHITBF subjects_compared=N` at exit beside BPSEED's line,
+//! N the subjects the loops with the test scanned.
 
 use crate::algorithm::tblastn::x_scan_bf::{x_block_candidates, X_BLOCK};
 use crate::algorithm::tblastx::blast_extend::DiagStruct;
@@ -396,6 +461,35 @@ impl<'a> XDiagTable<'a> {
     #[inline(always)]
     fn prefetch(&self, query_offset: i32, subject_offset: i32) {
         x_prefetch(self.entries, self.coord(query_offset, subject_offset));
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPHITBF): [`XDiagTable::entry`] with the index taken as a `u32` (it is
+    /// at most `mask`, so not negative), for the loop of [`x_cell_per_hit_bf`].
+    #[inline(always)]
+    fn entry_bf(&mut self, query_offset: i32, subject_offset: i32) -> &mut DiagStruct {
+        let coord = (query_offset.wrapping_sub(subject_offset) & self.mask) as u32 as usize;
+        // SAFETY: coord <= mask < entries.len() (checked in `new`).
+        unsafe { self.entries.get_unchecked_mut(coord) }
+    }
+
+    /// EXPERIMENT (LOSAT_X_BPHITBF): [`XDiagTable::prefetch`] without the bound check of
+    /// [`x_prefetch`] (the index is at most `mask`), for the loop of [`x_cell_per_hit_bf`].
+    #[inline(always)]
+    fn prefetch_bf(&self, query_offset: i32, subject_offset: i32) {
+        #[cfg(target_arch = "x86_64")]
+        {
+            let coord = (query_offset.wrapping_sub(subject_offset) & self.mask) as u32 as usize;
+            // SAFETY: coord <= mask < entries.len() (checked in `new`), so the address is inside
+            // the table; a prefetch has no effect on program state.
+            unsafe {
+                std::arch::x86_64::_mm_prefetch(
+                    self.entries.as_ptr().add(coord).cast::<i8>(),
+                    std::arch::x86_64::_MM_HINT_T0,
+                );
+            }
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        let _ = (query_offset, subject_offset);
     }
 }
 
@@ -1174,20 +1268,49 @@ pub(super) fn x_cell_per_hit_bf<F>(
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     let here = bf.here(s);
-    for (i, &query_offset) in hits.iter().enumerate() {
-        // The read-ahead of `x_cell_per_hit`.
-        if let Some(&ahead) = hits.get(i + test.prefetch) {
-            table.prefetch(ahead, s);
-        }
-        let entry = table.entry(query_offset, s);
-        if bf.test(entry, here) {
-            continue;
-        }
-        if let Some((last_hit, diff)) =
-            x_test_hit(entry, s, test.diag_offset, test.window, test.word_size)
-        {
-            candidate(query_offset, s, last_hit, diff, entry);
-        }
+    // The read-ahead of `x_cell_per_hit` (a cache hint, x86-64 only): the hits with a later hit
+    // `prefetch` places ahead read its entry ahead, in a loop of their own so that no hit checks
+    // whether there is one; the last `prefetch` hits read none. (With `prefetch` 0 no hit reads
+    // ahead; `x_cell_per_hit` then hints the hit's own entry, which it reads at once.)
+    let p = test.prefetch;
+    let ahead = if p == 0 {
+        0
+    } else {
+        hits.len().saturating_sub(p)
+    };
+    let (first, rest) = hits.split_at(ahead);
+    for (&query_offset, &later) in first.iter().zip(&hits[p.min(hits.len())..]) {
+        table.prefetch_bf(later, s);
+        x_hit_bf(query_offset, s, here, table, test, bf, candidate);
+    }
+    for &query_offset in rest {
+        x_hit_bf(query_offset, s, here, table, test, bf, candidate);
+    }
+}
+
+/// EXPERIMENT (LOSAT_X_BPHITBF): one hit of [`x_cell_per_hit_bf`]: [`XHitBf::test`], then
+/// [`x_test_hit`] and the candidate's call for a flag-1 entry or a candidate.
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+#[inline(always)]
+fn x_hit_bf<F>(
+    query_offset: i32,
+    s: i32,
+    here: u32,
+    table: &mut XDiagTable<'_>,
+    test: XDiagTest,
+    bf: XHitBf,
+    candidate: &mut F,
+) where
+    F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
+{
+    let entry = table.entry_bf(query_offset, s);
+    if bf.test(entry, here) {
+        return;
+    }
+    if let Some((last_hit, diff)) =
+        x_test_hit(entry, s, test.diag_offset, test.window, test.word_size)
+    {
+        candidate(query_offset, s, last_hit, diff, entry);
     }
 }
 
@@ -1883,6 +2006,209 @@ mod tests {
             }
         }
         assert!(calls > 1000, "the edges must give candidates: {calls}");
+    }
+
+    // ---- EXPERIMENT (LOSAT_X_BPHITBF): the branch-free test against the per-hit test ----
+
+    /// One hit by the reference (`x_test_hit`) and by `bf` then `x_test_hit` where `bf` leaves the
+    /// hit: the entry's bits and the result of each, and whether `bf` took the hit.
+    #[allow(clippy::type_complexity)]
+    fn hit_outcomes(
+        raw: u32,
+        s: i32,
+        test: XDiagTest,
+        bf: XHitBf,
+    ) -> ((u32, Option<(i32, i32)>), (u32, Option<(i32, i32)>), bool) {
+        let (offset, window, word) = (test.diag_offset, test.window, test.word_size);
+        let mut reference = entry_of(raw);
+        let expected = x_test_hit(&mut reference, s, offset, window, word);
+        let mut got = entry_of(raw);
+        let taken = bf.test(&mut got, bf.here(s));
+        let result = if taken {
+            None
+        } else {
+            x_test_hit(&mut got, s, offset, window, word)
+        };
+        (
+            (reference.raw_bits(), expected),
+            (got.raw_bits(), result),
+            taken,
+        )
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    #[test]
+    fn the_branch_free_test_gives_the_reference_outcomes_in_its_range() {
+        // too far, overlap, candidate, flag 1 kept, flag 1 reset
+        let mut reached = [0usize; 5];
+        let pairs = [
+            (2, 1),
+            (3, 1),
+            (3, 2),
+            (40, 3),
+            (41, 40),
+            (1 << 20, 6),
+            ((1 << 28) - 1, 1),
+            ((1 << 28) - 1, (1 << 28) - 2),
+        ];
+        for (window, word_size) in pairs {
+            for length in [1usize, 2, 300, 1 << 20] {
+                // The most diagonal offset the rule allows for this subject, and no more.
+                let most = ((1i64 << 30) - 2 * i64::from(window) - length as i64 - 1) as i32;
+                assert!(XHitBf::new(most + 1, length, window, word_size).is_none());
+                assert!(XHitBf::new(-1, length, window, word_size).is_none());
+                for diag_offset in [0, 1, window, most / 2, most] {
+                    let bf = XHitBf::new(diag_offset, length, window, word_size).expect("in range");
+                    let test = XDiagTest {
+                        diag_offset,
+                        window,
+                        word_size,
+                        prefetch: 0,
+                    };
+                    // The flag-0 values a table holds (module header): [-window, diag_offset +
+                    // length).
+                    let (lowest, highest) = (-window, diag_offset + length as i32 - 1);
+                    for s in [0, length as i32 - 1] {
+                        let here = s + diag_offset;
+                        let flag0 = [
+                            here - (word_size - 1),
+                            here - word_size,
+                            here - (window - 1),
+                            here - window,
+                            here - window - 1,
+                            here,
+                            here + 1,
+                            0,
+                            lowest,
+                            highest,
+                        ];
+                        let flag1 = [here + 1, here, here - 1, lowest, highest];
+                        let entries = flag0
+                            .into_iter()
+                            .filter(|last| (lowest..=highest).contains(last))
+                            .map(|last| last as u32 & X_LAST_HIT_MASK)
+                            .chain(flag1.map(|last| 0x8000_0000 | (last as u32 & X_LAST_HIT_MASK)));
+                        for raw in entries {
+                            let (expected, got, taken) = hit_outcomes(raw, s, test, bf);
+                            assert_eq!(
+                                got, expected,
+                                "window {window} word {word_size} length {length} offset {diag_offset} s {s} raw {raw:#x}"
+                            );
+                            let outcome = match (raw >> 31, expected) {
+                                (0, (_, Some(_))) => 2,
+                                (0, (after, None)) if after != raw => 0,
+                                (0, _) => 1,
+                                (_, (after, _)) if after == raw => 3,
+                                _ => 4,
+                            };
+                            assert_eq!(taken, outcome < 2, "raw {raw:#x}: taken");
+                            reached[outcome] += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(reached.iter().all(|&n| n > 0), "every outcome: {reached:?}");
+        // Just past the range the doubled difference wraps: a cleared entry at the offset 2^30 is
+        // too far for the reference and an overlap for the test.
+        let (window, word_size, diag_offset) = (40, 3, 1 << 30);
+        let bf = XHitBf {
+            diag_offset,
+            word2: 2 * word_size,
+            span2: 2 * (window - word_size) as u32,
+            window2: 2 * window,
+        };
+        let test = XDiagTest {
+            diag_offset,
+            window,
+            word_size,
+            prefetch: 0,
+        };
+        let (expected, got, _) = hit_outcomes(-window as u32 & X_LAST_HIT_MASK, 0, test, bf);
+        assert_ne!(got, expected, "outside the range");
+    }
+
+    /// [`run_cells`] with the per-hit loop of the branch-free test.
+    fn run_cells_bf(
+        entries: &mut [DiagStruct],
+        mask: i32,
+        test: XDiagTest,
+        bf: XHitBf,
+        cells: &[(i32, Vec<i32>)],
+    ) -> Vec<Call> {
+        let mut calls = Vec::new();
+        let mut table = XDiagTable::new(entries, mask);
+        let mut candidate = |q: i32, s: i32, last_hit: i32, diff: i32, entry: &mut DiagStruct| {
+            calls.push((q, s, last_hit, diff, entry.raw_bits()));
+            extend(q, s, entry, test.diag_offset);
+        };
+        for (s, hits) in cells {
+            x_cell_per_hit_bf(hits, *s, &mut table, test, bf, &mut candidate);
+        }
+        calls
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
+    #[test]
+    fn the_branch_free_per_hit_loop_equals_the_per_hit_loop() {
+        let mut seed = 0xb7_u64;
+        let size = 1024usize;
+        let mask = (size - 1) as i32;
+        let length = 5_000usize;
+        let mut calls = 0;
+        for (window, word_size) in [(40, 3), (16, 2), (4, 3), (2, 1)] {
+            // From the first offset to the most the rule allows for the subject.
+            let most = ((1i64 << 30) - 2 * i64::from(window) - length as i64 - 1) as i32;
+            for diag_offset in [window, 1_000, i32::MAX / 4, most] {
+                let bf = XHitBf::new(diag_offset, length, window, word_size).expect("in range");
+                let (lowest, highest) = (-window, diag_offset + length as i32 - 1);
+                for (k, n) in HIT_COUNTS.into_iter().enumerate() {
+                    let test = XDiagTest {
+                        diag_offset,
+                        window,
+                        word_size,
+                        prefetch: [0, 3, 16][k % 3],
+                    };
+                    let s0 = (next(&mut seed) % 4000) as i32;
+                    // The entries a table holds (module header): flag 0 with last_hit in [-window,
+                    // diag_offset + length), most of them near the cells' subject offsets, or
+                    // flag 1.
+                    let entries: Vec<DiagStruct> = (0..size)
+                        .map(|_| {
+                            let r = next(&mut seed);
+                            let last = if r % 4 == 0 {
+                                lowest + (next(&mut seed) % (highest - lowest + 1) as u32) as i32
+                            } else {
+                                let back = (next(&mut seed) % (window as u32 + 20)) as i32 - 8;
+                                (s0 + diag_offset - back).clamp(lowest, highest)
+                            };
+                            let flag = if r % 4 == 1 { 0x8000_0000 } else { 0 };
+                            entry_of(flag | (last as u32 & X_LAST_HIT_MASK))
+                        })
+                        .collect();
+                    // Later cells read what earlier cells (and their candidates) wrote.
+                    let cells: Vec<(i32, Vec<i32>)> = [0, 1, 1, 3, 10, 41]
+                        .iter()
+                        .map(|&step| {
+                            let base = (next(&mut seed) % 3) as i32 * 7;
+                            (s0 + step, distinct_offsets(&mut seed, size, n, base))
+                        })
+                        .collect();
+                    let mut reference = entries.clone();
+                    let expected = run_cells(XDiagMode::PerHit, &mut reference, mask, test, &cells);
+                    let mut got = entries.clone();
+                    let got_calls = run_cells_bf(&mut got, mask, test, bf, &cells);
+                    assert_eq!(got_calls, expected, "{test:?}: candidate calls");
+                    let at = got
+                        .iter()
+                        .zip(&reference)
+                        .position(|(a, b)| a.raw_bits() != b.raw_bits());
+                    assert!(at.is_none(), "{test:?}: entry {at:?}");
+                    calls += expected.len();
+                }
+            }
+        }
+        assert!(calls > 1000, "the tables must give candidates: {calls}");
     }
 
     // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:495-512 and blast_aascan.c:60-99

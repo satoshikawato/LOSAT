@@ -48,6 +48,10 @@
 //! The closure, the switches (`LOSAT_X_BPSEED`, `LOSAT_X_BPSEEDSHADOW`, `LOSAT_X_BPSEED_PREFETCH`) and
 //! the shadow are those of `x_seed_fused.rs`. `LOSAT_X_BPSEED` is a switch of the
 //! strict set (`utils/xswitch.rs`): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
+//!
+//! EXPERIMENT (LOSAT_X_BPHITBF): where its range holds, the loop takes a flag-0 entry's too-far and
+//! overlap outcomes without a branch (`x_scan_two_hit_compressed_hitbf`, the test and the argument of
+//! `x_seed_fused.rs`, module header).
 
 use std::cell::Cell;
 
@@ -447,7 +451,7 @@ pub(crate) fn x_scan_two_hit_compressed<F>(
             XDiagTable::new(diag_array, diag_mask),
             XDiagTest::new(diag_offset, window, word_size),
             bf,
-            &mut candidate,
+            candidate,
         );
         return;
     }
@@ -479,7 +483,8 @@ pub(crate) fn x_scan_two_hit_compressed<F>(
 
 /// EXPERIMENT (LOSAT_X_BPHITBF): [`x_scan_two_hit_compressed`] with the branch-free two-hit test
 /// (`x_seed_fused::x_cell_per_hit_bf`). Out of line, and with a closure of its own type, so that the
-/// loop without the test keeps its code.
+/// loop without the test keeps its code (the closure is moved here, so that the caller's
+/// loop keeps it as before rather than lending it out).
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:509-518 (quoted at
 // `x_scan_two_hit_compressed`)
 #[inline(never)]
@@ -490,7 +495,7 @@ fn x_scan_two_hit_compressed_hitbf<F>(
     mut table: XDiagTable<'_>,
     test: XDiagTest,
     bf: XHitBf,
-    candidate: &mut F,
+    mut candidate: F,
 ) where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {

@@ -2,7 +2,8 @@
 
 //! BLAST XML (outfmt 5) of BLASTX: the refusals of what NCBI BLAST+ 2.17.0 cannot write (a
 //! byte >= 0x80 in a title or in the `-db` name, DECISIONS 19, Q2) and the document across
-//! several query batches (one header, global Iteration numbers, one trailer).
+//! several query batches (one header, global Iteration numbers, one trailer), and the refusals
+//! of a later batch (OF4b part 2): every refusal comes before the first byte of the output.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
 //! ```c++
@@ -33,6 +34,10 @@ fn temp_dir(stem: &str) -> PathBuf {
 }
 
 fn run_str(args: &[&str]) -> Output {
+    run_env(args, &[])
+}
+
+fn run_env(args: &[&str], env: &[(&str, &str)]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_X_DEFAULT" {
@@ -44,6 +49,7 @@ fn run_str(args: &[&str]) -> Output {
         "LOSAT_BLASTX_WORKER_LOG",
         std::env::temp_dir().join("losat_outfmt5_worker.log"),
     );
+    command.envs(env.iter().copied());
     command.args(args).output().expect("run LOSAT")
 }
 
@@ -94,14 +100,18 @@ fn fasta(path: &Path, records: &[(&[u8], &[u8])]) {
 }
 
 fn refused(output: &Output, what: &str) {
+    refused_as(output, what, what)
+}
+
+fn refused_as(output: &Output, what: &str, label: &str) {
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "{what}: {stderr}");
-    assert!(output.stdout.is_empty(), "{what}: nothing is written");
+    assert_eq!(output.status.code(), Some(1), "{label}: {stderr}");
+    assert!(output.stdout.is_empty(), "{label}: nothing is written");
     assert!(
         stderr.contains(&format!(
             "{what} with a character outside the US-ASCII range (which the XML output of NCBI BLAST+ cannot write) is not supported by LOSAT's BLASTX"
         )),
-        "{stderr}"
+        "{label}: {stderr}"
     );
 }
 
@@ -285,16 +295,110 @@ fn several_batches_make_one_document_with_global_iteration_numbers() {
     fs::remove_dir_all(dir).ok();
 }
 
+/// The run of `blastx -outfmt 5` on `query` and `subject` at 1 thread, at 4 threads, at 4
+/// threads with the waves of queued batches instead of the flow, and with `-out`: each has
+/// the same result. Returns the first.
+fn runs(
+    dir: &Path,
+    query: &Path,
+    subject: &Path,
+    extra: &[&str],
+) -> Vec<(String, Output, Vec<u8>)> {
+    let mut results = Vec::new();
+    let variants: [(&str, &str, &[(&str, &str)]); 3] = [
+        ("1 thread", "1", &[]),
+        ("4 threads", "4", &[]),
+        ("4 threads, waves", "4", &[("LOSAT_X_BXFLOW", "0")]),
+    ];
+    for (what, threads, env) in variants {
+        let out = dir.join(format!("out_{threads}_{}.xml", env.len()));
+        let mut args = vec![
+            "blastx",
+            "-query",
+            query.to_str().unwrap(),
+            "-subject",
+            subject.to_str().unwrap(),
+            "-outfmt",
+            "5",
+            "-num_threads",
+            threads,
+        ];
+        args.extend_from_slice(extra);
+        let mut with_out = args.clone();
+        with_out.extend_from_slice(&["-out", out.to_str().unwrap()]);
+        let output = run_env(&with_out, env);
+        let file = fs::read(&out).expect("the -out file is made before the search");
+        results.push((what.to_string(), output, file));
+        let output = run_env(&args, env);
+        results.push((format!("{what}, stdout"), output, Vec::new()));
+    }
+    results
+}
+
+/// `refused` for every run of `runs`: rc 1, the message, nothing on standard output, and an
+/// empty `-out` file.
+fn all_refused(results: &[(String, Output, Vec<u8>)], what: &str) {
+    for (variant, output, file) in results {
+        refused_as(output, what, &format!("{what} ({variant})"));
+        assert!(
+            file.is_empty(),
+            "{what} ({variant}): the -out file is empty"
+        );
+    }
+}
+
 #[test]
-fn a_refusal_in_a_later_batch_ends_the_run_without_the_trailer() {
-    // A query is checked when its batch is reached (the reader delivers the queries batch by
-    // batch), so the batches before it are already written; the run stops with the refusal
-    // and no trailer.
-    let dir = temp_dir("later");
+fn a_bad_query_title_in_a_later_batch_writes_nothing() {
+    let dir = temp_dir("later_query");
     let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
     many_queries(&query, Some((25, "q25 caf\u{e9}".as_bytes())));
     fasta(&subject, &[(b"s1 subject", PROTEIN.as_bytes())]);
-    let output = run_str(&[
+    all_refused(&runs(&dir, &query, &subject, &[]), "a query title");
+    // The last query of the file, and the first of a later batch.
+    for index in [29, 12] {
+        many_queries(&query, Some((index, "caf\u{e9}".as_bytes())));
+        all_refused(&runs(&dir, &query, &subject, &[]), "a query title");
+    }
+    fs::remove_dir_all(dir).ok();
+}
+
+/// 30 queries: the first 25 are the back-translation of `PROTEIN` (hits for the subject `s1`),
+/// the others of `OTHER_PROTEIN` (a hit for the subject `s2`, which comes only in the batches
+/// after the first). The titles of the subjects are those given.
+fn late_hit_files(dir: &Path, s2_title: &[u8]) -> (PathBuf, PathBuf) {
+    let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
+    let padding = "ACGTTGCAAGCTTGCA".repeat(60);
+    let first = format!("{}{padding}", back_translate(PROTEIN));
+    let late = format!("{}{padding}", back_translate(OTHER_PROTEIN_LONG));
+    let titles: Vec<String> = (0..30).map(|n| format!("q{n} plain")).collect();
+    let mut records: Vec<(&[u8], &[u8])> = Vec::new();
+    for n in 0..30 {
+        let sequence = if n < 25 { &first } else { &late };
+        records.push((titles[n].as_bytes(), sequence.as_bytes()));
+    }
+    fasta(&query, &records);
+    fasta(
+        &subject,
+        &[
+            (b"s1 subject", PROTEIN.as_bytes()),
+            (s2_title, OTHER_PROTEIN_LONG.as_bytes()),
+        ],
+    );
+    (query, subject)
+}
+
+/// Only the exact matches are hits, so a query hits the subject it was made from alone.
+const STRICT: &[&str] = &["-evalue", "1e-10"];
+
+const OTHER_PROTEIN_LONG: &str =
+    "MKVLAAGIVGLLSQPRTEWDNHYCFPSMKQDLERAIHTGWNVYFKCMLPQSTDERAGHIKNVWYFLMPQRSTE";
+
+#[test]
+fn a_bad_subject_title_whose_only_hit_is_in_a_later_batch_writes_nothing() {
+    let dir = temp_dir("later_subject");
+    // Control: the same searches with a plain title; s2 is hit by the late queries alone.
+    let (query, subject) = late_hit_files(&dir, b"s2 plain");
+    let control = run_str(&[
         "blastx",
         "-query",
         query.to_str().unwrap(),
@@ -302,11 +406,59 @@ fn a_refusal_in_a_later_batch_ends_the_run_without_the_trailer() {
         subject.to_str().unwrap(),
         "-outfmt",
         "5",
+        "-evalue",
+        "1e-10",
     ]);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(1), "{stderr}");
-    assert!(stderr.contains("a query title with a character outside the US-ASCII range"));
-    let text = String::from_utf8_lossy(&output.stdout);
-    assert!(!text.contains("</BlastOutput>"));
+    assert_eq!(control.status.code(), Some(0));
+    let text = String::from_utf8(control.stdout).expect("ASCII");
+    assert_eq!(
+        text.matches("<Hit_def>s2 plain</Hit_def>").count(),
+        5,
+        "{text}"
+    );
+    assert!(text.matches("<Hit_def>s1 subject</Hit_def>").count() >= 25);
+    let (query, subject) = late_hit_files(&dir, "s2 caf\u{e9}".as_bytes());
+    all_refused(&runs(&dir, &query, &subject, STRICT), "a subject title");
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_bad_subject_title_without_a_hit_gives_the_whole_document() {
+    let dir = temp_dir("subject_no_hit");
+    // No query hits s2: its title is never written, so the document is NCBI's (it equals the
+    // document of the same searches with a plain title, which has been compared with
+    // `blastx -outfmt 5 -num_threads 1` of NCBI BLAST+ 2.17.0).
+    let write = |s2_title: &[u8]| {
+        let (query, subject) = (dir.join("q.fa"), dir.join("s.fa"));
+        many_queries(&query, None);
+        fasta(
+            &subject,
+            &[
+                (b"s1 subject", PROTEIN.as_bytes()),
+                (s2_title, OTHER_PROTEIN_LONG.as_bytes()),
+            ],
+        );
+        (query, subject)
+    };
+    let (query, subject) = write(b"s2 plain");
+    let expected = runs(&dir, &query, &subject, STRICT);
+    let (query, subject) = write("s2 caf\u{e9}".as_bytes());
+    let results = runs(&dir, &query, &subject, STRICT);
+    let reference = &expected[1].1.stdout;
+    assert_eq!(expected[1].1.status.code(), Some(0));
+    let text = String::from_utf8_lossy(reference);
+    assert_eq!(text.matches("<Iteration>").count(), 30);
+    assert!(!text.contains("s2 plain"), "no query hits s2");
+    assert!(text.ends_with("</Iteration>\n</BlastOutput_iterations>\n</BlastOutput>\n\n"));
+    for (variant, output, file) in &results {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "{variant}: {stderr}");
+        if file.is_empty() {
+            assert_eq!(&output.stdout, reference, "{variant}");
+        } else {
+            assert!(output.stdout.is_empty(), "{variant}");
+            assert_eq!(file, reference, "{variant}: the -out file");
+        }
+    }
     fs::remove_dir_all(dir).ok();
 }

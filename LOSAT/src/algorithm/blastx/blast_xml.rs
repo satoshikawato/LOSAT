@@ -27,8 +27,21 @@
 //! ```
 //! (`PrintOneResultSet` is called once per query's result set; the accumulated lists hold that
 //! one query.)
+//!
+//! Every refusal (`XmlRefusal`: a byte NCBI's XML stream cannot write in a title) comes before
+//! the first byte of the document, though the query file is read batch by batch:
+//!
+//! - `prescan_queries` reads the query file once more before the search (only with outfmt 5)
+//!   and refuses the first query whose title the writer would refuse;
+//! - when some `-subject` title would be refused if its subject had a hit
+//!   (`subjects_may_be_refused`), or some query's message would be (a title that is refused only
+//!   in the message of a query NCBI did not search), the run holds the document in memory
+//!   (`HeldOutput`) and writes it at the epilog; a refusal found while the batches are reported
+//!   drops it, with nothing written.
 
+use std::cell::RefCell;
 use std::io::Write;
+use std::rc::Rc;
 
 use anyhow::{Context, Result};
 
@@ -187,6 +200,142 @@ fn subject_names(
     }
 }
 
+/// The output of a run with outfmt 5: it passes the bytes on, or, once `hold` is called, keeps
+/// them in memory until `release` (the epilog), so that a refusal found while the batches are
+/// reported leaves nothing written. A run that ends with any other error writes what it held
+/// (the bytes of the batches before it, as the run without a hold does); `discard` is for the
+/// refusal alone.
+#[derive(Clone)]
+pub(super) struct HeldOutput(Rc<RefCell<HeldState>>);
+
+struct HeldState {
+    inner: Box<dyn Write>,
+    holding: bool,
+    held: Vec<u8>,
+    discarded: bool,
+}
+
+impl HeldOutput {
+    pub(super) fn new(inner: Box<dyn Write>) -> Self {
+        HeldOutput(Rc::new(RefCell::new(HeldState {
+            inner,
+            holding: false,
+            held: Vec::new(),
+            discarded: false,
+        })))
+    }
+
+    /// Keeps everything written from now on in memory.
+    pub(super) fn hold(&self) {
+        self.0.borrow_mut().holding = true;
+    }
+
+    /// Drops what is held, and everything written after (the run ends with a refusal).
+    pub(super) fn discard(&self) {
+        let mut state = self.0.borrow_mut();
+        state.discarded = true;
+        state.held.clear();
+    }
+
+    /// Writes what is held and passes the bytes on again.
+    pub(super) fn release(&self) -> std::io::Result<()> {
+        let mut state = self.0.borrow_mut();
+        state.holding = false;
+        let held = std::mem::take(&mut state.held);
+        state.inner.write_all(&held)?;
+        state.inner.flush()
+    }
+}
+
+impl Write for HeldOutput {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let mut state = self.0.borrow_mut();
+        if state.discarded {
+            Ok(bytes.len())
+        } else if state.holding {
+            state.held.extend_from_slice(bytes);
+            Ok(bytes.len())
+        } else {
+            state.inner.write(bytes)
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut state = self.0.borrow_mut();
+        if state.holding || state.discarded {
+            Ok(())
+        } else {
+            state.inner.flush()
+        }
+    }
+}
+
+impl Drop for HeldState {
+    fn drop(&mut self) {
+        if !self.discarded && !self.held.is_empty() {
+            let _ = self.inner.write_all(&self.held);
+            let _ = self.inner.flush();
+        }
+    }
+}
+
+/// The `QueryText` of a query, refused as the writer refuses it. `search_skipped`: NCBI did not
+/// search the query's batch (its message then carries the query's id, made of its title).
+fn query_text(query: &FastaRecord, search_skipped: bool, has_hits: bool) -> Result<QueryText> {
+    names::query_text(
+        PROGRAM,
+        &query.internal_id,
+        query.title.as_bytes(),
+        false,
+        &query_messages(query, search_skipped),
+        has_hits,
+    )
+    .map_err(|error| anyhow::Error::new(XmlRefusal(error.to_string())))
+}
+
+/// Reads the query file once before the search and refuses the first query the writer would
+/// refuse (a title with a byte NCBI's XML stream cannot write), so that no refusal can follow
+/// a written byte. Returns whether some query would be refused if NCBI had not searched its
+/// batch (a title that only its message cannot carry); the run then holds the document.
+///
+/// The reader is the search's own (same records and titles). A record it refuses for every
+/// format (a title that is not UTF-8) ends the scan: the run reads the file again and fails
+/// there as it always did.
+pub(super) fn prescan_queries(file: std::fs::File, lowercase: bool) -> Result<bool> {
+    let mut stream = super::input::FastaStream::from_file(file);
+    let mut may_be_refused = false;
+    let scanned = super::input::parse_fasta_stream_with_warnings(
+        &mut stream,
+        false,
+        lowercase,
+        super::query_setup::BATCH_SIZE,
+        &mut |batch| {
+            for query in batch {
+                query_text(query, false, true)?;
+                may_be_refused |= query_text(query, true, true).is_err();
+            }
+            Ok(())
+        },
+        &mut |_| Ok(()),
+    );
+    match scanned {
+        Err(error) if error.is::<XmlRefusal>() => Err(error),
+        _ => Ok(may_be_refused),
+    }
+}
+
+/// Whether the title of some `-subject` would be refused if the subject had a hit.
+pub(super) fn subjects_may_be_refused(subjects: &[FastaRecord]) -> bool {
+    subjects.iter().any(|subject| {
+        names::xml_subject_names(
+            subject.internal_id.as_bytes(),
+            subject.title.as_bytes(),
+            true,
+        )
+        .is_err()
+    })
+}
+
 /// Refuses a `-db` name that NCBI's XML stream cannot write (a byte outside US-ASCII); the
 /// run checks it before the search, as the Seq-annot formats check theirs.
 pub(super) fn check_database_name(name: &str) -> Result<()> {
@@ -197,7 +346,8 @@ pub(super) fn check_database_name(name: &str) -> Result<()> {
 /// document's header before the first query of the run (`queries_before` is the number of
 /// queries formatted before this call), each query's Iteration, and nothing else; the end of
 /// the document is `write_epilog`'s. Everything NCBI cannot write is refused before this
-/// call's first byte: the query titles and messages, the titles of the subjects with hits.
+/// call's first byte: the query titles and messages, the titles of the subjects with hits
+/// (and, with a hold, the whole run's bytes stay in memory, `HeldOutput`).
 pub(super) fn write_blastx_xml(
     writer: &mut impl Write,
     options: &ResolvedOptions,
@@ -258,17 +408,7 @@ pub(super) fn write_blastx_xml(
         for (qidx, lists) in batch.queries.iter().enumerate() {
             let query = &queries[batch.query_ordinal + qidx];
             let has_hits = lists.iter().any(|list| reported(list, options.gapped));
-            texts.push(
-                names::query_text(
-                    PROGRAM,
-                    &query.internal_id,
-                    query.title.as_bytes(),
-                    false,
-                    &query_messages(query, batch.search_skipped),
-                    has_hits,
-                )
-                .map_err(|error| anyhow::Error::new(XmlRefusal(error.to_string())))?,
-            );
+            texts.push(query_text(query, batch.search_skipped, has_hits)?);
             for list in lists.iter().filter(|list| reported(list, options.gapped)) {
                 if subject_cache[list.oid].is_none() {
                     subject_cache[list.oid] =

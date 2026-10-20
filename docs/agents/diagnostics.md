@@ -341,6 +341,7 @@ export LOSAT_X_NEWTONLANES8=1
 export LOSAT_X_PAIRLUT=1
 export LOSAT_X_PAIRPAR=1
 export LOSAT_X_PAIRPARDISC=1
+export LOSAT_X_PAIRPARDISCARR=1
 export LOSAT_X_PAIRPARFOLD=1
 export LOSAT_X_PAIRPARGATE=1
 export LOSAT_X_PAIRWISEPAR=1
@@ -2484,6 +2485,35 @@ Scheduling (each value computed by one thread with the original function; order 
   (`-subject`) at 16 threads -73.8 / -71.0 / -62.3 % wall, at 4 threads -62.4 / -61.6 %; megablast and blastn: it
   does not act. Max RSS +10-72 MiB, below NCBI `-db` in every cell (494 vs 700 MiB at 16 threads on the 31,168
   cDNAs). Its helpers only yield on wasm32 (`std::thread::sleep` panics under the browser's WASI shim).
+- `LOSAT_X_PAIRPARDISCARR=1` (in the strict set since 2026-10-20 (perf/dc-seed-batch, evidence at the end of this
+  entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; it does not depend on `LOSAT_X_PAIRPARDISC`)
+  blastn `-task dc-megablast`, one query-subject pair on a pool of 2+ threads: the two-hit seed stage of a subject
+  chunk whose query block has NCBI's diagonal array instead of the hash (`kQueryLenForHashTable`: at most 8000
+  letters with both strands, so a query of at most about 4000 bases; `LOSAT_X_PAIRPARDISC` takes the hash only).
+  Same scope otherwise (`scan_range` 0, unmasked subject, one subject, no debug or trace). The pool threads scan
+  the strips of `LOSAT_X_PAIRPARDISC` (same kernel, same strips), and the owner thread folds the pairs in scan
+  order through a statement-for-statement copy of the two-hit diagonal-array branch of `process_offset_pairs`
+  (`s_BlastnDiagTableExtendInitialHit`: the diagonal masked by `diag_mask`, `last_hit` and `flag` in
+  `hit_level_array`, the hit length as a byte in `hit_len_array`; `fold_two_hit_array` in
+  `blastn/blast_engine/x_pair_seed_disc.rs`). The array of such a block has at most 8192 + window diagonals, and
+  its chunks carry few pairs (31,168 cDNAs against 3 Mb: 10 chunks, 42,107 seeds in all, against 188.7 M in the
+  27 hash chunks); the stage replaces the one-thread scan of the whole subject, which NCBI's `CBatchSizeMixer`
+  brings once per small batch (a batch of one short cDNA after a large batch).
+  Anything else runs the original code. Shadow: `LOSAT_X_PAIRPARDISCARRSHADOW=1` (per chunk the hit list and both
+  arrays compared with the original code; one `[X_PAIRPARDISCARRSHADOW]` summary line on stderr at the end, with
+  the number of chunks, hits and array cells compared). With `LOSAT_TIMING` a `[TIMING] x_pairpardiscarr_seed` line
+  gives the chunks, strips, seeds and the owner's fold, scan and wait time. Test:
+  `LOSAT/tests/blastn_pairpar_disc_arr.rs`.
+  Default ON since 2026-10-20 (perf/dc-seed-batch; workstation (2x Xeon Gold 6338, node 1 booked through its FIFO,
+  8 / 16 / 32 physical cores with the siblings idle, `numactl --membind 1`, rotated rounds, every output the
+  expected one; v4-D `results/v4d10_probe1`); a ratio is the median of the per-round with / without, 65a2283b
+  against origin/dev 7e73ec9c, both built on that machine): dc-megablast of 31,168 D. melanogaster cDNAs against
+  3 Mb of chromosome 2L (`-subject`) in the batch loop (`LOSAT_X_QBATCHPAR=0`) x0.950 / 0.918 / 0.900 at 8 / 16 / 32
+  threads (its 10 array chunks took 0.024 s each on one thread; `[TIMING] scan_lookup` summed over the batches
+  1.57 -> 1.35 s at 16 threads), by default (QBATCHPAR slots) x0.974 / 0.996 / 1.006; 1,775 cDNAs (the batch loop
+  by default) x0.919 / 0.879 at 8 / 16 threads, x0.996 at one thread (8 rounds; the stage needs a pool); 31,168
+  cDNAs at one thread x1.004 (2 rounds); megablast and blastn of 31,168 cDNAs at 16 threads x0.991 / 0.999 (it
+  does not act there). Max RSS unchanged in every cell.
 - `LOSAT_X_QDUSTPAR=1` (BLASTN, all tasks with DUST on, which is the default of megablast, dc-megablast and
   blastn, and blastn-short with `-dust yes`; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the DUST masks
   of a query batch are made on the search pool instead of one query after the other

@@ -273,6 +273,14 @@ pub struct BlastnArgs {
     // ```
     #[arg(long = "lcase_masking", default_value_t = false)]
     pub lcase_masking: bool,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
+    // ```c++
+    //         arg_desc.AddDefaultKey(kArgStrand, "strand",
+    //                      "Query strand(s) to search against database/subject",
+    //                                CArgDescriptions::eString, kDfltArgStrand);
+    // ```
+    #[arg(long, default_value = "both", value_parser = ["both", "plus", "minus"])]
+    pub strand: String,
     // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:1945-1949
     // ```c++
     //     // query location

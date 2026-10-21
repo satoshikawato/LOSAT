@@ -351,7 +351,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "soft_masking"
             | "sorthits"
             | "sorthsps"
-            | "strand"
             | "taxidlist"
             | "taxids"
             | "ungapped"

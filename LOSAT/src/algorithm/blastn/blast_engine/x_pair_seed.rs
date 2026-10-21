@@ -1918,7 +1918,7 @@ mod tests {
                     masks: masks[c].clone(),
                 })
                 .collect();
-            let index = QueryContextIndex::new(&contexts);
+            let index = QueryContextIndex::new(&contexts, false);
             let score_matrix = build_blastna_matrix(1, -2);
             let nucl_score_table = build_nucl_score_table(1, -2);
             let seq_ranges = [(0i32, s_len as i32)];

@@ -3212,6 +3212,8 @@ unsafe fn x_greedy_row_impl_f2<const REVERSE: bool, const ARM: u8>(
             for i in 0..block_len {
                 *slide.add(i) = -1;
             }
+        } else if ARM == 5 {
+            // PROBE (arm 5): the scalar pass 2 runs inside the pass 3 loop below.
         } else if ARM >= 3 {
             // PROBE (arms 3 and 4): the scalar pass 2 over the offsets pass 1 left (two loads, two word
             // loads, xor / and / or, one `tzcnt` / `lzcnt`, the tail); the unfit mask is merged afterwards.
@@ -3386,6 +3388,8 @@ unsafe fn x_greedy_row_impl_f2<const REVERSE: bool, const ARM: u8>(
             }
         }
 
+        let run7 = cold.longest_match_run.min(7);
+        let cold_run0 = cold.longest_match_run;
         // pass 3
         let mut diag_lower = cold.diag_lower;
         let mut curr_extent = cold.curr_extent;
@@ -3401,7 +3405,53 @@ unsafe fn x_greedy_row_impl_f2<const REVERSE: bool, const ARM: u8>(
                 }
                 continue;
             }
-            let index = *slide.add(i);
+            let index = if ARM == 5 {
+                // PROBE (arm 5): the arm 3 scalar pass 2 for this diagonal only.
+                if inline_ok && *badm.add(i) == 0 {
+                    let (w1, w2) = (
+                        u64::from_le((seq1.add(*p1s.add(i) as usize) as *const u64).read_unaligned()),
+                        u64::from_le((seq2.add(*p2s.add(i) as usize) as *const u64).read_unaligned()),
+                    );
+                    let diff = (w1 ^ w2) | (w1 & NOT_A_BASE);
+                    let bits = if REVERSE {
+                        diff.leading_zeros()
+                    } else {
+                        diff.trailing_zeros()
+                    };
+                    let shift = bits & 0x38;
+                    let stop_byte = if REVERSE {
+                        (w2 >> (56 - shift)) as u8
+                    } else {
+                        (w2 >> shift) as u8
+                    };
+                    let index = (bits >> 3) as i32;
+                    let mut r = index;
+                    if index > run7 {
+                        r = -1;
+                    }
+                    if stop_byte == FENCE_SENTRY {
+                        r = -1;
+                    }
+                    r
+                } else {
+                    -1
+                }
+            } else {
+                *slide.add(i)
+            };
+            if ARM == 5 && x_f2_check_on() {
+                x_f2_check_one::<REVERSE>(
+                    seq1,
+                    seq2,
+                    len1,
+                    len2,
+                    inline_ok,
+                    seq2_index,
+                    block_first + i as i32,
+                    cold_run0,
+                    index,
+                );
+            }
             if index < 0 {
                 cold.diag_lower = diag_lower;
                 cold.curr_extent = curr_extent;
@@ -3487,6 +3537,58 @@ fn x_f2_greedy_arm() -> u8 {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0)
     })
+}
+
+/// PROBE (arm 5 with `LOSAT_X_F2CHECK=1`): the reference expression of the default pass 2 for one diagonal.
+///
+/// SAFETY: as `x_f2_check` (`inline_ok` says whether both sequences have eight bytes).
+#[cfg(target_arch = "x86_64")]
+#[inline(never)]
+unsafe fn x_f2_check_one<const REVERSE: bool>(
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    inline_ok: bool,
+    seq2_index: i32,
+    base1: i32,
+    longest_match_run: i32,
+    got: i32,
+) {
+    const NOT_A_BASE: u64 = 0xFCFC_FCFC_FCFC_FCFC;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static CHECKED: AtomicU64 = AtomicU64::new(0);
+    let want = if !inline_ok {
+        -1
+    } else {
+        let seq1_index = seq2_index + base1;
+        let unfit = (len1 - 8 - seq1_index) | (len2 - 8 - seq2_index) | seq1_index | seq2_index;
+        let at1 = if unfit < 0 { 0 } else { seq1_index };
+        let at2 = if unfit < 0 { 0 } else { seq2_index };
+        let (w1, w2) = if REVERSE {
+            (
+                u64::from_le((seq1.add((len1 - 8 - at1) as usize) as *const u64).read_unaligned()),
+                u64::from_le((seq2.add((len2 - 8 - at2) as usize) as *const u64).read_unaligned()),
+            )
+        } else {
+            (
+                u64::from_le((seq1.add(at1 as usize) as *const u64).read_unaligned()),
+                u64::from_le((seq2.add(at2 as usize) as *const u64).read_unaligned()),
+            )
+        };
+        let diff = (w1 ^ w2) | (w1 & NOT_A_BASE);
+        let bits = if REVERSE { diff.leading_zeros() } else { diff.trailing_zeros() };
+        let shift = bits & 0x38;
+        let stop_byte = if REVERSE { (w2 >> (56 - shift)) as u8 } else { (w2 >> shift) as u8 };
+        let index = (bits >> 3) as i32;
+        let other = (unfit < 0) | (diff == 0) | (stop_byte == FENCE_SENTRY) | (index > longest_match_run);
+        if other { -1 } else { index }
+    };
+    assert!(want == got, "F2CHECK(one): start {} reverse {}: reference {} arm {}", seq2_index, REVERSE, want, got);
+    let n = CHECKED.fetch_add(1, Ordering::Relaxed) + 1;
+    if n % 4_000_000 == 0 {
+        eprintln!("[F2CHECK] {} diagonals agree", n);
+    }
 }
 
 /// PROBE (`LOSAT_X_F2CHECK=1`): compare the arms' pass 2 with the reference expression of the default
@@ -3634,6 +3736,12 @@ unsafe fn x_greedy_row(
                 }
                 3 => {
                     return x_greedy_row_avx2_f2::<3>(
+                        reverse, seq1, seq2, len1, len2, previous, current, tmp_diag_lower,
+                        diag_origin, xdrop_score, st,
+                    )
+                }
+                5 => {
+                    return x_greedy_row_avx2_f2::<5>(
                         reverse, seq1, seq2, len1, len2, previous, current, tmp_diag_lower,
                         diag_origin, xdrop_score, st,
                     )

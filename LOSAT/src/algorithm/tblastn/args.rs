@@ -1288,6 +1288,11 @@ fn write_first_batch_prologs(
                 database,
             )?;
             writer.flush()?;
+        } else if let Some(kind) = super::stage_e_report::xml2_kind(format.outfmt) {
+            // The XML2 and JSON documents start with their prolog too.
+            let mut writer = format.sink.open()?;
+            writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+            writer.flush()?;
         }
     }
     Ok(())
@@ -1365,13 +1370,14 @@ fn search(
         dbsize: args.dbsize,
     };
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
-    // BLAST XML cannot carry a database name outside US-ASCII (NCBI's stream throws): refused
-    // before the search, and before anything is written.
+    // BLAST XML (5, and the XML2 documents of 16 and 15) cannot carry a database name outside
+    // US-ASCII (NCBI's stream throws): refused before the search, and before anything is
+    // written.
     if let Some(database) = database {
         if outputs
             .formats
             .iter()
-            .any(|format| super::stage_e_report::format_number(format.outfmt) == 5)
+            .any(|format| super::stage_e_report::is_structured_xml(format.outfmt))
         {
             crate::report::blast_xml::names::check_database_name("TBLASTN", database.name())?;
         }
@@ -1765,6 +1771,19 @@ fn search(
             None => None,
         };
         drop(database_stores);
+        // `-db`, XML2 and JSON: the taxid of each reported sequence, and what the taxonomy
+        // database says about it (the refusals of both come before any byte).
+        let xml_taxa = match (&reported, database) {
+            (Some(reported), Some(database))
+                if outputs
+                    .formats
+                    .iter()
+                    .any(|format| super::stage_e_report::xml2_kind(format.outfmt).is_some()) =>
+            {
+                database.read_taxids(reported, &results)?
+            }
+            _ => Default::default(),
+        };
         let (report_records, report_letters, shown) = match (&reported, database) {
             (Some(reported), Some(database)) => (
                 reported.records.as_slice(),
@@ -1820,7 +1839,11 @@ fn search(
             super::blast_xml::XmlValues {
                 expect: resolved.evalue,
                 soft_masking: resolved.soft_masking,
+                gapped: resolved.gapped,
+                cbs: resolved.composition_mode as i32,
+                db_gencode: i32::from(resolved.db_gencode),
             },
+            xml_taxa,
         )?;
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
         // The failed batch's reading messages, then its error.

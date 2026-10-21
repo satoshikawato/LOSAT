@@ -265,3 +265,10 @@ writes (`Error: [blastn] ...`).
   `LOSAT_X_BPQBLOCK` of 50,000 letters and two with a value of at most 10,000, which
   `tests/blastp_query_blocks_fmt.rs` runs against these frozen bytes), the first 30 of that length in file order. Rows `db.sa.bpqb.{5,8,9,12}`: `blastp -db paja -evalue 0.1
   -max_target_seqs 2 -max_hsps 1` (9 rows of outfmt 6: some queries have hits, some do not).
+
+- `x16_ttaxid_q.faa`, `x16_ttaxid_qwarn.faa`, `x16_ttaxid_qwarn2.faa` (OF5b part 2, TBLASTN outfmt 15 and 16): protein queries
+  translated from `sn1` (frame +1) and `sn2` (frame -3) of `x16_ntaxid.fna`, and an unrelated one without hits; the `qwarn` files
+  add a title that ends in 60 amino-acid letters (the reader's warning) and the `qwarn2` order puts the query without hits
+  first. They search the existing nucleotide databases `x16_ntaxid` (taxid 9606) and `x16_ntaxid_99990`: rows
+  `db.sa.x16_ttaxid.*` (`BLASTDB=DIR` and `BATCH_SIZE=N` tokens as in the BLASTP and BLASTN rows; the messages on standard
+  error name `tblastn`).

@@ -274,6 +274,7 @@ export LOSAT_X_BPDBCUT=1
 export LOSAT_X_BPDEFER=1
 export LOSAT_X_BPDIAG=1
 export LOSAT_X_BPGAP=1
+export LOSAT_X_BPHITBF=1
 export LOSAT_X_BPLISTEDLEAN=1
 export LOSAT_X_BPLKPAHEAD=1
 export LOSAT_X_BPLKPFLAT=1
@@ -350,6 +351,7 @@ export LOSAT_X_PAIRPARDISC=1
 export LOSAT_X_PAIRPARDISCARR=1
 export LOSAT_X_PAIRPARFOLD=1
 export LOSAT_X_PAIRPARGATE=1
+export LOSAT_X_PAIRPARNA=1
 export LOSAT_X_PAIRWISEPAR=1
 export LOSAT_X_PURGEFAST=1
 export LOSAT_X_QBATCHPAR=1
@@ -1353,7 +1355,8 @@ Rebuilding less:
   as no previous hit (`x_shadow_compare`). The compressed scan reads letters past the buffer as the sentinel in
   both loops, so its tables are always compared.
   One line at exit: `[X_SHADOW] BPSEED subjects= initial_hsps= identical`, with
-  `(tables not compared for N subjects shorter than a word)` when there were such subjects.
+  `(tables not compared for N subjects shorter than a word)` when there were such subjects; with
+  `LOSAT_X_BPHITBF` on (the default) a second, `[X_SHADOW] BPHITBF subjects_compared=` (`LOSAT_X_BPHITBF`).
 - `LOSAT_X_BPCLUT=1` (BLASTP `-task blastp-fast`, speed and memory; in the strict set since 2026-10-17, on by
   default together with `LOSAT_X_BPLKPFLAT`) the compressed lookup table (`CompressedAaLookupTable`) is
   built flat in three passes (`tblastx/lookup/x_clut_direct.rs`, exactness argument in its header): a count pass
@@ -1584,6 +1587,41 @@ Rebuilding less:
   10 proteins x volume 00 at 8 threads 0.995. In the strict set from its first pull request (no measured
   case slower; Owner decision of 2026-10-17 that the branch-free scans join the set once each shows no
   loss, and plan v4's rule that a switch that wins everywhere joins in the pull request that adds it).
+- `LOSAT_X_BPHITBF=1` (BLASTP, speed; in the strict set from the pull request that added it, 2026-10-20;
+  `=0` turns it off) the per-hit loop of the fused seed loop (`blastp/x_seed_fused.rs` `x_cell_per_hit`, the
+  loop without `LOSAT_X_BPDIAG`'s batches: the default where the CPU has no AVX2, aarch64 and WebAssembly;
+  exactness argument in the module header) takes the two outcomes most hits of a flag-0 entry end in, too far
+  (`diff >= window`: `last_hit = s + diag_offset`) and overlap (`diff < wordsize`: nothing), without a branch,
+  in doubled arithmetic: with the packed entry `raw`, `d2 = 2 (s + diag_offset) - (raw <<
+  1)` is twice the reference's `diff` (a cleared entry holds `-window`), a candidate is `(d2 - 2 wordsize) as
+  u32 < 2 (window - wordsize)`, and the entry's next value is selected. A flag-1 entry or a candidate goes on
+  to `x_test_hit`. The loop also reads ahead (`LOSAT_X_BPSEED_PREFETCH`, x86-64) in a loop of its own over the
+  hits that have a later hit, without a bound check per hit. Acts per subject where `1 <= wordsize < window`,
+  `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (otherwise the loop without the test runs: a
+  window equal to the word size, or a subject of about 2^29 letters or a `-window_size` near 2^29). The
+  AVX2 batches of `LOSAT_X_BPDIAG` (the x86-64 default) and blastp-fast's loops keep their own tests (on
+  blastp-fast the test gave x0.97 on 300 yeast proteins x the fly proteome with 3-4 % more instructions and
+  changed the loops without it; not taken). With `LOSAT_X_BPDIAG=0` 72-74 % of the hits of WSSV x PajaWSV and of 300 yeast
+  proteins x the fly proteome are too far, 18.6-18.8 % overlap, 2.5-3.7 % meet a flag-1 entry and 4.7-5.3 %
+  are candidates (v4-A10 probe bp1). Shadow: `LOSAT_X_BPSEEDSHADOW=1` compares the fused loop that runs, this
+  one where it acts, with the reference on every subject, and prints `[X_SHADOW] BPHITBF subjects_compared=N`
+  beside BPSEED's line (N: the subjects this loop scanned).
+  Measured 2026-10-20 on the workstation (node 0, one physical core, its HT sibling idle, warmed 3 s before
+  every run, arm order reversed every other round, one warm-up round + 4 rounds, medians of the per-round
+  ratios against dev 23b4ef09, the binary before the switch; other lines' gates ran on node 0 meanwhile, load
+  12-27, so the cycle and instruction counts are the firmer measure; every report identical between the
+  arms). With `LOSAT_X_BPDIAG=0` (the per-hit loop on every subject, as without AVX2): 30 yeast proteins x the
+  fly proteome (`-db`, `-evalue 1e-5`) x0.824 (5.40 -> 4.45 s; cycles x0.823, instructions x0.988,
+  mispredicted branches x0.546); WSSV x PajaWSV (`-subject`) x0.966 (cycles x0.965, instructions x0.993,
+  mispredicted branches x0.768). At 8 threads (node 1, CPUs 32-39, their HT siblings idle, the same form, 4
+  rounds): x0.835 (0.730 -> 0.611 s; cycles x0.825, instructions x0.988, mispredicted branches x0.548) and
+  x0.974 (0.195 -> 0.191 s; cycles x0.959, instructions x0.993); `=0` x0.995-0.997, the default x0.995, both
+  with instructions x1.0000. By default with AVX2 the batches take every subject: x0.996-1.002,
+  instructions x1.0000. With `=0` the instruction counts equal those of the binary before the switch
+  (x1.0000-1.0001, with and without `LOSAT_X_BPDIAG=0`). On WebAssembly (LOSAT Web's serial reactor, ABI v2,
+  under Node 26 in one process: an instance per arm, the default and `=0` alternating, one warm-up search +
+  8 rounds, on one booked workstation core): AP027131 x AP027133 proteins x0.977 (19.51 -> 19.11 s, 7 of 8
+  rounds below 1), WSSV x PajaWSV x0.991 (6 of 8), the same output bytes.
 - `LOSAT_X_BPUNGAP=1` (BLASTP and BLASTX one-hit and two-hit BLOSUM62 ungapped extension, speed; in the
   strict set since 2026-10-14; `=0` turns it off) the word loop and the
   X-drop walks of `s_BlastAaExtendLeft` / `s_BlastAaExtendRight` read the scores from one flat 32 x 32 byte
@@ -2630,6 +2668,38 @@ Scheduling (each value computed by one thread with the original function; order 
   by default) x0.919 / 0.879 at 8 / 16 threads, x0.996 at one thread (8 rounds; the stage needs a pool); 31,168
   cDNAs at one thread x1.004 (2 rounds); megablast and blastn of 31,168 cDNAs at 16 threads x0.991 / 0.999 (it
   does not act there). Max RSS unchanged in every cell.
+- `LOSAT_X_PAIRPARNA=1` (in the strict set since 2026-10-20 (perf/bn-short-strip, evidence at the end of this entry): on
+  unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; it does not depend on `LOSAT_X_PAIRPAR`) blastn with a lookup
+  table that is not two-stage (the lookup width is the word size: `-task blastn-short`'s word 7, and word sizes 4 to 8
+  when the table has enough entries), one subject of up to 5 Mb (a longer one is searched in chunks in parallel already)
+  and a query block on a pool of 2+ threads: the one-hit seed stage of the chunk with the diagonal hash (query block over 8000
+  letters, both strands counted, so about 4000 query letters; `window_size` and `scan_range` 0, unmasked subject, no
+  debug or trace). The pool threads scan strips (512 x max(threads, 4) of them, at least 512 subject offsets each: 512
+  offsets on 3 Mb from 12 threads on) with the scan kernel of the reference
+  (`run.rs`, the branch after `if two_stage_lookup_ref.is_none()`), each lookup hit becoming a seed with the context of
+  its query offset, and the pairs are folded in scan order through a copy of the reference's one-hit diagonal-hash code
+  (`last_hit` test, `s_TypeOfWord`, the ungapped extension on the context's query slice, the cutoff, every insert;
+  `blastn/blast_engine/x_pair_seed_na.rs`); with `LOSAT_X_PAIRPARFOLD` (default) the fold is split by diagonal-hash
+  bucket over the threads, without it the owner folds. Every lookup hit is a seed here (about 100 per subject offset for
+  30,000 24-mers against 3 Mb), so the helpers scan at most two strips per thread ahead of the slowest fold. Anything
+  else (the diagonal array of a query block up to 8000 letters, such as a few primers; one thread; several subjects or
+  subject chunks searched in parallel) runs the original code. Before it, blastn-short against one subject ran on one core at any thread count. Shadow:
+  `LOSAT_X_PAIRPARNASHADOW=1` (per chunk the hit list and the whole diagonal hash compared with the original code; one
+  `[X_PAIRPARNASHADOW]` summary line on stderr at the end, with the number of chunks compared). With `LOSAT_TIMING` a
+  `[TIMING] x_pairparna_seed` line gives the strips, seeds and the fold, scan and wait time. Tests:
+  `LOSAT/tests/blastn_pairpar_na.rs`, `x_pair_seed_na.rs` `seed_stage_on_strips_equals_one_scan`.
+  Default ON since 2026-10-20 (perf/bn-short-strip; workstation (2x Xeon Gold 6338, node 1 booked through its FIFO,
+  16 physical cores with the siblings idle, `numactl --membind 1`, rotated rounds, every output the same bytes in every
+  arm; v4-B `results/b13ab`); a ratio is the median of the per-round with / without, a718932f (the switch opt-in, same
+  code paths) built on that machine): blastn-short of 30,000 24-mers (taken at even steps from the subject) against
+  3 Mb of D. melanogaster chromosome 2L (`-subject`, `-evalue 0.001`, outfmt 6) x0.510 / 0.284 / 0.189 / 0.094 at 2 /
+  4 / 8 / 16 threads (30.3 -> 2.97 s at 16 threads, where NCBI 2.17.0 `-db` takes 29.4-29.8 s on one core), x1.001 at
+  one thread (the stage needs a pool); 30,000 queries of 18-30 nt x0.110 at 16 threads (34.3 -> 3.78 s); outfmt 0
+  x0.140 at 16 threads. Max RSS 191-197 -> 238 / 270 / 275 / 304-311 MiB at 2 / 4 / 8 / 16 threads (the seeds of the
+  strips in flight and one table per partition), below NCBI's 392 / 414 MiB at 1 / 16 threads. `-task blastn` (the
+  megablast table, where the switch does not act) at 2 threads: same instructions (7.50 / 7.51 G) and cycles. At 8 and
+  16 threads the threads spend 1.2-1.8x the user time of the serial scan, mostly waiting for the slowest partition
+  (cycles up at equal instructions, sys 2-5 s).
 - `LOSAT_X_QDUSTPAR=1` (BLASTN, all tasks with DUST on, which is the default of megablast, dc-megablast and
   blastn, and blastn-short with `-dust yes`; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the DUST masks
   of a query batch are made on the search pool instead of one query after the other

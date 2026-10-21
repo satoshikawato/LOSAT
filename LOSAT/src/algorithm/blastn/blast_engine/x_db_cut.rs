@@ -303,7 +303,7 @@ where
     R: Send + Debug,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
-    M: FnMut(u32, R),
+    M: FnMut(u32, R) + Send,
 {
     let db = &database.db;
     let block_bytes = x_db_cut_block_bytes(db, pool, parallel);
@@ -324,6 +324,7 @@ where
             new_scratch,
             search,
             merge,
+            extends,
         )
         .map_err(one_thread_error);
     }
@@ -338,6 +339,7 @@ where
         new_scratch,
         search,
         &mut |ordinal, result| found.push((ordinal, result)),
+        extends,
     )
     .map_err(one_thread_error);
     let counted = extends.load(Ordering::Relaxed);
@@ -351,6 +353,7 @@ where
         new_scratch,
         search,
         &mut |ordinal, result| expected.push((ordinal, format!("{result:?}"))),
+        extends,
     );
     // The second search's extensions do not count: the next query batch is sized as without the
     // shadow.

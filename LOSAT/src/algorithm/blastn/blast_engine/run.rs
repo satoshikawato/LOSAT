@@ -251,6 +251,12 @@ pub fn x_db_cut_print_summary() {
     database::x_db_cut_print_summary();
 }
 
+/// EXPERIMENT (LOSAT_X_BNDBSTREAMSHADOW): the summary line `main` prints at exit. No NCBI
+/// counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_db_stream_print_summary() {
+    database::x_db_stream_print_summary();
+}
+
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
 // ```c
 // #define NCBIMATH_LN2 0.69314718055994530941723212145818

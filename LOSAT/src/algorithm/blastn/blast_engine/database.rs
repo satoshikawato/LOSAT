@@ -74,6 +74,16 @@ const BLOCKS_PER_THREAD: usize = 8;
 #[path = "x_db_cut.rs"]
 mod x_db_cut;
 
+// EXPERIMENT (LOSAT_X_BNDBSTREAM): the parallel preliminary stage without rounds, the blocks'
+// results handed to the hit lists in ordinal order while the threads search the next blocks (a
+// child module, so that it uses the private block reader of this file).
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+#[path = "x_db_stream.rs"]
+mod x_db_stream;
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_encoding.c:75-78
 // ```c
 // const char BLASTNA_TO_IUPACNA[BLASTNA_SIZE] = {
@@ -253,6 +263,12 @@ fn block_subject(block: &SequenceBlock, i: usize) -> Result<BlastnSubjectRef<'_>
 /// error (`x_db_cut.rs`, exactness argument in its header). `x_extends` is the count of
 /// good initial extensions that `search` adds to (it sizes the next query batch); the
 /// shadow mode of the switch, which runs `search` twice, leaves it as one search leaves it.
+///
+/// EXPERIMENT (LOSAT_X_BNDBSTREAM): with more than one thread there are no rounds: the
+/// threads claim the blocks in ordinal order and one of them hands the results over in that
+/// order while the others search the next blocks, at most a window of blocks ahead
+/// (`x_db_stream.rs`, exactness argument in its header). Its shadow mode leaves `x_extends`
+/// as one search leaves it too.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn search_blocks<T, R, I, K, M>(
     database: &BlastnDatabase,
@@ -267,7 +283,7 @@ where
     R: Send + std::fmt::Debug,
     I: Fn() -> T + Sync + Send,
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
-    M: FnMut(u32, R),
+    M: FnMut(u32, R) + Send,
 {
     #[cfg(all(
         feature = "parallel",
@@ -300,11 +316,6 @@ where
             );
         }
     }
-    #[cfg(any(
-        not(feature = "parallel"),
-        all(target_arch = "wasm32", not(feature = "wasm-threads"))
-    ))]
-    let _ = x_extends;
     search_blocks_of(
         database,
         pool,
@@ -314,6 +325,7 @@ where
         new_scratch,
         search,
         merge,
+        x_extends,
     )
 }
 
@@ -327,13 +339,26 @@ pub(super) fn x_db_cut_print_summary() {
     x_db_cut::x_bn_db_cut_print_summary();
 }
 
-/// `search_blocks` with blocks of at most `block_bytes` and rounds of `blocks_per_thread`
-/// blocks per thread.
-#[allow(clippy::too_many_arguments)]
-fn search_blocks_of<T, R, I, K, M>(
-    database: &BlastnDatabase,
+// No NCBI counterpart: prints counters and changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BNDBSTREAMSHADOW): the shadow mode's line at exit.
+pub(super) fn x_db_stream_print_summary() {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    x_db_stream::x_bn_db_stream_print_summary();
+}
+
+/// The rounds of `search_blocks_of` with `parallel`: `blocks_per_thread` blocks of at most
+/// `block_bytes` per thread searched with a scratch per worker (`map_init`), and the round's
+/// results merged in ordinal order when the whole round is searched.
+#[cfg(all(
+    feature = "parallel",
+    any(not(target_arch = "wasm32"), feature = "wasm-threads")
+))]
+fn search_rounds<T, R, I, K, M>(
+    db: &SeqDb,
     pool: &SearchPool<'_>,
-    parallel: bool,
     block_bytes: u64,
     blocks_per_thread: usize,
     new_scratch: &I,
@@ -346,59 +371,106 @@ where
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R),
 {
+    let round_blocks = pool.threads().saturating_mul(blocks_per_thread).max(1);
+    let mut next_ordinal = 0u32;
+    loop {
+        let mut round: Vec<BlockRange> = Vec::with_capacity(round_blocks);
+        while round.len() < round_blocks {
+            let Some(range) = db.next_block(next_ordinal, block_bytes) else {
+                break;
+            };
+            round.push(range);
+            next_ordinal = range.end_ordinal();
+        }
+        if round.is_empty() {
+            break;
+        }
+        let found: Vec<Result<Vec<(u32, R)>>> = pool.install(|| {
+            round
+                .par_iter()
+                .map_init(new_scratch, |scratch, &range| -> Result<Vec<(u32, R)>> {
+                    let block = db.read_block(range).map_err(search_read_error)?;
+                    let mut kept = Vec::new();
+                    for i in 0..block.len() {
+                        let ordinal = range.first_ordinal + i as u32;
+                        if let Some(result) =
+                            search(scratch, ordinal, block_subject(&block, i)?)
+                        {
+                            kept.push((ordinal, result));
+                        }
+                    }
+                    Ok(kept)
+                })
+                .collect()
+        });
+        // The sequences that keep nothing change no hit list, so the order of the
+        // merges is the one-thread order.
+        for block_results in found {
+            for (ordinal, result) in block_results? {
+                merge(ordinal, result);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `search_blocks` with blocks of at most `block_bytes` and rounds of `blocks_per_thread`
+/// blocks per thread (with LOSAT_X_BNDBSTREAM, the window of `x_db_stream.rs` instead of
+/// rounds). `extends`: as `search_blocks`'s `x_extends`.
+#[allow(clippy::too_many_arguments)]
+fn search_blocks_of<T, R, I, K, M>(
+    database: &BlastnDatabase,
+    pool: &SearchPool<'_>,
+    parallel: bool,
+    block_bytes: u64,
+    blocks_per_thread: usize,
+    new_scratch: &I,
+    search: &K,
+    merge: &mut M,
+    extends: &std::sync::atomic::AtomicU64,
+) -> Result<()>
+where
+    R: Send + std::fmt::Debug,
+    I: Fn() -> T + Sync + Send,
+    K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
+    M: FnMut(u32, R) + Send,
+{
     let db = &database.db;
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
     if parallel {
-        let round_blocks = pool.threads().saturating_mul(blocks_per_thread).max(1);
-        let mut next_ordinal = 0u32;
-        loop {
-            let mut round: Vec<BlockRange> = Vec::with_capacity(round_blocks);
-            while round.len() < round_blocks {
-                let Some(range) = db.next_block(next_ordinal, block_bytes) else {
-                    break;
-                };
-                round.push(range);
-                next_ordinal = range.end_ordinal();
-            }
-            if round.is_empty() {
-                break;
-            }
-            let found: Vec<Result<Vec<(u32, R)>>> = pool.install(|| {
-                round
-                    .par_iter()
-                    .map_init(new_scratch, |scratch, &range| -> Result<Vec<(u32, R)>> {
-                        let block = db.read_block(range).map_err(search_read_error)?;
-                        let mut kept = Vec::new();
-                        for i in 0..block.len() {
-                            let ordinal = range.first_ordinal + i as u32;
-                            if let Some(result) =
-                                search(scratch, ordinal, block_subject(&block, i)?)
-                            {
-                                kept.push((ordinal, result));
-                            }
-                        }
-                        Ok(kept)
-                    })
-                    .collect()
-            });
-            // The sequences that keep nothing change no hit list, so the order of the
-            // merges is the one-thread order.
-            for block_results in found {
-                for (ordinal, result) in block_results? {
-                    merge(ordinal, result);
-                }
-            }
+        // EXPERIMENT (LOSAT_X_BNDBSTREAM / LOSAT_X_BNDBSTREAMSHADOW): `x_db_stream.rs`.
+        let mode = x_db_stream::x_bn_db_stream();
+        if mode != x_db_stream::XDbStream::Off {
+            return x_db_stream::x_search_blocks_stream(
+                mode,
+                db,
+                pool,
+                block_bytes,
+                blocks_per_thread,
+                new_scratch,
+                search,
+                merge,
+                extends,
+            );
         }
-        return Ok(());
+        return search_rounds(
+            db,
+            pool,
+            block_bytes,
+            blocks_per_thread,
+            new_scratch,
+            search,
+            merge,
+        );
     }
     #[cfg(any(
         not(feature = "parallel"),
         all(target_arch = "wasm32", not(feature = "wasm-threads"))
     ))]
-    let _ = (pool, parallel, blocks_per_thread);
+    let _ = (pool, parallel, blocks_per_thread, extends);
 
     let mut scratch = new_scratch();
     let mut next_ordinal = 0u32;
@@ -1011,6 +1083,7 @@ mod tests {
                     assert_eq!(ordinal, kept);
                     merged.push(ordinal);
                 },
+                &std::sync::atomic::AtomicU64::new(0),
             )
         })
         .unwrap();

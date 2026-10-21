@@ -527,6 +527,55 @@ impl XdropScratch {
         }
     }
 
+    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:70-83
+    // ```c
+    //    if (head == NULL) {
+    //       ...
+    //       Int4	chunksize = MAX(CHUNKSIZE, length + length/3);
+    //       ...
+    //       retval->state_array = (Uint1*) malloc(chunksize*sizeof(Uint1));
+    // ```
+    // Room for one more traceback row of `additional` cells and its entry in `rows`, as
+    // `s_GapGetState` finds room for a row of `edit_script`. EXPERIMENT (LOSAT_X_XDROPTRIM): see
+    // `x_grow_row`.
+    #[inline(always)]
+    pub(super) fn reserve_row(&mut self, additional: usize) {
+        if self.trace.capacity() - self.trace.len() < additional
+            || self.rows.len() == self.rows.capacity()
+        {
+            self.x_grow_row(additional);
+        }
+    }
+
+    // No NCBI counterpart: NCBI keeps its state chunks in `gap_align->state_struct` until the
+    // search ends; with LOSAT_X_XDROPTRIM the rows of a long alignment are mapped and freed after
+    // it (`x_release_rows`), so that each worker does not keep the longest alignment's rows.
+    #[cold]
+    #[inline(never)]
+    fn x_grow_row(&mut self, additional: usize) {
+        if x_xdrop_trim() {
+            crate::utils::x_mapped::x_reserve_mapped(&mut self.trace, additional);
+            crate::utils::x_mapped::x_reserve_mapped(&mut self.rows, 1);
+        } else {
+            self.trace.reserve(additional);
+            self.rows.reserve(1);
+        }
+    }
+
+    /// EXPERIMENT (LOSAT_X_XDROPTRIM): frees the traceback rows when they hold at least
+    /// `X_MAPPED_FROM` bytes. Called after each alignment; the operation list stays.
+    #[inline(always)]
+    fn x_release_rows(&mut self) {
+        let big = crate::utils::x_mapped::X_MAPPED_FROM;
+        if (self.trace.capacity() >= big
+            || self.rows.capacity() * std::mem::size_of::<(u32, u32, u32)>() >= big)
+            && x_xdrop_trim()
+        {
+            crate::utils::x_mapped::x_release_mapped(&mut self.trace);
+            crate::utils::x_mapped::x_release_mapped(&mut self.rows);
+        }
+    }
+
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_gapalign.c:641-649
     // ```c
     //         if (last_b_index + num_extra_cells + 3 >= gap_align->dp_mem_alloc) {
@@ -1576,7 +1625,7 @@ mod kernel {
 
             let row_off = sc.trace.len();
             if TB {
-                sc.trace.reserve(bend - first + num_extra + 96);
+                sc.reserve_row(bend - first + num_extra + 96);
             }
             let tr = sc.trace.as_mut_ptr().add(row_off);
             let survw = sc.surv.as_mut_ptr();
@@ -2022,7 +2071,7 @@ mod kernel {
 
             let row_off = sc.trace.len();
             if TB {
-                sc.trace.reserve(bend - first + num_extra + 96);
+                sc.reserve_row(bend - first + num_extra + 96);
             }
             let tr = sc.trace.as_mut_ptr().add(row_off);
             let survw = sc.surv.as_mut_ptr();
@@ -2451,6 +2500,17 @@ mod x_neon2;
 #[path = "x_xdrop_capture.rs"]
 mod x_capture;
 
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_XDROPTRIM, a switch of the strict set,
+/// `utils/xswitch.rs`: on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set): the
+/// traceback rows of an alignment that needs `x_mapped::X_MAPPED_FROM` bytes or more are mapped
+/// (`x_mapped.rs`) and freed after it. It changes only where the rows are allocated, not any
+/// value NCBI computes.
+pub(crate) fn x_xdrop_trim() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_XDROPTRIM"))
+}
+
 /// No NCBI counterpart: reads the LOSAT_X_DPAVX2 and LOSAT_X_DPCAPTURE switches once; it does not
 /// change any value NCBI computes. Bit 0: try the 256-bit kernels first (set only when the CPU
 /// has AVX2); bit 1: record a sample of the calls. 0 (both off) leaves `xdrop_align` as it was.
@@ -2687,7 +2747,41 @@ fn x_extra_dispatch(
 ///
 /// Score-only (`tb == false`) or traceback X-drop alignment.
 /// `None` means "not handled here": the caller must run the scalar kernel.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn xdrop_align(
+    q: &RowSeq<'_>,
+    s: &ColSeq<'_>,
+    scores: &Scores<'_>,
+    len1: usize,
+    len2: usize,
+    gap_open: i32,
+    gap_extend: i32,
+    x_drop: i32,
+    tb: bool,
+    check_fence: bool,
+    sc: &mut XdropScratch,
+) -> Option<XdropResult> {
+    let result = xdrop_align_kernels(
+        q,
+        s,
+        scores,
+        len1,
+        len2,
+        gap_open,
+        gap_extend,
+        x_drop,
+        tb,
+        check_fence,
+        sc,
+    );
+    // EXPERIMENT (LOSAT_X_XDROPTRIM): the rows of a long alignment are not kept.
+    sc.x_release_rows();
+    result
+}
+
+/// The kernel of `xdrop_align` for this CPU.
+#[allow(clippy::too_many_arguments)]
+fn xdrop_align_kernels(
     q: &RowSeq<'_>,
     s: &ColSeq<'_>,
     scores: &Scores<'_>,

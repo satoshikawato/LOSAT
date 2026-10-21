@@ -846,6 +846,26 @@ impl SeqDb {
         self.volumes[volume].read_block(first, first + 1, ordinal)
     }
 
+    /// EXPERIMENT (LOSAT_X_BNSEQMAP): `read_block` with the bytes in a buffer that glibc maps
+    /// from 1 MiB on (`Volume::x_read_block_mapped`).
+    pub fn x_read_block_mapped(&self, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
+        let Some(volume) = self.volumes.get(range.volume) else {
+            return Err(SeqDbError::Range(format!(
+                "volume {} is outside the database ({} volumes)",
+                range.volume,
+                self.volumes.len()
+            )));
+        };
+        volume.x_read_block_mapped(range.first, range.end, range.first_ordinal)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNSEQMAP): `read_sequence` with the bytes in a buffer that glibc maps
+    /// from 1 MiB on.
+    pub fn x_read_sequence_mapped(&self, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
+        let (volume, first) = self.find_volume(ordinal)?;
+        self.volumes[volume].x_read_block_mapped(first, first + 1, ordinal)
+    }
+
     /// Whether the ambiguity data of nucleotide `ordinal` decode
     /// (`Volume::check_ambiguity`: `SequenceBlock::ambiguity_runs`' error,
     /// read without the letters).

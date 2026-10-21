@@ -300,6 +300,27 @@ impl Volume {
         end: u32,
         first_ordinal: u32,
     ) -> Result<SequenceBlock, SeqDbError> {
+        self.read_block_in(first, end, first_ordinal, false)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNSEQMAP): `read_block` with the bytes in a buffer of
+    /// `File::x_read_range_mapped`.
+    pub fn x_read_block_mapped(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+    ) -> Result<SequenceBlock, SeqDbError> {
+        self.read_block_in(first, end, first_ordinal, true)
+    }
+
+    fn read_block_in(
+        &self,
+        first: u32,
+        end: u32,
+        first_ordinal: u32,
+        mapped: bool,
+    ) -> Result<SequenceBlock, SeqDbError> {
         self.check_range(first, end)?;
         let seqtype = self.index.seqtype;
         let seq_offsets = self.index.sequence_offsets(first, end)?;
@@ -317,7 +338,11 @@ impl Volume {
         let data_start = u64::from(seq_offsets[0]) - self.lead();
         let data_end = u64::from(seq_offsets[seq_offsets.len() - 1]);
         let file = self.seq_file()?;
-        let data = file.read_range(data_start, data_end)?;
+        let data = if mapped {
+            file.x_read_range_mapped(data_start, data_end)?
+        } else {
+            file.read_range(data_start, data_end)?
+        };
         let block = SequenceBlock {
             seqtype,
             first_ordinal,
@@ -902,12 +927,32 @@ impl SequenceBlock {
     /// restored, and the sentinel byte 15 before and after the bases (the
     /// buffer NCBI's traceback gets): `len + 2` bytes.
     pub fn nucleotide_blastna(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {
+        self.nucleotide_blastna_in(i, false)
+    }
+
+    /// EXPERIMENT (LOSAT_X_BNSEQMAP): `nucleotide_blastna` in a buffer with the capacity of
+    /// `utils::x_mapped::x_mapped_capacity` (mapped by glibc from 1 MiB on). No NCBI
+    /// counterpart: only where the bytes are kept.
+    pub fn x_nucleotide_blastna_mapped(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {
+        self.nucleotide_blastna_in(i, true)
+    }
+
+    fn nucleotide_blastna_in(&self, i: usize, mapped: bool) -> Result<Vec<u8>, SeqDbError> {
         let packed = self.nucleotide_packed(i);
         let base_length = self.nucleotide_len(i)?;
         if base_length < 1 {
             return Err(self.format(i, "Error: could not get sequence or range."));
         }
-        let mut buffer = vec![0u8; base_length + 2];
+        let mut buffer = if mapped {
+            let mut buffer = Vec::with_capacity(crate::utils::x_mapped::x_mapped_capacity(
+                base_length + 2,
+                1,
+            ));
+            buffer.resize(base_length + 2, 0u8);
+            buffer
+        } else {
+            vec![0u8; base_length + 2]
+        };
         {
             let seq = &mut buffer[1..=base_length];
             for (position, base) in seq.iter_mut().enumerate() {

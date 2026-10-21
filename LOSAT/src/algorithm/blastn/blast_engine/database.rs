@@ -10,8 +10,9 @@
 //!   set's report);
 //! - the preliminary stage reads the stored 2-bit data in blocks and searches them in the
 //!   order of their ordinal ids (`search_blocks`); a sequence's preliminary HSPs go into
-//!   the preliminary hit lists as soon as its block's round is searched, so nothing but the
-//!   hit lists is kept for the whole database;
+//!   the preliminary hit lists as soon as its block is handed over (LOSAT_X_BNDBSTREAM; without
+//!   it, when its block's round is searched), so nothing but the hit lists is kept for the
+//!   whole database;
 //! - the traceback reads again, by ordinal id, the sequences of the preliminary hit lists
 //!   (`traceback_listed`), with their ambiguity codes (BLASTNA);
 //! - the definition lines of the final hit lists are read after each query batch's
@@ -393,9 +394,7 @@ where
                     let mut kept = Vec::new();
                     for i in 0..block.len() {
                         let ordinal = range.first_ordinal + i as u32;
-                        if let Some(result) =
-                            search(scratch, ordinal, block_subject(&block, i)?)
-                        {
+                        if let Some(result) = search(scratch, ordinal, block_subject(&block, i)?) {
                             kept.push((ordinal, result));
                         }
                     }

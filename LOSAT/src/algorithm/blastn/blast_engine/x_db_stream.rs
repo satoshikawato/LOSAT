@@ -134,9 +134,14 @@ where
     }
     let mut found: Vec<(u32, R)> = Vec::new();
     let before = extends.load(Ordering::Relaxed);
-    let result = search_window(db, pool, &blocks, new_scratch, search, &mut |ordinal, kept| {
-        found.push((ordinal, kept))
-    });
+    let result = search_window(
+        db,
+        pool,
+        &blocks,
+        new_scratch,
+        search,
+        &mut |ordinal, kept| found.push((ordinal, kept)),
+    );
     let counted = extends.load(Ordering::Relaxed);
     let mut expected: Vec<(u32, String)> = Vec::new();
     let expected_result = search_rounds(
@@ -315,8 +320,8 @@ fn x_compare_merged<R: Debug>(found: &[(u32, R)], expected: &[(u32, String)]) ->
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::BlastnDatabase;
+    use super::*;
 
     fn open(name: &str) -> BlastnDatabase {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

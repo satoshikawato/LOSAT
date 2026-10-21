@@ -12,7 +12,7 @@
 //! `[BLAST] BLASTDB`), names inside alias files are looked for there too when
 //! they are found nowhere else, and volumes are recorded under normalised
 //! directory names. `resolve_one_name` takes the path of one database as it
-//! is and looks nowhere else (`LOSAT makedb`).
+//! is and looks nowhere else (`losat makedb`).
 
 use std::collections::VecDeque;
 use std::ffi::OsStr;
@@ -1665,7 +1665,7 @@ pub(super) fn resolve_in(
 // }
 // ```
 // This entry point is for a caller that holds the path of one database, not
-// a list in the syntax above (`LOSAT makedb`, whose output name is one name
+// a list in the syntax above (`losat makedb`, whose output name is one name
 // by makeblastdb's own check): the name is not split, so a space or a double
 // quote in it is a character of the path. NCBI has no such entry point: its
 // reader splits every name it is given.

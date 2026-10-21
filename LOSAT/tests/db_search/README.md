@@ -1,7 +1,7 @@
 # Inputs of the `-db` fixtures
 
 Used by `LOSAT/tests/db_search_fixtures.py` and `LOSAT/tests/db_search_manifest.tsv` (rows that run
-`LOSAT blastp -db ...`, `LOSAT blastn -db ...`, `LOSAT tblastn -db ...`, `LOSAT blastx -db ...` or `LOSAT tblastx -db ...` against frozen NCBI BLAST+ 2.17.0
+`losat blastp -db ...`, `losat blastn -db ...`, `losat tblastn -db ...`, `losat blastx -db ...` or `losat tblastx -db ...` against frozen NCBI BLAST+ 2.17.0
 `blastp -db ...`, `blastn -db ...`, `tblastn -db ...`, `blastx -db ...` or `tblastx -db ... -num_threads 1` bytes; the manifest's `program` column says which). NCBI is the
 comparison oracle only; the tests read the committed files and run no NCBI program.
 

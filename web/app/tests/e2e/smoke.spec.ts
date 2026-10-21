@@ -26,11 +26,11 @@ test(`paste, queue, run, view and export with ${BUILD_HAS_ENGINE ? 'the engine' 
   await page.getByTestId('results-view-outputs').click();
   await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:6');
   await expect(page.getByTestId('result-command')).toHaveText(
-    'LOSAT tblastx -query query.fa -subject subject.fa -outfmt 6',
+    'losat tblastx -query query.fa -subject subject.fa -outfmt 6',
   );
   await page.getByTestId('format-0').click();
   await expect(page.getByTestId('result-command')).toHaveText(
-    'LOSAT tblastx -query query.fa -subject subject.fa -outfmt 0',
+    'losat tblastx -query query.fa -subject subject.fa -outfmt 0',
   );
   await expect(page.getByTestId('result-output')).toHaveAttribute('data-shown', '1:0');
   await expect(page.getByTestId('result-output')).toContainText(BUILD_HAS_ENGINE ? 'TBLASTX 2.17.0+' : 'FAKE ENGINE OUTPUT');

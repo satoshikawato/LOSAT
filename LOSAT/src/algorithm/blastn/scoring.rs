@@ -470,7 +470,7 @@ mod tests {
 
     fn args(words: &[&str]) -> BlastnArgs {
         let argv = [
-            "LOSAT", "blastn", "-query", "q", "-subject", "s", "-outfmt", "6",
+            "losat", "blastn", "-query", "q", "-subject", "s", "-outfmt", "6",
         ];
         let cli: crate::cli::Cli =
             crate::cli::try_parse_from(argv.iter().chain(words)).expect("valid arguments");

@@ -57,7 +57,7 @@ impl Inputs {
         let query = self.query.0.display().to_string();
         let subject = self.subject.0.display().to_string();
         let mut argv = vec![
-            "LOSAT", "blastn", "-query", &query, "-subject", &subject, "-outfmt", "6",
+            "losat", "blastn", "-query", &query, "-subject", &subject, "-outfmt", "6",
         ];
         argv.extend_from_slice(extra);
         let cli: Cli = try_parse_from(argv).expect("blastn argv");
@@ -81,7 +81,7 @@ impl Inputs {
     /// The CLI output file and standard error of one single-format run.
     fn cli(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
         let out = self.query.0.with_extension(format!("cli{outfmt}.out"));
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("blastn")
             .arg("-query")
             .arg(&self.query.0)

@@ -19,11 +19,11 @@ requirements:
 
 test:
   commands:
-    - LOSAT --version
-    - LOSAT --help
-    - LOSAT blastn --help
-    - LOSAT blastp --help
-    - LOSAT tblastx --help
+    - losat --version
+    - losat --help
+    - losat blastn --help
+    - losat blastp --help
+    - losat tblastx --help
 
 about:
   home: https://github.com/satoshikawato/LOSAT

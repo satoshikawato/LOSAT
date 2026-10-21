@@ -51,7 +51,7 @@ fn blastp(
     vars: &[(&str, &str)],
     extra: &[&str],
 ) -> (Vec<u8>, Vec<usize>, Option<usize>) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")

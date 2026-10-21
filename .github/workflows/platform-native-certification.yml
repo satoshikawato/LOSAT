@@ -324,7 +324,7 @@ jobs:
             "stage=platform_certification" \
             "stage_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             >> "$evidence_log"
-          native_bin="$GITHUB_WORKSPACE/LOSAT/target/release/LOSAT$EXECUTABLE_SUFFIX"
+          native_bin="$GITHUB_WORKSPACE/LOSAT/target/release/losat$EXECUTABLE_SUFFIX"
           oracle_bin="$ORACLE_DIR/ncbi-blast-2.17.0+/bin"
           resume_args=()
           if [[ -f "$CHECKPOINT_DIR/identity.json" ]]; then

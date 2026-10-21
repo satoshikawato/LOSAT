@@ -12,8 +12,8 @@ From the repository root:
 
 ```bash
 cd LOSAT
-cargo build --release --bin LOSAT
-cargo build --release --bin LOSAT --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command
+cargo build --release --bin losat
+cargo build --release --bin losat --target wasm32-wasip1-threads --features wasm-threads --target-dir target/threaded-command
 cd tests
 
 ./run_comparison.sh
@@ -25,7 +25,7 @@ cd tests
 Requirements: Bash 4+, a current Node.js release with WASI support (the current
 frozen snapshot used Node 26.8.2), NCBI BLAST+ (`blastn`, `blastp`,
 `tblastx`, `makeblastdb`), Python 3 with `matplotlib`, `pandas` and `seaborn>=0.12`.
-`--bin LOSAT` builds the command artifact with `_start`; library Wasm artifacts
+`--bin losat` builds the command artifact with `_start`; library Wasm artifacts
 cannot run these CLI comparisons. Missing or incorrect artifacts fail explicitly.
 
 To compare Wasm with a fresh NCBI oracle without running native LOSAT:
@@ -239,7 +239,7 @@ verifies the opposite build order:
 
 ```bash
 python build_wasi_artifacts.py --target-dir ../target --output-dir ../../.tmp/wasi-artifacts
-python check_wasm_threading.py --native ../target/release/LOSAT \
+python check_wasm_threading.py --native ../target/release/losat \
   --threaded ../../.tmp/wasi-artifacts/losat-threaded-command.wasm \
   --reactor ../../.tmp/wasi-artifacts/losat-threaded-reactor.wasm \
   --output-dir ../../.tmp/threading-gates
@@ -248,7 +248,7 @@ python check_wasm_threading.py --native ../target/release/LOSAT \
 For compatibility checks, add `--include-serial` to the builder and pass
 `--serial` and `--serial-reactor` with those explicit artifacts to the checker.
 To also check native without parallel support, build it using
-`cargo build --release --bin LOSAT --no-default-features --target-dir target/native-serial`
+`cargo build --release --bin losat --no-default-features --target-dir target/native-serial`
 from the crate directory and pass `--native-serial` to the checker.
 The comparison gate requires NCBI BLAST+ 2.17.0 only as a test oracle. It retains
 raw bytes, argv, stderr, artifact identity, and worker lifecycle records.

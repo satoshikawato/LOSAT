@@ -158,13 +158,13 @@ impl Run {
     }
 }
 
-/// One `LOSAT blastx` run with `args`, with `env` as its only variables that choose a code path.
+/// One `losat blastx` run with `args`, with `env` as its only variables that choose a code path.
 /// `LOSAT_BLASTX_WORKER_LOG` is a file of its own: a binary built with the `blastx-worker-probe`
 /// feature (`cargo test --all-features`, as in CI) needs that file name as soon as a search has
 /// more than one thread, and it selects nothing.
 fn blastx(args: &[&str], env: &[(&str, &str)]) -> Run {
     let log = temp_path("worker.log");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if text.starts_with("LOSAT_")
@@ -387,7 +387,7 @@ fn an_error_at_a_later_batch_comes_as_without_the_switch() {
     }
 }
 
-// A protein database made by `LOSAT makedb` as the subject, at three threads.
+// A protein database made by `losat makedb` as the subject, at three threads.
 #[test]
 fn a_database_gives_the_reports_without_the_switch() {
     let query = TempFasta::new("q", &queries_with_warnings());
@@ -396,7 +396,7 @@ fn a_database_gives_the_reports_without_the_switch() {
     let name = dir.join("subject");
     let name = name.to_str().expect("UTF-8 path");
     let proteins = subject(400);
-    let made = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let made = Command::new(env!("CARGO_BIN_EXE_losat"))
         .args([
             "makedb",
             "-in",
@@ -407,7 +407,7 @@ fn a_database_gives_the_reports_without_the_switch() {
             name,
         ])
         .output()
-        .expect("run LOSAT makedb");
+        .expect("run losat makedb");
     assert!(
         made.status.success(),
         "{}",

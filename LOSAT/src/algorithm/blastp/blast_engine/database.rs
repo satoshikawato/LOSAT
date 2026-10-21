@@ -1648,7 +1648,7 @@ mod tests {
                 .collect()
         }
 
-        /// The generated database written by `LOSAT makedb` into a new directory of the test
+        /// The generated database written by `losat makedb` into a new directory of the test
         /// (`label`), with volumes of at most `max_file_sz` bytes; returns the directory and the
         /// database name.
         fn generated_database(label: &str, max_file_sz: &str) -> (PathBuf, String) {

@@ -64,10 +64,10 @@ jobs:
       - name: Build separate artifacts in both orders
         run: |
           cd LOSAT
-          cargo build --release --locked --bin LOSAT
+          cargo build --release --locked --bin losat
           compat_args=()
           if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
-            cargo build --release --locked --bin LOSAT --no-default-features --target-dir target/native-serial
+            cargo build --release --locked --bin losat --no-default-features --target-dir target/native-serial
             compat_args=(--include-serial)
           fi
           cd ..
@@ -96,12 +96,12 @@ jobs:
           # (*thread)->Run(); (*thread)->Join(&result);
           compat_args=()
           if [[ "$INCLUDE_SERIAL_COMPATIBILITY" == true ]]; then
-            compat_args=(--native-serial LOSAT/target/native-serial/release/LOSAT
+            compat_args=(--native-serial LOSAT/target/native-serial/release/losat
               --serial .tmp/threading/artifacts/losat-serial-command.wasm
               --serial-reactor .tmp/threading/artifacts/losat-serial-reactor.wasm)
           fi
           python3 LOSAT/tests/check_wasm_threading.py \
-            --native LOSAT/target/release/LOSAT \
+            --native LOSAT/target/release/losat \
             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
             --reactor .tmp/threading/artifacts/losat-threaded-reactor.wasm \
             --oracle-dir .tmp/threading/oracle/ncbi-blast-2.17.0+/bin \
@@ -119,7 +119,7 @@ jobs:
             compat_args=(--serial .tmp/threading/artifacts/losat-serial-command.wasm)
           fi
           python3 LOSAT/tests/check_wasm_threading_regressions.py \
-            --native LOSAT/target/release/LOSAT \
+            --native LOSAT/target/release/losat \
             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
             --oracle-dir .tmp/threading/oracle/ncbi-blast-2.17.0+/bin \
             --jobs 3 --timeout-seconds 7200 \
@@ -133,7 +133,7 @@ jobs:
             compat_args=(--serial .tmp/threading/artifacts/losat-serial-command.wasm)
           fi
           python3 LOSAT/tests/check_tblastx_thread_thresholds.py \
-            --native LOSAT/target/release/LOSAT \
+            --native LOSAT/target/release/losat \
             --threaded .tmp/threading/artifacts/losat-threaded-command.wasm \
             --oracle .tmp/threading/oracle/ncbi-blast-2.17.0+/bin/tblastx \
             --output-dir .tmp/threading/threshold-regressions "${compat_args[@]}"

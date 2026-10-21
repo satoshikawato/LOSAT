@@ -226,3 +226,7 @@ search that feeds `-dbsize` to the link cutoffs gives 111 rows, at 100000000 it 
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index
 files, so the frozen outputs (`Posted date:` lines) must then be frozen again:
 `python3 LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin DIR`.
+- `bpqb_q.faa`: 30 records of `tests/fasta/MeenMJNV.faa` of 280-560 letters (11,940 letters, so NCBI searches
+  them in two query batches of its default size, and LOSAT's block search of `LOSAT_X_BPQBLOCK` writes two
+  blocks), the first 30 of that length in file order. Rows `db.sa.bpqb.{5,8,9,12}`: `blastp -db paja -evalue 0.1
+  -max_target_seqs 2 -max_hsps 1` (9 rows of outfmt 6: some queries have hits, some do not).

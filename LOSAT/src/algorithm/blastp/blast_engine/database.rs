@@ -1072,6 +1072,65 @@ pub(super) fn x_titles_allow_blocks(
     (0..db.num_seqs()).all(allowed)
 }
 
+// EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the block search of outfmt 8, 9, 12 and 5.
+// These reports show no tabular id and no outfmt 0 title, so of the failures that
+// `x_titles_allow_blocks` rules out only those of the definition lines' reading remain: NCBI's
+// reader error (`HeaderReadError`), more than one definition line, and a stored title with a byte
+// outside ' ' ..= '~' (`ListedSubjects::read_titles`, `ListedTitles::check_reported_titles`; for
+// outfmt 5 that range is what `names::check_text` passes). A new function, so that
+// `x_titles_allow_blocks` and the per-definition-line code of the outfmt 0, 6 and 7 path stay as
+// they are.
+// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): whether every sequence of the database has
+/// one definition line that reads and holds no byte outside ' ' ..= '~'. Read in `pool` as
+/// `x_titles_allow_blocks` reads it; a reader error is `false`.
+pub(super) fn x_titles_read_allow_blocks(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    let db = &database.db;
+    let readable = |deflines: std::result::Result<
+        Vec<crate::seqdb::OrdinalDefline>,
+        crate::seqdb::SeqDbError,
+    >|
+     -> bool {
+        match deflines {
+            Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
+            Err(_) => false,
+        }
+    };
+    if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
+        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+        let readable_range = |range: &BlockRange| -> bool {
+            db.visit_deflines(*range, |_ordinal, deflines| readable(deflines))
+        };
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if pool.enabled() {
+            return pool.install(|| ranges.par_iter().all(readable_range));
+        }
+        let _ = pool;
+        return ranges.iter().all(readable_range);
+    }
+    let allowed = |ordinal: u32| -> bool { readable(db.deflines(ordinal)) };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() {
+        return pool.install(|| {
+            (0..db.num_seqs())
+                .into_par_iter()
+                .with_min_len(4096)
+                .all(allowed)
+        });
+    }
+    let _ = pool;
+    (0..db.num_seqs()).all(allowed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2231,7 +2290,18 @@ mod tests {
                 .unwrap()
             })
         };
+        // EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the same databases for the
+        // read-only check of outfmt 8, 9, 12 and 5.
+        let read_allowed = |database: &BlastpDatabase| -> [bool; 2] {
+            [1, 4].map(|threads| {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    Ok(x_titles_read_allow_blocks(database, pool))
+                })
+                .unwrap()
+            })
+        };
         assert_eq!(allowed(&open("prot_v4")), [true, true]);
+        assert_eq!(read_allowed(&open("prot_v4")), [true, true]);
         let dir = std::env::temp_dir().join(format!(
             "losat-db-qblock-titles-{}-{:?}",
             std::process::id(),
@@ -2252,6 +2322,7 @@ mod tests {
             BlastpDatabase::open(dir.join("prot_mv").to_str().unwrap(), &Default::default())
                 .unwrap();
         assert_eq!(allowed(&missing), [false, false]);
+        assert_eq!(read_allowed(&missing), [false, false]);
         // A stored title with a byte outside ' ' ..= '~' (LOSAT's refusal when it is reported).
         for ext in ["pin", "psq"] {
             std::fs::copy(fixture("prot_v4") + "." + ext, dir.join(format!("b.{ext}"))).unwrap();
@@ -2266,6 +2337,7 @@ mod tests {
         let bad =
             BlastpDatabase::open(dir.join("b").to_str().unwrap(), &Default::default()).unwrap();
         assert_eq!(allowed(&bad), [false, false]);
+        assert_eq!(read_allowed(&bad), [false, false]);
         drop((missing, bad));
         std::fs::remove_dir_all(&dir).unwrap();
     }

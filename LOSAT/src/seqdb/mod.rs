@@ -37,6 +37,7 @@ pub mod date;
 pub mod file;
 pub mod header;
 pub mod index;
+pub mod taxdb;
 pub mod volume;
 
 #[cfg(test)]

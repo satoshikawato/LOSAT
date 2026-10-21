@@ -22,6 +22,7 @@ pub mod x_ungapped_fast;
 // max_offset = BlastGetStartForGappedAlignment(...);
 // status = s_BlastProtGappedAlignment(...);
 // BLASTP and TBLASTN use the same protein gapped-score path.
+mod blast_xml;
 pub(crate) mod gapalign;
 mod hsp;
 mod query_split;
@@ -89,6 +90,12 @@ pub fn x_bp_subj_run_print_summary() {
 // No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_bp_db_cut_print_summary() {
     blast_engine::x_bp_db_cut_print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BPLISTEDLEANSHADOW): the shadow mode's line at exit.
+// No NCBI counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_bp_listed_lean_print_summary() {
+    blast_engine::x_bp_listed_lean_print_summary();
 }
 
 /// EXPERIMENT (LOSAT_X_BPSUBJMETASHADOW): the shadow mode's line at exit.

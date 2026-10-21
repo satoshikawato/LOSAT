@@ -1,0 +1,256 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/x16_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_1",
+          "query_title": "qp1 query protein one",
+          "query_len": 140,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "st2 plain",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 135,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 283.493,
+                  "score": 724,
+                  "evalue": 4.49578e-105,
+                  "identity": 135,
+                  "positive": 135,
+                  "query_from": 6,
+                  "query_to": 140,
+                  "hit_from": 1,
+                  "hit_to": 135,
+                  "align_len": 135,
+                  "gaps": 0,
+                  "qseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "hseq": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG",
+                  "midline": "SVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "st1 alpha",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 272.322,
+                  "score": 695,
+                  "evalue": 1.17489e-100,
+                  "identity": 130,
+                  "positive": 130,
+                  "query_from": 1,
+                  "query_to": 130,
+                  "hit_from": 1,
+                  "hit_to": 130,
+                  "align_len": 130,
+                  "gaps": 0,
+                  "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "hseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM",
+                  "midline": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYM"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 2,
+            "db_len": 265,
+            "hsp_len": 19,
+            "eff_space": 27467,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastp",
+      "version": "BLASTP 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "db": "tests/db_search/x16_taxid"
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "F",
+        "cbs": 2
+      },
+      "results": {
+        "search": {
+          "query_id": "Query_2",
+          "query_title": "qp2 unrelated protein (no hits expected)",
+          "query_len": 45,
+          "hits": [
+            {
+              "num": 1,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|0",
+                  "accession": "0",
+                  "title": "st1 alpha",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 130,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 12.3122,
+                  "score": 20,
+                  "evalue": 1.69859,
+                  "identity": 3,
+                  "positive": 5,
+                  "query_from": 24,
+                  "query_to": 32,
+                  "hit_from": 1,
+                  "hit_to": 9,
+                  "align_len": 9,
+                  "gaps": 0,
+                  "qseq": "LWKEHLTFQ",
+                  "hseq": "MWMEHSVLK",
+                  "midline": "+W EH   +"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 12.3122,
+                  "score": 20,
+                  "evalue": 1.84594,
+                  "identity": 4,
+                  "positive": 4,
+                  "query_from": 33,
+                  "query_to": 39,
+                  "hit_from": 35,
+                  "hit_to": 41,
+                  "align_len": 7,
+                  "gaps": 0,
+                  "qseq": "WCNYFWT",
+                  "hseq": "WENYCWP",
+                  "midline": "W NY W "
+                },
+                {
+                  "num": 3,
+                  "bit_score": 11.5418,
+                  "score": 18,
+                  "evalue": 3.9172,
+                  "identity": 13,
+                  "positive": 19,
+                  "query_from": 4,
+                  "query_to": 42,
+                  "hit_from": 45,
+                  "hit_to": 83,
+                  "align_len": 44,
+                  "gaps": 10,
+                  "qseq": "NWKMVCRYVPYLEEDMEAWMLW-----KEHLTFQWCNYFWTDVV",
+                  "hseq": "SWKVLMKY--EFSSDIHPCNLWICWIPKEMATPGWWN---TDTL",
+                  "midline": "+WK++ +Y      D+    LW     KE  T  W N   TD +"
+                }
+              ]
+            },
+            {
+              "num": 2,
+              "description": [
+                {
+                  "id": "gnl|BL_ORD_ID|1",
+                  "accession": "1",
+                  "title": "st2 plain",
+                  "taxid": 9606,
+                  "sciname": "Homo sapiens"
+                }
+              ],
+              "len": 135,
+              "hsps": [
+                {
+                  "num": 1,
+                  "bit_score": 12.3122,
+                  "score": 20,
+                  "evalue": 1.71739,
+                  "identity": 4,
+                  "positive": 4,
+                  "query_from": 33,
+                  "query_to": 38,
+                  "hit_from": 30,
+                  "hit_to": 35,
+                  "align_len": 6,
+                  "gaps": 0,
+                  "qseq": "WCNYFW",
+                  "hseq": "WENYCW",
+                  "midline": "W NY W"
+                },
+                {
+                  "num": 2,
+                  "bit_score": 11.927,
+                  "score": 19,
+                  "evalue": 2.76321,
+                  "identity": 13,
+                  "positive": 19,
+                  "query_from": 4,
+                  "query_to": 42,
+                  "hit_from": 40,
+                  "hit_to": 78,
+                  "align_len": 44,
+                  "gaps": 10,
+                  "qseq": "NWKMVCRYVPYLEEDMEAWMLW-----KEHLTFQWCNYFWTDVV",
+                  "hseq": "SWKVLMKY--EFSSDIHPCNLWICWIPKEMATPGWWN---TDTL",
+                  "midline": "+WK++ +Y      D+    LW     KE  T  W N   TD +"
+                }
+              ]
+            }
+          ],
+          "stat": {
+            "db_num": 2,
+            "db_len": 265,
+            "hsp_len": 11,
+            "eff_space": 8262,
+            "kappa": 0.041,
+            "lambda": 0.267,
+            "entropy": 0.14
+          }
+        }
+      }
+    }
+  }
+]
+}

@@ -84,20 +84,20 @@ impl SeqId<'_> {
     pub fn write<E: Encoder>(&self, enc: &mut E) {
         match *self {
             SeqId::Local(id) => {
-                enc.variant("local", 0);
-                enc.variant("str", 1);
+                enc.variant("Seq-id", "local", 0);
+                enc.variant("Object-id", "str", 1);
                 enc.visible_str(id.as_bytes());
                 enc.end_variant();
                 enc.end_variant();
             }
             SeqId::BlOrdId(oid) => {
-                enc.variant("general", 10);
-                enc.begin_sequence();
+                enc.variant("Seq-id", "general", 10);
+                enc.begin_sequence("Dbtag");
                 enc.member("db", 0);
                 enc.visible_str(b"BL_ORD_ID");
                 enc.end_member();
                 enc.member("tag", 1);
-                enc.variant("id", 0);
+                enc.variant("Object-id", "id", 0);
                 // An ordinal ID is an `Int4` in NCBI (`int oid`); a database has fewer than
                 // 2^31 sequences.
                 enc.int(oid as i32);

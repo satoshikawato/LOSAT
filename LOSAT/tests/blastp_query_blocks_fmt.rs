@@ -1,11 +1,14 @@
 //! The blastp search in blocks of whole query batches (`LOSAT_X_BPQBLOCK`) for outfmt 0 and 7
-//! with `LOSAT_X_BPQBLOCKFMT` (`src/algorithm/blastp/x_query_blocks.rs`) on whole searches.
+//! with `LOSAT_X_BPQBLOCKFMT`, outfmt 8, 9 and 12 with `LOSAT_X_BPQBLOCKSA`, and outfmt 5 with
+//! `LOSAT_X_BPQBLOCKXML` (`src/algorithm/blastp/x_query_blocks.rs`) on whole searches.
 //!
-//! Both switches are in the strict set (`src/utils/xswitch.rs`): on by default, off with `0` or
-//! with `LOSAT_X_DEFAULT=0` and the variable not set. With both on, a search whose one report is
-//! outfmt 0, 6 or 7 searches its queries block by block and writes each block's report before it
-//! searches the next block: the outfmt 0 prolog with the first block, the epilog and outfmt 7's
-//! count of the queries with the last. These tests compare the standard output and the standard
+//! The switches are in the strict set (`src/utils/xswitch.rs`): on by default, off with `0` or
+//! with `LOSAT_X_DEFAULT=0` and the variable not set. With them on, a search whose one report is
+//! outfmt 0, 5, 6, 7, 8, 9 or 12 searches its queries block by block and writes each block's report
+//! before it searches the next block: the outfmt 0 prolog and the XML header with the first block,
+//! the epilog, the XML end and outfmt 7's count of the queries with the last. A run that the
+//! block search could not report as the search of all queries does (an XML name NCBI cannot
+//! write, a `-db` definition line that does not read) takes the search of all queries. These tests compare the standard output and the standard
 //! error (without its `[TIMING]` lines) with the search of all queries (`LOSAT_X_BPQBLOCK=0`), and
 //! count the `[TIMING] blastp_total` lines (one per search of a query set) to tell whether the
 //! blocks ran. `BATCH_SIZE` (NCBI's query batch size) makes small batches, so that the fixture
@@ -39,6 +42,17 @@ const SWITCH_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCK", "0");
 const FMT_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKFMT", "0");
 const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_BPQBLOCKFMTSHADOW", "1");
+const SA_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKSA", "0");
+const XML_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKXML", "0");
+
+/// The family switch of an outfmt of the Seq-annot and XML reports, set to `0`.
+fn family_off(spec: &str) -> (&'static str, &'static str) {
+    match spec {
+        "5" => XML_OFF,
+        "8" | "9" | "12" => SA_OFF,
+        _ => FMT_OFF,
+    }
+}
 
 /// One blastp run.
 struct Run {
@@ -114,6 +128,34 @@ fn blastp(
         searches,
         shadow,
     }
+}
+
+/// The subject of the first-hit row of the latest query in `rows` (outfmt 6 of the search of
+/// all queries, in the order of the queries): a subject that no query of block 0 hits.
+/// Returns the subject and the number (from 1) of its first-hit query in `query`'s file. The
+/// refusal of a title that is made for that subject can only come after the earlier blocks'
+/// bytes, so a check that is missing from the block plan changes the run's output.
+fn subject_first_hit_late(query: &Path, rows: &str) -> (String, usize) {
+    let text = std::fs::read_to_string(query).unwrap();
+    let ids: Vec<&str> = text
+        .lines()
+        .filter_map(|line| line.strip_prefix('>'))
+        .map(|line| line.split_whitespace().next().unwrap())
+        .collect();
+    let mut first: Vec<(&str, usize)> = Vec::new();
+    for row in rows.lines() {
+        let mut cells = row.split('\t');
+        let (id, subject) = (cells.next().unwrap(), cells.next().unwrap());
+        if first.iter().all(|(seen, _)| *seen != subject) {
+            let number = ids.iter().position(|name| *name == id).unwrap() + 1;
+            first.push((subject, number));
+        }
+    }
+    let (subject, number) = first.into_iter().max_by_key(|(_, number)| *number).unwrap();
+    // Block 0 holds the first five records at one thread (one batch of `BATCH`, 3,268 letters)
+    // and about 26 at four (20,000 letters).
+    assert!(number > 30, "the latest first hit is by record {number}");
+    (subject.to_string(), number)
 }
 
 fn outfmt(spec: &str) -> [OsString; 2] {
@@ -276,6 +318,102 @@ fn the_default_writes_outfmt_0_and_7_in_blocks() {
     }
 }
 
+// outfmt 5, 8, 9 and 12 with `-subject` and `-db`: the blocks (one per query batch at one thread,
+// of 20,000 letters at four) write the bytes of the search of all queries (BER and the XML are
+// compared as bytes), and with the family's switch at `0` these formats take the search of all
+// queries.
+#[test]
+fn outfmt_5_8_9_12_blocks_write_the_report_of_the_search_of_all_queries() {
+    let query = fixture("MeenMJNV.faa");
+    let fasta = fixture("MejoMJNV.faa");
+    let db = subject_database("sareports");
+    for subject in [
+        [OsStr::new("-subject"), fasta.as_os_str()],
+        [OsStr::new("-db"), db.as_os_str()],
+    ] {
+        for spec in ["5", "8", "9", "12"] {
+            let fmt = outfmt(spec);
+            for (threads, letters) in [(1, "1"), (2, "1"), (4, "20000")] {
+                let what = format!("{:?} outfmt {spec} threads {threads}", subject[0]);
+                let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
+                assert!(
+                    !reference.stdout.is_empty(),
+                    "{what}: the fixture pair has a report"
+                );
+                let run = blastp(
+                    &query,
+                    &subject,
+                    threads,
+                    &[BATCH, ("LOSAT_X_BPQBLOCK", letters)],
+                    &os(&fmt),
+                );
+                assert_same(
+                    &run,
+                    &reference,
+                    true,
+                    &format!("{what} blocks of {letters}"),
+                );
+                if threads != 2 {
+                    let run = blastp(
+                        &query,
+                        &subject,
+                        threads,
+                        &[BATCH, ("LOSAT_X_BPQBLOCK", "1"), family_off(spec)],
+                        &os(&fmt),
+                    );
+                    assert_same(&run, &reference, false, &format!("{what} family off"));
+                }
+            }
+        }
+    }
+    std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
+}
+
+// The default: with no variable outfmt 5, 8, 9 and 12 are searched in blocks of 50,000 query
+// letters (two blocks); `LOSAT_X_DEFAULT=0` searches all queries together, and with the variables
+// set (`LOSAT_X_BPQBLOCK` and the family's switch) the blocks are back.
+#[test]
+fn the_default_writes_outfmt_5_8_9_12_in_blocks() {
+    let query = fixture("MeenMJNV.faa");
+    let fasta = fixture("MejoMJNV.faa");
+    let subject = [OsStr::new("-subject"), fasta.as_os_str()];
+    for spec in ["5", "8", "9", "12"] {
+        let fmt = outfmt(spec);
+        let family = match spec {
+            "5" => ("LOSAT_X_BPQBLOCKXML", "1"),
+            _ => ("LOSAT_X_BPQBLOCKSA", "1"),
+        };
+        let reference = blastp(&query, &subject, 4, &[BATCH, SWITCH_OFF], &os(&fmt));
+        let run = blastp(&query, &subject, 4, &[BATCH], &os(&fmt));
+        assert_same(&run, &reference, true, &format!("outfmt {spec} default"));
+        assert_eq!(
+            run.searches,
+            reference.searches + 1,
+            "outfmt {spec}: two blocks"
+        );
+        let run = blastp(&query, &subject, 4, &[BATCH, DEFAULT_OFF], &os(&fmt));
+        assert_same(
+            &run,
+            &reference,
+            false,
+            &format!("outfmt {spec} LOSAT_X_DEFAULT=0"),
+        );
+        let run = blastp(
+            &query,
+            &subject,
+            4,
+            &[BATCH, DEFAULT_OFF, ("LOSAT_X_BPQBLOCK", "50000"), family],
+            &os(&fmt),
+        );
+        assert_same(
+            &run,
+            &reference,
+            true,
+            &format!("outfmt {spec} LOSAT_X_DEFAULT=0 with the variables set"),
+        );
+    }
+}
+
 /// A file of the test's directory `dir` holding `text`.
 fn write_file(dir: &Path, name: &str, text: &str) -> PathBuf {
     let path = dir.join(name);
@@ -311,16 +449,34 @@ fn query_warnings_keep_their_place_before_each_report() {
     let query = write_file(&dir, "queries.faa", &text);
     let fasta = fixture("MejoMJNV.faa");
     let subject = [OsStr::new("-subject"), fasta.as_os_str()];
-    for spec in ["0", "7", "6"] {
+    for spec in ["0", "7", "6", "5", "8", "12"] {
         let fmt = outfmt(spec);
         for threads in THREADS {
             let what = format!("outfmt {spec} threads {threads}");
             let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
-            assert!(
-                reference.stderr.contains("Warning:"),
-                "{what}: the queries have warnings: {}",
-                reference.stderr
-            );
+            // Outfmt 0, 6 and 7 write a query's warnings to standard error, the XML report in the
+            // Iteration_message of the query; the Seq-annot formats (8, 12) write none, so there
+            // the equality below only shows that the blocks add none.
+            match spec {
+                "5" => {
+                    let report = String::from_utf8_lossy(&reference.stdout);
+                    assert!(
+                        report.contains("O characters replaced")
+                            && report.contains("Sequence contains no data"),
+                        "{what}: the warnings in the Iteration_message"
+                    );
+                    assert!(reference.stderr.is_empty(), "{what}: {}", reference.stderr);
+                }
+                "8" | "12" => {
+                    assert!(reference.stderr.is_empty(), "{what}: {}", reference.stderr);
+                }
+                _ => assert!(
+                    reference.stderr.contains("O characters replaced")
+                        && reference.stderr.contains("Sequence contains no data"),
+                    "{what}: the queries have warnings: {}",
+                    reference.stderr
+                ),
+            }
             let run = blastp(
                 &query,
                 &subject,
@@ -419,7 +575,7 @@ fn the_out_file_and_the_shadow() {
         [OsStr::new("-subject"), fasta.as_os_str()],
         [OsStr::new("-db"), db.as_os_str()],
     ] {
-        for spec in ["0", "6", "7"] {
+        for spec in ["0", "6", "7", "5", "8", "9", "12"] {
             let fmt = outfmt(spec);
             let what = format!("{:?} outfmt {spec}", subject[0]);
             let reference = blastp(&query, &subject, 4, &[BATCH, SWITCH_OFF], &os(&fmt));
@@ -448,7 +604,7 @@ fn the_out_file_and_the_shadow() {
                     &query,
                     &subject,
                     threads,
-                    &[BATCH, ("LOSAT_X_BPQBLOCK", "1"), FMT_OFF, SHADOW],
+                    &[BATCH, ("LOSAT_X_BPQBLOCK", "1"), family_off(spec), SHADOW],
                     &os(&fmt),
                 );
                 assert!(
@@ -471,5 +627,573 @@ fn the_out_file_and_the_shadow() {
         }
     }
     std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A protein of `length` random letters (a query or a subject that has no hit).
+fn random_protein(state: &mut u64, length: usize) -> String {
+    const LETTERS: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+    (0..length)
+        .map(|_| {
+            *state ^= *state << 13;
+            *state ^= *state >> 7;
+            *state ^= *state << 17;
+            LETTERS[(*state % 20) as usize] as char
+        })
+        .collect()
+}
+
+/// Asserts that `run` ended as `reference` did (the same status, standard output and standard
+/// error), in blocks (more searches) when `blocks` is set, else in one search.
+fn assert_same_outcome(run: &Run, reference: &Run, blocks: bool, what: &str) {
+    assert_eq!(run.success, reference.success, "{what}: the status differs");
+    assert!(run.stdout == reference.stdout, "{what}: the output differs");
+    assert_eq!(
+        run.stderr, reference.stderr,
+        "{what}: standard error differs"
+    );
+    if blocks {
+        assert!(
+            run.searches > reference.searches,
+            "{what}: {} searches, the reference {}",
+            run.searches,
+            reference.searches
+        );
+    } else {
+        assert_eq!(run.searches, reference.searches, "{what}: not in blocks");
+    }
+}
+
+// Queries without hits at the edges of the blocks: the first query (the XML header is written from
+// it), a run of 30 queries that fills whole batches (outfmt 8, 9 and 12 write nothing for them; the
+// XML writes Iterations with "No hits found"), the last query (the XML end after a no-hit
+// Iteration), and a query of X only (invalid). `-subject` and `-db`, one and four threads.
+#[test]
+fn queries_without_hits_at_the_edges_of_blocks() {
+    let dir = std::env::temp_dir().join(format!("losat-bpqblockfmt-nohit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let real = std::fs::read_to_string(fixture("MeenMJNV.faa")).unwrap();
+    let real: Vec<&str> = real
+        .split('>')
+        .filter(|record| !record.is_empty())
+        .collect();
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut text = String::new();
+    let mut none = |text: &mut String, name: &str| {
+        text.push_str(&format!(
+            ">{name} no hits\n{}\n",
+            random_protein(&mut state, 300)
+        ));
+    };
+    none(&mut text, "first");
+    for record in &real[..20] {
+        text.push('>');
+        text.push_str(record);
+    }
+    for index in 0..30 {
+        none(&mut text, &format!("run{index}"));
+    }
+    for record in &real[20..40] {
+        text.push('>');
+        text.push_str(record);
+    }
+    text.push_str(">allx all X\nXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\n");
+    none(&mut text, "last");
+    let query = write_file(&dir, "queries.faa", &text);
+    let fasta = fixture("MejoMJNV.faa");
+    let db = subject_database("nohit");
+    for subject in [
+        [OsStr::new("-subject"), fasta.as_os_str()],
+        [OsStr::new("-db"), db.as_os_str()],
+    ] {
+        for spec in ["5", "8", "9", "12"] {
+            let fmt = outfmt(spec);
+            for threads in THREADS {
+                let what = format!("{:?} outfmt {spec} threads {threads}", subject[0]);
+                let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
+                assert!(reference.success, "{what}: {}", reference.stderr);
+                if spec == "5" {
+                    let xml = String::from_utf8_lossy(&reference.stdout);
+                    assert!(xml.contains("No hits found"), "{what}: no-hit Iterations");
+                    assert!(xml.contains("<Hit>"), "{what}: hits too");
+                }
+                let run = blastp(
+                    &query,
+                    &subject,
+                    threads,
+                    &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                    &os(&fmt),
+                );
+                assert_same(&run, &reference, true, &what);
+            }
+        }
+    }
+    std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// Refusals that the block search could meet in a later block, with a name outside US-ASCII:
+// - outfmt 5, a query title in the 60th record: the search of all queries refuses before it writes
+//   a byte, so the blocks are not used and the run fails as without them (outfmt 8, 9 and 12 write
+//   no title and are searched in blocks);
+// - outfmt 5, a `-subject` title on a subject with hits: refused the same way; on a subject without
+//   hits both complete, and the blocks are not used either (the check names every subject);
+// - outfmt 8, 9 and 12 take the same subjects, and the `>, ,` title, in blocks.
+#[test]
+fn xml_names_that_ncbi_cannot_write_leave_the_search_of_all_queries() {
+    let dir = std::env::temp_dir().join(format!("losat-bpqblockfmt-names-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let query = fixture("MeenMJNV.faa");
+    let fasta = fixture("MejoMJNV.faa");
+    let subject = [OsStr::new("-subject"), fasta.as_os_str()];
+    // (a) the 60th query's title.
+    let queries = std::fs::read_to_string(&query).unwrap();
+    let mut records: Vec<String> = queries
+        .split('>')
+        .filter(|record| !record.is_empty())
+        .map(|record| format!(">{record}"))
+        .collect();
+    let (header, rest) = records[59].split_once('\n').unwrap();
+    records[59] = format!(
+        "{}caf\u{e9}\n{rest}",
+        &header[..header.find(' ').unwrap() + 1]
+    );
+    let cafe_query = write_file(&dir, "queries_cafe.faa", &records.concat());
+    for threads in THREADS {
+        let fmt = outfmt("5");
+        let what = format!("a query title, outfmt 5, threads {threads}");
+        let reference = blastp(
+            &cafe_query,
+            &subject,
+            threads,
+            &[BATCH, SWITCH_OFF],
+            &os(&fmt),
+        );
+        assert!(!reference.success && reference.stdout.is_empty(), "{what}");
+        let run = blastp(
+            &cafe_query,
+            &subject,
+            threads,
+            &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+            &os(&fmt),
+        );
+        assert_same_outcome(&run, &reference, false, &what);
+        for spec in ["8", "9", "12"] {
+            let fmt = outfmt(spec);
+            let what = format!("a query title, outfmt {spec}, threads {threads}");
+            let reference = blastp(
+                &cafe_query,
+                &subject,
+                threads,
+                &[BATCH, SWITCH_OFF],
+                &os(&fmt),
+            );
+            let run = blastp(
+                &cafe_query,
+                &subject,
+                threads,
+                &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                &os(&fmt),
+            );
+            assert_same(&run, &reference, true, &what);
+        }
+    }
+    // (b), (c), (d): subjects with a title outside US-ASCII.
+    let rows = blastp(&query, &subject, 1, &[BATCH, SWITCH_OFF], &os(&outfmt("6")));
+    let rows = String::from_utf8(rows.stdout).unwrap();
+    let (hit, _) = subject_first_hit_late(&query, &rows);
+    let subjects = std::fs::read_to_string(&fasta).unwrap();
+    let defline = subjects
+        .lines()
+        .find(|line| line.starts_with(&format!(">{hit} ")))
+        .unwrap()
+        .to_string();
+    let mut state = 0x1234_5678_9abc_def1u64;
+    let with_hit = write_file(
+        &dir,
+        "subjects_hit.faa",
+        &subjects.replacen(&defline, &format!(">{hit} caf\u{e9}"), 1),
+    );
+    let without_hit = write_file(
+        &dir,
+        "subjects_nohit.faa",
+        &format!(
+            "{subjects}>nohit caf\u{e9}\n{}\n",
+            random_protein(&mut state, 200)
+        ),
+    );
+    let punctuation = write_file(
+        &dir,
+        "subjects_punct.faa",
+        &subjects.replacen(&defline, ">, ,", 1),
+    );
+    for (file, name, xml_succeeds) in [
+        (&with_hit, "a title on a subject with hits", false),
+        (&without_hit, "a title on a subject without hits", true),
+        (&punctuation, "the >, , title", false),
+    ] {
+        let subject = [OsStr::new("-subject"), file.as_os_str()];
+        for threads in THREADS {
+            let fmt = outfmt("5");
+            let what = format!("{name}, outfmt 5, threads {threads}");
+            let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
+            assert_eq!(
+                reference.success, xml_succeeds,
+                "{what}: {}",
+                reference.stderr
+            );
+            if !xml_succeeds {
+                assert!(
+                    reference.stdout.is_empty(),
+                    "{what}: no byte before the refusal"
+                );
+            }
+            let run = blastp(
+                &query,
+                &subject,
+                threads,
+                &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                &os(&fmt),
+            );
+            assert_same_outcome(&run, &reference, false, &what);
+            for spec in ["8", "9", "12"] {
+                let fmt = outfmt(spec);
+                let what = format!("{name}, outfmt {spec}, threads {threads}");
+                let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
+                let run = blastp(
+                    &query,
+                    &subject,
+                    threads,
+                    &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                    &os(&fmt),
+                );
+                assert_same(&run, &reference, true, &what);
+            }
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// `-db`: one stored title with a Latin-1 byte, on a subject with hits (refused by outfmt 5 and 8)
+// and on one without (both complete): the block search is not used, and the run ends as the search
+// of all queries does.
+#[test]
+fn a_database_title_outside_the_printable_range_leaves_the_search_of_all_queries() {
+    let dir = std::env::temp_dir().join(format!("losat-bpqblockfmt-dbt-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let query = fixture("MeenMJNV.faa");
+    let fasta = fixture("MejoMJNV.faa");
+    let rows = blastp(
+        &query,
+        &[OsStr::new("-subject"), fasta.as_os_str()],
+        1,
+        &[BATCH, SWITCH_OFF],
+        &os(&outfmt("6")),
+    );
+    let rows = String::from_utf8(rows.stdout).unwrap();
+    let (hit, _) = subject_first_hit_late(&query, &rows);
+    // `makedb` stores a byte outside ' ' ..= '~' as '#', so the title is made with four letters
+    // that the test then replaces by a Latin-1 one in the header file (the same length).
+    let subjects = std::fs::read_to_string(&fasta).unwrap();
+    let defline = subjects
+        .lines()
+        .find(|line| line.starts_with(&format!(">{hit} ")))
+        .unwrap()
+        .to_string();
+    let mut state = 0x0fed_cba9_8765_4321u64;
+    let with_hit = subjects.replacen(&defline, &format!(">{hit} cafX"), 1);
+    let without_hit = format!(
+        "{subjects}>nohit cafY\n{}\n",
+        random_protein(&mut state, 200)
+    );
+    for (text, marker, name, completes) in [
+        (&with_hit, "cafX", "a title on a subject with hits", false),
+        (
+            &without_hit,
+            "cafY",
+            "a title on a subject without hits",
+            true,
+        ),
+    ] {
+        let fasta = dir.join(format!("{}.faa", name.replace(' ', "_")));
+        std::fs::write(&fasta, text).unwrap();
+        let db = dir.join(name.replace(' ', "_"));
+        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+            .arg("makedb")
+            .arg("-in")
+            .arg(&fasta)
+            .args(["-dbtype", "prot"])
+            .arg("-out")
+            .arg(&db)
+            .output()
+            .expect("run LOSAT makedb");
+        assert!(
+            output.status.success(),
+            "makedb: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let header = db.with_extension("phr");
+        let stored = std::fs::read(&header).unwrap();
+        let at = stored
+            .windows(4)
+            .position(|window| window == marker.as_bytes())
+            .expect("the title is stored once");
+        let mut latin = stored.clone();
+        latin[at + 3] = 0xe9;
+        std::fs::write(&header, latin).unwrap();
+        let subject = [OsStr::new("-db"), db.as_os_str()];
+        for spec in ["5", "8"] {
+            let fmt = outfmt(spec);
+            for threads in THREADS {
+                let what = format!("{name}, outfmt {spec}, threads {threads}");
+                let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
+                assert_eq!(reference.success, completes, "{what}: {}", reference.stderr);
+                let run = blastp(
+                    &query,
+                    &subject,
+                    threads,
+                    &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                    &os(&fmt),
+                );
+                assert_same_outcome(&run, &reference, false, &what);
+            }
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// outfmt 5 with a `-db` path in a directory whose name is outside US-ASCII: the database name is
+// written as `BlastOutput_db`, which NCBI cannot write, so the search of all queries refuses before
+// its first byte; the block search is not used and the run ends the same way.
+#[cfg(unix)]
+#[test]
+fn a_database_name_outside_us_ascii_leaves_the_search_of_all_queries() {
+    let dir = std::env::temp_dir().join(format!("losat-bpqblockfmt-dbn-{}", std::process::id()));
+    let named = dir.join("d\u{e9}");
+    std::fs::create_dir_all(&named).unwrap();
+    let db = named.join("MejoMJNV");
+    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        .arg("makedb")
+        .arg("-in")
+        .arg(fixture("MejoMJNV.faa"))
+        .args(["-dbtype", "prot"])
+        .arg("-out")
+        .arg(&db)
+        .output()
+        .expect("run LOSAT makedb");
+    assert!(
+        output.status.success(),
+        "makedb: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let query = fixture("MeenMJNV.faa");
+    let subject = [OsStr::new("-db"), db.as_os_str()];
+    // The same database under an ASCII name takes the blocks with outfmt 5, so the plan reaches
+    // the name check (and the run leaves the blocks there, not before).
+    let plain = subject_database("ascii");
+    let plain_subject = [OsStr::new("-db"), plain.as_os_str()];
+    for threads in THREADS {
+        let fmt = outfmt("5");
+        let what = format!("an ASCII database name, outfmt 5, threads {threads}");
+        let reference = blastp(
+            &query,
+            &plain_subject,
+            threads,
+            &[BATCH, SWITCH_OFF],
+            &os(&fmt),
+        );
+        let run = blastp(
+            &query,
+            &plain_subject,
+            threads,
+            &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+            &os(&fmt),
+        );
+        assert_same(&run, &reference, true, &what);
+    }
+    std::fs::remove_dir_all(plain.parent().unwrap()).unwrap();
+    for spec in ["5", "8"] {
+        let fmt = outfmt(spec);
+        for threads in THREADS {
+            let what = format!("outfmt {spec} threads {threads}");
+            let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
+            let run = blastp(
+                &query,
+                &subject,
+                threads,
+                &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                &os(&fmt),
+            );
+            if spec == "5" {
+                assert!(!reference.success && reference.stdout.is_empty(), "{what}");
+                assert_same_outcome(&run, &reference, false, &what);
+            } else {
+                assert_same(&run, &reference, true, &what);
+            }
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// The four NCBI-frozen rows `db.sa.bpqb.{5,8,9,12}` (`tests/db_search_manifest.tsv`): their 30
+// queries have 11,940 letters, which is one block at the default `LOSAT_X_BPQBLOCK` (the fixture
+// script drops `LOSAT_*`, so CI's db_search check never leaves the search of all queries for
+// them). With `LOSAT_X_BPQBLOCK=1` the block search runs two searches (one per NCBI batch) and
+// must write the bytes that NCBI froze, standard error included, at one and four threads.
+#[test]
+fn the_frozen_ncbi_rows_of_two_query_batches_are_written_by_two_blocks() {
+    let manifest = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search_manifest.tsv"),
+    )
+    .unwrap();
+    let mut lines = manifest.lines().filter(|line| !line.starts_with('#'));
+    let columns: Vec<&str> = lines.next().unwrap().split('\t').collect();
+    let column = |name: &str| columns.iter().position(|c| *c == name).unwrap();
+    let (id, db, query, extra, format) = (
+        column("row_id"),
+        column("db"),
+        column("query"),
+        column("extra_args"),
+        column("outfmt"),
+    );
+    let frozen = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/db_search");
+    let mut rows = 0;
+    for line in lines.filter(|line| line.starts_with("db.sa.bpqb.")) {
+        let cells: Vec<&str> = line.split('\t').collect();
+        let row = cells[id];
+        let mut expected_err = String::new();
+        if let Ok(text) = std::fs::read_to_string(frozen.join(format!("{row}.err"))) {
+            expected_err = text;
+        }
+        let expected_out = std::fs::read(frozen.join(format!("{row}.out"))).unwrap();
+        for threads in THREADS {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+            for (name, _) in std::env::vars_os() {
+                let text = name.to_string_lossy();
+                if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
+                    || text == "BATCH_SIZE"
+                {
+                    command.env_remove(name);
+                }
+            }
+            if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
+                command.env(
+                    "LOSAT_BLASTX_WORKER_LOG",
+                    std::env::temp_dir().join("losat-bpqblockfmt-worker.log"),
+                );
+            }
+            let output = command
+                .current_dir(env!("CARGO_MANIFEST_DIR"))
+                .arg("blastp")
+                .args(["-db", cells[db], "-query", cells[query]])
+                .args(cells[extra].split_whitespace())
+                .args(["-outfmt", cells[format]])
+                .args(["-num_threads", &threads.to_string()])
+                .env("LOSAT_TIMING", "1")
+                .env("LOSAT_X_BPQBLOCK", "1")
+                .output()
+                .expect("run LOSAT");
+            let all = String::from_utf8_lossy(&output.stderr).into_owned();
+            let searches = all
+                .lines()
+                .filter(|line| line.starts_with("[TIMING] blastp_total:"))
+                .count();
+            let stderr: String = all
+                .split_inclusive('\n')
+                .filter(|line| !line.starts_with("[TIMING]"))
+                .collect();
+            let what = format!("{row} threads {threads}");
+            assert!(output.status.success(), "{what}: {stderr}");
+            assert!(searches >= 2, "{what}: {searches} searches, not in blocks");
+            assert!(
+                output.stdout == expected_out,
+                "{what}: the bytes of NCBI differ"
+            );
+            assert_eq!(stderr, expected_err, "{what}: standard error differs");
+        }
+        rows += 1;
+    }
+    assert_eq!(rows, 4);
+}
+
+// `-db` with a stored title of punctuation (`, ,`) on a subject with hits: outfmt 6 cannot make the
+// tabular id NCBI writes from it and refuses, so it leaves the blocks (`x_titles_allow_blocks`);
+// outfmt 8, 9, 12 and 5 write no id, so they run in blocks (`x_titles_read_allow_blocks`) and write
+// the bytes of the search of all queries.
+#[test]
+fn a_punctuation_database_title_stops_outfmt_6_blocks_but_not_the_others() {
+    let dir = std::env::temp_dir().join(format!("losat-bpqblockfmt-punct-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let query = fixture("MeenMJNV.faa");
+    let fasta = fixture("MejoMJNV.faa");
+    let rows = blastp(
+        &query,
+        &[OsStr::new("-subject"), fasta.as_os_str()],
+        1,
+        &[BATCH, SWITCH_OFF],
+        &os(&outfmt("6")),
+    );
+    let rows = String::from_utf8(rows.stdout).unwrap();
+    let (hit, _) = subject_first_hit_late(&query, &rows);
+    let subjects = std::fs::read_to_string(&fasta).unwrap();
+    let defline = subjects
+        .lines()
+        .find(|line| line.starts_with(&format!(">{hit} ")))
+        .unwrap()
+        .to_string();
+    // `makedb` stores the whole definition line as the title, so the title is `, ,` itself.
+    let source = write_file(
+        &dir,
+        "subjects.faa",
+        &subjects.replacen(&defline, ">, ,", 1),
+    );
+    let db = dir.join("punct");
+    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        .arg("makedb")
+        .arg("-in")
+        .arg(&source)
+        .args(["-dbtype", "prot"])
+        .arg("-out")
+        .arg(&db)
+        .output()
+        .expect("run LOSAT makedb");
+    assert!(
+        output.status.success(),
+        "makedb: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let subject = [OsStr::new("-db"), db.as_os_str()];
+    for threads in THREADS {
+        let fmt = outfmt("6");
+        let what = format!("outfmt 6, threads {threads}");
+        let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
+        assert!(
+            !reference.success && reference.stdout.is_empty(),
+            "{what}: the title of punctuation is refused: {}",
+            reference.stderr
+        );
+        let run = blastp(
+            &query,
+            &subject,
+            threads,
+            &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+            &os(&fmt),
+        );
+        assert_same_outcome(&run, &reference, false, &what);
+        for spec in ["5", "8", "9", "12"] {
+            let fmt = outfmt(spec);
+            let what = format!("outfmt {spec}, threads {threads}");
+            let reference = blastp(&query, &subject, threads, &[BATCH, SWITCH_OFF], &os(&fmt));
+            assert!(reference.success, "{what}: {}", reference.stderr);
+            let run = blastp(
+                &query,
+                &subject,
+                threads,
+                &[BATCH, ("LOSAT_X_BPQBLOCK", "1")],
+                &os(&fmt),
+            );
+            assert_same(&run, &reference, true, &what);
+        }
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -34,6 +34,9 @@ pub struct JsonEncoder<'b> {
     indent: usize,
     /// `CObjectOStreamJson::m_BlockStart`.
     block_start: bool,
+    /// A report written into the array of a 15 document: no wrapper object, the indentation
+    /// one level in (`array_element`).
+    array_element: bool,
     error: Option<SerialError>,
 }
 
@@ -44,8 +47,20 @@ impl<'b> JsonEncoder<'b> {
             out,
             indent: 0,
             block_start: false,
+            array_element: false,
             error: None,
         }
+    }
+
+    /// An encoder for one report of a 15 document (`CBlastOStreamJson`,
+    /// blastxml2_format.cpp:816-831): `WriteFileHeader` is `IncIndentLevel` alone and `EndOfWrite`
+    /// is `DecIndentLevel` and `PutEol`, so the report is the object `{` (members one level in)
+    /// `\n  }` and an end of line, with no wrapper object around it.
+    pub fn array_element(out: &'b mut Vec<u8>) -> Self {
+        let mut encoder = Self::new(out);
+        encoder.indent = 2;
+        encoder.array_element = true;
+        encoder
     }
 
     /// `COStreamBuffer::PutEol(true)` (`asn_text::AsnTextEncoder::eol`).
@@ -240,6 +255,9 @@ impl Encoder for JsonEncoder<'_> {
     /// }
     /// ```
     fn begin_document(&mut self, type_name: &str) {
+        if self.array_element {
+            return;
+        }
         self.start_block();
         self.eol();
         self.write_key(type_name);
@@ -263,6 +281,11 @@ impl Encoder for JsonEncoder<'_> {
     /// }
     /// ```
     fn end_document(&mut self) {
+        if self.array_element {
+            self.indent -= 2;
+            self.eol();
+            return;
+        }
         self.end_block();
         self.eol();
     }
@@ -277,7 +300,7 @@ impl Encoder for JsonEncoder<'_> {
     ///     StartBlock();
     /// }
     /// ```
-    fn begin_sequence(&mut self) {
+    fn begin_sequence(&mut self, _type_name: &str) {
         self.start_block();
     }
 
@@ -397,7 +420,7 @@ impl Encoder for JsonEncoder<'_> {
     ///     WriteMemberId(id);
     /// }
     /// ```
-    fn variant(&mut self, name: &str, _tag: u8) {
+    fn variant(&mut self, _type_name: &str, name: &str, _tag: u8) {
         self.start_block();
         self.next_element();
         self.write_key(name);
@@ -427,6 +450,11 @@ impl Encoder for JsonEncoder<'_> {
     fn int(&mut self, value: i32) {
         let mut digits = itoa_i32(value);
         self.out.extend_from_slice(digits.text());
+    }
+
+    /// `WriteInt8`: the decimal digits, as `WriteInt4`.
+    fn big_int(&mut self, value: i64) {
+        self.out.extend_from_slice(value.to_string().as_bytes());
     }
 
     /// An ENUMERATED value is its name as a string (not an INTEGER with named values).

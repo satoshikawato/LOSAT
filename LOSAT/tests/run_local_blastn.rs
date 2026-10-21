@@ -19,7 +19,7 @@ use LOSAT::api::local_blast::{run_local_blastn, FormatOutput, OutputSink, Report
 use LOSAT::blastinput::fasta_reader::ReaderConfig;
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 6] = ["0", "6", "7", "8", "9", "12"];
+const FORMATS: [&str; 9] = ["0", "6", "7", "8", "9", "12", "5", "15", "16"];
 
 /// Three queries against four subjects cut from two genomes. The first query overlaps
 /// two subjects, so `-max_target_seqs 1` removes a subject from its hit list.
@@ -202,7 +202,7 @@ fn unsupported_formats_fail_before_searching() {
         ReaderConfig::subject("BLASTN", false, true),
     );
     // NCBI ignores a custom specification with outfmt 0 (blast_args.cpp:2845-2851).
-    for outfmt in ["5", "6 qseqid", "abc"] {
+    for outfmt in ["10", "6 qseqid", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![
@@ -601,12 +601,13 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
     //         ERR_POST(Warning << results.GetWarningStrings());
     //     }
     // ```
-    // The warnings go with the first format (outfmt 0 here); outfmt 8, 9 and 12 write no query
-    // result warnings, so their CLI runs equal `run_local` with that format alone.
+    // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9 and 12 write no query
+    // result warnings, so their CLI runs equal `run_local` with that format alone (outfmt 15 and 16
+    // return the same way, `x_PrintStructuredReport`).
     for (index, outfmt) in FORMATS.into_iter().enumerate() {
         let (cli_output, cli_stderr) = inputs.cli(outfmt, &[]);
         assert_eq!(run.outputs[index], cli_output, "outfmt {outfmt}");
-        if matches!(outfmt, "8" | "9" | "12") {
+        if matches!(outfmt, "5" | "8" | "9" | "12" | "15" | "16") {
             let alone = inputs.run(&[outfmt], &[], false);
             assert_eq!(
                 String::from_utf8_lossy(&alone.diagnostics),

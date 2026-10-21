@@ -127,6 +127,8 @@ use std::sync::OnceLock;
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
     "LOSAT_X_BNDBCUT",
+    "LOSAT_X_BNDBSTREAM",
+    "LOSAT_X_BNFEWSUBJ",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
     "LOSAT_X_BPCLUT",
@@ -135,6 +137,8 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPDEFER",
     "LOSAT_X_BPDIAG",
     "LOSAT_X_BPGAP",
+    "LOSAT_X_BPHITBF",
+    "LOSAT_X_BPLISTEDLEAN",
     "LOSAT_X_BPLKPAHEAD",
     "LOSAT_X_BPLKPFLAT",
     "LOSAT_X_BPLUT",
@@ -142,6 +146,8 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPPFREE",
     "LOSAT_X_BPQBLOCK",
     "LOSAT_X_BPQBLOCKFMT",
+    "LOSAT_X_BPQBLOCKSA",
+    "LOSAT_X_BPQBLOCKXML",
     "LOSAT_X_BPREDOFIT",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",
@@ -155,6 +161,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXCHUNK",
     "LOSAT_X_BXDIAG",
     "LOSAT_X_BXFLOW",
+    "LOSAT_X_BXHITBF",
     "LOSAT_X_BXLAZYCTX",
     "LOSAT_X_BXLEAN",
     "LOSAT_X_BXLUT",
@@ -208,6 +215,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_PAIRPARDISCARR",
     "LOSAT_X_PAIRPARFOLD",
     "LOSAT_X_PAIRPARGATE",
+    "LOSAT_X_PAIRPARNA",
     "LOSAT_X_PAIRWISEPAR",
     "LOSAT_X_PURGEFAST",
     "LOSAT_X_QBATCHPAR",
@@ -236,6 +244,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNPAR",
     "LOSAT_X_TBNQSIDE",
     "LOSAT_X_TBNSCANBF",
+    "LOSAT_X_TBNSCANBYTE",
     "LOSAT_X_TBNSSIDE",
     "LOSAT_X_TBNSTATE",
     "LOSAT_X_TBNSTORE",
@@ -255,6 +264,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXRPTPAR",
     "LOSAT_X_TBXSCANBF",
     "LOSAT_X_TBXUNGAP",
+    "LOSAT_X_TBXUNITMASK",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that

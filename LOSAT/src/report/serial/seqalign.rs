@@ -101,6 +101,21 @@ impl SerialFormat {
 /// static const TSeqPos kBlastAlignmentDim = 2;
 /// ```
 const SMALLEST_EVALUE: f64 = 1.0e-180;
+
+/// The e-value of a Seq-align score list: 0 below `SMALLEST_EVALUE` (shared with BLAST XML,
+/// which reads the same Seq-align, `s_SeqAlignSetToXMLHsps`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_seqalign.cpp:1186
+/// ```c++
+///     double evalue = (hsp->evalue < SMALLEST_EVALUE) ? 0.0 : hsp->evalue;
+/// ```
+pub(crate) fn seqalign_evalue(evalue: f64) -> f64 {
+    if evalue < SMALLEST_EVALUE {
+        0.0
+    } else {
+        evalue
+    }
+}
 const GAP_VALUE: i32 = -1;
 const BLAST_ALIGNMENT_DIM: i32 = 2;
 
@@ -582,30 +597,30 @@ enum UserData {
 fn write_user_object<E: Encoder>(enc: &mut E, type_str: &[u8], label: &[u8], data: UserData) {
     // Annotdesc ::= CHOICE { name, title, comment, pub, user User-object, ... }
     // (objects/seq/seq.asn:440-445).
-    enc.variant("user", 4);
-    enc.begin_sequence();
+    enc.variant("Annotdesc", "user", 4);
+    enc.begin_sequence("User-object");
     enc.member("type", 1);
-    enc.variant("str", 1);
+    enc.variant("Object-id", "str", 1);
     enc.visible_str(type_str);
     enc.end_variant();
     enc.end_member();
     enc.member("data", 2);
     enc.begin_list(false);
     enc.element();
-    enc.begin_sequence();
+    enc.begin_sequence("User-field");
     enc.member("label", 0);
-    enc.variant("str", 1);
+    enc.variant("Object-id", "str", 1);
     enc.visible_str(label);
     enc.end_variant();
     enc.end_member();
     enc.member("data", 2);
     match data {
         UserData::Int(value) => {
-            enc.variant("int", 1);
+            enc.variant("User-field_data", "int", 1);
             enc.int(value);
         }
         UserData::Bool(value) => {
-            enc.variant("bool", 3);
+            enc.variant("User-field_data", "bool", 3);
             enc.boolean(value);
         }
     }
@@ -794,7 +809,7 @@ pub fn check_database(
 fn write_score_int<E: Encoder>(enc: &mut E, name: &str, value: i32) {
     write_score_id(enc, name);
     enc.member("value", 1);
-    enc.variant("int", 1);
+    enc.variant("Score_value", "int", 1);
     enc.int(value);
     enc.end_variant();
     enc.end_member();
@@ -805,7 +820,7 @@ fn write_score_int<E: Encoder>(enc: &mut E, name: &str, value: i32) {
 fn write_score_real<E: Encoder>(enc: &mut E, name: &str, value: f64) {
     write_score_id(enc, name);
     enc.member("value", 1);
-    enc.variant("real", 0);
+    enc.variant("Score_value", "real", 0);
     enc.real(value);
     enc.end_variant();
     enc.end_member();
@@ -815,9 +830,9 @@ fn write_score_real<E: Encoder>(enc: &mut E, name: &str, value: f64) {
 /// The start of a Score: its `id str`.
 fn write_score_id<E: Encoder>(enc: &mut E, name: &str) {
     enc.element();
-    enc.begin_sequence();
+    enc.begin_sequence("Score");
     enc.member("id", 0);
-    enc.variant("str", 1);
+    enc.variant("Object-id", "str", 1);
     enc.visible_str(name.as_bytes());
     enc.end_variant();
     enc.end_member();
@@ -900,11 +915,7 @@ fn write_score_list<E: Encoder>(enc: &mut E, hsp: &HspRecord<'_>, query_length: 
     if hsp.num > 1 {
         write_score_int(enc, "sum_n", hsp.num);
     }
-    let evalue = if hsp.evalue < SMALLEST_EVALUE {
-        0.0
-    } else {
-        hsp.evalue
-    };
+    let evalue = seqalign_evalue(hsp.evalue);
     if evalue >= 0.0 {
         let score_type = if hsp.num <= 1 { "e_value" } else { "sum_e" };
         write_score_real(enc, score_type, evalue);
@@ -995,7 +1006,7 @@ fn write_dense_seg<E: Encoder>(
     segments: &Segments,
     offsets: [i32; 2],
 ) {
-    enc.begin_sequence();
+    enc.begin_sequence("Dense-seg");
     enc.member("dim", 0);
     enc.int(BLAST_ALIGNMENT_DIM);
     enc.end_member();
@@ -1136,8 +1147,8 @@ fn remap_strands(segments: &mut Segments) {
 ///     fuzz-to Int-fuzz OPTIONAL }
 /// ```
 fn write_seq_interval<E: Encoder>(enc: &mut E, id: &SeqId<'_>, from: i32, to: i32, strand: Strand) {
-    enc.variant("int", 3);
-    enc.begin_sequence();
+    enc.variant("Seq-loc", "int", 3);
+    enc.begin_sequence("Seq-interval");
     enc.member("from", 0);
     enc.int(from);
     enc.end_member();
@@ -1157,7 +1168,7 @@ fn write_seq_interval<E: Encoder>(enc: &mut E, id: &SeqId<'_>, from: i32, to: i3
 /// A Seq-loc `empty`: the gap row of a Std-seg (`master_loc->SetEmpty(*master)`, see
 /// `write_std_segs`).
 fn write_seq_loc_empty<E: Encoder>(enc: &mut E, id: &SeqId<'_>) {
-    enc.variant("empty", 1);
+    enc.variant("Seq-loc", "empty", 1);
     id.write(enc);
     enc.end_variant();
 }
@@ -1176,7 +1187,7 @@ fn write_seq_loc_empty<E: Encoder>(enc: &mut E, id: &SeqId<'_>) {
 /// (BLAST sets `dim` to `kBlastAlignmentDim`, so it is written.)
 fn begin_std_seg<E: Encoder>(enc: &mut E, query_id: &SeqId<'_>, subject_id: &SeqId<'_>) {
     enc.element();
-    enc.begin_sequence();
+    enc.begin_sequence("Std-seg");
     enc.member("dim", 0);
     enc.int(BLAST_ALIGNMENT_DIM);
     enc.end_member();
@@ -1478,12 +1489,12 @@ fn write_seq_align_diags<E: Encoder>(
     hsps: &[HspRecord<'_>],
 ) {
     enc.element();
-    enc.begin_sequence();
+    enc.begin_sequence("Seq-align");
     enc.member("type", 0);
     enc.enumerated("diags", 2);
     enc.end_member();
     enc.member("segs", 3);
-    enc.variant("std", 2);
+    enc.variant("Seq-align_segs", "std", 2);
     enc.begin_list(false);
     for hsp in hsps {
         let (q_from, q_to) =
@@ -1612,7 +1623,7 @@ fn write_seq_align_gapped<E: Encoder>(
         remap_strands(segments);
     }
     enc.element();
-    enc.begin_sequence();
+    enc.begin_sequence("Seq-align");
     enc.member("type", 0);
     enc.enumerated("partial", 3);
     enc.end_member();
@@ -1639,7 +1650,7 @@ fn write_seq_align_gapped<E: Encoder>(
     enc.end_member();
     enc.member("segs", 3);
     if translated {
-        enc.variant("std", 2);
+        enc.variant("Seq-align_segs", "std", 2);
         write_std_segs(
             enc,
             &query.id,
@@ -1650,7 +1661,7 @@ fn write_seq_align_gapped<E: Encoder>(
             run.remaps_subjects(),
         );
     } else {
-        enc.variant("denseg", 1);
+        enc.variant("Seq-align_segs", "denseg", 1);
         write_dense_seg(
             enc,
             &query.id,
@@ -1742,10 +1753,10 @@ fn write_seq_annot<E: Encoder>(
 ) {
     let mut segments = Segments::default();
     enc.begin_document("Seq-annot");
-    enc.begin_sequence();
+    enc.begin_sequence("Seq-annot");
     write_desc(enc, run);
     enc.member("data", 4);
-    enc.variant("align", 1);
+    enc.variant("Seq-annot_data", "align", 1);
     enc.begin_list(true);
     if run.gapped {
         for hsp in hsps.iter().filter(|hsp| hsp.score != 0) {

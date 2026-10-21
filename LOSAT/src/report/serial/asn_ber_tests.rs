@@ -153,18 +153,18 @@ fn a_non_finite_real_is_an_error() {
 fn constructed_values_use_indefinite_lengths_and_explicit_tags() {
     let score = bytes(|enc| {
         enc.begin_document("Seq-align");
-        enc.begin_sequence();
+        enc.begin_sequence("Seq-align");
         enc.member("score", 2);
         enc.begin_list(true);
         enc.element();
-        enc.begin_sequence();
+        enc.begin_sequence("Score");
         enc.member("id", 0);
-        enc.variant("str", 1);
+        enc.variant("Score_id", "str", 1);
         enc.visible_str(b"score");
         enc.end_variant();
         enc.end_member();
         enc.member("value", 1);
-        enc.variant("int", 1);
+        enc.variant("Score_value", "int", 1);
         enc.int(329);
         enc.end_variant();
         enc.end_member();
@@ -196,7 +196,7 @@ fn documents_are_concatenated() {
     for _ in 0..2 {
         let mut enc = AsnBinaryEncoder::new(&mut buf);
         enc.begin_document("Seq-annot");
-        enc.begin_sequence();
+        enc.begin_sequence("Seq-annot");
         enc.end_sequence();
         enc.end_document();
     }

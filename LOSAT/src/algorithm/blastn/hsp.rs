@@ -33,6 +33,11 @@ pub enum BlastnOutputFormat {
     /// The Seq-annot of Seq-aligns of each query: outfmt 8 (ASN.1 text) or 12 (JSON)
     /// (`report::serial::write_query`, through `algorithm::blastn::seqalign`).
     Seqalign(crate::report::serial::SerialFormat),
+    /// BLAST XML (outfmt 5; `report::blast_xml`, through `algorithm::blastn::blast_xml`).
+    Xml,
+    /// The XML2 / JSON documents of outfmt 16 and 15 (`report::blast_xml2`, through the same
+    /// `algorithm::blastn::blast_xml`).
+    Xml2(crate::report::blast_xml2::Xml2Kind),
 }
 
 impl BlastnOutputFormat {
@@ -68,6 +73,13 @@ impl BlastnOutputFormat {
             ReportFormat::Pairwise => Ok(BlastnOutputFormat::Pairwise),
             ReportFormat::Tabular => Ok(BlastnOutputFormat::Tabular),
             ReportFormat::TabularWithComments => Ok(BlastnOutputFormat::TabularWithComments),
+            ReportFormat::Xml => Ok(BlastnOutputFormat::Xml),
+            ReportFormat::Xml2S => Ok(BlastnOutputFormat::Xml2(
+                crate::report::blast_xml2::Xml2Kind::Single16,
+            )),
+            ReportFormat::JsonS => Ok(BlastnOutputFormat::Xml2(
+                crate::report::blast_xml2::Xml2Kind::Single15,
+            )),
             other => match crate::report::serial::SerialFormat::of(other) {
                 Some(serial) => Ok(BlastnOutputFormat::Seqalign(serial)),
                 None => anyhow::bail!(
@@ -87,9 +99,27 @@ impl BlastnOutputFormat {
     }
 
     /// Whether NCBI writes a query's result warnings with its report
-    /// (`ReportFormat::writes_query_warnings`): not for the Seq-annot formats.
+    /// (`ReportFormat::writes_query_warnings`): not for the structured formats.
     pub(crate) fn writes_query_warnings(self) -> bool {
-        !matches!(self, BlastnOutputFormat::Seqalign(_))
+        !matches!(
+            self,
+            BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_)
+        )
+    }
+
+    /// Whether the report is a structured XML / JSON document of the queries' final hit lists:
+    /// BLAST XML (outfmt 5) or the XML2 / JSON documents (outfmt 15 and 16), which read the same
+    /// per-query records and the subjects' letters.
+    pub(crate) fn is_structured_xml(self) -> bool {
+        matches!(self, BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_))
+    }
+
+    /// The XML2 / JSON document of outfmt 15 and 16.
+    pub(crate) fn xml2_kind(self) -> Option<crate::report::blast_xml2::Xml2Kind> {
+        match self {
+            BlastnOutputFormat::Xml2(kind) => Some(kind),
+            _ => None,
+        }
     }
 
     /// Whether the format is one of the tabular formats (outfmt 6 and 7), which read the

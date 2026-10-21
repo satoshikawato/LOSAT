@@ -127,6 +127,7 @@ use std::sync::OnceLock;
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
     "LOSAT_X_BNDBCUT",
+    "LOSAT_X_BNDBSTREAM",
     "LOSAT_X_BNFEWSUBJ",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
@@ -145,6 +146,8 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPPFREE",
     "LOSAT_X_BPQBLOCK",
     "LOSAT_X_BPQBLOCKFMT",
+    "LOSAT_X_BPQBLOCKSA",
+    "LOSAT_X_BPQBLOCKXML",
     "LOSAT_X_BPREDOFIT",
     "LOSAT_X_BPREDOLPT",
     "LOSAT_X_BPREDOPAR",
@@ -259,6 +262,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXRPTPAR",
     "LOSAT_X_TBXSCANBF",
     "LOSAT_X_TBXUNGAP",
+    "LOSAT_X_TBXUNITMASK",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that

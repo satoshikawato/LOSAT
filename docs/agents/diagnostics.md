@@ -2698,6 +2698,14 @@ Scheduling (each value computed by one thread with the original function; order 
   presence vector, the counters and the longest chain, and a pool build with the serial one; the scans then
   read the CSR. Exit line `[X_SHADOW] DCCSR tables= pool= cells= words= diffs=0 identical`; a difference
   prints `DIFFERENT` and panics.
+  Evidence (ws, node 1 timed, dev 7bea6267 against perf/dc-csr 8b8b3f51, medians; v4-A15 ab2 / ab3): 31,168
+  dmel cDNAs against 3 Mb of dmel genome with `-subject`, 16 threads 2.619 -> 1.847 s (x0.705, cycles:u 101.7 ->
+  69.1 G), 8 threads x0.733, 1 thread x0.788; the same queries against that genome as `-db`, 16 threads x0.796;
+  1,775 cDNAs x0.86 (16 threads) and x0.80 (1 thread); 236 cDNAs (one table at 0.31 of the cells, just above the
+  size rule) x0.92-0.96 at 1, 8 and 16 threads; 100 16S queries against a 16S `-db` (small tables, chains in
+  both arms) x1.003. `=0` is dev's (x0.998); instructions of megablast and blastn at one thread move by at most
+  0.04 %. Peak RSS with `MALLOC_ARENA_MAX=1`: 374 against 386 MiB (`-subject`, 16 threads) and 113 against
+  115 MiB (`-db`); with the default arenas both arms vary between about 130 and 144 MiB on `-db`.
 - `LOSAT_X_PAIRPARDISC=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; it does not depend on `LOSAT_X_PAIRPAR`) blastn `-task dc-megablast`, one query-subject pair
   on a pool of 2+ threads: the two-hit seed stage of a subject chunk with a discontiguous megablast
   table (one or two templates) and the diagonal hash (query block over 8000 letters, `scan_range`

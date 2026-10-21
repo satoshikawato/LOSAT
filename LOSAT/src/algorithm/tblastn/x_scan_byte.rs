@@ -665,18 +665,28 @@ unsafe fn write<const AVX2: bool>(
         let cursor = (*cell).entries[0] as usize;
         let src = table.overflow.add(cursor);
         let whole = chain_whole(table, cursor, numhits);
-        let mut j = 0;
-        while j < whole {
-            for l in 0..4 {
-                d.add(j + l)
-                    .write_unaligned(pair_bits(*src.add(j + l) as u32, s_off));
-            }
-            j += 4;
-        }
-        while j < numhits {
+        // SAFETY: the first `whole` query offsets are inside the overflow array (`chain_whole`) and
+        // `d` has room for `whole <= numhits + 3` pairs; the two do not overlap.
+        chain_fours(
+            std::slice::from_raw_parts_mut(d.cast::<u8>(), 8 * whole),
+            std::slice::from_raw_parts(src, whole),
+            s_off,
+        );
+        for j in whole..numhits {
             d.add(j)
                 .write_unaligned(pair_bits(*src.add(j) as u32, s_off));
-            j += 1;
+        }
+    }
+}
+
+/// Writes the pairs of the query offsets `src` (a multiple of four) with the subject offset
+/// `s_off` to `dst` (8 bytes per pair), four at a time. The two slices are separate arguments so
+/// that the compiler knows they do not overlap and can widen the four without a runtime test.
+#[inline(always)]
+fn chain_fours(dst: &mut [u8], src: &[i32], s_off: u32) {
+    for (out, q) in dst.chunks_exact_mut(32).zip(src.chunks_exact(4)) {
+        for l in 0..4 {
+            out[8 * l..8 * l + 8].copy_from_slice(&pair_bits(q[l] as u32, s_off).to_ne_bytes());
         }
     }
 }

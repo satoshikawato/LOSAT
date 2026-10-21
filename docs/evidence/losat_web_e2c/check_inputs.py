@@ -405,7 +405,7 @@ def cases(work: Path) -> list[tuple[str, list[str], str]]:
         ("audit6.task.blastn_short", [*mq, *multi_s, "-task", "blastn-short"], "same"),
         ("audit6.task.rmblastn", [*mq, *multi_s, "-task", "rmblastn"], "losat-rejects"),
         ("audit6.task.capitals", [*mq, *multi_s, "-task", "BLASTN"], "arg-error"),
-        ("audit6.option.strand", [*mq, *multi_s, "-strand", "plus"], "losat-rejects"),
+        ("audit6.option.strand", [*mq, *multi_s, "-strand", "plus"], "same"),
         ("audit6.option.ungapped", [*mq, *multi_s, "-ungapped"], "losat-rejects"),
         ("audit6.option.xdrop_gap", [*mq, *multi_s, "-xdrop_gap", "30"], "losat-rejects"),
         ("audit6.option.num_alignments", [*mq, *multi_s, "-num_alignments", "5"], "losat-rejects"),

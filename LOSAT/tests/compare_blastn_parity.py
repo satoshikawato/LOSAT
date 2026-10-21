@@ -515,8 +515,8 @@ def validate_manifest_row(row: dict[str, str]) -> None:
     )
     require_manifest_condition(
         row,
-        row["strand"] == "both",
-        "paired/refresh execution currently supports only strand=both",
+        row["strand"] in ("both", "plus", "minus"),
+        "paired/refresh execution supports only strand=both, plus or minus",
     )
     require_manifest_condition(
         row,

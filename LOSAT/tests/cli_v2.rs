@@ -663,7 +663,6 @@ fn numeric_values_are_validated_before_io() {
     // NCBI's other blastn tasks and options are rejected explicitly (AGENTS.md rule 2).
     for extra in [
         &["-task", "rmblastn"][..],
-        &["-strand", "plus"],
         &["-ungapped"],
         &["-h"],
         &["-version"],
@@ -677,6 +676,34 @@ fn numeric_values_are_validated_before_io() {
         );
     }
     assert!(parse("blastn", &["-outfmt", "6", "-task", "BLASTN"]).is_err());
+    // `-strand` is NCBI's (blast_args.cpp:1953-1955): plus, minus and both are accepted, any
+    // other value is a clap error (LOSAT's rule for argument errors, rc 2).
+    for (value, want) in [("plus", "plus"), ("minus", "minus"), ("both", "both")] {
+        let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-strand", value])
+            .unwrap()
+            .command
+        else {
+            unreachable!("blastn")
+        };
+        assert_eq!(args.strand, want);
+    }
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6"]).unwrap().command else {
+        unreachable!("blastn")
+    };
+    assert_eq!(args.strand, "both");
+    let Commands::Blastn(args) = parse("blastn", &["-outfmt", "6", "-strand=minus"])
+        .unwrap()
+        .command
+    else {
+        unreachable!("blastn")
+    };
+    assert_eq!(args.strand, "minus");
+    for value in ["foo", "PLUS", "Both", "", "1"] {
+        assert!(
+            parse("blastn", &["-outfmt", "6", "-strand", value]).is_err(),
+            "{value:?}"
+        );
+    }
     // NCBI blast_input_aux.hpp:79-87 (CDirEntry::GetName, ncbifile.cpp:298-312,358-363,
     // 465-472): the name after the trailing separators are removed.
     let dotted = format!("{}/.", "o".repeat(256));

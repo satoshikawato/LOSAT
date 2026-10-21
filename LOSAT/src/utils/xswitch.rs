@@ -127,6 +127,7 @@ use std::sync::OnceLock;
 pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_AHEAD",
     "LOSAT_X_BNDBCUT",
+    "LOSAT_X_BNFEWSUBJ",
     "LOSAT_X_BNSTORE",
     "LOSAT_X_BNSTREAM",
     "LOSAT_X_BPCLUT",
@@ -136,6 +137,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BPDIAG",
     "LOSAT_X_BPGAP",
     "LOSAT_X_BPHITBF",
+    "LOSAT_X_BPLISTEDLEAN",
     "LOSAT_X_BPLKPAHEAD",
     "LOSAT_X_BPLKPFLAT",
     "LOSAT_X_BPLUT",
@@ -155,6 +157,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_BXCHUNK",
     "LOSAT_X_BXDIAG",
     "LOSAT_X_BXFLOW",
+    "LOSAT_X_BXHITBF",
     "LOSAT_X_BXLAZYCTX",
     "LOSAT_X_BXLEAN",
     "LOSAT_X_BXLUT",

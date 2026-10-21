@@ -1218,7 +1218,19 @@ Rebuilding less:
   the copy too and compares the lengths and every read of the redo and of `x_read_shown` with it (the length and every
   residue), and checks that no final subject left without residues has an O in it; the first difference prints the line
   otherwise printed at exit and panics: `[X_SHADOW] BPREDODBSUBJ searches= lengths= reads= residues= identical`.
-  Evidence: FILL.
+  Evidence 2026-10-21 (perf/bp-redo-db-subjects, head 90bb60f8, workstation; the same binary on / off in one job):
+  `blastp -db` UniRef50 q100 at 32 threads (node 1, untimed) peak RssAnon 235 / 289 MiB (max RSS 229 / 280 MiB; NCBI
+  195 MiB), wall 541 / 543 s, the same output (= NCBI); Swiss-Prot q100 peak RssAnon 91.5 / 121.0 MiB at 8 threads and
+  101.4 / 130.1 MiB at 16 (medians of 2 pairs; NCBI 125 and 136 MiB). Instructions (`perf stat` `:u`, 8 threads, on /
+  off) x1.0007 OrthoFinder blastp-fast Species4 x BlastDBSpecies6, x1.0002 Swiss-Prot q100 outfmt 6, x1.0003 the same
+  with outfmt 0, x1.000 `uniref50.04` q100. Timed (8 cores of node 0 with their siblings idle, warmed, order
+  alternated): median ratio of wall time x0.997 (0.991-1.001, 8 pairs) OrthoFinder, x0.995 (0.986-1.083, 10)
+  Swiss-Prot q100, x1.002 (0.973-1.066, 8) `uniref50.04` q100; max RSS 94 / 123 MiB Swiss-Prot q100, 121 / 121 MiB
+  OrthoFinder, 54 / 54 MiB `uniref50.04` q100 (untimed, 3 rounds: 54.6 / 52.8 MiB; keeping the reads ahead of the
+  Newton problems for the redo read 61.9 MiB). Gates: `cargo test` (94 binaries, 2,065 passed); ci_fast all programs
+  with the switch, with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases, 0 failures each); blastp `-db` fixtures at 1 and
+  4 threads under the shadow (59 rows, 0 differing, the exit line `identical` in every run that ends without an
+  error).
 - `LOSAT_X_BPSUBJMETA=1` (BLASTP, speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; acts only in the `-subject` block search of `LOSAT_X_BPQBLOCK`, for
   blastp and blastp-fast) the subjects' tabular IDs and titles are made once for all blocks instead of once
   per block (`blastp/blast_engine/x_subject_meta.rs`, exactness argument in its header). Without it each

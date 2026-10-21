@@ -76,7 +76,6 @@ impl BlastxDatabase {
         &self.name
     }
 
-    /// What the `Database:` lines of outfmt 0 show (title, date, real totals).
     /// Whether `taxdb.bti` resolves on NCBI's search path, so that the XML2 and JSON formats
     /// write the scientific name of a taxid (`SeqDb::taxdb_found`).
     pub(crate) fn taxdb_found(&self) -> bool {
@@ -90,6 +89,7 @@ impl BlastxDatabase {
         shared::taxdb_may_refuse(&self.db)
     }
 
+    /// What the `Database:` lines of outfmt 0 show (title, date, real totals).
     pub(crate) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db, &self.name)
     }
@@ -266,7 +266,7 @@ impl ReportedSubjects {
                     &shown,
                     PROGRAM,
                 )
-                .map_err(super::blast_xml::XmlRefusal::of)?;
+                .map_err(super::blast_xml::XmlRefusal::of_taxonomy)?;
         }
         Ok(reported)
     }

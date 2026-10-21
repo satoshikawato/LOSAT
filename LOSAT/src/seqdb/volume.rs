@@ -443,10 +443,52 @@ impl Volume {
         piece_bytes: u64,
         visit: &mut dyn FnMut(u32, Result<Vec<Defline>, SeqDbError>) -> bool,
     ) -> bool {
+        self.visit_headers(
+            first,
+            end,
+            piece_bytes,
+            &|oid| self.deflines(oid),
+            &decode_defline_set,
+            visit,
+        )
+    }
+
+    /// `visit_deflines` for `defline_taxids` (OF5b: the taxdb pre-pass of BLASTX 15/16 reads the
+    /// taxid of every sequence's first definition line): the same pieces and fallbacks, with
+    /// the decoder of `defline_taxids`.
+    pub(super) fn visit_defline_taxids(
+        &self,
+        first: u32,
+        end: u32,
+        piece_bytes: u64,
+        visit: &mut dyn FnMut(u32, Result<Vec<i32>, SeqDbError>) -> bool,
+    ) -> bool {
+        self.visit_headers(
+            first,
+            end,
+            piece_bytes,
+            &|oid| self.defline_taxids(oid),
+            &decode_defline_taxids,
+            visit,
+        )
+    }
+
+    /// The shared walk of `visit_deflines` and `visit_defline_taxids`: `single(oid)` is the
+    /// one-sequence read that gives the result for a sequence that is not read in a piece,
+    /// `decode(record, path)` decodes a record read in a piece.
+    fn visit_headers<T>(
+        &self,
+        first: u32,
+        end: u32,
+        piece_bytes: u64,
+        single: &dyn Fn(u32) -> Result<T, SeqDbError>,
+        decode: &dyn Fn(&[u8], &Path) -> Result<T, SeqDbError>,
+        visit: &mut dyn FnMut(u32, Result<T, SeqDbError>) -> bool,
+    ) -> bool {
         let one_by_one =
             |oids: std::ops::Range<u32>,
-             visit: &mut dyn FnMut(u32, Result<Vec<Defline>, SeqDbError>) -> bool| {
-                oids.into_iter().all(|oid| visit(oid, self.deflines(oid)))
+             visit: &mut dyn FnMut(u32, Result<T, SeqDbError>) -> bool| {
+                oids.into_iter().all(|oid| visit(oid, single(oid)))
             };
         if self.check_range(first, end).is_err() {
             return one_by_one(first..end, visit);
@@ -486,10 +528,7 @@ impl Volume {
             for j in i..stop {
                 let lo = (u64::from(offsets[j]) - start) as usize;
                 let hi = (u64::from(offsets[j + 1]) - start) as usize;
-                if !visit(
-                    first + j as u32,
-                    decode_defline_set(&data[lo..hi], &hr_path),
-                ) {
+                if !visit(first + j as u32, decode(&data[lo..hi], &hr_path)) {
                     return false;
                 }
             }

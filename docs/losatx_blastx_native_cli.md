@@ -6,7 +6,12 @@ LOSAT blastx -query query.fna -subject subject.faa -outfmt "7 std qframe btop st
 ```
 
 The local FASTA path uses the final Rust runtime results for pairwise format 0,
-tabular format 6, and commented tabular format 7. Format 0 is the default.
+tabular format 6, commented tabular format 7, BLAST XML format 5, Seq-align
+formats 8 (text ASN.1), 9 (binary ASN.1) and 12 (JSON), BLAST JSON format 15 and
+BLAST XML2 format 16; `-db` writes the same formats. Format 0 is the default.
+Formats 15 and 16 take the structure of 5 (one document across the query
+batches) and, with `-db`, the taxid and scientific name from `taxdb.bti` when
+the taxonomy database is on the search path.
 Supported query genetic-code IDs are
 `1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33`.
 ID 32 is invalid for this BLASTX CLI. Protein subjects have no `db_gencode`.

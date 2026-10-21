@@ -62,6 +62,7 @@ use super::report::{
 use super::results::Hsp;
 use super::runtime::BatchResults;
 use crate::algorithm::common::database::TaxdbNotes;
+use crate::algorithm::common::database::TaxonomyRefusal;
 use crate::common::GapEditOp;
 use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::blast_xml::matrix::FormattingMatrix;
@@ -92,10 +93,17 @@ impl std::fmt::Display for XmlRefusal {
 impl std::error::Error for XmlRefusal {}
 
 impl XmlRefusal {
-    /// A refusal that carries `error`'s message, for a LOSAT refusal found outside the writer
-    /// (the taxonomy database of outfmt 15 and 16, `ReportedSubjects::for_batch`).
-    pub(super) fn of(error: anyhow::Error) -> anyhow::Error {
-        XmlRefusal(format!("{error:#}")).into()
+    /// The error of the taxonomy lookups of outfmt 15 and 16 (`ReportedSubjects::for_batch`): a
+    /// [`TaxonomyRefusal`] becomes a refusal that carries its message (it drops what the run
+    /// holds); any other error, such as a header or taxonomy file that cannot be read, is
+    /// returned as it is, so that the run writes what it holds, as NCBI writes what it has
+    /// before a reader error.
+    pub(super) fn of_taxonomy(error: anyhow::Error) -> anyhow::Error {
+        if error.is::<TaxonomyRefusal>() {
+            XmlRefusal(format!("{error:#}")).into()
+        } else {
+            error
+        }
     }
 }
 
@@ -624,4 +632,52 @@ pub(super) fn write_xml_epilog(
     }
     writer.write_all(&buf)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod taxonomy_error_tests {
+    //! `XmlRefusal::of_taxonomy`: only a refusal of the taxonomy lookups drops a held document;
+    //! a read error passes through, and the run writes what it holds (`HeldState::drop`).
+    use super::*;
+    use crate::cli::NativeError;
+    use crate::seqdb::SeqDbError;
+    use std::path::PathBuf;
+
+    fn through(error: SeqDbError) -> anyhow::Error {
+        XmlRefusal::of_taxonomy(crate::algorithm::common::database::taxdb_error_for_tests(
+            error,
+        ))
+    }
+
+    #[test]
+    fn a_refused_record_or_name_is_a_refusal_with_its_message() {
+        let error = through(SeqDbError::Unsupported {
+            path: PathBuf::from("taxdb.btd"),
+            message: "the taxonomy record of taxid 9606 reaches past the mapped end".into(),
+        });
+        assert!(error.is::<XmlRefusal>());
+        assert!(error.to_string().contains("taxid 9606"), "{error}");
+    }
+
+    #[test]
+    fn a_read_error_is_not_a_refusal() {
+        let io = SeqDbError::Io {
+            path: PathBuf::from("taxdb.btd"),
+            source: std::io::Error::other("Input/output error"),
+        };
+        let error = through(io);
+        assert!(!error.is::<XmlRefusal>(), "{error}");
+        let format = SeqDbError::Format {
+            path: PathBuf::from("db.phr"),
+            message: "byte range 0..9 passes the end of the file (4 bytes)".into(),
+        };
+        let error = through(format);
+        assert!(!error.is::<XmlRefusal>(), "{error}");
+        // An error of NCBI's own (exit status 2) is passed on whole.
+        let native = anyhow::Error::new(NativeError {
+            exit: 2,
+            message: "BLAST Database error: x\n".into(),
+        });
+        assert!(XmlRefusal::of_taxonomy(native).is::<NativeError>());
+    }
 }

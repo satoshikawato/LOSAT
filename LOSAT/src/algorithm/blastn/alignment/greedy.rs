@@ -3476,6 +3476,19 @@ unsafe fn x_greedy_row_impl_f2<const REVERSE: bool, const ARM: u8>(
 }
 
 
+/// PROBE (line F s5 p6; not for merge): `LOSAT_X_F2GREEDY` (read once; 0 = the code as it is).
+#[cfg(target_arch = "x86_64")]
+fn x_f2_greedy_arm() -> u8 {
+    use std::sync::OnceLock;
+    static ARM: OnceLock<u8> = OnceLock::new();
+    *ARM.get_or_init(|| {
+        std::env::var("LOSAT_X_F2GREEDY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
 /// PROBE (`LOSAT_X_F2CHECK=1`): compare the arms' pass 2 with the reference expression of the default
 /// pass 2 on every diagonal; panics on the first difference and reports the number of diagonals checked.
 #[cfg(target_arch = "x86_64")]

@@ -3556,9 +3556,9 @@ Scheduling (each value computed by one thread with the original function; order 
   AVX2, no chain from word to word as in the rolled index) and lists the candidates from a presence
   vector with one byte per index (32 KB, built once per table and thread). The copy then takes each
   candidate once: while three hits for every candidate left fit in the offset array (one test, made
-  again only after a cell of more hits), a cell of up to three hits is written without a test as one
-  32-byte store; a cell of more hits takes NCBI's test and is copied from the overflow array four
-  pairs per 32-byte store; a candidate met while the block could fill the array takes NCBI's test,
+  again only after a cell of more hits), a cell of up to three hits is written without a test (one
+  32-byte store with AVX2); a cell of more hits takes NCBI's test and is copied from the overflow
+  array four pairs at a time; a candidate met while the block could fill the array takes NCBI's test,
   so the scan stops at the same word and every call returns NCBI's pairs and scan range (test
   `x_scan_byte_equals_ncbi_scan_on_random_subjects` against `s_blast_aa_scan_subject_one_range`,
   both forms). The offset array has four entries more. `LOSAT_X_TBNSCANBYTE=2` takes plain loops of

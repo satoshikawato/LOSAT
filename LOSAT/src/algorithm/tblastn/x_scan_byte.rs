@@ -233,7 +233,9 @@ fn x_scan_byte_if_read() -> Option<XScanByte> {
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): `s_blast_aa_scan_subject_one_range` for a table that `fits`
 /// (see the module text). Same arguments, same result, same `s_range`; `presence` is
 /// `presence_bytes(lookup)` and `offset_pairs` must hold `array_size + X_SCAN_BYTE_SLACK` entries.
-/// With `mode` the shadow, NCBI's loop runs on a second array and must give the same.
+/// With `mode` the shadow, NCBI's loop runs on a second array and must give the same. Not inlined:
+/// the switch-off scan of `x_scan_unit` keeps its code.
+#[inline(never)]
 pub(super) fn x_scan_one_range_byte(
     mode: XScanByte,
     lookup: &BlastAaLookupTable,
@@ -320,14 +322,22 @@ fn scan(
         "offset array of {} entries for array_size {array_size}",
         offset_pairs.len()
     );
+    #[cfg(target_arch = "x86_64")]
+    debug_assert!(!avx2 || avx2_detected(), "AVX2 forms without AVX2");
     let s_first = s_range[1] as usize;
     let s_last = s_range[2] as usize;
-    // NCBI's loop reads `subject[s + 2]` for every `s <= s_last`.
-    assert!(
-        s_last + 2 < subject.len(),
-        "scan to {s_last} in {}",
-        subject.len()
-    );
+    // NCBI's loop reads `subject[s + 2]` for every `s <= s_last`. A first range of one letter at
+    // the end of the slice (`x_scan_unit` sets its end to its left edge, aa_ungapped.c:500-501)
+    // reads one byte past it: that call takes NCBI's loop, as without this switch.
+    if s_last + 2 >= subject.len() {
+        return s_blast_aa_scan_subject_one_range(
+            lookup,
+            subject,
+            offset_pairs,
+            array_size,
+            s_range,
+        );
+    }
     let table = Table {
         backbone: lookup.backbone.as_ptr(),
         overflow: lookup.overflow.as_ptr(),
@@ -812,7 +822,14 @@ mod tests {
         array_size: usize,
         avx2: Option<bool>,
     ) -> Vec<(Vec<(u32, u32)>, i32)> {
-        let mut pairs = vec![BlastOffsetPair::default(); array_size + X_SCAN_BYTE_SLACK];
+        // Guard entries after the slack: no form may write past `array_size + X_SCAN_BYTE_SLACK`.
+        let guard = BlastOffsetPair {
+            q_off: 0xdead_beef,
+            s_off: 0xfeed_f00d,
+        };
+        let end = array_size + X_SCAN_BYTE_SLACK;
+        let mut pairs = vec![BlastOffsetPair::default(); end];
+        pairs.resize(end + 2 * X_SCAN_BYTE_SLACK, guard);
         let mut scan_range = [0, range.0, range.1];
         let mut out = Vec::new();
         while scan_range[1] <= scan_range[2] {
@@ -839,6 +856,12 @@ mod tests {
                 .map(|pair| (pair.q_off, pair.s_off))
                 .collect();
             out.push((got, scan_range[1]));
+            assert!(
+                pairs[end..]
+                    .iter()
+                    .all(|pair| (pair.q_off, pair.s_off) == (guard.q_off, guard.s_off)),
+                "write past the slack (array_size {array_size}, avx2 {avx2:?})"
+            );
             assert!(out.len() < 1_000_000, "scan does not advance");
         }
         out

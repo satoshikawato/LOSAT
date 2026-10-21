@@ -259,3 +259,9 @@ subjects, `qn2` none, `qn3` is a slice of `qn1`), and the databases built from t
 The rows `db.sa.x16_ntitles.{15,16}` and `db.sa.x16_ntaxid[.<case>].{15,16}` are the BLASTN counterparts of the BLASTP rows of
 part 1 and 1b (`BLASTDB=DIR` tokens as there); `db.sa.x16_ntaxid.lastoff.16` freezes the messages that NCBI's BLASTN
 writes (`Error: [blastn] ...`).
+
+- `bpqb_q.faa`: 30 records of `tests/fasta/MeenMJNV.faa` of 280-560 letters (11,940 letters, so NCBI searches
+  them in two query batches of its default size; LOSAT's block search takes one block at the default
+  `LOSAT_X_BPQBLOCK` of 50,000 letters and two with a value of at most 10,000, which
+  `tests/blastp_query_blocks_fmt.rs` runs against these frozen bytes), the first 30 of that length in file order. Rows `db.sa.bpqb.{5,8,9,12}`: `blastp -db paja -evalue 0.1
+  -max_target_seqs 2 -max_hsps 1` (9 rows of outfmt 6: some queries have hits, some do not).

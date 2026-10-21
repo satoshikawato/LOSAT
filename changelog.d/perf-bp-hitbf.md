@@ -1,0 +1,1 @@
+- `blastp` takes the two-hit test's two common outcomes (too far, overlap) of the per-hit seed loop without a branch, the default where the CPU has no AVX2 (aarch64, WebAssembly): x0.82-0.97 with that loop on every subject on x86-64, x0.98-0.99 in WebAssembly (`LOSAT_X_BPHITBF`, one of the switches above; `=0` turns it off; same results).

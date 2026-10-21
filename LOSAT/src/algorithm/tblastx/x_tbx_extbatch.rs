@@ -651,6 +651,48 @@ impl XPairPar {
         init_hsps: &mut S,
         len: usize,
     ) -> (u64, u64) {
+        // EXPERIMENT (LOSAT_X_TBXUNITMASK): the masked table where the rule holds (x_pair_par.rs
+        // module doc), as in `scan_unit_hits`.
+        match self.x_unit_mask(unit, inp.window) {
+            None => self.scan_unit_batched_cells::<S, XUnmasked, PF, BF>(
+                unit, inp, scratch, init_hsps, len, 0,
+            ),
+            Some(mask) => {
+                self.scan_unit_batched_masked::<S, PF, BF>(unit, inp, scratch, init_hsps, len, mask)
+            }
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXUNITMASK): the masked form in a function of its own, as
+    // `scan_unit_masked`.
+    /// `scan_unit_batched_cells` with `XMasked`.
+    #[inline(never)]
+    fn scan_unit_batched_masked<S: XInitSink, const PF: bool, const BF: bool>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+        len: usize,
+        mask: u32,
+    ) -> (u64, u64) {
+        self.scan_unit_batched_cells::<S, XMasked, PF, BF>(unit, inp, scratch, init_hsps, len, mask)
+    }
+
+    // The statements of `scan_unit_batched_hits` for one form of the unit's cells (`XCells`), as
+    // `scan_unit_cells` is for `scan_unit_hits`.
+    /// `scan_unit_batched_hits` with the cells `C` (`mask`: the masked table's cells minus one).
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    fn scan_unit_batched_cells<S: XInitSink, C: XCells, const PF: bool, const BF: bool>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+        len: usize,
+        mask: u32,
+    ) -> (u64, u64) {
         debug_assert!((1..=BATCH).contains(&len));
         let group = &self.groups[unit.g];
         let sub = &group.lookup;
@@ -677,8 +719,14 @@ impl XPairPar {
                 .offset_pairs
                 .resize(offset_pairs_len, OffsetPair::default());
         }
-        let width = x_unit_width(group, &chunk);
+        // LOSAT_X_TBXUNITMASK: a masked table has mask + 1 cells (`scan_unit_cells`).
         let lo = group.q_min.wrapping_sub(chunk.length as u32 - 1);
+        let cells = C::of(lo, mask);
+        let width = if C::MASKED {
+            mask as usize + 1
+        } else {
+            x_unit_width(group, &chunk)
+        };
         if scratch.diag.capacity() < width
             && x_unit_mapped(scratch.unmap, x_unit_span(group), chunk.length)
         {
@@ -747,11 +795,11 @@ impl XPairPar {
                     // SAFETY: as in `scan_unit_hits`; every candidate's cell is a cell of this
                     // unit's table.
                     unsafe {
-                        x_tbx_hitbf::x_hits_bf::<PF>(
+                        x_tbx_hitbf::x_hits_bf::<C, PF>(
                             diag_ptr,
                             offset_pairs_ptr,
                             hits as usize,
-                            lo,
+                            cells,
                             width,
                             window,
                             wordsize,
@@ -776,8 +824,7 @@ impl XPairPar {
                         // SAFETY: as in `scan_unit`.
                         unsafe {
                             let ahead = &*offset_pairs_ptr.add(i + X_PREFETCH_AHEAD);
-                            let cell =
-                                ahead.q_off.wrapping_sub(ahead.s_off).wrapping_sub(lo) as usize;
+                            let cell = cells.cell(ahead.q_off, ahead.s_off);
                             core::arch::x86_64::_mm_prefetch(
                                 diag_ptr.wrapping_add(cell) as *const i8,
                                 core::arch::x86_64::_MM_HINT_T0,
@@ -788,8 +835,7 @@ impl XPairPar {
                     let pair = unsafe { &*offset_pairs_ptr.add(i) };
                     let query_offset = pair.q_off;
                     let subject_offset = pair.s_off;
-                    let diag_coord =
-                        query_offset.wrapping_sub(subject_offset).wrapping_sub(lo) as usize;
+                    let diag_coord = cells.cell(query_offset, subject_offset);
                     debug_assert!(diag_coord < width, "unit diagonal outside its table");
                     // SAFETY: diag_coord < width = scratch.diag.len() (as in `scan_unit`), and
                     // every candidate's cell is such a cell of this unit.
@@ -922,6 +968,8 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: None,
+                mask_rule: None,
+                extents: Vec::new(),
             };
             // Windows the module takes (`active`): from its smallest, wordsize + BATCH.
             let window = [40, 3 + BATCH as i32, 64][case % 3];

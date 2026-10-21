@@ -178,13 +178,15 @@
 //! offsets from the group's first context to the next group's, the last group to the end of its
 //! last context, `x_group_extents`) plus the window, and the cell of hit (q, s) is
 //! (q - s - lo) & (P - 1) (`XMasked`), where that table has at most the switch's KiB and its
-//! unmasked table (`x_unit_width`) at least four times P cells, or, in a batch that `guard` rejects
-//! (LOSAT_X_TBXBAND), where its subject chunk is longer than the reference table has cells
-//! (`x_unit_mask_for`). Measured (workstation, 2 to 16 threads): a unit's hit loop does one more
-//! instruction per hit on a masked table and saves the clearing of the unmasked table's every cell
-//! per unit, so masking pays where the group is short against the chunk (1.5-1.9 kb queries against
-//! MG1655 and the fruit fly genome x0.84-0.91, max RSS 772 -> 309 MiB at 16 threads) and costs up to
-//! 1.7 % on genome pairs with groups of 100,000 letters or more.
+//! unmasked table (`x_unit_width`) at least four times P cells, at two or more threads, or, in a
+//! batch that `guard` rejects (LOSAT_X_TBXBAND), where its subject chunk is longer than the
+//! reference table has cells (`x_unit_mask_for`). Measured (workstation node 1): a unit's hit loop
+//! does one more instruction per hit on a masked table and saves the clearing of the unmasked
+//! table's every cell per unit, so masking pays where the group is short against the chunk (1.5 kb
+//! against MG1655 and the fruit fly genome database x0.80-0.86 at 16 threads, max RSS 774 -> 308
+//! MiB; Sakai 1-100,000 x MG1655 x1.000 at 16, 144 -> 61 MiB, where NCBI BLAST+ takes 130 MiB),
+//! costs 0.8-1.7 % with groups of 100,000 letters or more (Sakai 1-300,000 x MG1655 with
+//! `=512`), and at one thread, where a unit's table is the only one, 0.6 % (Sakai 1-100,000).
 //! The units of a batch whose groups LOSAT_X_TBXQSLICE's rule cuts keep their unmasked tables
 //! (`x_tbx_qslice::rule_cuts`, whatever the diagnostics switches say). With the switch, `decide`
 //! does not apply `x_band_fits` to a batch whose groups the rule does not cut: every unit whose
@@ -654,9 +656,10 @@ pub fn print_summary() {
         return;
     }
     let load = |c: &AtomicU64| c.load(AtomicOrdering::Relaxed);
-    // LOSAT_X_TBXUNITMASK: printed whenever the switch is on (zero where no unit took a masked
-    // table).
-    if let Some(kib) = unit_mask_kib() {
+    // LOSAT_X_TBXUNITMASK: printed whenever the switch is on and a TBLASTX batch reached the unit
+    // path's decision (zero where no unit took a masked table); not for the other programs, which
+    // share LOSAT_X_PAIRPARSHADOW and LOSAT_X_STATS.
+    if let Some(kib) = unit_mask_kib().filter(|_| load(&BATCHES) > 0) {
         if m == 2 {
             eprintln!("[X_SHADOW] TBXUNITMASK units_masked={}", load(&UM_UNITS));
         }
@@ -1979,7 +1982,12 @@ impl XPairPar {
                     && !x_tbx_qslice::rule_cuts(b.contexts, &group_starts(b.contexts), b.threads)
             })
             .map(|kib| XMaskRule {
-                max_cells: kib.saturating_mul(1024) / std::mem::size_of::<DiagStruct>(),
+                // At one thread a unit's table is the only one: no size rule (module doc).
+                max_cells: if b.threads > 1 {
+                    kib.saturating_mul(1024) / std::mem::size_of::<DiagStruct>()
+                } else {
+                    0
+                },
                 ratio: X_UNITMASK_RATIO,
                 band_cells: band.then_some(b.diag_array_size),
             });

@@ -3212,8 +3212,8 @@ unsafe fn x_greedy_row_impl_f2<const REVERSE: bool, const ARM: u8>(
             for i in 0..block_len {
                 *slide.add(i) = -1;
             }
-        } else if ARM == 5 {
-            // PROBE (arm 5): the scalar pass 2 runs inside the pass 3 loop below.
+        } else if ARM >= 5 {
+            // PROBE (arms 5, 6): the scalar pass 2 runs inside the pass 3 loop below (arm 6 also checks it).
         } else if ARM >= 3 {
             // PROBE (arms 3 and 4): the scalar pass 2 over the offsets pass 1 left (two loads, two word
             // loads, xor / and / or, one `tzcnt` / `lzcnt`, the tail); the unfit mask is merged afterwards.
@@ -3405,8 +3405,8 @@ unsafe fn x_greedy_row_impl_f2<const REVERSE: bool, const ARM: u8>(
                 }
                 continue;
             }
-            let index = if ARM == 5 {
-                // PROBE (arm 5): the arm 3 scalar pass 2 for this diagonal only.
+            let index = if ARM >= 5 {
+                // PROBE (arms 5, 6): the arm 3 scalar pass 2 for this diagonal only.
                 if inline_ok && *badm.add(i) == 0 {
                     let (w1, w2) = (
                         u64::from_le((seq1.add(*p1s.add(i) as usize) as *const u64).read_unaligned()),
@@ -3439,7 +3439,7 @@ unsafe fn x_greedy_row_impl_f2<const REVERSE: bool, const ARM: u8>(
             } else {
                 *slide.add(i)
             };
-            if ARM == 5 && x_f2_check_on() {
+            if ARM == 6 && x_f2_check_on() {
                 x_f2_check_one::<REVERSE>(
                     seq1,
                     seq2,
@@ -3736,6 +3736,12 @@ unsafe fn x_greedy_row(
                 }
                 3 => {
                     return x_greedy_row_avx2_f2::<3>(
+                        reverse, seq1, seq2, len1, len2, previous, current, tmp_diag_lower,
+                        diag_origin, xdrop_score, st,
+                    )
+                }
+                6 => {
+                    return x_greedy_row_avx2_f2::<6>(
                         reverse, seq1, seq2, len1, len2, previous, current, tmp_diag_lower,
                         diag_origin, xdrop_score, st,
                     )

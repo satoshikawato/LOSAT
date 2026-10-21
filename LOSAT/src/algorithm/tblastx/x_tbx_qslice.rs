@@ -180,9 +180,22 @@ pub(super) fn partition(
     x_partition(&x_group_spans(contexts, starts), rule.letters, min_len)
 }
 
+// No NCBI counterpart: the rule alone (module doc), without the conditions of `partition` that
+// depend on diagnostics (the probes, LOSAT_X_TBXEXTBATCHSHADOW), for LOSAT_X_TBXUNITMASK
+// (x_pair_par.rs module doc), whose choices must not change with them.
+/// Whether the switch's rule cuts a group of `contexts` (first contexts `starts`) at `threads`
+/// threads, whatever the diagnostics switches say.
+pub(super) fn rule_cuts(contexts: &[QueryContext], starts: &[usize], threads: usize) -> bool {
+    let Some(rule) = slice_rule() else {
+        return false;
+    };
+    let min_len = rule.min_span_threads.div_ceil(threads.max(1) as u64);
+    x_partition(&x_group_spans(contexts, starts), rule.letters, min_len).is_some()
+}
+
 // No NCBI counterpart: the rule's input (module doc).
 /// The query offsets `[a, b)` of each group (`group_starts`'s first contexts `starts`).
-fn x_group_spans(contexts: &[QueryContext], starts: &[usize]) -> Vec<(i32, i32)> {
+pub(super) fn x_group_spans(contexts: &[QueryContext], starts: &[usize]) -> Vec<(i32, i32)> {
     let end = contexts
         .last()
         .map(|c| c.frame_base + c.aa_len as i32)
@@ -760,11 +773,11 @@ impl XPairPar {
                         // below width = scratch.diag.len() as below; `fits` holds (the caller's
                         // rule); every candidate's cell is a cell of this unit's table.
                         unsafe {
-                            x_tbx_hitbf::x_hits_bf::<PF>(
+                            x_tbx_hitbf::x_hits_bf::<_, PF>(
                                 diag_ptr,
                                 offset_pairs_ptr,
                                 hits as usize,
-                                lo,
+                                XUnmasked { lo },
                                 width,
                                 window,
                                 wordsize,
@@ -1096,6 +1109,9 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: Some(direct),
+                mask_ratio: None,
+                extents: Vec::new(),
+                diag_array_size: 0,
             };
             let window = [40, 3 + BATCH as i32, 64][case % 3];
             let inp = XSubject {

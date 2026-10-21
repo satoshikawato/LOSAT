@@ -394,6 +394,7 @@ export LOSAT_X_TBXQSLICE=1
 export LOSAT_X_TBXRPTPAR=1
 export LOSAT_X_TBXSCANBF=1
 export LOSAT_X_TBXUNGAP=1
+export LOSAT_X_TBXUNITMASK=4
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -402,7 +403,8 @@ built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64), `LOSAT_X_TBXPREFETCH` 
 4,194,304, built-in 256: Ki letters of a subject's largest unit query-group span), `LOSAT_X_TBXQSLICE`
 (2 to 1,073,741,824: letters of a query slice, on every group longer than that; `1` or unset: the
 built-in rule, slices of 131,072 letters where a group's span times the threads reaches 6 Mi
-letters), `LOSAT_X_BPQBLOCK` (1 or
+letters), `LOSAT_X_TBXUNITMASK` (2 to 1,048,576, built-in 4: the ratio of a unit's unmasked
+diagonal table to its masked one at which it takes the masked one), `LOSAT_X_BPQBLOCK` (1 or
 more, built-in 50,000: query letters per block; a value that is not a positive number is the
 built-in value).
 

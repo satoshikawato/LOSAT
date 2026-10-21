@@ -166,7 +166,7 @@ pub(super) fn print_summary() {
 // subtraction with the cell's next value selected (module doc), and `rare` for a flag-1 cell or a
 // candidate. One constant (`k`) besides the window, so that both can stay in registers.
 /// The two-hit test of the `n` hits at `pairs` on the unit table at `diag_ptr` (cell of a hit
-/// (q, s): q - s - lo), with `rare(cell, q, s)` for a hit whose cell has flag 1 or that passes the
+/// (q, s): `cells.cell(q, s)`, q - s - lo or, with LOSAT_X_TBXUNITMASK, that masked), with `rare(cell, q, s)` for a hit whose cell has flag 1 or that passes the
 /// test; `PF` prefetches the cell of the hit `X_PREFETCH_AHEAD` entries ahead (x86-64).
 ///
 /// SAFETY: `pairs` points to `n` entries, and with `PF` to `X_PREFETCH_AHEAD` initialized entries
@@ -177,11 +177,11 @@ pub(super) fn print_summary() {
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub(super) unsafe fn x_hits_bf<const PF: bool>(
+pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
     diag_ptr: *mut DiagStruct,
     pairs: *const OffsetPair,
     n: usize,
-    lo: u32,
+    cells: C,
     width: usize,
     window: i32,
     wordsize: i32,
@@ -201,7 +201,7 @@ pub(super) unsafe fn x_hits_bf<const PF: bool>(
         if PF {
             // SAFETY: the caller's bound (X_PREFETCH_AHEAD initialized entries after the n).
             let ahead = unsafe { p.add(X_PREFETCH_AHEAD).read() };
-            let cell = ahead.q_off.wrapping_sub(ahead.s_off).wrapping_sub(lo) as usize;
+            let cell = cells.cell(ahead.q_off, ahead.s_off);
             // SAFETY: a prefetch never faults.
             unsafe {
                 core::arch::x86_64::_mm_prefetch(
@@ -218,10 +218,11 @@ pub(super) unsafe fn x_hits_bf<const PF: bool>(
         // SAFETY: p < end, so p + 1 <= end.
         p = unsafe { p.add(1) };
         // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
-        // Unit cell: the raw diagonal minus the unit's lowest one (no mask).
-        let cell = query_offset.wrapping_sub(subject_offset).wrapping_sub(lo) as usize;
+        // Unit cell: the raw diagonal minus the unit's lowest one (`XUnmasked`: no mask;
+        // LOSAT_X_TBXUNITMASK's `XMasked`: masked to the table).
+        let cell = cells.cell(query_offset, subject_offset);
         debug_assert!(cell < width, "unit diagonal outside its table");
-        // SAFETY: cell < width (the caller's bound).
+        // SAFETY: cell < width (the caller's bound; a masked cell is at most the mask, width - 1).
         let entry = unsafe { diag_ptr.add(cell) };
         // SAFETY: as above.
         let raw = unsafe { (*entry).raw_bits() };
@@ -254,18 +255,18 @@ pub(super) unsafe fn x_hits_bf<const PF: bool>(
 #[cfg(target_arch = "wasm32")]
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub(super) unsafe fn x_hits_bf<const PF: bool>(
+pub(super) unsafe fn x_hits_bf<C: XCells, const PF: bool>(
     diag_ptr: *mut DiagStruct,
     pairs: *const OffsetPair,
     n: usize,
-    lo: u32,
+    cells: C,
     width: usize,
     window: i32,
     wordsize: i32,
     rare: impl FnMut(usize, u32, u32),
 ) {
     // SAFETY: the caller's bounds, passed on.
-    unsafe { x_hits_bf_split(diag_ptr, pairs, n, lo, width, window, wordsize, rare) }
+    unsafe { x_hits_bf_split(diag_ptr, pairs, n, cells, width, window, wordsize, rare) }
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510-552 (as `x_hits_bf`)
@@ -282,11 +283,11 @@ pub(super) unsafe fn x_hits_bf<const PF: bool>(
 #[cfg(any(target_arch = "wasm32", test))]
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-unsafe fn x_hits_bf_split(
+unsafe fn x_hits_bf_split<C: XCells>(
     diag_ptr: *mut DiagStruct,
     pairs: *const OffsetPair,
     n: usize,
-    lo: u32,
+    cells: C,
     width: usize,
     window: i32,
     wordsize: i32,
@@ -300,7 +301,7 @@ unsafe fn x_hits_bf_split(
     let mut p = pairs;
     loop {
         // SAFETY: pairs <= p <= end (the bounds `x_hits_bf_run` keeps).
-        p = unsafe { x_hits_bf_run(diag_ptr, p, end, lo, width, window_u, k) };
+        p = unsafe { x_hits_bf_run(diag_ptr, p, end, cells, width, window_u, k) };
         if p == end {
             break;
         }
@@ -313,7 +314,7 @@ unsafe fn x_hits_bf_split(
         // SAFETY: p < end, so p + 1 <= end.
         p = unsafe { p.add(1) };
         // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
-        let cell = query_offset.wrapping_sub(subject_offset).wrapping_sub(lo) as usize;
+        let cell = cells.cell(query_offset, subject_offset);
         debug_assert!(cell < width, "unit diagonal outside its table");
         // [C] if (diag_array[diag_coord].flag), or a hit past both tests.
         rare(cell, query_offset, subject_offset);
@@ -331,11 +332,11 @@ unsafe fn x_hits_bf_split(
 /// window, `k` = window - wordsize).
 #[cfg(any(target_arch = "wasm32", test))]
 #[inline(never)]
-unsafe fn x_hits_bf_run(
+unsafe fn x_hits_bf_run<C: XCells>(
     diag_ptr: *mut DiagStruct,
     mut p: *const OffsetPair,
     end: *const OffsetPair,
-    lo: u32,
+    cells: C,
     width: usize,
     window_u: u32,
     k: u32,
@@ -347,9 +348,9 @@ unsafe fn x_hits_bf_run(
             s_off: subject_offset,
         } = unsafe { p.read() };
         // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
-        let cell = query_offset.wrapping_sub(subject_offset).wrapping_sub(lo) as usize;
+        let cell = cells.cell(query_offset, subject_offset);
         debug_assert!(cell < width, "unit diagonal outside its table");
-        // SAFETY: cell < width (the caller's bound).
+        // SAFETY: cell < width (the caller's bound; a masked cell is at most the mask, width - 1).
         let entry = unsafe { diag_ptr.add(cell) };
         // SAFETY: as above.
         let raw = unsafe { (*entry).raw_bits() };
@@ -909,15 +910,33 @@ mod tests {
                 // holds and every flag-0 value is below chunk_len + window.
                 unsafe {
                     if split {
-                        x_hits_bf_split(ptr, pairs.as_ptr(), n, lo, width, window, wordsize, rare)
-                    } else if pf {
-                        x_hits_bf::<true>(ptr, pairs.as_ptr(), n, lo, width, window, wordsize, rare)
-                    } else {
-                        x_hits_bf::<false>(
+                        x_hits_bf_split(
                             ptr,
                             pairs.as_ptr(),
                             n,
-                            lo,
+                            XUnmasked { lo },
+                            width,
+                            window,
+                            wordsize,
+                            rare,
+                        )
+                    } else if pf {
+                        x_hits_bf::<_, true>(
+                            ptr,
+                            pairs.as_ptr(),
+                            n,
+                            XUnmasked { lo },
+                            width,
+                            window,
+                            wordsize,
+                            rare,
+                        )
+                    } else {
+                        x_hits_bf::<_, false>(
+                            ptr,
+                            pairs.as_ptr(),
+                            n,
+                            XUnmasked { lo },
                             width,
                             window,
                             wordsize,
@@ -988,6 +1007,9 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: None,
+                mask_ratio: None,
+                extents: Vec::new(),
+                diag_array_size: 0,
             };
             // The default window, the smallest `fits` takes, a wide one, and the smallest of the
             // batched scan.
@@ -1148,6 +1170,9 @@ mod tests {
             shadow: false,
             stub: false,
             sliced: None,
+            mask_ratio: None,
+            extents: Vec::new(),
+            diag_array_size: 0,
         };
         let inp = XSubject {
             s_frames_preliminary: &s_frames,

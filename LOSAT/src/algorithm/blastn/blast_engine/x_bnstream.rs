@@ -15,6 +15,14 @@
 //!        }
 //! ```
 //! The hand-over keeps the order of NCBI's one-thread loop, so the hit lists are the same.
+//!
+//! With `assist` (the `-db` path, LOSAT_X_BNDBSTREAM, `database/x_db_stream.rs`), a thread that
+//! waits (a helper for room in the window, the owner for the next result) first runs a pending
+//! job of the pool (`rayon::yield_now`), so that the chunks of a long subject that another
+//! thread's search hands out (a nested parallel stage) are searched by the waiting threads too, as
+//! the idle workers of a `par_iter` would; it spins or sleeps only when no job is pending. The jobs
+//! it can run are those nested stages' (the loops are broadcast jobs, which no other thread runs),
+//! and they end on their own.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -25,6 +33,7 @@ use std::sync::Mutex;
 struct Window<R> {
     n: usize,
     window: usize,
+    assist: bool,
     next: AtomicUsize,
     handed: AtomicUsize,
     slots: Vec<Mutex<Option<R>>>,
@@ -65,11 +74,12 @@ impl<R> Drop for Closing<'_, R> {
 }
 
 impl<R> Window<R> {
-    fn new(n: usize, window: usize) -> Self {
+    fn new(n: usize, window: usize, assist: bool) -> Self {
         let window = window.clamp(1, n.max(1));
         Self {
             n,
             window,
+            assist,
             next: AtomicUsize::new(0),
             handed: AtomicUsize::new(0),
             slots: (0..window).map(|_| Mutex::new(None)).collect(),
@@ -133,6 +143,11 @@ impl<R> Window<R> {
                 }
                 Claim::Done => return,
                 Claim::Full => {
+                    if self.assist && run_pending_job() {
+                        idle = 0;
+                        nap = 20;
+                        continue;
+                    }
                     idle = idle.saturating_add(1);
                     if idle < 128 {
                         std::hint::spin_loop();
@@ -164,7 +179,7 @@ impl<R> Window<R> {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .take()
-                    .expect("LOSAT_X_BNSTREAM: a ready slot holds its result");
+                    .expect("search_in_order: a ready slot holds its result");
                 self.ready[slot].store(false, Ordering::Relaxed);
                 self.handed.store(handed + 1, Ordering::Release);
                 hand_over(handed, result);
@@ -174,7 +189,7 @@ impl<R> Window<R> {
             }
             assert!(
                 !self.failed.load(Ordering::Acquire),
-                "LOSAT_X_BNSTREAM: a subject search failed"
+                "search_in_order: a search of the pass failed"
             );
             match self.claim(handed) {
                 Claim::Item(i) => {
@@ -183,6 +198,10 @@ impl<R> Window<R> {
                     self.search(i, state, search);
                 }
                 Claim::Full | Claim::Done => {
+                    if self.assist && run_pending_job() {
+                        idle = 0;
+                        continue;
+                    }
                     idle = idle.saturating_add(1);
                     if idle < 128 {
                         std::hint::spin_loop();
@@ -193,6 +212,21 @@ impl<R> Window<R> {
             }
         }
     }
+}
+
+/// No NCBI counterpart (scheduling only): with `assist`, a waiting thread runs one pending job
+/// of the pool it runs in, if there is one (`true`).
+fn run_pending_job() -> bool {
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    return matches!(rayon::yield_now(), Some(rayon::Yield::Executed));
+    #[cfg(any(
+        not(feature = "parallel"),
+        all(target_arch = "wasm32", not(feature = "wasm-threads"))
+    ))]
+    false
 }
 
 /// No NCBI counterpart: a helper's wait for room in the window. A native helper sleeps
@@ -213,7 +247,8 @@ fn pause(micros: u64) {
 /// No NCBI counterpart (scheduling only): runs `search` for items `0..n` on every thread of
 /// the pool this thread runs in (each thread with its own state from `init`, made when it
 /// first claims an item), and `hand_over` for every item in item order on one of them (the
-/// owner). At most `window` items past the last one handed over are claimed. Call it from a
+/// owner). At most `window` items past the last one handed over are claimed; with `assist`, a
+/// thread that waits runs the pool's pending jobs first (module documentation). Call it from a
 /// thread of the search pool (`SearchPool::install`); outside a pool, or in a pool of one
 /// thread, the items are searched and handed over one at a time on this thread.
 ///
@@ -223,6 +258,7 @@ fn pause(micros: u64) {
 pub(super) fn search_in_order<S, R: Send>(
     n: usize,
     window: usize,
+    assist: bool,
     init: &(impl Fn() -> S + Sync),
     search: &(impl Fn(&mut S, usize) -> R + Sync),
     hand_over: &mut (dyn FnMut(usize, R) + Send),
@@ -230,7 +266,7 @@ pub(super) fn search_in_order<S, R: Send>(
     if n == 0 {
         return;
     }
-    let shared = Window::new(n, window);
+    let shared = Window::new(n, window, assist);
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -288,22 +324,28 @@ mod tests {
             (8, 1000, 64),
             (3, 7, 100),
         ] {
-            let handed = pool(threads).install(|| {
-                let mut handed: Vec<(usize, u64)> = Vec::new();
-                search_in_order(
-                    n,
-                    window,
-                    &|| 0usize,
-                    &|calls: &mut usize, i| {
-                        *calls += 1;
-                        work(i)
-                    },
-                    &mut |i, value| handed.push((i, value)),
+            for assist in [false, true] {
+                let handed = pool(threads).install(|| {
+                    let mut handed: Vec<(usize, u64)> = Vec::new();
+                    search_in_order(
+                        n,
+                        window,
+                        assist,
+                        &|| 0usize,
+                        &|calls: &mut usize, i| {
+                            *calls += 1;
+                            work(i)
+                        },
+                        &mut |i, value| handed.push((i, value)),
+                    );
+                    handed
+                });
+                let want: Vec<(usize, u64)> = (0..n).map(|i| (i, work(i))).collect();
+                assert_eq!(
+                    handed, want,
+                    "threads {threads} n {n} window {window} assist {assist}"
                 );
-                handed
-            });
-            let want: Vec<(usize, u64)> = (0..n).map(|i| (i, work(i))).collect();
-            assert_eq!(handed, want, "threads {threads} n {n} window {window}");
+            }
         }
     }
 
@@ -319,19 +361,60 @@ mod tests {
                 .map(|x| work(i + x))
                 .reduce(|| 0, u64::wrapping_add)
         };
+        let want: Vec<(usize, u64)> = (0..400).map(|i| (i, nested(i))).collect();
+        for assist in [false, true] {
+            let handed = pool(threads).install(|| {
+                let mut handed: Vec<(usize, u64)> = Vec::new();
+                search_in_order(
+                    400,
+                    8,
+                    assist,
+                    &|| (),
+                    &|_: &mut (), i| nested(i),
+                    &mut |i, value| handed.push((i, value)),
+                );
+                handed
+            });
+            assert_eq!(handed, want, "assist {assist}");
+        }
+    }
+
+    // With `assist`, the threads that wait for the window run the chunks that a slow item's
+    // search hands out: a pass whose first item is long and parallel (the long subject of a `-db`
+    // search) ends with the other threads' help, in item order.
+    #[test]
+    fn waiting_threads_run_a_long_items_nested_jobs_with_assist() {
+        use rayon::prelude::*;
+        use std::collections::HashSet;
+        use std::sync::Mutex;
+        let threads = 4;
+        let runners: Mutex<HashSet<usize>> = Mutex::new(HashSet::new());
+        let search = |_: &mut (), i: usize| -> u64 {
+            if i == 0 {
+                (0..256usize)
+                    .into_par_iter()
+                    .map(|x| {
+                        runners
+                            .lock()
+                            .unwrap()
+                            .insert(rayon::current_thread_index().unwrap());
+                        (0..20_000u64).fold(x as u64, |a, y| a.wrapping_mul(31).wrapping_add(y))
+                    })
+                    .reduce(|| 0, u64::wrapping_add)
+            } else {
+                work(i)
+            }
+        };
         let handed = pool(threads).install(|| {
-            let mut handed: Vec<(usize, u64)> = Vec::new();
-            search_in_order(
-                400,
-                8,
-                &|| (),
-                &|_: &mut (), i| nested(i),
-                &mut |i, value| handed.push((i, value)),
-            );
+            let mut handed: Vec<usize> = Vec::new();
+            search_in_order(64, 8, true, &|| (), &search, &mut |i, _| handed.push(i));
             handed
         });
-        let want: Vec<(usize, u64)> = (0..400).map(|i| (i, nested(i))).collect();
-        assert_eq!(handed, want);
+        assert_eq!(handed, (0..64).collect::<Vec<_>>());
+        assert!(
+            runners.lock().unwrap().len() > 1,
+            "the long item ran on one thread"
+        );
     }
 
     #[test]
@@ -344,6 +427,7 @@ mod tests {
             search_in_order(
                 2000,
                 window,
+                false,
                 &|| (),
                 &|_: &mut (), i| {
                     let ahead = i - handed.load(Ordering::SeqCst).min(i);
@@ -365,6 +449,7 @@ mod tests {
             search_in_order(
                 300,
                 32,
+                false,
                 &|| {
                     states.fetch_add(1, Ordering::SeqCst);
                 },
@@ -384,6 +469,7 @@ mod tests {
                     search_in_order(
                         300,
                         16,
+                        false,
                         &|| (),
                         &|_: &mut (), i| {
                             assert!(i != failing, "item {i} fails");
@@ -400,9 +486,14 @@ mod tests {
     #[test]
     fn runs_on_one_thread_outside_a_pool() {
         let mut handed = Vec::new();
-        search_in_order(20, 4, &|| (), &|_: &mut (), i| i * 2, &mut |i, value| {
-            handed.push((i, value))
-        });
+        search_in_order(
+            20,
+            4,
+            false,
+            &|| (),
+            &|_: &mut (), i| i * 2,
+            &mut |i, value| handed.push((i, value)),
+        );
         assert_eq!(handed, (0..20).map(|i| (i, i * 2)).collect::<Vec<_>>());
     }
 }

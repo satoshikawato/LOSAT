@@ -179,6 +179,22 @@ impl Volume {
         }
     }
 
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues of protein `oid` (volume-relative), read
+    /// from the index alone: `read_block(oid, oid + 1, _)`'s `protein(0).len()`.
+    pub fn protein_length(&self, oid: u32) -> Result<u32, SeqDbError> {
+        assert!(
+            self.index.seqtype == SeqType::Protein,
+            "protein length of a nucleotide volume"
+        );
+        self.check_range(oid, oid.saturating_add(1))?;
+        // The residues and the sentinel bytes before and after them.
+        let bytes = self.block_bytes(oid, oid + 1)?;
+        bytes
+            .checked_sub(2)
+            .and_then(|residues| u32::try_from(residues).ok())
+            .ok_or_else(|| self.index.sequence_changed(oid, 2))
+    }
+
     /// Bytes of the sequence file that a block of the sequences `first..end`
     /// occupies (protein: with the sentinel bytes around them; nucleotide:
     /// with their ambiguity data).

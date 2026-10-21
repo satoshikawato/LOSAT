@@ -3676,9 +3676,11 @@ impl<'a> ShownSubjects<'a> {
             Self::Records(records) => records
                 .get(s_idx)
                 .map(|record| ShownLetters::Ascii(record.seq())),
-            Self::Listed { subjects, .. } => subjects
-                .get(s_idx)
-                .map(|subject| ShownLetters::Stored(&subject.aa_seq[1..=subject.aa_len])),
+            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a subject without residues has no O, which is all
+            // a report reads of it (`ListedSubjects::x_read_shown`).
+            Self::Listed { subjects, .. } => subjects.get(s_idx).map(|subject| {
+                ShownLetters::Stored(subject.aa_seq.get(1..=subject.aa_len).unwrap_or_default())
+            }),
         }
     }
 
@@ -9120,8 +9122,19 @@ fn run_resolved_in_pool(
     // and stand for the subject set in the redo; the hit lists name them by their rank
     // among the listed ordinal ids from here on (`database::ListedSubjects`). Their
     // definition lines are read after the redo (`ListedSubjects::read_titles`).
+    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the listed subjects without a copy of their residues
+    // (`ListedSubjects::x_list`); the redo reads each match's subject from the database.
     let t_search = crate::utils::xtiming::clock();
-    let listed_subjects = match database {
+    let x_redo_db_subj = super::x_redo_subjects::x_bp_redo_db_subj();
+    let mut listed_subjects = match database {
+        Some(database) if x_redo_db_subj != super::x_redo_subjects::XRedoDbSubj::Off => {
+            Some(database::ListedSubjects::x_list(
+                database,
+                &mut preliminary_hit_lists,
+                &mut x_compact_hit_lists,
+                x_redo_db_subj,
+            )?)
+        }
         Some(database) => Some(database::ListedSubjects::read(
             database,
             &mut preliminary_hit_lists,
@@ -9129,9 +9142,9 @@ fn run_resolved_in_pool(
         )?),
         None => None,
     };
-    let subjects: &[EncodedProtein] = match listed_subjects.as_ref() {
-        Some(listed) => &listed.encoded,
-        None => &subjects,
+    let redo_subjects = match (listed_subjects.as_ref(), database) {
+        (Some(listed), Some(database)) => listed.redo_subjects(database),
+        _ => super::x_redo_subjects::XRedoSubjects::Encoded(&subjects),
     };
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
@@ -9381,7 +9394,7 @@ fn run_resolved_in_pool(
                 "kappa-query-redo",
                 args.num_threads,
                 blastp_num_threads,
-                subjects.len(),
+                redo_subjects.len(),
                 kappa_parallel_query_indices.len(),
                 total_db_len,
             )
@@ -9412,7 +9425,7 @@ fn run_resolved_in_pool(
                 "kappa-match-redo",
                 args.num_threads,
                 blastp_num_threads,
-                subjects.len(),
+                redo_subjects.len(),
                 match_jobs,
                 total_db_len,
             ) {
@@ -9460,7 +9473,7 @@ fn run_resolved_in_pool(
         contexts: &contexts,
         query_nomask: query_nomask_sequence,
         search_spaces: &search_spaces,
-        subjects,
+        subjects: redo_subjects,
         query_batches: &kappa_query_batches,
         matrix: args.scoring.matrix,
         gapped_params: &gapped_params,
@@ -9484,7 +9497,7 @@ fn run_resolved_in_pool(
             "kappa-redo-par",
             args.num_threads,
             blastp_num_threads,
-            subjects.len(),
+            redo_subjects.len(),
             super::x_redo_par::x_matches(&preliminary_hit_lists),
             total_db_len,
         );
@@ -9614,9 +9627,10 @@ fn run_resolved_in_pool(
                             }
 
                             let s_idx = local_match.oid;
-                            let subject = &subjects[s_idx as usize];
-                            let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
                             let redo_align_params = build_redo_align_params(q_idx)?;
+                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here.
+                            let subject = redo_subjects.read(s_idx)?;
+                            let subject_raw = subject.residues();
                             let query_workspace = query_workspace.get_or_init(|| {
                                 build_query_workspace(
                                     query_raw,
@@ -9852,8 +9866,6 @@ fn run_resolved_in_pool(
                                 continue;
                             }
 
-                            let subject = &subjects[s_idx as usize];
-                            let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
                             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
                             // ```c
                             //                 if (BlastCompo_EarlyTermination(
@@ -9873,6 +9885,18 @@ fn run_resolved_in_pool(
                             {
                                 continue;
                             }
+                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after
+                            // the test, as NCBI reads it; an error is kept for the replay as the
+                            // redo's own errors are (below).
+                            let subject = match redo_subjects.read(s_idx) {
+                                Ok(subject) => subject,
+                                Err(error) if replayed => {
+                                    kept_for_replay.push((match_position, Err(error)));
+                                    continue;
+                                }
+                                Err(error) => return Err(error),
+                            };
+                            let subject_raw = subject.residues();
 
                             // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of this
                             // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
@@ -9883,7 +9907,7 @@ fn run_resolved_in_pool(
                                 x_newton_lanes_prefetch_matches(
                                     &preliminary_hit_list.hsplist_array[match_position
                                         ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
-                                    &subjects,
+                                    redo_subjects,
                                     std::slice::from_ref(if alone_in_batch {
                                         &redone_match
                                     } else {
@@ -10113,8 +10137,6 @@ fn run_resolved_in_pool(
                     continue;
                 }
 
-                let subject = &subjects[s_idx as usize];
-                let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:3525-3528
                 // ```c
                 // if (BlastCompo_EarlyTermination(localMatch->best_evalue,
@@ -10131,6 +10153,10 @@ fn run_resolved_in_pool(
                 ) {
                     continue;
                 }
+                // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after the test,
+                // as NCBI reads it.
+                let subject = redo_subjects.read(s_idx)?;
+                let subject_raw = subject.residues();
 
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
                 // ```c
@@ -10149,7 +10175,7 @@ fn run_resolved_in_pool(
                     x_newton_lanes_prefetch_matches(
                         &preliminary_hit_list.hsplist_array[x_match_position
                             ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
-                        &subjects,
+                        redo_subjects,
                         &redone_matches[batch.clone()],
                         &query_workspace,
                         &composition_workspace,
@@ -10291,6 +10317,29 @@ fn run_resolved_in_pool(
         database::XListedLean::Off
     } else {
         database::x_bp_listed_lean()
+    };
+    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues that the reports read, read from the
+    // database again after the redo (`ListedSubjects::x_read_shown`): every listed subject's for
+    // the records, those with an O where every report is tabular rows of the default fields or
+    // Seq-aligns (which read the letters only to find an O), every final subject's otherwise.
+    if let (Some(listed), Some(database)) = (listed_subjects.as_mut(), database) {
+        let residues = if x_listed_lean != database::XListedLean::On {
+            database::XShownResidues::Listed
+        } else if outputs.hits.is_none()
+            && requested_formats.iter().all(|(outfmt, custom_fields)| {
+                matches!(outfmt, BlastpReport::Seqalign(_))
+                    || (outfmt.is_tabular() && custom_fields.is_none())
+            })
+        {
+            database::XShownResidues::WithO
+        } else {
+            database::XShownResidues::Final
+        };
+        listed.x_read_shown(database, &hit_lists, residues)?;
+    }
+    let subjects: &[EncodedProtein] = match listed_subjects.as_ref() {
+        Some(listed) => &listed.encoded,
+        None => &subjects,
     };
     let listed_titles = match (listed_subjects.as_ref(), database) {
         (Some(listed), Some(database)) => Some(match x_listed_lean {

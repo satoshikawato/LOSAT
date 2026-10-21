@@ -144,7 +144,6 @@ use crate::stats::{BlastGumbelBlk, KarlinParams};
 use crate::utils::threading::SearchPool;
 
 use super::blast_engine::preliminary_hit_from_local_match_hsp;
-use super::encoding::EncodedProtein;
 use super::gapalign::{BlastpPreliminaryHsp, GapAlignScratch};
 use super::hsp::{
     blast_compo_early_termination, fill_results_from_compo_heaps, BlastCompoHeap, BlastpHitList,
@@ -155,6 +154,7 @@ use super::kappa::{
     x_seg_share, BlastRedoAlignParams, BlastpKappaQueryWorkspace, BlastpKappaSubjectRangeCache,
     BlastpPostprocessResult, XSharedSubjectRanges,
 };
+use super::x_redo_subjects::XRedoSubjects;
 
 /// EXPERIMENT (LOSAT_X_BPREDOPAR): the mode the variables select.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,7 +226,8 @@ pub(crate) struct XRedoParSearch<'a, P> {
     /// `blast_engine::query_nomask_sequence`.
     pub query_nomask: fn(&QueryContext) -> &[u8],
     pub search_spaces: &'a [SearchSpace],
-    pub subjects: &'a [EncodedProtein],
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): or a database's listed subjects, read per match.
+    pub subjects: XRedoSubjects<'a>,
     /// Each query's batch (`kappa_query_batches`): the heaps its early termination test reads.
     pub query_batches: &'a [Range<usize>],
     pub matrix: ScoringMatrix,
@@ -588,8 +589,8 @@ fn x_redo_match<P>(
             .iter()
             .map(preliminary_hit_from_local_match_hsp),
     );
-    let subject = &search.subjects[local_match.oid as usize];
-    let subject_raw = &subject.aa_seq[1..subject.aa_seq.len() - 1];
+    let subject = search.subjects.read(local_match.oid)?;
+    let subject_raw = subject.residues();
     postprocess_preliminary_hits(
         &scratch.hits,
         query_workspace,
@@ -776,8 +777,8 @@ fn x_job_costs<P>(
                     let query = search.contexts[matched.q_idx].aa_len as u64;
                     let subject = search
                         .subjects
-                        .get(x_local_match(lists, matched).oid as usize)
-                        .map_or(0, |subject| subject.aa_len as u64);
+                        .aa_len(x_local_match(lists, matched).oid as usize)
+                        .map_or(0, |length| length as u64);
                     query.saturating_mul(subject)
                 })
                 .fold(0, u64::saturating_add)
@@ -1518,6 +1519,7 @@ pub(crate) fn x_bp_redo_par_print_summary() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::algorithm::blastp::encoding::EncodedProtein;
 
     const ECUTOFF: f64 = 0.002;
 
@@ -2596,7 +2598,7 @@ mod tests {
                         contexts: &fixture.contexts,
                         query_nomask: query_raw,
                         search_spaces: &fixture.search_spaces,
-                        subjects: &fixture.subjects,
+                        subjects: XRedoSubjects::Encoded(&fixture.subjects),
                         query_batches: &fixture.batches,
                         matrix: ScoringMatrix::Blosum62,
                         gapped_params: &fixture.gapped_params,

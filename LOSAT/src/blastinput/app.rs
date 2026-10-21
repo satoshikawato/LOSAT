@@ -355,8 +355,8 @@ impl Program {
             CommaSeparatedValuesWithHeader => false,
             // Line OF track S (structured formats): 5 for BLASTP and BLASTN (OF4a), BLASTX
             // (OF4b part 1), TBLASTN (OF4b part 3) and TBLASTX (OF4b part 4): every program;
-            // 15 and 16 (JSON_S, XML2_S) for BLASTP (OF5a part 1), BLASTN (OF5a part 2) and
-            // TBLASTN (OF5b part 2).
+            // 15 and 16 (JSON_S, XML2_S) for BLASTP (OF5a part 1), BLASTN (OF5a part 2),
+            // TBLASTN (OF5b part 2) and TBLASTX (OF5b part 3).
             Xml => true,
             AsnText => true,
             AsnBinary => true,
@@ -364,8 +364,14 @@ impl Program {
             JsonSeqalign => true,
             Json => false,
             Xml2 => false,
-            JsonS => matches!(self, Program::Blastp | Program::Blastn | Program::Tblastn),
-            Xml2S => matches!(self, Program::Blastp | Program::Blastn | Program::Tblastn),
+            JsonS => matches!(
+                self,
+                Program::Blastp | Program::Blastn | Program::Tblastn | Program::Tblastx
+            ),
+            Xml2S => matches!(
+                self,
+                Program::Blastp | Program::Blastn | Program::Tblastn | Program::Tblastx
+            ),
             Sam => false,
         }
     }
@@ -1089,7 +1095,7 @@ mod tests {
     // The one table of the formats LOSAT writes (`Program::writes`): 0, 6, 7, 8, 9 and 12 in
     // every program (8 and 12: line OF track S, OF3b; 9: OF3c), and 5 in every program
     // (BLASTN, BLASTP: OF4a; BLASTX, TBLASTN, TBLASTX: OF4b); 15 and 16 in BLASTP and BLASTN
-    // (OF5a) and TBLASTN (OF5b).
+    // (OF5a), TBLASTN (OF5b part 2) and TBLASTX (OF5b part 3).
     #[test]
     fn every_program_writes_its_formats_only() {
         for program in PROGRAMS {
@@ -1100,7 +1106,7 @@ mod tests {
                 .collect();
             let expected: &[i32] = if matches!(
                 program,
-                Program::Blastp | Program::Blastn | Program::Tblastn
+                Program::Blastp | Program::Blastn | Program::Tblastn | Program::Tblastx
             ) {
                 &[0, 5, 6, 7, 8, 9, 12, 15, 16]
             } else {

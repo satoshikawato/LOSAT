@@ -35,7 +35,7 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 | **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `15`, `16` (see [Output formats](#output-formats)) | Nucleotide vs. nucleotide alignment |
 | **`blastx`** | `blastx`; native and Wasm entry points | `0`, `5`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
 | **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `15`, `16` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
-| **`tblastx`** | `tblastx` | `0`, `5`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
+| **`tblastx`** | `tblastx` | `0`, `5`, `6`, `7`, `8`, `9`, `12`, `15`, `16` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
 | **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0`, `5`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
 
 > **Note**: Tabular output (`-outfmt 6` and `7`) writes the 12 standard BLAST fields:  
@@ -65,8 +65,8 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `12` | Seqalign (JSON) | all five | all five programs |
 | `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | not yet |
 | `14` | Multiple-file BLAST XML2 | all five, with `-out FILE` only | not yet |
-| `15` | Single-file BLAST JSON | all five | `blastp`, `blastn`, `tblastn` (with `-subject` and `-db`) |
-| `16` | Single-file BLAST XML2 | all five | `blastp`, `blastn`, `tblastn` (with `-subject` and `-db`) |
+| `15` | Single-file BLAST JSON | all five | `blastp`, `blastn`, `tblastn`, `tblastx` (with `-subject` and `-db`) |
+| `16` | Single-file BLAST XML2 | all five | `blastp`, `blastn`, `tblastn`, `tblastx` (with `-subject` and `-db`) |
 | `17` | Sequence Alignment/Map (SAM) | `blastn` only | not yet |
 | `18` | Organism Report | all five | not yet |
 | `20` | Comma-separated values with header lines | all five | not yet |
@@ -218,7 +218,7 @@ LOSAT blastx \
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp`, `blastp-fast` or `blastp-short` (for `blastp`); `blastx` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`) |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `12`=Seq-align (JSON), `15`=BLAST JSON and `16`=BLAST XML2 (BLASTP, BLASTN and TBLASTN only); custom tabular fields in BLASTP and BLASTX only |
+| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `12`=Seq-align (JSON), `15`=BLAST JSON and `16`=BLAST XML2 (BLASTP, BLASTN, TBLASTN and TBLASTX only); custom tabular fields in BLASTP and BLASTX only |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |

@@ -873,7 +873,7 @@ const CUSTOM: &[&str] = &["blastp", "blastx"];
 const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
 // The programs that do not write outfmt 15 and 16 yet.
-const NO_XML2: &[&str] = &["blastx", "tblastx"];
+const NO_XML2: &[&str] = &["blastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
     "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
@@ -951,7 +951,7 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "18", None, UNSUPPORTED),
         (ALL, "20", None, UNSUPPORTED),
         // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c), 5 in
-        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in BLASTP and BLASTN (OF5a) and TBLASTN (OF5b), NCBI dropping a custom specification
+        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in BLASTP and BLASTN (OF5a), TBLASTN and TBLASTX (OF5b), NCBI dropping a custom specification
         // (blast_args.cpp:2844-2851); the others not yet.
         (ALL, "8", None, Writes(AsnText)),
         (ALL, "12", None, Writes(JsonSeqalign)),
@@ -964,9 +964,24 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "11", None, UNSUPPORTED),
         (ALL, "13", Some("o.json"), UNSUPPORTED),
         (ALL, "14", Some("o.xml"), UNSUPPORTED),
-        (&["blastp", "blastn", "tblastn"], "15", None, Writes(JsonS)),
-        (&["blastp", "blastn", "tblastn"], "16", None, Writes(Xml2S)),
-        (&["blastp", "blastn", "tblastn"], " 16 std", None, Writes(Xml2S)),
+        (
+            &["blastp", "blastn", "tblastn", "tblastx"],
+            "15",
+            None,
+            Writes(JsonS),
+        ),
+        (
+            &["blastp", "blastn", "tblastn", "tblastx"],
+            "16",
+            None,
+            Writes(Xml2S),
+        ),
+        (
+            &["blastp", "blastn", "tblastn", "tblastx"],
+            " 16 std",
+            None,
+            Writes(Xml2S),
+        ),
         (NO_XML2, "15", None, UNSUPPORTED),
         (NO_XML2, "16", None, UNSUPPORTED),
         (&["blastn"], "17", None, UNSUPPORTED),

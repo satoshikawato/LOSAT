@@ -134,6 +134,7 @@ pub(super) fn render(
     mask_lowercase: bool,
     query_warning_lines: &[Vec<u8>],
     ranges: &ReportRanges<'_>,
+    xml_values: super::blast_xml::XmlValues,
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
@@ -146,6 +147,30 @@ pub(super) fn render(
         hitlist.drop_zero_score_hsps();
     }
     let hitlists: &[KappaResultHitList] = hitlists;
+    // BLAST XML (outfmt 5): its texts are made, and what NCBI cannot write is refused, before
+    // any format writes (`-out` is already created, empty, as NCBI's).
+    let xml = if outputs
+        .formats
+        .iter()
+        .any(|format| format_number(format.outfmt) == 5)
+    {
+        Some(super::blast_xml::prepare(
+            xml_values,
+            query_records,
+            subject_records,
+            subject_letters,
+            shown,
+            hitlists,
+            parameters,
+            query_validity,
+            scoring,
+            matrix_name,
+            seg,
+            ranges,
+        )?)
+    } else {
+        None
+    };
     // The tabular subject IDs, made before any format is written: a subject that NCBI
     // writes part of a row for and then stops at (RP-20) is rejected first
     // (`tabular_subject_ids`).
@@ -238,6 +263,22 @@ pub(super) fn render(
                 probe.as_mut(),
                 warnings.as_mut(),
             )?,
+            // BLAST XML: one document per run, a header before the first query and a
+            // trailer after the last (`blast_xml`).
+            5 => xml
+                .as_ref()
+                .expect("XML prepared for TBLASTN outfmt 5")
+                .write(
+                    &mut writer,
+                    query_records,
+                    subject_letters,
+                    hitlists,
+                    genetic_code,
+                    seg,
+                    mask_lowercase,
+                    ranges,
+                    warnings.as_mut(),
+                )?,
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
             // ```c++
             //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
@@ -490,7 +531,7 @@ fn write_tabular(
 /// ```
 /// A subject interval has the strand both, so `RemapAlignToLoc` (seq_align_util.cpp:71-78)
 /// moves its row by the interval's start.
-fn record_coordinates(
+pub(super) fn record_coordinates(
     ranges: &ReportRanges<'_>,
     q_idx: usize,
     s_idx: usize,
@@ -670,6 +711,10 @@ mod tests {
                     queries: &Default::default(),
                     subjects: &Default::default(),
                     epilog: true,
+                },
+                super::super::blast_xml::XmlValues {
+                    expect: 10.0,
+                    soft_masking: false,
                 },
             )
             .unwrap();
@@ -1225,4 +1270,40 @@ fn aligned_sequences(
         }
     }
     Ok((query_string, subject_string))
+}
+
+/// `aligned_sequences` into two strings the caller keeps, for the outfmt 5 rows, which are
+/// made for one HSP at a time. It calls `aligned_sequences` as it is (the rows of 0/6/7 are
+/// made by that function alone, unchanged since the base of OF4b, DECISIONS 23) and moves its
+/// strings into the caller's.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn aligned_sequences_into(
+    query: &[u8],
+    subject: SubjectNt<'_>,
+    window_buffer: &mut Vec<u8>,
+    code: &GeneticCode,
+    target: &mut TargetTranslation<'_>,
+    frame: i8,
+    q_start: i32,
+    s_start: i32,
+    s_end: i32,
+    script: &[GapEditOp],
+    report_masks: &[(usize, usize)],
+    query_string: &mut String,
+    subject_string: &mut String,
+) -> Result<()> {
+    (*query_string, *subject_string) = aligned_sequences(
+        query,
+        subject,
+        window_buffer,
+        code,
+        target,
+        frame,
+        q_start,
+        s_start,
+        s_end,
+        script,
+        report_masks,
+    )?;
+    Ok(())
 }

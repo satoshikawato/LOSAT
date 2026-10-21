@@ -1089,6 +1089,17 @@ fn search_cli(
             }
         }
     }
+    // The BLAST XML (outfmt 5) cannot write a `-db` name outside US-ASCII: refused before the
+    // search (`names::check_database_name`).
+    if let Some(database) = database.as_ref() {
+        if outputs
+            .formats
+            .iter()
+            .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Xml)
+        {
+            crate::report::blast_xml::names::check_database_name("TBLASTX", database.name())?;
+        }
+    }
     let source = match &database {
         Some(database) => SubjectSource::Database(database),
         None => SubjectSource::Fasta {
@@ -1516,6 +1527,9 @@ pub(crate) struct TblastxReportRun<'a> {
     pub ranges: &'a QueryRuns<'a>,
     /// Whether the reports end with the epilog (not when the search stops at a batch).
     pub epilog: bool,
+    /// The subject set's numbers (the BLAST XML computes a query's length adjustment again
+    /// from them).
+    pub numbers: &'a SubjectSetNumbers,
     /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
     pub v1_titles: bool,
     /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the pool the report stage runs on (tblastx/x_rpt_par.rs),
@@ -1767,7 +1781,7 @@ fn write_tblastx_outputs(
     if outputs.hits.is_some()
         || output_formats
             .iter()
-            .any(|format| !matches!(format, report::TblastxOutputFormat::Seqalign(_)))
+            .any(|format| format.reads_displayed_counts())
     {
         // EXPERIMENT (LOSAT_X_TBXRPTPAR): the identities over chunks of the list on the pool.
         match run.x_pool {
@@ -2002,6 +2016,21 @@ fn write_tblastx_outputs(
                     warnings.as_mut(),
                 )?
             }
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:708-744
+            // ```c++
+            //     } else if (m_FormatType == CFormattingArgs::eXml) {
+            //         ...
+            //         	BlastXML_FormatReport(xml_output, &report_data, &m_Outfile,
+            //                                   m_BlastXMLIncremental.GetPointer());
+            // ```
+            // The document of every query; the hits are the final list after `shift_to_records`
+            // (record coordinates), the rows are read from the searched letters.
+            report::TblastxOutputFormat::Xml => super::super::blast_xml::write_tblastx_xml(
+                &mut writer,
+                &hits,
+                run,
+                warnings.as_mut(),
+            )?,
             report::TblastxOutputFormat::Tabular
             | report::TblastxOutputFormat::TabularWithComments => match run.x_pool {
                 // EXPERIMENT (LOSAT_X_TBXRPTPAR): the rows formatted on the pool; with the format
@@ -2175,6 +2204,7 @@ fn run_in_pool(
         query_runs,
         query_ids: &query_ids,
         subjects: &subjects.shown,
+        numbers: &subjects.numbers,
         titles: std::cell::RefCell::new(DatabaseTitles::new()),
         v1_titles,
         x_search_pool: parallel_pool,
@@ -2388,14 +2418,13 @@ fn run_batch_loop(
     //         ERR_POST(Warning << results.GetWarningStrings());
     //     }
     // ```
-    // A structured format (outfmt 8, 12) writes none of a query's own warnings
-    // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
-    let result_warnings = outputs.formats.first().is_none_or(|format| {
-        !matches!(
-            report::output_format(format.outfmt),
-            report::TblastxOutputFormat::Seqalign(_)
-        )
-    });
+    // A structured format (outfmt 5, 8, 9, 12) writes none of a query's own warnings
+    // (`ReportFormat::writes_query_warnings`; outfmt 5 puts them in the Iteration's message,
+    // `blast_xml`); the warnings go with the first format.
+    let result_warnings = outputs
+        .formats
+        .first()
+        .is_none_or(|format| report::output_format(format.outfmt).writes_query_warnings());
     // A batch is read from the input records (`input_start..input_end`); its searched
     // queries are `start..end` (all of them without `-query_loc`). A batch size counts the
     // whole records, and a record whose range starts past its end is skipped
@@ -2714,6 +2743,7 @@ struct BatchReports<'a> {
     query_runs: &'a QueryRuns<'a>,
     query_ids: &'a [Arc<[u8]>],
     subjects: &'a ShownSubjects<'a>,
+    numbers: &'a SubjectSetNumbers,
     /// `-db`: the stored titles of the batches' reported sequences (`run_in_pool`).
     titles: std::cell::RefCell<DatabaseTitles>,
     v1_titles: bool,
@@ -2785,6 +2815,7 @@ impl BatchReports<'_> {
                 warnings: &warnings[..reported],
                 ranges: self.query_runs,
                 epilog,
+                numbers: self.numbers,
                 v1_titles: self.v1_titles,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
                 x_pairwise_pool: crate::report::x_pairwise_par::pool(self.x_search_pool),
@@ -3747,6 +3778,7 @@ fn search_query_batch(
         .map(|frames| TblastxQueryStats {
             karlin: None,
             eff_searchsp: 0,
+            aa_len: 0,
             seg_masks: frames
                 .iter()
                 .map(|frame| (frame.frame, frame.seg_masks.clone()))
@@ -3758,6 +3790,7 @@ fn search_query_batch(
         if ctx.is_valid && stats.karlin.is_none() {
             stats.karlin = Some(ctx.karlin_params);
             stats.eff_searchsp = eff_searchsp_per_context[ctx_idx];
+            stats.aa_len = ctx.aa_len;
         }
     }
     // NCBI reference: /mnt/c/Users/genom/GitHub/ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:401-416

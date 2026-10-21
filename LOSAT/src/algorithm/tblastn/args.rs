@@ -1411,6 +1411,17 @@ fn search(
         dbsize: args.dbsize,
     };
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
+    // BLAST XML cannot carry a database name outside US-ASCII (NCBI's stream throws): refused
+    // before the search, and before anything is written.
+    if let Some(database) = database {
+        if outputs
+            .formats
+            .iter()
+            .any(|format| super::stage_e_report::format_number(format.outfmt) == 5)
+        {
+            crate::report::blast_xml::names::check_database_name("TBLASTN", database.name())?;
+        }
+    }
     let subject_path = match database {
         Some(_) => None,
         None => Some(
@@ -1855,6 +1866,10 @@ fn search(
                 // ```
                 // A run that stops at a query batch writes no epilog.
                 epilog: batches.stop.is_none() && failed.is_none(),
+            },
+            super::blast_xml::XmlValues {
+                expect: resolved.evalue,
+                soft_masking: resolved.soft_masking,
             },
         )?;
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);

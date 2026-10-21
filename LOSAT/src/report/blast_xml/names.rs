@@ -53,6 +53,12 @@ pub fn check_text(text: &[u8]) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// Refuses a `-db` name that NCBI's XML stream cannot write (a byte outside US-ASCII); each
+/// program checks it before its search.
+pub fn check_database_name(program: &str, name: &str) -> anyhow::Result<()> {
+    check_text(name.as_bytes()).map_err(|refusal| refusal.error(program, "a database name"))
+}
+
 /// `CDeflineGenerator().GenerateDefline(bh)` of a record with the FASTA title `title` (no
 /// flags), checked for what the XML stream can write.
 fn generated(title: &[u8], protein: bool) -> Result<Vec<u8>, Refusal> {
@@ -176,6 +182,27 @@ pub struct QueryText {
     pub message: Option<Vec<u8>>,
 }
 
+/// The `QueryText` of one query (`program` names the program in a refusal): its record's
+/// `local_id` (`Query_N`) and FASTA `title`, the query's warning messages and whether it has
+/// Seq-aligns.
+pub fn query_text(
+    program: &str,
+    local_id: &str,
+    title: &[u8],
+    protein: bool,
+    warnings: &[String],
+    has_hits: bool,
+) -> anyhow::Result<QueryText> {
+    let def =
+        xml_query_def(title, protein).map_err(|refusal| refusal.error(program, "a query title"))?;
+    let id = crate::report::query_warnings::warning_query_id(local_id.as_bytes(), title);
+    let message = xml_message(&id, warnings, has_hits);
+    if let Some(message) = &message {
+        check_text(message).map_err(|refusal| refusal.error(program, "a query title"))?;
+    }
+    Ok(QueryText { def, message })
+}
+
 /// The `QueryText` of every query of `records` (`program` names the program in a refusal):
 /// `warnings[q]` are the query's warning messages and `has_hits(q)` whether it has Seq-aligns.
 pub fn query_texts(
@@ -189,17 +216,14 @@ pub fn query_texts(
         .iter()
         .enumerate()
         .map(|(q_idx, record)| {
-            let def = xml_query_def(&record.title, protein)
-                .map_err(|refusal| refusal.error(program, "a query title"))?;
-            let id = crate::report::query_warnings::warning_query_id(
-                record.local_id.as_bytes(),
+            query_text(
+                program,
+                &record.local_id,
                 &record.title,
-            );
-            let message = xml_message(&id, &warnings[q_idx], has_hits(q_idx));
-            if let Some(message) = &message {
-                check_text(message).map_err(|refusal| refusal.error(program, "a query title"))?;
-            }
-            Ok(QueryText { def, message })
+                protein,
+                &warnings[q_idx],
+                has_hits(q_idx),
+            )
         })
         .collect()
 }

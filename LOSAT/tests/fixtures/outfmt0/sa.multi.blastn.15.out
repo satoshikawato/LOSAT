@@ -1,0 +1,364 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "gap_open": 5,
+        "gap_extend": 2,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "mq1 query matching several subjects",
+            "query_len": 600,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "msA",
+                    "title": "msA close homolog of base (1% divergence)"
+                  }
+                ],
+                "len": 700,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 1060.77,
+                    "score": 1175,
+                    "evalue": 0,
+                    "identity": 595,
+                    "query_from": 1,
+                    "query_to": 600,
+                    "query_strand": "Plus",
+                    "hit_from": 51,
+                    "hit_to": 650,
+                    "hit_strand": "Plus",
+                    "align_len": 600,
+                    "gaps": 0,
+                    "qseq": "TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCCCTCCAAACTTATACGATGCTCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGTTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACCGAACCCAATCGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGCCAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAGCAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGTTTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCCGCTAGCTTAAGGGCGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGCACGGCCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACATTTTG",
+                    "hseq": "TTCCCCCAGTATCTCGTCCTCGAATGAAGATCGATCTAGCCCTCCAAACTTATACGATGCTCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGGGCCTTTCGGCGTTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACCGAACCCAATCGTCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGCCAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAGCAGCGGTGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGTTTGGGAGCAACGGAGGCCTTGGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCCGCTAGCTTAAGGGCGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGCACGGCCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACATTTTG",
+                    "midline": "|||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 21.1234,
+                    "score": 22,
+                    "evalue": 0.83741,
+                    "identity": 11,
+                    "query_from": 27,
+                    "query_to": 37,
+                    "query_strand": "Plus",
+                    "hit_from": 88,
+                    "hit_to": 78,
+                    "hit_strand": "Minus",
+                    "align_len": 11,
+                    "gaps": 0,
+                    "qseq": "TAGATCGATCT",
+                    "hseq": "TAGATCGATCT",
+                    "midline": "|||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "msB",
+                    "title": "msB medium homolog of base (6% divergence), reverse complemented"
+                  }
+                ],
+                "len": 660,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 930.021,
+                    "score": 1030,
+                    "evalue": 0,
+                    "identity": 566,
+                    "query_from": 1,
+                    "query_to": 600,
+                    "query_strand": "Plus",
+                    "hit_from": 630,
+                    "hit_to": 31,
+                    "hit_strand": "Minus",
+                    "align_len": 600,
+                    "gaps": 0,
+                    "qseq": "TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCCCTCCAAACTTATACGATGCTCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGTTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACCGAACCCAATCGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGCCAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAGCAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGTTTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCCGCTAGCTTAAGGGCGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGCACGGCCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACATTTTG",
+                    "hseq": "TTCCCCCAGTATCGCGTACACGAATGTAGATCGTTCTAGCCCGCCAAACTTACACGATGCTCCATGTCGTACCTAAACGCCTCCGTCGAACAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGCTCTTCACTAAGTAAAGAGTGCCATAAGCGCTATCCATCGGGACCGAACCCCATCGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAACGGGATGCCAGTCCCTACCACATAACCCGAGCTCAATTACCGTCTAGCCTCATCCGTCCGCACCCTTCCGGGTCAAAAAGCAGCGGAGCGACGTCGGCTAAGCCATAGGCCCAAACCCGGAATATTGTTTGGGGGCGACGGAGGCCTTAGATAAGTTTGCAATCAGTTGAATACTCTAAAGCCAATGCCGCTAGCTTAAGGGTGCAAGCTCGTCGCGGCTGCCGCCGACTCAGTAATATTAAACGCGCACCGCCAAGACGTGATGTGCGCAGGCTTCGCGAAGCCTAAGGGAGGGAGTCCACATCTTG",
+                    "midline": "||||||||||||| ||| | ||||||||||||| |||||||| ||||||||| |||||||||  ||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||| |||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||| |||||||||||| |||||| ||||||||||||||||||||||||||||||||||| ||||||||||| ||||||||| ||||||||||||||||||||||||||||||| ||||||||||||||| ||||||| || |||||||||||||||||||||||| ||||||||| |||||||||||||||||||||||||||||| | ||| |||||| |||||||||||||||||||||||||||| ||||| ||||||||||||||||||||| |||||||||||||||||| | |||||||||| |||"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 25.6318,
+                    "score": 27,
+                    "evalue": 0.0687388,
+                    "identity": 15,
+                    "query_from": 563,
+                    "query_to": 578,
+                    "query_strand": "Plus",
+                    "hit_from": 53,
+                    "hit_to": 68,
+                    "hit_strand": "Plus",
+                    "align_len": 16,
+                    "gaps": 0,
+                    "qseq": "AGCCTTCGCGAAGCCT",
+                    "hseq": "AGGCTTCGCGAAGCCT",
+                    "midline": "|| |||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "msC",
+                    "title": "msC distant homolog of base (12% divergence)"
+                  }
+                ],
+                "len": 400,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 528.772,
+                    "score": 585,
+                    "evalue": 2.38233e-153,
+                    "identity": 357,
+                    "query_from": 101,
+                    "query_to": 500,
+                    "query_strand": "Plus",
+                    "hit_from": 1,
+                    "hit_to": 400,
+                    "hit_strand": "Plus",
+                    "align_len": 400,
+                    "gaps": 0,
+                    "qseq": "TTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGTTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACCGAACCCAATCGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGCCAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAGCAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGTTTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCCGCTAGCTTAAGGGCGAAAG",
+                    "hseq": "TTTGACAGTGCGCGAGGCAGTATTGAGGTCGTATCGTTCTGCGAGGCTGGCTGTAACAGCTCGTAGCAAGAAATCGGCATTCGTGCTTTTCGGCGTTCTTCAATAAGAAGAGTGTGCCATAAGCGTCATCCCTCGGGACCGAACCCAATCGCCGAATCGCACTCCTACTACCTGGGTTAGCCGGGGATTAAGCGCGATGTCAATGCCTACCGAATAACCCGGGCTCAATTACCGTCGAGCCTCATCCCTCCGCACCCTTACGGTTCAAACAGCAGCGGAGCGACGTCGGCTAAGCCCTTGGTCCCAACCCGGAATATAGTTTGGCACCAACAGAGGCGTTGGATACGTCTGCAGTCAGTGAAAAACTCTCAAGCCAATCCCGCTAGCTTAAGGGCGTAAG",
+                    "midline": "||||||||| |||||| | ||||||||||||| |||||||||||||| | |||||||||||||| ||||||||| ||||||||||| ||||||||||||||| |||| |||| ||||||||||||  |||| ||||||||||||||||||||||| ||||||| |||||||||||| ||||| ||||||||||| |||| || | ||||||| |||||||| |||||||||||||| |||||||||||||||||||||||||| ||||| |||||||||||||||||||||||||| | ||||| ||||||||||||||||||| | |||| ||||| || |||| || ||||||||||  |||||||| |||||||| ||||||||||||||||| |||"
+                  }
+                ]
+              },
+              {
+                "num": 4,
+                "description": [
+                  {
+                    "id": "msD",
+                    "title": "msD two copies of a base fragment, one on each strand"
+                  }
+                ],
+                "len": 540,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 343.926,
+                    "score": 380,
+                    "evalue": 5.61756e-98,
+                    "identity": 196,
+                    "query_from": 1,
+                    "query_to": 200,
+                    "query_strand": "Plus",
+                    "hit_from": 41,
+                    "hit_to": 240,
+                    "hit_strand": "Plus",
+                    "align_len": 200,
+                    "gaps": 0,
+                    "qseq": "TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCCCTCCAAACTTATACGATGCTCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCGTGCCTTTCGGCGTTCTT",
+                    "hseq": "TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCACTCCAAACTTATACGATGCTCACTGTCGTACCTTAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTGTATTGAGGTCGAGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCATTCATGCCTTTCGGCGTTCTT",
+                    "midline": "|||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 339.418,
+                    "score": 375,
+                    "evalue": 2.38865e-96,
+                    "identity": 195,
+                    "query_from": 301,
+                    "query_to": 500,
+                    "query_strand": "Plus",
+                    "hit_from": 500,
+                    "hit_to": 301,
+                    "hit_strand": "Minus",
+                    "align_len": 200,
+                    "gaps": 0,
+                    "qseq": "CAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAGCAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGTTTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCCGCTAGCTTAAGGGCGAAAG",
+                    "hseq": "CAGTTCCTACTGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTACGGGTCAAATAGAAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAGTATAGTTTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGCAGCTAGCTTAAGTGCGAAAG",
+                    "midline": "|||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||| |||||||"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 22.9267,
+                    "score": 24,
+                    "evalue": 0.239922,
+                    "identity": 12,
+                    "query_from": 27,
+                    "query_to": 38,
+                    "query_strand": "Plus",
+                    "hit_from": 78,
+                    "hit_to": 67,
+                    "hit_strand": "Minus",
+                    "align_len": 12,
+                    "gaps": 0,
+                    "qseq": "TAGATCGATCTA",
+                    "hseq": "TAGATCGATCTA",
+                    "midline": "||||||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 15,
+              "eff_space": 1912950,
+              "kappa": 0.41,
+              "lambda": 0.625,
+              "entropy": 0.78
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "gap_open": 5,
+        "gap_extend": 2,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "mq2 query with no significant hit",
+            "query_len": 300,
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 14,
+              "eff_space": 936936,
+              "kappa": 0.41,
+              "lambda": 0.625,
+              "entropy": 0.78
+            },
+            "message": "No hits found"
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "gap_open": 5,
+        "gap_extend": 2,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "mq3 query matching msF on the minus strand",
+            "query_len": 300,
+            "query_masking": [
+              {
+                "from": 92,
+                "to": 98
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "msF",
+                    "title": "msF contains the second query region"
+                  }
+                ],
+                "len": 560,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 471.064,
+                    "score": 521,
+                    "evalue": 2.74655e-136,
+                    "identity": 283,
+                    "query_from": 3,
+                    "query_to": 300,
+                    "query_strand": "Plus",
+                    "hit_from": 428,
+                    "hit_to": 131,
+                    "hit_strand": "Minus",
+                    "align_len": 298,
+                    "gaps": 0,
+                    "qseq": "TTGTGTTTACGTGTTGACGTCGAGACAAGGGCAACGTGTTACGTGCGCCCGTGACCTGTTGGACAGCCTGACGTGGCACTGTTATTCGGAcccccccGTCATTCTCTATAACCAGCCCAGTGTATCGCCCCACAGTGGGGTGTTCTCGGGGTTATGGTCAATACTGATATAACAAGAAAGCAGGCCAAGTCACGAATTTGTCGAGGAGGTTGCCACATGAGATGCGCACAAGTGCCGACACCCGGTGGCTGTACCAATACGCAGCCTGCCGACAGTTCTTCAGGAGGTGTAAGATGTT",
+                    "hseq": "TTGTGTTTACGTGTTGACGTCGAGACAAGGGCAGCGTGTTACGTGCGCCCGTGACCTGTTGGACAGCTTGACGTGGCACTGTTTTTCGGACGCCCCCGTCATTATCTATAACCAGCCCAGTCTATCGCCCCACAGTGGGGTGCTCTCGGGGTTATGGTCAATACTGATATAACAAGAACGCAGGCCAAGTACCGAATTTGTCCAGGAGGTTGCCAAGTGAGATGCGTACAAGTGCCGACACCCGGTGGCTGTACCAATAGGCAGCCTGCCGACAGTTCTTCAGGAGGTGTAAGATGTT",
+                    "midline": "||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||| ||||||||||||||| ||||||| ||||||||||| ||||||||||||||||| |||||||||||||||||||| ||||||||||||||||||||||||||||||||||| |||||||||||  |||||||||| ||||||||||||  ||||||||| |||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 14,
+              "eff_space": 936936,
+              "kappa": 0.41,
+              "lambda": 0.625,
+              "entropy": 0.78
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

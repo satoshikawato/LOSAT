@@ -1,0 +1,146 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "qn1",
+            "query_len": 480,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "sn1",
+                    "title": "sn1"
+                  }
+                ],
+                "len": 488,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 608.668,
+                    "score": 329,
+                    "evalue": 2.57589e-178,
+                    "identity": 394,
+                    "query_from": 31,
+                    "query_to": 453,
+                    "query_strand": "Plus",
+                    "hit_from": 46,
+                    "hit_to": 466,
+                    "hit_strand": "Plus",
+                    "align_len": 425,
+                    "gaps": 6,
+                    "qseq": "ATGTGGATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGGATTTGCTGGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAA--TGGTGAGATTCACAGATCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCCACTACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC",
+                    "hseq": "ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGCATTTGCTG----CCTAAGGATATGGCAAACCCAGGATTGTCGAAGACGGATACGTTGCATAGGTCAGCAATGGGTCTGTGGAGGCATAAGCATCTCAAGGGTATGTGTGTAACGTGGTGAGAATCACAGATCAATCTCTCCGGCATTGCAAACCTAACCATGACGCTAACTGCGAGAAATTTAAGATCTTCCACAACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC",
+                    "midline": "|||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||| ||||||||    |||||||| ||||||| |||||||| || |||||||||||||||||||| | ||| |||||||||||||| ||||||| ||| |||| ||||||||||||  |||||||| ||||||||||||||||||||||||| |||  |||||||||||||||||  |||||| |||||||||||||| ||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "sn2",
+                    "title": "sn2 subject nucleotide beta reverse"
+                  }
+                ],
+                "len": 477,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 448.01,
+                    "score": 242,
+                    "evalue": 5.94238e-130,
+                    "identity": 361,
+                    "query_from": 36,
+                    "query_to": 450,
+                    "query_strand": "Plus",
+                    "hit_from": 452,
+                    "hit_to": 41,
+                    "hit_strand": "Minus",
+                    "align_len": 418,
+                    "gaps": 9,
+                    "qseq": "GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGA--AGTA-TGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGGATTTGCTGGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAATGGTGAGATTCACAGATCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCCACTACATGGTGGGTCATGGGAGAACAGCATCTGAGGGC",
+                    "hseq": "GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGGGCTTAGTGAAGTGATGGACGATCCCAAAATACAGTATGGGCCAATGGCTGTAATGAAGGGCATGGAGCACTATTGCCCGCCCGCTAATCTGAGCTGGAAAGTCCGTATGTTTAGTTTTGGGTTTTCATCCGATATCCACGCTTGCAATTTGTGGCTTTGCTCGATCCCTAAGTAGATGGCACTCCCAGGATTGGGGAAGTCGAATACGTGG--T----CAGAAAACGGTCCGTGGATGCATAAGTATCCCAAGTGTAAGTGTGTACAGGTGTGATTCACAAATTACTCTCTCTGGCAATGGAAAATTAGCCATGACGCTAACTGTGAGAAACTTAAGATCCTCCACTACATGGTGGGTCATGGGAGAACAGCAGCTGAGGGC",
+                    "midline": "||||||||||||||||||||||||||||||||||| |||| || ||||||||||||| || ||||||| | ||||||| ||||||||||||||||||  |||| ||||||||  |||||| ||| ||||||||||||||| ||||   |||  || |||||| |||||||||||| |||||||||| ||| |||||| |||||||||| ||||||||  |||||||| | ||||| || |||||| |  |    ||||||  |||| |||||||||||||||||||||||||| |||||||  |||| |||||||| || | |||||| |||| |||||||||| |||||||||||||| |||||||||||||||| |||||||||||||||||||||||||||||||| ||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 12,
+              "eff_space": 434772,
+              "kappa": 0.46,
+              "lambda": 1.28,
+              "entropy": 0.85
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "qn2 unrelated nucleotide (no hits expected)",
+            "query_len": 90,
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 10,
+              "eff_space": 74800,
+              "kappa": 0.46,
+              "lambda": 1.28,
+              "entropy": 0.85
+            },
+            "message": "No hits found"
+          }
+        ]
+      }
+    }
+  }
+]
+}

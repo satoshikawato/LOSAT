@@ -1812,8 +1812,10 @@ Rebuilding less:
   (`database::x_titles_read_allow_blocks`, read in the search pool before the first block); with `-subject` no
   title is read. Otherwise, and for the cases `LOSAT_X_BPQBLOCK` leaves to the search of all queries, the search
   of all queries (memory as before: bp_hsap `-db` 212-218 MiB at one thread, 350-360 MiB at 16, against about
-  32 / 47-50 MiB for outfmt 6 in blocks). Reports identical; off = `LOSAT_X_BPQBLOCKSA=0`. ws numbers (max RSS and
-  wall, bp_hsap `-db`, outfmt 8 / 9 / 12, on and off, NCBI 2.17.0): TBD.
+  32 / 47-50 MiB for outfmt 6 in blocks). Reports identical; off = `LOSAT_X_BPQBLOCKSA=0`. ws (2026-10-21, node 1,
+  bp_hsap -db, median of 3 pairs; NCBI 2.17.0 one run in the same job): max RSS at 1 / 16 threads, on 32.5 / 48.6
+  MiB (outfmt 8), 32.5 / 48.6 (9), 32.0 / 48.6 (12), off 212.8 / 351.9, NCBI 76.0 / 139.9 (8), 73.8 / 131.0 (9),
+  75.2 / 151.2 (12); wall on/off x0.81-0.83 at 1 thread, x0.64-0.66 at 16; outputs equal NCBI's -num_threads 1.
 - `LOSAT_X_BPQBLOCKXML=1` (BLASTP, speed and memory; in the strict set from the pull request that added it,
   on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search of `LOSAT_X_BPQBLOCK` also for one outfmt 5
   (BLAST XML) report: block 0 writes the header (from the first query of the input) and its Iterations, each
@@ -1828,8 +1830,9 @@ Rebuilding less:
   outside ' ' ..= '~', reported or not; it then refuses (or completes) exactly where it does today. The CLI
   creates the `-out` file before any search (an empty file stays after such a refusal, in both paths); the block
   search's own file sink creates nothing before its first block. Reports
-  identical; off = `LOSAT_X_BPQBLOCKXML=0`. ws numbers (bp_hsap `-db` outfmt 5, on and off, NCBI 2.17.0; the
-  `-subject` cost of the names check): TBD.
+  identical; off = `LOSAT_X_BPQBLOCKXML=0`. ws (2026-10-21, same job): max RSS at 1 / 16 threads on 32.8 / 49.8 MiB,
+  off 212.9 / 350.6, NCBI 101.0 / 146.7; wall on/off x0.83 at 1 thread, x0.65 at 16; outputs equal NCBI's
+  -num_threads 1. The -subject cost of the names check was not measured.
 - `LOSAT_X_BPQBLOCKFMTSHADOW=1` shadow of the block search (turns `LOSAT_X_BPQBLOCKFMT`, `LOSAT_X_BPQBLOCKSA` and
   `LOSAT_X_BPQBLOCKXML` on; any format the
   block search takes): keeps a copy of the bytes the blocks write to the output and to standard error, then

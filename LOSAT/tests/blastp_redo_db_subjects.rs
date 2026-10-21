@@ -66,9 +66,10 @@ impl Run {
     }
 }
 
-/// A directory of this test.
-fn work_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("losat-bpredodbsubj-{}", std::process::id()));
+/// A directory of the test `test` (the tests of this file run in parallel).
+fn work_dir(test: &str) -> PathBuf {
+    let dir =
+        std::env::temp_dir().join(format!("losat-bpredodbsubj-{}-{test}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -173,7 +174,7 @@ fn blastp(query: &Path, db: &Path, threads: u32, vars: &[(&str, &str)], outfmt: 
 
 #[test]
 fn reports_with_reads_per_match_are_the_copys_reports() {
-    let dir = work_dir();
+    let dir = work_dir("reports");
     let db = subject_database(&dir);
     let all = fixture("MeenMJNV.faa");
     let one = one_query(&dir);
@@ -247,8 +248,7 @@ const SUFFIX: &str = "GLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQTLGQHD
 // formats) with the switch off and on.
 #[test]
 fn pyrrolysine_recounts_are_the_copys() {
-    let dir = work_dir().join("pyrrolysine");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = work_dir("pyrrolysine");
     let with_o_at_128 = format!("{}O{}", &SUFFIX[..100], &SUFFIX[101..]);
     let subjects = format!(
         ">sx X at 27\n{PREFIX}X{SUFFIX}\n>so O at 128\n{PREFIX}G{with_o_at_128}\n\

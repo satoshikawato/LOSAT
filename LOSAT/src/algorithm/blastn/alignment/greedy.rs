@@ -2819,7 +2819,7 @@ const X_GREEDY_BLOCK: usize = 256;
 ///
 /// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
 #[inline(always)]
-unsafe fn x_greedy_row_impl<const REVERSE: bool>(
+unsafe fn x_greedy_row_impl<const REVERSE: bool, const ARM: u8>(
     seq1: *const u8,
     seq2: *const u8,
     len1: i32,
@@ -2885,6 +2885,66 @@ unsafe fn x_greedy_row_impl<const REVERSE: bool>(
         if !inline_ok {
             for i in 0..block_len {
                 *slide.add(i) = -1;
+            }
+        } else if ARM != 0 {
+            // PROBE (line F s5 p6, LOSAT_X_F2GREEDY=1,2; not for merge): the same pass 2 as one scalar
+            // instruction sequence per diagonal (no lane extraction or assembly, one `tzcnt` / `lzcnt`).
+            // The empty asm keeps the loop scalar. Arm 2 tests the fence and the longest-run conditions
+            // with branches (taken for 0.02 % of the diagonals) instead of conditional moves.
+            let run7 = cold.longest_match_run.min(7);
+            // `inline_ok` means len1 >= 8 and len2 >= 8.
+            let l1 = (len1 - 8) as u32;
+            let l2 = (len2 - 8) as u32;
+            for i in 0..block_len {
+                std::arch::asm!("", options(nomem, nostack, preserves_flags));
+                let s2 = *start.add(i);
+                let a1 = s2 + (block_first + i as i32);
+                // unsigned compares catch both the negative and the too large offsets
+                let bad1 = (a1 as u32) > l1;
+                let bad2 = (s2 as u32) > l2;
+                let at1 = if bad1 { 0 } else { a1 as u32 };
+                let at2 = if bad2 { 0 } else { s2 as u32 };
+                let (w1, w2) = if REVERSE {
+                    (
+                        u64::from_le((seq1.add((l1 - at1) as usize) as *const u64).read_unaligned()),
+                        u64::from_le((seq2.add((l2 - at2) as usize) as *const u64).read_unaligned()),
+                    )
+                } else {
+                    (
+                        u64::from_le((seq1.add(at1 as usize) as *const u64).read_unaligned()),
+                        u64::from_le((seq2.add(at2 as usize) as *const u64).read_unaligned()),
+                    )
+                };
+                let diff = (w1 ^ w2) | (w1 & NOT_A_BASE);
+                let bits = if REVERSE {
+                    diff.leading_zeros()
+                } else {
+                    diff.trailing_zeros()
+                };
+                let shift = bits & 0x38;
+                let stop_byte = if REVERSE {
+                    (w2 >> (56 - shift)) as u8
+                } else {
+                    (w2 >> shift) as u8
+                };
+                // 8 when all eight positions match, which is above `run7` (<= 7)
+                let index = (bits >> 3) as i32;
+                let mut r = index;
+                if ARM == 1 {
+                    if index > run7 {
+                        r = -1;
+                    }
+                    if stop_byte == FENCE_SENTRY {
+                        r = -1;
+                    }
+                } else if index > run7 || stop_byte == FENCE_SENTRY {
+                    x_f2_cold();
+                    r = -1;
+                }
+                if bad1 | bad2 {
+                    r = -1;
+                }
+                *slide.add(i) = r;
             }
         } else {
             let longest_match_run = cold.longest_match_run;
@@ -3048,7 +3108,7 @@ unsafe fn x_greedy_row_any(
     st: &mut XGreedyRowState,
 ) -> bool {
     if reverse {
-        x_greedy_row_impl::<true>(
+        x_greedy_row_impl::<true, 0>(
             seq1,
             seq2,
             len1,
@@ -3061,7 +3121,7 @@ unsafe fn x_greedy_row_any(
             st,
         )
     } else {
-        x_greedy_row_impl::<false>(
+        x_greedy_row_impl::<false, 0>(
             seq1,
             seq2,
             len1,
@@ -3116,6 +3176,54 @@ unsafe fn x_greedy_row_avx2(
     )
 }
 
+/// PROBE (line F s5 p6; not for merge): `LOSAT_X_F2GREEDY` (read once; 0 = the code as it is).
+#[cfg(target_arch = "x86_64")]
+fn x_f2_greedy_arm() -> u8 {
+    use std::sync::OnceLock;
+    static ARM: OnceLock<u8> = OnceLock::new();
+    *ARM.get_or_init(|| {
+        std::env::var("LOSAT_X_F2GREEDY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    })
+}
+
+/// PROBE: a branch target the compiler is told is rarely taken (arm 2).
+#[cfg(target_arch = "x86_64")]
+#[cold]
+#[inline(never)]
+fn x_f2_cold() {}
+
+/// PROBE (line F s5 p6; not for merge): `x_greedy_row_avx2` with the scalar pass 2 of arm `ARM`.
+///
+/// SAFETY: as `x_greedy_row_avx2`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,bmi1,bmi2,lzcnt")]
+unsafe fn x_greedy_row_avx2_f2<const ARM: u8>(
+    reverse: bool,
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    previous: &[i32],
+    current: &mut [i32],
+    tmp_diag_lower: i32,
+    diag_origin: i32,
+    xdrop_score: i32,
+    st: &mut XGreedyRowState,
+) -> bool {
+    if reverse {
+        x_greedy_row_impl::<true, ARM>(
+            seq1, seq2, len1, len2, previous, current, tmp_diag_lower, diag_origin, xdrop_score, st,
+        )
+    } else {
+        x_greedy_row_impl::<false, ARM>(
+            seq1, seq2, len1, len2, previous, current, tmp_diag_lower, diag_origin, xdrop_score, st,
+        )
+    }
+}
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537
 /// ```c
 ///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
@@ -3148,6 +3256,22 @@ unsafe fn x_greedy_row(
                 && std::is_x86_feature_detected!("bmi2")
                 && std::is_x86_feature_detected!("lzcnt")
         }) {
+            // PROBE (LOSAT_X_F2GREEDY): the scalar pass 2 arms.
+            match x_f2_greedy_arm() {
+                1 => {
+                    return x_greedy_row_avx2_f2::<1>(
+                        reverse, seq1, seq2, len1, len2, previous, current, tmp_diag_lower,
+                        diag_origin, xdrop_score, st,
+                    )
+                }
+                2 => {
+                    return x_greedy_row_avx2_f2::<2>(
+                        reverse, seq1, seq2, len1, len2, previous, current, tmp_diag_lower,
+                        diag_origin, xdrop_score, st,
+                    )
+                }
+                _ => {}
+            }
             return x_greedy_row_avx2(
                 reverse,
                 seq1,

@@ -1559,7 +1559,7 @@ fn csr_on_pool(
     helper_array: &mut [u32],
     chunk: usize,
 ) -> super::x_dc_csr::Csr {
-    use super::x_dc_csr::{assemble, prefetch, sum_cells, SpinBarrier};
+    use super::x_dc_csr::{assemble, prefetch, sum_cells, Poison, SpinBarrier};
     let chunk = chunk.max(1);
     let (block_shift, mut owner) = plan(cells, pv_array_bts, parts);
     debug_assert!(
@@ -1577,7 +1577,15 @@ fn csr_on_pool(
         let e = &mut own[o as usize];
         *e = (r.start, if e.1 == 0 { r.end } else { e.1 });
     }
+    // Once per table: the owners' cells cover the table (every element of `offsets` is written),
+    // and the positions, which bound the words, fit the `u32` offsets.
+    assert_eq!(own.iter().map(|&(c0, c1)| c1 - c0).sum::<usize>(), cells);
+    assert!(pv_array_bts >= 5 && helper_array.len() == cells >> 11);
     let (segments, total) = segments(words);
+    assert!(
+        total <= u32::MAX as usize,
+        "DCCSR: more positions than u32 offsets"
+    );
     // The reading-only `Fill`: `read::<false>` uses only the words, the segments, the owners and
     // the buckets.
     let mut first: Vec<Bucket> = (0..parts * parts).map(|_| Bucket::default()).collect();
@@ -1639,6 +1647,7 @@ fn csr_on_pool(
     let (fill, own, bar) = (&fill, &own, &bar);
     rayon::broadcast(|ctx| {
         let o = ctx.index();
+        let _poison = Poison(bar);
         let (ob, qb, pv, helper, own_w) = (ob, qb, pv, helper, own_w);
         let (c0, c1) = own[o];
         // SAFETY (all of the job's accesses): reader `o` uses only the buckets `(o, *)` and owner

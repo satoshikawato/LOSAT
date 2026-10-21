@@ -1031,6 +1031,12 @@ impl TwoStageLookup {
     /// (LOSAT_X_DCCSR) has no chains: its scans read `DiscTemplates::x_csr`.
     #[inline(always)]
     pub fn for_each_hit(&self, lut_kmer: u64, callback: impl FnMut(u32)) {
+        debug_assert!(
+            self.disc
+                .as_ref()
+                .is_none_or(|d| d.x_csr.is_none() || !self.mb_lookup.hashtable.is_empty()),
+            "a CSR table (LOSAT_X_DCCSR) has no chains"
+        );
         self.mb_lookup.for_each_hit(lut_kmer, callback)
     }
 

@@ -308,6 +308,7 @@ export LOSAT_X_COMPFAST=1
 export LOSAT_X_CTXFAST=1
 export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
+export LOSAT_X_DCCSR=1
 export LOSAT_X_DEKKER=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DISCLUTPAR=1
@@ -2543,6 +2544,37 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_PAIRPARDISC`, `LOSAT_X_QBATCHPAR` slots and split query chunks, megablast with and without a
   template, the timing and split lines, and AP027131 against NZ_CP006932 with one and two templates,
   whose tables span two chunks).
+- `LOSAT_X_DCCSR=1` (BLASTN `-task dc-megablast` with one template, `coding` or `optimal`, and megablast
+  given `-template_type`, `-template_length` and `-word_size` 11 or 12; `-subject` and `-db`, any thread count;
+  in the strict set from the pull request that added it, 2026-10-21: `LOSAT_X_DCCSR=0` or `LOSAT_X_DEFAULT=0`
+  turn it off) lays out the first template's chains of a discontiguous megablast table as CSR
+  (`blastn/x_dc_csr.rs`, argument in its header): `offsets[cell] .. offsets[cell + 1]` of `qs` holds the
+  cell's 1-based query offsets in the chain's order (newest first), built from the fill's own words by a
+  count pass, a running sum (which also makes the fill's presence vector and longest-chain counters from
+  the counts) and a place pass, instead of NCBI's `hashtable` / `next_pos` (`s_FillDiscMBTable`), which
+  are then not allocated: `qs` has one element per word where `next_pos` had one per query position, so
+  the table takes no more memory. Only tables whose word loop reads at least a quarter as many positions
+  as the table has cells (1,048,576 at word size 11) get it; smaller ones, such as NCBI's one-query
+  batches, keep the chains, which fit the caches there. Two-template tables (`coding_and_optimal`) keep
+  their chains. With a search pool of two threads or more (where `LOSAT_X_DISCLUTPAR`'s fill would run)
+  the table is built on the pool (`x_disc_lookup_par::csr`): the fill's readers put the words into the
+  owners' buckets, once to count and once to place, and each thread owns a contiguous run of cell blocks;
+  the whole build is one `rayon::broadcast` whose threads pass a spin barrier between the reading and the
+  owners' work of each chunk (one `rayon::scope` per phase and chunk started its last job about 0.15 ms
+  late each time; v4-R R16). The scans read a word's run instead of walking its chain: the strip scan of
+  `LOSAT_X_PAIRPARDISC` and of its diagonal-array stage, and the reference scan (one thread, `-db` with
+  subjects searched by several threads, and the cases outside those stages) put the words through a FIFO
+  of 32 words that prefetches each word's `offsets` element on entry and the first and last cache line of
+  its run 16 words later (x86_64; elsewhere the FIFO only delays the words); the words, pairs and their
+  order are the chain walk's. The masked-word test of `s_TypeOfWord` (`contains_hit`) searches the run.
+  The `[TIMING] disc_lookup_build` interval includes the CSR builds (in `loop` or `pool_fill` of
+  `disc_lookup_split`; its phase times count the chain fills only), and `[TIMING] disc_lookup_csr:
+  builds= parallel= words=` counts them. `LOSAT_X_DISCLUTPARSHADOW` compares the chain fills only.
+  Shadow: `LOSAT_X_DCCSRSHADOW=1` (implies the switch) builds the CSR of every one-template table whatever
+  its size and the chains too, compares every cell's run with its chain (and that it decreases), the
+  presence vector, the counters and the longest chain, and a pool build with the serial one; the scans then
+  read the CSR. Exit line `[X_SHADOW] DCCSR tables= pool= cells= words= diffs=0 identical`; a difference
+  prints `DIFFERENT` and panics.
 - `LOSAT_X_PAIRPARDISC=1` (in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; it does not depend on `LOSAT_X_PAIRPAR`) blastn `-task dc-megablast`, one query-subject pair
   on a pool of 2+ threads: the two-hit seed stage of a subject chunk with a discontiguous megablast
   table (one or two templates) and the diagonal hash (query block over 8000 letters, `scan_range`

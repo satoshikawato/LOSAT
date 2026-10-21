@@ -377,8 +377,9 @@ pub(super) fn build(
     pv_array_bts: usize,
     helper_array: &mut [u32],
 ) -> Csr {
-    debug_assert!(!words.two_templates);
-    debug_assert_eq!(helper_array.len(), cells >> 11);
+    // Once per table: the bounds the unchecked writes below rely on.
+    assert!(!words.two_templates && cells % 2048 == 0 && pv_array_bts >= 5);
+    assert_eq!(helper_array.len(), cells >> 11);
     let mut offsets: Vec<u32> = Vec::with_capacity(cells + 1);
     let ob = offsets.as_mut_ptr();
     // SAFETY: `cells + 1` elements of the capacity, written here before anything reads them.
@@ -442,11 +443,26 @@ pub(super) fn build(
 /// No NCBI counterpart (scheduling only): a spin barrier for the `n` threads of one
 /// `rayon::broadcast` (`x_disc_lookup_par::csr`): the last of the `n` arrivals resets the count
 /// and bumps the generation, the others wait until it changes (spinning, then yielding the CPU
-/// on native targets).
+/// on native targets; WebAssembly only spins). A thread that panics between barriers (`Poison`,
+/// unwinding builds only: the release profile aborts) makes the waiting threads panic instead of
+/// waiting for it forever.
 pub(super) struct SpinBarrier {
     n: usize,
     count: AtomicUsize,
     generation: AtomicUsize,
+    poisoned: std::sync::atomic::AtomicBool,
+}
+
+/// Held by each thread of a build that waits at a `SpinBarrier`: poisons the barrier when the
+/// thread unwinds.
+pub(super) struct Poison<'a>(pub(super) &'a SpinBarrier);
+
+impl Drop for Poison<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0.poisoned.store(true, Ordering::Release);
+        }
+    }
 }
 
 impl SpinBarrier {
@@ -455,6 +471,7 @@ impl SpinBarrier {
             n,
             count: AtomicUsize::new(0),
             generation: AtomicUsize::new(0),
+            poisoned: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -467,6 +484,9 @@ impl SpinBarrier {
         }
         let mut spins = 0u32;
         while self.generation.load(Ordering::Acquire) == g {
+            if self.poisoned.load(Ordering::Acquire) {
+                panic!("DCCSR: another thread of the table's build panicked");
+            }
             if cfg!(target_arch = "wasm32") || spins < 1 << 16 {
                 std::hint::spin_loop();
                 spins += 1;
@@ -579,6 +599,10 @@ pub(super) fn shadow_check(
                     &csr.run(cell)[..csr.run(cell).len().min(8)],
                     &chain[..chain.len().min(8)]
                 ));
+                break;
+            }
+            if csr.run(cell).windows(2).any(|w| w[0] <= w[1]) {
+                diffs.push(format!("cell {cell} run not decreasing"));
                 break;
             }
             if let Some(&q) = chain.first() {

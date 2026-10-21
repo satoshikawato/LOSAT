@@ -40,11 +40,21 @@
 //! `exp/f2-tbn-scan` ff918e61: HsG_p1 x hsap_dna `-db` n1 whole-run cycles x0.703 of dev, with
 //! the offset pairs and `s_range` of every call and the output equal.
 //!
+//! Both stages have an AVX2 form and a plain-loop form (the same values; the plain index loop is
+//! left to the compiler's vectorizer). On the workstation (one core, the scan before this switch =
+//! LOSAT_X_TBNSCANBF) the AVX2 forms take x0.75 of the time of one protein x the human genome and
+//! x0.98-0.99 where most words are candidates (many proteins x a genome, 55 proteins x 16S); the
+//! plain loops take x0.79 and x0.83 (the LOSAT Web serial reactor, one protein x E. coli) of the
+//! time where few words are candidates, but x1.01-1.06 where most are: their copy of a cell's hits
+//! costs more than the copy before. So by default the switch scans this way where the CPU has
+//! AVX2 only.
+//!
 //! The switch is read once. It is in the strict set (`utils/xswitch.rs`): on unless
-//! `LOSAT_X_TBNSCANBYTE=0`, or `LOSAT_X_DEFAULT=0` and it is not set. On x86-64 with AVX2 the
-//! scan uses the AVX2 forms of both stages; elsewhere, and with `LOSAT_X_TBNSCANBYTE=2`, the plain
-//! loops (same values). A table of another shape is scanned as before (LOSAT_X_TBNSCANBF or NCBI's
-//! loop). With `LOSAT_X_TBNSCANBYTESHADOW` set (any value; it turns the path on) every scan call
+//! `LOSAT_X_TBNSCANBYTE=0`, or `LOSAT_X_DEFAULT=0` and it is not set; on, it takes the AVX2 forms
+//! of both stages on x86-64 with AVX2, and changes nothing elsewhere. `LOSAT_X_TBNSCANBYTE=2` takes
+//! the plain loops on any CPU. A table of another shape is scanned as before (LOSAT_X_TBNSCANBF or
+//! NCBI's loop). With `LOSAT_X_TBNSCANBYTESHADOW` set (any value; it turns the path on) every scan call
+//! (the AVX2 forms where the CPU has AVX2 unless `LOSAT_X_TBNSCANBYTE=2`, else the plain loops)
 //! also runs NCBI's loop on a second offset array and the count, the pairs and `s_range` must be
 //! equal; `main` prints `[X_SHADOW] TBNSCANBYTE calls_compared= pairs_compared=` at exit when the
 //! unit path scanned any range this way. With `LOSAT_X_STATS` set, `main` prints
@@ -92,21 +102,22 @@ impl XScanByte {
 // No NCBI counterpart: reads LOSAT_X_TBNSCANBYTE and LOSAT_X_TBNSCANBYTESHADOW once and detects
 // AVX2; it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan of the unit path. LOSAT_X_TBNSCANBYTE is a switch of
-/// the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; `2` takes the
-/// plain loops also where AVX2 is there. The shadow wins.
+/// the strict set, on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. On, it takes the
+/// AVX2 forms where the CPU has AVX2 and is off elsewhere (the plain loops lose where most words
+/// are candidates, see the module text); `2` takes the plain loops on any CPU. The shadow wins: it
+/// runs the AVX2 forms where AVX2 is there (unless `2`), else the plain loops.
 pub(super) fn x_scan_byte() -> XScanByte {
     static MODE: std::sync::OnceLock<XScanByte> = std::sync::OnceLock::new();
     *MODE.get_or_init(|| {
         let shadow = std::env::var_os("LOSAT_X_TBNSCANBYTESHADOW").is_some();
         let value = crate::utils::xswitch::value("LOSAT_X_TBNSCANBYTE", 1..=2, 1);
-        if !shadow && value.is_none() {
-            return XScanByte::Off;
-        }
         let avx2 = value != Some(2) && avx2_detected();
         if shadow {
             XScanByte::Shadow { avx2 }
-        } else {
+        } else if value == Some(2) || (value.is_some() && avx2) {
             XScanByte::On { avx2 }
+        } else {
+            XScanByte::Off
         }
     })
 }

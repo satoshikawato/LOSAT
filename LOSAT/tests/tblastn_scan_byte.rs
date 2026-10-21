@@ -19,8 +19,9 @@
 //! The switch's scan returns NCBI's offset pairs and scan range on every call (the unit test
 //! `x_scan_byte_equals_ncbi_scan_on_random_subjects` compares the calls of both forms), so a search
 //! with it gives the report of the scan before it (`LOSAT_X_TBNSCANBYTE=0`) and takes as many scan
-//! calls. The switch is on by default (the AVX2 forms where the CPU has AVX2, the plain loops with
-//! `=2` and elsewhere), off with `=0`, and off with `LOSAT_X_DEFAULT=0` unless its variable is set;
+//! calls. The switch is on by default where the CPU has AVX2 (the AVX2 forms; elsewhere the
+//! default scans as before, and `=2` takes the plain loops on any CPU), off with `=0`, and off with
+//! `LOSAT_X_DEFAULT=0` unless its variable is set;
 //! it acts in the unit path (`LOSAT_X_TBNPAR`). These tests compare the reports and read the
 //! `[X_STATS] TBNSCANBYTE units= calls= avx2=` line (`LOSAT_X_STATS=1`), the
 //! `[X_STATS] TBNSCANBF` line of the scans before, and the `[X_SHADOW] TBNSCANBYTE` line of
@@ -146,7 +147,7 @@ const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
 const UNIT_PATH: (&str, &str) = ("LOSAT_X_TBNPAR", "1");
 
 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (above). Each search gives the
-// report of the scan before the switch with the switch on (the default; both forms) and in the
+// report of the scan before the switch with the switch on (the default; =2, the plain loops) and in the
 // shadow, at one and four threads; the lines say which scan ran, and at one thread every scan took
 // the same number of calls. The search of all proteins took more calls than units: the offset
 // array filled.
@@ -165,17 +166,32 @@ fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
             assert!(calls > units, "{query:?}: the offset array never filled");
         }
 
-        for (variables, form) in [(&[][..], avx2()), (&[PLAIN][..], false)] {
-            let (report, stderr) = tblastn(query, 1, variables);
-            assert!(
-                report == expected,
-                "{query:?} {variables:?}: the report changed"
-            );
+        // The default scans this way where the CPU has AVX2 (with the AVX2 forms), as before
+        // elsewhere; `=2` takes the plain loops on any CPU.
+        let (report, stderr) = tblastn(query, 1, &[]);
+        assert!(
+            report == expected,
+            "{query:?}: the default changed the report"
+        );
+        if avx2() {
             let (counts, ran_avx2) = byte_scans(&stderr).expect("a TBNSCANBYTE line");
-            assert_eq!(counts, [units, calls], "{query:?} {variables:?}");
-            assert_eq!(ran_avx2, form, "{query:?} {variables:?}");
-            assert_eq!(earlier_scans(&stderr), None, "{query:?} {variables:?}");
+            assert_eq!(counts, [units, calls], "{query:?}");
+            assert!(ran_avx2, "{query:?}: the default takes the AVX2 forms");
+            assert_eq!(earlier_scans(&stderr), None, "{query:?}");
+        } else {
+            assert_eq!(
+                byte_scans(&stderr),
+                None,
+                "{query:?}: no AVX2, the scan before"
+            );
+            assert_eq!(earlier_scans(&stderr), Some([units, calls]), "{query:?}");
         }
+        let (report, stderr) = tblastn(query, 1, &[PLAIN]);
+        assert!(report == expected, "{query:?}: =2 changed the report");
+        let (counts, ran_avx2) = byte_scans(&stderr).expect("a TBNSCANBYTE line with =2");
+        assert_eq!(counts, [units, calls], "{query:?}: =2");
+        assert!(!ran_avx2, "{query:?}: =2 takes the plain loops");
+        assert_eq!(earlier_scans(&stderr), None, "{query:?}: =2");
 
         let (report, stderr) = tblastn(query, 1, &[SHADOW]);
         assert!(
@@ -199,7 +215,10 @@ fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
                     byte_scans(&stderr).is_some(),
                     earlier_scans(&stderr).is_some()
                 ],
-                [variables.is_empty(), !variables.is_empty()],
+                [
+                    variables.is_empty() && avx2(),
+                    !(variables.is_empty() && avx2())
+                ],
                 "{query:?} {variables:?}"
             );
         }
@@ -209,7 +228,8 @@ fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
 // No NCBI counterpart: where the switch acts. With `LOSAT_X_DEFAULT=0` the reference loop searches
 // each subject, no unit of the unit path is scanned (no line), and the variable changes nothing.
 // With `LOSAT_X_TBNPAR` set as well the unit path runs again, and the switch is off unless its
-// variable (or the shadow's) is set, as before it joined the set.
+// variable (or the shadow's) is set, as before it joined the set; `=1` then scans this way where
+// the CPU has AVX2, `=2` and the shadow on any CPU.
 #[test]
 fn the_switch_acts_in_the_unit_path_only() {
     let [one, _] = queries();
@@ -224,13 +244,14 @@ fn the_switch_acts_in_the_unit_path_only() {
     assert!(report == expected);
     assert_eq!(byte_scans(&stderr), None);
     assert!(earlier_scans(&stderr).is_some());
-    for variables in [
-        &[PREVIOUS, UNIT_PATH, ON][..],
-        &[PREVIOUS, UNIT_PATH, SHADOW],
+    for (variables, byte) in [
+        (&[PREVIOUS, UNIT_PATH, ON][..], avx2()),
+        (&[PREVIOUS, UNIT_PATH, PLAIN], true),
+        (&[PREVIOUS, UNIT_PATH, SHADOW], true),
     ] {
         let (report, stderr) = tblastn(one, 1, variables);
         assert!(report == expected, "{variables:?}");
-        assert!(byte_scans(&stderr).is_some(), "{variables:?}");
-        assert_eq!(earlier_scans(&stderr), None, "{variables:?}");
+        assert_eq!(byte_scans(&stderr).is_some(), byte, "{variables:?}");
+        assert_eq!(earlier_scans(&stderr).is_some(), !byte, "{variables:?}");
     }
 }

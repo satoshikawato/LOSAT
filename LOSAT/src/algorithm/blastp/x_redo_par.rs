@@ -154,7 +154,6 @@ use super::kappa::{
     x_seg_share, BlastRedoAlignParams, BlastpKappaQueryWorkspace, BlastpKappaSubjectRangeCache,
     BlastpPostprocessResult, XSharedSubjectRanges,
 };
-use super::x_redo_subjects::XRedoSubjects;
 
 /// EXPERIMENT (LOSAT_X_BPREDOPAR): the mode the variables select.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -227,7 +226,7 @@ pub(crate) struct XRedoParSearch<'a, P> {
     pub query_nomask: fn(&QueryContext) -> &[u8],
     pub search_spaces: &'a [SearchSpace],
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): or a database's listed subjects, read per match.
-    pub subjects: XRedoSubjects<'a>,
+    pub subjects: super::x_redo_subjects::XRedoSubjects<'a>,
     /// Each query's batch (`kappa_query_batches`): the heaps its early termination test reads.
     pub query_batches: &'a [Range<usize>],
     pub matrix: ScoringMatrix,
@@ -2598,7 +2597,9 @@ mod tests {
                         contexts: &fixture.contexts,
                         query_nomask: query_raw,
                         search_spaces: &fixture.search_spaces,
-                        subjects: XRedoSubjects::Encoded(&fixture.subjects),
+                        subjects: crate::algorithm::blastp::x_redo_subjects::XRedoSubjects::Encoded(
+                            &fixture.subjects,
+                        ),
                         query_batches: &fixture.batches,
                         matrix: ScoringMatrix::Blosum62,
                         gapped_params: &fixture.gapped_params,

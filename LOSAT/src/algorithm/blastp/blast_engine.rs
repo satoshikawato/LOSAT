@@ -9142,9 +9142,11 @@ fn run_resolved_in_pool(
         )?),
         None => None,
     };
-    let redo_subjects = match (listed_subjects.as_ref(), database) {
+    // The subject set of a `-subject` search, which the reports read after the redo.
+    let subject_set: &[EncodedProtein] = &subjects;
+    let subjects = match (listed_subjects.as_ref(), database) {
         (Some(listed), Some(database)) => listed.redo_subjects(database),
-        _ => super::x_redo_subjects::XRedoSubjects::Encoded(&subjects),
+        _ => super::x_redo_subjects::XRedoSubjects::Encoded(subject_set),
     };
 
     let merge_sort_start = blastp_timing_start(timing_enabled);
@@ -9394,7 +9396,7 @@ fn run_resolved_in_pool(
                 "kappa-query-redo",
                 args.num_threads,
                 blastp_num_threads,
-                redo_subjects.len(),
+                subjects.len(),
                 kappa_parallel_query_indices.len(),
                 total_db_len,
             )
@@ -9425,7 +9427,7 @@ fn run_resolved_in_pool(
                 "kappa-match-redo",
                 args.num_threads,
                 blastp_num_threads,
-                redo_subjects.len(),
+                subjects.len(),
                 match_jobs,
                 total_db_len,
             ) {
@@ -9473,7 +9475,7 @@ fn run_resolved_in_pool(
         contexts: &contexts,
         query_nomask: query_nomask_sequence,
         search_spaces: &search_spaces,
-        subjects: redo_subjects,
+        subjects,
         query_batches: &kappa_query_batches,
         matrix: args.scoring.matrix,
         gapped_params: &gapped_params,
@@ -9497,7 +9499,7 @@ fn run_resolved_in_pool(
             "kappa-redo-par",
             args.num_threads,
             blastp_num_threads,
-            redo_subjects.len(),
+            subjects.len(),
             super::x_redo_par::x_matches(&preliminary_hit_lists),
             total_db_len,
         );
@@ -9629,7 +9631,7 @@ fn run_resolved_in_pool(
                             let s_idx = local_match.oid;
                             let redo_align_params = build_redo_align_params(q_idx)?;
                             // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here.
-                            let subject = redo_subjects.read(s_idx)?;
+                            let subject = subjects.read(s_idx)?;
                             let subject_raw = subject.residues();
                             let query_workspace = query_workspace.get_or_init(|| {
                                 build_query_workspace(
@@ -9888,7 +9890,7 @@ fn run_resolved_in_pool(
                             // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after
                             // the test, as NCBI reads it; an error is kept for the replay as the
                             // redo's own errors are (below).
-                            let subject = match redo_subjects.read(s_idx) {
+                            let subject = match subjects.read(s_idx) {
                                 Ok(subject) => subject,
                                 Err(error) if replayed => {
                                     kept_for_replay.push((match_position, Err(error)));
@@ -9907,7 +9909,7 @@ fn run_resolved_in_pool(
                                 x_newton_lanes_prefetch_matches(
                                     &preliminary_hit_list.hsplist_array[match_position
                                         ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
-                                    redo_subjects,
+                                    subjects,
                                     std::slice::from_ref(if alone_in_batch {
                                         &redone_match
                                     } else {
@@ -10155,7 +10157,7 @@ fn run_resolved_in_pool(
                 }
                 // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after the test,
                 // as NCBI reads it.
-                let subject = redo_subjects.read(s_idx)?;
+                let subject = subjects.read(s_idx)?;
                 let subject_raw = subject.residues();
 
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
@@ -10175,7 +10177,7 @@ fn run_resolved_in_pool(
                     x_newton_lanes_prefetch_matches(
                         &preliminary_hit_list.hsplist_array[x_match_position
                             ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
-                        redo_subjects,
+                        subjects,
                         &redone_matches[batch.clone()],
                         &query_workspace,
                         &composition_workspace,
@@ -10339,7 +10341,7 @@ fn run_resolved_in_pool(
     }
     let subjects: &[EncodedProtein] = match listed_subjects.as_ref() {
         Some(listed) => &listed.encoded,
-        None => &subjects,
+        None => subject_set,
     };
     let listed_titles = match (listed_subjects.as_ref(), database) {
         (Some(listed), Some(database)) => Some(match x_listed_lean {

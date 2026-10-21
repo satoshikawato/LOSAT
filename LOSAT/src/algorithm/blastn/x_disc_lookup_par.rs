@@ -249,7 +249,6 @@ use super::{
     DiscWords, PvArrayType, BLAST2NA_MASK, PV_ARRAY_MASK,
 };
 use crate::algorithm::blastn::disc_lookup::compute_discontiguous_index;
-#[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -1832,6 +1831,45 @@ impl std::fmt::Display for XR16Phase {
 #[derive(Default)]
 struct XR16Codes(Vec<u32>);
 
+/// EXPERIMENT (exp/r16-csr, R16 `bar`): a spin barrier for the `n` threads of one broadcast (sense
+/// by generation: the last of the `n` arrivals resets the count and bumps the generation, the
+/// others spin until it changes). A thread stuck for 60 s aborts the process (a probe must not
+/// hold the measurement node).
+struct XR16Barrier {
+    n: usize,
+    count: AtomicUsize,
+    generation: AtomicUsize,
+}
+
+impl XR16Barrier {
+    fn new(n: usize) -> Self {
+        Self {
+            n,
+            count: AtomicUsize::new(0),
+            generation: AtomicUsize::new(0),
+        }
+    }
+
+    fn wait(&self) {
+        let g = self.generation.load(Ordering::Acquire);
+        if self.count.fetch_add(1, Ordering::AcqRel) + 1 == self.n {
+            self.count.store(0, Ordering::Relaxed);
+            self.generation.store(g.wrapping_add(1), Ordering::Release);
+            return;
+        }
+        let t = std::time::Instant::now();
+        let mut spins = 0u32;
+        while self.generation.load(Ordering::Acquire) == g {
+            std::hint::spin_loop();
+            spins = spins.wrapping_add(1);
+            if spins & 0xffff == 0 && t.elapsed().as_secs() > 60 {
+                eprintln!("R16 bar: a barrier waited 60 s");
+                std::process::abort();
+            }
+        }
+    }
+}
+
 /// EXPERIMENT (exp/r16-csr, R16 `rdx` / `c4` / `c8`): the words that end at the stream positions
 /// `[s0, s1)` of the first template, read by the loop of `Fill::read` (the same segments, resets,
 /// `accum`, index and owner), each handed to `sink(owner, index, ecode)` in reading order.
@@ -2036,6 +2074,211 @@ pub(super) fn x_r15_csr_par(
     let [mut pz, mut pcr, mut pc, mut ps1, mut ps2, mut ppr, mut pp, mut prd] =
         [XR16Phase::default(); 8];
     let pre_ns = t0.elapsed().as_nanos();
+    // R16 `bar`: the whole build as one broadcast; the threads pass `XR16Barrier` between the
+    // phases (the same phases, jobs and order as below: zero; per chunk read, count; the owners'
+    // bases (thread 0); the sum from them; per chunk read, place).
+    if m.bar {
+        assert!(
+            sum1 && m.sumlean && !(m.c4 || m.c8 || m.rdx || m.psplit || m.qpf || m.cpf || m.sum0),
+            "R16 bar: with cblk,sum1,sumlean (and cpfc) only"
+        );
+        assert_eq!(
+            rayon::current_num_threads(),
+            parts,
+            "R16 bar: one pool thread per part"
+        );
+        let bar = XR16Barrier::new(parts);
+        let mut spv = vec![0u32; ph.pv.len()];
+        let mut shp = vec![0u32; ph.helper.len()];
+        let (spv_s, shp_s) = (Shared::new(&mut spv), Shared::new(&mut shp));
+        let mut bases = vec![0u32; parts];
+        let bases_s = Shared::new(&mut bases);
+        let chunks = total.div_ceil(CHUNK_POSITIONS);
+        let span2 = |c: usize, a: usize| {
+            let start = c * CHUNK_POSITIONS;
+            let end = total.min(start + CHUNK_POSITIONS);
+            (
+                start + (end - start) * a / parts,
+                start + (end - start) * (a + 1) / parts,
+            )
+        };
+        let begun = Instant::now();
+        type Log = (Vec<(u8, u64, u64)>, Vec<u64>);
+        let logs: Vec<Log> = rayon::broadcast(|ctx| {
+            let i = ctx.index();
+            let (offsets, qs, spv_s, shp_s, bases_s, own_w) =
+                (offsets, qs, spv_s, shp_s, bases_s, own_w);
+            let ns = || begun.elapsed().as_nanos() as u64;
+            let mut log: Vec<(u8, u64, u64)> = Vec::with_capacity(4 * chunks + 8);
+            let mut exits: Vec<u64> = Vec::with_capacity(4 * chunks + 8);
+            let mut step = |kind: u8, work: &mut dyn FnMut()| {
+                let s0 = ns();
+                work();
+                let e0 = ns();
+                log.push((kind, s0, e0));
+                bar.wait();
+                if i == 0 {
+                    exits.push(ns());
+                }
+            };
+            step(0, &mut || {
+                for b in own(i) {
+                    let r = cells_of(b);
+                    // SAFETY: the cells of `i`'s blocks of `offsets` are this thread's.
+                    unsafe { std::ptr::write_bytes(offsets.ptr.add(r.start), 0, r.len()) };
+                }
+            });
+            let mut got = 0u64;
+            for c in 0..chunks {
+                let (s0, s1) = span2(c, i);
+                // SAFETY: thread `i` uses only the buckets `(i, *)`.
+                step(1, &mut || unsafe {
+                    fill.read::<false>(i, s0, s1, [false; 3])
+                });
+                step(2, &mut || {
+                    for a in 0..parts {
+                        // SAFETY: owner `i` uses only the buckets `(*, i)` and its cells; entry
+                        // `i` of the owners' words is its own (read by thread 0 after a barrier).
+                        unsafe {
+                            let es = fill.first.at(a, i);
+                            got += es.len() as u64;
+                            for j in 0..es.len() {
+                                if m.cpfc {
+                                    if let Some(ahead) = es.get(j + 16) {
+                                        prefetch(offsets.ptr.add(ahead.value as usize));
+                                    }
+                                }
+                                let c = es[j].value as usize;
+                                offsets.set(c, offsets.get(c) + 1);
+                            }
+                        }
+                    }
+                    // SAFETY: as above.
+                    unsafe { own_w.set(i, got) };
+                });
+            }
+            step(4, &mut || {
+                if i == 0 {
+                    let mut run = 0u64;
+                    for o in 0..parts {
+                        // SAFETY: no thread writes the owners' words or bases in this phase.
+                        unsafe {
+                            bases_s.set(o, run as u32);
+                            run += own_w.get(o);
+                        }
+                    }
+                }
+            });
+            step(3, &mut || {
+                let mut bs = own(i);
+                if let Some(b0) = bs.next() {
+                    let b1 = bs.last().unwrap_or(b0);
+                    let (c0, c1) = (cells_of(b0).start, cells_of(b1).end);
+                    // SAFETY: the cells, PV words and counters of `i`'s blocks are this thread's.
+                    unsafe {
+                        range_lean(
+                            spv_s.ptr,
+                            spv_s.len,
+                            shp_s.ptr,
+                            offsets.ptr,
+                            bases_s.get(i),
+                            c0,
+                            c1,
+                            ph.bts,
+                            true,
+                        )
+                    };
+                }
+            });
+            for c in 0..chunks {
+                let (s0, s1) = span2(c, i);
+                // SAFETY: as the count pass's.
+                step(6, &mut || unsafe {
+                    fill.read::<false>(i, s0, s1, [false; 3])
+                });
+                step(7, &mut || {
+                    for a in 0..parts {
+                        // SAFETY: as the place of `run_jobs` below.
+                        unsafe {
+                            for e in fill.first.at(a, i).iter() {
+                                let c = e.value as usize;
+                                let p = offsets.get(c) - 1;
+                                offsets.set(c, p);
+                                qs.set(p as usize, e.index);
+                            }
+                        }
+                    }
+                });
+            }
+            (log, exits)
+        });
+        let exits = &logs[0].1;
+        let steps = logs[0].0.len();
+        let mut walls = [0u128; 8];
+        for k in 0..steps {
+            let kind = logs[0].0[k].0 as usize;
+            let prev = if k == 0 { 0 } else { exits[k - 1] };
+            let (mut sum, mut mx, mut late) = (0u64, 0u64, 0u64);
+            for (l, _) in &logs {
+                let (_, s0, e0) = l[k];
+                sum += e0 - s0;
+                mx = mx.max(e0 - s0);
+                late = late.max(s0.saturating_sub(prev));
+            }
+            let wall = (exits[k] - prev) as u128;
+            walls[kind] += wall;
+            let acc = match kind {
+                0 => &mut pz,
+                1 => &mut pcr,
+                2 => &mut pc,
+                3 => &mut ps1,
+                4 => &mut ps2,
+                6 => &mut ppr,
+                _ => &mut pp,
+            };
+            acc.calls += 1;
+            acc.wall += wall;
+            acc.sum += sum as u128;
+            acc.max += mx as u128;
+            acc.late += late as u128;
+        }
+        let words_total = own_words.iter().sum::<u64>() as usize;
+        assert!(
+            words_total < n.max(1),
+            "R15 csrp: more words than query offsets"
+        );
+        // SAFETY: no thread is running; `offsets[cells]` is no cell's end.
+        unsafe { offsets.set(cells, words_total as u32) };
+        let t2 = Instant::now();
+        crate::utils::xtiming::x_r13("csr", Some(t0), words_total as u64);
+        eprintln!(
+            "[R11] csr words-build-par cells={cells} words={words_total} parts={parts} zero_ns={} count_read_ns={} count_ns={} sum_ns={} place_read_ns={} place_ns={} build_ns={} csr_bytes={} rdx_ns=0",
+            walls[0],
+            walls[1],
+            walls[2],
+            walls[3] + walls[4],
+            walls[6],
+            walls[7],
+            (t2 - t0).as_nanos(),
+            (cells + 1 + words_total) * 4,
+        );
+        let ow: Vec<String> = own_words.iter().map(|w| w.to_string()).collect();
+        eprintln!(
+            "[R16] csrp-jobs cells={cells} words={words_total} parts={parts} blocks={blocks} flags=bar1cpfc{} pre_ns={pre_ns} alloc_ns=0 prefix_ns={} zero={pz} cread={pcr} count={pc} sum1={ps1} sum2={ps2} rdx={prd} pread={ppr} place={pp} ownw={}",
+            m.cpfc as u8,
+            walls[4],
+            ow.join("/"),
+        );
+        if m.check {
+            super::x_r11_csr::check_against_chains(hashtable, next_pos, words_total);
+            super::x_r11_csr::PvScratch {
+                pv: spv,
+                helper: shp,
+            }
+            .check(&ph);
+        }
+        return;
+    }
     // Zero.
     timed(&mut zero_ns, &mut pz, &|o| {
         // The whole `Shared` (Sync), not its pointer field.
@@ -2105,7 +2348,7 @@ pub(super) fn x_r15_csr_par(
                         let v = &(*codes_ptr.ptr.add(a * parts + o)).0;
                         got += v.len() as u64;
                         for (j, &c) in v.iter().enumerate() {
-                            if m.cpf {
+                            if m.cpf || m.cpfc {
                                 if let Some(&ahead) = v.get(j + 16) {
                                     prefetch(offsets.ptr.add(ahead as usize));
                                 }
@@ -2117,7 +2360,7 @@ pub(super) fn x_r15_csr_par(
                         let es = fill.first.at(a, o);
                         got += es.len() as u64;
                         for j in 0..es.len() {
-                            if m.cpf {
+                            if m.cpf || m.cpfc {
                                 if let Some(ahead) = es.get(j + 16) {
                                     prefetch(offsets.ptr.add(ahead.value as usize));
                                 }

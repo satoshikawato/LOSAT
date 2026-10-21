@@ -78,6 +78,12 @@ pub(crate) struct Mode {
     /// thread keeps from table to table (zeroed by a write over resident pages), copied into
     /// `next_pos`'s capacity after the place pass (`copy_ns`, not in `build_ns`).
     pub(crate) offkeep: bool,
+    /// R16 `cpfc`: `cpf` in the count pass only.
+    pub(crate) cpfc: bool,
+    /// R16 `bar` (`csrp`, with `cblk,sum1,sumlean`): the whole build of a table as one
+    /// `rayon::broadcast` whose threads pass a spin barrier between the phases, instead of one
+    /// `run_jobs` per phase and chunk.
+    pub(crate) bar: bool,
 }
 
 pub(crate) fn mode() -> Mode {
@@ -107,6 +113,8 @@ pub(crate) fn mode() -> Mode {
                     "c4" => m.c4 = true,
                     "c8" => m.c8 = true,
                     "offkeep" => m.offkeep = true,
+                    "cpfc" => m.cpfc = true,
+                    "bar" => m.bar = true,
                     _ => {}
                 }
             }
@@ -476,8 +484,8 @@ pub(crate) fn attach_words<W: Words>(
     };
     let t1 = Instant::now();
     let mut words = 0usize;
-    if m.cpf {
-        // R16 `cpf`: each word's element is prefetched, and counted 16 words later.
+    if m.cpf || m.cpfc {
+        // R16 `cpf` / `cpfc`: each word's element is prefetched, and counted 16 words later.
         let hp = head.as_ptr();
         let mut ring = [0usize; 16];
         let mut seen = 0usize;
@@ -623,7 +631,7 @@ pub(crate) fn attach_words<W: Words>(
     // EXPERIMENT (exp/r13-wall): the CSR build's interval (`R13_PROBE=tl`).
     crate::utils::xtiming::x_r13("csr", Some(t0), words as u64);
     eprintln!(
-        "[R11] csr words-build cells={cells} words={words} next_pos_len={n} ascending={} pvh={} zero_ns={} count_ns={} sum_ns={} place_ns={} build_ns={} csr_bytes={} r16=cpf{}lean{}sum0{}keep{}fresh{} copy_ns={copy_ns}",
+        "[R11] csr words-build cells={cells} words={words} next_pos_len={n} ascending={} pvh={} zero_ns={} count_ns={} sum_ns={} place_ns={} build_ns={} csr_bytes={} r16=cpf{}cpfc{}lean{}sum0{}keep{}fresh{} copy_ns={copy_ns}",
         asc as u8,
         ph.is_some() as u8,
         (t1 - t0).as_nanos(),
@@ -633,6 +641,7 @@ pub(crate) fn attach_words<W: Words>(
         (t4 - t0).as_nanos(),
         (cells + 1 + words) * 4,
         m.cpf as u8,
+        m.cpfc as u8,
         m.sumlean as u8,
         m.sum0 as u8,
         m.offkeep as u8,

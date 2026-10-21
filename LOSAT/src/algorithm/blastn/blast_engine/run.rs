@@ -3104,9 +3104,9 @@ struct UngappedHit {
 /// `0`, or `LOSAT_X_DEFAULT=0` and it is not set): the large per-subject buffers of BLASTN (the
 /// blocks and sequences read from a database and their BLASTNA letters, `database.rs`; the
 /// ungapped hits of a subject and the scratch of their sort) are kept in buffers that glibc maps
-/// from 1 MiB on and that go to the shared pools of `utils/x_mapped.rs` when they are done, so
-/// that a worker thread's chromosome-sized buffers are lent to the next thread that needs one
-/// instead of staying in that thread's arena.
+/// from 1 MiB on and that go to the shared pools of `utils/x_mapped.rs` when they are done (the
+/// hits when their scratch is dropped), so that a worker thread's chromosome-sized buffers are
+/// lent to the next thread that needs one instead of staying in that thread's arena.
 fn x_bn_mapped() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
@@ -4081,6 +4081,18 @@ struct SubjectScratch {
 // hsp_list = Blast_HSPListFree(hsp_list);
 // BlastInitHitListReset(init_hitlist);
 // ```
+// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) a scratch that is dropped (the parallel
+// stages make one per job of `map_init`) gives its large hit buffer to `X_HITS`, so the next
+// scratch takes it with its pages resident; a scratch that lives on keeps its buffer, as NCBI
+// keeps its `init_hitlist`.
+impl Drop for SubjectScratch {
+    fn drop(&mut self) {
+        if x_bn_mapped() {
+            X_HITS.give(&mut self.ungapped_hits);
+        }
+    }
+}
+
 impl SubjectScratch {
     fn new(query_count: usize, offset_array_size: usize, window_size: usize) -> Self {
         Self {
@@ -11012,10 +11024,6 @@ fn search_query_batch(
             // BlastInitHitListReset(init_hitlist);
             // ```
             let ungapped_hits = &mut subject_scratch.ungapped_hits;
-            // EXPERIMENT (LOSAT_X_BNMAPPED): the hits of a long subject go back to the pool.
-            if x_bn_mapped() {
-                X_HITS.give(ungapped_hits);
-            }
             ungapped_hits.clear();
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-64

@@ -917,6 +917,33 @@ impl ListedTitles<'_> {
         Ok(())
     }
 
+    /// The Blast-def-line taxid of each reported subject by rank (0 for none and for a
+    /// subject in no final hit list), which the XML2 and JSON formats write in the `Hit`
+    /// description. It is read apart from the titles, for those formats only. NCBI then also
+    /// writes the scientific name of a taxid when it finds `taxdb.bti` on the search path
+    /// (data4xml2format.cpp x_InitCommon, blastxml2_format.cpp:380-386), which LOSAT does not
+    /// know: a database with a taxid that is searched with a taxonomy database in reach is
+    /// LOSAT's refusal.
+    pub(super) fn read_taxids(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> Result<Vec<i32>> {
+        let mut taxids = vec![0; self.listed.ordinals.len()];
+        for rank in Self::reported(hit_lists) {
+            let defline_taxids = database
+                .db
+                .defline_taxids(self.listed.ordinals[rank])
+                .map_err(database_error)?;
+            // One definition line per reported sequence (`shared::stored_title`).
+            taxids[rank] = defline_taxids.first().copied().unwrap_or(0);
+        }
+        if taxids.iter().any(|&taxid| taxid != 0) && database.db.taxdb_found() {
+            return Err(crate::report::blast_xml::names::taxdb_refusal(PROGRAM));
+        }
+        Ok(taxids)
+    }
+
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).
     fn reported(hit_lists: &[Option<BlastpHitList>]) -> std::collections::BTreeSet<usize> {
         hit_lists

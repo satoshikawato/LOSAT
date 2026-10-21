@@ -66,22 +66,39 @@ impl XmlStats {
 pub struct XmlQuery<'a> {
     /// `Iteration_query-ID`: `Query_N` (`CBlastFormatUtil::GetSeqIdString`).
     pub id: &'a [u8],
-    /// `Iteration_query-def`: `GenerateDefline` of the query, or `No definition line`.
-    pub def: &'a [u8],
+    /// `GenerateDefline` of the query, as generated: empty for an empty nucleotide title.
+    /// `Iteration_query-def` is `No definition line` then; `Search_query-title` (XML2) is
+    /// absent (blastxml2_format.cpp:590-592).
+    pub title: &'a [u8],
     /// `Iteration_query-len`: the length of the searched interval.
     pub len: i32,
     pub stats: XmlStats,
     /// `Iteration_message` (`names::xml_message`); none when empty.
     pub message: Option<&'a [u8]>,
+    /// Whether NCBI searched the query's batch (it has a valid context in it). The XML2
+    /// `Search` of a query that it did not search has no `hits` member and adds
+    /// ` \nNo hits found` to its message (blastxml2_format.cpp:614-622); outfmt 5 does not
+    /// read it.
+    pub searched: bool,
+    /// The query's masked regions in NCBI's order and frames (`TMaskedQueryRegions`):
+    /// outfmt 5 masks an HSP's row with the regions of the HSP's own frame, XML2 lists every
+    /// region of a plus frame in `Search_query-masking` and masks with the regions of frame 0
+    /// or the HSP's translated frame.
+    pub masks: &'a [QueryMask],
 }
 
 /// A subject with HSPs (a `Hit`).
 pub struct XmlHit<'a> {
     pub id: &'a [u8],
-    pub def: &'a [u8],
+    /// The subject's title as generated or stored: empty for an empty nucleotide `-subject`
+    /// title or an empty stored title. `Hit_def` is `No definition line` then; XML2's
+    /// `HitDescr_title` is empty.
+    pub title: &'a [u8],
     pub accession: &'a [u8],
     /// `Hit_len`: the length of the subject's record.
     pub len: i32,
+    /// The Blast-def-line's taxid of a `-db` sequence, 0 for none (XML2's `HitDescr_taxid`).
+    pub taxid: i32,
 }
 
 /// A masked region of the query in NCBI's form (`CSeqLocInfo`): inclusive 0-based positions in
@@ -120,6 +137,4 @@ pub struct XmlHsp<'a> {
     /// nucleotide of the first residue).
     pub query_first: i32,
     pub query_step: i32,
-    /// The query's masked regions.
-    pub masks: &'a [QueryMask],
 }

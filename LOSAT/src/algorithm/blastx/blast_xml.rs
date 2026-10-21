@@ -59,7 +59,7 @@ use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
 use crate::report::blast_xml::subjects::SubjectNames;
 use crate::report::blast_xml::{
-    filter, BlastXmlWriter, QueryMask, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
+    filter, BlastXmlWriter, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
     REFERENCE_GAPPED_BLAST,
 };
 use crate::report::query_warnings::INVALID_QUERY_MESSAGE;
@@ -166,6 +166,8 @@ fn subject_names(
         ShownSubjects::Database { reported, .. } => SubjectNames::of_database_sequence(
             reported.ordinal(oid),
             &reported.stored_titles()[oid],
+            // XML2 alone shows the taxid (outfmt 15 and 16 of BLASTX: OF5b).
+            0,
         )
         .map_err(|refusal| refuse(refusal, "a database title")),
     }
@@ -454,10 +456,13 @@ pub(super) fn write_blastx_xml(
             let masks = query_masks(batch, qidx, length);
             let xml_query = XmlQuery {
                 id: query.internal_id.as_bytes(),
-                def: &text.def,
+                title: &text.title,
                 len: i32::try_from(length)?,
                 stats: query_stats(batch, qidx, options.gapped, &gapped_karlin),
                 message: text.message.as_deref(),
+                // Read by XML2 alone (outfmt 15 and 16 of BLASTX: OF5b).
+                searched: !batch.search_skipped,
+                masks: &masks,
             };
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 for list in lists.iter().filter(|list| reported(list, options.gapped)) {
@@ -467,9 +472,10 @@ pub(super) fn write_blastx_xml(
                         .context("names of a subject with hits")?;
                     let hit = XmlHit {
                         id: &names.id,
-                        def: &names.def,
+                        title: &names.title,
                         accession: &names.accession,
                         len: i32::try_from(subject.sequence.len())?,
+                        taxid: names.taxid,
                     };
                     sink.hit(&hit, |hsps| {
                         for hsp in list
@@ -505,7 +511,6 @@ pub(super) fn write_blastx_xml(
                                 // strand, where the row runs backwards.
                                 query_first: if plus { query_from - 1 } else { query_to - 1 },
                                 query_step: if plus { 3 } else { -3 },
-                                masks: &masks,
                             })?;
                         }
                         Ok(())
@@ -526,7 +531,7 @@ pub(super) fn write_blastx_xml(
 /// else the epilog's end of line alone.
 pub(super) fn write_xml_epilog(writer: &mut impl Write, queries: usize) -> Result<()> {
     let mut buf = Vec::new();
-    BlastXmlWriter::new(queries).finish(&mut buf);
+    BlastXmlWriter::new(queries).finish(&mut buf)?;
     writer.write_all(&buf)?;
     Ok(())
 }

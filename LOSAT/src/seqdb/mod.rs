@@ -398,6 +398,9 @@ pub struct SeqDb {
     date: String,
     total_length: u64,
     max_length: u32,
+    /// The search path the database was found on (`open_in`), for files NCBI looks for
+    /// beside it (`taxdb.bti`).
+    search_path: Option<SearchPath>,
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:1093-1102
@@ -442,7 +445,18 @@ impl SeqDb {
     /// cannot be opened (missing, or an `open` that fails) is not checked:
     /// NCBI opens a header file at its first read, and the error comes there.
     pub fn open_in(name: &str, seqtype: SeqType, path: &SearchPath) -> Result<Self, SeqDbError> {
-        Self::open_tree(alias::resolve_in(name, seqtype, path)?, name, seqtype)
+        let mut db = Self::open_tree(alias::resolve_in(name, seqtype, path)?, name, seqtype)?;
+        db.search_path = Some(path.clone());
+        Ok(db)
+    }
+
+    /// Whether `taxdb.bti` is found on the search path the database was opened with
+    /// (`SeqDB_ResolveDbPath("taxdb.bti")`, data4xml2format.cpp:x_InitCommon): NCBI's XML2 and
+    /// JSON formats then write the scientific name of a taxid.
+    pub fn taxdb_found(&self) -> bool {
+        self.search_path
+            .as_ref()
+            .is_some_and(|path| path.resolves_file("taxdb.bti"))
     }
 
     /// Opens the one database at the path `name` (without extension), taken
@@ -662,6 +676,7 @@ impl SeqDb {
             date,
             total_length,
             max_length,
+            search_path: None,
         };
         // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:126-133
         // ```c++
@@ -856,6 +871,13 @@ impl SeqDb {
     pub fn deflines(&self, ordinal: u32) -> Result<Vec<OrdinalDefline>, SeqDbError> {
         let (volume, oid) = self.find_volume(ordinal)?;
         self.ordinal_deflines(volume, ordinal, self.volumes[volume].deflines(oid))
+    }
+
+    /// The Blast-def-line `taxid` of each definition line of `ordinal`, 0 for none: read
+    /// apart from `deflines`, only for the XML2 and JSON formats.
+    pub fn defline_taxids(&self, ordinal: u32) -> Result<Vec<i32>, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].defline_taxids(oid)
     }
 
     /// The definition lines of a volume's sequence as `deflines` gives them for `ordinal`.

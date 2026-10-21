@@ -226,3 +226,13 @@ search that feeds `-dbsize` to the link cutoffs gives 111 rows, at 100000000 it 
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index
 files, so the frozen outputs (`Posted date:` lines) must then be frozen again:
 `python3 LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin DIR`.
+
+OF5a (XML2 and JSON, outfmt 15 and 16): `x16_taxid.faa` (the two `-subject` records of the XML2 probe sprot_tax, `st1` and
+`st2`) and `x16_taxid_q.faa` (its query), and `x16_taxid`, built from them with a taxid in each definition line (only `.pin
+.psq .phr` are kept):
+
+    makeblastdb -in tests/db_search/x16_taxid.faa -dbtype prot -out tests/db_search/x16_taxid \
+        -title "x16 taxid 9606" -blastdb_version 4 -taxid 9606
+
+NCBI writes the taxid in the `Hit` description of outfmt 13-16 (`HitDescr_taxid`); the rows `db.sa.x16_taxid.15` and
+`db.sa.x16_taxid.16` freeze that, with no `taxdb.bti` on the search path.

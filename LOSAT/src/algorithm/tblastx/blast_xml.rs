@@ -45,8 +45,8 @@ use crate::report::blast_xml::hsp::translation_frame;
 use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    filter, BlastXmlWriter, QueryMask, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun,
-    XmlStats, XmlSubjects, REFERENCE_GAPPED_BLAST,
+    filter, BlastXmlWriter, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery,
+    XmlRun, XmlStats, XmlSubjects, REFERENCE_GAPPED_BLAST,
 };
 use crate::report::query_warnings::{QueryWarnings, INVALID_QUERY_MESSAGE};
 use crate::report::serial::seqalign::seqalign_evalue;
@@ -193,6 +193,8 @@ pub(crate) fn write_tblastx_xml(
         Some(database) => XmlSubjects::Database {
             ordinals: &database.reported.ordinals,
             titles: crate::report::blast_xml::XmlTitles::Records(run.subjects),
+            // Only XML2 shows the taxid (outfmt 15 and 16 of TBLASTX: OF5b).
+            taxids: &[],
             length: &subject_length,
         },
         None => XmlSubjects::Records {
@@ -224,13 +226,6 @@ pub(crate) fn write_tblastx_xml(
         let text = &texts[q_idx];
         let searched_length = query.seq().len();
         let record_length = query_placements.length(q_idx, searched_length) as i32;
-        let xml_query = XmlQuery {
-            id: query.local_id.as_bytes(),
-            def: &text.def,
-            len: i32::try_from(searched_length)?,
-            stats: query_stats(&run.query_stats[q_idx], run.numbers),
-            message: text.message.as_deref(),
-        };
         let query_hits = &hits[query_hits[q_idx].clone()];
         masks.clear();
         if !query_hits.is_empty() {
@@ -241,6 +236,16 @@ pub(crate) fn write_tblastx_xml(
                 &mut masks,
             );
         }
+        let xml_query = XmlQuery {
+            id: query.local_id.as_bytes(),
+            title: &text.title,
+            len: i32::try_from(searched_length)?,
+            stats: query_stats(&run.query_stats[q_idx], run.numbers),
+            message: text.message.as_deref(),
+            // Read by XML2 alone (outfmt 15 and 16 of TBLASTX: OF5b).
+            searched: run.searched[q_idx],
+            masks: &masks,
+        };
         let written = document.query(&xml_run, &xml_query, &mut buf, |sink| {
             let mut first = 0usize;
             while first < query_hits.len() {
@@ -253,9 +258,10 @@ pub(crate) fn write_tblastx_xml(
                 let subject_record_length = subjects.length(s_idx as usize);
                 let hit = XmlHit {
                     id: &subject.id,
-                    def: &subject.def,
+                    title: &subject.title,
                     accession: &subject.accession,
                     len: subject_record_length,
+                    taxid: subject.taxid,
                 };
                 sink.hit(&hit, |hsps| {
                     for hsp in &query_hits[first..end] {
@@ -308,7 +314,6 @@ pub(crate) fn write_tblastx_xml(
                             // where the row runs backwards.
                             query_first: if plus { query_from - 1 } else { query_to - 1 },
                             query_step: if plus { 3 } else { -3 },
-                            masks: &masks,
                         })?;
                     }
                     Ok(())
@@ -323,7 +328,7 @@ pub(crate) fn write_tblastx_xml(
         buf.clear();
     }
     if run.epilog {
-        document.finish(&mut buf);
+        document.finish(&mut buf)?;
         writer.write_all(&buf)?;
     }
     Ok(())

@@ -50,7 +50,7 @@ use crate::report::blast_xml::matrix::FormattingMatrix;
 use crate::report::blast_xml::names::{self, QueryText};
 use crate::report::blast_xml::subjects::SubjectNames;
 use crate::report::blast_xml::{
-    filter, BlastXmlWriter, QueryMask, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
+    filter, BlastXmlWriter, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
     REFERENCE_GAPPED_BLAST,
 };
 use crate::report::query_warnings::{replaced_o_message, QueryWarnings, INVALID_QUERY_MESSAGE};
@@ -209,7 +209,8 @@ pub(super) fn prepare(
         subject_names[oid] = Some(match shown.ordinal(oid) {
             None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false)
                 .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?,
-            Some(ordinal) => SubjectNames::of_database_sequence(ordinal, record.title())
+            // The taxid is shown by XML2 alone (outfmt 15 and 16 of TBLASTN: OF5b).
+            Some(ordinal) => SubjectNames::of_database_sequence(ordinal, record.title(), 0)
                 .map_err(|refusal| refusal.error(PROGRAM, "a database title"))?,
         });
         // The whole record (`-subject_loc` searches part of it).
@@ -297,7 +298,7 @@ impl PreparedXml {
             // NCBI never builds the table and writes the epilog's end of line alone.
             if ranges.epilog {
                 let mut buf = Vec::new();
-                BlastXmlWriter::new(0).finish(&mut buf);
+                BlastXmlWriter::new(0).finish(&mut buf)?;
                 writer.write_all(&buf)?;
             }
             return Ok(());
@@ -332,13 +333,6 @@ impl PreparedXml {
             }
             let text = &self.texts[q_idx];
             let query_letters = query.seq();
-            let xml_query = XmlQuery {
-                id: query.local_id.as_bytes(),
-                def: &text.def,
-                len: i32::try_from(query_letters.len())?,
-                stats: self.stats[q_idx],
-                message: text.message.as_deref(),
-            };
             masks.clear();
             if hitlist
                 .lists()
@@ -355,6 +349,16 @@ impl PreparedXml {
                     &mut masks,
                 );
             }
+            let xml_query = XmlQuery {
+                id: query.local_id.as_bytes(),
+                title: &text.title,
+                len: i32::try_from(query_letters.len())?,
+                stats: self.stats[q_idx],
+                message: text.message.as_deref(),
+                // Read by XML2 alone (outfmt 15 and 16 of TBLASTN: OF5b).
+                searched: true,
+                masks: &masks,
+            };
             let written = document.query(&run, &xml_query, &mut buf, |sink| {
                 for list in hitlist.lists() {
                     if list.hsps.hsps.is_empty() {
@@ -371,9 +375,10 @@ impl PreparedXml {
                     let record_length = self.subject_lengths[oid];
                     let hit = XmlHit {
                         id: &names.id,
-                        def: &names.def,
+                        title: &names.title,
                         accession: &names.accession,
                         len: record_length,
+                        taxid: names.taxid,
                     };
                     let subject_seq = subject_letters.nt(oid);
                     let mut translation = TargetTranslation::of(subject_seq, &code);
@@ -439,7 +444,6 @@ impl PreparedXml {
                                 ops: Some(&payload.edit_script),
                                 query_first: q_start - 1,
                                 query_step: 1,
-                                masks: &masks,
                             })?;
                         }
                         Ok(())
@@ -453,7 +457,7 @@ impl PreparedXml {
             buf.clear();
         }
         if ranges.epilog {
-            document.finish(&mut buf);
+            document.finish(&mut buf)?;
             writer.write_all(&buf)?;
         }
         Ok(())

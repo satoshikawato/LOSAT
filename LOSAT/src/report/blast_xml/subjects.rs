@@ -25,6 +25,10 @@ pub enum XmlSubjects<'a> {
     Database {
         ordinals: &'a [u32],
         titles: XmlTitles<'a>,
+        /// The Blast-def-line taxid of each sequence by rank, 0 for none; only XML2 shows
+        /// it. Empty where the program has not read them (outfmt 5 alone): every taxid is
+        /// then 0.
+        taxids: &'a [i32],
         length: &'a dyn Fn(usize) -> usize,
     },
 }
@@ -58,19 +62,24 @@ impl<'a> XmlTitles<'a> {
 /// The names of a `Hit`.
 pub struct SubjectNames {
     pub id: Vec<u8>,
-    pub def: Vec<u8>,
+    /// The title as generated (`-subject`) or stored (`-db`), not yet replaced by
+    /// `No definition line` when empty (`names::NO_DEFINITION_LINE`).
+    pub title: Vec<u8>,
     pub accession: Vec<u8>,
+    /// The `-db` sequence's Blast-def-line taxid, 0 for none and for a `-subject` record.
+    pub taxid: i32,
 }
 
 impl SubjectNames {
     /// The names of a `-subject` record `id` with the FASTA title `title` (`Subject_N` and the
     /// generated definition line). `protein`: the record is a protein.
     pub fn of_record(id: &[u8], title: &[u8], protein: bool) -> Result<Self, Refusal> {
-        let (xml_id, def) = names::xml_subject_names(id, title, protein)?;
+        let (xml_id, title) = names::xml_subject_names(id, title, protein)?;
         Ok(SubjectNames {
             id: xml_id,
-            def,
+            title,
             accession: id.to_vec(),
+            taxid: 0,
         })
     }
 
@@ -79,11 +88,13 @@ impl SubjectNames {
     pub fn of_database_sequence(
         ordinal: impl std::fmt::Display,
         title: &[u8],
+        taxid: i32,
     ) -> Result<Self, Refusal> {
         Ok(SubjectNames {
             id: format!("gnl|BL_ORD_ID|{ordinal}").into_bytes(),
-            def: names::xml_db_def(title)?,
+            title: names::xml_db_title(title)?,
             accession: ordinal.to_string().into_bytes(),
+            taxid,
         })
     }
 }
@@ -101,7 +112,10 @@ impl XmlSubjects<'_> {
                     .map_err(|refusal| refusal.error(program, "a subject title"))
             }
             XmlSubjects::Database {
-                ordinals, titles, ..
+                ordinals,
+                titles,
+                taxids,
+                ..
             } => {
                 let ordinal = *ordinals
                     .get(s_idx)
@@ -109,7 +123,8 @@ impl XmlSubjects<'_> {
                 let title = titles
                     .get(s_idx)
                     .context("HSP of an unknown database sequence")?;
-                SubjectNames::of_database_sequence(ordinal, title)
+                let taxid = taxids.get(s_idx).copied().unwrap_or(0);
+                SubjectNames::of_database_sequence(ordinal, title, taxid)
                     .map_err(|refusal: Refusal| refusal.error(program, "a database title"))
             }
         }

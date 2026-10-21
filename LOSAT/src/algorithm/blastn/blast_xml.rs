@@ -33,7 +33,8 @@ use super::x_subject_store::SubjectLetters;
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    BlastXmlWriter, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats, XmlSubjects,
+    BlastXmlWriter, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
+    XmlSubjects,
 };
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::serial::seqalign::seqalign_evalue;
@@ -96,10 +97,13 @@ pub(crate) fn write_blastn_xml(
         let text = &texts[q_idx];
         let query = XmlQuery {
             id: record.local_id.as_bytes(),
-            def: &text.def,
+            title: &text.title,
             len: xml.searched_lengths[q_idx] as i32,
             stats: xml.stats[q_idx],
             message: text.message.as_deref(),
+            // Read by XML2 alone (outfmt 15 and 16 of BLASTN are written from OF5a part 2).
+            searched: true,
+            masks: &[],
         };
         let hit_list = hit_lists.get(q_idx).and_then(Option::as_ref);
         let start = buf.len();
@@ -115,9 +119,10 @@ pub(crate) fn write_blastn_xml(
                 let subject = subjects.get(s_idx, PROGRAM)?;
                 let hit = XmlHit {
                     id: &subject.id,
-                    def: &subject.def,
+                    title: &subject.title,
                     accession: &subject.accession,
                     len: xml.subjects.length(s_idx),
+                    taxid: subject.taxid,
                 };
                 sink.hit(&hit, |hsps| {
                     for hsp in &hsp_list.hsps {
@@ -145,7 +150,6 @@ pub(crate) fn write_blastn_xml(
                             ops: hsp.gap_info.as_deref(),
                             query_first: hsp.q_start as i32 - 1,
                             query_step: 1,
-                            masks: &[],
                         })?;
                     }
                     Ok(())
@@ -161,7 +165,7 @@ pub(crate) fn write_blastn_xml(
         buf.clear();
     }
     if xml.epilog {
-        document.finish(&mut buf);
+        document.finish(&mut buf)?;
         writer.write_all(&buf)?;
     }
     Ok(())

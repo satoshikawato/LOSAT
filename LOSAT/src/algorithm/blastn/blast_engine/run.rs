@@ -5956,6 +5956,8 @@ fn post_process_hits_and_write(
                 Some(ordinals) if is_database => crate::report::blast_xml::XmlSubjects::Database {
                     ordinals,
                     titles: crate::report::blast_xml::XmlTitles::Records(subject_records),
+                    // Only XML2 shows the taxid (outfmt 15 and 16 of BLASTN: OF5a part 2).
+                    taxids: &[],
                     length: &database_length,
                 },
                 _ => crate::report::blast_xml::XmlSubjects::Records {

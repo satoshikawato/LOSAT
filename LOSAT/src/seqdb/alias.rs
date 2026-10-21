@@ -678,6 +678,15 @@ impl SearchPath {
         Self::new(&cwd, blastdb.as_deref(), registry)
     }
 
+    /// Whether the file `name` is found in one of the directories of the path
+    /// (`SeqDB_ResolveDbPath`, seqdbcommon.cpp: the same directories as the database's).
+    pub fn resolves_file(&self, name: &str) -> bool {
+        self.path
+            .split(path_splitter())
+            .filter(|directory| !directory.is_empty())
+            .any(|directory| Path::new(directory).join(name).is_file())
+    }
+
     /// The string NCBI names in its "No alias or index file found" message:
     /// the directories, each followed by the separator.
     pub fn as_str(&self) -> &str {

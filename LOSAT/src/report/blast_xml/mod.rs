@@ -15,7 +15,7 @@ pub mod writer;
 
 pub use records::{QueryMask, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats};
 pub use subjects::{SubjectNameCache, XmlSubjects, XmlTitles};
-pub use writer::{BlastXmlWriter, HitSink, HspSink};
+pub use writer::{BlastXmlWriter, HitSink, HitWrite, HspSink, HspWrite, StructuredXml};
 
 /// `BlastOutput_reference` of a Gapped BLAST search (every task but megablast); the
 /// `&auml;` is NCBI's text (api/version.cpp:47-51) and is escaped again when written.

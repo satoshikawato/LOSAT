@@ -61,7 +61,9 @@
 //! position), so the table takes no more memory. Every reader of the chains of a discontiguous
 //! table goes through `DiscTemplates::x_csr`: the strip scan of LOSAT_X_PAIRPARDISC and its
 //! diagonal-array stage (`scan_strip_disc`), the reference scan of `search_query_batch`
-//! (`run.rs`, its `on_word`), `TwoStageLookup::contains_hit` and `count_hits`.
+//! (`run.rs`, its `x_on_word_csr`; the chains' `on_word` stays as it was), and
+//! `TwoStageLookup::contains_hit` and `count_hits` where the table has no chains (under the
+//! shadow, which keeps the chains, these two walk the chains).
 //!
 //! The scans of a CSR table read their words through `Ring`: each word enters a FIFO of `RING`
 //! words and leaves it, unchanged and in order, `RING` words later; a word entering prefetches
@@ -91,7 +93,7 @@ use std::sync::OnceLock;
 /// `LOSAT_X_DCCSR=0` or `LOSAT_X_DEFAULT=0`; LOSAT_X_DCCSRSHADOW, off unless set to any value,
 /// implies the switch). They choose between two LOSAT layouts of the same chains and change no
 /// value NCBI computes.
-fn switches() -> (bool, bool) {
+pub(super) fn switches() -> (bool, bool) {
     static SWITCHES: OnceLock<(bool, bool)> = OnceLock::new();
     *SWITCHES.get_or_init(|| {
         let shadow = std::env::var_os("LOSAT_X_DCCSRSHADOW").is_some();

@@ -1079,6 +1079,7 @@ impl TwoStageLookup {
     #[cold]
     #[inline(never)]
     fn x_csr_contains(&self, lut_kmer: u64, q_off_1: u32) -> bool {
+        debug_assert!(self.disc.as_ref().is_some_and(|d| d.x_csr.is_some()));
         self.disc
             .as_ref()
             .and_then(|d| d.x_csr.as_ref())
@@ -1089,6 +1090,7 @@ impl TwoStageLookup {
     #[cold]
     #[inline(never)]
     fn x_csr_count(&self, lut_kmer: u64) -> usize {
+        debug_assert!(self.disc.as_ref().is_some_and(|d| d.x_csr.is_some()));
         self.disc
             .as_ref()
             .and_then(|d| d.x_csr.as_ref())

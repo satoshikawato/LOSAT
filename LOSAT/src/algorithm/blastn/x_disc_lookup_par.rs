@@ -210,7 +210,9 @@
 //! program that embeds LOSAT and calls a one-thread search from a thread of its own rayon pool
 //! would see that pool used, as `x_mb_lookup_par` and `x_link_sort` say). Each phase is one
 //! `rayon::scope` whose jobs use only their own buckets and cells and never wait for anything (no
-//! lock, spin or sleep), so no job can block a thread that steals it.
+//! lock, spin or sleep), so no job can block a thread that steals it. The CSR build of
+//! LOSAT_X_DCCSR (`csr`) is the exception: one `rayon::broadcast` whose jobs spin at a barrier,
+//! which needs every thread of the pool free to join it (its doc gives the conditions).
 //!
 //! Paths that reach it: `blastn -task dc-megablast`, `-subject` and `-db`, with one template
 //! (`coding` or `optimal`) or two (`coding_and_optimal`), template lengths 16, 18 and 21 and
@@ -3914,10 +3916,7 @@ mod tests {
                 approx,
             );
             let disc = lookup.disc().expect("a discontiguous table");
-            assert_eq!(
-                disc.x_csr().is_some(),
-                crate::utils::xswitch::on("LOSAT_X_DCCSR")
-            );
+            assert_eq!(disc.x_csr().is_some(), super::super::x_dc_csr::switches().0);
             assert_eq!(lookup.longest_chain(), reference.longest_chain);
             let mut chain = Vec::new();
             for cell in (0..reference.hashtable.len()).step_by(3) {

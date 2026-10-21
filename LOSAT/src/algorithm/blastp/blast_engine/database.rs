@@ -2338,7 +2338,25 @@ mod tests {
             BlastpDatabase::open(dir.join("b").to_str().unwrap(), &Default::default()).unwrap();
         assert_eq!(allowed(&bad), [false, false]);
         assert_eq!(read_allowed(&bad), [false, false]);
-        drop((missing, bad));
+        // A title of punctuation only (`, ,`): the tabular id NCBI writes cannot be made from it
+        // (outfmt 6 and 7 refuse it, `x_titles_allow_blocks`), but outfmt 8, 9, 12 and 5 write no
+        // id, so `x_titles_read_allow_blocks` takes the blocks (the stricter function must not
+        // replace it).
+        for ext in ["pin", "psq"] {
+            std::fs::copy(fixture("prot_v4") + "." + ext, dir.join(format!("c.{ext}"))).unwrap();
+        }
+        let mut header = std::fs::read(fixture("prot_v4") + ".phr").unwrap();
+        let at = header
+            .windows(16)
+            .position(|window| window == b"p10 last protein")
+            .expect("the title of p10");
+        header[at..at + 16].copy_from_slice(b", , , , , , , , ");
+        std::fs::write(dir.join("c.phr"), header).unwrap();
+        let punctuation =
+            BlastpDatabase::open(dir.join("c").to_str().unwrap(), &Default::default()).unwrap();
+        assert_eq!(allowed(&punctuation), [false, false]);
+        assert_eq!(read_allowed(&punctuation), [true, true]);
+        drop((missing, bad, punctuation));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

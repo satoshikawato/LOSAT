@@ -1824,8 +1824,10 @@ Rebuilding less:
   message id, every `-subject` record's names (conservative: the writer refuses only a subject with hits), and
   with `-db` the definition lines as for `LOSAT_X_BPQBLOCKSA`. Fallbacks to the search of all queries (memory as
   before): a refusable `-subject` title on a subject without hits, a query id that would fail in a message that is
-  never written, a `-db` title outside ' ' ..= '~' on a subject that is not reported; it then refuses (or
-  completes) exactly where it does today, and the output file is not created before the refusal. Reports
+  never written, a `-db` sequence with an unreadable header or more than one definition line, or a title
+  outside ' ' ..= '~', reported or not; it then refuses (or completes) exactly where it does today. The CLI
+  creates the `-out` file before any search (an empty file stays after such a refusal, in both paths); the block
+  search's own file sink creates nothing before its first block. Reports
   identical; off = `LOSAT_X_BPQBLOCKXML=0`. ws numbers (bp_hsap `-db` outfmt 5, on and off, NCBI 2.17.0; the
   `-subject` cost of the names check): TBD.
 - `LOSAT_X_BPQBLOCKFMTSHADOW=1` shadow of the block search (turns `LOSAT_X_BPQBLOCKFMT`, `LOSAT_X_BPQBLOCKSA` and

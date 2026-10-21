@@ -6077,8 +6077,11 @@ fn search(
                 // The last checks of the block search, on the pool; when one fails, nothing has
                 // been written and the search of all queries below runs: the lookup tables' words
                 // (`x_block_words_fit`), then with `-db` the definition lines
-                // (`database::x_titles_allow_blocks`), with outfmt 0 and `-subject` the subjects'
-                // titles (`x_block_shown_titles_allowed`).
+                // (`database::x_titles_allow_blocks`; for outfmt 8, 9, 12 and 5
+                // `database::x_titles_read_allow_blocks`), with outfmt 0 and `-subject` the
+                // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
+                // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
+                // name and queries' names (`x_block_xml_run_allowed`).
                 if !x_block_words_fit(&args, &searched_queries, &query_input, batch_size, pool) {
                     return Ok(None);
                 }
@@ -6339,7 +6342,9 @@ fn x_bp_encode_block_subjects(
 // searched whole), every batch read, more than one block, no subject whose tabular ID the
 // reference path rejects before it writes any row (`tabular_subject_ids`, for outfmt 6 and 7;
 // with `-db`, the definition lines are checked where the blocks are searched,
-// `database::x_titles_allow_blocks`; outfmt 0's titles also there, `x_block_shown_titles_allowed`),
+// `database::x_titles_allow_blocks` (outfmt 8, 9, 12 and 5: `x_titles_read_allow_blocks`); outfmt
+// 0's titles also there, `x_block_shown_titles_allowed`; outfmt 5's names too,
+// `x_query_blocks::x_block_xml_subjects_allowed` and `x_block_xml_run_allowed`),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
 // (`blastp_database_search_space`, with `-db` or `-dbsize`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block

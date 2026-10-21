@@ -401,7 +401,9 @@ pub(crate) enum XBlockReport {
 // all queries runs and refuses where it does today.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKXML): whether the database name and every query's definition line and
 /// message id can be written by the XML report. The message of a query holds only its warning id
-/// (`warning_query_id`) besides ASCII text.
+/// (`warning_query_id`) besides ASCII text. The database name check is defensive: the CLI refuses
+/// the name in block 0 before any byte with the same output, and `run_local` takes no `-db`; it
+/// would bind if `run_local` ever searched a database (its file is created at `open()`).
 pub(crate) fn x_block_xml_run_allowed(
     db_name: &str,
     queries: &[FastaRecord],

@@ -63,7 +63,7 @@ use super::super::alignment::{
 // EXPERIMENT (LOSAT_X_GREEDYPRELIM): dispatch of the preliminary greedy alignment
 // (NCBI reference: blast_gapalign.c:4019-4025, BLAST_GreedyGappedAlignment with compressed_subject).
 use super::super::alignment::x_greedy_prelim;
-use super::super::args::BlastnArgs;
+use super::super::args::{BlastnArgs, QueryStrand};
 use super::super::blast_extend::DiagStruct;
 use super::super::coordination::{
     build_lookup_tables, chunk_query_masks, collect_lowercase_masks, configure_task,
@@ -93,7 +93,7 @@ use super::super::lookup::{
 };
 use super::super::pairwise::{pairwise_hits, DisplayMasks};
 use super::super::query_split::{
-    calculate_num_chunks, restrict_masks, split_query_batch, QueryChunk, QueryStrand, SplitSizes,
+    calculate_num_chunks, restrict_masks, split_query_batch, QueryChunk, SplitSizes,
 };
 use super::super::scoring::{
     check_greedy_gap_costs, check_losat_limits, check_scoring_options, context_blocks,
@@ -4489,6 +4489,24 @@ fn bsearch_context_info(n: usize, index: &QueryContextIndex) -> usize {
     b
 }
 
+/// The query length that picks the diagonal container (hash above 8000 letters, array
+/// otherwise): NCBI's `query_offset + query_length` of the LAST context. With `-strand plus`
+/// the last context is the empty minus context of the last query, one past the end of the plus
+/// context, so this is the searched block's length + 1; when the last context has letters it
+/// is the searched block's length (`query_concat_length`).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:225-229
+/// ```c
+/// (query_info->contexts[query_info->last_context].query_offset +
+///  query_info->contexts[query_info->last_context].query_length) > kQueryLenForHashTable)
+///     p->container_type = eDiagHash;
+/// ```
+fn diag_container_query_length(query_contexts: &[QueryContext]) -> usize {
+    query_contexts
+        .last()
+        .map_or(0, |last| last.query_offset.max(0) as usize + last.len)
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:500-603
 // ```c
 // int buflen = QueryInfo_GetSeqBufLen(qinfo);
@@ -4522,7 +4540,8 @@ fn build_query_blastna_buffer(
         let length = letters.len();
         // A context that is empty or does not end inside the block stays sentinels.
         // (Twin: `place` and the two encoder calls below are copied in x_query_prep_par.rs
-        // (LOSAT_X_QPREPPAR); change them there too.)
+        // (LOSAT_X_QPREPPAR) and, with the strand switches, in
+        // `build_strand_query_blastna_buffer`; change them there too.)
         let place = |offset: i32| -> Option<std::ops::Range<usize>> {
             let start = offset.max(0) as usize;
             let end = start.saturating_add(length);
@@ -6839,6 +6858,8 @@ pub fn run_local(
     if args.db.is_some() {
         anyhow::bail!("-db (a database search) is not supported by LOSAT Web yet");
     }
+    // The command line has checked `-strand` at parsing (clap); a caller of `run_local` has not.
+    QueryStrand::parse(&args.strand)?;
     let output_formats = parse_output_formats(outputs.formats.iter().map(|format| format.outfmt))?;
     // The subject range and its record checks come where NCBI reads the subjects (`run`):
     // the messages of each record read, up to a record whose range starts past its end.
@@ -9533,6 +9554,7 @@ fn search_query_batch(
         (last.query_offset.max(0) as usize + length + if length == 0 { 1 } else { 2 })
             .saturating_sub(2)
     });
+    let diag_container_query_length = diag_container_query_length(&query_contexts);
     // NCBI reference: ncbi-blast/c++/src/algo/blast/unit_tests/api/ntscan_unit_test.cpp:166-174
     // ```c
     // query_info->contexts[0].query_offset = 0;
@@ -10398,7 +10420,7 @@ fn search_query_batch(
         && subjects.prepared().is_some()
         && x_pair_seed::takes_owner_chunks(
             two_stage_lookup_ref,
-            query_concat_length <= 8000,
+            diag_container_query_length <= 8000,
             window_size,
             scan_range,
             !small_na_compressed_query.is_empty(),
@@ -10950,7 +10972,7 @@ fn search_query_batch(
             // else
             //     p->container_type = eDiagArray;
             // ```
-            let use_diag_hash = query_concat_length > 8000;
+            let use_diag_hash = diag_container_query_length > 8000;
             let use_array_indexing = !use_diag_hash;
             let diag_window = window_size as i32;
 
@@ -17703,6 +17725,55 @@ mod tests {
                 }
             }
         }
+    }
+
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_parameters.c:225-229
+    // ```c
+    // (query_info->contexts[query_info->last_context].query_offset +
+    //  query_info->contexts[query_info->last_context].query_length) > kQueryLenForHashTable)
+    //     p->container_type = eDiagHash;
+    // ```
+    // The diagonal hash starts above 8000 on the LAST context's end: with `-strand plus` that
+    // is the empty minus context, one past the plus context, so a query of exactly 8000 letters
+    // takes the hash; with `minus` the last context is the searched one; with both strands the
+    // value is odd (two contexts and the gap between them).
+    #[test]
+    fn the_diagonal_hash_starts_at_the_end_of_the_last_context() {
+        let hash = |lengths: &[usize], strand| {
+            diag_container_query_length(&strand_contexts(lengths, strand)) > 8000
+        };
+        // plus
+        assert!(!hash(&[7999], QueryStrand::Plus));
+        assert!(hash(&[8000], QueryStrand::Plus));
+        assert!(!hash(&[4000, 3998], QueryStrand::Plus));
+        assert!(hash(&[4000, 3999], QueryStrand::Plus));
+        // minus
+        assert!(!hash(&[8000], QueryStrand::Minus));
+        assert!(hash(&[8001], QueryStrand::Minus));
+        assert!(!hash(&[4000, 3999], QueryStrand::Minus));
+        assert!(hash(&[4000, 4000], QueryStrand::Minus));
+        // both
+        assert!(!hash(&[3999], QueryStrand::Both));
+        assert!(hash(&[4000], QueryStrand::Both));
+        // The value is the searched block's length (the query buffer without its sentinels)
+        // plus 1 for `plus`, and that length otherwise.
+        for (lengths, strand, extra) in [
+            (vec![10usize, 3, 10], QueryStrand::Plus, 1),
+            (vec![10, 3, 10], QueryStrand::Minus, 0),
+            (vec![10, 3, 10], QueryStrand::Both, 0),
+        ] {
+            let contexts = strand_contexts(&lengths, strand);
+            let last = contexts.last().unwrap();
+            let concat_len =
+                (last.query_offset as usize + last.len + if last.len == 0 { 1 } else { 2 })
+                    .saturating_sub(2);
+            assert_eq!(
+                diag_container_query_length(&contexts),
+                concat_len + extra,
+                "{strand:?}"
+            );
+        }
+        assert_eq!(diag_container_query_length(&[]), 0);
     }
 
     #[test]

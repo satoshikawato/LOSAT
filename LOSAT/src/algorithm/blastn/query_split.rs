@@ -3,6 +3,7 @@
 //! the contexts of the batch and merges them (`run.rs`), and then runs the traceback on the
 //! whole batch.
 
+use super::args::QueryStrand;
 use crate::utils::dust::MaskedInterval;
 
 /// The query chunk size of the task when the environment variable `CHUNK_SIZE` is not set
@@ -105,53 +106,6 @@ impl SplitSizes {
     /// ```
     pub fn mixer_max_batch_size(&self) -> i32 {
         self.chunk_size.wrapping_sub(1000) as u32 as i32
-    }
-}
-
-/// The strand(s) of the query that a search covers (`-strand`): the strand of the query's
-/// Seq-loc. A strand that is not searched has a context of length 0 and, in a split search, a
-/// chunk context of `None` (`kInvalidContext`).
-///
-/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:394-410
-/// ```c
-///                     if (ctx % NUM_STRANDS == 0) {
-///                         if (kStrand == eNa_strand_minus) {
-///                             m_SplitBlk->AddContextToChunk(chunk_num,
-///                                                           kInvalidContext);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QueryStrand {
-    Both,
-    Plus,
-    Minus,
-}
-
-impl QueryStrand {
-    /// The value of `-strand` (`both`, `plus`, `minus`; clap has checked it).
-    pub fn from_option(value: &str) -> Self {
-        match value {
-            "plus" => Self::Plus,
-            "minus" => Self::Minus,
-            _ => Self::Both,
-        }
-    }
-
-    /// The first valid context of a query (1 for the minus strand).
-    ///
-    /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:146-149
-    /// ```c
-    ///     // Adjust the first context if the requested strand is the minus strand
-    ///     if (strand == eNa_strand_minus) {
-    ///         query_info->first_context = translate ? 3 : 1;
-    ///     }
-    /// ```
-    pub fn first_context(self) -> usize {
-        usize::from(self == Self::Minus)
-    }
-
-    /// Whether the plus (context 0) and minus (context 1) strand of a query is searched.
-    pub fn searched(self) -> (bool, bool) {
-        (self != Self::Minus, self != Self::Plus)
     }
 }
 
@@ -1041,12 +995,5 @@ mod tests {
             minus[1].context_offsets,
             vec![i32::MAX, 0, i32::MAX, 1_000_000 - 42]
         );
-    }
-
-    #[test]
-    fn the_strand_option_is_read_once() {
-        assert_eq!(QueryStrand::from_option("both").searched(), (true, true));
-        assert_eq!(QueryStrand::from_option("plus").searched(), (true, false));
-        assert_eq!(QueryStrand::from_option("minus").searched(), (false, true));
     }
 }

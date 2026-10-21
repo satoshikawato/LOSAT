@@ -6,7 +6,7 @@
 //! - DUST masking
 //! - Lookup table building
 
-use super::args::BlastnArgs;
+use super::args::{BlastnArgs, QueryStrand};
 use super::constants::{
     LUT_WIDTH_11_THRESHOLD_10, LUT_WIDTH_11_THRESHOLD_8, MAX_DIRECT_LOOKUP_WORD_SIZE,
     MIN_DIAG_SEPARATION_BLASTN, MIN_DIAG_SEPARATION_MEGABLAST, MIN_UNGAPPED_SCORE_BLASTN,
@@ -973,21 +973,22 @@ pub fn apply_dust_masking<R: InputRecord>(
         // (The conversion to two bits reads letters other than C, G, T as A and N at random,
         // `symdust.hpp:76-84`, so on a query with ambiguity codes the intervals differ by strand.)
         // `plus` and `both` dust the letters as they are.
-        let masks: Vec<Vec<MaskedInterval>> = if args.strand == "minus" {
-            let reverse: Vec<Vec<u8>> = queries
-                .iter()
-                .map(|record| super::lookup::reverse_complement(record.seq()))
-                .collect();
-            let seqs: Vec<&[u8]> = reverse.iter().map(Vec::as_slice).collect();
-            super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool)
-                .into_iter()
-                .zip(&seqs)
-                .map(|(masks, seq)| reverse_mask_intervals(&masks, seq.len()))
-                .collect()
-        } else {
-            let seqs: Vec<&[u8]> = queries.iter().map(|record| record.seq()).collect();
-            super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool)
-        };
+        let masks: Vec<Vec<MaskedInterval>> =
+            if QueryStrand::from_option(&args.strand) == QueryStrand::Minus {
+                let reverse: Vec<Vec<u8>> = queries
+                    .iter()
+                    .map(|record| super::lookup::reverse_complement(record.seq()))
+                    .collect();
+                let seqs: Vec<&[u8]> = reverse.iter().map(Vec::as_slice).collect();
+                super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool)
+                    .into_iter()
+                    .zip(&seqs)
+                    .map(|(masks, seq)| reverse_mask_intervals(&masks, seq.len()))
+                    .collect()
+            } else {
+                let seqs: Vec<&[u8]> = queries.iter().map(|record| record.seq()).collect();
+                super::x_query_dust_par::masks(&seqs, dust_level, dust_window, dust_linker, pool)
+            };
 
         let total_masked: usize = masks
             .iter()

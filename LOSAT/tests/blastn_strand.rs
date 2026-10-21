@@ -67,6 +67,9 @@ fn an_unknown_strand_is_a_clap_error() {
     }
 }
 
+// The union holds with the default options only: with a hit-list limit (`-max_target_seqs`,
+// `-max_hsps`) or `-subject_besthit` each strand's search keeps or drops hits by what that strand
+// alone found, so the lines of `plus` and `minus` need not add up to those of `both`.
 #[test]
 fn both_is_the_search_without_the_option_and_the_strands_add_up() {
     for (query, subject) in CASES {

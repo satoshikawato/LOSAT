@@ -2,6 +2,70 @@ use crate::blastinput::value_parsers::*;
 use clap::Args;
 use std::path::PathBuf;
 
+/// The strand(s) of the query that a search covers (`-strand`): the strand of the query's
+/// Seq-loc. A strand that is not searched has a context of length 0 and, in a split search, a
+/// chunk context of `None` (`kInvalidContext`).
+///
+/// NCBI reference: ncbi-blast/c++/src/algo/blast/api/split_query_cxx.cpp:394-410
+/// ```c
+///                     if (ctx % NUM_STRANDS == 0) {
+///                         if (kStrand == eNa_strand_minus) {
+///                             m_SplitBlk->AddContextToChunk(chunk_num,
+///                                                           kInvalidContext);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueryStrand {
+    Both,
+    Plus,
+    Minus,
+}
+
+impl QueryStrand {
+    /// The value of `-strand`: `both`, `plus` or `minus`, anything else is NCBI's argument
+    /// error (the command line checks it at parsing, `run_local` with this function).
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:1953-1955
+    /// ```c
+    ///         arg_desc.AddDefaultKey(kArgStrand, "strand",
+    ///                      "Query strand(s) to search against database/subject",
+    ///                                CArgDescriptions::eString, kDfltArgStrand);
+    /// ```
+    pub fn parse(value: &str) -> anyhow::Result<Self> {
+        match value {
+            "both" => Ok(Self::Both),
+            "plus" => Ok(Self::Plus),
+            "minus" => Ok(Self::Minus),
+            _ => anyhow::bail!(
+                "Argument \"strand\". Illegal value, expected `both', `minus', `plus':  `{value}'"
+            ),
+        }
+    }
+
+    /// The value of `-strand` of arguments that have passed `parse` (clap's value parser, or
+    /// `run_local`'s check): a value that is none of the three would be a bug of the caller.
+    pub fn from_option(value: &str) -> Self {
+        Self::parse(value).expect("-strand was checked when the arguments were read")
+    }
+
+    /// The first valid context of a query (1 for the minus strand).
+    ///
+    /// NCBI reference: ncbi-blast/c++/src/algo/blast/api/blast_setup_cxx.cpp:146-149
+    /// ```c
+    ///     // Adjust the first context if the requested strand is the minus strand
+    ///     if (strand == eNa_strand_minus) {
+    ///         query_info->first_context = translate ? 3 : 1;
+    ///     }
+    /// ```
+    pub fn first_context(self) -> usize {
+        usize::from(self == Self::Minus)
+    }
+
+    /// Whether the plus (context 0) and minus (context 1) strand of a query is searched.
+    pub fn searched(self) -> (bool, bool) {
+        (self != Self::Minus, self != Self::Plus)
+    }
+}
+
 // CLI v2 names/defaults: NCBI c++/src/algo/blast/blastinput/blast_args.cpp:
 // 166-170,203-207,332-349,2657-2660,3158-3163; cmdline_flags.cpp:46-94.
 // arg_desc.AddOptionalKey(kArgMaxHSPsPerSubject, "int_value", ..., eInteger);
@@ -433,5 +497,30 @@ impl BlastnArgs {
             })?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::QueryStrand;
+
+    #[test]
+    fn the_strand_option_is_read_once() {
+        assert_eq!(QueryStrand::from_option("both").searched(), (true, true));
+        assert_eq!(QueryStrand::from_option("plus").searched(), (true, false));
+        assert_eq!(QueryStrand::from_option("minus").searched(), (false, true));
+    }
+
+    #[test]
+    fn an_unknown_strand_is_an_argument_error() {
+        for value in ["foo", "", "Plus", "PLUS", "both "] {
+            let error = QueryStrand::parse(value).unwrap_err().to_string();
+            assert_eq!(
+                error,
+                format!(
+                    "Argument \"strand\". Illegal value, expected `both', `minus', `plus':  `{value}'"
+                )
+            );
+        }
     }
 }

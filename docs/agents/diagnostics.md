@@ -400,6 +400,7 @@ export LOSAT_X_TBXQSLICE=1
 export LOSAT_X_TBXRPTPAR=1
 export LOSAT_X_TBXSCANBF=1
 export LOSAT_X_TBXUNGAP=1
+export LOSAT_X_TBXUNITMASK=256
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,
@@ -408,7 +409,9 @@ built-in 64), `LOSAT_X_BXCHUNK` (1 or more, built-in 64), `LOSAT_X_TBXPREFETCH` 
 4,194,304, built-in 256: Ki letters of a subject's largest unit query-group span), `LOSAT_X_TBXQSLICE`
 (2 to 1,073,741,824: letters of a query slice, on every group longer than that; `1` or unset: the
 built-in rule, slices of 131,072 letters where a group's span times the threads reaches 6 Mi
-letters), `LOSAT_X_BPQBLOCK` (1 or
+letters), `LOSAT_X_TBXUNITMASK` (2 to 4,194,304, built-in 256 for `1` or unset: KiB of the largest
+masked unit diagonal table a unit takes for its size alone at eight threads or more),
+`LOSAT_X_BPQBLOCK` (1 or
 more, built-in 50,000: query letters per block; a value that is not a positive number is the
 built-in value).
 
@@ -3732,7 +3735,8 @@ Scheduling (each value computed by one thread with the original function; order 
   each against a subject frame longer than `slack`. Those whose longest subject chunk has at most
   as many letters as the reference table has cells (subjects of up to about six times the query's
   bases) now go through `LOSAT_X_PAIRPARGATE` like any other batch (small tables keep the reference
-  loop at one thread). The others keep the reference loop: a memory rule (`x_band_fits`), since a
+  loop at one thread). The others keep the reference loop without `LOSAT_X_TBXUNITMASK` (with it,
+  masked unit tables; next entry): a memory rule (`x_band_fits`), since a
   unit's diagonal table has a cell for every raw diagonal of its query group and subject chunk, one
   table per thread, against the reference's one table of 2^k cells per subject in flight.
   `LOSAT_X_STATS=1` adds `band=` (such batches the units took) to the `[X_STATS] PAIRPAR` line;
@@ -3748,9 +3752,48 @@ Scheduling (each value computed by one thread with the original function; order 
   differences), max RSS equal. Without the rule, 3 fruit fly transcripts (2,005 bases) against the
   fruit fly genome database ran 1.91 -> 1.41 s at 8 threads and 1.93 -> 0.87 s at 16 but its max
   RSS grew from 318 to 600-650 and 873 MiB (NCBI BLAST+ 2.17.0: 368 MiB at 8 threads), and a 1.9 kb
-  query against MG1655 0.30 -> 0.10 s and 0.31 -> 0.09 s with 21 -> 68-82 and 111 MiB; the rule
-  leaves both on the reference loop (as before). A masked unit table sized by the query group (also
-  exact by item 3) would let these batches take the units without that memory.
+  query against MG1655 0.30 -> 0.10 s and 0.31 -> 0.09 s with 21 -> 68-82 and 111 MiB; without
+  `LOSAT_X_TBXUNITMASK` the rule leaves both on the reference loop (as before); with it (the default)
+  they take the units on masked tables (next entry).
+- `LOSAT_X_TBXUNITMASK=256` (TBLASTX, speed and memory; a value switch, in the strict set from the
+  pull request that added it, 2026-10-21; `=0` turns it off, `1` or unset is the built-in 256, `=N`
+  N KiB; acts while `LOSAT_X_PAIRPAR` is on) a unit of the unit path takes a diagonal table of P
+  cells, P the smallest power of two of at least its query group's extent plus the window, and finds
+  a hit's cell as (q - s - lo) & (P - 1), instead of a table with a cell for every raw diagonal of its
+  group and subject chunk: where the unmasked one has at least four times P cells and P is at most
+  the switch's KiB at eight threads or more, at most 4,096 cells at two to seven, and, in a batch
+  whose first guard fails
+  (`LOSAT_X_TBXBAND`), wherever the subject chunk is longer than the reference table has cells, so
+  that `LOSAT_X_TBXBAND`'s memory rule (`x_band_fits`) no longer keeps such batches on the reference
+  frame loop. Exact by item 3's masked-aliasing argument applied to the group (`tblastx/x_pair_par.rs`
+  module doc): two raw diagonals that share a masked cell lie at least P minus the group's extent,
+  at least the window, apart along the subject, so the first hit of the later one leaves the cell as
+  it leaves a fresh cell. A batch whose groups `LOSAT_X_TBXQSLICE`'s rule cuts keeps unmasked tables
+  (the scan in slices brings a cell's diagonals out of subject order). A masked table costs one
+  instruction per hit and saves the clearing of the unmasked table's every cell per unit, hence the
+  size rule. `LOSAT_X_STATS=1` prints `[X_STATS] TBXUNITMASK kib= units_masked=` and
+  `LOSAT_X_PAIRPARSHADOW=1` `[X_SHADOW] TBXUNITMASK units_masked=` (both only after a TBLASTX batch).
+  `tests/tblastx_band.rs` runs a band batch against a genome through the binary. Measured
+  (workstation node 1, 16, 8, 4 or 2 booked cores or one, each run after a 3 s warm-up of its cores,
+  order rotated, medians of 8 runs, every report equal across arms and to NCBI BLAST+ 2.17.0 where
+  it ran), against `=0`: band batches against longer subjects, which ran the reference frame loop:
+  Sakai 1-500,000 x MG1655 at 16 threads 57.27 -> 5.34 s (x0.093; max RSS 217 -> 226 MiB, NCBI 315 MiB
+  in 3,433 s), 3 fruit fly transcripts (2,005 bases) against the fruit fly genome database x0.351
+  at 16 threads and x0.549 at 8 (311 MiB, NCBI 360), Sakai 100,001-101,900 x MG1655 x0.273 / x0.297 /
+  x0.531 at 16 / 8 / 2 (21 -> 24 MiB, NCBI 91); small groups against long subjects, which took
+  unmasked tables: Sakai 100,001-101,500 against the fruit fly genome database x0.853 / x0.865 at 16
+  / 8 threads with max RSS 784 / 570 -> 309 MiB (NCBI 356 MiB: above NCBI before), against MG1655
+  x0.800 (110 -> 24 MiB), Sakai 1-100,000 x MG1655 x0.987 at 16 threads (143 -> 61 MiB, NCBI 130),
+  x1.000 at 8, Sakai 1-50,000 x MG1655 x1.000 (125 -> 40 MiB); at four and two threads Sakai
+  100,001-103,000 and 1-10,000 x MG1655 (tables of 2 and 4 Ki cells) x0.941 / x0.923 and x0.971 /
+  x0.957, Sakai 100,001-101,500 x0.964 / x0.895 (50 / 41 -> 24-25 MiB), while 1-50,000 and 1-100,000
+  (32 and 64 Ki cells, left unmasked there) lose 0.2-0.9 % masked; Sakai 1-30,000 x MG1655, a band
+  batch, x0.256 / x0.447. The groups the rule
+  leaves unmasked (Sakai 1-300,000 and 1 Mb x MG1655) ran as before (x1.000-1.001; against the binary
+  before the switch x0.992-1.004, instructions +0.06-0.25 %). With `=512` the groups of 100,000
+  letters (Sakai 1-300,000 x MG1655) ran x1.008-1.012 (165 -> 143 MiB; NCBI 224); at one thread
+  masking only adds the instruction (x1.006 on Sakai 1-100,000). Five to seven threads were not
+  measured. Prefetching the masked tables (`LOSAT_X_TBXPREFETCH=2`) was slower (x1.008-1.028).
 - `LOSAT_X_PAIRPARGATE=1` (TBLASTX, speed; in the strict set since 2026-10-18, on by default, with
   `LOSAT_X_TBXLUT`; added off unless set in #255; acts only while `LOSAT_X_PAIRPAR` is on without
   its shadow and without `LOSAT_X_PAIRLUTSHADOW`) a query batch that the gates and the guard of

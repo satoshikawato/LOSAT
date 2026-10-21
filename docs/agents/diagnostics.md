@@ -1529,7 +1529,10 @@ Rebuilding less:
   arms). With `LOSAT_X_BPDIAG=0` (the per-hit loop on every subject, as without AVX2): 30 yeast proteins x the
   fly proteome (`-db`, `-evalue 1e-5`) x0.824 (5.40 -> 4.45 s; cycles x0.823, instructions x0.988,
   mispredicted branches x0.546); WSSV x PajaWSV (`-subject`) x0.966 (cycles x0.965, instructions x0.993,
-  mispredicted branches x0.768). By default with AVX2 the batches take every subject: x0.996-1.002,
+  mispredicted branches x0.768). At 8 threads (node 1, CPUs 32-39, their HT siblings idle, the same form, 4
+  rounds): x0.835 (0.730 -> 0.611 s; cycles x0.825, instructions x0.988, mispredicted branches x0.548) and
+  x0.974 (0.195 -> 0.191 s; cycles x0.959, instructions x0.993); `=0` x0.995-0.997, the default x0.995, both
+  with instructions x1.0000. By default with AVX2 the batches take every subject: x0.996-1.002,
   instructions x1.0000. With `=0` the instruction counts equal those of the binary before the switch
   (x1.0000-1.0001, with and without `LOSAT_X_BPDIAG=0`). On WebAssembly (LOSAT Web's serial reactor, ABI v2,
   under Node 26 in one process: an instance per arm, the default and `=0` alternating, one warm-up search +

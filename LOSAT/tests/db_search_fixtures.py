@@ -5,7 +5,7 @@ LOSAT/tests/db_search_manifest.tsv lists the rows (columns: row_id, program, kin
 outfmt, rc, stdout_sha256, stdout_bytes, stderr_sha256, covers). Every row runs from LOSAT/ as
 `PROGRAM -db DB -query QUERY EXTRA_ARGS -outfmt OUTFMT`, PROGRAM being the row's `program` cell
 (`blastp`, `blastn`, `tblastn`, `blastx` or `tblastx`; NCBI's own binary of that name, or `LOSAT PROGRAM`) (an empty `db` cell is the literal empty
-argument `-db ""`; `extra_args` is split like a shell line; `outfmt` is one argument, so a custom
+argument `-db ""`; `extra_args` is split like a shell line, its tokens `BLASTDB=DIR` are not arguments but the environment variable of both programs (the directory of a `taxdb.bti`, relative to LOSAT/); `outfmt` is one argument, so a custom
 `7 qseqid sseqid ...` spec stays whole). The databases are under LOSAT/tests/seqdb/db and
 LOSAT/tests/db_search (README.md there says how they were built).
 
@@ -48,6 +48,7 @@ COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "
 PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx")
 NCBI_ENV = ("BLASTDB", "NCBI", "BATCH_SIZE", "CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY")
 TIMEOUT = 600
+ENV_PREFIX = "BLASTDB="
 
 
 def read_manifest() -> tuple[list[str], list[dict[str, str]]]:
@@ -76,9 +77,24 @@ def write_manifest(comments: list[str], rows: list[dict[str, str]]) -> None:
     MANIFEST.write_text("\n".join(lines) + "\n")
 
 
+def extra_tokens(row: dict[str, str]) -> list[str]:
+    return shlex.split(row["extra_args"])
+
+
 def search_argv(row: dict[str, str]) -> list[str]:
     """The arguments after the program name (the same for NCBI and LOSAT)."""
-    return ["-db", row["db"], "-query", row["query"], *shlex.split(row["extra_args"]), "-outfmt", row["outfmt"]]
+    extra = [token for token in extra_tokens(row) if not token.startswith(ENV_PREFIX)]
+    return ["-db", row["db"], "-query", row["query"], *extra, "-outfmt", row["outfmt"]]
+
+
+def row_env(row: dict[str, str], base: dict[str, str]) -> dict[str, str]:
+    """`base` plus the row's `BLASTDB=DIR` tokens (the search path of the taxonomy database, DIR
+    relative to LOSAT/, the directory both programs run in)."""
+    env = dict(base)
+    for token in extra_tokens(row):
+        if token.startswith(ENV_PREFIX):
+            env["BLASTDB"] = token[len(ENV_PREFIX):]
+    return env
 
 
 def sha256(data: bytes) -> str:
@@ -115,7 +131,7 @@ def freeze(args: argparse.Namespace) -> int:
         if row["kind"] != "ncbi" or not selected(row, args):
             continue
         run = subprocess.run([str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"],
-                             cwd=ENGINE, capture_output=True, timeout=TIMEOUT)
+                             cwd=ENGINE, capture_output=True, timeout=TIMEOUT, env=row_env(row, dict(os.environ)))
         (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         err = FROZEN / f"{row['row_id']}.err"
         if run.stderr:
@@ -131,7 +147,7 @@ def freeze(args: argparse.Namespace) -> int:
 
 def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str]) -> tuple[str, str]:
     run = subprocess.run([str(losat), row["program"], *search_argv(row), "-num_threads", str(threads)],
-                         cwd=ENGINE, capture_output=True, env=env, timeout=TIMEOUT)
+                         cwd=ENGINE, capture_output=True, env=row_env(row, env), timeout=TIMEOUT)
     if row["kind"] == "losat-rejection":
         problems = []
         if run.returncode != int(row["rc"]):

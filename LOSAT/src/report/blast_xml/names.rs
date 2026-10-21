@@ -165,16 +165,6 @@ pub fn xml_message(query_id: &[u8], warnings: &[String], has_hits: bool) -> Opti
     (!message.is_empty()).then_some(message)
 }
 
-/// LOSAT's refusal of a reported `-db` sequence with a taxid when `taxdb.bti` is on the search
-/// path, in the XML2 and JSON formats (outfmt 13-16): NCBI writes the scientific name next to
-/// the taxid then (`HitDescr_sciname`), and LOSAT has no taxonomy database (Q4). `program` names
-/// the program.
-pub fn taxdb_refusal(program: &str) -> anyhow::Error {
-    anyhow::anyhow!(
-        "a database sequence with a taxonomy ID searched with a taxonomy database (taxdb.bti) on the BLAST database search path is not supported by LOSAT's {program} in outfmt 13 to 16 (NCBI BLAST+ writes the scientific name there)"
-    )
-}
-
 /// The title and message of a query, made and checked before the document is written.
 pub struct QueryText {
     /// The generated title (`xml_query_title`).

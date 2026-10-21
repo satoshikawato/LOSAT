@@ -99,7 +99,40 @@ pub struct XmlHit<'a> {
     pub len: i32,
     /// The Blast-def-line's taxid of a `-db` sequence, 0 for none (XML2's `HitDescr_taxid`).
     pub taxid: i32,
+    /// What the taxonomy database said about the taxid (XML2's `HitDescr_sciname`); outfmt 5
+    /// does not read it.
+    pub taxonomy: &'a HitTaxonomy,
 }
+
+/// What NCBI's XML2 and JSON formats do with the taxid of a `Hit` once the taxonomy database has
+/// been asked (`s_SeqAlignToXMLHit`, blastxml2_format.cpp:380-386; DECISIONS 28).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-386
+/// ```c++
+///             if (data->HasTaxDB()) {
+///                 SSeqDBTaxInfo taxinfo;
+///                 CSeqDB::GetTaxInfo(taxid, taxinfo);
+///                 hit_descr->SetSciname(taxinfo.scientific_name);
+///             }
+/// ```
+/// (`GetTaxInfo` throws when the taxid is not found; the `catch` of the hit replaces its
+/// description by the sequence id alone.)
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum HitTaxonomy {
+    /// No scientific name is written: no taxid, `-subject`, or no `taxdb.bti` on the search
+    /// path.
+    #[default]
+    Unnamed,
+    /// The scientific name, written after the taxid (an empty one too).
+    Named(Vec<u8>),
+    /// The taxonomy database does not know the taxid (or is damaged): the description is the id
+    /// alone. The texts are the `ERR_POST` messages of this hit's lookup (NCBI writes them again
+    /// at every hit).
+    NotFound(Vec<String>),
+}
+
+/// The `taxonomy` of a hit without a taxonomy lookup.
+pub const UNNAMED: &HitTaxonomy = &HitTaxonomy::Unnamed;
 
 /// A masked region of the query in NCBI's form (`CSeqLocInfo`): inclusive 0-based positions in
 /// the query record and the frame of the context it belongs to.

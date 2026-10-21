@@ -3,8 +3,8 @@
 //! BLAST XML2 and JSON (outfmt 16 and 15) of BLASTP: what the frozen-fixture rows cannot show.
 //! The `-subject` report that NCBI holds back one query (a failed batch loses it), the documents
 //! of a run with no query, and the searches LOSAT refuses before the first byte (a byte >= 0x80 in
-//! a title or the `-db` name, DECISIONS 19 Q2; a `-db` taxid with `taxdb.bti` on the search path,
-//! Q4). The bytes of NCBI BLAST+ 2.17.0 are in `tests/fixtures/outfmt16`
+//! a title or the `-db` name, DECISIONS 19 Q2; a taxonomy database scientific name, DECISIONS 30)
+//! and the taxonomy database of a `-db` taxid (DECISIONS 28). The bytes of NCBI BLAST+ 2.17.0 are in `tests/fixtures/outfmt16`
 //! (`badbatch_{sub,db}_{15,16}.out`: `BATCH_SIZE=100 blastp -query qprot_bad.faa -subject
 //! sprot.faa | -db db/sprot -num_threads 1 -outfmt N`, run in that directory).
 //!
@@ -273,12 +273,13 @@ fn a_title_or_database_name_outside_us_ascii_is_refused_in_15_and_16() {
     fs::remove_dir_all(dir).ok();
 }
 
-/// Q3 and Q4: a reported `-db` sequence with a taxid is written (`HitDescr_taxid`, the frozen rows
-/// `db.sa.x16_taxid.{15,16}`), but NCBI also writes its scientific name when `taxdb.bti` is on the
-/// search path (the current directory, `BLASTDB`), which LOSAT cannot: that search is refused
-/// before the first byte. A taxdb with a database whose sequences have no taxid changes nothing.
+/// DECISIONS 28: a reported `-db` sequence with a taxid is written (`HitDescr_taxid`, the frozen
+/// rows `db.sa.x16_taxid.{15,16}`) and, when `taxdb.bti` is on the search path (the current
+/// directory, `BLASTDB`), NCBI asks the taxonomy database: whatever the file holds, a taxid it
+/// cannot name leaves the `HitDescr` with the id alone (the empty `taxdb.bti` is a damaged
+/// database). A database without taxids is not touched by the taxdb.
 #[test]
-fn a_taxid_database_is_refused_only_with_a_taxdb_on_the_search_path() {
+fn a_taxdb_that_names_nothing_leaves_the_id_alone() {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
     let taxid_db = tests.join("x16_taxid");
     let query = tests.join("x16_taxid_q.faa");
@@ -301,12 +302,13 @@ fn a_taxid_database_is_refused_only_with_a_taxdb_on_the_search_path() {
                 format.to_string(),
             ]
         };
-        // without a taxdb: the taxid is written
+        // without a taxdb: the taxid is written, no scientific name
         let work = temp_dir("nottaxdb");
         let output = run_in(&work, &as_str(&args(&taxid_db, &query)), &[]);
         assert_eq!(output.status.code(), Some(0));
         let text = String::from_utf8_lossy(&output.stdout);
         assert!(text.contains("9606"), "{text}");
+        assert!(text.contains("accession"), "{text}");
         assert!(!text.contains("sciname"), "{text}");
         fs::remove_dir_all(work).ok();
         // taxdb.bti in BLASTDB, or in the current directory
@@ -319,16 +321,18 @@ fn a_taxid_database_is_refused_only_with_a_taxdb_on_the_search_path() {
         ] {
             let output = run_in(&cwd, &as_str(&args(&taxid_db, &query)), &env);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            assert_eq!(output.status.code(), Some(1), "{format} {env:?}: {stderr}");
-            assert!(output.stdout.is_empty(), "nothing is written");
-            assert!(
-                stderr.contains("with a taxonomy ID searched with a taxonomy database (taxdb.bti)"),
-                "{stderr}"
-            );
-            assert!(
-                stderr.contains("LOSAT's BLASTP in outfmt 13 to 16"),
-                "{stderr}"
-            );
+            assert_eq!(output.status.code(), Some(0), "{format} {env:?}: {stderr}");
+            let text = String::from_utf8_lossy(&output.stdout);
+            assert!(text.contains("gnl|BL_ORD_ID|"), "{text}");
+            for gone in ["accession", "title", "9606", "sciname"] {
+                assert!(
+                    !text.contains(&format!("\"{gone}\"")) && !text.contains(&format!("<{gone}>")),
+                    "{gone} in {text}"
+                );
+            }
+            // the hits keep their lengths and alignments
+            assert!(text.contains("hsps"), "{text}");
+            assert!(stderr.is_empty(), "{stderr}");
             if cwd != dir {
                 fs::remove_dir_all(cwd).ok();
             }
@@ -340,7 +344,71 @@ fn a_taxid_database_is_refused_only_with_a_taxdb_on_the_search_path() {
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
+            assert!(!String::from_utf8_lossy(&output.stdout).contains("sciname"));
         }
     }
     fs::remove_dir_all(dir).ok();
+}
+
+/// The rows `db.sa.x16_taxid.*` of `db_search_manifest.tsv` (OF5a part 1b: outfmt 15 and 16 with
+/// a taxonomy database in `BLASTDB`), at one and four threads: the bytes of NCBI BLAST+ 2.17.0
+/// (`blastp -num_threads 1`) for stdout, stderr and the exit status; the rows of kind
+/// `losat-rejection` write nothing and name their reason.
+#[test]
+fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
+    let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = fs::read_to_string(engine.join("tests/db_search_manifest.tsv")).unwrap();
+    let mut rows = 0;
+    for line in manifest
+        .lines()
+        .filter(|line| line.starts_with("db.sa.x16_taxid."))
+    {
+        let cells: Vec<&str> = line.split('\t').collect();
+        let (id, kind, db, query, extra, outfmt, rc, covers) = (
+            cells[0], cells[2], cells[3], cells[4], cells[5], cells[6], cells[7], cells[11],
+        );
+        let Some(taxdb) = extra.strip_prefix("BLASTDB=") else {
+            continue;
+        };
+        for threads in ["1", "4"] {
+            let output = run_in(
+                engine,
+                &[
+                    "blastp",
+                    "-db",
+                    db,
+                    "-query",
+                    query,
+                    "-outfmt",
+                    outfmt,
+                    "-num_threads",
+                    threads,
+                ],
+                &[("BLASTDB", taxdb)],
+            );
+            let rc: i32 = rc.parse().unwrap();
+            assert_eq!(output.status.code(), Some(rc), "{id} threads {threads}");
+            if kind == "losat-rejection" {
+                let expect = covers.split("expect: ").nth(1).unwrap();
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert!(output.stdout.is_empty(), "{id}: nothing is written");
+                assert!(stderr.contains(expect), "{id}: {stderr}");
+                continue;
+            }
+            let frozen = engine.join("tests/fixtures/db_search");
+            let out = fs::read(frozen.join(format!("{id}.out"))).unwrap();
+            let err = fs::read(frozen.join(format!("{id}.err"))).unwrap_or_default();
+            assert!(
+                output.stdout == out,
+                "{id} threads {threads}: stdout differs"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&err),
+                "{id} threads {threads}: stderr"
+            );
+        }
+        rows += 1;
+    }
+    assert!(rows >= 20, "{rows} rows");
 }

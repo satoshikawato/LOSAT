@@ -195,6 +195,7 @@ pub(crate) fn write_tblastx_xml(
             titles: crate::report::blast_xml::XmlTitles::Records(run.subjects),
             // Only XML2 shows the taxid (outfmt 15 and 16 of TBLASTX: OF5b).
             taxids: &[],
+            taxonomy: &[],
             length: &subject_length,
         },
         None => XmlSubjects::Records {
@@ -262,6 +263,7 @@ pub(crate) fn write_tblastx_xml(
                     accession: &subject.accession,
                     len: subject_record_length,
                     taxid: subject.taxid,
+                    taxonomy: &subject.taxonomy,
                 };
                 sink.hit(&hit, |hsps| {
                     for hsp in &query_hits[first..end] {

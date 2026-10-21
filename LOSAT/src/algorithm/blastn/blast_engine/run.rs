@@ -5958,6 +5958,7 @@ fn post_process_hits_and_write(
                     titles: crate::report::blast_xml::XmlTitles::Records(subject_records),
                     // Only XML2 shows the taxid (outfmt 15 and 16 of BLASTN: OF5a part 2).
                     taxids: &[],
+                    taxonomy: &[],
                     length: &database_length,
                 },
                 _ => crate::report::blast_xml::XmlSubjects::Records {

@@ -236,3 +236,11 @@ OF5a (XML2 and JSON, outfmt 15 and 16): `x16_taxid.faa` (the two `-subject` reco
 
 NCBI writes the taxid in the `Hit` description of outfmt 13-16 (`HitDescr_taxid`); the rows `db.sa.x16_taxid.15` and
 `db.sa.x16_taxid.16` freeze that, with no `taxdb.bti` on the search path.
+
+OF5a part 1b (taxonomy names in outfmt 15 and 16): `x16_taxid_99990` and `x16_taxid_7777` are `x16_taxid` built with
+`-taxid 99990` and `-taxid 7777` (same command); `x16_taxid_q2.faa` is `x16_taxid_q.faa` with a third query (`qp3`, hits
+both subjects) so that a subject is a `Hit` of two queries. The rows `db.sa.x16_taxid.<case>.{15,16}` set
+`BLASTDB=tests/seqdb/taxdb/<variant>` in `extra_args` (a `BLASTDB=DIR` token is the environment variable of both programs,
+not an argument): `good`, `bad_magic`, `count_larger`, `no_btd`, `empty_fields`, `offset_last_past_end` and
+`tests/seqdb/taxdb_xml2/no_9606` (`make_taxdb.py write` of `taxdb.tsv` without the row of 9606). The rows `.nonascii.*`
+(`high_bytes_utf8`) are LOSAT refusals: NCBI aborts its XML2 writer there.

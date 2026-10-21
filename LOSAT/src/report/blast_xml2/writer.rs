@@ -19,7 +19,7 @@
 use anyhow::Result;
 
 use crate::report::blast_xml::hsp::{round6, MaskLetter};
-use crate::report::blast_xml::records::{XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats};
+use crate::report::blast_xml::records::{HitTaxonomy, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats};
 use crate::report::blast_xml::writer::{
     count_hsp, int_member, real_member, string_member, HitSink, HitWrite, HspSink, HspWrite,
     Scratch, StructuredXml,
@@ -275,13 +275,20 @@ impl<E: Encoder> HitWrite for Xml2Hits<'_, E> {
         enc.element();
         enc.begin_sequence("HitDescr");
         string_member(enc, "id", 0, hit.id);
-        // `-subject` ids are local: no accession (blastxml2_format.cpp:398-402).
-        if database {
-            string_member(enc, "accession", 1, hit.accession);
-        }
-        string_member(enc, "title", 2, hit.title);
-        if database && hit.taxid != 0 {
-            int_member(enc, "taxid", 3, hit.taxid);
+        // A taxid the taxonomy database does not know (`GetTaxInfo` throws) leaves the id alone
+        // (blastxml2_format.cpp:422-428).
+        if !matches!(hit.taxonomy, HitTaxonomy::NotFound(_)) {
+            // `-subject` ids are local: no accession (blastxml2_format.cpp:398-402).
+            if database {
+                string_member(enc, "accession", 1, hit.accession);
+            }
+            string_member(enc, "title", 2, hit.title);
+            if database && hit.taxid != 0 {
+                int_member(enc, "taxid", 3, hit.taxid);
+                if let HitTaxonomy::Named(sciname) = hit.taxonomy {
+                    string_member(enc, "sciname", 4, sciname);
+                }
+            }
         }
         enc.end_sequence();
         enc.end_list();

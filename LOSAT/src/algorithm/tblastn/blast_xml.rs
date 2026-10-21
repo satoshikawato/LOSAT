@@ -210,8 +210,10 @@ pub(super) fn prepare(
             None => SubjectNames::of_record(record.local_id.as_bytes(), record.title(), false)
                 .map_err(|refusal| refusal.error(PROGRAM, "a subject title"))?,
             // The taxid is shown by XML2 alone (outfmt 15 and 16 of TBLASTN: OF5b).
-            Some(ordinal) => SubjectNames::of_database_sequence(ordinal, record.title(), 0)
-                .map_err(|refusal| refusal.error(PROGRAM, "a database title"))?,
+            Some(ordinal) => {
+                SubjectNames::of_database_sequence(ordinal, record.title(), 0, Default::default())
+                    .map_err(|refusal| refusal.error(PROGRAM, "a database title"))?
+            }
         });
         // The whole record (`-subject_loc` searches part of it).
         subject_lengths[oid] =
@@ -379,6 +381,7 @@ impl PreparedXml {
                         accession: &names.accession,
                         len: record_length,
                         taxid: names.taxid,
+                        taxonomy: &names.taxonomy,
                     };
                     let subject_seq = subject_letters.nt(oid);
                     let mut translation = TargetTranslation::of(subject_seq, &code);

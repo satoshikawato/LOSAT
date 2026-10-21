@@ -183,6 +183,7 @@ fn write_hits(writer: &mut BlastXmlWriter, matrix: &FormattingMatrix, out: &mut 
                     accession: b"Subject_1",
                     len: 137,
                     taxid: 0,
+                    taxonomy: crate::report::blast_xml::records::UNNAMED,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {

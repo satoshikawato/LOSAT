@@ -168,6 +168,7 @@ fn subject_names(
             &reported.stored_titles()[oid],
             // XML2 alone shows the taxid (outfmt 15 and 16 of BLASTX: OF5b).
             0,
+            Default::default(),
         )
         .map_err(|refusal| refuse(refusal, "a database title")),
     }
@@ -476,6 +477,7 @@ pub(super) fn write_blastx_xml(
                         accession: &names.accession,
                         len: i32::try_from(subject.sequence.len())?,
                         taxid: names.taxid,
+                        taxonomy: &names.taxonomy,
                     };
                     sink.hit(&hit, |hsps| {
                         for hsp in list

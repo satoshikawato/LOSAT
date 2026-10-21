@@ -10826,11 +10826,14 @@ fn run_resolved_in_pool(
                         .length(s_idx, subject_records[s_idx].seq().len())
                 };
                 // The taxids of the reported subjects, read for the XML2 and JSON formats only.
-                let xml_taxids: Vec<i32> = match (xml2_kind, listed_titles.as_ref(), database) {
+                let (xml_taxids, xml_taxonomy): (
+                    Vec<i32>,
+                    Vec<crate::report::blast_xml::HitTaxonomy>,
+                ) = match (xml2_kind, listed_titles.as_ref(), database) {
                     (Some(_), Some(titles), Some(database)) => {
                         titles.read_taxids(database, &hit_lists)?
                     }
-                    _ => Vec::new(),
+                    _ => (Vec::new(), Vec::new()),
                 };
                 let xml_subjects = match (listed_subjects.as_ref(), listed_titles.as_ref()) {
                     // The stored titles by rank, of the records or of LOSAT_X_BPLISTEDLEAN
@@ -10840,6 +10843,7 @@ fn run_resolved_in_pool(
                         titles: crate::report::blast_xml::XmlTitles::Shared(&subject_titles),
                         // Only XML2 shows the taxid.
                         taxids: &xml_taxids,
+                        taxonomy: &xml_taxonomy,
                         length: &database_length,
                     },
                     _ => crate::report::blast_xml::XmlSubjects::Records {

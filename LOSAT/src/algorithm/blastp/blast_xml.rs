@@ -33,13 +33,14 @@ use anyhow::{bail, Context, Result};
 use super::hsp::BlastpHitList;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
-    XmlSubjects,
+    HitTaxonomy, QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun,
+    XmlStats, XmlSubjects,
 };
 use crate::report::pairwise::PairwiseHit;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::QueryNames;
 use crate::report::serial::seqalign::seqalign_evalue;
+use crate::seqdb::taxdb::err_post_line;
 
 /// What the BLASTP document needs besides the final hit lists.
 pub(crate) struct BlastpXml<'a> {
@@ -144,7 +145,15 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                     accession: &subject.accession,
                     len: xml.subjects.length(s_idx),
                     taxid: subject.taxid,
+                    taxonomy: &subject.taxonomy,
                 };
+                // NCBI's lookup of the taxid at this `Hit` (`CSeqDB::GetTaxInfo`) writes its
+                // messages every time.
+                if let HitTaxonomy::NotFound(messages) = &subject.taxonomy {
+                    for text in messages {
+                        eprintln!("{}", err_post_line("blastp", text));
+                    }
+                }
                 sink.hit(&hit, |hsps| {
                     for hsp in &hsp_list.hsps {
                         let row = hit_rows

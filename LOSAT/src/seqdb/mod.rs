@@ -457,7 +457,18 @@ impl SeqDb {
     pub fn taxdb_found(&self) -> bool {
         self.search_path
             .as_ref()
-            .is_some_and(|path| path.resolves_file("taxdb.bti"))
+            .is_some_and(|path| path.resolve_file("taxdb.bti").is_some())
+    }
+
+    /// The search path the database was opened with (`open_in`), none for a database opened
+    /// by another way.
+    pub fn search_path(&self) -> Option<&SearchPath> {
+        self.search_path.as_ref()
+    }
+
+    /// The number of the volume that holds `ordinal` (`CSeqDBVolSet::FindVol`).
+    pub fn volume_index(&self, ordinal: u32) -> Result<usize, SeqDbError> {
+        self.find_volume(ordinal).map(|(volume, _)| volume)
     }
 
     /// Opens the one database at the path `name` (without extension), taken

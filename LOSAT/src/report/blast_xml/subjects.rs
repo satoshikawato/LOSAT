@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use crate::blastinput::fasta_reader::FastaRecord;
 
 use super::names::{self, Refusal};
+use super::records::HitTaxonomy;
 
 /// The subjects of a search, indexed by the subject number of its HSPs.
 pub enum XmlSubjects<'a> {
@@ -29,6 +30,9 @@ pub enum XmlSubjects<'a> {
         /// it. Empty where the program has not read them (outfmt 5 alone): every taxid is
         /// then 0.
         taxids: &'a [i32],
+        /// What the taxonomy database said about each sequence's taxid by rank
+        /// (`HitTaxonomy`); empty where nothing was asked: every one is `Unnamed`.
+        taxonomy: &'a [HitTaxonomy],
         length: &'a dyn Fn(usize) -> usize,
     },
 }
@@ -68,6 +72,8 @@ pub struct SubjectNames {
     pub accession: Vec<u8>,
     /// The `-db` sequence's Blast-def-line taxid, 0 for none and for a `-subject` record.
     pub taxid: i32,
+    /// What the taxonomy database said about `taxid` (XML2 and JSON only).
+    pub taxonomy: HitTaxonomy,
 }
 
 impl SubjectNames {
@@ -80,6 +86,7 @@ impl SubjectNames {
             title,
             accession: id.to_vec(),
             taxid: 0,
+            taxonomy: HitTaxonomy::Unnamed,
         })
     }
 
@@ -89,12 +96,14 @@ impl SubjectNames {
         ordinal: impl std::fmt::Display,
         title: &[u8],
         taxid: i32,
+        taxonomy: HitTaxonomy,
     ) -> Result<Self, Refusal> {
         Ok(SubjectNames {
             id: format!("gnl|BL_ORD_ID|{ordinal}").into_bytes(),
             title: names::xml_db_title(title)?,
             accession: ordinal.to_string().into_bytes(),
             taxid,
+            taxonomy,
         })
     }
 }
@@ -115,6 +124,7 @@ impl XmlSubjects<'_> {
                 ordinals,
                 titles,
                 taxids,
+                taxonomy,
                 ..
             } => {
                 let ordinal = *ordinals
@@ -124,7 +134,8 @@ impl XmlSubjects<'_> {
                     .get(s_idx)
                     .context("HSP of an unknown database sequence")?;
                 let taxid = taxids.get(s_idx).copied().unwrap_or(0);
-                SubjectNames::of_database_sequence(ordinal, title, taxid)
+                let taxonomy = taxonomy.get(s_idx).cloned().unwrap_or_default();
+                SubjectNames::of_database_sequence(ordinal, title, taxid, taxonomy)
                     .map_err(|refusal: Refusal| refusal.error(program, "a database title"))
             }
         }

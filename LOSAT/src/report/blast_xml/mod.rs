@@ -13,7 +13,7 @@ pub mod records;
 pub mod subjects;
 pub mod writer;
 
-pub use records::{QueryMask, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats};
+pub use records::{HitTaxonomy, QueryMask, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats};
 pub use subjects::{SubjectNameCache, XmlSubjects, XmlTitles};
 pub use writer::{BlastXmlWriter, HitSink, HitWrite, HspSink, HspWrite, StructuredXml};
 

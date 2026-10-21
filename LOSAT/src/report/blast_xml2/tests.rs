@@ -282,6 +282,22 @@ fn a_delayed_document_writes_one_report_late_and_drops_the_last_on_a_failure() {
 }
 
 fn one_hsp(hits_title: &'static [u8], target: Xml2Target, taxid: i32, kind: Xml2Kind) -> String {
+    one_hsp_named(
+        hits_title,
+        target,
+        taxid,
+        kind,
+        crate::report::blast_xml::records::UNNAMED,
+    )
+}
+
+fn one_hsp_named(
+    hits_title: &'static [u8],
+    target: Xml2Target,
+    taxid: i32,
+    kind: Xml2Kind,
+    taxonomy: &crate::report::blast_xml::HitTaxonomy,
+) -> String {
     let matrix = FormattingMatrix::new("BLOSUM62").unwrap();
     let run = run(
         Some(&matrix),
@@ -323,6 +339,7 @@ fn one_hsp(hits_title: &'static [u8], target: Xml2Target, taxid: i32, kind: Xml2
                     accession: b"3",
                     len: 20,
                     taxid,
+                    taxonomy,
                 },
                 |hsps| {
                     hsps.hsp(&XmlHsp {
@@ -450,4 +467,41 @@ fn the_json_report_is_an_array_element_and_the_xml_std_mode_has_its_own_tags() {
             crate::report::serial::xml::XML2_ROOT_ATTRIBUTES
         )
     );
+}
+
+#[test]
+fn the_scientific_name_follows_the_taxid_and_an_unknown_taxid_leaves_the_id_alone() {
+    use crate::report::blast_xml::HitTaxonomy;
+    let named = HitTaxonomy::Named(b"Quote \"x\", y; z".to_vec());
+    let xml = one_hsp_named(b"t", Xml2Target::Database, 9606, Xml2Kind::Single16, &named);
+    assert!(
+        xml.contains("<taxid>9606</taxid>\n                      <sciname>Quote &quot;x&quot;, y; z</sciname>\n                    </HitDescr>"),
+        "{xml}"
+    );
+    let json = one_hsp_named(b"t", Xml2Target::Database, 9606, Xml2Kind::Single15, &named);
+    assert!(
+        json.contains("\"taxid\": 9606,\n                  \"sciname\": \"Quote \\\"x\\\", y; z\""),
+        "{json}"
+    );
+    // an empty name is written
+    let empty = HitTaxonomy::Named(Vec::new());
+    let xml = one_hsp_named(b"t", Xml2Target::Database, 9606, Xml2Kind::Single16, &empty);
+    assert!(xml.contains("<sciname></sciname>"), "{xml}");
+    // not found: the description is the id alone, the hit keeps its length
+    let missing = HitTaxonomy::NotFound(Vec::new());
+    let xml = one_hsp_named(
+        b"t",
+        Xml2Target::Database,
+        9606,
+        Xml2Kind::Single16,
+        &missing,
+    );
+    assert!(
+        xml.contains("<HitDescr>\n                      <id>gnl|BL_ORD_ID|3</id>\n                    </HitDescr>"),
+        "{xml}"
+    );
+    assert!(xml.contains("<len>20</len>"), "{xml}");
+    // a name without a taxid is not written
+    let xml = one_hsp_named(b"t", Xml2Target::Database, 0, Xml2Kind::Single16, &named);
+    assert!(!xml.contains("sciname"), "{xml}");
 }

@@ -123,6 +123,7 @@ pub(crate) fn write_blastn_xml(
                     accession: &subject.accession,
                     len: xml.subjects.length(s_idx),
                     taxid: subject.taxid,
+                    taxonomy: &subject.taxonomy,
                 };
                 sink.hit(&hit, |hsps| {
                     for hsp in &hsp_list.hsps {

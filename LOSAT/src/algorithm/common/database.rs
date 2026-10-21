@@ -863,6 +863,13 @@ pub(crate) fn read_reported_taxids(
     Ok((taxids, taxonomy, notes))
 }
 
+/// How many taxonomy database entries cost as much to check as one database sequence: the
+/// taxonomy side is chosen when `entries <= TAXDB_ENTRIES_PER_SEQUENCE * sequences`. Measured
+/// (OF5b fix, 1 thread, hot page cache): the pass over NCBI's taxdb takes 0.15 s for 2,314,695
+/// entries (about 0.065 us each), the database side 0.25 s for 2,000,000 sequences (about
+/// 0.125 us each), so an entry costs about half a sequence.
+const TAXDB_ENTRIES_PER_SEQUENCE: u64 = 2;
+
 /// The most database sequences the per-sequence side of [`taxdb_may_refuse`] reads after the
 /// taxonomy side found a record that could be refused (about 0.3 us each, so a few seconds);
 /// a larger database is held without reading it.
@@ -875,15 +882,16 @@ const PREPASS_DB_SEQUENCES_MAX: u64 = 1 << 22;
 /// search reports: limits (`-gilist`, `-taxidlist`) and the hits themselves are ignored.
 /// `false` without `taxdb.bti` on the search path and for a database without taxids.
 ///
-/// The answer comes from whichever side has fewer entries (the sequences of the database,
-/// `SeqDb::num_seqs`, or the entries of `taxdb.bti`, from its header):
+/// The answer comes from whichever side is cheaper: the taxonomy side when the entries of
+/// `taxdb.bti` (from its header) number at most [`TAXDB_ENTRIES_PER_SEQUENCE`] times the
+/// sequences of the database (`SeqDb::num_seqs`), else the database side:
 /// * [`taxdb_side`]: one sequential pass over the taxonomy database asks whether any taxid's
 ///   lookup could be refused; none -> `false`, without reading the database. This is the
 ///   normal case for NCBI's taxdb, so the cost does not grow with the database.
 /// * [`database_side`]: the first definition line's taxid of every sequence, each distinct
 ///   non-zero one looked up. It decides the cases the taxonomy side leaves open. When the
-///   taxonomy side ran first (the database has at least as many sequences as the taxonomy
-///   database has entries) and found something, a database of more than
+///   taxonomy side ran first (the taxonomy database has at most twice as many entries as the
+///   database has sequences) and found something, a database of more than
 ///   [`PREPASS_DB_SEQUENCES_MAX`] sequences is held without this pass.
 ///
 /// "No hold" means that no lookup of the run can refuse after a byte: the taxonomy side proves it
@@ -908,9 +916,9 @@ pub(crate) fn taxdb_may_refuse(db: &SeqDb) -> bool {
     let sequences = u64::from(db.num_seqs());
     // An index that cannot be opened is left to the database side, which asks for a name only
     // when a sequence has a taxid.
-    let taxdb_first = taxdb
-        .entry_count()
-        .map_or(false, |entries| entries <= sequences);
+    let taxdb_first = taxdb.entry_count().map_or(false, |entries| {
+        entries <= TAXDB_ENTRIES_PER_SEQUENCE * sequences
+    });
     if taxdb_first {
         if taxdb_side(&taxdb) == Some(false) {
             return false;

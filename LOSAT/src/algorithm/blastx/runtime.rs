@@ -526,6 +526,7 @@ pub fn x_search_internal_in_pool<'a>(
         stream: None,
         chunk: None,
         output: Vec::new(),
+        x_probe: None,
     };
     search_core(records, subjects, options, false, &mut pipeline, pool)?;
     Ok(pipeline.output)
@@ -574,6 +575,7 @@ pub fn search_internal_observed<'a>(
         stream: None,
         chunk: None,
         output: Vec::new(),
+        x_probe: None,
     };
     crate::utils::threading::with_search_pool(options.num_threads as usize, "BLASTX", |pool| {
         search_core(records, subjects, options, false, &mut pipeline, pool)
@@ -590,6 +592,8 @@ struct Runtime<'a> {
     stream: Option<HspStream>,
     chunk: Option<HspStream>,
     output: Vec<BatchResults>,
+    /// EXPERIMENT (LOSAT_X_BXSTOREPROBE=1): the probe's counts of the current batch.
+    x_probe: Option<Box<super::x_store_probe::Batch>>,
 }
 impl PreliminarySink for Runtime<'_> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/api/local_blast.cpp:176-181,202-210
@@ -818,6 +822,15 @@ impl PreliminarySink for Runtime<'_> {
         batch: &PreparedQueryBatch,
         params: &[ContextParameters],
     ) -> Result<()> {
+        if !input.is_empty() {
+            if let Some(probe) = &self.x_probe {
+                probe.prelim(oid, self.subjects.length(oid));
+                if !self.options.gapped {
+                    use super::x_store_probe::Stage;
+                    probe.read(Stage::Link, oid, self.subjects.length(oid));
+                }
+            }
+        }
         let mut hsps: Vec<_> = input
             .iter()
             .map(|h| Hsp {
@@ -1392,6 +1405,17 @@ impl PreliminarySink for Runtime<'_> {
     //     return m_InternalData;
     // }
     // ```
+    fn x_probe_begin(&mut self, q0: &str, queries: usize) {
+        self.x_probe = Some(super::x_store_probe::Batch::begin(q0, queries));
+    }
+
+    fn x_probe_end(&mut self, passes: usize, chunks: usize, pool_threads: usize) {
+        if let Some(probe) = self.x_probe.take() {
+            probe.scanned(passes, chunks, pool_threads);
+            probe.end();
+        }
+    }
+
     fn chunk_end(&mut self, chunk: &QueryChunk, is_split: bool) -> Result<()> {
         let incoming = self.chunk.take().expect("chunk stream");
         if is_split {
@@ -1825,6 +1849,7 @@ impl PreliminarySink for Runtime<'_> {
                         (self.options, self.subjects, self.db_length);
                     let full = &full;
                     let workers = &x_workers;
+                    let x_probe = self.x_probe.as_deref();
                     let x_t = super::x_timing::lap();
                     speculated = batch_lists
                         .par_iter()
@@ -1835,6 +1860,13 @@ impl PreliminarySink for Runtime<'_> {
                             }
                             let slot = rayon::current_thread_index().unwrap_or(0) % workers.len();
                             let mut guard = workers[slot].lock().expect("BLASTX redo worker state");
+                            if let Some(probe) = x_probe {
+                                probe.read(
+                                    super::x_store_probe::Stage::Redo,
+                                    list.oid,
+                                    subjects.length(list.oid),
+                                );
+                            }
                             x_speculate_match(
                                 &mut guard.0,
                                 list,
@@ -1909,6 +1941,13 @@ impl PreliminarySink for Runtime<'_> {
                 } else {
                     x_serial += 1;
                     let x_t = super::x_timing::lap();
+                    if let Some(probe) = &self.x_probe {
+                        probe.read(
+                            super::x_store_probe::Stage::Redo,
+                            list.oid,
+                            self.subjects.length(list.oid),
+                        );
+                    }
                     let encoded = self.subjects.encoded(list.oid);
                     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();
                     let redone =
@@ -2217,6 +2256,13 @@ impl PreliminarySink for Runtime<'_> {
             //         ASSERT(batches);
             // ```
             for lists in result_batches {
+                if let Some(probe) = &self.x_probe {
+                    probe.read(
+                        super::x_store_probe::Stage::Traceback,
+                        lists[0].oid,
+                        self.subjects.length(lists[0].oid),
+                    );
+                }
                 let encoded = self.subjects.encoded(lists[0].oid);
                 for list in lists {
                     let input: Vec<_> = list.hsps.iter().map(|h| h.hsp.clone()).collect();

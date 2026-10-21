@@ -554,11 +554,25 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     let x_t = super::x_timing::lap();
     // The database's sequences, read once for every batch; an error belongs to the first
     // batch with a valid context (`Subjects::Unreadable`, `search_error`).
+    // EXPERIMENT (LOSAT_X_BXSTOREPROBE=1): RssAnon around the store's read.
+    let x_probe_rss = super::x_store_probe::on().then(super::x_store_probe::rss_anon_kib);
     let (stores, unreadable) = match database.as_ref().map(BlastxDatabase::read_stores) {
         Some(Ok(stores)) => (Some(stores), None),
         Some(Err(error)) => (None, Some(error)),
         None => (None, None),
     };
+    if let (Some(rss_before), Some(stores)) = (x_probe_rss, &stores) {
+        let (bytes, bytes_cap, starts, starts_cap) = stores.x_probe_sizes();
+        let sentinels = stores.len() + 1;
+        eprintln!(
+            "XBXSTOREPROBE store sequences={} residue_bytes={} sentinel_bytes={sentinels} bytes_len={bytes} bytes_cap={bytes_cap} starts_len={starts} starts_cap={starts_cap} starts_bytes={} starts_cap_bytes={} rss_anon_kib_before={rss_before} rss_anon_kib_after={}",
+            stores.len(),
+            bytes - sentinels,
+            starts * std::mem::size_of::<usize>(),
+            starts_cap * std::mem::size_of::<usize>(),
+            super::x_store_probe::rss_anon_kib()
+        );
+    }
     super::x_timing::run(XRun::ReadStores, x_t);
     let unreadable = std::cell::RefCell::new(unreadable);
     let search_subjects = match (&database, &stores) {
@@ -616,6 +630,20 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                             options.outfmt == 0,
                         );
                         super::x_timing::run(XRun::Titles, x_t);
+                        if super::x_store_probe::on() {
+                            if let Ok(reported) = &reported {
+                                super::x_store_probe::report(
+                                    queries.first().map_or("", |q| q.title.as_str()),
+                                    queries.len(),
+                                    reported.records().len(),
+                                    reported
+                                        .records()
+                                        .iter()
+                                        .map(|r| r.sequence.len() as u64)
+                                        .sum(),
+                                );
+                            }
+                        }
                         reported.map_err(|error| match error.downcast::<HeaderReadError>() {
                             Ok(header) => header.error,
                             Err(error) => error,
@@ -1031,6 +1059,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         x_batches.map_err(input_error)?;
     }
     super::x_timing::run(XRun::Loop, x_t_loop);
+    if super::x_store_probe::on() {
+        super::x_store_probe::run_summary(options.num_threads as usize);
+    }
     let x_t = super::x_timing::lap();
     report::write_epilog(&mut writer, &options, &subjects, &shown_run, processed)
         .map_err(report_error)?;

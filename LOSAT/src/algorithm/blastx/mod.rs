@@ -338,6 +338,9 @@ pub mod kappa;
 // EXPERIMENT (LOSAT_X_BXSEGMEMO): the redo-stage subject SEG memoised per subject.
 mod x_seg_memo;
 
+// EXPERIMENT (LOSAT_X_BXSTOREPROBE=1): counts of the `-db` store's use. No NCBI counterpart.
+mod x_store_probe;
+
 // Diagnostic (LOSAT_TIMING): the stage times of a BLASTX run. No NCBI counterpart.
 mod x_timing;
 

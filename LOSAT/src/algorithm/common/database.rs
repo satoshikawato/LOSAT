@@ -574,6 +574,17 @@ impl StoredProteins {
     pub(crate) fn max_length(&self) -> usize {
         (0..self.len()).map(|i| self.length(i)).max().unwrap_or(0)
     }
+
+    /// EXPERIMENT (LOSAT_X_BXSTOREPROBE): the lengths and capacities of `bytes` and `starts`
+    /// (elements). No NCBI counterpart.
+    pub(crate) fn x_probe_sizes(&self) -> (usize, usize, usize, usize) {
+        (
+            self.bytes.len(),
+            self.bytes.capacity(),
+            self.starts.len(),
+            self.starts.capacity(),
+        )
+    }
 }
 
 /// Reads every sequence of the protein database `db` once, in blocks of

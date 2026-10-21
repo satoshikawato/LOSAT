@@ -164,6 +164,10 @@ pub(crate) trait PreliminarySink {
     fn chunk_end(&mut self, _chunk: &QueryChunk, _is_split: bool) -> Result<()> {
         Ok(())
     }
+    // EXPERIMENT (LOSAT_X_BXSTOREPROBE=1): the probe's batch (x_store_probe.rs); called only
+    // when the probe is on. No NCBI counterpart.
+    fn x_probe_begin(&mut self, _q0: &str, _queries: usize) {}
+    fn x_probe_end(&mut self, _passes: usize, _chunks: usize, _pool_threads: usize) {}
     fn batch_end(
         &mut self,
         _batch: &PreparedQueryBatch,
@@ -625,7 +629,13 @@ pub(crate) fn search_core(
         //     int retval = 0;
         // ```
         sink.batch_start(range.start, &full, &full_params)?;
+        if super::x_store_probe::on() {
+            sink.x_probe_begin(&queries[0].title, queries.len());
+        }
         let chunks = split_queries(queries, &full, options)?;
+        // EXPERIMENT (LOSAT_X_BXSTOREPROBE=1): complete passes over the subjects.
+        let x_chunks_total = chunks.len();
+        let mut x_passes = 0usize;
         super::x_timing::batch(XBatch::Setup, x_t);
         // NCBI reference (598d8ae6): c++/src/algo/blast/api/prelim_stage.cpp:233-236
         // ```c++
@@ -713,6 +723,7 @@ pub(crate) fn search_core(
                     let Some((params, results)) = computed? else {
                         continue;
                     };
+                    x_passes += 1;
                     let batch = &chunk.prepared;
                     let mut kept = results.into_iter().peekable();
                     for oid in 0..subjects.len() {
@@ -794,6 +805,8 @@ pub(crate) fn search_core(
             //     }
             //     return retval;
             // ```
+            x_passes += 1;
+            let _x_chunk = super::x_store_probe::enter_chunk();
             let x_t = super::x_timing::lap();
             let fixed_spaces = &spaces;
             let lookup = Lookup::new(batch, &params, options)?;
@@ -1193,6 +1206,13 @@ pub(crate) fn search_core(
         // ```
         let x_t = super::x_timing::lap();
         sink.batch_end(&full, &full_params)?;
+        if super::x_store_probe::on() {
+            sink.x_probe_end(
+                x_passes,
+                x_chunks_total,
+                if pool.enabled() { pool.threads() } else { 0 },
+            );
+        }
         super::x_timing::batch(XBatch::BatchEnd, x_t);
         super::x_timing::batch(XBatch::Sum, x_t_batch);
         super::x_timing::batch_count();
@@ -1267,6 +1287,7 @@ fn x_compute_chunk(
     if !params.iter().any(|p| p.valid) {
         return Ok(None);
     }
+    let _x_chunk = super::x_store_probe::enter_chunk();
     let lookup = Lookup::new(batch, &params, options)?;
     let last = batch.contexts.last().expect("BLASTX contexts");
     let mut diagonals = Diagonals::new(last.offset + last.length, options.window_size)?;

@@ -132,6 +132,7 @@ fn search_task(
     db_length: i64,
     x_containment: bool,
 ) -> Task {
+    let _x_task = crate::algorithm::blastx::x_store_probe::enter_task();
     let mut kept = Vec::new();
     for oid in task * k..subjects.len().min((task + 1) * k) {
         match compute_subject(
@@ -228,6 +229,7 @@ pub(super) fn run(
     sink: &mut impl PreliminarySink,
 ) -> Result<usize> {
     let tasks = subjects.len().div_ceil(k);
+    crate::algorithm::blastx::x_store_probe::flow_run(k, tasks, helper_tables.len());
     let compute = |task: usize, table: &mut Diagonals| {
         search_task(
             task,

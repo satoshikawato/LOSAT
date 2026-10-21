@@ -22,14 +22,15 @@
 //!
 //! The copy then takes the block's candidates in position order, as NCBI's loop does, each once.
 //! While three hits for every candidate left in the block fit in the offset array (one test, made
-//! again only after a candidate that took NCBI's test), the hits of a cell of up to
-//! `AA_HITS_PER_CELL` are written without the capacity test, as four pairs (with AVX2 one 32-byte
-//! store: the cell broadcast, one `vpermd`, one `vpblendd` with the subject offset) of which the
-//! first `num_used` count. A cell with more hits, and every candidate of a block that could fill
-//! the array, takes NCBI's test: when its hits do not fit,
-//! `s_range[1]` is that word's position and the scan returns, so the next call resumes there. The
-//! offset pairs and the `s_range` values of every call are NCBI's (the words after the stop were
-//! looked at but not used; the next call looks at them again, as with LOSAT_X_TBNSCANBF).
+//! again only after a cell of more hits), the hits of a cell of up to `AA_HITS_PER_CELL` are
+//! written without the capacity test, as three pairs of one 8-byte store each (with AVX2 four pairs
+//! in one 32-byte store: the cell broadcast, one `vpermd`, one `vpblendd` with the subject offset)
+//! of which the first `num_used` count. A cell of more hits, and every candidate met while the
+//! block could fill the array, takes NCBI's test; a larger cell's hits are then written four pairs
+//! at a time from the overflow array. When a word's hits do not fit, `s_range[1]` is that word's
+//! position and the scan returns, so the next call resumes there. The offset pairs and the
+//! `s_range` values of every call are NCBI's (the words after the stop were looked at but not
+//! used; the next call looks at them again, as with LOSAT_X_TBNSCANBF).
 //!
 //! The offset array must have `X_SCAN_BYTE_SLACK` entries after `array_size`; the entries past the
 //! returned count are not part of the result. `presence` depends on the lookup table only; each
@@ -474,6 +475,72 @@ unsafe fn candidates_avx2(
     list(&index[..words], presence, cand)
 }
 
+/// Whether three hits for each of the `left` candidates fit after `totalhits` (then no candidate
+/// of up to `AA_HITS_PER_CELL` hits can stop the scan).
+#[inline(always)]
+fn room_for_rest(totalhits: i32, left: usize, array_size: i32) -> bool {
+    totalhits as i64 + (AA_HITS_PER_CELL * left) as i64 <= array_size as i64
+}
+
+/// The plain-loop copy stage for the candidates `cand[..n]` of the block that starts at
+/// `block_first` (`copy_block`).
+///
+/// # Safety
+/// As `copy_block`.
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+unsafe fn copy(
+    table: &Table,
+    dest: *mut BlastOffsetPair,
+    index: &[u16; X_BLOCK],
+    cand: &[MaybeUninit<u16>; X_BLOCK],
+    n: usize,
+    block_first: usize,
+    totalhits: i32,
+    array_size: i32,
+) -> (i32, Option<u32>) {
+    copy_block::<false>(
+        table,
+        dest,
+        index,
+        cand,
+        n,
+        block_first,
+        totalhits,
+        array_size,
+    )
+}
+
+/// The AVX2 copy stage (`copy_block` with the AVX2 writes).
+///
+/// # Safety
+/// As `copy`; AVX2 must be there.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+unsafe fn copy_avx2(
+    table: &Table,
+    dest: *mut BlastOffsetPair,
+    index: &[u16; X_BLOCK],
+    cand: &[MaybeUninit<u16>; X_BLOCK],
+    n: usize,
+    block_first: usize,
+    totalhits: i32,
+    array_size: i32,
+) -> (i32, Option<u32>) {
+    copy_block::<true>(
+        table,
+        dest,
+        index,
+        cand,
+        n,
+        block_first,
+        totalhits,
+        array_size,
+    )
+}
+
 // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:99-123
 // ```c
 //         numhits = bbc[index].num_used;
@@ -490,64 +557,20 @@ unsafe fn candidates_avx2(
 //             return totalhits;
 //         }
 // ```
-/// The tested copy of one candidate (NCBI's statements above): `None` when the word's hits do not
-/// fit (the scan stops at this word), else the new total.
+/// The copy stage for the candidates `cand[..n]` of the block that starts at `block_first` (NCBI's
+/// statements above, in NCBI's order): the new
+/// total, and the subject offset of the word at which the offset array has no room, if one has
+/// none. While three hits for every candidate left fit, a cell of up to `AA_HITS_PER_CELL` hits is
+/// written without NCBI's test (after it they still fit); a larger cell takes the test, and the
+/// room is computed again after it. A candidate met without that room takes the test whatever its
+/// size. `AVX2` = the AVX2 writes (`write`).
 ///
 /// # Safety
-/// `ix` is a candidate's index; `dest` has `array_size + X_SCAN_BYTE_SLACK` entries.
-#[inline(always)]
-unsafe fn copy_tested(
-    table: &Table,
-    dest: *mut BlastOffsetPair,
-    ix: usize,
-    s_off: u32,
-    totalhits: i32,
-    array_size: i32,
-) -> Option<i32> {
-    let cell = &*table.backbone.add(ix);
-    let numhits = cell.num_used;
-    if numhits > array_size - totalhits {
-        return None;
-    }
-    let d = dest.add(totalhits as usize);
-    if numhits as usize <= AA_HITS_PER_CELL {
-        for i in 0..AA_HITS_PER_CELL {
-            *d.add(i) = BlastOffsetPair {
-                q_off: cell.entries[i] as u32,
-                s_off,
-            };
-        }
-    } else {
-        let src = table.overflow.add(cell.entries[0] as usize);
-        for i in 0..numhits as usize {
-            *d.add(i) = BlastOffsetPair {
-                q_off: *src.add(i) as u32,
-                s_off,
-            };
-        }
-    }
-    Some(totalhits + numhits)
-}
-
-/// Whether three hits for each of the `left` candidates fit after `totalhits` (then no candidate
-/// of up to `AA_HITS_PER_CELL` hits can stop the scan).
-#[inline(always)]
-fn room_for_rest(totalhits: i32, left: usize, array_size: i32) -> bool {
-    totalhits as i64 + (AA_HITS_PER_CELL * left) as i64 <= array_size as i64
-}
-
-/// The plain-loop copy stage for the candidates `cand[..n]` of the block that starts at
-/// `block_first`: the new total, and the subject offset of the word at which the offset array has
-/// no room, if one has none. Each candidate is taken once: while `room` holds (three hits for every
-/// candidate left fit), a cell of up to `AA_HITS_PER_CELL` hits is written without the test, and
-/// `room` still holds after it; any other candidate takes the test (`copy_tested`), and `room` is
-/// computed again after it.
-///
-/// # Safety
-/// As `copy_tested`, for every candidate.
+/// The candidates' indexes are those of backbone cells of `table`; `dest` has `array_size +
+/// X_SCAN_BYTE_SLACK` entries; AVX2 must be there when `AVX2`.
 #[allow(clippy::too_many_arguments)]
-#[inline(never)]
-unsafe fn copy(
+#[inline(always)]
+unsafe fn copy_block<const AVX2: bool>(
     table: &Table,
     dest: *mut BlastOffsetPair,
     index: &[u16; X_BLOCK],
@@ -557,115 +580,164 @@ unsafe fn copy(
     mut totalhits: i32,
     array_size: i32,
 ) -> (i32, Option<u32>) {
-    let cand = cand.as_ptr().cast::<u16>();
-    let mut room = room_for_rest(totalhits, n, array_size);
-    for i in 0..n {
-        let k = *cand.add(i) as usize;
-        let ix = index[k] as usize;
-        let cell = &*table.backbone.add(ix);
-        let numhits = cell.num_used;
-        let s_off = (block_first + k) as u32;
-        if room && numhits as usize <= AA_HITS_PER_CELL {
-            let d = dest.add(totalhits as usize);
-            for j in 0..AA_HITS_PER_CELL {
-                *d.add(j) = BlastOffsetPair {
-                    q_off: cell.entries[j] as u32,
-                    s_off,
-                };
-            }
-            totalhits += numhits;
-        } else {
-            match copy_tested(table, dest, ix, s_off, totalhits, array_size) {
-                Some(total) => totalhits = total,
-                None => return (totalhits, Some(s_off)),
-            }
-            room = room_for_rest(totalhits, n - i - 1, array_size);
-        }
-    }
-    (totalhits, None)
-}
-
-/// The AVX2 copy stage: `copy` with the pairs of a cell of up to `AA_HITS_PER_CELL` hits written by
-/// one 32-byte store (`[e0, s, e1, s, e2, s, e2, s]` from the cell `[num_used, e0, e1, e2]`), and
-/// those of a larger cell four at a time (four query offsets widened to 64 bits and the subject
-/// offset put in the high halves, one 32-byte store); the same values in the first `num_used`
-/// pairs. The last store of a larger cell may write up to three pairs after them (inside the
-/// `X_SCAN_BYTE_SLACK` entries, as the cell's hits fit before `array_size`); it reads past the
-/// cell's query offsets only while they stay inside the overflow array, else the last pairs are
-/// written one by one.
-///
-/// # Safety
-/// As `copy`; AVX2 must be there.
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
-#[allow(clippy::too_many_arguments)]
-#[inline(never)]
-unsafe fn copy_avx2(
-    table: &Table,
-    dest: *mut BlastOffsetPair,
-    index: &[u16; X_BLOCK],
-    cand: &[MaybeUninit<u16>; X_BLOCK],
-    n: usize,
-    block_first: usize,
-    mut totalhits: i32,
-    array_size: i32,
-) -> (i32, Option<u32>) {
-    use std::arch::x86_64::*;
-    const _: () = assert!(std::mem::size_of::<BackboneCell>() == 16 && AA_HITS_PER_CELL == 3);
-    const _: () = assert!(std::mem::size_of::<BlastOffsetPair>() == 8);
-    let order = _mm256_setr_epi32(1, 0, 2, 0, 3, 0, 3, 0);
     let cand = cand.as_ptr().cast::<u16>();
     let index = index.as_ptr();
-    let mut room = room_for_rest(totalhits, n, array_size);
-    for i in 0..n {
-        let k = *cand.add(i) as usize;
-        let ix = *index.add(k) as usize;
-        let cell = table.backbone.add(ix);
-        let numhits = (*cell).num_used;
-        let s_off = (block_first + k) as u32;
-        let small = numhits as usize <= AA_HITS_PER_CELL;
-        if !(room && small) {
-            // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:100,118-123 (the test).
+    let mut i = 0usize;
+    while i < n {
+        if room_for_rest(totalhits, n - i, array_size) {
+            while i < n {
+                let k = *cand.add(i) as usize;
+                let cell = table.backbone.add(*index.add(k) as usize);
+                let numhits = (*cell).num_used;
+                let s_off = (block_first + k) as u32;
+                i += 1;
+                if numhits as usize <= AA_HITS_PER_CELL {
+                    write::<AVX2>(table, dest.add(totalhits as usize), cell, s_off);
+                    totalhits += numhits;
+                } else {
+                    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:100,118-123
+                    if numhits > array_size - totalhits {
+                        return (totalhits, Some(s_off));
+                    }
+                    write::<AVX2>(table, dest.add(totalhits as usize), cell, s_off);
+                    totalhits += numhits;
+                    if !room_for_rest(totalhits, n - i, array_size) {
+                        break;
+                    }
+                }
+            }
+        } else {
+            let k = *cand.add(i) as usize;
+            let cell = table.backbone.add(*index.add(k) as usize);
+            let numhits = (*cell).num_used;
+            let s_off = (block_first + k) as u32;
+            // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:100,118-123
             if numhits > array_size - totalhits {
                 return (totalhits, Some(s_off));
             }
-        }
-        let d = dest.add(totalhits as usize);
-        if small {
-            let c = _mm256_broadcastsi128_si256(_mm_loadu_si128(cell as *const __m128i));
-            let s = _mm256_set1_epi32(s_off as i32);
-            let v = _mm256_blend_epi32::<0xAA>(_mm256_permutevar8x32_epi32(c, order), s);
-            _mm256_storeu_si256(d as *mut __m256i, v);
-        } else {
-            let cursor = (*cell).entries[0] as usize;
-            let src = table.overflow.add(cursor);
-            let hits = numhits as usize;
-            let high = _mm256_set1_epi64x((s_off as i64) << 32);
-            let whole = if cursor + hits.next_multiple_of(4) <= table.overflow_len {
-                hits.next_multiple_of(4)
-            } else {
-                hits & !3
-            };
-            let mut j = 0;
-            while j < whole {
-                let q = _mm256_cvtepu32_epi64(_mm_loadu_si128(src.add(j) as *const __m128i));
-                _mm256_storeu_si256(d.add(j) as *mut __m256i, _mm256_or_si256(q, high));
-                j += 4;
-            }
-            while j < hits {
-                *d.add(j) = BlastOffsetPair {
-                    q_off: *src.add(j) as u32,
-                    s_off,
-                };
-                j += 1;
-            }
-        }
-        totalhits += numhits;
-        if !(room && small) {
-            room = room_for_rest(totalhits, n - i - 1, array_size);
+            write::<AVX2>(table, dest.add(totalhits as usize), cell, s_off);
+            totalhits += numhits;
+            i += 1;
         }
     }
     (totalhits, None)
+}
+
+/// One offset pair as the 8 bytes it is in memory (`q_off`, then `s_off`: `BlastOffsetPair` is
+/// `repr(C)`), to write it with one store.
+#[inline(always)]
+fn pair_bits(q_off: u32, s_off: u32) -> u64 {
+    if cfg!(target_endian = "little") {
+        q_off as u64 | (s_off as u64) << 32
+    } else {
+        (q_off as u64) << 32 | s_off as u64
+    }
+}
+
+/// Writes the hits of `cell` (subject offset `s_off`) at `d`: a cell of up to `AA_HITS_PER_CELL`
+/// hits as `AA_HITS_PER_CELL` pairs (with AVX2 `AA_HITS_PER_CELL + 1`), a larger one from the
+/// overflow array four pairs at a time. The pairs past the cell's hits are not part of the result;
+/// a larger cell writes at most three of them, and reads past its query offsets only while they
+/// stay inside the overflow array (else its last pairs are written one by one).
+///
+/// # Safety
+/// `cell` is a backbone cell of `table`; `d` has room for the cell's hits and
+/// `X_SCAN_BYTE_SLACK` entries more; AVX2 must be there when `AVX2`.
+#[inline(always)]
+unsafe fn write<const AVX2: bool>(
+    table: &Table,
+    d: *mut BlastOffsetPair,
+    cell: *const BackboneCell,
+    s_off: u32,
+) {
+    #[cfg(target_arch = "x86_64")]
+    if AVX2 {
+        return write_avx2(table, d, cell, s_off);
+    }
+    let numhits = (*cell).num_used as usize;
+    let d = d.cast::<u64>();
+    if numhits <= AA_HITS_PER_CELL {
+        for j in 0..AA_HITS_PER_CELL {
+            d.add(j)
+                .write_unaligned(pair_bits((*cell).entries[j] as u32, s_off));
+        }
+    } else {
+        let cursor = (*cell).entries[0] as usize;
+        let src = table.overflow.add(cursor);
+        let whole = chain_whole(table, cursor, numhits);
+        let mut j = 0;
+        while j < whole {
+            for l in 0..4 {
+                d.add(j + l)
+                    .write_unaligned(pair_bits(*src.add(j + l) as u32, s_off));
+            }
+            j += 4;
+        }
+        while j < numhits {
+            d.add(j)
+                .write_unaligned(pair_bits(*src.add(j) as u32, s_off));
+            j += 1;
+        }
+    }
+}
+
+/// The pairs of an overflow chain of `numhits` hits at `cursor` written four at a time: all of
+/// them, rounded up to four, when those query offsets are inside the overflow array, else the
+/// whole fours.
+#[inline(always)]
+fn chain_whole(table: &Table, cursor: usize, numhits: usize) -> usize {
+    if cursor + numhits.next_multiple_of(4) <= table.overflow_len {
+        numhits.next_multiple_of(4)
+    } else {
+        numhits & !3
+    }
+}
+
+/// `write` with AVX2: a cell of up to `AA_HITS_PER_CELL` hits as one 32-byte store
+/// (`[e0, s, e1, s, e2, s, e2, s]` from the cell `[num_used, e0, e1, e2]`), a larger one as 32-byte
+/// stores of four query offsets widened to 64 bits with `s_off` in the high halves.
+///
+/// # Safety
+/// As `write`.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline]
+unsafe fn write_avx2(
+    table: &Table,
+    d: *mut BlastOffsetPair,
+    cell: *const BackboneCell,
+    s_off: u32,
+) {
+    use std::arch::x86_64::*;
+    const _: () = assert!(std::mem::size_of::<BackboneCell>() == 16 && AA_HITS_PER_CELL == 3);
+    const _: () =
+        assert!(std::mem::size_of::<BlastOffsetPair>() == 8 && cfg!(target_endian = "little"));
+    let numhits = (*cell).num_used as usize;
+    if numhits <= AA_HITS_PER_CELL {
+        let order = _mm256_setr_epi32(1, 0, 2, 0, 3, 0, 3, 0);
+        let c = _mm256_broadcastsi128_si256(_mm_loadu_si128(cell as *const __m128i));
+        let s = _mm256_set1_epi32(s_off as i32);
+        let v = _mm256_blend_epi32::<0xAA>(_mm256_permutevar8x32_epi32(c, order), s);
+        _mm256_storeu_si256(d as *mut __m256i, v);
+    } else {
+        let cursor = (*cell).entries[0] as usize;
+        let src = table.overflow.add(cursor);
+        let high = _mm256_set1_epi64x((s_off as i64) << 32);
+        let whole = chain_whole(table, cursor, numhits);
+        let mut j = 0;
+        while j < whole {
+            let q = _mm256_cvtepu32_epi64(_mm_loadu_si128(src.add(j) as *const __m128i));
+            _mm256_storeu_si256(d.add(j) as *mut __m256i, _mm256_or_si256(q, high));
+            j += 4;
+        }
+        while j < numhits {
+            *d.add(j) = BlastOffsetPair {
+                q_off: *src.add(j) as u32,
+                s_off,
+            };
+            j += 1;
+        }
+    }
 }
 
 #[cfg(test)]

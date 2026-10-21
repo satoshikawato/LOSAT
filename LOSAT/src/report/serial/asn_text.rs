@@ -316,7 +316,7 @@ impl Encoder for AsnTextEncoder<'_> {
     ///     StartBlock();
     /// }
     /// ```
-    fn begin_sequence(&mut self) {
+    fn begin_sequence(&mut self, _type_name: &str) {
         self.start_block();
     }
 
@@ -449,6 +449,11 @@ impl Encoder for AsnTextEncoder<'_> {
         let mut digits = itoa_i32(value);
         let text = digits.text();
         self.put(text);
+    }
+
+    /// `WriteInt8`: the decimal digits, as `WriteInt4`.
+    fn big_int(&mut self, value: i64) {
+        self.put(value.to_string().as_bytes());
     }
 
     /// NCBI reference (598d8ae6): c++/src/serial/objostrasn.cpp:113-127

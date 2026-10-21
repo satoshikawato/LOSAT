@@ -1084,10 +1084,12 @@ Rebuilding less:
   stage of `-db` has no rounds: the threads claim the blocks once each in ordinal order, and one of them hands each
   block's results to the hit lists in that order while the others search the next blocks, at most 2 blocks per thread
   past the last one handed over (`blastn/blast_engine/x_db_stream.rs`, exactness argument in its header; the driver is
-  `x_bnstream::search_in_order`, that of the `-subject` path's `LOSAT_X_BNSTREAM`). Without it the stage searches
-  rounds of 8 blocks per thread and merges a round's results when the whole round is searched, so the preliminary HSP
-  lists of all sequences of the round are in memory together; with `LOSAT_X_BNDBCUT` (about 4 blocks per thread) every
-  database below 32 x threads MiB of sequence bytes is one round. Megablast of 100 16S queries x the 28,036 16S rRNA
+  `x_bnstream::search_in_order`, that of the `-subject` path's `LOSAT_X_BNSTREAM`, here with its `assist`: a thread
+  that waits for room in the window, or the owner for the next block, runs the pool's pending jobs first, such as the
+  chunks of a long sequence that another thread's search hands out). The blocks are listed 65,536 at a time. Without
+  it the stage searches rounds of 8 blocks per thread and merges a round's results when the whole round is searched,
+  so the preliminary HSP lists of all sequences of the round are in memory together; blocks hold at most 1 MiB, so
+  every database below 8 x threads MiB of sequence bytes is one round (128 MiB at 16 threads). Megablast of 100 16S queries x the 28,036 16S rRNA
   genes at 16 threads: the round held 69 MiB of preliminary HSP lists, against 16 MiB for the lookup table, and the
   arenas kept the freed space to the end (103 MiB free in them at exit; probe of the live allocations by thread and
   region, v4-B session 10). The order of the merges is the one-thread order, every block is searched once, and a

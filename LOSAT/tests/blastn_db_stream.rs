@@ -370,7 +370,7 @@ fn a_damaged_database_fails_with_the_same_error_with_the_window() {
 }
 
 // A database of several volumes (`-max_file_sz 60000`): at 4 threads the switch off, on and in its
-// shadow mode give one thread's report.
+// shadow mode give one thread's report, with the blocks of the cut and of 1 MiB.
 #[test]
 fn a_database_of_volumes_reports_with_the_window_are_the_reports_with_rounds() {
     let db = database("volumes", 0, 10_000, &["-max_file_sz", "60000"]);
@@ -382,12 +382,16 @@ fn a_database_of_volumes_reports_with_the_window_are_the_reports_with_rounds() {
         .count();
     assert!(volumes >= 3, "{volumes} volumes");
     let one_thread = blastn("megablast", &db, 1, &[], "6");
-    let counts = same_reports("megablast", &db, 4, "6", &[], &one_thread);
-    assert!(counts["searches"] >= 1, "{counts:?}");
-    assert!(
-        counts["blocks"] >= volumes as u64 * counts["searches"],
-        "{counts:?}"
-    );
-    assert!(counts["merged"] > 0, "{counts:?}");
+    // The blocks of the cut and, without it, of 1 MiB: a volume ends a block, so the window has a
+    // block per volume at least.
+    for extra in [&[][..], &[CUT_OFF][..]] {
+        let counts = same_reports("megablast", &db, 4, "6", extra, &one_thread);
+        assert!(counts["searches"] >= 1, "{extra:?} {counts:?}");
+        assert!(
+            counts["blocks"] >= volumes as u64 * counts["searches"],
+            "{extra:?} {counts:?}"
+        );
+        assert!(counts["merged"] > 0, "{extra:?} {counts:?}");
+    }
     let _ = std::fs::remove_dir_all(db.parent().unwrap());
 }

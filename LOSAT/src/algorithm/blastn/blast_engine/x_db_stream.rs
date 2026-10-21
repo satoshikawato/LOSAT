@@ -4,18 +4,23 @@
 //! the others go on with the next blocks (`x_bnstream::search_in_order`, the driver of the
 //! `-subject` path's LOSAT_X_BNSTREAM). A thread claims a block only while it is fewer than
 //! `X_BNDBSTREAM_BLOCKS_PER_THREAD` x threads blocks past the last one handed over, so that at
-//! most that many blocks' results wait for the owner.
+//! most that many blocks' results wait for the owner. A thread that waits (for room in the window,
+//! or the owner for the next block) runs the pool's pending jobs first (`search_in_order`'s
+//! `assist`): the chunks of a long sequence that a search hands out (a nested parallel stage) are
+//! searched by the waiting threads too, as the idle workers of the rounds' `par_iter` search them.
 //!
 //! Without the switch, `search_blocks_of` searches rounds of `BLOCKS_PER_THREAD` x threads blocks
 //! (`search_rounds`) and merges a round's results when the whole round is searched, so the
-//! preliminary HSP lists of every sequence of the round are in memory together. A database of
-//! fewer than `BLOCKS_PER_THREAD` x threads blocks is one round; with LOSAT_X_BNDBCUT (about 4
-//! blocks per thread), every database below 8 x 4 x threads MiB is. Megablast of 100 16S queries
-//! against the 28,036 16S rRNA genes on the workstation, one round from 2 threads on: at 16
-//! threads the round held 69 MiB of preliminary HSP lists (the lookup table is 16 MiB), and the
-//! arenas kept the freed space to the end of the run: max RSS 34 MiB at 1 thread, 108 MiB at 2,
-//! 126 MiB at 16 (NCBI `-db` at 16 threads: 109 MiB with outfmt 8). v4-B session 10, probe of the
-//! allocations by thread and region (`v4-B/results/b14probe`).
+//! preliminary HSP lists of every sequence of the round are in memory together. A database of at
+//! most `BLOCKS_PER_THREAD` x threads blocks is one round: blocks hold at most 1 MiB, with or
+//! without LOSAT_X_BNDBCUT, so every database below 8 x threads MiB of sequence bytes is (128 MiB
+//! at 16 threads). Megablast of 100 16S queries against the 28,036 16S rRNA genes on the
+//! workstation (one round from 2 threads on): at 16 threads the round held 69 MiB of preliminary
+//! HSP lists at the peak of the live allocations (the lookup table is 16 MiB), and the arenas kept
+//! the freed space to the end of the run (v4-B session 10, probe of the allocations by thread and
+//! region, `v4-B/results/b14probe`); max RSS with outfmt 8, 33 MiB at one thread, 117-120 MiB at
+//! 16 threads in rounds and 81-82 MiB with the window, against NCBI `-db`'s 108 MiB
+//! (`v4-B/results/b14ab/mem.tsv`).
 //!
 //! Why the reports do not change (`search_blocks`'s comment holds for the order of the merges):
 //!
@@ -37,8 +42,10 @@
 //!
 //! Memory: at most the window's blocks of results wait for the owner, and each thread holds one
 //! block and one scratch (the rounds make a scratch per `map_init` run, a few hundred per thread
-//! in the case above). The blocks are listed before the search: one `BlockRange` (16 bytes) per
-//! block, 1.6 MB for a database of 100 GB of sequence bytes in blocks of 1 MiB.
+//! in the case above). The blocks are listed `X_SEGMENT_BLOCKS` at a time, one `BlockRange` (24
+//! bytes on 64-bit targets) each, at most 1.5 MiB however many blocks the database has (a damaged
+//! index makes blocks of one sequence); the threads end a segment together before the next is
+//! listed.
 //!
 //! No NCBI counterpart for the window itself: NCBI's search threads take chunks of ordinal ids
 //! from one iterator and write each sequence's HSP list to the HSP stream when it is done
@@ -95,15 +102,70 @@ pub(super) fn x_bn_db_stream() -> XDbStream {
 /// the oldest one.
 const X_BNDBSTREAM_BLOCKS_PER_THREAD: usize = 2;
 
-/// The blocks of at most `block_bytes` of `db`, in ordinal order.
-fn blocks_of(db: &SeqDb, block_bytes: u64) -> Vec<BlockRange> {
+// No NCBI counterpart (scheduling only): as the window.
+/// Blocks listed at a time.
+const X_SEGMENT_BLOCKS: usize = 1 << 16;
+
+// No NCBI counterpart (scheduling only): `SeqDb::next_block`'s blocks, which follow each other in
+// ordinal order (the rounds list them alike).
+/// Up to `max` blocks of at most `block_bytes` of `db` from ordinal id `first_ordinal` on, in
+/// ordinal order.
+fn blocks_of(db: &SeqDb, first_ordinal: u32, block_bytes: u64, max: usize) -> Vec<BlockRange> {
     let mut blocks = Vec::new();
-    let mut next_ordinal = 0u32;
-    while let Some(range) = db.next_block(next_ordinal, block_bytes) {
+    let mut next_ordinal = first_ordinal;
+    while blocks.len() < max {
+        let Some(range) = db.next_block(next_ordinal, block_bytes) else {
+            break;
+        };
         blocks.push(range);
         next_ordinal = range.end_ordinal();
     }
     blocks
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413,1553-1554
+// ```c
+//     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
+//
+//     /* iterate over all subject sequences */
+//     while ( (seq_arg.oid = BlastSeqSrcIteratorNext(seq_src, itr))
+//            != BLAST_SEQSRC_EOF) {
+// ...
+//           /* Save the results. */
+//           status = BlastHSPStreamWrite(hsp_stream, &hsp_list);
+// ```
+/// The window over the whole database: its blocks of at most `block_bytes`, `segment` blocks
+/// after `segment` blocks (`X_SEGMENT_BLOCKS`), through `search_window`; the first error in
+/// ordinal order is returned after the blocks before it are merged. Also returns the number of
+/// blocks searched.
+fn stream_blocks<T, R, I, K, M>(
+    db: &SeqDb,
+    pool: &SearchPool<'_>,
+    block_bytes: u64,
+    segment: usize,
+    new_scratch: &I,
+    search: &K,
+    merge: &mut M,
+) -> (Result<()>, u64)
+where
+    R: Send,
+    I: Fn() -> T + Sync + Send,
+    K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
+    M: FnMut(u32, R) + Send,
+{
+    let mut next_ordinal = 0u32;
+    let mut blocks_searched = 0u64;
+    loop {
+        let blocks = blocks_of(db, next_ordinal, block_bytes, segment.max(1));
+        let Some(last) = blocks.last() else {
+            return (Ok(()), blocks_searched);
+        };
+        next_ordinal = last.end_ordinal();
+        blocks_searched += blocks.len() as u64;
+        if let Err(error) = search_window(db, pool, &blocks, new_scratch, search, merge) {
+            return (Err(error), blocks_searched);
+        }
+    }
 }
 
 /// The preliminary stage of `search_blocks_of` at more than one thread with LOSAT_X_BNDBSTREAM
@@ -128,16 +190,25 @@ where
     K: Fn(&mut T, u32, BlastnSubjectRef<'_>) -> Option<R> + Sync + Send,
     M: FnMut(u32, R) + Send,
 {
-    let blocks = blocks_of(db, block_bytes);
     if mode != XDbStream::Shadow {
-        return search_window(db, pool, &blocks, new_scratch, search, merge);
+        return stream_blocks(
+            db,
+            pool,
+            block_bytes,
+            X_SEGMENT_BLOCKS,
+            new_scratch,
+            search,
+            merge,
+        )
+        .0;
     }
     let mut found: Vec<(u32, R)> = Vec::new();
     let before = extends.load(Ordering::Relaxed);
-    let result = search_window(
+    let (result, blocks) = stream_blocks(
         db,
         pool,
-        &blocks,
+        block_bytes,
+        X_SEGMENT_BLOCKS,
         new_scratch,
         search,
         &mut |ordinal, kept| found.push((ordinal, kept)),
@@ -166,14 +237,16 @@ where
             }
             x_compare_merged(&found, &expected)
         }
-        (Err(error), Err(expected)) => {
-            let (text, expected_text) = (format!("{error:#}"), format!("{expected:#}"));
+        (Err(error), Err(expected_error)) => {
+            let (text, expected_text) = (format!("{error:#}"), format!("{expected_error:#}"));
             if text != expected_text {
                 x_shadow_difference(format!(
                     "the search's error differs from the one in rounds: {text} / {expected_text}"
                 ));
             }
-            0
+            // Both stop at the first failing block in ordinal order, with the same blocks: the
+            // blocks before it are merged alike.
+            x_compare_merged(&found, &expected)
         }
         (Ok(()), Err(expected)) => x_shadow_difference(format!(
             "the search succeeded; in rounds it failed: {expected:#}"
@@ -183,7 +256,7 @@ where
         )),
     };
     X_SEARCHES.fetch_add(1, Ordering::Relaxed);
-    X_BLOCKS.fetch_add(blocks.len() as u64, Ordering::Relaxed);
+    X_BLOCKS.fetch_add(blocks, Ordering::Relaxed);
     X_MERGED.fetch_add(compared, Ordering::Relaxed);
     result?;
     for (ordinal, kept) in found {
@@ -192,7 +265,8 @@ where
     Ok(())
 }
 
-/// The window: `blocks` claimed by the threads of `pool` in order, and each block's results
+// No NCBI counterpart (scheduling only): the window (module documentation).
+/// The window over `blocks`: claimed by the threads of `pool` in order, and each block's results
 /// handed to `merge` in ordinal order by the owner; the first error in ordinal order is returned
 /// after the blocks before it are merged.
 fn search_window<T, R, I, K, M>(
@@ -251,6 +325,7 @@ where
         super::super::x_bnstream::search_in_order(
             blocks.len(),
             window,
+            true,
             new_scratch,
             &search_block,
             &mut hand_over,
@@ -262,6 +337,7 @@ where
     }
 }
 
+// No NCBI counterpart: the shadow mode's counters and line; they change no value NCBI computes.
 static X_SEARCHES: AtomicU64 = AtomicU64::new(0);
 static X_BLOCKS: AtomicU64 = AtomicU64::new(0);
 static X_MERGED: AtomicU64 = AtomicU64::new(0);
@@ -280,6 +356,7 @@ fn x_shadow_print_line(identical: bool) {
     );
 }
 
+// No NCBI counterpart: prints counters.
 /// The shadow mode's line at exit.
 pub(super) fn x_bn_db_stream_print_summary() {
     if x_bn_db_stream() == XDbStream::Shadow {
@@ -287,11 +364,13 @@ pub(super) fn x_bn_db_stream_print_summary() {
     }
 }
 
+// No NCBI counterpart: stops the run at the shadow's first difference.
 fn x_shadow_difference(message: String) -> ! {
     x_shadow_print_line(false);
     panic!("[X_SHADOW] BNDBSTREAM {message}");
 }
 
+// No NCBI counterpart: the shadow's comparison.
 fn x_compare_merged<R: Debug>(found: &[(u32, R)], expected: &[(u32, String)]) -> u64 {
     if found.len() != expected.len() {
         x_shadow_difference(format!(
@@ -411,7 +490,7 @@ mod tests {
         let database = open("nucl_mv");
         let db = &database.db;
         for block_bytes in [1u64, 40, 100, 1 << 20] {
-            let blocks = blocks_of(db, block_bytes);
+            let blocks = blocks_of(db, 0, block_bytes, usize::MAX);
             let mut next = 0u32;
             for range in &blocks {
                 assert_eq!(range.first_ordinal, next, "{block_bytes}");
@@ -420,6 +499,125 @@ mod tests {
             }
             assert_eq!(next, db.num_seqs(), "{block_bytes}");
         }
-        assert_eq!(blocks_of(db, 1).len(), 12);
+        assert_eq!(blocks_of(db, 0, 1, usize::MAX).len(), 12);
+        // Segments: up to `max` blocks from the given ordinal id on.
+        let first = blocks_of(db, 0, 1, 5);
+        assert_eq!(first.len(), 5);
+        let rest = blocks_of(db, first[4].end_ordinal(), 1, usize::MAX);
+        assert_eq!(rest.len(), 7);
+        assert_eq!(rest[0].first_ordinal, 5);
+    }
+
+    // Segments of 1, 5 and 64 blocks: every kept result once, in ordinal order, and the blocks
+    // counted.
+    #[test]
+    fn segments_merge_in_ordinal_order_once() {
+        let database = open("nucl_mv");
+        let db = &database.db;
+        let want: Vec<u32> = (0..db.num_seqs()).filter(|o| o % 2 == 0).collect();
+        for threads in [2usize, 5] {
+            for segment in [1usize, 5, 64] {
+                let mut merged = Vec::new();
+                let (result, blocks) =
+                    crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
+                        Ok(stream_blocks(
+                            db,
+                            pool,
+                            1,
+                            segment,
+                            &|| (),
+                            &|_: &mut (), ordinal: u32, _: BlastnSubjectRef<'_>| {
+                                (ordinal % 2 == 0).then_some(ordinal)
+                            },
+                            &mut |ordinal, kept| {
+                                assert_eq!(ordinal, kept);
+                                merged.push(ordinal);
+                            },
+                        ))
+                    })
+                    .unwrap();
+                result.unwrap();
+                assert_eq!(blocks, 12, "threads {threads} segment {segment}");
+                assert_eq!(merged, want, "threads {threads} segment {segment}");
+            }
+        }
+    }
+
+    // A volume in the middle of the database cut short: the window returns the rounds' error (the
+    // first failing block in ordinal order) after merging the same blocks before it, and nothing
+    // after it, at 2 to 8 threads with blocks of one sequence, of 40 bytes and of 1 MiB.
+    #[test]
+    fn a_failing_block_in_the_middle_stops_the_window_as_it_stops_the_rounds() {
+        let dir = std::env::temp_dir().join(format!(
+            "losat-bndbstream-middle-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seqdb/db");
+        for entry in std::fs::read_dir(&fixtures).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().into_string().unwrap();
+            if name.starts_with("nucl_mv.") {
+                std::fs::copy(entry.path(), dir.join(&name)).unwrap();
+            }
+        }
+        let nsq = dir.join("nucl_mv.02.nsq");
+        let bytes = std::fs::read(&nsq).unwrap();
+        std::fs::write(&nsq, &bytes[..bytes.len() / 2]).unwrap();
+        let database = BlastnDatabase::open(
+            dir.join("nucl_mv").to_str().unwrap(),
+            &crate::blastinput::ncbi_environment::ApplicationSettings::default(),
+        )
+        .unwrap();
+        let db = &database.db;
+        let kernel = |_: &mut (), ordinal: u32, _: BlastnSubjectRef<'_>| Some(ordinal);
+        for threads in 2..=8 {
+            for block_bytes in [1u64, 40, 1 << 20] {
+                let (mut rounds, mut window) = (Vec::new(), Vec::new());
+                let (rounds_result, window_result) =
+                    crate::utils::threading::with_search_pool(threads, "blastn", |pool| {
+                        let rounds_result = search_rounds(
+                            db,
+                            pool,
+                            block_bytes,
+                            2,
+                            &|| (),
+                            &kernel,
+                            &mut |o, k| {
+                                assert_eq!(o, k);
+                                rounds.push(o);
+                            },
+                        );
+                        let (window_result, _) = stream_blocks(
+                            db,
+                            pool,
+                            block_bytes,
+                            3,
+                            &|| (),
+                            &kernel,
+                            &mut |o, k| {
+                                assert_eq!(o, k);
+                                window.push(o);
+                            },
+                        );
+                        Ok((rounds_result, window_result))
+                    })
+                    .unwrap();
+                let case = format!("threads {threads} block_bytes {block_bytes}");
+                let rounds_error = format!("{:#}", rounds_result.expect_err(&case));
+                let window_error = format!("{:#}", window_result.expect_err(&case));
+                assert_eq!(window_error, rounds_error, "{case}");
+                assert_eq!(window, rounds, "{case}");
+                assert!(window.len() < db.num_seqs() as usize, "{case}");
+                assert_eq!(
+                    window,
+                    (0..window.len() as u32).collect::<Vec<_>>(),
+                    "{case}"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

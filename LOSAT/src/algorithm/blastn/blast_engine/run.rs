@@ -16783,6 +16783,7 @@ fn search_query_batch(
                         x_bnstream::search_in_order(
                             num_subjects,
                             window,
+                            false,
                             &new_state,
                             &search_one,
                             &mut |s_idx, (hits, prelim)| sink(s_idx, hits, prelim),

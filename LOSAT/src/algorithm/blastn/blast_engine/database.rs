@@ -350,9 +350,13 @@ pub(super) fn x_db_stream_print_summary() {
     x_db_stream::x_bn_db_stream_print_summary();
 }
 
-/// The rounds of `search_blocks_of` with `parallel`: `blocks_per_thread` blocks of at most
-/// `block_bytes` per thread searched with a scratch per worker (`map_init`), and the round's
-/// results merged in ordinal order when the whole round is searched.
+// No NCBI counterpart (scheduling only): the rounds of LOSAT's parallel stage; the merges in
+// ordinal order are NCBI's one-thread order (blast_engine.c:1553-1554, quoted above
+// `search_blocks`).
+/// The rounds of `search_blocks_of` with `parallel` (without LOSAT_X_BNDBSTREAM, and the
+/// reference of its shadow): `blocks_per_thread` blocks of at most `block_bytes` per thread
+/// searched with a scratch per worker (`map_init`), and the round's results merged in ordinal
+/// order when the whole round is searched.
 #[cfg(all(
     feature = "parallel",
     any(not(target_arch = "wasm32"), feature = "wasm-threads")

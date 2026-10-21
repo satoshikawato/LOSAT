@@ -53,6 +53,10 @@
 //! blast_engine.c:1409; seqdbimpl.cpp:328-350, quoted above `SeqDb::next_block`), whatever the
 //! thread count; LOSAT's blocks are cut by bytes, because one block is one read of one file.
 //!
+//! With LOSAT_X_BNDBSTREAM (`x_db_stream.rs`, in the strict set) the parallel stage has no rounds:
+//! the threads claim the cut's blocks in ordinal order and the results are handed over in that
+//! order; the shadow's second search with blocks of 1 MiB runs the same way.
+//!
 //! `LOSAT_X_BNDBCUT` is a switch of the strict set: on unless it is `0`, or `LOSAT_X_DEFAULT=0`
 //! and it is not set. It acts for every BLASTN task with `-db` (megablast, blastn, dc-megablast,
 //! blastn-short).

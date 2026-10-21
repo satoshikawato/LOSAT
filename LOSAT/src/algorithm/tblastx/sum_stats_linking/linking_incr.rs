@@ -527,9 +527,30 @@ fn sweep_stop() -> bool {
 // instead of every remaining HSP of that order, and reads the offsets of the Fenwick fills from an array
 // in the fill order. It visits the queued HSPs in the same order and fills the tree with the same HSPs
 // before each, so every value is the one of the default sweep.
-fn sweep_layout() -> bool {
-    static FLAG: OnceLock<bool> = OnceLock::new();
-    *FLAG.get_or_init(|| std::env::var_os("LOSAT_X_LINKSWEEPLAYOUT").is_some_and(|v| v == "1"))
+// LOSAT_X_LINKSWEEPLAYOUT=2 also prefetches, `PREFETCH_AHEAD` fills ahead, what a fill reads at random.
+fn sweep_layout() -> u8 {
+    static FLAG: OnceLock<u8> = OnceLock::new();
+    *FLAG.get_or_init(|| match std::env::var("LOSAT_X_LINKSWEEPLAYOUT").as_deref() {
+        Ok("1") => 1,
+        Ok("2") => 2,
+        _ => 0,
+    })
+}
+
+/// Fills ahead of the one in progress whose random reads LOSAT_X_LINKSWEEPLAYOUT=2 prefetches.
+const PREFETCH_AHEAD: usize = 8;
+
+/// A prefetch hint for the cache line of `r` (x86_64 only; elsewhere nothing).
+#[inline(always)]
+fn prefetch<T>(r: &T) {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: a prefetch hint reads no memory architecturally and cannot fault; the pointer is
+    // derived from a live reference.
+    unsafe {
+        core::arch::x86_64::_mm_prefetch(r as *const T as *const i8, core::arch::x86_64::_MM_HINT_T0);
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = r;
 }
 
 // No NCBI counterpart: counters of what the kernel did; they do not change any value NCBI computes.
@@ -935,60 +956,52 @@ pub(super) fn link_hsp_group_incr_with_slice(
     let wide = options.wide_keys
         || n >= (1 << 24) - 1
         || pass_bound(group_hits, cutoffs) >= <u64 as LinkKey>::MAX_VALUE;
-    if wide {
-        let (_, mut stats) = if sweep_layout() {
-            link_group::<u128, true>(
-                group_hits,
-                cutoffs,
-                gap_decay_rate,
-                subject_len_nucl,
-                query_contexts,
-                length_adj_per_context,
-                eff_searchsp_per_context,
-                log_k_by_ctx,
-                options,
-            )
-        } else {
-            link_group::<u128, false>(
-                group_hits,
-                cutoffs,
-                gap_decay_rate,
-                subject_len_nucl,
-                query_contexts,
-                length_adj_per_context,
-                eff_searchsp_per_context,
-                log_k_by_ctx,
-                options,
-            )
+    let layout = sweep_layout();
+    macro_rules! run {
+        ($key:ty) => {
+            match layout {
+                1 => link_group::<$key, 1>(
+                    group_hits,
+                    cutoffs,
+                    gap_decay_rate,
+                    subject_len_nucl,
+                    query_contexts,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    log_k_by_ctx,
+                    options,
+                ),
+                2 => link_group::<$key, 2>(
+                    group_hits,
+                    cutoffs,
+                    gap_decay_rate,
+                    subject_len_nucl,
+                    query_contexts,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    log_k_by_ctx,
+                    options,
+                ),
+                _ => link_group::<$key, 0>(
+                    group_hits,
+                    cutoffs,
+                    gap_decay_rate,
+                    subject_len_nucl,
+                    query_contexts,
+                    length_adj_per_context,
+                    eff_searchsp_per_context,
+                    log_k_by_ctx,
+                    options,
+                ),
+            }
         };
+    }
+    if wide {
+        let (_, mut stats) = run!(u128);
         stats.wide_groups = 1;
         stats
     } else {
-        let (_, stats) = if sweep_layout() {
-            link_group::<u64, true>(
-                group_hits,
-                cutoffs,
-                gap_decay_rate,
-                subject_len_nucl,
-                query_contexts,
-                length_adj_per_context,
-                eff_searchsp_per_context,
-                log_k_by_ctx,
-                options,
-            )
-        } else {
-            link_group::<u64, false>(
-                group_hits,
-                cutoffs,
-                gap_decay_rate,
-                subject_len_nucl,
-                query_contexts,
-                length_adj_per_context,
-                eff_searchsp_per_context,
-                log_k_by_ctx,
-                options,
-            )
-        };
+        let (_, stats) = run!(u64);
         stats
     }
 }
@@ -1008,7 +1021,7 @@ pub(super) fn link_hsp_group_incr_with_slice(
 // the linking call's list for LOSAT_X_LINKSLICES) and hands the same slice back: the body indexes,
 // reads and writes fields of the records and never adds, removes or moves one.
 #[allow(clippy::too_many_arguments)]
-fn link_group<'g, K: LinkKey, const LAYOUT: bool>(
+fn link_group<'g, K: LinkKey, const LAYOUT: u8>(
     group_hits: &'g mut [UngappedHit],
     cutoffs: &LinkHspCutoffs,
     gap_decay_rate: f64,
@@ -1215,7 +1228,7 @@ fn link_group<'g, K: LinkKey, const LAYOUT: bool>(
     // EXPERIMENT (LOSAT_X_LINKSWEEPLAYOUT): the static q_end_trim order and the rank of every HSP in
     // it, a bitmap of the queued HSPs by rank, the fill order's offsets and ranks as arrays in that
     // order, and the number of remaining HSPs of the sweep. Empty for the default sweep.
-    let (rank_of, qstat, mut bitmap, mut io_qo, mut io_rr, mut elig_alive) = if LAYOUT {
+    let (rank_of, qstat, mut bitmap, mut io_qo, mut io_rr, mut elig_alive) = if LAYOUT != 0 {
         let mut rank_of: Vec<u32> = vec![0; n];
         for (r, &i) in qorder.iter().enumerate() {
             rank_of[i as usize] = r as u32;
@@ -1323,7 +1336,7 @@ fn link_group<'g, K: LinkKey, const LAYOUT: bool>(
 // `round` is inlined into the loop, which it was the body of.
 /// One round's view of a group: its read-only values, and references to the pass values and
 /// structures and to the loop's variables, which `link_group` owns.
-struct LinkRounds<'r, K, const LAYOUT: bool> {
+struct LinkRounds<'r, K, const LAYOUT: u8> {
     // Read-only values of the group.
     n: usize,
     c: [i32; 2],
@@ -1388,7 +1401,7 @@ struct LinkRounds<'r, K, const LAYOUT: bool> {
     active_head: &'r mut u32,
 }
 
-impl<K: LinkKey, const LAYOUT: bool> LinkRounds<'_, K, LAYOUT> {
+impl<K: LinkKey, const LAYOUT: u8> LinkRounds<'_, K, LAYOUT> {
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:589-980
     // ```c
     //       while (number_of_hsps > 0)
@@ -1554,7 +1567,7 @@ impl<K: LinkKey, const LAYOUT: bool> LinkRounds<'_, K, LAYOUT> {
                     for i in 0..n {
                         if score[i] > c[m] {
                             queued[m][i] = true;
-                            if LAYOUT && m == 1 {
+                            if LAYOUT != 0 && m == 1 {
                                 let r = rank_of[i] as usize;
                                 bitmap[r >> 6] |= 1u64 << (r & 63);
                             }
@@ -1580,7 +1593,7 @@ impl<K: LinkKey, const LAYOUT: bool> LinkRounds<'_, K, LAYOUT> {
                             children[m].prev[cu] = NONE;
                             if alive[cu] && !queued[m][cu] {
                                 queued[m][cu] = true;
-                                if LAYOUT && m == 1 {
+                                if LAYOUT != 0 && m == 1 {
                                     let r = rank_of[cu] as usize;
                                     bitmap[r >> 6] |= 1u64 << (r & 63);
                                 }
@@ -1622,7 +1635,7 @@ impl<K: LinkKey, const LAYOUT: bool> LinkRounds<'_, K, LAYOUT> {
                 let mut qw = 0usize;
                 let mut qi = 0usize;
                 let mut wi = 0usize;
-                if LAYOUT && sweep && !first_pass {
+                if LAYOUT != 0 && sweep && !first_pass {
                     // The default sweep reads every remaining HSP of the order (those with
                     // score > cutoff[1]); the same count.
                     stats.swept += *elig_alive as u64;
@@ -1634,7 +1647,7 @@ impl<K: LinkKey, const LAYOUT: bool> LinkRounds<'_, K, LAYOUT> {
                 loop {
                     // The next HSP to visit: from the heap in list order, or the next remaining HSP of
                     // the sweep (which also fills the Fenwick tree with the HSPs before it).
-                    let x = if LAYOUT && sweep {
+                    let x = if LAYOUT != 0 && sweep {
                         // The next queued HSP in the static q_end_trim order, from the bitmap (a child
                         // queued during the pass has a larger rank than the HSP that is visited).
                         let mut found = NONE;
@@ -1655,6 +1668,13 @@ impl<K: LinkKey, const LAYOUT: bool> LinkRounds<'_, K, LAYOUT> {
                             while p < ilen && io_qo[p] > h_qe {
                                 let j = iorder[p] as usize;
                                 let mut f = io_rr[p] as usize;
+                                if LAYOUT == 2 {
+                                    let a = (p + PREFETCH_AHEAD).min(ilen - 1);
+                                    let ja = iorder[a] as usize;
+                                    prefetch(&sum[1][ja]);
+                                    prefetch(&alive[ja]);
+                                    prefetch(&fen[io_rr[a] as usize]);
+                                }
                                 p += 1;
                                 if alive[j] {
                                     let k = K::new(sum[1][j], j);
@@ -1911,7 +1931,7 @@ impl<K: LinkKey, const LAYOUT: bool> LinkRounds<'_, K, LAYOUT> {
                                 if !sweep {
                                     heap.push(Reverse(ch));
                                 } else {
-                                    if LAYOUT {
+                                    if LAYOUT != 0 {
                                         let r = rank_of[cu] as usize;
                                         bitmap[r >> 6] |= 1u64 << (r & 63);
                                     }
@@ -1922,7 +1942,7 @@ impl<K: LinkKey, const LAYOUT: bool> LinkRounds<'_, K, LAYOUT> {
                         }
                     }
                 }
-                if LAYOUT && sweep {
+                if LAYOUT != 0 && sweep {
                     let mut w = 0usize;
                     for r in 0..iorder.len() {
                         let j = iorder[r];
@@ -2172,7 +2192,7 @@ impl<K: LinkKey, const LAYOUT: bool> LinkRounds<'_, K, LAYOUT> {
                 path_changed = true;
             }
             alive[cur] = false;
-            if LAYOUT {
+            if LAYOUT != 0 {
                 *elig_alive -= usize::from(score[cur] > c[1]);
             }
             removed.push(cur as u32);

@@ -865,7 +865,7 @@ unsafe fn align16<const TB: bool>(
 
         let row_off = sc.trace.len();
         if TB {
-            sc.reserve_row(bend - first + num_extra + 96);
+            sc.trace.reserve(bend - first + num_extra + 96);
         }
         let tr = sc.trace.as_mut_ptr().add(row_off);
 
@@ -1415,7 +1415,7 @@ unsafe fn align8<const TB: bool, const EM: bool>(
 
         let row_off = sc.trace.len();
         if TB {
-            sc.reserve_row(bend - first + num_extra + 96);
+            sc.trace.reserve(bend - first + num_extra + 96);
         }
         let tr = sc.trace.as_mut_ptr().add(row_off);
 

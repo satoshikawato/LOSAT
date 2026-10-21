@@ -1,5 +1,5 @@
-//! EXPERIMENT (LOSAT_X_XDROPTRIM, LOSAT_X_BNMAPPED): large per-thread buffers that glibc maps
-//! and returns when they are dropped, and a pool that hands them from one thread to the next.
+//! EXPERIMENT (LOSAT_X_BNMAPPED): large per-thread buffers that glibc maps and returns when they
+//! are dropped, and a pool that hands them from one thread to the next.
 //!
 //! No NCBI counterpart: these choose only the capacity of LOSAT buffers and when they are freed;
 //! no value NCBI computes changes.
@@ -56,9 +56,14 @@ pub(crate) fn x_reserve_mapped<T>(v: &mut Vec<T>, additional: usize) {
     v.reserve_exact(target - v.len());
 }
 
+/// No NCBI counterpart: the built-in bound of `x_pool_idle_bytes`, in MiB (BLASTN of 1,500 cDNAs
+/// x the D. melanogaster genome at 16 threads, max RSS: 273 MiB with 0, 317-331 with 64, 346-367
+/// with 256; with 0 every reuse faults again, x1.04 wall).
+const X_POOL_IDLE_MIB: usize = 64;
+
 /// No NCBI counterpart: the idle buffers of an `XPool` may hold this many touched bytes
-/// (`LOSAT_X_POOLIDLE` MiB, a tuning variable, 0 to 65,536; built-in 256); the oldest ones beyond
-/// it are freed.
+/// (`LOSAT_X_POOLIDLE` MiB, a tuning variable, 0 to 65,536; built-in `X_POOL_IDLE_MIB`); the
+/// oldest ones beyond it are freed.
 pub(crate) fn x_pool_idle_bytes() -> usize {
     static IDLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *IDLE.get_or_init(|| {
@@ -66,7 +71,7 @@ pub(crate) fn x_pool_idle_bytes() -> usize {
             .ok()
             .and_then(|v| v.trim().parse::<usize>().ok())
             .filter(|v| *v <= 65_536)
-            .unwrap_or(256)
+            .unwrap_or(X_POOL_IDLE_MIB)
             << 20
     })
 }
@@ -111,7 +116,12 @@ impl<T: Copy> XPool<T> {
             .enumerate()
             .filter(|(_, (_, touched))| *touched >= bytes)
             .min_by_key(|(_, (_, touched))| *touched)
-            .or_else(|| st.idle.iter().enumerate().max_by_key(|(_, (_, touched))| *touched))
+            .or_else(|| {
+                st.idle
+                    .iter()
+                    .enumerate()
+                    .max_by_key(|(_, (_, touched))| *touched)
+            })
             .map(|(i, _)| i)?;
         let (v, touched) = st.idle.swap_remove(pick);
         st.idle_touched -= touched;
@@ -171,8 +181,8 @@ impl<T: Copy> XPool<T> {
     }
 }
 
-/// No NCBI counterpart: the pool of byte buffers: traceback rows of the X-drop kernels
-/// (LOSAT_X_XDROPTRIM), and BLASTN's database reads and BLASTNA letters (LOSAT_X_BNMAPPED).
+/// No NCBI counterpart: the pool of byte buffers: BLASTN's database reads and BLASTNA letters
+/// (LOSAT_X_BNMAPPED).
 pub(crate) static X_BYTES: XPool<u8> = XPool::new();
 
 /// No NCBI counterpart: the elements sorted at a time with `sort_by` before they are merged in

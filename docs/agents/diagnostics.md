@@ -403,7 +403,6 @@ export LOSAT_X_TBXRPTPAR=1
 export LOSAT_X_TBXSCANBF=1
 export LOSAT_X_TBXUNGAP=1
 export LOSAT_X_TBXUNITMASK=256
-export LOSAT_X_XDROPTRIM=1
 ```
 
 Value switches: `LOSAT_X_AHEAD` (2 to 65,536, built-in 16), `LOSAT_X_MBBATCH` (2 to 4,096,

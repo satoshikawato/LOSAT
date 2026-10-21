@@ -1109,9 +1109,8 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: Some(direct),
-                mask_ratio: None,
+                mask_rule: None,
                 extents: Vec::new(),
-                diag_array_size: 0,
             };
             let window = [40, 3 + BATCH as i32, 64][case % 3];
             let inp = XSubject {

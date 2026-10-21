@@ -173,12 +173,18 @@
 //! with no cut group runs `scan_unit`, whose machine code is the one before the switch.
 //!
 //! `LOSAT_X_TBXUNITMASK` (in the strict set, a value switch: on unless it is `0`, or
-//! `LOSAT_X_DEFAULT=0` and it is not set; unset or `=1` the built-in ratio 4, `=N` the ratio N): a
-//! unit takes a table of P cells, P the smallest power of two of at least its group's extent G
-//! (the query offsets from the group's first context to the next group's, the last group to the
-//! end of its last context, `x_group_extents`) plus the window, and the cell of hit (q, s) is
-//! (q - s - lo) & (P - 1) (`XMasked`), where its unmasked table (`x_unit_width`) has at least N times
-//! P cells or its subject chunk is longer than the reference table has cells (`x_unit_mask_for`).
+//! `LOSAT_X_DEFAULT=0` and it is not set; unset or `=1` the built-in 256, `=N` N KiB): a unit takes
+//! a table of P cells, P the smallest power of two of at least its group's extent G (the query
+//! offsets from the group's first context to the next group's, the last group to the end of its
+//! last context, `x_group_extents`) plus the window, and the cell of hit (q, s) is
+//! (q - s - lo) & (P - 1) (`XMasked`), where that table has at most the switch's KiB and its
+//! unmasked table (`x_unit_width`) at least four times P cells, or, in a batch that `guard` rejects
+//! (LOSAT_X_TBXBAND), where its subject chunk is longer than the reference table has cells
+//! (`x_unit_mask_for`). Measured (workstation, 2 to 16 threads): a unit's hit loop does one more
+//! instruction per hit on a masked table and saves the clearing of the unmasked table's every cell
+//! per unit, so masking pays where the group is short against the chunk (1.5-1.9 kb queries against
+//! MG1655 and the fruit fly genome x0.84-0.91, max RSS 772 -> 309 MiB at 16 threads) and costs up to
+//! 1.7 % on genome pairs with groups of 100,000 letters or more.
 //! The units of a batch whose groups LOSAT_X_TBXQSLICE's rule cuts keep their unmasked tables
 //! (`x_tbx_qslice::rule_cuts`, whatever the diagnostics switches say). With the switch, `decide`
 //! does not apply `x_band_fits` to a batch whose groups the rule does not cut: every unit whose
@@ -367,25 +373,30 @@ fn tbx_band() -> bool {
 // result (module doc, LOSAT_X_TBXUNITMASK); NCBI has one table per thread. Read once per process,
 // as the other modes of this file.
 /// LOSAT_X_TBXUNITMASK: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off (`0`,
-/// or `LOSAT_X_DEFAULT=0` and it is not set); otherwise the smallest ratio of a unit's unmasked
-/// table (`x_unit_width`) to its masked table (`x_masked_cells`) at which it takes the masked one.
-fn unit_mask_ratio() -> Option<usize> {
-    static RATIO: OnceLock<Option<usize>> = OnceLock::new();
-    *RATIO.get_or_init(|| {
+/// or `LOSAT_X_DEFAULT=0` and it is not set); otherwise the largest masked table, in KiB, that a
+/// unit takes for its size alone (`XMaskRule::max_cells`, module doc).
+fn unit_mask_kib() -> Option<usize> {
+    static KIB: OnceLock<Option<usize>> = OnceLock::new();
+    *KIB.get_or_init(|| {
         crate::utils::xswitch::value(
             "LOSAT_X_TBXUNITMASK",
-            2..=X_UNITMASK_MAX_RATIO,
-            X_UNITMASK_RATIO,
+            2..=X_UNITMASK_MAX_KIB,
+            X_UNITMASK_KIB,
         )
     })
 }
 
-/// No NCBI counterpart: LOSAT_X_TBXUNITMASK's built-in ratio (module doc).
-const X_UNITMASK_RATIO: usize = 4;
+/// No NCBI counterpart: LOSAT_X_TBXUNITMASK's built-in, in KiB (module doc): masked tables of up to
+/// 65,536 cells (group extents plus the window of up to 64 Ki letters).
+const X_UNITMASK_KIB: usize = 256;
 
-/// No NCBI counterpart: the largest ratio LOSAT_X_TBXUNITMASK takes; a value outside
-/// 2..=X_UNITMASK_MAX_RATIO other than `0`, or a non-numeric one, gives the built-in.
-const X_UNITMASK_MAX_RATIO: usize = 1 << 20;
+/// No NCBI counterpart: the largest value LOSAT_X_TBXUNITMASK takes (4 GiB); a value outside
+/// 2..=X_UNITMASK_MAX_KIB other than `0`, or a non-numeric one, gives the built-in.
+const X_UNITMASK_MAX_KIB: usize = 1 << 22;
+
+/// No NCBI counterpart: LOSAT_X_TBXUNITMASK takes a masked table for its size only where the
+/// unmasked one has at least this many times its cells (module doc).
+const X_UNITMASK_RATIO: usize = 4;
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510
 // ```c
@@ -464,24 +475,37 @@ fn x_masked_cells(extent: usize, window: i32) -> usize {
     (extent + window.max(0) as usize).next_power_of_two()
 }
 
-// No NCBI counterpart: the rule of LOSAT_X_TBXUNITMASK (module doc), apart from the switch so that
-// a test can give it values.
-/// The mask of the table of a unit whose group extends over `extent` letters, whose unmasked
-/// table has `width` cells and whose subject chunk has `chunk_len` letters, at the switch's
-/// `ratio`, in a batch whose reference table has `diag_array_size` cells: the masked table's cells
-/// minus one when `width >= ratio * x_masked_cells(extent, window)` or the chunk is longer than
-/// the reference table has cells (`x_band_fits` fails), else None (the unmasked table).
-fn x_unit_mask_for(
+// No NCBI counterpart: the rule of LOSAT_X_TBXUNITMASK for one batch (module doc), apart from the
+// switch so that a test can give it values.
+/// Which units of a batch take a masked table (`x_unit_mask_for`).
+#[derive(Clone, Copy)]
+struct XMaskRule {
+    /// A unit whose masked table has at most this many cells takes it where its unmasked table has
+    /// at least `ratio` times as many (`X_UNITMASK_RATIO`)...
+    max_cells: usize,
     ratio: usize,
+    /// ... and, in a batch that `guard` rejects (LOSAT_X_TBXBAND), a unit whose subject chunk is
+    /// longer than the reference table's cells (these) takes it whatever its size (`x_band_fits`).
+    band_cells: Option<i32>,
+}
+
+// No NCBI counterpart: the rule of LOSAT_X_TBXUNITMASK (module doc).
+/// The mask of the table of a unit whose group extends over `extent` letters, whose unmasked
+/// table has `width` cells and whose subject chunk has `chunk_len` letters, under `rule`: the
+/// masked table's cells minus one, or None (the unmasked table).
+fn x_unit_mask_for(
+    rule: &XMaskRule,
     extent: usize,
     window: i32,
     width: usize,
     chunk_len: usize,
-    diag_array_size: i32,
 ) -> Option<u32> {
     let cells = x_masked_cells(extent, window);
-    (width as u64 >= ratio as u64 * cells as u64 || !x_band_fits(chunk_len, diag_array_size))
-        .then(|| (cells - 1) as u32)
+    let small = cells <= rule.max_cells && width as u64 >= rule.ratio as u64 * cells as u64;
+    let band = rule
+        .band_cells
+        .is_some_and(|diag_array_size| !x_band_fits(chunk_len, diag_array_size));
+    (small || band).then(|| (cells - 1) as u32)
 }
 
 // No NCBI counterpart: the groups' query offsets as LOSAT_X_TBXQSLICE reads them (from the first
@@ -632,14 +656,13 @@ pub fn print_summary() {
     let load = |c: &AtomicU64| c.load(AtomicOrdering::Relaxed);
     // LOSAT_X_TBXUNITMASK: printed whenever the switch is on (zero where no unit took a masked
     // table).
-    if unit_mask_ratio().is_some() {
+    if let Some(kib) = unit_mask_kib() {
         if m == 2 {
             eprintln!("[X_SHADOW] TBXUNITMASK units_masked={}", load(&UM_UNITS));
         }
         if std::env::var_os("LOSAT_X_STATS").is_some() {
             eprintln!(
-                "[X_STATS] TBXUNITMASK ratio={} units_masked={}",
-                unit_mask_ratio().unwrap_or(0),
+                "[X_STATS] TBXUNITMASK kib={kib} units_masked={}",
                 load(&UM_UNITS)
             );
         }
@@ -854,7 +877,7 @@ pub(super) struct XGates<'a> {
     pub threshold: i32,
     /// `tbx_band()`: LOSAT_X_TBXBAND, `guard` is not applied.
     pub band: bool,
-    /// `unit_mask_ratio().is_some()`: LOSAT_X_TBXUNITMASK, `x_band_fits` is not applied to a batch
+    /// `unit_mask_kib().is_some()`: LOSAT_X_TBXUNITMASK, `x_band_fits` is not applied to a batch
     /// whose groups LOSAT_X_TBXQSLICE does not cut.
     pub unit_mask: bool,
 }
@@ -1131,7 +1154,7 @@ fn lut_direct(e: &XLutEarly<'_>, shadow: bool) -> Option<XLutBatch> {
         cost_gate: cost_gate(),
         threshold: e.threshold,
         band: tbx_band(),
-        unit_mask: unit_mask_ratio().is_some(),
+        unit_mask: unit_mask_kib().is_some(),
     };
     if decide(mode(), &gates) != XDecision::Units {
         return None;
@@ -1832,14 +1855,12 @@ pub(super) struct XPairPar {
     /// EXPERIMENT (LOSAT_X_TBXQSLICE): the batch's groups as slices, when the switch cuts one of
     /// them (x_tbx_qslice.rs); the units then index this list and scan with its tables.
     sliced: Option<Vec<XSliced>>,
-    /// EXPERIMENT (LOSAT_X_TBXUNITMASK): the switch's ratio (`unit_mask_ratio`), None when it is
-    /// off or LOSAT_X_TBXQSLICE cuts a group of the batch (module doc).
-    mask_ratio: Option<usize>,
-    /// LOSAT_X_TBXUNITMASK: each group's extent (`x_group_extents`) while `mask_ratio` is Some,
+    /// EXPERIMENT (LOSAT_X_TBXUNITMASK): the batch's rule, None when the switch is off or
+    /// LOSAT_X_TBXQSLICE's rule cuts a group of the batch (module doc).
+    mask_rule: Option<XMaskRule>,
+    /// LOSAT_X_TBXUNITMASK: each group's extent (`x_group_extents`) while `mask_rule` is Some,
     /// else empty.
     extents: Vec<usize>,
-    /// LOSAT_X_TBXUNITMASK: the batch's reference table cells (`XBatch::diag_array_size`).
-    diag_array_size: i32,
 }
 
 impl XPairPar {
@@ -1872,7 +1893,7 @@ impl XPairPar {
                 cost_gate: cost_gate(),
                 threshold: b.threshold,
                 band: tbx_band(),
-                unit_mask: unit_mask_ratio().is_some(),
+                unit_mask: unit_mask_kib().is_some(),
             },
         );
         if decision != XDecision::Off {
@@ -1934,40 +1955,46 @@ impl XPairPar {
         // EXPERIMENT (LOSAT_X_TBXUNITMASK): the groups' extents for the units' masked tables; none
         // where LOSAT_X_TBXQSLICE's rule cuts a group (module doc; `x_band_masked`), so a batch
         // takes the same tables with and without the diagnostics that stop the slicing.
-        let mask_ratio = unit_mask_ratio().filter(|_| {
-            sliced.is_none()
-                && !x_tbx_qslice::rule_cuts(b.contexts, &group_starts(b.contexts), b.threads)
-        });
-        let extents = if mask_ratio.is_some() {
-            x_group_extents(b.contexts)
-        } else {
-            Vec::new()
-        };
         assert!(
             !(stub && m == 2),
             "LOSAT_X_PAIRLUT: the reference loop of LOSAT_X_PAIRPARSHADOW cannot run on the stub table"
         );
         // LOSAT_X_TBXBAND: a batch the first guard rejects, counted for the `[X_STATS] PAIRPAR` and
         // `[X_SHADOW] PAIRPAR` lines (without the switch no such batch gets here).
-        if tbx_band() {
+        let band = tbx_band() && {
             let (max_context_len, longest_subject_chunk) = x_guard_lengths(b.contexts, b.subjects);
-            if !guard(
+            !guard(
                 max_context_len,
                 longest_subject_chunk,
                 b.query_length,
                 b.diag_array_size,
-            ) {
-                BAND.fetch_add(1, AtomicOrdering::Relaxed);
-            }
+            )
+        };
+        if band {
+            BAND.fetch_add(1, AtomicOrdering::Relaxed);
         }
+        let mask_rule = unit_mask_kib()
+            .filter(|_| {
+                sliced.is_none()
+                    && !x_tbx_qslice::rule_cuts(b.contexts, &group_starts(b.contexts), b.threads)
+            })
+            .map(|kib| XMaskRule {
+                max_cells: kib.saturating_mul(1024) / std::mem::size_of::<DiagStruct>(),
+                ratio: X_UNITMASK_RATIO,
+                band_cells: band.then_some(b.diag_array_size),
+            });
+        let extents = if mask_rule.is_some() {
+            x_group_extents(b.contexts)
+        } else {
+            Vec::new()
+        };
         Some(Self {
             groups,
             shadow: m == 2,
             stub,
             sliced,
-            mask_ratio,
+            mask_rule,
             extents,
-            diag_array_size: b.diag_array_size,
         })
     }
 
@@ -1985,14 +2012,13 @@ impl XPairPar {
     // No NCBI counterpart: LOSAT_X_TBXUNITMASK's choice of a unit's table (module doc).
     /// The mask of `unit`'s table (`x_unit_mask_for`), or None for the unmasked table.
     fn x_unit_mask(&self, unit: &XUnit, window: i32) -> Option<u32> {
-        let ratio = self.mask_ratio?;
+        let rule = self.mask_rule.as_ref()?;
         x_unit_mask_for(
-            ratio,
+            rule,
             self.extents[unit.g],
             window,
             x_unit_width(&self.groups[unit.g], &unit.chunk),
             unit.chunk.length,
-            self.diag_array_size,
         )
     }
 
@@ -2072,7 +2098,7 @@ impl XPairPar {
                     self.x_unit_cells(unit, inp.window) * std::mem::size_of::<DiagStruct>()
                 }),
             );
-            if self.mask_ratio.is_some() {
+            if self.mask_rule.is_some() {
                 let masked = units
                     .iter()
                     .filter(|unit| self.x_unit_mask(unit, inp.window).is_some())
@@ -3527,9 +3553,8 @@ mod tests {
             shadow: false,
             stub: false,
             sliced: None,
-            mask_ratio: None,
+            mask_rule: None,
             extents: Vec::new(),
-            diag_array_size: 0,
         };
         let mut diag_array = vec![start; size as usize];
         let mut diag_offset = start_offset;
@@ -3918,9 +3943,8 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: None,
-                mask_ratio: None,
+                mask_rule: None,
                 extents: Vec::new(),
-                diag_array_size: 0,
             };
             assert_eq!(
                 unit_lists(&pp, &inp),
@@ -4050,9 +4074,8 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: None,
-                mask_ratio: None,
+                mask_rule: None,
                 extents: Vec::new(),
-                diag_array_size: 0,
             };
             // Ratio 1: every unit whose unmasked table is at least the masked one's size.
             let pp = XPairPar {
@@ -4060,9 +4083,12 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: None,
-                mask_ratio: Some(1),
+                mask_rule: Some(XMaskRule {
+                    max_cells: usize::MAX,
+                    ratio: 1,
+                    band_cells: None,
+                }),
                 extents: x_group_extents(&contexts),
-                diag_array_size: size,
             };
             assert_eq!(pp.extents.len(), pp.groups.len());
             // Negative control: tables of half the masked size (below extent + window, against
@@ -4072,13 +4098,12 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: None,
-                mask_ratio: Some(1),
+                mask_rule: pp.mask_rule,
                 extents: pp
                     .extents
                     .iter()
                     .map(|&e| (x_masked_cells(e, window) / 2).saturating_sub(window as usize))
                     .collect(),
-                diag_array_size: size,
             };
             let chunk = SubjectChunk {
                 offset: 0,
@@ -4229,13 +4254,30 @@ mod tests {
         assert_eq!(x_masked_cells(1 << 20, 0), 1 << 20);
         assert_eq!(x_masked_cells((1 << 20) - 40, 40), 1 << 20);
         assert_eq!(x_masked_cells((1 << 20) - 39, 40), 1 << 21);
-        // width >= ratio x cells, or a chunk longer than the reference table (`x_band_fits`).
-        assert_eq!(x_unit_mask_for(4, 24, 40, 256, 200, 256), Some(63));
-        assert_eq!(x_unit_mask_for(4, 24, 40, 255, 200, 256), None);
-        assert_eq!(x_unit_mask_for(2, 25, 40, 256, 200, 256), Some(127));
-        assert_eq!(x_unit_mask_for(2, 25, 40, 255, 200, 256), None);
-        assert_eq!(x_unit_mask_for(1 << 20, 24, 40, 300, 256, 256), None);
-        assert_eq!(x_unit_mask_for(1 << 20, 24, 40, 300, 257, 256), Some(63));
+        // Small masked tables where the unmasked one has at least `ratio` times their cells; in a
+        // band batch, every unit whose chunk is longer than the reference table.
+        let rule = |max_cells: usize, band_cells: Option<i32>| XMaskRule {
+            max_cells,
+            ratio: 4,
+            band_cells,
+        };
+        assert_eq!(x_unit_mask_for(&rule(64, None), 24, 40, 256, 200), Some(63));
+        assert_eq!(x_unit_mask_for(&rule(64, None), 24, 40, 255, 200), None);
+        assert_eq!(x_unit_mask_for(&rule(63, None), 24, 40, 256, 200), None);
+        assert_eq!(
+            x_unit_mask_for(&rule(128, None), 25, 40, 512, 200),
+            Some(127)
+        );
+        assert_eq!(x_unit_mask_for(&rule(128, None), 25, 40, 511, 200), None);
+        assert_eq!(x_unit_mask_for(&rule(0, Some(256)), 24, 40, 300, 256), None);
+        assert_eq!(
+            x_unit_mask_for(&rule(0, Some(256)), 24, 40, 300, 257),
+            Some(63)
+        );
+        assert_eq!(
+            x_unit_mask_for(&rule(0, None), 24, 40, 1 << 20, 1 << 20),
+            None
+        );
         // The groups: one per context up to X_MAX_GROUPS, from a context's first offset to the
         // next group's (sentinels included), the last to the end of its last context.
         let frames: Vec<QueryFrame> = [5usize, 7, 9]
@@ -4941,9 +4983,8 @@ mod tests {
                     shadow: false,
                     stub: false,
                     sliced: None,
-                    mask_ratio: None,
+                    mask_rule: None,
                     extents: Vec::new(),
-                    diag_array_size: 0,
                 },
                 cutoff_scores: vec![12; contexts.len()],
                 x_dropoff_per_context: vec![16; contexts.len()],
@@ -5460,9 +5501,8 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: None,
-                mask_ratio: None,
+                mask_rule: None,
                 extents: Vec::new(),
-                diag_array_size: 0,
             },
             cutoff_scores: vec![12; contexts.len()],
             x_dropoff_per_context: vec![16; contexts.len()],

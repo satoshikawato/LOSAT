@@ -968,9 +968,8 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: None,
-                mask_ratio: None,
+                mask_rule: None,
                 extents: Vec::new(),
-                diag_array_size: 0,
             };
             // Windows the module takes (`active`): from its smallest, wordsize + BATCH.
             let window = [40, 3 + BATCH as i32, 64][case % 3];

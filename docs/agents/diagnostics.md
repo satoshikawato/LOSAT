@@ -348,6 +348,7 @@ export LOSAT_X_PAIRPARDISC=1
 export LOSAT_X_PAIRPARDISCARR=1
 export LOSAT_X_PAIRPARFOLD=1
 export LOSAT_X_PAIRPARGATE=1
+export LOSAT_X_PAIRPARNA=1
 export LOSAT_X_PAIRWISEPAR=1
 export LOSAT_X_PURGEFAST=1
 export LOSAT_X_QBATCHPAR=1
@@ -2632,6 +2633,38 @@ Scheduling (each value computed by one thread with the original function; order 
   by default) x0.919 / 0.879 at 8 / 16 threads, x0.996 at one thread (8 rounds; the stage needs a pool); 31,168
   cDNAs at one thread x1.004 (2 rounds); megablast and blastn of 31,168 cDNAs at 16 threads x0.991 / 0.999 (it
   does not act there). Max RSS unchanged in every cell.
+- `LOSAT_X_PAIRPARNA=1` (in the strict set since 2026-10-20 (perf/bn-short-strip, evidence at the end of this entry): on
+  unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; it does not depend on `LOSAT_X_PAIRPAR`) blastn with a lookup
+  table that is not two-stage (the lookup width is the word size: `-task blastn-short`'s word 7, and word sizes 4 to 8
+  when the table has enough entries), one subject of up to 5 Mb (a longer one is searched in chunks in parallel already)
+  and a query block on a pool of 2+ threads: the one-hit seed stage of the chunk with the diagonal hash (query block over 8000
+  letters, both strands counted, so about 4000 query letters; `window_size` and `scan_range` 0, unmasked subject, no
+  debug or trace). The pool threads scan strips (512 x max(threads, 4) of them, at least 512 subject offsets each: 512
+  offsets on 3 Mb from 12 threads on) with the scan kernel of the reference
+  (`run.rs`, the branch after `if two_stage_lookup_ref.is_none()`), each lookup hit becoming a seed with the context of
+  its query offset, and the pairs are folded in scan order through a copy of the reference's one-hit diagonal-hash code
+  (`last_hit` test, `s_TypeOfWord`, the ungapped extension on the context's query slice, the cutoff, every insert;
+  `blastn/blast_engine/x_pair_seed_na.rs`); with `LOSAT_X_PAIRPARFOLD` (default) the fold is split by diagonal-hash
+  bucket over the threads, without it the owner folds. Every lookup hit is a seed here (about 100 per subject offset for
+  30,000 24-mers against 3 Mb), so the helpers scan at most two strips per thread ahead of the slowest fold. Anything
+  else (the diagonal array of a query block up to 8000 letters, such as a few primers; one thread; several subjects or
+  subject chunks searched in parallel) runs the original code. Before it, blastn-short against one subject ran on one core at any thread count. Shadow:
+  `LOSAT_X_PAIRPARNASHADOW=1` (per chunk the hit list and the whole diagonal hash compared with the original code; one
+  `[X_PAIRPARNASHADOW]` summary line on stderr at the end, with the number of chunks compared). With `LOSAT_TIMING` a
+  `[TIMING] x_pairparna_seed` line gives the strips, seeds and the fold, scan and wait time. Tests:
+  `LOSAT/tests/blastn_pairpar_na.rs`, `x_pair_seed_na.rs` `seed_stage_on_strips_equals_one_scan`.
+  Default ON since 2026-10-20 (perf/bn-short-strip; workstation (2x Xeon Gold 6338, node 1 booked through its FIFO,
+  16 physical cores with the siblings idle, `numactl --membind 1`, rotated rounds, every output the same bytes in every
+  arm; v4-B `results/b13ab`); a ratio is the median of the per-round with / without, a718932f (the switch opt-in, same
+  code paths) built on that machine): blastn-short of 30,000 24-mers (taken at even steps from the subject) against
+  3 Mb of D. melanogaster chromosome 2L (`-subject`, `-evalue 0.001`, outfmt 6) x0.510 / 0.284 / 0.189 / 0.094 at 2 /
+  4 / 8 / 16 threads (30.3 -> 2.97 s at 16 threads, where NCBI 2.17.0 `-db` takes 29.4-29.8 s on one core), x1.001 at
+  one thread (the stage needs a pool); 30,000 queries of 18-30 nt x0.110 at 16 threads (34.3 -> 3.78 s); outfmt 0
+  x0.140 at 16 threads. Max RSS 191-197 -> 238 / 270 / 275 / 304-311 MiB at 2 / 4 / 8 / 16 threads (the seeds of the
+  strips in flight and one table per partition), below NCBI's 392 / 414 MiB at 1 / 16 threads. `-task blastn` (the
+  megablast table, where the switch does not act) at 2 threads: same instructions (7.50 / 7.51 G) and cycles. At 8 and
+  16 threads the threads spend 1.2-1.8x the user time of the serial scan, mostly waiting for the slowest partition
+  (cycles up at equal instructions, sys 2-5 s).
 - `LOSAT_X_QDUSTPAR=1` (BLASTN, all tasks with DUST on, which is the default of megablast, dc-megablast and
   blastn, and blastn-short with `-dust yes`; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set) the DUST masks
   of a query batch are made on the search pool instead of one query after the other

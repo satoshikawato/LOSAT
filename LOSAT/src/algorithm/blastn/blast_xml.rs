@@ -144,6 +144,7 @@ pub(crate) fn write_blastn_xml(
                             srow: &subject_row,
                             ops: hsp.gap_info.as_deref(),
                             query_first: hsp.q_start as i32 - 1,
+                            query_step: 1,
                             masks: &[],
                         })?;
                     }

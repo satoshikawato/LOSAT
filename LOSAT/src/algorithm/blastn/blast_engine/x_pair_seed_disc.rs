@@ -68,7 +68,7 @@ use super::super::{
 };
 use super::{
     copy_hash, part, plan_strips, pool_threads, run_strips, seed_of_pair, DiagArray, FoldCounts,
-    Inputs, PartScratch, Seed, StageStats, Stash, StripJob, STASH,
+    Inputs, PartScratch, Seed, StageStats, Stash, StashPath, StripJob, STASH,
 };
 use crate::algorithm::blastn::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
 use crate::algorithm::blastn::lookup::DiscTemplates;
@@ -977,7 +977,7 @@ pub(super) fn run(
             *s.borrow_mut() = Some(Stash {
                 hits: shadow_hits,
                 hash,
-                disc: true,
+                path: StashPath::Disc,
             })
         });
         return false;

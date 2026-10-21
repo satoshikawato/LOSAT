@@ -12731,6 +12731,51 @@ fn search_query_batch(
                     //     total_hits += num_hits;
                     // }
                     // ```
+                    // Dispatch point of LOSAT_X_PAIRPARNA: `x_pair_seed::run_na` runs this block
+                    // (scan, diagonal hash, ungapped extension; one-hit diagonal-hash scope only)
+                    // with the subject scan in strips on the pool threads and the pairs folded in
+                    // the scan order; `continue` ends the one-iteration strand loop. Otherwise
+                    // (and with LOSAT_X_PAIRPARNASHADOW) the code below runs.
+                    if x_pair_seed::run_na(
+                        &x_pair_seed::NaInputs {
+                            pv_direct_lookup: pv_direct_lookup_ref,
+                            na_lookup: na_lookup_ref,
+                            use_direct_lookup,
+                            word_length: safe_k,
+                            search_seq_packed,
+                            s_len,
+                            subject_seq_ranges: &subject_seq_ranges,
+                            subject_masked,
+                            scan_step,
+                            query_context_index: &query_context_index,
+                            query_contexts,
+                            encoded_queries_blastna: &encoded_queries_blastna,
+                            cutoff_scores: &cutoff_scores,
+                            x_dropoff_scores: &x_dropoff_scores,
+                            reduced_cutoff_scores: &reduced_cutoff_scores,
+                            score_matrix: &score_matrix,
+                            nucl_score_table: &nucl_score_table,
+                            diag_offset,
+                            diag_hash_window: diag_hash_insert_window(
+                                window_size,
+                                scan_range,
+                                safe_k,
+                            ),
+                            use_array_indexing,
+                            window_size,
+                            scan_range,
+                            diagnostics: debug_enabled
+                                || blastn_trace_enabled
+                                || debug_window.is_some(),
+                            one_subject_owner: !use_parallel && reuse_prelim_hits,
+                            timing: timing_ref,
+                        },
+                        diag_hash,
+                        ungapped_hits,
+                        &mut subject_scratch.x_pair_fold,
+                    ) {
+                        continue;
+                    }
                     let scan_start = if timing_enabled {
                         Some(std::time::Instant::now())
                     } else {

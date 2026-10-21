@@ -265,6 +265,7 @@ count of the set anywhere, so that two pull requests that each add a switch do n
 ```bash
 export LOSAT_X_AHEAD=16
 export LOSAT_X_BNDBCUT=1
+export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
@@ -1082,6 +1083,52 @@ Rebuilding less:
   (panic) after printing the line that is otherwise printed at exit: `[X_SHADOW] BNDBCUT searches= blocks=
   blocks_ref= merged= identical` (`blocks`: blocks of the cut; `blocks_ref`: blocks of 1 MiB; `merged`: kept results
   compared). The preliminary stage runs twice, so its `LOSAT_TIMING` and `LOSAT_X_STATS` count double, and its results are held twice.
+- `LOSAT_X_BNDBSTREAM=1` (BLASTN, every task, memory; in the strict set from the pull request that added it
+  (perf/bn-db-stream, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set;
+  acts only where a `-db` search runs its preliminary stage on the pool: more than one thread) the parallel preliminary
+  stage of `-db` has no rounds: the threads claim the blocks once each in ordinal order, and one of them hands each
+  block's results to the hit lists in that order while the others search the next blocks, at most 2 blocks per thread
+  past the last one handed over (`blastn/blast_engine/x_db_stream.rs`, exactness argument in its header; the driver is
+  `x_bnstream::search_in_order`, that of the `-subject` path's `LOSAT_X_BNSTREAM`, here with its `assist`: a thread
+  that waits for room in the window, or the owner for the next block, runs the pool's pending jobs first, such as the
+  chunks of a long sequence that another thread's search hands out). The blocks are listed 65,536 at a time. Without
+  it the stage searches rounds of 8 blocks per thread and merges a round's results when the whole round is searched,
+  so the preliminary HSP lists of all sequences of the round are in memory together; blocks hold at most 1 MiB, so
+  every database below 8 x threads MiB of sequence bytes is one round (128 MiB at 16 threads). Megablast of 100 16S queries x the 28,036 16S rRNA
+  genes at 16 threads: the round held 69 MiB of preliminary HSP lists, against 16 MiB for the lookup table, and the
+  arenas kept the freed space to the end (103 MiB free in them at exit; probe of the live allocations by thread and
+  region, v4-B session 10). The order of the merges is the one-thread order, every block is searched once, and a
+  thread keeps one scratch for the blocks it claims in increasing order (a sequence's result does not depend on what
+  the scratch searched before it, which the rounds' `map_init` already relies on); a failed search returns the first
+  error in ordinal order after merging the blocks before it, as a round does, and blocks not yet claimed are not
+  searched. Memory measured on the workstation (node 0, untimed, v4-MEM's `mem_run.py`: VmHWM and RssAnon every 50 ms;
+  both arms and NCBI 2.17.0 `-db` in the same run; every output equal to NCBI's `-num_threads 1` output; v4-B
+  `results/b14ab/mem.tsv`), megablast of 100 16S queries x 28,036 16S, max RSS with / without the switch (NCBI): 16
+  threads outfmt 6 77-78 / 114-115 MiB (141), outfmt 8 81-82 / 117-120 (108), outfmt 9 78-79 / 118-119 (107), outfmt
+  12 79-83 / 120-123 (109); 8 threads outfmt 6 70-74 / 105-108 (146), outfmt 8 77-78 / 115-117 (114), outfmt 9 68-75 /
+  108-110 (115), outfmt 12 79-80 / 113-118 (115); one thread unchanged (33 MiB with outfmt 8, NCBI 112). Time measured
+  on the workstation (node 1; 16, 8 or 2 booked cores with their siblings idle, a 3 s warm-up before each run, alternating
+  order, against `LOSAT_X_BNDBSTREAM=0` with the same binary; every output identical; v4-B `results/b14ab/ab3.tsv`,
+  `ab4.tsv`, `ab5.tsv`), 100 16S queries x 28,036 16S at 16 threads: megablast (outfmt 8) 5.885 -> 5.055 s (x0.859),
+  dc-megablast 12.76 -> 10.17 s (x0.797), blastn 13.01 -> 10.56 s (x0.812); megablast at 8 threads 10.18 -> 9.41 s
+  (x0.924), at 2 threads 36.47 -> 35.97 s (x0.986); megablast of the Sakai genome x 28,036 16S at 16 threads 0.575 ->
+  0.490 s (x0.852; max RSS 199 -> 174 MiB). User-space instructions fall where the round held many results
+  (dc-megablast 1,570 -> 1,500 G at 16 threads): one scratch per thread, and no merge after the round. A database of
+  a few long sequences is unchanged (the D. melanogaster genome, 1,870 sequences with arms of 23-32 Mb: blocks of one
+  sequence and the nested chunk stage, which the waiting threads join): 1,500 2L cDNAs, blastn per-pair median x1.009
+  (9 pairs, 0.971-1.033) at 16 threads and x1.001 (8 pairs) at 8, dc-megablast x0.995 (7 pairs) at 16; max RSS equal
+  with and without the switch (blastn at 16 threads 568-640 / 572-629 MiB, which is above NCBI's 382 MiB either way: a
+  per-thread excess this switch does not touch).
+- `LOSAT_X_BNDBSTREAMSHADOW=1` shadow of `LOSAT_X_BNDBSTREAM` (implies it): each parallel preliminary stage of `-db`
+  keeps what the window hands to the hit lists, those of the whole database at once, the stage runs again in rounds
+  (the same pool, blocks and kernel), and the two are compared (the ordinal ids in order, each kept result by its
+  `Debug` text, and the good initial extensions each counted; or the texts of the two errors). The count of good
+  initial extensions, which sizes the next query batch, is put back to what one search left, and the kept results go to
+  the hit lists after the comparison, so the run continues as without the shadow. The first difference stops the run
+  (panic) after printing the line that is otherwise printed at exit: `[X_SHADOW] BNDBSTREAM searches= blocks= merged=
+  identical` (`searches`: parallel preliminary stages; `blocks`: their blocks; `merged`: kept results compared; 0 at one
+  thread). The stage runs twice, so its `LOSAT_TIMING` and `LOSAT_X_STATS` count double, and its results are held
+  twice (megablast of 100 16S x 28,036 16S at 16 threads: max RSS 481 MiB).
 - `LOSAT_X_BNFEWSUBJ=1` (BLASTN `-subject`, every task whose seed stage has strips (`LOSAT_X_PAIRPAR`,
   `LOSAT_X_PAIRPARDISC`, `LOSAT_X_PAIRPARDISCARR`), speed; in the strict set from the pull request that added it
   (perf/bn-few-subj, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set;

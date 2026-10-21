@@ -256,7 +256,12 @@ fn pyrrolysine_recounts_are_the_copys() {
     );
     std::fs::write(dir.join("subjects.faa"), subjects).unwrap();
     let db = protein_database(&dir.join("subjects.faa"), &dir.join("subjects"));
-    let queries = format!(">qo O at 27\n{PREFIX}O{SUFFIX}\n>qg G at 27\n{PREFIX}G{SUFFIX}\n");
+    // qx holds an X where so holds its O: the recount of qx x so reads so's letters, which only a
+    // read of the redo that found the O keeps.
+    let with_x_at_128 = format!("{}X{}", &SUFFIX[..100], &SUFFIX[101..]);
+    let queries = format!(
+        ">qo O at 27\n{PREFIX}O{SUFFIX}\n>qg G at 27\n{PREFIX}G{SUFFIX}\n>qx X at 128\n{PREFIX}G{with_x_at_128}\n"
+    );
     let query = dir.join("queries.faa");
     std::fs::write(&query, queries).unwrap();
     for (outfmt, threads) in [
@@ -275,13 +280,15 @@ fn pyrrolysine_recounts_are_the_copys() {
             outfmt,
         );
         if outfmt == "6" {
-            // The recount ran: qo's O against sx's X is a mismatch.
-            let row = String::from_utf8_lossy(&off.stdout)
-                .lines()
-                .find(|row| row.starts_with("qo\tsx\t"))
-                .map(str::to_string)
-                .unwrap_or_else(|| panic!("{what}: no qo x sx row"));
-            assert!(!row.contains("\t100.000\t"), "{what}: {row}");
+            // The recount ran: qo's O against sx's X and qx's X against so's O are mismatches.
+            for pair in ["qo\tsx\t", "qx\tso\t"] {
+                let row = String::from_utf8_lossy(&off.stdout)
+                    .lines()
+                    .find(|row| row.starts_with(pair))
+                    .map(str::to_string)
+                    .unwrap_or_else(|| panic!("{what}: no {pair:?} row"));
+                assert!(!row.contains("\t100.000\t"), "{what}: {row}");
+            }
         }
         let on = blastp(
             &query,

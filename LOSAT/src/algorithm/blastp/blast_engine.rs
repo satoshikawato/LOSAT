@@ -9912,9 +9912,10 @@ fn run_resolved_in_pool(
                                     &mut kappa_subject_range_cache,
                                 );
                             }
-                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here (or
-                            // taken from the reads ahead), after the test, as NCBI reads it; an
-                            // error is kept for the replay as the redo's own errors are (below).
+                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after
+                            // the test, as NCBI reads it, unless the first Newton problems read it
+                            // ahead (`x_prefetched`); an error is kept for the replay as the redo's
+                            // own errors are (below).
                             let subject = match x_prefetched.take_or_read(&subjects, s_idx) {
                                 Ok(subject) => subject,
                                 Err(error) if replayed => {
@@ -10186,8 +10187,8 @@ fn run_resolved_in_pool(
                         &mut kappa_subject_range_cache,
                     );
                 }
-                // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here (or taken from the
-                // reads ahead), after the test, as NCBI reads it.
+                // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after the test, as
+                // NCBI reads it, unless the first Newton problems read it ahead (`x_prefetched`).
                 let subject = x_prefetched.take_or_read(&subjects, s_idx)?;
                 let subject_raw = subject.residues();
                 let postprocessed = postprocess_preliminary_hits(

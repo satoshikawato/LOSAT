@@ -12331,8 +12331,7 @@ fn search_query_batch(
                         |kmer_start: usize,
                          s_range: usize,
                          current_lut_kmer: u64,
-                         second_template_index: Option<u64>,
-                         x_run: Option<&[u32]>| {
+                         second_template_index: Option<u64>| {
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:193-207
                             // ```c
                             // for (; s <= s_end; s += scan_step) {
@@ -12414,7 +12413,7 @@ fn search_query_batch(
                             }
 
                             // For each match, add to the offset_pairs buffer.
-                            let x_push = |q_off_1: u32| {
+                            two_stage.for_each_hit(current_lut_kmer, |q_off_1| {
                                 if debug_enabled {
                                     dbg_seeds_found += 1;
                                 }
@@ -12431,14 +12430,7 @@ fn search_query_batch(
                                     };
                                     offset_pairs_len += 1;
                                 }
-                            };
-                            // EXPERIMENT (LOSAT_X_DCCSR): `x_run` is the run of the word's cell
-                            // in a table laid out as CSR (empty when its presence bit is clear),
-                            // the chain's offsets in the chain's order (`lookup::x_dc_csr`).
-                            match x_run {
-                                None => two_stage.for_each_hit(current_lut_kmer, x_push),
-                                Some(run) => run.iter().copied().for_each(x_push),
-                            }
+                            });
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_nascan.c:1456-1469
                             // ```c
                             // /** access the megablast lookup table with two templates */
@@ -12515,18 +12507,60 @@ fn search_query_batch(
                         //                                 query_info, ewp, init_hitlist, scan_range[2] + lut_word_length);
                         //     }
                         // ```
-                        // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains;
-                        // its words go to `on_word` in the same order, each `RING` words late
-                        // through the ring that prefetches their cells' offsets and runs, with
-                        // the cell's run (one template, so no second index).
+                        // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains; its
+                        // words go through `x_on_word_csr`, `on_word`'s statements for one template
+                        // with the cell's run (the chain's offsets in the chain's order) instead of
+                        // the chain walk, in the same order, each `RING` words late through the ring
+                        // that prefetches their cells' offsets and runs (`lookup::x_dc_csr`). `on_word`
+                        // keeps its two callers, so its code is the one without the switch.
                         if let Some(csr) = disc.x_csr() {
-                            let mut emit = |(s_off, s_range, index): (usize, usize, u64)| {
-                                let run = if two_stage.has_hits(index) {
+                            let mut x_on_word_csr = |(kmer_start, s_range, index): (
+                                usize,
+                                usize,
+                                u64,
+                            )| {
+                                if debug_enabled {
+                                    dbg_total_s_positions += 1;
+                                }
+                                let run: &[u32] = if two_stage.has_hits(index) {
                                     csr.run(index as usize)
                                 } else {
                                     &[]
                                 };
-                                on_word(s_off, s_range, index, None, Some(run))
+                                if (debug_mode || blastn_debug) && run.len() > 1000 {
+                                    eprintln!(
+                                        "[WARN] Large matches_slice: len={} for kmer at position {}",
+                                        run.len(),
+                                        kmer_start
+                                    );
+                                }
+                                if offset_pairs_len >= OFFSET_ARRAY_SIZE {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
+                                for &q_off_1 in run {
+                                    if debug_enabled {
+                                        dbg_seeds_found += 1;
+                                    }
+                                    offset_pairs[offset_pairs_len] = OffsetPair {
+                                        q_off: q_off_1 as usize - 1,
+                                        s_off: kmer_start,
+                                        s_range,
+                                    };
+                                    offset_pairs_len += 1;
+                                }
+                                if offset_pairs_len >= offset_array_size {
+                                    process_offset_pairs(
+                                        offset_pairs,
+                                        &mut offset_pairs_len,
+                                        &mut scan_pause_ns,
+                                        true,
+                                    );
+                                }
                             };
                             let mut ring: x_dc_csr::Ring<'_, (usize, usize, u64)> =
                                 x_dc_csr::Ring::new(csr);
@@ -12538,10 +12572,14 @@ fn search_query_batch(
                                 subject_masked,
                                 |s_off, s_range, index, index2| {
                                     debug_assert!(index2.is_none());
-                                    ring.push((s_off, s_range, index), |w| w.2 as usize, &mut emit)
+                                    ring.push(
+                                        (s_off, s_range, index),
+                                        |w| w.2 as usize,
+                                        &mut x_on_word_csr,
+                                    )
                                 },
                             );
-                            ring.flush(&mut emit);
+                            ring.flush(&mut x_on_word_csr);
                         } else {
                             scan_subject_disc_words_with_ranges(
                                 search_seq_packed,
@@ -12550,7 +12588,7 @@ fn search_query_batch(
                                 &subject_seq_ranges,
                                 subject_masked,
                                 |s_off, s_range, index, index2| {
-                                    on_word(s_off, s_range, index, index2, None)
+                                    on_word(s_off, s_range, index, index2)
                                 },
                             );
                         }
@@ -12567,7 +12605,7 @@ fn search_query_batch(
                             subject_masked,
                             mb_scan_kind,
                             |kmer_start, s_range, current_lut_kmer| {
-                                on_word(kmer_start, s_range, current_lut_kmer, None, None)
+                                on_word(kmer_start, s_range, current_lut_kmer, None)
                             },
                         );
                     }

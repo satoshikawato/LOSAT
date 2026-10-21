@@ -944,23 +944,43 @@ impl MbLookupTable {
         }
     }
 
+    // EXPERIMENT (LOSAT_X_DCCSR): `x_csr` answers for a table laid out as CSR, whose `hashtable` is
+    // empty: the bounds check of the chain's head, which the walk needs anyway, sends it there, so
+    // a table with chains runs the same statements as before.
     #[inline(always)]
-    fn contains_hit(&self, index: u64, q_off_1: u32) -> bool {
+    fn contains_hit(&self, index: u64, q_off_1: u32, x_csr: impl FnOnce() -> bool) -> bool {
+        if !self.has_hits(index) {
+            return false;
+        }
+        let Some(&head) = self.hashtable.get(index as usize) else {
+            return x_csr();
+        };
         let mut found = false;
-        self.for_each_hit(index, |hit_q_off| {
-            if hit_q_off == q_off_1 {
+        let mut q_off = head;
+        while q_off != 0 {
+            if q_off == q_off_1 {
                 found = true;
             }
-        });
+            q_off = self.next_pos[q_off as usize];
+        }
         found
     }
 
+    // EXPERIMENT (LOSAT_X_DCCSR): as `contains_hit`.
     #[inline(always)]
-    fn count_hits(&self, index: u64) -> usize {
+    fn count_hits(&self, index: u64, x_csr: impl FnOnce() -> usize) -> usize {
+        if !self.has_hits(index) {
+            return 0;
+        }
+        let Some(&head) = self.hashtable.get(index as usize) else {
+            return x_csr();
+        };
         let mut count = 0usize;
-        self.for_each_hit(index, |_| {
+        let mut q_off = head;
+        while q_off != 0 {
             count += 1;
-        });
+            q_off = self.next_pos[q_off as usize];
+        }
         count
     }
 
@@ -1040,27 +1060,39 @@ impl TwoStageLookup {
         self.mb_lookup.for_each_hit(lut_kmer, callback)
     }
 
+    /// EXPERIMENT (LOSAT_X_DCCSR): after the same presence test, a table laid out as CSR answers
+    /// from the cell's run, which holds the chain's offsets (`x_dc_csr.rs`).
     #[inline(always)]
     pub fn contains_hit(&self, lut_kmer: u64, q_off_1: u32) -> bool {
-        // EXPERIMENT (LOSAT_X_DCCSR): a CSR table's run holds the chain's offsets
-        // (`x_dc_csr.rs`), after the same presence test.
-        if let Some(csr) = self.disc.as_ref().and_then(|d| d.x_csr.as_ref()) {
-            return self.mb_lookup.has_hits(lut_kmer) && csr.contains(lut_kmer as usize, q_off_1);
-        }
-        self.mb_lookup.contains_hit(lut_kmer, q_off_1)
+        self.mb_lookup
+            .contains_hit(lut_kmer, q_off_1, || self.x_csr_contains(lut_kmer, q_off_1))
     }
 
     #[inline(always)]
     pub fn count_hits(&self, lut_kmer: u64) -> usize {
-        // EXPERIMENT (LOSAT_X_DCCSR): as `contains_hit`.
-        if let Some(csr) = self.disc.as_ref().and_then(|d| d.x_csr.as_ref()) {
-            return if self.mb_lookup.has_hits(lut_kmer) {
-                csr.run(lut_kmer as usize).len()
-            } else {
-                0
-            };
-        }
-        self.mb_lookup.count_hits(lut_kmer)
+        self.mb_lookup
+            .count_hits(lut_kmer, || self.x_csr_count(lut_kmer))
+    }
+
+    /// EXPERIMENT (LOSAT_X_DCCSR): `contains_hit` of a table laid out as CSR (none without chains
+    /// and CSR).
+    #[cold]
+    #[inline(never)]
+    fn x_csr_contains(&self, lut_kmer: u64, q_off_1: u32) -> bool {
+        self.disc
+            .as_ref()
+            .and_then(|d| d.x_csr.as_ref())
+            .is_some_and(|csr| csr.contains(lut_kmer as usize, q_off_1))
+    }
+
+    /// EXPERIMENT (LOSAT_X_DCCSR): `count_hits` of a table laid out as CSR.
+    #[cold]
+    #[inline(never)]
+    fn x_csr_count(&self, lut_kmer: u64) -> usize {
+        self.disc
+            .as_ref()
+            .and_then(|d| d.x_csr.as_ref())
+            .map_or(0, |csr| csr.run(lut_kmer as usize).len())
     }
 
     /// Get lookup word length. A discontiguous table scans and extends template-length

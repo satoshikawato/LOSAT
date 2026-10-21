@@ -1,0 +1,313 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>db/sprot</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>qp1 valid with a low-complexity run</query-title>
+              <query-len>160</query-len>
+              <query-masking>
+                <Range>
+                  <from>30</from>
+                  <to>49</to>
+                </Range>
+              </query-masking>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|0</id>
+                      <accession>0</accession>
+                      <title>sp1 subject protein alpha</title>
+                    </HitDescr>
+                  </description>
+                  <len>137</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>243.817</bit-score>
+                      <score>621</score>
+                      <evalue>6.32467e-89</evalue>
+                      <identity>125</identity>
+                      <positive>128</positive>
+                      <query-from>1</query-from>
+                      <query-to>160</query-to>
+                      <hit-from>1</hit-from>
+                      <hit-to>137</hit-to>
+                      <align-len>160</align-len>
+                      <gaps>23</gaps>
+                      <qseq>MWMEHSVLKANFAVLRKVMDDPKIRDGPMAqqqqqqqqqqqqqqqqqqqqVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG</qseq>
+                      <hseq>MWMEHSVLKAVFAVRRKVMDDPKIRDGPMA--------------------VMKGWENYCWPANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHKYPKCMCVMVRYTDQSLRHWEINTDANFEKLKILHHMVGHGRTASEG</hseq>
+                      <midline>MWMEHSVLKA FAV RKVMDDPKIRDGPMA                    VMKGWENYCWPANMSWKVLMKYEFSSDIHP   WICWIPKE  TPGWW TDTLHM+EMGLWMHKYPKCMCVMVR TDQSLRHW+I  DANFEKLKI H+MVGHGRTASEG</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+                <Hit>
+                  <num>2</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|1</id>
+                      <accession>1</accession>
+                      <title>sp2 subject protein beta, distant</title>
+                    </HitDescr>
+                  </description>
+                  <len>142</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>176.407</bit-score>
+                      <score>446</score>
+                      <evalue>3.18728e-62</evalue>
+                      <identity>100</identity>
+                      <positive>106</positive>
+                      <query-from>2</query-from>
+                      <query-to>160</query-to>
+                      <hit-from>2</hit-from>
+                      <hit-to>142</hit-to>
+                      <align-len>163</align-len>
+                      <gaps>26</gaps>
+                      <qseq>WMEHSVLKANFAVLRKVMDDPKIRDGPMAqqqqqqqqqqqqqqqqqqqqVMKGWENYCWP----ANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG</qseq>
+                      <hseq>WMEHSVLKADQLQLRKVMDDPKIRDGPMA--------------------VMKVWESYCFILHSIANMSAHVLMKYEFQSGIHPCNQWTCWIPKYMAVPGWCPTDTLHVSEMGLWMHCEP--MCHMVRETTHALRHWKINEICNFEKLKAFPYQVPMGRAANEG</hseq>
+                      <midline>WMEHSVLKA+   LRKVMDDPKIRDGPMA                    VMK WE+YC+     ANMS  VLMKYEF S IHPCN W CWIPK MA PGW  TDTLH+SEMGLWMH  P  MC MVR T  +LRHWKI    NFEKLK F Y V  GR A+EG</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>2</db-num>
+                  <db-len>279</db-len>
+                  <hsp-len>21</hsp-len>
+                  <eff-space>32943</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>db/sprot</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_2</query-id>
+              <query-title>inv1 all X</query-title>
+              <query-len>60</query-len>
+              <stat>
+                <Statistics>
+                  <db-num>2</db-num>
+                  <db-len>279</db-len>
+                  <hsp-len>0</hsp-len>
+                  <eff-space>0</eff-space>
+                  <kappa>-1</kappa>
+                  <lambda>-1</lambda>
+                  <entropy>-1</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_2 inv1 all X:  Query_2 inv1 all X: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found &#xa;No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>db/sprot</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_3</query-id>
+              <query-title>polyQ masked whole by SEG</query-title>
+              <query-len>60</query-len>
+              <stat>
+                <Statistics>
+                  <db-num>2</db-num>
+                  <db-len>279</db-len>
+                  <hsp-len>0</hsp-len>
+                  <eff-space>0</eff-space>
+                  <kappa>-1</kappa>
+                  <lambda>-1</lambda>
+                  <entropy>-1</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_3 polyQ masked whole by SEG:  Query_3 polyQ masked whole by SEG: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found &#xa;No hits found</message>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <db>db/sprot</db>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>L;</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <search>
+            <Search>
+              <query-id>Query_4</query-id>
+              <query-title>qp2 unrelated protein</query-title>
+              <query-len>45</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>gnl|BL_ORD_ID|0</id>
+                      <accession>0</accession>
+                      <title>sp1 subject protein alpha</title>
+                    </HitDescr>
+                  </description>
+                  <len>137</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>12.6974</bit-score>
+                      <score>21</score>
+                      <evalue>1.51524</evalue>
+                      <identity>4</identity>
+                      <positive>4</positive>
+                      <query-from>33</query-from>
+                      <query-to>38</query-to>
+                      <hit-from>35</hit-from>
+                      <hit-to>40</hit-to>
+                      <align-len>6</align-len>
+                      <gaps>0</gaps>
+                      <qseq>WCNYFW</qseq>
+                      <hseq>WENYCW</hseq>
+                      <midline>W NY W</midline>
+                    </Hsp>
+                    <Hsp>
+                      <num>2</num>
+                      <bit-score>12.3122</bit-score>
+                      <score>20</score>
+                      <evalue>1.88522</evalue>
+                      <identity>3</identity>
+                      <positive>5</positive>
+                      <query-from>24</query-from>
+                      <query-to>32</query-to>
+                      <hit-from>1</hit-from>
+                      <hit-to>9</hit-to>
+                      <align-len>9</align-len>
+                      <gaps>0</gaps>
+                      <qseq>LWKEHLTFQ</qseq>
+                      <hseq>MWMEHSVLK</hseq>
+                      <midline>+W EH   +</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <db-num>2</db-num>
+                  <db-len>279</db-len>
+                  <hsp-len>11</hsp-len>
+                  <eff-space>8738</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+            </Search>
+          </search>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

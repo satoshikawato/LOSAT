@@ -513,6 +513,23 @@ fn a_query_of_an_unsearched_batch_has_no_hits_member_and_the_no_hits_suffix() {
     assert!(out.contains("No hits found &#xa;No hits found"), "{out}");
 }
 
+/// A query of an unsearched batch lists no `query-masking`, and a query of a searched batch lists
+/// its SEG region (`unsearchedmask_blastp_*`: `BATCH_SIZE=10 blastp -seg yes`, queries `qp1` with a
+/// run of Q, `inv1` of X, a query of Q that SEG masks whole, `qp2`): the region of `qp1` is the
+/// only one in the document.
+#[test]
+fn a_query_of_an_unsearched_batch_lists_no_masks() {
+    equals_frozen(
+        "unsearchedmask_blastp",
+        "qprot_unsearched_seg.faa",
+        &["-seg", "yes"],
+        &[("BATCH_SIZE", "10")],
+        0,
+    );
+    let out = fs::read_to_string(fixtures().join("unsearchedmask_blastp_sub_16.out")).unwrap();
+    assert_eq!(out.matches("<query-masking>").count(), 1, "{out}");
+}
+
 /// The taxonomy database is read for outfmt 15 and 16 only (DECISIONS 30): a `taxdb.bti` of the
 /// search path that cannot be read (here a damaged one) changes no byte of outfmt 0, 5, 6, 7 or 8
 /// and adds no line to standard error, while 15 and 16 refuse it. The database has taxids, so the

@@ -220,6 +220,37 @@ fn a_query_of_an_unsearched_batch_has_no_hits_member_and_the_no_hits_suffix() {
     }
 }
 
+/// A query of an unsearched batch lists no `query-masking` (`unsearchedmask_blastn_*`:
+/// `BATCH_SIZE=10 blastn -lcase_masking`, queries `qn1` with a lower-case run, `inv_lc` of N with a
+/// lower-case run, `qn2`): the run of `qn1` is the only region in the document.
+#[test]
+fn a_query_of_an_unsearched_batch_lists_no_masks() {
+    let dir = fixtures();
+    for format in ["15", "16"] {
+        for mode in ["sub", "db"] {
+            let expected = frozen(&format!("unsearchedmask_blastn_{mode}_{format}.out"));
+            for threads in ["1", "4"] {
+                let mut args = args("qnucl_unsearched_lc.fna", mode, threads, format);
+                args.push("-lcase_masking");
+                let output = run_in(&dir, &args, &[("BATCH_SIZE", "10")]);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert_eq!(output.status.code(), Some(0), "{mode} {format}: {stderr}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout),
+                    expected,
+                    "{mode} {format} threads {threads}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        frozen("unsearchedmask_blastn_sub_16.out")
+            .matches("<query-masking>")
+            .count(),
+        1
+    );
+}
+
 /// A run with no query formatted writes the prolog and the epilog (`PrintProlog`, `PrintEpilog`;
 /// `emptypipe_blastn_*`); an empty query file is `Query is Empty!` and no bytes
 /// (`emptyfile_blastn_*`).

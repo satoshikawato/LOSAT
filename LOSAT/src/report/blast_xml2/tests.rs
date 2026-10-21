@@ -190,6 +190,38 @@ fn an_unsearched_query_is_the_sample_in_16_and_15() {
 }
 
 #[test]
+fn an_unsearched_query_lists_no_masks() {
+    // NCBI makes the result of a batch it did not search without the search, so the masks the
+    // query carries (an N-only query with a lower-case run) are not written; the document is
+    // the one of a query without masks, in 16 and 15.
+    let message = invalid_message();
+    let masks = [QueryMask {
+        from: 10,
+        to: 19,
+        frame: 0,
+    }];
+    for (kind, expected) in [
+        (Xml2Kind::Single16, INVALID_ONLY_16),
+        (Xml2Kind::Single15, INVALID_ONLY_15),
+    ] {
+        let run = run(None, b"");
+        let mut writer = Xml2Writer::new(kind, params(Xml2Target::Subjects(2)));
+        let mut out = Vec::new();
+        let query = XmlQuery {
+            masks: &masks,
+            ..invalid_query(&message)
+        };
+        writer
+            .query(&run, &query, &mut out, |_| {
+                panic!("a query of an unsearched batch has no hits")
+            })
+            .unwrap();
+        writer.finish(&mut out).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), expected);
+    }
+}
+
+#[test]
 fn a_subject_report_is_held_until_the_epilog() {
     // `-subject` keeps the last report back (blast_format.cpp:2363-2404): without the epilog
     // (a failed batch) the document ends before it.

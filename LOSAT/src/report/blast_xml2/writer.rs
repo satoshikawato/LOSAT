@@ -135,8 +135,11 @@ where
         string_member(enc, "query-title", 1, query.title);
     }
     int_member(enc, "query-len", 2, query.len);
-    // The masks of a query that has any, but not those of a minus frame.
-    if !query.masks.is_empty() {
+    // The masks of a query that has any, but not those of a minus frame. A query of a batch that
+    // was not searched lists none: NCBI makes its result without the search, so the masks the
+    // search would have reported (probe: `BATCH_SIZE=10 -lcase_masking`, an N-only query with a
+    // lower-case run) are not there.
+    if query.searched && !query.masks.is_empty() {
         enc.member("query-masking", 3);
         enc.begin_list(false);
         for mask in query.masks.iter().filter(|mask| mask.frame >= 0) {

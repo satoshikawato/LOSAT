@@ -2819,7 +2819,7 @@ const X_GREEDY_BLOCK: usize = 256;
 ///
 /// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
 #[inline(always)]
-unsafe fn x_greedy_row_impl<const REVERSE: bool, const ARM: u8>(
+unsafe fn x_greedy_row_impl<const REVERSE: bool>(
     seq1: *const u8,
     seq2: *const u8,
     len1: i32,
@@ -2886,15 +2886,393 @@ unsafe fn x_greedy_row_impl<const REVERSE: bool, const ARM: u8>(
             for i in 0..block_len {
                 *slide.add(i) = -1;
             }
+        } else {
+            let longest_match_run = cold.longest_match_run;
+            for i in 0..block_len {
+                let seq2_index = *start.add(i);
+                let seq1_index = seq2_index + block_first + i as i32;
+                // Sign bit set when the diagonal was dropped, when either
+                // sequence has fewer than eight positions left, or when an
+                // offset is negative.
+                let unfit =
+                    (len1 - 8 - seq1_index) | (len2 - 8 - seq2_index) | seq1_index | seq2_index;
+                let at1 = if unfit < 0 { 0 } else { seq1_index };
+                let at2 = if unfit < 0 { 0 } else { seq2_index };
+                let (w1, w2) = if REVERSE {
+                    (
+                        u64::from_le(
+                            (seq1.add((len1 - 8 - at1) as usize) as *const u64).read_unaligned(),
+                        ),
+                        u64::from_le(
+                            (seq2.add((len2 - 8 - at2) as usize) as *const u64).read_unaligned(),
+                        ),
+                    )
+                } else {
+                    (
+                        u64::from_le((seq1.add(at1 as usize) as *const u64).read_unaligned()),
+                        u64::from_le((seq2.add(at2 as usize) as *const u64).read_unaligned()),
+                    )
+                };
+                let diff = (w1 ^ w2) | (w1 & NOT_A_BASE);
+                // 64 when all eight positions match
+                let bits = if REVERSE {
+                    diff.leading_zeros()
+                } else {
+                    diff.trailing_zeros()
+                };
+                let shift = bits & 0x38;
+                let stop_byte = if REVERSE {
+                    (w2 >> (56 - shift)) as u8
+                } else {
+                    (w2 >> shift) as u8
+                };
+                let index = (bits >> 3) as i32;
+                let other = (unfit < 0)
+                    | (diff == 0)
+                    | (stop_byte == FENCE_SENTRY)
+                    | (index > longest_match_run);
+                *slide.add(i) = if other { -1 } else { index };
+            }
+        }
+
+        // pass 3
+        let mut diag_lower = cold.diag_lower;
+        let mut curr_extent = cold.curr_extent;
+        let mut best_cell = cold.best_cell;
+        for i in 0..block_len {
+            let cell = block + i;
+            let seq2_index = *start.add(i);
+            if seq2_index < 0 {
+                if tmp_diag_lower + cell as i32 == diag_lower {
+                    diag_lower += 1;
+                } else {
+                    *current.add(cell) = INVALID_OFFSET;
+                }
+                continue;
+            }
+            let index = *slide.add(i);
+            if index < 0 {
+                cold.diag_lower = diag_lower;
+                cold.curr_extent = curr_extent;
+                cold.best_cell = best_cell;
+                x_greedy_cell_slow::<REVERSE>(
+                    seq1,
+                    seq2,
+                    len1,
+                    len2,
+                    seq2_index + block_first + i as i32,
+                    seq2_index,
+                    cell,
+                    tmp_diag_lower + cell as i32,
+                    current,
+                    &mut cold,
+                );
+                if cold.stopped {
+                    last_valid = cell;
+                    break 'row;
+                }
+                diag_lower = cold.diag_lower;
+                curr_extent = cold.curr_extent;
+                best_cell = cold.best_cell;
+                continue;
+            }
+            let stop2 = seq2_index + index;
+            *current.add(cell) = stop2;
+            // seq1_index + index + seq2_index + index
+            let extent = stop2 + stop2 + block_first + i as i32;
+            if extent > curr_extent {
+                curr_extent = extent;
+                best_cell = cell;
+            }
+        }
+        cold.diag_lower = diag_lower;
+        cold.curr_extent = curr_extent;
+        cold.best_cell = best_cell;
+
+        // last surviving diagonal of this block
+        let mut j = block_len;
+        while j > 0 {
+            j -= 1;
+            if *start.add(j) >= 0 {
+                last_valid = block + j;
+                break;
+            }
+        }
+        block += block_len;
+    }
+
+    st.diag_lower = cold.diag_lower;
+    if last_valid != X_NO_CELL {
+        let k = tmp_diag_lower + last_valid as i32;
+        st.diag_upper = if cold.end1_cell == last_valid {
+            k - 1
+        } else {
+            k
+        };
+    }
+    st.end1_reached = cold.end1_reached;
+    st.end2_reached = cold.end2_reached;
+    st.curr_extent = cold.curr_extent;
+    if cold.best_cell != X_NO_CELL {
+        st.curr_seq2_index = *current.add(cold.best_cell);
+        st.curr_diag = tmp_diag_lower + cold.best_cell as i32;
+    }
+    st.longest_match_run = cold.longest_match_run;
+    st.seed_start_q = cold.seed_start_q;
+    st.seed_start_s = cold.seed_start_s;
+    st.fence_hit = cold.fence_hit;
+    cold.stopped
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537,571-573
+/// ```c
+///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+/// ...
+///             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
+/// ```
+/// Chooses the `REVERSE` instance of `x_greedy_row_impl` (the C `reverse` argument).
+///
+/// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
+#[inline(always)]
+unsafe fn x_greedy_row_any(
+    reverse: bool,
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    previous: &[i32],
+    current: &mut [i32],
+    tmp_diag_lower: i32,
+    diag_origin: i32,
+    xdrop_score: i32,
+    st: &mut XGreedyRowState,
+) -> bool {
+    if reverse {
+        x_greedy_row_impl::<true>(
+            seq1,
+            seq2,
+            len1,
+            len2,
+            previous,
+            current,
+            tmp_diag_lower,
+            diag_origin,
+            xdrop_score,
+            st,
+        )
+    } else {
+        x_greedy_row_impl::<false>(
+            seq1,
+            seq2,
+            len1,
+            len2,
+            previous,
+            current,
+            tmp_diag_lower,
+            diag_origin,
+            xdrop_score,
+            st,
+        )
+    }
+}
+
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537
+/// ```c
+///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
+/// ```
+/// The same integer code as `x_greedy_row_any`, so the same result as the C loop; the
+/// compiler may only use wider registers and `tzcnt` / `lzcnt`.
+///
+/// The same code compiled for AVX2/BMI (wider first pass, `tzcnt`/`lzcnt`).
+///
+/// SAFETY: as `x_greedy_row_any`, and the CPU must support the features.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,bmi1,bmi2,lzcnt")]
+unsafe fn x_greedy_row_avx2(
+    reverse: bool,
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    previous: &[i32],
+    current: &mut [i32],
+    tmp_diag_lower: i32,
+    diag_origin: i32,
+    xdrop_score: i32,
+    st: &mut XGreedyRowState,
+) -> bool {
+    x_greedy_row_any(
+        reverse,
+        seq1,
+        seq2,
+        len1,
+        len2,
+        previous,
+        current,
+        tmp_diag_lower,
+        diag_origin,
+        xdrop_score,
+        st,
+    )
+}
+
+/// PROBE (line F s5 p6; not for merge): a copy of `x_greedy_row_impl` whose pass 2 is the scalar form of arm `ARM`.
+/// The default instance is left as it is.
+///
+/// SAFETY: as `x_greedy_row_impl`.
+#[inline(always)]
+unsafe fn x_greedy_row_impl_f2<const REVERSE: bool, const ARM: u8>(
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    previous: &[i32],
+    current: &mut [i32],
+    tmp_diag_lower: i32,
+    diag_origin: i32,
+    xdrop_score: i32,
+    st: &mut XGreedyRowState,
+) -> bool {
+    const NOT_A_BASE: u64 = 0xFCFC_FCFC_FCFC_FCFC;
+    let band_len = current.len();
+    debug_assert!(previous.len() >= band_len + 2);
+    let previous = previous.as_ptr();
+    let current = current.as_mut_ptr();
+    // seq1_index = seq2_index + k - diag_origin = seq2_index + first + cell
+    let first = tmp_diag_lower - diag_origin;
+    // Pass 2 reads eight bytes at offset 0 for the diagonals it does not
+    // handle, so both sequences must have eight bytes. With the fence already
+    // hit, no diagonal may skip `x_greedy_cell_slow`: the reference loop
+    // returns at its first surviving diagonal.
+    let inline_ok = len1 >= 8 && len2 >= 8 && !st.fence_hit;
+    let mut cold = XGreedyRowCold {
+        diag_lower: st.diag_lower,
+        end1_reached: st.end1_reached,
+        end2_reached: st.end2_reached,
+        curr_extent: st.curr_extent,
+        best_cell: X_NO_CELL,
+        end1_cell: X_NO_CELL,
+        longest_match_run: st.longest_match_run,
+        seed_start_q: st.seed_start_q,
+        seed_start_s: st.seed_start_s,
+        fence_hit: st.fence_hit,
+        stopped: false,
+    };
+    let mut last_valid = X_NO_CELL;
+
+    // Both arrays are written for `0..block_len` before they are read.
+    let mut start = [std::mem::MaybeUninit::<i32>::uninit(); X_GREEDY_BLOCK];
+    let mut slide = [std::mem::MaybeUninit::<i32>::uninit(); X_GREEDY_BLOCK];
+    let start = start.as_mut_ptr() as *mut i32;
+    let slide = slide.as_mut_ptr() as *mut i32;
+    // PROBE arms 3 and 4: pass 1 also leaves the clamped load offsets and the unfit mask.
+    let mut p1s = [std::mem::MaybeUninit::<u32>::uninit(); X_GREEDY_BLOCK];
+    let mut p2s = [std::mem::MaybeUninit::<u32>::uninit(); X_GREEDY_BLOCK];
+    let mut badm = [std::mem::MaybeUninit::<i32>::uninit(); X_GREEDY_BLOCK];
+    let p1s = p1s.as_mut_ptr() as *mut u32;
+    let p2s = p2s.as_mut_ptr() as *mut u32;
+    let badm = badm.as_mut_ptr() as *mut i32;
+    // `inline_ok` means len1 >= 8 and len2 >= 8; otherwise these are not used.
+    let l1 = (len1 - 8) as u32;
+    let l2 = (len2 - 8) as u32;
+    let mut block = 0usize;
+    'row: while block < band_len {
+        let block_len = (band_len - block).min(X_GREEDY_BLOCK);
+        let block_first = first + block as i32;
+
+        // pass 1
+        for i in 0..block_len {
+            let p = previous.add(block + i);
+            let mut seq2_index = (*p.add(2)).max(*p.add(1)) + 1;
+            seq2_index = seq2_index.max(*p);
+            let extent = seq2_index + seq2_index + block_first + i as i32;
+            *start.add(i) = if seq2_index < 0 || extent < xdrop_score {
+                -1
+            } else {
+                seq2_index
+            };
+        }
+        if ARM >= 3 {
+            for i in 0..block_len {
+                let s2 = *start.add(i);
+                let a1 = s2 + (block_first + i as i32);
+                // unsigned compares catch both the negative and the too large offsets
+                let bad1 = (a1 as u32) > l1;
+                let bad2 = (s2 as u32) > l2;
+                let at1 = if bad1 { 0 } else { a1 as u32 };
+                let at2 = if bad2 { 0 } else { s2 as u32 };
+                *p1s.add(i) = if REVERSE { l1 - at1 } else { at1 };
+                *p2s.add(i) = if REVERSE { l2 - at2 } else { at2 };
+                *badm.add(i) = -((bad1 | bad2) as i32);
+            }
+        }
+
+        // pass 2
+        if !inline_ok {
+            for i in 0..block_len {
+                *slide.add(i) = -1;
+            }
+        } else if ARM >= 3 {
+            // PROBE (arms 3 and 4): the scalar pass 2 over the offsets pass 1 left (two loads, two word
+            // loads, xor / and / or, one `tzcnt` / `lzcnt`, the tail); the unfit mask is merged afterwards.
+            // Arm 4 tests the fence and the longest-run conditions with branches.
+            let run7 = cold.longest_match_run.min(7);
+            for i in 0..block_len {
+                std::arch::asm!("", options(nomem, nostack, preserves_flags));
+                let (w1, w2) = (
+                    u64::from_le((seq1.add(*p1s.add(i) as usize) as *const u64).read_unaligned()),
+                    u64::from_le((seq2.add(*p2s.add(i) as usize) as *const u64).read_unaligned()),
+                );
+                let diff = (w1 ^ w2) | (w1 & NOT_A_BASE);
+                let bits = if REVERSE {
+                    diff.leading_zeros()
+                } else {
+                    diff.trailing_zeros()
+                };
+                let shift = bits & 0x38;
+                let stop_byte = if REVERSE {
+                    (w2 >> (56 - shift)) as u8
+                } else {
+                    (w2 >> shift) as u8
+                };
+                // 8 when all eight positions match, which is above `run7` (<= 7)
+                let index = (bits >> 3) as i32;
+                let mut r = index;
+                if ARM == 3 {
+                    if index > run7 {
+                        r = -1;
+                    }
+                    if stop_byte == FENCE_SENTRY {
+                        r = -1;
+                    }
+                } else if index > run7 || stop_byte == FENCE_SENTRY {
+                    x_f2_cold();
+                    r = -1;
+                }
+                *slide.add(i) = r;
+            }
+            for i in 0..block_len {
+                *slide.add(i) |= *badm.add(i);
+            }
+            if x_f2_check_on() {
+                x_f2_check::<REVERSE>(
+                    seq1,
+                    seq2,
+                    len1,
+                    len2,
+                    start,
+                    slide,
+                    block_len,
+                    block_first,
+                    cold.longest_match_run,
+                );
+            }
         } else if ARM != 0 {
             // PROBE (line F s5 p6, LOSAT_X_F2GREEDY=1,2; not for merge): the same pass 2 as one scalar
             // instruction sequence per diagonal (no lane extraction or assembly, one `tzcnt` / `lzcnt`).
             // The empty asm keeps the loop scalar. Arm 2 tests the fence and the longest-run conditions
             // with branches (taken for 0.02 % of the diagonals) instead of conditional moves.
             let run7 = cold.longest_match_run.min(7);
-            // `inline_ok` means len1 >= 8 and len2 >= 8.
-            let l1 = (len1 - 8) as u32;
-            let l2 = (len2 - 8) as u32;
             for i in 0..block_len {
                 std::arch::asm!("", options(nomem, nostack, preserves_flags));
                 let s2 = *start.add(i);
@@ -3097,110 +3475,6 @@ unsafe fn x_greedy_row_impl<const REVERSE: bool, const ARM: u8>(
     cold.stopped
 }
 
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537,571-573
-/// ```c
-///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-/// ...
-///             index = s_FindFirstMismatch(seq1, seq2, len1, len2,
-/// ```
-/// Chooses the `REVERSE` instance of `x_greedy_row_impl` (the C `reverse` argument).
-///
-/// SAFETY: `seq1` and `seq2` must be readable for `len1` and `len2` bytes.
-#[inline(always)]
-unsafe fn x_greedy_row_any(
-    reverse: bool,
-    seq1: *const u8,
-    seq2: *const u8,
-    len1: i32,
-    len2: i32,
-    previous: &[i32],
-    current: &mut [i32],
-    tmp_diag_lower: i32,
-    diag_origin: i32,
-    xdrop_score: i32,
-    st: &mut XGreedyRowState,
-) -> bool {
-    if reverse {
-        x_greedy_row_impl::<true, 0>(
-            seq1,
-            seq2,
-            len1,
-            len2,
-            previous,
-            current,
-            tmp_diag_lower,
-            diag_origin,
-            xdrop_score,
-            st,
-        )
-    } else {
-        x_greedy_row_impl::<false, 0>(
-            seq1,
-            seq2,
-            len1,
-            len2,
-            previous,
-            current,
-            tmp_diag_lower,
-            diag_origin,
-            xdrop_score,
-            st,
-        )
-    }
-}
-
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/greedy_align.c:537
-/// ```c
-///         for (k = tmp_diag_lower; k <= tmp_diag_upper; k++) {
-/// ```
-/// The same integer code as `x_greedy_row_any`, so the same result as the C loop; the
-/// compiler may only use wider registers and `tzcnt` / `lzcnt`.
-///
-/// The same code compiled for AVX2/BMI (wider first pass, `tzcnt`/`lzcnt`).
-///
-/// SAFETY: as `x_greedy_row_any`, and the CPU must support the features.
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2,bmi1,bmi2,lzcnt")]
-unsafe fn x_greedy_row_avx2(
-    reverse: bool,
-    seq1: *const u8,
-    seq2: *const u8,
-    len1: i32,
-    len2: i32,
-    previous: &[i32],
-    current: &mut [i32],
-    tmp_diag_lower: i32,
-    diag_origin: i32,
-    xdrop_score: i32,
-    st: &mut XGreedyRowState,
-) -> bool {
-    x_greedy_row_any(
-        reverse,
-        seq1,
-        seq2,
-        len1,
-        len2,
-        previous,
-        current,
-        tmp_diag_lower,
-        diag_origin,
-        xdrop_score,
-        st,
-    )
-}
-
-/// PROBE (line F s5 p6; not for merge): `LOSAT_X_F2GREEDY` (read once; 0 = the code as it is).
-#[cfg(target_arch = "x86_64")]
-fn x_f2_greedy_arm() -> u8 {
-    use std::sync::OnceLock;
-    static ARM: OnceLock<u8> = OnceLock::new();
-    *ARM.get_or_init(|| {
-        std::env::var("LOSAT_X_F2GREEDY")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0)
-    })
-}
 
 /// PROBE (`LOSAT_X_F2CHECK=1`): compare the arms' pass 2 with the reference expression of the default
 /// pass 2 on every diagonal; panics on the first difference and reports the number of diagonals checked.
@@ -3213,7 +3487,7 @@ fn x_f2_check_on() -> bool {
 
 /// PROBE: the reference form of pass 2 (the default instance's source), one diagonal at a time.
 ///
-/// SAFETY: as `x_greedy_row_impl` with `inline_ok`.
+/// SAFETY: as `x_greedy_row_impl_f2` with `inline_ok`.
 #[cfg(target_arch = "x86_64")]
 #[inline(never)]
 unsafe fn x_f2_check<const REVERSE: bool>(
@@ -3295,11 +3569,11 @@ unsafe fn x_greedy_row_avx2_f2<const ARM: u8>(
     st: &mut XGreedyRowState,
 ) -> bool {
     if reverse {
-        x_greedy_row_impl::<true, ARM>(
+        x_greedy_row_impl_f2::<true, ARM>(
             seq1, seq2, len1, len2, previous, current, tmp_diag_lower, diag_origin, xdrop_score, st,
         )
     } else {
-        x_greedy_row_impl::<false, ARM>(
+        x_greedy_row_impl_f2::<false, ARM>(
             seq1, seq2, len1, len2, previous, current, tmp_diag_lower, diag_origin, xdrop_score, st,
         )
     }
@@ -3341,6 +3615,18 @@ unsafe fn x_greedy_row(
             match x_f2_greedy_arm() {
                 1 => {
                     return x_greedy_row_avx2_f2::<1>(
+                        reverse, seq1, seq2, len1, len2, previous, current, tmp_diag_lower,
+                        diag_origin, xdrop_score, st,
+                    )
+                }
+                3 => {
+                    return x_greedy_row_avx2_f2::<3>(
+                        reverse, seq1, seq2, len1, len2, previous, current, tmp_diag_lower,
+                        diag_origin, xdrop_score, st,
+                    )
+                }
+                4 => {
+                    return x_greedy_row_avx2_f2::<4>(
                         reverse, seq1, seq2, len1, len2, previous, current, tmp_diag_lower,
                         diag_origin, xdrop_score, st,
                     )

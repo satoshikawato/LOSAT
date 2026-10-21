@@ -18,6 +18,14 @@
 //!   5  V2's candidate stage, and the copy stage writes the hits of a cell of up to three hits with
 //!      two 16-byte stores (four pairs, the fourth not part of the result: the offset array has
 //!      four entries after `array_size`) instead of six 4-byte stores.
+//!   6  arm 7's copy stage with a `prefetcht0` of the cell eight candidates ahead (to test whether the
+//!      cell load's L1 miss costs cycles).
+//!   7  V2's candidate stage, and a copy stage with the fewest instructions per candidate: a block
+//!      whose candidates cannot fill the offset array (checked once per block) is copied without
+//!      the per-candidate capacity test; a cell of up to three hits is one 32-byte store (cell
+//!      broadcast to both halves, one `vpermd`, one `vpblendd` with the subject offset); a cell of
+//!      more than three hits, and a block that could fill the array, take the arm 5 path for that
+//!      candidate, so the stop is at the same word as in the base loop.
 //! `LOSAT_X_F2CHECK` (set) counts words, candidates and hits of every call and sums a hash of every
 //! call's offset pairs and `s_range[1]`; `main` prints them as `[X_STATS] F2SCAN ...`.
 
@@ -36,7 +44,7 @@ pub(super) fn x_f2_arm() -> u8 {
         std::env::var("LOSAT_X_F2SCAN")
             .ok()
             .and_then(|v| v.parse::<u8>().ok())
-            .filter(|v| *v <= 5)
+            .filter(|v| *v <= 7)
             .unwrap_or(0)
     })
 }
@@ -237,7 +245,9 @@ fn x_scan_range_f2(
         2 if avx2 => scan::<2>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
         4 if avx2 => scan::<4>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
         5 if avx2 => scan::<5>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
-        2 | 4 | 5 => scan::<1>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        6 if avx2 => scan::<6>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        7 if avx2 => scan::<7>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        2 | 4 | 5 | 6 | 7 => scan::<1>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
         _ => scan::<3>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
     }
 }
@@ -331,6 +341,71 @@ unsafe fn copy_cell_vec(
     copy_cell(backbone, overflow, dest, ix, s_off, totalhits, array_size)
 }
 
+/// Arms 6 and 7: the candidates `cand[0..n]` (positions in the block) of one block; returns the
+/// running total of hits and -1, or the total and the subject offset of the word at which the
+/// offset array has no room.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn copy_block_fast<const PF: bool>(
+    backbone: *const crate::algorithm::tblastx::lookup::BackboneCell,
+    overflow: *const i32,
+    dest: *mut BlastOffsetPair,
+    cand: *const u16,
+    ixbuf: *const u16,
+    n: usize,
+    block_first: usize,
+    mut totalhits: i32,
+    array_size: i32,
+) -> (i32, i64) {
+    use std::arch::x86_64::*;
+    // pair j = (q_j, s): dwords [e0, s, e1, s, e2, s, e2, s] from the broadcast cell [n, e0, e1, e2].
+    let idx = _mm256_setr_epi32(1, 0, 2, 0, 3, 0, 3, 0);
+    let mut i = 0usize;
+    while i < n {
+        // The block cannot fill the array if 3 hits per remaining candidate fit.
+        if totalhits as i64 + 3 * (n - i) as i64 <= array_size as i64 {
+            let mut d = dest.add(totalhits as usize);
+            let mut t = totalhits;
+            while i < n {
+                let k = *cand.add(i) as usize;
+                let cell = backbone.add(*ixbuf.add(k) as usize);
+                let numhits = (*cell).num_used;
+                if numhits > AA_HITS_PER_CELL as i32 {
+                    break;
+                }
+                if PF {
+                    let j = if i + 8 < n { i + 8 } else { i };
+                    let kj = *cand.add(j) as usize;
+                    _mm_prefetch::<_MM_HINT_T0>(backbone.add(*ixbuf.add(kj) as usize) as *const i8);
+                }
+                let c = _mm256_broadcastsi128_si256(_mm_loadu_si128(cell as *const __m128i));
+                let sv = _mm256_set1_epi32((block_first + k) as i32);
+                let v = _mm256_blend_epi32::<0xAA>(_mm256_permutevar8x32_epi32(c, idx), sv);
+                _mm256_storeu_si256(d as *mut __m256i, v);
+                d = d.add(numhits as usize);
+                t += numhits;
+                i += 1;
+            }
+            totalhits = t;
+            if i >= n {
+                break;
+            }
+        }
+        // One candidate on the checked path (a cell of more than three hits, or a block that
+        // could fill the array).
+        let k = *cand.add(i) as usize;
+        let s_off = (block_first + k) as u32;
+        match copy_cell_vec(backbone, overflow, dest, *ixbuf.add(k) as usize, s_off, totalhits, array_size) {
+            Some(total) => totalhits = total,
+            None => return (totalhits, s_off as i64),
+        }
+        i += 1;
+    }
+    (totalhits, -1)
+}
+
 /// Arm 4: `copy_cell` with the hit count read from `numtab` (255 = the cell's `num_used`).
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
@@ -411,11 +486,43 @@ fn scan<const ARM: u8>(
     while block_first <= s_last {
         let block_last = s_last.min(block_first + X_BLOCK - 1);
         let block = (block_first, block_last);
-        if ARM == 2 || ARM == 4 || ARM == 5 {
+        if ARM == 2 || ARM == 4 || ARM == 5 || ARM == 6 || ARM == 7 {
             #[cfg(target_arch = "x86_64")]
             {
                 // SAFETY: AVX2 was detected by the caller.
                 let n = unsafe { v2_candidates(subject, pvb, block, &mut ixbuf, &mut cand16) };
+                if ARM == 6 || ARM == 7 {
+                    // SAFETY: AVX2 was detected by the caller; the first `n` entries were written.
+                    let (total, stop) = unsafe {
+                        let args = (
+                            backbone,
+                            overflow,
+                            dest,
+                            cand16.as_ptr().cast::<u16>(),
+                            ixbuf.as_ptr(),
+                            n,
+                            block_first,
+                            totalhits,
+                            array_size,
+                        );
+                        if ARM == 6 {
+                            copy_block_fast::<true>(
+                                args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7, args.8,
+                            )
+                        } else {
+                            copy_block_fast::<false>(
+                                args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7, args.8,
+                            )
+                        }
+                    };
+                    if stop >= 0 {
+                        s_range[1] = stop as i32;
+                        return total;
+                    }
+                    totalhits = total;
+                    block_first = block_last + 1;
+                    continue;
+                }
                 for c in &cand16[..n] {
                     // SAFETY: the first `n` entries were written.
                     let k = unsafe { c.assume_init() } as usize;

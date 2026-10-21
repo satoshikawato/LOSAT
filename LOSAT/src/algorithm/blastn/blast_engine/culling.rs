@@ -303,6 +303,10 @@ pub(super) fn cull_traceback(
 
     // `s_BlastHSPCullingFinal`: the new hit list (as `PrelimCulling::finish`, with
     // `ScoreCompareHSPs` on the final HSPs).
+    // `hsplist_max` is set from `prelim_hitlist_size` as NCBI's pipe Final sets it
+    // (`Blast_HitListNew(params->prelim_hitlist_size)`); nothing reads it afterwards: the hit
+    // list is finished by `finish_query_hit_list`, which trims by `hitlist_size`, and neither
+    // `HitList::update` nor the array growth runs on it.
     let mut new_list = BlastnHitList::new(prelim_hitlist_size);
     let mut worst_evalue = 0.0f64;
     let mut low_score = i32::MAX;

@@ -92,12 +92,22 @@ pub(crate) type CulledQuery<H> = Vec<(u32, Vec<H>)>;
 /// NCBI's culling writer (or pipe) over the HSPs of one search: `s_BlastHSPCullingInit`
 /// (`new`), `s_BlastHSPCullingRun` (`save`, once per HSP) and `s_BlastHSPCullingFinal`
 /// (`finalize`). `trees` is `c_tree`: the root node of each tree id (NCBI's `cid`) with a tree.
+///
+/// NCBI frees an HSP, its `LinkedHSP` and an emptied tree node at once (`s_HSPFree`,
+/// `s_CTreeNodeFree`). The arenas do the same with free lists: the slot of a freed HSP, the
+/// entry of a freed `LinkedHSP` and a freed node are reused by the next one that is made, so
+/// the arenas hold at most as many items as were alive together, not one for every HSP
+/// offered. The index values are never compared except `r != y` between live entries, and
+/// the lists keep their order, so the reuse changes no output.
 pub(crate) struct CullingForest<H> {
     culling_max: i32,
     hsps: Vec<Option<H>>,
     entries: Vec<LinkedHsp>,
     nodes: Vec<CTreeNode>,
     trees: BTreeMap<usize, usize>,
+    free_hsps: Vec<usize>,
+    free_entries: Vec<usize>,
+    free_nodes: Vec<usize>,
 }
 
 impl<H> CullingForest<H> {
@@ -118,7 +128,27 @@ impl<H> CullingForest<H> {
             entries: Vec::new(),
             nodes: Vec::new(),
             trees: BTreeMap::new(),
+            free_hsps: Vec::new(),
+            free_entries: Vec::new(),
+            free_nodes: Vec::new(),
         }
+    }
+
+    /// `s_HSPFree` of the linked HSP `entry`: its payload is dropped and its slot and entry
+    /// go to the free lists.
+    fn free_entry(&mut self, entry: usize) {
+        let slot = self.entries[entry].hsp;
+        self.hsps[slot] = None;
+        self.free_hsps.push(slot);
+        self.free_entries.push(entry);
+    }
+
+    /// `s_CTreeNodeFree` of an emptied node (no list, no children, already unlinked from its
+    /// parent by the caller): the index goes to the free list.
+    fn free_node(&mut self, node: usize) {
+        debug_assert!(self.nodes[node].hsplist.is_empty());
+        self.nodes[node].hsplist = VecDeque::new();
+        self.free_nodes.push(node);
     }
 
     /// The `culling_max` of the preliminary writer: three more than the option when it is
@@ -156,7 +186,16 @@ impl<H> CullingForest<H> {
     ///       }
     /// ```
     pub(crate) fn save(&mut self, cid: usize, qlen: i32, sid: u32, key: CullKey, hsp: H) {
-        let index = self.hsps.len();
+        let index = match self.free_hsps.pop() {
+            Some(index) => {
+                self.hsps[index] = Some(hsp);
+                index
+            }
+            None => {
+                self.hsps.push(Some(hsp));
+                self.hsps.len() - 1
+            }
+        };
         let mut a = LinkedHsp {
             hsp: index,
             sid,
@@ -166,7 +205,6 @@ impl<H> CullingForest<H> {
             subject_offset: key.subject_offset,
             merit: self.culling_max,
         };
-        self.hsps.push(Some(hsp));
         let root = match self.trees.get(&cid) {
             Some(&root) => root,
             None => {
@@ -177,6 +215,7 @@ impl<H> CullingForest<H> {
         };
         if !self.save_hsp(root, &mut a) {
             self.hsps[index] = None;
+            self.free_hsps.push(index);
         }
     }
 
@@ -385,24 +424,25 @@ impl<H> CullingForest<H> {
     /// ```
     /// `y` is the index of the new HSP's entry (`x` of `s_SaveHSP`).
     fn process_hsp_list(&mut self, node: usize, y: usize) -> i32 {
-        let list = std::mem::take(&mut self.nodes[node].hsplist);
-        let mut kept = VecDeque::with_capacity(list.len());
+        // The list is unlinked in place (`retain_mut` visits from the front, as NCBI's `p`).
+        let mut list = std::mem::take(&mut self.nodes[node].hsplist);
         let mut num = 0;
         let y_entry = self.entries[y];
-        for r in list {
+        list.retain_mut(|r| {
+            let r = *r;
             num += 1;
             if r != y && self.dominate_test(&y_entry, &self.entries[r]) {
                 let merit = self.entries[r].merit.wrapping_sub(1);
                 self.entries[r].merit = merit;
                 if merit <= 0 {
                     num -= 1;
-                    self.hsps[self.entries[r].hsp] = None;
-                    continue;
+                    self.free_entry(r);
+                    return false;
                 }
             }
-            kept.push_back(r);
-        }
-        self.nodes[node].hsplist = kept;
+            true
+        });
+        self.nodes[node].hsplist = list;
         num
     }
 
@@ -429,21 +469,21 @@ impl<H> CullingForest<H> {
     /// }
     /// ```
     fn mark_down_hsp_list(&mut self, node: usize) -> i32 {
-        let list = std::mem::take(&mut self.nodes[node].hsplist);
-        let mut kept = VecDeque::with_capacity(list.len());
+        let mut list = std::mem::take(&mut self.nodes[node].hsplist);
         let mut num = 0;
-        for r in list {
+        list.retain_mut(|r| {
+            let r = *r;
             num += 1;
             let merit = self.entries[r].merit.wrapping_sub(1);
             self.entries[r].merit = merit;
             if merit <= 0 {
                 num -= 1;
-                self.hsps[self.entries[r].hsp] = None;
-                continue;
+                self.free_entry(r);
+                return false;
             }
-            kept.push_back(r);
-        }
-        self.nodes[node].hsplist = kept;
+            true
+        });
+        self.nodes[node].hsplist = list;
         num
     }
 
@@ -483,14 +523,23 @@ impl<H> CullingForest<H> {
                 }
             }
         };
-        self.nodes.push(CTreeNode {
+        let fresh = CTreeNode {
             begin,
             end,
             left: None,
             right: None,
             hsplist: VecDeque::new(),
-        });
-        self.nodes.len() - 1
+        };
+        match self.free_nodes.pop() {
+            Some(node) => {
+                self.nodes[node] = fresh;
+                node
+            }
+            None => {
+                self.nodes.push(fresh);
+                self.nodes.len() - 1
+            }
+        }
     }
 
     /// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c:376-381
@@ -549,9 +598,9 @@ impl<H> CullingForest<H> {
     /// ```
     fn fork_children(&mut self, node: usize) {
         let midpt = (self.nodes[node].begin + self.nodes[node].end) / 2;
-        let list = std::mem::take(&mut self.nodes[node].hsplist);
-        let mut kept = VecDeque::with_capacity(list.len());
-        for r in list {
+        let mut list = std::mem::take(&mut self.nodes[node].hsplist);
+        list.retain_mut(|r| {
+            let r = *r;
             let LinkedHsp { begin, end, .. } = self.entries[r];
             let child = if end < midpt {
                 Some(match self.nodes[node].left {
@@ -575,11 +624,14 @@ impl<H> CullingForest<H> {
                 None
             };
             match child {
-                Some(child) => self.nodes[child].hsplist.push_front(r),
-                None => kept.push_back(r),
+                Some(child) => {
+                    self.nodes[child].hsplist.push_front(r);
+                    false
+                }
+                None => true,
             }
-        }
-        self.nodes[node].hsplist = kept;
+        });
+        self.nodes[node].hsplist = list;
     }
 
     /// Returns whether the node is freed (NCBI sets `*node = NULL`).
@@ -603,11 +655,13 @@ impl<H> CullingForest<H> {
         if let Some(left) = self.nodes[node].left {
             if self.mark_down_ctree(left) {
                 self.nodes[node].left = None;
+                self.free_node(left);
             }
         }
         if let Some(right) = self.nodes[node].right {
             if self.mark_down_ctree(right) {
                 self.nodes[node].right = None;
+                self.free_node(right);
             }
         }
         self.mark_down_hsp_list(node) <= 0
@@ -670,6 +724,7 @@ impl<H> CullingForest<H> {
             if let Some(left) = writer.nodes[node].left {
                 if writer.process_ctree(left, x) {
                     writer.nodes[node].left = None;
+                    writer.free_node(left);
                 }
             }
         };
@@ -677,6 +732,7 @@ impl<H> CullingForest<H> {
             if let Some(right) = writer.nodes[node].right {
                 if writer.process_ctree(right, x) {
                     writer.nodes[node].right = None;
+                    writer.free_node(right);
                 }
             }
         };
@@ -782,8 +838,16 @@ impl<H> CullingForest<H> {
                 break;
             }
         }
-        let x = self.entries.len();
-        self.entries.push(*a);
+        let x = match self.free_entries.pop() {
+            Some(x) => {
+                self.entries[x] = *a;
+                x
+            }
+            None => {
+                self.entries.push(*a);
+                self.entries.len() - 1
+            }
+        };
         self.nodes[node].hsplist.push_front(x);
         if self.nodes[node].left.is_none() && self.nodes[node].right.is_none() {
             if self.process_hsp_list(node, x) >= K_NUM_HSP_TO_FORK {
@@ -795,11 +859,13 @@ impl<H> CullingForest<H> {
         if let Some(left) = self.nodes[node].left {
             if self.process_ctree(left, x) {
                 self.nodes[node].left = None;
+                self.free_node(left);
             }
         }
         if let Some(right) = self.nodes[node].right {
             if self.process_ctree(right, x) {
                 self.nodes[node].right = None;
+                self.free_node(right);
             }
         }
         true
@@ -849,6 +915,34 @@ mod tests {
         assert_eq!(CullingForest::<()>::prelim_max(2147483644), 2147483647);
         assert_eq!(CullingForest::<()>::prelim_max(2147483645), i32::MIN);
         assert_eq!(CullingForest::<()>::prelim_max(2147483647), -2147483646);
+    }
+
+    // NCBI frees a culled HSP at once (`s_HSPFree`): slots, entries and nodes are reused, so
+    // a stream of ever better overlapping HSPs, each culling its predecessor, and a stream of
+    // dominated HSPs both keep the arenas at a few items, and the survivors are unchanged.
+    #[test]
+    fn freed_slots_entries_and_nodes_are_reused() {
+        let mut f = forest(1);
+        for i in 0..1000 {
+            f.save(0, 300, 0, key(10, 40, 10 + i), (10 + i, i as usize));
+        }
+        for i in 0..1000 {
+            f.save(0, 300, 1, key(10, 40, 5), (5, i as usize));
+        }
+        assert!(f.hsps.len() <= 3 && f.entries.len() <= 3 && f.nodes.len() <= 3);
+        assert_eq!(kept(f), vec![(0, vec![1009])]);
+        // Disjoint HSPs fork the root; a long HSP then culls them all and frees the nodes.
+        let mut f = forest(1);
+        for i in 0..100 {
+            f.save(0, 1000, 0, key(i * 5, i * 5 + 4, 10), (10, i as usize));
+        }
+        let nodes = f.nodes.len();
+        f.save(0, 1000, 0, key(0, 600, 5000), (5000, 100));
+        for i in 0..100 {
+            f.save(0, 1000, 0, key(i * 5, i * 5 + 4, 10), (10, i as usize));
+        }
+        assert_eq!(f.hsps.len(), 101);
+        assert!(f.nodes.len() <= nodes + 3);
     }
 
     // NCBI c++/src/algo/blast/core/hspfilter_culling.c:136-163: an HSP never dominates

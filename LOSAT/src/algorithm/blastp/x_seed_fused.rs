@@ -130,7 +130,9 @@
 //! [`x_test_hit`], unchanged; any other hit stores `s + diag_offset` (too far; the flag stays 0) or
 //! what it read (overlap), selected without a branch. So the table holds after each hit what
 //! `x_test_hit` leaves there, the extension is called for the same hits with the same values and
-//! entries, and the initial HSPs are the same, in the same order.
+//! entries, and the initial HSPs are the same, in the same order. blastx's direct loop takes the same
+//! test (`XHitBf` is shared; LOSAT_X_BXHITBF, `blastx/x_seed_scan.rs`, whose header shows that its
+//! table holds the same range of flag-0 values).
 //!
 //! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
 //! `LOSAT_X_BPHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. The loop with the test is its own
@@ -234,10 +236,11 @@ pub(crate) fn x_bp_hit_bf() -> bool {
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BPHITBF"))
 }
 
-/// EXPERIMENT (LOSAT_X_BPHITBF): the constants of the branch-free two-hit test ([`XHitBf::test`])
-/// for one subject: the diagonal offset, `2 wordsize`, `2 (window - wordsize)` and `2 window`.
+/// EXPERIMENT (LOSAT_X_BPHITBF, LOSAT_X_BXHITBF): the constants of the branch-free two-hit test
+/// ([`XHitBf::test`]) for one subject: the diagonal offset, `2 wordsize`, `2 (window - wordsize)`
+/// and `2 window`. blastp's per-hit loop and blastx's direct loop (`blastx/x_seed_scan.rs`) use it.
 #[derive(Clone, Copy, Debug)]
-struct XHitBf {
+pub(crate) struct XHitBf {
     diag_offset: i32,
     word2: i32,
     span2: u32,
@@ -247,27 +250,39 @@ struct XHitBf {
 impl XHitBf {
     // No NCBI counterpart: the range in which LOSAT's branch-free test gives the reference's
     // outcomes; it does not change any value NCBI computes.
-    /// The test for a subject of `length` letters scanned at `diag_offset`, where it gives the
-    /// reference's outcomes (module header): `1 <= word_size < window`, `0 <= diag_offset` and
-    /// `diag_offset + length + 2 window < 2^30`. `None` elsewhere.
-    fn new(diag_offset: i32, length: usize, window: i32, word_size: i32) -> Option<Self> {
+    /// Whether the test gives the reference's outcomes for a subject of `length` letters scanned
+    /// at `diag_offset` (module header): `1 <= word_size < window`, `0 <= diag_offset` and
+    /// `diag_offset + length + 2 window < 2^30`.
+    pub(crate) fn fits(diag_offset: i32, length: usize, window: i32, word_size: i32) -> bool {
         let room = (1i64 << 30) - i64::from(diag_offset) - 2 * i64::from(window);
-        let fits = 1 <= word_size
+        1 <= word_size
             && word_size < window
             && 0 <= diag_offset
-            && i64::try_from(length).is_ok_and(|n| n < room);
-        // In range 2 window < 2^30, so the doubled constants do not overflow.
-        fits.then(|| Self {
+            && i64::try_from(length).is_ok_and(|n| n < room)
+    }
+
+    /// The test for a subject of `length` letters scanned at `diag_offset` where
+    /// [`XHitBf::fits`] holds; `None` elsewhere.
+    fn new(diag_offset: i32, length: usize, window: i32, word_size: i32) -> Option<Self> {
+        Self::fits(diag_offset, length, window, word_size)
+            .then(|| Self::in_range(diag_offset, window, word_size))
+    }
+
+    /// The constants for a caller that checked [`XHitBf::fits`] for the subject: there `2 window
+    /// < 2^30`, so they do not overflow. The test is exact only there.
+    #[inline(always)]
+    pub(crate) fn in_range(diag_offset: i32, window: i32, word_size: i32) -> Self {
+        Self {
             diag_offset,
-            word2: word_size * 2,
-            span2: ((window - word_size) * 2) as u32,
-            window2: window * 2,
-        })
+            word2: word_size.wrapping_mul(2),
+            span2: window.wrapping_sub(word_size).wrapping_mul(2) as u32,
+            window2: window.wrapping_mul(2),
+        }
     }
 
     /// The subject offset plus the diagonal offset, the `here` of [`XHitBf::test`].
     #[inline(always)]
-    fn here(self, subject_offset: i32) -> u32 {
+    pub(crate) fn here(self, subject_offset: i32) -> u32 {
         subject_offset.wrapping_add(self.diag_offset) as u32
     }
 
@@ -275,9 +290,9 @@ impl XHitBf {
     /// The two-hit test of one hit on `entry`, with `here` = [`XHitBf::here`]: when the entry's
     /// flag is 0 and the hit is too far or overlaps, stores what [`x_test_hit`] stores and returns
     /// `true`; otherwise (a flag-1 entry or a candidate) leaves the entry and returns `false`.
-    /// Exact where [`XHitBf::new`] gave the test (module header).
+    /// Exact where [`XHitBf::fits`] holds for the subject (module header).
     #[inline(always)]
-    fn test(self, entry: &mut DiagStruct, here: u32) -> bool {
+    pub(crate) fn test(self, entry: &mut DiagStruct, here: u32) -> bool {
         let raw = entry.raw_bits();
         let d2 = here.wrapping_mul(2).wrapping_sub(raw << 1) as i32;
         let candidate = (d2.wrapping_sub(self.word2) as u32) < self.span2;

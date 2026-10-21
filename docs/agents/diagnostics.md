@@ -229,8 +229,9 @@ their variables mean
   in `BPDIAG`'s AVX2 batch; `BPGAP` runs the
   vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPLUT` declines in
   diagnostics mode; `BPQBLOCK` takes the block path only for one `-outfmt 6` report (with
-  `BPQBLOCKFMT`, one outfmt 0, 6 or 7 report) with more than one block (see its entry), and
-  `BPQBLOCKFMT` acts only with `BPQBLOCK`; `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
+  `BPQBLOCKFMT`, one outfmt 0, 6 or 7 report; with `BPQBLOCKSA`, one outfmt 8, 9 or 12 report; with
+  `BPQBLOCKXML`, one outfmt 5 report) with more than one block (see its entry), and
+  `BPQBLOCKFMT`, `BPQBLOCKSA` and `BPQBLOCKXML` act only with `BPQBLOCK`; `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
   `TBXNEXT` only in TBLASTX's parallel subject loop (2 or more threads, several subjects; native
   builds and the threaded Wasm module); `BPCLUT` acts on `blastp -task blastp-fast` only, and `BPLKPFLAT` only where the search's pool
   builds the flat table of `BPCLUT` (`BPCLUT` on, 2 or more threads), so with `BPCLUT=0` it changes
@@ -282,6 +283,8 @@ export LOSAT_X_BPPCOMPACT=1
 export LOSAT_X_BPPFREE=1
 export LOSAT_X_BPQBLOCK=50000
 export LOSAT_X_BPQBLOCKFMT=1
+export LOSAT_X_BPQBLOCKSA=1
+export LOSAT_X_BPQBLOCKXML=1
 export LOSAT_X_BPREDOFIT=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
@@ -1804,7 +1807,7 @@ Rebuilding less:
   batch at a time. Both lookup tables take it: the default one, and the compressed one of `-task blastp-fast`
   (word size 5), whose table each block builds for its own batches and tests for NCBI's overflow banks with
   them. Taken only where a block's report is its rows: one output in tabular format 6 (with
-  `LOSAT_X_BPQBLOCKFMT`, below, also outfmt 0 or 7), no `-query_loc`, every batch read, more than one block, no subject whose tabular ID the reference path rejects, and none of the
+  `LOSAT_X_BPQBLOCKFMT`, below, also outfmt 0 or 7; `LOSAT_X_BPQBLOCKSA` outfmt 8, 9 or 12; `LOSAT_X_BPQBLOCKXML` outfmt 5), no `-query_loc`, every batch read, more than one block, no subject whose tabular ID the reference path rejects, and none of the
   reference path's other refusals that come before its rows (a `-window_size` whose diagonal table with all
   queries passes 2^30, a query split that LOSAT rejects, or with the compressed table a query batch whose
   offsets add more than four times NCBI's overflow cells, about 859 million words, counted before the search);
@@ -1840,7 +1843,39 @@ Rebuilding less:
   40.14 / 56.61 s at 8, 281.3 / 353.6 s at 1; outfmt 7 21.91 / 32.37 s and 37.83 / 53.57 s. Peak memory 36-58 MiB with it
   against 217-350 MiB (sp4) and 662-1,266 MiB (BP-yeast) without. outfmt 6 (the switch does not act) equal to dev within
   1 %. A query set of one block (BP-q100 x Swiss-Prot, 35,048 letters) is unchanged.
-- `LOSAT_X_BPQBLOCKFMTSHADOW=1` shadow of the block search (turns `LOSAT_X_BPQBLOCKFMT` on; any format the
+- `LOSAT_X_BPQBLOCKSA=1` (BLASTP, speed and memory; in the strict set from the pull request that added it,
+  on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search of `LOSAT_X_BPQBLOCK` also for one
+  outfmt 8, 9 or 12 report (the Seq-annot of Seq-aligns as ASN.1 text, BER or JSON; `blastp/x_query_blocks.rs`,
+  exactness argument in its header): each block writes its queries' Seq-annots before the next block is
+  searched; NCBI writes one self-contained Seq-annot per query and no prolog or epilog for these formats, and
+  nothing in LOSAT's writer is kept from one query to the next. With `-db` the blocks are searched only when every
+  definition line of the database reads, is one line and holds no byte outside ' ' ..= '~'
+  (`database::x_titles_read_allow_blocks`, read in the search pool before the first block); with `-subject` no
+  title is read. Otherwise, and for the cases `LOSAT_X_BPQBLOCK` leaves to the search of all queries, the search
+  of all queries (memory as before: bp_hsap `-db` 212-218 MiB at one thread, 350-360 MiB at 16, against about
+  32 / 47-50 MiB for outfmt 6 in blocks). Reports identical; off = `LOSAT_X_BPQBLOCKSA=0`. ws (2026-10-21, node 1,
+  bp_hsap -db, median of 3 pairs; NCBI 2.17.0 one run in the same job): max RSS at 1 / 16 threads, on 32.5 / 48.6
+  MiB (outfmt 8), 32.5 / 48.6 (9), 32.0 / 48.6 (12), off 212.8 / 351.9, NCBI 76.0 / 139.9 (8), 73.8 / 131.0 (9),
+  75.2 / 151.2 (12); wall on/off x0.81-0.83 at 1 thread, x0.64-0.66 at 16; outputs equal NCBI's -num_threads 1.
+- `LOSAT_X_BPQBLOCKXML=1` (BLASTP, speed and memory; in the strict set from the pull request that added it,
+  on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search of `LOSAT_X_BPQBLOCK` also for one outfmt 5
+  (BLAST XML) report: block 0 writes the header (from the first query of the input) and its Iterations, each
+  later block the Iterations numbered over the run (`BlastpReports::x_queries_before`), the last block the
+  end. The XML writer refuses what NCBI cannot write before its first byte, which a later block would do
+  after the bytes of the blocks before; so the blocks are searched only when none is refused, checked before
+  the first block with the writer's own functions: the database name and every query's definition line and
+  message id, every `-subject` record's names (conservative: the writer refuses only a subject with hits), and
+  with `-db` the definition lines as for `LOSAT_X_BPQBLOCKSA`. Fallbacks to the search of all queries (memory as
+  before): a refusable `-subject` title on a subject without hits, a query id that would fail in a message that is
+  never written, a `-db` sequence with an unreadable header or more than one definition line, or a title
+  outside ' ' ..= '~', reported or not; it then refuses (or completes) exactly where it does today. The CLI
+  creates the `-out` file before any search (an empty file stays after such a refusal, in both paths); the block
+  search's own file sink creates nothing before its first block. Reports
+  identical; off = `LOSAT_X_BPQBLOCKXML=0`. ws (2026-10-21, same job): max RSS at 1 / 16 threads on 32.8 / 49.8 MiB,
+  off 212.9 / 350.6, NCBI 101.0 / 146.7; wall on/off x0.83 at 1 thread, x0.65 at 16; outputs equal NCBI's
+  -num_threads 1. The -subject cost of the names check was not measured.
+- `LOSAT_X_BPQBLOCKFMTSHADOW=1` shadow of the block search (turns `LOSAT_X_BPQBLOCKFMT`, `LOSAT_X_BPQBLOCKSA` and
+  `LOSAT_X_BPQBLOCKXML` on; any format the
   block search takes): keeps a copy of the bytes the blocks write to the output and to standard error, then
   searches all queries again and writes their report and warnings into memory; a difference prints
   `[X_SHADOW] BPQBLOCKFMT output|stderr DIFFERENT at byte N ...` and stops the run. One line after the

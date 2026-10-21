@@ -305,6 +305,7 @@ impl HspSink<'_, '_> {
             hsp.qrow,
             &scratch.segments,
             hsp.query_first,
+            hsp.query_step,
             hsp.masks,
             hsp.query_frame,
             run.mask_char,

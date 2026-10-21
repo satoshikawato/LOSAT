@@ -156,6 +156,33 @@ fn displayed_rows(
     (query_row, subject_row)
 }
 
+/// `displayed_rows` into two buffers (cleared first), which the BLAST XML reuses from HSP to HSP.
+#[allow(clippy::too_many_arguments)]
+fn displayed_rows_into(
+    hsp: &TblastxHsp,
+    query: &[u8],
+    subject: &[u8],
+    subject_first: usize,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+    query_row: &mut Vec<u8>,
+    subject_row: &mut Vec<u8>,
+) {
+    let hit = &hsp.hit;
+    let query_frame = hit.query_frame as i8;
+    query_row.clear();
+    query_row.extend(
+        (hit.sort_query_offset..hit.sort_query_end)
+            .map(|offset| display_residue(query, query_frame, offset, query_code)),
+    );
+    subject_row.clear();
+    subject_row.extend(
+        (hit.sort_subject_offset..hit.sort_subject_end).map(|offset| {
+            display_residue(subject, hsp.subject_frame, offset - subject_first, db_code)
+        }),
+    );
+}
+
 /// The letters of the subjects that the displayed rows read, by subject index.
 #[derive(Clone, Copy)]
 pub(crate) enum SubjectLetters<'a> {
@@ -225,6 +252,52 @@ impl SubjectLetters<'_> {
                 let (start, length) = codon_window(store.len(), hsp.subject_frame, from, to);
                 store.letters_into(start, start + length, window);
                 displayed_rows(hsp, query, window, from, query_code, db_code)
+            }
+        }
+    }
+}
+
+impl SubjectLetters<'_> {
+    /// `rows` into two buffers (cleared first): the BLAST XML builds the rows of one HSP at a
+    /// time into buffers it reuses.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rows_into(
+        &self,
+        hsp: &TblastxHsp,
+        query: &[u8],
+        query_code: &GeneticCode,
+        db_code: &GeneticCode,
+        window: &mut Vec<u8>,
+        query_row: &mut Vec<u8>,
+        subject_row: &mut Vec<u8>,
+    ) {
+        let s_idx = hsp.hit.s_idx as usize;
+        match self {
+            Self::Records(records) => displayed_rows_into(
+                hsp,
+                query,
+                records[s_idx].seq(),
+                0,
+                query_code,
+                db_code,
+                query_row,
+                subject_row,
+            ),
+            Self::Stored { stores, ordinals } => {
+                let store = &stores[ordinals[s_idx] as usize];
+                let (from, to) = (hsp.hit.sort_subject_offset, hsp.hit.sort_subject_end);
+                let (start, length) = codon_window(store.len(), hsp.subject_frame, from, to);
+                store.letters_into(start, start + length, window);
+                displayed_rows_into(
+                    hsp,
+                    query,
+                    window,
+                    from,
+                    query_code,
+                    db_code,
+                    query_row,
+                    subject_row,
+                );
             }
         }
     }
@@ -606,6 +679,31 @@ fn shown_query_masks(
             (frame, shown)
         })
         .collect()
+}
+
+/// The masked regions of a query as NCBI hands them to the BLAST XML writer
+/// (`Blast_GetSeqLocInfoVector`, blast_aux.cpp:930-959): the SEG intervals of each frame in
+/// nucleotides, joined as `BlastSeqLocCombine(filter_out, 0)` joins them (only overlapping ones,
+/// `query_dna_masks`), moved into the query's record and without the whole interval
+/// (`shown_query_masks`), in context order, each with the frame of its context. `out` is cleared
+/// first.
+pub(crate) fn xml_query_masks(
+    stats: &TblastxQueryStats,
+    query_length: usize,
+    offset: usize,
+    out: &mut Vec<crate::report::blast_xml::QueryMask>,
+) {
+    out.clear();
+    let shown = shown_query_masks(query_dna_masks(stats, query_length), query_length, offset);
+    for (frame, ranges) in shown {
+        for (from, to) in ranges {
+            out.push(crate::report::blast_xml::QueryMask {
+                from,
+                to,
+                frame: i32::from(frame),
+            });
+        }
+    }
 }
 
 /// Lowercases the residues of a displayed query row that a shown SEG mask (record
@@ -1023,7 +1121,7 @@ pub(crate) fn write_tabular_row<W: Write>(
     )
 }
 
-/// The TBLASTX output formats (`-outfmt` 0, 6, 7, 8, 9 and 12, `tblastx_outfmt`).
+/// The TBLASTX output formats (`-outfmt` 0, 5, 6, 7, 8, 9 and 12, `tblastx_outfmt`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TblastxOutputFormat {
     Pairwise,
@@ -1031,12 +1129,27 @@ pub(crate) enum TblastxOutputFormat {
     TabularWithComments,
     /// A Seq-annot of Seq-aligns (outfmt 8, 9, 12).
     Seqalign(crate::report::serial::SerialFormat),
+    /// BLAST XML (outfmt 5, `tblastx/blast_xml.rs`).
+    Xml,
 }
 
 impl TblastxOutputFormat {
     /// Whether the format is a table (outfmt 6, 7).
     pub(crate) fn is_tabular(self) -> bool {
         matches!(self, Self::Tabular | Self::TabularWithComments)
+    }
+
+    /// Whether the format writes the displayed identity counts of the rows
+    /// (`set_displayed_identities`): not the structured formats, which read the engine's counts
+    /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5).
+    pub(crate) fn reads_displayed_counts(self) -> bool {
+        !matches!(self, Self::Seqalign(_) | Self::Xml)
+    }
+
+    /// Whether the format writes a query's own warnings to standard error
+    /// (`ReportFormat::writes_query_warnings`: not the structured formats).
+    pub(crate) fn writes_query_warnings(self) -> bool {
+        self.reads_displayed_counts()
     }
 }
 
@@ -1055,6 +1168,7 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
         Ok(8) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnText),
         Ok(9) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnBinary),
         Ok(12) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::Json),
+        Ok(5) => TblastxOutputFormat::Xml,
         _ => TblastxOutputFormat::Tabular,
     }
 }
@@ -1530,9 +1644,8 @@ mod tests {
     #[test]
     fn query_masks_convert_with_ncbis_frame_formulas() {
         let stats = TblastxQueryStats {
-            karlin: None,
-            eff_searchsp: 0,
             seg_masks: vec![(1, vec![(2, 5)]), (-1, vec![(2, 5)])],
+            ..TblastxQueryStats::default()
         };
         // A 30-nt query: frame lengths 10, 9, 9, so the DNA length is 30.
         let masks = query_dna_masks(&stats, 30);
@@ -1547,6 +1660,53 @@ mod tests {
         let mut minus = b"AAAAAAAAAA".to_vec();
         lowercase_query_row(&mut minus, -1, 0, 29, &masks);
         assert_eq!(&minus, b"AAaaAAAAAA");
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_filter.c:993 (BlastSeqLocCombine(filter_out, 0)) joins
+    // only intervals that overlap (adjacent ones stay apart), per frame, before the conversion
+    // to nucleotides; the XML writer reads that list (blast_aux.cpp:930-959), in context order,
+    // each mask with its context's frame, moved into the record by the interval's start.
+    #[test]
+    fn xml_masks_join_overlapping_intervals_only_and_keep_the_frames() {
+        let stats = TblastxQueryStats {
+            // Frame 1: residues 2-4 and 5-7 (adjacent, apart), frame 2: 2-6 and 4-7 (joined),
+            // frame -1: one run.
+            seg_masks: vec![
+                (1, vec![(5, 8), (2, 5)]),
+                (2, vec![(2, 7), (4, 8)]),
+                (-1, vec![(2, 5)]),
+            ],
+            ..TblastxQueryStats::default()
+        };
+        let mut out = Vec::new();
+        xml_query_masks(&stats, 30, 0, &mut out);
+        let got: Vec<(i32, i32, i32)> = out.iter().map(|m| (m.from, m.to, m.frame)).collect();
+        assert_eq!(got, vec![(6, 12, 1), (15, 21, 1), (7, 22, 2), (18, 23, -1)]);
+        // `-query_loc`: moved by the interval's start, buffer cleared first.
+        xml_query_masks(&stats, 30, 100, &mut out);
+        assert_eq!(out.len(), 4);
+        assert_eq!((out[0].from, out[0].to), (106, 112));
+        // No SEG masks, no masks.
+        xml_query_masks(&TblastxQueryStats::default(), 30, 0, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn the_structured_formats_read_no_displayed_counts_and_write_no_query_warnings() {
+        assert_eq!(output_format("5"), TblastxOutputFormat::Xml);
+        for (outfmt, counts) in [
+            ("0", true),
+            ("5", false),
+            ("6", true),
+            ("7", true),
+            ("8", false),
+            ("9", false),
+            ("12", false),
+        ] {
+            let format = output_format(outfmt);
+            assert_eq!(format.reads_displayed_counts(), counts, "{outfmt}");
+            assert_eq!(format.writes_query_warnings(), counts, "{outfmt}");
+        }
     }
 
     // NCBI c++/src/algo/blast/api/blast_aux.cpp:825-842 (`Map`): with `-query_loc` a mask

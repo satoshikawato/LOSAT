@@ -20,12 +20,13 @@
 //! instead of a load, a shift and a mask. Indexes past the backbone read 0 and are never
 //! candidates.
 //!
-//! The copy then takes the block's candidates in position order, as NCBI's loop does. While three
-//! hits for every candidate left in the block fit in the offset array (one test for the rest of the
-//! block), the hits of a cell of up to `AA_HITS_PER_CELL` are written without the capacity test, as
-//! four pairs (with AVX2 one 32-byte store: the cell broadcast, one `vpermd`, one `vpblendd` with
-//! the subject offset) of which the first `num_used` count. A cell with more hits, and every
-//! candidate of a block that could fill the array, takes NCBI's test: when its hits do not fit,
+//! The copy then takes the block's candidates in position order, as NCBI's loop does, each once.
+//! While three hits for every candidate left in the block fit in the offset array (one test, made
+//! again only after a candidate that took NCBI's test), the hits of a cell of up to
+//! `AA_HITS_PER_CELL` are written without the capacity test, as four pairs (with AVX2 one 32-byte
+//! store: the cell broadcast, one `vpermd`, one `vpblendd` with the subject offset) of which the
+//! first `num_used` count. A cell with more hits, and every candidate of a block that could fill
+//! the array, takes NCBI's test: when its hits do not fit,
 //! `s_range[1]` is that word's position and the scan returns, so the next call resumes there. The
 //! offset pairs and the `s_range` values of every call are NCBI's (the words after the stop were
 //! looked at but not used; the next call looks at them again, as with LOSAT_X_TBNSCANBF).
@@ -318,6 +319,7 @@ fn scan(
     let table = Table {
         backbone: lookup.backbone.as_ptr(),
         overflow: lookup.overflow.as_ptr(),
+        overflow_len: lookup.overflow.len(),
     };
     let dest = offset_pairs.as_mut_ptr();
     let mut index = [0u16; X_BLOCK];
@@ -391,6 +393,7 @@ fn scan(
 struct Table {
     backbone: *const BackboneCell,
     overflow: *const i32,
+    overflow_len: usize,
 }
 
 // NCBI reference: c++/include/algo/blast/core/blast_lookup.h:96-107,121-127
@@ -535,7 +538,10 @@ fn room_for_rest(totalhits: i32, left: usize, array_size: i32) -> bool {
 
 /// The plain-loop copy stage for the candidates `cand[..n]` of the block that starts at
 /// `block_first`: the new total, and the subject offset of the word at which the offset array has
-/// no room, if one has none.
+/// no room, if one has none. Each candidate is taken once: while `room` holds (three hits for every
+/// candidate left fit), a cell of up to `AA_HITS_PER_CELL` hits is written without the test, and
+/// `room` still holds after it; any other candidate takes the test (`copy_tested`), and `room` is
+/// computed again after it.
 ///
 /// # Safety
 /// As `copy_tested`, for every candidate.
@@ -552,45 +558,41 @@ unsafe fn copy(
     array_size: i32,
 ) -> (i32, Option<u32>) {
     let cand = cand.as_ptr().cast::<u16>();
-    let mut i = 0usize;
-    while i < n {
-        if room_for_rest(totalhits, n - i, array_size) {
-            while i < n {
-                let k = *cand.add(i) as usize;
-                let cell = &*table.backbone.add(index[k] as usize);
-                let numhits = cell.num_used;
-                if numhits as usize > AA_HITS_PER_CELL {
-                    break;
-                }
-                let s_off = (block_first + k) as u32;
-                let d = dest.add(totalhits as usize);
-                for j in 0..AA_HITS_PER_CELL {
-                    *d.add(j) = BlastOffsetPair {
-                        q_off: cell.entries[j] as u32,
-                        s_off,
-                    };
-                }
-                totalhits += numhits;
-                i += 1;
-            }
-            if i == n {
-                break;
-            }
-        }
+    let mut room = room_for_rest(totalhits, n, array_size);
+    for i in 0..n {
         let k = *cand.add(i) as usize;
+        let ix = index[k] as usize;
+        let cell = &*table.backbone.add(ix);
+        let numhits = cell.num_used;
         let s_off = (block_first + k) as u32;
-        match copy_tested(table, dest, index[k] as usize, s_off, totalhits, array_size) {
-            Some(total) => totalhits = total,
-            None => return (totalhits, Some(s_off)),
+        if room && numhits as usize <= AA_HITS_PER_CELL {
+            let d = dest.add(totalhits as usize);
+            for j in 0..AA_HITS_PER_CELL {
+                *d.add(j) = BlastOffsetPair {
+                    q_off: cell.entries[j] as u32,
+                    s_off,
+                };
+            }
+            totalhits += numhits;
+        } else {
+            match copy_tested(table, dest, ix, s_off, totalhits, array_size) {
+                Some(total) => totalhits = total,
+                None => return (totalhits, Some(s_off)),
+            }
+            room = room_for_rest(totalhits, n - i - 1, array_size);
         }
-        i += 1;
     }
     (totalhits, None)
 }
 
 /// The AVX2 copy stage: `copy` with the pairs of a cell of up to `AA_HITS_PER_CELL` hits written by
-/// one 32-byte store (`[e0, s, e1, s, e2, s, e2, s]` from the cell `[num_used, e0, e1, e2]`); the
-/// same values in the first `num_used` pairs.
+/// one 32-byte store (`[e0, s, e1, s, e2, s, e2, s]` from the cell `[num_used, e0, e1, e2]`), and
+/// those of a larger cell four at a time (four query offsets widened to 64 bits and the subject
+/// offset put in the high halves, one 32-byte store); the same values in the first `num_used`
+/// pairs. The last store of a larger cell may write up to three pairs after them (inside the
+/// `X_SCAN_BYTE_SLACK` entries, as the cell's hits fit before `array_size`); it reads past the
+/// cell's query offsets only while they stay inside the overflow array, else the last pairs are
+/// written one by one.
 ///
 /// # Safety
 /// As `copy`; AVX2 must be there.
@@ -614,43 +616,54 @@ unsafe fn copy_avx2(
     let order = _mm256_setr_epi32(1, 0, 2, 0, 3, 0, 3, 0);
     let cand = cand.as_ptr().cast::<u16>();
     let index = index.as_ptr();
-    let mut i = 0usize;
-    while i < n {
-        if room_for_rest(totalhits, n - i, array_size) {
-            let mut d = dest.add(totalhits as usize);
-            while i < n {
-                let k = *cand.add(i) as usize;
-                let cell = table.backbone.add(*index.add(k) as usize);
-                let numhits = (*cell).num_used;
-                if numhits as usize > AA_HITS_PER_CELL {
-                    break;
-                }
-                let c = _mm256_broadcastsi128_si256(_mm_loadu_si128(cell as *const __m128i));
-                let s = _mm256_set1_epi32((block_first + k) as i32);
-                let v = _mm256_blend_epi32::<0xAA>(_mm256_permutevar8x32_epi32(c, order), s);
-                _mm256_storeu_si256(d as *mut __m256i, v);
-                d = d.add(numhits as usize);
-                totalhits += numhits;
-                i += 1;
-            }
-            if i == n {
-                break;
-            }
-        }
+    let mut room = room_for_rest(totalhits, n, array_size);
+    for i in 0..n {
         let k = *cand.add(i) as usize;
+        let ix = *index.add(k) as usize;
+        let cell = table.backbone.add(ix);
+        let numhits = (*cell).num_used;
         let s_off = (block_first + k) as u32;
-        match copy_tested(
-            table,
-            dest,
-            *index.add(k) as usize,
-            s_off,
-            totalhits,
-            array_size,
-        ) {
-            Some(total) => totalhits = total,
-            None => return (totalhits, Some(s_off)),
+        let small = numhits as usize <= AA_HITS_PER_CELL;
+        if !(room && small) {
+            // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:100,118-123 (the test).
+            if numhits > array_size - totalhits {
+                return (totalhits, Some(s_off));
+            }
         }
-        i += 1;
+        let d = dest.add(totalhits as usize);
+        if small {
+            let c = _mm256_broadcastsi128_si256(_mm_loadu_si128(cell as *const __m128i));
+            let s = _mm256_set1_epi32(s_off as i32);
+            let v = _mm256_blend_epi32::<0xAA>(_mm256_permutevar8x32_epi32(c, order), s);
+            _mm256_storeu_si256(d as *mut __m256i, v);
+        } else {
+            let cursor = (*cell).entries[0] as usize;
+            let src = table.overflow.add(cursor);
+            let hits = numhits as usize;
+            let high = _mm256_set1_epi64x((s_off as i64) << 32);
+            let whole = if cursor + hits.next_multiple_of(4) <= table.overflow_len {
+                hits.next_multiple_of(4)
+            } else {
+                hits & !3
+            };
+            let mut j = 0;
+            while j < whole {
+                let q = _mm256_cvtepu32_epi64(_mm_loadu_si128(src.add(j) as *const __m128i));
+                _mm256_storeu_si256(d.add(j) as *mut __m256i, _mm256_or_si256(q, high));
+                j += 4;
+            }
+            while j < hits {
+                *d.add(j) = BlastOffsetPair {
+                    q_off: *src.add(j) as u32,
+                    s_off,
+                };
+                j += 1;
+            }
+        }
+        totalhits += numhits;
+        if !(room && small) {
+            room = room_for_rest(totalhits, n - i - 1, array_size);
+        }
     }
     (totalhits, None)
 }
@@ -880,6 +893,71 @@ mod tests {
         }
         assert!(!avx2, "AVX2 off x86-64");
         candidates(letters, presence, index, cand)
+    }
+
+    // NCBI reference: c++/src/algo/blast/core/blast_aascan.c:99-115 (the copy of an overflow chain).
+    // Not a port of an NCBI unit case: the chain that ends the overflow array, of a length that is
+    // not a multiple of four, is copied exactly (the AVX2 form then writes its last pairs one by
+    // one instead of reading past the array), with offset arrays from the longest chain up (as
+    // `x_scan_unit`'s: a smaller one would never hold the longest cell, and NCBI's loop would stop
+    // at that word on every call).
+    #[test]
+    fn the_last_overflow_chain_is_copied_exactly() {
+        let mut rng = XorShift(0x5851_f42d_4c95_7f2d);
+        let mut tails = 0usize;
+        for case in 0..64 {
+            let queries: Vec<Vec<u8>> = (0..1 + case % 5)
+                .map(|_| {
+                    let len = 30 + rng.below(600);
+                    (0..len).map(|_| AMINO[rng.below(AMINO.len())]).collect()
+                })
+                .collect();
+            let lookup = lookup_for(&queries, [11, 12, 13][case % 3]);
+            let Some((ix, cell)) = lookup
+                .backbone
+                .iter()
+                .enumerate()
+                .filter(|(_, cell)| cell.num_used as usize > AA_HITS_PER_CELL)
+                .max_by_key(|(_, cell)| cell.entries[0])
+            else {
+                continue;
+            };
+            let hits = cell.num_used as usize;
+            let cursor = cell.entries[0] as usize;
+            if cursor + hits != lookup.overflow.len() || hits % 4 == 0 {
+                continue;
+            }
+            tails += 1;
+            let presence = build_presence(&lookup);
+            // The chain's word three times, then the sentinel.
+            let word = [(ix >> 10) as u8, ((ix >> 5) & 31) as u8, (ix & 31) as u8];
+            let mut subject: Vec<u8> = word.repeat(3);
+            subject.push(0);
+            let longest = lookup.longest_chain.max(1) as usize;
+            for array_size in [
+                longest,
+                longest + 1,
+                longest + hits,
+                3 * longest,
+                longest * 1024,
+            ] {
+                let range = (0, subject.len() as i32 - 4);
+                let want = calls(&lookup, &presence, &subject, range, array_size, None);
+                assert!(
+                    want[0].0.len() >= hits,
+                    "case {case}: the chain was not copied"
+                );
+                let mut forms = vec![false];
+                if avx2_detected() {
+                    forms.push(true);
+                }
+                for avx2 in forms {
+                    let got = calls(&lookup, &presence, &subject, range, array_size, Some(avx2));
+                    assert_eq!(got, want, "case {case} array_size {array_size} avx2 {avx2}");
+                }
+            }
+        }
+        assert!(tails >= 4, "{tails} tables whose last chain ends the array");
     }
 
     // No NCBI counterpart: the kept presence bytes follow the table (a new table, also one at a

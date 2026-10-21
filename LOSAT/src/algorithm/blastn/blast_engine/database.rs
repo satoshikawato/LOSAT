@@ -114,6 +114,8 @@ pub(super) struct BlastnDatabase {
     db: SeqDb,
     name: String,
     metadata: SubjectMetadata,
+    /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16).
+    taxdb: shared::TaxdbRun,
 }
 
 impl BlastnDatabase {
@@ -158,7 +160,31 @@ impl BlastnDatabase {
             db,
             name: name.to_string(),
             metadata,
+            taxdb: shared::TaxdbRun::default(),
         })
+    }
+
+    /// The Blast-def-line taxid of each reported sequence by rank (`ordinals`: the ordinal id of
+    /// each rank, `ReportedSubjects::ordinals`) and what the taxonomy database says about it,
+    /// for the XML2 and JSON formats (`algorithm::common::database::read_reported_taxids`);
+    /// the sequences of `hit_lists` with HSPs are the reported ones.
+    pub(super) fn read_taxids(
+        &self,
+        ordinals: &[u32],
+        hit_lists: &[Option<BlastnHitList>],
+    ) -> Result<(
+        Vec<i32>,
+        Vec<crate::report::blast_xml::HitTaxonomy>,
+        shared::TaxdbNotes,
+    )> {
+        let reported: std::collections::BTreeSet<usize> = hit_lists
+            .iter()
+            .flatten()
+            .flat_map(|hit_list| &hit_list.hsplist_array)
+            .filter_map(|hsp_list| hsp_list.hsps.first())
+            .map(|hsp| hsp.s_idx as usize)
+            .collect();
+        shared::read_reported_taxids(&self.db, &self.taxdb, ordinals, &reported, PROGRAM)
     }
 
     /// The `-db` value as NCBI keeps it (outfmt 7's `# Database:` line).

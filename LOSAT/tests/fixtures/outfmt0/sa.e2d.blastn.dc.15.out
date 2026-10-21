@@ -1,0 +1,226 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 2,
+        "sc_mismatch": -3,
+        "gap_open": 5,
+        "gap_extend": 2,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "q1",
+            "query_len": 5000,
+            "query_masking": [
+              {
+                "from": 1499,
+                "to": 1526
+              },
+              {
+                "from": 1661,
+                "to": 1734
+              },
+              {
+                "from": 1779,
+                "to": 1785
+              },
+              {
+                "from": 1901,
+                "to": 1907
+              },
+              {
+                "from": 1934,
+                "to": 1942
+              },
+              {
+                "from": 2150,
+                "to": 2156
+              },
+              {
+                "from": 3147,
+                "to": 3249
+              },
+              {
+                "from": 5118,
+                "to": 5199
+              },
+              {
+                "from": 5294,
+                "to": 5302
+              },
+              {
+                "from": 5394,
+                "to": 5426
+              },
+              {
+                "from": 5856,
+                "to": 5864
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "s1",
+                    "title": "s1"
+                  }
+                ],
+                "len": 7000,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 1474.64,
+                    "score": 1634,
+                    "evalue": 0,
+                    "identity": 853,
+                    "query_from": 5119,
+                    "query_to": 6000,
+                    "query_strand": "Plus",
+                    "hit_from": 3695,
+                    "hit_to": 2834,
+                    "hit_strand": "Minus",
+                    "align_len": 882,
+                    "gaps": 20,
+                    "qseq": "atatatatatatatacatatatctatatacctatatagatatatatatatatatatatagatatatacttattttatatataCATGGAAATATCAAGATGACTGTAATAAAATATCTTTATAATTTATTGTGATAAAACAACTTTTAGGACATGTATAAATGTTAAGAATATAATGaaaaaaaaaGCTTCATATGTTTTATTAAAGAATCATTATAATAGTTATATACTATAATTTTTATCAACTGCAACACAGATTTTTCATTAAACTCAATGAAatatatatatatatatatatatatatatatataCAAAAAATGAAATACAAGTTACATTACTTTAAACTGATCCTCTCTTAAAATAAATGAATATCACCCTAAATACTCGGCATCGGAATAGTGTATCAGAAGGAACATTTTCAAATGGTAAAGGGTAGTCTTCGGTACAATGAGGAAATGTCAAAATCTCAAGGTTTGGTCGACAATCAGATAATATGTCACAATCTTTCTTAAAATCTGTTGATATAGTGTCAGATAGTAACACATCTCTCTTGATAATATCTGAACTTGCAAGAATGTCAGTCGTCTCTTGATTCATAATCGTCTCTTGATTCATAATCAGCATTCTGTCCGATAGTGATGGTTGAGGTAGATCTTTCTCTCTTGGGTCGCGCTTCAGTATCTCCATTTTATCTGATGGTAATATTATCAACTTTCTCTTTACTGACTATATTCCATTCAtttttttttATTTTCCTGTAAAATAAAGTTTTCAATCACAAATATAATACTTTCGACATGGATTGACTTATATATATTAAACTATATTATTTCACTGTGATAGTCAACTCTACAACAATATAAAATACCAACCTGATCACTACT",
+                    "hseq": "ATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATACTTATTTTATATATACATGGAAATATCAAGATGACTGTAATAAAATATCTTTATAATTTATTGTGATAAAACAACTTTTAGGACATGTATAAATGTTAAGAATATAATGAAAAAAAAAGCTTCATATGTTTTATTAAAGAATCATTATAATAGTTATATACTATAATTTTTATCAACTGCAACACAGATTTTTCATTAAACTCAATGAAATATATACACACA--------------------CAAAAAATGAAATACAAGTTACATTACTTTAAACTGATCCTCTCTTAAAATAAATGAATATCACCCTAAATACTCGGCATCGGAATAGTGTATCAGAAGGAACATTTTCAAATGGTAAAGGGTAGTCTTCGGTACAATGAGGAAATGTCAAAATCTCAAGGTTTGGTCGACAATCAGATAATATGTCACAATCTTTCTTAAAATCTGTTGATATAGTGTCAGATAGTAACACATCTCTCTTGATAATATCTGAACTTGCAAGAATGTCAGTCGTCTCTTGATTCATAATCGTCTCTTGATTCATAATCAGCATTCTGTCCGATAGTGATGGTTGAGGTAGATCTTTCTCTCTTGGGTCGCGCTTCAGTATCTCCATTTTATCTGATGGTAATATTATCAACTTTCTCTTTACTGACTATATTCCATTCATTTTTTTTTATTTTCCTGTAAAATAAAGTTTTCAATCACAAATATAATACTTTCGACATGGATTGACTTATATATATTAAACTATATTATTTCACTGTGATAGTCAACTCTACAACAATATAAAATACCAACCTGATCACTACT",
+                    "midline": "||||||||||||||| |||||| ||||||  |||||| ||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| | | |                    |||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 1395.29,
+                    "score": 1546,
+                    "evalue": 0,
+                    "identity": 793,
+                    "query_from": 2428,
+                    "query_to": 3225,
+                    "query_strand": "Plus",
+                    "hit_from": 4519,
+                    "hit_to": 3720,
+                    "hit_strand": "Minus",
+                    "align_len": 801,
+                    "gaps": 4,
+                    "qseq": "ATATATATACTCACCAATTAGTCTTTAAAGAACATTTCATTAGTCGCTACAGTAGGAGCAACACACATATACAATCATACGTATAAACGTGCACGTGGAACTCTTTCATCATGTCAGAATTTAAAAGTTTGTTAAAGTTTAAGAAACTTACTGAGCACGCTTTCACACCCTCAAAGGGTTCAAAATTTGCTGCCGGGTTTGATCTATGCAGTGCTTATGACTTGACAATCCCGGCTAATGGAAAGTCCCTGGTAAAGACAGATATTCAGGTGGAACTTCCTGAAGGGTGTTATGGTAGGATTGCACCAAGATCTGGTCTATCGTGGAAGTATCATCTTGACATAGGAGCTGGTGTAGTAGACAGAGATTACAGAGGAAATGTTGGTGTAATTTTGTTTAATCATGCTAAAACCGATTATAAAGTGGAGAAGGGAGATCGCATCGCTCAACTAATCTGTGAAAAAATTATATATCCCGACATAGAGCAAGTTGAAGAATTGACGGAGACAGAGCGTGGTGGAAAAGGGTATGGATCCACAGGCGAGAAATAATGGAGTATATTATCATACACATGTATCAATTTCTTTATTGACTAATGATGTTATAGTTGATATCATTAACAAGTATGTATCTATCTGGAGTATATTATCATACACATGTATCAATTTCTTTTTTGACTAATGATGTTATGTCATTAACAATTATGTATCTATCAAACATtatatatatatatatatatatatatatatatatatatatatatatatatatat-tata-atctat-taaataaactatata",
+                    "hseq": "ATATATATACTCACCAATTAGTCTTTAAAGAACATTTCATTAGTCGCTACAGTAGGAACAACACACATATACAATCATACGTATAAACGTGCACGTGGAACTCTTTCATCATGTCAGAATTTAAAAGTTTGTTAAAGTTTAAGAAACTTACTGAGCACGCTTTCACACCCTCAAAGGGTTCAAAATTTGCTGCCGGGTTTGATCTATGCAGTGCTTATGACTTGACAATCCCGGCTAATGGAAAGTCCCTGGTAAAGACAGATATTCAGGTGGAACTTCCTGAAGGGTGTTATGGTAGGATTGCACCAAGATCTGGTCTATCGTGGAAGTATCATCTTGACATAGGAGCTGGTGTAGTAGACAGAGATTACAGAGGAAATGTTGGTGTAATTTTGTTTAATCATGCTAAAACCGATTATAAAGTGGAGAAGGGAGATCGCATCGCTCAACTAATCTGTGAAAAAATTATATATCCCGACATAGAGCAAGTTGAAGAATTGACGGAGACAGAGCGTGGTGGAAAAGGGTATGGATCCACAGGCGAGAAATAATGGAGTATATTATCATACACATGTATCAATTTCTTTATTGACTAATGATGTTATAGTTGATATCATTAACAAGTATGTATCTATCTGGAGTATATTATCATACACATGTATCAATTTCTTTTTTGACTAATGATGTTATGTCATTAACAATTATGTATCTATCAAACATTATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATA-TATATA",
+                    "midline": "||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| |||| || ||| || ||| | ||||||"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 1373.65,
+                    "score": 1522,
+                    "evalue": 0,
+                    "identity": 769,
+                    "query_from": 1660,
+                    "query_to": 2428,
+                    "query_strand": "Plus",
+                    "hit_from": 5576,
+                    "hit_to": 4805,
+                    "hit_strand": "Minus",
+                    "align_len": 772,
+                    "gaps": 3,
+                    "qseq": "TTaaaaataaaaa-caaactacccattacacatatacacatatacacacataaacacatacacacactcacacacacGTGCGCGTCCTTATGCGCACTAGGAGACTGACAGAAGGTCATGTggggggg--TATCCCTTTCCGGTTCTAGAAACACAAACGTTTTTGTCATGTCTTGTCATGTATAAAAGACGCGTCTTAGCTTCCAAGCCTTCAGAACAGTTTGGCTAGAGCTCATAGTGCCAGAtttttttCTTTCTCTCTTTGTCTCACGAGAAAGaaaaaaaaaGGAAACATATCAAGTTTTACGATATGTTCCCTAATATTGAAAAATGTGTACGAGCGATGGTCCGTATTCCCGGAAGTGGCAAAGAAGAACCAAAGAAAGCCATCTGTATCAACTTCGCCAAGGTATCGAGCATAGCTGCTGCTGCTGCGGCCAGAAAACCACTACCCCACCAACAGTTATTCACAAGACCTCCAGCCACACCTTCTCaaaaaaaCAACCAGACTGCTGAATCTCGGAGGAACGGTAGACAATACATCTCCAAGTTTTAATCTGGATACTTGCTAGTTGATGGTTATCAAAGGGTAGAATGTGATTTTGTAGATACCATTTGATATGAAAAGAGCTGATTCACCAATGAAAACTATGACAAGAATAAAGGAAGGGAGTACAACATCCATCACCACTGCTTCCCAGCAAATATCGTCCTCGGAACCACAGTCGGGCCGACATCATTAGCATCAACCTTATTCATCGATGTCGGAGAA",
+                    "hseq": "TTAAAAATAAAAAACAAACTACCCATTACACATATACACATATACACACATAAACACATACACACACTCACACACACGTGCGCGTCCTTATGCGCACTAGGAGACTGACAGAAGGTCATGTGGGGGGGGGTATCCCTTTCCGGTTCTAGAAACACAAACGTTTTTGTCATGTCTTGTCATGTATAAAAGACGCGTCTTAGCTTCCAAGCCTTCAGAACAGTTTGGCTAGAGCTCATAGTGCCAGATTTTTTTCTTTCTCTCTTTGTCTCACGAGAAAGAAAAAAAAAGGAAACATATCAAGTTTTACGATATGTTCCCTAATATTGAAAAATGTGTACGAGCGATGGTCCGTATTCCCGGAAGTGGCAAAGAAGAACCAAAGAAAGCCATCTGTATCAACTTCGCCAAGGTATCGAGCATAGCTGCTGCTGCTGCGGCCAGAAAACCACTACCCCACCAACAGTTATTCACAAGACCTCCAGCCACACCTTCTCAAAAAAACAACCAGACTGCTGAATCTCGGAGGAACGGTAGACAATACATCTCCAAGTTTTAATCTGGATACTTGCTAGTTGATGGTTATCAAAGGGTAGAATGTGATTTTGTAGATACCATTTGATATGAAAAGAGCTGATTCACCAATGAAAACTATGACAAGAATAAAGGAAGGGAGTACAACATCCATCACCACTGCTTCCCAGCAAATATCGTCCTCGGAACCACAGTCGGGCCGACATCATTAGCATCAACCTTATTCATCGATGTCGGAGAA",
+                    "midline": "||||||||||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||  ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 168.098,
+                    "score": 185,
+                    "evalue": 1.41374e-43,
+                    "identity": 200,
+                    "query_from": 2979,
+                    "query_to": 3225,
+                    "query_strand": "Plus",
+                    "hit_from": 3883,
+                    "hit_to": 3641,
+                    "hit_strand": "Minus",
+                    "align_len": 255,
+                    "gaps": 20,
+                    "qseq": "TGGAGTATATTATCATACACATGTATCAATTTCTTTATTGACTAATGATGTTATAGTTGATATCATTAACAAGTATGTATCTATC-TGGAGTATAT-TATCATACACATGTATCAATTTCTTTTTTGACTAATGATGT-TATGTCATTAACAATTATGTATCTATCAAACAT-tatatata-tatatatatatatatatatatatatatatatatatatatatatat-tata-atctat-taaataaactatata",
+                    "hseq": "TGGAGTATATTATCATACACATGTATCAATTTCTTTTTTGACTAATGATGTT-------ATGTCATTAACAATTATGTATCTATCAAACATTATATATAT-ATATATATATATATATATATATATATA-TATATATATATATAT-ATATATATATATATATATAT-ATATATATATATATATTATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATATA-TATATA",
+                    "midline": "|||||||||||||||||||||||||||||||||||| |||||||||||||||       || |||||||||| ||||||||||||    | ||||| ||| ||| | || |||  || | | | |  | ||   || | ||| | ||  | |  ||| ||| ||| | | || |||||||| ||||||||||||||||||||||||||||||||||||||||||||| |||| || ||| || ||| | ||||||"
+                  },
+                  {
+                    "num": 5,
+                    "bit_score": 111.292,
+                    "score": 122,
+                    "evalue": 9.5341e-27,
+                    "identity": 75,
+                    "query_from": 3064,
+                    "query_to": 3141,
+                    "query_strand": "Plus",
+                    "hit_from": 3968,
+                    "hit_to": 3884,
+                    "hit_strand": "Minus",
+                    "align_len": 85,
+                    "gaps": 7,
+                    "qseq": "TGGAGTATATTATCATACACATGTATCAATTTCTTTTTTGACTAATGATGTT-------ATGTCATTAACAATTATGTATCTATC",
+                    "hseq": "TGGAGTATATTATCATACACATGTATCAATTTCTTTATTGACTAATGATGTTATAGTTGATATCATTAACAAGTATGTATCTATC",
+                    "midline": "|||||||||||||||||||||||||||||||||||| |||||||||||||||       || |||||||||| ||||||||||||"
+                  },
+                  {
+                    "num": 6,
+                    "bit_score": 84.2413,
+                    "score": 92,
+                    "evalue": 1.32526e-18,
+                    "identity": 49,
+                    "query_from": 2378,
+                    "query_to": 2428,
+                    "query_strand": "Plus",
+                    "hit_from": 4768,
+                    "hit_to": 4718,
+                    "hit_strand": "Minus",
+                    "align_len": 51,
+                    "gaps": 0,
+                    "qseq": "ACAGTCGGGCCGACATCATTAGCATCAACCTTATTCATCGATGTCGGAGAA",
+                    "hseq": "ACAGTCGGGCCAACATCATCAGCATCAACCTTATTCATCGATGTCGGAGAA",
+                    "midline": "||||||||||| ||||||| |||||||||||||||||||||||||||||||"
+                  },
+                  {
+                    "num": 7,
+                    "bit_score": 79.7328,
+                    "score": 87,
+                    "evalue": 5.63515e-17,
+                    "identity": 48,
+                    "query_from": 2378,
+                    "query_to": 2428,
+                    "query_strand": "Plus",
+                    "hit_from": 4681,
+                    "hit_to": 4631,
+                    "hit_strand": "Minus",
+                    "align_len": 51,
+                    "gaps": 0,
+                    "qseq": "ACAGTCGGGCCGACATCATTAGCATCAACCTTATTCATCGATGTCGGAGAA",
+                    "hseq": "ACAGTCGGGCCAACATCATCAGCATCAACCTTATTCATCGATATCGGAGAA",
+                    "midline": "||||||||||| ||||||| |||||||||||||||||||||| ||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 18,
+              "eff_space": 30300524,
+              "kappa": 0.41,
+              "lambda": 0.625,
+              "entropy": 0.78
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

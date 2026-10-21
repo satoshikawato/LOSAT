@@ -1,0 +1,144 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -3,
+        "gap_open": 2,
+        "gap_extend": 2,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "qn1",
+            "query_len": 480,
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "sn1",
+                    "title": "sn1"
+                  }
+                ],
+                "len": 488,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 599.392,
+                    "score": 303,
+                    "evalue": 1.63172e-175,
+                    "identity": 394,
+                    "query_from": 31,
+                    "query_to": 453,
+                    "query_strand": "Plus",
+                    "hit_from": 46,
+                    "hit_to": 466,
+                    "hit_strand": "Plus",
+                    "align_len": 425,
+                    "gaps": 6,
+                    "qseq": "ATGTGGATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGGATTTGCTGGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAA--TGGTGAGATTCACAGATCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCCACTACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC",
+                    "hseq": "ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGCATTTGCTG----CCTAAGGATATGGCAAACCCAGGATTGTCGAAGACGGATACGTTGCATAGGTCAGCAATGGGTCTGTGGAGGCATAAGCATCTCAAGGGTATGTGTGTAACGTGGTGAGAATCACAGATCAATCTCTCCGGCATTGCAAACCTAACCATGACGCTAACTGCGAGAAATTTAAGATCTTCCACAACATGGTGGGTCATGGGAGAACAGCATCTGAGGGCAAC",
+                    "midline": "|||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||| ||||||||    |||||||| ||||||| |||||||| || |||||||||||||||||||| | ||| |||||||||||||| ||||||| ||| |||| ||||||||||||  |||||||| ||||||||||||||||||||||||| |||  |||||||||||||||||  |||||| |||||||||||||| ||||||||||||||||||||||||||||||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "sn2",
+                    "title": "sn2 subject nucleotide beta reverse"
+                  }
+                ],
+                "len": 477,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 378.025,
+                    "score": 191,
+                    "evalue": 7.09236e-109,
+                    "identity": 361,
+                    "query_from": 36,
+                    "query_to": 450,
+                    "query_strand": "Plus",
+                    "hit_from": 452,
+                    "hit_to": 41,
+                    "hit_strand": "Minus",
+                    "align_len": 418,
+                    "gaps": 9,
+                    "qseq": "GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATG--AAG-TATGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGGATTTGCTGGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATGGGTCTGTGGATGCATAAGTATCCCAAGTGTATGTGTGTAATGGTGAGATTCACAGATCAATCTCTCCGGCATTGGAAAATTAACCATGACGCTAACTTTGAGAAACTTAAGATCTTCCACTACATGGTGGGTCATGGGAGAACAGCATCTGAGGGC",
+                    "hseq": "GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGGGCTTAGTGAAGTGATGGACGATCCCAAAATACAGTATGGGCCAATGGCTGTAATGAAGGGCATGGAGCACTATTGCCCGCCCGCTAATCTGAGCTGGAAAGTCCGTATGTTTAGTTTTGGGTTTTCATCCGATATCCACGCTTGCAATTTGTGGCTTTGCTCGATCCCTAAGTAGATGGCACTCCCAGGATTGGGGAAGTCGAATACG-TG-----GTCAGAAAACGGTCCGTGGATGCATAAGTATCCCAAGTGTAAGTGTGTACAGGTGTGATTCACAAATTACTCTCTCTGGCAATGGAAAATTAGCCATGACGCTAACTGTGAGAAACTTAAGATCCTCCACTACATGGTGGGTCATGGGAGAACAGCAGCTGAGGGC",
+                    "midline": "||||||||||||||||||||||||||||||||||| |||| || ||||||||||||| || ||||||| | ||||||| ||||||||||||||||||  |||| ||||||||  |||||| ||| ||||||||||||||| ||||   || | || |||||| |||||||||||| |||||||||| ||| |||||| |||||||||| ||||||||  |||||||| | ||||| || ||||| ||     | ||||||  |||| |||||||||||||||||||||||||| |||||||  |||| |||||||| || | |||||| |||| |||||||||| |||||||||||||| |||||||||||||||| |||||||||||||||||||||||||||||||| ||||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 10,
+              "eff_space": 444150,
+              "kappa": 0.7,
+              "lambda": 1.37,
+              "entropy": 1.2
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -3,
+        "gap_open": 2,
+        "gap_extend": 2,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "qn2 unrelated nucleotide (no hits expected)",
+            "query_len": 90,
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 8,
+              "eff_space": 77818,
+              "kappa": 0.7,
+              "lambda": 1.37,
+              "entropy": 1.2
+            },
+            "message": "No hits found"
+          }
+        ]
+      }
+    }
+  }
+]
+}

@@ -21,7 +21,8 @@
 //!   taken out of `extend` and one out of `seed`, and `clock_overhead` is the time taken out.
 //!   The split is an estimate: the counter is not serializing.
 //! - `XStatsProbe` (LOSAT_X_STATS; it takes the place of the timer when both are set) counts, per
-//!   cell of the unit's diagonal table (one cell is one diagonal of the concatenated query):
+//!   cell of the unit's diagonal table (one cell is one diagonal of the concatenated query; with
+//!   LOSAT_X_TBXUNITMASK's masked tables, the diagonals that share the cell):
 //!   the hits per cell over the unit and over each `scansub` batch (`h̄` and its histogram,
 //!   1 / 2 / 3 / 4-7 / 8+, by cells and by hits), the isolated hits (no other hit on the cell
 //!   less than `window` subject positions before or after it), the runs of consecutive

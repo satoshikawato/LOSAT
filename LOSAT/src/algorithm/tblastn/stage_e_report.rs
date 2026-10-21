@@ -68,6 +68,21 @@ impl ShownSubjects<'_> {
             Self::Database { pairwise, .. } => Some(pairwise),
         }
     }
+
+    /// The database title of the Seq-annots (`RunRecord::db_title`; NCBI's
+    /// `m_DbInfo.front().definition`, the `Database:` line's title), `None` for `-subject`.
+    pub(super) fn db_title(&self) -> Option<&[u8]> {
+        self.pairwise_database()
+            .map(|pairwise| pairwise.definition.as_slice())
+    }
+
+    /// The ordinal ID of the reported database sequence of rank `rank`, `None` for `-subject`.
+    pub(super) fn ordinal(&self, rank: usize) -> Option<u32> {
+        match self {
+            Self::Fasta { .. } => None,
+            Self::Database { reported, .. } => Some(reported.ordinals[rank]),
+        }
+    }
 }
 
 // NCBI c++/src/algo/blast/format/blast_format.cpp:759-835,1411-1458:
@@ -119,6 +134,7 @@ pub(super) fn render(
     mask_lowercase: bool,
     query_warning_lines: &[Vec<u8>],
     ranges: &ReportRanges<'_>,
+    xml_values: super::blast_xml::XmlValues,
 ) -> Result<()> {
     ensure!(
         query_records.len() == hitlists.len(),
@@ -131,6 +147,30 @@ pub(super) fn render(
         hitlist.drop_zero_score_hsps();
     }
     let hitlists: &[KappaResultHitList] = hitlists;
+    // BLAST XML (outfmt 5): its texts are made, and what NCBI cannot write is refused, before
+    // any format writes (`-out` is already created, empty, as NCBI's).
+    let xml = if outputs
+        .formats
+        .iter()
+        .any(|format| format_number(format.outfmt) == 5)
+    {
+        Some(super::blast_xml::prepare(
+            xml_values,
+            query_records,
+            subject_records,
+            subject_letters,
+            shown,
+            hitlists,
+            parameters,
+            query_validity,
+            scoring,
+            matrix_name,
+            seg,
+            ranges,
+        )?)
+    } else {
+        None
+    };
     // The tabular subject IDs, made before any format is written: a subject that NCBI
     // writes part of a row for and then stops at (RP-20) is rejected first
     // (`tabular_subject_ids`).
@@ -221,6 +261,51 @@ pub(super) fn render(
                 max_target_seqs_given,
                 ranges,
                 probe.as_mut(),
+                warnings.as_mut(),
+            )?,
+            // BLAST XML: one document per run, a header before the first query and a
+            // trailer after the last (`blast_xml`).
+            5 => xml
+                .as_ref()
+                .expect("XML prepared for TBLASTN outfmt 5")
+                .write(
+                    &mut writer,
+                    query_records,
+                    subject_letters,
+                    hitlists,
+                    genetic_code,
+                    seg,
+                    mask_lowercase,
+                    ranges,
+                    warnings.as_mut(),
+                )?,
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
+            // ```c++
+            //     if (m_FormatType == CFormattingArgs::eAsnText || m_FormatType == CFormattingArgs::eJsonSeqalign) {
+            //         if (results.HasAlignments()) {
+            //     	    CRef<CSeq_align_set> aln_set (new CSeq_align_set);
+            //             CBlastFormatUtil::PruneSeqalign(*(results.GetSeqAlign()), *aln_set, m_HitlistSize);
+            //             if(m_FormatType == CFormattingArgs::eAsnText)
+            //             	m_Outfile << MSerial_AsnText << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+            //             else
+            //             	m_Outfile << MSerial_Json << *x_WrapAlignmentInSeqAnnot(aln_set, db_title);
+            //         }
+            // ```
+            // (`eAsnBinary` is the same pruning and `MSerial_AsnBinary`,
+            // blast_format.cpp:699-705.) The Seq-annot of each query with alignments.
+            number @ (8 | 9 | 12) => super::seqalign::write_tblastn_seqalign(
+                match number {
+                    8 => crate::report::serial::SerialFormat::AsnText,
+                    9 => crate::report::serial::SerialFormat::AsnBinary,
+                    _ => crate::report::serial::SerialFormat::Json,
+                },
+                &mut writer,
+                query_records,
+                subject_records,
+                subject_letters,
+                shown,
+                hitlists,
+                ranges,
                 warnings.as_mut(),
             )?,
             _ => bail!("unsupported TBLASTN outfmt {}", format.outfmt),
@@ -446,7 +531,7 @@ fn write_tabular(
 /// ```
 /// A subject interval has the strand both, so `RemapAlignToLoc` (seq_align_util.cpp:71-78)
 /// moves its row by the interval's start.
-fn record_coordinates(
+pub(super) fn record_coordinates(
     ranges: &ReportRanges<'_>,
     q_idx: usize,
     s_idx: usize,
@@ -580,6 +665,7 @@ mod tests {
                     max_target_seqs: 500,
                     query_offsets: &[],
                     subject_set: Default::default(),
+                    engine_positives: false,
                 },
                 mode == 2,
                 true,
@@ -625,6 +711,10 @@ mod tests {
                     queries: &Default::default(),
                     subjects: &Default::default(),
                     epilog: true,
+                },
+                super::super::blast_xml::XmlValues {
+                    expect: 10.0,
+                    soft_masking: false,
                 },
             )
             .unwrap();
@@ -1178,4 +1268,40 @@ fn aligned_sequences(
         }
     }
     Ok((query_string, subject_string))
+}
+
+/// `aligned_sequences` into two strings the caller keeps, for the outfmt 5 rows, which are
+/// made for one HSP at a time. It calls `aligned_sequences` as it is (the rows of 0/6/7 are
+/// made by that function alone, unchanged since the base of OF4b, DECISIONS 23) and moves its
+/// strings into the caller's.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn aligned_sequences_into(
+    query: &[u8],
+    subject: SubjectNt<'_>,
+    window_buffer: &mut Vec<u8>,
+    code: &GeneticCode,
+    target: &mut TargetTranslation<'_>,
+    frame: i8,
+    q_start: i32,
+    s_start: i32,
+    s_end: i32,
+    script: &[GapEditOp],
+    report_masks: &[(usize, usize)],
+    query_string: &mut String,
+    subject_string: &mut String,
+) -> Result<()> {
+    (*query_string, *subject_string) = aligned_sequences(
+        query,
+        subject,
+        window_buffer,
+        code,
+        target,
+        frame,
+        q_start,
+        s_start,
+        s_end,
+        script,
+        report_masks,
+    )?;
+    Ok(())
 }

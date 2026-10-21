@@ -139,6 +139,38 @@ Run from `LOSAT/`:
     rm tests/db_search/bslice.pjs
     cp tests/db_search/bslice.pin tests/db_search/bnophr.pin; cp tests/db_search/bslice.psq tests/db_search/bnophr.psq
 
+Query-coverage inputs of the ungapped searches (row `db.blastx.ungapped_qcov60_mts1.6`, and the TBLASTX
+`-subject` fixtures `qcov.tblastx.*` of `LOSAT/tests/outfmt0_manifest.tsv`), written by `make_qcov_inputs.py`
+(run from `LOSAT/`; random letters from `random.Random(20261019)`):
+
+- `qcovp_q.fna`: the query, 600 random bases.
+- `qcovp.fna`: `s_part` (the query's first 330 bases unchanged between random flanks: 55 % of the query and the
+  best e-value) and `s_full` (the whole query with 25 % substitutions: a weaker e-value).
+- `qcovp.faa`: the translations of the same two (`p_part`, `p_full`; `p_full` has its own substitutions), the
+  records of the database `qcovp`.
+- With `-max_target_seqs 1 -qcov_hsp_perc 60` NCBI reports `s_full` (`p_full` with `blastx -ungapped
+  -comp_based_stats 0`): an ungapped search removes the HSPs below the coverage before the preliminary hit list,
+  which has the final size, is filled (`blast_engine.c:1538`). Without the coverage it reports `s_part` alone.
+
+The database (version 4, no `-parse_seqids`; only `.pin .psq .phr` are kept, the `.pjs` file was deleted). Run from
+`LOSAT/`:
+
+    python3 tests/db_search/make_qcov_inputs.py
+    makeblastdb -in tests/db_search/qcovp.faa -dbtype prot -out tests/db_search/qcovp \
+        -title "query coverage, ungapped" -blastdb_version 4
+    rm tests/db_search/qcovp.pjs
+
+`bxbest` (row `db.blastx.best_hsp.0`) is the database of `tests/fasta/outfmt0/bx_best_hsp_subject.faa`, the Ensembl
+R64-1-1 peptide YOL075C, searched with `tests/fasta/outfmt0/bx_best_hsp_query.fna`, the Ensembl BDGP6.54 cDNA
+FBtr0100310 (both copied unchanged from the release files; the same pair is the `-subject` fixture `best_hsp.blastx` of
+`LOSAT/tests/outfmt0_manifest.tsv`). The subject's first HSP by E-value is a sum-statistics pair of 119 and 45.4 bits
+(Expect(2) = 8e-38) and its third has 131 bits (5e-35), so the description table shows 131 and 5e-35. Version 4, no
+`-parse_seqids`, `.pjs` deleted; run from `LOSAT/`:
+
+    makeblastdb -in tests/fasta/outfmt0/bx_best_hsp_subject.faa -dbtype prot -out tests/db_search/bxbest \
+        -title "BLASTX best HSP: yeast YOL075C" -blastdb_version 4
+    rm tests/db_search/bxbest.pjs
+
 Nucleotide-versus-nucleotide translated inputs (TBLASTX rows, `db.tblastx.*`), written by `make_tblastx_inputs.py`
 (run from `LOSAT/`; slices of `tests/fasta/MelaMJNV.fasta`, `LvMJNV.fasta` and `PemoMJNVA.fasta`; mutations and
 ambiguity codes come from a seeded generator). TBLASTX is slow, so the database holds 14 kb and the queries 5 kb:
@@ -194,3 +226,42 @@ search that feeds `-dbsize` to the link cutoffs gives 111 rows, at 100000000 it 
 `LOSAT/tests/seqdb/db` (see `LOSAT/tests/seqdb/README.md`). A rebuild changes the dates stored in the index
 files, so the frozen outputs (`Posted date:` lines) must then be frozen again:
 `python3 LOSAT/tests/db_search_fixtures.py freeze --ncbi-bin DIR`.
+
+OF5a (XML2 and JSON, outfmt 15 and 16): `x16_taxid.faa` (the two `-subject` records of the XML2 probe sprot_tax, `st1` and
+`st2`) and `x16_taxid_q.faa` (its query), and `x16_taxid`, built from them with a taxid in each definition line (only `.pin
+.psq .phr` are kept):
+
+    makeblastdb -in tests/db_search/x16_taxid.faa -dbtype prot -out tests/db_search/x16_taxid \
+        -title "x16 taxid 9606" -blastdb_version 4 -taxid 9606
+
+NCBI writes the taxid in the `Hit` description of outfmt 13-16 (`HitDescr_taxid`); the rows `db.sa.x16_taxid.15` and
+`db.sa.x16_taxid.16` freeze that, with no `taxdb.bti` on the search path.
+
+OF5a part 1b (taxonomy names in outfmt 15 and 16): `x16_taxid_99990` and `x16_taxid_7777` are `x16_taxid` built with
+`-taxid 99990` and `-taxid 7777` (same command); `x16_taxid_q2.faa` is `x16_taxid_q.faa` with a third query (`qp3`, hits
+both subjects) so that a subject is a `Hit` of two queries. The rows `db.sa.x16_taxid.<case>.{15,16}` set
+`BLASTDB=tests/seqdb/taxdb/<variant>` in `extra_args` (a `BLASTDB=DIR` token is the environment variable of both programs,
+not an argument): `good`, `bad_magic`, `count_larger`, `no_btd`, `empty_fields`, `offset_last_past_end` and
+`tests/seqdb/taxdb_xml2/no_9606` (`make_taxdb.py write` of `taxdb.tsv` without the row of 9606). The rows `.nonascii.*`
+(`high_bytes_utf8`) are LOSAT refusals: NCBI aborts its XML2 writer there.
+
+OF5a part 2 (XML2 and JSON of BLASTN): `x16_ntitles.fna` (three records: an empty definition line, a title with an
+ampersand, angle brackets and quotes, and `.`) and `x16_ntaxid.fna` with its query `x16_ntaxid_q.fna` (`qn1` hits both
+subjects, `qn2` none, `qn3` is a slice of `qn1`), and the databases built from them (only `.nhr .nin .nsq` are kept):
+
+    makeblastdb -in tests/db_search/x16_ntitles.fna -dbtype nucl -out tests/db_search/x16_ntitles \
+        -title "x16 ntitles" -blastdb_version 4
+    makeblastdb -in tests/db_search/x16_ntaxid.fna -dbtype nucl -out tests/db_search/x16_ntaxid \
+        -title "x16 ntaxid 9606" -blastdb_version 4 -taxid 9606
+    makeblastdb -in tests/db_search/x16_ntaxid.fna -dbtype nucl -out tests/db_search/x16_ntaxid_99990 \
+        -title "x16 ntaxid 99990" -blastdb_version 4 -taxid 99990
+
+The rows `db.sa.x16_ntitles.{15,16}` and `db.sa.x16_ntaxid[.<case>].{15,16}` are the BLASTN counterparts of the BLASTP rows of
+part 1 and 1b (`BLASTDB=DIR` tokens as there); `db.sa.x16_ntaxid.lastoff.16` freezes the messages that NCBI's BLASTN
+writes (`Error: [blastn] ...`).
+
+- `bpqb_q.faa`: 30 records of `tests/fasta/MeenMJNV.faa` of 280-560 letters (11,940 letters, so NCBI searches
+  them in two query batches of its default size; LOSAT's block search takes one block at the default
+  `LOSAT_X_BPQBLOCK` of 50,000 letters and two with a value of at most 10,000, which
+  `tests/blastp_query_blocks_fmt.rs` runs against these frozen bytes), the first 30 of that length in file order. Rows `db.sa.bpqb.{5,8,9,12}`: `blastp -db paja -evalue 0.1
+  -max_target_seqs 2 -max_hsps 1` (9 rows of outfmt 6: some queries have hits, some do not).

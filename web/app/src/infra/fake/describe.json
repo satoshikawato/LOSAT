@@ -71,6 +71,11 @@
     "takes_value": true
    },
    {
+    "flag": "-qcov_hsp_perc",
+    "help": "Percent query coverage per hsp",
+    "takes_value": true
+   },
+   {
     "flag": "-reward",
     "help": "Reward for a nucleotide match (default: 1 for megablast and blastn-short, 2 for blastn and dc-megablast; LOSAT does not support 0)",
     "takes_value": true
@@ -190,6 +195,11 @@
    {
     "flag": "-max_hsps",
     "help": "",
+    "takes_value": true
+   },
+   {
+    "flag": "-qcov_hsp_perc",
+    "help": "Percent query coverage per hsp",
     "takes_value": true
    },
    {
@@ -394,6 +404,16 @@
     "takes_value": true
    },
    {
+    "flag": "-max_hsps",
+    "help": "Set maximum number of HSPs per subject sequence to save for each query",
+    "takes_value": true
+   },
+   {
+    "flag": "-qcov_hsp_perc",
+    "help": "Percent query coverage per hsp",
+    "takes_value": true
+   },
+   {
     "flag": "-ungapped",
     "help": "",
     "takes_value": false,
@@ -495,6 +515,16 @@
    {
     "flag": "-max_target_seqs",
     "help": "Maximum number of aligned sequences to keep (default: 500)",
+    "takes_value": true
+   },
+   {
+    "flag": "-max_hsps",
+    "help": "Set maximum number of HSPs per subject sequence to save for each query",
+    "takes_value": true
+   },
+   {
+    "flag": "-qcov_hsp_perc",
+    "help": "Percent query coverage per hsp",
     "takes_value": true
    },
    {

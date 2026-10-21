@@ -443,6 +443,10 @@ mod even_gap;
 //         formatter.PrintEpilog(opt);
 // ```
 pub mod report;
+// NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
+// Seq-aligns of each query's final hit list (outfmt 8, 12).
+mod blast_xml;
+mod seqalign;
 
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:254-254
 // ```c++

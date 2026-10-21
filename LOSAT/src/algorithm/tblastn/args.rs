@@ -198,6 +198,11 @@ pub struct TblastnArgs {
     // An omitted value keeps the default hit list size (500).
     #[arg(long, value_parser = blastn_count, help = "Maximum number of aligned sequences to keep [default: 500]")]
     pub max_target_seqs: Option<usize>,
+    // NCBI blast_args.cpp:196-206: -qcov_hsp_perc in 0..100, -max_hsps >= 1.
+    #[arg(long = "max_hsps", value_parser = blastn_count, help = "Set maximum number of HSPs per subject sequence to save for each query")]
+    pub max_hsps: Option<usize>,
+    #[arg(long = "qcov_hsp_perc", value_parser = tblastn_query_coverage, help = "Percent query coverage per hsp")]
+    pub qcov_hsp_perc: Option<f64>,
     #[arg(long, default_value_t = 1, value_parser = blastn_count)]
     pub num_threads: usize,
     #[arg(long)]
@@ -243,6 +248,10 @@ pub struct ResolvedTblastnArgs {
     /// The -max_target_seqs value, which also sets the numbers of descriptions and
     /// alignments of the pairwise report (500 and 250 when it is not given).
     pub max_target_seqs_given: Option<usize>,
+    /// The -max_hsps value, or 0 (every HSP).
+    pub max_hsps: usize,
+    /// The -qcov_hsp_perc value, or 0 (no filter).
+    pub query_cov_hsp_perc: f64,
     pub composition_mode: crate::blastinput::app::CompositionMode,
     /// The `-comp_based_stats` value as typed.
     pub comp_based_stats: String,
@@ -480,7 +489,7 @@ impl TblastnArgs {
         //     }
         // ```
         let choice = parse_formatting_string(&self.outfmt)?;
-        formatting_handler_check(&choice, false)?;
+        formatting_handler_check(&choice, crate::blastinput::app::Program::Tblastn)?;
         if self.max_target_seqs.is_some_and(|size| size < 5) {
             diagnostics.write_all(&crate::report::query_warnings::few_matches_warning(
                 "tblastn",
@@ -531,6 +540,9 @@ impl TblastnArgs {
             window_size,
             hitlist_size: self.max_target_seqs.unwrap_or(500),
             max_target_seqs_given: self.max_target_seqs,
+            // NCBI blast_args.cpp:313-319: SetQueryCovHspPerc, SetMaxHspsPerSubject.
+            max_hsps: self.max_hsps.unwrap_or(0),
+            query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             composition_mode,
             comp_based_stats: self.comp_based_stats.clone(),
             num_threads: self.num_threads,
@@ -719,7 +731,7 @@ impl TblastnArgs {
         // option handlers run; a format that NCBI runs and LOSAT does not write is rejected
         // there too.
         let choice = app::parse_formatting_string(&args.outfmt)?;
-        let format = app::report_format(&choice, "TBLASTN", false, args.out.as_deref(), false)?;
+        let format = app::report_format(&choice, app::Program::Tblastn, args.out.as_deref())?;
         // LOSAT's thread capability is checked before any input or output, as for BLASTN.
         crate::utils::threading::validate_threads(args.num_threads)?;
         // NCBI reference: ncbi-blast/c++/src/algo/blast/blastinput/blast_args.cpp:2553-2562
@@ -966,6 +978,20 @@ fn search_cli(
         Some(name) => Some(super::database::TblastnDatabase::open(name, &settings)?),
         None => None,
     };
+    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // (`report::serial::seqalign::check_database`).
+    if let (Some(database), Some(serial)) = (
+        database.as_ref(),
+        crate::blastinput::app::ReportFormat::from_number(choice.number)
+            .and_then(crate::report::serial::SerialFormat::of),
+    ) {
+        crate::report::serial::seqalign::check_database(
+            serial,
+            database.name(),
+            &database.pairwise_database().definition,
+            crate::blastinput::app::Program::Tblastn,
+        )?;
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:200-221
     // ```c++
     //         SDataLoaderConfig dlconfig =
@@ -1183,8 +1209,8 @@ pub fn run_local(
     }
     for format in &outputs.formats {
         let choice = app::parse_formatting_string(format.outfmt)?;
-        if app::report_format(&choice, "TBLASTN", false, None, false)?.is_none() {
-            app::formatting_handler_check(&choice, false)?;
+        if app::report_format(&choice, app::Program::Tblastn, None)?.is_none() {
+            app::formatting_handler_check(&choice, app::Program::Tblastn)?;
             app::xinclude_check(&choice)?;
         }
     }
@@ -1324,6 +1350,14 @@ fn search(
         Some(stores) => SubjectLetters::Packed(stores),
         None => SubjectLetters::Records(&subject_seqs),
     };
+    // What the requested formats need beyond outfmt 0, 6 and 7, decided once for the search
+    // (`ReportNeeds`): with the Seq-aligns (outfmt 8, 12), the engine positives of the
+    // composition-adjusted matches (`LocalStageDProfile::engine_positives`).
+    let engine_positives =
+        crate::report::record::ReportNeeds::of(outputs.formats.iter().filter_map(|format| {
+            app::ReportFormat::from_number(super::stage_e_report::format_number(format.outfmt))
+        }))
+        .seqalign;
     // A database's numbers and `-dbsize` (`SubjectSetNumbers`), and the `Database:` lines of
     // a database search.
     let subject_set = SubjectSetNumbers {
@@ -1331,6 +1365,17 @@ fn search(
         dbsize: args.dbsize,
     };
     let pairwise_database = database.map(TblastnDatabase::pairwise_database);
+    // BLAST XML cannot carry a database name outside US-ASCII (NCBI's stream throws): refused
+    // before the search, and before anything is written.
+    if let Some(database) = database {
+        if outputs
+            .formats
+            .iter()
+            .any(|format| super::stage_e_report::format_number(format.outfmt) == 5)
+        {
+            crate::report::blast_xml::names::check_database_name("TBLASTN", database.name())?;
+        }
+    }
     let subject_path = match database {
         Some(_) => None,
         None => Some(
@@ -1489,6 +1534,7 @@ fn search(
                 max_target_seqs: resolved.hitlist_size,
                 query_offsets: &query_offsets[range],
                 subject_set,
+                engine_positives,
             },
             composition_mode2,
             resolved.sum_stats,
@@ -1529,6 +1575,7 @@ fn search(
                             max_target_seqs: resolved.hitlist_size,
                             query_offsets: &query_offsets[range.clone()],
                             subject_set,
+                            engine_positives,
                         },
                         composition_mode2,
                         resolved.sum_stats,
@@ -1557,6 +1604,33 @@ fn search(
             //                                                   seqinfo_src,
             //                                                   search_msgs));
             // ```
+            // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_traceback.c:1763-1777
+            // ```c++
+            //     if(hit_params->options->query_cov_hsp_perc > 0 || hit_params->options->max_hsps_per_subject > 0 ||
+            //        (hit_params->options->hsp_filt_opt != NULL && hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
+            //     	s_FilterBlastResults(results, hit_params->options, query_info, program_number);
+            //     }
+            //
+            //     /* Re-sort the hit lists according to their best e-values, because they
+            //        could have changed. Only do this for a database search. */
+            //     if (BlastSeqSrcGetTotLen(seq_src) > 0) {
+            //         Blast_HSPResultsSortByEvalue(results);
+            //     }
+            // ```
+            // `-max_hsps` and `-qcov_hsp_perc` filter the batch's final hit lists (each query's
+            // context is its searched letters), which the search has sorted by e-value; the
+            // sort is a total order (best e-value, first score, OID), so sorting again after
+            // the filter gives NCBI's order. A search with hits has subject letters.
+            if resolved.max_hsps > 0 || resolved.query_cov_hsp_perc > 0.0 {
+                for (hitlist, query) in batch_results.iter_mut().zip(&query_seqs[range.clone()]) {
+                    hitlist.filter_results(
+                        resolved.max_hsps,
+                        resolved.query_cov_hsp_perc,
+                        query.len(),
+                    );
+                    hitlist.sort_by_evalue_for_positive_totlen();
+                }
+            }
             // `-db`: the definition lines of the batch's final hit lists are read where NCBI
             // makes the batch's Seq-aligns (`database::read_titles`); a header file that NCBI
             // cannot read fails this batch, after the reports of the batches before.
@@ -1630,11 +1704,38 @@ fn search(
         // (`query_warning`): the O characters read as X, and the message of its set-up (a
         // query without letters) or of its Karlin-Altschul parameters (an invalid query
         // with letters).
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
+        // ```c++
+        //     if (m_FormatType == CFormattingArgs::eAsnText
+        //       ...
+        //       || m_FormatType == CFormattingArgs::eJsonSeqalign
+        //       || m_FormatType == CFormattingArgs::eSAM)
+        //     {
+        //         x_PrintStructuredReport(results, queries);
+        //         return;
+        //     }
+        //     ...
+        //     if (results.HasWarnings()) {
+        //         ERR_POST(Warning << results.GetWarningStrings());
+        //     }
+        // ```
+        // A structured format (outfmt 8, 12) writes none of a query's own warnings
+        // (`ReportFormat::writes_query_warnings`); the warnings go with the first format.
+        let result_warnings = outputs.formats.first().is_none_or(|format| {
+            crate::blastinput::app::ReportFormat::from_number(super::stage_e_report::format_number(
+                format.outfmt,
+            ))
+            .is_none_or(crate::blastinput::app::ReportFormat::writes_query_warnings)
+        });
         let query_warning_lines: Vec<Vec<u8>> = queries
             .iter()
             .zip(&query_validity)
             .enumerate()
             .map(|(index, (query, valid))| {
+                let mut lines = batches.warnings[index].clone();
+                if !result_warnings {
+                    return lines;
+                }
                 let mut messages = Vec::new();
                 messages.extend(crate::report::query_warnings::replaced_o_message(
                     query.seq(),
@@ -1644,7 +1745,6 @@ fn search(
                 } else if !valid {
                     messages.push(crate::report::query_warnings::INVALID_QUERY_MESSAGE.to_string());
                 }
-                let mut lines = batches.warnings[index].clone();
                 lines.extend(crate::report::query_warnings::query_warning(
                     "tblastn",
                     query_input.ordinal(index),
@@ -1716,6 +1816,10 @@ fn search(
                 // ```
                 // A run that stops at a query batch writes no epilog.
                 epilog: batches.stop.is_none() && failed.is_none(),
+            },
+            super::blast_xml::XmlValues {
+                expect: resolved.evalue,
+                soft_masking: resolved.soft_masking,
             },
         )?;
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
@@ -1880,9 +1984,23 @@ mod tests {
             &parse(&["-comp_based_stats", "0", "-max_target_seqs", "1073741824"]).unwrap(),
         )
         .unwrap();
+        // NCBI blast_args.cpp:313-319: -qcov_hsp_perc and -max_hsps.
+        let resolved = parse(&["-max_hsps", "2", "-qcov_hsp_perc", "50.5"])
+            .unwrap()
+            .resolve()
+            .unwrap();
+        assert_eq!((resolved.max_hsps, resolved.query_cov_hsp_perc), (2, 50.5));
+        let resolved = parse(&[]).unwrap().resolve().unwrap();
+        assert_eq!((resolved.max_hsps, resolved.query_cov_hsp_perc), (0, 0.0));
         for extra in [
-            &["-max_hsps", "2"][..],
-            &["-db_soft_mask", "1"],
+            &["-max_hsps", "0"][..],
+            &["-qcov_hsp_perc", "100.5"],
+            &["-qcov_hsp_perc", "nan"],
+        ] {
+            assert!(parse(extra).is_err(), "{extra:?}");
+        }
+        for extra in [
+            &["-db_soft_mask", "1"][..],
             &["-remote"],
             &["-in_pssm", "p.asn"],
             &["-use_sw_tback"],

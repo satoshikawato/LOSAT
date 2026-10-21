@@ -1,0 +1,234 @@
+Seq-annot ::= {
+  desc {
+    user {
+      type str "Hist Seqalign",
+      data {
+        {
+          label str "Hist Seqalign",
+          data bool TRUE
+        }
+      }
+    },
+    user {
+      type str "Blast Type",
+      data {
+        {
+          label str "blastp",
+          data int 2
+        }
+      }
+    },
+    user {
+      type str "Blast Database Title",
+      data {
+        {
+          label str "n/a",
+          data bool FALSE
+        }
+      }
+    }
+  },
+  data align {
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 957
+        },
+        {
+          id str "blast_score",
+          value int 957
+        },
+        {
+          id str "e_value",
+          value real { 608052161782043, 10, -143 }
+        },
+        {
+          id str "bit_score",
+          value real { 373244226432951, 10, -12 }
+        },
+        {
+          id str "num_ident",
+          value int 183
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 243
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 996677740863787, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 5,
+        ids {
+          local str "Query_1",
+          local str "Subject_1"
+        },
+        starts {
+          100,
+          109,
+          133,
+          -1,
+          139,
+          142,
+          198,
+          -1,
+          209,
+          201
+        },
+        lens {
+          33,
+          6,
+          59,
+          11,
+          191
+        },
+        strands {
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 44
+        },
+        {
+          id str "blast_score",
+          value int 44
+        },
+        {
+          id str "e_value",
+          value real { 139388638598967, 10, -15 }
+        },
+        {
+          id str "bit_score",
+          value real { 215570136204075, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 11
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 2
+        },
+        {
+          id str "num_positives",
+          value int 16
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 84734219269103, 10, -13 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 3,
+        ids {
+          local str "Query_1",
+          local str "Subject_1"
+        },
+        starts {
+          147,
+          41,
+          -1,
+          46,
+          152,
+          48
+        },
+        lens {
+          5,
+          2,
+          19
+        },
+        strands {
+          plus,
+          plus,
+          plus,
+          plus,
+          plus,
+          plus
+        }
+      }
+    },
+    {
+      type partial,
+      dim 2,
+      score {
+        {
+          id str "score",
+          value int 32
+        },
+        {
+          id str "blast_score",
+          value int 32
+        },
+        {
+          id str "e_value",
+          value real { 427693051841438, 10, -14 }
+        },
+        {
+          id str "bit_score",
+          value real { 169346187093993, 10, -13 }
+        },
+        {
+          id str "num_ident",
+          value int 7
+        },
+        {
+          id str "comp_adjustment_method",
+          value int 1
+        },
+        {
+          id str "num_positives",
+          value int 15
+        },
+        {
+          id str "hsp_percent_coverage",
+          value real { 913787375415282, 10, -14 }
+        }
+      },
+      segs denseg {
+        dim 2,
+        numseg 1,
+        ids {
+          local str "Query_1",
+          local str "Subject_3"
+        },
+        starts {
+          331,
+          610
+        },
+        lens {
+          26
+        },
+        strands {
+          plus,
+          plus
+        }
+      }
+    }
+  }
+}

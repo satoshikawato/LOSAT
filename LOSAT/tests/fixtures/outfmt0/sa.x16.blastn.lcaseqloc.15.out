@@ -1,0 +1,113 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastn",
+      "version": "BLASTN 2.17.0+",
+      "reference": "Zheng Zhang, Scott Schwartz, Lukas Wagner, and Webb Miller (2000), \"A greedy algorithm for aligning DNA sequences\", J Comput Biol 2000; 7(1-2):203-14.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "expect": 10,
+        "sc_match": 1,
+        "sc_mismatch": -2,
+        "gap_open": 0,
+        "gap_extend": 0,
+        "filter": "L;m;"
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "qn1 lcase",
+            "query_len": 270,
+            "query_masking": [
+              {
+                "from": 30,
+                "to": 39
+              },
+              {
+                "from": 200,
+                "to": 229
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "sn1",
+                    "title": "sn1 subject nucleotide alpha"
+                  }
+                ],
+                "len": 488,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 401.843,
+                    "score": 217,
+                    "evalue": 2.63593e-116,
+                    "identity": 253,
+                    "query_from": 31,
+                    "query_to": 300,
+                    "query_strand": "Plus",
+                    "hit_from": 46,
+                    "hit_to": 311,
+                    "hit_strand": "Plus",
+                    "align_len": 270,
+                    "gaps": 4,
+                    "qseq": "atgtggatggAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGAAGTATGAGTTTTCCTCCGAtatccacccttgcaatttatggatttgctgGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGTTGCATATGGCAGAAATGGGTCTG",
+                    "hseq": "ATGTGGATGGAACACTCCGTGCTAGAAGCAATTTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGCAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATAAGCTGGAAAGTCCTTATGAAGTTTGAGTTTTCCTCCGATATCCACCCTTGCAATTTATGCATTTGCTG----CCTAAGGATATGGCAAACCCAGGATTGTCGAAGACGGATACGTTGCATAGGTCAGCAATGGGTCTG",
+                    "midline": "|||||||||||||||||||||||| |||||| ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||| |||||||||||||||||||||| |||||||||||||||||||||||||||||||||||| ||||||||    |||||||| ||||||| |||||||| || |||||||||||||||||||| | ||| ||||||||||"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "sn2",
+                    "title": "sn2 subject nucleotide beta reverse"
+                  }
+                ],
+                "len": 477,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 261.498,
+                    "score": 141,
+                    "evalue": 4.66768e-74,
+                    "identity": 211,
+                    "query_from": 36,
+                    "query_to": 277,
+                    "query_strand": "Plus",
+                    "hit_from": 452,
+                    "hit_to": 208,
+                    "hit_strand": "Minus",
+                    "align_len": 245,
+                    "gaps": 3,
+                    "qseq": "GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGTGCTTCGTAAAGTGATGGACGACCCGAAAATACGGGATGGGCCCATGGCTGTAATGAAGGGCTGGGAGAACTATTGCTGGCCCGCGAATATGAGCTGGAAAGTCCTTATGA--AGTA-TGAGTTTTCCTCCGAtatccacccttgcaatttatggatttgctgGATCCCTAAGGAGATGGCAACCCCAGGATGGTGGAAGACGGATACGT",
+                    "hseq": "GATGGAACACTCCGTGCTAAAAGCAAATTTTGCCGGGCTTAGTGAAGTGATGGACGATCCCAAAATACAGTATGGGCCAATGGCTGTAATGAAGGGCATGGAGCACTATTGCCCGCCCGCTAATCTGAGCTGGAAAGTCCGTATGTTTAGTTTTGGGTTTTCATCCGATATCCACGCTTGCAATTTGTGGCTTTGCTCGATCCCTAAGTAGATGGCACTCCCAGGATTGGGGAAGTCGAATACGT",
+                    "midline": "||||||||||||||||||||||||||||||||||| |||| || ||||||||||||| || ||||||| | ||||||| ||||||||||||||||||  |||| ||||||||  |||||| ||| ||||||||||||||| ||||   |||  || |||||| |||||||||||| |||||||||| ||| |||||| |||||||||| ||||||||  |||||||| | ||||| || ||||||"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 11,
+              "eff_space": 244237,
+              "kappa": 0.46,
+              "lambda": 1.28,
+              "entropy": 0.85
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

@@ -22,7 +22,7 @@ use LOSAT::api::local_blast::{run_local_tblastx, FormatOutput, OutputSink, Repor
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 3] = ["0", "6", "7"];
+const FORMATS: [&str; 7] = ["0", "6", "7", "8", "9", "12", "5"];
 
 /// Two queries against three subjects cut from two genomes; the first query overlaps
 /// two subjects.
@@ -208,7 +208,7 @@ fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
     let queries = queries(&inputs.query.0);
     let subjects = subjects(&inputs.subject.0);
-    for outfmt in ["5", "6 qseqid", "abc"] {
+    for outfmt in ["2", "6 qseqid", "abc"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![
@@ -509,9 +509,17 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
             let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
             let mut outputs =
                 ReportOutputs::single(outfmt, OutputSink::Writer(&mut report), &mut diagnostics);
-            run_local_tblastx(inputs.args(&[]), &queries, &subjects, &mut outputs)
-                .unwrap_or_else(|error| panic!("outfmt {outfmt} {defline:?}: {error}"));
+            let result = run_local_tblastx(inputs.args(&[]), &queries, &subjects, &mut outputs);
             drop(outputs);
+            // BLAST XML: NCBI crashes on the punctuation-only title of a subject with hits
+            // (outfmt 0 and 5 alike), so LOSAT refuses it and writes nothing.
+            if outfmt == "5" && defline == ", ," {
+                let error = result.expect_err("outfmt 5 refuses the punctuation title");
+                assert!(error.to_string().contains("crashes on"), "{error}");
+                assert!(report.is_empty(), "nothing is written");
+                continue;
+            }
+            result.unwrap_or_else(|error| panic!("outfmt {outfmt} {defline:?}: {error}"));
             if outfmt == "0" {
                 let report = String::from_utf8(report).expect("UTF-8 report");
                 assert!(report.contains(heading), "{defline:?}: {report}");
@@ -631,10 +639,36 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
             && commented.contains("# BLAST processed 3 queries\n"),
         "{commented}"
     );
+    // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
+    // ```c++
+    //     if (m_FormatType == CFormattingArgs::eAsnText
+    //       ...
+    //       || m_FormatType == CFormattingArgs::eJsonSeqalign
+    //       || m_FormatType == CFormattingArgs::eSAM)
+    //     {
+    //         x_PrintStructuredReport(results, queries);
+    //         return;
+    //     }
+    //     ...
+    //     if (results.HasWarnings()) {
+    //         ERR_POST(Warning << results.GetWarningStrings());
+    //     }
+    // ```
+    // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9 and 12 write no query
+    // result warnings, so their CLI runs equal `run_local` with that format alone.
     for (index, outfmt) in FORMATS.into_iter().enumerate() {
         let (cli_output, cli_stderr) = inputs.cli(outfmt, &[]);
         assert!(run.outputs[index] == cli_output, "outfmt {outfmt}");
-        assert_eq!(run.diagnostics, cli_stderr, "outfmt {outfmt}");
+        if matches!(outfmt, "5" | "8" | "9" | "12") {
+            let alone = inputs.run(&[outfmt], &[], false);
+            assert_eq!(
+                String::from_utf8_lossy(&alone.diagnostics),
+                "Warning: [tblastx] Subject_2 s2 no letters: Subject sequence contains no data\n"
+            );
+            assert_eq!(alone.diagnostics, cli_stderr, "outfmt {outfmt}");
+        } else {
+            assert_eq!(run.diagnostics, cli_stderr, "outfmt {outfmt}");
+        }
     }
 }
 

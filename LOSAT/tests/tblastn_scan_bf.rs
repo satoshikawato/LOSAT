@@ -26,7 +26,9 @@
 //!
 //! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` (the presence bit is set at
 //! few subject words) and all 115 of them (72,314 residues, four query batches; the offset array
-//! fills, so the scan stops and resumes); the subject is `tests/fasta/MelaMJNV.fasta`.
+//! fills, so the scan stops and resumes); the subject is `tests/fasta/MelaMJNV.fasta`. Every run
+//! sets `LOSAT_X_TBNSCANBYTE=0`: that switch (on by default, `tests/tblastn_scan_byte.rs`) scans
+//! tblastn's table in place of both loops compared here.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -47,8 +49,9 @@ fn queries() -> &'static [PathBuf; 2] {
     })
 }
 
-/// One TBLASTN run against `MelaMJNV.fasta` (`-outfmt 6` on standard output) with `variables`
-/// and `LOSAT_X_STATS` as its only `LOSAT_*` variables, except `LOSAT_BLASTX_WORKER_LOG`: a build
+/// One TBLASTN run against `MelaMJNV.fasta` (`-outfmt 6` on standard output) with `variables`,
+/// `LOSAT_X_STATS` and `LOSAT_X_TBNSCANBYTE=0` as its only `LOSAT_*` variables, except
+/// `LOSAT_BLASTX_WORKER_LOG`: a build
 /// with the worker probe (`--all-features`) writes to that file as soon as a pool starts, so the
 /// caller's value is kept, or a file of the tests is named. Returns the report and the standard
 /// error.
@@ -72,6 +75,7 @@ fn tblastn(query: &Path, threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/MelaMJNV.fasta"))
         .args(["-outfmt", "6", "-num_threads", &threads.to_string()])
         .env("LOSAT_X_STATS", "1")
+        .env("LOSAT_X_TBNSCANBYTE", "0")
         .envs(variables.iter().copied())
         .output()
         .expect("run LOSAT");

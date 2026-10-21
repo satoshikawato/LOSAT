@@ -8,6 +8,7 @@ mod seg_lnfact;
 pub mod threading;
 pub mod winmask;
 pub mod x_logclone;
+pub mod x_seg_trim_memo;
 pub(crate) mod xahead;
 pub(crate) mod xdrop_simd;
 pub(crate) mod xenv;

@@ -85,6 +85,43 @@ fn translate_sequence(seq: &[u8], table: &GeneticCode) -> (Vec<u8>, usize) {
     (aa_seq, len_aa)
 }
 
+/// The residue of codon `offset` of `frame` (+1..+3, -1..-3) of `sequence` as the search
+/// translates it: the residue `generate_frames` puts at index `offset + 1` of that frame (the
+/// codon from `3 * offset + |frame| - 1` of the sequence, or of its reverse complement
+/// `dna::revcomp`, translated by `codon_to_aa_ncbistdaa`). The report reads single codons
+/// with it (the engine counts of the Seq-aligns, `report::engine_counts`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1299-1308
+/// ```c
+///                /* First produce the reverse strand of the nucleotide sequence */
+///               GetReverseNuclSequence(subject_blk->sequence_start, subject_blk->length,
+///                     &nucl_seq_rev);
+///
+///               for (context = 0; context < num_frames; ++context) {
+///                  int frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+///                  retval->translations[context] = (Uint1*) malloc((2+subject_blk->length/3)*sizeof(Uint1));
+///                  BLAST_GetTranslation(subject_blk->sequence_start, nucl_seq_rev,
+///                     subject_blk->length, frame, retval->translations[context], gen_code_string);
+///               }
+/// ```
+pub(crate) fn frame_residue(sequence: &[u8], frame: i8, offset: usize, table: &GeneticCode) -> u8 {
+    let first = 3 * offset + frame.unsigned_abs() as usize - 1;
+    if frame > 0 {
+        codon_to_aa_ncbistdaa(&sequence[first..first + 3], table)
+    } else {
+        // `dna::revcomp(sequence)[j]` is `dna::complement(sequence[len - 1 - j])`.
+        let last = sequence.len() - 1 - first;
+        codon_to_aa_ncbistdaa(
+            &[
+                dna::complement(sequence[last]),
+                dna::complement(sequence[last - 1]),
+                dna::complement(sequence[last - 2]),
+            ],
+            table,
+        )
+    }
+}
+
 /// Generate all six reading frames (3 forward + 3 reverse) for a DNA sequence
 ///
 /// # Arguments

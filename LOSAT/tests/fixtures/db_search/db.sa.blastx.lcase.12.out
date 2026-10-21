@@ -1,0 +1,1848 @@
+{
+  "Seq_annot": {
+    "desc": [
+      {
+        "user": {
+          "type": {
+            "str": "Hist Seqalign"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "Hist Seqalign"
+              },
+              "data": {
+                "bool": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Type"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "blastx"
+              },
+              "data": {
+                "int": 3
+              }
+            }
+          ]
+        }
+      },
+      {
+        "user": {
+          "type": {
+            "str": "Blast Database Title"
+          },
+          "data": [
+            {
+              "label": {
+                "str": "protein slice of a shrimp virus proteome"
+              },
+              "data": {
+                "bool": false
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "data": {
+      "align": [
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 590
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 590
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 1.61263536577532e-68
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 231.875982071282
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 128
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 199
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 30.7
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2635,
+                      "to": 2706,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 3,
+                      "to": 26,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Query_1"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 27,
+                      "to": 30,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2311,
+                      "to": 2634,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 31,
+                      "to": 138,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Query_1"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 139,
+                      "to": 163,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2290,
+                      "to": 2310,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 164,
+                      "to": 170,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2284,
+                      "to": 2289,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 32
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2257,
+                      "to": 2283,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 171,
+                      "to": 179,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2254,
+                      "to": 2256,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 32
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2203,
+                      "to": 2253,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 180,
+                      "to": 196,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Query_1"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 197,
+                      "to": 197,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2191,
+                      "to": 2202,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 198,
+                      "to": 201,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2188,
+                      "to": 2190,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 32
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 1984,
+                      "to": 2187,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 202,
+                      "to": 269,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Query_1"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 270,
+                      "to": 275,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 1945,
+                      "to": 1983,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 276,
+                      "to": 288,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Query_1"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 289,
+                      "to": 307,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 1801,
+                      "to": 1944,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 308,
+                      "to": 355,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 186
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 186
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 5.20591459852311e-17
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 76.2553534006717
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 30
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 43
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 6.1
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 1324,
+                      "to": 1491,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 521,
+                      "to": 576,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "partial",
+          "dim": 2,
+          "score": [
+            {
+              "id": {
+                "str": "score"
+              },
+              "value": {
+                "int": 89
+              }
+            },
+            {
+              "id": {
+                "str": "blast_score"
+              },
+              "value": {
+                "int": 89
+              }
+            },
+            {
+              "id": {
+                "str": "e_value"
+              },
+              "value": {
+                "real": 2.24021698688367e-05
+              }
+            },
+            {
+              "id": {
+                "str": "bit_score"
+              },
+              "value": {
+                "real": 38.8909945366884
+              }
+            },
+            {
+              "id": {
+                "str": "num_ident"
+              },
+              "value": {
+                "int": 57
+              }
+            },
+            {
+              "id": {
+                "str": "comp_adjustment_method"
+              },
+              "value": {
+                "int": 2
+              }
+            },
+            {
+              "id": {
+                "str": "num_positives"
+              },
+              "value": {
+                "int": 103
+              }
+            },
+            {
+              "id": {
+                "str": "hsp_percent_coverage"
+              },
+              "value": {
+                "real": 22
+              }
+            }
+          ],
+          "segs": {
+            "std": [
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2845,
+                      "to": 2913,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 44,
+                      "to": 66,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2827,
+                      "to": 2844,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 32
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2791,
+                      "to": 2826,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 67,
+                      "to": 78,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2788,
+                      "to": 2790,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 32
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2668,
+                      "to": 2787,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 79,
+                      "to": 118,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Query_1"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 119,
+                      "to": 122,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2617,
+                      "to": 2667,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 123,
+                      "to": 139,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Query_1"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 140,
+                      "to": 165,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2578,
+                      "to": 2616,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 166,
+                      "to": 178,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Query_1"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 179,
+                      "to": 191,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2557,
+                      "to": 2577,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 192,
+                      "to": 198,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "empty": {
+                      "local": {
+                        "str": "Query_1"
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 199,
+                      "to": 199,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2374,
+                      "to": 2556,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 200,
+                      "to": 260,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2353,
+                      "to": 2373,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 32
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2284,
+                      "to": 2352,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 261,
+                      "to": 283,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2281,
+                      "to": 2283,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "empty": {
+                      "general": {
+                        "db": "BL_ORD_ID",
+                        "tag": {
+                          "id": 32
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "dim": 2,
+                "ids": [
+                  {
+                    "local": {
+                      "str": "Query_1"
+                    }
+                  },
+                  {
+                    "general": {
+                      "db": "BL_ORD_ID",
+                      "tag": {
+                        "id": 32
+                      }
+                    }
+                  }
+                ],
+                "loc": [
+                  {
+                    "int": {
+                      "from": 2269,
+                      "to": 2280,
+                      "strand": "minus",
+                      "id": {
+                        "local": {
+                          "str": "Query_1"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "int": {
+                      "from": 284,
+                      "to": 287,
+                      "strand": "unknown",
+                      "id": {
+                        "general": {
+                          "db": "BL_ORD_ID",
+                          "tag": {
+                            "id": 32
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

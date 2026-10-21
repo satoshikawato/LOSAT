@@ -180,9 +180,22 @@ pub(super) fn partition(
     x_partition(&x_group_spans(contexts, starts), rule.letters, min_len)
 }
 
+// No NCBI counterpart: the rule alone (module doc), without the conditions of `partition` that
+// depend on diagnostics (the probes, LOSAT_X_TBXEXTBATCHSHADOW), for LOSAT_X_TBXUNITMASK
+// (x_pair_par.rs module doc), whose choices must not change with them.
+/// Whether the switch's rule cuts a group of `contexts` (first contexts `starts`) at `threads`
+/// threads, whatever the diagnostics switches say.
+pub(super) fn rule_cuts(contexts: &[QueryContext], starts: &[usize], threads: usize) -> bool {
+    let Some(rule) = slice_rule() else {
+        return false;
+    };
+    let min_len = rule.min_span_threads.div_ceil(threads.max(1) as u64);
+    x_partition(&x_group_spans(contexts, starts), rule.letters, min_len).is_some()
+}
+
 // No NCBI counterpart: the rule's input (module doc).
 /// The query offsets `[a, b)` of each group (`group_starts`'s first contexts `starts`).
-fn x_group_spans(contexts: &[QueryContext], starts: &[usize]) -> Vec<(i32, i32)> {
+pub(super) fn x_group_spans(contexts: &[QueryContext], starts: &[usize]) -> Vec<(i32, i32)> {
     let end = contexts
         .last()
         .map(|c| c.frame_base + c.aa_len as i32)
@@ -566,14 +579,16 @@ impl XPairPar {
         init_hsps: &mut S,
     ) {
         let group = self.x_sliced(unit);
+        // EXPERIMENT (LOSAT_X_TBXHITBF): the scan in slices or its branch-free hit loop
+        // (x_tbx_hitbf.rs).
         if !shadow() {
-            self.scan_unit_sliced::<S, B, PF>(group, unit, inp, scratch, init_hsps);
+            self.scan_unit_sliced_or_bf::<S, B, PF>(group, unit, inp, scratch, init_hsps);
             return;
         }
         let mut reference = S::default();
         self.scan_unit::<S, XShadowRef, PF>(unit, inp, scratch, &mut reference, &mut XShadowRef);
         let reference_diag = std::mem::take(&mut scratch.diag);
-        let scans = self.scan_unit_sliced::<S, B, PF>(group, unit, inp, scratch, init_hsps);
+        let scans = self.scan_unit_sliced_or_bf::<S, B, PF>(group, unit, inp, scratch, init_hsps);
         let mut sorted = init_hsps.clone();
         sorted.x_sort();
         reference.x_sort();
@@ -623,7 +638,29 @@ impl XPairPar {
     /// Scans one unit of the cut batch's group `group` in slices and saves its init HSPs into
     /// `init_hsps`. Returns the number of slices scanned.
     #[inline(always)]
-    fn scan_unit_sliced<S: XInitSink, const B: bool, const PF: bool>(
+    pub(super) fn scan_unit_sliced<S: XInitSink, const B: bool, const PF: bool>(
+        &self,
+        group: &XSliced,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+    ) -> u64 {
+        self.scan_unit_sliced_hits::<S, B, PF, false>(group, unit, inp, scratch, init_hsps)
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXHITBF, x_tbx_hitbf.rs): with `BF` the hits of a batch go through
+    // `x_hits_bf`, which takes the too-far and overlap outcomes without a branch and hands the
+    // others to `x_hit` (or `x_hit_batched` with `B`); without it this is the loop before the
+    // switch. `BF` runs only where `x_tbx_hitbf::fits` holds.
+    /// `scan_unit_sliced`, with `BF` the branch-free hit loop of LOSAT_X_TBXHITBF.
+    #[inline(always)]
+    pub(super) fn scan_unit_sliced_hits<
+        S: XInitSink,
+        const B: bool,
+        const PF: bool,
+        const BF: bool,
+    >(
         &self,
         group: &XSliced,
         unit: &XUnit,
@@ -684,8 +721,11 @@ impl XPairPar {
             scans += 1;
             // NCBI sizes the offset array from the table it scans (lookup_wrap.c:264-266).
             let offset_array_size: i32 = OFFSET_ARRAY_SIZE + sub.longest_chain;
+            // EXPERIMENT (LOSAT_X_TBXHITBF): with `BF` and `PF`, X_PREFETCH_AHEAD entries more, as
+            // in `scan_unit_hits`.
             let offset_pairs_len =
-                crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size);
+                crate::algorithm::tblastx::x_scan_bf::x_offset_pairs_len(offset_array_size)
+                    + if BF && PF { X_PREFETCH_AHEAD } else { 0 };
             if scratch.offset_pairs.len() < offset_pairs_len {
                 scratch
                     .offset_pairs
@@ -725,6 +765,48 @@ impl XPairPar {
                     }
                     let diag_ptr = scratch.diag.as_mut_ptr();
                     let offset_pairs_ptr = scratch.offset_pairs.as_ptr();
+                    // EXPERIMENT (LOSAT_X_TBXHITBF): the loop below, with the too-far and overlap
+                    // outcomes taken without a branch (x_tbx_hitbf.rs).
+                    if BF {
+                        // SAFETY: hits <= offset_array_size, and with `PF` the X_PREFETCH_AHEAD
+                        // entries after them are in offset_pairs too (sized above); every cell is
+                        // below width = scratch.diag.len() as below; `fits` holds (the caller's
+                        // rule); every candidate's cell is a cell of this unit's table.
+                        unsafe {
+                            x_tbx_hitbf::x_hits_bf::<_, PF>(
+                                diag_ptr,
+                                offset_pairs_ptr,
+                                hits as usize,
+                                XUnmasked { lo },
+                                width,
+                                window,
+                                wordsize,
+                                |cell, query_offset, subject_offset| {
+                                    if B {
+                                        x_tbx_extbatch::x_hit_batched(
+                                            diag_ptr,
+                                            cell,
+                                            query_offset,
+                                            subject_offset,
+                                            &h,
+                                            &mut b,
+                                            init_hsps,
+                                        );
+                                    } else {
+                                        x_hit(
+                                            &mut *diag_ptr.add(cell),
+                                            query_offset,
+                                            subject_offset,
+                                            &h,
+                                            init_hsps,
+                                            &mut XNoProbe,
+                                        );
+                                    }
+                                },
+                            )
+                        };
+                        continue;
+                    }
                     // [C] for (i = 0; i < hits; ++i)
                     for i in 0..hits as usize {
                         #[cfg(target_arch = "x86_64")]
@@ -936,9 +1018,34 @@ mod tests {
         }
     }
 
+    // No NCBI counterpart: one instance of the scan in slices by the bits of `variant`: batched
+    // extensions (2), the prefetch (1), the branch-free hit loop of LOSAT_X_TBXHITBF (4).
+    fn scan_sliced_variant<S: XInitSink>(
+        pp: &XPairPar,
+        variant: usize,
+        sliced: &XSliced,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        got: &mut S,
+    ) -> u64 {
+        match variant {
+            0 => {
+                pp.scan_unit_sliced_hits::<_, false, false, false>(sliced, unit, inp, scratch, got)
+            }
+            1 => pp.scan_unit_sliced_hits::<_, false, true, false>(sliced, unit, inp, scratch, got),
+            2 => pp.scan_unit_sliced_hits::<_, true, false, false>(sliced, unit, inp, scratch, got),
+            3 => pp.scan_unit_sliced_hits::<_, true, true, false>(sliced, unit, inp, scratch, got),
+            4 => pp.scan_unit_sliced_hits::<_, false, false, true>(sliced, unit, inp, scratch, got),
+            5 => pp.scan_unit_sliced_hits::<_, false, true, true>(sliced, unit, inp, scratch, got),
+            6 => pp.scan_unit_sliced_hits::<_, true, false, true>(sliced, unit, inp, scratch, got),
+            _ => pp.scan_unit_sliced_hits::<_, true, true, true>(sliced, unit, inp, scratch, got),
+        }
+    }
+
     // No NCBI counterpart: compares the scan in slices with `scan_unit` on the same units (module
     // doc, items 1-4), for slices built directly and filtered (item 5), with and without the
-    // batched extensions and the prefetch.
+    // batched extensions, the prefetch and the branch-free hit loop (LOSAT_X_TBXHITBF).
     #[test]
     fn slices_equal_scan_unit() {
         let alphabet = aa("ACDEKLMNPQRSTVWY");
@@ -1002,6 +1109,8 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: Some(direct),
+                mask_rule: None,
+                extents: Vec::new(),
             };
             let window = [40, 3 + BATCH as i32, 64][case % 3];
             let inp = XSubject {
@@ -1039,48 +1148,53 @@ mod tests {
                     let reference_diag = scratch.diag.clone();
                     reference.x_sort();
                     for sliced in [&pp.sliced.as_ref().unwrap()[g], &filtered[g]] {
-                        for variant in 0..4 {
+                        let mut plain: Vec<Vec<InitHSP>> = Vec::new();
+                        for variant in 0..8 {
                             let mut got: Vec<InitHSP> = Vec::new();
-                            match variant {
-                                0 => pp.scan_unit_sliced::<_, false, false>(
-                                    sliced,
-                                    &unit,
-                                    &inp,
-                                    &mut scratch,
-                                    &mut got,
-                                ),
-                                1 => pp.scan_unit_sliced::<_, false, true>(
-                                    sliced,
-                                    &unit,
-                                    &inp,
-                                    &mut scratch,
-                                    &mut got,
-                                ),
-                                2 => pp.scan_unit_sliced::<_, true, false>(
-                                    sliced,
-                                    &unit,
-                                    &inp,
-                                    &mut scratch,
-                                    &mut got,
-                                ),
-                                _ => pp.scan_unit_sliced::<_, true, true>(
-                                    sliced,
-                                    &unit,
-                                    &inp,
-                                    &mut scratch,
-                                    &mut got,
-                                ),
-                            };
+                            scan_sliced_variant(
+                                &pp,
+                                variant,
+                                sliced,
+                                &unit,
+                                &inp,
+                                &mut scratch,
+                                &mut got,
+                            );
                             assert!(
                                 scratch.diag == reference_diag,
                                 "case {case} frame {f} group {g} variant {variant}: table"
                             );
+                            if variant < 4 {
+                                plain.push(got.clone());
+                            } else {
+                                // LOSAT_X_TBXHITBF: the same records in the same order.
+                                assert_eq!(
+                                    got,
+                                    plain[variant - 4],
+                                    "case {case} frame {f} group {g} variant {variant}: order"
+                                );
+                            }
                             got.x_sort();
                             assert_eq!(
                                 got, reference,
                                 "case {case} frame {f} group {g} variant {variant}: records"
                             );
                         }
+                        // LOSAT_X_TBXHITBFSHADOW: both scans compared, the branch-free one's
+                        // records kept.
+                        let mut shadowed: Vec<InitHSP> = Vec::new();
+                        pp.scan_unit_sliced_mode::<_, true, false>(
+                            2,
+                            sliced,
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut shadowed,
+                        );
+                        assert_eq!(
+                            shadowed, plain[2],
+                            "case {case} frame {f} group {g}: shadow"
+                        );
                     }
                     records += reference.len();
                     // The compact records, sorted, are today's too.
@@ -1099,6 +1213,18 @@ mod tests {
                         &inp,
                         &mut scratch,
                         &mut compact,
+                    );
+                    let mut compact_bf: Vec<XUnitHsp> = Vec::new();
+                    pp.scan_unit_sliced_hits::<_, true, false, true>(
+                        &pp.sliced.as_ref().unwrap()[g],
+                        &unit,
+                        &inp,
+                        &mut scratch,
+                        &mut compact_bf,
+                    );
+                    assert_eq!(
+                        compact_bf, compact,
+                        "case {case} frame {f} group {g}: compact, branch-free"
                     );
                     compact.x_sort();
                     compact_ref.x_sort();

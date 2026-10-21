@@ -9,6 +9,7 @@ use crate::api::local_blast::{FormatProbe, HspIndex};
 use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::seq_range::{record_frame, Placements};
 use crate::config::ScoringMatrix;
+use crate::core::blast_hits::trim_by_max_hsps;
 use crate::report::outfmt6::{write_hit_fields_bytes, OutputConfig};
 use crate::report::pairwise::PairwiseHit;
 use crate::sequence::packed_subject::PackedNucleotide;
@@ -116,6 +117,24 @@ pub(crate) fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &
     crate::algorithm::blastx::report::display_codon(masks, code)
 }
 
+/// The displayed query and subject rows of an HSP, in uppercase: the HSP's codons of each
+/// sequence translated again from the nucleotides, the query with `-query_gencode` and the
+/// subject with `-db_gencode` (`query_code`, `db_code`). The HSP's residue offsets within
+/// its frames are those of the search (`Hit::sort_*`); `subject` holds the subject's letters
+/// from the codon of residue `subject_first` on (`SubjectLetters`; 0 for a whole record).
+fn displayed_rows(
+    hsp: &TblastxHsp,
+    query: &[u8],
+    subject: &[u8],
+    subject_first: usize,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+) -> (Vec<u8>, Vec<u8>) {
+    let (query_row, subject_row) =
+        displayed_residues(hsp, query, subject, subject_first, query_code, db_code);
+    (query_row.collect(), subject_row.collect())
+}
+
 // NCBI reference: c++/src/objtools/align_format/showalign.cpp:1948-1953
 // ```c++
 //             CRef<CAlnVec> avRef = x_GetAlnVecForSeqalign(**iter);
@@ -131,28 +150,71 @@ pub(crate) fn display_residue(sequence: &[u8], frame: i8, offset: usize, code: &
 //         alnVec->GetWholeAlnSeqString(0, m_QuerySeq);
 //         alnVec->GetWholeAlnSeqString(1, m_SubjectSeq);
 // ```
-/// The displayed query and subject rows of an HSP, in uppercase: the HSP's codons of each
-/// sequence translated again from the nucleotides, the query with `-query_gencode` and the
-/// subject with `-db_gencode` (`query_code`, `db_code`). The HSP's residue offsets within
-/// its frames are those of the search (`Hit::sort_*`); `subject` holds the subject's letters
-/// from the codon of residue `subject_first` on (`SubjectLetters`; 0 for a whole record).
-fn displayed_rows(
+/// The residues of the displayed rows of `hsp` (`displayed_rows`), query and subject, in row
+/// order, each translated as it is read.
+fn displayed_residues<'r>(
+    hsp: &'r TblastxHsp,
+    query: &'r [u8],
+    subject: &'r [u8],
+    subject_first: usize,
+    query_code: &'r GeneticCode,
+    db_code: &'r GeneticCode,
+) -> (impl Iterator<Item = u8> + 'r, impl Iterator<Item = u8> + 'r) {
+    let hit = &hsp.hit;
+    let query_frame = hit.query_frame as i8;
+    let query_row = (hit.sort_query_offset..hit.sort_query_end)
+        .map(move |offset| display_residue(query, query_frame, offset, query_code));
+    let subject_row = (hit.sort_subject_offset..hit.sort_subject_end).map(move |offset| {
+        display_residue(subject, hsp.subject_frame, offset - subject_first, db_code)
+    });
+    (query_row, subject_row)
+}
+
+// No NCBI counterpart: NCBI counts on the rows it formats (tabular.cpp:1003-1021, at
+// `pair_counts`). The identities pass needs only the counts, so it reads the residues pair by
+// pair and makes no rows. On LOSAT Web's threaded build (wasi-libc's dlmalloc, one lock for
+// the whole heap) the rows of this pass and of `PairwiseRows::hit` were the allocator's time
+// of the report stage on the pool (TBXRPTPAR): d04 at 8 threads 138-186 ms per search, of
+// which 60 ms under this pass (v4-W s8).
+/// `row_counts` of the displayed rows of `hsp` (`displayed_rows`), without making them. The
+/// HSPs are ungapped: both rows have the HSP's length.
+fn displayed_counts(
     hsp: &TblastxHsp,
     query: &[u8],
     subject: &[u8],
     subject_first: usize,
     query_code: &GeneticCode,
     db_code: &GeneticCode,
-) -> (Vec<u8>, Vec<u8>) {
+) -> (usize, usize) {
     let hit = &hsp.hit;
-    let query_frame = hit.query_frame as i8;
-    let query_row = (hit.sort_query_offset..hit.sort_query_end)
-        .map(|offset| display_residue(query, query_frame, offset, query_code))
-        .collect();
-    let subject_row = (hit.sort_subject_offset..hit.sort_subject_end)
-        .map(|offset| display_residue(subject, hsp.subject_frame, offset - subject_first, db_code))
-        .collect();
-    (query_row, subject_row)
+    debug_assert_eq!(
+        hit.sort_query_end - hit.sort_query_offset,
+        hit.sort_subject_end - hit.sort_subject_offset,
+        "ungapped HSP"
+    );
+    let (query_row, subject_row) =
+        displayed_residues(hsp, query, subject, subject_first, query_code, db_code);
+    pair_counts(query_row.zip(subject_row))
+}
+
+/// `displayed_rows` into two buffers (cleared first), which the BLAST XML reuses from HSP to HSP.
+#[allow(clippy::too_many_arguments)]
+fn displayed_rows_into(
+    hsp: &TblastxHsp,
+    query: &[u8],
+    subject: &[u8],
+    subject_first: usize,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+    query_row: &mut Vec<u8>,
+    subject_row: &mut Vec<u8>,
+) {
+    let (query_residues, subject_residues) =
+        displayed_residues(hsp, query, subject, subject_first, query_code, db_code);
+    query_row.clear();
+    query_row.extend(query_residues);
+    subject_row.clear();
+    subject_row.extend(subject_residues);
 }
 
 /// The letters of the subjects that the displayed rows read, by subject index.
@@ -169,13 +231,46 @@ pub(crate) enum SubjectLetters<'a> {
     },
 }
 
-impl SubjectLetters<'_> {
+impl<'a> SubjectLetters<'a> {
     /// The number of bases of subject `s_idx`.
     pub(crate) fn length(&self, s_idx: usize) -> usize {
         match self {
             Self::Records(records) => records[s_idx].seq().len(),
             Self::Stored { stores, ordinals } => stores[ordinals[s_idx] as usize].len(),
         }
+    }
+
+    /// The letters that the rows of `hsp` read and the residue offset they start at: its
+    /// record's letters from 0, or a stored subject's codons of the HSP made into `window`.
+    fn letters<'w>(&self, hsp: &TblastxHsp, window: &'w mut Vec<u8>) -> (&'w [u8], usize)
+    where
+        'a: 'w,
+    {
+        let s_idx = hsp.hit.s_idx as usize;
+        match self {
+            Self::Records(records) => (records[s_idx].seq(), 0),
+            Self::Stored { stores, ordinals } => {
+                let store = &stores[ordinals[s_idx] as usize];
+                let (from, to) = (hsp.hit.sort_subject_offset, hsp.hit.sort_subject_end);
+                let (start, length) = codon_window(store.len(), hsp.subject_frame, from, to);
+                store.letters_into(start, start + length, window);
+                (window, from)
+            }
+        }
+    }
+
+    /// The engine counts of `hsp` (`hsp_engine_counts`) against its subject; `window` is the
+    /// buffer of a stored subject's letters.
+    fn engine_counts(
+        &self,
+        hsp: &TblastxHsp,
+        query: &[u8],
+        query_code: &GeneticCode,
+        db_code: &GeneticCode,
+        window: &mut Vec<u8>,
+    ) -> (usize, usize) {
+        let (subject, subject_first) = self.letters(hsp, window);
+        hsp_engine_counts(hsp, query, subject, subject_first, query_code, db_code)
     }
 
     /// The displayed rows of `hsp` (`displayed_rows`) against its subject; `window` is the
@@ -188,19 +283,55 @@ impl SubjectLetters<'_> {
         db_code: &GeneticCode,
         window: &mut Vec<u8>,
     ) -> (Vec<u8>, Vec<u8>) {
-        let s_idx = hsp.hit.s_idx as usize;
-        match self {
-            Self::Records(records) => {
-                displayed_rows(hsp, query, records[s_idx].seq(), 0, query_code, db_code)
-            }
-            Self::Stored { stores, ordinals } => {
-                let store = &stores[ordinals[s_idx] as usize];
-                let (from, to) = (hsp.hit.sort_subject_offset, hsp.hit.sort_subject_end);
-                let (start, length) = codon_window(store.len(), hsp.subject_frame, from, to);
-                store.letters_into(start, start + length, window);
-                displayed_rows(hsp, query, window, from, query_code, db_code)
-            }
-        }
+        let (subject, subject_first) = self.letters(hsp, window);
+        displayed_rows(hsp, query, subject, subject_first, query_code, db_code)
+    }
+
+    // No NCBI counterpart for the attribute: on wasm32 the counts of an HSP stay a function of
+    // their own, called once per HSP, so that V8 runs the later HSPs in its optimized code (as
+    // `PairwiseRows::hit`); inlined, the serial pass over a whole list is one call in V8's
+    // baseline code. Other targets keep the compiler's choice.
+    /// The counts of the displayed rows of `hsp` (`displayed_counts`) against its subject;
+    /// `window` is the buffer of a stored subject's letters.
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
+    fn counts(
+        &self,
+        hsp: &TblastxHsp,
+        query: &[u8],
+        query_code: &GeneticCode,
+        db_code: &GeneticCode,
+        window: &mut Vec<u8>,
+    ) -> (usize, usize) {
+        let (subject, subject_first) = self.letters(hsp, window);
+        displayed_counts(hsp, query, subject, subject_first, query_code, db_code)
+    }
+}
+
+impl SubjectLetters<'_> {
+    /// `rows` into two buffers (cleared first): the BLAST XML builds the rows of one HSP at a
+    /// time into buffers it reuses.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn rows_into(
+        &self,
+        hsp: &TblastxHsp,
+        query: &[u8],
+        query_code: &GeneticCode,
+        db_code: &GeneticCode,
+        window: &mut Vec<u8>,
+        query_row: &mut Vec<u8>,
+        subject_row: &mut Vec<u8>,
+    ) {
+        let (subject, subject_first) = self.letters(hsp, window);
+        displayed_rows_into(
+            hsp,
+            query,
+            subject,
+            subject_first,
+            query_code,
+            db_code,
+            query_row,
+            subject_row,
+        );
     }
 }
 
@@ -221,6 +352,11 @@ fn codon_window(length: usize, frame: i8, from: usize, to: usize) -> (usize, usi
         length + 1 - 3 * to - shift
     };
     (start, number)
+}
+
+/// The identities and the positives (identities included) of two displayed rows.
+fn row_counts(query_row: &[u8], subject_row: &[u8]) -> (usize, usize) {
+    pair_counts(query_row.iter().copied().zip(subject_row.iter().copied()))
 }
 
 // NCBI reference: c++/src/objtools/align_format/showalign.cpp:2131-2150
@@ -249,11 +385,12 @@ fn codon_window(length: usize, frame: i8, from: usize, to: usize) -> (usize, usi
 //                         ++num_positives;
 //                     }
 // ```
-/// The identities and the positives (identities included) of two displayed rows.
-fn row_counts(query_row: &[u8], subject_row: &[u8]) -> (usize, usize) {
+/// The identities and the positives (identities included) of the letter pairs of two
+/// displayed rows, in row order (`row_counts`, `displayed_counts`).
+fn pair_counts(pairs: impl Iterator<Item = (u8, u8)>) -> (usize, usize) {
     let mut identities = 0;
     let mut positives = 0;
-    for (&q, &s) in query_row.iter().zip(subject_row) {
+    for (q, s) in pairs {
         if q == s {
             identities += 1;
             positives += 1;
@@ -285,14 +422,13 @@ pub(crate) fn set_displayed_identities(
 ) {
     let mut window = Vec::new();
     for hsp in hits {
-        let (query_row, subject_row) = subjects.rows(
+        let (identities, positives) = subjects.counts(
             hsp,
             queries[hsp.hit.q_idx as usize].seq(),
             query_code,
             db_code,
             &mut window,
         );
-        let (identities, positives) = row_counts(&query_row, &subject_row);
         let hit = &mut hsp.hit;
         hit.num_ident = identities;
         hit.num_positives = positives;
@@ -303,6 +439,118 @@ pub(crate) fn set_displayed_identities(
             0.0
         };
     }
+}
+
+/// NCBI's engine identities and positives (identities included) of an HSP, which its
+/// Seq-aligns show (`num_ident`, `num_positives`): counted on the residues the search
+/// translated (`translation::frame_residue`: the unmasked query frame with `-query_gencode`,
+/// the subject frame with `-db_gencode`, as the re-evaluation's buffers, not the display's
+/// table), a pair that is not an identity being positive by the search matrix. `subject`
+/// holds the subject's letters from the codon of residue `subject_first` on (as
+/// `displayed_rows`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:2708-2717
+/// ```c
+///       if (!delete_hsp) {
+///           const Uint1* query_nomask = query_blk->sequence_nomask +
+///               query_info->contexts[context].query_offset;
+///           Int4 align_length = 0;
+///           Blast_HSPGetNumIdentitiesAndPositives(query_nomask,
+///                    							    subject_start,
+///                                					hsp,
+///                                					score_params->options,
+///                                					&align_length,
+///                                					sbp);
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:770-792
+/// ```c
+///    if(NULL != sbp)
+///    {
+/// 	   if(sbp->protein_alphabet)
+/// 		   matrix = sbp->matrix->data;
+///    }
+///
+///    if (!hsp->gap_info) {
+///       /* Ungapped case. Check that lengths are the same in query and subject,
+///          then count number of matches. */
+///       if (q_length != s_length)
+///          return -1;
+///       align_length = q_length;
+///       for (i=0; i<align_length; i++) {
+///          if (*q == *s)
+///             num_ident++;
+///          else if (NULL != matrix) {
+///         	 if (matrix[*q][*s] > 0)
+///         		 num_pos ++;
+///             }
+///          q++;
+///          s++;
+///       }
+///    	}
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:831-832
+/// ```c
+///    if(NULL != matrix)
+/// 	   *num_pos_ptr = num_pos + num_ident;
+/// ```
+fn hsp_engine_counts(
+    hsp: &TblastxHsp,
+    query: &[u8],
+    subject: &[u8],
+    subject_first: usize,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+) -> (usize, usize) {
+    use super::translation::frame_residue;
+    let hit = &hsp.hit;
+    let query_frame = hit.query_frame as i8;
+    let mut identities = 0;
+    let mut positives = 0;
+    for (q_offset, s_offset) in (hit.sort_query_offset..hit.sort_query_end)
+        .zip(hit.sort_subject_offset..hit.sort_subject_end)
+    {
+        let q = frame_residue(query, query_frame, q_offset, query_code);
+        let s = frame_residue(
+            subject,
+            hsp.subject_frame,
+            s_offset - subject_first,
+            db_code,
+        );
+        if q == s {
+            identities += 1;
+        } else if crate::utils::matrix::blosum62_score(q, s) > 0 {
+            positives += 1;
+        }
+    }
+    (identities, identities + positives)
+}
+
+/// The engine counts of the Seq-aligns of `hits` (outfmt 8, 12), by HSP index: the engine's
+/// `num_ident` (the search's count, which `set_displayed_identities` replaces by the display
+/// count; read before it) and its `num_positives`, which the search does not count
+/// (`hsp_engine_counts`: the same letters give the same identities, checked in debug builds).
+/// Made only when a Seq-align format is requested.
+pub(crate) fn engine_counts(
+    hits: &[TblastxHsp],
+    queries: &[FastaRecord],
+    subjects: SubjectLetters<'_>,
+    query_code: &GeneticCode,
+    db_code: &GeneticCode,
+) -> Vec<(u32, u32)> {
+    let mut window = Vec::new();
+    hits.iter()
+        .map(|hsp| {
+            let (identities, positives) = subjects.engine_counts(
+                hsp,
+                queries[hsp.hit.q_idx as usize].seq(),
+                query_code,
+                db_code,
+                &mut window,
+            );
+            debug_assert_eq!(identities, hsp.hit.num_ident, "engine identities");
+            (hsp.hit.num_ident as u32, positives as u32)
+        })
+        .collect()
 }
 
 /// The SEG masks of a query in nucleotide coordinates, by frame.
@@ -468,6 +716,31 @@ fn shown_query_masks(
             (frame, shown)
         })
         .collect()
+}
+
+/// The masked regions of a query as NCBI hands them to the BLAST XML writer
+/// (`Blast_GetSeqLocInfoVector`, blast_aux.cpp:930-959): the SEG intervals of each frame in
+/// nucleotides, joined as `BlastSeqLocCombine(filter_out, 0)` joins them (only overlapping ones,
+/// `query_dna_masks`), moved into the query's record and without the whole interval
+/// (`shown_query_masks`), in context order, each with the frame of its context. `out` is cleared
+/// first.
+pub(crate) fn xml_query_masks(
+    stats: &TblastxQueryStats,
+    query_length: usize,
+    offset: usize,
+    out: &mut Vec<crate::report::blast_xml::QueryMask>,
+) {
+    out.clear();
+    let shown = shown_query_masks(query_dna_masks(stats, query_length), query_length, offset);
+    for (frame, ranges) in shown {
+        for (from, to) in ranges {
+            out.push(crate::report::blast_xml::QueryMask {
+                from,
+                to,
+                frame: i32::from(frame),
+            });
+        }
+    }
 }
 
 /// Lowercases the residues of a displayed query row that a shown SEG mask (record
@@ -666,8 +939,8 @@ impl<'a> PairwiseRows<'a> {
         hit.num_positives = positives;
         PairwiseHit {
             hit,
-            query_seq: Some(String::from_utf8_lossy(&query_row).into_owned()),
-            subject_seq: Some(String::from_utf8_lossy(&subject_row).into_owned()),
+            query_seq: Some(row_string(query_row)),
+            subject_seq: Some(row_string(subject_row)),
             query_frame: Some(query_frame),
             subject_frame: Some(subject_frame),
             positives: Some(positives),
@@ -685,6 +958,15 @@ impl<'a> PairwiseRows<'a> {
             sum_n: Some(hsp.num),
         }
     }
+}
+
+// No NCBI counterpart: a row becomes its `String` in its own buffer, with no copy and no
+// second allocation (see `displayed_counts` for why that counts on LOSAT Web).
+/// A displayed row as a `String`: valid UTF-8 (the rows are ASCII letters) keeps the row's
+/// buffer; a row with an invalid byte is the text of `String::from_utf8_lossy`.
+fn row_string(row: Vec<u8>) -> String {
+    String::from_utf8(row)
+        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
 }
 
 /// Moves a hit's reported coordinates from the searched letters into the records: by the
@@ -885,12 +1167,36 @@ pub(crate) fn write_tabular_row<W: Write>(
     )
 }
 
-/// The TBLASTX output formats (`-outfmt` 0, 6 and 7, `tblastx_outfmt`).
+/// The TBLASTX output formats (`-outfmt` 0, 5, 6, 7, 8, 9 and 12, `tblastx_outfmt`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TblastxOutputFormat {
     Pairwise,
     Tabular,
     TabularWithComments,
+    /// A Seq-annot of Seq-aligns (outfmt 8, 9, 12).
+    Seqalign(crate::report::serial::SerialFormat),
+    /// BLAST XML (outfmt 5, `tblastx/blast_xml.rs`).
+    Xml,
+}
+
+impl TblastxOutputFormat {
+    /// Whether the format is a table (outfmt 6, 7).
+    pub(crate) fn is_tabular(self) -> bool {
+        matches!(self, Self::Tabular | Self::TabularWithComments)
+    }
+
+    /// Whether the format writes the displayed identity counts of the rows
+    /// (`set_displayed_identities`): not the structured formats, which read the engine's counts
+    /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5).
+    pub(crate) fn reads_displayed_counts(self) -> bool {
+        !matches!(self, Self::Seqalign(_) | Self::Xml)
+    }
+
+    /// Whether the format writes a query's own warnings to standard error
+    /// (`ReportFormat::writes_query_warnings`: not the structured formats).
+    pub(crate) fn writes_query_warnings(self) -> bool {
+        self.reads_displayed_counts()
+    }
 }
 
 /// The format of a validated `-outfmt` value (`tblastx_outfmt`).
@@ -905,6 +1211,10 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
     match crate::blastinput::app::parse_formatting_string(outfmt).map(|choice| choice.number) {
         Ok(0) => TblastxOutputFormat::Pairwise,
         Ok(7) => TblastxOutputFormat::TabularWithComments,
+        Ok(8) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnText),
+        Ok(9) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnBinary),
+        Ok(12) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::Json),
+        Ok(5) => TblastxOutputFormat::Xml,
         _ => TblastxOutputFormat::Tabular,
     }
 }
@@ -983,6 +1293,72 @@ impl crate::algorithm::blastn::hsp::HitListEntry for TblastxHspList {
     }
 }
 
+/// The filters of NCBI's `s_FilterBlastResults` that TBLASTX has: `-max_hsps` (`max_hsps`,
+/// 0 when omitted) and `-qcov_hsp_perc` (`query_cov_hsp_perc`, 0 when omitted), with the
+/// nucleotide lengths of the queries (`query_lengths`, read for the coverage only).
+///
+/// NCBI reference: c++/src/algo/blast/core/blast_engine.c:1533-1538
+/// ```c
+///                } else {
+///         	   status = s_Blast_HSPListReapByPrelimEvalue(hsp_list, hit_params);
+///                }
+///
+///                Blast_HSPListReapByQueryCoverage(hsp_list,hit_params->options, query_info, program_number);
+/// ```
+/// NCBI reference: c++/src/algo/blast/core/blast_traceback.c:1763-1766
+/// ```c
+///     if(hit_params->options->query_cov_hsp_perc > 0 || hit_params->options->max_hsps_per_subject > 0 ||
+///        (hit_params->options->hsp_filt_opt != NULL && hit_params->options->hsp_filt_opt->subject_besthit_opts != NULL)) {
+///     	s_FilterBlastResults(results, hit_params->options, query_info, program_number);
+///     }
+/// ```
+/// TBLASTX is ungapped, so the preliminary stage removes the HSPs below the query coverage
+/// after the e-value reap, before the hit list (or the culling writer) receives a subject's
+/// HSPs, and a subject left without HSPs never reaches it. After the traceback (and the
+/// culling pipe) `s_FilterBlastResults` cuts each list to `-max_hsps` in its order (score
+/// order, or e-value order once the hit list has filled), without setting its best e-value
+/// again; its coverage reap then finds nothing to remove, because NCBI never splits the query
+/// of an ungapped search (split_query_cxx.cpp:60-61), so both reaps read the same context
+/// lengths.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct HitFilters<'a> {
+    pub max_hsps: usize,
+    pub query_cov_hsp_perc: f64,
+    pub query_lengths: &'a [usize],
+}
+
+impl HitFilters<'_> {
+    /// The lengths of the contexts (frames) of query `q_idx`, read only by the coverage.
+    fn context_lengths(&self, q_idx: u32) -> [i32; 6] {
+        if self.query_cov_hsp_perc > 0.0 {
+            super::hsp_culling::tblastx_context_lengths(self.query_lengths[q_idx as usize])
+        } else {
+            [0; 6]
+        }
+    }
+
+    /// `Blast_HSPListReapByQueryCoverage` on one subject's HSPs; returns whether none is
+    /// left (NCBI's collector and culling writer skip an empty list).
+    fn reap_by_query_coverage(
+        &self,
+        hsps: &mut Vec<TblastxHsp>,
+        context_lengths: &[i32; 6],
+    ) -> bool {
+        if self.query_cov_hsp_perc <= 0.0 {
+            return false;
+        }
+        crate::core::blast_hits::reap_by_query_coverage(hsps, self.query_cov_hsp_perc, |hsp| {
+            let context = super::hsp_culling::tblastx_context(hsp.hit.query_frame);
+            (
+                hsp.hit.sort_query_offset as i64,
+                hsp.hit.sort_query_end as i64,
+                i64::from(context_lengths[context]),
+            )
+        });
+        hsps.is_empty()
+    }
+}
+
 /// The final HSP list of a run in NCBI's order, which every format prints: per query (in
 /// input order) the subjects that the hit list keeps, best first, and each subject's
 /// HSPs in the order of its Seq-align.
@@ -1025,7 +1401,14 @@ impl crate::algorithm::blastn::hsp::HitListEntry for TblastxHspList {
 /// preliminary hit list of tblastx has the final size (`GetPrelimHitlistSize` without
 /// gapping or composition-based statistics, blast_hits.c:44-71), and the traceback of an
 /// ungapped search keeps it (`s_BlastPruneExtraHits` removes nothing).
-pub(crate) fn final_hit_order(hits: Vec<TblastxHsp>, hitlist_size: usize) -> Vec<TblastxHsp> {
+///
+/// `filters` (`-qcov_hsp_perc`, `-max_hsps`) apply where NCBI applies them
+/// (`HitFilters`).
+pub(crate) fn final_hit_order(
+    hits: Vec<TblastxHsp>,
+    hitlist_size: usize,
+    filters: &HitFilters<'_>,
+) -> Vec<TblastxHsp> {
     use crate::algorithm::blastn::hsp::HitList;
     let mut lists: std::collections::BTreeMap<(u32, u32), Vec<TblastxHsp>> =
         std::collections::BTreeMap::new();
@@ -1038,14 +1421,23 @@ pub(crate) fn final_hit_order(hits: Vec<TblastxHsp>, hitlist_size: usize) -> Vec
     let mut ordered = Vec::new();
     let mut lists = lists.into_iter().peekable();
     while let Some(&((q_idx, _), _)) = lists.peek() {
+        let context_lengths = filters.context_lengths(q_idx);
         let mut hit_list: HitList<TblastxHspList> = HitList::new(hitlist_size);
         while let Some(((_, oid), mut hsps)) = lists.next_if(|((q, _), _)| *q == q_idx) {
             hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
+            if filters.reap_by_query_coverage(&mut hsps, &context_lengths) {
+                continue;
+            }
             hit_list.update(TblastxHspList {
                 oid,
                 hsps,
                 best_evalue: 0.0,
             });
+        }
+        if filters.max_hsps > 0 {
+            for list in &mut hit_list.hsplist_array {
+                trim_by_max_hsps(&mut list.hsps, filters.max_hsps);
+            }
         }
         hit_list.sort_by_evalue();
         for mut list in hit_list.hsplist_array {
@@ -1142,6 +1534,7 @@ pub(crate) fn culled_hit_order(
     hitlist_size: usize,
     culling_limit: i32,
     query_lengths: &[usize],
+    filters: &HitFilters<'_>,
 ) -> Vec<TblastxHsp> {
     use super::hsp_culling::{tblastx_context_lengths, CullingWriter};
     use crate::algorithm::blastn::hsp::{HitList, HitListEntry};
@@ -1166,6 +1559,9 @@ pub(crate) fn culled_hit_order(
         let mut writer = CullingWriter::new(prelim_max, context_lengths);
         for (oid, mut hsps) in subjects {
             hsps.sort_by(|a, b| crate::common::score_compare_hsps(&a.hit, &b.hit));
+            if filters.reap_by_query_coverage(&mut hsps, &context_lengths) {
+                continue;
+            }
             writer.run(hsps, oid);
         }
         let mut culled = writer.finalize();
@@ -1199,6 +1595,7 @@ pub(crate) fn culled_hit_order(
                 best_evalue: 0.0,
             };
             list.update_best_evalue();
+            trim_by_max_hsps(&mut list.hsps, filters.max_hsps);
             final_lists.hsplist_array.push(list);
         }
         final_lists.hsplist_count = final_lists.hsplist_array.len();
@@ -1288,14 +1685,102 @@ mod tests {
         assert_eq!(row_counts(b"XAB*J", b"XADKI"), (2, 3));
     }
 
+    // The identities pass counts without the rows: the counts of a residue-by-residue loop
+    // over `display_residue` (the query with code 1, the subject with code 4), on every frame
+    // pair, for HSPs at the start, inside and at the end of the subject's frame, for a record and
+    // a stored subject with ambiguous bases; and the same as `row_counts` of the rows.
+    #[test]
+    fn displayed_counts_equal_the_counts_of_the_rows() {
+        let (query_code, db_code) = (GeneticCode::from_id(1), GeneticCode::from_id(4));
+        let subject: Vec<u8> = (0..120u32)
+            .map(|i| b"ACGTACGTRYNACGT"[(i * 7 + i / 5) as usize % 15])
+            .collect();
+        let query: Vec<u8> = (0..120u32)
+            .map(|i| b"ACGTACGTN"[(i * 11 + i / 4) as usize % 9])
+            .collect();
+        let records = [FastaRecord::new("s", b"s", &subject)];
+        let stores = [PackedNucleotide::from_subject_letters(&subject).expect("letters")];
+        let ordinals = [0u32];
+        let forms = [
+            SubjectLetters::Records(&records),
+            SubjectLetters::Stored {
+                stores: &stores,
+                ordinals: &ordinals,
+            },
+        ];
+        let frame_length = |frame: i8| (120 - usize::from(frame.unsigned_abs()) + 1) / 3;
+        let mut window = Vec::new();
+        let (mut mismatched, mut positive) = (0, 0);
+        for subjects in forms {
+            for query_frame in [1i8, 2, 3, -1, -2, -3] {
+                for subject_frame in [1i8, 2, 3, -1, -2, -3] {
+                    let last = frame_length(subject_frame) - 10;
+                    for (query_offset, subject_offset) in [(0, 0), (3, 7), (25, last)] {
+                        let mut hsp = hsp(0, 0, 10, 1.0, 0);
+                        hsp.hit.query_frame = query_frame as i32;
+                        hsp.hit.sort_query_offset = query_offset;
+                        hsp.hit.sort_query_end = query_offset + 10;
+                        hsp.hit.sort_subject_offset = subject_offset;
+                        hsp.hit.sort_subject_end = subject_offset + 10;
+                        hsp.subject_frame = subject_frame;
+                        let mut expected = (0, 0);
+                        for i in 0..10 {
+                            let q =
+                                display_residue(&query, query_frame, query_offset + i, &query_code);
+                            let s = display_residue(
+                                &subject,
+                                subject_frame,
+                                subject_offset + i,
+                                &db_code,
+                            );
+                            if q == s {
+                                expected.0 += 1;
+                                expected.1 += 1;
+                            } else if protein_display_score(ScoringMatrix::Blosum62, q, s) > 0 {
+                                expected.1 += 1;
+                            }
+                        }
+                        let counts =
+                            subjects.counts(&hsp, &query, &query_code, &db_code, &mut window);
+                        assert_eq!(
+                            counts, expected,
+                            "frames {query_frame} {subject_frame} at {subject_offset}"
+                        );
+                        let (query_row, subject_row) =
+                            subjects.rows(&hsp, &query, &query_code, &db_code, &mut window);
+                        assert_eq!(row_counts(&query_row, &subject_row), expected);
+                        mismatched += usize::from(expected.0 < 10);
+                        positive += usize::from(expected.1 > expected.0);
+                    }
+                }
+            }
+        }
+        // Not all identities, and some positives that are not identities.
+        assert!(mismatched > 0 && positive > 0, "{mismatched} {positive}");
+    }
+
+    // The rows are ASCII letters (uppercase and the lowercase of the masks): the String keeps
+    // the row; any other byte gives the text of `from_utf8_lossy`.
+    #[test]
+    fn row_strings_are_the_lossy_text_of_the_rows() {
+        for row in [&b"ARNDxyz*-"[..], b"", &[b'A', 0xff, b'C', 0xc3]] {
+            assert_eq!(
+                row_string(row.to_vec()),
+                String::from_utf8_lossy(row).into_owned()
+            );
+        }
+        let row = b"MKV".to_vec();
+        let pointer = row.as_ptr();
+        assert_eq!(row_string(row).as_ptr(), pointer);
+    }
+
     // NCBI c++/src/algo/blast/core/blast_filter.c:925-931: a minus-frame run starts one
     // codon too high, so its last residue is not masked.
     #[test]
     fn query_masks_convert_with_ncbis_frame_formulas() {
         let stats = TblastxQueryStats {
-            karlin: None,
-            eff_searchsp: 0,
             seg_masks: vec![(1, vec![(2, 5)]), (-1, vec![(2, 5)])],
+            ..TblastxQueryStats::default()
         };
         // A 30-nt query: frame lengths 10, 9, 9, so the DNA length is 30.
         let masks = query_dna_masks(&stats, 30);
@@ -1310,6 +1795,53 @@ mod tests {
         let mut minus = b"AAAAAAAAAA".to_vec();
         lowercase_query_row(&mut minus, -1, 0, 29, &masks);
         assert_eq!(&minus, b"AAaaAAAAAA");
+    }
+
+    // NCBI c++/src/algo/blast/core/blast_filter.c:993 (BlastSeqLocCombine(filter_out, 0)) joins
+    // only intervals that overlap (adjacent ones stay apart), per frame, before the conversion
+    // to nucleotides; the XML writer reads that list (blast_aux.cpp:930-959), in context order,
+    // each mask with its context's frame, moved into the record by the interval's start.
+    #[test]
+    fn xml_masks_join_overlapping_intervals_only_and_keep_the_frames() {
+        let stats = TblastxQueryStats {
+            // Frame 1: residues 2-4 and 5-7 (adjacent, apart), frame 2: 2-6 and 4-7 (joined),
+            // frame -1: one run.
+            seg_masks: vec![
+                (1, vec![(5, 8), (2, 5)]),
+                (2, vec![(2, 7), (4, 8)]),
+                (-1, vec![(2, 5)]),
+            ],
+            ..TblastxQueryStats::default()
+        };
+        let mut out = Vec::new();
+        xml_query_masks(&stats, 30, 0, &mut out);
+        let got: Vec<(i32, i32, i32)> = out.iter().map(|m| (m.from, m.to, m.frame)).collect();
+        assert_eq!(got, vec![(6, 12, 1), (15, 21, 1), (7, 22, 2), (18, 23, -1)]);
+        // `-query_loc`: moved by the interval's start, buffer cleared first.
+        xml_query_masks(&stats, 30, 100, &mut out);
+        assert_eq!(out.len(), 4);
+        assert_eq!((out[0].from, out[0].to), (106, 112));
+        // No SEG masks, no masks.
+        xml_query_masks(&TblastxQueryStats::default(), 30, 0, &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn the_structured_formats_read_no_displayed_counts_and_write_no_query_warnings() {
+        assert_eq!(output_format("5"), TblastxOutputFormat::Xml);
+        for (outfmt, counts) in [
+            ("0", true),
+            ("5", false),
+            ("6", true),
+            ("7", true),
+            ("8", false),
+            ("9", false),
+            ("12", false),
+        ] {
+            let format = output_format(outfmt);
+            assert_eq!(format.reads_displayed_counts(), counts, "{outfmt}");
+            assert_eq!(format.writes_query_warnings(), counts, "{outfmt}");
+        }
     }
 
     // NCBI c++/src/algo/blast/api/blast_aux.cpp:825-842 (`Map`): with `-query_loc` a mask
@@ -1336,7 +1868,7 @@ mod tests {
             hsp(0, 1, 110, 1e-5, 0),
         ];
         let order = |size| -> Vec<(u32, i32)> {
-            final_hit_order(hits.clone(), size)
+            final_hit_order(hits.clone(), size, &HitFilters::default())
                 .iter()
                 .map(|hsp| (hsp.hit.s_idx, hsp.hit.raw_score))
                 .collect()

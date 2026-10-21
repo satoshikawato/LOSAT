@@ -629,11 +629,45 @@ pub fn blastn_evalue(value: &str) -> Result<f64, String> {
 ///                                new CArgAllow_Doubles(0.0, 100.0));
 /// ```
 pub fn blastn_percentage(value: &str) -> Result<f64, String> {
-    let n = ncbi_double(value, "BLASTN")?;
+    percentage(value, "BLASTN")
+}
+/// A percentage of `program`, in 0..=100 (NaN is outside): `-perc_identity`, and
+/// `-qcov_hsp_perc` of every program (the `*_query_coverage` parsers).
+///
+/// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:196-201
+/// ```c
+///         arg_desc.AddOptionalKey(kArgQueryCovHspPerc, "float_value",
+///                             "Percent query coverage per hsp",
+///                             CArgDescriptions::eDouble);
+///         arg_desc.SetConstraint(kArgQueryCovHspPerc,
+///                            new CArgAllow_Doubles(0.0, 100.0));
+/// ```
+fn percentage(value: &str, program: &str) -> Result<f64, String> {
+    let n = ncbi_double(value, program)?;
     if !(0.0..=100.0).contains(&n) {
         return Err("expected a percentage in 0..=100".into());
     }
     Ok(n)
+}
+/// A BLASTN `-qcov_hsp_perc` value (`percentage`).
+pub fn blastn_query_coverage(value: &str) -> Result<f64, String> {
+    percentage(value, "BLASTN")
+}
+/// A BLASTP `-qcov_hsp_perc` value (`percentage`).
+pub fn blastp_query_coverage(value: &str) -> Result<f64, String> {
+    percentage(value, "BLASTP")
+}
+/// A BLASTX `-qcov_hsp_perc` value (`percentage`).
+pub fn blastx_query_coverage(value: &str) -> Result<f64, String> {
+    percentage(value, "BLASTX")
+}
+/// A TBLASTN `-qcov_hsp_perc` value (`percentage`).
+pub fn tblastn_query_coverage(value: &str) -> Result<f64, String> {
+    percentage(value, "TBLASTN")
+}
+/// A TBLASTX `-qcov_hsp_perc` value (`percentage`).
+pub fn tblastx_query_coverage(value: &str) -> Result<f64, String> {
+    percentage(value, "TBLASTX")
 }
 pub fn blastp_word_size(value: &str) -> Result<usize, String> {
     let n = positive_usize(value)?;
@@ -915,6 +949,21 @@ impl SegSpec {
     #[inline]
     pub fn is_enabled(&self) -> bool {
         !matches!(self, Self::No)
+    }
+
+    /// The options as NCBI's filter string prints them (`BlastFilteringOptionsToString`): the
+    /// defaults for `yes`, the given window, locut and hicut otherwise (the substitution of
+    /// the defaults for a value not above 0 is `params`', after the options are set).
+    pub fn filter_options(&self) -> Option<(i32, f64, f64)> {
+        match *self {
+            Self::No => None,
+            Self::Yes => Some((12, 2.2, 2.5)),
+            Self::WindowLocutHicut {
+                window,
+                locut,
+                hicut,
+            } => Some((window, locut, hicut)),
+        }
     }
 
     /// The SEG parameters of the query filter: a window, locut or hicut that is not above

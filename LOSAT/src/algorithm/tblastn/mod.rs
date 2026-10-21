@@ -7,6 +7,8 @@ mod args;
 mod search_seed;
 // EXPERIMENT (LOSAT_X_TBNSCANBF): the lookup scan without a branch on the presence vector.
 pub(crate) mod x_scan_bf;
+// EXPERIMENT (LOSAT_X_TBNSCANBYTE): the lookup scan on presence bytes, a block of indexes at once.
+mod x_scan_byte;
 // NCBI c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
 // translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);
@@ -55,6 +57,11 @@ mod x_oid_flow;
 // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:
 // PrintOneResultSet dispatches the retained search result to its output format.
 mod stage_e_report;
+// TBLASTN's BLAST XML (outfmt 5), once per run, from the final hit lists.
+mod blast_xml;
+// NCBI c++/src/algo/blast/api/blast_seqalign.cpp:1549-1649 (BlastHitList2SeqAlign_OMF): the
+// Seq-aligns of each query's final hit list (outfmt 8, 12).
+mod seqalign;
 // NCBI c++/src/app/blast/tblastn_app.cpp:188-194 and seqsrc_seqdb.cpp: the search of a BLAST
 // nucleotide database (`-db`): its sequences, numbers and titles.
 mod database;
@@ -68,6 +75,9 @@ pub use x_subject_store::print_summary as x_subject_store_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSCANBF): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use x_scan_bf::print_summary as x_scan_bf_print_summary;
+// EXPERIMENT (LOSAT_X_TBNSCANBYTE / LOSAT_X_TBNSCANBYTESHADOW): the summary lines `main` prints at
+// exit. No NCBI counterpart: they print counters and change no value NCBI computes.
+pub use x_scan_byte::print_summary as x_scan_byte_print_summary;
 // EXPERIMENT (LOSAT_X_TBNLINKWIN): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.
 pub use stage_d_linking::x_link_window_print_summary;

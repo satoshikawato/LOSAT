@@ -74,7 +74,21 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    let command = T::command();
+    try_parse_from_command(T::command(), argv)
+}
+
+/// `try_parse_from` with `command`, one of `T`'s commands whose arguments a caller changed
+/// (Web ABI v1's BLASTX keeps its own `-outfmt` values, `blastx/web.rs`), read as clap's
+/// `Parser::try_parse_from` reads `T::command()`.
+pub(crate) fn try_parse_from_command<T, I, S>(
+    command: clap::Command,
+    argv: I,
+) -> Result<T, clap::Error>
+where
+    T: clap::FromArgMatches,
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
     let tokens: Vec<OsString> = argv.into_iter().map(Into::into).collect();
     // NCBI's application reads its own toolkit words before the program's arguments.
     if let Some(program) = tokens
@@ -202,7 +216,9 @@ where
             translated.push(format!("--{name}").into());
         }
     }
-    let parsed = T::try_parse_from(translated)?;
+    let mut matches = command.clone().try_get_matches_from(translated)?;
+    let parsed = T::from_arg_matches_mut(&mut matches)
+        .map_err(|error| error.format(&mut command.clone()))?;
     match non_utf8_value {
         Some((scope, name)) => Err(non_utf8_value_error(scope, &name)),
         None => Ok(parsed),
@@ -328,7 +344,6 @@ fn is_unported_blastn_arg(name: &str) -> bool {
             | "num_descriptions"
             | "off_diagonal_range"
             | "parse_deflines"
-            | "qcov_hsp_perc"
             | "remote"
             | "searchsp"
             | "seqidlist"
@@ -390,7 +405,6 @@ fn is_unported_blastp_arg(name: &str) -> bool {
             | "num_alignments"
             | "num_descriptions"
             | "parse_deflines"
-            | "qcov_hsp_perc"
             | "remote"
             | "searchsp"
             | "seqidlist"
@@ -602,7 +616,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "import_search_strategy"
             | "in_pssm"
             | "line_length"
-            | "max_hsps"
             | "mt_mode"
             | "negative_gilist"
             | "negative_seqidlist"
@@ -612,7 +625,6 @@ fn is_unported_tblastn_arg(name: &str) -> bool {
             | "num_alignments"
             | "num_descriptions"
             | "parse_deflines"
-            | "qcov_hsp_perc"
             | "remote"
             | "searchsp"
             | "seqidlist"
@@ -656,7 +668,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "lcase_masking"
             | "line_length"
             | "matrix"
-            | "max_hsps"
             | "max_intron_length"
             | "negative_gilist"
             | "negative_seqidlist"
@@ -666,7 +677,6 @@ fn is_unported_tblastx_arg(name: &str) -> bool {
             | "num_alignments"
             | "num_descriptions"
             | "parse_deflines"
-            | "qcov_hsp_perc"
             | "remote"
             | "searchsp"
             | "seqidlist"
@@ -719,7 +729,6 @@ fn is_unported_blastx_arg(name: &str) -> bool {
             | "db_hard_mask"
             | "ipglist"
             | "negative_ipglist"
-            | "qcov_hsp_perc"
             | "best_hit_overhang"
             | "best_hit_score_edge"
             | "searchsp"

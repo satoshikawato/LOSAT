@@ -21,7 +21,9 @@ use LOSAT::api::local_blast::{run_local_tblastn, FormatOutput, OutputSink, Repor
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 3] = ["0", "6", "7"];
+const FORMATS: [&str; 7] = ["0", "6", "7", "8", "9", "12", "5"];
+/// The formats of the saved NCBI outputs (`docs/evidence/tlosan_stage_g/`).
+const SAVED_FORMATS: [&str; 3] = ["0", "6", "7"];
 
 fn repository(path: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(path)
@@ -122,11 +124,11 @@ fn formats_of_one_search_equal_the_ncbi_bytes_and_warn_once() {
             &query,
             &repository(subject),
             (query_name, subject_name),
-            &FORMATS,
+            &SAVED_FORMATS,
             &[],
             true,
         );
-        for (index, outfmt) in FORMATS.iter().enumerate() {
+        for (index, outfmt) in SAVED_FORMATS.iter().enumerate() {
             let expected = std::fs::read(repository(&format!("{stem}.fmt{outfmt}{suffix}")))
                 .expect("saved NCBI output");
             assert!(
@@ -266,6 +268,33 @@ fn every_format_of_one_search_matches_the_cli_run_of_that_format() {
                 together.outputs[index] == cli_output,
                 "CLI outfmt {outfmt} {extra:?}"
             );
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1452
+            // ```c++
+            //     if (m_FormatType == CFormattingArgs::eAsnText
+            //       ...
+            //       || m_FormatType == CFormattingArgs::eJsonSeqalign
+            //       || m_FormatType == CFormattingArgs::eSAM)
+            //     {
+            //         x_PrintStructuredReport(results, queries);
+            //         return;
+            //     }
+            //     ...
+            //     if (results.HasWarnings()) {
+            //         ERR_POST(Warning << results.GetWarningStrings());
+            //     }
+            // ```
+            // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9 and 12 write no
+            // query result warnings, so their CLI runs equal `run_local` with that format alone.
+            if matches!(*outfmt, "5" | "8" | "9" | "12") {
+                // (The `-max_target_seqs 1` warning of the arguments stays.)
+                assert!(
+                    !String::from_utf8_lossy(&cli_stderr).contains("Query_3"),
+                    "outfmt {outfmt}: no query warning: {}",
+                    String::from_utf8_lossy(&cli_stderr)
+                );
+                assert_eq!(alone.diagnostics, cli_stderr, "outfmt {outfmt}");
+                continue;
+            }
             assert!(!cli_stderr.is_empty(), "the invalid query is warned about");
             assert_eq!(
                 together.diagnostics, cli_stderr,
@@ -316,7 +345,7 @@ fn unsupported_formats_fail_before_searching() {
     let (query_name, subject_name) = inputs.names();
     // NCBI blast_args.cpp:2845-2851: a custom specification of outfmt 0 is ignored, so
     // "0 qseqid" is outfmt 0; LOSAT's TBLASTN writes no custom tabular fields or delimiter.
-    for outfmt in ["5", "6 qseq sseq", "6 delim=,"] {
+    for outfmt in ["2", "6 qseq sseq", "6 delim=,"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![
@@ -384,14 +413,22 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
             let (mut report, mut diagnostics) = (Vec::new(), Vec::new());
             let mut outputs =
                 ReportOutputs::single(outfmt, OutputSink::Writer(&mut report), &mut diagnostics);
-            run_local_tblastn(
+            let result = run_local_tblastn(
                 tblastn_args("q", "s", &[]),
                 &queries,
                 &subjects,
                 &mut outputs,
-            )
-            .unwrap_or_else(|error| panic!("outfmt {outfmt} {defline:?}: {error}"));
+            );
             drop(outputs);
+            // BLAST XML: NCBI crashes on the punctuation-only title of a subject with hits
+            // (outfmt 0 and 5 alike), so LOSAT refuses it and writes nothing.
+            if outfmt == "5" && defline == ", ," {
+                let error = result.expect_err("outfmt 5 refuses the punctuation title");
+                assert!(error.to_string().contains("crashes on"), "{error}");
+                assert!(report.is_empty(), "nothing is written");
+                continue;
+            }
+            result.unwrap_or_else(|error| panic!("outfmt {outfmt} {defline:?}: {error}"));
             if outfmt == "0" {
                 let report = String::from_utf8(report).expect("UTF-8 report");
                 assert!(report.contains(heading), "{defline:?}: {report}");

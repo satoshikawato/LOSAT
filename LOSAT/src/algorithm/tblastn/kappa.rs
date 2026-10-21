@@ -11,13 +11,14 @@ use crate::algorithm::blastp::gapalign::{
     blast_gapped_alignment_with_traceback_with_scratch, protein_identities_from_edit_ops,
     stats_from_edit_ops_protein, GapAlignScratch,
 };
+use crate::common::GapEditOp;
 use crate::config::ScoringMatrix;
 use crate::core::composition_adjustment::adjust_scores::{
     AdjustedProteinMatrix, BlastCompositionWorkspace,
 };
 use crate::core::composition_adjustment::redo_alignment::{
-    blast_compo_alignment_new, blast_redo_one_match_with_workspace_queries, redo_calc_lambda,
-    translated_subject_get_range, BlastCompoAdjustMode, BlastCompoAlignment,
+    blast_compo_alignment_new, blast_redo_one_match_with_workspace_queries_and_matrix,
+    redo_calc_lambda, translated_subject_get_range, BlastCompoAdjustMode, BlastCompoAlignment,
     BlastCompoAlignmentContext, BlastCompoMatchingSequence, BlastCompoQueryInfo,
     BlastCompoSequenceData, BlastCompoSequenceRange, BlastRedoAlignCallbacks, BlastRedoAlignParams,
     BlastRedoOneMatchResult, EMatrixAdjustRule,
@@ -307,6 +308,99 @@ pub(super) fn postredo_converted_stats_with_matrix(
     ))
 }
 
+/// NCBI's engine positives of an HSP of a redone match (`BlastHSP::num_positives`, which the
+/// Seq-aligns show): `s_ComputeNumIdentities` counts them on the working (masked) query and
+/// the target translation with the score block whose matrix the match's composition
+/// adjustments have overwritten (`Blast_AdjustScores` writes its `matrix` argument, the
+/// thread-local `sbp->matrix->data`), so a pair is positive by `adjusted`, the matrix of the
+/// match's last adjustment. `postredo_converted_stats` counts them with BLOSUM62 for the other
+/// reports. With the Seq-aligns only (`LocalStageDProfile::engine_positives`).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3500-3502,3625-3635
+/// ```c
+///                 sbp                  = sbp_tld[tid];
+///                 redo_align_params    = redo_align_params_tld[tid];
+///                 matrix               = matrix_tld[tid];
+/// ...
+///                                 Blast_RedoOneMatch(
+///                                         alignments,             // thread-local
+///                                         ...
+///                                         matrix,                 // thread-local
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3360-3362
+/// ```c
+///             matrix_tld[i] = sbp_tld[i]->psi_matrix->pssm->data;
+///         } else {
+///             matrix_tld[i] = sbp_tld[i]->matrix->data;
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/composition_adjustment/redo_alignment.c:1232-1241
+/// ```c
+///                 if (compo_adjust_mode != eNoCompositionBasedStats &&
+///                         (subject_is_translated || hsp_index == 0
+///                                 || (nearIdenticalStatus != oldNearIdenticalStatus))) {
+///                     Blast_AminoAcidComposition subject_composition;
+///                     s_GetComposition(&subject_composition,
+///                             alphsize, &subject,
+///                             &window->subject_range,
+///                             in_align, FALSE, subject_is_translated);
+///                     adjust_search_failed =
+///                             Blast_AdjustScores(matrix, query_composition,
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:525-528
+/// ```c
+///         /* Translate subject if needed. */
+///         if (program_number == eBlastTypeTblastn) {
+///             const Uint1* target_sequence = Blast_HSPGetTargetTranslation(target_t, hsp, NULL);
+///             status = Blast_HSPGetNumIdentitiesAndPositives(query, target_sequence, hsp, scoring_options, 0, sbp);
+///         }
+/// ```
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:800-812
+/// ```c
+///          case eGapAlignSub:
+///             for (i=0; i<esp->num[index]; i++) {
+///                if (*q == *s) {
+///                   num_ident++;
+///                }
+///                else if (NULL != matrix) {
+///             	   if (matrix[*q][*s] > 0)
+///             		   num_pos ++;
+///                }
+///                q++;
+///                s++;
+///             }
+///             break;
+/// ```
+pub(super) fn postredo_engine_positives(
+    converted: &ConvertedKappaHsp,
+    query_sequence: &[u8],
+    target: &mut TargetTranslation<'_>,
+    adjusted: &AdjustedProteinMatrix,
+) -> Result<usize> {
+    let hsp = &converted.hsp;
+    let (subject, _, subject_base) = target.get(hsp.frame, hsp.s_start, hsp.s_end)?;
+    let mut s_index = super::search_gapped::window_index(hsp.s_start, subject_base)
+        .context("TBLASTN positive subject offset before translation range")?;
+    let mut q_index = usize::try_from(hsp.q_start)?;
+    let mut positives = 0usize;
+    for op in &converted.edit_script {
+        match *op {
+            GapEditOp::Sub(n) => {
+                for _ in 0..n {
+                    let (q, s) = (query_sequence[q_index], subject[s_index]);
+                    if q == s || adjusted.is_positive(q, s) {
+                        positives += 1;
+                    }
+                    q_index += 1;
+                    s_index += 1;
+                }
+            }
+            GapEditOp::Del(n) => s_index += n as usize,
+            GapEditOp::Ins(n) => q_index += n as usize,
+        }
+    }
+    Ok(positives)
+}
+
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_kappa.c:102-114;
 // c++/src/algo/blast/core/ncbi_math.c:437-441
 // ```c
@@ -440,6 +534,10 @@ pub(super) fn redo_preliminary_match<'s>(
     matrix: ScoringMatrix,
     scratch: &mut GapAlignScratch,
     composition_workspace: &mut BlastCompositionWorkspace,
+    // The matrix that the match's adjustments leave (NCBI's thread-local `sbp->matrix->data`,
+    // which `Blast_AdjustScores` overwrites); the caller passes `None` (no adjustment yet) and
+    // reads it after the redo (`postredo_engine_positives`).
+    matrix_state: &mut Option<AdjustedProteinMatrix>,
 ) -> Result<BlastRedoOneMatchResult> {
     if params.compo_adjust_mode == BlastCompoAdjustMode::NoCompositionBasedStats {
         bail!("TBLASTN Kappa redo requires composition mode");
@@ -475,7 +573,7 @@ pub(super) fn redo_preliminary_match<'s>(
         .gapping_params
         .context
         .replace(Some(NonNull::from(&context).cast::<c_void>()));
-    let result = blast_redo_one_match_with_workspace_queries(
+    let result = blast_redo_one_match_with_workspace_queries_and_matrix(
         &incoming,
         params,
         &matching_seq,
@@ -483,6 +581,7 @@ pub(super) fn redo_preliminary_match<'s>(
         lambda,
         &TBLASTN_REDO_CALLBACKS,
         composition_workspace,
+        matrix_state,
     );
     params.gapping_params.context.set(previous);
     result
@@ -793,6 +892,7 @@ mod tests {
             ScoringMatrix::Blosum62,
             &mut scratch,
             &mut workspace,
+            &mut None,
         )
         .unwrap();
         let align = redone.alignments_by_query[0].as_ref().unwrap();
@@ -1164,6 +1264,7 @@ mod tests {
             ScoringMatrix::Blosum62,
             &mut scratch,
             &mut workspace,
+            &mut None,
         )
         .unwrap();
         let alignment = redone.alignments_by_query[0].as_deref().unwrap();
@@ -1533,6 +1634,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 &mut scratch,
                 &mut workspace,
+                &mut None,
             )
             .unwrap();
             let expected: Vec<_> = mode
@@ -2386,6 +2488,7 @@ mod tests {
                 ScoringMatrix::Blosum62,
                 &mut scratch,
                 &mut workspace,
+                &mut None,
             )
             .unwrap();
             let align = redone.alignments_by_query[0].as_deref().unwrap();

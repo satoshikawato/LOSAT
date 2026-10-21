@@ -7,8 +7,8 @@ docs/evidence/losat_web_e1a/capture_outputs.py and checks, per case:
   (docs/evidence/losat_web_e1a/baseline/hashes.tsv);
 - the frozen expected hash (Gate A, TLOSAN Stage G), with the known mismatches of
   frozen_mismatch_allowlist.json (a stale entry fails);
-the outfmt 0 fixtures (docs/evidence/losat_web_e2a/check_losat.py) of the
-selected programs at 1 and 4 threads, for BLASTN the frozen NCBI outputs of
+the -subject fixtures of outfmt0_manifest.tsv (docs/evidence/losat_web_e2a/check_losat.py: outfmt 0/6/7
+and the 8/9/12 rows sa.* and the 5 rows of BLASTN and BLASTP) of the selected programs at 1 and 4 threads, for BLASTN the frozen NCBI outputs of
 blastn_regression_fixtures.py (preliminary hit lists, batches, split, ambiguity,
 lowercase masking) and for TBLASTX those of tblastx_regression_fixtures.py (query
 batches, warnings, hit lists, ambiguity, empty inputs, failed writes); for each
@@ -56,7 +56,8 @@ import certify_platform_native_v010 as certify  # noqa: E402
 from frozen_allowlist import Allowlist  # noqa: E402
 
 PROGRAMS = capture_outputs.PROGRAMS
-FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")
+FIXTURE_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx")  # the programs of fasta_input_fixtures.py
+OUTFMT0_PROGRAMS = ("blastn", "blastp", "tblastn", "tblastx", "blastx")  # the programs of outfmt0_manifest.tsv
 DB_SEARCH_PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx")  # the programs of db_search_manifest.tsv
 REGRESSION_FIXTURES = {"blastn": "BLASTN", "tblastx": "TBLASTX"}
 # TBLASTX manifest cases that finish in under 30 s (2026-10-01, native release binary);
@@ -206,7 +207,7 @@ def run_fasta_input_fixtures(losat: Path, programs: set[str], out: Path, jobs: i
 
 def run_fixtures(losat: Path, programs: set[str], out: Path) -> list[str]:
     failures = []
-    selected = [program for program in FIXTURE_PROGRAMS if program in programs]
+    selected = [program for program in OUTFMT0_PROGRAMS if program in programs]
     if not selected:
         return failures
     for threads in (1, 4):

@@ -1,5 +1,7 @@
 //! BLASTX options and native serial local-subject search/report dispatch.
-use crate::blastinput::value_parsers::{genetic_code, ncbi_int8, nonnegative_f64};
+use crate::blastinput::value_parsers::{
+    blastx_query_coverage, genetic_code, ncbi_int8, nonnegative_f64,
+};
 use anyhow::{bail, Result};
 use clap::Args;
 use std::path::PathBuf;
@@ -124,6 +126,16 @@ pub struct BlastxArgs {
     // ```
     #[arg(long, value_parser = positive)]
     pub max_hsps: Option<i32>,
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:196-201
+    // ```c++
+    //         arg_desc.AddOptionalKey(kArgQueryCovHspPerc, "float_value",
+    //                             "Percent query coverage per hsp",
+    //                             CArgDescriptions::eDouble);
+    //         arg_desc.SetConstraint(kArgQueryCovHspPerc,
+    //                            new CArgAllow_Doubles(0.0, 100.0));
+    // ```
+    #[arg(long, value_parser = blastx_query_coverage, help = "Percent query coverage per hsp")]
+    pub qcov_hsp_perc: Option<f64>,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:241-243
     // ```c++
     //         arg_desc.AddOptionalKey(kArgSumStats, "bool_value",
@@ -259,7 +271,9 @@ pub struct BlastxArgs {
     //                            CArgDescriptions::eString,
     //                            NStr::IntToString(dft_outfmt));
     // ```
-    #[arg(long, default_value = "0", value_parser = outfmt)]
+    // NCBI reads the value when it sets the options (`native::run`; `blastinput/app.rs`
+    // `parse_formatting_string`).
+    #[arg(long, default_value = "0")]
     pub outfmt: String,
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2726-2730
     // ```c++
@@ -537,44 +551,41 @@ pub const FIELDS: &[&str] = &[
     "mismatch", "positive", "gapopen", "gaps", "ppos", "qframe", "sframe", "frames", "btop",
     "stitle",
 ];
-// NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2827-2845
+// NCBI reference (598d8ae6): c++/src/objtools/align_format/tabular.cpp:76-91
 // ```c++
-//         }
-//         int val = 0;
-//         try { val = NStr::StringToInt(fmt_choice); }
-//         catch (const CStringException&) {   // probably a conversion error
-//             CNcbiOstrstream os;
-//             os << "'" << fmt_choice << "' is not a valid output format";
-//             string msg = CNcbiOstrstreamToString(os);
-//             NCBI_THROW(CInputException, eInvalidInput, msg);
-//         }
-//         if (val < 0 || val >= static_cast<int>(eEndValue)) {
-//             string msg("Formatting choice is out of range");
-//             throw std::out_of_range(msg);
-//         }
-//         if (m_IsIgBlast && (val != 3 && val != 4 && val != 7 && val != eAirrRearrangement)) {
-//             string msg("Formatting choice is not valid");
-//             throw std::out_of_range(msg);
-//         }
-//         fmt_type = static_cast<EOutputFormat>(val);
-//         if ( !(fmt_type == eTabular ||
+//     vector<string> format_tokens;
+//     NStr::Split(format, " ", format_tokens);
+//
+//     if (format_tokens.empty())
+//         x_AddDefaultFieldsToShow();
+//
+//     ITERATE (vector<string>, iter, format_tokens) {
+//         if (*iter == kDfltArgTabularOutputFmtTag)
+//             x_AddDefaultFieldsToShow();
+//         else if ((*iter)[0] == '-') {
+//             string field = (*iter).substr(1);
+//             if (m_FieldMap.count(field) > 0)
+//                 x_DeleteFieldToShow(m_FieldMap[field]);
+//         } else {
+//             if (m_FieldMap.count(*iter) > 0)
 // ```
-fn outfmt(value: &str) -> std::result::Result<String, String> {
-    let mut tokens = value.split_whitespace();
-    let f = tokens.next().ok_or("empty outfmt")?;
-    if !matches!(f, "0" | "6" | "7") {
-        return Err("unsupported BLASTX outfmt: use 0, 6 or 7".into());
-    }
-    let fields: Vec<_> = tokens.collect();
-    if f == "0" && !fields.is_empty() {
-        return Err("custom fields require outfmt 6/7".into());
-    }
-    for field in fields {
+/// The field tokens of a custom specification that NCBI keeps (`parse_formatting_string`):
+/// the words between single spaces (an empty word names no field).
+pub(crate) fn spec_tokens(spec: &str) -> impl Iterator<Item = &str> {
+    spec.split(' ').filter(|token| !token.is_empty())
+}
+
+/// LOSAT's check of the custom fields of a format that BLASTX writes, before the inputs are
+/// read (`native::run`): every word must be `std` or a field of `FIELDS`. NCBI ignores a
+/// word that names no field and removes a field named with a leading `-` (tabular.cpp
+/// above); BLASTX rejects both.
+pub(crate) fn check_custom_fields(choice: &crate::blastinput::app::FormatChoice) -> Result<()> {
+    for field in spec_tokens(&choice.spec) {
         if field != "std" && !FIELDS.contains(&field) {
-            return Err(format!("unsupported BLASTX outfmt field '{field}'"));
+            bail!("unsupported BLASTX outfmt field '{field}'");
         }
     }
-    Ok(value.to_string())
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -695,6 +706,8 @@ pub struct ResolvedOptions {
     pub sum_stats: bool,
     pub max_intron_length: i32,
     pub max_hsps: i32,
+    /// The -qcov_hsp_perc value, or 0 (no filter).
+    pub query_cov_hsp_perc: f64,
     pub culling_limit: i32,
     pub subject_besthit: bool,
     pub hitlist_size: i32,
@@ -772,6 +785,30 @@ impl BlastxArgs {
     // 	}
     // ```
     pub fn resolve(&self) -> Result<ResolvedOptions> {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2844-2851
+        // ```c++
+        //         fmt_type = static_cast<EOutputFormat>(val);
+        //         if ( !(fmt_type == eTabular ||
+        //                fmt_type == eTabularWithComments ||
+        //                fmt_type == eCommaSeparatedValues ||
+        //                fmt_type == eCommaSeparatedValuesWithHeader ||
+        //                fmt_type == eSAM) ) {
+        //                custom_fmt_spec.clear();
+        //         }
+        // ```
+        // The format as NCBI reads it (`native::run` reads it first, with NCBI's errors).
+        let choice = crate::blastinput::app::parse_formatting_string(&self.outfmt)?;
+        let outfmt = u8::try_from(choice.number)?;
+        self.resolve_with_format(outfmt, spec_tokens(&choice.spec))
+    }
+
+    /// `resolve` with the format number and the custom field words already read (Web ABI
+    /// v1 reads them its own way, `web.rs`).
+    pub(crate) fn resolve_with_format<'a>(
+        &self,
+        outfmt: u8,
+        spec: impl Iterator<Item = &'a str>,
+    ) -> Result<ResolvedOptions> {
         if self.query.as_os_str() == "-"
             || self
                 .subject
@@ -847,15 +884,9 @@ impl BlastxArgs {
             .into());
         }
         let word_size = self.word_size.unwrap_or(3);
-        let outfmt = self
-            .outfmt
-            .split_whitespace()
-            .next()
-            .unwrap()
-            .parse::<u8>()?;
         let hitlist_size = self.max_target_seqs.unwrap_or(500);
         let mut fields = Vec::new();
-        let spec: Vec<_> = self.outfmt.split_whitespace().skip(1).collect();
+        let spec: Vec<_> = spec.collect();
         if outfmt != 0 {
             let spec = if spec.is_empty() { vec!["std"] } else { spec };
             for token in spec {
@@ -954,6 +985,7 @@ impl BlastxArgs {
             sum_stats: self.sum_stats.unwrap_or(true),
             max_intron_length: self.max_intron_length,
             max_hsps: self.max_hsps.unwrap_or(0),
+            query_cov_hsp_perc: self.qcov_hsp_perc.unwrap_or(0.0),
             culling_limit: self.culling_limit,
             subject_besthit: self.subject_besthit,
             hitlist_size,
@@ -1138,6 +1170,47 @@ mod tests {
             ),
             (500, 500, 500)
         );
+    }
+
+    // NCBI blast_args.cpp:2801-2855: BLASTX reads -outfmt as NCBI (a specification counts
+    // only for the tabular formats); its custom fields are LOSAT's list (`FIELDS`).
+    #[test]
+    fn outfmt_is_read_as_ncbi_and_fields_are_checked() {
+        use crate::blastinput::app::parse_formatting_string;
+        let fields = |outfmt: &str| {
+            let resolved = parse(&["-outfmt", outfmt]).resolve().unwrap();
+            (resolved.outfmt, resolved.fields)
+        };
+        let std: Vec<String> = STD_FIELDS.split(' ').map(String::from).collect();
+        assert_eq!(fields("0 std"), (0, Vec::new()));
+        assert_eq!(fields("0 foo"), (0, Vec::new()));
+        assert_eq!(fields(" 6 delim="), (6, std.clone()));
+        assert_eq!(fields("7"), (7, std.clone()));
+        // Words between single spaces; an empty word names no field.
+        let mut listed = vec!["qseqid".to_string(), "sseqid".to_string()];
+        listed.extend(std.iter().cloned());
+        assert_eq!(fields("7 qseqid  sseqid std"), (7, listed));
+        // The XInclude formats to standard output fail later (`native::run`).
+        assert_eq!(fields("13").0, 13);
+        let check = |outfmt: &str| {
+            check_custom_fields(&parse_formatting_string(outfmt).unwrap())
+                .map_err(|error| error.to_string())
+        };
+        assert!(check("6 std qseqid stitle btop").is_ok());
+        assert!(check("6 qseqid  sseqid").is_ok());
+        assert!(check("0 foo").is_ok());
+        for (outfmt, field) in [
+            ("7 qaccver foo", "foo"),
+            ("6 -qseqid", "-qseqid"),
+            ("6 qseqid\tsseqid", "qseqid\tsseqid"),
+            ("6 staxids", "staxids"),
+        ] {
+            assert_eq!(
+                check(outfmt).unwrap_err(),
+                format!("unsupported BLASTX outfmt field '{field}'"),
+                "{outfmt:?}"
+            );
+        }
     }
 }
 

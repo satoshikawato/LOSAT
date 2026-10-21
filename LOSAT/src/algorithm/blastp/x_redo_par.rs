@@ -236,6 +236,8 @@ pub(crate) struct XRedoParSearch<'a, P> {
     /// `build_redo_align_params` of `run_resolved_in_pool`.
     pub build_redo_align_params: &'a P,
     pub timing: bool,
+    /// `postprocess_preliminary_hits`' `engine_positives` (the Seq-aligns are requested).
+    pub engine_positives: bool,
 }
 
 /// One match: its query and the position of its list in the query's preliminary hit list.
@@ -601,6 +603,7 @@ fn x_redo_match<P>(
         search.evalue,
         &mut scratch.gap_scratch,
         &mut scratch.range_cache,
+        search.engine_positives,
     )
 }
 
@@ -2601,6 +2604,7 @@ mod tests {
                         evalue: 10.0,
                         build_redo_align_params: &build,
                         timing: false,
+                        engine_positives: false,
                     };
                     let shared = || seg_share.then(|| Arc::new(XSharedSubjectRanges::new()));
                     for window in &windows {

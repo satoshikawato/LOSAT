@@ -2,10 +2,12 @@
 //! batch whose longest context and longest subject chunk are both longer than the slack of the
 //! reference's diagonal table (`guard` in `src/algorithm/tblastx/x_pair_par.rs`, which the switch no
 //! longer applies; module doc item 3 for why the units stay exact), when the subject chunks have at
-//! most as many letters as that table has cells (`x_band_fits`, a memory rule). The query is the
-//! first 1,900 bases of MjeNMV (six frames of 632-633 letters, a table of 4,096 cells, a slack of
-//! about 290); the subject is MjeNMV's first 9,000 bases (frames of about 3,000 letters: the band)
-//! or the PemoMJNVA genome (frames of about 99,000 letters: the rule keeps the guard).
+//! most as many letters as that table has cells (`x_band_fits`, a memory rule), or, with
+//! `LOSAT_X_TBXUNITMASK` (also in the strict set), when the units whose chunks are longer take
+//! masked tables. The query is the first 1,900 bases of MjeNMV (six frames of 632-633 letters, a
+//! table of 4,096 cells, a slack of about 290); the subject is MjeNMV's first 9,000 bases (frames of
+//! about 3,000 letters: the band) or the PemoMJNVA genome (frames of about 99,000 letters: the
+//! memory rule keeps the guard without `LOSAT_X_TBXUNITMASK`, masked units with it).
 //! `LOSAT_X_PAIRPARGATE` still decides after the guards: at one thread the batch keeps the reference
 //! loop ("fallback: cost"), at several the units split the one subject over the pool.
 //!
@@ -28,6 +30,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn fasta(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -52,8 +55,11 @@ fn losat(switches: &[(&str, &str)]) -> Command {
     command
 }
 
-/// A file of one record, the first `length` bases of `name`.
+/// A new file of one record, the first `length` bases of `name`. Every call writes its own file: the
+/// tests of this binary run in parallel, and a shared name let one test read the file while another
+/// was writing it again (an empty or cut query).
 fn query(name: &str, length: usize) -> PathBuf {
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
     let dir = std::env::temp_dir().join(format!("losat-tblastx-band-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let letters: Vec<u8> = std::fs::read_to_string(fasta(name))
@@ -67,7 +73,8 @@ fn query(name: &str, length: usize) -> PathBuf {
         text.push_str(std::str::from_utf8(line).unwrap());
         text.push('\n');
     }
-    let file = dir.join(format!("q{length}.fna"));
+    let call = CALLS.fetch_add(1, Ordering::Relaxed);
+    let file = dir.join(format!("q{length}-{call}.fna"));
     std::fs::write(&file, text).unwrap();
     file
 }
@@ -180,10 +187,17 @@ fn the_cost_gate_still_decides_at_one_thread() {
     assert_eq!(counters(&on, PAIRPAR_LINE, PAIRPAR_FIELDS), [0, 0, 1, 0]);
 }
 
-// A subject longer than the reference table's cells (the PemoMJNVA genome) keeps the guard: the
-// reference loop at several threads, with the switch as without it.
+const MASK_OFF: (&str, &str) = ("LOSAT_X_TBXUNITMASK", "0");
+/// The size rule's tables of at most 2 KiB (512 cells): below this query's group tables (1,024
+/// cells), so only the band batch's rule masks them.
+const MASK_BAND_ONLY: (&str, &str) = ("LOSAT_X_TBXUNITMASK", "2");
+
+// A subject longer than the reference table's cells (the PemoMJNVA genome): without
+// `LOSAT_X_TBXUNITMASK` the memory rule keeps the guard (the reference loop at several threads);
+// with it (the default) the units take the batch, every one on a masked table, with the same
+// report, and the shadow finds the reference loop's lists.
 #[test]
-fn a_subject_longer_than_the_table_keeps_the_reference_loop() {
+fn a_subject_longer_than_the_table_takes_masked_units() {
     let q = query("MjeNMV.fasta", 1_900);
     let genome = fasta("PemoMJNVA.fasta");
     let (reference, off) = tblastx(&q, &genome, 2, &[STATS, BAND_OFF]);
@@ -192,7 +206,66 @@ fn a_subject_longer_than_the_table_keeps_the_reference_loop() {
         "the search finds hits"
     );
     assert_eq!(counters(&off, PAIRPAR_LINE, PAIRPAR_FIELDS), [0, 1, 0, 0]);
-    let (report, on) = tblastx(&q, &genome, 2, &[STATS]);
-    assert!(report == reference, "the report differs with the switch");
-    assert_eq!(counters(&on, PAIRPAR_LINE, PAIRPAR_FIELDS), [0, 1, 0, 0]);
+    let (report, unmasked) = tblastx(&q, &genome, 2, &[STATS, MASK_OFF]);
+    assert!(
+        report == reference,
+        "the report differs without the masked tables"
+    );
+    assert_eq!(
+        counters(&unmasked, PAIRPAR_LINE, PAIRPAR_FIELDS),
+        [0, 1, 0, 0]
+    );
+    for threads in [2, 4] {
+        let (report, on) = tblastx(&q, &genome, threads, &[STATS]);
+        assert!(
+            report == reference,
+            "threads {threads}: the report differs with the masked tables"
+        );
+        let [units, guard, cost, band] = counters(&on, PAIRPAR_LINE, PAIRPAR_FIELDS);
+        assert!(units > 0, "threads {threads}: the units run\n{on}");
+        assert_eq!((guard, cost, band), (0, 0, 1), "threads {threads}");
+        assert_eq!(
+            counters(&on, "[X_STATS] TBXUNITMASK ", ["units_masked"]),
+            [units],
+            "threads {threads}: every unit's chunk is longer than the reference table"
+        );
+        let (shadowed, shadow) = tblastx(&q, &genome, threads, &[("LOSAT_X_PAIRPARSHADOW", "1")]);
+        assert!(
+            shadowed == reference,
+            "threads {threads}: the shadow's report differs"
+        );
+        assert_eq!(
+            counters(
+                &shadow,
+                "[X_SHADOW] PAIRPAR ",
+                ["subjects_compared", "fallback_guard", "band"]
+            ),
+            [1, 0, 1],
+            "threads {threads}"
+        );
+        assert!(
+            counters(&shadow, "[X_SHADOW] TBXUNITMASK ", ["units_masked"])[0] > 0,
+            "{shadow}"
+        );
+        assert!(
+            shadow.contains("(combined_ungapped_hits identical)"),
+            "{shadow}"
+        );
+        // The band batch's rule alone (chunks longer than the reference table) masks every unit.
+        let (report, band_only) = tblastx(&q, &genome, threads, &[STATS, MASK_BAND_ONLY]);
+        assert!(
+            report == reference,
+            "threads {threads}: the report differs with the band rule alone"
+        );
+        let [units, ..] = counters(&band_only, PAIRPAR_LINE, PAIRPAR_FIELDS);
+        assert_eq!(
+            counters(
+                &band_only,
+                "[X_STATS] TBXUNITMASK ",
+                ["kib", "units_masked"]
+            ),
+            [2, units],
+            "threads {threads}"
+        );
+    }
 }

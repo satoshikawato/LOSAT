@@ -933,13 +933,16 @@ pub(super) struct OnceStats {
 /// gives the phases and why every element of the four arrays is the loop's. `timed`: a build of
 /// the search (LOSAT_TIMING's `[TIMING] x_mb_lookup_once` counts it), not the shadow's. `hashtable`
 /// must be zeroed (as `build_mb_lookup` and the shadow allocate it, NCBI's `calloc`): the loop's
-/// empty cells, and the premise of the prefault round (LOSAT_X_MBLUTPREFAULT).
+/// empty cells, and the premise of the prefault round (LOSAT_X_MBLUTPREFAULT). `resident`: a table
+/// kept by LOSAT_X_MBLUTKEEP and zeroed, whose pages are mapped: no prefault round
+/// (`x_mb_lut_keep.rs`, "The prefault round").
 pub(super) fn fill(
     parts: usize,
     words: &Words<'_>,
     tables: Tables<'_>,
     in_pool: bool,
     timed: bool,
+    resident: bool,
 ) -> OnceStats {
     fill_chunked(
         parts,
@@ -948,7 +951,7 @@ pub(super) fn fill(
         in_pool,
         timed,
         chunk_positions(parts),
-        prefault_on(),
+        prefault_on() && !resident,
     )
 }
 

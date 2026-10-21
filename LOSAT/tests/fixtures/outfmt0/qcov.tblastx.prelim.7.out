@@ -1,0 +1,12 @@
+# TBLASTX 2.17.0+
+# Query: qcovp_q
+# Database: User specified sequence set (Input: tests/db_search/qcovp.fna)
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score
+# 6 hits found
+qcovp_q	s_full	54.545	165	75	0	599	105	799	305	5.09e-55	190
+qcovp_q	s_full	52.747	182	86	0	13	558	213	758	1.53e-48	176
+qcovp_q	s_full	49.744	195	98	0	12	596	212	796	1.94e-47	172
+qcovp_q	s_full	52.062	194	93	0	595	14	795	214	4.64e-46	168
+qcovp_q	s_full	47.895	190	99	0	582	13	782	213	2.27e-45	166
+qcovp_q	s_full	47.475	198	104	0	2	595	202	795	4.29e-45	165
+# BLAST processed 1 queries

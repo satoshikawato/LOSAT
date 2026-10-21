@@ -32,8 +32,9 @@
 //!
 //! Why the bytes are those of the reports written after the loop:
 //! - every report of a query depends only on that query's final list and on fixed inputs: the
-//!   lists are finished per query (`finish_query_hit_list`: `-max_hsps`, `-subject_besthit`, the
-//!   sort, `-max_target_seqs`; the HSPs of score 0), the coordinates move by the query's and the
+//!   lists are finished per query (`finish_query_hit_list`: `-max_hsps`, `-qcov_hsp_perc`,
+//!   `-subject_besthit`, the sort, `-max_target_seqs`; the HSPs of score 0), the coordinates move
+//!   by the query's and the
 //!   subject's own range start (`shift_to_records`), and the rows, outfmt 7 headers and outfmt 0
 //!   sections are written query by query from the query's list, record, masks, blocks and search
 //!   space, the subject records and the options. BLASTN has no culling and no cross-query sort.
@@ -48,15 +49,20 @@
 //!   switch; a sink that writes it with the reports is a file sink, which is not streamed), the
 //!   outfmt 0 epilog (the database lines and the options, fixed inputs), outfmt 7's last line
 //!   (the number of queries formatted, NCBI's `m_QueriesFormatted`: the last call counts the
-//!   queries of every batch, `BlastnReportInputs::queries_before`), and outfmt 6 has none. LOSAT's
-//!   BLASTN writes outfmt 0, 6 and 7 only (no XML, JSON, SAM or HTML).
+//!   queries of every batch, `BlastnReportInputs::queries_before`), and outfmt 6 has none. The
+//!   formats 8, 9 and 12 (OF3) write per query like 6; BLAST XML (5, OF4a) is not argued here
+//!   and is never streamed (`Off::Xml`, below).
 //! - the errors: an error of NCBI's that a batch meets (a reader error, an `eEOF` batch, a batch
 //!   of queries without letters, `ErrorAfterInvalidBatches`, a header file that cannot be read)
 //!   comes after the reports of the batches before, without the epilog, in both: here they were
 //!   written when the loop took them, so the error paths write only what follows them (the
 //!   batch's title and reader warnings). An error that LOSAT raises where NCBI would not stop
 //!   (LOSAT's refusals) is written without the reports of the batches before; so with two or more
-//!   batches the switch acts only where no such refusal can come after the first batch (`check`):
+//!   batches the switch acts only where no such refusal can come after the first batch (`check`).
+//!   BLAST XML has refusals of its own (a `-db` name, query title or id, or a title of a subject
+//!   with a hit that cannot be written, `blast_xml.rs`), made per report call, so `-outfmt 5` is
+//!   never streamed (`Off::Xml`, any number of batches): the report runs once after the search and
+//!   every refusal comes before the first byte. Without XML the conditions are:
 //!   scoring options with Karlin-Altschul values and greedy gap costs that LOSAT supports (the
 //!   refusals of `search_query_batch` for scoring options without values or large greedy gap
 //!   costs), no negative `CHUNK_SIZE` (the refusal in `search_query_chunks`), search spaces that
@@ -166,6 +172,8 @@ pub(super) enum Off {
     Debug,
     /// Scoring options without Karlin-Altschul values, or greedy gap costs that LOSAT refuses.
     Scoring,
+    /// `-outfmt 5` (BLAST XML), which is written after the loop (the module doc has the reason).
+    Xml,
     /// A negative `CHUNK_SIZE`.
     ChunkSize,
     /// A database length times a query length that could overflow NCBI's 64-bit search space.
@@ -184,6 +192,7 @@ impl Off {
             Off::NotSet => "not_set",
             Off::Outputs => "outputs",
             Off::Debug => "debug",
+            Off::Xml => "xml",
             Off::Scoring => "scoring",
             Off::ChunkSize => "chunk_size",
             Off::SearchSpace => "search_space",
@@ -578,6 +587,15 @@ fn check(
     if x_debug_output(args) {
         return Err(Off::Debug);
     }
+    // BLAST XML (DESIGN_OF4 Q8, Owner-delegated 2026-10-20): the XML writer refuses a `-db` name,
+    // a query title or id, or the title of a subject with a hit that it cannot write as NCBI's
+    // XML (DESIGN_OF4 Q2), and those checks are made by the report call of the batch that holds
+    // the query or the subject. With several batches a later batch's refusal would come after
+    // the first batch's Iterations were written, so outfmt 5 is never streamed: the one report
+    // call after the search finds every refusal before the first byte.
+    if output_formats.contains(&BlastnOutputFormat::Xml) {
+        return Err(Off::Xml);
+    }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
     // ```c++
     //     TSeqPos size_read = 0;
@@ -807,6 +825,30 @@ mod tests {
         split: crate::algorithm::blastn::query_split::SplitSizes,
         outputs: &mut ReportOutputs<'_>,
     ) -> std::result::Result<Ready, Off> {
+        checked_as(
+            &[BlastnOutputFormat::Tabular],
+            mode,
+            extra,
+            subjects,
+            queries,
+            batch_size,
+            split,
+            outputs,
+        )
+    }
+
+    /// `checked` for the output formats `formats`.
+    #[allow(clippy::too_many_arguments)]
+    fn checked_as(
+        formats: &[BlastnOutputFormat],
+        mode: u8,
+        extra: &[&str],
+        subjects: &[crate::blastinput::fasta_reader::FastaRecord],
+        queries: usize,
+        batch_size: u32,
+        split: crate::algorithm::blastn::query_split::SplitSizes,
+        outputs: &mut ReportOutputs<'_>,
+    ) -> std::result::Result<Ready, Off> {
         let args = args(extra);
         let query_records: Vec<_> = (0..queries)
             .map(|index| record(index, b"q", 1000))
@@ -832,7 +874,7 @@ mod tests {
             mode,
             &args,
             &*outputs,
-            &[BlastnOutputFormat::Tabular],
+            formats,
             SubjectSource::Prepared(&prepared),
             SubjectRanges {
                 placements: &Placements::default(),
@@ -958,6 +1000,14 @@ mod tests {
         );
         // The shadow mode checks the same.
         assert!(checked(2, &[], &good, 10, 4000, plain, &mut outputs).is_ok());
+        // BLAST XML is never streamed, with one batch (20,000 letters) or several.
+        for batch_size in [20_000, 4000] {
+            let xml = [BlastnOutputFormat::Xml];
+            assert_eq!(
+                checked_as(&xml, 1, &[], &good, 10, batch_size, plain, &mut outputs).err(),
+                Some(Off::Xml)
+            );
+        }
     }
 
     #[test]

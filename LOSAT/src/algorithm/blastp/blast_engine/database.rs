@@ -53,6 +53,11 @@ use super::{
     any(not(target_arch = "wasm32"), feature = "wasm-threads")
 ))]
 mod x_db_cut;
+mod x_listed_lean;
+pub(super) use x_listed_lean::{
+    x_bp_listed_lean, x_bp_listed_lean_print_summary,
+    x_shadow_compare as x_listed_lean_shadow_compare, XListedLean,
+};
 
 // NCBI reference (598d8ae6): c++/include/algo/blast/core/blast_seqsrc.h:205
 // ```c
@@ -851,7 +856,7 @@ impl ListedSubjects {
         }
         Ok(ListedTitles {
             listed: self,
-            records,
+            shown: ListedShown::Records(records),
             replaced_title_bytes,
         })
     }
@@ -861,15 +866,42 @@ impl ListedSubjects {
 /// (`ListedSubjects::read_titles`).
 pub(super) struct ListedTitles<'a> {
     listed: &'a ListedSubjects,
-    /// The stored titles (empty for a subject in no final hit list) and the stored
-    /// letters, by rank.
-    pub(super) records: Vec<FastaRecord>,
+    /// The titles (and letters) as the reports read them, by rank.
+    pub(super) shown: ListedShown,
     /// Whether the stored title of a subject holds a byte outside ' ' ..= '~' (read as
     /// '#'), by rank (`check_reported_titles`).
     replaced_title_bytes: Vec<bool>,
 }
 
+/// The titles (and letters) of the listed subjects as the reports read them, by rank.
+pub(super) enum ListedShown {
+    /// The stored titles (empty for a subject in no final hit list) and the stored letters.
+    Records(Vec<FastaRecord>),
+    /// EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the stored titles, where the subjects in no final hit
+    /// list share one empty title; the letters are the stored residues
+    /// (`ListedSubjects::encoded`, `x_listed_lean.rs`).
+    Lean(Vec<Arc<[u8]>>),
+}
+
 impl ListedTitles<'_> {
+    /// The stored title of the subject of rank `rank` (empty for a subject in no final hit
+    /// list).
+    fn title(&self, rank: usize) -> &[u8] {
+        match &self.shown {
+            ListedShown::Records(records) => &records[rank].title,
+            ListedShown::Lean(titles) => &titles[rank],
+        }
+    }
+
+    /// The records of `read_titles`.
+    #[cfg(test)]
+    fn records(&self) -> &[FastaRecord] {
+        match &self.shown {
+            ListedShown::Records(records) => records,
+            ListedShown::Lean(_) => panic!("lean titles have no records"),
+        }
+    }
+
     /// LOSAT's rejection of a reported subject (one with rows in the final `hit_lists`)
     /// whose stored title holds a byte outside ' ' ..= '~'
     /// (`algorithm::common::database::check_reported_title`): NCBI writes an error message
@@ -908,14 +940,20 @@ impl ListedTitles<'_> {
         hit_lists: &[Option<BlastpHitList>],
     ) -> Result<Vec<Arc<[u8]>>> {
         let reported = Self::reported(hit_lists);
-        let mut ids: Vec<Arc<[u8]>> = Vec::with_capacity(self.records.len());
-        for (rank, record) in self.records.iter().enumerate() {
+        let ranks = self.listed.ordinals.len();
+        let mut ids: Vec<Arc<[u8]>> = Vec::with_capacity(ranks);
+        // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): one empty id for every subject without rows.
+        let empty: Arc<[u8]> = Arc::from(&b""[..]);
+        for rank in 0..ranks {
             if !reported.contains(&rank) {
-                ids.push(Arc::from(&b""[..]));
+                ids.push(match self.shown {
+                    ListedShown::Lean(_) => Arc::clone(&empty),
+                    ListedShown::Records(_) => Arc::from(&b""[..]),
+                });
                 continue;
             }
             let ordinal = self.listed.ordinals[rank];
-            let id = shared::tabular_subject_id(&record.title, ordinal, true, PROGRAM)?;
+            let id = shared::tabular_subject_id(self.title(rank), ordinal, true, PROGRAM)?;
             ids.push(Arc::from(id));
         }
         Ok(ids)
@@ -924,10 +962,13 @@ impl ListedTitles<'_> {
     /// The `stitle` text of every listed subject, by rank: the stored title (an empty
     /// one is written `N/A`, `blastp_subject_stitle`).
     pub(super) fn stitles(&self) -> Vec<Arc<[u8]>> {
-        self.records
-            .iter()
-            .map(|record| Arc::from(record.title()))
-            .collect()
+        match &self.shown {
+            ListedShown::Records(records) => records
+                .iter()
+                .map(|record| Arc::from(record.title()))
+                .collect(),
+            ListedShown::Lean(titles) => titles.clone(),
+        }
     }
 
     /// LOSAT's rejection of the outfmt 0 titles that it does not write as NCBI, of the
@@ -941,7 +982,7 @@ impl ListedTitles<'_> {
     ) -> Result<()> {
         for &rank in shown {
             shared::check_shown_protein_title(
-                &self.records[rank].title,
+                self.title(rank),
                 self.listed.ordinals[rank],
                 PROGRAM,
             )?;
@@ -956,7 +997,8 @@ impl ListedTitles<'_> {
 // first block, which reads the whole database as every batch does), the failures of a database
 // search that depend on its hits are those of the definition lines of the reported subjects:
 // NCBI's reader error (`HeaderReadError`, the batch of the query that reaches it fails after the
-// reports of the batches before) and LOSAT's refusals (`ListedSubjects::read_titles`,
+// reports of the batches before) and LOSAT's refusals (`ListedSubjects::read_titles` and
+// `ListedSubjects::x_read_titles_lean`,
 // `ListedTitles::check_reported_titles`, `ListedTitles::tabular_subject_ids`, and for outfmt 0
 // `ListedTitles::check_shown_titles`). When every definition line of the database reads and none
 // of them is refused, none of these failures can happen in any batch.
@@ -1014,6 +1056,65 @@ pub(super) fn x_titles_allow_blocks(
         return ranges.iter().all(allowed_range);
     }
     let allowed = |ordinal: u32| -> bool { allowed_deflines(ordinal, db.deflines(ordinal)) };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() {
+        return pool.install(|| {
+            (0..db.num_seqs())
+                .into_par_iter()
+                .with_min_len(4096)
+                .all(allowed)
+        });
+    }
+    let _ = pool;
+    (0..db.num_seqs()).all(allowed)
+}
+
+// EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the block search of outfmt 8, 9, 12 and 5.
+// These reports show no tabular id and no outfmt 0 title, so of the failures that
+// `x_titles_allow_blocks` rules out only those of the definition lines' reading remain: NCBI's
+// reader error (`HeaderReadError`), more than one definition line, and a stored title with a byte
+// outside ' ' ..= '~' (`ListedSubjects::read_titles`, `ListedTitles::check_reported_titles`; for
+// outfmt 5 that range is what `names::check_text` passes). A new function, so that
+// `x_titles_allow_blocks` and the per-definition-line code of the outfmt 0, 6 and 7 path stay as
+// they are.
+// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): whether every sequence of the database has
+/// one definition line that reads and holds no byte outside ' ' ..= '~'. Read in `pool` as
+/// `x_titles_allow_blocks` reads it; a reader error is `false`.
+pub(super) fn x_titles_read_allow_blocks(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    let db = &database.db;
+    let readable = |deflines: std::result::Result<
+        Vec<crate::seqdb::OrdinalDefline>,
+        crate::seqdb::SeqDbError,
+    >|
+     -> bool {
+        match deflines {
+            Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
+            Err(_) => false,
+        }
+    };
+    if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
+        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+        let readable_range = |range: &BlockRange| -> bool {
+            db.visit_deflines(*range, |_ordinal, deflines| readable(deflines))
+        };
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if pool.enabled() {
+            return pool.install(|| ranges.par_iter().all(readable_range));
+        }
+        let _ = pool;
+        return ranges.iter().all(readable_range);
+    }
+    let allowed = |ordinal: u32| -> bool { readable(db.deflines(ordinal)) };
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -1855,11 +1956,11 @@ mod tests {
         assert_eq!(renamed, [(0, vec![0, 0]), (1, vec![1, 1])]);
         // p03: every letter; the redo and the report read the stored letters (O is O).
         assert_eq!(
-            titles.records[1].title(),
+            titles.records()[1].title(),
             b"p03 every letter of NCBIstdaa but the gap"
         );
         assert_eq!(
-            titles.records[1].seq(),
+            titles.records()[1].seq(),
             b"ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT"
         );
         let redone: String = listed.encoded[1].aa_seq[1..=listed.encoded[1].aa_len]
@@ -1869,7 +1970,7 @@ mod tests {
         assert_eq!(redone, "ABCDEFGHIKLMNPQRSTVWXYZUOJMHCENQT");
         assert_eq!(listed.encoded[1].aa_seq.len(), 35);
         assert_eq!(
-            titles.records[2].seq(),
+            titles.records()[2].seq(),
             b"MUGYDNEDMDNEPCNDCRACIGFRYKYMMVKWOFASVIHWKHVWDJ"
         );
         assert_eq!(listed.encoded[3].aa_len, 300);
@@ -1887,6 +1988,64 @@ mod tests {
             .check_shown_titles(&[0usize, 1, 2, 3].into_iter().collect())
             .unwrap();
         titles.check_reported_titles(&hit_lists).unwrap();
+    }
+
+    // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles are the records' titles, rank by rank,
+    // with one shared empty title for the subjects in no final hit list, and the stored residues
+    // give the records' letters (`x_listed_lean.rs`).
+    #[test]
+    fn lean_titles_are_the_records_titles_and_letters() {
+        let database = open("prot_mv");
+        let list = |oid: u32, raw_score: i32| BlastpHspList {
+            oid,
+            query_index: 0,
+            hsps: vec![test_hsp(oid, raw_score)],
+            best_evalue: 1e-5,
+        };
+        let mut first = BlastpHitList::new(10);
+        for (oid, score) in [(7, 60), (2, 55), (9, 50)] {
+            first.update(list(oid, score));
+        }
+        let mut second = BlastpHitList::new(10);
+        second.update(list(2, 70));
+        second.update(list(0, 65));
+        let mut hit_lists = vec![Some(first), None, Some(second)];
+        let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
+        // Ordinal ids 7 and 9 (ranks 2 and 3) stay listed but leave the final hit lists.
+        let first = hit_lists[0].as_mut().unwrap();
+        first.hsplist_array.retain(|hsp_list| hsp_list.oid == 1);
+        first.hsplist_count = first.hsplist_array.len();
+        let records = listed.read_titles(&database, &hit_lists).unwrap();
+        let lean = listed.x_read_titles_lean(&database, &hit_lists).unwrap();
+        let ListedShown::Lean(lean_titles) = &lean.shown else {
+            panic!("lean titles");
+        };
+        assert!(matches!(records.shown, ListedShown::Records(_)));
+        assert_eq!(lean_titles.len(), 4);
+        for rank in 0..4 {
+            assert_eq!(
+                lean.title(rank),
+                records.records()[rank].title(),
+                "rank {rank}"
+            );
+            assert_eq!(
+                lean.replaced_title_bytes[rank],
+                records.replaced_title_bytes[rank]
+            );
+        }
+        assert_eq!(lean.title(1), b"p03 every letter of NCBIstdaa but the gap");
+        assert!(lean.title(2).is_empty() && lean.title(3).is_empty());
+        assert!(Arc::ptr_eq(&lean_titles[2], &lean_titles[3]));
+        assert_eq!(
+            lean.tabular_subject_ids(&hit_lists).unwrap(),
+            records.tabular_subject_ids(&hit_lists).unwrap()
+        );
+        lean.check_shown_titles(&[0usize, 1].into_iter().collect())
+            .unwrap();
+        lean.check_reported_titles(&hit_lists).unwrap();
+        assert_eq!(lean.stitles(), records.stitles());
+        // The shadow's comparison: titles, flags and every letter.
+        x_listed_lean_shadow_compare(&lean, &records);
     }
 
     // blast_seqalign.cpp:1569-1582 and seqdbvol.cpp:2302-2310: NCBI opens a volume's
@@ -1934,11 +2093,15 @@ mod tests {
         assert_eq!(listed.ordinals, [1, 3]);
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
         assert_eq!(
-            titles.records[1].title(),
+            titles.records()[1].title(),
             b"p04 lower case and ambiguity codes"
         );
-        assert_eq!(titles.records[0].title(), b"");
-        assert_eq!(titles.records[0].seq(), b"I");
+        assert_eq!(titles.records()[0].title(), b"");
+        assert_eq!(titles.records()[0].seq(), b"I");
+        // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles do not read it either.
+        let lean = listed.x_read_titles_lean(&database, &hit_lists).unwrap();
+        assert_eq!(lean.title(1), b"p04 lower case and ambiguity codes");
+        assert_eq!(lean.title(0), b"");
         // Query 2 reports ordinal id 9 (volume 05) before ordinal id 0 (volume 00): the
         // first header file read is that of volume 05, in query 2's batch.
         let mut hit_lists = vec![
@@ -1960,6 +2123,23 @@ mod tests {
             .downcast_ref::<NativeError>()
             .expect("NCBI's error");
         assert_eq!(native.exit, 2);
+        // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles are read in the same order, with
+        // the same error.
+        let lean_error = listed
+            .x_read_titles_lean(&database, &hit_lists)
+            .err()
+            .expect("a missing header file")
+            .downcast::<HeaderReadError>()
+            .expect("NCBI's error, with the query that reached it");
+        assert_eq!(lean_error.query, 2);
+        assert_eq!(
+            lean_error
+                .error
+                .downcast_ref::<NativeError>()
+                .unwrap()
+                .message,
+            native.message
+        );
         // The volume is recorded under its directory normalised with symbolic links
         // followed (seqdbalias.cpp:851-862, `NormalizePath(dir_name, eFollowLinks)`), so
         // the message names that directory: on macOS the temporary directory under `/var`
@@ -2021,7 +2201,7 @@ mod tests {
         let mut hit_lists = vec![Some(bad)];
         let listed = ListedSubjects::read(&database, &mut hit_lists, &mut []).unwrap();
         let titles = listed.read_titles(&database, &hit_lists).unwrap();
-        assert_eq!(titles.records[1].title(), b"p10 l#st protein");
+        assert_eq!(titles.records()[1].title(), b"p10 l#st protein");
         let error = titles.check_reported_titles(&hit_lists).unwrap_err();
         assert!(
             format!("{error:#}").starts_with(
@@ -2029,6 +2209,12 @@ mod tests {
             ),
             "{error:#}"
         );
+        // EXPERIMENT (LOSAT_X_BPLISTEDLEAN): the lean titles hold the same title and flag, and
+        // give the same refusal.
+        let lean = listed.x_read_titles_lean(&database, &hit_lists).unwrap();
+        assert_eq!(lean.title(1), b"p10 l#st protein");
+        let lean_error = lean.check_reported_titles(&hit_lists).unwrap_err();
+        assert_eq!(format!("{lean_error:#}"), format!("{error:#}"));
         drop(database);
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -2104,7 +2290,18 @@ mod tests {
                 .unwrap()
             })
         };
+        // EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the same databases for the
+        // read-only check of outfmt 8, 9, 12 and 5.
+        let read_allowed = |database: &BlastpDatabase| -> [bool; 2] {
+            [1, 4].map(|threads| {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    Ok(x_titles_read_allow_blocks(database, pool))
+                })
+                .unwrap()
+            })
+        };
         assert_eq!(allowed(&open("prot_v4")), [true, true]);
+        assert_eq!(read_allowed(&open("prot_v4")), [true, true]);
         let dir = std::env::temp_dir().join(format!(
             "losat-db-qblock-titles-{}-{:?}",
             std::process::id(),
@@ -2125,6 +2322,7 @@ mod tests {
             BlastpDatabase::open(dir.join("prot_mv").to_str().unwrap(), &Default::default())
                 .unwrap();
         assert_eq!(allowed(&missing), [false, false]);
+        assert_eq!(read_allowed(&missing), [false, false]);
         // A stored title with a byte outside ' ' ..= '~' (LOSAT's refusal when it is reported).
         for ext in ["pin", "psq"] {
             std::fs::copy(fixture("prot_v4") + "." + ext, dir.join(format!("b.{ext}"))).unwrap();
@@ -2139,7 +2337,26 @@ mod tests {
         let bad =
             BlastpDatabase::open(dir.join("b").to_str().unwrap(), &Default::default()).unwrap();
         assert_eq!(allowed(&bad), [false, false]);
-        drop((missing, bad));
+        assert_eq!(read_allowed(&bad), [false, false]);
+        // A title of punctuation only (`, ,`): the tabular id NCBI writes cannot be made from it
+        // (outfmt 6 and 7 refuse it, `x_titles_allow_blocks`), but outfmt 8, 9, 12 and 5 write no
+        // id, so `x_titles_read_allow_blocks` takes the blocks (the stricter function must not
+        // replace it).
+        for ext in ["pin", "psq"] {
+            std::fs::copy(fixture("prot_v4") + "." + ext, dir.join(format!("c.{ext}"))).unwrap();
+        }
+        let mut header = std::fs::read(fixture("prot_v4") + ".phr").unwrap();
+        let at = header
+            .windows(16)
+            .position(|window| window == b"p10 last protein")
+            .expect("the title of p10");
+        header[at..at + 16].copy_from_slice(b", , , , , , , , ");
+        std::fs::write(dir.join("c.phr"), header).unwrap();
+        let punctuation =
+            BlastpDatabase::open(dir.join("c").to_str().unwrap(), &Default::default()).unwrap();
+        assert_eq!(allowed(&punctuation), [false, false]);
+        assert_eq!(read_allowed(&punctuation), [true, true]);
+        drop((missing, bad, punctuation));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

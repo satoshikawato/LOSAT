@@ -192,6 +192,9 @@ pub struct BlastnArgs {
     /// Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
     #[arg(long = "max_hsps", value_parser = blastn_count)]
     pub max_hsps_per_subject: Option<usize>,
+    // NCBI blast_args.cpp:196-201,313-315: no filter when omitted or 0.
+    #[arg(long = "qcov_hsp_perc", value_parser = blastn_query_coverage, help = "Percent query coverage per hsp")]
+    pub qcov_hsp_perc: Option<f64>,
     /// Minimum diagonal separation between HSPs on the same subject (0 = auto, task-specific)
     /// Reference: ncbi-blast/c++/src/algo/blast/api/blast_nucl_options.cpp:231-270
     /// Default: 50 for blastn, 6 for megablast
@@ -340,7 +343,7 @@ pub struct BlastnArgs {
     ///
     /// Default fields: qaccver saccver pident length mismatch gapopen qstart qend sstart send evalue bitscore
     // NCBI's argument is a string (blast_args.cpp:2657-2660), parsed when the options
-    // are set (`blastn/hsp.rs` `parse_blastn_output_format`).
+    // are set (`blastinput/app.rs` `parse_formatting_string` and `report_format`).
     #[arg(long, default_value = "0", value_name = "SPEC")]
     pub outfmt: String,
 }

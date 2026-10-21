@@ -33,7 +33,8 @@ fn fasta_records_from_bytes(bytes: &[u8]) -> Result<Vec<bio::io::fasta::Record>>
 }
 
 /// ABI v1's reading of a BLASTN `-outfmt` value, which is frozen (plan TD-1): it keeps the
-/// values that it accepted before `parse_blastn_output_format` followed NCBI.
+/// values that it accepted before BLASTN's reading of `-outfmt` followed NCBI (now
+/// `blastinput/app.rs` `parse_formatting_string`).
 fn v1_output_format(spec: &str) -> Result<BlastnOutputFormat> {
     let mut parts = spec.split_whitespace();
     let format = parts.next().unwrap_or("6");
@@ -81,6 +82,10 @@ pub(super) fn run_web_pair(
         BlastnOutputFormat::Pairwise => anyhow::bail!("unsupported BLASTN output format: 0"),
         BlastnOutputFormat::Tabular => "6".to_string(),
         BlastnOutputFormat::TabularWithComments => "7".to_string(),
+        // `v1_output_format` reads 0, 6 and 7 only.
+        BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Xml => {
+            anyhow::bail!("unsupported BLASTN output format")
+        }
     };
     // ABI v1 is frozen (plan TD-1) except fail-fast fixes. Before S07+ it checked the
     // thread count first (in its search pool) and gave the empty report of an empty

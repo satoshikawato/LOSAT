@@ -32,15 +32,44 @@ On certified pairwise profiles and fixtures, LOSAT is checked against declared N
 
 | Program | Supported Tasks | Output Formats (`-outfmt`) | Description |
 |:---|:---|:---|:---|
-| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0` (pairwise, default), `6` (tabular), `7` (commented tabular) | Nucleotide vs. nucleotide alignment |
-| **`blastx`** | `blastx`; native and Wasm entry points | `0` (default), `6`, `7` | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
-| **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0` (default), `6`, `7` | Protein vs. protein alignment |
-| **`tblastx`** | `tblastx` | `0` (default), `6`, `7` | Translated 6-frame nucleotide vs. nucleotide alignment |
-| **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0` (default), `6`, `7` | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
+| **`blastn`** | `megablast` (default), `blastn`, `dc-megablast`, `blastn-short` | `0`, `5`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Nucleotide vs. nucleotide alignment |
+| **`blastx`** | `blastx`; native and Wasm entry points | `0`, `5`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Nucleotide query vs. protein subject; [CLI scope and release status](docs/losatx_blastx_native_cli.md) |
+| **`blastp`** | `blastp` (default), `blastp-fast`, `blastp-short` | `0`, `5`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Protein vs. protein alignment |
+| **`tblastx`** | `tblastx` | `0`, `5`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Translated 6-frame nucleotide vs. nucleotide alignment |
+| **`tblastn`** | `tblastn` (default), `tblastn-fast` | `0`, `5`, `6`, `7`, `8`, `9`, `12` (see [Output formats](#output-formats)) | Protein query vs. translated nucleotide subject; [v0.2.0 fixture-scoped contract](docs/release/v0.2.0.md) |
 
 > **Note**: Tabular output (`-outfmt 6` and `7`) writes the 12 standard BLAST fields:  
 > `qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore`.  
-> BLASTP and BLASTX also accept a custom field list (for example `-outfmt "6 qseqid sseqid evalue"`); BLASTN, TBLASTN and TBLASTX write the standard fields only. Other `-outfmt` numbers and `delim=` are rejected.
+> BLASTP and BLASTX also accept a custom field list (for example `-outfmt "6 qseqid sseqid evalue"`); BLASTN, TBLASTN and TBLASTX write the standard fields only. `delim=` is rejected.
+
+---
+
+## Output formats
+
+The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blastp`, `blastx`, `tblastn`, `tblastx`) write; `19` and `21` belong to igblastn and magicblast. Every LOSAT program reads `-outfmt` as NCBI does and gives NCBI's error for a value that NCBI rejects. A format that NCBI writes and LOSAT does not write yet is rejected with "output format N is not supported by LOSAT's PROGRAM" before the inputs are read. The default is `0`.
+
+| `-outfmt` | NCBI name | NCBI programs that write it | LOSAT |
+|:---|:---|:---|:---|
+| `0` | Pairwise | all five | all five programs |
+| `1` | Query-anchored showing identities | all five | not yet |
+| `2` | Query-anchored no identities | all five | not yet |
+| `3` | Flat query-anchored showing identities | all five | not yet |
+| `4` | Flat query-anchored no identities | all five | not yet |
+| `5` | BLAST XML | all five | all five programs (with `-subject` and `-db`) |
+| `6` | Tabular | all five | all five programs |
+| `7` | Tabular with comment lines | all five | all five programs |
+| `8` | Seqalign (Text ASN.1) | all five | all five programs |
+| `9` | Seqalign (Binary ASN.1) | all five | all five programs |
+| `10` | Comma-separated values | all five | not yet |
+| `11` | BLAST archive (ASN.1) | all five | not yet |
+| `12` | Seqalign (JSON) | all five | all five programs |
+| `13` | Multiple-file BLAST JSON | all five, with `-out FILE` only | not yet |
+| `14` | Multiple-file BLAST XML2 | all five, with `-out FILE` only | not yet |
+| `15` | Single-file BLAST JSON | all five | not yet |
+| `16` | Single-file BLAST XML2 | all five | not yet |
+| `17` | Sequence Alignment/Map (SAM) | `blastn` only | not yet |
+| `18` | Organism Report | all five | not yet |
+| `20` | Comma-separated values with header lines | all five | not yet |
 
 ---
 
@@ -187,10 +216,11 @@ LOSAT blastx \
 | `-db <name>` | Database name | — | BLAST database to search in place of `-subject` (BLASTP, BLASTN, TBLASTN, BLASTX, TBLASTX; section 6) |
 | `-task <string>` | String | Program default | Task: `megablast`, `blastn`, `dc-megablast` or `blastn-short` (for `blastn`); `blastp`, `blastp-fast` or `blastp-short` (for `blastp`); `blastx` (for `blastx`); `tblastn` or `tblastn-fast` (for `tblastn`) |
 | `-evalue <real>` | Float | `10.0` | Expectation value (E-value) threshold |
-| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `6`=tabular, `7`=commented tabular; custom tabular fields in BLASTP and BLASTX only |
+| `-outfmt <spec>` | Integer, or `6`/`7` with fields | `0` | Output format for every program: `0`=pairwise, `5`=BLAST XML, `6`=tabular, `7`=commented tabular, `8`=Seq-align (text ASN.1), `9`=Seq-align (binary ASN.1), `12`=Seq-align (JSON); custom tabular fields in BLASTP and BLASTX only |
 | `-num_threads <int>` | Integer | `1` | Number of threads to use |
 | `-max_target_seqs <int>`| Integer | `500` | Maximum number of aligned target sequences to keep |
 | `-max_hsps <int>` | Integer | Unlimited | Maximum number of HSPs per subject sequence |
+| `-qcov_hsp_perc <real>` | Float | `0` (no filter) | Percent query coverage per HSP: HSPs that cover less of the query (of the query frame in BLASTX/TBLASTX) are removed |
 | `-dust <args>` | String | `20 64 1` | DUST low-complexity filter for BLASTN (`yes`, `no`, or `"level window linker"`) |
 | `-seg <args>` | String | `no` (blastp)<br>`12 2.2 2.5` (blastx/tblastx/tblastn) | SEG low-complexity filter for BLASTX/BLASTP/TBLASTX/TBLASTN (`yes`, `no`, or `"window locut hicut"`) |
 | `-query_gencode <int>` | Integer | `1` | Genetic code for query translation (BLASTX/TBLASTX) |

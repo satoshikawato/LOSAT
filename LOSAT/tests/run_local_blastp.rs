@@ -22,7 +22,7 @@ use LOSAT::cli::{try_parse_from, Cli, Commands};
 
 const CUSTOM: &str =
     "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore qseq sseq btop";
-const FORMATS: [&str; 4] = ["0", "6", "7", CUSTOM];
+const FORMATS: [&str; 8] = ["0", "6", "7", CUSTOM, "8", "9", "12", "5"];
 
 /// A temporary FASTA file holding the first `count` records of a fixture, byte for byte.
 fn fixture_prefix(name: &str, count: usize) -> PathBuf {
@@ -233,7 +233,7 @@ fn unsupported_formats_fail_before_searching() {
     // NCBI blast_args.cpp:2845-2851 and tabular.cpp:70-99: a custom specification of
     // outfmt 0 and a token that is not a field name are ignored ("0 qseqid", "6 nosuchfield"
     // run as "0" and "6"); a field that LOSAT's BLASTP does not write is rejected.
-    for outfmt in ["9", "6 sallseqid", "6 delim=, std"] {
+    for outfmt in ["10", "6 sallseqid", "6 delim=, std"] {
         let (mut valid, mut invalid, mut diagnostics) = (Vec::new(), Vec::new(), Vec::new());
         let mut outputs = ReportOutputs {
             formats: vec![

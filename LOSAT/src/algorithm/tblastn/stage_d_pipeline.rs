@@ -11,8 +11,8 @@ use rayon::prelude::*;
 
 use super::kappa::{
     convert_distinct_alignments, normalize_postredo_scores, postredo_converted_stats,
-    postredo_converted_stats_with_matrix, reap_contained_postredo_hsps, redo_preliminary_match,
-    ConvertedKappaHsp,
+    postredo_converted_stats_with_matrix, postredo_engine_positives, reap_contained_postredo_hsps,
+    redo_preliminary_match, ConvertedKappaHsp,
 };
 use super::kappa_heap::{compo_early_termination, CompoHeap, CompoHeapRecord};
 use super::search_gapped::{
@@ -78,6 +78,9 @@ pub(super) struct LocalStageDProfile<'a> {
     pub query_offsets: &'a [usize],
     /// The numbers of the subject set that the statistics read (a database's, `-dbsize`).
     pub subject_set: SubjectSetNumbers,
+    /// The Seq-aligns are requested (outfmt 8, 12; `ReportNeeds::seqalign`): the HSPs of a
+    /// composition-adjusted match get NCBI's engine positives (`postredo_engine_positives`).
+    pub engine_positives: bool,
 }
 
 /// The numbers of a database (`-db`) as NCBI's search reads them from its sequence source:
@@ -1366,6 +1369,9 @@ fn run_local_search_with_pool(
         // the translations below read windows of it, as NCBI's do.
         let subject = subjects.nt(oid);
         let incoming: Vec<_> = list.hsps.iter().map(|hsp| hsp.hsp).collect();
+        // The matrix that the match's adjustments leave, for the engine positives
+        // (`postredo_engine_positives`).
+        let mut matrix_state = None;
         let mut redo = redo_preliminary_match(
             &incoming,
             i32::try_from(context)?,
@@ -1377,6 +1383,7 @@ fn run_local_search_with_pool(
             ScoringMatrix::Blosum62,
             scratch,
             workspace,
+            &mut matrix_state,
         )?;
         let converted = convert_distinct_alignments(&mut redo.alignments_by_query[context])?;
         if converted.is_empty() {
@@ -1438,6 +1445,17 @@ fn run_local_search_with_pool(
                     .context("TBLASTN Kappa source owner reused")?;
                 let (ident, positives, length, mismatches, gap_opens, gap_letters) =
                     postredo_converted_stats(&converted, &encoded[context], &mut target)?;
+                // With the Seq-aligns requested, NCBI's engine positives: by the matrix of the
+                // match's last adjustment (`postredo_engine_positives`).
+                let positives = match matrix_state.as_ref().filter(|_| profile.engine_positives) {
+                    Some(adjusted) => postredo_engine_positives(
+                        &converted,
+                        &encoded[context],
+                        &mut target,
+                        adjusted,
+                    )?,
+                    None => positives,
+                };
                 // NCBI core/blast_kappa.c:515-526 uses the masked working query;
                 // objtools/align_format/tabular.cpp:983-1021 recomputes the
                 // report counts from the original aligned query sequence.
@@ -2996,6 +3014,7 @@ mod tests {
                 max_target_seqs: 500,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             },
             true,
             true,
@@ -3044,6 +3063,7 @@ mod tests {
                 max_target_seqs: 500,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             },
             true,
             true,
@@ -3332,6 +3352,7 @@ mod tests {
                 max_target_seqs: 2,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             },
             true,
             true,
@@ -3418,6 +3439,7 @@ mod tests {
                 max_target_seqs: 500,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             },
             true,
             true,
@@ -3573,6 +3595,7 @@ mod tests {
                 max_target_seqs: 500,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             },
         )
         .unwrap();
@@ -3664,6 +3687,7 @@ mod tests {
                     max_target_seqs: 500,
                     query_offsets: &[],
                     subject_set: Default::default(),
+                    engine_positives: false,
                 },
             )
             .unwrap();
@@ -3846,6 +3870,7 @@ mod tests {
                     max_target_seqs: 500,
                     query_offsets: &[],
                     subject_set: Default::default(),
+                    engine_positives: false,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -4071,6 +4096,7 @@ mod tests {
                     max_target_seqs: 500,
                     query_offsets: &[],
                     subject_set: Default::default(),
+                    engine_positives: false,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -4279,6 +4305,7 @@ mod tests {
                 max_target_seqs: 500,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             },
             false,
             false,
@@ -4425,6 +4452,7 @@ mod tests {
                 max_target_seqs: 500,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             },
             false,
             false,
@@ -4592,6 +4620,7 @@ mod tests {
                 max_target_seqs: 500,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             };
             let mut boundary = StageDBoundaryTrace::default();
             let result = run_local_search(
@@ -4787,6 +4816,7 @@ mod tests {
                     max_target_seqs: 500,
                     query_offsets: &[],
                     subject_set: Default::default(),
+                    engine_positives: false,
                 };
                 let mut boundary = StageDBoundaryTrace::default();
                 let results = run_local_search(
@@ -4945,6 +4975,7 @@ mod tests {
                         max_target_seqs: 500,
                         query_offsets: &[],
                         subject_set: Default::default(),
+                        engine_positives: false,
                     },
                     true,
                     true,
@@ -5254,6 +5285,7 @@ mod tests {
                 max_target_seqs: 112,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             },
         )
         .unwrap();
@@ -5442,6 +5474,7 @@ mod tests {
                     max_target_seqs: 500,
                     query_offsets: &[],
                     subject_set: Default::default(),
+                    engine_positives: false,
                 },
             )
             .unwrap();
@@ -5555,6 +5588,7 @@ mod tests {
                 max_target_seqs: 1,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             },
         )
         .unwrap();
@@ -5650,6 +5684,7 @@ mod tests {
                 max_target_seqs: 1,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             },
         )
         .unwrap();
@@ -5762,6 +5797,7 @@ mod tests {
                 max_target_seqs: 1,
                 query_offsets: &[],
                 subject_set: Default::default(),
+                engine_positives: false,
             },
         )
         .unwrap();
@@ -5989,6 +6025,7 @@ mod tests {
             max_target_seqs: 500,
             query_offsets: &[],
             subject_set: Default::default(),
+            engine_positives: false,
         };
         let taken = x_tbn_parallel() && super::super::search_seed::XSubjectSide::enabled();
         for ranges in [
@@ -6079,6 +6116,7 @@ mod tests {
             max_target_seqs: 500,
             query_offsets: &[],
             subject_set: Default::default(),
+            engine_positives: false,
         };
         let ranges = vec![0..1, 1..2, 2..3, 3..4];
         let searched = x_search_batches(

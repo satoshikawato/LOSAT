@@ -116,6 +116,9 @@ pub(crate) struct ReportedSubjects {
     records: Vec<FastaRecord>,
     titles: Vec<Arc<[u8]>>,
     tabular_ids: Vec<String>,
+    /// The ordinal id of each rank, ascending (the Seq-ids of the Seq-annots,
+    /// `general { db "BL_ORD_ID", tag id <oid> }`).
+    ordinals: Vec<u32>,
 }
 
 impl ReportedSubjects {
@@ -202,6 +205,7 @@ impl ReportedSubjects {
                 warnings: Vec::new(),
             });
             reported.titles.push(title);
+            reported.ordinals.push(ordinal);
         }
         // Ranks keep the order of the ordinal ids, so every tie broken by subject index
         // is broken as before.
@@ -223,6 +227,11 @@ impl ReportedSubjects {
     /// The records by rank.
     pub(crate) fn records(&self) -> &[FastaRecord] {
         &self.records
+    }
+
+    /// The ordinal id of rank `rank`.
+    pub(crate) fn ordinal(&self, rank: usize) -> u32 {
+        self.ordinals[rank]
     }
 
     /// The tabular subject id of rank `rank` (only with `tabular` in `for_batch`).

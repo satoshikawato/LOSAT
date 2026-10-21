@@ -117,7 +117,10 @@ fn report_error(error: anyhow::Error) -> anyhow::Error {
     // {
     //     m_Outfile.exceptions(NcbiBadbit);
     // ```
-    if error.downcast_ref::<report::TabularFlushError>().is_some() {
+    if error.is::<super::blast_xml::XmlRefusal>() {
+        // LOSAT's refusal of a title NCBI's XML cannot write, not an error of NCBI's engine.
+        error
+    } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
     } else if let Some(e) = error.downcast_ref::<io::Error>() {
         output_error(io::Error::new(e.kind(), e.to_string()))
@@ -231,6 +234,22 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     //         NCBI_THROW(CInputException, eInvalidInput, e.GetMsg());
     //     }
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:3624-3627
+    // ```c++
+    //     if (GetExportSearchStrategyStream(args) ||
+    //            m_FormattingArgs->ArchiveFormatRequested(args)) {
+    //         locality = CBlastOptions::eBoth;
+    //     }
+    // ```
+    // `ArchiveFormatRequested` parses `-outfmt` (blast_args.cpp:2745-2748) before the
+    // option handlers run, with NCBI's errors; a format that NCBI runs and LOSAT does not
+    // write is rejected there too, and the custom tabular fields are checked (LOSAT's own
+    // list, `check_custom_fields`).
+    use crate::blastinput::app::{self, Program};
+    let choice = app::parse_formatting_string(&args.outfmt)?;
+    if app::report_format(&choice, Program::Blastx, args.out.as_deref())?.is_some() {
+        super::args::check_custom_fields(&choice)?;
+    }
     // Preserve explicit product refusals; defer supported semantic failures
     // until subject and standard query/output streams have been extracted.
     let resolution = args.resolve();
@@ -328,6 +347,14 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         Some(path) => Box::new(File::create(path).map_err(|_| inaccessible("out", path))?),
         None => Box::new(io::stdout().lock()),
     };
+    // BLAST XML (outfmt 5): the output can hold the whole document in memory
+    // (`blast_xml::HeldOutput`), decided below before the search.
+    let (destination, held) = if choice.number == 5 {
+        let held = super::blast_xml::HeldOutput::new(destination);
+        (Box::new(held.clone()) as Box<dyn Write>, Some(held))
+    } else {
+        (destination, None)
+    };
     let mut writer = BufWriter::new(destination);
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2975-2977
     // ```c++
@@ -335,6 +362,30 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     //    		ERR_POST(Warning << "Examining 5 or more matches is recommended");
     //     }
     // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_args.cpp:2874-2886
+    // ```c++
+    //     ParseFormattingString(args, m_OutputFormat, m_CustomOutputFormatSpec,m_CustomDelim);
+    //     if((m_OutputFormat == eSAM) && !(m_FormatFlags & eIsSAM) ){
+    //     		NCBI_THROW(CInputException, eInvalidInput,
+    //     		                        "SAM format is only applicable to blastn" );
+    //     }
+    // ```
+    // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blastx_args.cpp:110-126
+    // ```c++
+    //     arg.Reset(new CGeneticCodeArgs(CGeneticCodeArgs::eQuery));
+    //     m_Args.push_back(arg);
+    //
+    //     m_FormattingArgs.Reset(new CFormattingArgs);
+    //     arg.Reset(m_FormattingArgs);
+    //     m_Args.push_back(arg);
+    // ...
+    //     arg.Reset(new CCompositionBasedStatsArgs);
+    //     m_Args.push_back(arg);
+    // ```
+    // The formatting handler raises NCBI's errors for the formats of other programs (SAM,
+    // AIRR rearrangement, FASTA) before its warning. The deferred errors of `resolve` are
+    // those of the composition-based statistics handler and of `Validate`, which come later.
+    app::formatting_handler_check(&choice, Program::Blastx)?;
     if args.max_target_seqs.unwrap_or(500) < 5 {
         stderr.write_all(b"Warning: [blastx] Examining 5 or more matches is recommended\n")?;
     }
@@ -374,6 +425,45 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         }
         None => None,
     };
+    // LOSAT's refusals of a database for the Seq-annot formats, before the search
+    // (`report::serial::seqalign::check_database`).
+    if let (Some(database), Some(serial)) = (
+        database.as_ref(),
+        app::ReportFormat::from_number(choice.number)
+            .and_then(crate::report::serial::SerialFormat::of),
+    ) {
+        crate::report::serial::seqalign::check_database(
+            serial,
+            database.name(),
+            &database.pairwise_database().definition,
+            Program::Blastx,
+        )?;
+    }
+    // LOSAT's refusal of a database name that BLAST XML (outfmt 5) cannot write, before the
+    // search (`blast_xml::check_database_name`).
+    if let (Some(database), 5) = (database.as_ref(), choice.number) {
+        super::blast_xml::check_database_name(database.name())?;
+    }
+    // LOSAT's other refusals of BLAST XML (a title with a byte NCBI's XML stream cannot write)
+    // come before the first byte, though the query file is read batch by batch: the query
+    // titles are checked by a read of the file before the search, and a run in which a
+    // `-subject` title (or the message of a query) could still be refused later holds the
+    // document in memory until its epilog (`blast_xml::HeldOutput`). Only with outfmt 5; the
+    // other formats read the file once.
+    if let Some(held) = &held {
+        // A query that is not a regular file (a pipe, `<(...)`, `/dev/stdin` from a pipe, a
+        // FIFO) cannot be read a second time: the read before the search would take every
+        // byte (DECISIONS 22). Refused as `-query -` is (`args.rs`), before the search.
+        if !query_file.metadata().is_ok_and(|m| m.is_file()) {
+            bail!("unsupported BLASTX query input for -outfmt 5: use a regular file");
+        }
+        let query_file = File::open(&args.query).map_err(|_| inaccessible("query", &args.query))?;
+        let messages_may_be_refused =
+            super::blast_xml::prescan_queries(query_file, args.lcase_masking)?;
+        if messages_may_be_refused || super::blast_xml::subjects_may_be_refused(&subjects) {
+            held.hold();
+        }
+    }
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:856-873
     // ```c++
     // 	char c;
@@ -432,6 +522,16 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             s.internal_id, s.title
         )?;
     }
+    // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:251-254
+    // ```c++
+    // 	if(UseXInclude(*fmt_args, args[kArgOutput].AsString())) {
+    //         	formatter.SetBaseFile(args[kArgOutput].AsString());
+    //         }
+    //         formatter.PrintProlog();
+    // ```
+    // The XInclude formats written to standard output fail after the formatter is made (a
+    // format 13 or 14 to a file is LOSAT's rejection, above).
+    app::xinclude_check(&choice)?;
     let pairwise_database = database.as_ref().map(BlastxDatabase::pairwise_database);
     let no_reported = ReportedSubjects::default();
     let shown_run = match (&database, &pairwise_database) {
@@ -486,10 +586,21 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     // The reports of one query batch: with `-db`, the titles of its reported sequences are
     // read first and its hit lists renamed to ranks (`ReportedSubjects::for_batch`); NCBI's
     // reader error there stops the run at this batch, with no epilog.
+    // A refusal of a title (BLAST XML) found while a batch is reported drops what the run holds.
+    let refused = |error: anyhow::Error| -> anyhow::Error {
+        let error = report_error(error);
+        if error.is::<super::blast_xml::XmlRefusal>() {
+            if let Some(held) = &held {
+                held.discard();
+            }
+        }
+        error
+    };
     let render_batch = |writer: &mut BufWriter<Box<dyn Write>>,
                         diagnostics: &mut dyn Write,
                         queries: &[FastaRecord],
-                        results: &mut Vec<BatchResults>|
+                        results: &mut Vec<BatchResults>,
+                        queries_before: usize|
      -> Result<()> {
         match (&database, &pairwise_database) {
             (Some(database), Some(pairwise)) => {
@@ -501,7 +612,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                             stores,
                             results,
                             options.gapped,
-                            options.outfmt != 0,
+                            matches!(options.outfmt, 6 | 7),
                             options.outfmt == 0,
                         );
                         super::x_timing::run(XRun::Titles, x_t);
@@ -524,8 +635,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         reported: &reported,
                     },
                     results,
+                    queries_before,
                 )
-                .map_err(report_error)
+                .map_err(refused)
             }
             _ => report::render_queries(
                 writer,
@@ -535,8 +647,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                 &subjects,
                 &shown_run,
                 results,
+                queries_before,
             )
-            .map_err(report_error),
+            .map_err(refused),
         }
     };
     let mut processed = 0usize;
@@ -672,6 +785,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                                 &mut **diagnostics.borrow_mut(),
                                 queries,
                                 &mut results,
+                                processed,
                             )?;
                             writer.flush().map_err(output_error)?;
                             processed += queries.len();
@@ -779,6 +893,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                                     &mut **diagnostics.borrow_mut(),
                                     queries,
                                     &mut results,
+                                    processed,
                                 )?;
                                 writer.flush().map_err(output_error)?;
                                 processed += queries.len();
@@ -880,6 +995,7 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
                         &mut **diagnostics.borrow_mut(),
                         queries,
                         &mut results,
+                        processed,
                     )?;
                     writer.flush().map_err(output_error)?;
                     super::x_timing::run(XRun::Render, x_t);
@@ -919,6 +1035,10 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     report::write_epilog(&mut writer, &options, &subjects, &shown_run, processed)
         .map_err(report_error)?;
     writer.flush().map_err(output_error)?;
+    // The document a hold kept: written at the end of the run, with the epilog.
+    if let Some(held) = &held {
+        held.release().map_err(output_error)?;
+    }
     super::x_timing::run(XRun::Epilog, x_t);
     super::x_timing::run(XRun::Total, x_t_run);
     // Diagnostic (LOSAT_TIMING): the run's share of the common line (x_timing.rs).

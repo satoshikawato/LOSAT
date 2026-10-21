@@ -25,6 +25,11 @@ replaced by that title and the stand-in's path by the subject's (the two paths h
 same length), the check of docs/evidence/losat_web_e2g/title_sweep.py and
 docs/evidence/losat_web_e2e/title_sweep.py.
 
+A row whose `files` column is `xinclude` (outfmt 13 or 14: LOSAT/tests/xinclude_fixtures.py) runs
+with `-out <tmp>/<fixture_id>.out` added. NCBI writes the master file there and the side files
+next to it; the master is DIR/<fixture_id>.out (its hash is `stdout_sha256`, standard output must
+be empty) and the side files are DIR/<fixture_id>.out_<n>.json|xml (`side_sha256`, in order).
+
 - default: compare the outputs with the manifest's hash columns; exit 1 on a difference.
 - --freeze: write the hash and size columns of the manifest instead (run with
   --out LOSAT/tests/fixtures/outfmt0 so the fixtures are the frozen bytes).
@@ -52,8 +57,13 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 ENGINE = REPO / "LOSAT"
+sys.path.insert(0, str(ENGINE / "tests"))
+import xinclude_fixtures as xinclude  # noqa: E402  (the rows of outfmt 13 and 14)
 MANIFEST = ENGINE / "tests/outfmt0_manifest.tsv"
 HASHES = ("stdout_sha256", "stdout_bytes", "stderr_sha256")
+# The columns of the old form of the manifest; the `files` columns follow them and are left out of a
+# row that does not use them (so that the rows of the old form keep their text).
+BASE_COLUMNS = 13
 DEVIATION = "approved_db_gencode_deviation"
 PUNCT_TITLE = "approved_punct_title:"
 # BATCH_SIZE and CHUNK_SIZE change the query batches (blast_input_aux.cpp:86-90,
@@ -66,6 +76,14 @@ def read_manifest() -> tuple[list[str], list[str], list[dict[str, str]]]:
     comments = [line for line in lines if line.startswith("#")]
     header, *body = [line.split("\t") for line in lines if not line.startswith("#")]
     return comments, header, [dict(zip(header, row)) for row in body]
+
+
+def row_cells(header: list[str], row: dict[str, str]) -> list[str]:
+    """The cells of a row in the manifest: the `files` columns are left out when they are empty."""
+    cells = [row.get(key, "") for key in header]
+    while len(cells) > BASE_COLUMNS and cells[-1] == "":
+        cells.pop()
+    return cells
 
 
 def outfmt(row: dict[str, str]) -> str:
@@ -157,14 +175,21 @@ def main() -> int:
     for row in selected:
         command = [str(args.bin_dir / row["program"]), *search_argv(row)]
         start = time.monotonic()
+        files = xinclude.wants_files(row)
         if row.get("contract", "").startswith(PUNCT_TITLE):
             run = punct_title_run(row, args.bin_dir / row["program"])
+        elif files:
+            written = xinclude.run_with_files(command, row["fixture_id"], outfmt(row), cwd=ENGINE)
+            run = written.run
         else:
             run = subprocess.run(command, cwd=ENGINE, capture_output=True)
         wall = time.monotonic() - start
         if run.returncode != 0:
             raise SystemExit(f"{row['fixture_id']}: exit {run.returncode}\n{run.stderr.decode()}")
-        (args.out / f"{row['fixture_id']}.out").write_bytes(run.stdout)
+        if files:
+            xinclude.freeze(written, args.out, row["fixture_id"], outfmt(row))
+        else:
+            (args.out / f"{row['fixture_id']}.out").write_bytes(run.stdout)
         err = args.out / f"{row['fixture_id']}.err"
         if run.stderr:
             err.write_bytes(run.stderr)
@@ -173,6 +198,9 @@ def main() -> int:
         observed = {"stdout_sha256": digest(run.stdout), "stdout_bytes": str(len(run.stdout)),
                     "stderr_sha256": digest(run.stderr) if run.stderr else ""}
         hashes = list(HASHES)
+        if files:
+            observed.update(xinclude.observed(written))
+            hashes.append("side_sha256")
         if row.get("contract") == DEVIATION:
             # outfmt 7 prints the -db argument, so the database has a fixed path.
             db_dir = Path(tempfile.gettempdir()) / "losat_outfmt0_db" / row["fixture_id"]
@@ -198,7 +226,7 @@ def main() -> int:
         print("\t".join(record))
     if args.freeze:
         MANIFEST.write_text("\n".join([*comments, "\t".join(header),
-                                       *("\t".join(row.get(key, "") for key in header) for row in rows)]) + "\n")
+                                       *("\t".join(row_cells(header, row)) for row in rows)]) + "\n")
     print(f"# fixtures={len(selected)} differing={differing}")
     return 1 if differing else 0
 

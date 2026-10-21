@@ -872,6 +872,8 @@ const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 const CUSTOM: &[&str] = &["blastp", "blastx"];
 const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
+const BLASTP_BLASTN: &[&str] = &["blastn", "blastp"];
+const OTHER_PROGRAMS: &[&str] = &["blastx", "tblastn", "tblastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
     "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
@@ -960,8 +962,13 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "9", None, Writes(AsnBinary)),
         (ALL, " 9 std", None, Writes(AsnBinary)),
         (ALL, "11", None, UNSUPPORTED),
-        (ALL, "13", Some("o.json"), UNSUPPORTED),
-        (ALL, "14", Some("o.xml"), UNSUPPORTED),
+        // 13 and 14 (BLAST JSON and XML2 as side files and a master file at `-out`): BLASTP and
+        // BLASTN (OF5c part 1); the others not yet.
+        (BLASTP_BLASTN, "13", Some("o.json"), Writes(Json)),
+        (BLASTP_BLASTN, "14", Some("o.xml"), Writes(Xml2)),
+        (BLASTP_BLASTN, " 14 std", Some("o"), Writes(Xml2)),
+        (OTHER_PROGRAMS, "13", Some("o.json"), UNSUPPORTED),
+        (OTHER_PROGRAMS, "14", Some("o.xml"), UNSUPPORTED),
         (ALL, "15", None, Writes(JsonS)),
         (ALL, "16", None, Writes(Xml2S)),
         (ALL, " 16 std", None, Writes(Xml2S)),

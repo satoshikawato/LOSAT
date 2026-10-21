@@ -1,0 +1,1 @@
+- `tblastn` in LOSAT Web and on x86-64 CPUs without AVX2 scans tables of few query words with the same scan in plain loops: x0.82-0.94 with 1-8 proteins x E. coli in the Web serial engine (`LOSAT_X_TBNSCANBYTE`, `=3` on any CPU; tables where more than three tenths of the index cells have hits are scanned as before; same results).

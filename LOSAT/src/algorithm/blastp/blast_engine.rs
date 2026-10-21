@@ -6038,13 +6038,18 @@ fn search(
     // of its own whose report is written before the next block is searched
     // (`x_query_blocks.rs`, exactness argument in its header), where the one report is tabular
     // format 6, or with LOSAT_X_BPQBLOCKFMT outfmt 0 or 7 (the outfmt 0 prolog with the first
-    // block, the epilog and outfmt 7's count of the queries with the last); otherwise the search of
+    // block, the epilog and outfmt 7's count of the queries with the last), with
+    // LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with LOSAT_X_BPQBLOCKXML outfmt 5 (the header with the
+    // first block, the end with the last); otherwise the search of
     // all queries below. With `-db` the blocks are searched only when no definition line of the
-    // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, read
+    // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
+    // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, read
     // in the block search's pool before the first block), and with outfmt 0 and `-subject` only
     // when no subject's title is refused where the report shows it
-    // (`x_block_shown_titles_allowed`); otherwise the search of all queries below.
-    if let Some(blocks) = x_query_block_plan(
+    // (`x_block_shown_titles_allowed`), with outfmt 5 only when the names of the database, the
+    // queries and the subjects can be written (`x_query_blocks.rs` `x_block_xml_*_allowed`);
+    // otherwise the search of all queries below.
+    if let Some((x_kind, blocks)) = x_query_block_plan(
         &args,
         &searched_queries,
         &query_input,
@@ -6061,8 +6066,9 @@ fn search(
             ..
         } = &mut *outputs;
         let outfmt = formats[0].outfmt;
-        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): an outfmt 0 report, whose shown titles are checked below.
-        let x_pairwise = matches!(OutputFormat::parse(outfmt), Ok((OutputFormat::Pairwise, _)));
+        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT, LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the report the
+        // blocks write, whose titles are checked below.
+        let x_pairwise = x_kind == super::x_query_blocks::XBlockReport::Pairwise;
         // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): copies of what the blocks write, compared below
         // with the search of all queries.
         let x_shadow = super::x_query_blocks::x_bp_qblock_fmt() == 2;
@@ -6071,19 +6077,44 @@ fn search(
                 // The last checks of the block search, on the pool; when one fails, nothing has
                 // been written and the search of all queries below runs: the lookup tables' words
                 // (`x_block_words_fit`), then with `-db` the definition lines
-                // (`database::x_titles_allow_blocks`), with outfmt 0 and `-subject` the subjects'
-                // titles (`x_block_shown_titles_allowed`).
+                // (`database::x_titles_allow_blocks`; for outfmt 8, 9, 12 and 5
+                // `database::x_titles_read_allow_blocks`), with outfmt 0 and `-subject` the
+                // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
+                // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
+                // name and queries' names (`x_block_xml_run_allowed`).
                 if !x_block_words_fit(&args, &searched_queries, &query_input, batch_size, pool) {
                     return Ok(None);
                 }
-                let titles_allowed = match database {
-                    Some(database) => database::x_titles_allow_blocks(database, x_pairwise, pool),
-                    None => {
-                        !x_pairwise
-                            || x_block_shown_titles_allowed(&subjects.records, v1.is_some(), pool)
+                use super::x_query_blocks::XBlockReport;
+                let titles_allowed = match (database, x_kind) {
+                    // Outfmt 8, 9, 12 and 5 write no tabular id: only the definition lines' reading
+                    // and bytes can fail (`x_titles_read_allow_blocks`).
+                    (Some(database), XBlockReport::Seqalign | XBlockReport::Xml) => {
+                        database::x_titles_read_allow_blocks(database, pool)
                     }
+                    (Some(database), _) => {
+                        database::x_titles_allow_blocks(database, x_pairwise, pool)
+                    }
+                    (None, XBlockReport::Pairwise) => {
+                        x_block_shown_titles_allowed(&subjects.records, v1.is_some(), pool)
+                    }
+                    (None, XBlockReport::Xml) => {
+                        super::x_query_blocks::x_block_xml_subjects_allowed(&subjects.records, pool)
+                    }
+                    (None, _) => true,
                 };
                 if !titles_allowed {
+                    return Ok(None);
+                }
+                // EXPERIMENT (LOSAT_X_BPQBLOCKXML): the XML report's refusals of the database
+                // name and of the queries' names, which it makes before its first byte.
+                if x_kind == XBlockReport::Xml
+                    && !super::x_query_blocks::x_block_xml_run_allowed(
+                        database.map_or("", |database| database.name()),
+                        query_records,
+                        pool,
+                    )
+                {
                     return Ok(None);
                 }
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks
@@ -6305,11 +6336,15 @@ fn x_bp_encode_block_subjects(
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the blocks of the block search, or `None` for the search of all
 // queries. The block search is taken only where the blocks' reports written one after the other
 // are the report of the search of all queries: one output, tabular format 6 (or with
-// LOSAT_X_BPQBLOCKFMT outfmt 0 or 7, `x_query_blocks.rs`), no `-query_loc` (every record is
+// LOSAT_X_BPQBLOCKFMT outfmt 0 or 7, with LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with
+// LOSAT_X_BPQBLOCKXML outfmt 5, `x_query_blocks.rs`; the kind of report is returned with the
+// blocks), no `-query_loc` (every record is
 // searched whole), every batch read, more than one block, no subject whose tabular ID the
 // reference path rejects before it writes any row (`tabular_subject_ids`, for outfmt 6 and 7;
 // with `-db`, the definition lines are checked where the blocks are searched,
-// `database::x_titles_allow_blocks`; outfmt 0's titles also there, `x_block_shown_titles_allowed`),
+// `database::x_titles_allow_blocks` (outfmt 8, 9, 12 and 5: `x_titles_read_allow_blocks`); outfmt
+// 0's titles also there, `x_block_shown_titles_allowed`; outfmt 5's names too,
+// `x_query_blocks::x_block_xml_subjects_allowed` and `x_block_xml_run_allowed`),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
 // (`blastp_database_search_space`, with `-db` or `-dbsize`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
@@ -6326,7 +6361,11 @@ fn x_query_block_plan(
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
     v1: bool,
-) -> Option<Vec<std::ops::Range<usize>>> {
+) -> Option<(
+    super::x_query_blocks::XBlockReport,
+    Vec<std::ops::Range<usize>>,
+)> {
+    use super::x_query_blocks::XBlockReport;
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
     if args.query_range.is_some()
         || outputs.formats.len() != 1
@@ -6338,23 +6377,37 @@ fn x_query_block_plan(
     {
         return None;
     }
-    // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): outfmt 0 and 7 too.
-    let tabular = match OutputFormat::parse(outputs.formats[0].outfmt) {
-        Ok((OutputFormat::Tabular, _)) => true,
+    // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): outfmt 0 and 7 too. EXPERIMENT (LOSAT_X_BPQBLOCKSA,
+    // LOSAT_X_BPQBLOCKXML): outfmt 8, 9, 12 and 5, which `OutputFormat::parse` does not know.
+    let kind = match OutputFormat::parse(outputs.formats[0].outfmt) {
+        Ok((OutputFormat::Tabular, _)) => XBlockReport::Tabular,
         Ok((OutputFormat::TabularWithComments, _))
             if super::x_query_blocks::x_bp_qblock_fmt() > 0 =>
         {
-            true
+            XBlockReport::Tabular
         }
         // ABI v1's outfmt 0 titles of a database are not argued here.
         Ok((OutputFormat::Pairwise, _))
             if super::x_query_blocks::x_bp_qblock_fmt() > 0
                 && !(v1 && subject_source.database().is_some()) =>
         {
-            false
+            XBlockReport::Pairwise
+        }
+        Err(_)
+            if super::x_query_blocks::x_bp_qblock_sa()
+                && blastp_seqalign_format(outputs.formats[0].outfmt).is_some() =>
+        {
+            XBlockReport::Seqalign
+        }
+        Err(_)
+            if super::x_query_blocks::x_bp_qblock_xml()
+                && blastp_is_xml(outputs.formats[0].outfmt) =>
+        {
+            XBlockReport::Xml
         }
         _ => return None,
     };
+    let tabular = kind == XBlockReport::Tabular;
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
             if tabular
@@ -6394,7 +6447,7 @@ fn x_query_block_plan(
     let query_batches = query_input.batches(batch_size);
     let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters)?;
     (blocks.len() > 1 && x_block_search_refuses_nothing(args, queries, &query_batches, &lengths))
-        .then_some(blocks)
+        .then_some((kind, blocks))
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse

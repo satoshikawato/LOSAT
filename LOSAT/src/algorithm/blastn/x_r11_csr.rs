@@ -44,6 +44,40 @@ pub(crate) struct Mode {
     pub(crate) check: bool,
     /// R15 `pvbf`: the sum pass makes the PV bits and helper counters without a branch per cell.
     pub(crate) pvbf: bool,
+    /// R16 `cpf`: the count and place passes prefetch the cell's `offsets` element 16 words ahead
+    /// (the serial build through a ring of 16 words; `csrp` in the owners' bucket loops, as the
+    /// fill's `update_all`).
+    pub(crate) cpf: bool,
+    /// R16 `psplit` (`csrp`): the owner's place of a bucket in two loops, the `offsets` decrements
+    /// (each entry's `value` becomes its place) and then the `qs` writes.
+    pub(crate) psplit: bool,
+    /// R16 `qpf` (`csrp`, with `psplit`): the `qs` loop prefetches for writing (PREFETCHW) the
+    /// place 16 entries ahead.
+    pub(crate) qpf: bool,
+    /// R16 `cblk` (`csrp`): the owners hold contiguous runs of blocks (block `b` to owner
+    /// `b * parts / blocks`) instead of the fill's round robin.
+    pub(crate) cblk: bool,
+    /// R16 `sum1` (`csrp`, with `cblk`): one sum pass per owner from its base (the owners' word
+    /// counts are the lengths of their buckets), instead of block sums, a prefix over the blocks
+    /// and a second pass.
+    pub(crate) sum1: bool,
+    /// R16 `sumlean`: the sum pass makes each PV word from 32 cells at a time and each helper
+    /// counter from the difference of the running sums minus the non-empty cells (popcount).
+    pub(crate) sumlean: bool,
+    /// R16 `sum0` (measurement only): the sum pass without the PV bits and helper counters (the
+    /// plain prefix sum of R11); `csrchk` then skips the PV / helper check.
+    pub(crate) sum0: bool,
+    /// R16 `rdx` (`csrp`, measurement only): before each chunk's place read, the same read without
+    /// the bucket pushes (`rdx_ns`).
+    pub(crate) rdx: bool,
+    /// R16 `c4` (`csrp`): the count pass's read pushes the cell codes only (4 bytes) into buckets
+    /// of its own; `c8`: the same probe read pushing the fill's entries (control of `c4`).
+    pub(crate) c4: bool,
+    pub(crate) c8: bool,
+    /// R16 `offkeep` (serial build, measurement only): the counts and running sums in a buffer the
+    /// thread keeps from table to table (zeroed by a write over resident pages), copied into
+    /// `next_pos`'s capacity after the place pass (`copy_ns`, not in `build_ns`).
+    pub(crate) offkeep: bool,
 }
 
 pub(crate) fn mode() -> Mode {
@@ -62,6 +96,17 @@ pub(crate) fn mode() -> Mode {
                     "csrp" => m.par = true,
                     "csrchk" => m.check = true,
                     "pvbf" => m.pvbf = true,
+                    "cpf" => m.cpf = true,
+                    "psplit" => m.psplit = true,
+                    "qpf" => m.qpf = true,
+                    "cblk" => m.cblk = true,
+                    "sum1" => m.sum1 = true,
+                    "sumlean" => m.sumlean = true,
+                    "sum0" => m.sum0 = true,
+                    "rdx" => m.rdx = true,
+                    "c4" => m.c4 = true,
+                    "c8" => m.c8 = true,
+                    "offkeep" => m.offkeep = true,
                     _ => {}
                 }
             }
@@ -71,7 +116,7 @@ pub(crate) fn mode() -> Mode {
 }
 
 #[inline(always)]
-fn prefetch<T>(p: *const T) {
+pub(crate) fn prefetch<T>(p: *const T) {
     #[cfg(target_arch = "x86_64")]
     // SAFETY: a prefetch does not access memory architecturally; any address is allowed.
     unsafe {
@@ -79,6 +124,103 @@ fn prefetch<T>(p: *const T) {
     }
     #[cfg(not(target_arch = "x86_64"))]
     let _ = p;
+}
+
+/// R16 `qpf`: PREFETCHW (the line in the exclusive state, ready for a store; Broadwell and later,
+/// the workstation's Ice Lake included). The default target has no `prfchw` feature, under which
+/// `_MM_HINT_ET0` is a plain PREFETCHT0, hence the instruction itself.
+#[inline(always)]
+pub(crate) fn prefetch_w<T>(p: *const T) {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: a prefetch does not access memory architecturally; any address is allowed.
+    unsafe {
+        core::arch::asm!("prefetchw [{0}]", in(reg) p, options(nostack, preserves_flags, readonly));
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = p;
+}
+
+/// R16 `sumlean` (and `sum0` with `pvh == false`): cells `c0 .. c1` (`c0` a multiple of 2048, and
+/// `bts >= 5`): `cnt.add(c)` holds cell `c`'s count and receives its inclusive running sum from
+/// `base`; returns the running sum after `c1`. With `pvh`, each 32 cells give 32 presence bits
+/// (OR-ed into word `c >> bts` when the word's last group or the range ends, if the word is below
+/// `pv_len`), and each counter `c >> 11` gets the run's growth over its 2048 cells minus their
+/// non-empty cells (`sum(cnt - (cnt != 0))`, R15 `pvbf`'s value, wrapping), so the loop has no
+/// per-cell work beyond the running sum and one bit.
+///
+/// SAFETY: the counts, PV words and counters of the range are the caller's alone, and the
+/// pointers are valid for them.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn range_lean(
+    pv: *mut u32,
+    pv_len: usize,
+    helper: *mut u32,
+    cnt: *mut u32,
+    base: u32,
+    c0: usize,
+    c1: usize,
+    bts: usize,
+    pvh: bool,
+) -> u32 {
+    debug_assert!(c0 % 2048 == 0 && bts >= 5);
+    let pv_last = (1usize << bts) - 1;
+    let (mut end, mut word, mut pop, mut h0) = (base, 0u32, 0u32, base);
+    let mut g = c0;
+    while g < c1 {
+        let n = (c1 - g).min(32);
+        let mut w32 = 0u32;
+        if n == 32 {
+            for i in 0..32 {
+                // SAFETY: cell `g + i < c1` is the caller's.
+                unsafe {
+                    let x = *cnt.add(g + i);
+                    w32 |= ((x != 0) as u32) << i;
+                    end = end.wrapping_add(x);
+                    *cnt.add(g + i) = end;
+                }
+            }
+        } else {
+            for i in 0..n {
+                // SAFETY: as above.
+                unsafe {
+                    let x = *cnt.add(g + i);
+                    w32 |= ((x != 0) as u32) << i;
+                    end = end.wrapping_add(x);
+                    *cnt.add(g + i) = end;
+                }
+            }
+        }
+        g += n;
+        if pvh {
+            word |= w32;
+            pop += w32.count_ones();
+            if g & pv_last == 0 || g >= c1 {
+                let i = (g - 1) >> bts;
+                if i < pv_len {
+                    // SAFETY: PV word `i` holds cells of the range only (or the range ends in it).
+                    unsafe { *pv.add(i) |= word };
+                }
+                word = 0;
+            }
+            if g & 2047 == 0 || g >= c1 {
+                let h = (g - 1) >> 11;
+                // SAFETY: counter `h` holds cells of the range only (or the range ends in it).
+                unsafe {
+                    *helper.add(h) =
+                        (*helper.add(h)).wrapping_add(end.wrapping_sub(h0).wrapping_sub(pop))
+                };
+                h0 = end;
+                pop = 0;
+            }
+        }
+    }
+    end
+}
+
+/// R16 `offkeep`: the thread's kept buffer of counts (measurement only).
+thread_local! {
+    static XR16_KEPT: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Builds the CSR of the chains of `hashtable` / `next_pos` into the spare capacity of
@@ -290,43 +432,101 @@ pub(crate) fn check_against_chains(hashtable: &[u32], next_pos: &Vec<u32>, words
 /// comment); prints one line `[R11] csr ...` with the time of each pass. With `ph`, the sum pass
 /// also makes the presence vector and the helper counters from the counts (scratch). With
 /// `csrchk`, the chain walk of `attach` builds it again and the two are compared.
+/// R16: `cpf` (the passes through a ring of 16 words that prefetches each word's `offsets`
+/// element), `sumlean` / `sum0` (`range_lean`), `offkeep` (the counts in the thread's kept buffer).
 pub(crate) fn attach_words<W: Words>(
     w: &W,
     hashtable: &[u32],
     next_pos: &mut Vec<u32>,
     ph: Option<PvHelper<'_>>,
 ) {
+    let m = mode();
     let t0 = Instant::now();
     let cells = hashtable.len();
     let n = next_pos.len();
     let need = cells + 1 + n;
     let asc = w.ascending();
     next_pos.reserve_exact(need);
-    let ptr = next_pos.as_mut_ptr();
-    // SAFETY: `ptr + n .. ptr + n + need` is the reserved capacity of `next_pos`, apart from the
-    // vector's own elements; `offsets` is initialized here before it is read, `qs` is only
-    // written (each place once) before `view` reads it.
-    let spare = unsafe {
-        std::slice::from_raw_parts_mut(ptr.add(n) as *mut std::mem::MaybeUninit<u32>, need)
-    };
+    // SAFETY: `sp .. sp + need` is the reserved capacity of `next_pos`, apart from the vector's
+    // own elements; `offsets` is initialized here before it is read, `qs` is only written (each
+    // place once) before `view` reads it.
+    let sp = unsafe { next_pos.as_mut_ptr().add(n) };
     // The counts: `offsets[cell]`, or `offsets[cell + 2]` when ascending (which also needs
     // `offsets[cells + 1]`, the first element of `qs`; `n >= words + 1 >= 1` leaves room).
     let k = if asc { 2 } else { 0 };
     let z = cells + 1 + asc as usize;
-    spare[..z].fill(std::mem::MaybeUninit::new(0));
-    // SAFETY: every element of `spare[..z]` was just initialized.
-    let head: &mut [u32] =
-        unsafe { &mut *(&mut spare[..z] as *mut [std::mem::MaybeUninit<u32>] as *mut [u32]) };
+    // R16 `offkeep`: the counts in the thread's kept buffer (a fresh one when it is shorter).
+    let mut kept: Vec<u32> = Vec::new();
+    let mut kept_fresh = 0u8;
+    let head: &mut [u32] = if m.offkeep {
+        kept = XR16_KEPT.with(|b| std::mem::take(&mut *b.borrow_mut()));
+        if kept.len() < z {
+            kept = vec![0u32; z];
+            kept_fresh = 1;
+        } else {
+            kept[..z].fill(0);
+        }
+        &mut kept[..z]
+    } else {
+        // SAFETY: `z <= need`; every element of `sp[..z]` is initialized here.
+        unsafe {
+            std::ptr::write_bytes(sp, 0, z);
+            std::slice::from_raw_parts_mut(sp, z)
+        }
+    };
     let t1 = Instant::now();
     let mut words = 0usize;
-    w.each(&mut |cell, _q| {
-        head[cell + k] += 1;
-        words += 1;
-    });
+    if m.cpf {
+        // R16 `cpf`: each word's element is prefetched, and counted 16 words later.
+        let hp = head.as_ptr();
+        let mut ring = [0usize; 16];
+        let mut seen = 0usize;
+        w.each(&mut |cell, _q| {
+            prefetch(hp.wrapping_add(cell + k));
+            let slot = seen & 15;
+            if seen >= 16 {
+                head[ring[slot] + k] += 1;
+            }
+            ring[slot] = cell;
+            seen += 1;
+        });
+        for i in seen.saturating_sub(16)..seen {
+            head[ring[i & 15] + k] += 1;
+        }
+        words = seen;
+    } else {
+        w.each(&mut |cell, _q| {
+            head[cell + k] += 1;
+            words += 1;
+        });
+    }
     let t2 = Instant::now();
     let mut scratch = ph.as_ref().map(PvScratch::new);
     let mut end = 0u32;
-    if let (true, Some(s), Some(ph)) = (mode().pvbf, scratch.as_mut(), ph.as_ref()) {
+    if m.sumlean || m.sum0 {
+        // R16 `sumlean` / `sum0`: 32 cells per PV group, counters by difference (or no PV/helper).
+        let pvh = !m.sum0 && scratch.is_some();
+        let (pvp, pvl, hlp) = match scratch.as_mut() {
+            Some(s) => (s.pv.as_mut_ptr(), s.pv.len(), s.helper.as_mut_ptr()),
+            None => (std::ptr::null_mut(), 0, std::ptr::null_mut()),
+        };
+        let bts = ph.as_ref().map_or(5, |ph| ph.bts);
+        // SAFETY: `head[k .. k + cells]` are the counts; the scratch arrays are this build's and
+        // of the fill's lengths (`c >> 11 < helper.len()` for every cell).
+        end = unsafe {
+            range_lean(
+                pvp,
+                pvl,
+                hlp,
+                head.as_mut_ptr().add(k),
+                0,
+                0,
+                cells,
+                bts,
+                pvh,
+            )
+        };
+    } else if let (true, Some(s), Some(ph)) = (m.pvbf, scratch.as_mut(), ph.as_ref()) {
         // R15 `pvbf`: the same prefix sum, PV bits and helper counters without a branch per cell.
         end = s.range_bf(0, cells, ph.bts, |c| {
             let cnt = head[c + k];
@@ -348,37 +548,82 @@ pub(crate) fn attach_words<W: Words>(
         head[cells] = end;
     }
     let t3 = Instant::now();
-    let base = spare.as_mut_ptr() as *mut u32;
-    if asc {
+    // `ob`: the counts / offsets (`head`), `qb`: `qs` (after `offsets` in `next_pos`'s capacity).
+    let ob = head.as_mut_ptr();
+    // SAFETY: `cells + 1 <= need`.
+    let qb = unsafe { sp.add(cells + 1) };
+    // SAFETY (both): `cell + 1 <= cells`, `p < words <= n - 1`, so `cells + 1 + p < need`; the
+    // elements read and written are initialized (`offsets`, or `qs[0]` only as the written target
+    // of the last write to it, never read: `cells + 1` is no cell + 1).
+    #[inline(always)]
+    unsafe fn place_asc(ob: *mut u32, qb: *mut u32, cell: usize, q: u32) {
+        unsafe {
+            let p = *ob.add(cell + 1);
+            *ob.add(cell + 1) = p + 1;
+            *qb.add(p as usize) = q;
+        }
+    }
+    // SAFETY: `cell < cells`, `offsets[cell] >= 1` (it is the end of a non-empty run),
+    // `e < words <= n - 1`, so `cells + 1 + e < need`.
+    #[inline(always)]
+    unsafe fn place_desc(ob: *mut u32, qb: *mut u32, cell: usize, q: u32) {
+        unsafe {
+            let e = *ob.add(cell) - 1;
+            *ob.add(cell) = e;
+            *qb.add(e as usize) = q;
+        }
+    }
+    let one = if asc { place_asc } else { place_desc };
+    if m.cpf {
+        // R16 `cpf`: each word's element is prefetched, and the word placed 16 words later (in
+        // the same order, so each run gets its words in the same order).
+        let mut ring = [(0usize, 0u32); 16];
+        let mut seen = 0usize;
         w.each(&mut |cell, q| {
             assert!(cell < cells);
-            // SAFETY: `cell + 1 <= cells`, `p < words <= n - 1`, so `cells + 1 + p < need`; the
-            // elements read and written are initialized (`offsets`, or `qs[0]` only as the
-            // written target of the last write to it, never read: `cells + 1` is no cell + 1).
-            unsafe {
-                let p = *base.add(cell + 1);
-                *base.add(cell + 1) = p + 1;
-                *base.add(cells + 1 + p as usize) = q;
+            prefetch(ob.wrapping_add(cell + asc as usize));
+            let slot = seen & 15;
+            if seen >= 16 {
+                let (c, x) = ring[slot];
+                // SAFETY: as `place_asc` / `place_desc`.
+                unsafe { one(ob, qb, c, x) };
             }
+            ring[slot] = (cell, q);
+            seen += 1;
+        });
+        for i in seen.saturating_sub(16)..seen {
+            let (c, x) = ring[i & 15];
+            // SAFETY: as above.
+            unsafe { one(ob, qb, c, x) };
+        }
+    } else if asc {
+        w.each(&mut |cell, q| {
+            assert!(cell < cells);
+            // SAFETY: as `place_asc`.
+            unsafe { place_asc(ob, qb, cell, q) };
         });
     } else {
         w.each(&mut |cell, q| {
             assert!(cell < cells);
-            // SAFETY: `cell < cells`, `offsets[cell] >= 1` (it is the end of a non-empty run),
-            // `e < words <= n - 1`, so `cells + 1 + e < need`.
-            unsafe {
-                let e = *base.add(cell) - 1;
-                *base.add(cell) = e;
-                *base.add(cells + 1 + e as usize) = q;
-            }
+            // SAFETY: as `place_desc`.
+            unsafe { place_desc(ob, qb, cell, q) };
         });
         // `offsets[cells]` was the total and is no cell's end, so it stays the total.
     }
     let t4 = Instant::now();
+    // R16 `offkeep`: the offsets into `next_pos`'s capacity (not in `build_ns`), the buffer back.
+    let mut copy_ns = 0u128;
+    if m.offkeep {
+        let tc = Instant::now();
+        // SAFETY: `cells + 1 <= need` elements of the capacity; the kept buffer has `z > cells`.
+        unsafe { std::ptr::copy_nonoverlapping(kept.as_ptr(), sp, cells + 1) };
+        copy_ns = tc.elapsed().as_nanos();
+        XR16_KEPT.with(|b| *b.borrow_mut() = std::mem::take(&mut kept));
+    }
     // EXPERIMENT (exp/r13-wall): the CSR build's interval (`R13_PROBE=tl`).
     crate::utils::xtiming::x_r13("csr", Some(t0), words as u64);
     eprintln!(
-        "[R11] csr words-build cells={cells} words={words} next_pos_len={n} ascending={} pvh={} zero_ns={} count_ns={} sum_ns={} place_ns={} build_ns={} csr_bytes={}",
+        "[R11] csr words-build cells={cells} words={words} next_pos_len={n} ascending={} pvh={} zero_ns={} count_ns={} sum_ns={} place_ns={} build_ns={} csr_bytes={} r16=cpf{}lean{}sum0{}keep{}fresh{} copy_ns={copy_ns}",
         asc as u8,
         ph.is_some() as u8,
         (t1 - t0).as_nanos(),
@@ -387,10 +632,15 @@ pub(crate) fn attach_words<W: Words>(
         (t4 - t3).as_nanos(),
         (t4 - t0).as_nanos(),
         (cells + 1 + words) * 4,
+        m.cpf as u8,
+        m.sumlean as u8,
+        m.sum0 as u8,
+        m.offkeep as u8,
+        kept_fresh,
     );
-    if mode().check {
+    if m.check {
         check_against_chains(hashtable, next_pos, words);
-        if let (Some(s), Some(ph)) = (scratch.as_ref(), ph.as_ref()) {
+        if let (Some(s), Some(ph), false) = (scratch.as_ref(), ph.as_ref(), m.sum0) {
             s.check(ph);
         }
     }

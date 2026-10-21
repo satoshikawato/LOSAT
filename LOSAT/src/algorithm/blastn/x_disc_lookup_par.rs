@@ -1805,6 +1805,82 @@ fn fill_with<P: Fn(u8) + Sync>(
     stats
 }
 
+/// EXPERIMENT (exp/r16-csr, v4-R R16; evidence only): the times of one phase of `x_r15_csr_par`
+/// over a table: its `run_jobs` calls, their summed wall time, the jobs' summed running time, the
+/// summed longest job and the summed latest start (ns after the call began).
+#[derive(Clone, Copy, Default)]
+struct XR16Phase {
+    calls: u64,
+    wall: u128,
+    sum: u128,
+    max: u128,
+    late: u128,
+}
+
+impl std::fmt::Display for XR16Phase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}/{}/{}/{}/{}",
+            self.calls, self.wall, self.sum, self.max, self.late
+        )
+    }
+}
+
+/// EXPERIMENT (exp/r16-csr, R16 `c4`): one bucket of cell codes on a cache line of its own.
+#[repr(align(64))]
+#[derive(Default)]
+struct XR16Codes(Vec<u32>);
+
+/// EXPERIMENT (exp/r16-csr, R16 `rdx` / `c4` / `c8`): the words that end at the stream positions
+/// `[s0, s1)` of the first template, read by the loop of `Fill::read` (the same segments, resets,
+/// `accum`, index and owner), each handed to `sink(owner, index, ecode)` in reading order.
+///
+/// SAFETY: as `Fill::read`'s (the sink decides what the job touches).
+#[inline(always)]
+unsafe fn xr16_scan(
+    fill: &Fill<'_, '_>,
+    s0: usize,
+    s1: usize,
+    mut sink: impl FnMut(usize, u32, u32),
+) {
+    let words = fill.words;
+    let template_length = words.template_length;
+    if s0 >= s1 {
+        return;
+    }
+    let mut g = fill
+        .segments
+        .partition_point(|seg| seg.stream + (seg.end - seg.start) <= s0);
+    while g < fill.segments.len() && fill.segments[g].stream < s1 {
+        let seg = &fill.segments[g];
+        let len = seg.end - seg.start;
+        let first_pos = seg.start + (s0.max(seg.stream) - seg.stream);
+        let end_pos = seg.start + (s1.min(seg.stream + len) - seg.stream);
+        let warm_start = seg.start.max(first_pos.saturating_sub(template_length - 1));
+        let mut accum: u64 = 0;
+        let mut valid_bases = 0usize;
+        for pos in warm_start..end_pos {
+            let val = seg.seq[pos];
+            if (val & BLAST2NA_MASK) != 0 {
+                accum = 0;
+                valid_bases = 0;
+                continue;
+            }
+            accum = (accum << 2) | val as u64;
+            valid_bases += 1;
+            if valid_bases < template_length || pos < first_pos {
+                continue;
+            }
+            let index = (seg.query_offset + pos + 2 - template_length) as u32;
+            let ecode1 = compute_discontiguous_index(accum, words.template_type);
+            let o1 = fill.owner[(ecode1 as usize) >> fill.block_shift] as usize;
+            sink(o1, index, ecode1);
+        }
+        g += 1;
+    }
+}
+
 /// EXPERIMENT (exp/r15-csr, v4-R R15; evidence only, `R4_PROBE=csrw,csrp`, see `x_r11_csr.rs`):
 /// the dc table's CSR (`offsets`, `qs` in `next_pos`'s spare capacity) built from the words on the
 /// search pool; one template. The words are read by the fill's own reader (`Fill::read::<false>`,
@@ -1825,6 +1901,14 @@ fn fill_with<P: Fn(u8) + Sync>(
 ///   reverse of the fill's order, which is the chain's order (as `attach_words`).
 /// Prints `[R11] csr words-build-par ...`; with `csrchk` compares with the chain walk and the
 /// scratch presence vector / counters with the fill's.
+///
+/// R16 (`x_r11_csr::Mode`): every phase's job times (`[R16] csrp-jobs`, `XR16Phase`) and the
+/// owners' words; `cpf` (owner loops prefetch `offsets` 16 entries ahead), `psplit` / `qpf`
+/// (place in two loops, the second prefetching its `qs` places for writing), `cblk` (owners hold
+/// contiguous runs of blocks), `sum1` (with `cblk`: one sum pass per owner from its base, the
+/// bases from the owners' bucket lengths), `sumlean` / `sum0` (`range_lean`), `rdx` (a read without
+/// pushes before each place read), `c4` / `c8` (the count read by `xr16_scan` into 4-byte code
+/// buckets / the fill's buckets). The values and the order of every run are the same in all.
 pub(super) fn x_r15_csr_par(
     parts: usize,
     words: &DiscWords<'_>,
@@ -1832,17 +1916,27 @@ pub(super) fn x_r15_csr_par(
     next_pos: &mut Vec<u32>,
     ph: super::x_r11_csr::PvHelper<'_>,
 ) {
+    use super::x_r11_csr::{prefetch, prefetch_w, range_lean};
     use std::time::Instant;
     assert!(!words.two_templates, "R15 csrp: one template only");
+    let m = super::x_r11_csr::mode();
     let t0 = Instant::now();
     let cells = hashtable.len();
     let n = next_pos.len();
     let need = cells + 1 + n;
     next_pos.reserve_exact(need);
-    let (block_shift, owner) = plan(cells, ph.bts, parts);
+    let (block_shift, mut owner) = plan(cells, ph.bts, parts);
     let parts = parts.clamp(1, 255);
     let blocks = owner.len();
     assert!(block_shift >= K_COMPRESSION_FACTOR_SHIFT && block_shift >= ph.bts);
+    // R16 `cblk`: contiguous runs of blocks per owner (owner `o` has the blocks `b` with
+    // `b * parts / blocks == o`, in cell order).
+    if m.cblk {
+        for (b, o) in owner.iter_mut().enumerate() {
+            *o = (b * parts / blocks) as u8;
+        }
+    }
+    let sum1 = m.sum1 && m.cblk;
     // SAFETY: `n .. n + need` is the reserved capacity of `next_pos`, apart from the vector's own
     // elements; `offsets` (`cells + 1` words) is zeroed before it is read, `qs` (`n` words, at
     // most `n - 1` are words) is only written (each place once) before `view` reads it.
@@ -1892,18 +1986,58 @@ pub(super) fn x_r15_csr_par(
         #[cfg(test)]
         unmarked_reads: AtomicUsize::new(0),
     };
+    // R16 `c4`: the count read's code buckets (`parts x parts`, row = reader), freed before the
+    // place pass.
+    let mut codes: Vec<XR16Codes> = if m.c4 {
+        (0..parts * parts).map(|_| XR16Codes::default()).collect()
+    } else {
+        Vec::new()
+    };
+    let codes_ptr = Shared {
+        ptr: codes.as_mut_ptr(),
+        len: codes.len(),
+    };
     let cells_of = |b: usize| (b << block_shift)..((b + 1) << block_shift).min(cells);
     let owner_of = &owner[..];
     let own = |o: usize| (0..blocks).filter(move |&b| owner_of[b] as usize == o);
-    let timed = |acc: &mut u128, job: &(dyn Fn(usize) + Sync)| {
+    // R16: the owners' words (count pass), and with `sum1` their bases.
+    let mut own_words = vec![0u64; parts];
+    let own_w = Shared::new(&mut own_words);
+    let starts: Vec<AtomicU64> = (0..parts).map(|_| AtomicU64::new(0)).collect();
+    let ends: Vec<AtomicU64> = (0..parts).map(|_| AtomicU64::new(0)).collect();
+    let timed = |acc: &mut u128, ph16: &mut XR16Phase, job: &(dyn Fn(usize) + Sync)| {
         let t = Instant::now();
-        run_jobs(parts, true, job);
-        *acc += t.elapsed().as_nanos();
+        run_jobs(parts, true, |i| {
+            let s = t.elapsed().as_nanos() as u64;
+            job(i);
+            let e = t.elapsed().as_nanos() as u64;
+            starts[i].store(s, Ordering::Relaxed);
+            ends[i].store(e, Ordering::Relaxed);
+        });
+        let wall = t.elapsed().as_nanos();
+        *acc += wall;
+        ph16.calls += 1;
+        ph16.wall += wall;
+        let (mut mx, mut late) = (0u64, 0u64);
+        for i in 0..parts {
+            let (s, e) = (
+                starts[i].load(Ordering::Relaxed),
+                ends[i].load(Ordering::Relaxed),
+            );
+            ph16.sum += (e - s) as u128;
+            mx = mx.max(e - s);
+            late = late.max(s);
+        }
+        ph16.max += mx as u128;
+        ph16.late += late as u128;
     };
     let (mut zero_ns, mut count_read_ns, mut count_ns, mut sum_ns) = (0u128, 0u128, 0u128, 0u128);
-    let (mut place_read_ns, mut place_ns) = (0u128, 0u128);
+    let (mut place_read_ns, mut place_ns, mut rdx_ns) = (0u128, 0u128, 0u128);
+    let [mut pz, mut pcr, mut pc, mut ps1, mut ps2, mut ppr, mut pp, mut prd] =
+        [XR16Phase::default(); 8];
+    let pre_ns = t0.elapsed().as_nanos();
     // Zero.
-    timed(&mut zero_ns, &|o| {
+    timed(&mut zero_ns, &mut pz, &|o| {
         // The whole `Shared` (Sync), not its pointer field.
         let offsets = offsets;
         for b in own(o) {
@@ -1924,25 +2058,82 @@ pub(super) fn x_r15_csr_par(
                 start + (end - start) * (a + 1) / parts,
             )
         };
-        timed(&mut count_read_ns, &|a| {
+        timed(&mut count_read_ns, &mut pcr, &|a| {
+            // The whole `Shared` (Sync), not its pointer field.
+            let codes_ptr = &codes_ptr;
             let (s0, s1) = span(a);
-            // SAFETY: job `a` uses only the buckets `(a, *)`.
-            unsafe { fill.read::<false>(a, s0, s1, [false; 3]) }
+            if m.c4 {
+                // SAFETY: job `a` uses only the code buckets `(a, *)`.
+                unsafe {
+                    for o in 0..parts {
+                        let v = &mut (*codes_ptr.ptr.add(a * parts + o)).0;
+                        v.clear();
+                        if v.capacity() > fill.keep {
+                            v.shrink_to(fill.keep);
+                        }
+                    }
+                    xr16_scan(&fill, s0, s1, |o, _index, ecode| {
+                        (*codes_ptr.ptr.add(a * parts + o)).0.push(ecode)
+                    });
+                }
+            } else if m.c8 {
+                // SAFETY: job `a` uses only the buckets `(a, *)`.
+                unsafe {
+                    for o in 0..parts {
+                        empty(fill.first.at(a, o), fill.keep);
+                    }
+                    xr16_scan(&fill, s0, s1, |o, index, ecode| {
+                        fill.first.at(a, o).push(Entry {
+                            index,
+                            value: ecode,
+                        })
+                    });
+                }
+            } else {
+                // SAFETY: job `a` uses only the buckets `(a, *)`.
+                unsafe { fill.read::<false>(a, s0, s1, [false; 3]) }
+            }
         });
-        timed(&mut count_ns, &|o| {
+        timed(&mut count_ns, &mut pc, &|o| {
+            let codes_ptr = &codes_ptr;
+            let mut got = 0u64;
             for a in 0..parts {
                 // SAFETY: owner `o` uses only the buckets `(*, o)`; every `ecode` lies in a block
                 // of `o` (the reader's bucket choice), so `offsets[ecode]` is this job's.
                 unsafe {
-                    for e in fill.first.at(a, o).iter() {
-                        let c = e.value as usize;
-                        offsets.set(c, offsets.get(c) + 1);
+                    if m.c4 {
+                        let v = &(*codes_ptr.ptr.add(a * parts + o)).0;
+                        got += v.len() as u64;
+                        for (j, &c) in v.iter().enumerate() {
+                            if m.cpf {
+                                if let Some(&ahead) = v.get(j + 16) {
+                                    prefetch(offsets.ptr.add(ahead as usize));
+                                }
+                            }
+                            let c = c as usize;
+                            offsets.set(c, offsets.get(c) + 1);
+                        }
+                    } else {
+                        let es = fill.first.at(a, o);
+                        got += es.len() as u64;
+                        for j in 0..es.len() {
+                            if m.cpf {
+                                if let Some(ahead) = es.get(j + 16) {
+                                    prefetch(offsets.ptr.add(ahead.value as usize));
+                                }
+                            }
+                            let c = es[j].value as usize;
+                            offsets.set(c, offsets.get(c) + 1);
+                        }
                     }
                 }
             }
+            // SAFETY: entry `o` is this job's.
+            unsafe { own_w.set(o, own_w.get(o) + got) };
         });
         start = end;
     }
+    drop(codes);
     // Sum (and the presence vector and counters from the counts, in scratch arrays).
     let t_sum = Instant::now();
     let mut spv = vec![0u32; ph.pv.len()];
@@ -1950,10 +2141,66 @@ pub(super) fn x_r15_csr_par(
     let (spv_s, shp_s) = (Shared::new(&mut spv), Shared::new(&mut shp));
     let mut block_totals = vec![0u32; blocks];
     let totals = Shared::new(&mut block_totals);
-    sum_ns += t_sum.elapsed().as_nanos();
-    let pvbf = super::x_r11_csr::mode().pvbf;
-    timed(&mut sum_ns, &|o| {
+    let alloc_ns = t_sum.elapsed().as_nanos();
+    sum_ns += alloc_ns;
+    let pvbf = m.pvbf;
+    let lean = m.sumlean || m.sum0;
+    let pvh = !m.sum0;
+    // R16 `sum1`: the owners' bases (owner `o`'s blocks follow owner `o - 1`'s with `cblk`).
+    let mut bases = vec![0u32; parts];
+    let mut run_total = 0u64;
+    if sum1 {
+        for o in 0..parts {
+            bases[o] = run_total as u32;
+            run_total += own_words[o];
+        }
+    }
+    let bases_s = &bases[..];
+    let mut prefix_ns = 0u128;
+    timed(&mut sum_ns, &mut ps1, &|o| {
+        if sum1 {
+            // R16 `sum1`: the owner's blocks are one run of cells; one pass from its base.
+            let mut bs = own(o);
+            let Some(b0) = bs.next() else { return };
+            let b1 = bs.last().unwrap_or(b0);
+            let (c0, c1) = (cells_of(b0).start, cells_of(b1).end);
+            // SAFETY: the cells, PV words and counters of `o`'s blocks are this job's.
+            unsafe {
+                range_lean(
+                    spv_s.ptr,
+                    spv_s.len,
+                    shp_s.ptr,
+                    offsets.ptr,
+                    bases_s[o],
+                    c0,
+                    c1,
+                    ph.bts,
+                    pvh,
+                )
+            };
+            return;
+        }
         for b in own(o) {
+            if lean {
+                let r = cells_of(b);
+                // SAFETY: as below (the cells, PV words and counters of `o`'s blocks).
+                let end = unsafe {
+                    range_lean(
+                        spv_s.ptr,
+                        spv_s.len,
+                        shp_s.ptr,
+                        offsets.ptr,
+                        0,
+                        r.start,
+                        r.end,
+                        ph.bts,
+                        pvh,
+                    )
+                };
+                // SAFETY: entry `b` is owner `o`'s.
+                unsafe { totals.set(b, end) };
+                continue;
+            }
             if pvbf {
                 // R15 `pvbf`: the block's counts become its running sums from 0 (the second
                 // owner pass adds the block's base), and its PV words and helper counters are made
@@ -2012,44 +2259,54 @@ pub(super) fn x_r15_csr_par(
             unsafe { totals.set(b, sum) };
         }
     });
-    let t_prefix = Instant::now();
-    let mut run = 0u64;
-    for t in block_totals.iter_mut() {
-        let sum = *t;
-        *t = run as u32;
-        run += sum as u64;
+    let words_total;
+    if sum1 {
+        words_total = run_total as usize;
+    } else {
+        let t_prefix = Instant::now();
+        let mut run = 0u64;
+        for t in block_totals.iter_mut() {
+            let sum = *t;
+            *t = run as u32;
+            run += sum as u64;
+        }
+        words_total = run as usize;
+        prefix_ns = t_prefix.elapsed().as_nanos();
+        sum_ns += prefix_ns;
     }
-    let words_total = run as usize;
     // At most one word per query offset (`next_pos[0]` is never a word).
     assert!(
         words_total < n.max(1),
         "R15 csrp: more words than query offsets"
     );
-    sum_ns += t_prefix.elapsed().as_nanos();
-    timed(&mut sum_ns, &|o| {
-        for b in own(o) {
-            // SAFETY: entry `b` and the cells of `o`'s blocks are this job's; no job writes the
-            // entries during this phase.
-            unsafe {
-                if pvbf {
-                    // R15 `pvbf`: the cells hold the block's running sums; add its base.
-                    let base = totals.get(b);
-                    for c in cells_of(b) {
-                        offsets.set(c, offsets.get(c) + base);
+    if !sum1 {
+        timed(&mut sum_ns, &mut ps2, &|o| {
+            for b in own(o) {
+                // SAFETY: entry `b` and the cells of `o`'s blocks are this job's; no job writes the
+                // entries during this phase.
+                unsafe {
+                    if pvbf || lean {
+                        // R15 `pvbf`: the cells hold the block's running sums; add its base.
+                        let base = totals.get(b);
+                        for c in cells_of(b) {
+                            offsets.set(c, offsets.get(c) + base);
+                        }
+                        continue;
                     }
-                    continue;
-                }
-                let mut end = totals.get(b);
-                for c in cells_of(b) {
-                    end += offsets.get(c);
-                    offsets.set(c, end);
+                    let mut end = totals.get(b);
+                    for c in cells_of(b) {
+                        end += offsets.get(c);
+                        offsets.set(c, end);
+                    }
                 }
             }
-        }
-    });
+        });
+    }
     // SAFETY: no job is running; `offsets[cells]` is no cell's end and stays the total.
     unsafe { offsets.set(cells, words_total as u32) };
     // Place.
+    let mut sinks = vec![0u64; parts];
+    let sinks_s = Shared::new(&mut sinks);
     let mut start = 0usize;
     while start < total {
         let end = total.min(start.saturating_add(CHUNK_POSITIONS));
@@ -2059,17 +2316,62 @@ pub(super) fn x_r15_csr_par(
                 start + (end - start) * (a + 1) / parts,
             )
         };
-        timed(&mut place_read_ns, &|a| {
+        if m.rdx {
+            // R16 `rdx` (measurement only): the chunk's read without the pushes.
+            timed(&mut rdx_ns, &mut prd, &|a| {
+                let (s0, s1) = span(a);
+                let mut x = 0u64;
+                // SAFETY: the read only reads; entry `a` of the sinks is this job's.
+                unsafe {
+                    xr16_scan(&fill, s0, s1, |o, index, ecode| {
+                        x = x.wrapping_add((ecode ^ index) as u64 + o as u64)
+                    });
+                    sinks_s.set(a, sinks_s.get(a) ^ std::hint::black_box(x));
+                }
+            });
+        }
+        timed(&mut place_read_ns, &mut ppr, &|a| {
             let (s0, s1) = span(a);
             // SAFETY: job `a` uses only the buckets `(a, *)`.
             unsafe { fill.read::<false>(a, s0, s1, [false; 3]) }
         });
-        timed(&mut place_ns, &|o| {
+        timed(&mut place_ns, &mut pp, &|o| {
             for a in 0..parts {
                 // SAFETY: as the count pass; the run of the cell is the cell's own part of `qs`
                 // (`offsets[ecode] - 1 < words_total <= n - 1`, one place per word).
                 unsafe {
-                    for e in fill.first.at(a, o).iter() {
+                    let es = fill.first.at(a, o);
+                    if m.psplit || m.qpf {
+                        // R16 `psplit`: the decrements, each entry's `value` becoming its place,
+                        // then the writes of `qs` (with `qpf`, prefetched for writing 16 ahead).
+                        for j in 0..es.len() {
+                            if m.cpf {
+                                if let Some(ahead) = es.get(j + 16) {
+                                    prefetch(offsets.ptr.add(ahead.value as usize));
+                                }
+                            }
+                            let c = es[j].value as usize;
+                            let p = offsets.get(c) - 1;
+                            offsets.set(c, p);
+                            es[j].value = p;
+                        }
+                        for j in 0..es.len() {
+                            if m.qpf {
+                                if let Some(ahead) = es.get(j + 16) {
+                                    prefetch_w(qs.ptr.add(ahead.value as usize));
+                                }
+                            }
+                            qs.set(es[j].value as usize, es[j].index);
+                        }
+                        continue;
+                    }
+                    for j in 0..es.len() {
+                        if m.cpf {
+                            if let Some(ahead) = es.get(j + 16) {
+                                prefetch(offsets.ptr.add(ahead.value as usize));
+                            }
+                        }
+                        let e = es[j];
                         let c = e.value as usize;
                         let p = offsets.get(c) - 1;
                         offsets.set(c, p);
@@ -2080,21 +2382,39 @@ pub(super) fn x_r15_csr_par(
         });
         start = end;
     }
+    std::hint::black_box(&sinks);
     let t2 = Instant::now();
     // EXPERIMENT (exp/r13-wall): the CSR build's interval (`R13_PROBE=tl`).
     crate::utils::xtiming::x_r13("csr", Some(t0), words_total as u64);
     eprintln!(
-        "[R11] csr words-build-par cells={cells} words={words_total} parts={parts} zero_ns={zero_ns} count_read_ns={count_read_ns} count_ns={count_ns} sum_ns={sum_ns} place_read_ns={place_read_ns} place_ns={place_ns} build_ns={} csr_bytes={}",
+        "[R11] csr words-build-par cells={cells} words={words_total} parts={parts} zero_ns={zero_ns} count_read_ns={count_read_ns} count_ns={count_ns} sum_ns={sum_ns} place_read_ns={place_read_ns} place_ns={place_ns} build_ns={} csr_bytes={} rdx_ns={rdx_ns}",
         (t2 - t0).as_nanos(),
         (cells + 1 + words_total) * 4,
     );
-    if super::x_r11_csr::mode().check {
+    let ow: Vec<String> = own_words.iter().map(|w| w.to_string()).collect();
+    eprintln!(
+        "[R16] csrp-jobs cells={cells} words={words_total} parts={parts} blocks={blocks} flags=cpf{}ps{}qpf{}cblk{}sum1{}lean{}sum0{}rdx{}c4{}c8{} pre_ns={pre_ns} alloc_ns={alloc_ns} prefix_ns={prefix_ns} zero={pz} cread={pcr} count={pc} sum1={ps1} sum2={ps2} rdx={prd} pread={ppr} place={pp} ownw={}",
+        m.cpf as u8,
+        m.psplit as u8,
+        m.qpf as u8,
+        m.cblk as u8,
+        sum1 as u8,
+        m.sumlean as u8,
+        m.sum0 as u8,
+        m.rdx as u8,
+        m.c4 as u8,
+        m.c8 as u8,
+        ow.join("/"),
+    );
+    if m.check {
         super::x_r11_csr::check_against_chains(hashtable, next_pos, words_total);
-        super::x_r11_csr::PvScratch {
-            pv: spv,
-            helper: shp,
+        if !m.sum0 {
+            super::x_r11_csr::PvScratch {
+                pv: spv,
+                helper: shp,
+            }
+            .check(&ph);
         }
-        .check(&ph);
     }
 }
 

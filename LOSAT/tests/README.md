@@ -342,6 +342,9 @@ cases; `--all-cases` runs all of them nightly). Both manifests freeze NCBI's
 outfmt 0/6/7 and, in the rows `sa.*` and `db.sa.*`, outfmt 8 (Seq-annot, ASN.1 text),
 12 (Seq-annot, JSON) and 9 (Seq-annot, binary ASN.1; the ids ending `.9`, a subset of the 8
 rows' searches) of all five programs (the BLASTX `-subject` rows are 8, 9 and 12 only);
+and 5 (BLAST XML, text) of BLASTN and BLASTP (OF4a: the ids ending `.5` and the `x5.*` rows of
+`outfmt0_manifest.tsv`, each the search of an existing row; `check_xml_layout.py` of the OF4 line
+checks the layout of the frozen files);
 `run_oracle.py --freeze --only sa.` and `db_search_fixtures.py freeze --only db.sa.`
 freeze those rows alone (`--only` takes any id prefix, so `--only sa.multi.megablast.9` freezes
 one row). The fixture directories carry a `.gitattributes` with `-text` for the binary `.out` files. `--jobs` overlaps independent

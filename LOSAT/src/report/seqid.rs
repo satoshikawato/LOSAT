@@ -92,7 +92,7 @@ impl SeqId<'_> {
             }
             SeqId::BlOrdId(oid) => {
                 enc.variant("general", 10);
-                enc.begin_sequence();
+                enc.begin_sequence("Dbtag");
                 enc.member("db", 0);
                 enc.visible_str(b"BL_ORD_ID");
                 enc.end_member();

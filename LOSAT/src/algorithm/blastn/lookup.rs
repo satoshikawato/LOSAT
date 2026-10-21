@@ -140,19 +140,28 @@ const NCBI4NA_REV_COMP: [u8; 16] = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 1
 /// base as its uppercase form. `IUPACNA_TO_NCBI4NA` maps only uppercase letters, so
 /// the letter is uppercased first; the result is uppercase.
 pub fn reverse_complement(seq: &[u8]) -> Vec<u8> {
-    seq.iter()
-        .rev()
-        .map(|&b| {
-            let b = b.to_ascii_uppercase();
-            let idx = if b < 128 {
-                IUPACNA_TO_NCBI4NA[b as usize]
-            } else {
-                0
-            };
-            let rc = NCBI4NA_REV_COMP[idx as usize];
-            NCBI4NA_TO_IUPACNA[rc as usize]
-        })
-        .collect()
+    seq.iter().rev().map(|&b| complement_letter(b)).collect()
+}
+
+/// `reverse_complement` of `seq` in place (the same letters; for buffers that are reused).
+pub fn reverse_complement_in_place(seq: &mut [u8]) {
+    seq.reverse();
+    for letter in seq {
+        *letter = complement_letter(*letter);
+    }
+}
+
+/// The complement of one letter, as `reverse_complement` writes it.
+#[inline]
+fn complement_letter(b: u8) -> u8 {
+    let b = b.to_ascii_uppercase();
+    let idx = if b < 128 {
+        IUPACNA_TO_NCBI4NA[b as usize]
+    } else {
+        0
+    };
+    let rc = NCBI4NA_REV_COMP[idx as usize];
+    NCBI4NA_TO_IUPACNA[rc as usize]
 }
 
 /// The BLASTNA code of the reverse complement of each byte: entry `b` is

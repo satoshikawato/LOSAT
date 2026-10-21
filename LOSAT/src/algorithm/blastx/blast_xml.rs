@@ -41,7 +41,9 @@
 //! - when some `-subject` title would be refused if its subject had a hit
 //!   (`subjects_may_be_refused`), or some query's message would be (a title that is refused only
 //!   in the message of a query NCBI did not search), or (15 and 16 with `-db`) the taxonomy
-//!   database is on the search path, whose scientific name or damage a later batch can refuse,
+//!   database is on the search path and the lookup of the taxid of some sequence of the database
+//!   would be refused (a scientific name NCBI's XML cannot write, a damaged record: checked once
+//!   before the first byte, `taxdb_may_refuse`), so that a later batch could refuse it,
 //!   the run holds the document in memory (`HeldOutput`) and writes it at the epilog; a refusal
 //!   found while the batches are reported drops it, with nothing written.
 

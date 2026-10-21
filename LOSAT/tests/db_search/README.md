@@ -275,3 +275,9 @@ OF5b part 1 (XML2 and JSON of BLASTX): `make_x16_blastx_inputs.py` writes the in
 `db.x16.blastx.*` (bslice) and `db.x16_bx_taxid.*` (taxid and `BLASTDB=` variants, as in the BLASTP rows) are frozen from NCBI
 BLAST+ 2.17.0; `tests/fixtures/outfmt16/db/sprot_tax` is `sprot.faa` built with `makeblastdb -dbtype prot -blastdb_version 4
 -taxid 9606` (only `.phr .pin .psq` kept).
+
+OF5b part 1 fix (DECISIONS 32, BLASTX `-db` 15/16 with a taxonomy database): `tests/fixtures/outfmt16/db/sprot_mixtax.pal` lists
+`sprot_tax10090` (`sprot.faa`, `makeblastdb -dbtype prot -blastdb_version 4 -taxid 10090`) and `other_tax9606` (`other.faa`, one protein
+nothing hits, `-taxid 9606`; only `.phr .pin .psq` kept). `mixtax_blastx_{good,badname}_{15,16}` are NCBI BLAST+ 2.17.0
+`blastx -query qnx_late.fna -db db/sprot_mixtax -num_threads 1` with `BLASTDB=tests/seqdb/taxdb/good` and `.../high_bytes_utf8` (the name of
+9606 has bytes >= 0x80; 9606 is in the database and never reported, so NCBI writes the same bytes as with `good`).

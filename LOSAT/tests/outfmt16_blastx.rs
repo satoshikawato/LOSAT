@@ -197,8 +197,9 @@ fn equals_frozen(stem: &str, query: &str, modes: &[&str], rc: i32, stderr_start:
 /// Design §5.2 row 22 for BLASTX (`blastx_{sub,db}_badbatch_fmt{15,16}`): the third query's batch fails to
 /// read. `-db` has written the reports of the two queries before it; `-subject` only the first one's (the
 /// second is held back and lost), and neither has an epilog. `dbtax` is a `-db` search with the taxonomy
-/// database on the search path: LOSAT holds the output in memory there (a later batch can refuse a
-/// scientific name), and the run that ends with the reader error writes what it held.
+/// database on the search path: the output is written batch by batch there too (the taxonomy database holds
+/// no name LOSAT would refuse, DECISIONS 32), and the run that ends with the reader error has written the
+/// batches before it.
 #[test]
 fn a_failed_batch_keeps_the_db_report_and_loses_the_held_subject_report() {
     equals_frozen(
@@ -448,6 +449,56 @@ fn a_taxdb_refusal_in_a_later_batch_leaves_nothing_written() {
                 stderr.contains("a taxonomy database scientific name with a character outside the US-ASCII range"),
                 "{stderr}"
             );
+        }
+    }
+}
+
+/// DECISIONS 32: the output of a `-db` search with the taxonomy database on the search path is held in memory
+/// only when some sequence of the database has a taxid whose lookup would be refused (the pre-pass,
+/// `algorithm::common::database::taxdb_may_refuse`, unit-tested in `taxdb_prepass_tests`). `db/sprot_mixtax` is
+/// `sprot.faa` with taxid 10090 and a third protein, never hit, with taxid 9606; `qnx_late.fna` is two batches
+/// (the second hits the first two sequences). With the `good` taxonomy database nothing is held; with
+/// `high_bytes_utf8` (the name of 9606 has bytes >= 0x80) the pre-pass finds the unreported taxid and holds, and
+/// the run writes what NCBI BLAST+ 2.17.0 writes (`mixtax_blastx_{good,badname}_{15,16}`: it never looks 9606 up).
+/// The same taxonomy database with `db/sprot_tax`, where 9606 is reported in the second batch, is refused with
+/// nothing written (`a_taxdb_refusal_in_a_later_batch_leaves_nothing_written`).
+#[test]
+fn a_taxid_that_is_in_the_database_but_never_reported_does_not_refuse_the_run() {
+    let dir = fixtures();
+    for format in ["15", "16"] {
+        for (case, taxdb) in [("good", "good"), ("badname", "high_bytes_utf8")] {
+            let name = format!("mixtax_blastx_{case}_{format}");
+            let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
+            let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+            let taxdb = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/seqdb/taxdb")
+                .join(taxdb);
+            for threads in ["1", "4"] {
+                let args = [
+                    "blastx",
+                    "-query",
+                    "qnx_late.fna",
+                    "-db",
+                    "db/sprot_mixtax",
+                    "-num_threads",
+                    threads,
+                    "-outfmt",
+                    format,
+                ];
+                let output = run_in(&dir, &args, &[("BLASTDB", taxdb.to_str().unwrap())]);
+                let case = format!("{name} threads {threads}");
+                assert_eq!(output.status.code(), Some(0), "{case}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&out),
+                    "{case}: stdout"
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stderr),
+                    String::from_utf8_lossy(&err),
+                    "{case}: stderr"
+                );
+            }
         }
     }
 }

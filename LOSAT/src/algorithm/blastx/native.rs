@@ -467,9 +467,13 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
             super::blast_xml::prescan_queries(query_file, args.lcase_masking)?;
         // The XML2 and JSON documents of a `-db` search with a taxonomy database on the search
         // path: a later batch can still refuse the scientific name of a taxid, or the damaged
-        // database (`read_reported_taxids`, which needs the batch's hits).
-        let taxdb_may_refuse =
-            choice.number != 5 && database.as_ref().is_some_and(BlastxDatabase::taxdb_found);
+        // database (`read_reported_taxids`, which needs the batch's hits). The taxids of every
+        // sequence are looked up here, once, and the output is held only when one of them would
+        // be refused (DECISIONS 32); the usual run, in which none is, writes batch by batch.
+        let taxdb_may_refuse = choice.number != 5
+            && database
+                .as_ref()
+                .is_some_and(|database| database.taxdb_found() && database.taxdb_may_refuse());
         if messages_may_be_refused
             || taxdb_may_refuse
             || super::blast_xml::subjects_may_be_refused(&subjects)

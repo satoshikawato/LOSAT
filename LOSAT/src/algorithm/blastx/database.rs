@@ -83,6 +83,13 @@ impl BlastxDatabase {
         self.db.taxdb_found()
     }
 
+    /// Whether a later query batch of an XML2 or JSON run could still refuse a taxonomy
+    /// database name or record (`algorithm::common::database::taxdb_may_refuse`: every
+    /// sequence's taxid looked up once, before the first byte).
+    pub(crate) fn taxdb_may_refuse(&self) -> bool {
+        shared::taxdb_may_refuse(&self.db)
+    }
+
     pub(crate) fn pairwise_database(&self) -> PairwiseDatabase {
         shared::pairwise_database(&self.db, &self.name)
     }

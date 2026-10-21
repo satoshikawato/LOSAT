@@ -825,6 +825,51 @@ pub(crate) fn read_reported_taxids(
     Ok((taxids, taxonomy, notes))
 }
 
+/// Whether [`read_reported_taxids`] could refuse for some sequence of the database, which a
+/// run that writes its batches one by one cannot take back (OF5b BLASTX, DECISIONS 32): the
+/// distinct non-zero taxids of every sequence are looked up in the taxonomy database with the
+/// code `read_reported_taxids` uses, and the answer is `true` as soon as one lookup would
+/// refuse (a scientific name NCBI's XML stream cannot write, a record past the last mapped
+/// page of `taxdb.btd`), or a header or the taxonomy database cannot be read. A superset of
+/// what a search reports: limits (`-gilist`, `-taxidlist`) and the hits themselves are
+/// ignored. `false` without `taxdb.bti` on the search path and for a database without taxids.
+///
+/// It has its own taxonomy handle (`LazyTaxDb`), so the run's [`TaxdbRun`], its volume lookups
+/// and the notes that [`TaxdbPrinter`] writes are as they would be without this call. Memory:
+/// the distinct taxids, nothing per sequence.
+pub(crate) fn taxdb_may_refuse(db: &SeqDb) -> bool {
+    use crate::seqdb::taxdb::LazyTaxDb;
+    if !db.taxdb_found() {
+        return false;
+    }
+    let Some(search_path) = db.search_path() else {
+        return false;
+    };
+    let taxdb = LazyTaxDb::new(search_path.clone());
+    let mut seen: std::collections::HashSet<i32> = Default::default();
+    for ordinal in 0..db.num_seqs() {
+        let Ok(defline_taxids) = db.defline_taxids(ordinal) else {
+            return true;
+        };
+        // One definition line per sequence (`read_reported_taxids`).
+        let taxid = defline_taxids.first().copied().unwrap_or(0);
+        if taxid == 0 || !seen.insert(taxid) {
+            continue;
+        }
+        let mut messages = Vec::new();
+        match taxdb.names(taxid, &mut messages) {
+            Err(_) => return true,
+            Ok(Some(names)) => {
+                if crate::report::blast_xml::names::check_text(&names.scientific_name).is_err() {
+                    return true;
+                }
+            }
+            Ok(None) => {}
+        }
+    }
+    false
+}
+
 /// NCBI's messages about the taxonomy database that are not the lookup of a `Hit`: the texts of
 /// opening it (at the first lookup of the run) and the lookup that a volume makes the first
 /// time it fetches a subject with a taxid (`CSeqDBVol::x_GetTaxonomy`). NCBI writes them when
@@ -957,5 +1002,92 @@ mod taxdb_notes_tests {
             lines(&mut none.printer(), 0, 9606, &HitTaxonomy::Unnamed),
             ""
         );
+    }
+}
+
+#[cfg(test)]
+mod taxdb_prepass_tests {
+    //! `taxdb_may_refuse`: the answer of the lookup of every sequence's taxid, with the
+    //! databases of `tests/fixtures/outfmt16/db` (`sprot_tax`: two sequences, taxid 9606;
+    //! `sprot_mixtax`: those two with taxid 10090 and a third with taxid 9606) and the taxonomy
+    //! databases of `tests/seqdb/taxdb`.
+    use super::*;
+    use crate::seqdb::alias::SearchPath;
+    use crate::seqdb::SeqType;
+    use std::path::{Path, PathBuf};
+
+    fn root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests")
+    }
+
+    /// The database `name` of `tests/fixtures/outfmt16/db` opened with `BLASTDB=taxdb`
+    /// (`None`: not set), from an empty current directory.
+    fn database(name: &str, taxdb: Option<&Path>) -> SeqDb {
+        let cwd = std::env::temp_dir().join(format!("losat_prepass_cwd_{}", std::process::id()));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let search = SearchPath::new(&cwd, taxdb.map(Path::as_os_str), None).unwrap();
+        let path = root().join("fixtures/outfmt16/db").join(name);
+        SeqDb::open_in(path.to_str().unwrap(), SeqType::Protein, &search).unwrap()
+    }
+
+    fn variant(name: &str) -> PathBuf {
+        root().join("seqdb/taxdb").join(name)
+    }
+
+    #[test]
+    fn names_that_can_be_written_do_not_hold() {
+        for name in ["sprot_tax", "sprot_mixtax"] {
+            let db = database(name, Some(&variant("good")));
+            assert!(db.taxdb_found());
+            assert!(!taxdb_may_refuse(&db), "{name}");
+        }
+        // 10090 has a common name and a kingdom with bytes >= 0x80 in this taxonomy database,
+        // which XML2 does not write: only the scientific name is checked.
+        let db = database("sprot_mixtax", Some(&variant("high_bytes_latin1")));
+        assert!(!taxdb_may_refuse(&db));
+    }
+
+    #[test]
+    fn a_name_that_cannot_be_written_holds_whether_or_not_the_taxid_is_reported() {
+        // sprot_tax: 9606 is the taxid of both sequences. sprot_mixtax: 9606 belongs to the
+        // third sequence only, which a search for the first two never reports.
+        for name in ["sprot_tax", "sprot_mixtax"] {
+            let db = database(name, Some(&variant("high_bytes_utf8")));
+            assert!(taxdb_may_refuse(&db), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_record_past_the_last_page_holds() {
+        // The record of 10090 (entry 3) ends at the offset of entry 4: 5000 bytes, past the
+        // 4096-byte page that ends the mapping of the small `taxdb.btd`.
+        let dir = std::env::temp_dir().join(format!("losat_prepass_btd_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::copy(variant("good").join("taxdb.btd"), dir.join("taxdb.btd")).unwrap();
+        let mut index = std::fs::read(variant("good").join("taxdb.bti")).unwrap();
+        let at = 24 + 8 * 4 + 4;
+        index[at..at + 4].copy_from_slice(&5000u32.to_be_bytes());
+        std::fs::write(dir.join("taxdb.bti"), &index).unwrap();
+        assert!(taxdb_may_refuse(&database("sprot_mixtax", Some(&dir))));
+        // 9606 (entry 2) is fine: the database with that taxid alone does not hold.
+        assert!(!taxdb_may_refuse(&database("sprot_tax", Some(&dir))));
+    }
+
+    #[test]
+    fn a_missing_or_damaged_taxdb_that_ncbi_survives_does_not_hold() {
+        // No `taxdb.bti` on the search path: the formats write no name.
+        let db = database("sprot_mixtax", None);
+        assert!(!db.taxdb_found());
+        assert!(!taxdb_may_refuse(&db));
+        // NCBI turns a wrong magic number into a message and N/A (`expected.tsv`).
+        let db = database("sprot_mixtax", Some(&variant("bad_magic")));
+        assert!(!taxdb_may_refuse(&db));
+    }
+
+    #[test]
+    fn a_database_without_taxids_does_not_hold() {
+        let db = database("sprot", Some(&variant("high_bytes_utf8")));
+        assert!(db.taxdb_found());
+        assert!(!taxdb_may_refuse(&db));
     }
 }

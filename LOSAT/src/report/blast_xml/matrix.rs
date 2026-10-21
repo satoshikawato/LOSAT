@@ -39,14 +39,12 @@
 //! U and O are letters outside the packed symbols (BLOSUM62's `defscore` -4), and J has the
 //! packed table's J row.
 
-use crate::utils::matrix::BLOSUM62;
+use crate::config::ScoringMatrix;
+use crate::utils::matrix::standard_protein_matrix;
 
 /// The packed table's symbols, in the order of its rows (NCBI `s_Blosum62PSM`:
 /// A, R, N, D, C, Q, E, G, H, I, L, K, M, F, P, S, T, W, Y, V, B, J, Z, X, *).
 const SYMBOLS: &[u8; 25] = b"ARNDCQEGHILKMFPSTWYVBJZX*";
-
-/// `defscore` of `NCBISM_Blosum62` (a letter outside the packed symbols).
-const DEFSCORE: i32 = -4;
 
 /// The letters of the NCBIstdaa codes 1-27 that `CSeqportUtil::Convert` gives an IUPACaa
 /// letter: all but `*` (code 25), and `-` (code 0).
@@ -58,17 +56,26 @@ pub struct FormattingMatrix {
     scores: Box<[i32]>,
 }
 
+/// The packed matrix of `data4xmlformat.cpp`'s `x_FillScoreMatrix` by name (exactly as typed)
+/// that LOSAT runs; none for a name it does not know (BLOSUM50, 80, 90, PAM and IDENTITY
+/// are NCBI's, but no LOSAT program with outfmt 5 runs them).
+fn packed_matrix(name: &str) -> Option<ScoringMatrix> {
+    match name {
+        "BLOSUM45" => Some(ScoringMatrix::Blosum45),
+        "BLOSUM62" => Some(ScoringMatrix::Blosum62),
+        _ => None,
+    }
+}
+
 impl FormattingMatrix {
     /// The matrix of the score matrix `name` (`CCmdLineBlastXMLReportData::x_FillScoreMatrix`);
-    /// only BLOSUM62 runs in LOSAT.
+    /// BLOSUM62 and BLOSUM45 run in LOSAT.
     pub fn new(name: &str) -> Option<Self> {
-        if name != "BLOSUM62" {
-            return None;
-        }
+        let matrix = packed_matrix(name)?;
         let mut scores = vec![i32::MIN; 256 * 256].into_boxed_slice();
         for &row in IUPACAA_LETTERS {
             for &col in IUPACAA_LETTERS {
-                scores[usize::from(row) * 256 + usize::from(col)] = packed_score(row, col);
+                scores[usize::from(row) * 256 + usize::from(col)] = packed_score(matrix, row, col);
             }
         }
         Some(Self { scores })
@@ -86,13 +93,14 @@ impl FormattingMatrix {
     }
 }
 
-/// `NCBISM_Unpack` of BLOSUM62 for two letters: the packed table, or `defscore` when either
-/// letter is not one of the packed symbols.
-fn packed_score(row: u8, col: u8) -> i32 {
+/// `NCBISM_Unpack` of a packed matrix for two letters: the packed table, or its `defscore`
+/// (BLOSUM62 -4, BLOSUM45 -5) when either letter is not one of the packed symbols.
+fn packed_score(matrix: ScoringMatrix, row: u8, col: u8) -> i32 {
+    let table = standard_protein_matrix(matrix);
     let index = |letter: u8| SYMBOLS.iter().position(|&symbol| symbol == letter);
     match (index(row), index(col)) {
-        (Some(r), Some(c)) => i32::from(BLOSUM62[r * SYMBOLS.len() + c]),
-        _ => DEFSCORE,
+        (Some(r), Some(c)) => i32::from(table.scores[r * SYMBOLS.len() + c]),
+        _ => table.defscore,
     }
 }
 
@@ -103,13 +111,13 @@ mod tests {
     #[test]
     fn engine_table_is_the_packed_ncbi_table_with_its_symbol_order() {
         // sm_blosum62.c: the A row, the J row and the V column.
-        assert_eq!(packed_score(b'A', b'A'), 4);
-        assert_eq!(packed_score(b'A', b'R'), -1);
-        assert_eq!(packed_score(b'J', b'I'), 3);
-        assert_eq!(packed_score(b'J', b'V'), 2);
-        assert_eq!(packed_score(b'J', b'L'), 3);
-        assert_eq!(packed_score(b'*', b'*'), 1);
-        assert_eq!(packed_score(b'*', b'A'), -4);
+        assert_eq!(packed_score(ScoringMatrix::Blosum62, b'A', b'A'), 4);
+        assert_eq!(packed_score(ScoringMatrix::Blosum62, b'A', b'R'), -1);
+        assert_eq!(packed_score(ScoringMatrix::Blosum62, b'J', b'I'), 3);
+        assert_eq!(packed_score(ScoringMatrix::Blosum62, b'J', b'V'), 2);
+        assert_eq!(packed_score(ScoringMatrix::Blosum62, b'J', b'L'), 3);
+        assert_eq!(packed_score(ScoringMatrix::Blosum62, b'*', b'*'), 1);
+        assert_eq!(packed_score(ScoringMatrix::Blosum62, b'*', b'A'), -4);
     }
 
     #[test]
@@ -122,10 +130,10 @@ mod tests {
         assert!(!matrix.positive(b'J', b'A'));
         // U and O are not packed symbols: `defscore` -4, so never positive unless equal
         // (equal letters are counted before the matrix is read).
-        assert_eq!(matrix.score(b'U', b'C'), DEFSCORE);
+        assert_eq!(matrix.score(b'U', b'C'), -4);
         assert!(!matrix.positive(b'U', b'C'));
         assert!(!matrix.positive(b'O', b'X'));
-        assert_eq!(matrix.score(b'U', b'U'), DEFSCORE);
+        assert_eq!(matrix.score(b'U', b'U'), -4);
         // '-' and '*' have no IUPACaa letter.
         assert_eq!(matrix.score(b'*', b'*'), i32::MIN);
         assert_eq!(matrix.score(b'-', b'A'), i32::MIN);
@@ -149,7 +157,7 @@ mod tests {
                 }
                 assert_eq!(
                     matrix.score(row, col),
-                    i32::from(BLOSUM62[r * 25 + c]),
+                    i32::from(crate::utils::matrix::BLOSUM62[r * 25 + c]),
                     "{} {}",
                     row as char,
                     col as char
@@ -157,5 +165,22 @@ mod tests {
             }
         }
         assert!(FormattingMatrix::new("BLOSUM80").is_none());
+        assert!(FormattingMatrix::new("blosum62").is_none());
+    }
+
+    #[test]
+    fn blosum45_is_the_packed_table_with_defscore_minus_five() {
+        // sm_blosum45.c: A/A 5, A/R -2, J/I 4, J/V 3, the `*` diagonal 1, defscore -5.
+        let blosum45 = ScoringMatrix::Blosum45;
+        assert_eq!(packed_score(blosum45, b'A', b'A'), 5);
+        assert_eq!(packed_score(blosum45, b'A', b'R'), -2);
+        assert_eq!(packed_score(blosum45, b'J', b'I'), 4);
+        assert_eq!(packed_score(blosum45, b'*', b'*'), 1);
+        assert_eq!(packed_score(blosum45, b'*', b'A'), -5);
+        let matrix = FormattingMatrix::new("BLOSUM45").expect("BLOSUM45");
+        assert_eq!(matrix.score(b'U', b'C'), -5);
+        assert_eq!(matrix.score(b'A', b'A'), 5);
+        assert!(matrix.positive(b'I', b'V'));
+        assert!(!matrix.positive(b'A', b'R'));
     }
 }

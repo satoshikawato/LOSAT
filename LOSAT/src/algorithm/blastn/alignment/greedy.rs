@@ -2946,6 +2946,19 @@ unsafe fn x_greedy_row_impl<const REVERSE: bool, const ARM: u8>(
                 }
                 *slide.add(i) = r;
             }
+            if x_f2_check_on() {
+                x_f2_check::<REVERSE>(
+                    seq1,
+                    seq2,
+                    len1,
+                    len2,
+                    start,
+                    slide,
+                    block_len,
+                    block_first,
+                    cold.longest_match_run,
+                );
+            }
         } else {
             let longest_match_run = cold.longest_match_run;
             for i in 0..block_len {
@@ -3187,6 +3200,74 @@ fn x_f2_greedy_arm() -> u8 {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0)
     })
+}
+
+/// PROBE (`LOSAT_X_F2CHECK=1`): compare the arms' pass 2 with the reference expression of the default
+/// pass 2 on every diagonal; panics on the first difference and reports the number of diagonals checked.
+#[cfg(target_arch = "x86_64")]
+fn x_f2_check_on() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("LOSAT_X_F2CHECK").map(|v| v == "1").unwrap_or(false))
+}
+
+/// PROBE: the reference form of pass 2 (the default instance's source), one diagonal at a time.
+///
+/// SAFETY: as `x_greedy_row_impl` with `inline_ok`.
+#[cfg(target_arch = "x86_64")]
+#[inline(never)]
+unsafe fn x_f2_check<const REVERSE: bool>(
+    seq1: *const u8,
+    seq2: *const u8,
+    len1: i32,
+    len2: i32,
+    start: *const i32,
+    slide: *const i32,
+    block_len: usize,
+    block_first: i32,
+    longest_match_run: i32,
+) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static CHECKED: AtomicU64 = AtomicU64::new(0);
+    const NOT_A_BASE: u64 = 0xFCFC_FCFC_FCFC_FCFC;
+    for i in 0..block_len {
+        let seq2_index = *start.add(i);
+        let seq1_index = seq2_index + block_first + i as i32;
+        let unfit = (len1 - 8 - seq1_index) | (len2 - 8 - seq2_index) | seq1_index | seq2_index;
+        let at1 = if unfit < 0 { 0 } else { seq1_index };
+        let at2 = if unfit < 0 { 0 } else { seq2_index };
+        let (w1, w2) = if REVERSE {
+            (
+                u64::from_le((seq1.add((len1 - 8 - at1) as usize) as *const u64).read_unaligned()),
+                u64::from_le((seq2.add((len2 - 8 - at2) as usize) as *const u64).read_unaligned()),
+            )
+        } else {
+            (
+                u64::from_le((seq1.add(at1 as usize) as *const u64).read_unaligned()),
+                u64::from_le((seq2.add(at2 as usize) as *const u64).read_unaligned()),
+            )
+        };
+        let diff = (w1 ^ w2) | (w1 & NOT_A_BASE);
+        let bits = if REVERSE { diff.leading_zeros() } else { diff.trailing_zeros() };
+        let shift = bits & 0x38;
+        let stop_byte = if REVERSE { (w2 >> (56 - shift)) as u8 } else { (w2 >> shift) as u8 };
+        let index = (bits >> 3) as i32;
+        let other = (unfit < 0)
+            | (diff == 0)
+            | (stop_byte == FENCE_SENTRY)
+            | (index > longest_match_run);
+        let want = if other { -1 } else { index };
+        let got = *slide.add(i);
+        assert!(
+            want == got,
+            "F2CHECK: diagonal {} of the block (start {}, reverse {}): reference {} arm {}",
+            i, seq2_index, REVERSE, want, got
+        );
+    }
+    let n = CHECKED.fetch_add(block_len as u64, Ordering::Relaxed) + block_len as u64;
+    if (n - block_len as u64) / 4_000_000 != n / 4_000_000 {
+        eprintln!("[F2CHECK] {} diagonals agree", n / 4_000_000 * 4_000_000);
+    }
 }
 
 /// PROBE: a branch target the compiler is told is rarely taken (arm 2).

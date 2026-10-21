@@ -1101,7 +1101,19 @@ Rebuilding less:
   `results/b14ab/mem.tsv`), megablast of 100 16S queries x 28,036 16S, max RSS with / without the switch (NCBI): 16
   threads outfmt 6 77-78 / 114-115 MiB (141), outfmt 8 81-82 / 117-120 (108), outfmt 9 78-79 / 118-119 (107), outfmt
   12 79-83 / 120-123 (109); 8 threads outfmt 6 70-74 / 105-108 (146), outfmt 8 77-78 / 115-117 (114), outfmt 9 68-75 /
-  108-110 (115), outfmt 12 79-80 / 113-118 (115); one thread unchanged (33 MiB with outfmt 8, NCBI 112). TIMING_TBD
+  108-110 (115), outfmt 12 79-80 / 113-118 (115); one thread unchanged (33 MiB with outfmt 8, NCBI 112). Time measured
+  on the workstation (node 1; 16, 8 or 2 booked cores with their siblings idle, a 3 s warm-up before each run, alternating
+  order, against `LOSAT_X_BNDBSTREAM=0` with the same binary; every output identical; v4-B `results/b14ab/ab3.tsv`,
+  `ab4.tsv`, `ab5.tsv`), 100 16S queries x 28,036 16S at 16 threads: megablast (outfmt 8) 5.885 -> 5.055 s (x0.859),
+  dc-megablast 12.76 -> 10.17 s (x0.797), blastn 13.01 -> 10.56 s (x0.812); megablast at 8 threads 10.18 -> 9.41 s
+  (x0.924), at 2 threads 36.47 -> 35.97 s (x0.986); megablast of the Sakai genome x 28,036 16S at 16 threads 0.575 ->
+  0.490 s (x0.852; max RSS 199 -> 174 MiB). User-space instructions fall where the round held many results
+  (dc-megablast 1,570 -> 1,500 G at 16 threads): one scratch per thread, and no merge after the round. A database of
+  a few long sequences is unchanged (the D. melanogaster genome, 1,870 sequences with arms of 23-32 Mb: blocks of one
+  sequence and the nested chunk stage, which the waiting threads join): 1,500 2L cDNAs, blastn per-pair median x1.009
+  (9 pairs, 0.971-1.033) at 16 threads and x1.001 (8 pairs) at 8, dc-megablast x0.995 (7 pairs) at 16; max RSS equal
+  with and without the switch (blastn at 16 threads 568-640 / 572-629 MiB, which is above NCBI's 382 MiB either way: a
+  per-thread excess this switch does not touch).
 - `LOSAT_X_BNDBSTREAMSHADOW=1` shadow of `LOSAT_X_BNDBSTREAM` (implies it): each parallel preliminary stage of `-db`
   keeps what the window hands to the hit lists, those of the whole database at once, the stage runs again in rounds
   (the same pool, blocks and kernel), and the two are compared (the ordinal ids in order, each kept result by its

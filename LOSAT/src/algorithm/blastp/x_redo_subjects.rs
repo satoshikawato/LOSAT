@@ -14,12 +14,14 @@
 //! lengths before a window's matches are redone). Every redo path (the one-thread loop, the two
 //! query-parallel paths and `x_redo_par.rs`) and the first Newton problems of `LOSAT_X_NEWTONLANES`
 //! read a match's subject with `SeqDb::read_sequence` (`XRedoSubjects::read`): the stored residues
-//! that the copy holds, so the redo computes the same values. The redo of a match takes the subject
-//! that the first Newton problems read ahead for it (`XPrefetchedSubjects`, which drops what no
-//! redo took at their next call), so a match is read once. The one-thread loop reads after the
-//! early termination test, as NCBI does, or takes the subject that the first Newton problems read
-//! ahead of the test; the parallel paths read the matches that they compute ahead of the test's
-//! replay. A read that finds a pyrrolysine (O) sets the subject's flag (`ListedSubjects::x_has_o`).
+//! that the copy holds, so the redo computes the same values. Each read is dropped after its match:
+//! the first Newton problems read a match ahead of its redo, and the redo reads it again (keeping
+//! the reads ahead for the redo raised the maximum resident set of the UniRef50 `uniref50.04`
+//! search at 8 threads from 53.6 to 60.3 MiB, medians of 3, against 53.9 MiB for the copy: v4-D12
+//! s5m3, workstation). The one-thread loop reads after the early termination test, as NCBI does,
+//! and after the first Newton problems; the parallel paths read the matches that they compute ahead
+//! of the test's replay. A read that finds a pyrrolysine (O) sets the subject's flag
+//! (`ListedSubjects::x_has_o`).
 //! The block that the read returns holds the sentinel bytes of the sequence file on both sides of
 //! the residues, where the copy holds `NCBISTDAA_GAP`; the redo reads the residues only, and SEG
 //! makes its own copy of a range (`build_subject_range_data`). After the redo,
@@ -139,45 +141,6 @@ impl XRedoSubject<'_> {
         match self {
             Self::Encoded(residues) => residues,
             Self::Read(block) => block.protein(0),
-        }
-    }
-}
-
-// No NCBI counterpart: keeps reads for their second reader; no value is computed differently.
-/// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the subjects of a database that the first Newton problems of
-/// `LOSAT_X_NEWTONLANES` read for the next matches (`x_newton_lanes_prefetch_matches`), which the
-/// redo of those matches takes instead of reading them again.
-#[derive(Default)]
-pub(crate) struct XPrefetchedSubjects<'a> {
-    read: Vec<(u32, XRedoSubject<'a>)>,
-}
-
-impl<'a> XPrefetchedSubjects<'a> {
-    /// Drops the subjects read ahead that no redo took.
-    pub(crate) fn clear(&mut self) {
-        self.read.clear();
-    }
-
-    /// Reads the subject `s_idx` of `subjects` (a database's) ahead, for its redo.
-    pub(crate) fn read_ahead(
-        &mut self,
-        subjects: &XRedoSubjects<'a>,
-        s_idx: u32,
-    ) -> Result<&XRedoSubject<'a>> {
-        self.read.push((s_idx, subjects.read(s_idx)?));
-        Ok(&self.read.last().expect("just pushed").1)
-    }
-
-    /// The subject `s_idx` for its redo: the one read ahead, or a read of `subjects`.
-    #[inline]
-    pub(crate) fn take_or_read(
-        &mut self,
-        subjects: &XRedoSubjects<'a>,
-        s_idx: u32,
-    ) -> Result<XRedoSubject<'a>> {
-        match self.read.iter().position(|&(read, _)| read == s_idx) {
-            Some(at) => Ok(self.read.swap_remove(at).1),
-            None => subjects.read(s_idx),
         }
     }
 }

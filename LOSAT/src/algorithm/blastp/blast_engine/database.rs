@@ -666,8 +666,8 @@ pub(super) struct ListedSubjects {
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the number of residues of each subject, by rank (`x_list`;
     /// empty without the switch).
     x_lengths: Vec<u32>,
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): whether a read of the redo found a pyrrolysine (O), by
-    /// rank (`x_list`; empty without the switch).
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): whether a read of the redo or of the first Newton problems
+    /// found a pyrrolysine (O), by rank (`x_list`; empty without the switch).
     x_has_o: Vec<std::sync::atomic::AtomicBool>,
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): the copy that `read` makes, by rank (empty
     /// without the shadow mode).

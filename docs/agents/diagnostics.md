@@ -1202,10 +1202,11 @@ Rebuilding less:
   `ListedSubjects::read` copies the residues of every subject of the preliminary hit lists, which the redo and the
   reports read. With it `ListedSubjects::x_list` keeps their ordinal ids and lengths (from the index; the estimate of
   `LOSAT_X_BPREDOLPT` reads the lengths), every redo path and the first Newton problems of `LOSAT_X_NEWTONLANES` read a
-  match's stored residues with `SeqDb::read_sequence` once (the redo takes the subject that the Newton problems read
-  ahead, also ahead of the early termination test; otherwise the one-thread loop reads after the test, as NCBI; the
-  parallel paths read the matches they compute ahead of the test's replay), a read that finds a pyrrolysine (O) sets the
-  subject's flag, and after the redo `ListedSubjects::x_read_shown` reads the subjects of the final hit lists again for
+  match's stored residues with `SeqDb::read_sequence` and drop them after the match (the Newton problems read ahead of
+  the redo and the redo reads again: keeping the reads ahead for the redo raised the maximum resident set; the
+  one-thread loop reads after the early termination test, as NCBI, and after the Newton problems; the parallel paths
+  read the matches they compute ahead of the test's replay), a read that finds a pyrrolysine (O) sets the subject's
+  flag, and after the redo `ListedSubjects::x_read_shown` reads the subjects of the final hit lists again for
   the reports. Where every report is tabular rows of the default fields or Seq-aligns, which read the letters only to
   recount the HSPs whose query or subject has a pyrrolysine (O), it keeps the residues of the subjects with an O (read
   again only where the flag is set: the redo read every final subject) and of the subjects of the HSPs whose query has

@@ -50,7 +50,7 @@
 //! has AVX2, and elsewhere the plain loops for sparse tables only: those where at most three tenths
 //! of the backbone cells have hits (`X_SPARSE_TENTHS`; known when the presence bytes are built).
 //! The first k proteins of AP027131 x E. coli (one core): the plain loops against the scan before
-//! took x0.82-0.94 in the LOSAT Web serial reactor and cycles x0.84-0.90 on x86-64 at a fill of
+//! took x0.84-0.95 in the LOSAT Web serial reactor and cycles x0.84-0.90 on x86-64 at a fill of
 //! 0.09-0.24 (k = 1-8), x1.00 and x0.95 at 0.34 (k = 16), and x1.02-1.03 and x0.99-1.00 at 0.42-0.46.
 //!
 //! The switch is read once. It is in the strict set (`utils/xswitch.rs`): on unless

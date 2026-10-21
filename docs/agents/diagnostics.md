@@ -3568,7 +3568,7 @@ Scheduling (each value computed by one thread with the original function; order 
   words are candidates); `=3` takes them on any CPU for sparse tables only, those where at most three
   tenths of the backbone cells have hits (the default without AVX2 on x86-64 and in WebAssembly). The
   first k proteins of AP027131 x MG1655 (one core, plain loops against the scan before): the LOSAT
-  Web serial reactor x0.82-0.94 and x86-64 cycles x0.84-0.90 at a fill of 0.09-0.24 (k = 1-8), x1.00
+  Web serial reactor x0.84-0.95 and x86-64 cycles x0.84-0.90 at a fill of 0.09-0.24 (k = 1-8), x1.00
   and x0.95 at 0.34 (k = 16), x1.02-1.03 and x0.99-1.00 at 0.42-0.46. Tables of other shapes, tables
   that are not sparse without AVX2, aarch64 and `LOSAT_X_DEFAULT=0` keep the scans before
   (`TBNSCANBF`, NCBI's loop). Shadow: `LOSAT_X_TBNSCANBYTESHADOW=1` also runs NCBI's loop on every

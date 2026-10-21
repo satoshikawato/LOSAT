@@ -3984,6 +3984,9 @@ struct SubjectScratch {
     // ```
     prelim_hits: Vec<PrelimHit>,
     ungapped_hits: Vec<UngappedHit>,
+    // No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) the scratch of the ungapped hits' sort,
+    // kept with them (`x_mapped::x_sort_by_mapped`).
+    x_sort_buf: Vec<UngappedHit>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:356-357
     // ```c
     // gap_align->fwd_prelim_tback = GapPrelimEditBlockNew();
@@ -4096,6 +4099,7 @@ impl SubjectScratch {
             // ```
             prelim_hits: Vec::new(),
             ungapped_hits: Vec::new(),
+            x_sort_buf: Vec::new(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:356-357
             // ```c
             // gap_align->fwd_prelim_tback = GapPrelimEditBlockNew();
@@ -11008,11 +11012,9 @@ fn search_query_batch(
             // BlastInitHitListReset(init_hitlist);
             // ```
             let ungapped_hits = &mut subject_scratch.ungapped_hits;
-            // EXPERIMENT (LOSAT_X_BNMAPPED): the hits of a long subject are not kept.
-            if x_bn_mapped() {
-                crate::utils::x_mapped::x_release_mapped(ungapped_hits);
-            }
             ungapped_hits.clear();
+            // EXPERIMENT (LOSAT_X_BNMAPPED): the scratch of the hits' sort.
+            let x_sort_buf = &mut subject_scratch.x_sort_buf;
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-64
             // ```c
@@ -13800,6 +13802,7 @@ fn search_query_batch(
                 _ if x_bn_mapped() => crate::utils::x_mapped::x_sort_by_mapped(
                     ungapped_hits,
                     score_compare_ungapped_hits,
+                    x_sort_buf,
                 ),
                 _ => ungapped_hits.sort_by(score_compare_ungapped_hits),
             }

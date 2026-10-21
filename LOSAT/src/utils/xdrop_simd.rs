@@ -562,14 +562,15 @@ impl XdropScratch {
         }
     }
 
-    /// EXPERIMENT (LOSAT_X_XDROPTRIM): frees the traceback rows when they hold at least
-    /// `X_MAPPED_FROM` bytes. Called after each alignment; the operation list stays.
+    /// EXPERIMENT (LOSAT_X_XDROPTRIM): frees the traceback rows when this alignment used more
+    /// than `x_xdrop_trim_keep` bytes of them (a mapped buffer that is kept holds at most that
+    /// many touched bytes). Called after each alignment; the operation list stays.
     #[inline(always)]
     fn x_release_rows(&mut self) {
-        let big = crate::utils::x_mapped::X_MAPPED_FROM;
-        if (self.trace.capacity() >= big
-            || self.rows.capacity() * std::mem::size_of::<(u32, u32, u32)>() >= big)
+        let used = self.trace.len() + self.rows.len() * std::mem::size_of::<(u32, u32, u32)>();
+        if used > crate::utils::x_mapped::X_MAPPED_FROM
             && x_xdrop_trim()
+            && used > x_xdrop_trim_keep()
         {
             crate::utils::x_mapped::x_release_mapped(&mut self.trace);
             crate::utils::x_mapped::x_release_mapped(&mut self.rows);
@@ -2510,6 +2511,26 @@ pub(crate) fn x_xdrop_trim() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_XDROPTRIM"))
 }
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_XDROPTRIM) the traceback rows that an alignment may
+/// leave touched in a worker's scratch, in bytes: `LOSAT_X_XDROPTRIMKEEP` MiB (a tuning
+/// variable, 1 to 4,096), else `X_XDROPTRIM_KEEP_MIB`. Larger alignments free their rows, so the
+/// next one maps and touches its rows again.
+pub(crate) fn x_xdrop_trim_keep() -> usize {
+    use std::sync::OnceLock;
+    static KEEP: OnceLock<usize> = OnceLock::new();
+    *KEEP.get_or_init(|| {
+        let mib = std::env::var("LOSAT_X_XDROPTRIMKEEP")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|v| (1..=4096).contains(v))
+            .unwrap_or(X_XDROPTRIM_KEEP_MIB);
+        mib << 20
+    })
+}
+
+/// No NCBI counterpart: the built-in bound of `x_xdrop_trim_keep`, in MiB.
+const X_XDROPTRIM_KEEP_MIB: usize = 8;
 
 /// No NCBI counterpart: reads the LOSAT_X_DPAVX2 and LOSAT_X_DPCAPTURE switches once; it does not
 /// change any value NCBI computes. Bit 0: try the 256-bit kernels first (set only when the CPU

@@ -61,11 +61,13 @@ const X_SORT_RUN_BYTES: usize = 64 << 10;
 
 /// No NCBI counterpart: `v.sort_by(cmp)` (a stable sort: the same order as `sort_by` for a
 /// comparator that is a total order) whose scratch, when it would need `X_MAPPED_FROM` bytes or
-/// more with glibc, is one buffer of `x_mapped_capacity`: runs of `X_SORT_RUN_BYTES` sorted with
-/// `sort_by`, then merged pairwise (the left run first among equal elements).
+/// more with glibc, is `buf` (kept by the caller, grown with `x_reserve_mapped`): runs of
+/// `X_SORT_RUN_BYTES` sorted with `sort_by`, then merged pairwise (the left run first among equal
+/// elements).
 pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     v: &mut [T],
     mut cmp: F,
+    buf: &mut Vec<T>,
 ) {
     let size = std::mem::size_of::<T>().max(1);
     let n = v.len();
@@ -77,7 +79,8 @@ pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     for chunk in v.chunks_mut(run) {
         chunk.sort_by(&mut cmp);
     }
-    let mut buf: Vec<T> = Vec::with_capacity(x_mapped_capacity(n, size));
+    buf.clear();
+    x_reserve_mapped(buf, n);
     buf.extend_from_slice(v);
     let mut width = run;
     let mut in_v = true;
@@ -168,7 +171,8 @@ mod tests {
             let mut a = v.clone();
             a.sort_by(|x, y| y.0.cmp(&x.0));
             let mut b = v.clone();
-            x_sort_by_mapped(&mut b, |x, y| y.0.cmp(&x.0));
+            let mut buf = vec![(7, 7); 3];
+            x_sort_by_mapped(&mut b, |x, y| y.0.cmp(&x.0), &mut buf);
             assert_eq!(a, b, "n = {n}");
         }
     }

@@ -2298,15 +2298,18 @@ pub(crate) fn postprocess_preliminary_hits(
 // same input bits, and the cache returns the value the redo computes itself. It does not change any
 // value NCBI computes.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn x_newton_lanes_prefetch_matches(
+pub(crate) fn x_newton_lanes_prefetch_matches<'s>(
     local_matches: &[BlastpHspList],
-    subjects: super::x_redo_subjects::XRedoSubjects<'_>,
+    subjects: super::x_redo_subjects::XRedoSubjects<'s>,
+    x_prefetched: &mut super::x_redo_subjects::XPrefetchedSubjects<'s>,
     heaps: &[BlastCompoHeap],
     query_workspace: &BlastpKappaQueryWorkspace,
     composition_workspace: &BlastCompositionWorkspace,
     redo_align_params: &BlastRedoAlignParams,
     subject_range_cache: &mut BlastpKappaSubjectRangeCache,
 ) {
+    // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the subjects read ahead for the matches before.
+    x_prefetched.clear();
     if redo_align_params.smith_waterman
         || redo_align_params.position_based
         || !redo_align_params.uses_composition_based_stats()
@@ -2326,10 +2329,21 @@ pub(crate) fn x_newton_lanes_prefetch_matches(
             .iter()
             .map(super::blast_engine::preliminary_hit_from_local_match_hsp)
             .collect();
-        // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database; on an error nothing is
-        // computed ahead, and the redo of the match reaches the error itself.
-        let Ok(subject) = subjects.read(local_match.oid) else {
-            continue;
+        // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a database's subject is read ahead and kept for the
+        // redo of the match (`x_prefetched`); on an error nothing is computed ahead, and the redo
+        // of the match reaches the error itself.
+        let encoded;
+        let subject = if let super::x_redo_subjects::XRedoSubjects::Encoded(_) = subjects {
+            let Ok(subject) = subjects.read(local_match.oid) else {
+                continue;
+            };
+            encoded = subject;
+            &encoded
+        } else {
+            let Ok(subject) = x_prefetched.read_ahead(&subjects, local_match.oid) else {
+                continue;
+            };
+            subject
         };
         let subject_raw = subject.residues();
         let incoming_aligns =

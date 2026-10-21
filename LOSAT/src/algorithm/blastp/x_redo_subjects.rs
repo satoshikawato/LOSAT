@@ -15,8 +15,11 @@
 //! two query-parallel paths and `x_redo_par.rs`) and the first Newton problems of
 //! `LOSAT_X_NEWTONLANES` read a match's subject with `SeqDb::read_sequence` (`XRedoSubjects::read`)
 //! and drop it after the match: the stored residues that the copy holds, so the redo computes the
-//! same values. The one-thread loop reads after the early termination test, as NCBI does; the
-//! parallel paths read the matches that they compute ahead of the test's replay. The block that the read returns holds the sentinel bytes of the sequence file on
+//! same values. The redo of a match takes the subject that the first Newton problems read ahead for
+//! it (`XPrefetchedSubjects`), so a match is read once. The one-thread loop reads after the early
+//! termination test, as NCBI does; the parallel paths read the matches that they compute ahead of
+//! the test's replay. A read that finds a pyrrolysine (O) sets the subject's flag
+//! (`ListedSubjects::x_has_o`). The block that the read returns holds the sentinel bytes of the sequence file on
 //! both sides of the residues, where the copy holds `NCBISTDAA_GAP`; the redo reads the residues
 //! only, and SEG makes its own copy of a range (`build_subject_range_data`). After the redo,
 //! `ListedSubjects::x_read_shown` reads the subjects of the final hit lists again for the reports
@@ -24,7 +27,9 @@
 //! listed subject, and their residues where a report reads them: where every report is tabular
 //! rows of the default fields or Seq-aligns, which read the letters only to recount the HSPs whose
 //! query or subject has an O (`recount_pyrrolysine_identities`), a subject with a pyrrolysine (O)
-//! and every subject of an HSP whose query has an O; every subject of the final hit lists when a
+//! and every subject of an HSP whose query has an O (the others are not read again: the redo of a
+//! match reads its subject before the subject can reach a final hit list, so the flags of the
+//! subjects with an O are set); every subject of the final hit lists when a
 //! report renders the alignments (outfmt 0, XML, tabular fields other than the default ones, the
 //! hits of the library API); every listed subject when the reports make records
 //! (`ListedSubjects::read_titles`: `LOSAT_X_BPLISTEDLEAN=0`, its shadow mode, ABI v1's titles).
@@ -44,12 +49,13 @@
 //!
 //! `LOSAT_X_BPREDODBSUBJSHADOW=1` (shadow mode, implies the switch): `ListedSubjects::x_list` makes
 //! the copy of `read` too, first, and compares the lengths with it, and every read of the redo and
-//! of `x_read_shown` is compared with the copy (the length and every residue). The first difference
+//! of `x_read_shown` is compared with the copy (the length and every residue), and a subject of the
+//! final hit lists left without residues without a read has no O in the copy. The first difference
 //! stops the run (panic) after printing the line that is otherwise printed at exit:
 //! `[X_SHADOW] BPREDODBSUBJ searches= lengths= reads= residues= identical` (`searches`: listings;
 //! `lengths`: lengths compared; `reads`: reads compared; `residues`: residues compared).
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use anyhow::Result;
@@ -111,6 +117,9 @@ pub(crate) struct XDbSubjects<'a> {
     pub(crate) lengths: &'a [u32],
     /// The program that the refusals name.
     pub(crate) program: &'static str,
+    /// Whether a read found a pyrrolysine (O), by rank (`ListedSubjects::x_has_o`). The redo of a
+    /// match reads its subject before it can reach a final hit list.
+    pub(crate) has_o: &'a [AtomicBool],
     /// The shadow mode's copy (`ListedSubjects::read`), by rank.
     pub(crate) shadow: Option<&'a [EncodedProtein]>,
 }
@@ -129,6 +138,45 @@ impl XRedoSubject<'_> {
         match self {
             Self::Encoded(residues) => residues,
             Self::Read(block) => block.protein(0),
+        }
+    }
+}
+
+// No NCBI counterpart: keeps reads for their second reader; no value is computed differently.
+/// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the subjects of a database that the first Newton problems of
+/// `LOSAT_X_NEWTONLANES` read for the next matches (`x_newton_lanes_prefetch_matches`), which the
+/// redo of those matches takes instead of reading them again.
+#[derive(Default)]
+pub(crate) struct XPrefetchedSubjects<'a> {
+    read: Vec<(u32, XRedoSubject<'a>)>,
+}
+
+impl<'a> XPrefetchedSubjects<'a> {
+    /// Drops the subjects read ahead that no redo took.
+    pub(crate) fn clear(&mut self) {
+        self.read.clear();
+    }
+
+    /// Reads the subject `s_idx` of `subjects` (a database's) ahead, for its redo.
+    pub(crate) fn read_ahead(
+        &mut self,
+        subjects: &XRedoSubjects<'a>,
+        s_idx: u32,
+    ) -> Result<&XRedoSubject<'a>> {
+        self.read.push((s_idx, subjects.read(s_idx)?));
+        Ok(&self.read.last().expect("just pushed").1)
+    }
+
+    /// The subject `s_idx` for its redo: the one read ahead, or a read of `subjects`.
+    #[inline]
+    pub(crate) fn take_or_read(
+        &mut self,
+        subjects: &XRedoSubjects<'a>,
+        s_idx: u32,
+    ) -> Result<XRedoSubject<'a>> {
+        match self.read.iter().position(|&(read, _)| read == s_idx) {
+            Some(at) => Ok(self.read.swap_remove(at).1),
+            None => subjects.read(s_idx),
         }
     }
 }
@@ -176,6 +224,9 @@ impl XDbSubjects<'_> {
         let block = self.db.read_sequence(ordinal).map_err(|error| {
             crate::algorithm::common::database::database_error(error, self.program)
         })?;
+        if x_has_stored_o(block.protein(0)) {
+            self.has_o[rank as usize].store(true, Ordering::Relaxed);
+        }
         if let Some(copy) = self.shadow {
             x_shadow_compare_residues(
                 rank as usize,
@@ -262,6 +313,17 @@ pub(crate) fn x_shadow_compare_lengths(ordinals: &[u32], lengths: &[u32], copy: 
         }
     }
     X_LENGTHS.fetch_add(lengths.len() as u64, Ordering::Relaxed);
+}
+
+// No NCBI counterpart: a check of the shadow mode; it changes no value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): a subject of the final hit lists that the reports keep
+/// without its residues because no read found an O has no O in its copy.
+pub(crate) fn x_shadow_check_no_o(rank: usize, ordinal: u32, copy: &EncodedProtein) {
+    if x_has_stored_o(&copy.aa_seq[1..=copy.aa_len]) {
+        x_shadow_difference(format!(
+            "rank {rank} (ordinal {ordinal}): no read found an O, the copy holds one"
+        ));
+    }
 }
 
 /// Whether stored residues hold a pyrrolysine (O).

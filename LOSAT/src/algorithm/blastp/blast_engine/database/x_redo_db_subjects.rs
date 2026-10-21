@@ -2,6 +2,8 @@
 //! search without the copy of their residues; the redo reads each match's subject from the
 //! database (`blastp/x_redo_subjects.rs`, which describes the switch).
 
+use std::sync::atomic::Ordering;
+
 use anyhow::Result;
 
 use super::{
@@ -9,8 +11,8 @@ use super::{
     BlastpHitList, EncodedProtein, ListedSubjects, XPrelimHsp, PROGRAM,
 };
 use crate::algorithm::blastp::x_redo_subjects::{
-    x_has_stored_o, x_shadow_compare_lengths, x_shadow_compare_residues, XDbSubjects, XRedoDbSubj,
-    XRedoSubjects,
+    x_shadow_check_no_o, x_shadow_compare_lengths, x_shadow_compare_residues, XDbSubjects,
+    XRedoDbSubj, XRedoSubjects,
 };
 
 /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues that the reports of a search read
@@ -54,6 +56,7 @@ impl ListedSubjects {
         }
         rename_to_ranks(&ordinals, hit_lists, x_compact_hit_lists);
         Ok(Self {
+            x_has_o: ordinals.iter().map(|_| Default::default()).collect(),
             ordinals,
             encoded: Vec::new(),
             x_mode: mode,
@@ -74,6 +77,7 @@ impl ListedSubjects {
                 db: &database.db,
                 ordinals: &self.ordinals,
                 lengths: &self.x_lengths,
+                has_o: &self.x_has_o,
                 program: PROGRAM,
                 shadow: (self.x_mode == XRedoDbSubj::Shadow).then_some(&self.x_shadow_copy[..]),
             }),
@@ -124,16 +128,22 @@ impl ListedSubjects {
                 encoded.push(length_only);
                 continue;
             }
+            // With `WithO`, a subject that no read of the redo found an O in (the redo read every
+            // subject of the final hit lists) and no HSP of a query with an O names keeps its length
+            // only, without a read.
+            if !kept[rank] && !self.x_has_o[rank].load(Ordering::Relaxed) {
+                if shadow {
+                    x_shadow_check_no_o(rank, ordinal, &self.x_shadow_copy[rank]);
+                }
+                encoded.push(length_only);
+                continue;
+            }
             let stored = database.db.read_sequence(ordinal).map_err(database_error)?;
             let stored = stored.protein(0);
             if shadow {
                 x_shadow_compare_residues(rank, ordinal, &self.x_shadow_copy[rank], stored);
             }
-            if !kept[rank] && !x_has_stored_o(stored) {
-                encoded.push(length_only);
-            } else {
-                encoded.push(encoded_stored(stored));
-            }
+            encoded.push(encoded_stored(stored));
         }
         self.encoded = encoded;
         Ok(())

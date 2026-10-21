@@ -9850,6 +9850,9 @@ fn run_resolved_in_pool(
                         // ```
                         // No NCBI counterpart: position of the next LOSAT_X_NEWTONLANES prefetch.
                         let mut x_next_prefetch = 0usize;
+                        // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the subjects it reads ahead.
+                        let mut x_prefetched =
+                            super::x_redo_subjects::XPrefetchedSubjects::default();
                         for (match_position, local_match) in preliminary_hit_list
                             .hsplist_array
                             .iter()
@@ -9887,19 +9890,6 @@ fn run_resolved_in_pool(
                             {
                                 continue;
                             }
-                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after
-                            // the test, as NCBI reads it; an error is kept for the replay as the
-                            // redo's own errors are (below).
-                            let subject = match subjects.read(s_idx) {
-                                Ok(subject) => subject,
-                                Err(error) if replayed => {
-                                    kept_for_replay.push((match_position, Err(error)));
-                                    continue;
-                                }
-                                Err(error) => return Err(error),
-                            };
-                            let subject_raw = subject.residues();
-
                             // No NCBI counterpart: LOSAT_X_NEWTONLANES solves the first Newton problems of this
                             // and the next matches ahead, four per vector (kappa::x_newton_lanes_prefetch_matches);
                             // a result is used only by a call with the same input bits. It does not change any value
@@ -9910,6 +9900,7 @@ fn run_resolved_in_pool(
                                     &preliminary_hit_list.hsplist_array[match_position
                                         ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
                                     subjects,
+                                    &mut x_prefetched,
                                     std::slice::from_ref(if alone_in_batch {
                                         &redone_match
                                     } else {
@@ -9921,6 +9912,18 @@ fn run_resolved_in_pool(
                                     &mut kappa_subject_range_cache,
                                 );
                             }
+                            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here (or
+                            // taken from the reads ahead), after the test, as NCBI reads it; an
+                            // error is kept for the replay as the redo's own errors are (below).
+                            let subject = match x_prefetched.take_or_read(&subjects, s_idx) {
+                                Ok(subject) => subject,
+                                Err(error) if replayed => {
+                                    kept_for_replay.push((match_position, Err(error)));
+                                    continue;
+                                }
+                                Err(error) => return Err(error),
+                            };
+                            let subject_raw = subject.residues();
                             let postprocessed = postprocess_preliminary_hits(
                                 &kappa_preliminary_hits,
                                 &query_workspace,
@@ -10114,6 +10117,8 @@ fn run_resolved_in_pool(
             // admission order match NCBI.
             // No NCBI counterpart: position of the next LOSAT_X_NEWTONLANES prefetch.
             let mut x_next_prefetch = 0usize;
+            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the subjects it reads ahead.
+            let mut x_prefetched = super::x_redo_subjects::XPrefetchedSubjects::default();
             for (x_match_position, local_match) in preliminary_hit_list
                 .hsplist_array
                 .iter()
@@ -10155,11 +10160,6 @@ fn run_resolved_in_pool(
                 ) {
                     continue;
                 }
-                // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here, after the test,
-                // as NCBI reads it.
-                let subject = subjects.read(s_idx)?;
-                let subject_raw = subject.residues();
-
                 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
                 // ```c
                 //                 if (BlastCompo_EarlyTermination(
@@ -10178,6 +10178,7 @@ fn run_resolved_in_pool(
                         &preliminary_hit_list.hsplist_array[x_match_position
                             ..x_next_prefetch.min(preliminary_hit_list.hsplist_count)],
                         subjects,
+                        &mut x_prefetched,
                         &redone_matches[batch.clone()],
                         &query_workspace,
                         &composition_workspace,
@@ -10185,6 +10186,10 @@ fn run_resolved_in_pool(
                         &mut kappa_subject_range_cache,
                     );
                 }
+                // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): read from the database here (or taken from the
+                // reads ahead), after the test, as NCBI reads it.
+                let subject = x_prefetched.take_or_read(&subjects, s_idx)?;
+                let subject_raw = subject.residues();
                 let postprocessed = postprocess_preliminary_hits(
                     &kappa_preliminary_hits,
                     &query_workspace,

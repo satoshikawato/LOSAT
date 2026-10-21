@@ -572,14 +572,16 @@ fn x_query_workspace<P>(search: &XRedoParSearch<'_, P>, q_idx: usize) -> BlastpK
 //                                         redo_align_params,      // thread-local
 //                                         incoming_aligns,        // thread-local
 // ```
-/// The redo of one match: the call of the one-thread loop, with the same arguments.
-fn x_redo_match<P>(
-    search: &XRedoParSearch<'_, P>,
+/// The redo of one match: the call of the one-thread loop, with the same arguments (the subject
+/// taken from `x_prefetched` when the first Newton problems read it ahead).
+fn x_redo_match<'a, P>(
+    search: &XRedoParSearch<'a, P>,
     q_idx: usize,
     local_match: &BlastpHspList,
     query_workspace: &BlastpKappaQueryWorkspace,
     redo_align_params: &BlastRedoAlignParams,
     scratch: &mut XScratch,
+    x_prefetched: &mut super::x_redo_subjects::XPrefetchedSubjects<'a>,
 ) -> Result<BlastpPostprocessResult> {
     scratch.hits.clear();
     scratch.hits.extend(
@@ -588,7 +590,7 @@ fn x_redo_match<P>(
             .iter()
             .map(preliminary_hit_from_local_match_hsp),
     );
-    let subject = search.subjects.read(local_match.oid)?;
+    let subject = x_prefetched.take_or_read(&search.subjects, local_match.oid)?;
     let subject_raw = subject.residues();
     postprocess_preliminary_hits(
         &scratch.hits,
@@ -697,6 +699,8 @@ where
         // NCBI computes. Given the heaps of the batch as the window's start left them, as the
         // one-thread loop gives its heaps, it leaves out the matches the test ends on them: those
         // not computed here.
+        // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the subjects that it reads ahead, for the redo.
+        let mut x_prefetched = super::x_redo_subjects::XPrefetchedSubjects::default();
         if newton_lanes {
             let list = lists[q_idx]
                 .as_ref()
@@ -705,6 +709,7 @@ where
                 &list.hsplist_array
                     [job_matches[0].position..=job_matches[job_matches.len() - 1].position],
                 search.subjects,
+                &mut x_prefetched,
                 &heaps[search.query_batches[q_idx].clone()],
                 query_workspace,
                 &scratch.composition_workspace,
@@ -724,6 +729,7 @@ where
                         query_workspace,
                         &redo_align_params,
                         scratch,
+                        &mut x_prefetched,
                     )
                 })
             })
@@ -1216,6 +1222,7 @@ impl XSerialReference {
                 query_workspace,
                 params,
                 scratch,
+                &mut Default::default(),
             )
             .map_err(|error| format!("{error:#}")),
             Err(error) => Err(error.clone()),

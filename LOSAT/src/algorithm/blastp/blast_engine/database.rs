@@ -666,6 +666,9 @@ pub(super) struct ListedSubjects {
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the number of residues of each subject, by rank (`x_list`;
     /// empty without the switch).
     x_lengths: Vec<u32>,
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): whether a read of the redo found a pyrrolysine (O), by
+    /// rank (`x_list`; empty without the switch).
+    x_has_o: Vec<std::sync::atomic::AtomicBool>,
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): the copy that `read` makes, by rank (empty
     /// without the shadow mode).
     x_shadow_copy: Vec<EncodedProtein>,
@@ -728,6 +731,7 @@ impl ListedSubjects {
             encoded,
             x_mode: XRedoDbSubj::Off,
             x_lengths: Vec::new(),
+            x_has_o: Vec::new(),
             x_shadow_copy: Vec::new(),
         })
     }
@@ -1983,6 +1987,10 @@ mod tests {
         ] {
             let mut shown =
                 ListedSubjects::x_list(&database, &mut make(), &mut [], XRedoDbSubj::On).unwrap();
+            // The redo reads the subjects of the final lists (and finds the O of p03).
+            for rank in [1, 3] {
+                shown.redo_subjects(&database).read(rank).unwrap();
+            }
             shown
                 .x_read_shown(&database, &final_lists, residues, query_has_o)
                 .unwrap();

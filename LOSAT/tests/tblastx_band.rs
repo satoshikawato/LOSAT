@@ -188,6 +188,9 @@ fn the_cost_gate_still_decides_at_one_thread() {
 }
 
 const MASK_OFF: (&str, &str) = ("LOSAT_X_TBXUNITMASK", "0");
+/// The size rule's tables of at most 2 KiB (512 cells): below this query's group tables (1,024
+/// cells), so only the band batch's rule masks them.
+const MASK_BAND_ONLY: (&str, &str) = ("LOSAT_X_TBXUNITMASK", "2");
 
 // A subject longer than the reference table's cells (the PemoMJNVA genome): without
 // `LOSAT_X_TBXUNITMASK` the memory rule keeps the guard (the reference loop at several threads);
@@ -247,6 +250,22 @@ fn a_subject_longer_than_the_table_takes_masked_units() {
         assert!(
             shadow.contains("(combined_ungapped_hits identical)"),
             "{shadow}"
+        );
+        // The band batch's rule alone (chunks longer than the reference table) masks every unit.
+        let (report, band_only) = tblastx(&q, &genome, threads, &[STATS, MASK_BAND_ONLY]);
+        assert!(
+            report == reference,
+            "threads {threads}: the report differs with the band rule alone"
+        );
+        let [units, ..] = counters(&band_only, PAIRPAR_LINE, PAIRPAR_FIELDS);
+        assert_eq!(
+            counters(
+                &band_only,
+                "[X_STATS] TBXUNITMASK ",
+                ["kib", "units_masked"]
+            ),
+            [2, units],
+            "threads {threads}"
         );
     }
 }

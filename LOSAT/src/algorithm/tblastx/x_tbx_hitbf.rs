@@ -166,8 +166,9 @@ pub(super) fn print_summary() {
 // subtraction with the cell's next value selected (module doc), and `rare` for a flag-1 cell or a
 // candidate. One constant (`k`) besides the window, so that both can stay in registers.
 /// The two-hit test of the `n` hits at `pairs` on the unit table at `diag_ptr` (cell of a hit
-/// (q, s): `cells.cell(q, s)`, q - s - lo or, with LOSAT_X_TBXUNITMASK, that masked), with `rare(cell, q, s)` for a hit whose cell has flag 1 or that passes the
-/// test; `PF` prefetches the cell of the hit `X_PREFETCH_AHEAD` entries ahead (x86-64).
+/// (q, s): `cells.cell(q, s)`, q - s - lo or, with LOSAT_X_TBXUNITMASK, that masked), with
+/// `rare(cell, q, s)` for a hit whose cell has flag 1 or that passes the test; `PF` prefetches the
+/// cell of the hit `X_PREFETCH_AHEAD` entries ahead (x86-64).
 ///
 /// SAFETY: `pairs` points to `n` entries, and with `PF` to `X_PREFETCH_AHEAD` initialized entries
 /// after them; every hit's cell is below `width`, the length of the table `diag_ptr` points into;
@@ -897,7 +898,17 @@ mod tests {
             }
 
             // The loop with and without `PF`, and the wasm32 form (`x_hits_bf_split`).
-            for (pf, split) in [(false, false), (true, false), (false, true)] {
+            // LOSAT_X_TBXUNITMASK: the `XMasked` instances too, with the mask of all ones (the same
+            // cells as `XUnmasked`).
+            for (pf, split, masked) in [
+                (false, false, false),
+                (true, false, false),
+                (false, true, false),
+                (false, false, true),
+                (true, false, true),
+                (false, true, true),
+            ] {
+                let all = XMasked { lo, mask: u32::MAX };
                 let mut got = table.clone();
                 let mut log = Vec::new();
                 let ptr = got.as_mut_ptr();
@@ -909,7 +920,31 @@ mod tests {
                 // SAFETY: n entries and X_PREFETCH_AHEAD more; every cell is below width; `fits`
                 // holds and every flag-0 value is below chunk_len + window.
                 unsafe {
-                    if split {
+                    if masked && split {
+                        x_hits_bf_split(ptr, pairs.as_ptr(), n, all, width, window, wordsize, rare)
+                    } else if masked && pf {
+                        x_hits_bf::<_, true>(
+                            ptr,
+                            pairs.as_ptr(),
+                            n,
+                            all,
+                            width,
+                            window,
+                            wordsize,
+                            rare,
+                        )
+                    } else if masked {
+                        x_hits_bf::<_, false>(
+                            ptr,
+                            pairs.as_ptr(),
+                            n,
+                            all,
+                            width,
+                            window,
+                            wordsize,
+                            rare,
+                        )
+                    } else if split {
                         x_hits_bf_split(
                             ptr,
                             pairs.as_ptr(),

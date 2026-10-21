@@ -123,8 +123,9 @@
 //! those against subject frames of at most 2^k letters (genome pairs of similar size) go through
 //! `LOSAT_X_PAIRPARGATE` like any other batch instead of always going to the reference frame loop,
 //! which searches a subject on one thread; those against longer subjects (a gene against a genome)
-//! keep the reference loop. The `[X_STATS] PAIRPAR` and `[X_SHADOW] PAIRPAR` lines count the band
-//! batches the units took (`band`).
+//! keep the reference loop without LOSAT_X_TBXUNITMASK and take the units on masked tables with it
+//! (section below). The `[X_STATS] PAIRPAR` and `[X_SHADOW] PAIRPAR` lines count the band batches
+//! the units took (`band`).
 //!
 //! `LOSAT_X_PAIRLUT=1` (with `LOSAT_X_PAIRPAR`): the group tables are built directly from the
 //! query (`lookup/x_pair_lut.rs`, exactness argument in its header) and the batch's full table is
@@ -177,16 +178,19 @@
 //! a table of P cells, P the smallest power of two of at least its group's extent G (the query
 //! offsets from the group's first context to the next group's, the last group to the end of its
 //! last context, `x_group_extents`) plus the window, and the cell of hit (q, s) is
-//! (q - s - lo) & (P - 1) (`XMasked`), where that table has at most the switch's KiB and its
-//! unmasked table (`x_unit_width`) at least four times P cells, at two or more threads, or, in a
-//! batch that `guard` rejects (LOSAT_X_TBXBAND), where its subject chunk is longer than the
-//! reference table has cells (`x_unit_mask_for`). Measured (workstation node 1): a unit's hit loop
+//! (q - s - lo) & (P - 1) (`XMasked`), where its unmasked table (`x_unit_width`) has at least four
+//! times P cells and P is at most the switch's KiB at eight threads or more, at most 4,096 cells at
+//! two to seven, never at one (`x_mask_max_cells`), or, in a batch that `guard` rejects
+//! (LOSAT_X_TBXBAND), where its subject chunk is longer than the reference table has cells
+//! (`x_unit_mask_for`). Measured (workstation node 1): a unit's hit loop
 //! does one more instruction per hit on a masked table and saves the clearing of the unmasked
 //! table's every cell per unit, so masking pays where the group is short against the chunk (1.5 kb
-//! against MG1655 and the fruit fly genome database x0.80-0.86 at 16 threads, max RSS 774 -> 308
-//! MiB; Sakai 1-100,000 x MG1655 x1.000 at 16, 144 -> 61 MiB, where NCBI BLAST+ takes 130 MiB),
+//! against MG1655 and the fruit fly genome database x0.80-0.85 at 16 threads, max RSS 784 -> 309
+//! MiB; Sakai 1-100,000 x MG1655 x0.987 at 16, 143 -> 61 MiB, where NCBI BLAST+ takes 130 MiB),
 //! costs 0.8-1.7 % with groups of 100,000 letters or more (Sakai 1-300,000 x MG1655 with
-//! `=512`), and at one thread, where a unit's table is the only one, 0.6 % (Sakai 1-100,000).
+//! `=512`). With fewer threads the clearing weighs less: at two and four threads tables of 1-4 Ki
+//! cells gain (x0.895-0.971) and those of 32-64 Ki cells lose 0.2-0.9 %, and at one thread, where a
+//! unit's table is the only one, Sakai 1-100,000 loses 0.6 %.
 //! The units of a batch whose groups LOSAT_X_TBXQSLICE's rule cuts keep their unmasked tables
 //! (`x_tbx_qslice::rule_cuts`, whatever the diagnostics switches say). With the switch, `decide`
 //! does not apply `x_band_fits` to a batch whose groups the rule does not cut: every unit whose
@@ -376,7 +380,8 @@ fn tbx_band() -> bool {
 // as the other modes of this file.
 /// LOSAT_X_TBXUNITMASK: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off (`0`,
 /// or `LOSAT_X_DEFAULT=0` and it is not set); otherwise the largest masked table, in KiB, that a
-/// unit takes for its size alone (`XMaskRule::max_cells`, module doc).
+/// unit takes for its size alone at `X_UNITMASK_MANY_THREADS` threads or more (`x_mask_max_cells`,
+/// module doc).
 fn unit_mask_kib() -> Option<usize> {
     static KIB: OnceLock<Option<usize>> = OnceLock::new();
     *KIB.get_or_init(|| {
@@ -399,6 +404,27 @@ const X_UNITMASK_MAX_KIB: usize = 1 << 22;
 /// No NCBI counterpart: LOSAT_X_TBXUNITMASK takes a masked table for its size only where the
 /// unmasked one has at least this many times its cells (module doc).
 const X_UNITMASK_RATIO: usize = 4;
+
+/// No NCBI counterpart: from this many threads LOSAT_X_TBXUNITMASK's size rule takes masked tables
+/// of up to the switch's KiB; below it, of up to `X_UNITMASK_FEW_THREADS_CELLS` (module doc).
+const X_UNITMASK_MANY_THREADS: usize = 8;
+
+/// No NCBI counterpart: the largest masked table, in cells (16 KiB), of LOSAT_X_TBXUNITMASK's size
+/// rule at 2 to `X_UNITMASK_MANY_THREADS - 1` threads (module doc).
+const X_UNITMASK_FEW_THREADS_CELLS: usize = 1 << 12;
+
+// No NCBI counterpart: the size limit of LOSAT_X_TBXUNITMASK's rule (module doc).
+/// The largest masked table, in cells, that a unit takes for its size at `threads` threads, for
+/// the switch's `kib`: none at one thread, at most `X_UNITMASK_FEW_THREADS_CELLS` below
+/// `X_UNITMASK_MANY_THREADS`, the switch's KiB from there.
+fn x_mask_max_cells(kib: usize, threads: usize) -> usize {
+    let cells = kib.saturating_mul(1024) / std::mem::size_of::<DiagStruct>();
+    match threads {
+        0 | 1 => 0,
+        t if t < X_UNITMASK_MANY_THREADS => cells.min(X_UNITMASK_FEW_THREADS_CELLS),
+        _ => cells,
+    }
+}
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510
 // ```c
@@ -939,7 +965,8 @@ pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
 // table) ran x0.08-0.13 with a lower max RSS; 3 fruit fly transcripts (2,005 bases, 4,096 cells)
 // against the fruit fly genome database and a 1.9 kb query against MG1655 (chunks of 2,000 and
 // 380 times the table) ran x0.29-0.74, but their max RSS grew from 318 to 600-873 MiB (NCBI 368
-// MiB at 8 threads) and from 21 to 68-111 MiB, so such batches keep the reference loop.
+// MiB at 8 threads) and from 21 to 68-111 MiB, so such batches keep the reference loop without
+// LOSAT_X_TBXUNITMASK.
 /// LOSAT_X_TBXBAND: the longest subject chunk has at most as many letters as the reference's
 /// diagonal table has cells.
 fn x_band_fits(longest_subject_chunk: usize, diag_array_size: i32) -> bool {
@@ -1955,9 +1982,6 @@ impl XPairPar {
         if let Some(sliced) = &sliced {
             x_tbx_qslice::count_batch(sliced);
         }
-        // EXPERIMENT (LOSAT_X_TBXUNITMASK): the groups' extents for the units' masked tables; none
-        // where LOSAT_X_TBXQSLICE's rule cuts a group (module doc; `x_band_masked`), so a batch
-        // takes the same tables with and without the diagnostics that stop the slicing.
         assert!(
             !(stub && m == 2),
             "LOSAT_X_PAIRLUT: the reference loop of LOSAT_X_PAIRPARSHADOW cannot run on the stub table"
@@ -1976,18 +2000,17 @@ impl XPairPar {
         if band {
             BAND.fetch_add(1, AtomicOrdering::Relaxed);
         }
+        // EXPERIMENT (LOSAT_X_TBXUNITMASK): the batch's rule and the groups' extents for the units'
+        // masked tables; none where LOSAT_X_TBXQSLICE's rule cuts a group (module doc;
+        // `x_band_masked`), so a batch takes the same tables with and without the diagnostics that
+        // stop the slicing.
         let mask_rule = unit_mask_kib()
             .filter(|_| {
                 sliced.is_none()
                     && !x_tbx_qslice::rule_cuts(b.contexts, &group_starts(b.contexts), b.threads)
             })
             .map(|kib| XMaskRule {
-                // At one thread a unit's table is the only one: no size rule (module doc).
-                max_cells: if b.threads > 1 {
-                    kib.saturating_mul(1024) / std::mem::size_of::<DiagStruct>()
-                } else {
-                    0
-                },
+                max_cells: x_mask_max_cells(kib, b.threads),
                 ratio: X_UNITMASK_RATIO,
                 band_cells: band.then_some(b.diag_array_size),
             });
@@ -1996,6 +2019,7 @@ impl XPairPar {
         } else {
             Vec::new()
         };
+        debug_assert!(extents.is_empty() || extents.len() == groups.len());
         Some(Self {
             groups,
             shadow: m == 2,
@@ -4286,6 +4310,13 @@ mod tests {
             x_unit_mask_for(&rule(0, None), 24, 40, 1 << 20, 1 << 20),
             None
         );
+        // The size limit by thread count: none at one, 4,096 cells at 2-7, the switch's KiB at 8+.
+        assert_eq!(x_mask_max_cells(256, 1), 0);
+        assert_eq!(x_mask_max_cells(256, 2), 4096);
+        assert_eq!(x_mask_max_cells(256, 7), 4096);
+        assert_eq!(x_mask_max_cells(256, 8), 65536);
+        assert_eq!(x_mask_max_cells(2, 4), 512);
+        assert_eq!(x_mask_max_cells(2, 16), 512);
         // The groups: one per context up to X_MAX_GROUPS, from a context's first offset to the
         // next group's (sentinels included), the last to the end of its last context.
         let frames: Vec<QueryFrame> = [5usize, 7, 9]

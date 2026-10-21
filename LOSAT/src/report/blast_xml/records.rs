@@ -114,8 +114,12 @@ pub struct XmlHsp<'a> {
     /// The edit script of the rows (`None`: one segment of substitutions over the whole row), which
     /// gives the Dense-seg segments that the mask loop walks.
     pub ops: Option<&'a [GapEditOp]>,
-    /// The 0-based record position of the query row's first residue.
+    /// The 0-based record position of the query row's first residue and how the residues
+    /// follow (`hsp::mask_query_row`): 1 for a protein or plus-strand nucleotide row, 3 for a
+    /// translated plus frame, -3 for a minus frame (`query_first` is then the highest
+    /// nucleotide of the first residue).
     pub query_first: i32,
+    pub query_step: i32,
     /// The query's masked regions.
     pub masks: &'a [QueryMask],
 }

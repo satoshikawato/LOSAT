@@ -44,6 +44,8 @@ pub use run_impl::x_seed_release_print_summary;
 // ABI v1 (`web_api::v1_tblastx`) searches through `run_local_with` with its checks.
 #[cfg(target_arch = "wasm32")]
 pub(crate) use run_impl::{check_losat_limits, run_local_with, V1Checks};
+// What every report of a run needs (`blast_xml`).
+pub(crate) use run_impl::TblastxReportRun;
 
 // Imports used by submodules
 pub(crate) use anyhow::{Context, Result};
@@ -188,6 +190,10 @@ pub(crate) struct TblastxQueryStats {
     pub karlin: Option<KarlinParams>,
     /// That context's effective search space (0 without a valid context).
     pub eff_searchsp: i64,
+    /// That context's length in residues (0 without a valid context): the BLAST XML (outfmt 5)
+    /// computes the context's length adjustment again from it at report time
+    /// (`blast_xml::query_stats`), so that no search path keeps the adjustment.
+    pub aa_len: usize,
     /// The SEG intervals (residues of the frame, end exclusive) of each translated frame.
     pub seg_masks: Vec<(i8, Vec<(usize, usize)>)>,
 }

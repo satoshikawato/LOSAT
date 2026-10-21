@@ -113,6 +113,21 @@ fn x_read_sequence(db: &SeqDb, ordinal: u32) -> Result<SequenceBlock, SeqDbError
     }
 }
 
+/// With LOSAT_X_BNMAPPED, gives a block read by `x_read_block` or `x_read_sequence` back to
+/// `utils::x_mapped::X_BYTES`.
+fn x_done_block(block: SequenceBlock) {
+    if super::x_bn_mapped() {
+        block.x_recycle();
+    }
+}
+
+/// With LOSAT_X_BNMAPPED, gives letters of `x_blastna` back to `utils::x_mapped::X_BYTES`.
+fn x_done_bytes(mut bytes: Vec<u8>) {
+    if super::x_bn_mapped() {
+        crate::utils::x_mapped::X_BYTES.give(&mut bytes);
+    }
+}
+
 /// `SequenceBlock::nucleotide_blastna(0)`, mapped with LOSAT_X_BNMAPPED.
 fn x_blastna(block: &SequenceBlock) -> Result<Vec<u8>, SeqDbError> {
     if super::x_bn_mapped() {
@@ -455,6 +470,7 @@ where
                             kept.push((ordinal, result));
                         }
                     }
+                    x_done_block(block);
                     Ok(kept)
                 })
                 .collect()
@@ -538,6 +554,7 @@ where
                 merge(ordinal, result);
             }
         }
+        x_done_block(block);
         next_ordinal = range.end_ordinal();
     }
     Ok(())
@@ -628,7 +645,10 @@ where
             blastna: Some(&blastna[1..=length]),
             store: None,
         };
-        Ok(traceback(scratch, ordinal, subject, kept))
+        let result = traceback(scratch, ordinal, subject, kept);
+        x_done_bytes(blastna);
+        x_done_block(stored);
+        Ok(result)
     };
     #[cfg(all(
         feature = "parallel",
@@ -811,10 +831,13 @@ pub(super) fn reported_subjects(
             let block = x_read_sequence(&database.db, ordinal).map_err(database_error)?;
             let length = block.nucleotide_len(0).map_err(database_error)?;
             let blastna = x_blastna(&block).map_err(database_error)?;
-            blastna[1..=length]
+            let letters = blastna[1..=length]
                 .iter()
                 .map(|&code| BLASTNA_TO_IUPACNA[usize::from(code & 0xF)])
-                .collect()
+                .collect();
+            x_done_bytes(blastna);
+            x_done_block(block);
+            letters
         } else {
             Vec::new()
         };

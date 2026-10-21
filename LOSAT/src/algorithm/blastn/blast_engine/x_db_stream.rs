@@ -297,6 +297,7 @@ where
                 kept.push((ordinal, result));
             }
         }
+        super::x_done_block(block);
         Ok(kept)
     };
     let window = pool

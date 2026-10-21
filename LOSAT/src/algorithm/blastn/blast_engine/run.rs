@@ -3104,13 +3104,17 @@ struct UngappedHit {
 /// `0`, or `LOSAT_X_DEFAULT=0` and it is not set): the large per-subject buffers of BLASTN (the
 /// blocks and sequences read from a database and their BLASTNA letters, `database.rs`; the
 /// ungapped hits of a subject and the scratch of their sort) are kept in buffers that glibc maps
-/// from 1 MiB on (`utils/x_mapped.rs`), so that a worker thread's chromosome-sized buffers go
-/// back to the system when they are dropped instead of staying in that thread's arena; the hits
-/// of a subject that needed such a buffer are freed when the next subject starts.
+/// from 1 MiB on and that go to the shared pools of `utils/x_mapped.rs` when they are done, so
+/// that a worker thread's chromosome-sized buffers are lent to the next thread that needs one
+/// instead of staying in that thread's arena.
 fn x_bn_mapped() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
 }
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) the pool of the ungapped hits' buffers and
+/// of their sort's scratch.
+static X_HITS: crate::utils::x_mapped::XPool<UngappedHit> = crate::utils::x_mapped::XPool::new();
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:254-268
 // ```c
@@ -3120,8 +3124,8 @@ fn x_bn_mapped() -> bool {
 //         init_hsp_array = (BlastInitHSP *)
 //             realloc(init_hitlist->init_hsp_array, sizeof(BlastInitHSP) * new_size);
 // ```
-/// `hits.push(hit)`, growing as `Vec` does; with LOSAT_X_BNMAPPED the capacity of
-/// `x_mapped::x_reserve_mapped`.
+/// `hits.push(hit)`, growing as `Vec` does; with LOSAT_X_BNMAPPED from `X_HITS` and with the
+/// capacity of `x_mapped::x_reserve_mapped`.
 #[inline(always)]
 fn x_push_ungapped(hits: &mut Vec<UngappedHit>, hit: UngappedHit) {
     if hits.len() == hits.capacity() {
@@ -3134,7 +3138,7 @@ fn x_push_ungapped(hits: &mut Vec<UngappedHit>, hit: UngappedHit) {
 #[inline(never)]
 fn x_grow_ungapped(hits: &mut Vec<UngappedHit>) {
     if x_bn_mapped() {
-        crate::utils::x_mapped::x_reserve_mapped(hits, 1);
+        X_HITS.reserve(hits, 1);
     } else {
         hits.reserve(1);
     }
@@ -3984,9 +3988,6 @@ struct SubjectScratch {
     // ```
     prelim_hits: Vec<PrelimHit>,
     ungapped_hits: Vec<UngappedHit>,
-    // No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) the scratch of the ungapped hits' sort,
-    // kept with them (`x_mapped::x_sort_by_mapped`).
-    x_sort_buf: Vec<UngappedHit>,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:356-357
     // ```c
     // gap_align->fwd_prelim_tback = GapPrelimEditBlockNew();
@@ -4099,7 +4100,6 @@ impl SubjectScratch {
             // ```
             prelim_hits: Vec::new(),
             ungapped_hits: Vec::new(),
-            x_sort_buf: Vec::new(),
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:356-357
             // ```c
             // gap_align->fwd_prelim_tback = GapPrelimEditBlockNew();
@@ -11012,9 +11012,11 @@ fn search_query_batch(
             // BlastInitHitListReset(init_hitlist);
             // ```
             let ungapped_hits = &mut subject_scratch.ungapped_hits;
+            // EXPERIMENT (LOSAT_X_BNMAPPED): the hits of a long subject go back to the pool.
+            if x_bn_mapped() {
+                X_HITS.give(ungapped_hits);
+            }
             ungapped_hits.clear();
-            // EXPERIMENT (LOSAT_X_BNMAPPED): the scratch of the hits' sort.
-            let x_sort_buf = &mut subject_scratch.x_sort_buf;
 
             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:52-64
             // ```c
@@ -13802,7 +13804,7 @@ fn search_query_batch(
                 _ if x_bn_mapped() => crate::utils::x_mapped::x_sort_by_mapped(
                     ungapped_hits,
                     score_compare_ungapped_hits,
-                    x_sort_buf,
+                    &X_HITS,
                 ),
                 _ => ungapped_hits.sort_by(score_compare_ungapped_hits),
             }

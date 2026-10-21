@@ -1,5 +1,5 @@
 //! EXPERIMENT (LOSAT_X_XDROPTRIM, LOSAT_X_BNMAPPED): large per-thread buffers that glibc maps
-//! and returns when they are dropped.
+//! and returns when they are dropped, and a pool that hands them from one thread to the next.
 //!
 //! No NCBI counterpart: these choose only the capacity of LOSAT buffers and when they are freed;
 //! no value NCBI computes changes.
@@ -12,6 +12,15 @@
 //! is always mapped and returned when dropped; the pages beyond its length are never touched and
 //! are not resident. Other allocators return large blocks on their own, so elsewhere the
 //! capacity is what `Vec` would give.
+//!
+//! A mapped block that is freed and mapped again is touched again: every page faults, and with
+//! many threads the faults wait for each other (BLASTN of 1,500 cDNAs x the D. melanogaster
+//! genome at 16 threads: 590,000 more minor faults, x1.04 wall). So a buffer that is done goes
+//! to an `XPool` of its element type instead, shared by all threads, and the next buffer that
+//! must grow past `X_MAPPED_FROM` takes one from there, its pages already resident. A thread's
+//! arena keeps its free space for that thread only; the pool lends it to any thread, so the
+//! resident buffers are those in use at the busiest moment, plus at most `x_pool_idle_bytes` of
+//! idle ones.
 
 /// No NCBI counterpart: the buffers from which a buffer is mapped (Linux with glibc).
 pub(crate) const X_MAPPED_FROM: usize = 1 << 20;
@@ -47,13 +56,124 @@ pub(crate) fn x_reserve_mapped<T>(v: &mut Vec<T>, additional: usize) {
     v.reserve_exact(target - v.len());
 }
 
-/// No NCBI counterpart: frees `v` when its capacity is at least `X_MAPPED_FROM` bytes (with
-/// glibc, then a mapped block that goes back to the system).
-pub(crate) fn x_release_mapped<T>(v: &mut Vec<T>) {
-    if v.capacity().saturating_mul(std::mem::size_of::<T>()) >= X_MAPPED_FROM {
-        *v = Vec::new();
+/// No NCBI counterpart: the idle buffers of an `XPool` may hold this many touched bytes
+/// (`LOSAT_X_POOLIDLE` MiB, a tuning variable, 0 to 65,536; built-in 256); the oldest ones beyond
+/// it are freed.
+pub(crate) fn x_pool_idle_bytes() -> usize {
+    static IDLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *IDLE.get_or_init(|| {
+        std::env::var("LOSAT_X_POOLIDLE")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|v| *v <= 65_536)
+            .unwrap_or(256)
+            << 20
+    })
+}
+
+/// No NCBI counterpart: idle buffers of at least `X_MAPPED_FROM` bytes, shared by all threads
+/// (see the module header). Each idle buffer is kept with the bytes it may have touched (the
+/// most it held while lent out, as far as the pool saw it).
+pub(crate) struct XPool<T> {
+    state: std::sync::Mutex<XPoolState<T>>,
+}
+
+struct XPoolState<T> {
+    idle: Vec<(Vec<T>, usize)>,
+    idle_touched: usize,
+    // address -> touched bytes of the buffers lent out
+    lent: Vec<(usize, usize)>,
+}
+
+impl<T: Copy> XPool<T> {
+    pub(crate) const fn new() -> Self {
+        Self {
+            state: std::sync::Mutex::new(XPoolState {
+                idle: Vec::new(),
+                idle_touched: 0,
+                lent: Vec::new(),
+            }),
+        }
+    }
+
+    /// An empty idle buffer for `need` elements, if there is one: of those that have touched
+    /// enough bytes already, the one that touched the fewest, else the one that touched the most
+    /// (all are mapped, so capacity says nothing about the resident pages).
+    pub(crate) fn take(&self, need: usize) -> Option<Vec<T>> {
+        if !X_MAPPED_ALLOCATOR {
+            return None;
+        }
+        let bytes = need.saturating_mul(std::mem::size_of::<T>().max(1));
+        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let pick = st
+            .idle
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, touched))| *touched >= bytes)
+            .min_by_key(|(_, (_, touched))| *touched)
+            .or_else(|| st.idle.iter().enumerate().max_by_key(|(_, (_, touched))| *touched))
+            .map(|(i, _)| i)?;
+        let (v, touched) = st.idle.swap_remove(pick);
+        st.idle_touched -= touched;
+        st.lent.push((v.as_ptr() as usize, touched));
+        Some(v)
+    }
+
+    /// `x_reserve_mapped(v, additional)`; when `v` then needs `X_MAPPED_FROM` bytes or more for
+    /// the first time, its contents move into an idle buffer of the pool first, if there is one.
+    pub(crate) fn reserve(&self, v: &mut Vec<T>, additional: usize) {
+        let size = std::mem::size_of::<T>().max(1);
+        let need = v.len().saturating_add(additional);
+        if v.capacity() >= need {
+            return;
+        }
+        if v.capacity().saturating_mul(size) < X_MAPPED_FROM
+            && need.saturating_mul(size) >= X_MAPPED_FROM
+        {
+            if let Some(mut pooled) = self.take(need) {
+                pooled.extend_from_slice(v);
+                *v = pooled;
+            }
+        }
+        x_reserve_mapped(v, additional);
+    }
+
+    /// Puts `v` into the pool, empty, when its capacity is at least `X_MAPPED_FROM` bytes (`v`
+    /// becomes a new empty `Vec`); a smaller `v` stays as it is. Idle buffers beyond
+    /// `x_pool_idle_bytes` touched bytes are freed, the oldest first.
+    pub(crate) fn give(&self, v: &mut Vec<T>) {
+        let size = std::mem::size_of::<T>().max(1);
+        if !X_MAPPED_ALLOCATOR || v.capacity().saturating_mul(size) < X_MAPPED_FROM {
+            return;
+        }
+        let mut v = std::mem::take(v);
+        let used = v.len() * size;
+        v.clear();
+        let mut freed = Vec::new();
+        {
+            let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            let addr = v.as_ptr() as usize;
+            let before = match st.lent.iter().position(|&(a, _)| a == addr) {
+                Some(i) => st.lent.swap_remove(i).1,
+                None => 0,
+            };
+            let touched = used.max(before);
+            st.idle_touched += touched;
+            st.idle.push((v, touched));
+            let cap = x_pool_idle_bytes();
+            while st.idle_touched > cap && !st.idle.is_empty() {
+                let (old, t) = st.idle.remove(0);
+                st.idle_touched -= t;
+                freed.push(old);
+            }
+        }
+        drop(freed);
     }
 }
+
+/// No NCBI counterpart: the pool of byte buffers: traceback rows of the X-drop kernels
+/// (LOSAT_X_XDROPTRIM), and BLASTN's database reads and BLASTNA letters (LOSAT_X_BNMAPPED).
+pub(crate) static X_BYTES: XPool<u8> = XPool::new();
 
 /// No NCBI counterpart: the elements sorted at a time with `sort_by` before they are merged in
 /// `x_sort_by_mapped` (its scratch stays below glibc's first mmap threshold).
@@ -61,13 +181,13 @@ const X_SORT_RUN_BYTES: usize = 64 << 10;
 
 /// No NCBI counterpart: `v.sort_by(cmp)` (a stable sort: the same order as `sort_by` for a
 /// comparator that is a total order) whose scratch, when it would need `X_MAPPED_FROM` bytes or
-/// more with glibc, is `buf` (kept by the caller, grown with `x_reserve_mapped`): runs of
+/// more with glibc, is a buffer of `pool` (given back after the sort): runs of
 /// `X_SORT_RUN_BYTES` sorted with `sort_by`, then merged pairwise (the left run first among equal
 /// elements).
 pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     v: &mut [T],
     mut cmp: F,
-    buf: &mut Vec<T>,
+    pool: &XPool<T>,
 ) {
     let size = std::mem::size_of::<T>().max(1);
     let n = v.len();
@@ -79,8 +199,8 @@ pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     for chunk in v.chunks_mut(run) {
         chunk.sort_by(&mut cmp);
     }
-    buf.clear();
-    x_reserve_mapped(buf, n);
+    let mut buf: Vec<T> = Vec::new();
+    pool.reserve(&mut buf, n);
     buf.extend_from_slice(v);
     let mut width = run;
     let mut in_v = true;
@@ -116,6 +236,7 @@ pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
     if !in_v {
         v.copy_from_slice(&buf);
     }
+    pool.give(&mut buf);
 }
 
 #[cfg(test)]
@@ -138,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn reserve_doubles_as_vec_below_the_bound_and_release_keeps_small_buffers() {
+    fn reserve_doubles_as_vec_below_the_bound() {
         let mut v: Vec<u8> = Vec::with_capacity(1000);
         v.resize(1000, 7);
         x_reserve_mapped(&mut v, 1);
@@ -146,13 +267,9 @@ mod tests {
         assert_eq!(v.len(), 1000);
         x_reserve_mapped(&mut v, 10);
         assert_eq!(v.capacity(), 2000);
-        x_release_mapped(&mut v);
-        assert_eq!(v.capacity(), 2000);
         x_reserve_mapped(&mut v, X_MAPPED_FROM);
         assert!(v.capacity() >= 1000 + X_MAPPED_FROM);
         assert!(v.iter().all(|&b| b == 7));
-        x_release_mapped(&mut v);
-        assert_eq!(v.capacity(), 0);
     }
 
     #[test]
@@ -171,9 +288,32 @@ mod tests {
             let mut a = v.clone();
             a.sort_by(|x, y| y.0.cmp(&x.0));
             let mut b = v.clone();
-            let mut buf = vec![(7, 7); 3];
-            x_sort_by_mapped(&mut b, |x, y| y.0.cmp(&x.0), &mut buf);
+            static POOL: XPool<(u32, u32)> = XPool::new();
+            x_sort_by_mapped(&mut b, |x, y| y.0.cmp(&x.0), &POOL);
             assert_eq!(a, b, "n = {n}");
+        }
+    }
+
+    #[test]
+    fn pool_lends_idle_buffers_and_keeps_small_ones_out() {
+        let pool: XPool<u8> = XPool::new();
+        let mut small = vec![1u8; 100];
+        pool.give(&mut small);
+        assert_eq!(small.len(), 100);
+        assert!(pool.take(1).is_none());
+        let mut v: Vec<u8> = vec![5; 10];
+        pool.reserve(&mut v, X_MAPPED_FROM);
+        assert_eq!(&v[..], &[5u8; 10][..]);
+        assert!(v.capacity() >= 10 + X_MAPPED_FROM);
+        let addr = v.as_ptr();
+        v.resize(X_MAPPED_FROM + 10, 0);
+        pool.give(&mut v);
+        assert_eq!(v.capacity(), 0);
+        if X_MAPPED_ALLOCATOR {
+            let mut w: Vec<u8> = vec![9; 3];
+            pool.reserve(&mut w, X_MAPPED_FROM);
+            assert_eq!(w.as_ptr(), addr);
+            assert_eq!(&w[..], &[9u8; 3][..]);
         }
     }
 }

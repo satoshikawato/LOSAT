@@ -633,6 +633,13 @@ const NCBINA8_TO_BLASTNA8: [u8; 16] = [15, 0, 1, 6, 2, 4, 9, 13, 3, 8, 5, 12, 7,
 pub const BLASTNA_SENTINEL: u8 = 15;
 
 impl SequenceBlock {
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): gives the block's bytes to `utils::x_mapped::X_BYTES` (a
+    /// buffer of `File::x_read_range_mapped` of 1 MiB or more; smaller ones are dropped). No NCBI
+    /// counterpart: only where the bytes go.
+    pub fn x_recycle(mut self) {
+        crate::utils::x_mapped::X_BYTES.give(&mut self.data);
+    }
+
     /// Sequence type of the block.
     pub fn seqtype(&self) -> SeqType {
         self.seqtype
@@ -931,8 +938,8 @@ impl SequenceBlock {
     }
 
     /// EXPERIMENT (LOSAT_X_BNMAPPED): `nucleotide_blastna` in a buffer with the capacity of
-    /// `utils::x_mapped::x_mapped_capacity` (mapped by glibc from 1 MiB on). No NCBI
-    /// counterpart: only where the bytes are kept.
+    /// `utils::x_mapped::X_BYTES` (a mapped buffer from 1 MiB on, given back with
+    /// `x_mapped::X_BYTES.give`). No NCBI counterpart: only where the bytes are kept.
     pub fn x_nucleotide_blastna_mapped(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {
         self.nucleotide_blastna_in(i, true)
     }
@@ -944,10 +951,8 @@ impl SequenceBlock {
             return Err(self.format(i, "Error: could not get sequence or range."));
         }
         let mut buffer = if mapped {
-            let mut buffer = Vec::with_capacity(crate::utils::x_mapped::x_mapped_capacity(
-                base_length + 2,
-                1,
-            ));
+            let mut buffer = Vec::new();
+            crate::utils::x_mapped::X_BYTES.reserve(&mut buffer, base_length + 2);
             buffer.resize(base_length + 2, 0u8);
             buffer
         } else {

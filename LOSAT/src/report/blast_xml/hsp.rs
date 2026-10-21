@@ -22,6 +22,15 @@ pub fn round6(value: f64) -> f64 {
     format!("{value:.5e}").parse().unwrap_or(value)
 }
 
+/// What a masked query letter becomes: outfmt 5 writes one fixed letter (`X`, `N`;
+/// `eSubstituteMask`... `s_MaskQuerySeq`'s `eXMask` / `eNMask` forms), XML2 the lower-case
+/// letter (`eLowerCase`, blastxml2_format.cpp:279); `tolower` leaves `*` as it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaskLetter {
+    Fixed(u8),
+    Lower,
+}
+
 /// The query row of an HSP with its masked regions replaced by the mask letter
 /// (`s_MaskQuerySeq`, blastfmtutil.cpp:446-521), literally.
 ///
@@ -79,18 +88,24 @@ pub fn round6(value: f64) -> f64 {
 /// the last column.
 ///
 /// `row` is the unmasked query row, `segments` the Dense-seg segments as inclusive column
-/// ranges (`GetAlnStart` / `GetAlnStop`), `first` the 0-based record position of the row's
-/// first residue (query residues rise by one per residue: the protein and plus-strand rows),
-/// `masks` the query's masked regions in record coordinates. The masked row is written to
-/// `out`; `columns` is scratch.
+/// ranges (`GetAlnStart` / `GetAlnStop`), `masks` the query's masked regions in record
+/// coordinates. `first` and `step` place the row's residues in the record: residue `j` (the
+/// `j`-th letter of the row that is not a gap) lies at `first + j` for `step` 1 (a protein or
+/// plus-strand nucleotide row); at the nucleotides `first + 3j ..= first + 3j + 2` for `step`
+/// 3 (a translated query, plus frame); at `first - 3j - 2 ..= first - 3j` for `step` -3 (minus
+/// frame, the row runs from the high end: `first` is the highest nucleotide). A position
+/// maps to the column of the residue that holds it
+/// (`delta = (seq_pos - start) / GetWidth(row)`, alnmap.cpp:593-595), and to -1 outside the
+/// row's residues. The masked row is written to `out`; `columns` is scratch.
 #[allow(clippy::too_many_arguments)]
 pub fn mask_query_row(
     row: &[u8],
     segments: &[(usize, usize)],
     first: i32,
+    step: i32,
     masks: &[QueryMask],
     query_frame: i32,
-    mask_char: u8,
+    mask_letter: MaskLetter,
     out: &mut Vec<u8>,
     columns: &mut Vec<usize>,
 ) {
@@ -107,12 +122,17 @@ pub fn mask_query_row(
             .filter(|&(_, &letter)| letter != b'-')
             .map(|(column, _)| column),
     );
+    let width = i64::from(step.abs().max(1));
     let aln_pos = |position: i32| -> i32 {
-        let index = i64::from(position) - i64::from(first);
-        if index < 0 || index >= columns.len() as i64 {
+        let distance = if step < 0 {
+            i64::from(first) - i64::from(position)
+        } else {
+            i64::from(position) - i64::from(first)
+        };
+        if distance < 0 || distance / width >= columns.len() as i64 {
             -1
         } else {
-            columns[index as usize] as i32
+            columns[(distance / width) as usize] as i32
         }
     };
     let aln_stop = row.len() as i32 - 1;
@@ -152,7 +172,10 @@ pub fn mask_query_row(
             while mask_pos <= mask_stop {
                 let letter = &mut out[mask_pos as usize];
                 if *letter != b'-' {
-                    *letter = mask_char;
+                    *letter = match mask_letter {
+                        MaskLetter::Fixed(letter) => letter,
+                        MaskLetter::Lower => letter.to_ascii_lowercase(),
+                    };
                 }
                 mask_pos += 1;
             }
@@ -212,6 +235,30 @@ pub fn recount(
     (identity, positive)
 }
 
+/// `s_GetTranslationFrame` (blastxml_format.cpp:85-97) on the 1-based endpoints of a translated
+/// HSP's interval in a record (`start` the lower, `end` the higher) of `length` letters: the
+/// reading frame by the record's own coordinates, whatever interval was searched.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:88-96
+/// ```c++
+///     int frame;
+///
+///     if (plus_strand) {
+///         frame = (start - 1) % 3 + 1;
+///     } else {
+///         frame = -((seq_length - end) % 3 + 1);
+///     }
+///
+///     return frame;
+/// ```
+pub fn translation_frame(plus_strand: bool, start: i32, end: i32, length: i32) -> i32 {
+    if plus_strand {
+        (start - 1) % 3 + 1
+    } else {
+        -((length - end) % 3 + 1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,7 +269,17 @@ mod tests {
 
     fn masked(row: &[u8], segments: &[(usize, usize)], first: i32, masks: &[QueryMask]) -> String {
         let (mut out, mut columns) = (Vec::new(), Vec::new());
-        mask_query_row(row, segments, first, masks, 0, b'X', &mut out, &mut columns);
+        mask_query_row(
+            row,
+            segments,
+            first,
+            1,
+            masks,
+            0,
+            MaskLetter::Fixed(b'X'),
+            &mut out,
+            &mut columns,
+        );
         String::from_utf8(out).expect("ASCII")
     }
 
@@ -282,6 +339,24 @@ mod tests {
     }
 
     #[test]
+    fn the_lower_case_mask_letter_keeps_a_star() {
+        // XML2: `tolower`, which leaves `*` and the gap as they are (tblastx_db_gc HSP 14)
+        let (mut out, mut columns) = (Vec::new(), Vec::new());
+        mask_query_row(
+            b"AC*-EF",
+            &[(0, 5)],
+            0,
+            1,
+            &[mask(0, 3)],
+            0,
+            MaskLetter::Lower,
+            &mut out,
+            &mut columns,
+        );
+        assert_eq!(out, b"ac*-eF");
+    }
+
+    #[test]
     fn masks_of_another_frame_are_ignored() {
         let (mut out, mut columns) = (Vec::new(), Vec::new());
         let masks = [QueryMask {
@@ -293,9 +368,10 @@ mod tests {
             b"ACDEF",
             &[(0, 4)],
             10,
+            1,
             &masks,
             0,
-            b'X',
+            MaskLetter::Fixed(b'X'),
             &mut out,
             &mut columns,
         );
@@ -304,9 +380,10 @@ mod tests {
             b"ACDEF",
             &[(0, 4)],
             10,
+            1,
             &masks,
             1,
-            b'N',
+            MaskLetter::Fixed(b'N'),
             &mut out,
             &mut columns,
         );
@@ -335,5 +412,47 @@ mod tests {
             masked(row, &[(0, 7)], 0, &[mask(5, 6), mask(1, 2)]),
             "AXXDEXXH"
         );
+    }
+
+    /// A translated query row: nucleotide masks reach the columns of the residues that hold
+    /// them (`GetAlnPosFromSeqPos`: `(seq_pos - start) / width`), the minus frame's row runs
+    /// from the highest nucleotide, and a mask whose first column in alignment order lies
+    /// before the HSP is dropped.
+    #[test]
+    fn nucleotide_masks_of_a_translated_row_reach_the_columns_of_their_codons() {
+        let frame = |frame: i32, from: i32, to: i32| QueryMask { from, to, frame };
+        let run = |row: &[u8], first: i32, step: i32, query_frame: i32, masks: &[QueryMask]| {
+            let (mut out, mut columns) = (Vec::new(), Vec::new());
+            let segments = [(0, row.len() - 1)];
+            mask_query_row(
+                row,
+                &segments,
+                first,
+                step,
+                masks,
+                query_frame,
+                MaskLetter::Fixed(b'X'),
+                &mut out,
+                &mut columns,
+            );
+            String::from_utf8(out).unwrap()
+        };
+        // Plus frame: residue j holds the nucleotides 30 + 3j ..= 32 + 3j.
+        assert_eq!(run(b"ABCDE", 30, 3, 1, &[frame(1, 36, 41)]), "ABXXE");
+        // a mask inside a codon masks that codon's residue
+        assert_eq!(run(b"ABCDE", 30, 3, 1, &[frame(1, 37, 37)]), "ABXDE");
+        // starting before the HSP: dropped whole; running past its end: cut at the last column
+        assert_eq!(run(b"ABCDE", 30, 3, 1, &[frame(1, 28, 36)]), "ABCDE");
+        assert_eq!(run(b"ABCDE", 30, 3, 1, &[frame(1, 40, 90)]), "ABCXX");
+        // another frame's mask is not applied
+        assert_eq!(run(b"ABCDE", 30, 3, 1, &[frame(2, 36, 41)]), "ABCDE");
+        // Minus frame: the row runs from the highest nucleotide 47 down; residue j holds
+        // 45 - 3j ..= 47 - 3j.
+        assert_eq!(run(b"ABCDE", 47, -3, -1, &[frame(-1, 36, 41)]), "ABXXE");
+        assert_eq!(run(b"ABCDE", 47, -3, -1, &[frame(-1, 30, 41)]), "ABXXX");
+        // reaching past the row's high end is the dropped leading mask of the alignment order
+        assert_eq!(run(b"ABCDE", 47, -3, -1, &[frame(-1, 40, 50)]), "ABCDE");
+        // a gap column in the row keeps its '-'
+        assert_eq!(run(b"AB-DE", 30, 3, 1, &[frame(1, 33, 41)]), "AX-XX");
     }
 }

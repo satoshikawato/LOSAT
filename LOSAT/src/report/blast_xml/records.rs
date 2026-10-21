@@ -66,23 +66,73 @@ impl XmlStats {
 pub struct XmlQuery<'a> {
     /// `Iteration_query-ID`: `Query_N` (`CBlastFormatUtil::GetSeqIdString`).
     pub id: &'a [u8],
-    /// `Iteration_query-def`: `GenerateDefline` of the query, or `No definition line`.
-    pub def: &'a [u8],
+    /// `GenerateDefline` of the query, as generated: empty for an empty nucleotide title.
+    /// `Iteration_query-def` is `No definition line` then; `Search_query-title` (XML2) is
+    /// absent (blastxml2_format.cpp:590-592).
+    pub title: &'a [u8],
     /// `Iteration_query-len`: the length of the searched interval.
     pub len: i32,
     pub stats: XmlStats,
     /// `Iteration_message` (`names::xml_message`); none when empty.
     pub message: Option<&'a [u8]>,
+    /// Whether NCBI searched the query's batch (it has a valid context in it). The XML2
+    /// `Search` of a query that it did not search has no `hits` member and adds
+    /// ` \nNo hits found` to its message (blastxml2_format.cpp:614-622); outfmt 5 does not
+    /// read it.
+    pub searched: bool,
+    /// The query's masked regions in NCBI's order and frames (`TMaskedQueryRegions`):
+    /// outfmt 5 masks an HSP's row with the regions of the HSP's own frame, XML2 lists every
+    /// region of a plus frame in `Search_query-masking` and masks with the regions of frame 0
+    /// or the HSP's translated frame.
+    pub masks: &'a [QueryMask],
 }
 
 /// A subject with HSPs (a `Hit`).
 pub struct XmlHit<'a> {
     pub id: &'a [u8],
-    pub def: &'a [u8],
+    /// The subject's title as generated or stored: empty for an empty nucleotide `-subject`
+    /// title or an empty stored title. `Hit_def` is `No definition line` then; XML2's
+    /// `HitDescr_title` is empty.
+    pub title: &'a [u8],
     pub accession: &'a [u8],
     /// `Hit_len`: the length of the subject's record.
     pub len: i32,
+    /// The Blast-def-line's taxid of a `-db` sequence, 0 for none (XML2's `HitDescr_taxid`).
+    pub taxid: i32,
+    /// What the taxonomy database said about the taxid (XML2's `HitDescr_sciname`); outfmt 5
+    /// does not read it.
+    pub taxonomy: &'a HitTaxonomy,
 }
+
+/// What NCBI's XML2 and JSON formats do with the taxid of a `Hit` once the taxonomy database has
+/// been asked (`s_SeqAlignToXMLHit`, blastxml2_format.cpp:380-386; DECISIONS 28).
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:380-386
+/// ```c++
+///             if (data->HasTaxDB()) {
+///                 SSeqDBTaxInfo taxinfo;
+///                 CSeqDB::GetTaxInfo(taxid, taxinfo);
+///                 hit_descr->SetSciname(taxinfo.scientific_name);
+///             }
+/// ```
+/// (`GetTaxInfo` throws when the taxid is not found; the `catch` of the hit replaces its
+/// description by the sequence id alone.)
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum HitTaxonomy {
+    /// No scientific name is written: no taxid, `-subject`, or no `taxdb.bti` on the search
+    /// path.
+    #[default]
+    Unnamed,
+    /// The scientific name, written after the taxid (an empty one too).
+    Named(Vec<u8>),
+    /// The taxonomy database does not know the taxid (or is damaged): the description is the id
+    /// alone. The texts are the `ERR_POST` messages of this hit's lookup (NCBI writes them again
+    /// at every hit).
+    NotFound(Vec<String>),
+}
+
+/// The `taxonomy` of a hit without a taxonomy lookup.
+pub const UNNAMED: &HitTaxonomy = &HitTaxonomy::Unnamed;
 
 /// A masked region of the query in NCBI's form (`CSeqLocInfo`): inclusive 0-based positions in
 /// the query record and the frame of the context it belongs to.
@@ -114,8 +164,10 @@ pub struct XmlHsp<'a> {
     /// The edit script of the rows (`None`: one segment of substitutions over the whole row), which
     /// gives the Dense-seg segments that the mask loop walks.
     pub ops: Option<&'a [GapEditOp]>,
-    /// The 0-based record position of the query row's first residue.
+    /// The 0-based record position of the query row's first residue and how the residues
+    /// follow (`hsp::mask_query_row`): 1 for a protein or plus-strand nucleotide row, 3 for a
+    /// translated plus frame, -3 for a minus frame (`query_first` is then the highest
+    /// nucleotide of the first residue).
     pub query_first: i32,
-    /// The query's masked regions.
-    pub masks: &'a [QueryMask],
+    pub query_step: i32,
 }

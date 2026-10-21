@@ -35,6 +35,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 #[cfg(test)]
 use crate::cli::NativeError;
+use crate::report::blast_xml::HitTaxonomy;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{BlockRange, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
@@ -100,6 +101,8 @@ const BLOCKS_PER_THREAD: usize = 8;
 pub(super) struct BlastpDatabase {
     db: SeqDb,
     name: String,
+    /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16).
+    taxdb: shared::TaxdbRun,
 }
 
 /// The program that LOSAT's refusals name.
@@ -125,6 +128,7 @@ impl BlastpDatabase {
         Ok(Self {
             db,
             name: name.to_string(),
+            taxdb: shared::TaxdbRun::default(),
         })
     }
 
@@ -917,6 +921,38 @@ impl ListedTitles<'_> {
         Ok(())
     }
 
+    /// The Blast-def-line taxid of each reported subject by rank (0 for none and for a
+    /// subject in no final hit list), which the XML2 and JSON formats write in the `Hit`
+    /// description, and what the taxonomy database says about it. They are read apart from the
+    /// titles, for those formats only.
+    ///
+    /// NCBI writes the scientific name of a taxid when it finds `taxdb.bti` on the search path
+    /// (`data4xml2format.cpp x_InitCommon`, `blastxml2_format.cpp:380-386`; validity is not
+    /// checked): `taxonomy[rank]` is then `Named`, or `NotFound` when the taxonomy database does
+    /// not know the taxid (the description is the id alone). Without `taxdb.bti`, or without a
+    /// taxid, `taxonomy` is empty. A scientific name that NCBI's XML stream cannot write, and a
+    /// taxonomy database that LOSAT cannot read as NCBI does, are refusals made here, before any
+    /// byte is written.
+    ///
+    /// NCBI's messages about the taxonomy database go to standard error: those of opening and of
+    /// the lookup that the volume makes for each taxid of a fetched subject (`CSeqDBVol::
+    /// x_GetTaxonomy`, once per volume and taxid) are returned as `TaxdbNotes`, which
+    /// `write_blastp_xml` writes at the first `Hit` that needs them, and those of the lookup of
+    /// each `Hit` are written there too.
+    pub(super) fn read_taxids(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> Result<(Vec<i32>, Vec<HitTaxonomy>, shared::TaxdbNotes)> {
+        shared::read_reported_taxids(
+            &database.db,
+            &database.taxdb,
+            &self.listed.ordinals,
+            &Self::reported(hit_lists),
+            PROGRAM,
+        )
+    }
+
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).
     fn reported(hit_lists: &[Option<BlastpHitList>]) -> std::collections::BTreeSet<usize> {
         hit_lists
@@ -1056,6 +1092,65 @@ pub(super) fn x_titles_allow_blocks(
         return ranges.iter().all(allowed_range);
     }
     let allowed = |ordinal: u32| -> bool { allowed_deflines(ordinal, db.deflines(ordinal)) };
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
+    if pool.enabled() {
+        return pool.install(|| {
+            (0..db.num_seqs())
+                .into_par_iter()
+                .with_min_len(4096)
+                .all(allowed)
+        });
+    }
+    let _ = pool;
+    (0..db.num_seqs()).all(allowed)
+}
+
+// EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the block search of outfmt 8, 9, 12 and 5.
+// These reports show no tabular id and no outfmt 0 title, so of the failures that
+// `x_titles_allow_blocks` rules out only those of the definition lines' reading remain: NCBI's
+// reader error (`HeaderReadError`), more than one definition line, and a stored title with a byte
+// outside ' ' ..= '~' (`ListedSubjects::read_titles`, `ListedTitles::check_reported_titles`; for
+// outfmt 5 that range is what `names::check_text` passes). A new function, so that
+// `x_titles_allow_blocks` and the per-definition-line code of the outfmt 0, 6 and 7 path stay as
+// they are.
+// No NCBI counterpart: chooses LOSAT's path; it does not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): whether every sequence of the database has
+/// one definition line that reads and holds no byte outside ' ' ..= '~'. Read in `pool` as
+/// `x_titles_allow_blocks` reads it; a reader error is `false`.
+pub(super) fn x_titles_read_allow_blocks(
+    database: &BlastpDatabase,
+    pool: &crate::utils::threading::SearchPool<'_>,
+) -> bool {
+    let db = &database.db;
+    let readable = |deflines: std::result::Result<
+        Vec<crate::seqdb::OrdinalDefline>,
+        crate::seqdb::SeqDbError,
+    >|
+     -> bool {
+        match deflines {
+            Ok(deflines) => deflines.len() == 1 && deflines[0].replaced_title_bytes == 0,
+            Err(_) => false,
+        }
+    };
+    if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
+        let ranges = db.header_ranges(crate::seqdb::HEADER_RANGE_SEQS);
+        let readable_range = |range: &BlockRange| -> bool {
+            db.visit_deflines(*range, |_ordinal, deflines| readable(deflines))
+        };
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if pool.enabled() {
+            return pool.install(|| ranges.par_iter().all(readable_range));
+        }
+        let _ = pool;
+        return ranges.iter().all(readable_range);
+    }
+    let allowed = |ordinal: u32| -> bool { readable(db.deflines(ordinal)) };
     #[cfg(all(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
@@ -2231,7 +2326,18 @@ mod tests {
                 .unwrap()
             })
         };
+        // EXPERIMENT (LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the same databases for the
+        // read-only check of outfmt 8, 9, 12 and 5.
+        let read_allowed = |database: &BlastpDatabase| -> [bool; 2] {
+            [1, 4].map(|threads| {
+                crate::utils::threading::with_search_pool(threads, "blastp", |pool| {
+                    Ok(x_titles_read_allow_blocks(database, pool))
+                })
+                .unwrap()
+            })
+        };
         assert_eq!(allowed(&open("prot_v4")), [true, true]);
+        assert_eq!(read_allowed(&open("prot_v4")), [true, true]);
         let dir = std::env::temp_dir().join(format!(
             "losat-db-qblock-titles-{}-{:?}",
             std::process::id(),
@@ -2252,6 +2358,7 @@ mod tests {
             BlastpDatabase::open(dir.join("prot_mv").to_str().unwrap(), &Default::default())
                 .unwrap();
         assert_eq!(allowed(&missing), [false, false]);
+        assert_eq!(read_allowed(&missing), [false, false]);
         // A stored title with a byte outside ' ' ..= '~' (LOSAT's refusal when it is reported).
         for ext in ["pin", "psq"] {
             std::fs::copy(fixture("prot_v4") + "." + ext, dir.join(format!("b.{ext}"))).unwrap();
@@ -2266,7 +2373,26 @@ mod tests {
         let bad =
             BlastpDatabase::open(dir.join("b").to_str().unwrap(), &Default::default()).unwrap();
         assert_eq!(allowed(&bad), [false, false]);
-        drop((missing, bad));
+        assert_eq!(read_allowed(&bad), [false, false]);
+        // A title of punctuation only (`, ,`): the tabular id NCBI writes cannot be made from it
+        // (outfmt 6 and 7 refuse it, `x_titles_allow_blocks`), but outfmt 8, 9, 12 and 5 write no
+        // id, so `x_titles_read_allow_blocks` takes the blocks (the stricter function must not
+        // replace it).
+        for ext in ["pin", "psq"] {
+            std::fs::copy(fixture("prot_v4") + "." + ext, dir.join(format!("c.{ext}"))).unwrap();
+        }
+        let mut header = std::fs::read(fixture("prot_v4") + ".phr").unwrap();
+        let at = header
+            .windows(16)
+            .position(|window| window == b"p10 last protein")
+            .expect("the title of p10");
+        header[at..at + 16].copy_from_slice(b", , , , , , , , ");
+        std::fs::write(dir.join("c.phr"), header).unwrap();
+        let punctuation =
+            BlastpDatabase::open(dir.join("c").to_str().unwrap(), &Default::default()).unwrap();
+        assert_eq!(allowed(&punctuation), [false, false]);
+        assert_eq!(read_allowed(&punctuation), [true, true]);
+        drop((missing, bad, punctuation));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

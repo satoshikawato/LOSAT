@@ -123,8 +123,9 @@
 //! those against subject frames of at most 2^k letters (genome pairs of similar size) go through
 //! `LOSAT_X_PAIRPARGATE` like any other batch instead of always going to the reference frame loop,
 //! which searches a subject on one thread; those against longer subjects (a gene against a genome)
-//! keep the reference loop. The `[X_STATS] PAIRPAR` and `[X_SHADOW] PAIRPAR` lines count the band
-//! batches the units took (`band`).
+//! keep the reference loop without LOSAT_X_TBXUNITMASK and take the units on masked tables with it
+//! (section below). The `[X_STATS] PAIRPAR` and `[X_SHADOW] PAIRPAR` lines count the band batches
+//! the units took (`band`).
 //!
 //! `LOSAT_X_PAIRLUT=1` (with `LOSAT_X_PAIRPAR`): the group tables are built directly from the
 //! query (`lookup/x_pair_lut.rs`, exactness argument in its header) and the batch's full table is
@@ -171,6 +172,43 @@
 //! touches at one subject position span the slice, not the group. Each cell sees its hits in
 //! the same order, so the table and the chunk's sorted init HSPs are those of `scan_unit`. A batch
 //! with no cut group runs `scan_unit`, whose machine code is the one before the switch.
+//!
+//! `LOSAT_X_TBXUNITMASK` (in the strict set, a value switch: on unless it is `0`, or
+//! `LOSAT_X_DEFAULT=0` and it is not set; unset or `=1` the built-in 256, `=N` N KiB): a unit takes
+//! a table of P cells, P the smallest power of two of at least its group's extent G (the query
+//! offsets from the group's first context to the next group's, the last group to the end of its
+//! last context, `x_group_extents`) plus the window, and the cell of hit (q, s) is
+//! (q - s - lo) & (P - 1) (`XMasked`), where its unmasked table (`x_unit_width`) has at least four
+//! times P cells and P is at most the switch's KiB at eight threads or more, at most 4,096 cells at
+//! two to seven, never at one (`x_mask_max_cells`), or, in a batch that `guard` rejects
+//! (LOSAT_X_TBXBAND), where its subject chunk is longer than the reference table has cells
+//! (`x_unit_mask_for`). Measured (workstation node 1): a unit's hit loop
+//! does one more instruction per hit on a masked table and saves the clearing of the unmasked
+//! table's every cell per unit, so masking pays where the group is short against the chunk (1.5 kb
+//! against MG1655 and the fruit fly genome database x0.80-0.85 at 16 threads, max RSS 784 -> 309
+//! MiB; Sakai 1-100,000 x MG1655 x0.987 at 16, 143 -> 61 MiB, where NCBI BLAST+ takes 130 MiB),
+//! costs 0.8-1.7 % with groups of 100,000 letters or more (Sakai 1-300,000 x MG1655 with
+//! `=512`). With fewer threads the clearing weighs less: at two and four threads tables of 1-4 Ki
+//! cells gain (x0.895-0.971) and those of 32-64 Ki cells lose 0.2-0.9 %, and at one thread, where a
+//! unit's table is the only one, Sakai 1-100,000 loses 0.6 %.
+//! The units of a batch whose groups LOSAT_X_TBXQSLICE's rule cuts keep their unmasked tables
+//! (`x_tbx_qslice::rule_cuts`, whatever the diagnostics switches say). With the switch, `decide`
+//! does not apply `x_band_fits` to a batch whose groups the rule does not cut: every unit whose
+//! chunk is longer than the reference table then takes a masked table, of at most the reference
+//! table's cells. Why the units' init HSPs do not change, item 3's masked-aliasing argument for the
+//! group: raw diagonals d > d' of the unit share a masked cell when d - d' = m P (m >= 1); every hit
+//! of the group has q in [a, a + G), so for hits (q, s) on d and (q', s') on d',
+//! s' - s = m P - (q - q') >= P - G + 1 > window, and the cell sees all hits of d before those of
+//! d'. Flag 0: the cell holds `s_d + D` of a hit on d and diff = s' - s_d > window, too far, the
+//! state of a fresh cell after its first hit. Flag 1: the last right extension of d, from (q0, s0),
+//! stopped at the end of q0's context at the latest, at most a + G, so s_last_off - s0 <= a + G -
+//! q0, while s' - s0 = q' - q0 + m P >= a - q0 + P: s' >= s_last_off + window, the hit is not masked,
+//! it resets the cell to the fresh state. So the first hit of d' leaves its cell as on an unmasked
+//! table, and by induction every hit takes the branch it takes there. The scan in slices cannot use
+//! such a table: a slice's pass over the whole chunk brings hits of d' (low q') before the later
+//! slices' hits of d. The masked loops are their own instances (`scan_unit_masked`,
+//! `scan_unit_batched_masked`); the unmasked ones are the code before the switch. The
+//! `[X_STATS] TBXUNITMASK` and `[X_SHADOW] TBXUNITMASK` lines count the units with a masked table.
 
 use super::*;
 use crate::algorithm::tblastx::blast_gapalign::get_ungapped_hsp_list_into;
@@ -245,6 +283,9 @@ static SU_COPIES: AtomicU64 = AtomicU64::new(0);
 // No NCBI counterpart: the counter of LOSAT_X_TBXBAND (batches the units took that `guard`
 // rejects); it does not change any value NCBI computes.
 static BAND: AtomicU64 = AtomicU64::new(0);
+// No NCBI counterpart: the counter of LOSAT_X_TBXUNITMASK (units that took a masked table); it does
+// not change any value NCBI computes.
+static UM_UNITS: AtomicU64 = AtomicU64::new(0);
 
 /// Largest number of context groups (units per subject chunk).
 const X_MAX_GROUPS: usize = 6;
@@ -332,6 +373,177 @@ pub(super) fn cost_gate() -> bool {
 fn tbx_band() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBXBAND"))
+}
+
+// No NCBI counterpart: a LOSAT variable that chooses, per unit, between two tables with the same
+// result (module doc, LOSAT_X_TBXUNITMASK); NCBI has one table per thread. Read once per process,
+// as the other modes of this file.
+/// LOSAT_X_TBXUNITMASK: a strict-set value switch (`utils/xswitch.rs`). `None` when it is off (`0`,
+/// or `LOSAT_X_DEFAULT=0` and it is not set); otherwise the largest masked table, in KiB, that a
+/// unit takes for its size alone at `X_UNITMASK_MANY_THREADS` threads or more (`x_mask_max_cells`,
+/// module doc).
+fn unit_mask_kib() -> Option<usize> {
+    static KIB: OnceLock<Option<usize>> = OnceLock::new();
+    *KIB.get_or_init(|| {
+        crate::utils::xswitch::value(
+            "LOSAT_X_TBXUNITMASK",
+            2..=X_UNITMASK_MAX_KIB,
+            X_UNITMASK_KIB,
+        )
+    })
+}
+
+/// No NCBI counterpart: LOSAT_X_TBXUNITMASK's built-in, in KiB (module doc): masked tables of up to
+/// 65,536 cells (group extents plus the window of up to 64 Ki letters).
+const X_UNITMASK_KIB: usize = 256;
+
+/// No NCBI counterpart: the largest value LOSAT_X_TBXUNITMASK takes (4 GiB); a value outside
+/// 2..=X_UNITMASK_MAX_KIB other than `0`, or a non-numeric one, gives the built-in.
+const X_UNITMASK_MAX_KIB: usize = 1 << 22;
+
+/// No NCBI counterpart: LOSAT_X_TBXUNITMASK takes a masked table for its size only where the
+/// unmasked one has at least this many times its cells (module doc).
+const X_UNITMASK_RATIO: usize = 4;
+
+/// No NCBI counterpart: from this many threads LOSAT_X_TBXUNITMASK's size rule takes masked tables
+/// of up to the switch's KiB; below it, of up to `X_UNITMASK_FEW_THREADS_CELLS` (module doc).
+const X_UNITMASK_MANY_THREADS: usize = 8;
+
+/// No NCBI counterpart: the largest masked table, in cells (16 KiB), of LOSAT_X_TBXUNITMASK's size
+/// rule at 2 to `X_UNITMASK_MANY_THREADS - 1` threads (module doc).
+const X_UNITMASK_FEW_THREADS_CELLS: usize = 1 << 12;
+
+// No NCBI counterpart: the size limit of LOSAT_X_TBXUNITMASK's rule (module doc).
+/// The largest masked table, in cells, that a unit takes for its size at `threads` threads, for
+/// the switch's `kib`: none at one thread, at most `X_UNITMASK_FEW_THREADS_CELLS` below
+/// `X_UNITMASK_MANY_THREADS`, the switch's KiB from there.
+fn x_mask_max_cells(kib: usize, threads: usize) -> usize {
+    let cells = kib.saturating_mul(1024) / std::mem::size_of::<DiagStruct>();
+    match threads {
+        0 | 1 => 0,
+        t if t < X_UNITMASK_MANY_THREADS => cells.min(X_UNITMASK_FEW_THREADS_CELLS),
+        _ => cells,
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:510
+// ```c
+//         diag_coord = (query_offset - subject_offset) & diag_mask;
+// ```
+// The cell of a hit in a unit's table: the raw diagonal minus the unit's lowest one, without a
+// mask (`XUnmasked`, module doc item 3), or, with LOSAT_X_TBXUNITMASK, that value masked to the
+// unit's table of `x_masked_cells` cells (`XMasked`, module doc). One type per form, so that the
+// hit loops are compiled once for each and the unmasked loops keep their machine code.
+/// How a unit maps a hit (q, s) to the cell of its table.
+pub(super) trait XCells: Copy {
+    /// Whether the table is masked (`XMasked`).
+    const MASKED: bool;
+    /// The cells of a unit whose lowest raw diagonal is `lo`; `mask` is the masked table's
+    /// number of cells minus one (`XMasked`) or ignored (`XUnmasked`).
+    fn of(lo: u32, mask: u32) -> Self;
+    /// The cell of hit (q, s).
+    fn cell(self, query_offset: u32, subject_offset: u32) -> usize;
+}
+
+/// The unmasked cells: q - s - lo (u32 wrapping).
+#[derive(Clone, Copy)]
+pub(super) struct XUnmasked {
+    pub lo: u32,
+}
+
+impl XCells for XUnmasked {
+    const MASKED: bool = false;
+    #[inline(always)]
+    fn of(lo: u32, _mask: u32) -> Self {
+        Self { lo }
+    }
+    #[inline(always)]
+    fn cell(self, query_offset: u32, subject_offset: u32) -> usize {
+        query_offset
+            .wrapping_sub(subject_offset)
+            .wrapping_sub(self.lo) as usize
+    }
+}
+
+/// LOSAT_X_TBXUNITMASK's cells: (q - s - lo) & mask (u32 wrapping), mask + 1 a power of two.
+#[derive(Clone, Copy)]
+pub(super) struct XMasked {
+    pub lo: u32,
+    pub mask: u32,
+}
+
+impl XCells for XMasked {
+    const MASKED: bool = true;
+    #[inline(always)]
+    fn of(lo: u32, mask: u32) -> Self {
+        Self { lo, mask }
+    }
+    #[inline(always)]
+    fn cell(self, query_offset: u32, subject_offset: u32) -> usize {
+        (query_offset
+            .wrapping_sub(subject_offset)
+            .wrapping_sub(self.lo)
+            & self.mask) as usize
+    }
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-56
+// ```c
+// diag_array_length = 1;
+// /* What power of 2 is just longer than the query? */
+// while (diag_array_length < (qlen+window_size))
+// {
+//         diag_array_length = diag_array_length << 1;
+// }
+// ```
+/// LOSAT_X_TBXUNITMASK: the cells of the masked table of a unit whose query group extends over
+/// `extent` letters (`x_group_extents`): the smallest power of two of at least extent + window, as
+/// NCBI sizes its table from the whole query.
+fn x_masked_cells(extent: usize, window: i32) -> usize {
+    (extent + window.max(0) as usize).next_power_of_two()
+}
+
+// No NCBI counterpart: the rule of LOSAT_X_TBXUNITMASK for one batch (module doc), apart from the
+// switch so that a test can give it values.
+/// Which units of a batch take a masked table (`x_unit_mask_for`).
+#[derive(Clone, Copy)]
+struct XMaskRule {
+    /// A unit whose masked table has at most this many cells takes it where its unmasked table has
+    /// at least `ratio` times as many (`X_UNITMASK_RATIO`)...
+    max_cells: usize,
+    ratio: usize,
+    /// ... and, in a batch that `guard` rejects (LOSAT_X_TBXBAND), a unit whose subject chunk is
+    /// longer than the reference table's cells (these) takes it whatever its size (`x_band_fits`).
+    band_cells: Option<i32>,
+}
+
+// No NCBI counterpart: the rule of LOSAT_X_TBXUNITMASK (module doc).
+/// The mask of the table of a unit whose group extends over `extent` letters, whose unmasked
+/// table has `width` cells and whose subject chunk has `chunk_len` letters, under `rule`: the
+/// masked table's cells minus one, or None (the unmasked table).
+fn x_unit_mask_for(
+    rule: &XMaskRule,
+    extent: usize,
+    window: i32,
+    width: usize,
+    chunk_len: usize,
+) -> Option<u32> {
+    let cells = x_masked_cells(extent, window);
+    let small = cells <= rule.max_cells && width as u64 >= rule.ratio as u64 * cells as u64;
+    let band = rule
+        .band_cells
+        .is_some_and(|diag_array_size| !x_band_fits(chunk_len, diag_array_size));
+    (small || band).then(|| (cells - 1) as u32)
+}
+
+// No NCBI counterpart: the groups' query offsets as LOSAT_X_TBXQSLICE reads them (from the first
+// context of a group to the first of the next, the last one to the end of its last context).
+/// The number of query offsets each group of `contexts` extends over (`group_starts`).
+fn x_group_extents(contexts: &[QueryContext]) -> Vec<usize> {
+    x_tbx_qslice::x_group_spans(contexts, &group_starts(contexts))
+        .into_iter()
+        .map(|(a, b)| (b - a) as usize)
+        .collect()
 }
 
 // No NCBI counterpart: chooses how LOSAT holds a unit's saved init HSPs between the units and the
@@ -470,6 +682,20 @@ pub fn print_summary() {
         return;
     }
     let load = |c: &AtomicU64| c.load(AtomicOrdering::Relaxed);
+    // LOSAT_X_TBXUNITMASK: printed whenever the switch is on and a TBLASTX batch reached the unit
+    // path's decision (zero where no unit took a masked table); not for the other programs, which
+    // share LOSAT_X_PAIRPARSHADOW and LOSAT_X_STATS.
+    if let Some(kib) = unit_mask_kib().filter(|_| load(&BATCHES) > 0) {
+        if m == 2 {
+            eprintln!("[X_SHADOW] TBXUNITMASK units_masked={}", load(&UM_UNITS));
+        }
+        if std::env::var_os("LOSAT_X_STATS").is_some() {
+            eprintln!(
+                "[X_STATS] TBXUNITMASK kib={kib} units_masked={}",
+                load(&UM_UNITS)
+            );
+        }
+    }
     if m == 2 {
         eprintln!(
             "[X_SHADOW] PAIRPAR subjects_compared={} units={} hsps_compared={} fallback_gate={} fallback_guard={} band={} (combined_ungapped_hits identical)",
@@ -680,6 +906,9 @@ pub(super) struct XGates<'a> {
     pub threshold: i32,
     /// `tbx_band()`: LOSAT_X_TBXBAND, `guard` is not applied.
     pub band: bool,
+    /// `unit_mask_kib().is_some()`: LOSAT_X_TBXUNITMASK, `x_band_fits` is not applied to a batch
+    /// whose groups LOSAT_X_TBXQSLICE does not cut.
+    pub unit_mask: bool,
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:52-63
@@ -707,8 +936,9 @@ pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
     }
     let (max_context_len, longest_subject_chunk) = x_guard_lengths(g.contexts, g.subjects);
     // EXPERIMENT (LOSAT_X_TBXBAND): with the switch the first guard is not applied (module doc
-    // item 3) where the subject chunks fit the reference table (`x_band_fits`).
-    if !((g.band && x_band_fits(longest_subject_chunk, g.diag_array_size))
+    // item 3) where the subject chunks fit the reference table (`x_band_fits`), or, with
+    // LOSAT_X_TBXUNITMASK, where the units' tables are masked or small (`x_band_masked`).
+    if !((g.band && (x_band_fits(longest_subject_chunk, g.diag_array_size) || x_band_masked(g)))
         || guard(
             max_context_len,
             longest_subject_chunk,
@@ -726,19 +956,34 @@ pub(super) fn decide(m: u8, g: &XGates<'_>) -> XDecision {
 }
 
 // No NCBI counterpart: a memory rule of LOSAT_X_TBXBAND (module doc). The units need no length
-// condition for exactness (item 3), but a unit's diagonal table has a cell for every raw diagonal
-// of its query group and subject chunk, one table per thread, where the reference loop has one
-// table of `diag_array_size` cells per subject in flight. With a subject chunk of at most that
+// condition for exactness (item 3), but a unit's unmasked diagonal table has a cell for every raw
+// diagonal of its query group and subject chunk, one table per thread, where the reference loop
+// has one table of `diag_array_size` cells per subject in flight (LOSAT_X_TBXUNITMASK masks the
+// tables of the units this rule would stop, `x_band_masked`). With a subject chunk of at most that
 // many letters a unit's table is less than twice the reference's. Measured (workstation, 8 and 16
 // threads): a 1 Mb and a 3.9 Mb query against 1 and 4.6 Mb genomes (chunks of 0.16 and 0.18 of the
 // table) ran x0.08-0.13 with a lower max RSS; 3 fruit fly transcripts (2,005 bases, 4,096 cells)
 // against the fruit fly genome database and a 1.9 kb query against MG1655 (chunks of 2,000 and
 // 380 times the table) ran x0.29-0.74, but their max RSS grew from 318 to 600-873 MiB (NCBI 368
-// MiB at 8 threads) and from 21 to 68-111 MiB, so such batches keep the reference loop.
+// MiB at 8 threads) and from 21 to 68-111 MiB, so such batches keep the reference loop without
+// LOSAT_X_TBXUNITMASK.
 /// LOSAT_X_TBXBAND: the longest subject chunk has at most as many letters as the reference's
 /// diagonal table has cells.
 fn x_band_fits(longest_subject_chunk: usize, diag_array_size: i32) -> bool {
     longest_subject_chunk as i64 <= diag_array_size as i64
+}
+
+// No NCBI counterpart: the memory rule of LOSAT_X_TBXBAND with LOSAT_X_TBXUNITMASK (module doc).
+// A unit whose subject chunk is longer than the reference's table has cells then takes a masked
+// table (`x_unit_mask_for`: `x_masked_cells`, at most the reference's), so `x_band_fits` holds for
+// every unit that keeps an unmasked one. The scan in slices of LOSAT_X_TBXQSLICE never takes a
+// masked table (module doc), so a batch whose groups its rule cuts keeps `x_band_fits`.
+// `rule_cuts` reads only the contexts, the thread count and process-wide switches (not the
+// diagnostics ones), so the lookup build site and `prepare` agree, with and without diagnostics.
+/// LOSAT_X_TBXBAND with LOSAT_X_TBXUNITMASK: the switch is on and LOSAT_X_TBXQSLICE's rule cuts
+/// no group of the batch.
+fn x_band_masked(g: &XGates<'_>) -> bool {
+    g.unit_mask && !x_tbx_qslice::rule_cuts(g.contexts, &group_starts(g.contexts), g.threads)
 }
 
 // No NCBI counterpart: the lengths the guards compare, from the batch's contexts and subjects (a
@@ -939,6 +1184,7 @@ fn lut_direct(e: &XLutEarly<'_>, shadow: bool) -> Option<XLutBatch> {
         cost_gate: cost_gate(),
         threshold: e.threshold,
         band: tbx_band(),
+        unit_mask: unit_mask_kib().is_some(),
     };
     if decide(mode(), &gates) != XDecision::Units {
         return None;
@@ -1639,6 +1885,12 @@ pub(super) struct XPairPar {
     /// EXPERIMENT (LOSAT_X_TBXQSLICE): the batch's groups as slices, when the switch cuts one of
     /// them (x_tbx_qslice.rs); the units then index this list and scan with its tables.
     sliced: Option<Vec<XSliced>>,
+    /// EXPERIMENT (LOSAT_X_TBXUNITMASK): the batch's rule, None when the switch is off or
+    /// LOSAT_X_TBXQSLICE's rule cuts a group of the batch (module doc).
+    mask_rule: Option<XMaskRule>,
+    /// LOSAT_X_TBXUNITMASK: each group's extent (`x_group_extents`) while `mask_rule` is Some,
+    /// else empty.
+    extents: Vec<usize>,
 }
 
 impl XPairPar {
@@ -1671,6 +1923,7 @@ impl XPairPar {
                 cost_gate: cost_gate(),
                 threshold: b.threshold,
                 band: tbx_band(),
+                unit_mask: unit_mask_kib().is_some(),
             },
         );
         if decision != XDecision::Off {
@@ -1735,22 +1988,45 @@ impl XPairPar {
         );
         // LOSAT_X_TBXBAND: a batch the first guard rejects, counted for the `[X_STATS] PAIRPAR` and
         // `[X_SHADOW] PAIRPAR` lines (without the switch no such batch gets here).
-        if tbx_band() {
+        let band = tbx_band() && {
             let (max_context_len, longest_subject_chunk) = x_guard_lengths(b.contexts, b.subjects);
-            if !guard(
+            !guard(
                 max_context_len,
                 longest_subject_chunk,
                 b.query_length,
                 b.diag_array_size,
-            ) {
-                BAND.fetch_add(1, AtomicOrdering::Relaxed);
-            }
+            )
+        };
+        if band {
+            BAND.fetch_add(1, AtomicOrdering::Relaxed);
         }
+        // EXPERIMENT (LOSAT_X_TBXUNITMASK): the batch's rule and the groups' extents for the units'
+        // masked tables; none where LOSAT_X_TBXQSLICE's rule cuts a group (module doc;
+        // `x_band_masked`), so a batch takes the same tables with and without the diagnostics that
+        // stop the slicing.
+        let mask_rule = unit_mask_kib()
+            .filter(|_| {
+                sliced.is_none()
+                    && !x_tbx_qslice::rule_cuts(b.contexts, &group_starts(b.contexts), b.threads)
+            })
+            .map(|kib| XMaskRule {
+                max_cells: x_mask_max_cells(kib, b.threads),
+                ratio: X_UNITMASK_RATIO,
+                band_cells: band.then_some(b.diag_array_size),
+            });
+        let extents = if mask_rule.is_some() {
+            x_group_extents(b.contexts)
+        } else {
+            Vec::new()
+        };
+        debug_assert!(extents.is_empty() || extents.len() == groups.len());
         Some(Self {
             groups,
             shadow: m == 2,
             stub,
             sliced,
+            mask_rule,
+            extents,
         })
     }
 
@@ -1763,6 +2039,28 @@ impl XPairPar {
     /// tables; the reference frame loop must run zero times).
     pub(super) fn stub(&self) -> bool {
         self.stub
+    }
+
+    // No NCBI counterpart: LOSAT_X_TBXUNITMASK's choice of a unit's table (module doc).
+    /// The mask of `unit`'s table (`x_unit_mask_for`), or None for the unmasked table.
+    fn x_unit_mask(&self, unit: &XUnit, window: i32) -> Option<u32> {
+        let rule = self.mask_rule.as_ref()?;
+        x_unit_mask_for(
+            rule,
+            self.extents[unit.g],
+            window,
+            x_unit_width(&self.groups[unit.g], &unit.chunk),
+            unit.chunk.length,
+        )
+    }
+
+    // No NCBI counterpart: the size of a unit's table, for LOSAT_X_TBXPREFETCH's rule.
+    /// The number of cells of `unit`'s table: the masked one's, or `x_unit_width`.
+    fn x_unit_cells(&self, unit: &XUnit, window: i32) -> usize {
+        match self.x_unit_mask(unit, window) {
+            Some(mask) => mask as usize + 1,
+            None => x_unit_width(&self.groups[unit.g], &unit.chunk),
+        }
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:479-491
@@ -1825,13 +2123,20 @@ impl XPairPar {
             // EXPERIMENT (LOSAT_X_TBXPREFETCH, module doc): all units of the subject scan with the
             // prefetch when one of their tables is large enough; the units and their order are
             // the same either way.
+            // LOSAT_X_TBXUNITMASK: the tables' own sizes (`x_unit_cells`).
             let prefetch = x_prefetch_units(
                 tbx_prefetch_min_kib(),
                 units.iter().map(|unit| {
-                    x_unit_width(&self.groups[unit.g], &unit.chunk)
-                        * std::mem::size_of::<DiagStruct>()
+                    self.x_unit_cells(unit, inp.window) * std::mem::size_of::<DiagStruct>()
                 }),
             );
+            if self.mask_rule.is_some() {
+                let masked = units
+                    .iter()
+                    .filter(|unit| self.x_unit_mask(unit, inp.window).is_some())
+                    .count();
+                UM_UNITS.fetch_add(masked as u64, AtomicOrdering::Relaxed);
+            }
             if prefetch {
                 self.run_subject_unit_fns::<true>(&units, inp, pool)
             } else {
@@ -2351,6 +2656,47 @@ impl XPairPar {
         init_hsps: &mut S,
         probe: &mut P,
     ) {
+        // EXPERIMENT (LOSAT_X_TBXUNITMASK): the masked table where the rule holds (module doc).
+        match self.x_unit_mask(unit, inp.window) {
+            None => self.scan_unit_cells::<S, P, XUnmasked, PF, BF>(
+                unit, inp, scratch, init_hsps, probe, 0,
+            ),
+            Some(mask) => {
+                self.scan_unit_masked::<S, P, PF, BF>(unit, inp, scratch, init_hsps, probe, mask)
+            }
+        }
+    }
+
+    // EXPERIMENT (LOSAT_X_TBXUNITMASK): the masked form in a function of its own, so that the
+    // unmasked form inlined into `scan_unit_hits` keeps the code it had before the switch.
+    /// `scan_unit_cells` with `XMasked`.
+    #[inline(never)]
+    fn scan_unit_masked<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+        probe: &mut P,
+        mask: u32,
+    ) {
+        self.scan_unit_cells::<S, P, XMasked, PF, BF>(unit, inp, scratch, init_hsps, probe, mask);
+    }
+
+    // The statements of `scan_unit_hits` for one form of the unit's cells (`XCells`): with
+    // `XUnmasked` the table and the loop before LOSAT_X_TBXUNITMASK, with `XMasked` a table of
+    // `mask + 1` cells and the masked cell of every hit.
+    /// `scan_unit_hits` with the cells `C` (`mask`: the masked table's cells minus one).
+    #[inline(always)]
+    fn scan_unit_cells<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bool>(
+        &self,
+        unit: &XUnit,
+        inp: &XSubject<'_>,
+        scratch: &mut XScratch,
+        init_hsps: &mut S,
+        probe: &mut P,
+        mask: u32,
+    ) {
         let group = &self.groups[unit.g];
         let sub = &group.lookup;
         let wordsize = inp.wordsize;
@@ -2378,9 +2724,15 @@ impl XPairPar {
                 .resize(offset_pairs_len, OffsetPair::default());
         }
         // Unit cell of hit (q, s): q - s - lo, lo = q_min - (s_len - 1) (u32 wrapping), so the
-        // cells run from 0 to (q_max - q_min) + (s_len - 1).
-        let width = x_unit_width(group, &chunk);
+        // cells run from 0 to (q_max - q_min) + (s_len - 1). LOSAT_X_TBXUNITMASK: that value
+        // masked to the table's mask + 1 cells.
         let lo = group.q_min.wrapping_sub(chunk.length as u32 - 1);
+        let cells = C::of(lo, mask);
+        let width = if C::MASKED {
+            mask as usize + 1
+        } else {
+            x_unit_width(group, &chunk)
+        };
         probe.unit_begin(width);
         // EXPERIMENT (LOSAT_X_SEEDUNMAP, section above `X_MAPPED_BYTES`): a table too small for a
         // unit where `x_unit_mapped` holds is replaced by an empty one of the mapped capacity; the
@@ -2429,14 +2781,14 @@ impl XPairPar {
             // [C] while (scan_range[1] <= scan_range[2])
             while scan_range[1] <= scan_range[2] {
                 // One batch per call (`x_unit_batch`: its own function on wasm32 only).
-                if !x_unit_batch::<S, P, PF, BF>(
+                if !x_unit_batch::<S, P, C, PF, BF>(
                     group,
                     subject,
                     &seq_ranges,
                     offset_array_size,
                     &mut scan_range,
                     scratch,
-                    lo,
+                    cells,
                     width,
                     &h,
                     init_hsps,
@@ -2472,14 +2824,14 @@ impl XPairPar {
 #[cfg_attr(target_arch = "wasm32", inline(never))]
 #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
 #[allow(clippy::too_many_arguments)]
-fn x_unit_batch<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
+fn x_unit_batch<S: XInitSink, P: XProbe, C: XCells, const PF: bool, const BF: bool>(
     group: &XGroup,
     subject: &[u8],
     seq_ranges: &[(i32, i32)],
     offset_array_size: i32,
     scan_range: &mut [i32; 3],
     scratch: &mut XScratch,
-    lo: u32,
+    cells: C,
     width: usize,
     h: &XHitCtx<'_>,
     init_hsps: &mut S,
@@ -2511,11 +2863,11 @@ fn x_unit_batch<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
         // scratch.diag.len() as below; `fits` holds (the caller's rule). `x_hit` gets the cell of
         // its hit, as below.
         unsafe {
-            x_tbx_hitbf::x_hits_bf::<PF>(
+            x_tbx_hitbf::x_hits_bf::<C, PF>(
                 diag_ptr,
                 offset_pairs_ptr,
                 hits as usize,
-                lo,
+                cells,
                 width,
                 h.window,
                 h.wordsize,
@@ -2546,7 +2898,7 @@ fn x_unit_batch<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
             // (`wrapping_add`: no bound needed; it lies in the table as below).
             unsafe {
                 let ahead = &*offset_pairs_ptr.add(i + X_PREFETCH_AHEAD);
-                let cell = ahead.q_off.wrapping_sub(ahead.s_off).wrapping_sub(lo) as usize;
+                let cell = cells.cell(ahead.q_off, ahead.s_off);
                 core::arch::x86_64::_mm_prefetch(
                     diag_ptr.wrapping_add(cell) as *const i8,
                     core::arch::x86_64::_MM_HINT_T0,
@@ -2558,11 +2910,13 @@ fn x_unit_batch<S: XInitSink, P: XProbe, const PF: bool, const BF: bool>(
         let query_offset = pair.q_off;
         let subject_offset = pair.s_off;
         // [C] diag_coord = (query_offset - subject_offset) & diag_mask;
-        // Unit cell: the raw diagonal minus the unit's lowest one (no mask).
-        let diag_coord = query_offset.wrapping_sub(subject_offset).wrapping_sub(lo) as usize;
+        // Unit cell: the raw diagonal minus the unit's lowest one (`XUnmasked`: no mask;
+        // LOSAT_X_TBXUNITMASK's `XMasked`: masked to the table).
+        let diag_coord = cells.cell(query_offset, subject_offset);
         debug_assert!(diag_coord < width, "unit diagonal outside its table");
         // SAFETY: q_min <= query_offset <= q_max (the group's entries) and
-        // subject_offset < s_len, so diag_coord < width = scratch.diag.len().
+        // subject_offset < s_len, so an unmasked diag_coord is below width = scratch.diag.len();
+        // a masked one is at most the mask, width - 1.
         let diag_entry = unsafe { &mut *diag_ptr.add(diag_coord) };
         probe.at(diag_coord, subject_offset);
         let outcome = x_hit(
@@ -3231,6 +3585,8 @@ mod tests {
             shadow: false,
             stub: false,
             sliced: None,
+            mask_rule: None,
+            extents: Vec::new(),
         };
         let mut diag_array = vec![start; size as usize];
         let mut diag_offset = start_offset;
@@ -3619,6 +3975,8 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: None,
+                mask_rule: None,
+                extents: Vec::new(),
             };
             assert_eq!(
                 unit_lists(&pp, &inp),
@@ -3652,6 +4010,333 @@ mod tests {
         assert!(checked > 150, "checked {checked}");
         assert!(long_reach > 50, "long_reach {long_reach}");
         assert!(aliased_cases > 20, "aliased_cases {aliased_cases}");
+    }
+
+    // No NCBI counterpart: LOSAT_X_TBXUNITMASK (module doc). Units on masked tables against the
+    // same units on unmasked tables, in every hit loop (with and without LOSAT_X_TBXPREFETCH's hint
+    // and LOSAT_X_TBXHITBF, and LOSAT_X_TBXEXTBATCH's batched extensions), and the sorted lists
+    // against the reference loop on its own masked table. Query groups far shorter than the
+    // subject, so that many raw diagonals share each masked cell; subjects made of pieces of the
+    // query, so that long right extensions set flags that hits of aliasing diagonals then meet.
+    #[test]
+    fn masked_unit_tables_give_the_unmasked_units() {
+        let mut rng = Rng(0x7e57_ab1e_5eed_0b1b);
+        let alphabets = [aa("AW"), aa("ACW"), aa("ACDEKW")];
+        let frame_numbers = [1i8, 2, 3, -1, -2, -3];
+        let (mut masked_units, mut aliased_cases, mut saved) = (0usize, 0usize, 0usize);
+        let (mut exact_fits, mut wide_groups, mut control_differs) = (0usize, 0usize, 0usize);
+        for case_no in 0..300 {
+            let alphabet = &alphabets[case_no % alphabets.len()];
+            let window = [40, 3 + x_tbx_extbatch::BATCH as i32, 64][case_no % 3];
+            // Every fourth case two queries (7 to 12 contexts: groups of several contexts); every
+            // fifth one context lengths whose group extent plus the window is a power of two (a
+            // group's extent is its length and the sentinel after it, the last group's its length).
+            let queries = if case_no % 4 == 3 { 2 } else { 1 };
+            let n_frames = if queries == 2 {
+                7 + rng.below(6) as usize
+            } else {
+                1 + rng.below(6) as usize
+            };
+            let exact = queries == 1 && case_no % 5 == 0;
+            let mut frames = Vec::with_capacity(n_frames);
+            for i in 0..n_frames {
+                let len = if exact {
+                    let cells =
+                        [64usize, 128][i % 2].max((window as usize + 5).next_power_of_two());
+                    cells - window as usize - usize::from(i + 1 < n_frames)
+                } else {
+                    4 + rng.below(80) as usize
+                };
+                frames.push(frame(
+                    frame_numbers[i % 6],
+                    &random_residues(&mut rng, len, alphabet),
+                ));
+            }
+            let s_len = 1500 + rng.below(2500) as usize;
+            let mut residues = Vec::with_capacity(s_len);
+            while residues.len() < s_len {
+                if rng.below(3) != 0 {
+                    let q = &frames[rng.below(n_frames as u64) as usize];
+                    let len = q.aa_seq.len() - 2;
+                    let from = rng.below(len as u64) as usize;
+                    let take = (len - from).min(s_len - residues.len());
+                    residues.extend_from_slice(&q.aa_seq[1 + from..1 + from + take]);
+                } else {
+                    let take = (3 + rng.below(40) as usize).min(s_len - residues.len());
+                    residues.extend(random_residues(&mut rng, take, alphabet));
+                }
+            }
+            let s_frames = vec![frame(1, &residues)];
+            let (lookup, contexts) = if queries == 2 {
+                let (a, b) = frames.split_at(n_frames / 2);
+                let params = lookup_protein_params_ungapped(ScoringMatrix::Blosum62);
+                build_ncbi_lookup(&[a.to_vec(), b.to_vec()], 11, &params, true)
+            } else {
+                lookup_for(&frames)
+            };
+            let query_length = query_length_of(&contexts);
+            let size = diag_array_size_for(query_length, window);
+            let cutoff_scores = vec![12; contexts.len()];
+            let x_dropoff_per_context = vec![16; contexts.len()];
+            let mut diag_array = vec![DiagStruct::default(); size as usize];
+            let mut diag_offset = window;
+            let (reference, _, _) = masked_reference(
+                &lookup,
+                &contexts,
+                &s_frames,
+                &cutoff_scores,
+                &x_dropoff_per_context,
+                window,
+                &mut diag_array,
+                &mut diag_offset,
+            );
+            let inp = XSubject {
+                s_frames_preliminary: &s_frames,
+                s_frames: &s_frames,
+                contexts: &contexts,
+                cutoff_scores: &cutoff_scores,
+                x_dropoff_per_context: &x_dropoff_per_context,
+                window,
+                wordsize: 3,
+                s_idx: 0,
+                s_len: 999,
+            };
+            let plain = XPairPar {
+                groups: build_groups(&lookup, &contexts),
+                shadow: false,
+                stub: false,
+                sliced: None,
+                mask_rule: None,
+                extents: Vec::new(),
+            };
+            // Ratio 1: every unit whose unmasked table is at least the masked one's size.
+            let pp = XPairPar {
+                groups: build_groups(&lookup, &contexts),
+                shadow: false,
+                stub: false,
+                sliced: None,
+                mask_rule: Some(XMaskRule {
+                    max_cells: usize::MAX,
+                    ratio: 1,
+                    band_cells: None,
+                }),
+                extents: x_group_extents(&contexts),
+            };
+            assert_eq!(pp.extents.len(), pp.groups.len());
+            // Negative control: tables of half the masked size (below extent + window, against
+            // the module doc's condition), where the units may differ.
+            let control = XPairPar {
+                groups: build_groups(&lookup, &contexts),
+                shadow: false,
+                stub: false,
+                sliced: None,
+                mask_rule: pp.mask_rule,
+                extents: pp
+                    .extents
+                    .iter()
+                    .map(|&e| (x_masked_cells(e, window) / 2).saturating_sub(window as usize))
+                    .collect(),
+            };
+            let chunk = SubjectChunk {
+                offset: 0,
+                length: s_len,
+                overlap: 0,
+            };
+            let mut scratch = XScratch::new(false);
+            let mut aliased = false;
+            for g in 0..pp.groups.len() {
+                if pp.groups[g].lookup.longest_chain <= 0 {
+                    continue;
+                }
+                let unit = XUnit {
+                    f: 0,
+                    k: 0,
+                    chunk,
+                    g,
+                };
+                let mask = pp.x_unit_mask(&unit, window).expect("a masked table");
+                assert!(plain.x_unit_mask(&unit, window).is_none());
+                masked_units += 1;
+                // The masked table covers the group's extent plus the window (module doc).
+                assert!(mask as usize + 1 >= pp.extents[g] + window as usize);
+                exact_fits += usize::from(mask as usize + 1 == pp.extents[g] + window as usize);
+                wide_groups += usize::from(group_starts(&contexts).len() < contexts.len());
+                let mut want: Vec<InitHSP> = Vec::new();
+                plain.scan_unit_hits::<_, XNoProbe, false, false>(
+                    &unit,
+                    &inp,
+                    &mut scratch,
+                    &mut want,
+                    &mut XNoProbe,
+                );
+                saved += want.len();
+                // Two saved extensions of the unit on raw diagonals that share a masked cell.
+                let diagonals: Vec<i64> = want
+                    .iter()
+                    .map(|h| h.q_seed_absolute as i64 - h.s_seed as i64)
+                    .collect();
+                let cells = mask as i64 + 1;
+                aliased |= diagonals.iter().any(|&a| {
+                    diagonals
+                        .iter()
+                        .any(|&b| a != b && (a - b).rem_euclid(cells) == 0)
+                });
+                let mut lists: Vec<(&str, Vec<InitHSP>)> = Vec::new();
+                for name in ["scan", "scan pf", "bf", "bf pf"] {
+                    let mut got: Vec<InitHSP> = Vec::new();
+                    match name {
+                        "scan" => pp.scan_unit_hits::<_, XNoProbe, false, false>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            &mut XNoProbe,
+                        ),
+                        "scan pf" => pp.scan_unit_hits::<_, XNoProbe, true, false>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            &mut XNoProbe,
+                        ),
+                        "bf" => pp.scan_unit_hits::<_, XNoProbe, false, true>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            &mut XNoProbe,
+                        ),
+                        _ => pp.scan_unit_hits::<_, XNoProbe, true, true>(
+                            &unit,
+                            &inp,
+                            &mut scratch,
+                            &mut got,
+                            &mut XNoProbe,
+                        ),
+                    }
+                    assert_eq!(scratch.diag.len(), mask as usize + 1);
+                    lists.push((name, got));
+                }
+                for (name, len) in [("batched", x_tbx_extbatch::BATCH), ("batched 1", 1)] {
+                    let mut got: Vec<InitHSP> = Vec::new();
+                    pp.scan_unit_batched_hits::<_, false, false>(
+                        &unit,
+                        &inp,
+                        &mut scratch,
+                        &mut got,
+                        len,
+                    );
+                    lists.push((name, got));
+                    let mut got: Vec<InitHSP> = Vec::new();
+                    pp.scan_unit_batched_hits::<_, true, true>(
+                        &unit,
+                        &inp,
+                        &mut scratch,
+                        &mut got,
+                        len,
+                    );
+                    lists.push((name, got));
+                }
+                for (name, got) in &lists {
+                    assert_eq!(
+                        got, &want,
+                        "case {case_no} group {g}: {name} on the masked table differs"
+                    );
+                }
+                if control.x_unit_mask(&unit, window).map(|m| m as usize + 1)
+                    == Some((mask as usize + 1) / 2)
+                {
+                    let mut got: Vec<InitHSP> = Vec::new();
+                    control.scan_unit_hits::<_, XNoProbe, false, false>(
+                        &unit,
+                        &inp,
+                        &mut scratch,
+                        &mut got,
+                        &mut XNoProbe,
+                    );
+                    control_differs += usize::from(got != want);
+                }
+            }
+            assert_eq!(
+                unit_lists(&pp, &inp),
+                reference,
+                "case {case_no}: masked unit lists differ from the reference"
+            );
+            assert_eq!(
+                unit_lists_batched(&pp, &inp),
+                reference,
+                "case {case_no}: masked batched unit lists differ from the reference"
+            );
+            aliased_cases += usize::from(aliased);
+        }
+        assert!(masked_units > 600, "masked_units {masked_units}");
+        assert!(aliased_cases > 100, "aliased_cases {aliased_cases}");
+        assert!(saved > 10_000, "saved {saved}");
+        assert!(exact_fits > 50, "exact_fits {exact_fits}");
+        assert!(wide_groups > 100, "wide_groups {wide_groups}");
+        assert!(control_differs > 10, "control_differs {control_differs}");
+    }
+
+    // No NCBI counterpart: the sizes of LOSAT_X_TBXUNITMASK (module doc).
+    #[test]
+    fn masked_table_sizes_and_rule() {
+        assert_eq!(x_masked_cells(0, 40), 64);
+        assert_eq!(x_masked_cells(24, 40), 64);
+        assert_eq!(x_masked_cells(25, 40), 128);
+        assert_eq!(x_masked_cells(1 << 20, 0), 1 << 20);
+        assert_eq!(x_masked_cells((1 << 20) - 40, 40), 1 << 20);
+        assert_eq!(x_masked_cells((1 << 20) - 39, 40), 1 << 21);
+        // Small masked tables where the unmasked one has at least `ratio` times their cells; in a
+        // band batch, every unit whose chunk is longer than the reference table.
+        let rule = |max_cells: usize, band_cells: Option<i32>| XMaskRule {
+            max_cells,
+            ratio: 4,
+            band_cells,
+        };
+        assert_eq!(x_unit_mask_for(&rule(64, None), 24, 40, 256, 200), Some(63));
+        assert_eq!(x_unit_mask_for(&rule(64, None), 24, 40, 255, 200), None);
+        assert_eq!(x_unit_mask_for(&rule(63, None), 24, 40, 256, 200), None);
+        assert_eq!(
+            x_unit_mask_for(&rule(128, None), 25, 40, 512, 200),
+            Some(127)
+        );
+        assert_eq!(x_unit_mask_for(&rule(128, None), 25, 40, 511, 200), None);
+        assert_eq!(x_unit_mask_for(&rule(0, Some(256)), 24, 40, 300, 256), None);
+        assert_eq!(
+            x_unit_mask_for(&rule(0, Some(256)), 24, 40, 300, 257),
+            Some(63)
+        );
+        assert_eq!(
+            x_unit_mask_for(&rule(0, None), 24, 40, 1 << 20, 1 << 20),
+            None
+        );
+        // The size limit by thread count: none at one, 4,096 cells at 2-7, the switch's KiB at 8+.
+        assert_eq!(x_mask_max_cells(256, 1), 0);
+        assert_eq!(x_mask_max_cells(256, 2), 4096);
+        assert_eq!(x_mask_max_cells(256, 7), 4096);
+        assert_eq!(x_mask_max_cells(256, 8), 65536);
+        assert_eq!(x_mask_max_cells(2, 4), 512);
+        assert_eq!(x_mask_max_cells(2, 16), 512);
+        // The groups: one per context up to X_MAX_GROUPS, from a context's first offset to the
+        // next group's (sentinels included), the last to the end of its last context.
+        let frames: Vec<QueryFrame> = [5usize, 7, 9]
+            .iter()
+            .zip([1i8, 2, 3])
+            .map(|(&len, f)| frame(f, &vec![aa("A")[0]; len]))
+            .collect();
+        let (_, contexts) = lookup_for(&frames);
+        let extents = x_group_extents(&contexts);
+        assert_eq!(extents.len(), 3);
+        assert_eq!(
+            extents[0],
+            (contexts[1].frame_base - contexts[0].frame_base) as usize
+        );
+        assert_eq!(
+            extents[1],
+            (contexts[2].frame_base - contexts[1].frame_base) as usize
+        );
+        assert_eq!(extents[2], 9);
+        assert!(extents[0] > 5 && extents[1] > 7);
     }
 
     /// The unit lists of `inp` with the batched extensions of LOSAT_X_TBXEXTBATCH (`unit_lists`
@@ -4004,6 +4689,7 @@ mod tests {
                         cost_gate: false,
                         threshold: 13,
                         band,
+                        unit_mask: false,
                     },
                 )
             };
@@ -4045,6 +4731,29 @@ mod tests {
             XDecision::Units
         );
         assert!(x_band_fits(256, 256) && !x_band_fits(257, 256));
+        // LOSAT_X_TBXUNITMASK: the memory rule is not applied where LOSAT_X_TBXQSLICE cuts no group
+        // (small groups at one thread); the gates and the second guard still are.
+        let decision_mask = |subjects: &[FastaRecord], debugging: bool| {
+            decide(
+                1,
+                &XGates {
+                    contexts: &contexts,
+                    query_length,
+                    diag_array_size,
+                    subjects: crate::algorithm::tblastx::subjects::Subjects::Fasta(subjects),
+                    debugging,
+                    chunk_switches: false,
+                    threads: 1,
+                    cost_gate: false,
+                    threshold: 13,
+                    band: true,
+                    unit_mask: true,
+                },
+            )
+        };
+        assert_eq!(decision_mask(&longer, false), XDecision::Units);
+        assert_eq!(decision_mask(&fits, false), XDecision::Units);
+        assert_eq!(decision_mask(&longer, true), XDecision::Gate);
         // LOSAT_X_PAIRPARGATE still decides after the guard: this table of 256 cells at one thread.
         let gated = |m: u8, band: bool| {
             decide(
@@ -4060,6 +4769,7 @@ mod tests {
                     cost_gate: true,
                     threshold: 13,
                     band,
+                    unit_mask: false,
                 },
             )
         };
@@ -4083,6 +4793,7 @@ mod tests {
                 cost_gate: false,
                 threshold: 13,
                 band: false,
+                unit_mask: false,
             };
             assert_eq!(decide(m, &gates), XDecision::Guard);
             // LOSAT_X_TBXBAND does not lift the second guard.
@@ -4144,6 +4855,7 @@ mod tests {
                     cost_gate,
                     threshold,
                     band: false,
+                    unit_mask: false,
                 },
             )
         };
@@ -4310,6 +5022,8 @@ mod tests {
                     shadow: false,
                     stub: false,
                     sliced: None,
+                    mask_rule: None,
+                    extents: Vec::new(),
                 },
                 cutoff_scores: vec![12; contexts.len()],
                 x_dropoff_per_context: vec![16; contexts.len()],
@@ -4826,6 +5540,8 @@ mod tests {
                 shadow: false,
                 stub: false,
                 sliced: None,
+                mask_rule: None,
+                extents: Vec::new(),
             },
             cutoff_scores: vec![12; contexts.len()],
             x_dropoff_per_context: vec![16; contexts.len()],

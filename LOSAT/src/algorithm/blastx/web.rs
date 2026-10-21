@@ -270,6 +270,7 @@ pub(crate) fn run_pair(
                                 &subjects,
                                 &shown,
                                 &mut results,
+                                processed,
                             )?;
                             processed += queries.len();
                         }
@@ -352,6 +353,7 @@ pub(crate) fn run_pair(
                     &subjects,
                     &shown,
                     &mut results,
+                    processed,
                 )?;
                 processed += queries.len();
                 Ok(())

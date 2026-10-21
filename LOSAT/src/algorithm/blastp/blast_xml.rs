@@ -33,7 +33,7 @@ use anyhow::{bail, Context, Result};
 use super::hsp::BlastpHitList;
 use crate::report::blast_xml::names;
 use crate::report::blast_xml::{
-    BlastXmlWriter, QueryMask, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
+    QueryMask, StructuredXml, SubjectNameCache, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
     XmlSubjects,
 };
 use crate::report::pairwise::PairwiseHit;
@@ -51,21 +51,27 @@ pub(crate) struct BlastpXml<'a> {
     /// without letters, an invalid query).
     pub messages: Vec<Vec<String>>,
     pub subjects: XmlSubjects<'a>,
+    /// NCBI's messages about the taxonomy database that come before the `Hit`s' own
+    /// (XML2 and JSON with `-db`; nothing otherwise).
+    pub taxdb_notes: crate::algorithm::common::database::TaxdbNotes,
     /// By query, the masked regions of the query in record coordinates (`QueryMask`).
     pub masks: Vec<Vec<QueryMask>>,
+    /// By query: whether NCBI searched the query's batch (it has a valid context in it). Only
+    /// XML2 reads it.
+    pub searched: Vec<bool>,
     /// The program, for the refusals' messages (`BLASTP`).
     pub program: &'static str,
-    /// The number of queries formatted before this call, and whether the document ends with it.
-    pub queries_before: usize,
+    /// Whether the document ends with this call.
     pub epilog: bool,
 }
 
-/// Writes the document of every query of `hit_lists` (indexed by query) to `writer`, each
-/// query's warnings before it, with the document's header before the first query and its end
-/// after the last when `xml.epilog`. `rows(q)` gives the rows of query `q`'s HSPs, in the lists'
-/// order.
-pub(crate) fn write_blastp_xml(
+/// Writes the document of every query of `hit_lists` (indexed by query) through `document`
+/// (BLAST XML, or the XML2 / JSON documents) to `writer`, each query's warnings before it,
+/// with the document's header before the first query and its end after the last when
+/// `xml.epilog`. `rows(q)` gives the rows of query `q`'s HSPs, in the lists' order.
+pub(crate) fn write_blastp_xml<W: StructuredXml>(
     xml: &BlastpXml<'_>,
+    document: &mut W,
     hit_lists: &[Option<BlastpHitList>],
     rows: &mut dyn FnMut(usize) -> Result<Vec<PairwiseHit>>,
     writer: &mut dyn Write,
@@ -74,7 +80,11 @@ pub(crate) fn write_blastp_xml(
     let program = xml.program;
     // Everything NCBI cannot write is refused before the first byte of the document: the
     // database name, each query's definition line and message, the names of the subjects with
-    // hits.
+    // hits. This includes the last query of a `-subject` call, whose report NCBI holds back
+    // until the next query's arrives and never writes when the next batch fails to read
+    // (outfmt 15 and 16): LOSAT refuses a title it would not have written then. It cannot
+    // wait for the report to be written, which would refuse after a byte (the reports before
+    // it are written by now), and the next batch is not read yet.
     names::check_text(xml.run.db_name)
         .map_err(|refusal| refusal.error(program, "a database name"))?;
     let has_hits = |q_idx: usize| {
@@ -102,7 +112,7 @@ pub(crate) fn write_blastp_xml(
             }
         }
     }
-    let mut document = BlastXmlWriter::new(xml.queries_before);
+    let mut taxdb_printer = xml.taxdb_notes.printer();
     let mut buf: Vec<u8> = Vec::new();
     for (q_idx, hit_list) in hit_lists.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
@@ -113,10 +123,12 @@ pub(crate) fn write_blastp_xml(
         let text = &texts[q_idx];
         let query = XmlQuery {
             id: record.local_id.as_bytes(),
-            def: &text.def,
+            title: &text.title,
             len: xml.queries.searched_lengths[q_idx] as i32,
             stats: xml.stats[q_idx],
             message: text.message.as_deref(),
+            searched: xml.searched[q_idx],
+            masks: &xml.masks[q_idx],
         };
         let mut hit_rows: Vec<PairwiseHit> = Vec::new();
         if hit_list.is_some() {
@@ -136,10 +148,22 @@ pub(crate) fn write_blastp_xml(
                 let subject = subjects.get(s_idx, program)?;
                 let hit = XmlHit {
                     id: &subject.id,
-                    def: &subject.def,
+                    title: &subject.title,
                     accession: &subject.accession,
                     len: xml.subjects.length(s_idx),
+                    taxid: subject.taxid,
+                    taxonomy: &subject.taxonomy,
                 };
+                // NCBI's messages about the taxonomy database: opening and the volume's lookup
+                // at the first `Hit` that needs them, the lookup of the `Hit` every time.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    taxdb_printer.at_hit(
+                        s_idx,
+                        subject.taxid,
+                        &subject.taxonomy,
+                        &mut *warnings.sink,
+                    )?;
+                }
                 sink.hit(&hit, |hsps| {
                     for hsp in &hsp_list.hsps {
                         let row = hit_rows
@@ -163,7 +187,7 @@ pub(crate) fn write_blastp_xml(
                             srow: srow.as_bytes(),
                             ops: hsp.gap_info.as_deref(),
                             query_first: hsp.q_start as i32 - 1,
-                            masks: &xml.masks[q_idx],
+                            query_step: 1,
                         })?;
                     }
                     Ok(())
@@ -179,7 +203,7 @@ pub(crate) fn write_blastp_xml(
         buf.clear();
     }
     if xml.epilog {
-        document.finish(&mut buf);
+        document.finish(&mut buf)?;
         writer.write_all(&buf)?;
     }
     Ok(())

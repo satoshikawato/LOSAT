@@ -75,30 +75,27 @@
 //! far and 14.5-17.4 % overlap, which of the two is hard to predict, and 1.2-1.4 % meet a flag-1
 //! cell and 2.1-2.8 % are candidates for the extension.
 //!
-//! `x_hit_bf` reads the packed cell `raw` (`last_hit` in bits 0-30, the flag in bit 31) and works
-//! with twice the values: `d2 = 2 (s + diag_offset) - (raw << 1)`, in wrapping `u32` arithmetic read
-//! as `i32`. For a flag-0 cell `raw << 1` is twice the 31-bit field's signed value modulo 2^32 (a
-//! cleared cell holds `-window`), so `d2` is twice the reference's `diff = s - (last_hit -
-//! diag_offset)` whenever that fits in an `i32`. `x_hitbf_fits` (checked once per subject) makes it
-//! fit: with `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (`length` the subject's
-//! letters), every flag-0 `last_hit` the table holds is in `[-window, diag_offset + length)`: the
-//! cleared value, 0 in a new table, or an `s + diag_offset` of this subject or of an earlier one.
-//! Every store with flag 0 is such an `s + diag_offset` (the extension's `s_last_off - (wordsize - 1)
-//! + diag_offset` is stored with flag 1, and the flag goes back to 0 only with a store of `s +
-//! diag_offset`); the offset only grows between clears (`Diagonals::finish_subject`), so an earlier
-//! subject's stores are below this subject's offset, and none of them wrapped in the 31-bit field, as
-//! they were below 2^30. `s + diag_offset` is in `[diag_offset, diag_offset + length)`, so `diff`
-//! is in `(-length, diag_offset + length + window)` and `2 diff` in `(-2^31, 2^31)`. Then too far
-//! (`diff >= window`) is `d2 >= 2 window`, and a candidate (`wordsize <= diff < window`) is
-//! `(d2 - 2 wordsize) as u32 < 2 (window - wordsize)`, one unsigned compare: below `2 wordsize`
-//! the difference is negative (it does not wrap, as `2 length + 2 wordsize < 2^31`), so at least
-//! 2^31 as a `u32`. The rule also asks `1 <= wordsize < window`, a two-hit search (the one-hit
-//! search, window 0, keeps the statements). A flag-1 cell (`raw as i32 < 0`) or a candidate goes
-//! on to the statements of `word_finder_plain`, unchanged; any other hit stores `s + diag_offset`
-//! (too far; the flag stays 0) or what it read (overlap), selected without a branch. So the table
-//! holds after each hit what the statements leave there, the statements see the same table for
-//! every hit they run, and the init HSPs are the same, in the same order. (The context lookup the
-//! statements make before the diagonal test without LOSAT_X_BXLAZYCTX only reads.)
+//! The test is blastp's (`blastp::x_seed_fused::XHitBf`, whose module header gives the arithmetic):
+//! it reads the packed cell `raw` (`last_hit` in bits 0-30, the flag in bit 31) and works with
+//! twice the values, `d2 = 2 (s + diag_offset) - (raw << 1)` in wrapping `u32` arithmetic read as
+//! `i32`, which is twice the reference's `diff = s - (last_hit - diag_offset)` for a flag-0 cell
+//! whose `last_hit` is in `[-window, diag_offset + length)` where `XHitBf::fits` holds (checked
+//! once per subject): `0 <= diag_offset` and `diag_offset + length + 2 window < 2^30` (`length` the
+//! subject's letters). This table holds no other flag-0 value: the cleared value, 0 in a new table,
+//! or an `s + diag_offset` of this subject or of an earlier one. Every store with flag 0 is such an
+//! `s + diag_offset` (the extension's `s_last_off - (wordsize - 1) + diag_offset` is stored with
+//! flag 1, and the flag goes back to 0 only with a store of `s + diag_offset`); the offset only
+//! grows between clears (`Diagonals::finish_subject`), so an earlier subject's stores are below
+//! this subject's offset, and none of them wrapped in the 31-bit field, as they were below 2^30.
+//! Then too far (`diff >= window`) is `d2 >= 2 window`, and a candidate (`wordsize <= diff <
+//! window`) is `(d2 - 2 wordsize) as u32 < 2 (window - wordsize)`, one unsigned compare. The rule
+//! also asks `1 <= wordsize < window`, a two-hit search (the one-hit search, window 0, keeps the
+//! statements). A flag-1 cell (`raw as i32 < 0`) or a candidate goes on to the statements of
+//! `word_finder_plain`, unchanged; any other hit stores `s + diag_offset` (too far; the flag stays
+//! 0) or what it read (overlap), selected without a branch. So the table holds after each hit what
+//! the statements leave there, the statements see the same table for every hit they run, and the
+//! init HSPs are the same, in the same order. (The context lookup the statements make before the
+//! diagonal test without LOSAT_X_BXLAZYCTX only reads.)
 //!
 //! The switch is read once; it is in the strict set (`utils/xswitch.rs`): on unless
 //! `LOSAT_X_BXHITBF=0`, or `LOSAT_X_DEFAULT=0` and it is not set. The loop with the test is its own
@@ -109,6 +106,7 @@
 //! at exit beside BXSCAN's line, N the subjects this loop scanned.
 
 use super::*;
+use crate::algorithm::blastp::x_seed_fused::XHitBf;
 use crate::algorithm::tblastn::x_scan_bf::{x_scan_one_range_bf, X_SCAN_BF_SLACK};
 use std::cell::RefCell;
 
@@ -142,41 +140,12 @@ pub(crate) fn x_bxscan_bf() -> bool {
 // No NCBI counterpart: reads the LOSAT_X_BXHITBF switch once; it does not change any value NCBI
 // computes.
 /// EXPERIMENT (LOSAT_X_BXHITBF): whether the direct loop takes the too-far and overlap outcomes
-/// without a branch where [`x_hitbf_fits`] holds (module header); a switch of the strict set, on
+/// without a branch where [`XHitBf::fits`] holds (module header); a switch of the strict set, on
 /// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.
 pub(crate) fn x_bxhitbf() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BXHITBF"))
-}
-
-// No NCBI counterpart: the range in which LOSAT's branch-free test gives the reference's outcomes;
-// it does not change any value NCBI computes.
-/// EXPERIMENT (LOSAT_X_BXHITBF): whether [`x_hit_bf`] gives the reference's outcomes for a subject
-/// of `length` letters scanned at the diagonal offset `offset` (module header): `1 <= word <
-/// window`, `0 <= offset` and `offset + length + 2 window < 2^30`.
-fn x_hitbf_fits(offset: i32, length: usize, window: i32, word: i32) -> bool {
-    let room = (1i64 << 30) - i64::from(offset) - 2 * i64::from(window);
-    1 <= word && word < window && 0 <= offset && i64::try_from(length).is_ok_and(|n| n < room)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-551 (module header).
-/// EXPERIMENT (LOSAT_X_BXHITBF): the two-hit test of one hit on `cell`, with `here = s +
-/// diag_offset`, `word2 = 2 wordsize`, `span2 = 2 (window - wordsize)` and `window2 = 2 window`:
-/// when the cell's flag is 0 and the hit is too far or overlaps, stores what the reference stores
-/// and returns `true`; otherwise (a flag-1 cell or a candidate) leaves the cell and returns
-/// `false`. Exact where [`x_hitbf_fits`] holds for the subject (module header).
-#[inline(always)]
-fn x_hit_bf(cell: &mut DiagStruct, here: u32, word2: i32, span2: u32, window2: i32) -> bool {
-    let raw = cell.raw_bits();
-    let d2 = here.wrapping_mul(2).wrapping_sub(raw << 1) as i32;
-    let candidate = (d2.wrapping_sub(word2) as u32) < span2;
-    // `|`, not `||`: both tests are taken without a branch.
-    if ((raw as i32) < 0) | candidate {
-        return false;
-    }
-    cell.set_raw_bits(if d2 >= window2 { here } else { raw });
-    true
 }
 
 /// EXPERIMENT (LOSAT_X_BXSCANSHADOW): subjects compared so far.
@@ -325,7 +294,7 @@ pub(crate) fn x_word_finder_scan(
 
 // No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's hits and table.
 /// EXPERIMENT (LOSAT_X_BXHITBF): whether the direct loop for `subject` is the branch-free one:
-/// `hit_bf` (the switch) and [`x_hitbf_fits`] at the table's offset before the subject.
+/// `hit_bf` (the switch) and [`XHitBf::fits`] at the table's offset before the subject.
 fn x_hitbf_acts(
     hit_bf: bool,
     options: &ResolvedOptions,
@@ -333,7 +302,7 @@ fn x_hitbf_acts(
     diagonals: &Diagonals,
 ) -> bool {
     hit_bf
-        && x_hitbf_fits(
+        && XHitBf::fits(
             diagonals.offset,
             subject.len().saturating_sub(1),
             options.window_size,
@@ -345,7 +314,7 @@ fn x_hitbf_acts(
 // ports the NCBI code); both give the reference's hits and table.
 // The direct loop: `Lookup::scan` and `word_finder_plain` in one function (`x_word_finder_direct_with`).
 // EXPERIMENT (LOSAT_X_BXSCANBF): `branch_free` scans the standard table with `x_scan_one_range_bf`.
-// EXPERIMENT (LOSAT_X_BXHITBF): with `hit_bf`, where `x_hitbf_fits` holds for the subject, the
+// EXPERIMENT (LOSAT_X_BXHITBF): with `hit_bf`, where `XHitBf::fits` holds for the subject, the
 // instance with the branch-free two-hit test, `x_word_finder_direct_bf` (module header).
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
@@ -430,9 +399,9 @@ fn x_word_finder_direct_bf(
 // `Lookup::scan` (its range set-up and loop) and `word_finder_plain` (the statements per pair)
 // in one function; the pairs are read from the scanner's buffer. EXPERIMENT (LOSAT_X_BXSCANBF):
 // `branch_free` scans the standard table with `x_scan_one_range_bf` (module header).
-// EXPERIMENT (LOSAT_X_BXHITBF): with `HIT_BF` (only where the caller found `x_hitbf_fits` to hold)
-// each hit first goes through the branch-free two-hit test (`x_hit_bf`), and only a flag-1 cell or a
-// candidate reaches the statements of `word_finder_plain`.
+// EXPERIMENT (LOSAT_X_BXHITBF): with `HIT_BF` (only where the caller found `XHitBf::fits` to hold)
+// each hit first goes through the branch-free two-hit test (`XHitBf::test`), and only a flag-1 cell
+// or a candidate reaches the statements of `word_finder_plain`.
 #[inline(always)]
 fn x_word_finder_direct_with<const HIT_BF: bool>(
     batch: &PreparedQueryBatch,
@@ -472,12 +441,9 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
     // EXPERIMENT (LOSAT_X_BXSCANBF): room for the pairs the branch-free scan writes past
     // `array_size` (never read).
     let room = capacity + if branch_free { X_SCAN_BF_SLACK } else { 0 };
-    // EXPERIMENT (LOSAT_X_BXHITBF): the constants of `x_hit_bf` (in range: the caller checked
-    // x_hitbf_fits, so 2 window < 2^30).
-    let offset = diagonals.offset;
-    let word2 = word.wrapping_mul(2);
-    let span2 = window.wrapping_sub(word).wrapping_mul(2) as u32;
-    let window2 = window.wrapping_mul(2);
+    // EXPERIMENT (LOSAT_X_BXHITBF): the constants of the branch-free test (the caller checked
+    // XHitBf::fits).
+    let bf = XHitBf::in_range(diagonals.offset, window, word);
     X_PAIRS.with(|buffer| {
         let mut buffer = buffer.borrow_mut();
         if buffer.len() < room {
@@ -511,7 +477,7 @@ fn x_word_finder_direct_with<const HIT_BF: bool>(
                     // SAFETY: 0 <= index <= mask = entries.len() - 1 (a power of two less one,
                     // `Diagonals::new`).
                     let cell = unsafe { diagonals.entries.get_unchecked_mut(index) };
-                    if x_hit_bf(cell, s.wrapping_add(offset) as u32, word2, span2, window2) {
+                    if bf.test(cell, bf.here(s)) {
                         continue;
                     }
                 }
@@ -904,7 +870,7 @@ mod tests {
                 }
             }
             // EXPERIMENT (LOSAT_X_BXHITBF): the edge of the branch-free test's range. At the most
-            // offset `x_hitbf_fits` allows for this subject (cleared cells) the test acts, and one
+            // offset `XHitBf::fits` allows for this subject (cleared cells) the test acts, and one
             // more it does not; the loops agree at both.
             if window > options.word_size {
                 let most = (1 << 30) - 1 - (subject.len() as i32 - 1) - 2 * window;
@@ -1075,7 +1041,7 @@ mod tests {
         (diff < word).then_some(cell)
     }
 
-    /// `x_hit_bf` on a copy of `cell`: the cell after it and whether it took the hit.
+    /// `XHitBf::test` on a copy of `cell`: the cell after it and whether it took the hit.
     fn bf_outcome(
         cell: DiagStruct,
         s: i32,
@@ -1084,19 +1050,14 @@ mod tests {
         word: i32,
     ) -> (DiagStruct, bool) {
         let mut next = cell;
-        let taken = x_hit_bf(
-            &mut next,
-            (s + offset) as u32,
-            2 * word,
-            (2 * (window - word)) as u32,
-            2 * window,
-        );
+        let bf = XHitBf::in_range(offset, window, word);
+        let taken = bf.test(&mut next, bf.here(s));
         (next, taken)
     }
 
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:519-551 (module header).
     // EXPERIMENT (LOSAT_X_BXHITBF): the branch-free test against the reference statements at the
-    // edges of its range: offsets from 0 to the most `x_hitbf_fits` allows for the subject's length
+    // edges of its range: offsets from 0 to the most `XHitBf::fits` allows for the subject's length
     // (and that it allows no more), word sizes from 1 to window - 1, windows from 2 to 2^28 - 1,
     // subject positions at both ends, and cells around the outcomes' edges (diff = wordsize - 1,
     // wordsize, window - 1, window), the cleared cell (`-window`), a new table's 0, the lowest and
@@ -1115,9 +1076,9 @@ mod tests {
                 for length in [1usize, 2, 100, 1 << 20] {
                     let most = (1i64 << 30) - 1 - length as i64 - 2 * i64::from(window);
                     let most = i32::try_from(most).unwrap();
-                    assert!(x_hitbf_fits(most, length, window, word));
-                    assert!(!x_hitbf_fits(most + 1, length, window, word));
-                    assert!(!x_hitbf_fits(-1, length, window, word));
+                    assert!(XHitBf::fits(most, length, window, word));
+                    assert!(!XHitBf::fits(most + 1, length, window, word));
+                    assert!(!XHitBf::fits(-1, length, window, word));
                     for offset in [0, most / 2, most] {
                         let high = offset + length as i32;
                         for s in [0, 1, length as i32 / 2, length as i32 - 1] {
@@ -1162,16 +1123,16 @@ mod tests {
             }
         }
         assert!(outcomes.iter().all(|&n| n > 0), "{outcomes:?}");
-        assert!(!x_hitbf_fits(0, 10, 3, 3));
-        assert!(!x_hitbf_fits(0, 10, 3, 0));
-        assert!(!x_hitbf_fits(0, 10, 0, 3));
-        assert!(x_hitbf_fits(0, 10, 3, 2));
+        assert!(!XHitBf::fits(0, 10, 3, 3));
+        assert!(!XHitBf::fits(0, 10, 3, 0));
+        assert!(!XHitBf::fits(0, 10, 0, 3));
+        assert!(XHitBf::fits(0, 10, 3, 2));
         // Just past the range: a cleared cell at the end of a subject is too far for the
         // reference (diff = 2^30 + 499), but twice that wraps in an i32 and the branch-free test
         // reads it as an overlap.
         let (window, word, length) = (1000, 3, 1000usize);
         let offset = (1 << 30) - 1500;
-        assert!(!x_hitbf_fits(offset, length, window, word));
+        assert!(!XHitBf::fits(offset, length, window, word));
         let cleared = DiagStruct::clear(window);
         let expected = two_hit_reference(cleared, 999, offset, window, word).unwrap();
         assert_ne!(expected, cleared);

@@ -1,5 +1,5 @@
-//! NCBI's XML object stream (`CObjectOStreamXml`, outfmt 5; later the XML2 formats 14 and 16
-//! in its standard-XML mode) for the calls of `Encoder`.
+//! NCBI's XML object stream (`CObjectOStreamXml`, outfmt 5, and the XML2 formats 14 and 16 in
+//! its standard-XML mode) for the calls of `Encoder`.
 //!
 //! BLAST's XML writer (`BlastXML_FormatReport`, algo/blast/format/blastxml_format.cpp)
 //! serializes a document in pieces and joins them, so this encoder has three kinds of start:
@@ -9,6 +9,14 @@
 //! erased: the first tag without an end of line, and the end of line of `EndOfWrite` after the
 //! last). The caller cuts and joins the pieces (`report::blast_xml::writer`) and may add text
 //! between the calls with `raw`.
+//!
+//! The XML2 formats (`CBlastOutput2`, objects/blastxml2/blastxml2.asn) use the stream in its
+//! standard-XML mode (`SetEnforcedStdXml`, blastxml2_format.cpp:723, :738, :789), whose tags
+//! differ from outfmt 5's: a member's tag is the member name alone, a CHOICE writes its type tag and
+//! then the variant as a member, a SEQUENCE OF VisibleString repeats the member's tag for each
+//! string. A 14 side file is a `xml2_document` (the declaration, the root with its namespace
+//! attributes) and a 16 report an `xml2_report` (the root after an end of line, a final end of
+//! line, no declaration).
 //!
 //! NCBI reference (598d8ae6): c++/src/serial/objostrxml.cpp:1009-1042
 //! ```c++
@@ -56,7 +64,19 @@ enum Piece {
     Object,
     /// `Write` with its first line erased.
     Fragment,
+    /// `Write` of a `BlastOutput2` root (the 14 side file): the declaration without a DOCTYPE,
+    /// the root tag with the namespace attributes, and `EndOfWrite`'s end of line.
+    Xml2Document,
+    /// A `BlastOutput2` of the 16 document (`CBlastOStreamXml`, blastxml2_format.cpp:704-714,
+    /// whose file header is empty): the root after an end of line, and `EndOfWrite`'s end of
+    /// line after it.
+    Xml2Report,
 }
+
+/// The attributes of the root tag of a 14 side file (`x_WriteClassNamespace`, objostrxml.cpp:
+/// 284-342): the namespace, the schema instance namespace and the schema location, each on a
+/// line of its own, and a line break before the `>`.
+pub const XML2_ROOT_ATTRIBUTES: &str = "\n    xmlns=\"http://www.ncbi.nlm.nih.gov\"\n    xmlns:xs=\"http://www.w3.org/2001/XMLSchema-instance\"\n    xs:schemaLocation=\"http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd\"\n";
 
 /// The XML encoder, appending to `out`.
 pub struct XmlEncoder<'b> {
@@ -70,6 +90,10 @@ pub struct XmlEncoder<'b> {
     end_tag: bool,
     /// `CObjectOStreamXml::m_SkipIndent`: the next opening tag is not preceded by an end of line.
     skip_indent: bool,
+    /// The standard-XML mode (`SetEnforcedStdXml`): the XML2 formats.
+    std_xml: bool,
+    /// The root tag still to write has the namespace attributes (a 14 side file).
+    root_attributes: bool,
     /// The names of the open tags, innermost last: a class value's type name (`begin_sequence`)
     /// or a member's tag (`member`), each one a slice of `names` between two `marks`.
     names: Vec<u8>,
@@ -86,6 +110,8 @@ impl<'b> XmlEncoder<'b> {
             indent: 0,
             end_tag: false,
             skip_indent: piece == Piece::Fragment,
+            std_xml: matches!(piece, Piece::Xml2Document | Piece::Xml2Report),
+            root_attributes: piece == Piece::Xml2Document,
             names: Vec::new(),
             marks: Vec::new(),
             error: None,
@@ -107,6 +133,17 @@ impl<'b> XmlEncoder<'b> {
     /// end of line before it, an end of line after it.
     pub fn fragment(out: &'b mut Vec<u8>) -> Self {
         Self::new(out, Piece::Fragment, "")
+    }
+
+    /// A 14 side file: the declaration, the `BlastOutput2` root with the namespace attributes,
+    /// the standard-XML mode.
+    pub fn xml2_document(out: &'b mut Vec<u8>) -> Self {
+        Self::new(out, Piece::Xml2Document, "")
+    }
+
+    /// One `BlastOutput2` of a 16 document, in the standard-XML mode.
+    pub fn xml2_report(out: &'b mut Vec<u8>) -> Self {
+        Self::new(out, Piece::Xml2Report, "")
     }
 
     /// Text of the caller between two calls (the joints of the pieces).
@@ -135,6 +172,9 @@ impl<'b> XmlEncoder<'b> {
         }
         self.out.push(b'<');
         self.out.extend_from_slice(&self.names[name_start..]);
+        if std::mem::take(&mut self.root_attributes) {
+            self.out.extend_from_slice(XML2_ROOT_ATTRIBUTES.as_bytes());
+        }
         self.out.push(b'>');
         self.indent += 2;
         self.end_tag = false;
@@ -180,6 +220,13 @@ impl Encoder for XmlEncoder<'_> {
     /// (`SetEncoding(eEncoding_Ascii)`, blastxml_format.cpp:786: `US-ASCII`; the DTD prefix
     /// `SetDefaultDTDFilePrefix`, :789.)
     fn begin_document(&mut self, type_name: &str) {
+        if self.piece == Piece::Xml2Document {
+            // `WriteFileHeader` of the standard-XML mode: no DOCTYPE (objostrxml.cpp:232-276,
+            // `m_UseSchemaRef` / `m_EnforcedStdXml`).
+            self.out
+                .extend_from_slice(b"<?xml version=\"1.0\" encoding=\"US-ASCII\"?>");
+            return;
+        }
         if self.piece != Piece::Document {
             return;
         }
@@ -217,8 +264,15 @@ impl Encoder for XmlEncoder<'_> {
     }
 
     /// `BeginClassMember`: `<Type_member>` (`PrintTagName`, objostrxml.cpp:1089-1138: the
-    /// class's name, an underscore and the member's name, outside the standard-XML mode).
+    /// class's name, an underscore and the member's name, outside the standard-XML mode; in it
+    /// the member's name alone).
     fn member(&mut self, name: &str, _tag: u8) {
+        if self.std_xml {
+            self.push_name(&[name.as_bytes()]);
+            let start = *self.marks.last().expect("just pushed");
+            self.open_tag(start);
+            return;
+        }
         let class_start = self.marks.last().copied().unwrap_or(0);
         let class_end = self.names.len();
         let start = class_end;
@@ -244,11 +298,46 @@ impl Encoder for XmlEncoder<'_> {
     /// `EndContainer`.
     fn end_list(&mut self) {}
 
-    fn variant(&mut self, _name: &str, _tag: u8) {
-        self.fail(SerialError::XmlUnsupported("CHOICE"));
+    /// `BeginChoice` and `BeginChoiceVariant`: in the standard-XML mode the CHOICE's type tag
+    /// and the variant's name as a member tag (`<Target><db>`); outside it NCBI's stream
+    /// writes an element LOSAT's outfmt 5 never needs.
+    fn variant(&mut self, type_name: &str, name: &str, tag: u8) {
+        if !self.std_xml {
+            self.fail(SerialError::XmlUnsupported("CHOICE"));
+            return;
+        }
+        self.begin_sequence(type_name);
+        self.member(name, tag);
     }
 
-    fn end_variant(&mut self) {}
+    /// `EndChoiceVariant` and `EndChoice`.
+    fn end_variant(&mut self) {
+        if self.std_xml {
+            self.end_member();
+            self.end_sequence();
+        }
+    }
+
+    /// A SEQUENCE OF VisibleString variant in the standard-XML mode: the member's tag is
+    /// repeated for each string, with no wrapper around them
+    /// (`<Target><subjects>Subject_1</subjects><subjects>Subject_2</subjects></Target>`).
+    fn variant_string_list<I>(&mut self, type_name: &str, name: &str, tag: u8, items: I)
+    where
+        I: IntoIterator,
+        I::Item: AsRef<[u8]>,
+    {
+        if !self.std_xml {
+            self.fail(SerialError::XmlUnsupported("CHOICE"));
+            return;
+        }
+        self.begin_sequence(type_name);
+        for item in items {
+            self.member(name, tag);
+            self.visible_str(item.as_ref());
+            self.end_member();
+        }
+        self.end_sequence();
+    }
 
     /// `WriteInt4`: `PutInt4`, the decimal digits.
     fn int(&mut self, value: i32) {

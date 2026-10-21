@@ -64,6 +64,9 @@
 //! A chunk with a discontiguous megablast table goes to the child module `disc`
 //! (`x_pair_seed_disc.rs`, LOSAT_X_PAIRPARDISC: the two-hit stage of dc-megablast on the same
 //! strips, with its own switches; LOSAT_X_PAIRPARDISCARR: the same with the diagonal array).
+//! A chunk searched with a table that is not two-stage (the direct table of word sizes 4 to
+//! 8, `-task blastn-short`) goes to the child module `na` (`x_pair_seed_na.rs`,
+//! LOSAT_X_PAIRPARNA, called by `run.rs` as `run_na`).
 
 use super::DiagStruct;
 use super::{
@@ -84,6 +87,10 @@ use std::sync::{Mutex, OnceLock};
 
 #[path = "x_pair_seed_disc.rs"]
 mod disc;
+
+#[path = "x_pair_seed_na.rs"]
+mod na;
+pub(super) use na::{run as run_na, NaInputs};
 
 // EXPERIMENT (LOSAT_X_PAIRPARFOLD): the fold of both strips paths split by diagonal-hash bucket
 // over the pool (`x_pair_seed_part.rs`); its scratch is a field of `SubjectScratch`.
@@ -375,65 +382,65 @@ fn scan_strip(x: &Inputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
             }
         });
     };
-    let mb_scan_kind = select_mb_scan_kind(lut_word_length, scan_step, x.subject_masked);
-    match mb_scan_kind {
+    scan_kernel(
+        packed,
+        subject_len,
+        lut_word_length,
+        scan_step,
+        x.subject_masked,
+        start,
+        end,
+        &mut on_kmer,
+    );
+}
+
+/// The scan kernel `scan_subject_kmers_with_ranges` picks for this lookup width and step,
+/// from `start` to `end` (`scan_strip`, and the child module `na`).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn scan_kernel<F: FnMut(usize, u64)>(
+    packed: &[u8],
+    subject_len: usize,
+    lut_word_length: usize,
+    scan_step: usize,
+    subject_masked: bool,
+    start: usize,
+    end: usize,
+    on_kmer: &mut F,
+) {
+    match select_mb_scan_kind(lut_word_length, scan_step, subject_masked) {
         Some(MbScanSubjectKind::Any) => scan_subject_kmers_range_mb_any(
             packed,
             subject_len,
             lut_word_length,
             scan_step,
-            x.subject_masked,
+            subject_masked,
             start,
             end,
-            &mut on_kmer,
+            on_kmer,
         ),
-        Some(MbScanSubjectKind::Scan9_1) => scan_subject_kmers_range_mb_9_1(
-            packed,
-            subject_len,
-            scan_step,
-            start,
-            end,
-            &mut on_kmer,
-        ),
-        Some(MbScanSubjectKind::Scan9_2) => scan_subject_kmers_range_mb_9_2(
-            packed,
-            subject_len,
-            scan_step,
-            start,
-            end,
-            &mut on_kmer,
-        ),
-        Some(MbScanSubjectKind::Scan10_1) => scan_subject_kmers_range_mb_10_1(
-            packed,
-            subject_len,
-            scan_step,
-            start,
-            end,
-            &mut on_kmer,
-        ),
-        Some(MbScanSubjectKind::Scan10_2) => scan_subject_kmers_range_mb_10_2(
-            packed,
-            subject_len,
-            scan_step,
-            start,
-            end,
-            &mut on_kmer,
-        ),
-        Some(MbScanSubjectKind::Scan10_3) => scan_subject_kmers_range_mb_10_3(
-            packed,
-            subject_len,
-            scan_step,
-            start,
-            end,
-            &mut on_kmer,
-        ),
+        Some(MbScanSubjectKind::Scan9_1) => {
+            scan_subject_kmers_range_mb_9_1(packed, subject_len, scan_step, start, end, on_kmer)
+        }
+        Some(MbScanSubjectKind::Scan9_2) => {
+            scan_subject_kmers_range_mb_9_2(packed, subject_len, scan_step, start, end, on_kmer)
+        }
+        Some(MbScanSubjectKind::Scan10_1) => {
+            scan_subject_kmers_range_mb_10_1(packed, subject_len, scan_step, start, end, on_kmer)
+        }
+        Some(MbScanSubjectKind::Scan10_2) => {
+            scan_subject_kmers_range_mb_10_2(packed, subject_len, scan_step, start, end, on_kmer)
+        }
+        Some(MbScanSubjectKind::Scan10_3) => {
+            scan_subject_kmers_range_mb_10_3(packed, subject_len, scan_step, start, end, on_kmer)
+        }
         Some(MbScanSubjectKind::Scan11_1Mod4) => scan_subject_kmers_range_mb_11_1mod4(
             packed,
             subject_len,
             scan_step,
             start,
             end,
-            &mut on_kmer,
+            on_kmer,
         ),
         Some(MbScanSubjectKind::Scan11_2Mod4) => scan_subject_kmers_range_mb_11_2mod4(
             packed,
@@ -441,7 +448,7 @@ fn scan_strip(x: &Inputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
             scan_step,
             start,
             end,
-            &mut on_kmer,
+            on_kmer,
         ),
         Some(MbScanSubjectKind::Scan11_3Mod4) => scan_subject_kmers_range_mb_11_3mod4(
             packed,
@@ -449,17 +456,17 @@ fn scan_strip(x: &Inputs<'_>, job: &StripJob, out: &mut Vec<Seed>) {
             scan_step,
             start,
             end,
-            &mut on_kmer,
+            on_kmer,
         ),
         None => scan_subject_kmers_range(
             packed,
             subject_len,
             lut_word_length,
             scan_step,
-            x.subject_masked,
+            subject_masked,
             start,
             end,
-            &mut on_kmer,
+            on_kmer,
         ),
     }
 }
@@ -1361,12 +1368,20 @@ fn seed_stage(
     stats
 }
 
-/// The result of the shadow computation of one chunk, compared after the reference ran
-/// (`disc`: made by the child module `disc`, LOSAT_X_PAIRPARDISCSHADOW).
+/// The strips path that made a `Stash`: this module (LOSAT_X_PAIRPARSHADOW), the child module
+/// `disc` (LOSAT_X_PAIRPARDISCSHADOW) or the child module `na` (LOSAT_X_PAIRPARNASHADOW).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StashPath {
+    OneHit,
+    Disc,
+    Na,
+}
+
+/// The result of the shadow computation of one chunk, compared after the reference ran.
 struct Stash {
     hits: Vec<UngappedHit>,
     hash: DiagHashTable,
-    disc: bool,
+    path: StashPath,
 }
 
 thread_local! {
@@ -1483,7 +1498,7 @@ pub(super) fn run(
             *s.borrow_mut() = Some(Stash {
                 hits: shadow_hits,
                 hash,
-                disc: false,
+                path: StashPath::OneHit,
             })
         });
         return false;
@@ -1510,10 +1525,10 @@ pub(super) fn shadow_check(
     let Some(stash) = STASH.with(|s| s.borrow_mut().take()) else {
         return;
     };
-    let name = if stash.disc {
-        "LOSAT_X_PAIRPARDISCSHADOW"
-    } else {
-        "LOSAT_X_PAIRPARSHADOW"
+    let name = match stash.path {
+        StashPath::OneHit => "LOSAT_X_PAIRPARSHADOW",
+        StashPath::Disc => "LOSAT_X_PAIRPARDISCSHADOW",
+        StashPath::Na => "LOSAT_X_PAIRPARNASHADOW",
     };
     let key = |h: &UngappedHit| {
         (
@@ -1584,9 +1599,16 @@ pub(super) fn shadow_check(
             "{name}: diagonal hash cell {i} differs: reference {r:?} strips {p:?}"
         );
     }
-    if stash.disc {
-        disc::count_shadow(ungapped_hits.len(), diag_hash.occupancy);
-        return;
+    match stash.path {
+        StashPath::Disc => {
+            disc::count_shadow(ungapped_hits.len(), diag_hash.occupancy);
+            return;
+        }
+        StashPath::Na => {
+            na::count_shadow(ungapped_hits.len(), diag_hash.occupancy);
+            return;
+        }
+        StashPath::OneHit => {}
     }
     SHADOW_CHUNKS.fetch_add(1, Ordering::Relaxed);
     SHADOW_HITS.fetch_add(ungapped_hits.len() as u64, Ordering::Relaxed);
@@ -1595,7 +1617,7 @@ pub(super) fn shadow_check(
 
 /// No NCBI counterpart: the one summary line of LOSAT_X_PAIRPARSHADOW, and with LOSAT_TIMING
 /// the counters of LOSAT_X_PAIRPAR, on stderr at the end of the search; then those of
-/// LOSAT_X_PAIRPARDISC (child module `disc`).
+/// LOSAT_X_PAIRPARDISC (child module `disc`) and LOSAT_X_PAIRPARNA (child module `na`).
 pub(super) fn summary() {
     let (on, shadow) = switches();
     if shadow {
@@ -1628,6 +1650,7 @@ pub(super) fn summary() {
         );
     }
     disc::summary();
+    na::summary();
 }
 
 #[cfg(test)]

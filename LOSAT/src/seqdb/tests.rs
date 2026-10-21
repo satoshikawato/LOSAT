@@ -10,7 +10,7 @@ use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use super::alias::{test_read_values, test_split_quoted};
-use super::header::decode_defline_set;
+use super::header::{decode_defline_set, decode_defline_taxids};
 use super::index::IndexFile;
 use super::*;
 use crate::core::blast_encoding::{encode_iupac_to_blastna, iupacna_to_ncbi4na};
@@ -800,6 +800,43 @@ fn bl_ord_id(integer: &[u8]) -> Vec<u8> {
     seqid.extend_from_slice(integer);
     seqid.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0]);
     seqid
+}
+
+/// The taxid of a definition line is skipped by `decode_defline_set` and read apart by
+/// `decode_defline_taxids` (the XML2 and JSON formats write it).
+#[test]
+fn the_taxid_of_a_definition_line_is_read_apart() {
+    let path = Path::new("test.phr");
+    let plain = defline_record(b"t1 title", &bl_ord_id(&[0x05]));
+    // `taxid [2] INTEGER` 0, then 9606 (0x2586), then a negative value read as it is
+    let mut tagged = Vec::new();
+    for (taxid, bytes) in [(0, vec![0x00]), (9606, vec![0x25, 0x86]), (-1, vec![0xff])] {
+        let mut record = plain.clone();
+        let at = record
+            .windows(5)
+            .position(|window| window == [0xa2, 0x80, 0x02, 0x01, 0x00])
+            .unwrap();
+        let mut member = vec![0xa2, 0x80, 0x02, bytes.len() as u8];
+        member.extend_from_slice(&bytes);
+        record.splice(at..at + 5, member);
+        tagged.push((taxid, record));
+    }
+    for (taxid, record) in &tagged {
+        assert_eq!(decode_defline_taxids(record, path).unwrap(), [*taxid]);
+        // the title and ordinal id are read the same, and the default decode leaves the taxid 0
+        let deflines = decode_defline_set(record, path).unwrap();
+        assert_eq!(deflines[0].title, b"t1 title");
+        assert_eq!(deflines[0].volume_ordinal, 5);
+        assert_eq!(deflines[0].taxid, 0);
+    }
+    // a definition line without the member
+    let mut record = defline_record(b"t1", &bl_ord_id(&[0x05]));
+    let at = record
+        .windows(5)
+        .position(|window| window == [0xa2, 0x80, 0x02, 0x01, 0x00])
+        .unwrap();
+    record.drain(at..at + 7);
+    assert_eq!(decode_defline_taxids(&record, path).unwrap(), [0]);
 }
 
 #[test]

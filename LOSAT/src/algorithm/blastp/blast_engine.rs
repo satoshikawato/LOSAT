@@ -2363,12 +2363,14 @@ fn blastp_tabular_fields_require_rendered_alignment(fields: &[BlastpTabularField
 
 /// The report of one requested BLASTP format: one of LOSAT's text reports (outfmt 0, 6 and
 /// 7, with the custom fields of the tabular ones), the Seq-annot of Seq-aligns of each
-/// query (outfmt 8, 9, 12; `seqalign`), or BLAST XML (outfmt 5; `blast_xml`).
+/// query (outfmt 8, 9, 12; `seqalign`), BLAST XML (outfmt 5; `blast_xml`), or the XML2 / JSON
+/// documents (outfmt 15 and 16; `blast_xml2`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BlastpReport {
     Text(OutputFormat),
     Seqalign(crate::report::serial::SerialFormat),
     Xml,
+    Xml2(crate::report::blast_xml2::Xml2Kind),
 }
 
 impl BlastpReport {
@@ -2405,12 +2407,29 @@ fn blastp_is_xml(outfmt: &str) -> bool {
     })
 }
 
+/// The XML2 / JSON document of a `-outfmt` value (outfmt 15 and 16), read as NCBI reads it;
+/// `None` for the other formats.
+fn blastp_xml2_kind(outfmt: &str) -> Option<crate::report::blast_xml2::Xml2Kind> {
+    use crate::blastinput::app::ReportFormat;
+    use crate::report::blast_xml2::Xml2Kind;
+    let choice = crate::blastinput::app::parse_formatting_string(outfmt).ok()?;
+    match ReportFormat::from_number(choice.number)? {
+        ReportFormat::Xml2S => Some(Xml2Kind::Single16),
+        ReportFormat::JsonS => Some(Xml2Kind::Single15),
+        _ => None,
+    }
+}
+
 // NCBI blast_args.cpp:2657-2660; tabular.cpp:1100-1108:
 // ITERATE(list<ETabularField>, iter, m_FieldsToShow) { x_PrintField(*iter); }
 // Validate the CLI specification before loading any input sequences.
 pub(crate) fn validate_cli_outfmt(spec: &str) -> Result<String, String> {
-    // outfmt 5, 8, 9 and 12 have no fields (`report_format` has accepted them for BLASTP).
-    if blastp_seqalign_format(spec).is_some() || blastp_is_xml(spec) {
+    // outfmt 5, 8, 9, 12, 15 and 16 have no fields (`report_format` has accepted them for
+    // BLASTP).
+    if blastp_seqalign_format(spec).is_some()
+        || blastp_is_xml(spec)
+        || blastp_xml2_kind(spec).is_some()
+    {
         return Ok(spec.into());
     }
     let (format, fields) = OutputFormat::parse(spec)?;
@@ -6038,13 +6057,18 @@ fn search(
     // of its own whose report is written before the next block is searched
     // (`x_query_blocks.rs`, exactness argument in its header), where the one report is tabular
     // format 6, or with LOSAT_X_BPQBLOCKFMT outfmt 0 or 7 (the outfmt 0 prolog with the first
-    // block, the epilog and outfmt 7's count of the queries with the last); otherwise the search of
+    // block, the epilog and outfmt 7's count of the queries with the last), with
+    // LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with LOSAT_X_BPQBLOCKXML outfmt 5 (the header with the
+    // first block, the end with the last); otherwise the search of
     // all queries below. With `-db` the blocks are searched only when no definition line of the
-    // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, read
+    // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
+    // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, read
     // in the block search's pool before the first block), and with outfmt 0 and `-subject` only
     // when no subject's title is refused where the report shows it
-    // (`x_block_shown_titles_allowed`); otherwise the search of all queries below.
-    if let Some(blocks) = x_query_block_plan(
+    // (`x_block_shown_titles_allowed`), with outfmt 5 only when the names of the database, the
+    // queries and the subjects can be written (`x_query_blocks.rs` `x_block_xml_*_allowed`);
+    // otherwise the search of all queries below.
+    if let Some((x_kind, blocks)) = x_query_block_plan(
         &args,
         &searched_queries,
         &query_input,
@@ -6061,8 +6085,9 @@ fn search(
             ..
         } = &mut *outputs;
         let outfmt = formats[0].outfmt;
-        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): an outfmt 0 report, whose shown titles are checked below.
-        let x_pairwise = matches!(OutputFormat::parse(outfmt), Ok((OutputFormat::Pairwise, _)));
+        // EXPERIMENT (LOSAT_X_BPQBLOCKFMT, LOSAT_X_BPQBLOCKSA, LOSAT_X_BPQBLOCKXML): the report the
+        // blocks write, whose titles are checked below.
+        let x_pairwise = x_kind == super::x_query_blocks::XBlockReport::Pairwise;
         // EXPERIMENT (LOSAT_X_BPQBLOCKFMTSHADOW): copies of what the blocks write, compared below
         // with the search of all queries.
         let x_shadow = super::x_query_blocks::x_bp_qblock_fmt() == 2;
@@ -6071,19 +6096,44 @@ fn search(
                 // The last checks of the block search, on the pool; when one fails, nothing has
                 // been written and the search of all queries below runs: the lookup tables' words
                 // (`x_block_words_fit`), then with `-db` the definition lines
-                // (`database::x_titles_allow_blocks`), with outfmt 0 and `-subject` the subjects'
-                // titles (`x_block_shown_titles_allowed`).
+                // (`database::x_titles_allow_blocks`; for outfmt 8, 9, 12 and 5
+                // `database::x_titles_read_allow_blocks`), with outfmt 0 and `-subject` the
+                // subjects' titles (`x_block_shown_titles_allowed`), and with outfmt 5 the
+                // subjects' names (`x_block_xml_subjects_allowed`, `-subject`) and the database
+                // name and queries' names (`x_block_xml_run_allowed`).
                 if !x_block_words_fit(&args, &searched_queries, &query_input, batch_size, pool) {
                     return Ok(None);
                 }
-                let titles_allowed = match database {
-                    Some(database) => database::x_titles_allow_blocks(database, x_pairwise, pool),
-                    None => {
-                        !x_pairwise
-                            || x_block_shown_titles_allowed(&subjects.records, v1.is_some(), pool)
+                use super::x_query_blocks::XBlockReport;
+                let titles_allowed = match (database, x_kind) {
+                    // Outfmt 8, 9, 12 and 5 write no tabular id: only the definition lines' reading
+                    // and bytes can fail (`x_titles_read_allow_blocks`).
+                    (Some(database), XBlockReport::Seqalign | XBlockReport::Xml) => {
+                        database::x_titles_read_allow_blocks(database, pool)
                     }
+                    (Some(database), _) => {
+                        database::x_titles_allow_blocks(database, x_pairwise, pool)
+                    }
+                    (None, XBlockReport::Pairwise) => {
+                        x_block_shown_titles_allowed(&subjects.records, v1.is_some(), pool)
+                    }
+                    (None, XBlockReport::Xml) => {
+                        super::x_query_blocks::x_block_xml_subjects_allowed(&subjects.records, pool)
+                    }
+                    (None, _) => true,
                 };
                 if !titles_allowed {
+                    return Ok(None);
+                }
+                // EXPERIMENT (LOSAT_X_BPQBLOCKXML): the XML report's refusals of the database
+                // name and of the queries' names, which it makes before its first byte.
+                if x_kind == XBlockReport::Xml
+                    && !super::x_query_blocks::x_block_xml_run_allowed(
+                        database.map_or("", |database| database.name()),
+                        query_records,
+                        pool,
+                    )
+                {
                     return Ok(None);
                 }
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks
@@ -6305,11 +6355,15 @@ fn x_bp_encode_block_subjects(
 // EXPERIMENT (LOSAT_X_BPQBLOCK): the blocks of the block search, or `None` for the search of all
 // queries. The block search is taken only where the blocks' reports written one after the other
 // are the report of the search of all queries: one output, tabular format 6 (or with
-// LOSAT_X_BPQBLOCKFMT outfmt 0 or 7, `x_query_blocks.rs`), no `-query_loc` (every record is
+// LOSAT_X_BPQBLOCKFMT outfmt 0 or 7, with LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with
+// LOSAT_X_BPQBLOCKXML outfmt 5, `x_query_blocks.rs`; the kind of report is returned with the
+// blocks), no `-query_loc` (every record is
 // searched whole), every batch read, more than one block, no subject whose tabular ID the
 // reference path rejects before it writes any row (`tabular_subject_ids`, for outfmt 6 and 7;
 // with `-db`, the definition lines are checked where the blocks are searched,
-// `database::x_titles_allow_blocks`; outfmt 0's titles also there, `x_block_shown_titles_allowed`),
+// `database::x_titles_allow_blocks` (outfmt 8, 9, 12 and 5: `x_titles_read_allow_blocks`); outfmt
+// 0's titles also there, `x_block_shown_titles_allowed`; outfmt 5's names too,
+// `x_query_blocks::x_block_xml_subjects_allowed` and `x_block_xml_run_allowed`),
 // no query whose effective search space in NCBI's `Int8` the reference path rejects
 // (`blastp_database_search_space`, with `-db` or `-dbsize`), and none of the other refusals of the
 // search of all queries that come before its rows (`x_block_search_refuses_nothing`): a block
@@ -6326,7 +6380,11 @@ fn x_query_block_plan(
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
     v1: bool,
-) -> Option<Vec<std::ops::Range<usize>>> {
+) -> Option<(
+    super::x_query_blocks::XBlockReport,
+    Vec<std::ops::Range<usize>>,
+)> {
+    use super::x_query_blocks::XBlockReport;
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
     if args.query_range.is_some()
         || outputs.formats.len() != 1
@@ -6338,23 +6396,37 @@ fn x_query_block_plan(
     {
         return None;
     }
-    // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): outfmt 0 and 7 too.
-    let tabular = match OutputFormat::parse(outputs.formats[0].outfmt) {
-        Ok((OutputFormat::Tabular, _)) => true,
+    // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): outfmt 0 and 7 too. EXPERIMENT (LOSAT_X_BPQBLOCKSA,
+    // LOSAT_X_BPQBLOCKXML): outfmt 8, 9, 12 and 5, which `OutputFormat::parse` does not know.
+    let kind = match OutputFormat::parse(outputs.formats[0].outfmt) {
+        Ok((OutputFormat::Tabular, _)) => XBlockReport::Tabular,
         Ok((OutputFormat::TabularWithComments, _))
             if super::x_query_blocks::x_bp_qblock_fmt() > 0 =>
         {
-            true
+            XBlockReport::Tabular
         }
         // ABI v1's outfmt 0 titles of a database are not argued here.
         Ok((OutputFormat::Pairwise, _))
             if super::x_query_blocks::x_bp_qblock_fmt() > 0
                 && !(v1 && subject_source.database().is_some()) =>
         {
-            false
+            XBlockReport::Pairwise
+        }
+        Err(_)
+            if super::x_query_blocks::x_bp_qblock_sa()
+                && blastp_seqalign_format(outputs.formats[0].outfmt).is_some() =>
+        {
+            XBlockReport::Seqalign
+        }
+        Err(_)
+            if super::x_query_blocks::x_bp_qblock_xml()
+                && blastp_is_xml(outputs.formats[0].outfmt) =>
+        {
+            XBlockReport::Xml
         }
         _ => return None,
     };
+    let tabular = kind == XBlockReport::Tabular;
     match subject_source {
         BlastpSubjectSource::Fasta(subjects) => {
             if tabular
@@ -6394,7 +6466,7 @@ fn x_query_block_plan(
     let query_batches = query_input.batches(batch_size);
     let blocks = super::x_query_blocks::x_query_blocks(&query_batches, &lengths, block_letters)?;
     (blocks.len() > 1 && x_block_search_refuses_nothing(args, queries, &query_batches, &lengths))
-        .then_some(blocks)
+        .then_some((kind, blocks))
 }
 
 // EXPERIMENT (LOSAT_X_BPQBLOCK): whether the search of all queries passes the checks that refuse
@@ -6585,7 +6657,7 @@ fn blastp_database_name(args: &ResolvedBlastpArgs, subject_label: &str) -> Strin
 // {
 //     m_Outfile.exceptions(NcbiBadbit);
 // ```
-/// Writes and flushes the outfmt 0 prolog of every outfmt 0 format (`PrintProlog`), for a
+/// Writes and flushes the prolog of every outfmt 0, 15 and 16 format (`PrintProlog`), for a
 /// run that stops at its first query batch.
 fn write_pairwise_prologs(
     args: &ResolvedBlastpArgs,
@@ -6608,6 +6680,11 @@ fn write_pairwise_prologs(
                 total_letters,
                 pairwise_database.as_ref(),
             )?;
+            writer.flush()?;
+        } else if let Some(kind) = blastp_xml2_kind(format.outfmt) {
+            // The XML2 and JSON documents start with their prolog too.
+            let mut writer = format.sink.open()?;
+            writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
             writer.flush()?;
         }
     }
@@ -6652,6 +6729,17 @@ fn write_reports_without_queries(
         if blastp_is_xml(format.outfmt) {
             let mut writer = format.sink.open()?;
             writer.write_all(b"\n")?;
+            writer.flush()?;
+            continue;
+        }
+        // The XML2 and JSON documents write the prolog and the epilog without a query
+        // (`PrintProlog`, `PrintEpilog`: an empty pipe), and nothing for a query file that is
+        // empty (`Query is Empty!`, before the formatter).
+        if let Some(kind) = blastp_xml2_kind(format.outfmt) {
+            let mut writer = format.sink.open()?;
+            let mut bytes = Vec::new();
+            crate::report::blast_xml2::Xml2Document::new(kind, false).epilog(&mut bytes)?;
+            writer.write_all(&bytes)?;
             writer.flush()?;
             continue;
         }
@@ -7213,6 +7301,9 @@ fn run_resolved_in_pool(
                 }
                 if blastp_is_xml(format.outfmt) {
                     return Ok((BlastpReport::Xml, None));
+                }
+                if let Some(kind) = blastp_xml2_kind(format.outfmt) {
+                    return Ok((BlastpReport::Xml2(kind), None));
                 }
                 let (outfmt, custom_fields) =
                     OutputFormat::parse(format.outfmt).map_err(anyhow::Error::msg)?;
@@ -10604,10 +10695,8 @@ fn run_resolved_in_pool(
         None => Vec::new().into(),
     };
     let pairwise_database = database.map(database::BlastpDatabase::pairwise_database);
-    let mut format_warnings = Some(crate::report::query_warnings::QueryWarnings {
-        before: &query_warning_lines,
-        sink: &mut *outputs.diagnostics,
-    });
+    // The warnings are written once, with the first format (`QueryWarnings`).
+    let mut warning_lines: Option<&[Vec<u8>]> = Some(&query_warning_lines);
     // Each requested format prints the same final result without searching again.
     let mut output_result: Result<()> = Ok(());
     let observer = &mut outputs.observer;
@@ -10620,7 +10709,13 @@ fn run_resolved_in_pool(
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
-        let mut warnings = format_warnings.take();
+        // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
+        // format.
+        let mut warnings = (warning_lines.is_some() || matches!(outfmt, BlastpReport::Xml2(_)))
+            .then(|| crate::report::query_warnings::QueryWarnings {
+                before: warning_lines.take().unwrap_or(&[]),
+                sink: &mut *outputs.diagnostics,
+            });
         let format_result: Result<()> = match outfmt {
             BlastpReport::Seqalign(serial) => (|| -> Result<()> {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
@@ -10665,7 +10760,13 @@ fn run_resolved_in_pool(
                 writer.flush()?;
                 Ok(())
             })(),
-            BlastpReport::Xml => (|| -> Result<()> {
+            BlastpReport::Xml | BlastpReport::Xml2(_) => (|| -> Result<()> {
+                // The XML2 and JSON documents of outfmt 15 and 16 (`blast_xml2`) take the path
+                // of outfmt 5: the same per-query records, written by another writer.
+                let xml2_kind = match outfmt {
+                    BlastpReport::Xml2(kind) => Some(kind),
+                    _ => None,
+                };
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
                 // ```c++
                 //     if (m_FormatType == CFormattingArgs::eAsnText
@@ -10696,15 +10797,32 @@ fn run_resolved_in_pool(
                     Some(matrix) => matrix,
                     None if query_records.is_empty() => {
                         let mut writer = format.sink.open()?;
+                        if let Some(kind) = xml2_kind {
+                            // No report data is made without a query: the prolog and
+                            // the epilog alone.
+                            let mut bytes = Vec::new();
+                            crate::report::blast_xml2::Xml2Document::new(kind, false)
+                                .epilog(&mut bytes)?;
+                            writer.write_all(&bytes)?;
+                        }
                         writer.flush()?;
                         return Ok(());
                     }
                     None => {
+                        // The prolog is written before the search (`PrintProlog`); the report
+                        // data's constructor throws for the first query.
+                        if let Some(kind) = xml2_kind {
+                            let mut writer = format.sink.open()?;
+                            writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(
+                                kind,
+                            ))?;
+                            writer.flush()?;
+                        }
                         return Err(crate::cli::NativeError {
                             exit: 3,
                             message: "BLAST engine error: unsupported score matrix\n".to_string(),
                         }
-                        .into())
+                        .into());
                     }
                 };
                 let mut writer = format.sink.open()?;
@@ -10764,12 +10882,26 @@ fn run_resolved_in_pool(
                         .subject_placements
                         .length(s_idx, subject_records[s_idx].seq().len())
                 };
+                // The taxids of the reported subjects, read for the XML2 and JSON formats only.
+                let (xml_taxids, xml_taxonomy, xml_taxdb_notes): (
+                    Vec<i32>,
+                    Vec<crate::report::blast_xml::HitTaxonomy>,
+                    crate::algorithm::common::database::TaxdbNotes,
+                ) = match (xml2_kind, listed_titles.as_ref(), database) {
+                    (Some(_), Some(titles), Some(database)) => {
+                        titles.read_taxids(database, &hit_lists)?
+                    }
+                    _ => (Vec::new(), Vec::new(), Default::default()),
+                };
                 let xml_subjects = match (listed_subjects.as_ref(), listed_titles.as_ref()) {
                     // The stored titles by rank, of the records or of LOSAT_X_BPLISTEDLEAN
                     // (`subject_titles`, above).
                     (Some(listed), Some(_)) => crate::report::blast_xml::XmlSubjects::Database {
                         ordinals: &listed.ordinals,
                         titles: crate::report::blast_xml::XmlTitles::Shared(&subject_titles),
+                        // Only XML2 shows the taxid.
+                        taxids: &xml_taxids,
+                        taxonomy: &xml_taxonomy,
                         length: &database_length,
                     },
                     _ => crate::report::blast_xml::XmlSubjects::Records {
@@ -10820,9 +10952,15 @@ fn run_resolved_in_pool(
                     stats: xml_stats,
                     messages: xml_messages,
                     subjects: xml_subjects,
+                    taxdb_notes: xml_taxdb_notes,
                     masks: xml_masks,
+                    // NCBI did not search the batches that the search skipped (every query in
+                    // them invalid): XML2 shows it.
+                    searched: query_batch_skipped
+                        .iter()
+                        .map(|&skipped| !skipped)
+                        .collect(),
                     program: "BLASTP",
-                    queries_before: reports.x_queries_before,
                     epilog: reports.epilog,
                 };
                 // The rows of a query's HSPs are made from the searched letters: the final
@@ -10851,13 +10989,48 @@ fn run_resolved_in_pool(
                         crate::report::x_pairwise_par::pool(blastp_parallel_pool),
                     )
                 };
-                super::blast_xml::write_blastp_xml(
-                    &xml,
-                    &hit_lists,
-                    &mut xml_rows,
-                    &mut writer,
-                    warnings.as_mut(),
-                )?;
+                match xml2_kind {
+                    None => super::blast_xml::write_blastp_xml(
+                        &xml,
+                        &mut crate::report::blast_xml::BlastXmlWriter::new(
+                            reports.x_queries_before,
+                        ),
+                        &hit_lists,
+                        &mut xml_rows,
+                        &mut writer,
+                        warnings.as_mut(),
+                    )?,
+                    Some(kind) => {
+                        // gap costs only for a gapped search, `cbs` when the composition-based
+                        // statistics are on (blastxml2_format.cpp:531-546).
+                        let params = crate::report::blast_xml2::Xml2Run {
+                            target: if database.is_some() {
+                                crate::report::blast_xml2::Xml2Target::Database
+                            } else {
+                                crate::report::blast_xml2::Xml2Target::Subjects(
+                                    subject_records.len(),
+                                )
+                            },
+                            gapped: !args.ungapped,
+                            cbs: match args.comp_based_stats.mode {
+                                BlastpCompositionMode::NoCompositionBasedStats => 0,
+                                BlastpCompositionMode::CompositionBasedStats => 1,
+                                BlastpCompositionMode::CompositionMatrixAdjust => 2,
+                                BlastpCompositionMode::ForceFullMatrixAdjust => 3,
+                            },
+                            query_gencode: None,
+                            db_gencode: None,
+                        };
+                        super::blast_xml::write_blastp_xml(
+                            &xml,
+                            &mut crate::report::blast_xml2::Xml2Writer::new(kind, params),
+                            &hit_lists,
+                            &mut xml_rows,
+                            &mut writer,
+                            warnings.as_mut(),
+                        )?;
+                    }
+                }
                 // Flushed when written, as the other reports are.
                 writer.flush()?;
                 Ok(())

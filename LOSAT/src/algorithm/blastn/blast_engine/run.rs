@@ -3,7 +3,7 @@
 //! This module contains the main `run()` function that coordinates the BLASTN
 //! search process.
 
-use crate::api::local_blast::{FormatProbe, OutputSink, ReportOutputs};
+use crate::api::local_blast::{FormatOutput, FormatProbe, OutputSink, ReportOutputs};
 use crate::common::GapEditOp;
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -91,7 +91,7 @@ use super::super::lookup::x_mb_lut_keep;
 use super::super::lookup::{
     build_unmasked_ranges, encode_reverse_complement_blastna_into, DiscTemplates,
 };
-use super::super::pairwise::{pairwise_hits, DisplayMasks};
+use super::super::pairwise::{pairwise_hits, shown_query_masks, DisplayMasks};
 use super::super::query_split::{
     calculate_num_chunks, restrict_masks, split_query_batch, QueryChunk, SplitSizes,
 };
@@ -249,6 +249,12 @@ pub fn x_qgroup_par_print_summary() {
 /// counterpart: it prints counters and changes no value NCBI computes.
 pub fn x_db_cut_print_summary() {
     database::x_db_cut_print_summary();
+}
+
+/// EXPERIMENT (LOSAT_X_BNDBSTREAMSHADOW): the summary line `main` prints at exit. No NCBI
+/// counterpart: it prints counters and changes no value NCBI computes.
+pub fn x_db_stream_print_summary() {
+    database::x_db_stream_print_summary();
 }
 
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/ncbi_math.h:160-161
@@ -5163,6 +5169,9 @@ struct BlastnReportInputs<'a> {
     /// The ordinal ID of each reported sequence of a database search, by rank
     /// (`database::ReportedSubjects::ordinals`); `None` for a subject set.
     database_ordinals: Option<&'a [u32]>,
+    /// The opened database of a database search, which the XML2 and JSON formats read the taxids
+    /// of the reported sequences from; `None` for a subject set.
+    database_reader: Option<&'a database::BlastnDatabase>,
     /// Whether the hit lists were finished after each query batch's traceback (a database
     /// search, `run_in_pool`), not by `post_process_hits_and_write`.
     finished_hit_lists: bool,
@@ -5838,17 +5847,21 @@ fn post_process_hits_and_write(
         };
     let observer = &mut outputs.observer;
     // The warnings are written once, with the first format (`QueryWarnings`).
-    let mut warnings = Some(crate::report::query_warnings::QueryWarnings {
-        before: query_warnings,
-        sink: &mut *outputs.diagnostics,
-    });
+    let mut warning_lines = Some(query_warnings);
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(output_formats).enumerate()
     {
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
-        let mut format_warnings = warnings.take();
+        // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
+        // format.
+        let mut format_warnings = (warning_lines.is_some()
+            || matches!(output_format, BlastnOutputFormat::Xml2(_)))
+        .then(|| crate::report::query_warnings::QueryWarnings {
+            before: warning_lines.take().unwrap_or(&[]),
+            sink: &mut *outputs.diagnostics,
+        });
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
         // ```c
         // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
@@ -5911,7 +5924,10 @@ fn post_process_hits_and_write(
                 &mut writer,
                 format_warnings.as_mut(),
             )?;
-        } else if output_format == BlastnOutputFormat::Xml {
+        } else if output_format.is_structured_xml() {
+            // The XML2 / JSON documents of outfmt 15 and 16 take the path of outfmt 5: the same
+            // per-query records, written by another writer.
+            let xml2_kind = output_format.xml2_kind();
             // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:1431-1441
             // ```c++
             //     if (m_FormatType == CFormattingArgs::eAsnText
@@ -5952,10 +5968,53 @@ fn post_process_hits_and_write(
                     .placements
                     .length(s_idx, report.subjects.len(s_idx))
             };
+            // The taxids of the reported sequences and the taxonomy database's names, read for
+            // the XML2 and JSON formats only.
+            let (xml_taxids, xml_taxonomy, xml_taxdb_notes): (
+                Vec<i32>,
+                Vec<crate::report::blast_xml::HitTaxonomy>,
+                crate::algorithm::common::database::TaxdbNotes,
+            ) = match (xml2_kind, report.database_ordinals, report.database_reader) {
+                (Some(_), Some(ordinals), Some(database)) if is_database => {
+                    database.read_taxids(ordinals, &hit_lists)?
+                }
+                _ => (Vec::new(), Vec::new(), Default::default()),
+            };
+            // The masked regions of the queries in record coordinates and the queries of the
+            // batches that were not searched, which only XML2 shows (outfmt 5 shows neither).
+            let (xml_masks, xml_searched): (
+                Vec<Vec<crate::report::blast_xml::QueryMask>>,
+                Vec<bool>,
+            ) = if xml2_kind.is_some() {
+                (
+                    (0..report.queries.len())
+                        .map(|q_idx| {
+                            shown_query_masks(
+                                &report.query_masks[q_idx],
+                                query_lengths[q_idx],
+                                report.ranges.queries.placements.offset(q_idx),
+                            )
+                            .iter()
+                            .map(|mask| crate::report::blast_xml::QueryMask {
+                                from: mask.start as i32,
+                                to: mask.end as i32 - 1,
+                                frame: 0,
+                            })
+                            .collect()
+                        })
+                        .collect(),
+                    unsearched.iter().map(|&skipped| !skipped).collect(),
+                )
+            } else {
+                (Vec::new(), Vec::new())
+            };
             let xml_subjects = match report.database_ordinals {
                 Some(ordinals) if is_database => crate::report::blast_xml::XmlSubjects::Database {
                     ordinals,
                     titles: crate::report::blast_xml::XmlTitles::Records(subject_records),
+                    // Only XML2 shows the taxid.
+                    taxids: &xml_taxids,
+                    taxonomy: &xml_taxonomy,
                     length: &database_length,
                 },
                 _ => crate::report::blast_xml::XmlSubjects::Records {
@@ -6001,17 +6060,46 @@ fn post_process_hits_and_write(
                 searched_lengths: query_lengths,
                 stats: xml_stats,
                 messages: xml_messages,
+                masks: xml_masks,
+                searched: xml_searched,
                 subjects: xml_subjects,
+                taxdb_notes: xml_taxdb_notes,
                 letters: report.subjects,
-                queries_before: report.queries_before,
                 epilog: report.epilog,
             };
-            super::super::blast_xml::write_blastn_xml(
-                &xml,
-                &hit_lists,
-                &mut writer,
-                format_warnings.as_mut(),
-            )?;
+            match xml2_kind {
+                None => super::super::blast_xml::write_blastn_xml(
+                    &xml,
+                    &mut crate::report::blast_xml::BlastXmlWriter::new(report.queries_before),
+                    &hit_lists,
+                    &mut writer,
+                    format_warnings.as_mut(),
+                )?,
+                Some(kind) => {
+                    // The gap costs are written for a gapped search, which LOSAT's BLASTN
+                    // always is (it does not take `-ungapped`); `cbs` and the genetic codes
+                    // are not those of a nucleotide search (blastxml2_format.cpp:531-546).
+                    let params = crate::report::blast_xml2::Xml2Run {
+                        target: if is_database {
+                            crate::report::blast_xml2::Xml2Target::Database
+                        } else {
+                            crate::report::blast_xml2::Xml2Target::Subjects(subject_records.len())
+                        },
+                        gapped: true,
+                        cbs: 0,
+                        query_gencode: None,
+                        db_gencode: None,
+                    };
+                    let mut document = crate::report::blast_xml2::Xml2Writer::new(kind, params);
+                    super::super::blast_xml::write_blastn_xml(
+                        &xml,
+                        &mut document,
+                        &hit_lists,
+                        &mut writer,
+                        format_warnings.as_mut(),
+                    )?;
+                }
+            }
         } else {
             write_output_blastn_hitlists_to_writer(
                 &hit_lists,
@@ -6032,9 +6120,9 @@ fn post_process_hits_and_write(
         writer.flush()?;
     }
     // Without an output format the warnings are written all at once.
-    if let Some(warnings) = warnings {
-        for query_warnings in warnings.before {
-            warnings.sink.write_all(query_warnings)?;
+    if let Some(before) = warning_lines {
+        for query_warnings in before {
+            outputs.diagnostics.write_all(query_warnings)?;
         }
     }
 
@@ -8646,8 +8734,24 @@ fn prolog_before_search(sink: &OutputSink<'_>) -> bool {
     !matches!(sink, OutputSink::File(_))
 }
 
-/// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink whose prolog comes before
-/// the search (`before_search`) or, for a run that stops before any report, of the others.
+/// Whether the prolog of `format` comes with its reports (or, for a run that stops before any
+/// report, from `write_pairwise_prologs`) and not before the search: the outfmt 0 prolog of a
+/// file sink (`prolog_before_search`), and the start of the XML2 and JSON documents of outfmt
+/// 16 and 15 for every sink. NCBI writes that start before the search too (`PrintProlog`), but
+/// LOSAT's refusals of what NCBI could write (a title outside US-ASCII, DECISIONS 20) come
+/// after the search and before the first byte, so the start is written with the first report, or
+/// by the path of an NCBI error that stops the run before one.
+fn prolog_with_report(format: &FormatOutput<'_>, output_format: BlastnOutputFormat) -> bool {
+    match output_format {
+        BlastnOutputFormat::Pairwise => !prolog_before_search(&format.sink),
+        BlastnOutputFormat::Xml2(_) => true,
+        _ => false,
+    }
+}
+
+/// Writes and flushes the outfmt 0 prolog of every outfmt 0 sink whose prolog comes before the
+/// search (`before_search`) or, for a run that stops before any report, the prolog of the
+/// others (`prolog_with_report`: the file sinks of outfmt 0 and every sink of outfmt 15 and 16).
 fn write_pairwise_prologs(
     outputs: &mut ReportOutputs<'_>,
     output_formats: &[BlastnOutputFormat],
@@ -8656,21 +8760,41 @@ fn write_pairwise_prologs(
     before_search: bool,
 ) -> Result<()> {
     for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
-        if output_format == BlastnOutputFormat::Pairwise
-            && prolog_before_search(&format.sink) == before_search
-        {
-            let mut writer = format.sink.open()?;
-            write_blastn_pairwise_prolog(
-                &mut writer,
-                NCBI_BLASTN_VERSION,
-                megablast,
-                &shown.name,
-                shown.num_seqs,
-                shown.total_letters,
-                shown.database.as_ref(),
-            )?;
-            writer.flush()?;
+        let writes_prolog = match output_format {
+            BlastnOutputFormat::Pairwise => prolog_before_search(&format.sink) == before_search,
+            BlastnOutputFormat::Xml2(_) => !before_search,
+            _ => false,
+        };
+        if writes_prolog {
+            write_format_prolog(format, output_format, megablast, shown)?;
         }
+    }
+    Ok(())
+}
+
+/// Writes and flushes the prolog of one sink, for the formats that have one (outfmt 0, 15, 16).
+fn write_format_prolog(
+    format: &mut FormatOutput<'_>,
+    output_format: BlastnOutputFormat,
+    megablast: bool,
+    shown: &ShownSubjects,
+) -> Result<()> {
+    if output_format == BlastnOutputFormat::Pairwise {
+        let mut writer = format.sink.open()?;
+        write_blastn_pairwise_prolog(
+            &mut writer,
+            NCBI_BLASTN_VERSION,
+            megablast,
+            &shown.name,
+            shown.num_seqs,
+            shown.total_letters,
+            shown.database.as_ref(),
+        )?;
+        writer.flush()?;
+    } else if let Some(kind) = output_format.xml2_kind() {
+        let mut writer = format.sink.open()?;
+        writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+        writer.flush()?;
     }
     Ok(())
 }
@@ -8845,7 +8969,9 @@ fn write_reports_untimed(
         SubjectSource::Database(database) => {
             let letters = outputs.hits.is_some()
                 || output_formats.contains(&BlastnOutputFormat::Pairwise)
-                || output_formats.contains(&BlastnOutputFormat::Xml);
+                || output_formats
+                    .iter()
+                    .any(|format| format.is_structured_xml());
             Some(database::reported_subjects(
                 database,
                 subjects.titles,
@@ -8892,6 +9018,10 @@ fn write_reports_untimed(
         database_ordinals: reported
             .as_ref()
             .map(|reported| reported.ordinals.as_slice()),
+        database_reader: match subjects.source {
+            SubjectSource::Database(database) => Some(database),
+            SubjectSource::Prepared(_) => None,
+        },
         finished_hit_lists: reported.is_some(),
         epilog,
         prolog: outputs
@@ -9711,20 +9841,8 @@ fn search_query_batch(
             // The prolog of a file sink (the others were written before the search).
             let (outputs, output_formats) = outputs.expect(FIRST_BATCH_OUTPUTS);
             for (format, &output_format) in outputs.formats.iter_mut().zip(output_formats) {
-                if output_format == BlastnOutputFormat::Pairwise
-                    && !prolog_before_search(&format.sink)
-                {
-                    let mut writer = format.sink.open()?;
-                    write_blastn_pairwise_prolog(
-                        &mut writer,
-                        NCBI_BLASTN_VERSION,
-                        megablast,
-                        &shown.name,
-                        shown.num_seqs,
-                        shown.total_letters,
-                        shown.database.as_ref(),
-                    )?;
-                    writer.flush()?;
+                if prolog_with_report(format, output_format) {
+                    write_format_prolog(format, output_format, megablast, &shown)?;
                 }
             }
             return Err(karlin_error(&message, seq_data.queries.len()));
@@ -12613,6 +12731,51 @@ fn search_query_batch(
                     //     total_hits += num_hits;
                     // }
                     // ```
+                    // Dispatch point of LOSAT_X_PAIRPARNA: `x_pair_seed::run_na` runs this block
+                    // (scan, diagonal hash, ungapped extension; one-hit diagonal-hash scope only)
+                    // with the subject scan in strips on the pool threads and the pairs folded in
+                    // the scan order; `continue` ends the one-iteration strand loop. Otherwise
+                    // (and with LOSAT_X_PAIRPARNASHADOW) the code below runs.
+                    if x_pair_seed::run_na(
+                        &x_pair_seed::NaInputs {
+                            pv_direct_lookup: pv_direct_lookup_ref,
+                            na_lookup: na_lookup_ref,
+                            use_direct_lookup,
+                            word_length: safe_k,
+                            search_seq_packed,
+                            s_len,
+                            subject_seq_ranges: &subject_seq_ranges,
+                            subject_masked,
+                            scan_step,
+                            query_context_index: &query_context_index,
+                            query_contexts,
+                            encoded_queries_blastna: &encoded_queries_blastna,
+                            cutoff_scores: &cutoff_scores,
+                            x_dropoff_scores: &x_dropoff_scores,
+                            reduced_cutoff_scores: &reduced_cutoff_scores,
+                            score_matrix: &score_matrix,
+                            nucl_score_table: &nucl_score_table,
+                            diag_offset,
+                            diag_hash_window: diag_hash_insert_window(
+                                window_size,
+                                scan_range,
+                                safe_k,
+                            ),
+                            use_array_indexing,
+                            window_size,
+                            scan_range,
+                            diagnostics: debug_enabled
+                                || blastn_trace_enabled
+                                || debug_window.is_some(),
+                            one_subject_owner: !use_parallel && reuse_prelim_hits,
+                            timing: timing_ref,
+                        },
+                        diag_hash,
+                        ungapped_hits,
+                        &mut subject_scratch.x_pair_fold,
+                    ) {
+                        continue;
+                    }
                     let scan_start = if timing_enabled {
                         Some(std::time::Instant::now())
                     } else {
@@ -16777,6 +16940,7 @@ fn search_query_batch(
                         x_bnstream::search_in_order(
                             num_subjects,
                             window,
+                            false,
                             &new_state,
                             &search_one,
                             &mut |s_idx, (hits, prelim)| sink(s_idx, hits, prelim),

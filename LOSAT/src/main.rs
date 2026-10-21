@@ -239,6 +239,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastn::x_subject_translate_print_summary();
     LOSAT::algorithm::tblastn::x_subject_store_print_summary();
     LOSAT::algorithm::tblastn::x_scan_bf_print_summary();
+    LOSAT::algorithm::tblastn::x_scan_byte_print_summary();
     LOSAT::algorithm::tblastn::x_link_window_print_summary();
     LOSAT::algorithm::tblastn::x_tbn_hitbf_print_summary();
     LOSAT::algorithm::blastn::x_subject_store_print_summary();
@@ -246,6 +247,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::blastn::blast_engine::x_query_prep_par_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_qgroup_par_print_summary();
     LOSAT::algorithm::blastn::blast_engine::x_db_cut_print_summary();
+    LOSAT::algorithm::blastn::blast_engine::x_db_stream_print_summary();
     LOSAT::algorithm::blastp::x_bp_seed_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bpclut_print_summary();
     LOSAT::algorithm::tblastx::lookup::compressed::x_clut_direct::x_bplkpflat_print_summary();

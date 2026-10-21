@@ -163,6 +163,7 @@ pub(crate) fn write_blastp_xml(
                             srow: srow.as_bytes(),
                             ops: hsp.gap_info.as_deref(),
                             query_first: hsp.q_start as i32 - 1,
+                            query_step: 1,
                             masks: &xml.masks[q_idx],
                         })?;
                     }

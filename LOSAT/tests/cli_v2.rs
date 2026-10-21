@@ -872,9 +872,6 @@ const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 const CUSTOM: &[&str] = &["blastp", "blastx"];
 const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
-/// The programs that write BLAST XML (outfmt 5): OF4a; the translated programs follow in OF4b.
-const XML: &[&str] = &["blastn", "blastp"];
-const NO_XML: &[&str] = &["blastx", "tblastn", "tblastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
     "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
@@ -952,15 +949,14 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "18", None, UNSUPPORTED),
         (ALL, "20", None, UNSUPPORTED),
         // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c), 5 in
-        // BLASTN and BLASTP (OF4a), NCBI dropping a custom specification
+        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), NCBI dropping a custom specification
         // (blast_args.cpp:2844-2851); the others not yet.
         (ALL, "8", None, Writes(AsnText)),
         (ALL, "12", None, Writes(JsonSeqalign)),
         (ALL, " 8 std", None, Writes(AsnText)),
         (ALL, "12 delim=,", None, Writes(JsonSeqalign)),
-        (XML, "5", None, Writes(Xml)),
-        (XML, " 5 std", None, Writes(Xml)),
-        (NO_XML, "5", None, UNSUPPORTED),
+        (ALL, "5", None, Writes(Xml)),
+        (ALL, " 5 std", None, Writes(Xml)),
         (ALL, "9", None, Writes(AsnBinary)),
         (ALL, " 9 std", None, Writes(AsnBinary)),
         (ALL, "11", None, UNSUPPORTED),

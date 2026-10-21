@@ -706,3 +706,117 @@ mod tests {
         }
     }
 }
+
+/// The taxonomy database of a run (`CTaxDBFileInfo`, a static of NCBI's `GetTaxNames`) and the
+/// taxids the volumes have looked up (`CSeqDBVol::x_GetTaxonomy` caches them per volume).
+#[derive(Default)]
+pub(crate) struct TaxdbRun {
+    lazy: std::sync::OnceLock<crate::seqdb::taxdb::LazyTaxDb>,
+    volume_lookups: std::sync::Mutex<std::collections::HashSet<(usize, i32)>>,
+}
+
+/// The Blast-def-line taxid of each reported subject by rank (0 for none and for a subject
+/// that is not in `reported`), which the XML2 and JSON formats write in the `Hit` description,
+/// and what the taxonomy database says about it. They are read apart from the titles, for those
+/// formats only. `ordinals[rank]` is the ordinal id of the subject of rank `rank`.
+///
+/// NCBI writes the scientific name of a taxid when it finds `taxdb.bti` on the search path
+/// (`data4xml2format.cpp x_InitCommon`, `blastxml2_format.cpp:380-386`; validity is not
+/// checked): `taxonomy[rank]` is then `Named`, or `NotFound` when the taxonomy database does
+/// not know the taxid (the description is the id alone). Without `taxdb.bti`, or without a
+/// taxid, `taxonomy` is empty. A scientific name that NCBI's XML stream cannot write, and a
+/// taxonomy database that LOSAT cannot read as NCBI does, are refusals made here, before any
+/// byte is written.
+///
+/// NCBI's messages about the taxonomy database go to standard error: those of opening and of
+/// the lookup that the volume makes for each taxid of a fetched subject (`CSeqDBVol::
+/// x_GetTaxonomy`, once per volume and taxid) are written here, those of the lookup of each
+/// `Hit` at the hit (`write_hit_taxonomy_messages`). `program` is the program that refuses,
+/// as LOSAT's refusals name it (`BLASTP`); its messages name it in lower case.
+pub(crate) fn read_reported_taxids(
+    db: &SeqDb,
+    run: &TaxdbRun,
+    ordinals: &[u32],
+    reported: &std::collections::BTreeSet<usize>,
+    program: &str,
+) -> Result<(Vec<i32>, Vec<crate::report::blast_xml::HitTaxonomy>)> {
+    use crate::report::blast_xml::HitTaxonomy;
+    use crate::seqdb::taxdb::{err_post_line, LazyTaxDb};
+    let mut taxids = vec![0; ordinals.len()];
+    for &rank in reported {
+        let defline_taxids = db
+            .defline_taxids(ordinals[rank])
+            .map_err(|error| database_error(error, program))?;
+        // One definition line per reported sequence (`stored_title`).
+        taxids[rank] = defline_taxids.first().copied().unwrap_or(0);
+    }
+    if taxids.iter().all(|&taxid| taxid == 0) || !db.taxdb_found() {
+        return Ok((taxids, Vec::new()));
+    }
+    let Some(search_path) = db.search_path() else {
+        return Ok((taxids, Vec::new()));
+    };
+    let taxdb = run.lazy.get_or_init(|| LazyTaxDb::new(search_path.clone()));
+    // Written once everything is checked: the volumes' lookups.
+    let mut stderr_lines: Vec<String> = Vec::new();
+    let mut asked: std::collections::BTreeMap<i32, HitTaxonomy> = Default::default();
+    let mut taxonomy = vec![HitTaxonomy::Unnamed; taxids.len()];
+    for &rank in reported {
+        let taxid = taxids[rank];
+        if taxid == 0 {
+            continue;
+        }
+        // The volume's lookup when it fetches the sequence (once per volume and taxid).
+        let volume = db
+            .volume_index(ordinals[rank])
+            .map_err(|error| database_error(error, program))?;
+        let first = run
+            .volume_lookups
+            .lock()
+            .expect("the volume lookups")
+            .insert((volume, taxid));
+        if first {
+            let mut messages = Vec::new();
+            taxdb
+                .names(taxid, &mut messages)
+                .map_err(|error| database_error(error, program))?;
+            stderr_lines.extend(messages);
+        }
+        // The lookup of the `Hit` (`CSeqDB::GetTaxInfo`).
+        if !asked.contains_key(&taxid) {
+            let mut messages = Vec::new();
+            let found = taxdb
+                .names(taxid, &mut messages)
+                .map_err(|error| database_error(error, program))?;
+            let answer = match found {
+                Some(names) => {
+                    crate::report::blast_xml::names::check_text(&names.scientific_name).map_err(
+                        |refusal| refusal.error(program, "a taxonomy database scientific name"),
+                    )?;
+                    HitTaxonomy::Named(names.scientific_name)
+                }
+                None => HitTaxonomy::NotFound(messages),
+            };
+            asked.insert(taxid, answer);
+        }
+        taxonomy[rank] = asked[&taxid].clone();
+    }
+    let program_name = program.to_ascii_lowercase();
+    for line in stderr_lines {
+        eprintln!("{}", err_post_line(&program_name, &line));
+    }
+    Ok((taxids, taxonomy))
+}
+
+/// NCBI's lookup of the taxid at a `Hit` (`CSeqDB::GetTaxInfo`) writes its messages every
+/// time (`program` in lower case).
+pub(crate) fn write_hit_taxonomy_messages(
+    program: &str,
+    taxonomy: &crate::report::blast_xml::HitTaxonomy,
+) {
+    if let crate::report::blast_xml::HitTaxonomy::NotFound(messages) = taxonomy {
+        for text in messages {
+            eprintln!("{}", crate::seqdb::taxdb::err_post_line(program, text));
+        }
+    }
+}

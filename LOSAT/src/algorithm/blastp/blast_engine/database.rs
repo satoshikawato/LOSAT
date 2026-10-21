@@ -37,7 +37,6 @@ use crate::blastinput::ncbi_environment::ApplicationSettings;
 use crate::cli::NativeError;
 use crate::report::blast_xml::HitTaxonomy;
 use crate::report::pairwise::PairwiseDatabase;
-use crate::seqdb::taxdb::{err_post_line, LazyTaxDb};
 use crate::seqdb::{BlockRange, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
 use crate::stats::{compute_length_adjustment_ncbi, KarlinParams};
@@ -103,15 +102,7 @@ pub(super) struct BlastpDatabase {
     db: SeqDb,
     name: String,
     /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16).
-    taxdb: TaxdbRun,
-}
-
-/// The taxonomy database of a run (`CTaxDBFileInfo`, a static of NCBI's `GetTaxNames`) and the
-/// taxids the volumes have looked up (`CSeqDBVol::x_GetTaxonomy` caches them per volume).
-#[derive(Default)]
-struct TaxdbRun {
-    lazy: std::sync::OnceLock<crate::seqdb::taxdb::LazyTaxDb>,
-    volume_lookups: std::sync::Mutex<std::collections::HashSet<(usize, i32)>>,
+    taxdb: shared::TaxdbRun,
 }
 
 /// The program that LOSAT's refusals name.
@@ -137,7 +128,7 @@ impl BlastpDatabase {
         Ok(Self {
             db,
             name: name.to_string(),
-            taxdb: TaxdbRun::default(),
+            taxdb: shared::TaxdbRun::default(),
         })
     }
 
@@ -952,72 +943,13 @@ impl ListedTitles<'_> {
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
     ) -> Result<(Vec<i32>, Vec<HitTaxonomy>)> {
-        let mut taxids = vec![0; self.listed.ordinals.len()];
-        for rank in Self::reported(hit_lists) {
-            let defline_taxids = database
-                .db
-                .defline_taxids(self.listed.ordinals[rank])
-                .map_err(database_error)?;
-            // One definition line per reported sequence (`shared::stored_title`).
-            taxids[rank] = defline_taxids.first().copied().unwrap_or(0);
-        }
-        if taxids.iter().all(|&taxid| taxid == 0) || !database.db.taxdb_found() {
-            return Ok((taxids, Vec::new()));
-        }
-        let Some(search_path) = database.db.search_path() else {
-            return Ok((taxids, Vec::new()));
-        };
-        let taxdb = database
-            .taxdb
-            .lazy
-            .get_or_init(|| LazyTaxDb::new(search_path.clone()));
-        // Written once everything is checked: the volumes' lookups.
-        let mut stderr_lines: Vec<String> = Vec::new();
-        let mut asked: std::collections::BTreeMap<i32, HitTaxonomy> = Default::default();
-        let mut taxonomy = vec![HitTaxonomy::Unnamed; taxids.len()];
-        for rank in Self::reported(hit_lists) {
-            let taxid = taxids[rank];
-            if taxid == 0 {
-                continue;
-            }
-            // The volume's lookup when it fetches the sequence (once per volume and taxid).
-            let volume = database
-                .db
-                .volume_index(self.listed.ordinals[rank])
-                .map_err(database_error)?;
-            let first = database
-                .taxdb
-                .volume_lookups
-                .lock()
-                .expect("the volume lookups")
-                .insert((volume, taxid));
-            if first {
-                let mut messages = Vec::new();
-                taxdb.names(taxid, &mut messages).map_err(database_error)?;
-                stderr_lines.extend(messages);
-            }
-            // The lookup of the `Hit` (`CSeqDB::GetTaxInfo`).
-            if !asked.contains_key(&taxid) {
-                let mut messages = Vec::new();
-                let found = taxdb.names(taxid, &mut messages).map_err(database_error)?;
-                let answer = match found {
-                    Some(names) => {
-                        crate::report::blast_xml::names::check_text(&names.scientific_name)
-                            .map_err(|refusal| {
-                                refusal.error(PROGRAM, "a taxonomy database scientific name")
-                            })?;
-                        HitTaxonomy::Named(names.scientific_name)
-                    }
-                    None => HitTaxonomy::NotFound(messages),
-                };
-                asked.insert(taxid, answer);
-            }
-            taxonomy[rank] = asked[&taxid].clone();
-        }
-        for line in stderr_lines {
-            eprintln!("{}", err_post_line("blastp", &line));
-        }
-        Ok((taxids, taxonomy))
+        shared::read_reported_taxids(
+            &database.db,
+            &database.taxdb,
+            &self.listed.ordinals,
+            &Self::reported(hit_lists),
+            PROGRAM,
+        )
     }
 
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).

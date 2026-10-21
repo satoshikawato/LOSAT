@@ -244,3 +244,18 @@ both subjects) so that a subject is a `Hit` of two queries. The rows `db.sa.x16_
 not an argument): `good`, `bad_magic`, `count_larger`, `no_btd`, `empty_fields`, `offset_last_past_end` and
 `tests/seqdb/taxdb_xml2/no_9606` (`make_taxdb.py write` of `taxdb.tsv` without the row of 9606). The rows `.nonascii.*`
 (`high_bytes_utf8`) are LOSAT refusals: NCBI aborts its XML2 writer there.
+
+OF5a part 2 (XML2 and JSON of BLASTN): `x16_ntitles.fna` (three records: an empty definition line, a title with an
+ampersand, angle brackets and quotes, and `.`) and `x16_ntaxid.fna` with its query `x16_ntaxid_q.fna` (`qn1` hits both
+subjects, `qn2` none, `qn3` is a slice of `qn1`), and the databases built from them (only `.nhr .nin .nsq` are kept):
+
+    makeblastdb -in tests/db_search/x16_ntitles.fna -dbtype nucl -out tests/db_search/x16_ntitles \
+        -title "x16 ntitles" -blastdb_version 4
+    makeblastdb -in tests/db_search/x16_ntaxid.fna -dbtype nucl -out tests/db_search/x16_ntaxid \
+        -title "x16 ntaxid 9606" -blastdb_version 4 -taxid 9606
+    makeblastdb -in tests/db_search/x16_ntaxid.fna -dbtype nucl -out tests/db_search/x16_ntaxid_99990 \
+        -title "x16 ntaxid 99990" -blastdb_version 4 -taxid 99990
+
+The rows `db.sa.x16_ntitles.{15,16}` and `db.sa.x16_ntaxid[.<case>].{15,16}` are the BLASTN counterparts of the BLASTP rows of
+part 1 and 1b (`BLASTDB=DIR` tokens as there); `db.sa.x16_ntaxid.lastoff.16` freezes the messages that NCBI's BLASTN
+writes (`Error: [blastn] ...`).

@@ -421,6 +421,99 @@ fn query_masking_lists_the_plus_regions_and_a_nucleotide_row_is_masked_in_lower_
     assert!(out.contains("<qseq>WCNYFW</qseq>"), "{out}");
 }
 
+/// BLASTN's `Hsp` (OF5a part 2): `query-strand` Plus and a `hit-strand` from the order of the
+/// subject's coordinates (a Minus HSP has `hit-from` above `hit-to`), no `positive`, no frame; the
+/// regions of the query (frame 0) are applied to the nucleotide row in lower case, and the
+/// scores come from `reward_penalty`.
+fn blastn_document(kind: Xml2Kind, minus: bool) -> String {
+    let mut run = run(None, b"");
+    run.program = "blastn";
+    run.version = "BLASTN 2.17.0+";
+    run.matrix = None;
+    run.reward_penalty = Some((1, -2));
+    run.gap_open = 0;
+    run.gap_extend = 0;
+    run.filter = b"L;m;";
+    let mut writer = Xml2Writer::new(kind, params(Xml2Target::Subjects(2)));
+    let masks = [QueryMask {
+        from: 3,
+        to: 4,
+        frame: 0,
+    }];
+    let query = XmlQuery {
+        id: b"Query_1",
+        title: b"",
+        len: 12,
+        stats: XmlStats::NONE,
+        message: None,
+        searched: true,
+        masks: &masks,
+    };
+    let (hit_from, hit_to) = if minus { (10, 5) } else { (5, 10) };
+    let mut out = Vec::new();
+    writer
+        .query(&run, &query, &mut out, |sink| {
+            sink.hit(
+                &XmlHit {
+                    id: b"Subject_1",
+                    title: b"",
+                    accession: b"",
+                    len: 20,
+                    taxid: 0,
+                    taxonomy: crate::report::blast_xml::records::UNNAMED,
+                },
+                |hsps| {
+                    hsps.hsp(&XmlHsp {
+                        score: 21,
+                        bit_score: 12.7,
+                        evalue: 1.5,
+                        query_from: 3,
+                        query_to: 8,
+                        hit_from,
+                        hit_to,
+                        query_frame: 1,
+                        hit_frame: if minus { -1 } else { 1 },
+                        qrow: b"ACGTAC",
+                        srow: b"ACGTAC",
+                        ops: None,
+                        query_first: 2,
+                        query_step: 1,
+                    })
+                },
+            )
+        })
+        .unwrap();
+    writer.finish(&mut out).unwrap();
+    String::from_utf8(out).unwrap()
+}
+
+#[test]
+fn a_blastn_hsp_has_strands_no_positive_and_a_masked_row() {
+    for minus in [false, true] {
+        let out = blastn_document(Xml2Kind::Single16, minus);
+        assert!(out.contains("<query-strand>Plus</query-strand>"), "{out}");
+        let strand = if minus { "Minus" } else { "Plus" };
+        assert!(
+            out.contains(&format!("<hit-strand>{strand}</hit-strand>")),
+            "{out}"
+        );
+        assert!(!out.contains("<positive>"), "{out}");
+        assert!(!out.contains("-frame"), "{out}");
+        // the row starts at the 0-based query position 2; the region 3 to 4 (inclusive) masks its
+        // second and third letters
+        assert!(out.contains("<qseq>AcgTAC</qseq>"), "{out}");
+        assert!(out.contains("<sc-match>1</sc-match>"), "{out}");
+        assert!(out.contains("<sc-mismatch>-2</sc-mismatch>"), "{out}");
+        assert!(out.contains("<gap-open>0</gap-open>"), "{out}");
+        assert!(out.contains("<filter>L;m;</filter>"), "{out}");
+        // an empty subject title and no accession for a `-subject` hit
+        assert!(out.contains("<title></title>"), "{out}");
+        assert!(!out.contains("<accession>"), "{out}");
+        // no description: no query-title
+        assert!(!out.contains("<query-title>"), "{out}");
+    }
+}
+
 #[test]
 fn the_json_report_is_an_array_element_and_the_xml_std_mode_has_its_own_tags() {
     // JsonEncoder::array_element: the object at one level, no wrapper, a final end of line

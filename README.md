@@ -71,6 +71,8 @@ The `-outfmt` numbers that the five NCBI BLAST+ 2.17.0 programs (`blastn`, `blas
 | `18` | Organism Report | all five | not yet |
 | `20` | Comma-separated values with header lines | all five | not yet |
 
+Outfmt `15` and `16` with `-db` write the scientific name of a sequence's taxid (`sciname`) when `taxdb.bti` is found as NCBI finds it: in the current directory, in `BLASTDB` (the environment variable, `~/.ncbirc` or `NCBI_CONFIG__BLAST__BLASTDB`), not in the `-db` directory. The other output formats never read it.
+
 ---
 
 ## Installation

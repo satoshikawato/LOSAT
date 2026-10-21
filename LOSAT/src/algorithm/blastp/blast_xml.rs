@@ -51,6 +51,9 @@ pub(crate) struct BlastpXml<'a> {
     /// without letters, an invalid query).
     pub messages: Vec<Vec<String>>,
     pub subjects: XmlSubjects<'a>,
+    /// NCBI's messages about the taxonomy database that come before the `Hit`s' own
+    /// (XML2 and JSON with `-db`; nothing otherwise).
+    pub taxdb_notes: crate::algorithm::common::database::TaxdbNotes,
     /// By query, the masked regions of the query in record coordinates (`QueryMask`).
     pub masks: Vec<Vec<QueryMask>>,
     /// By query: whether NCBI searched the query's batch (it has a valid context in it). Only
@@ -77,7 +80,11 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
     let program = xml.program;
     // Everything NCBI cannot write is refused before the first byte of the document: the
     // database name, each query's definition line and message, the names of the subjects with
-    // hits.
+    // hits. This includes the last query of a `-subject` call, whose report NCBI holds back
+    // until the next query's arrives and never writes when the next batch fails to read
+    // (outfmt 15 and 16): LOSAT refuses a title it would not have written then. It cannot
+    // wait for the report to be written, which would refuse after a byte (the reports before
+    // it are written by now), and the next batch is not read yet.
     names::check_text(xml.run.db_name)
         .map_err(|refusal| refusal.error(program, "a database name"))?;
     let has_hits = |q_idx: usize| {
@@ -105,6 +112,7 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
             }
         }
     }
+    let mut taxdb_printer = xml.taxdb_notes.printer();
     let mut buf: Vec<u8> = Vec::new();
     for (q_idx, hit_list) in hit_lists.iter().enumerate() {
         // The query's warnings come before its document (`QueryWarnings`).
@@ -146,12 +154,16 @@ pub(crate) fn write_blastp_xml<W: StructuredXml>(
                     taxid: subject.taxid,
                     taxonomy: &subject.taxonomy,
                 };
-                // NCBI's lookup of the taxid at this `Hit` (`CSeqDB::GetTaxInfo`) writes its
-                // messages every time.
-                crate::algorithm::common::database::write_hit_taxonomy_messages(
-                    "blastp",
-                    &subject.taxonomy,
-                );
+                // NCBI's messages about the taxonomy database: opening and the volume's lookup
+                // at the first `Hit` that needs them, the lookup of the `Hit` every time.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    taxdb_printer.at_hit(
+                        s_idx,
+                        subject.taxid,
+                        &subject.taxonomy,
+                        &mut *warnings.sink,
+                    )?;
+                }
                 sink.hit(&hit, |hsps| {
                     for hsp in &hsp_list.hsps {
                         let row = hit_rows

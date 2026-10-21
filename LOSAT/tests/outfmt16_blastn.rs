@@ -3,8 +3,9 @@
 //! BLAST XML2 and JSON (outfmt 16 and 15) of BLASTN: what the frozen-fixture rows cannot show.
 //! The `-subject` report that NCBI holds back one query (a failed batch loses it), the documents
 //! of a run with no query, and the searches LOSAT refuses before the first byte (a byte >= 0x80 in
-//! a title or the `-db` name, DECISIONS 19 Q2; a taxonomy database scientific name, DECISIONS 30)
-//! and the sink of a file. The bytes of NCBI BLAST+ 2.17.0 are in `tests/fixtures/outfmt16`
+//! a title or the `-db` name, DECISIONS 19 Q2; a taxonomy database scientific name, DECISIONS 30:
+//! the rows `db.sa.x16_ntaxid.nonascii.*` of `db_search_manifest.tsv`), the prologs of the runs
+//! that stop early, the taxonomy database that only outfmt 15 and 16 read, and the sink of a file. The bytes of NCBI BLAST+ 2.17.0 are in `tests/fixtures/outfmt16`
 //! (`badbatch_blastn_{sub,db}_{15,16}.out`: `BATCH_SIZE=100 blastn -query qnucl_bad.fna -subject
 //! snucl.fna | -db db/snucl -num_threads 1 -outfmt N`; `unsearched_blastn_*`: the same with
 //! `qnucl_unsearched.fna`; `emptypipe_blastn_*` and `emptyfile_blastn_*`, run in that directory).
@@ -43,10 +44,19 @@ fn command(env: &[(&str, &str)]) -> Command {
             command.env_remove(name);
         }
     }
-    // NCBI's variables change a report (and the search path): none leaks in
+    // NCBI's variables change a report (and the search path): none leaks in, and `~/.ncbirc`
+    // (which can name a taxonomy database or BLASTDB) is not read: HOME is an empty directory.
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("NCBI") {
+            command.env_remove(name);
+        }
+    }
     for name in ["BATCH_SIZE", "CHUNK_SIZE", "BLASTDB"] {
         command.env_remove(name);
     }
+    let home = std::env::temp_dir().join("losat_outfmt16_home");
+    fs::create_dir_all(&home).expect("empty home");
+    command.env("HOME", &home).env("USERPROFILE", &home);
     command.env(
         "LOSAT_BLASTX_WORKER_LOG",
         std::env::temp_dir().join("losat_outfmt16_worker.log"),
@@ -407,5 +417,122 @@ fn a_file_sink_holds_the_document_of_standard_output() {
             );
             fs::remove_dir_all(scratch).ok();
         }
+    }
+}
+
+/// What NCBI BLAST+ 2.17.0 wrote for `blastn -query QUERY (-subject snucl.fna | -db db/snucl)
+/// EXTRA -outfmt N -num_threads 1` in `tests/fixtures/outfmt16` (`<stem>_{sub,db}_{15,16}.out`, and
+/// `.err` when stderr was not empty), with `env` and the exit status `rc`: LOSAT at one and four
+/// threads writes the same stdout, stderr and exit status.
+fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], rc: i32) {
+    let dir = fixtures();
+    for format in ["15", "16"] {
+        for mode in ["sub", "db"] {
+            let name = format!("{stem}_{mode}_{format}");
+            let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
+            let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+            for threads in ["1", "4"] {
+                let mut args = args(query, mode, threads, format);
+                args.extend(extra);
+                let output = run_in(&dir, &args, env);
+                let case = format!("{name} threads {threads}");
+                assert_eq!(output.status.code(), Some(rc), "{case}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&out),
+                    "{case}: stdout"
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stderr),
+                    String::from_utf8_lossy(&err),
+                    "{case}: stderr"
+                );
+            }
+        }
+    }
+}
+
+/// A `CHUNK_SIZE` that leaves no query in the first batch (`CHUNK_SIZE=1000`,
+/// `chunk_blastn_*`): NCBI has written the prolog and stops with `Empty CBlastQueryVector`
+/// (exit status 3).
+#[test]
+fn a_zero_batch_size_leaves_the_prolog_alone() {
+    equals_frozen(
+        "chunk_blastn",
+        "qnucl_unsearched.fna",
+        &[],
+        &[("CHUNK_SIZE", "1000")],
+        3,
+    );
+}
+
+/// Gap costs that no scoring system supports (`-task blastn -reward 1 -penalty -1 -gapopen 3
+/// -gapextend 3`, `karlin_blastn_*`) fail the first batch's statistics after the prolog: exit
+/// status 3 and NCBI's list of the supported costs.
+#[test]
+fn a_karlin_error_in_the_first_batch_leaves_the_prolog_alone() {
+    equals_frozen(
+        "karlin_blastn",
+        "qnucl_valid.fna",
+        &[
+            "-task",
+            "blastn",
+            "-reward",
+            "1",
+            "-penalty",
+            "-1",
+            "-gapopen",
+            "3",
+            "-gapextend",
+            "3",
+        ],
+        &[],
+        3,
+    );
+}
+
+/// The taxonomy database is read for outfmt 15 and 16 only (DECISIONS 30): a `taxdb.bti` of the
+/// search path that cannot be read (here a damaged one) changes no byte of outfmt 0, 5, 6, 7 or 8
+/// and adds no line to standard error, while 15 and 16 refuse it. The database has taxids, so the
+/// lookup would run if any other format asked for it.
+#[test]
+fn the_taxdb_is_not_opened_outside_outfmt_15_and_16() {
+    let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let (db, query) = (
+        "tests/db_search/x16_ntaxid",
+        "tests/db_search/x16_ntaxid_q.fna",
+    );
+    let damaged = "tests/seqdb/taxdb/btd_empty";
+    for format in ["0", "5", "6", "7", "8"] {
+        for threads in ["1", "4"] {
+            let args = [
+                "blastn",
+                "-db",
+                db,
+                "-query",
+                query,
+                "-outfmt",
+                format,
+                "-num_threads",
+                threads,
+            ];
+            let without = run_in(engine, &args, &[]);
+            let with = run_in(engine, &args, &[("BLASTDB", damaged)]);
+            let case = format!("outfmt {format} threads {threads}");
+            assert_eq!(without.status.code(), Some(0), "{case}");
+            assert_eq!(with.status.code(), Some(0), "{case}");
+            assert!(with.stderr.is_empty(), "{case}: {:?}", with.stderr);
+            assert!(!with.stdout.is_empty(), "{case}");
+            assert!(with.stdout == without.stdout, "{case}: stdout");
+        }
+    }
+    for format in ["15", "16"] {
+        let output = run_in(
+            engine,
+            &["blastn", "-db", db, "-query", query, "-outfmt", format],
+            &[("BLASTDB", damaged)],
+        );
+        assert_eq!(output.status.code(), Some(1), "outfmt {format}");
+        assert!(output.stdout.is_empty(), "outfmt {format}");
     }
 }

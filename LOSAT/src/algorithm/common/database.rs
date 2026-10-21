@@ -709,6 +709,11 @@ mod tests {
 
 /// The taxonomy database of a run (`CTaxDBFileInfo`, a static of NCBI's `GetTaxNames`) and the
 /// taxids the volumes have looked up (`CSeqDBVol::x_GetTaxonomy` caches them per volume).
+///
+/// It lives on the database of the search, so a `run_local` call that writes outfmt 15 and 16
+/// of one `-db` search shares it: the open and the volume-lookup messages are written for the
+/// first of the two only (the CLI writes one format). NCBI, which runs each format alone, writes
+/// them for both; the ABI callers that ask for both do not see them twice.
 #[derive(Default)]
 pub(crate) struct TaxdbRun {
     lazy: std::sync::OnceLock<crate::seqdb::taxdb::LazyTaxDb>,
@@ -728,20 +733,26 @@ pub(crate) struct TaxdbRun {
 /// taxonomy database that LOSAT cannot read as NCBI does, are refusals made here, before any
 /// byte is written.
 ///
-/// NCBI's messages about the taxonomy database go to standard error: those of opening and of
-/// the lookup that the volume makes for each taxid of a fetched subject (`CSeqDBVol::
-/// x_GetTaxonomy`, once per volume and taxid) are written here, those of the lookup of each
-/// `Hit` at the hit (`write_hit_taxonomy_messages`). `program` is the program that refuses,
-/// as LOSAT's refusals name it (`BLASTP`); its messages name it in lower case.
+/// NCBI's messages about the taxonomy database go to standard error, and not here: those of
+/// opening and of the lookup that the volume makes for each taxid of a fetched subject
+/// (`CSeqDBVol::x_GetTaxonomy`, once per volume and taxid) are in the returned [`TaxdbNotes`],
+/// which writes them at the first `Hit` that needs them, and those of the lookup of each `Hit`
+/// are in `taxonomy` and written at the hit ([`TaxdbPrinter::at_hit`]). `program` is the
+/// program that refuses, as LOSAT's refusals name it (`BLASTP`); its messages name it in lower
+/// case.
 pub(crate) fn read_reported_taxids(
     db: &SeqDb,
     run: &TaxdbRun,
     ordinals: &[u32],
     reported: &std::collections::BTreeSet<usize>,
     program: &str,
-) -> Result<(Vec<i32>, Vec<crate::report::blast_xml::HitTaxonomy>)> {
+) -> Result<(
+    Vec<i32>,
+    Vec<crate::report::blast_xml::HitTaxonomy>,
+    TaxdbNotes,
+)> {
     use crate::report::blast_xml::HitTaxonomy;
-    use crate::seqdb::taxdb::{err_post_line, LazyTaxDb};
+    use crate::seqdb::taxdb::LazyTaxDb;
     let mut taxids = vec![0; ordinals.len()];
     for &rank in reported {
         let defline_taxids = db
@@ -751,36 +762,46 @@ pub(crate) fn read_reported_taxids(
         taxids[rank] = defline_taxids.first().copied().unwrap_or(0);
     }
     if taxids.iter().all(|&taxid| taxid == 0) || !db.taxdb_found() {
-        return Ok((taxids, Vec::new()));
+        return Ok((taxids, Vec::new(), TaxdbNotes::default()));
     }
     let Some(search_path) = db.search_path() else {
-        return Ok((taxids, Vec::new()));
+        return Ok((taxids, Vec::new(), TaxdbNotes::default()));
     };
     let taxdb = run.lazy.get_or_init(|| LazyTaxDb::new(search_path.clone()));
-    // Written once everything is checked: the volumes' lookups.
-    let mut stderr_lines: Vec<String> = Vec::new();
+    let mut notes = TaxdbNotes {
+        program: program.to_ascii_lowercase(),
+        ..TaxdbNotes::default()
+    };
+    // NCBI opens the database at its first lookup; the texts are written at the first `Hit`.
+    notes.open = taxdb
+        .open()
+        .map_err(|error| database_error(error, program))?;
     let mut asked: std::collections::BTreeMap<i32, HitTaxonomy> = Default::default();
     let mut taxonomy = vec![HitTaxonomy::Unnamed; taxids.len()];
+    notes.volumes = vec![0; taxids.len()];
     for &rank in reported {
         let taxid = taxids[rank];
         if taxid == 0 {
             continue;
         }
-        // The volume's lookup when it fetches the sequence (once per volume and taxid).
+        // The volume's lookup when it fetches the sequence (once per volume and taxid;
+        // `x_GetTaxonomy` asks for a positive taxid only, seqdbvol.cpp:1136).
         let volume = db
             .volume_index(ordinals[rank])
             .map_err(|error| database_error(error, program))?;
-        let first = run
-            .volume_lookups
-            .lock()
-            .expect("the volume lookups")
-            .insert((volume, taxid));
+        notes.volumes[rank] = volume;
+        let first = taxid > 0
+            && run
+                .volume_lookups
+                .lock()
+                .expect("the volume lookups")
+                .insert((volume, taxid));
         if first {
             let mut messages = Vec::new();
             taxdb
                 .names(taxid, &mut messages)
                 .map_err(|error| database_error(error, program))?;
-            stderr_lines.extend(messages);
+            notes.lookups.insert((volume, taxid), messages);
         }
         // The lookup of the `Hit` (`CSeqDB::GetTaxInfo`).
         if !asked.contains_key(&taxid) {
@@ -801,22 +822,140 @@ pub(crate) fn read_reported_taxids(
         }
         taxonomy[rank] = asked[&taxid].clone();
     }
-    let program_name = program.to_ascii_lowercase();
-    for line in stderr_lines {
-        eprintln!("{}", err_post_line(&program_name, &line));
-    }
-    Ok((taxids, taxonomy))
+    Ok((taxids, taxonomy, notes))
 }
 
-/// NCBI's lookup of the taxid at a `Hit` (`CSeqDB::GetTaxInfo`) writes its messages every
-/// time (`program` in lower case).
-pub(crate) fn write_hit_taxonomy_messages(
-    program: &str,
-    taxonomy: &crate::report::blast_xml::HitTaxonomy,
-) {
-    if let crate::report::blast_xml::HitTaxonomy::NotFound(messages) = taxonomy {
-        for text in messages {
-            eprintln!("{}", crate::seqdb::taxdb::err_post_line(program, text));
+/// NCBI's messages about the taxonomy database that are not the lookup of a `Hit`: the texts of
+/// opening it (at the first lookup of the run) and the lookup that a volume makes the first
+/// time it fetches a subject with a taxid (`CSeqDBVol::x_GetTaxonomy`). NCBI writes them when
+/// the first `Hit` that needs them is formatted, after the reader's messages of its batch, so
+/// they are kept here and written by [`TaxdbPrinter::at_hit`].
+#[derive(Default)]
+pub(crate) struct TaxdbNotes {
+    /// The program's name in lower case, as the messages show it.
+    program: String,
+    /// The texts of opening the database, when this batch opened it.
+    open: Vec<String>,
+    /// The volume of each rank with a taxid.
+    volumes: Vec<usize>,
+    /// The texts of the lookup of each (volume, taxid) that no earlier batch had looked up.
+    lookups: std::collections::BTreeMap<(usize, i32), Vec<String>>,
+}
+
+impl TaxdbNotes {
+    /// A printer that writes these notes as the `Hit`s of a report come.
+    pub(crate) fn printer(&self) -> TaxdbPrinter<'_> {
+        TaxdbPrinter {
+            notes: self,
+            opened: false,
+            written: Default::default(),
         }
+    }
+}
+
+/// Writes the taxonomy database's messages of a report in NCBI's order: the notes of the
+/// taxid of a `Hit` before the messages of the `Hit`'s own lookup.
+pub(crate) struct TaxdbPrinter<'a> {
+    notes: &'a TaxdbNotes,
+    opened: bool,
+    written: std::collections::HashSet<(usize, i32)>,
+}
+
+impl TaxdbPrinter<'_> {
+    /// NCBI's messages at the `Hit` of subject `rank` (taxid `taxid`, `taxonomy` what its lookup
+    /// said): the texts of opening and of the volume's lookup, where they first apply, then the
+    /// messages of the `Hit`'s lookup (`CSeqDB::GetTaxInfo`, every time), to `sink`.
+    pub(crate) fn at_hit(
+        &mut self,
+        rank: usize,
+        taxid: i32,
+        taxonomy: &crate::report::blast_xml::HitTaxonomy,
+        sink: &mut dyn std::io::Write,
+    ) -> std::io::Result<()> {
+        use crate::seqdb::taxdb::err_post_line;
+        let mut text = String::new();
+        let program = &self.notes.program;
+        let mut push = |line: &str| {
+            text.push_str(&err_post_line(program, line));
+            text.push('\n');
+        };
+        if taxid != 0 {
+            if !std::mem::replace(&mut self.opened, true) {
+                self.notes.open.iter().for_each(|line| push(line));
+            }
+            if let Some(volume) = self.notes.volumes.get(rank).copied() {
+                if let Some(lines) = self.notes.lookups.get(&(volume, taxid)) {
+                    if self.written.insert((volume, taxid)) {
+                        lines.iter().for_each(|line| push(line));
+                    }
+                }
+            }
+        }
+        if let crate::report::blast_xml::HitTaxonomy::NotFound(messages) = taxonomy {
+            messages.iter().for_each(|line| push(line));
+        }
+        if text.is_empty() {
+            return Ok(());
+        }
+        sink.write_all(text.as_bytes())?;
+        sink.flush()
+    }
+}
+
+#[cfg(test)]
+mod taxdb_notes_tests {
+    use super::*;
+    use crate::report::blast_xml::HitTaxonomy;
+
+    fn lines(printer: &mut TaxdbPrinter<'_>, rank: usize, taxid: i32, hit: &HitTaxonomy) -> String {
+        let mut sink = Vec::new();
+        printer.at_hit(rank, taxid, hit, &mut sink).unwrap();
+        String::from_utf8(sink).unwrap()
+    }
+
+    /// NCBI writes the texts of opening at the first `Hit` with a taxid, the volume's lookup
+    /// at the first `Hit` of each (volume, taxid), and the `Hit`'s own lookup every time, each
+    /// after the lines before it (and so after the reader's messages of the batch).
+    #[test]
+    fn the_notes_come_at_the_first_hit_that_needs_them() {
+        let notes = TaxdbNotes {
+            program: "blastp".to_string(),
+            open: vec!["Error: open".to_string()],
+            volumes: vec![0, 0, 1, 0],
+            lookups: [
+                ((0, 9606), vec!["Error: lookup 9606".to_string()]),
+                ((1, 9606), vec!["Error: lookup 9606".to_string()]),
+            ]
+            .into_iter()
+            .collect(),
+        };
+        let mut printer = notes.printer();
+        let missing = HitTaxonomy::NotFound(vec!["Error: hit".to_string()]);
+        // a subject without a taxid writes nothing and does not open the database
+        assert_eq!(lines(&mut printer, 3, 0, &HitTaxonomy::Unnamed), "");
+        assert_eq!(
+            lines(&mut printer, 0, 9606, &missing),
+            "Error: [blastp] Error: open\nError: [blastp] Error: lookup 9606\nError: [blastp] Error: hit\n"
+        );
+        // the same (volume, taxid): the volume does not look it up again, the `Hit` does
+        assert_eq!(
+            lines(&mut printer, 1, 9606, &missing),
+            "Error: [blastp] Error: hit\n"
+        );
+        assert_eq!(
+            lines(&mut printer, 1, 9606, &HitTaxonomy::Named(Vec::new())),
+            ""
+        );
+        // another volume: its own lookup
+        assert_eq!(
+            lines(&mut printer, 2, 9606, &HitTaxonomy::Named(Vec::new())),
+            "Error: [blastp] Error: lookup 9606\n"
+        );
+        // no notes (a batch after the first, or a database without a taxonomy database)
+        let none = TaxdbNotes::default();
+        assert_eq!(
+            lines(&mut none.printer(), 0, 9606, &HitTaxonomy::Unnamed),
+            ""
+        );
     }
 }

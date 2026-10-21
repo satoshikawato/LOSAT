@@ -10642,10 +10642,8 @@ fn run_resolved_in_pool(
         None => Vec::new().into(),
     };
     let pairwise_database = database.map(database::BlastpDatabase::pairwise_database);
-    let mut format_warnings = Some(crate::report::query_warnings::QueryWarnings {
-        before: &query_warning_lines,
-        sink: &mut *outputs.diagnostics,
-    });
+    // The warnings are written once, with the first format (`QueryWarnings`).
+    let mut warning_lines: Option<&[Vec<u8>]> = Some(&query_warning_lines);
     // Each requested format prints the same final result without searching again.
     let mut output_result: Result<()> = Ok(());
     let observer = &mut outputs.observer;
@@ -10658,7 +10656,13 @@ fn run_resolved_in_pool(
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
-        let mut warnings = format_warnings.take();
+        // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
+        // format.
+        let mut warnings = (warning_lines.is_some() || matches!(outfmt, BlastpReport::Xml2(_)))
+            .then(|| crate::report::query_warnings::QueryWarnings {
+                before: warning_lines.take().unwrap_or(&[]),
+                sink: &mut *outputs.diagnostics,
+            });
         let format_result: Result<()> = match outfmt {
             BlastpReport::Seqalign(serial) => (|| -> Result<()> {
                 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
@@ -10826,14 +10830,15 @@ fn run_resolved_in_pool(
                         .length(s_idx, subject_records[s_idx].seq().len())
                 };
                 // The taxids of the reported subjects, read for the XML2 and JSON formats only.
-                let (xml_taxids, xml_taxonomy): (
+                let (xml_taxids, xml_taxonomy, xml_taxdb_notes): (
                     Vec<i32>,
                     Vec<crate::report::blast_xml::HitTaxonomy>,
+                    crate::algorithm::common::database::TaxdbNotes,
                 ) = match (xml2_kind, listed_titles.as_ref(), database) {
                     (Some(_), Some(titles), Some(database)) => {
                         titles.read_taxids(database, &hit_lists)?
                     }
-                    _ => (Vec::new(), Vec::new()),
+                    _ => (Vec::new(), Vec::new(), Default::default()),
                 };
                 let xml_subjects = match (listed_subjects.as_ref(), listed_titles.as_ref()) {
                     // The stored titles by rank, of the records or of LOSAT_X_BPLISTEDLEAN
@@ -10894,6 +10899,7 @@ fn run_resolved_in_pool(
                     stats: xml_stats,
                     messages: xml_messages,
                     subjects: xml_subjects,
+                    taxdb_notes: xml_taxdb_notes,
                     masks: xml_masks,
                     // NCBI did not search the batches that the search skipped (every query in
                     // them invalid): XML2 shows it.

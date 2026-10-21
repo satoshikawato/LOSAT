@@ -42,10 +42,19 @@ fn command(env: &[(&str, &str)]) -> Command {
             command.env_remove(name);
         }
     }
-    // NCBI's variables change a report (and the search path): none leaks in
+    // NCBI's variables change a report (and the search path): none leaks in, and `~/.ncbirc`
+    // (which can name a taxonomy database or BLASTDB) is not read: HOME is an empty directory.
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("NCBI") {
+            command.env_remove(name);
+        }
+    }
     for name in ["BATCH_SIZE", "CHUNK_SIZE", "BLASTDB"] {
         command.env_remove(name);
     }
+    let home = std::env::temp_dir().join("losat_outfmt16_home");
+    fs::create_dir_all(&home).expect("empty home");
+    command.env("HOME", &home).env("USERPROFILE", &home);
     command.env(
         "LOSAT_BLASTX_WORKER_LOG",
         std::env::temp_dir().join("losat_outfmt16_worker.log"),
@@ -351,14 +360,17 @@ fn a_taxdb_that_names_nothing_leaves_the_id_alone() {
 }
 
 /// The rows `db.sa.x16_taxid.*` of `db_search_manifest.tsv` (OF5a part 1b: outfmt 15 and 16 with
-/// a taxonomy database in `BLASTDB`), at one and four threads: the bytes of NCBI BLAST+ 2.17.0
-/// (`blastp -num_threads 1`) for stdout, stderr and the exit status; the rows of kind
-/// `losat-rejection` write nothing and name their reason.
+/// a taxonomy database in `BLASTDB`; the rows with `warn` in their name also have a query file with
+/// a reader warning, and some a `BATCH_SIZE`), at one and four threads: the bytes of NCBI BLAST+
+/// 2.17.0 (`blastp -num_threads 1`) for stdout, stderr and the exit status; the rows of kind
+/// `losat-rejection` write nothing and name their reason. Every row with a `NAME=VALUE` token
+/// (`BLASTDB`, `BATCH_SIZE`, `CHUNK_SIZE`) runs with it in the environment, as the harness does.
 #[test]
 fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
     let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = fs::read_to_string(engine.join("tests/db_search_manifest.tsv")).unwrap();
     let mut rows = 0;
+    let mut warn_rows = 0;
     for line in manifest
         .lines()
         .filter(|line| line.starts_with("db.sa.x16_taxid."))
@@ -367,9 +379,20 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
         let (id, kind, db, query, extra, outfmt, rc, covers) = (
             cells[0], cells[2], cells[3], cells[4], cells[5], cells[6], cells[7], cells[11],
         );
-        let Some(taxdb) = extra.strip_prefix("BLASTDB=") else {
+        let mut env: Vec<(&str, &str)> = Vec::new();
+        for token in extra.split_whitespace() {
+            let (name, value) = token
+                .split_once('=')
+                .unwrap_or_else(|| panic!("{id}: the extra argument {token:?} is not NAME=VALUE"));
+            assert!(
+                ["BLASTDB", "BATCH_SIZE", "CHUNK_SIZE"].contains(&name),
+                "{id}: {token}"
+            );
+            env.push((name, value));
+        }
+        if env.is_empty() {
             continue;
-        };
+        }
         for threads in ["1", "4"] {
             let output = run_in(
                 engine,
@@ -384,7 +407,7 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
                     "-num_threads",
                     threads,
                 ],
-                &[("BLASTDB", taxdb)],
+                &env,
             );
             let rc: i32 = rc.parse().unwrap();
             assert_eq!(output.status.code(), Some(rc), "{id} threads {threads}");
@@ -409,6 +432,129 @@ fn the_taxdb_rows_match_the_frozen_ncbi_bytes_at_one_and_four_threads() {
             );
         }
         rows += 1;
+        warn_rows += id.contains(".warn.") as usize;
     }
     assert!(rows >= 20, "{rows} rows");
+    assert!(warn_rows >= 4, "{warn_rows} rows with a reader warning");
+}
+
+/// What NCBI BLAST+ 2.17.0 wrote for `blastp -query QUERY (-subject sprot.faa | -db db/sprot)
+/// EXTRA -outfmt N -num_threads 1` in `tests/fixtures/outfmt16` (`<stem>_{sub,db}_{15,16}.out`, and
+/// `.err` when stderr was not empty), with `env` and the exit status `rc`: LOSAT at one and four
+/// threads writes the same stdout, stderr and exit status.
+fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], rc: i32) {
+    let dir = fixtures();
+    for format in ["15", "16"] {
+        for mode in ["sub", "db"] {
+            let name = format!("{stem}_{mode}_{format}");
+            let out = fs::read(dir.join(format!("{name}.out"))).unwrap();
+            let err = fs::read(dir.join(format!("{name}.err"))).unwrap_or_default();
+            for threads in ["1", "4"] {
+                let mut args = vec!["blastp", "-query", query];
+                args.extend(if mode == "sub" {
+                    ["-subject", "sprot.faa"]
+                } else {
+                    ["-db", "db/sprot"]
+                });
+                args.extend(extra);
+                args.extend(["-num_threads", threads, "-outfmt", format]);
+                let output = run_in(&dir, &args, env);
+                let case = format!("{name} threads {threads}");
+                assert_eq!(output.status.code(), Some(rc), "{case}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&out),
+                    "{case}: stdout"
+                );
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stderr),
+                    String::from_utf8_lossy(&err),
+                    "{case}: stderr"
+                );
+            }
+        }
+    }
+}
+
+/// A first batch that fails to read (the whole file is one batch, `firstbad_blastp_*`): NCBI has
+/// written the prolog (`PrintProlog` comes before the first batch is read) and nothing else; the
+/// error and the exit status 1 are NCBI's.
+#[test]
+fn a_first_batch_that_fails_to_read_leaves_the_prolog_alone() {
+    equals_frozen("firstbad_blastp", "qprot_bad.faa", &[], &[], 1);
+}
+
+/// A score matrix that the engine does not support (`-matrix blosum62`, in lower case) stops the
+/// search after the prolog (`matrix_blastp_*`): exit status 3 and `unsupported score matrix`.
+#[test]
+fn an_unsupported_matrix_leaves_the_prolog_alone() {
+    equals_frozen(
+        "matrix_blastp",
+        "qprot_unsearched.faa",
+        &["-matrix", "blosum62"],
+        &[],
+        3,
+    );
+}
+
+/// A query of X only is a batch NCBI does not search when `BATCH_SIZE` puts it alone: its `Search`
+/// has no `hits` member and ` \nNo hits found` after the message (`unsearched_blastp_*`:
+/// `BATCH_SIZE=100`, queries `qp1`, `inv1`, `qp2`, `inv2`), as for BLASTN.
+#[test]
+fn a_query_of_an_unsearched_batch_has_no_hits_member_and_the_no_hits_suffix() {
+    equals_frozen(
+        "unsearched_blastp",
+        "qprot_unsearched.faa",
+        &[],
+        &[("BATCH_SIZE", "100")],
+        0,
+    );
+    let out = fs::read_to_string(fixtures().join("unsearched_blastp_db_16.out")).unwrap();
+    assert!(out.contains("No hits found &#xa;No hits found"), "{out}");
+}
+
+/// The taxonomy database is read for outfmt 15 and 16 only (DECISIONS 30): a `taxdb.bti` of the
+/// search path that cannot be read (here a damaged one) changes no byte of outfmt 0, 5, 6, 7 or 8
+/// and adds no line to standard error, while 15 and 16 refuse it. The database has taxids, so the
+/// lookup would run if any other format asked for it.
+#[test]
+fn the_taxdb_is_not_opened_outside_outfmt_15_and_16() {
+    let engine = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let (db, query) = (
+        "tests/db_search/x16_taxid",
+        "tests/db_search/x16_taxid_q.faa",
+    );
+    let damaged = "tests/seqdb/taxdb/btd_empty";
+    for format in ["0", "5", "6", "7", "8"] {
+        for threads in ["1", "4"] {
+            let args = [
+                "blastp",
+                "-db",
+                db,
+                "-query",
+                query,
+                "-outfmt",
+                format,
+                "-num_threads",
+                threads,
+            ];
+            let without = run_in(engine, &args, &[]);
+            let with = run_in(engine, &args, &[("BLASTDB", damaged)]);
+            let case = format!("outfmt {format} threads {threads}");
+            assert_eq!(without.status.code(), Some(0), "{case}");
+            assert_eq!(with.status.code(), Some(0), "{case}");
+            assert!(with.stderr.is_empty(), "{case}: {:?}", with.stderr);
+            assert!(!with.stdout.is_empty(), "{case}");
+            assert!(with.stdout == without.stdout, "{case}: stdout");
+        }
+    }
+    for format in ["15", "16"] {
+        let output = run_in(
+            engine,
+            &["blastp", "-db", db, "-query", query, "-outfmt", format],
+            &[("BLASTDB", damaged)],
+        );
+        assert_eq!(output.status.code(), Some(1), "outfmt {format}");
+        assert!(output.stdout.is_empty(), "outfmt {format}");
+    }
 }

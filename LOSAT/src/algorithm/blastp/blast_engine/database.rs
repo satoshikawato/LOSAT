@@ -936,13 +936,14 @@ impl ListedTitles<'_> {
     ///
     /// NCBI's messages about the taxonomy database go to standard error: those of opening and of
     /// the lookup that the volume makes for each taxid of a fetched subject (`CSeqDBVol::
-    /// x_GetTaxonomy`, once per volume and taxid) are written here, those of the lookup of each
-    /// `Hit` at the hit (`write_blastp_xml`).
+    /// x_GetTaxonomy`, once per volume and taxid) are returned as `TaxdbNotes`, which
+    /// `write_blastp_xml` writes at the first `Hit` that needs them, and those of the lookup of
+    /// each `Hit` are written there too.
     pub(super) fn read_taxids(
         &self,
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
-    ) -> Result<(Vec<i32>, Vec<HitTaxonomy>)> {
+    ) -> Result<(Vec<i32>, Vec<HitTaxonomy>, shared::TaxdbNotes)> {
         shared::read_reported_taxids(
             &database.db,
             &database.taxdb,

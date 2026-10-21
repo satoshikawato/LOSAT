@@ -493,6 +493,44 @@ impl LazyTaxDb {
         }
     }
 
+    /// Opens the database if no call has (`CTaxDBFileInfo`, at the first `GetTaxNames`) and returns
+    /// the `ERR_POST` texts of opening when this call opened it, none when it was open already.
+    /// An open that was refused is the same error on every call.
+    pub fn open(&self) -> Result<Vec<String>, SeqDbError> {
+        let mut messages = Vec::new();
+        self.open_into(&mut messages)?;
+        Ok(messages)
+    }
+
+    /// Opens the database like [`LazyTaxDb::open`], appending the texts of opening to `messages`.
+    fn open_into(&self, messages: &mut Vec<String>) -> Result<&TaxDb, SeqDbError> {
+        let mut opened = false;
+        let db = self.db.get_or_init(|| {
+            opened = true;
+            TaxDb::open(&self.search).map_err(|error| match error {
+                SeqDbError::Unsupported { path, message } => (path, message),
+                // The file that failed, and what the system said of it.
+                SeqDbError::Open { path, source } | SeqDbError::Io { path, source } => {
+                    (path, source.to_string())
+                }
+                SeqDbError::Format { path, message } => (path, message),
+                other => (PathBuf::from("taxdb.bti"), other.to_string()),
+            })
+        });
+        match db {
+            Ok(db) => {
+                if opened {
+                    messages.extend(db.open_messages().iter().cloned());
+                }
+                Ok(db)
+            }
+            Err((path, message)) => Err(SeqDbError::Unsupported {
+                path: path.clone(),
+                message: message.clone(),
+            }),
+        }
+    }
+
     /// `GetTaxNames` through the lazily opened database. The `ERR_POST` texts
     /// of opening, which NCBI writes once at the first lookup, are appended to
     /// `messages` by the call that opens the database, before those of the
@@ -502,26 +540,7 @@ impl LazyTaxDb {
         tax_id: i32,
         messages: &mut Vec<String>,
     ) -> Result<Option<TaxNames>, SeqDbError> {
-        let mut opened = false;
-        let db = self.db.get_or_init(|| {
-            opened = true;
-            TaxDb::open(&self.search).map_err(|error| match error {
-                SeqDbError::Unsupported { path, message } => (path, message),
-                other => (PathBuf::from("taxdb.bti"), other.to_string()),
-            })
-        });
-        match db {
-            Ok(db) => {
-                if opened {
-                    messages.extend(db.open_messages().iter().cloned());
-                }
-                db.names(tax_id, messages)
-            }
-            Err((path, message)) => Err(SeqDbError::Unsupported {
-                path: path.clone(),
-                message: message.clone(),
-            }),
-        }
+        self.open_into(messages)?.names(tax_id, messages)
     }
 
     /// Whether the database has been opened (a name has been asked for).

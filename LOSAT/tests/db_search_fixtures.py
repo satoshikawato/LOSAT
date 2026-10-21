@@ -18,12 +18,14 @@ LOSAT/tests/db_search (README.md there says how they were built).
 
 `freeze --ncbi-bin DIR [--program NAME] [--only PREFIX]` runs NCBI for the `ncbi` rows, writes the frozen files and
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
-the default is every program). It
-refuses to run when ~/.ncbirc exists or when BLASTDB, NCBI, BATCH_SIZE, CHUNK_SIZE, OLD_FSC or
-BL2SEQ_LEGACY is set, because each one changes NCBI's result.
+the default is every program). It runs NCBI in a cleaned environment (see `check`), because each
+variable and file that is cleaned changes NCBI's result: BLASTDB, NCBI*, BLAST*, BATCH_SIZE, CHUNK_SIZE,
+OLD_FSC, BL2SEQ_LEGACY, and `~/.ncbirc` (HOME is an empty directory).
 
 `check --losat BIN [--threads N] [--program NAME] [--only PREFIX] [--out TSV]` runs LOSAT with `-num_threads N`
-(default 1) in a cleaned environment (no NCBI*, BLAST* or LOSAT_* variable), compares stdout,
+(default 1) in the same cleaned environment (no NCBI*, BLAST*, LOSAT_*, BATCH_SIZE, CHUNK_SIZE, OLD_FSC or
+BL2SEQ_LEGACY variable; HOME and USERPROFILE are an empty directory, so that no `~/.ncbirc` names a
+taxonomy database or a BLASTDB), compares stdout,
 stderr and exit status with the frozen files (and checks that each frozen file's sha256 is the
 manifest's), prints one line per row (`same`, `rejection`, or `differs` with the first differing
 line), writes the same lines to --out, and exits 0 only when every row is `same` or `rejection`.
@@ -37,6 +39,7 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parents[1]
@@ -46,9 +49,11 @@ FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
 PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx")
-NCBI_ENV = ("BLASTDB", "NCBI", "BATCH_SIZE", "CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY")
+NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY")
 TIMEOUT = 600
-ENV_PREFIX = "BLASTDB="
+# The `NAME=VALUE` tokens of `extra_args` that are environment variables of both programs: BLASTDB
+# (the directory of a `taxdb.bti`) and the two that cut a query file into batches.
+ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE")
 
 
 def read_manifest() -> tuple[list[str], list[dict[str, str]]]:
@@ -81,19 +86,33 @@ def extra_tokens(row: dict[str, str]) -> list[str]:
     return shlex.split(row["extra_args"])
 
 
+def is_env_token(token: str) -> bool:
+    return token.partition("=")[0] in ENV_NAMES
+
+
 def search_argv(row: dict[str, str]) -> list[str]:
     """The arguments after the program name (the same for NCBI and LOSAT)."""
-    extra = [token for token in extra_tokens(row) if not token.startswith(ENV_PREFIX)]
+    extra = [token for token in extra_tokens(row) if not is_env_token(token)]
     return ["-db", row["db"], "-query", row["query"], *extra, "-outfmt", row["outfmt"]]
 
 
 def row_env(row: dict[str, str], base: dict[str, str]) -> dict[str, str]:
-    """`base` plus the row's `BLASTDB=DIR` tokens (the search path of the taxonomy database, DIR
-    relative to LOSAT/, the directory both programs run in)."""
+    """`base` plus the row's `NAME=VALUE` tokens (`BLASTDB=DIR`: the search path of the taxonomy
+    database, DIR relative to LOSAT/, the directory both programs run in; `BATCH_SIZE`, `CHUNK_SIZE`)."""
     env = dict(base)
     for token in extra_tokens(row):
-        if token.startswith(ENV_PREFIX):
-            env["BLASTDB"] = token[len(ENV_PREFIX):]
+        if is_env_token(token):
+            name, _, value = token.partition("=")
+            env[name] = value
+    return env
+
+
+def clean_env(base: dict[str, str], home: str) -> dict[str, str]:
+    """`base` without what changes a result (NCBI*, BLAST*, LOSAT_*, `NCBI_ENV`), HOME and USERPROFILE
+    set to the empty directory `home` (`$HOME/.ncbirc` is read by both programs)."""
+    env = {k: v for k, v in base.items()
+           if not k.startswith(("NCBI", "BLAST", "LOSAT_")) and k not in NCBI_ENV}
+    env["HOME"] = env["USERPROFILE"] = home
     return env
 
 
@@ -121,17 +140,15 @@ def selected(row: dict[str, str], args: argparse.Namespace) -> bool:
 
 
 def freeze(args: argparse.Namespace) -> int:
-    if (Path.home() / ".ncbirc").exists():
-        raise SystemExit("~/.ncbirc exists: it changes NCBI's result")
-    if bad := [name for name in NCBI_ENV if name in os.environ]:
-        raise SystemExit(f"environment variables that change NCBI's result are set: {bad}")
     comments, rows = read_manifest()
     FROZEN.mkdir(parents=True, exist_ok=True)
+    home = tempfile.TemporaryDirectory(prefix="db_search_home_")
+    env = clean_env(dict(os.environ), home.name)
     for row in rows:
         if row["kind"] != "ncbi" or not selected(row, args):
             continue
         run = subprocess.run([str(Path(args.ncbi_bin) / row["program"]), *search_argv(row), "-num_threads", "1"],
-                             cwd=ENGINE, capture_output=True, timeout=TIMEOUT, env=row_env(row, dict(os.environ)))
+                             cwd=ENGINE, capture_output=True, timeout=TIMEOUT, env=row_env(row, env))
         (FROZEN / f"{row['row_id']}.out").write_bytes(run.stdout)
         err = FROZEN / f"{row['row_id']}.err"
         if run.stderr:
@@ -175,7 +192,8 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
 
 
 def check(args: argparse.Namespace) -> int:
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("NCBI", "BLAST", "LOSAT_"))}
+    home = tempfile.TemporaryDirectory(prefix="db_search_home_")
+    env = clean_env(dict(os.environ), home.name)
     losat = args.losat.resolve()
     lines, bad = [], 0
     for row in read_manifest()[1]:

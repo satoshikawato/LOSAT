@@ -58,6 +58,9 @@ pub(crate) struct BlastnXml<'a> {
     /// when every query was. Only XML2 shows it.
     pub searched: Vec<bool>,
     pub subjects: XmlSubjects<'a>,
+    /// NCBI's messages about the taxonomy database that come before the `Hit`s' own
+    /// (XML2 and JSON with `-db`; nothing otherwise).
+    pub taxdb_notes: crate::algorithm::common::database::TaxdbNotes,
     /// The letters of the subjects, which the rows read.
     pub letters: SubjectLetters<'a>,
     /// Whether the document ends with this call.
@@ -76,6 +79,11 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
     mut warnings: Option<&mut QueryWarnings<'_>>,
 ) -> Result<()> {
     const PROGRAM: &str = "BLASTN";
+    // Everything NCBI cannot write is refused before the first byte of the document, also the
+    // titles of the report of the last query of a `-subject` call, which NCBI holds back and
+    // never writes when the next batch fails to read (a refusal LOSAT makes where NCBI writes
+    // the other reports and the error): the refusal cannot wait for the report to be written,
+    // which would be after a byte, and the next batch is not read yet.
     names::check_text(xml.run.db_name)
         .map_err(|refusal| refusal.error(PROGRAM, "a database name"))?;
     let has_hits = |q_idx: usize| {
@@ -95,6 +103,7 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
             }
         }
     }
+    let mut taxdb_printer = xml.taxdb_notes.printer();
     let (mut query_row, mut subject_row): (Vec<u8>, Vec<u8>) = (Vec::new(), Vec::new());
     let mut buf: Vec<u8> = Vec::new();
     for (q_idx, record) in xml.queries.iter().enumerate() {
@@ -132,12 +141,16 @@ pub(crate) fn write_blastn_xml<W: StructuredXml>(
                     taxid: subject.taxid,
                     taxonomy: &subject.taxonomy,
                 };
-                // NCBI's lookup of the taxid at this `Hit` (`CSeqDB::GetTaxInfo`) writes its
-                // messages every time.
-                crate::algorithm::common::database::write_hit_taxonomy_messages(
-                    "blastn",
-                    &subject.taxonomy,
-                );
+                // NCBI's messages about the taxonomy database: opening and the volume's lookup
+                // at the first `Hit` that needs them, the lookup of the `Hit` every time.
+                if let Some(warnings) = warnings.as_deref_mut() {
+                    taxdb_printer.at_hit(
+                        s_idx,
+                        subject.taxid,
+                        &subject.taxonomy,
+                        &mut *warnings.sink,
+                    )?;
+                }
                 sink.hit(&hit, |hsps| {
                     for hsp in &hsp_list.hsps {
                         xml_rows_into(

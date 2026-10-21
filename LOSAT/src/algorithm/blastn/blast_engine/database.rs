@@ -161,7 +161,11 @@ impl BlastnDatabase {
         &self,
         ordinals: &[u32],
         hit_lists: &[Option<BlastnHitList>],
-    ) -> Result<(Vec<i32>, Vec<crate::report::blast_xml::HitTaxonomy>)> {
+    ) -> Result<(
+        Vec<i32>,
+        Vec<crate::report::blast_xml::HitTaxonomy>,
+        shared::TaxdbNotes,
+    )> {
         let reported: std::collections::BTreeSet<usize> = hit_lists
             .iter()
             .flatten()

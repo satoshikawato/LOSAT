@@ -5841,17 +5841,21 @@ fn post_process_hits_and_write(
         };
     let observer = &mut outputs.observer;
     // The warnings are written once, with the first format (`QueryWarnings`).
-    let mut warnings = Some(crate::report::query_warnings::QueryWarnings {
-        before: query_warnings,
-        sink: &mut *outputs.diagnostics,
-    });
+    let mut warning_lines = Some(query_warnings);
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(output_formats).enumerate()
     {
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
-        let mut format_warnings = warnings.take();
+        // The taxonomy database's messages of XML2 and JSON go to the diagnostics at every
+        // format.
+        let mut format_warnings = (warning_lines.is_some()
+            || matches!(output_format, BlastnOutputFormat::Xml2(_)))
+        .then(|| crate::report::query_warnings::QueryWarnings {
+            before: warning_lines.take().unwrap_or(&[]),
+            sink: &mut *outputs.diagnostics,
+        });
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
         // ```c
         // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
@@ -5960,13 +5964,16 @@ fn post_process_hits_and_write(
             };
             // The taxids of the reported sequences and the taxonomy database's names, read for
             // the XML2 and JSON formats only.
-            let (xml_taxids, xml_taxonomy): (Vec<i32>, Vec<crate::report::blast_xml::HitTaxonomy>) =
-                match (xml2_kind, report.database_ordinals, report.database_reader) {
-                    (Some(_), Some(ordinals), Some(database)) if is_database => {
-                        database.read_taxids(ordinals, &hit_lists)?
-                    }
-                    _ => (Vec::new(), Vec::new()),
-                };
+            let (xml_taxids, xml_taxonomy, xml_taxdb_notes): (
+                Vec<i32>,
+                Vec<crate::report::blast_xml::HitTaxonomy>,
+                crate::algorithm::common::database::TaxdbNotes,
+            ) = match (xml2_kind, report.database_ordinals, report.database_reader) {
+                (Some(_), Some(ordinals), Some(database)) if is_database => {
+                    database.read_taxids(ordinals, &hit_lists)?
+                }
+                _ => (Vec::new(), Vec::new(), Default::default()),
+            };
             // The masked regions of the queries in record coordinates and the queries of the
             // batches that were not searched, which only XML2 shows (outfmt 5 shows neither).
             let (xml_masks, xml_searched): (
@@ -6050,6 +6057,7 @@ fn post_process_hits_and_write(
                 masks: xml_masks,
                 searched: xml_searched,
                 subjects: xml_subjects,
+                taxdb_notes: xml_taxdb_notes,
                 letters: report.subjects,
                 epilog: report.epilog,
             };
@@ -6106,9 +6114,9 @@ fn post_process_hits_and_write(
         writer.flush()?;
     }
     // Without an output format the warnings are written all at once.
-    if let Some(warnings) = warnings {
-        for query_warnings in warnings.before {
-            warnings.sink.write_all(query_warnings)?;
+    if let Some(before) = warning_lines {
+        for query_warnings in before {
+            outputs.diagnostics.write_all(query_warnings)?;
         }
     }
 

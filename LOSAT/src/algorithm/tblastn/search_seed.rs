@@ -1203,10 +1203,17 @@ pub(super) fn x_scan_unit(
 ) {
     let (frame_index, chunk, ranges) = &plan.subject.units[unit];
     let frame = &plan.subject.frames[*frame_index];
+    // EXPERIMENT (LOSAT_X_TBNSCANBYTE): the scan on presence bytes, for a table of tblastn's shape;
+    // it writes up to X_SCAN_BYTE_SLACK entries after the capacity.
+    let scan_byte = super::x_scan_byte::x_scan_byte();
+    let presence = (scan_byte.on() && super::x_scan_byte::fits(&plan.lookup))
+        .then(|| super::x_scan_byte::presence_bytes(&plan.lookup));
     // EXPERIMENT (LOSAT_X_TBNSCANBF): the branch-free scan writes up to X_SCAN_BF_SLACK entries
     // after the capacity.
     let scan_bf = super::x_scan_bf::x_tbn_scan_bf();
-    let pairs_len = if scan_bf {
+    let pairs_len = if presence.is_some() {
+        plan.pair_capacity + super::x_scan_byte::X_SCAN_BYTE_SLACK
+    } else if scan_bf {
         plan.pair_capacity + super::x_scan_bf::X_SCAN_BF_SLACK
     } else {
         plan.pair_capacity
@@ -1229,7 +1236,17 @@ pub(super) fn x_scan_unit(
         }
         let mut scan_range = [0, left, end];
         while scan_range[1] <= scan_range[2] {
-            let hits = if scan_bf {
+            let hits = if let Some(presence) = &presence {
+                super::x_scan_byte::x_scan_one_range_byte(
+                    scan_byte,
+                    &plan.lookup,
+                    presence,
+                    &frame.aa_seq[1 + chunk.offset..],
+                    pairs,
+                    pair_capacity,
+                    &mut scan_range,
+                )
+            } else if scan_bf {
                 super::x_scan_bf::x_scan_one_range_bf(
                     &plan.lookup,
                     &frame.aa_seq[1 + chunk.offset..],
@@ -1250,7 +1267,9 @@ pub(super) fn x_scan_unit(
             x_calls += 1;
         }
     }
-    if super::x_scan_bf::x_stats() {
+    if presence.is_some() {
+        super::x_scan_byte::x_count_unit(x_calls);
+    } else if super::x_scan_bf::x_stats() {
         super::x_scan_bf::x_count_unit(scan_bf, x_calls);
     }
 }

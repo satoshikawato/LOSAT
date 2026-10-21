@@ -159,12 +159,12 @@ fn constructed_values_use_indefinite_lengths_and_explicit_tags() {
         enc.element();
         enc.begin_sequence("Score");
         enc.member("id", 0);
-        enc.variant("str", 1);
+        enc.variant("Score_id", "str", 1);
         enc.visible_str(b"score");
         enc.end_variant();
         enc.end_member();
         enc.member("value", 1);
-        enc.variant("int", 1);
+        enc.variant("Score_value", "int", 1);
         enc.int(329);
         enc.end_variant();
         enc.end_member();

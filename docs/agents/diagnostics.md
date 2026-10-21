@@ -3573,7 +3573,9 @@ Scheduling (each value computed by one thread with the original function; order 
   taken this way (`tests/tblastn_scan_byte.rs` reads both). Timed on the workstation (one booked
   core, against `TBNSCANBF`, same output): one protein x the human genome `-db` x0.754 (20.75 ->
   15.65 s; cycles x0.720), fly proteins x the fly genome `-db` x0.988-0.990, 16 batches x E. coli
-  `-db` x0.993-0.995, AP027131 x MG1655 x0.978-0.980, 55 proteins x 16S x0.984. N8_TBD
+  `-db` x0.993-0.995, AP027131 x MG1655 x0.978-0.980, 55 proteins x 16S x0.984. At 8 threads (8 booked cores, warmed 3 s,
+  4 rounds, medians of the per-round ratios): x0.828 (3.43 -> 2.84 s), x0.981, x0.997 (x0.977-1.021),
+  x0.985, x0.982 in the same order.
   Probe: line F P3 (V2) and P3b (arm 7, `exp/f2-tbn-scan`).
 - `LOSAT_X_TBNHITBF=1` tblastn (speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off) the two-hit loop of the unit path (`XTwoHit::pairs`, every offset array

@@ -1,0 +1,236 @@
+//! tblastn's lookup scan on presence bytes (`LOSAT_X_TBNSCANBYTE`, in the strict set;
+//! `src/algorithm/tblastn/x_scan_byte.rs`) on whole searches.
+//!
+//! NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127
+//! ```c
+//! for (s = s_first; s <= s_last; s++) {
+//!     index = ComputeTableIndexIncremental(word_length, lookup->charsize, lookup->mask, s, index);
+//!     if (PV_TEST(pv, index, PV_ARRAY_BTS)) {
+//!         numhits = bbc[index].num_used;
+//!         if (numhits <= (array_size - totalhits)) {
+//!             ...
+//!         } else {
+//!             s_range[1] = (Int4)(s - subject->sequence);
+//!             return totalhits;
+//!         }
+//!     }
+//! }
+//! ```
+//! The switch's scan returns NCBI's offset pairs and scan range on every call (the unit test
+//! `x_scan_byte_equals_ncbi_scan_on_random_subjects` compares the calls of both forms), so a search
+//! with it gives the report of the scan before it (`LOSAT_X_TBNSCANBYTE=0`) and takes as many scan
+//! calls. The switch is on by default (the AVX2 forms where the CPU has AVX2, the plain loops with
+//! `=2` and elsewhere), off with `=0`, and off with `LOSAT_X_DEFAULT=0` unless its variable is set;
+//! it acts in the unit path (`LOSAT_X_TBNPAR`). These tests compare the reports and read the
+//! `[X_STATS] TBNSCANBYTE units= calls= avx2=` line (`LOSAT_X_STATS=1`), the
+//! `[X_STATS] TBNSCANBF` line of the scans before, and the `[X_SHADOW] TBNSCANBYTE` line of
+//! `LOSAT_X_TBNSCANBYTESHADOW`.
+//!
+//! The queries are the first protein of `tests/fasta/PemoMJNVA.faa` (few candidate words) and all
+//! 115 of them (four query batches; the offset array fills, so the scan stops and resumes); the
+//! subject is `tests/fasta/MelaMJNV.fasta`.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// The two query files: the first protein of `PemoMJNVA.faa` (written once per test process),
+/// and the whole file.
+fn queries() -> &'static [PathBuf; 2] {
+    static FILES: std::sync::OnceLock<[PathBuf; 2]> = std::sync::OnceLock::new();
+    FILES.get_or_init(|| {
+        let all = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/PemoMJNVA.faa");
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("tblastn_scan_byte");
+        std::fs::create_dir_all(&dir).expect("work directory");
+        let one = dir.join(format!("one.{}.faa", std::process::id()));
+        let text = std::fs::read_to_string(&all).expect("query file");
+        let second = text[1..].find('>').map_or(text.len(), |at| at + 1);
+        std::fs::write(&one, &text[..second]).expect("query file");
+        [one, all]
+    })
+}
+
+/// One TBLASTN run against `MelaMJNV.fasta` (`-outfmt 6` on standard output) with `variables`
+/// and `LOSAT_X_STATS` as its only `LOSAT_*` variables, except `LOSAT_BLASTX_WORKER_LOG`: a build
+/// with the worker probe (`--all-features`) writes to that file as soon as a pool starts, so the
+/// caller's value is kept, or a file of the tests is named. Returns the report and the standard
+/// error.
+fn tblastn(query: &Path, threads: usize, variables: &[(&str, &str)]) -> (Vec<u8>, String) {
+    const WORKER_LOG: &str = "LOSAT_BLASTX_WORKER_LOG";
+    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    for (name, _) in std::env::vars_os() {
+        let name_text = name.to_string_lossy();
+        if name_text.starts_with("LOSAT_") && name_text != WORKER_LOG {
+            command.env_remove(name);
+        }
+    }
+    if std::env::var_os(WORKER_LOG).is_none() {
+        command.env(
+            WORKER_LOG,
+            query.with_file_name(format!("worker.{}.log", std::process::id())),
+        );
+    }
+    let output = command
+        .arg("tblastn")
+        .arg("-query")
+        .arg(query)
+        .arg("-subject")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fasta/MelaMJNV.fasta"))
+        .args(["-outfmt", "6", "-num_threads", &threads.to_string()])
+        .env("LOSAT_X_STATS", "1")
+        .envs(variables.iter().copied())
+        .output()
+        .expect("run LOSAT");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(output.status.success(), "{variables:?}: {stderr}");
+    (output.stdout, stderr)
+}
+
+/// The numbers of `fields` in the one line of `stderr` that starts with `prefix`; `None` without
+/// the line.
+fn line_fields<const N: usize>(stderr: &str, prefix: &str, fields: [&str; N]) -> Option<[u64; N]> {
+    let lines: Vec<_> = stderr
+        .lines()
+        .filter(|line| line.starts_with(prefix))
+        .collect();
+    assert!(lines.len() <= 1, "one {prefix} line per process:\n{stderr}");
+    let line = lines.first()?;
+    Some(fields.map(|field| {
+        line.split_whitespace()
+            .find_map(|word| word.strip_prefix(field)?.strip_prefix('='))
+            .unwrap_or_else(|| panic!("no {field} in {line}"))
+            .parse()
+            .expect("a number")
+    }))
+}
+
+/// `[units, calls]` of the `[X_STATS] TBNSCANBYTE` line, and whether it says the AVX2 forms ran.
+fn byte_scans(stderr: &str) -> Option<([u64; 2], bool)> {
+    let counts = line_fields(stderr, "[X_STATS] TBNSCANBYTE ", ["units", "calls"])?;
+    let avx2 = stderr
+        .lines()
+        .find(|line| line.starts_with("[X_STATS] TBNSCANBYTE "))
+        .and_then(|line| {
+            line.split_whitespace()
+                .find_map(|w| w.strip_prefix("avx2="))
+        })
+        .expect("avx2= in the line");
+    Some((counts, avx2 == "true"))
+}
+
+/// Scan units and calls of the `[X_STATS] TBNSCANBF` line, both loops together.
+fn earlier_scans(stderr: &str) -> Option<[u64; 2]> {
+    let [units_bf, calls_bf, units_ref, calls_ref] = line_fields(
+        stderr,
+        "[X_STATS] TBNSCANBF ",
+        ["units_bf", "calls_bf", "units_ref", "calls_ref"],
+    )?;
+    Some([units_bf + units_ref, calls_bf + calls_ref])
+}
+
+fn avx2() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        std::is_x86_feature_detected!("avx2")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
+const OFF: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "0");
+const ON: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "1");
+const PLAIN: (&str, &str) = ("LOSAT_X_TBNSCANBYTE", "2");
+const SHADOW: (&str, &str) = ("LOSAT_X_TBNSCANBYTESHADOW", "1");
+const PREVIOUS: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
+const UNIT_PATH: (&str, &str) = ("LOSAT_X_TBNPAR", "1");
+
+// NCBI reference: c++/src/algo/blast/core/blast_aascan.c:75-127 (above). Each search gives the
+// report of the scan before the switch with the switch on (the default; both forms) and in the
+// shadow, at one and four threads; the lines say which scan ran, and at one thread every scan took
+// the same number of calls. The search of all proteins took more calls than units: the offset
+// array filled.
+#[test]
+fn the_report_and_the_scan_calls_are_those_of_the_scan_before() {
+    for (query, many) in queries().iter().zip([false, true]) {
+        let (expected, stderr) = tblastn(query, 1, &[OFF]);
+        assert!(
+            !expected.is_empty(),
+            "{query:?}: the search must report hits"
+        );
+        assert_eq!(byte_scans(&stderr), None, "{query:?}: =0 scans as before");
+        let [units, calls] = earlier_scans(&stderr).expect("a TBNSCANBF line with =0");
+        assert!(units > 0, "{query:?}");
+        if many {
+            assert!(calls > units, "{query:?}: the offset array never filled");
+        }
+
+        for (variables, form) in [(&[][..], avx2()), (&[PLAIN][..], false)] {
+            let (report, stderr) = tblastn(query, 1, variables);
+            assert!(
+                report == expected,
+                "{query:?} {variables:?}: the report changed"
+            );
+            let (counts, ran_avx2) = byte_scans(&stderr).expect("a TBNSCANBYTE line");
+            assert_eq!(counts, [units, calls], "{query:?} {variables:?}");
+            assert_eq!(ran_avx2, form, "{query:?} {variables:?}");
+            assert_eq!(earlier_scans(&stderr), None, "{query:?} {variables:?}");
+        }
+
+        let (report, stderr) = tblastn(query, 1, &[SHADOW]);
+        assert!(
+            report == expected,
+            "{query:?}: the shadow changed the report"
+        );
+        let [compared, pairs] = line_fields(
+            &stderr,
+            "[X_SHADOW] TBNSCANBYTE ",
+            ["calls_compared", "pairs_compared"],
+        )
+        .expect("a shadow line");
+        assert_eq!(compared, calls, "{query:?}: one comparison per scan call");
+        assert!(pairs > 0, "{query:?}: no pair compared");
+
+        for variables in [&[][..], &[OFF]] {
+            let (report, stderr) = tblastn(query, 4, variables);
+            assert!(report == expected, "{query:?} {variables:?}: four threads");
+            assert_eq!(
+                [
+                    byte_scans(&stderr).is_some(),
+                    earlier_scans(&stderr).is_some()
+                ],
+                [variables.is_empty(), !variables.is_empty()],
+                "{query:?} {variables:?}"
+            );
+        }
+    }
+}
+
+// No NCBI counterpart: where the switch acts. With `LOSAT_X_DEFAULT=0` the reference loop searches
+// each subject, no unit of the unit path is scanned (no line), and the variable changes nothing.
+// With `LOSAT_X_TBNPAR` set as well the unit path runs again, and the switch is off unless its
+// variable (or the shadow's) is set, as before it joined the set.
+#[test]
+fn the_switch_acts_in_the_unit_path_only() {
+    let [one, _] = queries();
+    let (expected, _) = tblastn(one, 1, &[]);
+    for variables in [&[PREVIOUS][..], &[PREVIOUS, ON]] {
+        let (report, stderr) = tblastn(one, 1, variables);
+        assert!(report == expected, "{variables:?}");
+        assert_eq!(byte_scans(&stderr), None, "{variables:?}");
+        assert_eq!(earlier_scans(&stderr), None, "{variables:?}");
+    }
+    let (report, stderr) = tblastn(one, 1, &[PREVIOUS, UNIT_PATH]);
+    assert!(report == expected);
+    assert_eq!(byte_scans(&stderr), None);
+    assert!(earlier_scans(&stderr).is_some());
+    for variables in [
+        &[PREVIOUS, UNIT_PATH, ON][..],
+        &[PREVIOUS, UNIT_PATH, SHADOW],
+    ] {
+        let (report, stderr) = tblastn(one, 1, variables);
+        assert!(report == expected, "{variables:?}");
+        assert!(byte_scans(&stderr).is_some(), "{variables:?}");
+        assert_eq!(earlier_scans(&stderr), None, "{variables:?}");
+    }
+}

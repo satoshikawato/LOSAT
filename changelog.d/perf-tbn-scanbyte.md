@@ -1,0 +1,1 @@
+- `tblastn` scans the subject for lookup words with the table indexes of a block made at once and a one-byte presence table, and copies a block's hits with one room test: MEASUREMENTS_TBD (`LOSAT_X_TBNSCANBYTE`, one of the switches above; `=0` turns it off; same results).

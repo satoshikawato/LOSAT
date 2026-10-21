@@ -819,7 +819,7 @@ impl SeqDb {
         self.volumes[volume].read_block(first, first + 1, ordinal)
     }
 
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues of protein `ordinal`, read from the index
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the number of residues of protein `ordinal`, read from the index
     /// alone (`read_sequence(ordinal)`'s `protein(0).len()`).
     pub fn protein_length(&self, ordinal: u32) -> Result<u32, SeqDbError> {
         let (volume, oid) = self.find_volume(ordinal)?;

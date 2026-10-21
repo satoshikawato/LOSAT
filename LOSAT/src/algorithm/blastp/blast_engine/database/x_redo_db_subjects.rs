@@ -17,8 +17,10 @@ use crate::algorithm::blastp::x_redo_subjects::{
 /// (`ListedSubjects::x_read_shown`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::algorithm::blastp::blast_engine) enum XShownResidues {
-    /// Those of the subjects of the final hit lists with a pyrrolysine (O): the reports read the
-    /// letters only to find an O (the tabular rows of the default fields, the Seq-aligns).
+    /// Those of the subjects of the final hit lists with a pyrrolysine (O), and of every subject of
+    /// an HSP whose query has an O: the reports read the letters only to recount the HSPs whose
+    /// query or subject has an O (`recount_pyrrolysine_identities`; the tabular rows of the
+    /// default fields, the Seq-aligns).
     WithO,
     /// Those of every subject of the final hit lists: a report renders the alignments.
     Final,
@@ -82,22 +84,33 @@ impl ListedSubjects {
     // above `read_titles`: NCBI reads the database again when it formats the results of a batch.
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): after the redo, `encoded` for the reports (nothing to do
     /// without the switch): every listed subject with its length, and with its residues read from
-    /// the database where the reports read them (`residues`). The shadow mode compares each read
-    /// with the copy.
+    /// the database where the reports read them (`residues`; `query_has_o`: whether each query's
+    /// record has an O, by query index, read with `WithO`). The shadow mode compares each read with
+    /// the copy.
     pub(in crate::algorithm::blastp::blast_engine) fn x_read_shown(
         &mut self,
         database: &BlastpDatabase,
         hit_lists: &[Option<BlastpHitList>],
         residues: XShownResidues,
+        query_has_o: &[bool],
     ) -> Result<()> {
         if self.x_mode == XRedoDbSubj::Off {
             return Ok(());
         }
         let ranks = self.ordinals.len();
         let mut reported = vec![residues == XShownResidues::Listed; ranks];
+        // With `WithO`, the subjects of the HSPs whose query has an O: the recount reads all their
+        // letters.
+        let mut kept = vec![residues != XShownResidues::WithO; ranks];
         for hit_list in hit_lists.iter().flatten() {
             for hsp_list in &hit_list.hsplist_array {
                 reported[hsp_list.oid as usize] = true;
+                for hsp in &hsp_list.hsps {
+                    reported[hsp.s_idx as usize] = true;
+                    if query_has_o.get(hsp.q_idx as usize) == Some(&true) {
+                        kept[hsp.s_idx as usize] = true;
+                    }
+                }
             }
         }
         let shadow = self.x_mode == XRedoDbSubj::Shadow;
@@ -116,7 +129,7 @@ impl ListedSubjects {
             if shadow {
                 x_shadow_compare_residues(rank, ordinal, &self.x_shadow_copy[rank], stored);
             }
-            if residues == XShownResidues::WithO && !x_has_stored_o(stored) {
+            if !kept[rank] && !x_has_stored_o(stored) {
                 encoded.push(length_only);
             } else {
                 encoded.push(encoded_stored(stored));

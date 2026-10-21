@@ -1202,13 +1202,16 @@ Rebuilding less:
   `ListedSubjects::read` copies the residues of every subject of the preliminary hit lists, which the redo and the reports
   read. With it `ListedSubjects::x_list` keeps their ordinal ids and lengths (from the index; the estimate of
   `LOSAT_X_BPREDOLPT` reads the lengths), every redo path and the first Newton problems of `LOSAT_X_NEWTONLANES` read a
-  match's stored residues with `SeqDb::read_sequence` after the early termination test, and after the redo
-  `ListedSubjects::x_read_shown` reads the subjects of the final hit lists again for the reports, keeping the residues
-  of those with a pyrrolysine (O) where every report is tabular rows of the default fields or Seq-aligns, of every final
-  subject otherwise, and of every listed subject when the reports make records (`LOSAT_X_BPLISTEDLEAN=0`, its shadow
-  mode, ABI v1's titles). The redo reads the same stored residues and the reports the same letters and lengths, so
-  reports and errors do not change (a reader error of the redo's reads is the error of the copy's read, reached in the
-  redo; only a database changed after its preliminary read can fail there). Shadow: `LOSAT_X_BPREDODBSUBJSHADOW=1`
+  match's stored residues with `SeqDb::read_sequence` (the one-thread loop after the early termination test, as NCBI;
+  the parallel paths for the matches they compute ahead of the test's replay), and after the redo
+  `ListedSubjects::x_read_shown` reads the subjects of the final hit lists again for the reports. Where every report is
+  tabular rows of the default fields or Seq-aligns, which read the letters only to recount the HSPs whose query or
+  subject has a pyrrolysine (O), it keeps the residues of the subjects with an O and of the subjects of the HSPs whose
+  query has one; otherwise those of every final subject; those of every listed subject when the reports make records
+  (`LOSAT_X_BPLISTEDLEAN=0`, its shadow mode, ABI v1's titles); the others keep their lengths. The redo reads the same
+  stored residues and the reports the same letters and lengths, so reports do not change. A reader error of the redo's
+  reads is the error of the copy's read, reached in the redo and only for a subject that the redo reads; only a
+  database changed after its preliminary read can fail there. Shadow: `LOSAT_X_BPREDODBSUBJSHADOW=1`
   (implies the switch) makes the copy too and compares the lengths and every read of the redo and of `x_read_shown`
   with it (the length and every residue); the first difference prints the line otherwise printed at exit and panics:
   `[X_SHADOW] BPREDODBSUBJ searches= lengths= reads= residues= identical`. Evidence: FILL.

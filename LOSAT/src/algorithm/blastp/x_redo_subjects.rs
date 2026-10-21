@@ -15,21 +15,25 @@
 //! two query-parallel paths and `x_redo_par.rs`) and the first Newton problems of
 //! `LOSAT_X_NEWTONLANES` read a match's subject with `SeqDb::read_sequence` (`XRedoSubjects::read`)
 //! and drop it after the match: the stored residues that the copy holds, so the redo computes the
-//! same values. The block that the read returns holds the sentinel bytes of the sequence file on
+//! same values. The one-thread loop reads after the early termination test, as NCBI does; the
+//! parallel paths read the matches that they compute ahead of the test's replay. The block that the read returns holds the sentinel bytes of the sequence file on
 //! both sides of the residues, where the copy holds `NCBISTDAA_GAP`; the redo reads the residues
 //! only, and SEG makes its own copy of a range (`build_subject_range_data`). After the redo,
 //! `ListedSubjects::x_read_shown` reads the subjects of the final hit lists again for the reports
 //! (NCBI reads them again when it formats the Seq-aligns): their lengths are kept for every
-//! listed subject, and their residues where a report reads them: a subject with a pyrrolysine (O)
-//! (`recount_pyrrolysine_identities`, `restore_displayed_o`), every subject of the final hit lists
-//! when a report renders the alignments (outfmt 0, XML, tabular fields of the alignment, the hits
-//! of the library API), and every listed subject when the reports make records
+//! listed subject, and their residues where a report reads them: where every report is tabular
+//! rows of the default fields or Seq-aligns, which read the letters only to recount the HSPs whose
+//! query or subject has an O (`recount_pyrrolysine_identities`), a subject with a pyrrolysine (O)
+//! and every subject of an HSP whose query has an O; every subject of the final hit lists when a
+//! report renders the alignments (outfmt 0, XML, tabular fields other than the default ones, the
+//! hits of the library API); every listed subject when the reports make records
 //! (`ListedSubjects::read_titles`: `LOSAT_X_BPLISTEDLEAN=0`, its shadow mode, ABI v1's titles).
-//! A subject left without residues has no O, which is all a report reads of it.
+//! No report reads the letters of a subject left without residues.
 //!
 //! A reader error of the redo's reads is the error that `ListedSubjects::read` gives for the same
-//! read (`database_error`); it is reached in the redo, where NCBI reaches its own reads. Only a
-//! database changed after its preliminary read can fail there.
+//! read (`database_error`); it is reached in the redo, where NCBI reaches its own reads, and only
+//! for a subject that the redo reads. Only a database changed after its preliminary read can fail
+//! there.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:1381-1385, quoted above
 //! `ListedSubjects::read`: NCBI's redo fetches each match's sequence from the database in the
@@ -103,7 +107,7 @@ pub(crate) struct XDbSubjects<'a> {
     pub(crate) db: &'a SeqDb,
     /// The listed ordinal ids, by rank (`ListedSubjects::ordinals`).
     pub(crate) ordinals: &'a [u32],
-    /// Their residues, by rank (`ListedSubjects::x_lengths`).
+    /// Their numbers of residues, by rank (`ListedSubjects::x_lengths`).
     pub(crate) lengths: &'a [u32],
     /// The program that the refusals name.
     pub(crate) program: &'static str,
@@ -138,7 +142,7 @@ impl<'a> XRedoSubjects<'a> {
         }
     }
 
-    /// The residues of the subject `s_idx`, if there is one.
+    /// The number of residues of the subject `s_idx`, if there is one.
     pub(crate) fn aa_len(&self, s_idx: usize) -> Option<usize> {
         match self {
             Self::Encoded(subjects) => subjects.get(s_idx).map(|subject| subject.aa_len),

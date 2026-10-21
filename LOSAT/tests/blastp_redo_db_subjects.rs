@@ -7,8 +7,9 @@
 //! lists again. These tests compare the reports with the switch off and on on every redo path (the
 //! one-thread loop, `LOSAT_X_BPREDOPAR`, the two query-parallel paths of `LOSAT_X_BPREDOPAR=0`) and
 //! for each set of residues the reports keep (tabular rows of the default fields and Seq-aligns:
-//! the subjects with an O; outfmt 0, XML and tabular fields of the alignment: every final subject;
-//! the records of `LOSAT_X_BPLISTEDLEAN=0`: every listed subject), and run its shadow mode
+//! the subjects with an O and those of the HSPs whose query has one; outfmt 0, XML and other
+//! tabular fields: every final subject; the records of `LOSAT_X_BPLISTEDLEAN=0`: every listed
+//! subject; the recount of the HSPs with a pyrrolysine on proteins made for it), and run its shadow mode
 //! (`LOSAT_X_BPREDODBSUBJSHADOW`), which makes the copy too and compares every read with it; its
 //! line at exit shows that the path ran. A difference stops the run.
 //!
@@ -76,11 +77,17 @@ fn work_dir() -> PathBuf {
 /// A protein database of the fixture's subject proteome (`MejoMJNV.faa`, 124 sequences), made with
 /// `LOSAT makedb` in `dir`; returns the database name.
 fn subject_database(dir: &Path) -> PathBuf {
-    let name = dir.join("MejoMJNV");
+    protein_database(&fixture("MejoMJNV.faa"), &dir.join("MejoMJNV"))
+}
+
+/// A protein database of the records of `fasta`, made with `LOSAT makedb` as `name`; returns
+/// `name`.
+fn protein_database(fasta: &Path, name: &Path) -> PathBuf {
+    let name = name.to_path_buf();
     let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
         .arg("makedb")
         .arg("-in")
-        .arg(fixture("MejoMJNV.faa"))
+        .arg(fasta)
         .args(["-dbtype", "prot"])
         .arg("-out")
         .arg(&name)
@@ -225,5 +232,80 @@ fn reports_with_reads_per_match_are_the_copys_reports() {
             counts["reads"] > 0 && counts["residues"] > counts["reads"],
             "{what}: {counts:?}"
         );
+    }
+}
+
+/// The letters before position 27 of the proteins of `pyrrolysine_recounts_are_the_copys`.
+const PREFIX: &str = "MKTAYIAKQRQISFVKSHFSRQLEDN";
+/// The letters after position 27.
+const SUFFIX: &str = "GLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQTLGQHDFSAGEGLYTHMKALRPDEDRLSPLHSVYVDQWDWERVMGDGERQFSTLKSTVEAIWAGIKATEAAVSEEFGLAPFLPDQIHFVHSQELLSRYPDLDAKGRERAIAKDLGAVFLVGIGGKLSDGHRHDVRAPDYDDWSTPSELGHAGLNGDILVWNPVLEDAFELSSMGIRVDADTLKHQLALTGDEDRLELEWHQALLRGEMPQTIGGGIGQSRLTMLLLQLPHIGQVQAGVWPAACVRESVPALL";
+
+// The reports recount the identities of the HSPs whose query or subject has a pyrrolysine (O), which
+// the search reads as X: a query O against a subject X is not identical in NCBI's reports. With the
+// tabular rows of the default fields the reports keep the residues of the subjects with an O and of
+// the subjects of the HSPs whose query has one; these tests compare those rows (and those of other
+// formats) with the switch off and on.
+#[test]
+fn pyrrolysine_recounts_are_the_copys() {
+    let dir = work_dir().join("pyrrolysine");
+    std::fs::create_dir_all(&dir).unwrap();
+    let with_o_at_128 = format!("{}O{}", &SUFFIX[..100], &SUFFIX[101..]);
+    let subjects = format!(
+        ">sx X at 27\n{PREFIX}X{SUFFIX}\n>so O at 128\n{PREFIX}G{with_o_at_128}\n\
+         >s2 other\nMSTNPKPQRKTKRNTNRRPQDVKFPGGGQIVGGVYLLPRRGPRLGVRATRKTSERSQPRGRRQPIPKARRPEGRTWAQPGYPWPLYGNEGCGWAGWLLSPRGSRPSWGPTDPRRRSRNLGKVIDTLTCGFADLMGYIPLVGAPLGGAARALAHGVRVLEDGVNYATGNLPGCSFSIFLLALLSCLTVPASA\n"
+    );
+    std::fs::write(dir.join("subjects.faa"), subjects).unwrap();
+    let db = protein_database(&dir.join("subjects.faa"), &dir.join("subjects"));
+    let queries = format!(">qo O at 27\n{PREFIX}O{SUFFIX}\n>qg G at 27\n{PREFIX}G{SUFFIX}\n");
+    let query = dir.join("queries.faa");
+    std::fs::write(&query, queries).unwrap();
+    for (outfmt, threads) in [
+        ("6", 1),
+        ("6", 2),
+        ("7", 1),
+        ("6 qseqid sseqid pident nident mismatch positive", 2),
+        ("0", 1),
+    ] {
+        let what = format!("outfmt {outfmt} threads {threads}");
+        let off = blastp(
+            &query,
+            &db,
+            threads,
+            &[("LOSAT_X_BPREDODBSUBJ", "0")],
+            outfmt,
+        );
+        if outfmt == "6" {
+            // The recount ran: qo's O against sx's X is a mismatch.
+            let row = String::from_utf8_lossy(&off.stdout)
+                .lines()
+                .find(|row| row.starts_with("qo\tsx\t"))
+                .map(str::to_string)
+                .unwrap_or_else(|| panic!("{what}: no qo x sx row"));
+            assert!(!row.contains("\t100.000\t"), "{what}: {row}");
+        }
+        let on = blastp(
+            &query,
+            &db,
+            threads,
+            &[("LOSAT_X_BPREDODBSUBJ", "1")],
+            outfmt,
+        );
+        assert!(
+            on.stdout == off.stdout,
+            "{what}: report\n{}\n{}",
+            String::from_utf8_lossy(&on.stdout),
+            String::from_utf8_lossy(&off.stdout)
+        );
+        assert_eq!(on.stderr, off.stderr, "{what}: standard error");
+        let shadow = blastp(
+            &query,
+            &db,
+            threads,
+            &[("LOSAT_X_BPREDODBSUBJSHADOW", "1")],
+            outfmt,
+        );
+        assert!(shadow.stdout == off.stdout, "{what}: shadow report");
+        assert_eq!(shadow.stderr_without_shadow(), off.stderr, "{what}");
+        assert!(shadow.shadow()["reads"] > 0, "{what}");
     }
 }

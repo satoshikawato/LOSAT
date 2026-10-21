@@ -3676,8 +3676,8 @@ impl<'a> ShownSubjects<'a> {
             Self::Records(records) => records
                 .get(s_idx)
                 .map(|record| ShownLetters::Ascii(record.seq())),
-            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a subject without residues has no O, which is all
-            // a report reads of it (`ListedSubjects::x_read_shown`).
+            // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): a subject without residues has no O and no HSP with
+            // a query that has one; no report reads its letters (`ListedSubjects::x_read_shown`).
             Self::Listed { subjects, .. } => subjects.get(s_idx).map(|subject| {
                 ShownLetters::Stored(subject.aa_seq.get(1..=subject.aa_len).unwrap_or_default())
             }),
@@ -10322,8 +10322,9 @@ fn run_resolved_in_pool(
     };
     // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues that the reports read, read from the
     // database again after the redo (`ListedSubjects::x_read_shown`): every listed subject's for
-    // the records, those with an O where every report is tabular rows of the default fields or
-    // Seq-aligns (which read the letters only to find an O), every final subject's otherwise.
+    // the records; where every report is tabular rows of the default fields or Seq-aligns, which
+    // read the letters only to recount the HSPs whose query or subject has an O, those of the
+    // subjects with an O and of the HSPs whose query has one; every final subject's otherwise.
     if let (Some(listed), Some(database)) = (listed_subjects.as_mut(), database) {
         let residues = if x_listed_lean != database::XListedLean::On {
             database::XShownResidues::Listed
@@ -10337,7 +10338,21 @@ fn run_resolved_in_pool(
         } else {
             database::XShownResidues::Final
         };
-        listed.x_read_shown(database, &hit_lists, residues)?;
+        // The query test of `recount_pyrrolysine_identities`.
+        let query_has_o: Vec<bool> = if residues == database::XShownResidues::WithO {
+            query_records
+                .iter()
+                .map(|record| {
+                    record
+                        .seq()
+                        .iter()
+                        .any(|letter| letter.eq_ignore_ascii_case(&b'O'))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        listed.x_read_shown(database, &hit_lists, residues, &query_has_o)?;
     }
     let subjects: &[EncodedProtein] = match listed_subjects.as_ref() {
         Some(listed) => &listed.encoded,

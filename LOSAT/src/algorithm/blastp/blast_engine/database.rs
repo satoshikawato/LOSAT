@@ -663,8 +663,8 @@ pub(super) struct ListedSubjects {
     pub(super) encoded: Vec<EncodedProtein>,
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): where the redo reads the subjects (`Off`: `encoded`).
     x_mode: XRedoDbSubj,
-    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues of each subject, by rank (`x_list`; empty
-    /// without the switch).
+    /// EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the number of residues of each subject, by rank (`x_list`;
+    /// empty without the switch).
     x_lengths: Vec<u32>,
     /// EXPERIMENT (LOSAT_X_BPREDODBSUBJSHADOW): the copy that `read` makes, by rank (empty
     /// without the shadow mode).
@@ -1969,15 +1969,22 @@ mod tests {
         final_list.update(list(1, 60));
         final_list.update(list(3, 50));
         let final_lists = vec![None, Some(final_list)];
-        for (residues, kept) in [
-            (XShownResidues::WithO, [false, true, false, false]),
-            (XShownResidues::Final, [false, true, false, true]),
-            (XShownResidues::Listed, [true; 4]),
+        // With `WithO`, the HSPs of a query with an O (query 0 here) keep every subject's residues.
+        for (residues, query_has_o, kept) in [
+            (XShownResidues::WithO, &[][..], [false, true, false, false]),
+            (
+                XShownResidues::WithO,
+                &[false, true],
+                [false, true, false, false],
+            ),
+            (XShownResidues::WithO, &[true], [false, true, false, true]),
+            (XShownResidues::Final, &[][..], [false, true, false, true]),
+            (XShownResidues::Listed, &[][..], [true; 4]),
         ] {
             let mut shown =
                 ListedSubjects::x_list(&database, &mut make(), &mut [], XRedoDbSubj::On).unwrap();
             shown
-                .x_read_shown(&database, &final_lists, residues)
+                .x_read_shown(&database, &final_lists, residues, query_has_o)
                 .unwrap();
             assert_eq!(shown.encoded.len(), 4, "{residues:?}");
             for (rank, kept) in kept.into_iter().enumerate() {
@@ -1998,7 +2005,7 @@ mod tests {
         // Without the switch the copy stays as `read` made it.
         let mut copied = copied;
         copied
-            .x_read_shown(&database, &final_lists, XShownResidues::WithO)
+            .x_read_shown(&database, &final_lists, XShownResidues::WithO, &[])
             .unwrap();
         assert_eq!(copied.encoded[2].aa_len, lengths[2]);
         assert_eq!(copied.encoded[3].aa_seq.len(), 302);

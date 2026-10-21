@@ -949,7 +949,7 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "18", None, UNSUPPORTED),
         (ALL, "20", None, UNSUPPORTED),
         // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c), 5 in
-        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in BLASTP and BLASTN (OF5a) and BLASTX (OF5b), NCBI dropping a custom specification
+        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in every program (BLASTP and BLASTN: OF5a; BLASTX, TBLASTN and TBLASTX: OF5b), NCBI dropping a custom specification
         // (blast_args.cpp:2844-2851); the others not yet.
         (ALL, "8", None, Writes(AsnText)),
         (ALL, "12", None, Writes(JsonSeqalign)),
@@ -962,14 +962,9 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "11", None, UNSUPPORTED),
         (ALL, "13", Some("o.json"), UNSUPPORTED),
         (ALL, "14", Some("o.xml"), UNSUPPORTED),
-        (&["blastp", "blastn"], "15", None, Writes(JsonS)),
-        (&["blastp", "blastn"], "16", None, Writes(Xml2S)),
-        (&["blastp", "blastn"], " 16 std", None, Writes(Xml2S)),
-        (&["blastx"], "15", None, Writes(JsonS)),
-        (&["blastx"], "16", None, Writes(Xml2S)),
-        (&["blastx"], " 16 std", None, Writes(Xml2S)),
-        (&["tblastn", "tblastx"], "15", None, UNSUPPORTED),
-        (&["tblastn", "tblastx"], "16", None, UNSUPPORTED),
+        (ALL, "15", None, Writes(JsonS)),
+        (ALL, "16", None, Writes(Xml2S)),
+        (ALL, " 16 std", None, Writes(Xml2S)),
         (&["blastn"], "17", None, UNSUPPORTED),
         (&["blastn"], "17 qseqid", None, UNSUPPORTED),
     ]

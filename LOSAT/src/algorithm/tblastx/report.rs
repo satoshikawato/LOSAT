@@ -1167,7 +1167,7 @@ pub(crate) fn write_tabular_row<W: Write>(
     )
 }
 
-/// The TBLASTX output formats (`-outfmt` 0, 5, 6, 7, 8, 9 and 12, `tblastx_outfmt`).
+/// The TBLASTX output formats (`-outfmt` 0, 5, 6, 7, 8, 9, 12, 15 and 16, `tblastx_outfmt`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TblastxOutputFormat {
     Pairwise,
@@ -1177,6 +1177,9 @@ pub(crate) enum TblastxOutputFormat {
     Seqalign(crate::report::serial::SerialFormat),
     /// BLAST XML (outfmt 5, `tblastx/blast_xml.rs`).
     Xml,
+    /// The XML2 and JSON documents (outfmt 16 and 15), written from the same records as
+    /// outfmt 5 (`tblastx/blast_xml.rs`).
+    Xml2(crate::report::blast_xml2::Xml2Kind),
 }
 
 impl TblastxOutputFormat {
@@ -1187,9 +1190,15 @@ impl TblastxOutputFormat {
 
     /// Whether the format writes the displayed identity counts of the rows
     /// (`set_displayed_identities`): not the structured formats, which read the engine's counts
-    /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5).
+    /// (outfmt 8, 9, 12) or count the rows again themselves (outfmt 5, 15, 16).
     pub(crate) fn reads_displayed_counts(self) -> bool {
-        !matches!(self, Self::Seqalign(_) | Self::Xml)
+        !matches!(self, Self::Seqalign(_) | Self::Xml | Self::Xml2(_))
+    }
+
+    /// Whether the format is BLAST XML (5) or one of its XML2 / JSON siblings (15, 16), which
+    /// are made from the same records and refuse the same names.
+    pub(crate) fn is_structured_xml(self) -> bool {
+        matches!(self, Self::Xml | Self::Xml2(_))
     }
 
     /// Whether the format writes a query's own warnings to standard error
@@ -1215,6 +1224,8 @@ pub(crate) fn output_format(outfmt: &str) -> TblastxOutputFormat {
         Ok(9) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::AsnBinary),
         Ok(12) => TblastxOutputFormat::Seqalign(crate::report::serial::SerialFormat::Json),
         Ok(5) => TblastxOutputFormat::Xml,
+        Ok(16) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Single16),
+        Ok(15) => TblastxOutputFormat::Xml2(crate::report::blast_xml2::Xml2Kind::Single15),
         _ => TblastxOutputFormat::Tabular,
     }
 }
@@ -1829,6 +1840,33 @@ mod tests {
     #[test]
     fn the_structured_formats_read_no_displayed_counts_and_write_no_query_warnings() {
         assert_eq!(output_format("5"), TblastxOutputFormat::Xml);
+        // The XML2 and JSON documents of 16 and 15 take the path of outfmt 5 (`is_structured_xml`).
+        use crate::report::blast_xml2::Xml2Kind;
+        assert_eq!(
+            output_format(" 16 std"),
+            TblastxOutputFormat::Xml2(Xml2Kind::Single16)
+        );
+        assert_eq!(
+            output_format("15"),
+            TblastxOutputFormat::Xml2(Xml2Kind::Single15)
+        );
+        for (outfmt, structured) in [
+            ("5", true),
+            ("15", true),
+            ("16", true),
+            ("0", false),
+            ("6", false),
+            ("7", false),
+            ("8", false),
+            ("9", false),
+            ("12", false),
+        ] {
+            assert_eq!(
+                output_format(outfmt).is_structured_xml(),
+                structured,
+                "{outfmt}"
+            );
+        }
         for (outfmt, counts) in [
             ("0", true),
             ("5", false),
@@ -1837,6 +1875,8 @@ mod tests {
             ("8", false),
             ("9", false),
             ("12", false),
+            ("15", false),
+            ("16", false),
         ] {
             let format = output_format(outfmt);
             assert_eq!(format.reads_displayed_counts(), counts, "{outfmt}");

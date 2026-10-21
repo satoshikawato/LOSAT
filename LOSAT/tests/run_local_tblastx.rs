@@ -22,7 +22,7 @@ use LOSAT::api::local_blast::{run_local_tblastx, FormatOutput, OutputSink, Repor
 use LOSAT::blastinput::fasta_reader::{FastaRecord, ReaderConfig};
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 7] = ["0", "6", "7", "8", "9", "12", "5"];
+const FORMATS: [&str; 9] = ["0", "6", "7", "8", "9", "12", "5", "15", "16"];
 
 /// Two queries against three subjects cut from two genomes; the first query overlaps
 /// two subjects.
@@ -512,9 +512,9 @@ fn outfmt0_titles_are_written_as_ncbi_makes_them() {
             let result = run_local_tblastx(inputs.args(&[]), &queries, &subjects, &mut outputs);
             drop(outputs);
             // BLAST XML: NCBI crashes on the punctuation-only title of a subject with hits
-            // (outfmt 0 and 5 alike), so LOSAT refuses it and writes nothing.
-            if outfmt == "5" && defline == ", ," {
-                let error = result.expect_err("outfmt 5 refuses the punctuation title");
+            // (outfmt 0, 5, 15 and 16 alike), so LOSAT refuses it and writes nothing.
+            if matches!(outfmt, "5" | "15" | "16") && defline == ", ," {
+                let error = result.expect_err("outfmt 5, 15 and 16 refuse the punctuation title");
                 assert!(error.to_string().contains("crashes on"), "{error}");
                 assert!(report.is_empty(), "nothing is written");
                 continue;
@@ -654,12 +654,12 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
     //         ERR_POST(Warning << results.GetWarningStrings());
     //     }
     // ```
-    // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9 and 12 write no query
-    // result warnings, so their CLI runs equal `run_local` with that format alone.
+    // The warnings go with the first format (outfmt 0 here); outfmt 5, 8, 9, 12, 15 and 16 write no
+    // query result warnings, so their CLI runs equal `run_local` with that format alone.
     for (index, outfmt) in FORMATS.into_iter().enumerate() {
         let (cli_output, cli_stderr) = inputs.cli(outfmt, &[]);
         assert!(run.outputs[index] == cli_output, "outfmt {outfmt}");
-        if matches!(outfmt, "5" | "8" | "9" | "12") {
+        if matches!(outfmt, "5" | "8" | "9" | "12" | "15" | "16") {
             let alone = inputs.run(&[outfmt], &[], false);
             assert_eq!(
                 String::from_utf8_lossy(&alone.diagnostics),

@@ -281,3 +281,17 @@ OF5b part 1 fix (DECISIONS 32, BLASTX `-db` 15/16 with a taxonomy database): `te
 nothing hits, `-taxid 9606`; only `.phr .pin .psq` kept). `mixtax_blastx_{good,badname}_{15,16}` are NCBI BLAST+ 2.17.0
 `blastx -query qnx_late.fna -db db/sprot_mixtax -num_threads 1` with `BLASTDB=tests/seqdb/taxdb/good` and `.../high_bytes_utf8` (the name of
 9606 has bytes >= 0x80; 9606 is in the database and never reported, so NCBI writes the same bytes as with `good`).
+
+- `x16_ttaxid_q.faa`, `x16_ttaxid_qwarn.faa`, `x16_ttaxid_qwarn2.faa` (OF5b part 2, TBLASTN outfmt 15 and 16): protein queries
+  translated from `sn1` (frame +1) and `sn2` (frame -3) of `x16_ntaxid.fna`, and an unrelated one without hits; the `qwarn` files
+  add a title that ends in 60 amino-acid letters (the reader's warning) and the `qwarn2` order puts the query without hits
+  first. They search the existing nucleotide databases `x16_ntaxid` (taxid 9606) and `x16_ntaxid_99990`: rows
+  `db.sa.x16_ttaxid.*` (`BLASTDB=DIR` and `BATCH_SIZE=N` tokens as in the BLASTP and BLASTN rows; the messages on standard
+  error name `tblastn`).
+
+- `x16_xtaxid_q.fna`, `x16_xtaxid_qwarn.fna`, `x16_xtaxid_qwarn2.fna` (OF5b part 3, TBLASTX outfmt 15 and 16): nucleotide queries made
+  from `sn1` (its first 150 bases, `xq1`) and `sn2` (the reverse complement of its first 150 bases, `xq2`) of `x16_ntaxid.fna`, and an
+  unrelated one without hits (`xq3`); the `qwarn` files add a title that ends in 28 nucleotide letters (the reader's warning) to `xq2`
+  and the `qwarn2` order puts the query without hits first. With `-evalue 1e-20` each query hits its own subject only. They search the
+  existing databases `x16_ntaxid` (taxid 9606) and `x16_ntaxid_99990`: rows `db.sa.x16_xtaxid.*` (`BLASTDB=DIR` and `BATCH_SIZE=N`
+  tokens as in the BLASTP, BLASTN and TBLASTN rows, the other tokens are options; the messages on standard error name `tblastx`).

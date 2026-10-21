@@ -26,6 +26,12 @@
 //!      broadcast to both halves, one `vpermd`, one `vpblendd` with the subject offset); a cell of
 //!      more than three hits, and a block that could fill the array, take the arm 5 path for that
 //!      candidate, so the stop is at the same word as in the base loop.
+//!   8  arm 7's copy stage with the per-candidate work moved into the candidate stage: that stage
+//!      also writes the byte offset of every word's cell (`index * 16`, as `u32`, made 8 words at a
+//!      time with AVX2) and lists the candidates by their subject offset (`u32`), so the copy loop
+//!      reads two `u32`s instead of two `u16`s, a shift and a spill-prone offset computation.
+//!   9  arm 8 with the four pairs written by two 16-byte stores instead of one 32-byte store (the
+//!      32-byte store crosses a cache line for 3 of 8 positions, the 16-byte one for 1 of 8).
 //! `LOSAT_X_F2CHECK` (set) counts words, candidates and hits of every call and sums a hash of every
 //! call's offset pairs and `s_range[1]`; `main` prints them as `[X_STATS] F2SCAN ...`.
 
@@ -44,7 +50,7 @@ pub(super) fn x_f2_arm() -> u8 {
         std::env::var("LOSAT_X_F2SCAN")
             .ok()
             .and_then(|v| v.parse::<u8>().ok())
-            .filter(|v| *v <= 7)
+            .filter(|v| *v <= 9)
             .unwrap_or(0)
     })
 }
@@ -247,7 +253,9 @@ fn x_scan_range_f2(
         5 if avx2 => scan::<5>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
         6 if avx2 => scan::<6>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
         7 if avx2 => scan::<7>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
-        2 | 4 | 5 | 6 | 7 => scan::<1>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        8 if avx2 => scan::<8>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        9 if avx2 => scan::<9>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
+        2 | 4 | 5 | 6 | 7 | 8 | 9 => scan::<1>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
         _ => scan::<3>(lookup, pvb, numtab, subject, offset_pairs, array_size, s_range),
     }
 }
@@ -406,6 +414,131 @@ unsafe fn copy_block_fast<const PF: bool>(
     (totalhits, -1)
 }
 
+/// Arms 8 and 9: like `copy_block_fast`, for candidates listed by subject offset (`cand`) and a
+/// table of cell byte offsets indexed by subject offset (`offs`, already shifted by the block's
+/// first offset).
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn copy_block_fast2<const HALVES: bool>(
+    backbone: *const crate::algorithm::tblastx::lookup::BackboneCell,
+    overflow: *const i32,
+    dest: *mut BlastOffsetPair,
+    cand: *const u32,
+    offs: *const u32,
+    n: usize,
+    mut totalhits: i32,
+    array_size: i32,
+) -> (i32, i64) {
+    use std::arch::x86_64::*;
+    let idx = _mm256_setr_epi32(1, 0, 2, 0, 3, 0, 3, 0);
+    let base = backbone as *const u8;
+    let mut i = 0usize;
+    while i < n {
+        if totalhits as i64 + 3 * (n - i) as i64 <= array_size as i64 {
+            let mut d = dest.add(totalhits as usize);
+            let mut t = totalhits;
+            while i < n {
+                let s = *cand.add(i);
+                let cell = base.add(*offs.add(s as usize) as usize);
+                let numhits = *(cell as *const i32);
+                if numhits > AA_HITS_PER_CELL as i32 {
+                    break;
+                }
+                let c = _mm256_castsi128_si256(_mm_loadu_si128(cell as *const __m128i));
+                let sv = _mm256_set1_epi32(s as i32);
+                let v = _mm256_blend_epi32::<0xAA>(_mm256_permutevar8x32_epi32(c, idx), sv);
+                if HALVES {
+                    _mm_storeu_si128(d as *mut __m128i, _mm256_castsi256_si128(v));
+                    _mm_storeu_si128(d.add(2) as *mut __m128i, _mm256_extracti128_si256::<1>(v));
+                } else {
+                    _mm256_storeu_si256(d as *mut __m256i, v);
+                }
+                d = d.add(numhits as usize);
+                t += numhits;
+                i += 1;
+            }
+            totalhits = t;
+            if i >= n {
+                break;
+            }
+        }
+        let s = *cand.add(i);
+        match copy_cell_vec(
+            backbone,
+            overflow,
+            dest,
+            (*offs.add(s as usize) >> 4) as usize,
+            s,
+            totalhits,
+            array_size,
+        ) {
+            Some(total) => totalhits = total,
+            None => return (totalhits, s as i64),
+        }
+        i += 1;
+    }
+    (totalhits, -1)
+}
+
+/// Arms 8 and 9: `v2_candidates` plus the cell byte offsets of all words (`offbuf`), and the
+/// candidates listed by subject offset.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[inline(never)]
+unsafe fn v3_candidates(
+    subject: &[u8],
+    pvb: *const u8,
+    block: (usize, usize),
+    ixbuf: &mut [u16; X_BLOCK + 16],
+    offbuf: &mut [u32; X_BLOCK + 16],
+    cand: &mut [MaybeUninit<u32>; X_BLOCK],
+) -> usize {
+    use std::arch::x86_64::*;
+    let words = block.1 - block.0 + 1;
+    let base = subject.as_ptr().add(block.0);
+    let available = subject.len() - block.0;
+    let ixp = ixbuf.as_mut_ptr();
+    let offp = offbuf.as_mut_ptr();
+    let mut k = 0usize;
+    let m = _mm256_set1_epi16(MASK as i16);
+    while k + 16 <= words && k + 18 <= available {
+        let a = _mm256_cvtepu8_epi16(_mm_loadu_si128(base.add(k) as *const __m128i));
+        let b = _mm256_cvtepu8_epi16(_mm_loadu_si128(base.add(k + 1) as *const __m128i));
+        let c = _mm256_cvtepu8_epi16(_mm_loadu_si128(base.add(k + 2) as *const __m128i));
+        let v = _mm256_or_si256(
+            _mm256_or_si256(_mm256_slli_epi16(a, 10), _mm256_slli_epi16(b, 5)),
+            c,
+        );
+        let ix = _mm256_and_si256(v, m);
+        _mm256_storeu_si256(ixp.add(k) as *mut __m256i, ix);
+        let lo = _mm256_cvtepu16_epi32(_mm256_castsi256_si128(ix));
+        let hi = _mm256_cvtepu16_epi32(_mm256_extracti128_si256::<1>(ix));
+        _mm256_storeu_si256(offp.add(k) as *mut __m256i, _mm256_slli_epi32::<4>(lo));
+        _mm256_storeu_si256(offp.add(k + 8) as *mut __m256i, _mm256_slli_epi32::<4>(hi));
+        k += 16;
+    }
+    while k < words {
+        let v = ((*base.add(k) as u16) << 10)
+            | ((*base.add(k + 1) as u16) << 5)
+            | (*base.add(k + 2) as u16);
+        let ix = v & MASK as u16;
+        *ixp.add(k) = ix;
+        *offp.add(k) = (ix as u32) << 4;
+        k += 1;
+    }
+    let out = cand.as_mut_ptr().cast::<u32>();
+    let mut n = 0usize;
+    for k in 0..words {
+        let ix = *ixp.add(k) as usize;
+        let bit = *pvb.add(ix) as usize;
+        out.add(n).write((block.0 + k) as u32);
+        n += bit;
+    }
+    n
+}
+
 /// Arm 4: `copy_cell` with the hit count read from `numtab` (255 = the cell's `num_used`).
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
@@ -481,14 +614,52 @@ fn scan<const ARM: u8>(
     let mut cand = [MaybeUninit::<u64>::uninit(); X_BLOCK];
     let mut cand16 = [MaybeUninit::<u16>::uninit(); X_BLOCK];
     let mut ixbuf = [0u16; X_BLOCK + 16];
+    let mut offbuf = [0u32; X_BLOCK + 16];
+    let mut cand32 = [MaybeUninit::<u32>::uninit(); X_BLOCK];
     let mut totalhits: i32 = 0;
     let mut block_first = s_first;
     while block_first <= s_last {
         let block_last = s_last.min(block_first + X_BLOCK - 1);
         let block = (block_first, block_last);
-        if ARM == 2 || ARM == 4 || ARM == 5 || ARM == 6 || ARM == 7 {
+        if ARM == 2 || ARM == 4 || ARM == 5 || ARM == 6 || ARM == 7 || ARM == 8 || ARM == 9 {
             #[cfg(target_arch = "x86_64")]
             {
+                if ARM == 8 || ARM == 9 {
+                    // SAFETY: AVX2 was detected by the caller.
+                    let (total, stop) = unsafe {
+                        let n = v3_candidates(subject, pvb, block, &mut ixbuf, &mut offbuf, &mut cand32);
+                        if ARM == 8 {
+                            copy_block_fast2::<false>(
+                                backbone,
+                                overflow,
+                                dest,
+                                cand32.as_ptr().cast::<u32>(),
+                                offbuf.as_ptr().wrapping_sub(block_first),
+                                n,
+                                totalhits,
+                                array_size,
+                            )
+                        } else {
+                            copy_block_fast2::<true>(
+                                backbone,
+                                overflow,
+                                dest,
+                                cand32.as_ptr().cast::<u32>(),
+                                offbuf.as_ptr().wrapping_sub(block_first),
+                                n,
+                                totalhits,
+                                array_size,
+                            )
+                        }
+                    };
+                    if stop >= 0 {
+                        s_range[1] = stop as i32;
+                        return total;
+                    }
+                    totalhits = total;
+                    block_first = block_last + 1;
+                    continue;
+                }
                 // SAFETY: AVX2 was detected by the caller.
                 let n = unsafe { v2_candidates(subject, pvb, block, &mut ixbuf, &mut cand16) };
                 if ARM == 6 || ARM == 7 {

@@ -108,6 +108,31 @@ class DbSearchFixtureTests(unittest.TestCase):
             self.assertEqual(db_fixtures.sha256(err.read_bytes()) if err.exists() else "", r["stderr_sha256"], r["row_id"])
 
 
+    def test_env_tokens_are_environment_not_arguments(self):
+        row = {"extra_args": "BLASTDB=tests/seqdb/taxdb/good BATCH_SIZE=100 -evalue 1e-5 -word_size 3",
+               "db": "d", "query": "q", "outfmt": "16"}
+        self.assertEqual(db_fixtures.search_argv(row),
+                         ["-db", "d", "-query", "q", "-evalue", "1e-5", "-word_size", "3", "-outfmt", "16"])
+        env = db_fixtures.row_env(row, {"PATH": "/bin"})
+        self.assertEqual((env["BLASTDB"], env["BATCH_SIZE"], env["PATH"]),
+                         ("tests/seqdb/taxdb/good", "100", "/bin"))
+        self.assertNotIn("CHUNK_SIZE", env)
+        # a token of another name is an argument (and is not silently dropped)
+        self.assertFalse(db_fixtures.is_env_token("-evalue"))
+        self.assertFalse(db_fixtures.is_env_token("NCBI=1"))
+
+    def test_clean_env_drops_what_changes_a_result_and_seals_home(self):
+        dirty = {"PATH": "/bin", "HOME": "/home/someone", "USERPROFILE": "C:/Users/someone",
+                 "NCBI_CONFIG__BLAST__BLASTDB": "/x", "NCBI_CONFIG_PATH": "/y", "NCBI": "/z",
+                 "BLASTDB": "/d", "BLAST_USE_NCBI_ENV": "yes", "LOSAT_X_SOMETHING": "1",
+                 "BATCH_SIZE": "1", "CHUNK_SIZE": "2", "OLD_FSC": "1", "BL2SEQ_LEGACY": "1", "LANG": "C"}
+        clean = db_fixtures.clean_env(dirty, "/empty/home")
+        self.assertEqual(clean, {"PATH": "/bin", "HOME": "/empty/home", "USERPROFILE": "/empty/home",
+                                 "LANG": "C"})
+        # nothing of the caller's environment is changed
+        self.assertEqual(dirty["HOME"], "/home/someone")
+
+
 class SelectionTests(unittest.TestCase):
     def test_paths_select_programs(self):
         everything = set(fast.PROGRAMS)

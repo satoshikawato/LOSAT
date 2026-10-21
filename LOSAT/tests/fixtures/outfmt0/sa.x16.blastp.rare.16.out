@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="US-ASCII"?>
+<BlastXML2
+    xmlns="http://www.ncbi.nlm.nih.gov"
+    xmlns:xs="http://www.w3.org/2001/XMLSchema-instance"
+    xs:schemaLocation="http://www.ncbi.nlm.nih.gov http://www.ncbi.nlm.nih.gov/data_specs/schema_alt/NCBI_BlastOutput2.xsd"
+>
+<BlastOutput2>
+  <report>
+    <Report>
+      <program>blastp</program>
+      <version>BLASTP 2.17.0+</version>
+      <reference>Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&amp;auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), &quot;Gapped BLAST and PSI-BLAST: a new generation of protein database search programs&quot;, Nucleic Acids Res. 25:3389-3402.</reference>
+      <search-target>
+        <Target>
+          <subjects>Subject_1</subjects>
+        </Target>
+      </search-target>
+      <params>
+        <Parameters>
+          <matrix>BLOSUM62</matrix>
+          <expect>10</expect>
+          <gap-open>11</gap-open>
+          <gap-extend>1</gap-extend>
+          <filter>F</filter>
+          <cbs>2</cbs>
+        </Parameters>
+      </params>
+      <results>
+        <Results>
+          <bl2seq>
+            <Search>
+              <query-id>Query_1</query-id>
+              <query-title>qp1 rare letters</query-title>
+              <query-len>140</query-len>
+              <hits>
+                <Hit>
+                  <num>1</num>
+                  <description>
+                    <HitDescr>
+                      <id>sp1</id>
+                      <title>sp1 rare letters</title>
+                    </HitDescr>
+                  </description>
+                  <len>137</len>
+                  <hsps>
+                    <Hsp>
+                      <num>1</num>
+                      <bit-score>229.565</bit-score>
+                      <score>584</score>
+                      <evalue>5.87706e-84</evalue>
+                      <identity>115</identity>
+                      <positive>120</positive>
+                      <query-from>1</query-from>
+                      <query-to>140</query-to>
+                      <hit-from>1</hit-from>
+                      <hit-to>137</hit-to>
+                      <align-len>140</align-len>
+                      <gaps>3</gaps>
+                      <qseq>MWMEHSVLKAUFAVLRKVMDOPKIRDGPMAJMKGWENYCWBANMSZKVLMKYEFSSDIHPCNLWICWIPK*MATPGWWNTXTLHMSEMGLUMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG</qseq>
+                      <hseq>MWMEHSVLKAVFAVRRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHP---WICWIPKEQQTPGWWKTDTLHMAEMGLWMHUYPKCMCVMVBYTDQSLRHWZJNTDANFEKLKILHHMVGHGRTASEG</hseq>
+                      <midline>MWMEHSVLKA FAV RKVMD PKIRDGPMA+MKGWENYCW ANMS KVLMKYEFSSDIHP   WICWIPK   TPGWW T TLHM+EMGL MH YPKCMCVMV  TDQSLRHW++  DANFEKLKI H+MVGHGRTASEG</midline>
+                    </Hsp>
+                  </hsps>
+                </Hit>
+              </hits>
+              <stat>
+                <Statistics>
+                  <hsp-len>15</hsp-len>
+                  <eff-space>15250</eff-space>
+                  <kappa>0.041</kappa>
+                  <lambda>0.267</lambda>
+                  <entropy>0.14</entropy>
+                </Statistics>
+              </stat>
+              <message>Query_1 qp1 rare letters:  Query_1 qp1 rare letters: One or more O characters replaced by X for alignment score calculations at positions 20 </message>
+            </Search>
+          </bl2seq>
+        </Results>
+      </results>
+    </Report>
+  </report>
+</BlastOutput2>
+</BlastXML2>

@@ -194,6 +194,43 @@ fn equals_frozen(stem: &str, query: &str, modes: &[&str], rc: i32, stderr_start:
     }
 }
 
+/// A query of a batch NCBI did not search lists no `query-masking` (`unsearchedmask_blastx_*`:
+/// `blastx -lcase_masking`, queries `m_big` (10,003 bases, a batch of its own: BLASTX does not read
+/// `BATCH_SIZE`, so the padding makes the batches; its lower-case runs are listed), `q_alln_lc`
+/// (300 N with a lower-case run) and `q_short_lc` (two lower-case bases)): the masks of the first
+/// query are the only ones in the document, and the other two have no `hits` member.
+#[test]
+fn a_query_of_an_unsearched_batch_lists_no_masks() {
+    let dir = fixtures();
+    for format in ["15", "16"] {
+        for mode in ["sub", "db"] {
+            let name = format!("unsearchedmask_blastx_{mode}_{format}");
+            let expected = fs::read(dir.join(format!("{name}.out"))).unwrap();
+            for threads in ["1", "4"] {
+                let mut args = vec!["blastx", "-query", "qnx_unsearched_lc.fna"];
+                args.extend(if mode == "sub" {
+                    ["-subject", "sprot.faa"]
+                } else {
+                    ["-db", "db/sprot"]
+                });
+                args.extend(["-lcase_masking", "-num_threads", threads, "-outfmt", format]);
+                let output = run_in(&dir, &args, &[]);
+                let case = format!("{name} threads {threads}");
+                assert_eq!(output.status.code(), Some(0), "{case}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&expected),
+                    "{case}"
+                );
+                assert!(output.stderr.is_empty(), "{case}");
+            }
+        }
+    }
+    let out = fs::read_to_string(fixtures().join("unsearchedmask_blastx_sub_16.out")).unwrap();
+    assert_eq!(out.matches("<query-masking>").count(), 1, "{out}");
+    assert_eq!(out.matches(" &#xa;No hits found").count(), 2, "{out}");
+}
+
 /// Design §5.2 row 22 for BLASTX (`blastx_{sub,db}_badbatch_fmt{15,16}`): the third query's batch fails to
 /// read. `-db` has written the reports of the two queries before it; `-subject` only the first one's (the
 /// second is held back and lost), and neither has an epilog. `dbtax` is a `-db` search with the taxonomy

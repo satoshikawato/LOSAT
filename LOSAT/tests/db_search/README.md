@@ -265,3 +265,13 @@ writes (`Error: [blastn] ...`).
   `LOSAT_X_BPQBLOCK` of 50,000 letters and two with a value of at most 10,000, which
   `tests/blastp_query_blocks_fmt.rs` runs against these frozen bytes), the first 30 of that length in file order. Rows `db.sa.bpqb.{5,8,9,12}`: `blastp -db paja -evalue 0.1
   -max_target_seqs 2 -max_hsps 1` (9 rows of outfmt 6: some queries have hits, some do not).
+
+OF5b part 1 (XML2 and JSON of BLASTX): `make_x16_blastx_inputs.py` writes the inputs (run from `LOSAT/`):
+`x16_bx_taxid_q.fna` (three nucleotide queries for `x16_taxid`: a minus frame, a plus frame, one without hits) and
+`x16_bx_taxid_q2.fna` (two queries of 10,003 bases, each its own NCBI query batch of 10,002 bases, that both hit
+`x16_taxid_99990`), `tests/fasta/outfmt0/x16_bx_q_unsearched.fna` (a 10,003-base slice with lower-case stretches, then a
+300-N query and a 2-base query: a batch NCBI does not search) and, in `tests/fixtures/outfmt16`, `qnx_bad.fna`,
+`qnx_firstbad.fna`, `qnx_late.fna`. BLASTX does not read `BATCH_SIZE`, hence the padding to 10,003 bases. The rows
+`db.x16.blastx.*` (bslice) and `db.x16_bx_taxid.*` (taxid and `BLASTDB=` variants, as in the BLASTP rows) are frozen from NCBI
+BLAST+ 2.17.0; `tests/fixtures/outfmt16/db/sprot_tax` is `sprot.faa` built with `makeblastdb -dbtype prot -blastdb_version 4
+-taxid 9606` (only `.phr .pin .psq` kept).

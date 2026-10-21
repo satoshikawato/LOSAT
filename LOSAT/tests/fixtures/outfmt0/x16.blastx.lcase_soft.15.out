@@ -1,0 +1,630 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;m;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "m_fam_lc MelaMJNV 26001-29000, 301-700 and 1501-1800 in lower case",
+            "query_len": 3000,
+            "query_masking": [
+              {
+                "from": 39,
+                "to": 69
+              },
+              {
+                "from": 129,
+                "to": 153
+              },
+              {
+                "from": 270,
+                "to": 300
+              },
+              {
+                "from": 300,
+                "to": 699
+              },
+              {
+                "from": 1044,
+                "to": 1086
+              },
+              {
+                "from": 1275,
+                "to": 1332
+              },
+              {
+                "from": 1500,
+                "to": 1797
+              },
+              {
+                "from": 2949,
+                "to": 2973
+              },
+              {
+                "from": 298,
+                "to": 697
+              },
+              {
+                "from": 952,
+                "to": 973
+              },
+              {
+                "from": 1147,
+                "to": 1180
+              },
+              {
+                "from": 1498,
+                "to": 1798
+              },
+              {
+                "from": 1987,
+                "to": 2029
+              },
+              {
+                "from": 164,
+                "to": 197
+              },
+              {
+                "from": 299,
+                "to": 698
+              },
+              {
+                "from": 998,
+                "to": 1082
+              },
+              {
+                "from": 1250,
+                "to": 1319
+              },
+              {
+                "from": 1499,
+                "to": 1799
+              },
+              {
+                "from": 1916,
+                "to": 1961
+              },
+              {
+                "from": 2714,
+                "to": 2732
+              }
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "BDT61961.1",
+                    "title": "BDT61961.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 207,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 280.026,
+                    "score": 715,
+                    "evalue": 9.82406e-91,
+                    "identity": 147,
+                    "positive": 172,
+                    "query_from": 377,
+                    "query_to": 985,
+                    "query_frame": -3,
+                    "hit_from": 1,
+                    "hit_to": 207,
+                    "align_len": 207,
+                    "gaps": 4,
+                    "qseq": "MREYGNIYYSSMGGLLNALTEAGYSISKNDLSKRDNIESSYGDNGVILSHASEEalcltlycalglLIEKGITVNLSKSN-ADYLLNFPAVRIEIRpnrenntivrgrvykkdn-itigdy-vnvndihnggkeypypsktqysygd-tlrsiiieskgrglkahdilstvlyidsydrsrlsdiiadianyplkffraiilrgkrl",
+                    "hseq": "MREYGKIYYSSMVGLLNALTEAGYPISIHDLSDRDGIKSSYRDDGVIITHASEEALCLTLYCALGLLMEKGITVNLKRSNAAEYLLHFPTVKVEVRPNCETNTIVRGRIQRNDDRVAIGEEPVNTSDIYNGGKAYVYQNKALYSHSSGHLKTVIIESKGRGHTANDTLSTVLYIDSYDRSRLPDIIEDIAKYPLKFFRAIILRGKLL",
+                    "midline": "MREYG IYYSSM GLLNALTEAGY IS +DLS RD I+SSY D+GVI++HASEEALCLTLYCALGLL+EKGITVNL +SN A+YLL+FP V++E+RPN E NTIVRGR+ + D+ + IG+  VN +DI+NGGK Y Y +K  YS+    L+++IIESKGRG  A+D LSTVLYIDSYDRSRL DII DIA YPLKFFRAIILRGK L"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "BDT61962.1",
+                    "title": "BDT61962.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 577,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 292.738,
+                    "score": 748,
+                    "evalue": 1.64101e-90,
+                    "identity": 189,
+                    "positive": 273,
+                    "query_from": 1325,
+                    "query_to": 2707,
+                    "query_frame": -3,
+                    "hit_from": 4,
+                    "hit_to": 577,
+                    "align_len": 586,
+                    "gaps": 137,
+                    "qseq": "SSPGCMFAQNLYSLEDLNKYCKPP----QIHKTFIKYARDTLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKP-------------------------PKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASF-KDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQ------LKISENTLYESFD-------------------EMDLLMELDIVRCIVSIGYSINDAKCILKKHVTETGWPYLSIEPYV------------------------------LDinqmilkrpvriipkppsiirhlvsermks-llsisesasssttve------------gtdntisqkt--lpeadnmetltsqeivpeadntetftsqeiylpea-------------------------knaetstslkQSHEHMYEDRICKVCMSNEARVVYFPCTHMIACEDCTLALESCPICRKDINYVVRPIIS",
+                    "hseq": "SHPNSFLQQEEYRLTTFSEHETSPIDTTRVYRNMPFVSYDCLRYEEKRLGTFIDWPHEWLKPSELAADGFYYLRKDDHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSP--DETGLYQHS-GPKRSDFTTLDSRLKSYVEGWP-ILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTKGQDYINEVQQEHPPYTRTASTTIYSGIDKAASGSSNSPTEVQSVSEQELDLLMSLDVVKCVLEMGYPSCIVRACLKDRVEQTGEPYFVIEPCLEDVIHRMSVTENRVADNCSESTEREPSYGGTDISSSIFQQQAPIFPS--------TSETMGNRVASIQSLPSESTEVELLSQQQQVSILPSTPEIIRQQASIFPTAPLNTTLSSSSSSSERENTETEANHILQIVEEIISQVSEEEKEGYEEKEGYEEKEEFKSRQSYEQLKEELERMREDRTCKVCMDSEIAIVFLPCSHMVTCVSCAVSLRQCPICRRDIKHVCRAIVS",
+                    "midline": "S P     Q  Y L   +++   P    ++++     + D L YE+ RL TF DWPH+++ P ELAADGFY+L+K DH  C+FC GI+G +E  D  R +H+  FP C F+RG  T N+P V+ NI  +L   +                           P+   SP  D  G+++++    R    T + RL S+ + WP  L    +DLAEAGF+YCGLSDHV CF+C  G+ NW  +DIPW EHA++YP C ++ L KG+++I+ +Q       + +  T+Y   D                   E+DLLM LD+V+C++ +GY     +  LK  V +TG PY  IEP +                               DI+  I ++   I P          SE M + + SI    S ST VE             T   I Q+    P A    TL+S     E +NTET  +  + + E                          K+ ++   LK+  E M EDR CKVCM +E  +V+ PC+HM+ C  C ++L  CPICR+DI +V R I+S"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 41.9726,
+                    "score": 97,
+                    "evalue": 2.15376e-06,
+                    "identity": 57,
+                    "positive": 97,
+                    "query_from": 2270,
+                    "query_to": 2914,
+                    "query_frame": -3,
+                    "hit_from": 45,
+                    "hit_to": 288,
+                    "align_len": 259,
+                    "gaps": 59,
+                    "qseq": "IHLEQRRVETFINQFKENIDESLPIHYRLLAKAGFFYMKKDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYS----LEDLNKYCKPPQIHKTF--------------------------IKYARDTLIYEQH-------------RLETFAD-WPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKPPKQTKSPLLDYIGI",
+                    "hseq": "LRYEEKRLGTFIDWPHEWLKPSE------LAADGFYYLRKD-DHCACIFCRGIVGAWEKTDTPRGEHERHFPHCPFIRGQPTGNVPIVQGNILARLPVLHASLDDCGSRRVEADACRFSSRHMAGSYPECRGSPDETGLYQHSGPKRSDFTTLDSRLKSYVEGWPILGLHARDLAEAGFFYCGLSDHVRCFHCGKGLRNWISSDIPWKEHARWYPKCRFVLLTK-------GQDYINEVQQEHPPYTRTASTTI-YSGI",
+                    "midline": "+  E++R+ TFI+   E +  S       LA  GF+Y++KD   C C   +  V     +D     H++  P C F +   +    +   N   + P +H +                            + + D     QH             RL+++ + WP   +   +LA  GF++    DHV C  C   L  +   DI  ++H   +P C FV   K        ++   ++  E+ P  +T S  + Y GI"
+                  }
+                ]
+              },
+              {
+                "num": 3,
+                "description": [
+                  {
+                    "id": "BDT61964.1",
+                    "title": "BDT61964.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 719,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 187.963,
+                    "score": 476,
+                    "evalue": 1.89733e-52,
+                    "identity": 122,
+                    "positive": 177,
+                    "query_from": 1829,
+                    "query_to": 2851,
+                    "query_frame": -3,
+                    "hit_from": 37,
+                    "hit_to": 396,
+                    "align_len": 385,
+                    "gaps": 69,
+                    "qseq": "SLPIHYRLLAKAGFF---YMKKDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYSLEDLNKYCKPPQIHKTFIKYARD-------TLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGL-FEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHE-----------------------YKPPKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQLKISENTLYE---------SFDEMDLLMELDIV-RCIVSIGYSINDAKCILKKHVTETGWPY",
+                    "hseq": "SYVINPKILAKAGFMRCGLSSKQYIVCVDCHLYIDIDTIMPWDDIVKIHKDKNPLCLLARNL-----------PPLPRSKIFENRFDPATGLPADLRYEIKRLETFIDWPNKVVQAKDLAAAGFFYTRDTTCCICFSCHKYMNFSYDKPIVIRDMHLKKSPNCKFAQGKSVGNIPIRMSNILNSIVNQKRVAVTSATATATATATVDQEDLIKTRYEYAGPLHDYY--------------KTTQSRLESFLNWPHRHRQKIEALVEAGFYYLGISDHVQCFHCGACLRNWEEDDDPWRVHAEWYPECYYVQLKKGKEFIDKVRLEVSRIPMWRHSSSTSQDTSEHDWNILLGLDYTKRLILVQGFPVVAVRDALCEQILQTGIPF",
+                    "midline": "S  I+ ++LAKAGF       K  I C  C L ID+ T+   DDI+ IHK  +P C+ A+NL           PP       +   D        L YE  RLETF DWP+  V   +LAA GF++ +     +C  C   +   ++   ++R+ H    P C F +G    NIP    NI   + ++                        K   +   PL DY                T + RL SF +WP    QK + L EAGFYY G+SDHV CF+C   + NWE +D PW  HA++YP C Y+ LKKGK FID ++L++S   ++          S  + ++L+ LD   R I+  G+ +   +  L + + +TG P+"
+                  }
+                ]
+              },
+              {
+                "num": 4,
+                "description": [
+                  {
+                    "id": "BDT61963.1",
+                    "title": "BDT61963.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 728,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 143.28,
+                    "score": 360,
+                    "evalue": 6.72598e-38,
+                    "identity": 105,
+                    "positive": 177,
+                    "query_from": 1823,
+                    "query_to": 2839,
+                    "query_frame": -3,
+                    "hit_from": 39,
+                    "hit_to": 416,
+                    "align_len": 398,
+                    "gaps": 79,
+                    "qseq": "HYRLLAKAGFFYMKKDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQNLYSLEDLNKYCKPPQIHKTFIKYARDTLIYEQHRLETFADWP-HDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFE-------------MGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKL----------------------------------SHEYKPPKQTKSPLLDYIGIFEYNISSVRFKRDTFE---KRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFID------NIQLK--ISENTLYESFDEMDLLMELDIVRCIVSIGYSINDAKCILKKHVTETGWPYLS",
+                    "hseq": "HPKIMAKAGFYELDKRLI-CFRCGLNIDIDDIGKTDDIVEVHQTKRPSCVFARNL------------PSLPRSRLVVASD-LRYETKRLETFIDWPLGEVIEARDLAAAGFFYSRRNVECIC-FCCKVRISFKPCTRHGCCARHASTSQYITEKHLNS-AYCDFAMEKVTGNVPIRINKIISKIIGHQETDNEKNSCGNNEGRSRGASGEEDGGDSRESENDSSSRISAGNILSEMGIESYSGP----EHENFVTPISRKYTYDDWPLGDIMLPKKLIAAGFFYSGYGDHVNCFHCGVGIRNWEKGDDPWTQHAMWNPECHYVRTLMGQTFIDTAKTVKNVLFRKPTRERTYSVTDEDWNAVMGLDITKDLLISLFPVAAVRDCVREQILVHKIPFIT",
+                    "midline": "H +++AKAGF+ + K +I CF C L ID+  +  +DDI+ +H+   P C+FA+NL            P + ++ +  A D L YE  RLETF DWP  + +   +LAA GF++ ++    +C FC  +   F+                 + EKH ++   C F     T N+P     I  K+                                  S      + +   +L  +GI  Y+      + + F     R  ++ DWP   +  P+ L  AGF+Y G  DHV CF+C  GI NWE+ D PW +HA + P C+Y+    G+ FID      N+  +    E T   + ++ + +M LDI + ++   + +   +  +++ +     P+++"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 57.3806,
+                    "score": 137,
+                    "evalue": 4.1559e-11,
+                    "identity": 24,
+                    "positive": 42,
+                    "query_from": 1328,
+                    "query_to": 1531,
+                    "query_frame": -3,
+                    "hit_from": 660,
+                    "hit_to": 728,
+                    "align_len": 69,
+                    "gaps": 1,
+                    "qseq": "KNAETSTSLKQSHEHMYEDR-ICKVCMSNEARVVYFPCTHMIACEDCTLALESCPICRKDINYVVRPII",
+                    "hseq": "EDEERSSEIKEAPDSVIGDRYLCKICLNSCVKTVTLPCRHMSCCGNCIVTQTKCPICRKKIKYTLEPYL",
+                    "midline": "++ E S+ +K++ + +  DR +CK+C+++  + V  PC HM  C +C +    CPICRK I Y + P +"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 53.9138,
+                    "score": 128,
+                    "evalue": 5.42112e-10,
+                    "identity": 44,
+                    "positive": 70,
+                    "query_from": 2102,
+                    "query_to": 2587,
+                    "query_frame": -3,
+                    "hit_from": 23,
+                    "hit_to": 150,
+                    "align_len": 164,
+                    "gaps": 38,
+                    "qseq": "EQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGILGLFEMG--DIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEYKPPKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCE",
+                    "hseq": "ETHRANTYGDYDQYVHHPKIMAKAGFYELDKR--LICFRCGLNIDIDDIGKTDDIVEVHQTKRPSCVFAR-----NLPSLPRSRL-------------------------VVASDLRYE----TKRLETFIDWPLGEVIEARDLAAAGFFYSRRNVECICFCCK",
+                    "midline": "E HR  T+ D+      P  +A  GFY L K+  ++C  C   + + ++G  D + E H+   P C F R     N+P++ ++                              S +R++     KRL +F DWP   V + +DLA AGF+Y   +    CF C+"
+                  },
+                  {
+                    "num": 4,
+                    "bit_score": 40.817,
+                    "score": 94,
+                    "evalue": 4.98469e-06,
+                    "identity": 23,
+                    "positive": 34,
+                    "query_from": 2750,
+                    "query_to": 2914,
+                    "query_frame": -3,
+                    "hit_from": 106,
+                    "hit_to": 156,
+                    "align_len": 56,
+                    "gaps": 6,
+                    "qseq": "IHLEQRRVETFINQFKENIDESLPIHYRLLAKAGFFYMKKDV-IACFCCKLQIDVK",
+                    "hseq": "LRYETKRLETFIDWPLGEVIEA-----RDLAAAGFFYSRRNVECICFCCKVRISFK",
+                    "midline": "+  E +R+ETFI+     + E+     R LA AGFFY +++V   CFCCK++I  K"
+                  }
+                ]
+              },
+              {
+                "num": 5,
+                "description": [
+                  {
+                    "id": "BDT61876.1",
+                    "title": "BDT61876.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 181,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 87.8113,
+                    "score": 216,
+                    "evalue": 1.03684e-22,
+                    "identity": 37,
+                    "positive": 49,
+                    "query_from": 1997,
+                    "query_to": 2224,
+                    "query_frame": -3,
+                    "hit_from": 87,
+                    "hit_to": 162,
+                    "align_len": 76,
+                    "gaps": 0,
+                    "qseq": "EKRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFI",
+                    "hseq": "QRRLETFRWWPKETAQSPHKLAEAGFVSSGLGDTVYCFHCGVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDKFI",
+                    "midline": "++RL +F+ WP+   Q P  LAEAGF   GL D V CF+C   +  WE+ND+PW EHAK+ P C Y+ + KG  FI"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 42.743,
+                    "score": 99,
+                    "evalue": 3.31849e-07,
+                    "identity": 31,
+                    "positive": 43,
+                    "query_from": 2375,
+                    "query_to": 2641,
+                    "query_frame": -3,
+                    "hit_from": 76,
+                    "hit_to": 160,
+                    "align_len": 93,
+                    "gaps": 12,
+                    "qseq": "PPQIHKTFIKYARDTLIYEQHRLETFADWPHDFV-SPIELAADGFYFLKKQDHVMCVFCVGILGLFEMGDIVREKHKHAFPGCAF---VRGDK",
+                    "hseq": "PNPIHQEYVMHQR--------RLETFRWWPKETAQSPHKLAEAGFVSSGLGDTVYCFHCGVYLEQWEKNDMPWKEHAKWSPRCRYVKMVKGDK",
+                    "midline": "P  IH+ ++ + R        RLETF  WP +   SP +LA  GF      D V C  C   L  +E  D+  ++H    P C +   V+GDK"
+                  },
+                  {
+                    "num": 3,
+                    "bit_score": 28.1054,
+                    "score": 61,
+                    "evalue": 0.0238456,
+                    "identity": 27,
+                    "positive": 36,
+                    "query_from": 2681,
+                    "query_to": 2923,
+                    "query_frame": -3,
+                    "hit_from": 76,
+                    "hit_to": 154,
+                    "align_len": 86,
+                    "gaps": 12,
+                    "qseq": "PKHIHLE----QRRVETFINQFKENIDESLPIHYRLLAKAGFFYMK-KDVIACFCCKLQIDVKTLRTSDDIIMIHKKSSPGCMFAQ",
+                    "hseq": "PNPIHQEYVMHQRRLETFRWWPKETAQSP-----HKLAEAGFVSSGLGDTVYCFHCGVYLE--QWEKNDMPWKEHAKWSPRCRYVK",
+                    "midline": "P  IH E    QRR+ETF    KE            LA+AGF      D + CF C + ++      +D     H K SP C + +"
+                  }
+                ]
+              },
+              {
+                "num": 6,
+                "description": [
+                  {
+                    "id": "BDT61959.1",
+                    "title": "BDT61959.1 baculoviral IAP repeat-containing protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 261,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 85.5001,
+                    "score": 210,
+                    "evalue": 4.51164e-21,
+                    "identity": 72,
+                    "positive": 118,
+                    "query_from": 1838,
+                    "query_to": 2599,
+                    "query_frame": -3,
+                    "hit_from": 10,
+                    "hit_to": 239,
+                    "align_len": 266,
+                    "gaps": 48,
+                    "qseq": "TLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFCVGIL-------GLFEMGDIVREKHKHAFPGCAFVRGDKTCNIPAVKKNIFEKLSHEY--KPPKQTKSPLLDYIGIFEYNISSVRFKRDTFEKRLASFKDWPEYLVQKPQDLAEAGFYYCGLSDHVACFYCEGGILNWERNDIPWHEHAKYYPTCNYLYLKKGKNFIDNIQLKISENTLYESFDEMDLLMELDIVRCIVSIG---YSINDAKCILKKHVTETG",
+                    "hseq": "SLRYESERLLTFINWPFGSLAK-SLAWNGFY-RKCPDDLVCYFC-GICINVEDYSSLIEKGSGYINMKNIHYRSCPFIYGNSSMNVTREQEILISEMMRRYCKRYAKRTRTLY------------------KTPKKRFLSFTNFPNRYCNVNR-MAESGFYFTGELDAVRCFSCQIDIYGWQHNDDPISVHAQWSPDCEYIQAIVDDNFIDSVRDK-----------RYDTLIDPNVYQTLKDCGIPDYIIRHAH---RKHIIQSG",
+                    "midline": "+L YE  RL TF +WP   ++   LA +GFY  K  D ++C FC GI         L E G          +  C F+ G+ + N+   ++ +  ++   Y  +  K+T++                     T +KR  SF ++P       + +AE+GFY+ G  D V CF C+  I  W+ ND P   HA++ P C Y+      NFID+++ K             D L++ ++ + +   G   Y I  A    +KH+ ++G"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 46.595,
+                    "score": 109,
+                    "evalue": 4.27589e-08,
+                    "identity": 49,
+                    "positive": 81,
+                    "query_from": 2381,
+                    "query_to": 2920,
+                    "query_frame": -3,
+                    "hit_from": 9,
+                    "hit_to": 190,
+                    "align_len": 196,
+                    "gaps": 30,
+                    "qseq": "KHIHLEQRRVETFINQFKENIDESLPIHYRLLAKAGFFYMKKDVIACFCCKLQIDVKTL-----RTSDDIIM--IHKKSSP--------GCMFAQNLYSLEDLNKYCKPPQIHKTFIKYARDTLIYEQHRLETFADWPHDFVSPIELAADGFYFLKKQDHVMCVFC-VGILGLFEMGDIVREKHKHAFPGCAFVRG",
+                    "hseq": "KSLRYESERLLTFINWPFGSLAKSL-------AWNGFYRKCPDDLVCYFCGICINVEDYSSLIEKGSGYINMKNIHYRSCPFIYGNSSMNVTREQEILISEMMRRYCK------RYAKRTRTLYKTPKKRFLSFTNFPNRYCNVNRMAESGFYFTGELDAVRCFSCQIDIYG-WQHNDDPISVHAQWSPDCEYIQA",
+                    "midline": "K +  E  R+ TFIN    ++ +SL       A  GF+    D + C+ C + I+V+       + S  I M  IH +S P             Q +   E + +YCK       + K  R      + R  +F ++P+ + +   +A  GFYF  + D V C  C + I G ++  D     H    P C +++ "
+                  }
+                ]
+              },
+              {
+                "num": 7,
+                "description": [
+                  {
+                    "id": "BDT61960.1",
+                    "title": "BDT61960.1 hypothetical protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 492,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 62.3882,
+                    "score": 150,
+                    "evalue": 9.30364e-13,
+                    "identity": 32,
+                    "positive": 45,
+                    "query_from": 73,
+                    "query_to": 258,
+                    "query_frame": -1,
+                    "hit_from": 1,
+                    "hit_to": 63,
+                    "align_len": 63,
+                    "gaps": 1,
+                    "qseq": "IYDHTNYKVLFFDKDVYQDIKTIRDRVSFIINHMNN-QSGDNLLFLKNKAYSVDNIMKLASCT",
+                    "hseq": "MYDYIDYKLLFFGEDVIHRILQIRNQALFVINGIKKVQEHDNLLFSKEKIYTVNNVMELASCT",
+                    "midline": "+YD+ +YK+LFF +DV   I  IR++  F+IN +   Q  DNLLF K K Y+V+N+M+LASCT"
+                  }
+                ]
+              },
+              {
+                "num": 8,
+                "description": [
+                  {
+                    "id": "BDT61858.1",
+                    "title": "BDT61858.1 wsv026-like protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 1472,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 21.9422,
+                    "score": 45,
+                    "evalue": 3.46487,
+                    "identity": 8,
+                    "positive": 15,
+                    "query_from": 1403,
+                    "query_to": 1480,
+                    "query_frame": -3,
+                    "hit_from": 1323,
+                    "hit_to": 1348,
+                    "align_len": 26,
+                    "gaps": 0,
+                    "qseq": "EDRICKVCMSNEARVVYFPCTHMIAC",
+                    "hseq": "EERFSRMCMMRRSNCISAEYTNVIAC",
+                    "midline": "E+R  ++CM   +  +    T++IAC"
+                  }
+                ]
+              },
+              {
+                "num": 9,
+                "description": [
+                  {
+                    "id": "BDT61930.1",
+                    "title": "BDT61930.1 semaphorin-1A-like protein [Penaeus monodon majanivirus A]"
+                  }
+                ],
+                "len": 575,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 20.7866,
+                    "score": 42,
+                    "evalue": 7.74004,
+                    "identity": 9,
+                    "positive": 10,
+                    "query_from": 2317,
+                    "query_to": 2382,
+                    "query_frame": 1,
+                    "hit_from": 370,
+                    "hit_to": 391,
+                    "align_len": 22,
+                    "gaps": 0,
+                    "qseq": "YIHVTISRKCSSSRRGYYMFYP",
+                    "hseq": "YHHTTIKEHCSYVKDNYGSFEP",
+                    "midline": "Y H TI   CS  +  Y  F P"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 62,
+              "eff_space": 11463298,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "blastx",
+      "version": "BLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2",
+          "Subject_3",
+          "Subject_4",
+          "Subject_5",
+          "Subject_6",
+          "Subject_7",
+          "Subject_8",
+          "Subject_9",
+          "Subject_10",
+          "Subject_11",
+          "Subject_12",
+          "Subject_13",
+          "Subject_14",
+          "Subject_15",
+          "Subject_16",
+          "Subject_17",
+          "Subject_18",
+          "Subject_19",
+          "Subject_20",
+          "Subject_21",
+          "Subject_22",
+          "Subject_23",
+          "Subject_24",
+          "Subject_25",
+          "Subject_26",
+          "Subject_27",
+          "Subject_28",
+          "Subject_29",
+          "Subject_30",
+          "Subject_31",
+          "Subject_32",
+          "Subject_33",
+          "Subject_34",
+          "Subject_35"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 10,
+        "gap_open": 11,
+        "gap_extend": 1,
+        "filter": "L;m;",
+        "cbs": 2,
+        "query_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "q_nohit 300 random bases",
+            "query_len": 300,
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 43,
+              "eff_space": 734502,
+              "kappa": 0.041,
+              "lambda": 0.267,
+              "entropy": 0.14
+            },
+            "message": "No hits found"
+          }
+        ]
+      }
+    }
+  }
+]
+}

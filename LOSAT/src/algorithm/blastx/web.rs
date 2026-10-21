@@ -271,6 +271,7 @@ pub(crate) fn run_pair(
                                 &shown,
                                 &mut results,
                                 processed,
+                                None,
                             )?;
                             processed += queries.len();
                         }
@@ -354,6 +355,7 @@ pub(crate) fn run_pair(
                     &shown,
                     &mut results,
                     processed,
+                    None,
                 )?;
                 processed += queries.len();
                 Ok(())
@@ -383,7 +385,7 @@ pub(crate) fn run_pair(
     // ```c++
     //         formatter.PrintEpilog(opt);
     // ```
-    report::write_epilog(&mut output, &options, &subjects, &shown, processed)?;
+    report::write_epilog(&mut output, &options, &subjects, &shown, processed, None)?;
     Ok(output)
 }
 

@@ -872,7 +872,6 @@ const ALL: &[&str] = &["blastn", "blastp", "blastx", "tblastn", "tblastx"];
 const CUSTOM: &[&str] = &["blastp", "blastx"];
 const NO_CUSTOM: &[&str] = &["blastn", "tblastn", "tblastx"];
 const NOT_BLASTN: &[&str] = &["blastp", "blastx", "tblastn", "tblastx"];
-const NOT_BLASTP_BLASTN: &[&str] = &["blastx", "tblastn", "tblastx"];
 const UNSUPPORTED: Outfmt = Outfmt::Losat("output format {N} is not supported by LOSAT's {P}");
 const CUSTOM_SPEC: Outfmt = Outfmt::Losat(
     "a custom output format specification (fields or a delimiter) is not supported by LOSAT's {P}",
@@ -950,7 +949,7 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, "18", None, UNSUPPORTED),
         (ALL, "20", None, UNSUPPORTED),
         // Line OF track S (structured formats): 8 and 12 in every program (OF3b), 9 (OF3c), 5 in
-        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in BLASTP and BLASTN (OF5a), NCBI dropping a custom specification
+        // every program (BLASTN and BLASTP: OF4a; BLASTX, TBLASTN and TBLASTX: OF4b), 15 and 16 in BLASTP and BLASTN (OF5a) and BLASTX (OF5b), NCBI dropping a custom specification
         // (blast_args.cpp:2844-2851); the others not yet.
         (ALL, "8", None, Writes(AsnText)),
         (ALL, "12", None, Writes(JsonSeqalign)),
@@ -966,8 +965,11 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (&["blastp", "blastn"], "15", None, Writes(JsonS)),
         (&["blastp", "blastn"], "16", None, Writes(Xml2S)),
         (&["blastp", "blastn"], " 16 std", None, Writes(Xml2S)),
-        (NOT_BLASTP_BLASTN, "15", None, UNSUPPORTED),
-        (NOT_BLASTP_BLASTN, "16", None, UNSUPPORTED),
+        (&["blastx"], "15", None, Writes(JsonS)),
+        (&["blastx"], "16", None, Writes(Xml2S)),
+        (&["blastx"], " 16 std", None, Writes(Xml2S)),
+        (&["tblastn", "tblastx"], "15", None, UNSUPPORTED),
+        (&["tblastn", "tblastx"], "16", None, UNSUPPORTED),
         (&["blastn"], "17", None, UNSUPPORTED),
         (&["blastn"], "17 qseqid", None, UNSUPPORTED),
     ]

@@ -262,6 +262,46 @@ fn the_framing_joins_reports_and_ends_the_document() {
 }
 
 #[test]
+fn a_document_started_early_writes_its_start_once() {
+    // BLASTX writes the document's start with its prolog, before the first batch: the first
+    // report and the epilog add no second one, and a run that stops at its first batch leaves
+    // the start alone.
+    for kind in [Xml2Kind::Single16, Xml2Kind::Single15] {
+        for delayed in [false, true] {
+            let lazy = |early: bool| {
+                let mut doc = Xml2Document::new(kind, delayed);
+                let mut out = Vec::new();
+                if early {
+                    doc.start(&mut out);
+                }
+                let start = out.len();
+                doc.report(
+                    &mut b"\n<BlastOutput2>a</BlastOutput2>\n".to_vec(),
+                    &mut out,
+                )
+                .unwrap();
+                doc.report(
+                    &mut b"\n<BlastOutput2>b</BlastOutput2>\n".to_vec(),
+                    &mut out,
+                )
+                .unwrap();
+                doc.epilog(&mut out).unwrap();
+                (start, out)
+            };
+            let (start, early) = lazy(true);
+            assert_eq!(start, framing::prolog_bytes(kind).len(), "{kind:?}");
+            assert_eq!(early, lazy(false).1, "{kind:?} delayed {delayed}");
+            // a second call changes nothing
+            let mut doc = Xml2Document::new(kind, delayed);
+            let mut out = Vec::new();
+            doc.start(&mut out);
+            doc.start(&mut out);
+            assert_eq!(out, framing::prolog_bytes(kind), "{kind:?}");
+        }
+    }
+}
+
+#[test]
 fn a_delayed_document_writes_one_report_late_and_drops_the_last_on_a_failure() {
     let mut doc = Xml2Document::new(Xml2Kind::Single15, true);
     let mut out = Vec::new();

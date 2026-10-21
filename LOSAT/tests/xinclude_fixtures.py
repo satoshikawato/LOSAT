@@ -108,14 +108,24 @@ def observed(result: Result) -> dict[str, str]:
             "side_sha256": ",".join(sha256(side) for side in result.sides)}
 
 
+def defects(result: Result) -> list[str]:
+    """What is wrong with a run before any byte is compared: no master file, standard output, or a file
+    of the temporary directory that is neither the master nor a numbered side file. A freeze refuses to
+    write such a run; a comparison counts it as a difference of that fixture and goes on."""
+    found = []
+    if result.master is None:
+        found.append("the run wrote no master file")
+    if result.run.stdout:
+        found.append(f"standard output is not empty ({len(result.run.stdout)} bytes)")
+    if result.stray:
+        found.append(f"unexpected files {result.stray}")
+    return found
+
+
 def freeze(result: Result, frozen: Path, row_id: str, outfmt: str) -> None:
     """Writes the master as `<row_id>.out` and the side files; removes the side files of an older freeze."""
-    if result.master is None:
-        raise SystemExit(f"{row_id}: the run wrote no master file")
-    if result.run.stdout:
-        raise SystemExit(f"{row_id}: standard output is not empty ({len(result.run.stdout)} bytes)")
-    if result.stray:
-        raise SystemExit(f"{row_id}: unexpected files {result.stray}")
+    if found := defects(result):
+        raise SystemExit(f"{row_id}: {'; '.join(found)}")
     for old in frozen.glob(f"{row_id}.out_*"):
         old.unlink()
     (frozen / f"{row_id}.out").write_bytes(result.master)

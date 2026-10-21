@@ -89,6 +89,33 @@ impl Xml2Kind {
     }
 }
 
+/// A side file NCBI cannot open: `CArgException` "Cannot open output file", which the application
+/// reports as "Command line argument error: ..." with exit status 1 (see `Xml2Document::write`).
+pub fn side_file_open_error() -> anyhow::Error {
+    crate::cli::NativeError {
+        exit: 1,
+        message: "Command line argument error: Cannot open output file\n".to_string(),
+    }
+    .into()
+}
+
+/// A write to a side file that fails after it was opened (a full disk).
+///
+/// Deviation from NCBI (DECISIONS 35 S2): NCBI's `CObjectOStream` reports the failed flush on
+/// the error stream and goes on (the remaining side files and the master file are written,
+/// exit status 0; TBLASTX stops with an empty master file, also with exit status 0). LOSAT
+/// stops the run in every program with the message and the exit status of a failed write to
+/// `-out` in outfmt 0 (`BLAST failed to write output`, exit status 6; the side files written
+/// before stay, the master file stays empty). The same error is made by all five programs and
+/// by BLASTX's hold, so that a full disk gives one answer.
+pub fn side_file_write_error() -> anyhow::Error {
+    crate::cli::NativeError {
+        exit: 6,
+        message: "BLAST failed to write output\n".to_string(),
+    }
+    .into()
+}
+
 /// The files of a 13 / 14 run: `create(n)` opens the file of the n-th report (`<base>_<n>.xml` or
 /// `<base>_<n>.json`), and `listed(n)` is the name the master file gives for it (the two differ:
 /// the master drops the directory and always uses the XML rule for the base, `files::base_name`).
@@ -184,7 +211,9 @@ pub struct Xml2Document<F: SideFiles = NoSideFiles> {
 }
 
 impl Xml2Document<NoSideFiles> {
-    /// A document of kind `kind` on the output stream; `delayed` for a `-subject` search.
+    /// A document of kind `kind` on the output stream; `delayed` for a `-subject` search. The
+    /// unit tests make documents this way; a run uses `for_run`.
+    #[cfg(test)]
     pub fn new(kind: Xml2Kind, delayed: bool) -> Self {
         Self::with_files(kind, delayed, NoSideFiles)
     }
@@ -195,10 +224,8 @@ impl Xml2Document<RunSideFiles> {
     /// next to it (`FsSideFiles`); outfmt 15 and 16 have none. A caller with outfmt 13 or 14
     /// and no file name (`out` is `None`) gets an error when the first report is written.
     pub fn for_run(kind: Xml2Kind, delayed: bool, out: Option<&Path>) -> Self {
-        let files: RunSideFiles = match (kind, out) {
-            (Xml2Kind::Files14 | Xml2Kind::Files13, Some(out)) => {
-                Box::new(FsSideFiles::new(out, kind))
-            }
+        let files: RunSideFiles = match out {
+            Some(out) if kind.is_files() => Box::new(FsSideFiles::new(out, kind)),
             _ => Box::new(NoSideFiles),
         };
         Self::with_files(kind, delayed, files)
@@ -277,15 +304,13 @@ impl<F: SideFiles> Xml2Document<F> {
                 // The `CArgException` is caught by the application (blast_app_util.hpp:177-180):
                 // "Command line argument error: " and the message, exit status 1. The side files
                 // written before stay, and the master file stays empty (no epilog).
-                let mut file = self.files.create(self.written).map_err(|_| {
-                    anyhow::Error::from(crate::cli::NativeError {
-                        exit: 1,
-                        message: "Command line argument error: Cannot open output file\n"
-                            .to_string(),
-                    })
-                })?;
-                file.write_all(report)?;
-                file.flush()?;
+                let mut file = self
+                    .files
+                    .create(self.written)
+                    .map_err(|_| side_file_open_error())?;
+                file.write_all(report)
+                    .and_then(|()| file.flush())
+                    .map_err(|_| side_file_write_error())?;
             }
         }
         Ok(())

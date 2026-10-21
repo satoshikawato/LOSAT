@@ -58,8 +58,8 @@ use super::framing::{SideFiles, Xml2Kind};
 ///     }
 /// }
 /// ```
-fn is_separator(byte: u8) -> bool {
-    byte == b'/' || (cfg!(windows) && (byte == b'\\' || byte == b':'))
+fn is_separator(byte: u8, windows: bool) -> bool {
+    byte == b'/' || (windows && (byte == b'\\' || byte == b':'))
 }
 
 #[cfg(unix)]
@@ -68,6 +68,8 @@ fn path_bytes(path: &Path) -> Vec<u8> {
     path.as_os_str().as_bytes().to_vec()
 }
 
+/// Off Unix a path is Unicode text to the program: a `-out` name that is not valid Unicode is
+/// changed by `to_string_lossy` (and `path_from_bytes`), which no NCBI run on Windows tells apart.
 #[cfg(not(unix))]
 fn path_bytes(path: &Path) -> Vec<u8> {
     path.to_string_lossy().into_owned().into_bytes()
@@ -89,10 +91,15 @@ fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
 /// extension starts at the last `.` of the file name, so `.xml` alone is a base of nothing with
 /// the extension `.xml`, and `a.b.json` has the extension `.json`.
 pub fn base_name(out: &Path, xml: bool, with_dir: bool) -> Vec<u8> {
-    let path = path_bytes(out);
+    base_name_of(&path_bytes(out), xml, with_dir, cfg!(windows))
+}
+
+/// `base_name` of the bytes of a path, with the separators of Windows (`windows`) or of Unix (the
+/// unit tests check both on every platform).
+fn base_name_of(path: &[u8], xml: bool, with_dir: bool, windows: bool) -> Vec<u8> {
     let name_at = path
         .iter()
-        .rposition(|&byte| is_separator(byte))
+        .rposition(|&byte| is_separator(byte, windows))
         .map_or(0, |at| at + 1);
     let (dir, file) = path.split_at(name_at);
     let (mut base, ext) = match file.iter().rposition(|&byte| byte == b'.') {
@@ -168,5 +175,53 @@ impl SideFiles for FsSideFiles {
 
     fn listed(&self, n: u32) -> Vec<u8> {
         self.name(&self.listed_base, n)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `CDirEntry::SplitPath` ends the directory part at `:`, `/` or `\` on Windows and at `/` alone
+    /// elsewhere (ncbifile.cpp:105-116): checked here for both on every platform, since the Windows
+    /// job of the CI would be the only one to see a wrong `cfg!(windows)`.
+    #[test]
+    fn the_separators_of_windows_end_the_directory_part_there_only() {
+        let base = |path: &str, xml: bool, with_dir: bool, windows: bool| {
+            String::from_utf8(base_name_of(path.as_bytes(), xml, with_dir, windows)).unwrap()
+        };
+        // (path, xml, with_dir, base on Windows, base elsewhere)
+        let cases = [
+            ("d\\X.XML", true, true, "d\\X", "d\\X"),
+            ("d\\X.XML", true, false, "X", "d\\X"),
+            ("C:o.xml", true, true, "C:o", "C:o"),
+            ("C:o.xml", true, false, "o", "C:o"),
+            ("a/b\\c.json", false, true, "a/b\\c", "a/b\\c"),
+            ("a/b\\c.json", false, false, "c", "b\\c"),
+            // the dot before a separator is not the file's: `d.xml\o` has no extension on Windows
+            ("d.xml\\o", true, true, "d.xml\\o", "d.xml\\o"),
+            ("d.xml\\o", true, false, "o", "d.xml\\o"),
+            ("C:\\d\\.json", false, true, "C:\\d\\", "C:\\d\\"),
+        ];
+        for (path, xml, with_dir, on_windows, elsewhere) in cases {
+            assert_eq!(
+                base(path, xml, with_dir, true),
+                on_windows,
+                "{path} windows"
+            );
+            assert_eq!(base(path, xml, with_dir, false), elsewhere, "{path} unix");
+        }
+    }
+
+    /// The names of the side files and the master's entries on the platform of the build.
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_name_the_side_files_and_the_master_entries() {
+        let files = FsSideFiles::new(Path::new("d\\X.XML"), Xml2Kind::Files14);
+        assert_eq!(files.path(1), PathBuf::from("d\\X_1.xml"));
+        assert_eq!(files.listed(1), b"X_1.xml");
+        let files = FsSideFiles::new(Path::new("C:o.json"), Xml2Kind::Files13);
+        assert_eq!(files.path(2), PathBuf::from("C:o_2.json"));
+        assert_eq!(files.listed(2), b"o.json_2.json");
     }
 }

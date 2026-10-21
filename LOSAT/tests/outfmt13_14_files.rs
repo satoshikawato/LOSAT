@@ -1372,3 +1372,328 @@ fn run_local_does_not_write_outfmt_13_and_14_in_tblastn_and_tblastx() {
         }
     }
 }
+
+// ---- OF5c review fixes (DECISIONS 35) ----
+
+/// The inputs of the probes `W1` of the OF5c review: three query batches (BLASTX reads batches of 10,002 bases) of
+/// which the third carries an invalid residue (a reader warning), and a `-subject` file with a title outside
+/// US-ASCII on a sequence without a hit, which makes BLASTX hold its output.
+fn write_hold_inputs(work: &Path, third_query: &str) -> (PathBuf, PathBuf) {
+    let protein = "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWICWIPKEMATPGWWNTDTLHMSEMGLWMHKYPKCMCVMVRPTDQSLRHWKIMHDANFEKLKIFHYMVGHGRTASEG";
+    let codons: std::collections::HashMap<char, &str> = [
+        ('A', "GCT"),
+        ('C', "TGC"),
+        ('D', "GAT"),
+        ('E', "GAA"),
+        ('F', "TTC"),
+        ('G', "GGT"),
+        ('H', "CAC"),
+        ('I', "ATC"),
+        ('K', "AAA"),
+        ('L', "CTG"),
+        ('M', "ATG"),
+        ('N', "AAC"),
+        ('P', "CCT"),
+        ('Q', "CAG"),
+        ('R', "CGT"),
+        ('S', "TCT"),
+        ('T', "ACC"),
+        ('V', "GTG"),
+        ('W', "TGG"),
+        ('Y', "TAC"),
+    ]
+    .into_iter()
+    .collect();
+    let nucleotide: String = protein.chars().map(|c| codons[&c]).collect();
+    let mut padded = String::new();
+    while padded.len() < 10_003 {
+        padded.push_str("ACGTTGCAAGCTTGCA");
+    }
+    let (query, subject) = (work.join("q.fa"), work.join("s.fa"));
+    write_fasta(
+        &query,
+        &[
+            ("q1 no hit", padded.clone()),
+            ("q2 hit", format!("{nucleotide}{padded}")),
+            ("q3 later", third_query.to_string()),
+        ],
+    );
+    write_fasta(
+        &subject,
+        &[
+            ("s1 subject", protein.to_string()),
+            (
+                "s2 caf\u{e9} no hit",
+                "WQERTYIPASDFGHKLCVNMWQERTYIPASDFGHKLCVNM".to_string(),
+            ),
+        ],
+    );
+    (query, subject)
+}
+
+/// DECISIONS 35 S1 (OF5c review, probe `W1` and its later-batch-failure variant): a run that holds its side files
+/// opens each one when NCBI does, so a directory in the place of side file 1 stops the run when the first report
+/// is written (a `-subject` run writes it when the second arrives), with NCBI's message alone: the third batch is
+/// not read, so neither its reader warning nor its failure comes first. The directory stays and the master is empty.
+#[test]
+fn blastx_hold_stops_at_an_unopenable_side_file_before_it_reads_the_later_batches() {
+    let warned = format!("{}ACGTJJACGT{}", "ACGT".repeat(2400), "ACGT".repeat(100));
+    for (format, extension) in [("13", "json"), ("14", "xml")] {
+        for (label, third) in [("warning", warned.as_str()), ("bad batch", "ACGT%%%%")] {
+            for threads in ["1", "4"] {
+                let work = temp_dir("holdearly");
+                let (query, subject) = write_hold_inputs(&work, third);
+                let out = work.join("o.out");
+                let side = work.join(format!("o.out_1.{extension}"));
+                fs::create_dir(&side).unwrap();
+                let output = run_in(
+                    &work,
+                    &[
+                        "blastx",
+                        "-query",
+                        query.to_str().unwrap(),
+                        "-subject",
+                        subject.to_str().unwrap(),
+                        "-evalue",
+                        "1e-5",
+                        "-num_threads",
+                        threads,
+                        "-outfmt",
+                        format,
+                        "-out",
+                        out.to_str().unwrap(),
+                    ],
+                    &[],
+                );
+                let what = format!("{format} {label} {threads}");
+                assert_eq!(output.status.code(), Some(1), "{what}");
+                assert!(output.stdout.is_empty(), "{what}");
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stderr),
+                    "Command line argument error: Cannot open output file\n",
+                    "{what}"
+                );
+                assert_eq!(fs::read(&out).unwrap(), b"", "{what}: the master is empty");
+                assert!(side.is_dir(), "{what}");
+                assert_eq!(
+                    names(&work),
+                    [
+                        "o.out",
+                        format!("o.out_1.{extension}").as_str(),
+                        "q.fa",
+                        "s.fa"
+                    ],
+                    "{what}"
+                );
+                fs::remove_dir_all(work).ok();
+            }
+        }
+    }
+}
+
+/// The same run with nothing in the way writes the two files and the master, the third query's warning
+/// included: the early check leaves no file of its own and changes no byte.
+#[test]
+fn blastx_hold_with_free_side_files_writes_them_all_and_the_check_leaves_nothing_else() {
+    let warned = format!("{}ACGTJJACGT{}", "ACGT".repeat(2400), "ACGT".repeat(100));
+    for (format, extension) in [("13", "json"), ("14", "xml")] {
+        let work = temp_dir("holdfree");
+        let (query, subject) = write_hold_inputs(&work, &warned);
+        let out = work.join("o.out");
+        // an existing side file is replaced; a higher number stays
+        fs::write(
+            work.join(format!("o.out_1.{extension}")),
+            b"stale stale stale",
+        )
+        .unwrap();
+        fs::write(work.join(format!("o.out_9.{extension}")), b"stale").unwrap();
+        let output = run_in(
+            &work,
+            &[
+                "blastx",
+                "-query",
+                query.to_str().unwrap(),
+                "-subject",
+                subject.to_str().unwrap(),
+                "-evalue",
+                "1e-5",
+                "-num_threads",
+                "1",
+                "-outfmt",
+                format,
+                "-out",
+                out.to_str().unwrap(),
+            ],
+            &[],
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(0), "{format}: {stderr}");
+        assert!(
+            stderr.contains("Ignoring invalid residues"),
+            "{format}: {stderr}"
+        );
+        let mut expected = vec![
+            "o.out".to_string(),
+            format!("o.out_1.{extension}"),
+            format!("o.out_2.{extension}"),
+            format!("o.out_3.{extension}"),
+            format!("o.out_9.{extension}"),
+            "q.fa".to_string(),
+            "s.fa".to_string(),
+        ];
+        expected.sort();
+        assert_eq!(names(&work), expected, "{format}");
+        assert_ne!(
+            fs::read(work.join(format!("o.out_1.{extension}"))).unwrap(),
+            b"stale stale stale"
+        );
+        assert_eq!(
+            fs::read(work.join(format!("o.out_9.{extension}"))).unwrap(),
+            b"stale"
+        );
+        fs::remove_dir_all(work).ok();
+    }
+}
+
+/// DECISIONS 35 S2: a write to a side file that fails after it was opened (the file is a link to `/dev/full`)
+/// ends the run with one answer in all five programs and in BLASTX with and without a hold: `BLAST failed to write
+/// output`, exit status 6 (the message and status of a failed write to `-out` in outfmt 0), an empty master, and the
+/// side files after the failed one not written. Deviation: NCBI reports the failed flush and goes on with exit
+/// status 0 (OF5c review, probe `F`). Linux only: macOS and Windows have no `/dev/full`.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_side_file_write_error_gives_one_answer_in_every_program() {
+    let query = frozen().join("qprot.faa");
+    let sprot = inputs().join("sprot.faa");
+    let qnucl = inputs().join("qnucl_valid.fna");
+    let snucl = inputs().join("snucl.fna");
+    let db_snucl = inputs().join("db/snucl");
+    let db_sprot = inputs().join("db/sprot");
+    let (query, sprot, qnucl, snucl, db_snucl, db_sprot) = (
+        query.to_str().unwrap().to_string(),
+        sprot.to_str().unwrap().to_string(),
+        qnucl.to_str().unwrap().to_string(),
+        snucl.to_str().unwrap().to_string(),
+        db_snucl.to_str().unwrap().to_string(),
+        db_sprot.to_str().unwrap().to_string(),
+    );
+    let strs = |args: &[&str]| args.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+    // (label, arguments before -outfmt, whether the run holds)
+    let cases: Vec<(&str, Vec<String>, bool)> = vec![
+        (
+            "blastp -subject",
+            strs(&["blastp", "-query", &query, "-subject", &sprot]),
+            false,
+        ),
+        (
+            "blastp -db",
+            strs(&["blastp", "-query", &query, "-db", &db_sprot]),
+            false,
+        ),
+        (
+            "blastn -subject",
+            strs(&["blastn", "-query", &qnucl, "-subject", &snucl]),
+            false,
+        ),
+        (
+            "blastn -db",
+            strs(&["blastn", "-query", &qnucl, "-db", &db_snucl]),
+            false,
+        ),
+        (
+            "tblastn -subject",
+            strs(&["tblastn", "-query", &query, "-subject", &snucl]),
+            false,
+        ),
+        (
+            "tblastn -db",
+            strs(&["tblastn", "-query", &query, "-db", &db_snucl]),
+            false,
+        ),
+        (
+            "tblastx -subject",
+            strs(&[
+                "tblastx", "-query", &qnucl, "-subject", &snucl, "-evalue", "1e-20",
+            ]),
+            false,
+        ),
+        (
+            "tblastx -db",
+            strs(&[
+                "tblastx", "-query", &qnucl, "-db", &db_snucl, "-evalue", "1e-20",
+            ]),
+            false,
+        ),
+        (
+            "blastx -subject",
+            strs(&[
+                "blastx",
+                "-query",
+                inputs().join("qnx_late.fna").to_str().unwrap(),
+                "-subject",
+                &sprot,
+                "-evalue",
+                "1e-5",
+            ]),
+            false,
+        ),
+        (
+            "blastx -db",
+            strs(&[
+                "blastx",
+                "-query",
+                inputs().join("qnx_late.fna").to_str().unwrap(),
+                "-db",
+                &db_sprot,
+            ]),
+            false,
+        ),
+        // the hold: the subject file has a title outside US-ASCII on a sequence without a hit
+        ("blastx -subject, hold", Vec::new(), true),
+    ];
+    for (format, extension) in [("13", "json"), ("14", "xml")] {
+        for (label, args, hold) in &cases {
+            let work = temp_dir("devfull");
+            let mut args = args.clone();
+            if *hold {
+                let (query, subject) = write_hold_inputs(&work, &"ACGT".repeat(2600));
+                args = strs(&[
+                    "blastx",
+                    "-query",
+                    query.to_str().unwrap(),
+                    "-subject",
+                    subject.to_str().unwrap(),
+                    "-evalue",
+                    "1e-5",
+                ]);
+            }
+            let out = work.join("o.out");
+            std::os::unix::fs::symlink("/dev/full", work.join(format!("o.out_1.{extension}")))
+                .unwrap();
+            args.extend(strs(&[
+                "-num_threads",
+                "1",
+                "-outfmt",
+                format,
+                "-out",
+                out.to_str().unwrap(),
+            ]));
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let output = run_in(&inputs(), &args, &[]);
+            let what = format!("{label} {format}");
+            assert_eq!(
+                String::from_utf8_lossy(&output.stderr),
+                "BLAST failed to write output\n",
+                "{what}"
+            );
+            assert_eq!(output.status.code(), Some(6), "{what}");
+            assert!(output.stdout.is_empty(), "{what}");
+            assert_eq!(fs::read(&out).unwrap(), b"", "{what}: the master is empty");
+            assert!(
+                !work.join(format!("o.out_2.{extension}")).exists(),
+                "{what}: no side file after the failed one"
+            );
+            fs::remove_dir_all(work).ok();
+        }
+    }
+}

@@ -52,6 +52,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Write};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -75,6 +76,7 @@ use crate::report::blast_xml::{
     filter, BlastXmlWriter, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
     REFERENCE_GAPPED_BLAST,
 };
+use crate::report::blast_xml2::framing::{side_file_open_error, side_file_write_error};
 use crate::report::blast_xml2::{
     FsSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind, Xml2Run, Xml2Target, Xml2Writer,
 };
@@ -410,24 +412,46 @@ impl HeldSideFiles {
     fn release(&self) -> Result<()> {
         let mut state = self.state();
         state.holding = false;
-        state.write_held().map_err(|_| {
-            crate::cli::NativeError {
-                exit: 1,
-                message: "Command line argument error: Cannot open output file\n".to_string(),
-            }
-            .into()
-        })
+        state.write_held()
     }
 }
 
 impl SideState {
-    fn write_held(&mut self) -> io::Result<()> {
+    /// A file that cannot be created is NCBI's "Cannot open output file"; a write to one that was
+    /// opened is the side-file write error of every program (`side_file_write_error`).
+    fn write_held(&mut self) -> Result<()> {
         let held = std::mem::take(&mut self.held);
         for (n, bytes) in held {
-            let mut file = std::fs::File::create(self.files.path(n))?;
-            file.write_all(&bytes)?;
+            let mut file =
+                std::fs::File::create(self.files.path(n)).map_err(|_| side_file_open_error())?;
+            file.write_all(&bytes)
+                .map_err(|_| side_file_write_error())?;
         }
         Ok(())
+    }
+}
+
+/// Opens the side file of the n-th report as NCBI does when it writes the report, without
+/// leaving a mark: a path that exists is opened for writing and not truncated (a directory or a
+/// file without write permission fails), a path that does not exist is created and removed. The
+/// run that holds its side files makes this check when the report is made, so that an
+/// unopenable file stops it where NCBI's run stops, not at the epilog after every later batch
+/// was searched (DECISIONS 35 S1). The bytes are written at `release`, which creates the file
+/// again.
+fn check_side_file_openable(path: &Path) -> io::Result<()> {
+    match std::fs::OpenOptions::new().write(true).open(path) {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            // A dangling link is created through (`File::create` follows it); only a path that
+            // did not exist at all is removed again.
+            let existed = path.symlink_metadata().is_ok();
+            std::fs::File::create(path)?;
+            if !existed {
+                std::fs::remove_file(path)?;
+            }
+            Ok(())
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -473,6 +497,7 @@ impl SideFiles for HeldSideFiles {
             return Ok(Box::new(io::sink()));
         }
         if state.holding {
+            check_side_file_openable(&state.files.path(n))?;
             return Ok(Box::new(HeldReport {
                 side: self.clone(),
                 n,
@@ -941,17 +966,99 @@ mod held_side_files_tests {
         std::fs::remove_dir_all(dir).ok();
     }
 
+    /// DECISIONS 35 S1: the run that holds its side files opens each one when its report is made, as
+    /// NCBI does: a file that cannot be opened stops the run there (the earlier reports are written
+    /// by the drop, the master stays empty), and the check leaves no file of its own.
     #[test]
-    fn a_side_file_that_cannot_be_opened_at_the_release_stops_there_and_empties_the_master() {
+    fn a_side_file_that_cannot_be_opened_stops_at_its_report_while_holding() {
         let dir = work("blocked");
         std::fs::create_dir(dir.join("o.out_2.xml")).unwrap();
         let (held, mut side) = run(&dir);
         held.hold();
         report(&mut side, 1, b"one");
-        report(&mut side, 2, b"two");
-        report(&mut side, 3, b"three");
+        // nothing but the master file yet, and the check of the first report left no mark
+        assert_eq!(names(&dir), ["o.out", "o.out_2.xml"]);
+        let error = side.create(2).err().expect("a directory cannot be opened");
+        assert!(error.raw_os_error().is_some(), "{error:?}");
         let mut master = held.clone();
         master.write_all(b"master").unwrap();
+        drop((held, side, master));
+        // the file before the blocked one stays; the master has nothing of the held bytes of the
+        // failed report
+        assert_eq!(names(&dir), ["o.out", "o.out_1.xml", "o.out_2.xml"]);
+        assert_eq!(std::fs::read(dir.join("o.out_1.xml")).unwrap(), b"one");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// The check opens an existing file for writing without truncating it, and a refusal after it
+    /// (`discard`) leaves the file as it was.
+    #[test]
+    fn the_check_of_an_existing_side_file_does_not_truncate_it() {
+        let dir = work("existing");
+        std::fs::write(dir.join("o.out_1.xml"), b"old").unwrap();
+        let (held, mut side) = run(&dir);
+        held.hold();
+        report(&mut side, 1, b"new");
+        assert_eq!(std::fs::read(dir.join("o.out_1.xml")).unwrap(), b"old");
+        held.discard();
+        drop((held, side));
+        assert_eq!(std::fs::read(dir.join("o.out_1.xml")).unwrap(), b"old");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_side_file_stops_at_its_report_while_holding() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = work("readonly");
+        std::fs::write(dir.join("o.out_1.xml"), b"old").unwrap();
+        std::fs::set_permissions(
+            dir.join("o.out_1.xml"),
+            std::fs::Permissions::from_mode(0o444),
+        )
+        .unwrap();
+        let (held, mut side) = run(&dir);
+        held.hold();
+        // a process with the right to write anyway (root) opens it, as it opens it for NCBI
+        let writable = std::fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join("o.out_1.xml"))
+            .is_ok();
+        assert_eq!(side.create(1).is_ok(), writable);
+        drop((held, side));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// A write that fails after the open (a link to `/dev/full`) is the write error of every
+    /// program, not NCBI's "Cannot open output file" (DECISIONS 35 S2).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_side_file_write_error_at_the_release_is_the_write_error() {
+        let dir = work("full");
+        std::os::unix::fs::symlink("/dev/full", dir.join("o.out_1.xml")).unwrap();
+        let (held, mut side) = run(&dir);
+        held.hold();
+        report(&mut side, 1, b"one");
+        let mut master = held.clone();
+        master.write_all(b"master").unwrap();
+        let error = held.release().unwrap_err();
+        let native = error.downcast_ref::<NativeError>().expect("a NativeError");
+        assert_eq!(native.exit, 6);
+        assert_eq!(native.message, "BLAST failed to write output\n");
+        drop((held, side, master));
+        assert_eq!(std::fs::read(dir.join("o.out")).unwrap(), b"");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_side_file_that_cannot_be_created_at_the_release_is_the_open_error() {
+        // The check at the report passed; a directory put in its place before the release is
+        // what `File::create` then refuses.
+        let dir = work("late");
+        let (held, mut side) = run(&dir);
+        held.hold();
+        report(&mut side, 1, b"one");
+        std::fs::create_dir(dir.join("o.out_1.xml")).unwrap();
         let error = held.release().unwrap_err();
         let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
         assert_eq!(native.exit, 1);
@@ -959,11 +1066,7 @@ mod held_side_files_tests {
             native.message,
             "Command line argument error: Cannot open output file\n"
         );
-        drop((held, side, master));
-        // the file before the blocked one stays; the ones after it are not written
-        assert_eq!(names(&dir), ["o.out", "o.out_1.xml", "o.out_2.xml"]);
-        assert_eq!(std::fs::read(dir.join("o.out_1.xml")).unwrap(), b"one");
-        assert_eq!(std::fs::read(dir.join("o.out")).unwrap(), b"");
+        drop((held, side));
         std::fs::remove_dir_all(dir).ok();
     }
 }

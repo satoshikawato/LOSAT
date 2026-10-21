@@ -121,11 +121,12 @@ fn report_error(error: anyhow::Error) -> anyhow::Error {
     if error.is::<super::blast_xml::XmlRefusal>() {
         // LOSAT's refusal of a title NCBI's XML cannot write, not an error of NCBI's engine.
         error
-    } else if error
-        .downcast_ref::<NativeError>()
-        .is_some_and(|e| e.exit == 1 && e.message.starts_with("Command line argument error"))
-    {
-        // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1).
+    } else if error.downcast_ref::<NativeError>().is_some_and(|e| {
+        (e.exit == 1 && e.message.starts_with("Command line argument error"))
+            || (e.exit == 6 && e.message == "BLAST failed to write output\n")
+    }) {
+        // An outfmt 13 or 14 side file NCBI cannot open (`CArgException`, exit status 1), or a
+        // write to one that fails (`framing::side_file_write_error`).
         error
     } else if error.downcast_ref::<report::TabularFlushError>().is_some() {
         NativeError{exit:-6,message:"terminate called after throwing an instance of 'std::__ios_failure'\n  what():  basic_ios::clear: iostream error\n".into()}.into()
@@ -366,12 +367,11 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
         _ => false,
     };
     // The hold of the side files of outfmt 13 and 14 follows the master file's.
-    let side_files = match (out_file, choice.number) {
-        (Some(out), 13 | 14) => app::ReportFormat::from_number(choice.number)
-            .and_then(Xml2Kind::of)
-            .map(|kind| super::blast_xml::HeldSideFiles::new(FsSideFiles::new(out, kind))),
-        _ => None,
-    };
+    let side_files = out_file.and_then(|out| {
+        let kind = app::ReportFormat::from_number(choice.number).and_then(Xml2Kind::of)?;
+        kind.is_files()
+            .then(|| super::blast_xml::HeldSideFiles::new(FsSideFiles::new(out, kind)))
+    });
     let (destination, held) = if structured_xml {
         let held = super::blast_xml::HeldOutput::new(destination, side_files.clone());
         (Box::new(held.clone()) as Box<dyn Write>, Some(held))

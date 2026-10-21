@@ -397,7 +397,9 @@ pub struct Xml2Writer<F: SideFiles = NoSideFiles> {
 
 impl Xml2Writer<NoSideFiles> {
     /// A writer of the document `kind` for a search of `params.target`; a `-subject` search
-    /// holds the last report back one query (`Xml2Document`).
+    /// holds the last report back one query (`Xml2Document`). The unit tests make writers this
+    /// way; a run uses `for_run` or `with_document`.
+    #[cfg(test)]
     pub fn new(kind: Xml2Kind, params: Xml2Run) -> Self {
         let delayed = matches!(params.target, Xml2Target::Subjects(_));
         Self::with_document(Xml2Document::new(kind, delayed), params)

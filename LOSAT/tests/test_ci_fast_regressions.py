@@ -2,6 +2,8 @@
 """Tests for ci_fast_regressions.py and frozen_allowlist.py (no LOSAT binary is run)."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import re
 import sys
@@ -249,6 +251,47 @@ class XincludeFixtureTests(unittest.TestCase):
             noisy = xinclude.run_with_files(fake_search(directory, b"M", [b"A"], b"x"), "r", "14")
             with self.assertRaises(SystemExit):
                 xinclude.freeze(noisy, frozen, "r", "14")
+
+    def test_a_comparison_counts_a_stray_file_as_a_difference_and_writes_nothing(self):
+        # run_oracle.py in compare mode (no --freeze) with a stand-in for the NCBI program: a stray file
+        # or standard output is a difference of that fixture (the comparison goes on), --out stays empty
+        # and the manifest is not written.
+        def compare(stray: bool, stdout: bool) -> tuple[int, str, list[str]]:
+            with tempfile.TemporaryDirectory() as tmp:
+                bin_dir, out = Path(tmp) / "bin", Path(tmp) / "out"
+                bin_dir.mkdir()
+                out.mkdir()
+                program = bin_dir / "blastp"
+                program.write_text("\n".join([
+                    f"#!{sys.executable}", "import sys",
+                    "if sys.argv[1] == '-version':", "    print('blastp: 2.17.0+'); sys.exit(0)",
+                    "out = sys.argv[sys.argv.index('-out') + 1]",
+                    "open(out, 'wb').write(b'M')", "open(out + '_1.xml', 'wb').write(b'A')",
+                    "open(out + '_stray', 'wb').write(b'x')" if stray else "",
+                    "sys.stdout.write('x')" if stdout else ""]) + "\n")
+                program.chmod(0o755)
+                good = {"fixture_id": "r", "program": "blastp", "outfmt": "14", "files": "xinclude",
+                        "stdout_sha256": xinclude.sha256(b"M"), "stdout_bytes": "1", "stderr_sha256": "",
+                        "side_sha256": xinclude.sha256(b"A")}
+                rows = [good, {**good, "fixture_id": "s"}]
+                saved = (sys.argv, run_oracle.read_manifest, run_oracle.search_argv)
+                sys.argv = ["run_oracle.py", "--bin-dir", str(bin_dir), "--out", str(out)]
+                run_oracle.read_manifest = lambda: ([], list(good), rows)
+                run_oracle.search_argv = lambda row: ["-outfmt", "14"]
+                captured = io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(captured):
+                        status = run_oracle.main()
+                finally:
+                    sys.argv, run_oracle.read_manifest, run_oracle.search_argv = saved
+                return status, captured.getvalue(), [path.name for path in out.iterdir()]
+
+        status, printed, written = compare(stray=False, stdout=False)
+        self.assertEqual((status, written), (0, []), printed)
+        for stray, stdout in ((True, False), (False, True)):
+            status, printed, written = compare(stray, stdout)
+            self.assertEqual((status, written), (1, []), printed)
+            self.assertIn("differing=['r', 's']", printed)
 
     def test_the_files_column_and_the_format_are_validated(self):
         self.assertFalse(xinclude.wants_files({}))

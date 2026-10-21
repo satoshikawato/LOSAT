@@ -186,8 +186,13 @@ def main() -> int:
         wall = time.monotonic() - start
         if run.returncode != 0:
             raise SystemExit(f"{row['fixture_id']}: exit {run.returncode}\n{run.stderr.decode()}")
-        if files:
+        defects = []
+        if files and args.freeze:
             xinclude.freeze(written, args.out, row["fixture_id"], outfmt(row))
+        elif files:
+            # A comparison writes nothing to --out, and a stray file, standard output or a missing
+            # master is a difference of this fixture, not the end of the comparison.
+            defects = xinclude.defects(written)
         else:
             (args.out / f"{row['fixture_id']}.out").write_bytes(run.stdout)
         err = args.out / f"{row['fixture_id']}.err"
@@ -217,7 +222,7 @@ def main() -> int:
             hashes.append("db_stdout_sha256")
         if args.freeze:
             row.update(observed)
-        elif any(row.get(key, "") != observed[key] for key in hashes):
+        elif defects or any(row.get(key, "") != observed[key] for key in hashes):
             differing.append(row["fixture_id"])
         shown = shlex.join([row["program"], *search_argv(row)])
         records.append([row["fixture_id"], f"{wall:.2f}", *(observed[key] for key in HASHES), shown])

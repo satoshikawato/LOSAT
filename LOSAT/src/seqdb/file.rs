@@ -167,7 +167,7 @@ impl DbFile {
         self.read_range_in(start, end, false)
     }
 
-    /// EXPERIMENT (LOSAT_X_BNSEQMAP): `read_range` into a buffer with the capacity of
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_range` into a buffer with the capacity of
     /// `utils::x_mapped::x_mapped_capacity` (mapped by glibc from 1 MiB on). No NCBI counterpart:
     /// only where the bytes are kept.
     pub fn x_read_range_mapped(&self, start: u64, end: u64) -> Result<Vec<u8>, SeqDbError> {

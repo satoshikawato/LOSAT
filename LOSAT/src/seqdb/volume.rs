@@ -303,7 +303,7 @@ impl Volume {
         self.read_block_in(first, end, first_ordinal, false)
     }
 
-    /// EXPERIMENT (LOSAT_X_BNSEQMAP): `read_block` with the bytes in a buffer of
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): `read_block` with the bytes in a buffer of
     /// `File::x_read_range_mapped`.
     pub fn x_read_block_mapped(
         &self,
@@ -930,7 +930,7 @@ impl SequenceBlock {
         self.nucleotide_blastna_in(i, false)
     }
 
-    /// EXPERIMENT (LOSAT_X_BNSEQMAP): `nucleotide_blastna` in a buffer with the capacity of
+    /// EXPERIMENT (LOSAT_X_BNMAPPED): `nucleotide_blastna` in a buffer with the capacity of
     /// `utils::x_mapped::x_mapped_capacity` (mapped by glibc from 1 MiB on). No NCBI
     /// counterpart: only where the bytes are kept.
     pub fn x_nucleotide_blastna_mapped(&self, i: usize) -> Result<Vec<u8>, SeqDbError> {

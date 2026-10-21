@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_XDROPTRIM, LOSAT_X_BNSEQMAP): large per-thread buffers that glibc maps
+//! EXPERIMENT (LOSAT_X_XDROPTRIM, LOSAT_X_BNMAPPED): large per-thread buffers that glibc maps
 //! and returns when they are dropped.
 //!
 //! No NCBI counterpart: these choose only the capacity of LOSAT buffers and when they are freed;
@@ -55,6 +55,66 @@ pub(crate) fn x_release_mapped<T>(v: &mut Vec<T>) {
     }
 }
 
+/// No NCBI counterpart: the elements sorted at a time with `sort_by` before they are merged in
+/// `x_sort_by_mapped` (its scratch stays below glibc's first mmap threshold).
+const X_SORT_RUN_BYTES: usize = 64 << 10;
+
+/// No NCBI counterpart: `v.sort_by(cmp)` (a stable sort: the same order as `sort_by` for a
+/// comparator that is a total order) whose scratch, when it would need `X_MAPPED_FROM` bytes or
+/// more with glibc, is one buffer of `x_mapped_capacity`: runs of `X_SORT_RUN_BYTES` sorted with
+/// `sort_by`, then merged pairwise (the left run first among equal elements).
+pub(crate) fn x_sort_by_mapped<T: Copy, F: FnMut(&T, &T) -> std::cmp::Ordering>(
+    v: &mut [T],
+    mut cmp: F,
+) {
+    let size = std::mem::size_of::<T>().max(1);
+    let n = v.len();
+    if !X_MAPPED_ALLOCATOR || n.saturating_mul(size) < X_MAPPED_FROM {
+        v.sort_by(cmp);
+        return;
+    }
+    let run = (X_SORT_RUN_BYTES / size).max(1);
+    for chunk in v.chunks_mut(run) {
+        chunk.sort_by(&mut cmp);
+    }
+    let mut buf: Vec<T> = Vec::with_capacity(x_mapped_capacity(n, size));
+    buf.extend_from_slice(v);
+    let mut width = run;
+    let mut in_v = true;
+    while width < n {
+        let (src, dst): (&[T], &mut [T]) = if in_v {
+            (&*v, &mut buf[..])
+        } else {
+            (&buf[..], &mut *v)
+        };
+        let mut start = 0;
+        while start < n {
+            let mid = (start + width).min(n);
+            let end = (start + 2 * width).min(n);
+            let (mut i, mut j, mut k) = (start, mid, start);
+            while i < mid && j < end {
+                if cmp(&src[j], &src[i]) == std::cmp::Ordering::Less {
+                    dst[k] = src[j];
+                    j += 1;
+                } else {
+                    dst[k] = src[i];
+                    i += 1;
+                }
+                k += 1;
+            }
+            dst[k..k + (mid - i)].copy_from_slice(&src[i..mid]);
+            k += mid - i;
+            dst[k..k + (end - j)].copy_from_slice(&src[j..end]);
+            start = end;
+        }
+        width *= 2;
+        in_v = !in_v;
+    }
+    if !in_v {
+        v.copy_from_slice(&buf);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +150,26 @@ mod tests {
         assert!(v.iter().all(|&b| b == 7));
         x_release_mapped(&mut v);
         assert_eq!(v.capacity(), 0);
+    }
+
+    #[test]
+    fn sort_by_mapped_is_stable_and_equals_sort_by() {
+        // (key, position): sorted by key only, so equal keys must keep their order.
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for &n in &[0usize, 1, 7, 70_000, 200_003] {
+            let v: Vec<(u32, u32)> = (0..n as u32)
+                .map(|i| {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    ((state % 1000) as u32, i)
+                })
+                .collect();
+            let mut a = v.clone();
+            a.sort_by(|x, y| y.0.cmp(&x.0));
+            let mut b = v.clone();
+            x_sort_by_mapped(&mut b, |x, y| y.0.cmp(&x.0));
+            assert_eq!(a, b, "n = {n}");
+        }
     }
 }

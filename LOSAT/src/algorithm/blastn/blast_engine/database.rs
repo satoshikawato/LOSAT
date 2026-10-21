@@ -95,39 +95,27 @@ mod x_db_stream;
 /// The IUPAC letter of a BLASTNA code.
 const BLASTNA_TO_IUPACNA: [u8; 16] = *b"ACGTRYMKWSBDHVN-";
 
-// No NCBI counterpart: NCBI reads its sequences from the mapped database files; LOSAT copies
-// them into buffers, and this only chooses those buffers' capacity (no value changes).
-/// EXPERIMENT (LOSAT_X_BNSEQMAP, a switch of the strict set, `utils/xswitch.rs`: on unless it is
-/// `0`, or `LOSAT_X_DEFAULT=0` and it is not set): the blocks and sequences that BLASTN reads
-/// from a database, and their BLASTNA letters, are kept in buffers that glibc maps from 1 MiB on
-/// (`utils/x_mapped.rs`), so that a chromosome read by a worker thread goes back to the system
-/// when it is dropped instead of staying in that thread's arena.
-fn x_bn_seq_map() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNSEQMAP"))
-}
-
-/// `SeqDb::read_block`, mapped with LOSAT_X_BNSEQMAP.
+/// `SeqDb::read_block`, mapped with LOSAT_X_BNMAPPED.
 fn x_read_block(db: &SeqDb, range: BlockRange) -> Result<SequenceBlock, SeqDbError> {
-    if x_bn_seq_map() {
+    if super::x_bn_mapped() {
         db.x_read_block_mapped(range)
     } else {
         db.read_block(range)
     }
 }
 
-/// `SeqDb::read_sequence`, mapped with LOSAT_X_BNSEQMAP.
+/// `SeqDb::read_sequence`, mapped with LOSAT_X_BNMAPPED.
 fn x_read_sequence(db: &SeqDb, ordinal: u32) -> Result<SequenceBlock, SeqDbError> {
-    if x_bn_seq_map() {
+    if super::x_bn_mapped() {
         db.x_read_sequence_mapped(ordinal)
     } else {
         db.read_sequence(ordinal)
     }
 }
 
-/// `SequenceBlock::nucleotide_blastna(0)`, mapped with LOSAT_X_BNSEQMAP.
+/// `SequenceBlock::nucleotide_blastna(0)`, mapped with LOSAT_X_BNMAPPED.
 fn x_blastna(block: &SequenceBlock) -> Result<Vec<u8>, SeqDbError> {
-    if x_bn_seq_map() {
+    if super::x_bn_mapped() {
         block.x_nucleotide_blastna_mapped(0)
     } else {
         block.nucleotide_blastna(0)

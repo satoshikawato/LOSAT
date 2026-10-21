@@ -28,7 +28,8 @@
 //! (`PrintOneResultSet` is called once per query's result set; the accumulated lists hold that
 //! one query.)
 //!
-//! The XML2 and JSON documents of outfmt 15 and 16 (`report::blast_xml2`) take the same path
+//! The XML2 and JSON documents of outfmt 15 and 16, and 14 and 13 as side files with a master file
+//! (`report::blast_xml2`), take the same path
 //! with another writer: `write_blastx_xml` is generic over `StructuredXml`, and the run keeps
 //! one `Xml2Writer` across the query batches (`xml2_writer`), as it passes `queries_before` to
 //! outfmt 5's. Its document start is written with the prolog, before the first batch.
@@ -37,20 +38,22 @@
 //! the first byte of the document, though the query file is read batch by batch:
 //!
 //! - `prescan_queries` reads the query file once more before the search (only with outfmt 5,
-//!   15 and 16) and refuses the first query whose title the writer would refuse;
+//!   13 to 16) and refuses the first query whose title the writer would refuse;
 //! - when some `-subject` title would be refused if its subject had a hit
 //!   (`subjects_may_be_refused`), or some query's message would be (a title that is refused only
 //!   in the message of a query NCBI did not search), or (15 and 16 with `-db`) the taxonomy
 //!   database is on the search path and the lookup of the taxid of some sequence of the database
 //!   would be refused (a scientific name NCBI's XML cannot write, a damaged record: checked once
 //!   before the first byte, `taxdb_may_refuse`), so that a later batch could refuse it,
-//!   the run holds the document in memory (`HeldOutput`) and writes it at the epilog; a refusal
-//!   found while the batches are reported drops it, with nothing written.
+//!   the run holds the document in memory (`HeldOutput`; with outfmt 13 and 14 the side files'
+//!   bytes too, `HeldSideFiles`) and writes it at the epilog; a refusal found while the batches
+//!   are reported drops it, with nothing written (an empty master file, no side file).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{self, Write};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::{ensure, Context, Result};
 
@@ -72,7 +75,9 @@ use crate::report::blast_xml::{
     filter, BlastXmlWriter, QueryMask, StructuredXml, XmlHit, XmlHsp, XmlQuery, XmlRun, XmlStats,
     REFERENCE_GAPPED_BLAST,
 };
-use crate::report::blast_xml2::{Xml2Kind, Xml2Run, Xml2Target, Xml2Writer};
+use crate::report::blast_xml2::{
+    FsSideFiles, RunSideFiles, SideFiles, Xml2Document, Xml2Kind, Xml2Run, Xml2Target, Xml2Writer,
+};
 use crate::report::query_warnings::INVALID_QUERY_MESSAGE;
 use crate::report::serial::seqalign::seqalign_evalue;
 
@@ -252,11 +257,18 @@ fn xml_rows(
     Ok((qstart.min(qend), qstart.max(qend)))
 }
 
-/// The output of a run with outfmt 5: it passes the bytes on, or, once `hold` is called, keeps
-/// them in memory until `release` (the epilog), so that a refusal found while the batches are
-/// reported leaves nothing written. A run that ends with any other error writes what it held
-/// (the bytes of the batches before it, as the run without a hold does); `discard` is for the
-/// refusal alone.
+/// The writer of the XML2 and JSON documents of a BLASTX run, with the side files of outfmt 13 and
+/// 14 (`RunSideFiles`) of the run.
+pub(super) type RunXml2 = Xml2Writer<RunSideFiles>;
+
+/// The output of a run with outfmt 5, 13, 14, 15 or 16: it passes the bytes on, or, once `hold`
+/// is called, keeps them in memory until `release` (the epilog), so that a refusal found while
+/// the batches are reported leaves nothing written. A run that ends with any other error writes
+/// what it held (the bytes of the batches before it, as the run without a hold does); `discard`
+/// is for the refusal alone.
+///
+/// Outfmt 13 and 14 write their reports to side files: `side` is the hold of those files, which
+/// follows this output's `hold`, `discard` and `release` (the master file is this output).
 #[derive(Clone)]
 pub(super) struct HeldOutput(Rc<RefCell<HeldState>>);
 
@@ -265,21 +277,27 @@ struct HeldState {
     holding: bool,
     held: Vec<u8>,
     discarded: bool,
+    side: Option<HeldSideFiles>,
 }
 
 impl HeldOutput {
-    pub(super) fn new(inner: Box<dyn Write>) -> Self {
+    pub(super) fn new(inner: Box<dyn Write>, side: Option<HeldSideFiles>) -> Self {
         HeldOutput(Rc::new(RefCell::new(HeldState {
             inner,
             holding: false,
             held: Vec::new(),
             discarded: false,
+            side,
         })))
     }
 
     /// Keeps everything written from now on in memory.
     pub(super) fn hold(&self) {
-        self.0.borrow_mut().holding = true;
+        let mut state = self.0.borrow_mut();
+        state.holding = true;
+        if let Some(side) = &state.side {
+            side.hold();
+        }
     }
 
     /// Drops what is held, and everything written after (the run ends with a refusal).
@@ -287,15 +305,29 @@ impl HeldOutput {
         let mut state = self.0.borrow_mut();
         state.discarded = true;
         state.held.clear();
+        if let Some(side) = &state.side {
+            side.discard();
+        }
     }
 
-    /// Writes what is held and passes the bytes on again.
-    pub(super) fn release(&self) -> std::io::Result<()> {
+    /// Writes what is held and passes the bytes on again: the side files first (in order), then
+    /// the master file. A side file that cannot be opened stops the run there, as NCBI's does
+    /// (`Cannot open output file`, exit status 1): the side files before it stay and the master
+    /// file stays empty.
+    pub(super) fn release(&self) -> Result<()> {
         let mut state = self.0.borrow_mut();
         state.holding = false;
+        if let Some(side) = state.side.clone() {
+            if let Err(error) = side.release() {
+                state.discarded = true;
+                state.held.clear();
+                return Err(error);
+            }
+        }
         let held = std::mem::take(&mut state.held);
         state.inner.write_all(&held)?;
-        state.inner.flush()
+        state.inner.flush()?;
+        Ok(())
     }
 }
 
@@ -328,6 +360,132 @@ impl Drop for HeldState {
             let _ = self.inner.write_all(&self.held);
             let _ = self.inner.flush();
         }
+    }
+}
+
+/// The side files of an outfmt 13 or 14 run (`FsSideFiles`), which a hold keeps in memory: the
+/// n-th report is written to its file at once, or, while the run holds its output, at `release`
+/// (the epilog) in the order of the reports. A refusal found while the batches are reported
+/// drops them, so that the run leaves no side file (design OF5 4.4); any other error ends the
+/// run with the side files of the earlier reports written (`SideState::drop`), as NCBI leaves
+/// them.
+#[derive(Clone)]
+pub(super) struct HeldSideFiles(Arc<Mutex<SideState>>);
+
+struct SideState {
+    files: FsSideFiles,
+    holding: bool,
+    discarded: bool,
+    /// The reports held, as `(n, bytes)` in the order they were made.
+    held: Vec<(u32, Vec<u8>)>,
+}
+
+impl HeldSideFiles {
+    pub(super) fn new(files: FsSideFiles) -> Self {
+        HeldSideFiles(Arc::new(Mutex::new(SideState {
+            files,
+            holding: false,
+            discarded: false,
+            held: Vec::new(),
+        })))
+    }
+
+    fn state(&self) -> MutexGuard<'_, SideState> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn hold(&self) {
+        self.state().holding = true;
+    }
+
+    fn discard(&self) {
+        let mut state = self.state();
+        state.discarded = true;
+        state.held.clear();
+    }
+
+    /// Writes the held side files, each to a new file (truncating one of that name).
+    fn release(&self) -> Result<()> {
+        let mut state = self.state();
+        state.holding = false;
+        state.write_held().map_err(|_| {
+            crate::cli::NativeError {
+                exit: 1,
+                message: "Command line argument error: Cannot open output file\n".to_string(),
+            }
+            .into()
+        })
+    }
+}
+
+impl SideState {
+    fn write_held(&mut self) -> io::Result<()> {
+        let held = std::mem::take(&mut self.held);
+        for (n, bytes) in held {
+            let mut file = std::fs::File::create(self.files.path(n))?;
+            file.write_all(&bytes)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for SideState {
+    fn drop(&mut self) {
+        if !self.discarded {
+            let _ = self.write_held();
+        }
+    }
+}
+
+/// A report held for its side file: it joins the held reports when the document is done with it.
+struct HeldReport {
+    side: HeldSideFiles,
+    n: u32,
+    bytes: Vec<u8>,
+}
+
+impl Write for HeldReport {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for HeldReport {
+    fn drop(&mut self) {
+        let mut state = self.side.state();
+        if !state.discarded {
+            state.held.push((self.n, std::mem::take(&mut self.bytes)));
+        }
+    }
+}
+
+impl SideFiles for HeldSideFiles {
+    fn create(&mut self, n: u32) -> io::Result<Box<dyn Write + '_>> {
+        let state = self.state();
+        if state.discarded {
+            return Ok(Box::new(io::sink()));
+        }
+        if state.holding {
+            return Ok(Box::new(HeldReport {
+                side: self.clone(),
+                n,
+                bytes: Vec::new(),
+            }));
+        }
+        Ok(Box::new(io::BufWriter::new(std::fs::File::create(
+            state.files.path(n),
+        )?)))
+    }
+
+    fn listed(&self, n: u32) -> Vec<u8> {
+        self.state().files.listed(n)
     }
 }
 
@@ -394,9 +552,11 @@ pub(super) fn check_database_name(name: &str) -> Result<()> {
     names::check_database_name(PROGRAM, name).map_err(|error| XmlRefusal(error.to_string()).into())
 }
 
-/// The document of outfmt 15 or 16 for `outfmt` (`None` for any other format).
+/// The document of outfmt 13, 14, 15 or 16 for `outfmt` (`None` for any other format).
 pub(super) fn xml2_kind(outfmt: u8) -> Option<Xml2Kind> {
     match outfmt {
+        13 => Some(Xml2Kind::Files13),
+        14 => Some(Xml2Kind::Files14),
         15 => Some(Xml2Kind::Single15),
         16 => Some(Xml2Kind::Single16),
         _ => None,
@@ -405,7 +565,8 @@ pub(super) fn xml2_kind(outfmt: u8) -> Option<Xml2Kind> {
 
 /// The writer of the XML2 or JSON document of a run (`kind`), which the run keeps across its
 /// query batches: its count of reports and, with `-subject`, the report held back one query
-/// (`Xml2Document`). `-subject` has one `Subject_N` per record of the file (`subjects`).
+/// (`Xml2Document`). `-subject` has one `Subject_N` per record of the file (`subjects`). `files`
+/// are the side files of outfmt 13 and 14.
 ///
 /// NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml2_format.cpp:544-554
 /// ```c++
@@ -423,21 +584,21 @@ pub(super) fn xml2_writer(
     options: &ResolvedOptions,
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
-) -> Xml2Writer {
-    Xml2Writer::new(
-        kind,
-        Xml2Run {
-            target: match shown {
-                ShownSubjects::Fasta { .. } => Xml2Target::Subjects(subjects.len()),
-                ShownSubjects::Database { .. } => Xml2Target::Database,
-            },
-            // `-ungapped` writes no gap costs; it needs `-comp_based_stats 0`, so no `cbs` either.
-            gapped: options.gapped,
-            cbs: i32::from(options.composition),
-            query_gencode: Some(i32::from(options.query_gencode)),
-            db_gencode: None,
+    files: RunSideFiles,
+) -> RunXml2 {
+    let params = Xml2Run {
+        target: match shown {
+            ShownSubjects::Fasta { .. } => Xml2Target::Subjects(subjects.len()),
+            ShownSubjects::Database { .. } => Xml2Target::Database,
         },
-    )
+        // `-ungapped` writes no gap costs; it needs `-comp_based_stats 0`, so no `cbs` either.
+        gapped: options.gapped,
+        cbs: i32::from(options.composition),
+        query_gencode: Some(i32::from(options.query_gencode)),
+        db_gencode: None,
+    };
+    let delayed = matches!(params.target, Xml2Target::Subjects(_));
+    Xml2Writer::with_document(Xml2Document::with_files(kind, delayed, files), params)
 }
 
 /// Writes the documents of every query of `batches` (one query batch) through `document` (BLAST
@@ -623,7 +784,7 @@ pub(super) fn write_blastx_xml<W: StructuredXml>(
 pub(super) fn write_xml_epilog(
     writer: &mut impl Write,
     queries: usize,
-    xml2: Option<&mut Xml2Writer>,
+    xml2: Option<&mut RunXml2>,
 ) -> Result<()> {
     let mut buf = Vec::new();
     match xml2 {
@@ -679,5 +840,130 @@ mod taxonomy_error_tests {
             message: "BLAST Database error: x\n".into(),
         });
         assert!(XmlRefusal::of_taxonomy(native).is::<NativeError>());
+    }
+}
+
+#[cfg(test)]
+mod held_side_files_tests {
+    //! The hold of the side files of outfmt 13 and 14 (`HeldSideFiles`, `HeldOutput`): nothing on
+    //! the file system while the run holds its output, the files in report order at `release`, none
+    //! after `discard`, and the files made so far when the run ends with another error.
+    use super::*;
+    use crate::cli::NativeError;
+    use crate::report::blast_xml2::Xml2Kind;
+    use std::path::{Path, PathBuf};
+
+    fn work(stem: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("losat_held_side_{stem}_{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A held output over `<dir>/o.out` and its side files `<dir>/o.out_<n>.xml`.
+    fn run(dir: &Path) -> (HeldOutput, HeldSideFiles) {
+        let master = std::fs::File::create(dir.join("o.out")).unwrap();
+        let side = HeldSideFiles::new(FsSideFiles::new(&dir.join("o.out"), Xml2Kind::Files14));
+        (HeldOutput::new(Box::new(master), Some(side.clone())), side)
+    }
+
+    fn report(side: &mut HeldSideFiles, n: u32, bytes: &[u8]) {
+        let mut file = side.create(n).unwrap();
+        file.write_all(bytes).unwrap();
+        file.flush().unwrap();
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn without_a_hold_the_files_are_written_at_once() {
+        let dir = work("nohold");
+        let (held, mut side) = run(&dir);
+        report(&mut side, 1, b"one");
+        assert_eq!(std::fs::read(dir.join("o.out_1.xml")).unwrap(), b"one");
+        held.release().unwrap();
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_hold_keeps_the_files_in_memory_until_the_release_and_writes_them_in_order() {
+        let dir = work("hold");
+        let (held, mut side) = run(&dir);
+        held.hold();
+        report(&mut side, 1, b"one");
+        report(&mut side, 2, b"two");
+        let mut master = held.clone();
+        master.write_all(b"master").unwrap();
+        assert_eq!(names(&dir), ["o.out"]);
+        assert_eq!(std::fs::read(dir.join("o.out")).unwrap(), b"");
+        held.release().unwrap();
+        assert_eq!(names(&dir), ["o.out", "o.out_1.xml", "o.out_2.xml"]);
+        assert_eq!(std::fs::read(dir.join("o.out_2.xml")).unwrap(), b"two");
+        assert_eq!(std::fs::read(dir.join("o.out")).unwrap(), b"master");
+        // after the release the files are written at once again
+        report(&mut side, 3, b"three");
+        assert_eq!(std::fs::read(dir.join("o.out_3.xml")).unwrap(), b"three");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_discard_leaves_no_side_file_and_an_empty_master() {
+        let dir = work("discard");
+        let (held, mut side) = run(&dir);
+        held.hold();
+        report(&mut side, 1, b"one");
+        let mut master = held.clone();
+        master.write_all(b"master").unwrap();
+        held.discard();
+        report(&mut side, 2, b"two");
+        drop((held, side, master));
+        assert_eq!(names(&dir), ["o.out"]);
+        assert_eq!(std::fs::read(dir.join("o.out")).unwrap(), b"");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn any_other_end_of_the_run_writes_the_files_made_so_far() {
+        let dir = work("dropped");
+        let (held, mut side) = run(&dir);
+        held.hold();
+        report(&mut side, 1, b"one");
+        drop((held, side));
+        assert_eq!(std::fs::read(dir.join("o.out_1.xml")).unwrap(), b"one");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_side_file_that_cannot_be_opened_at_the_release_stops_there_and_empties_the_master() {
+        let dir = work("blocked");
+        std::fs::create_dir(dir.join("o.out_2.xml")).unwrap();
+        let (held, mut side) = run(&dir);
+        held.hold();
+        report(&mut side, 1, b"one");
+        report(&mut side, 2, b"two");
+        report(&mut side, 3, b"three");
+        let mut master = held.clone();
+        master.write_all(b"master").unwrap();
+        let error = held.release().unwrap_err();
+        let native = error.downcast_ref::<NativeError>().expect("NCBI's error");
+        assert_eq!(native.exit, 1);
+        assert_eq!(
+            native.message,
+            "Command line argument error: Cannot open output file\n"
+        );
+        drop((held, side, master));
+        // the file before the blocked one stays; the ones after it are not written
+        assert_eq!(names(&dir), ["o.out", "o.out_1.xml", "o.out_2.xml"]);
+        assert_eq!(std::fs::read(dir.join("o.out_1.xml")).unwrap(), b"one");
+        assert_eq!(std::fs::read(dir.join("o.out")).unwrap(), b"");
+        std::fs::remove_dir_all(dir).ok();
     }
 }

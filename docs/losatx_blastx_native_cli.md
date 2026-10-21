@@ -11,7 +11,11 @@ formats 8 (text ASN.1), 9 (binary ASN.1) and 12 (JSON), BLAST JSON format 15 and
 BLAST XML2 format 16; `-db` writes the same formats. Format 0 is the default.
 Formats 15 and 16 take the structure of 5 (one document across the query
 batches) and, with `-db`, the taxid and scientific name from `taxdb.bti` when
-the taxonomy database is on the search path.
+the taxonomy database is on the search path. Formats 13 and 14 (multiple-file
+BLAST JSON and XML2) write the same documents as side files next to `-out FILE`
+with a master file at `FILE` (they need `-out`); like 5, 15 and 16 they refuse a
+query that is not a regular file, and a run that is refused after its first
+batch leaves no side file.
 Supported query genetic-code IDs are
 `1,2,3,4,5,6,9,10,11,12,13,14,15,16,21,22,23,24,25,26,27,28,29,30,31,33`.
 ID 32 is invalid for this BLASTX CLI. Protein subjects have no `db_gencode`.

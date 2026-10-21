@@ -362,10 +362,10 @@ impl Program {
             AsnBinary => true,
             ArchiveFormat => false,
             JsonSeqalign => true,
-            // 13 and 14 (BLAST JSON and XML2 as files) are written by BLASTP and BLASTN (OF5c
-            // part 1); BLASTX, TBLASTN and TBLASTX follow in part 2.
-            Json => matches!(self, Program::Blastp | Program::Blastn),
-            Xml2 => matches!(self, Program::Blastp | Program::Blastn),
+            // 13 and 14 (BLAST JSON and XML2 as side files and a master file): every program
+            // (BLASTP and BLASTN: OF5c part 1; BLASTX, TBLASTN, TBLASTX: part 2).
+            Json => true,
+            Xml2 => true,
             JsonS => true,
             Xml2S => true,
             Sam => false,
@@ -1102,7 +1102,8 @@ mod tests {
     // every program (8 and 12: line OF track S, OF3b; 9: OF3c), and 5 in every program
     // (BLASTN, BLASTP: OF4a; BLASTX, TBLASTN, TBLASTX: OF4b); 15 and 16 in BLASTP and BLASTN
     // (OF5a), BLASTX (OF5b part 1), TBLASTN (OF5b part 2) and TBLASTX (OF5b part 3): every program;
-    // 13 and 14 in BLASTP and BLASTN (OF5c part 1).
+    // 13 and 14 in BLASTP and BLASTN (OF5c part 1), BLASTX, TBLASTN and TBLASTX (part 2): every
+    // program writes 0, 5 to 9 and 12 to 16.
     #[test]
     fn every_program_writes_its_formats_only() {
         for program in PROGRAMS {
@@ -1111,14 +1112,11 @@ mod tests {
                 .filter(|&format| program.writes(format))
                 .map(ReportFormat::number)
                 .collect();
-            // 13 and 14 (files) are written by BLASTP and BLASTN so far (OF5c part 1).
-            let files = matches!(program, Program::Blastp | Program::Blastn);
-            let mut expected = vec![0, 5, 6, 7, 8, 9, 12];
-            if files {
-                expected.extend([13, 14]);
-            }
-            expected.extend([15, 16]);
-            assert_eq!(written, expected, "{program:?}");
+            assert_eq!(
+                written,
+                [0, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16],
+                "{program:?}"
+            );
         }
         assert_eq!(
             PROGRAMS.map(Program::name),

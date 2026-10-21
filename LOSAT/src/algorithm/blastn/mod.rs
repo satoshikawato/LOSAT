@@ -2,6 +2,7 @@ pub mod alignment;
 pub mod args;
 pub mod blast_engine;
 pub mod blast_extend;
+pub(crate) mod blast_xml;
 pub mod constants;
 pub mod coordination;
 pub mod disc_lookup;

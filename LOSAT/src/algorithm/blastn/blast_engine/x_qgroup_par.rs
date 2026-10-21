@@ -41,8 +41,9 @@
 //! in the relative order they have in the batch's list, with a tree of its own, gives the HSPs the
 //! batch's loop gives for that query, in the same relative order.
 //!
-//! With the switch on, a search pool of two or more threads and one subject on the owner thread
-//! (`!use_parallel`; with several subjects the pool already searches subjects in parallel):
+//! With the switch on, a search pool of two or more threads and one subject at a time on the owner
+//! thread (`!use_parallel`: one subject, or several one at a time under LOSAT_X_BNFEWSUBJ; when the
+//! pool searches subjects in parallel it is already busy):
 //! - Preliminary stage (`collect_prelim_hits_for_chunk`, one chunk at a time on the owner): the
 //!   chunk's ungapped hits are split by query in the order the seed stage saved them, each query's
 //!   hits are sorted with the batch's comparator (stable, so in the batch's relative order), looped

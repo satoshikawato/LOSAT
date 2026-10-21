@@ -353,8 +353,9 @@ impl Program {
             CommaSeparatedValues => false,
             TaxFormat => false,
             CommaSeparatedValuesWithHeader => false,
-            // Line OF track S (structured formats).
-            Xml => false,
+            // Line OF track S (structured formats): 5 for BLASTP and BLASTN (OF4a), the
+            // translated programs with OF4b.
+            Xml => matches!(self, Program::Blastp | Program::Blastn),
             AsnText => true,
             AsnBinary => true,
             ArchiveFormat => false,
@@ -1084,7 +1085,8 @@ mod tests {
     }
 
     // The one table of the formats LOSAT writes (`Program::writes`): 0, 6, 7, 8, 9 and 12 in
-    // every program (8 and 12: line OF track S, OF3b; 9: OF3c).
+    // every program (8 and 12: line OF track S, OF3b; 9: OF3c), and 5 in BLASTN and BLASTP
+    // (OF4a).
     #[test]
     fn every_program_writes_its_formats_only() {
         for program in PROGRAMS {
@@ -1093,7 +1095,12 @@ mod tests {
                 .filter(|&format| program.writes(format))
                 .map(ReportFormat::number)
                 .collect();
-            assert_eq!(written, [0, 6, 7, 8, 9, 12], "{program:?}");
+            let expected: &[i32] = if matches!(program, Program::Blastn | Program::Blastp) {
+                &[0, 5, 6, 7, 8, 9, 12]
+            } else {
+                &[0, 6, 7, 8, 9, 12]
+            };
+            assert_eq!(written, expected, "{program:?}");
         }
         assert_eq!(
             PROGRAMS.map(Program::name),

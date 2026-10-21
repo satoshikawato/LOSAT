@@ -59,7 +59,8 @@
 //! Scope (anything else returns `false`, and the reference code runs): the diagonal hash
 //! (query longer than 8000), `window_size == 0` (one hit), `scan_range == 0`, a contiguous
 //! megablast table, an unmasked subject, no small-query word extension, no debug, trace or
-//! window diagnostics, one subject searched by the owner of a pool of two threads or more.
+//! window diagnostics, a subject searched by the owner of a pool of two threads or more by itself
+//! (one subject, or several one at a time under LOSAT_X_BNFEWSUBJ).
 //! A chunk with a discontiguous megablast table goes to the child module `disc`
 //! (`x_pair_seed_disc.rs`, LOSAT_X_PAIRPARDISC: the two-hit stage of dc-megablast on the same
 //! strips, with its own switches; LOSAT_X_PAIRPARDISCARR: the same with the diagonal array).
@@ -200,6 +201,67 @@ fn pool_threads() -> Option<usize> {
 ))]
 fn pool_threads() -> Option<usize> {
     None
+}
+
+/// No NCBI counterpart (scheduling only): the part of the scope of `run` (`disc`: of
+/// `disc::in_scope`) that does not depend on the chunk: the diagonal hash, one hit for a
+/// contiguous table and two hits for a discontiguous one, `scan_range == 0`, no small-query word
+/// extension, no diagnostics.
+fn chunk_free_scope(
+    disc: bool,
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    small_na_word: bool,
+    diagnostics: bool,
+) -> bool {
+    (if disc {
+        window_size > 0
+    } else {
+        window_size == 0
+    }) && !use_array_indexing
+        && scan_range == 0
+        && !small_na_word
+        && !diagnostics
+}
+
+/// No NCBI counterpart (scheduling only): whether the strips take an unmasked chunk that the owner
+/// of the pool this thread runs in (two threads or more) searches by itself, in a search with these
+/// inputs (the names of `Inputs`; `two_stage`: the search's two-stage table, without which the
+/// stage never runs): `chunk_free_scope` with the switch of the table on (LOSAT_X_PAIRPAR, or
+/// LOSAT_X_PAIRPARDISC for a discontiguous table; not a shadow alone), or for a discontiguous
+/// table with the diagonal array the scope of `disc::in_scope_array` with LOSAT_X_PAIRPARDISCARR
+/// on. LOSAT_X_BNFEWSUBJ (`x_few_subj.rs`) reads it before it gives a search the shape of a
+/// one-subject search.
+pub(super) fn takes_owner_chunks(
+    two_stage: Option<&TwoStageLookup>,
+    use_array_indexing: bool,
+    window_size: usize,
+    scan_range: usize,
+    small_na_word: bool,
+    diagnostics: bool,
+) -> bool {
+    let Some(two_stage) = two_stage else {
+        return false;
+    };
+    let disc = two_stage.disc().is_some();
+    // LOSAT_X_PAIRPARDISCARR: the array's stage has the hash stage's scope with the array.
+    let disc_array = disc && use_array_indexing;
+    let on = if disc_array {
+        disc::arr_on()
+    } else if disc {
+        disc::on()
+    } else {
+        switches().0
+    };
+    on && chunk_free_scope(
+        disc,
+        use_array_indexing && !disc_array,
+        window_size,
+        scan_range,
+        small_na_word,
+        diagnostics,
+    ) && pool_threads().is_some()
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
@@ -1175,6 +1237,12 @@ impl StageStats {
     }
 }
 
+/// No NCBI counterpart (scheduling only): strips per thread of a chunk's scan with the
+/// partitioned fold (LOSAT_X_PAIRPARFOLD), and strips per thread that the participants may scan
+/// past the slowest partition (`seed_stage`).
+const PART_STRIPS_PER_THREAD: usize = 64;
+const PART_AHEAD_PER_THREAD: usize = 2;
+
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:1673-1684
 /// ```c
 ///     while(s_DetermineScanningOffsets(subject, word_length, lut_word_length, scan_range)) {
@@ -1196,13 +1264,23 @@ fn seed_stage(
     timed: bool,
     fold_part: Option<part::FoldPart<'_>>,
 ) -> StageStats {
+    // The partitioned fold holds the seeds of the strips within its look-ahead of the slowest
+    // partition: `PART_AHEAD_PER_THREAD` of `PART_STRIPS_PER_THREAD` strips per thread, 1/32 of a
+    // chunk's seeds (as `disc`), where 2 of 8 per thread held a quarter (blastn of the Sakai
+    // genome against MG1655, 30 M seeds, at 4 threads: about +70 MiB over the search without
+    // strips; LOSAT_X_BNFEWSUBJ gives that shape to searches of two subjects or more).
+    let strips_per_thread = if fold_part.is_some() {
+        PART_STRIPS_PER_THREAD
+    } else {
+        8
+    };
     let jobs = plan_strips(
         x.subject_seq_ranges,
         x.s_len,
         x.two_stage.word_length(),
         x.two_stage.lut_word_length(),
         x.scan_step,
-        8 * threads.max(4),
+        strips_per_thread * threads.max(4),
     );
     let produce = |i: usize, out: &mut Vec<Seed>| scan_strip(x, &jobs[i], out);
     if let Some(fold_part) = fold_part {
@@ -1231,7 +1309,7 @@ fn seed_stage(
         let r = part::seed_stage_part(
             jobs.len(),
             threads,
-            2 * threads,
+            PART_AHEAD_PER_THREAD * threads,
             hash,
             hits,
             fold_part,
@@ -1351,12 +1429,14 @@ pub(super) fn run(
     if shadow {
         STASH.with(|s| s.borrow_mut().take());
     }
-    if x.use_array_indexing
-        || x.window_size != 0
-        || x.scan_range != 0
-        || x.subject_masked
-        || x.small_na_word
-        || x.diagnostics
+    if !chunk_free_scope(
+        false,
+        x.use_array_indexing,
+        x.window_size,
+        x.scan_range,
+        x.small_na_word,
+        x.diagnostics,
+    ) || x.subject_masked
         || !x.one_subject_owner
     {
         return false;

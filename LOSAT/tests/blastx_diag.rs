@@ -7,7 +7,9 @@
 //! forces a cell test, and `LOSAT_X_BXDIAGSHADOW` runs the reference beside it for
 //! every subject and stops at a difference. `LOSAT_X_BXDIAGMIN` sends the query batches with few
 //! hits per lookup cell to the other loop (`0`: none). `LOSAT_X_BXDEFER` (strict set) makes the
-//! AVX2 cell test the deferred calls with a masked last batch; `0` gives the AVX2 batch. So the
+//! AVX2 cell test the deferred calls with a masked last batch on the tables with at least
+//! `LOSAT_X_BXDEFERMIN` hits per used cell (the others count in `tables_avx2=`); `0` gives the
+//! AVX2 batch. So the
 //! properties under test are that the report, standard error without the diagnostic lines and the exit status equal those of the
 //! search with the switch off, with the default and every cell test, with `-subject` and `-db`, outfmt 6 and 7,
 //! one and three threads and a two-hit window other than the default, and with every batch, some
@@ -411,6 +413,37 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
         assert!(fused > 0, "{line}");
         let expected = if avx2 { unmasked * fused } else { 0 };
         assert_eq!(field(line, "tables_avx2"), expected, "{line}");
+    }
+    // The most as the minimum: the tables below it take the AVX2 batch and the others
+    // LOSAT_X_BXDEFER's cell test, in one search.
+    assert!(
+        least < most,
+        "the batches need different hits per cell: {all}"
+    );
+    let run = blastx(
+        &args,
+        &[
+            ("LOSAT_X_BXDIAG", "1"),
+            ("LOSAT_X_BXDIAGMIN", "0"),
+            ("LOSAT_X_BXDEFERMIN", &most.to_string()),
+            ("LOSAT_TIMING", "1"),
+        ],
+    );
+    assert_eq!(run.code, Some(0), "both: {}", run.stderr);
+    assert!(run.stdout == reference.stdout, "both: report differs");
+    let line = run
+        .stderr
+        .lines()
+        .find(|line| line.starts_with("[TIMING] blastx_diag: "))
+        .unwrap_or_else(|| panic!("both: no timing line: {}", run.stderr));
+    let unmasked = field(line, "tables_avx2");
+    if avx2 {
+        assert!(
+            0 < unmasked && unmasked < field(line, "tables_fused"),
+            "{line}"
+        );
+    } else {
+        assert_eq!(unmasked, 0, "{line}");
     }
     // A minimum above every table's: no subject went through the fused loop.
     let none = timing(&(most + 1).to_string());

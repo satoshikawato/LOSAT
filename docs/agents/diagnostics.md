@@ -4237,7 +4237,8 @@ Scheduling (each value computed by one thread with the original function; order 
   the subject scan and the two-hit diagonal test in one loop, with the hits of one lookup cell tested in
   batches of eight (`blastx/x_seed_diag.rs`, exactness argument in its header): blastx calls blastp's
   fused scan of `LOSAT_X_BPSEED` with the cell test of `LOSAT_X_BPDIAG` (the AVX2 batch on an x86-64 CPU
-  with AVX2, by default in the form of `LOSAT_X_BXDEFER`; the per-hit loop elsewhere), and the hits that
+  with AVX2, by default in the form of `LOSAT_X_BXDEFER` on tables of 7 or more hits per used cell; the
+  per-hit loop elsewhere), and the hits that
   pass the test go to the reference's context
   check, extension, save and entry update unchanged (the context from blastp's `XContextTable`, made once
   per query batch and thread, which gives the binary search's index). It rests on blastx's entries being
@@ -4296,8 +4297,9 @@ Scheduling (each value computed by one thread with the original function; order 
   cell about 106), so its last batch weighs more than in blastp. On a table with few hits per cell the masked
   batch and the buffer cost more than they save, so a fused table below `LOSAT_X_BXDEFERMIN` takes the AVX2
   batch (`XDiagMode::Avx2`); the choice is made with `LOSAT_X_BXDIAGMIN`'s, once per thread and table. With the
-  fused loop and the cell test forced on every table (`LOSAT_X_BXDIAGMIN=0 LOSAT_X_BXDEFERMIN=0`, one core,
-  medians of 6-8 per-round ratios against `=0`) the cycles were x1.256 at 1.76 hits per used cell (a 300-nt
+  fused loop and the cell test forced on every table (`LOSAT_X_BXDIAGMIN=0` on the binary before the rule,
+  the same as `LOSAT_X_BXDEFERMIN=0`; one core, medians of 3-8 per-round ratios against `=0`) the cycles were
+  x1.256 at 1.76 hits per used cell (a 300-nt
   cDNA piece x UniRef50 volume 00), x1.071 at 3.56 (the first 1,000 nt of a 2.1-kb fly cDNA x the fly proteome),
   x1.033 at 4.91 (its first 1,500 nt), x0.996 at 6.77 (the whole cDNA), x0.946 at 9.85 and x0.918 at 13.32 (the
   first two and three of 50 fly cDNAs x the fly proteome), and x0.88-0.96 on the tables of 17 or more below.
@@ -4310,14 +4312,15 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_BXDIAGSHADOW=1` compares the cell test each table takes with the reference for every subject (every
   table through the fused loop; `LOSAT_X_BXDEFERMIN=0` for this one on all); `tests/blastx_diag.rs` runs the
   default, `=0`, the rule's two ends and the shadow.
-  Measured 2026-10-22 on the workstation (perf stat, user-space cycles; one physical core of node 0 for 1 thread
+  Measured 2026-10-22/23 on the workstation (perf stat, user-space cycles; one physical core of node 0 for 1 thread
   (load 29-83 on the other cores), 16 physical cores of node 1 for 8 and 16 threads; HT siblings idle, the booked
   cores warmed 3 s before every run, arm order reversed every other round, one warm-up round and 8 rounds (fewer
   where noted), medians of the per-round ratios; the arms the binary before the switch (dev 7cfec941), the
-  default and `=0`, before the rule (every table below takes 17 or more hits per used cell, where the rule takes
-  this cell test); every report identical between the arms, and those of the reads the same bytes as NCBI BLAST+
+  default and `=0`, before the rule (every fused table of these cases has at least 7 hits per used cell: with
+  the rule `tables_avx2=0` on all of them); every report identical between the arms, and those of the reads
+  the same bytes as NCBI BLAST+
   2.17.0 on the same inputs (201 reads `-num_threads 1`; 1,000 reads the 16-thread runs of line E); max RSS
-  equal or lower), the default against `=0`, wall time (cycles, instructions, mispredicted branches): at 1
+  equal within noise), the default against `=0`, wall time (cycles, instructions, mispredicted branches): at 1
   thread 201 150-nt reads (ENA DRR1003646) x Swiss-Prot (`-db`) x0.891 (59.19 -> 52.26 s; x0.881, x0.933,
   x0.730; 5 rounds), a 50-kb piece of the fly genome x the fly proteome (`-db`, `-evalue 1e-5`) x0.894 (11.44 ->
   10.23 s; x0.892, x0.948, x0.726), 800 cDNAs x the yeast proteome x0.899 (64.27 -> 56.53 s; cycles x0.884; 3
@@ -4331,9 +4334,9 @@ Scheduling (each value computed by one thread with the original function; order 
   first 1,000 nt of the 2.1-kb cDNA, 3.56 hits per used cell; the 300-nt piece, 1.76, no hit at `-evalue 1e-5`)
   run as before (instructions x1.000, cycles x1.001-1.003). With the rule (the same setup on one core, load
   9-38, 3-8 rounds, against the binary before the switch): the 2.1-kb cDNA (6.77 hits per used cell, the AVX2
-  batch by the rule) cycles x1.001, instructions x1.000; the first two and three of the 50 cDNAs x0.939 and
-  x0.922; AP027131 x AP027133 x0.963; the 50-kb piece x0.897; 201 reads x Swiss-Prot x0.883 (wall 57.33 ->
-  50.10 s); WSSV x PajaWSV (blastp) instructions x1.000.
+  batch by the rule) cycles x1.001, instructions x1.000; cycles x0.939 and x0.922 for the first two and three
+  of the 50 cDNAs, x0.963 for AP027131 x AP027133, x0.897 for the 50-kb piece and x0.883 for 201 reads x
+  Swiss-Prot (wall 57.33 -> 50.10 s, x0.874); WSSV x PajaWSV (blastp) instructions x1.000.
 - `LOSAT_X_BXSCANBF=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's decision of that day
   (perf-si-20261012 DECISIONS 175) on the timings below: on by default, `=0` turns it off, and with
   `LOSAT_X_DEFAULT=0` it is off unless set; acts where the standard lookup table is scanned by `LOSAT_X_BXSCAN`'s

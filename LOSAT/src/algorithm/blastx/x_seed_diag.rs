@@ -45,9 +45,9 @@
 //! `LOSAT_X_DEFAULT=0` and it is not set; `LOSAT_X_BXDEFER=0` gives the AVX2 batch (`mode=avx2`).
 //! It acts on the tables with at least `LOSAT_X_BXDEFERMIN` hits per used backbone cell
 //! (hundredths, built-in 700; `0` every table); a fused table with fewer takes the AVX2 batch, as
-//! there the masked batch and the buffer cost more than they save (the fused loop forced on a
-//! 1.5-kb cDNA x the fly proteome, 4.91 hits per used cell: x1.033 cycles; the 2.1-kb cDNA, 6.77:
-//! x0.996). The choice is made with LOSAT_X_BXDIAGMIN's, once per thread and table; the timing
+//! there the masked batch and the buffer cost more than they save (the fused loop forced on the
+//! first 1,500 nt of a 2.1-kb fly cDNA x the fly proteome, 4.91 hits per used cell: x1.033
+//! cycles; the whole cDNA, 6.77: x0.996). The choice is made with LOSAT_X_BXDIAGMIN's, once per thread and table; the timing
 //! line then also gives `defer_min_hits_per_cell=` and `tables_avx2=` (the fused tables that took
 //! the AVX2 batch). `LOSAT_X_BXDIAGSHADOW` compares it with the reference like the other cell
 //! tests, on the tables the rule gives it.
@@ -239,7 +239,8 @@ fn x_table_ratio(table: &BlastAaLookupTable) -> (u64, bool) {
 // No NCBI counterpart: chooses LOSAT's loop; both loops give the reference's hits and table.
 /// EXPERIMENT (LOSAT_X_BXDIAGMIN): whether the fused loop scans the subjects of `table`'s query
 /// batch: its hits per used cell are at least [`x_min_hits_per_cell`]. Counted for the timing line
-/// once per table and thread, with the cell test `mode` would take for it.
+/// once per table and thread, with the cell test `mode` would take for it (LOSAT_X_BXDEFERMIN,
+/// [`x_table_mode`]).
 fn x_fused_pays(table: &BlastAaLookupTable, mode: XDiagMode) -> bool {
     let (ratio, first) = x_table_ratio(table);
     let fused = ratio >= x_min_hits_per_cell();
@@ -390,7 +391,7 @@ pub(crate) fn x_word_finder_diag(
         if !pays {
             return Ok(None);
         }
-        // EXPERIMENT (LOSAT_X_BXDEFERMIN): LOSAT_X_BXDEFER's cell test only with enough hits per cell.
+        // EXPERIMENT (LOSAT_X_BXDEFERMIN): BXDEFER's cell test only with enough hits per cell.
         let table_mode = x_table_mode(mode, x_table_ratio(table).0);
         #[cfg(target_arch = "x86_64")]
         if mode == XDiagMode::Avx2DeferMasked {

@@ -846,14 +846,17 @@ pub(super) fn x_partial_ranges(
 }
 
 /// EXPERIMENT (LOSAT_X_BNTBRANGEPAD=<bases>, a test knob): NCBI's 1024 of `x_partial_ranges`
-/// (both the widening and the gap); a small one makes the traceback meet fences, so that the
-/// tests reach the whole sequence's second traceback.
+/// (both the widening and the gap), 16 to 1,048,576; a small one makes the traceback meet
+/// fences, so that the tests reach the whole sequence's second traceback. Not below 16: the
+/// start of a gapped alignment is found by reading up to 12 bases on each side of the seed
+/// (`blast_get_start_for_gapped_alignment_nucl`), outside the kernels' fence tests.
 fn x_tb_range_pad() -> usize {
     static PAD: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *PAD.get_or_init(|| {
         std::env::var("LOSAT_X_BNTBRANGEPAD")
             .ok()
             .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|pad| (16..=1 << 20).contains(pad))
             .unwrap_or(1024)
     })
 }
@@ -878,7 +881,7 @@ fn x_partial_ranges_padded(
     let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
     for (from, to) in ranges {
         match merged.last_mut() {
-            Some(last) if from <= last.1 + MINGAP => last.1 = last.1.max(to),
+            Some(last) if from <= last.1.saturating_add(MINGAP) => last.1 = last.1.max(to),
             _ => merged.push((from, to)),
         }
     }

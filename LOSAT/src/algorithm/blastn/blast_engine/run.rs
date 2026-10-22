@@ -17269,7 +17269,11 @@ fn search_query_batch(
                     );
                     let (list, s1, s2, s3, s4) = x_post_purge(hits.drain(..).collect());
                     let (slow, s5) = x_final_list(list, &mut interval_tree);
-                    x_qgroup_par::compare(x_qgroup_par::Stage::Traceback, &slow, &fast);
+                    // EXPERIMENT (LOSAT_X_BNTBRANGE): a subject that met a fence is traced again
+                    // whole (`database::traceback_listed`), and compared there.
+                    if !x_fence::x_fenced(x_fenced) {
+                        x_qgroup_par::compare(x_qgroup_par::Stage::Traceback, &slow, &fast);
+                    }
                     (slow, [s1, s2, s3, s4, s5])
                 } else {
                     (fast, steps)

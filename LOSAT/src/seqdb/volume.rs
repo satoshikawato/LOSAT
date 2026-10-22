@@ -885,6 +885,36 @@ fn overlay_ambiguity_runs(
     }
 }
 
+/// EXPERIMENT (LOSAT_X_BNTBRANGE): the ambiguity codes of `runs` over the bases of `ranges`
+/// (sorted, disjoint) in `seq` (the whole sequence's bases): the runs in stored order, with the
+/// whole decode's tests (`nucleotide_blastna_in`: a run that ends before the sequence is skipped,
+/// the first one that starts at or after its end stops the loop), each run written over the
+/// ranges it overlaps. So a range's bytes are the whole decode's for ordered and unordered runs.
+fn x_overlay_runs_in_ranges(runs: &[AmbiguityRun], ranges: &[(usize, usize)], seq: &mut [u8]) {
+    let region_end = seq.len() as i64;
+    for run in runs {
+        let position = i64::from(run.offset as i32);
+        let row_len = i64::from(run.length);
+        if position + row_len <= 0 {
+            continue;
+        }
+        if position >= region_end {
+            break;
+        }
+        let run_from = position.max(0) as usize;
+        let run_to = (position + row_len).min(region_end) as usize;
+        let first = ranges.partition_point(|r| r.1 <= run_from);
+        for &(from, to) in &ranges[first..] {
+            if from >= run_to {
+                break;
+            }
+            for at in run_from.max(from)..run_to.min(to) {
+                seq[at] = run.ncbi4na;
+            }
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:590-607
 // ```c++
 // unsigned SeqDB_ncbina8_to_blastna8[] = {
@@ -1266,9 +1296,10 @@ impl SequenceBlock {
     /// (`[from, to)`, sorted and disjoint, as NCBI's partial-fetch ranges are; a range past the
     /// end is cut there), with `FENCE_SENTRY` before and after
     /// each range that does not reach an end of the sequence (`GetAmbigPartialSeq`): `len + 2`
-    /// bytes, zero outside the ranges. The buffer is zeroed by the allocator and, from
-    /// `x_mapped::X_MAPPED_FROM` on, mapped: its pages outside the ranges are not written, so
-    /// they are not resident.
+    /// bytes, zero outside the ranges. The buffer is zeroed by the allocator; from
+    /// `x_mapped::X_MAPPED_FROM` on its capacity is above glibc's mmap ceiling, so glibc maps it
+    /// (unless an arena has a free chunk that large) and writes none of it: the pages outside the
+    /// ranges are not resident. Other allocators may zero the whole buffer (Wasm's dlmalloc does).
     pub fn x_nucleotide_blastna_ranges(
         &self,
         i: usize,
@@ -1303,28 +1334,7 @@ impl SequenceBlock {
                 }
             }
             let ranges: Vec<(usize, usize)> = ranges.filter(|r| r.0 < r.1).collect();
-            let region_end = base_length as i64;
-            for run in self.ambiguity_runs(i)? {
-                let position = i64::from(run.offset as i32);
-                let row_len = i64::from(run.length);
-                if position + row_len <= 0 {
-                    continue;
-                }
-                if position >= region_end {
-                    break;
-                }
-                let run_from = position.max(0) as usize;
-                let run_to = (position + row_len).min(region_end) as usize;
-                let first = ranges.partition_point(|r| r.1 <= run_from);
-                for &(from, to) in &ranges[first..] {
-                    if from >= run_to {
-                        break;
-                    }
-                    for at in run_from.max(from)..run_to.min(to) {
-                        seq[at] = run.ncbi4na;
-                    }
-                }
-            }
+            x_overlay_runs_in_ranges(&self.ambiguity_runs(i)?, &ranges, seq);
             for &(from, to) in &ranges {
                 for base in &mut seq[from..to] {
                     *base = NCBINA8_TO_BLASTNA8[usize::from(*base & 0xF)];
@@ -1417,6 +1427,77 @@ mod tests {
             assert_eq!(letters, whole[from..to], "range {from}..{to}");
         }
         ambiguity.ordered
+    }
+
+    /// The ambiguity loop of `nucleotide_blastna_in` over the whole sequence.
+    fn whole_runs(runs: &[AmbiguityRun], seq: &mut [u8]) {
+        let region_end = seq.len() as i64;
+        for run in runs {
+            let mut position = i64::from(run.offset as i32);
+            let row_len = i64::from(run.length);
+            if position + row_len <= 0 {
+                continue;
+            }
+            if position >= region_end {
+                break;
+            }
+            for _ in 0..row_len {
+                if position >= 0 && position < region_end {
+                    seq[position as usize] = run.ncbi4na;
+                }
+                position += 1;
+            }
+        }
+    }
+
+    // LOSAT_X_BNTBRANGE: the runs over ranges give the whole decode's bytes inside the ranges,
+    // for ordered runs, shuffled and overlapping ones, offsets of 2^31 and more (negative as
+    // NCBI's Int4), and runs past the end (which stop the whole decode's loop).
+    #[test]
+    fn runs_over_ranges_equal_the_whole_decode_inside_them() {
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        for case in 0..400 {
+            let length = 1 + rng.next(3000) as usize;
+            let mut runs = Vec::new();
+            for _ in 0..rng.next(40) {
+                let offset = match rng.next(20) {
+                    0 => 0x8000_0000u32 + rng.next(1 << 20) as u32,
+                    1 => length as u32 + rng.next(100) as u32,
+                    2 => u32::MAX - rng.next(50) as u32,
+                    _ => rng.next(length as u64) as u32,
+                };
+                let longest = if rng.next(10) == 0 { 5000 } else { 20 };
+                runs.push(AmbiguityRun {
+                    offset,
+                    length: 1 + rng.next(longest) as u32,
+                    ncbi4na: rng.next(16) as u8,
+                });
+            }
+            if case % 2 == 0 {
+                runs.sort_by_key(|run| run.offset);
+            }
+            let mut ranges = Vec::new();
+            let mut at = 0usize;
+            while at < length {
+                let from = at + rng.next(200) as usize;
+                let to = (from + rng.next(300) as usize).min(length);
+                if from < to {
+                    ranges.push((from, to));
+                }
+                at = to + 1 + rng.next(100) as usize;
+            }
+            let mut whole = vec![1u8; length];
+            whole_runs(&runs, &mut whole);
+            let mut ranged = vec![1u8; length];
+            super::x_overlay_runs_in_ranges(&runs, &ranges, &mut ranged);
+            for &(from, to) in &ranges {
+                assert_eq!(
+                    ranged[from..to],
+                    whole[from..to],
+                    "case {case}, range {from}..{to}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -103,9 +103,10 @@ pub trait Encoder {
     fn element(&mut self);
     /// `EndContainer`.
     fn end_list(&mut self);
-    /// `BeginChoice` and `BeginChoiceVariant(id)`: a CHOICE value with variant `name`
-    /// (position `tag`).
-    fn variant(&mut self, name: &str, tag: u8);
+    /// `BeginChoice` and `BeginChoiceVariant(id)`: a CHOICE value of the ASN.1 type
+    /// `type_name` with variant `name` (position `tag`). Only the XML stream reads the type
+    /// name (in its standard-XML mode it writes `<Type>` and the variant as a member).
+    fn variant(&mut self, type_name: &str, name: &str, tag: u8);
     /// `EndChoiceVariant` and `EndChoice`.
     fn end_variant(&mut self);
     /// `WriteInt4`.
@@ -121,6 +122,25 @@ pub trait Encoder {
     fn visible_str(&mut self, value: &[u8]);
     /// `WriteDouble` of a REAL.
     fn real(&mut self, value: f64);
+    /// A CHOICE value of the type `type_name` whose variant `name` (position `tag`) is a
+    /// SEQUENCE OF VisibleString: the strings of `items` in order. The default is `variant`,
+    /// a list of string elements and `end_variant`; the XML stream in its standard-XML mode
+    /// writes the type's tag around one member tag for each string, with no list around
+    /// them (`<Target><subjects>a</subjects><subjects>b</subjects></Target>`).
+    fn variant_string_list<I>(&mut self, type_name: &str, name: &str, tag: u8, items: I)
+    where
+        I: IntoIterator,
+        I::Item: AsRef<[u8]>,
+    {
+        self.variant(type_name, name, tag);
+        self.begin_list(false);
+        for item in items {
+            self.element();
+            self.visible_str(item.as_ref());
+        }
+        self.end_list();
+        self.end_variant();
+    }
     /// The first error raised while writing (the document is then not written), if any.
     fn error(&self) -> Option<SerialError>;
 }

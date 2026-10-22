@@ -45,7 +45,7 @@
 //! - B (update, job = owner `o`): owner `o` takes the sub-ranges `(0, o)`, `(1, o)`, ...,
 //!   `(P-1, o)` and makes the loop's update for each word: `head = hashtable[cell]`; the presence
 //!   bit in its private copy of `pv_array` when `head == 0`, otherwise a saturating `+1` of the
-//!   cell's counter in its private copy of `helper_array` (the copies of LOSAT_X_MBLUTPAD,
+//!   cell's counter in its private copy of `helper_array` (the copies of
 //!   `x_mb_lookup_par::Copies`, zeroed by the owner in its first job); then `hashtable[cell] =
 //!   q_off_1`. It keeps `head` in the entry. On x86_64 it prefetches the cell 16 entries ahead.
 //! - C (link, job = reader `a`): reader `a` writes `next_pos[q_off_1] = head` for the entries of
@@ -111,8 +111,8 @@
 //! is freed at the end of the fill. The ranges of the stream (`segments`) are a `Vec` of the
 //! calling thread with one `Segment` (48 bytes on 64-bit targets) per unmasked range read (0.1-0.3
 //! MB for the megablast tables of 31,168 cDNAs; a query masked into tens of thousands of ranges
-//! takes more), freed at the end of the fill. The private copies are those of LOSAT_X_MBLUTPAD
-//! (`x_mb_lookup_par::Copies`, kept from fill to fill on glibc), one set per worker of each fill.
+//! takes more), freed at the end of the fill. The private copies are those of
+//! `x_mb_lookup_par::Copies` (kept from fill to fill on glibc), one set per worker of each fill.
 //! The per-range list of the loop's re-threading of `ascending_cells` (8 bytes a word) is not
 //! needed.
 //!
@@ -454,7 +454,7 @@ impl SharedArena {
 }
 
 /// No NCBI counterpart (scheduling only): one owner's private copies of `helper_array` and
-/// `pv_array` (LOSAT_X_MBLUTPAD's), zeroed by the owner in its first phase-B job.
+/// `pv_array`, zeroed by the owner in its first phase-B job.
 struct OwnerCopies<'c> {
     unready: Option<Unready<'c>>,
     private: Option<Private<'c>>,
@@ -997,7 +997,7 @@ fn fill_chunked(
         pv_array_bts: tables.pv_array_bts,
         helper_array: Shared::new(tables.helper_array),
     };
-    let mut copies = Copies::new(true, parts, shared.helper_array.len, shared.pv_array.len);
+    let mut copies = Copies::new(parts, shared.helper_array.len, shared.pv_array.len);
     let slots = Slots(
         copies
             .parts()
@@ -1240,7 +1240,7 @@ mod tests {
             )
         }
 
-        /// The loop's counters: the unpadded fill of `x_mb_lookup_par` in one part, which applies
+        /// The loop's counters: the fill of `x_mb_lookup_par` in one part, which applies
         /// the loop's statements in reading order.
         fn helper_of(&self, cells: usize, pv_len: usize, bts: usize) -> Vec<u32> {
             let refs = self.refs();
@@ -1637,7 +1637,7 @@ mod tests {
 
     // From start values other than 0 (production starts at 0): counters at u32::MAX - k and
     // others, presence-vector words with bits set; the flush's `saturating_add` and OR give the
-    // loop's saturating increments and kept bits (the loop's values: `x_mb_lookup_par`'s unpadded
+    // loop's saturating increments and kept bits (the loop's values: `x_mb_lookup_par`'s
     // fill in one part from the same start values).
     #[test]
     fn once_flush_matches_the_loop_from_any_start() {

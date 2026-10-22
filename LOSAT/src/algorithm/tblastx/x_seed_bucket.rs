@@ -75,8 +75,7 @@
 //! `LOSAT_X_SEEDBUCKET` is a switch of the strict set (`utils/xswitch.rs`): on
 //! unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set.  The reordering
 //! only pays when the table is large (see `min_cells`): it is used for tables
-//! of at least `LOSAT_X_SEEDBUCKET_MIN_CELLS` cells (default 2^21, 8 MiB), and
-//! in BLASTX only with `LOSAT_X_BXSEEDBUCKET=1` as well (see `blastx_mode`).
+//! of at least `LOSAT_X_SEEDBUCKET_MIN_CELLS` cells (default 2^21, 8 MiB).
 //! With the set on, TBLASTX reaches the scan loop this module acts in only
 //! where the unit path of `LOSAT_X_PAIRPAR` does not take the batch (its gates
 //! and exactness guards, `x_pair_par.rs` `decide`).
@@ -84,8 +83,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
-/// Subject chunks (TBLASTX) / subjects (BLASTX) compared in shadow mode, and
-/// the HSPs they produced.
+/// Subject chunks compared in shadow mode, and the HSPs they produced.
 pub(crate) static SHADOW_CHUNKS: AtomicU64 = AtomicU64::new(0);
 pub(crate) static SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:507
@@ -96,14 +94,14 @@ pub(crate) static SHADOW_HITS: AtomicU64 = AtomicU64::new(0);
 // NCBI counterpart for the maximum over scans kept here: it is printed by the shadow mode and
 // does not change any value NCBI computes.
 /// Shadow mode: the most lookup hits one bucketed scan (a subject chunk of one
-/// frame in TBLASTX, a subject in BLASTX) went through.
+/// frame) went through.
 pub(crate) static SHADOW_MAX_SCAN_HITS: AtomicU64 = AtomicU64::new(0);
 
 // No NCBI counterpart: counters for LOSAT_X_STATS that tell which order ran; they do not change
 // any value NCBI computes.
-/// Scans run in the bucketed order (a subject chunk of one frame in TBLASTX, a subject in
-/// BLASTX; in shadow mode the bucketed half of each comparison), counted where their buckets
-/// are made, and the flushes of those scans.
+/// Scans run in the bucketed order (a subject chunk of one frame; in shadow mode the bucketed
+/// half of each comparison), counted where their buckets are made, and the flushes of those
+/// scans.
 static BUCKETED_SCANS: AtomicU64 = AtomicU64::new(0);
 static BUCKET_FLUSHES: AtomicU64 = AtomicU64::new(0);
 
@@ -194,30 +192,6 @@ pub(crate) fn mode_for(cells: usize) -> u8 {
         1 if cells < min_cells() => 0,
         m => m,
     }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/aa_ungapped.c:502-516
-// ```c
-// while (scan_range[1] <= scan_range[2]) {
-// ...
-//     for (i = 0; i < hits; ++i) {
-//         Uint4 query_offset = offset_pairs[i].qs_offsets.q_off;
-//         Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
-// ...
-//         diag_coord = (query_offset - subject_offset) & diag_mask;
-// ```
-// Dispatch point for BLASTX: the same choice between the scan-order loop and the bucketed order.
-/// BLASTX: the bucketed order needs `LOSAT_X_BXSEEDBUCKET=1` as well (not a
-/// switch of the strict set: off unless set to any value).  The
-/// subjects are single proteins, so a subject's hits are far fewer than the
-/// rows of the (query-sized) table and the grouping buys nothing; measured
-/// slightly slower (blastx_ap 8.4 → 8.7 s).  The shadow mode still compares.
-pub(crate) fn blastx_mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| match mode() {
-        1 if std::env::var_os("LOSAT_X_BXSEEDBUCKET").is_none() => 0,
-        m => m,
-    })
 }
 
 // No NCBI counterpart: how many hits are buffered before they are processed. Buffering changes

@@ -1440,14 +1440,12 @@ fn compute_subject(
     //             Uint4 subject_offset = offset_pairs[i].qs_offsets.s_off;
     // ```
     // Dispatch point of LOSAT_X_BXSCAN / LOSAT_X_BXSCANSHADOW and LOSAT_X_BXDIAG /
-    // LOSAT_X_BXDIAGSHADOW: when nothing traces the seeds (not the diagnostic stages) and the
-    // diagonal order is the reference one (LOSAT_X_SEEDBUCKET mode 0), the seed loop reads the
-    // scanner's per-thread buffer in place (x_seed_scan.rs), or with LOSAT_X_BXDIAG reads the
+    // LOSAT_X_BXDIAGSHADOW: when nothing traces the seeds (not the diagnostic stages), the
+    // seed loop reads the scanner's per-thread buffer in place (x_seed_scan.rs), or with LOSAT_X_BXDIAG reads the
     // lookup cells in place (x_seed_diag.rs); otherwise the reference word finder below runs.
     let initial = if !diagnostics
         && (super::seed::x_seed_scan::x_bxscan_mode() != 0
             || super::seed::x_seed_diag::x_bxdiag_mode() != 0)
-        && crate::algorithm::tblastx::x_seed_bucket::blastx_mode() == 0
     {
         super::seed::x_seed_scan::x_word_finder_scan(
             batch, params, options, &encoded, lookup, diagonals,

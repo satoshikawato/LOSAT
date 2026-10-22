@@ -324,11 +324,22 @@ pub(super) fn pool_threads() -> Option<usize> {
 /// search runs on a pool of two threads or more, and the table is the plain one (`eligible`:
 /// no database word counts, no debug counters). `None` runs the original loops.
 pub(super) fn parts(eligible: bool) -> Option<usize> {
-    let (on, shadow, _, _) = switches();
+    let (on, shadow, _, once) = switches();
     if !on || shadow || !eligible {
+        if on && !shadow {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+            if once {
+                crate::utils::xreach::x_reach!("LOSAT_X_MBLUTONCE", false);
+            }
+        }
         return None;
     }
-    pool_threads()
+    let parts = pool_threads();
+    crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", parts.is_some());
+    if once {
+        crate::utils::xreach::x_reach!("LOSAT_X_MBLUTONCE", parts.is_some());
+    }
+    parts
 }
 
 /// No NCBI counterpart: LOSAT_X_PAIRPARSHADOW is set.

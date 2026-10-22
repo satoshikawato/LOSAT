@@ -181,6 +181,13 @@ impl<F: SideFiles> Xml2Document<F> {
         self.kind
     }
 
+    /// Writes the document's start now, when a program writes it before its first report
+    /// (`PrintProlog`, before the search; BLASTX does, so that a run that stops at its first
+    /// batch still has it). The first report or the epilog then writes no start of its own.
+    pub fn start(&mut self, out: &mut Vec<u8>) {
+        self.prolog(out);
+    }
+
     /// The document's start, once (`PrintProlog`, blast_format.cpp:360-367).
     fn prolog(&mut self, out: &mut Vec<u8>) {
         if std::mem::replace(&mut self.started, true) {

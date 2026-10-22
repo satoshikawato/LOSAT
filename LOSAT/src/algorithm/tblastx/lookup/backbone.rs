@@ -28,7 +28,7 @@ pub(crate) use x_lut_direct::x_shadow_tables as x_bxlut_shadow_tables;
 pub(crate) use x_lut_direct::x_bplut_shadow_tables;
 // EXPERIMENT (LOSAT_X_TBXLUT / LOSAT_X_TBXLUTSHADOW): TBLASTX's full table built in place
 // (x_lut_direct.rs); no NCBI counterpart for the re-export itself.
-pub(crate) use x_lut_direct::x_tbxlut_shadow_tables;
+pub(crate) use x_lut_direct::{x_tbxlut_reach_stub, x_tbxlut_shadow_tables};
 // EXPERIMENT (LOSAT_X_BPLKPAHEAD): the spares of exact blastp's table built ahead of its block, and
 // the comparison of its shadow mode (x_lut_direct.rs); no NCBI counterpart for the re-export
 // itself.

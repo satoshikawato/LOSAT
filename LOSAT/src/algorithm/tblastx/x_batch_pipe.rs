@@ -334,6 +334,7 @@ impl<'s, R: Send> XPipe<'s, R> {
         limit: u64,
     ) -> Option<Self> {
         if plan.len() < 2 {
+            crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", false);
             return None;
         }
         let n = plan.len();
@@ -425,13 +426,18 @@ impl<'s, R: Send> XPipe<'s, R> {
     /// and nothing started it yet.
     fn seed_ended(&'s self, scope: &rayon::Scope<'s>, i: usize) {
         let next = i + 1;
-        if !self.held.room()
-            || next >= self.plan.len()
-            || self.stop.load(Ordering::SeqCst)
-            || self.started[next].swap(true, Ordering::SeqCst)
-        {
+        if next >= self.plan.len() {
             return;
         }
+        if !self.held.room() {
+            // The HSPs held leave no room: the loop starts the next batch itself.
+            crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", false);
+            return;
+        }
+        if self.stop.load(Ordering::SeqCst) || self.started[next].swap(true, Ordering::SeqCst) {
+            return;
+        }
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXPIPE", true);
         self.counts.early.fetch_add(1, Ordering::Relaxed);
         scope.spawn(move |scope| {
             // The loop waits for this slot: a panic fills it too (item 5).

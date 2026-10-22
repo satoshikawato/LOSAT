@@ -12,6 +12,7 @@ pub mod x_seg_trim_memo;
 pub(crate) mod xahead;
 pub(crate) mod xdrop_simd;
 pub(crate) mod xenv;
+pub mod xreach;
 pub mod xstats;
 pub(crate) mod xswitch;
 pub mod xtiming;

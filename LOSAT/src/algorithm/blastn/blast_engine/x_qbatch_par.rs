@@ -1155,6 +1155,9 @@ where
     ) -> Self {
         let switches = shared.switches;
         let off = if switches.on { off } else { Some(Off::NotSet) };
+        if switches.on && off.is_some() {
+            crate::utils::xreach::x_reach!("LOSAT_X_QBATCHPAR", false);
+        }
         let phase = match off {
             Some(off) => Phase::Off(off),
             None => Phase::Pending,
@@ -1429,6 +1432,7 @@ where
         let units = batch_units(&letters);
         self.stats.units = units;
         if full.len() < 2 {
+            crate::utils::xreach::x_reach!("LOSAT_X_QBATCHPAR", false);
             self.set_off(Off::Single);
             return;
         }
@@ -1457,6 +1461,7 @@ where
         let (k, m) = match choice {
             Ok(slots) => slots,
             Err(off) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_QBATCHPAR", false);
                 self.set_off(off);
                 return;
             }
@@ -1467,11 +1472,15 @@ where
         self.shared.lock().budget = budget_mib.saturating_mul(MIB);
         match self.start_slots(k, m) {
             Ok(()) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_QBATCHPAR", true);
                 self.phase = Phase::Active;
                 self.stats.off = None;
                 self.window = 2 * k;
             }
-            Err(off) => self.stop(off),
+            Err(off) => {
+                crate::utils::xreach::x_reach!("LOSAT_X_QBATCHPAR", false);
+                self.stop(off);
+            }
         }
     }
 

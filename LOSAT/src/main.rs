@@ -224,6 +224,9 @@ fn main() -> Result<()> {
             }
         }
     }
+    // Diagnostic (LOSAT_X_REACH): the sides the conditional switches took (utils/xreach.rs). No
+    // NCBI counterpart; it writes only with LOSAT_X_REACH.
+    LOSAT::utils::xreach::write_report();
     LOSAT::utils::xstats::print();
     LOSAT::core::composition_adjustment::adjust_scores::x_adjmemo_print_stats();
     LOSAT::core::composition_adjustment::adjust_scores::x_newtonexact_print_stats();

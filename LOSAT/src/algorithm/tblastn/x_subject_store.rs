@@ -183,7 +183,10 @@ pub(super) fn x_read_subject_stores<R: std::io::Read>(
             Ok(x_packed(record))
         })?
     };
-    if read.iter().all(|(_, store)| store.is_some()) {
+    let all_packed = read.iter().all(|(_, store)| store.is_some());
+    // A byte without an ncbi4na code keeps the letters (the reference path).
+    crate::utils::xreach::x_reach!("LOSAT_X_TBNSTORE", all_packed);
+    if all_packed {
         let (records, stores): (_, Vec<PackedNucleotide>) = read
             .into_iter()
             .map(|(record, store)| (record, store.expect("every record packed")))

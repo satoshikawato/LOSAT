@@ -475,11 +475,11 @@ pub fn split_queries(
     // parallel; otherwise the loop below prepares them one after another as NCBI does. The chunks
     // are collected in index order and the corrections that follow still run in chunk order.
     #[cfg(feature = "parallel")]
-    if super::runtime::x_bx_parallel()
-        && !super::runtime::x_inner_serial()
-        && rayon::current_thread_index().is_some()
-        && rayon::current_num_threads() > 1
-    {
+    if super::runtime::x_bx_par_rule(|| {
+        !super::runtime::x_inner_serial()
+            && rayon::current_thread_index().is_some()
+            && rayon::current_num_threads() > 1
+    }) {
         use rayon::prelude::*;
         chunks = (0..count)
             .into_par_iter()

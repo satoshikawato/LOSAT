@@ -1022,6 +1022,29 @@ impl SeqDb {
         )
     }
 
+    /// `visit(ordinal, self.defline_taxids(ordinal))` for the sequences of `range` in order until
+    /// `visit` returns false; returns whether every call returned true. The headers of the range
+    /// are read as [`SeqDb::visit_deflines`] reads them (one read of the index file and one read of
+    /// the header file per MiB), decoded as `defline_taxids` decodes them: the taxdb pre-pass of
+    /// BLASTX 15/16 (`algorithm::common::database::taxdb_may_refuse`) walks the database with it.
+    pub fn visit_defline_taxids(
+        &self,
+        range: BlockRange,
+        mut visit: impl FnMut(u32, Result<Vec<i32>, SeqDbError>) -> bool,
+    ) -> bool {
+        let Some(vol) = self.volumes.get(range.volume) else {
+            return range.is_empty().then_some(true).unwrap_or_else(|| {
+                visit(range.first_ordinal, Err(volume_range_error(range, self)))
+            });
+        };
+        vol.visit_defline_taxids(
+            range.first,
+            range.end,
+            HEADER_PIECE_BYTES,
+            &mut |oid, taxids| visit(range.first_ordinal + (oid - range.first), taxids),
+        )
+    }
+
     /// EXPERIMENT (LOSAT_X_DBIDXREAD): calls `visit(ordinal, self.check_ambiguity(ordinal))`
     /// for the sequences of `range` in order until `visit` returns false; returns whether every
     /// call returned true. The offsets of the range are read at once

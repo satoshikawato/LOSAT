@@ -1764,6 +1764,11 @@ where
     F: FnMut(i32, i32, i32, i32, &mut DiagStruct),
 {
     use std::arch::x86_64::*;
+    // A cell without a batch of eight takes the scalar batch, as XDiagMode::Avx2 tests it: on a
+    // table with few hits per cell the masked batch and the buffer cost more than it.
+    if hits.len() < X_DIAG_LANES {
+        return x_test_batch_scalar(hits, s, table, test, candidate);
+    }
     let mut batches = hits.chunks_exact(X_DIAG_LANES);
     // Room for a full register past the last candidate (each batch stores eight lanes).
     buffer.clear();

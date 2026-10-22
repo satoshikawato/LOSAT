@@ -1077,38 +1077,38 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
 //                            NStr::IntToString(kDfltArgCullingLimit));
 //     arg_desc.SetConstraint(kArgCullingLimit, new CArgAllowValuesGreaterThanOrEqual(0));
 // ```
-// BLASTN reads `-culling_limit` as a non-negative integer (a hexadecimal value too, as
-// NCBI's argument parser does); BLASTP and TBLASTN still refuse it.
+// BLASTN, BLASTP and TBLASTN read `-culling_limit` as a non-negative integer (a hexadecimal
+// value too, as NCBI's argument parser does).
 #[test]
-fn blastn_accepts_culling_limit_as_ncbi_does() {
-    let limit = |words: &[&str]| -> Result<i32, String> {
-        match parse("blastn", words) {
-            Ok(cli) => match cli.command {
-                Commands::Blastn(args) => Ok(args.culling_limit),
-                _ => unreachable!("blastn"),
-            },
-            Err(error) => Err(LOSAT::cli::render_message(&error)),
-        }
-    };
-    assert_eq!(limit(&[]), Ok(0));
-    assert_eq!(limit(&["-culling_limit", "0"]), Ok(0));
-    assert_eq!(limit(&["-culling_limit", "1"]), Ok(1));
-    assert_eq!(limit(&["-culling_limit", "0x2"]), Ok(2));
-    assert_eq!(limit(&["-culling_limit", "2147483647"]), Ok(2147483647));
-    for bad in ["-1", "1.5", "abc", "2147483648"] {
-        let error = limit(&["-culling_limit", bad]).unwrap_err();
-        assert!(!error.contains("is not supported by"), "{bad}: {error}");
-    }
-    for program in ["blastp", "tblastn"] {
-        let error =
-            LOSAT::cli::render_message(&parse(program, &["-culling_limit", "2"]).unwrap_err());
-        assert!(
-            error.contains(&format!(
-                "is not supported by LOSAT's {}",
-                program.to_ascii_uppercase()
-            )),
-            "{program}: {error}"
+fn culling_limit_is_read_as_ncbi_does() {
+    for program in ["blastn", "blastp", "tblastn"] {
+        let limit = |words: &[&str]| -> Result<i32, String> {
+            match parse(program, words) {
+                Ok(cli) => match cli.command {
+                    Commands::Blastn(args) => Ok(args.culling_limit),
+                    Commands::Blastp(args) => Ok(args.culling_limit),
+                    Commands::Tblastn(args) => Ok(args.culling_limit),
+                    _ => unreachable!("{program}"),
+                },
+                Err(error) => Err(LOSAT::cli::render_message(&error)),
+            }
+        };
+        assert_eq!(limit(&[]), Ok(0), "{program}");
+        assert_eq!(limit(&["-culling_limit", "0"]), Ok(0), "{program}");
+        assert_eq!(limit(&["-culling_limit", "1"]), Ok(1), "{program}");
+        assert_eq!(limit(&["-culling_limit", "0x2"]), Ok(2), "{program}");
+        assert_eq!(
+            limit(&["-culling_limit", "2147483647"]),
+            Ok(2147483647),
+            "{program}"
         );
+        for bad in ["-1", "1.5", "abc", "2147483648"] {
+            let error = limit(&["-culling_limit", bad]).unwrap_err();
+            assert!(
+                !error.contains("is not supported by"),
+                "{program} {bad}: {error}"
+            );
+        }
     }
 }
 
@@ -1131,7 +1131,6 @@ fn unported_ncbi_options_are_rejected_explicitly() {
         ("blastp", &["-db_soft_mask", "21"]),
         ("blastp", &["-db_hard_mask", "21"]),
         ("blastp", &["-mt_mode", "1"]),
-        ("blastp", &["-culling_limit", "2"]),
         ("blastp", &["-lcase_masking"]),
         ("blastp", &["-h"]),
         ("blastp", &["-version"]),

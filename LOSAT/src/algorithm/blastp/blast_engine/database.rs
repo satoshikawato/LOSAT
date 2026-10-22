@@ -295,15 +295,7 @@ pub(super) fn blastp_database_search_space(
 /// is an error that names its ordinal id.
 fn prepare_search_block(block: &mut SequenceBlock) -> Result<()> {
     let sequences = block.len();
-    let mut gaps = 0usize;
-    let mut invalid = false;
-    for residue in block.protein_bytes_mut() {
-        if *residue == NCBISTDAA_O {
-            *residue = ncbistdaa::X;
-        }
-        gaps += usize::from(*residue == NCBISTDAA_GAP);
-        invalid |= usize::from(*residue) >= BLASTAA_SIZE;
-    }
+    let (gaps, invalid) = read_o_as_x(block.protein_bytes_mut());
     // A well-formed block holds one sentinel byte before its first sequence and one
     // after every sequence, and no other byte 0: with as many bytes 0 as sentinels, the
     // sentinels in place leave none inside a sequence.
@@ -320,6 +312,31 @@ fn prepare_search_block(block: &mut SequenceBlock) -> Result<()> {
         shared::check_protein_sequence(block.protein_with_sentinels(i), ordinal, PROGRAM)?;
     }
     bail!("a database block is not well-formed, which is not supported by LOSAT's BLASTP")
+}
+
+// No NCBI counterpart: LOSAT's check of a block's bytes (`prepare_search_block`). The bytes are
+// taken in runs of at most 255, and a run counts its gap bytes in a `u8`, so that the compiler
+// works on 16 bytes at a time. Counted in a `usize` per byte, every byte was widened to 64 bits,
+// and the loop took 38 % of the cycles of a one-thread blastp-fast `-db` search (one 357-residue
+// query against UniRef50 volume 00). The values are those of the byte-by-byte loop.
+/// Reads O as X in `bytes`; returns the number of gap bytes, and whether a byte is no NCBIstdaa
+/// residue (28 or more).
+fn read_o_as_x(bytes: &mut [u8]) -> (usize, bool) {
+    const BLASTAA_SIZE_U8: u8 = BLASTAA_SIZE as u8;
+    let mut gaps = 0usize;
+    let mut invalid = 0u8;
+    for run in bytes.chunks_mut(usize::from(u8::MAX)) {
+        let mut run_gaps = 0u8;
+        for residue in run.iter_mut() {
+            if *residue == NCBISTDAA_O {
+                *residue = ncbistdaa::X;
+            }
+            run_gaps += u8::from(*residue == NCBISTDAA_GAP);
+            invalid |= u8::from(*residue >= BLASTAA_SIZE_U8);
+        }
+        gaps += usize::from(run_gaps);
+    }
+    (gaps, invalid != 0)
 }
 
 /// Reads the block `range` and prepares it for the search (`prepare_search_block`).
@@ -1240,6 +1257,65 @@ mod tests {
     fn open(name: &str) -> BlastpDatabase {
         BlastpDatabase::open(&fixture(name), &ApplicationSettings::default())
             .unwrap_or_else(|error| panic!("{name}: {error:#}"))
+    }
+
+    // The byte-by-byte loop that `read_o_as_x` replaces.
+    fn read_o_as_x_by_byte(bytes: &mut [u8]) -> (usize, bool) {
+        let mut gaps = 0usize;
+        let mut invalid = false;
+        for residue in bytes {
+            if *residue == NCBISTDAA_O {
+                *residue = ncbistdaa::X;
+            }
+            gaps += usize::from(*residue == NCBISTDAA_GAP);
+            invalid |= usize::from(*residue) >= BLASTAA_SIZE;
+        }
+        (gaps, invalid)
+    }
+
+    // Lengths across the runs of 255 bytes, gap bytes from none to all, O, the last residue
+    // (27), the first byte that is none (28) and 255: the bytes and both values are those of the
+    // byte-by-byte loop.
+    #[test]
+    fn read_o_as_x_gives_the_values_of_the_byte_by_byte_loop() {
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for length in [0usize, 1, 2, 254, 255, 256, 509, 510, 511, 1_000, 4_096] {
+            for gap_every in [0u64, 1, 2, 7, 300] {
+                for wrong in [None, Some(27u8), Some(28), Some(255)] {
+                    let bytes: Vec<u8> = (0..length)
+                        .map(|_| {
+                            let r = next();
+                            if gap_every != 0 && r % gap_every == 0 {
+                                NCBISTDAA_GAP
+                            } else if r % 11 == 0 {
+                                NCBISTDAA_O
+                            } else if r % 97 == 0 {
+                                wrong.unwrap_or(1)
+                            } else {
+                                1 + (r % 25) as u8
+                            }
+                        })
+                        .collect();
+                    let mut runs = bytes.clone();
+                    let mut by_byte = bytes;
+                    assert_eq!(
+                        read_o_as_x(&mut runs),
+                        read_o_as_x_by_byte(&mut by_byte),
+                        "length {length}, a gap every {gap_every}, {wrong:?}"
+                    );
+                    assert_eq!(runs, by_byte);
+                }
+            }
+        }
+        // Every byte a gap: 255 per run, the largest count a run holds.
+        let mut gaps = vec![NCBISTDAA_GAP; 1_000];
+        assert_eq!(read_o_as_x(&mut gaps), (1_000, false));
     }
 
     fn blosum62_gapped() -> KarlinParams {

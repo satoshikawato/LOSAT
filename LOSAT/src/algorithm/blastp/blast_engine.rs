@@ -6059,7 +6059,8 @@ fn search(
     // format 6, or with LOSAT_X_BPQBLOCKFMT outfmt 0 or 7 (the outfmt 0 prolog with the first
     // block, the epilog and outfmt 7's count of the queries with the last), with
     // LOSAT_X_BPQBLOCKSA outfmt 8, 9 or 12, with LOSAT_X_BPQBLOCKXML outfmt 5 (the header with the
-    // first block, the end with the last); otherwise the search of
+    // first block, the end with the last), with LOSAT_X_BPQBLOCKWEB also several of these reports,
+    // the hit records and an observer (`run_local`); otherwise the search of
     // all queries below. With `-db` the blocks are searched only when no definition line of the
     // database can fail a batch where its titles are read (`database::x_titles_allow_blocks`, or
     // `x_titles_read_allow_blocks` for outfmt 8, 9, 12 and 5, read
@@ -6195,7 +6196,8 @@ fn search(
                         .map(|next| &searched_queries[next.clone()]);
                     let block_input = seq_range::QueryInput::whole(block_queries);
                     let records_before = x_records.as_ref().map_or(0, Vec::len);
-                    let x_first_query = block.start as u32;
+                    let x_first_query =
+                        u32::try_from(block.start).expect("a query index of the call fits q_idx");
                     let mut x_collect = |found: &[PairwiseHit]| {
                         if let Some(records) = x_records.as_mut() {
                             records.extend(found.iter().map(|record| {

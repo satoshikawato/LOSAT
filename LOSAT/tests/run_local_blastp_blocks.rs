@@ -72,8 +72,8 @@ fn fixture_prefix(name: &str, count: usize) -> PathBuf {
     path
 }
 
-/// A query and a subject file: 20 SicyWSV proteins (about 14,000 letters, five or more batches of
-/// `BATCH`; 13 of them with hits, from the second to the last) against the 86 PajaWSV proteins.
+/// A query and a subject file: 20 SicyWSV proteins (11,114 letters, four batches of `BATCH` and so
+/// four blocks; 13 of them with hits, from the second to the last) against the 86 PajaWSV proteins.
 struct Inputs {
     query: PathBuf,
     subject: PathBuf,
@@ -103,6 +103,8 @@ enum Observe {
     Both,
     /// The observer alone.
     ObserverOnly,
+    /// Nothing, each output a file the call creates.
+    Files,
 }
 
 impl Observe {
@@ -111,6 +113,7 @@ impl Observe {
             Observe::Nothing => "nothing",
             Observe::Both => "both",
             Observe::ObserverOnly => "observer",
+            Observe::Files => "files",
         }
     }
 
@@ -119,6 +122,7 @@ impl Observe {
             "nothing" => Observe::Nothing,
             "both" => Observe::Both,
             "observer" => Observe::ObserverOnly,
+            "files" => Observe::Files,
             _ => panic!("observe {name}"),
         }
     }
@@ -164,7 +168,7 @@ fn clean_env(command: &mut Command, vars: &[(&str, &str)]) {
     if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
         command.env(
             "LOSAT_BLASTX_WORKER_LOG",
-            std::env::temp_dir().join("losat-qblockweb-worker.log"),
+            std::env::temp_dir().join(format!("losat-qblockweb-worker-{}.log", std::process::id())),
         );
     }
     command.envs(vars.iter().copied());
@@ -317,6 +321,31 @@ fn child_search() {
         }
     };
     let write = |name: &str, bytes: &[u8]| std::fs::write(dir.join(name), bytes).expect(name);
+    if observe == Observe::Files {
+        let paths: Vec<PathBuf> = (0..formats.len())
+            .map(|index| dir.join(format!("out{index}")))
+            .collect();
+        let mut diagnostics = Vec::new();
+        {
+            let mut outputs = ReportOutputs {
+                formats: formats
+                    .iter()
+                    .zip(&paths)
+                    .map(|(&outfmt, path)| FormatOutput {
+                        outfmt,
+                        sink: OutputSink::File(path),
+                    })
+                    .collect(),
+                diagnostics: &mut diagnostics,
+                hits: None,
+                observer: None,
+            };
+            run_local_blastp(args(), &queries, &subjects, "", "", &mut outputs).expect("run_local");
+        }
+        write("diagnostics", &diagnostics);
+        write("done", b"");
+        return;
+    }
     if observe == Observe::ObserverOnly {
         let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
         let mut diagnostics = Vec::new();
@@ -501,12 +530,15 @@ fn calls_the_block_search_takes_and_does_not() {
             run.searches
         );
     }
-    // An observer without the hit records; an output the block search does not write (outfmt 15
-    // and 16); the switch off by `LOSAT_X_DEFAULT=0`; the block search off.
+    // An observer without the hit records; several outputs that are not the caller's writers; an
+    // output the block search does not write (outfmt 15 and 16); the switch off by
+    // `LOSAT_X_DEFAULT=0` (one outfmt 6 output with the records and the observer, which only
+    // `LOSAT_X_BPQBLOCKWEB` takes); the block search off.
     for (formats, observe, extra) in [
         (&WEB[..], Observe::ObserverOnly, None),
+        (&WEB[..], Observe::Files, None),
         (&["0", "6", "7", "15", "16"][..], Observe::Both, None),
-        (&WEB[..], Observe::Both, Some(("LOSAT_X_DEFAULT", "0"))),
+        (&WEB[1..2], Observe::Both, Some(("LOSAT_X_DEFAULT", "0"))),
         (&WEB[..], Observe::Both, Some(("LOSAT_X_BPQBLOCK", "0"))),
     ] {
         let mut vars = vec![BATCH];

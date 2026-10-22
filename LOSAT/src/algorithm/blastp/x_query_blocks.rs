@@ -177,9 +177,10 @@
 //! an observer comes with the records. Each block's call writes all the outputs, in the order asked:
 //! - each output's bytes are those of the one-output case above: what is not per query (the prolog,
 //!   the epilog, the counts of outfmt 7 and 5) is set per block for every output alike
-//!   (`BlastpReports`), each output's writer writes only to its own sink, and the sinks are the
-//!   caller's writers, unbuffered (one shared stream would get each block's formats in turn, so
-//!   several outputs need writers). The checks of the refusals that depend on the hits are made for
+//!   (`BlastpReports`), each output's writer writes only to its own sink, and with several outputs
+//!   the sinks are the caller's writers, unbuffered (a stream that two outputs share would get each
+//!   block's formats in turn, so several outputs need writers; one output may also be standard
+//!   output or a file, as above). The checks of the refusals that depend on the hits are made for
 //!   every kind of report among the outputs before the first block. The warnings go with the first
 //!   output, query by query, in every block.
 //! - the final list of all queries is the blocks' lists one after the other: it is ordered by query,
@@ -361,7 +362,8 @@ pub(crate) fn x_bp_qblock() -> Option<usize> {
 // any value; it implies the switch) once. They choose which reports the block search writes, not
 // any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKFMT): 0 = the block search only for one outfmt 6 report, 1 = for one
-/// report of outfmt 0, 6 or 7, 2 = the shadow (`x_block_shadow_compare`).
+/// report of outfmt 0, 6 or 7 (with LOSAT_X_BPQBLOCKWEB also for several reports of these and the
+/// others the block search takes), 2 = the shadow (`x_block_shadow_compare`).
 pub(crate) fn x_bp_qblock_fmt() -> u8 {
     use std::sync::OnceLock;
     static MODE: OnceLock<u8> = OnceLock::new();

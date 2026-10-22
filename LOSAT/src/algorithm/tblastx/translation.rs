@@ -168,6 +168,34 @@ pub fn generate_frames(seq: &[u8], table: &GeneticCode) -> Vec<QueryFrame> {
     frames
 }
 
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1216-1218
+// ```c
+//                length = BLAST_GetTranslation(nucl_seq, nucl_seq_rev,
+//                        nucl_length, hsp->subject.frame, target_t->translations[context],
+//                        target_t->gen_code_string);
+// ```
+// NCBI translates the one frame of the HSP. The frame here is the one `generate_frames` makes:
+// the same `translate_sequence` of the same letters (`seq[i..]`, or `revcomp(seq)[i..]`), present
+// under the same condition (`i + 3 <= len`).
+/// The frame `frame` (+1..+3, -1..-3) of `generate_frames(seq, table)`, as (residues with the
+/// sentinels, length), or `None` where `generate_frames` makes no such frame. Only that frame is
+/// translated (and for a reverse frame the reverse complement made).
+pub(crate) fn translate_frame(
+    seq: &[u8],
+    frame: i8,
+    table: &GeneticCode,
+) -> Option<(Vec<u8>, usize)> {
+    let i = usize::from(frame.unsigned_abs()).checked_sub(1)?;
+    if i >= 3 || i + 3 > seq.len() {
+        return None;
+    }
+    Some(if frame > 0 {
+        translate_sequence(&seq[i..], table)
+    } else {
+        translate_sequence(&dna::revcomp(seq)[i..], table)
+    })
+}
+
 /// The bases a window of `x_generate_frames_in_windows` holds: one window of a subject's letters
 /// and two letters of the window before it (3 x 2^16 bases, 192 KiB).
 const X_FRAME_WINDOW: usize = 3 << 16;
@@ -352,6 +380,53 @@ fn x_codon_residues(table: &GeneticCode) -> std::rc::Rc<[u8; 4096]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `translate_frame` against `generate_frames`: each frame's residues and length, and no
+    /// frame where `generate_frames` makes none, for every length up to 40 and a long sequence,
+    /// with every byte the readers give (IUPAC letters, `-`, both cases), under two codes.
+    #[test]
+    fn translate_frame_is_the_frame_of_generate_frames() {
+        let letters = b"ACGTMRSVWYHKDBN-acgtmrsvwyhkdbn";
+        let mut state = 7u64;
+        let mut sequence = |length: usize| -> Vec<u8> {
+            (0..length)
+                .map(|_| {
+                    state = state
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    let draw = (state >> 33) as usize;
+                    // mostly unambiguous bases, so stop codons and ordinary residues occur
+                    if draw % 4 == 0 {
+                        letters[draw / 4 % letters.len()]
+                    } else {
+                        b"ACGTacgt"[draw / 4 % 8]
+                    }
+                })
+                .collect()
+        };
+        let mut compared = 0;
+        for id in [1, 4] {
+            let code = GeneticCode::try_from_id(id).unwrap();
+            for length in (0..=40).chain([3_001]) {
+                let seq = sequence(length);
+                let frames = generate_frames(&seq, &code);
+                for frame in [1, 2, 3, -1, -2, -3] {
+                    let expected = frames
+                        .iter()
+                        .find(|candidate| candidate.frame == frame)
+                        .map(|candidate| (candidate.aa_seq.clone(), candidate.aa_len));
+                    assert_eq!(
+                        translate_frame(&seq, frame, &code),
+                        expected,
+                        "{length} {frame}"
+                    );
+                    compared += usize::from(expected.is_some());
+                }
+            }
+        }
+        // lengths 3 and 4 have two and four frames, 5 to 40 and 3,001 all six
+        assert_eq!(compared, 2 * (2 + 4 + 6 * 36 + 6));
+    }
 
     /// `x_frames_in_windows` against `generate_frames`: every field of every frame.
     fn assert_same_frames(seq: &[u8], window: usize, code: &GeneticCode) {

@@ -3884,11 +3884,12 @@ Scheduling (each value computed by one thread with the original function; order 
   plan from the resolved bases and stops if they differ. The reference loops (`LOSAT_X_DEFAULT=0`)
   read the packed bases as letters (`ACGT`, each ambiguous base as resolved), which resolve to
   themselves; with `-lcase_masking` the stage reads the letters. The redo (composition mode 2),
-  its translations and the pairwise rows (outfmt 0) read windows of the subject (`SubjectNt` in
-  `packed_subject.rs`: the HSP's codons, or the window around an HSP that NCBI translates), made
-  in upper case from the store when read (every reader ignores the case); only the traceback of
-  composition mode 0 makes a subject's whole letters again, exactly as the reader gave them (the
-  comparison tests in `packed_subject.rs`). The packed bases are those NCBI's subject set-up makes
+  its translations, the traceback of composition mode 0 (also every BLOSUM45 run) and the
+  pairwise rows (outfmt 0) read windows of the subject (`SubjectNt` in `packed_subject.rs`: the
+  HSP's codons, or the window around an HSP that NCBI translates), made in upper case from the
+  store when read, exactly as the reader gave them but for the case (every reader ignores the
+  case; the comparison tests in `packed_subject.rs`), so no stage after the preliminary one makes
+  a subject's whole letters again. The packed bases are those NCBI's subject set-up makes
   (`encode_subject_ncbi2na_packed`, `s_Ncbi4naToNcbi2na` in `blast_objmgr_tools.cpp:427-475`; one
   pass over the letters). Memory: about a quarter of a byte per base held instead of one; per
   thread the frames of the subject in hand (two bytes per base) instead of four bytes per base

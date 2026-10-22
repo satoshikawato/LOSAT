@@ -12,9 +12,10 @@ name: Platform checks
 #    register pairs, off unless set), must give the same outputs as well;
 #  - compare: the hashes of the platforms of the run must equal each other (no expected hash is
 #    stored; the frozen hashes are checked on Linux x64 by ci.yml);
-#  - tests: cargo test --all-features in both modes, built once per platform, on the platforms other
-#    than Linux x64 (ci.yml runs both modes on Linux x64); the reference mode leaves out the test
-#    files whose runs set every LOSAT_* variable themselves (LOSAT/tests/reference_step_targets.sh).
+#  - tests: cargo test --all-features (cargo-nextest) in both modes, built once per platform, on the
+#    platforms other than Linux x64 (ci.yml runs both modes on Linux x64); the reference mode leaves
+#    out the test files whose runs set every LOSAT_* variable themselves
+#    (LOSAT/tests/reference_step_targets.sh).
 #
 # Two sets of platforms (job `changes` chooses):
 #  - pull-request (a pull request into main, normally the promotion of dev): outputs on Linux
@@ -249,6 +250,12 @@ jobs:
     # took 82-130 min, and on macOS x64 it hit this limit; since then the reference run leaves out
     # the files that would repeat the default run (90 % of its time on Linux x64, 2026-10-21).
     timeout-minutes: 150
+    env:
+      # Optimized test code; the test profile keeps the dev profile's debug assertions and
+      # overflow checks (as in ci.yml). Set for the job, so that rust-cache's key keeps the
+      # dependencies built at this level.
+      CARGO_PROFILE_TEST_OPT_LEVEL: '3'
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - name: Check out without line-ending conversion
         if: runner.os == 'Windows'
@@ -263,27 +270,31 @@ jobs:
         with:
           workspaces: LOSAT -> target
           key: tests-${{ matrix.id }}
+      # cargo-nextest runs the tests of all test binaries together (cargo test runs one binary at
+      # a time), as in ci.yml.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
       # The switches are read at run time (LOSAT/src/utils/xswitch.rs), so one build serves both
       # modes; the second step runs the test binaries the first one built.
-      - name: cargo test --all-features, default
-        run: cd LOSAT && cargo test --locked --all-features --no-fail-fast
+      - name: cargo nextest run --all-features, default
+        run: |
+          cd LOSAT
+          cargo nextest run --locked --all-features --no-fail-fast
+          cargo test --locked --all-features --doc
         env:
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
-          # Optimized test code; the test profile keeps the dev profile's debug assertions
-          # and overflow checks (as in ci.yml).
-          CARGO_PROFILE_TEST_OPT_LEVEL: '1'
       # Without the test files marked "CI reference step: skipped": each of their runs sets its own
       # LOSAT_* variables, so it would repeat the default step (LOSAT/tests/reference_step_targets.sh).
-      - name: cargo test --all-features, reference (LOSAT_X_DEFAULT=0)
+      - name: cargo nextest run --all-features, reference (LOSAT_X_DEFAULT=0)
         if: ${{ !cancelled() }}
         run: |
           cd LOSAT
           targets=$(bash tests/reference_step_targets.sh)
-          cargo test --locked --all-features --no-fail-fast $targets
+          cargo nextest run --locked --all-features --no-fail-fast $targets
         env:
           LOSAT_X_DEFAULT: '0'
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log
-          CARGO_PROFILE_TEST_OPT_LEVEL: '1'
 
   # The check to require in the ruleset: it always runs and fails only if a job failed or was
   # cancelled (jobs skipped because no relevant file changed, or because the pull request is a

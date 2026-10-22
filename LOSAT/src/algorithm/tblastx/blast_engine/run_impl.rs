@@ -1089,13 +1089,13 @@ fn search_cli(
             }
         }
     }
-    // The BLAST XML (outfmt 5) cannot write a `-db` name outside US-ASCII: refused before the
-    // search (`names::check_database_name`).
+    // The BLAST XML (outfmt 5, and the XML2 and JSON documents of 16 and 15) cannot write a
+    // `-db` name outside US-ASCII: refused before the search (`names::check_database_name`).
     if let Some(database) = database.as_ref() {
         if outputs
             .formats
             .iter()
-            .any(|format| report::output_format(format.outfmt) == report::TblastxOutputFormat::Xml)
+            .any(|format| report::output_format(format.outfmt).is_structured_xml())
         {
             crate::report::blast_xml::names::check_database_name("TBLASTX", database.name())?;
         }
@@ -1530,6 +1530,9 @@ pub(crate) struct TblastxReportRun<'a> {
     /// The subject set's numbers (the BLAST XML computes a query's length adjustment again
     /// from them).
     pub numbers: &'a SubjectSetNumbers,
+    /// `-db`, XML2 and JSON: the taxid of each reported sequence by rank and what the taxonomy
+    /// database says about it (empty for the other formats).
+    pub xml_taxa: &'a super::super::database::XmlTaxa,
     /// Whether ABI v1's rejection of outfmt 0 titles applies (`V1Checks`).
     pub v1_titles: bool,
     /// EXPERIMENT (LOSAT_X_TBXRPTPAR): the pool the report stage runs on (tblastx/x_rpt_par.rs),
@@ -1886,10 +1889,10 @@ fn write_tblastx_outputs(
     // The `Query=` and `# Query:` text of each query: its title bytes.
     let query_titles: Vec<&[u8]> = run.queries.iter().map(|query| query.title()).collect();
     let unsearched: Vec<bool> = run.searched.iter().map(|&searched| !searched).collect();
-    let mut format_warnings = Some(crate::report::query_warnings::QueryWarnings {
-        before: run.warnings,
-        sink: &mut *outputs.diagnostics,
-    });
+    // The warnings of each query are written before its report, once, with the first format
+    // (`QueryWarnings`); the taxonomy database's messages of XML2 and JSON go to the
+    // diagnostics at every format.
+    let mut warning_lines = Some(run.warnings);
     let observer = &mut outputs.observer;
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(&output_formats).enumerate()
@@ -1897,8 +1900,12 @@ fn write_tblastx_outputs(
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
-        // The warnings are written once, with the first format (`QueryWarnings`).
-        let mut warnings = format_warnings.take();
+        let mut warnings = (warning_lines.is_some()
+            || matches!(output_format, report::TblastxOutputFormat::Xml2(_)))
+        .then(|| crate::report::query_warnings::QueryWarnings {
+            before: warning_lines.take().unwrap_or(&[]),
+            sink: &mut *outputs.diagnostics,
+        });
         // NCBI reference: ncbi-blast/c++/src/algo/blast/format/blast_format.cpp:68-93
         // ```c
         // CBlastFormat::CBlastFormat(..., CNcbiOstream& outfile, ...)
@@ -2026,6 +2033,21 @@ fn write_tblastx_outputs(
             // The document of every query; the hits are the final list after `shift_to_records`
             // (record coordinates), the rows are read from the searched letters.
             report::TblastxOutputFormat::Xml => super::super::blast_xml::write_tblastx_xml(
+                &mut crate::report::blast_xml::BlastXmlWriter::new(0),
+                false,
+                &mut writer,
+                &hits,
+                run,
+                warnings.as_mut(),
+            )?,
+            // The XML2 and JSON documents (outfmt 16 and 15): the same records, written by
+            // `Xml2Writer`.
+            report::TblastxOutputFormat::Xml2(kind) => super::super::blast_xml::write_tblastx_xml(
+                &mut crate::report::blast_xml2::Xml2Writer::new(
+                    kind,
+                    super::super::blast_xml::xml2_run(run),
+                ),
+                true,
                 &mut writer,
                 &hits,
                 run,
@@ -2072,9 +2094,9 @@ fn write_tblastx_outputs(
         crate::algorithm::tblastx::x_rpt_par::print_shadow_summary();
     }
     // Without an output format the warnings are written all at once.
-    if let Some(warnings) = format_warnings {
-        for query_warnings in warnings.before {
-            warnings.sink.write_all(query_warnings)?;
+    if let Some(lines) = warning_lines {
+        for query_warnings in lines {
+            outputs.diagnostics.write_all(query_warnings)?;
         }
     }
     Ok(())
@@ -2807,6 +2829,21 @@ impl BatchReports<'_> {
                 )
             }
         };
+        // `-db`, XML2 and JSON: the taxid of each reported sequence, and what the taxonomy
+        // database says about it (the refusals of both come before any byte).
+        let xml_taxa = match (&self.subjects, &database) {
+            (ShownSubjects::Database { database, .. }, Some(shown))
+                if outputs.formats.iter().any(|format| {
+                    matches!(
+                        report::output_format(format.outfmt),
+                        report::TblastxOutputFormat::Xml2(_)
+                    )
+                }) =>
+            {
+                database.read_taxids(&shown.reported.ordinals)?
+            }
+            _ => Default::default(),
+        };
         let written = write_tblastx_outputs(
             hits,
             outputs,
@@ -2823,6 +2860,7 @@ impl BatchReports<'_> {
                 ranges: self.query_runs,
                 epilog,
                 numbers: self.numbers,
+                xml_taxa: &xml_taxa,
                 v1_titles: self.v1_titles,
                 x_pool: crate::algorithm::tblastx::x_rpt_par::pool(self.x_search_pool),
                 x_pairwise_pool: crate::report::x_pairwise_par::pool(self.x_search_pool),
@@ -2843,7 +2881,18 @@ impl BatchReports<'_> {
         warnings: &[Vec<u8>],
     ) -> Result<()> {
         if done.searched.is_empty() {
-            write_pairwise_prologs(outputs, self.args, self.subjects, false)
+            write_pairwise_prologs(outputs, self.args, self.subjects, false)?;
+            // The XML2 and JSON documents start with their prolog too.
+            for format in outputs.formats.iter_mut() {
+                if let report::TblastxOutputFormat::Xml2(kind) =
+                    report::output_format(format.outfmt)
+                {
+                    let mut writer = format.sink.open()?;
+                    writer.write_all(&crate::report::blast_xml2::framing::prolog_bytes(kind))?;
+                    writer.flush()?;
+                }
+            }
+            Ok(())
         } else {
             self.write(outputs, done, warnings, false)
         }

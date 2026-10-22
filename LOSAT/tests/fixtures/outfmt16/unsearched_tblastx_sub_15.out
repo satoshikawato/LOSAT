@@ -1,0 +1,411 @@
+{
+"BlastOutput2": [
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-20,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_1",
+            "query_title": "qa valid",
+            "query_len": 300,
+            "query_masking": [
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "sn1",
+                    "title": "sn1 subject nucleotide alpha"
+                  }
+                ],
+                "len": 488,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 160.524,
+                    "score": 344,
+                    "evalue": 2.215e-50,
+                    "identity": 60,
+                    "positive": 63,
+                    "query_from": 31,
+                    "query_to": 228,
+                    "query_frame": 1,
+                    "hit_from": 46,
+                    "hit_to": 243,
+                    "hit_frame": 1,
+                    "align_len": 66,
+                    "gaps": 0,
+                    "qseq": "MWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                    "hseq": "MWMEHSVLEAIFAVLRKVMDDPKIRDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                    "midline": "MWMEHSVL+A FAVLRKVMDDPKIRDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 153.651,
+                    "score": 329,
+                    "evalue": 1.20373e-47,
+                    "identity": 61,
+                    "positive": 62,
+                    "query_from": 31,
+                    "query_to": 228,
+                    "query_frame": -1,
+                    "hit_from": 46,
+                    "hit_to": 243,
+                    "hit_frame": -3,
+                    "align_len": 66,
+                    "gaps": 0,
+                    "qseq": "ANP*IARVDIGGKLILHKDFPAHIRGPAIVLPALHYSHGPIPYFRVVHHFTKHGKICF*HGVFHPH",
+                    "hseq": "ANA*IARVDIGGKLKLHKDFPAYIRGPAIVLPALHCSHGPIPYFRVVHHFTKHGKNCF*HGVFHPH",
+                    "midline": "AN *IARVDIGGKL LHKDFPA+IRGPAIVLPALH SHGPIPYFRVVHHFTKHGK CF*HGVFHPH"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "sn2",
+                    "title": "sn2 subject nucleotide beta reverse"
+                  }
+                ],
+                "len": 477,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 93.6255,
+                    "score": 198,
+                    "evalue": 5.89007e-35,
+                    "identity": 39,
+                    "positive": 45,
+                    "query_from": 22,
+                    "query_to": 180,
+                    "query_frame": 1,
+                    "hit_from": 308,
+                    "hit_to": 466,
+                    "hit_frame": -3,
+                    "align_len": 53,
+                    "gaps": 0,
+                    "qseq": "LVLMWMEHSVLKANFAVLRKVMDDPKIRDGPMAVMKGWENYCWPANMSWKVLM",
+                    "hseq": "LINVSMEHSVLKANFAGLSEVMDDPKIQYGPMAVMKGMEHYCPPANLSWKVRM",
+                    "midline": "L+ + MEHSVLKANFA L +VMDDPKI+ GPMAVMKG E+YC PAN+SWKV M"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 95.9165,
+                    "score": 203,
+                    "evalue": 1.12978e-34,
+                    "identity": 38,
+                    "positive": 39,
+                    "query_from": 37,
+                    "query_to": 180,
+                    "query_frame": -1,
+                    "hit_from": 308,
+                    "hit_to": 451,
+                    "hit_frame": 2,
+                    "align_len": 48,
+                    "gaps": 0,
+                    "qseq": "HKDFPAHIRGPAIVLPALHYSHGPIPYFRVVHHFTKHGKICF*HGVFH",
+                    "hseq": "HTDFPAQISGRAIVLHALHYSHWPILYFGIVHHFTKPGKICF*HGVFH",
+                    "midline": "H DFPA I G AIVL ALHYSH PI YF +VHHFTK GKICF*HGVFH"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 16,
+              "eff_space": 24276,
+              "kappa": 0.133956144488482,
+              "lambda": 0.317605957635731,
+              "entropy": 0.401214524497119
+            }
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-20,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_2",
+            "query_title": "qn all N",
+            "query_len": 90,
+            "stat": {
+              "hsp_len": 0,
+              "eff_space": 0,
+              "kappa": -1,
+              "lambda": -1,
+              "entropy": -1
+            },
+            "message": "Query_2 qn all N:  Query_2 qn all N: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found \u000ANo hits found"
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-20,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_3",
+            "query_title": "qb CAG repeat",
+            "query_len": 300,
+            "stat": {
+              "hsp_len": 0,
+              "eff_space": 0,
+              "kappa": -1,
+              "lambda": -1,
+              "entropy": -1
+            },
+            "message": "Query_3 qb CAG repeat:  Query_3 qb CAG repeat: Could not calculate ungapped Karlin-Altschul parameters due to an invalid query sequence or its translation. Please verify the query sequence(s) and/or filtering options  No hits found \u000ANo hits found"
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-20,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_4",
+            "query_title": "qd CAGTAA repeat",
+            "query_len": 300,
+            "query_masking": [
+              {
+                "from": 1,
+                "to": 295
+              },
+              {
+                "from": 2,
+                "to": 296
+              }
+            ],
+            "hits": [
+            ],
+            "stat": {
+              "hsp_len": 16,
+              "eff_space": 24276,
+              "kappa": 0.133956144488482,
+              "lambda": 0.317605957635731,
+              "entropy": 0.401214524497119
+            },
+            "message": "No hits found"
+          }
+        ]
+      }
+    }
+  }
+,
+{
+    "report": {
+      "program": "tblastx",
+      "version": "TBLASTX 2.17.0+",
+      "reference": "Stephen F. Altschul, Thomas L. Madden, Alejandro A. Sch&auml;ffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J. Lipman (1997), \"Gapped BLAST and PSI-BLAST: a new generation of protein database search programs\", Nucleic Acids Res. 25:3389-3402.",
+      "search_target": {
+        "subjects": [
+          "Subject_1",
+          "Subject_2"
+        ]
+      },
+      "params": {
+        "matrix": "BLOSUM62",
+        "expect": 1e-20,
+        "filter": "L;",
+        "query_gencode": 1,
+        "db_gencode": 1
+      },
+      "results": {
+        "bl2seq": [
+          {
+            "query_id": "Query_5",
+            "query_title": "qe valid again",
+            "query_len": 300,
+            "query_masking": [
+            ],
+            "hits": [
+              {
+                "num": 1,
+                "description": [
+                  {
+                    "id": "sn1",
+                    "title": "sn1 subject nucleotide alpha"
+                  }
+                ],
+                "len": 488,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 108.746,
+                    "score": 231,
+                    "evalue": 5.4197e-50,
+                    "identity": 38,
+                    "positive": 40,
+                    "query_from": 3,
+                    "query_to": 128,
+                    "query_frame": 3,
+                    "hit_from": 118,
+                    "hit_to": 243,
+                    "hit_frame": 1,
+                    "align_len": 42,
+                    "gaps": 0,
+                    "qseq": "RDGPMAVMKGWENYCWPANMSWKVLMKYEFSSDIHPCNLWIC",
+                    "hseq": "RDGPMAAMKGWENYCWPANISWKVLMKFEFSSDIHPCNLCIC",
+                    "midline": "RDGPMA MKGWENYCWPAN+SWKVLMK+EFSSDIHPCNL IC"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 103.248,
+                    "score": 219,
+                    "evalue": 9.74906e-47,
+                    "identity": 41,
+                    "positive": 42,
+                    "query_from": 2,
+                    "query_to": 130,
+                    "query_frame": 2,
+                    "hit_from": 117,
+                    "hit_to": 245,
+                    "hit_frame": 3,
+                    "align_len": 43,
+                    "gaps": 0,
+                    "qseq": "TGWAHGCNEGLGELLLAREYELESPYEV*VFLRYPPLQFMDLL",
+                    "hseq": "TGWAHGCNEGLGELLLAREYKLESPYEV*VFLRYPPLQFMHLL",
+                    "midline": "TGWAHGCNEGLGELLLAREY+LESPYEV*VFLRYPPLQFM LL"
+                  }
+                ]
+              },
+              {
+                "num": 2,
+                "description": [
+                  {
+                    "id": "sn2",
+                    "title": "sn2 subject nucleotide beta reverse"
+                  }
+                ],
+                "len": 477,
+                "hsps": [
+                  {
+                    "num": 1,
+                    "bit_score": 73.0061,
+                    "score": 153,
+                    "evalue": 1.31073e-36,
+                    "identity": 29,
+                    "positive": 32,
+                    "query_from": 189,
+                    "query_to": 299,
+                    "query_frame": -2,
+                    "hit_from": 92,
+                    "hit_to": 202,
+                    "hit_frame": 2,
+                    "align_len": 37,
+                    "gaps": 0,
+                    "qseq": "FLKVSVMVNFPMPERLICESHHYTHTLGILMHPQTHF",
+                    "hseq": "FLTVSVMANFPLPERVICESHLYTLTLGILMHPRTVF",
+                    "midline": "FL VSVM NFP+PER+ICESH YT TLGILMHP+T F"
+                  },
+                  {
+                    "num": 2,
+                    "bit_score": 71.1732,
+                    "score": 149,
+                    "evalue": 7.78516e-33,
+                    "identity": 27,
+                    "positive": 31,
+                    "query_from": 188,
+                    "query_to": 298,
+                    "query_frame": -3,
+                    "hit_from": 93,
+                    "hit_to": 203,
+                    "hit_frame": 3,
+                    "align_len": 37,
+                    "gaps": 0,
+                    "qseq": "FSKLASWLIFQCRRD*SVNLTITHIHLGYLCIHRPIS",
+                    "hseq": "FSQLASWLIFHCQRE*FVNHTCTHLHLGYLCIHGPFS",
+                    "midline": "FS+LASWLIF C+R+* VN T TH+HLGYLCIH P S"
+                  }
+                ]
+              }
+            ],
+            "stat": {
+              "hsp_len": 16,
+              "eff_space": 24276,
+              "kappa": 0.133956144488482,
+              "lambda": 0.317605957635731,
+              "entropy": 0.401214524497119
+            }
+          }
+        ]
+      }
+    }
+  }
+]
+}

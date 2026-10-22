@@ -2352,12 +2352,11 @@ struct PreliminaryInputs<'a> {
 // Where the HSP lists of the subjects go as the owner of the search takes them in OID order:
 // the hit-list collector of the preliminary stage (`PreliminaryCollector`), or, with
 // `-culling_limit`, NCBI's culling writer (`PrelimCulling`). `run_preliminary_subjects` picks
-// one once per call, before the subject loop.
+// one once per call, before the subject loop. The search takes the sink as a trait object, so
+// it has one instance (one indirect call per subject), as before the culling writer.
 trait PreliminarySink {
     /// The list of subject `oid`: the linked HSPs of all queries and frames, in list order.
     fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()>;
-    /// The preliminary hit list of each query context.
-    fn finish(self) -> Result<Vec<Option<KappaResultHitList>>>;
 }
 
 // NCBI c++/src/algo/blast/core/hspfilter_collector.c:129-161:
@@ -2378,7 +2377,6 @@ impl PreliminaryCollector {
 }
 
 impl PreliminarySink for PreliminaryCollector {
-    #[inline(always)]
     fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
         for context in 0..self.hitlists.len() {
             let hsps: Vec<_> = linked
@@ -2403,20 +2401,11 @@ impl PreliminarySink for PreliminaryCollector {
         }
         Ok(())
     }
-
-    #[inline(always)]
-    fn finish(self) -> Result<Vec<Option<KappaResultHitList>>> {
-        Ok(self.hitlists)
-    }
 }
 
 impl PreliminarySink for PrelimCulling {
     fn add(&mut self, oid: usize, linked: &LinkedHspList) -> Result<()> {
         PrelimCulling::add(self, oid, &linked.hsps)
-    }
-
-    fn finish(self) -> Result<Vec<Option<KappaResultHitList>>> {
-        PrelimCulling::finish(self)
     }
 }
 
@@ -2432,35 +2421,27 @@ fn run_preliminary_subjects(
 ) -> Result<Vec<Option<KappaResultHitList>>> {
     // `-culling_limit` selects NCBI's culling writer in place of the collector, once per call.
     if inputs.culling_limit > 0 {
-        run_preliminary_subjects_into(
-            inputs,
-            subjects,
-            pool,
-            observer,
-            PrelimCulling::new(
-                inputs.query_lengths,
-                inputs.prelim_size,
-                inputs.culling_limit,
-            ),
-        )
+        let mut sink = PrelimCulling::new(
+            inputs.query_lengths,
+            inputs.prelim_size,
+            inputs.culling_limit,
+        );
+        run_preliminary_subjects_into(inputs, subjects, pool, observer, &mut sink)?;
+        sink.finish()
     } else {
-        run_preliminary_subjects_into(
-            inputs,
-            subjects,
-            pool,
-            observer,
-            PreliminaryCollector::new(inputs),
-        )
+        let mut sink = PreliminaryCollector::new(inputs);
+        run_preliminary_subjects_into(inputs, subjects, pool, observer, &mut sink)?;
+        Ok(sink.hitlists)
     }
 }
 
-fn run_preliminary_subjects_into<S: PreliminarySink + Send>(
+fn run_preliminary_subjects_into(
     inputs: &PreliminaryInputs<'_>,
     subjects: SubjectLetters<'_>,
     pool: Option<&SearchPool<'_>>,
     mut observer: Option<&mut StageDBoundaryTrace>,
-    mut sink: S,
-) -> Result<Vec<Option<KappaResultHitList>>> {
+    sink: &mut (dyn PreliminarySink + Send),
+) -> Result<()> {
     // NCBI c++/src/algo/blast/core/blast_engine.c:1469-1475,872-905:
     //      status =
     //          s_BlastSearchEngineCore(program_number, query, query_info,
@@ -2811,7 +2792,7 @@ fn run_preliminary_subjects_into<S: PreliminarySink + Send>(
             subjects.count(), workers, peak.load(Ordering::SeqCst), x_pool_entries, x_flow_fields
         );
     }
-    sink.finish()
+    Ok(())
 }
 
 // NCBI c++/src/algo/blast/core/blast_engine.c:728-729,804-813,882-887:

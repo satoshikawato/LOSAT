@@ -128,8 +128,12 @@ pub(super) fn shadow() -> bool {
 /// marks, and the shadow is on or the largest of the units' query-group `spans` reaches the
 /// switch's value.
 pub(super) fn active(window: i32, wordsize: i32, spans: impl Iterator<Item = usize>) -> bool {
-    window as i64 >= wordsize as i64 + BATCH as i64
-        && (shadow() || x_extbatch_units(min_span_ki(), spans))
+    let active = window as i64 >= wordsize as i64 + BATCH as i64
+        && (shadow() || x_extbatch_units(min_span_ki(), spans));
+    if min_span_ki().is_some() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXEXTBATCH", active);
+    }
+    active
 }
 
 // No NCBI counterpart: the size rule (module doc), apart from the switch so that a test can give it

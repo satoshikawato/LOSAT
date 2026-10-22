@@ -431,9 +431,12 @@ fn x_batches_side_by_side(
 ) -> usize {
     let many_subjects = subjects >= threads.saturating_mul(2);
     if threads < 2 || (subject_bases > X_SIDE_BY_SIDE_MAX_BASES && many_subjects) {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNBATCHRULE", false);
         return 0;
     }
-    batches / threads * threads
+    let waves = batches / threads * threads;
+    crate::utils::xreach::x_reach!("LOSAT_X_TBNBATCHRULE", waves > 0);
+    waves
 }
 
 // No NCBI counterpart: reads the LOSAT_X_TBNOWNPOOLS variable once; it does not change any value
@@ -483,11 +486,13 @@ fn x_batches_on_own_pools(
     } else {
         threads / 2
     };
-    if few_subjects && left >= 2 && left <= most {
+    let own_pools = if few_subjects && left >= 2 && left <= most {
         left
     } else {
         0
-    }
+    };
+    crate::utils::xreach::x_reach!("LOSAT_X_TBNOWNPOOLS", own_pools > 0);
+    own_pools
 }
 
 /// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the threads of the `index`-th of `pools` pools that share
@@ -629,6 +634,7 @@ pub(super) fn x_search_batches<'p>(
             } else {
                 0
             };
+            crate::utils::xreach::x_reach!("LOSAT_X_TBNBATCH", side_by_side > 0);
             // EXPERIMENT (LOSAT_X_TBNOWNPOOLS): the batches left after those, at the same time
             // on pools of their own (x_batches_on_own_pools).
             let own_pools = if x_tbn_own_pools() && x_tbn_batch_rule() {
@@ -2294,6 +2300,10 @@ fn run_preliminary_subjects(
     // EXPERIMENT (LOSAT_X_TBNOIDCHUNK): the bases one chunk may hold, from the size of the
     // sequence file of the subjects (x_oid_chunk_bases); none without the switch.
     #[cfg(feature = "parallel")]
+    if x_tbn_oid_chunk() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNOIDCHUNK", parallel_selected);
+    }
+    #[cfg(feature = "parallel")]
     let x_chunk_bases = match pool {
         Some(pool) if parallel_selected && x_tbn_oid_chunk() => Some(x_oid_chunk_bases(
             pool.threads(),
@@ -2318,10 +2328,12 @@ fn run_preliminary_subjects(
     let x_units_beyond = x_chunk_bases.filter(|_| x_tbn_oid_units());
     let x_unit_pool = |subject: SubjectNt<'_>| {
         #[cfg(feature = "parallel")]
-        if x_units_beyond
-            .is_some_and(|bases| u64::try_from(subject.len()).unwrap_or(u64::MAX) > bases)
-        {
-            return pool;
+        if let Some(bases) = x_units_beyond {
+            let beyond = u64::try_from(subject.len()).unwrap_or(u64::MAX) > bases;
+            crate::utils::xreach::x_reach!("LOSAT_X_TBNOIDUNITS", beyond);
+            if beyond {
+                return pool;
+            }
         }
         #[cfg(not(feature = "parallel"))]
         let _ = subject;
@@ -2472,6 +2484,10 @@ fn run_preliminary_subjects(
     };
     // EXPERIMENT (LOSAT_X_TBNOIDNEXT): every chunk of LOSAT_X_TBNOIDCHUNK handed to the threads
     // when they are free (`x_oid_flow.rs`); the lists come back below chunk by chunk in OID order.
+    #[cfg(feature = "parallel")]
+    if x_tbn_oid_next() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBNOIDNEXT", x_chunk_bases.is_some());
+    }
     #[cfg(feature = "parallel")]
     let x_flow = match x_chunk_bases {
         Some(bases) if x_tbn_oid_next() => Some(super::x_oid_flow::XOidFlow::new(

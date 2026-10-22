@@ -15,6 +15,9 @@ command-WASI builds. This check compares, and prints as JSON:
 - that no other Cargo configuration applies: no `.cargo/config[.toml]` in the parent
   directories of either crate or in CARGO_HOME, and no profile, build or rustflags
   environment variable (Cargo reads all of these in addition to the compared files).
+  Such a file is allowed, and its keys recorded, when it sets nothing that a release
+  build reads: only `[profile.dev]`, `[profile.test]` and `build.incremental = false`
+  (the release profile's own default), as a machine's disk settings for debug builds do.
 
 Usage: check_build_identity.py [--out FILE.json]   (exit status 1 on any difference)
 """
@@ -53,6 +56,20 @@ def other_cargo_configs() -> list[str]:
     return [str(path) for path in found if path.exists()]
 
 
+def release_inert_keys(path: str) -> list[str] | None:
+    """The dotted keys of a configuration file that a release build does not read, or None
+    if the file sets anything else (or cannot be read)."""
+    try:
+        config = tomllib.loads(Path(path).read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    profile, build = config.get("profile", {}), config.get("build", {})
+    if set(config) - {"profile", "build"} or set(profile) - {"dev", "test"} or build not in ({}, {"incremental": False}):
+        return None
+    keys = [f"profile.{name}.{key}" for name in sorted(profile) for key in sorted(profile[name])]
+    return keys + (["build.incremental"] if build else [])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", type=Path)
@@ -65,6 +82,7 @@ def main() -> int:
     engine_locks = lock_versions(ENGINE / "Cargo.lock")
     adapter_locks = lock_versions(ADAPTER / "Cargo.lock")
 
+    extra_configs = {path: release_inert_keys(path) for path in other_cargo_configs()}
     shared = sorted(set(engine_locks) & set(adapter_locks))
     differing = {name: {"engine": sorted(engine_locks[name]), "adapter": sorted(adapter_locks[name])}
                  for name in shared if engine_locks[name] != adapter_locks[name]}
@@ -84,9 +102,10 @@ def main() -> int:
             "engine_build_rs_sha256": hashlib.sha256((ENGINE / "build.rs").read_bytes()).hexdigest(),
         },
         "other_configuration": {
-            "cargo_config_files": other_cargo_configs(),
+            "cargo_config_files": [path for path, keys in extra_configs.items() if keys is None],
             "environment": sorted(name for name in os.environ if name.startswith(ENVIRONMENT)),
         },
+        "release_inert_configuration": sorted({key for keys in extra_configs.values() if keys for key in keys}),
     }
     failures = []
     if checks["profile_release"]["engine"] != checks["profile_release"]["adapter"]:

@@ -65,7 +65,8 @@ def main():
         for previous, expected in recorded.items():
             if digest(previous) != expected:
                 raise RuntimeError(f"build overwrote another artifact: {previous}")
-        built = target / kind / triple / "release/losat.wasm"
+        # A reactor is the cdylib of the library crate `LOSAT`; a command is the `losat` binary.
+        built = target / kind / triple / "release" / ("LOSAT.wasm" if kind.endswith("reactor") else "losat.wasm")
         identity = json.loads(subprocess.check_output([args.node, str(CRATE / "tests/wasi_artifact.js"), str(built), kind], text=True))
         destination = out / f"losat-{kind}.wasm"
         shutil.copyfile(built, destination)

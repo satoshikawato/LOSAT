@@ -83,7 +83,11 @@ fn query_file(name: &str, count: usize, length: impl Fn(usize) -> usize) -> Path
             String::from_utf8(seq).unwrap()
         ));
     }
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("blastn_pairpar_na");
+    // One directory per process: nextest runs each test in a process of its own, and a
+    // process that wrote these files again while another one's search read them cut its input.
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("blastn_pairpar_na")
+        .join(std::process::id().to_string());
     std::fs::create_dir_all(&dir).expect("work directory");
     let file = dir.join(format!("{name}.fa"));
     std::fs::write(&file, text).expect("query file");

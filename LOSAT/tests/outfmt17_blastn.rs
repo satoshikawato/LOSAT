@@ -221,7 +221,9 @@ fn a_stored_title_that_no_hit_reads_still_streams_the_document() {
     let dir = fixtures();
     for format in ["17", "17 SQ SR"] {
         let mut env = BATCHES.to_vec();
-        env.push(("LOSAT_X_STATS", "1"));
+        // The switch's own variable: the caller's `LOSAT_X_DEFAULT` is kept (`command`), and with
+        // `LOSAT_X_DEFAULT=0` (the reference step of CI) the switch would not act.
+        env.extend([("LOSAT_X_STATS", "1"), ("LOSAT_X_RPTSTREAM", "1")]);
         let output = run_in(
             &dir,
             &[

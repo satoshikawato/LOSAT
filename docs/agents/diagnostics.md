@@ -240,7 +240,8 @@ their variables mean
   more threads, several subjects); `BPSEED` acts on the two-hit seed stage only; `BPDIAG` acts only
   in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
   in `BPDIAG`'s AVX2 batch; `BPGAP` runs the
-  vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPLUT` declines in
+  vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPGAP16` acts only
+  in `BPGAP`'s vector alignment, where its costs fit 16 bits; `BPLUT` declines in
   diagnostics mode; `BPQBLOCK` takes the block path only for one `-outfmt 6` report (with
   `BPQBLOCKFMT`, one outfmt 0, 6 or 7 report; with `BPQBLOCKSA`, one outfmt 8, 9 or 12 report; with
   `BPQBLOCKXML`, one outfmt 5 report) with more than one block (see its entry), and
@@ -3848,6 +3849,18 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_BPGAPSHADOW=1` runs both for every restricted alignment and stops (panic) if
   `(a_offset, b_offset, best_score)` differ; one `[X_SHADOW] BPGAP compared= not_taken=` line on
   stderr at the end. With `LOSAT_X_STATS=1` a `[X_STATS] BPGAP fast= not_taken=` line.
+- `LOSAT_X_BPGAP16=1` (BLASTP, speed; in the strict set from the pull request that added it,
+  2026-10-23; `=0` turns it off; acts only where `LOSAT_X_BPGAP` runs its vector alignment) the
+  restricted gapped alignment's rows in 16-bit lanes, sixteen cells per step instead of eight
+  (`restricted_rows16_avx2` in `blastp/x_restricted_gap.rs`, exactness argument in its header,
+  "Sixteen-bit rows"): cells, column gaps and the row gap in 16 bits with saturating sums,
+  `i16::MIN` where the 32-bit rows hold `MININT`. Taken where the X-drop and `gap_open + gap_extend`
+  are at most 4,096, `gap_extend` at most 256 and the largest matrix entry at most 4,096 (every
+  matrix and gap cost pair blastp supports); a row starts in 16 bits only while the best score is at
+  most 32,767 - largest entry - 16 x `gap_extend` - 1 (32,739 for BLOSUM62 with 11/1), and past that
+  the 32-bit rows compute the alignment again from row 0. x86_64 with AVX2, BMI1 and LZCNT only:
+  aarch64 and WebAssembly keep the reference function (no AVX-512 on the default path).
+  `LOSAT_X_BPGAPSHADOW=1` compares these rows with the reference function too.
 - `LOSAT_X_PAIRPAR=1` TBLASTX seed stage (scan, two-hit test, ungapped extension) of each subject
   as units of (subject frame, chunk, query context), 36 per one-query pair, on the search pool (in
   order on the calling thread with one thread); each unit scans with a lookup table holding only its

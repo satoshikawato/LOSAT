@@ -1110,7 +1110,7 @@ fn search_cli(
     //         formatter.PrintProlog();
     // ```
     // The XInclude formats written to standard output fail after the formatter is made.
-    crate::blastinput::app::xinclude_check(choice)?;
+    crate::blastinput::app::xinclude_check_for(choice, args.out.as_deref())?;
     // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-277
     // ```c++
     //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {
@@ -1899,6 +1899,7 @@ fn search(
                 db_gencode: i32::from(resolved.db_gencode),
             },
             xml_taxa,
+            args.out.as_deref(),
         )?;
         crate::utils::xtiming::add(crate::utils::xtiming::Phase::Output, t_output);
         // The failed batch's reading messages, then its error.

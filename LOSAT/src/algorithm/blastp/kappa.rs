@@ -2287,7 +2287,7 @@ pub(crate) fn postprocess_preliminary_hits(
 //                                     &subject_composition,
 //                                     subject.length,
 // ```
-// EXPERIMENT (LOSAT_X_NEWTONLANES), BLASTP: for a group of local matches of one query (those without
+// Newton lanes, BLASTP: for a group of local matches of one query (those without
 // HSPs, or already ended by `BlastCompo_EarlyTermination` with the current heaps, are skipped), the
 // input of each match's first `Blast_AdjustScores` call as the redo of `postprocess_preliminary_hits`
 // builds it: preliminary hits, incoming alignments, protein windows, the first window with an

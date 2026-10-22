@@ -188,7 +188,7 @@ fn erfc_ncbi(z: f64) -> f64 {
             return 2.0;
         }
     }
-    // EXPERIMENT (LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
+    // Memo (was LOSAT_X_ERFMEMO): ErfC is a pure function of its argument and
     // BLAST_SpougeEtoS (blast_stat.c:5236-5282) asks for the same arguments again
     // for every subject of the same length; keep the last results per thread.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:252-255
@@ -214,40 +214,22 @@ fn erfc_ncbi(z: f64) -> f64 {
     // NCBI calls ErfC again with the same arguments for every candidate score `b` of every
     // subject length. The memo returns the value the first call computed for the same bits of
     // `z`; ErfC reads nothing else, so this is reuse only.
-    if x_erf_memo() {
-        let key = z.to_bits();
-        return X_ERFC_MEMO.with(|memo| {
-            let mut memo = memo.borrow_mut();
-            let slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 52) as usize;
-            let (stored, value) = memo[slot];
-            if stored == key {
-                return f64::from_bits(value);
-            }
-            let result = erf_impl_ncbi(z, true);
-            // A key of all ones marks an empty slot; that argument (a NaN) is
-            // simply never stored.
-            if key != u64::MAX {
-                memo[slot] = (key, result.to_bits());
-            }
-            result
-        });
-    }
-    erf_impl_ncbi(z, true)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:252-255
-// ```c
-// double ErfC(double z)
-// {
-//     return ErfImpl(z, TRUE);
-// }
-// ```
-// No NCBI counterpart: the switch is read once per process. It chooses between calling
-// `erf_impl_ncbi` (the port of ErfC above) and reusing an earlier result of that call.
-fn x_erf_memo() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_ERFMEMO"))
+    let key = z.to_bits();
+    X_ERFC_MEMO.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        let slot = (key.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 52) as usize;
+        let (stored, value) = memo[slot];
+        if stored == key {
+            return f64::from_bits(value);
+        }
+        let result = erf_impl_ncbi(z, true);
+        // A key of all ones marks an empty slot; that argument (a NaN) is
+        // simply never stored.
+        if key != u64::MAX {
+            memo[slot] = (key, result.to_bits());
+        }
+        result
+    })
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:58-59

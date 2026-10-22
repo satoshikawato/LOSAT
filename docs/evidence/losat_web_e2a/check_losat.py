@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Compare LOSAT with the frozen NCBI -subject fixtures (LOSAT/tests/outfmt0_manifest.tsv: outfmt 0, 6
 and 7, and 8, 9 and 12 in the rows sa.*, 5 for all five programs, 15 and 16 (BLAST JSON and XML2) for
-all five programs, and 17 (SAM) for BLASTN, whose @PG CL tag is not compared).
+all five programs, 13 and 14 (the same as side files and a master file) for every program, and 17 (SAM) for
+BLASTN, whose @PG CL tag is not compared).
 
 Every fixture runs from LOSAT/ as `LOSAT <program> <search_argv>` (the arguments of the
 oracle run). Its stdout must equal LOSAT/tests/fixtures/outfmt0/<fixture_id>.out byte for
 byte, and its stderr must equal <fixture_id>.err when the manifest records stderr
 (otherwise LOSAT must write nothing to stderr). Prints one line per fixture, with the
 first differing line of a difference, and exits 1 on any difference.
+
+A row whose `files` column is `xinclude` (outfmt 13 or 14) runs with `-out <tmp>/<fixture_id>.out`;
+its master file must equal <fixture_id>.out, each side file <fixture_id>.out_<n>.json|xml, their
+number the frozen number, and standard output must be empty (LOSAT/tests/xinclude_fixtures.py).
 
 A row with the contract `approved_db_gencode_deviation` (AGENTS.md's approved TBLASTX
 exception: LOSAT's local search applies a non-default -db_gencode to the subject) is
@@ -26,7 +31,7 @@ import sys
 from pathlib import Path
 import subprocess
 
-from run_oracle import DEVIATION, ENGINE, is_sam_outfmt, outfmt, read_manifest, search_argv, strip_sam_cl
+from run_oracle import DEVIATION, ENGINE, is_sam_outfmt, outfmt, read_manifest, search_argv, strip_sam_cl, xinclude
 
 FIXTURES = ENGINE / "tests/fixtures/outfmt0"
 
@@ -80,8 +85,13 @@ def main() -> int:
             if row["program"] in programs and row["fixture_id"].startswith(args.only)]
     for row in rows:
         threads = ["-num_threads", str(args.threads)] if args.threads else []
-        run = subprocess.run([str(args.losat.resolve()), row["program"], *search_argv(row), *threads],
-                             cwd=ENGINE, capture_output=True)
+        command = [str(args.losat.resolve()), row["program"], *search_argv(row), *threads]
+        files = xinclude.wants_files(row)
+        if files:
+            written = xinclude.run_with_files(command, row["fixture_id"], outfmt(row), cwd=ENGINE)
+            run = written.run
+        else:
+            run = subprocess.run(command, cwd=ENGINE, capture_output=True)
         expected_err_path = FIXTURES / f"{row['fixture_id']}.err"
         expected_err = expected_err_path.read_bytes() if row["stderr_sha256"] else b""
         expected_out = (FIXTURES / f"{row['fixture_id']}.out").read_bytes()
@@ -95,6 +105,8 @@ def main() -> int:
             observed, expected = normalize_database_lines(run.stdout), normalize_database_lines(database_out)
             if observed != expected:
                 problems.append("stdout (database oracle) " + first_difference(expected, observed))
+        elif files:
+            problems += xinclude.problems(written, row, FIXTURES, first_difference)
         elif is_sam_outfmt(outfmt(row)):
             # A SAM row (outfmt 17) differs from NCBI's in the CL tag of its @PG line only
             # (`strip_sam_cl`): LOSAT writes its own command line.

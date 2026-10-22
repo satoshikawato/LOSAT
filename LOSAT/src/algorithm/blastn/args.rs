@@ -379,6 +379,19 @@ pub struct BlastnArgs {
     /// Reference: ncbi-blast/c++/src/algo/blast/blastinput/cmdline_flags.cpp:135
     #[arg(long = "subject_besthit", default_value_t = false)]
     pub subject_besthit: bool,
+    // NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3335-3340
+    // ```c
+    // CHspFilteringArgs::ExtractAlgorithmOptions(const CArgs& args,
+    //                                            CBlastOptions& opts)
+    // {
+    //     if (args[kArgCullingLimit]) {
+    //         opts.SetCullingLimit(args[kArgCullingLimit].AsInteger());
+    //     }
+    // ```
+    /// If the query range of a hit is enveloped by that of at least this many
+    /// higher-scoring hits, delete the hit (default: 0, no culling).
+    #[arg(long, default_value_t = 0, value_parser = nonnegative_ncbi_integer)]
+    pub culling_limit: i32,
     // NCBI blastn has no such option (the LOSAT-only option was removed, AGENTS.md rule 5).
     #[arg(skip = false)]
     pub verbose: bool,

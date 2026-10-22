@@ -1095,6 +1095,50 @@ fn output_capabilities_fail_explicitly_and_help_is_canonical() {
     }
 }
 
+// NCBI reference: c++/src/algo/blast/blastinput/blast_args.cpp:3292-3333
+// ```c++
+//     arg_desc.AddDefaultKey(kArgCullingLimit, "int_value",
+//                            "If the query range of a hit is enveloped by that of at least this many "
+//                            "higher-scoring hits, delete the hit",
+//                            CArgDescriptions::eInteger,
+//                            NStr::IntToString(kDfltArgCullingLimit));
+//     arg_desc.SetConstraint(kArgCullingLimit, new CArgAllowValuesGreaterThanOrEqual(0));
+// ```
+// BLASTN reads `-culling_limit` as a non-negative integer (a hexadecimal value too, as
+// NCBI's argument parser does); BLASTP and TBLASTN still refuse it.
+#[test]
+fn blastn_accepts_culling_limit_as_ncbi_does() {
+    let limit = |words: &[&str]| -> Result<i32, String> {
+        match parse("blastn", words) {
+            Ok(cli) => match cli.command {
+                Commands::Blastn(args) => Ok(args.culling_limit),
+                _ => unreachable!("blastn"),
+            },
+            Err(error) => Err(LOSAT::cli::render_message(&error)),
+        }
+    };
+    assert_eq!(limit(&[]), Ok(0));
+    assert_eq!(limit(&["-culling_limit", "0"]), Ok(0));
+    assert_eq!(limit(&["-culling_limit", "1"]), Ok(1));
+    assert_eq!(limit(&["-culling_limit", "0x2"]), Ok(2));
+    assert_eq!(limit(&["-culling_limit", "2147483647"]), Ok(2147483647));
+    for bad in ["-1", "1.5", "abc", "2147483648"] {
+        let error = limit(&["-culling_limit", bad]).unwrap_err();
+        assert!(!error.contains("is not supported by"), "{bad}: {error}");
+    }
+    for program in ["blastp", "tblastn"] {
+        let error =
+            LOSAT::cli::render_message(&parse(program, &["-culling_limit", "2"]).unwrap_err());
+        assert!(
+            error.contains(&format!(
+                "is not supported by LOSAT's {}",
+                program.to_ascii_uppercase()
+            )),
+            "{program}: {error}"
+        );
+    }
+}
+
 // NCBI blastp 2.17.0+ -help options that LOSAT's BLASTP does not implement, and the NCBI C++
 // Toolkit's standard options (ncbiargs.cpp:78-87), are rejected explicitly.
 #[test]

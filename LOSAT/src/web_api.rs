@@ -280,6 +280,7 @@ fn parse_blastn_args(
         query_loc: None,
         subject_loc: None,
         subject_besthit: false,
+        culling_limit: 0,
         verbose: false,
         scan_step: 0,
         outfmt: "6".to_string(),

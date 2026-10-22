@@ -25,6 +25,9 @@ pub struct Defline {
     /// (`fix_visible_chars`). NCBI posts an error message for each of them every
     /// time it reads the definition line; makeblastdb stores none.
     pub replaced_title_bytes: usize,
+    /// `taxid` of the definition line, 0 unless `decode_defline_taxids` read it (a value
+    /// above `i32::MAX`, which makeblastdb does not write, reads as `i32::MAX`).
+    pub taxid: i32,
 }
 
 // NCBI reference (598d8ae6): c++/include/serial/impl/objstrasnb.hpp:71-130
@@ -57,6 +60,7 @@ const MAX_SKIP_DEPTH: u32 = 8;
 /// Member tags of `Blast-def-line` (blastdb.asn:34-46, in order).
 const DEFLINE_TITLE: u8 = 0;
 const DEFLINE_SEQID: u8 = 1;
+const DEFLINE_TAXID: u8 = 2;
 const DEFLINE_LAST_MEMBER: u8 = 5;
 /// `general` is the eleventh alternative of `Seq-id` (seqloc.asn:25-35).
 const SEQID_GENERAL: u8 = 10;
@@ -363,6 +367,24 @@ const PARSED_SEQIDS: &str = "the database stores parsed Seq-ids (makeblastdb -pa
 /// Decodes the `Blast-def-line-set` of one sequence. An empty record gives no
 /// definition line, as in NCBI.
 pub fn decode_defline_set(record: &[u8], path: &Path) -> Result<Vec<Defline>, SeqDbError> {
+    decode_deflines(record, path, false)
+}
+
+/// The `taxid` of each definition line of one sequence's record (0 for none), which the XML2
+/// and JSON formats show (`Hit` description). It is decoded apart from `decode_defline_set`,
+/// which skips it, so that no other report reads it.
+pub fn decode_defline_taxids(record: &[u8], path: &Path) -> Result<Vec<i32>, SeqDbError> {
+    Ok(decode_deflines(record, path, true)?
+        .into_iter()
+        .map(|defline| defline.taxid)
+        .collect())
+}
+
+fn decode_deflines(
+    record: &[u8],
+    path: &Path,
+    want_taxid: bool,
+) -> Result<Vec<Defline>, SeqDbError> {
     let mut deflines = Vec::new();
     if record.is_empty() {
         return Ok(deflines);
@@ -375,7 +397,7 @@ pub fn decode_defline_set(record: &[u8], path: &Path) -> Result<Vec<Defline>, Se
     ber.expect_tag(TAG_SEQUENCE, "Blast-def-line-set")?;
     let set_end = ber.open()?;
     while !ber.at_end(set_end)? {
-        deflines.push(decode_defline(&mut ber)?);
+        deflines.push(decode_defline(&mut ber, want_taxid)?);
     }
     if ber.pos != record.len() {
         return Err(ber.format("unexpected data after Blast-def-line-set"));
@@ -383,12 +405,13 @@ pub fn decode_defline_set(record: &[u8], path: &Path) -> Result<Vec<Defline>, Se
     Ok(deflines)
 }
 
-fn decode_defline(ber: &mut Ber<'_>) -> Result<Defline, SeqDbError> {
+fn decode_defline(ber: &mut Ber<'_>, want_taxid: bool) -> Result<Defline, SeqDbError> {
     ber.expect_tag(TAG_SEQUENCE, "Blast-def-line")?;
     let defline_end = ber.open()?;
     let mut title = Vec::new();
     let mut replaced_title_bytes = 0;
     let mut volume_ordinal = None;
+    let mut taxid = 0;
     let mut next_member = DEFLINE_TITLE;
     while !ber.at_end(defline_end)? {
         let tag = ber.tag()?;
@@ -419,6 +442,11 @@ fn decode_defline(ber: &mut Ber<'_>) -> Result<Defline, SeqDbError> {
                 }
                 ber.close(member_end, "the Seq-id list")?;
             }
+            // The taxid is read only when asked for (`decode_defline_taxids`).
+            DEFLINE_TAXID if want_taxid => {
+                taxid = i32::try_from(ber.integer()?).unwrap_or(i32::MAX);
+                ber.close(member_end, "the taxid")?;
+            }
             // taxid, memberships, links, other-info: not used by LOSAT.
             _ => {
                 while !ber.at_end(member_end)? {
@@ -434,6 +462,7 @@ fn decode_defline(ber: &mut Ber<'_>) -> Result<Defline, SeqDbError> {
         title,
         volume_ordinal,
         replaced_title_bytes,
+        taxid,
     })
 }
 

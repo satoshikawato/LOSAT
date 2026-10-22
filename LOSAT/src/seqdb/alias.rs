@@ -767,6 +767,30 @@ impl SearchPath {
                 None => exists(Path::new(attempt)),
             })
     }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:453-462
+    // ```c++
+    // string SeqDB_ResolveDbPath(const string & filename)
+    // {
+    //     CSeqDB_SimpleAccessor access;
+    //
+    //     return s_SeqDB_FindBlastDBPath(filename,
+    //                                    '-',
+    //                                    0,
+    //                                    true,
+    //                                    access);
+    // }
+    // ```
+    // `exact` is true, so `s_SeqDB_TryPaths` takes the file name as it is
+    // (the `dbtype` `'-'` is not used) and returns the first directory of the
+    // search path in which `CFile::GetLength` finds a regular file of that
+    // name; the search path is `CSeqDBAtlas::GenerateSearchPath()` (the
+    // string of this `SearchPath`).
+    /// `SeqDB_ResolveDbPath`: the first directory of the path that holds a
+    /// regular file `filename`, joined with it (`None`: NCBI's empty string).
+    pub fn resolve_file(&self, filename: &str) -> Option<String> {
+        self.find(filename, None)
+    }
 }
 
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbcommon.cpp:1762-1807

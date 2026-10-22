@@ -382,6 +382,7 @@ export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNPAR=1
 export LOSAT_X_TBNQSIDE=1
 export LOSAT_X_TBNSCANBF=1
+export LOSAT_X_TBNSCANBYTE=1
 export LOSAT_X_TBNSSIDE=1
 export LOSAT_X_TBNSTATE=1
 export LOSAT_X_TBNSTORE=1
@@ -3585,6 +3586,35 @@ Scheduling (each value computed by one thread with the original function; order 
   (`x_candidates_w3c5`, #273: cycles -6.0 % on the human and zebrafish genomes x one protein). An
   AVX2 form of the loop (`vpgatherdd` of the presence words) cut instructions by a third but was 2-7
   % slower (IPC 3.6 -> 2.3) and is not used.
+- `LOSAT_X_TBNSCANBYTE=1` tblastn (speed; in the strict set from the pull request that added it,
+  2026-10-21; `=0` turns it off; on by default where the CPU has AVX2, changes nothing elsewhere;
+  `tblastn/x_scan_byte.rs`, exactness argument in its header): for tblastn's table (word size 3,
+  5-bit letters) the lookup scan of the unit path (`x_scan_unit`) makes the table indexes of a block
+  of 256 words from the letters directly (`l[s] << 10 | l[s+1] << 5 | l[s+2]`, 16 at a time with
+  AVX2, no chain from word to word as in the rolled index) and lists the candidates from a presence
+  vector with one byte per index (32 KB, built once per table and thread). The copy then takes each
+  candidate once: while three hits for every candidate left fit in the offset array (one test, made
+  again only after a cell of more hits), a cell of up to three hits is written without a test (one
+  32-byte store with AVX2); a cell of more hits takes NCBI's test and is copied from the overflow
+  array four pairs at a time; a candidate met while the block could fill the array takes NCBI's test,
+  so the scan stops at the same word and every call returns NCBI's pairs and scan range (test
+  `x_scan_byte_equals_ncbi_scan_on_random_subjects` against `s_blast_aa_scan_subject_one_range`,
+  both forms). The offset array has four entries more. `LOSAT_X_TBNSCANBYTE=2` takes plain loops of
+  the same form on any CPU (not the default anywhere: one core on the workstation, one protein x
+  the human genome x0.79, the LOSAT Web serial reactor one protein x E. coli x0.83, but x1.01-1.06
+  where most words are candidates). Tables of other shapes, CPUs without AVX2 and
+  `LOSAT_X_DEFAULT=0` keep the scans before (`TBNSCANBF`, NCBI's loop). Shadow:
+  `LOSAT_X_TBNSCANBYTESHADOW=1` also runs NCBI's loop on every scan call (the AVX2 forms where AVX2 is
+  there unless `=2`, else the plain loops) and stops (panic) if the count, a pair or the scan range
+  differs; one `[X_SHADOW] TBNSCANBYTE calls_compared= pairs_compared=` line at the end. With
+  `LOSAT_X_STATS=1` a line `[X_STATS] TBNSCANBYTE units= calls= avx2=` gives the units and scan calls
+  taken this way (`tests/tblastn_scan_byte.rs` reads both). Timed on the workstation (one booked
+  core, against `TBNSCANBF`, same output): one protein x the human genome `-db` x0.754 (20.75 ->
+  15.65 s; cycles x0.720), fly proteins x the fly genome `-db` x0.988-0.990, 16 batches x E. coli
+  `-db` x0.993-0.995, AP027131 x MG1655 x0.978-0.980, 55 proteins x 16S x0.984. At 8 threads (8 booked cores, warmed 3 s,
+  4 rounds, medians of the per-round ratios): x0.828 (3.43 -> 2.84 s), x0.981, x0.997 (x0.977-1.021),
+  x0.985, x0.982 in the same order.
+  Probe: line F P3 (V2) and P3b (arm 7, `exp/f2-tbn-scan`).
 - `LOSAT_X_TBNHITBF=1` tblastn (speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` turns it off) the two-hit loop of the unit path (`XTwoHit::pairs`, every offset array
   the scan fills; `tblastn/x_tbn_hitbf.rs`, exactness argument in its header) takes the two outcomes most

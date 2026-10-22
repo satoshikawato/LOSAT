@@ -239,6 +239,7 @@ fn main() -> Result<()> {
     LOSAT::algorithm::tblastn::x_subject_translate_print_summary();
     LOSAT::algorithm::tblastn::x_subject_store_print_summary();
     LOSAT::algorithm::tblastn::x_scan_bf_print_summary();
+    LOSAT::algorithm::tblastn::x_scan_byte_print_summary();
     LOSAT::algorithm::tblastn::x_link_window_print_summary();
     LOSAT::algorithm::tblastn::x_tbn_hitbf_print_summary();
     LOSAT::algorithm::blastn::x_subject_store_print_summary();

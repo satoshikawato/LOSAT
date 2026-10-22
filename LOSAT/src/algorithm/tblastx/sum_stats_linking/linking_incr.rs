@@ -359,7 +359,12 @@ impl<K: Copy + Ord + Default> MaxTree<K> {
             let l = self.nodes[pos * 2];
             let r = self.nodes[pos * 2 + 1];
             let m = [l[0].max(r[0]), l[1].max(r[1])];
-            if self.nodes[pos] == m {
+            // wasm32 runs the 16-byte array compare as a byte loop over a stack copy of `m`.
+            #[cfg(target_arch = "wasm32")]
+            let same = self.nodes[pos][0] == m[0] && self.nodes[pos][1] == m[1];
+            #[cfg(not(target_arch = "wasm32"))]
+            let same = self.nodes[pos] == m;
+            if same {
                 break;
             }
             self.nodes[pos] = m;

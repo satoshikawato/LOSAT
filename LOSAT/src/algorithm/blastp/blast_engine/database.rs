@@ -36,6 +36,7 @@ use crate::blastinput::fasta_reader::FastaRecord;
 use crate::blastinput::ncbi_environment::ApplicationSettings;
 #[cfg(test)]
 use crate::cli::NativeError;
+use crate::report::blast_xml::HitTaxonomy;
 use crate::report::pairwise::PairwiseDatabase;
 use crate::seqdb::{BlockRange, SeqDb, SeqDbError, SeqType, SequenceBlock};
 use crate::stats::search_space::SearchSpace;
@@ -103,6 +104,8 @@ const BLOCKS_PER_THREAD: usize = 8;
 pub(super) struct BlastpDatabase {
     db: SeqDb,
     name: String,
+    /// The taxonomy database of this run, opened at the first name asked for (outfmt 15 and 16).
+    taxdb: shared::TaxdbRun,
 }
 
 /// The program that LOSAT's refusals name.
@@ -128,6 +131,7 @@ impl BlastpDatabase {
         Ok(Self {
             db,
             name: name.to_string(),
+            taxdb: shared::TaxdbRun::default(),
         })
     }
 
@@ -969,6 +973,38 @@ impl ListedTitles<'_> {
             )?;
         }
         Ok(())
+    }
+
+    /// The Blast-def-line taxid of each reported subject by rank (0 for none and for a
+    /// subject in no final hit list), which the XML2 and JSON formats write in the `Hit`
+    /// description, and what the taxonomy database says about it. They are read apart from the
+    /// titles, for those formats only.
+    ///
+    /// NCBI writes the scientific name of a taxid when it finds `taxdb.bti` on the search path
+    /// (`data4xml2format.cpp x_InitCommon`, `blastxml2_format.cpp:380-386`; validity is not
+    /// checked): `taxonomy[rank]` is then `Named`, or `NotFound` when the taxonomy database does
+    /// not know the taxid (the description is the id alone). Without `taxdb.bti`, or without a
+    /// taxid, `taxonomy` is empty. A scientific name that NCBI's XML stream cannot write, and a
+    /// taxonomy database that LOSAT cannot read as NCBI does, are refusals made here, before any
+    /// byte is written.
+    ///
+    /// NCBI's messages about the taxonomy database go to standard error: those of opening and of
+    /// the lookup that the volume makes for each taxid of a fetched subject (`CSeqDBVol::
+    /// x_GetTaxonomy`, once per volume and taxid) are returned as `TaxdbNotes`, which
+    /// `write_blastp_xml` writes at the first `Hit` that needs them, and those of the lookup of
+    /// each `Hit` are written there too.
+    pub(super) fn read_taxids(
+        &self,
+        database: &BlastpDatabase,
+        hit_lists: &[Option<BlastpHitList>],
+    ) -> Result<(Vec<i32>, Vec<HitTaxonomy>, shared::TaxdbNotes)> {
+        shared::read_reported_taxids(
+            &database.db,
+            &database.taxdb,
+            &self.listed.ordinals,
+            &Self::reported(hit_lists),
+            PROGRAM,
+        )
     }
 
     /// The ranks of the subjects with rows in `hit_lists` (the final hit lists).

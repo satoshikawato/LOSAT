@@ -396,7 +396,7 @@ pub(crate) enum XBlockReport {
 // ```
 // The refusals of the XML report (`write_blastp_xml`) come before its first byte; a block would
 // make them after the bytes of the blocks before. These are the writer's own checks, made for the
-// whole run before the first block (`names::check_text`, `names::xml_query_def`,
+// whole run before the first block (`names::check_text`, `names::xml_query_title`,
 // `query_warnings::warning_query_id`, `names::xml_subject_names`); when one fails the search of
 // all queries runs and refuses where it does today.
 /// EXPERIMENT (LOSAT_X_BPQBLOCKXML): whether the database name and every query's definition line and
@@ -413,7 +413,7 @@ pub(crate) fn x_block_xml_run_allowed(
     names::check_text(db_name.as_bytes()).is_ok()
         && x_all_in_groups(queries.len(), pool, |range| {
             queries[range].iter().all(|record| {
-                names::xml_query_def(&record.title, true).is_ok()
+                names::xml_query_title(&record.title, true).is_ok()
                     && names::check_text(&crate::report::query_warnings::warning_query_id(
                         record.local_id.as_bytes(),
                         &record.title,

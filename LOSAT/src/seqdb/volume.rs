@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::file::DbFile;
-use super::header::{decode_defline_set, Defline};
+use super::header::{decode_defline_set, decode_defline_taxids, Defline};
 use super::index::{self, IndexFile};
 use super::{SeqDbError, SeqType, XDbIdxRead};
 
@@ -370,6 +370,15 @@ impl Volume {
         self.check_range(oid, oid.saturating_add(1))?;
         let (start, end) = self.index.header_range(oid)?;
         self.hdr_file()?.read_range(start, end)
+    }
+
+    /// The `taxid` of each definition line of the sequence `oid` (volume-relative), 0 for none.
+    pub fn defline_taxids(&self, oid: u32) -> Result<Vec<i32>, SeqDbError> {
+        let record = self.header_bytes(oid)?;
+        decode_defline_taxids(
+            &record,
+            &with_extension(&self.base, self.index.seqtype, "hr"),
+        )
     }
 
     /// The definition lines of the sequence `oid` (volume-relative), with

@@ -37,7 +37,9 @@
 //!   by the query's and the
 //!   subject's own range start (`shift_to_records`), and the rows, outfmt 7 headers and outfmt 0
 //!   sections are written query by query from the query's list, record, masks, blocks and search
-//!   space, the subject records and the options. BLASTN has no culling and no cross-query sort.
+//!   space, the subject records and the options. BLASTN has no cross-query sort, and its culling
+//!   (`-culling_limit`, `culling.rs`) is NCBI's pipe, which culls each query's tree on its own and is the first
+//!   step of `finish_query_hit_list`.
 //!   The writers write the queries in order, so the reports of consecutive batches written one
 //!   after the other are the reports of all of them. A query's warnings come before its report
 //!   in both (`QueryWarnings`), with the first format (or all at once without a format).
@@ -172,7 +174,8 @@ pub(super) enum Off {
     Debug,
     /// Scoring options without Karlin-Altschul values, or greedy gap costs that LOSAT refuses.
     Scoring,
-    /// `-outfmt 5` (BLAST XML), which is written after the loop (the module doc has the reason).
+    /// `-outfmt 5` (BLAST XML), 15 and 16 (the XML2 / JSON documents), which are written after
+    /// the loop (the module doc has the reason).
     Xml,
     /// A negative `CHUNK_SIZE`.
     ChunkSize,
@@ -593,7 +596,10 @@ fn check(
     // the query or the subject. With several batches a later batch's refusal would come after
     // the first batch's Iterations were written, so outfmt 5 is never streamed: the one report
     // call after the search finds every refusal before the first byte.
-    if output_formats.contains(&BlastnOutputFormat::Xml) {
+    if output_formats
+        .iter()
+        .any(|format| format.is_structured_xml())
+    {
         return Err(Off::Xml);
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/blastinput/blast_input.cpp:138-170
@@ -1000,13 +1006,23 @@ mod tests {
         );
         // The shadow mode checks the same.
         assert!(checked(2, &[], &good, 10, 4000, plain, &mut outputs).is_ok());
-        // BLAST XML is never streamed, with one batch (20,000 letters) or several.
+        // BLAST XML, XML2 and JSON (outfmt 5, 16 and 15) are never streamed, with one batch
+        // (20,000 letters) or several.
         for batch_size in [20_000, 4000] {
-            let xml = [BlastnOutputFormat::Xml];
-            assert_eq!(
-                checked_as(&xml, 1, &[], &good, 10, batch_size, plain, &mut outputs).err(),
-                Some(Off::Xml)
-            );
+            for xml in [
+                [BlastnOutputFormat::Xml],
+                [BlastnOutputFormat::Xml2(
+                    crate::report::blast_xml2::Xml2Kind::Single16,
+                )],
+                [BlastnOutputFormat::Xml2(
+                    crate::report::blast_xml2::Xml2Kind::Single15,
+                )],
+            ] {
+                assert_eq!(
+                    checked_as(&xml, 1, &[], &good, 10, batch_size, plain, &mut outputs).err(),
+                    Some(Off::Xml)
+                );
+            }
         }
     }
 

@@ -220,7 +220,7 @@ impl Encoder for AsnBinaryEncoder<'_> {
         self.end_of_content();
     }
 
-    fn variant(&mut self, _name: &str, tag: u8) {
+    fn variant(&mut self, _type_name: &str, _name: &str, tag: u8) {
         self.context_open(tag);
     }
 

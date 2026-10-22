@@ -4237,7 +4237,7 @@ Scheduling (each value computed by one thread with the original function; order 
   the subject scan and the two-hit diagonal test in one loop, with the hits of one lookup cell tested in
   batches of eight (`blastx/x_seed_diag.rs`, exactness argument in its header): blastx calls blastp's
   fused scan of `LOSAT_X_BPSEED` with the cell test of `LOSAT_X_BPDIAG` (the AVX2 batch on an x86-64 CPU
-  with AVX2, the per-hit loop elsewhere), and the hits that pass the test go to the reference's context
+  with AVX2, by default in the form of `LOSAT_X_BXDEFER`; the per-hit loop elsewhere), and the hits that pass the test go to the reference's context
   check, extension, save and entry update unchanged (the context from blastp's `XContextTable`, made once
   per query batch and thread, which gives the binary search's index). It rests on blastx's entries being
   NCBI's `DiagStruct`, as blastp's are. `LOSAT_X_BXDIAG=per-hit` and `LOSAT_X_BXDIAG=scalar` force a cell test
@@ -4245,7 +4245,7 @@ Scheduling (each value computed by one thread with the original function; order 
   the diagonal table for every subject and stops at a difference of the hit lists or the tables (the
   tables are not compared for a subject shorter than a word less one letter, whose one scan position the
   reference reads past the sentinel); at exit `[X_SHADOW] BXDIAG subjects_compared=N ...`. With
-  `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2|scalar|per-hit> subjects= cells= batched_hits=
+  `LOSAT_TIMING=1`: `[TIMING] blastx_diag: mode=<avx2-defer-masked|avx2|scalar|per-hit> subjects= cells= batched_hits=
   candidates= min_hits_per_cell= tables_fused= tables_other= hits_per_cell=LEAST-MOST`. A query batch whose
   lookup table has fewer hits per used backbone cell than `LOSAT_X_BXDIAGMIN` (in hundredths; built-in 500,
   `0` fuses every batch) is scanned by `LOSAT_X_BXSCAN`'s direct loop instead, which is faster there; the

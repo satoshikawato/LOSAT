@@ -80,7 +80,8 @@
 //! outcome is LOSAT_X_BPDEFER's: the coordinates are the same values; a repeated lane reads the
 //! first hit's entry before any lane of the batch stores (every load of a batch comes before its
 //! stores), so it stores the value lane 0 stores, and its candidate bit is dropped; the hits of the
-//! last batch lie on entries that no other hit of the cell and no other call touches (above), so
+//! last batch lie on entries that no other hit of the cell and no other call touches (above; the
+//! closure is handed only its candidate's entry, as the table is borrowed by the cell test), so
 //! testing them before the calls changes nothing a call reads, and the calls keep their order (the
 //! batches', then the last batch's lanes'). The two changes come from line R's probes of blastp's
 //! cell test (v4-R R2, 2026-10-18); blastp's loops keep their code (the masked batch has a scan
@@ -333,8 +334,9 @@ pub(crate) enum XDiagMode {
     /// LOSAT_X_BPDIAG with LOSAT_X_BPDIAG_SIMD=0 (diagnostic): batches of [`X_DIAG_LANES`] hits in
     /// scalar code ([`x_test_batch_scalar`]).
     Scalar,
-    /// LOSAT_X_BPDIAG with AVX2 and LOSAT_X_BPDEFER off: batches of eight hits in AVX2 registers
-    /// ([`x_test_batch_avx2`]); a cell's last batch of fewer than eight hits is a scalar batch.
+    /// LOSAT_X_BPDIAG with AVX2 and LOSAT_X_BPDEFER off (and blastx's fused loop with
+    /// LOSAT_X_BXDEFER off): batches of eight hits in AVX2 registers ([`x_test_batch_avx2`]); a
+    /// cell's last batch of fewer than eight hits is a scalar batch.
     #[cfg(target_arch = "x86_64")]
     Avx2,
     /// LOSAT_X_BPDIAG with AVX2 and LOSAT_X_BPDEFER: the AVX2 batches with the candidates of a
@@ -400,9 +402,9 @@ fn x_diag_mode() -> XDiagMode {
 // LOSAT_X_BXDEFER); it does not change any value NCBI computes.
 /// EXPERIMENT (LOSAT_X_BXDIAG): the cell test of blastx's fused seed loop
 /// (`blastx/x_seed_diag.rs`): `"per-hit"` or `"scalar"` when asked by name (diagnostics), otherwise
-/// the choice LOSAT_X_BPDIAG makes for blastp: the AVX2 batch where the CPU has AVX2, else the
-/// per-hit loop (the scalar batch was slower than the per-hit loop; module header). With `masked`
-/// (LOSAT_X_BXDEFER) the AVX2 batch is [`XDiagMode::Avx2DeferMasked`]'s.
+/// the AVX2 batch where the CPU has AVX2, else the per-hit loop, as LOSAT_X_BPDIAG chooses for
+/// blastp (the scalar batch was slower than the per-hit loop; module header). The AVX2 batch is
+/// [`XDiagMode::Avx2DeferMasked`] with `masked` (LOSAT_X_BXDEFER), [`XDiagMode::Avx2`] without.
 pub(crate) fn x_cell_test(requested: &str, masked: bool) -> XDiagMode {
     match requested {
         "per-hit" => XDiagMode::PerHit,
@@ -416,6 +418,7 @@ pub(crate) fn x_cell_test(requested: &str, masked: bool) -> XDiagMode {
                     XDiagMode::Avx2
                 };
             }
+            #[cfg(not(target_arch = "x86_64"))]
             let _ = masked;
             XDiagMode::PerHit
         }
@@ -1689,6 +1692,7 @@ where
 ///
 /// # Safety
 /// The CPU must have AVX2, and every coordinate must be at most `table.mask`.
+// NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
@@ -1771,8 +1775,9 @@ where
         let p = batch.as_ptr();
         let query = _mm256_loadu_si256(p.cast());
         // The coordinates from scalar loads of the hits, not taken out of `query`: the volatile
-        // reads keep the compiler from extracting them from the register, which starts the
-        // batch's chain of loads 3-6 cycles later (v4-R R2, 2026-10-18: blastp job -1.9 %).
+        // reads keep the compiler from extracting them from the register, which would start the
+        // chain of the entry loads 3-6 cycles later (line R's probe of blastp's cell test,
+        // 2026-10-18).
         // i < X_DIAG_LANES = batch.len()
         let lane_coords: [u32; X_DIAG_LANES] = std::array::from_fn(|i| {
             (std::ptr::read_volatile(p.add(i)).wrapping_sub(s) & mask) as u32
@@ -1809,10 +1814,7 @@ where
         let lane_coords: [u32; X_DIAG_LANES] =
             std::array::from_fn(|i| (lane_hits[i].wrapping_sub(s) & mask) as u32);
         debug_assert!(x_batch_coords_distinct(
-            &lane_coords[..n]
-                .iter()
-                .map(|&c| c as usize)
-                .collect::<Vec<_>>()
+            &lane_coords.map(|c| c as usize)[..n]
         ));
         // The repeated lanes' candidate bits are lane 0's; only lanes 0..n are hits.
         let lanes = x_batch_avx2_at(lane_coords, s, table, test) & ((1u32 << n) - 1);
@@ -2152,7 +2154,10 @@ mod tests {
         i32::MAX - 700,
     ];
 
-    const HIT_COUNTS: [usize; 13] = [0, 1, 2, 7, 8, 9, 15, 16, 17, 24, 64, 333, 1024];
+    // Every last-batch size alone (1-7) and after full batches (9-15, 17).
+    const HIT_COUNTS: [usize; 20] = [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 14, 15, 16, 17, 24, 64, 333, 1024,
+    ];
 
     // NCBI reference: c++/src/algo/blast/core/aa_ungapped.c:513-552 (quoted at `x_test_hit`)
     #[test]

@@ -6,7 +6,8 @@
 //! AVX2 cell test), and the reference runs here set it to `0`; its value `per-hit` or `scalar`
 //! forces a cell test, and `LOSAT_X_BXDIAGSHADOW` runs the reference beside it for
 //! every subject and stops at a difference. `LOSAT_X_BXDIAGMIN` sends the query batches with few
-//! hits per lookup cell to the other loop (`0`: none). So the properties under test are that the
+//! hits per lookup cell to the other loop (`0`: none). `LOSAT_X_BXDEFER` (strict set) makes the AVX2
+//! cell test the deferred calls with a masked last batch; `0` gives the AVX2 batch. So the properties under test are that the
 //! report, standard error without the diagnostic lines and the exit status equal those of the
 //! search with the switch off, with the default and every cell test, with `-subject` and `-db`, outfmt 6 and 7,
 //! one and three threads and a two-hit window other than the default, and with every batch, some
@@ -227,7 +228,6 @@ fn the_fused_seed_loop_gives_the_reports_of_the_reference() {
             ("", "0", ""),
             ("", "0", "0"),
             ("1", "0", ""),
-            ("1", "0", "0"),
             ("per-hit", "0", ""),
             ("scalar", "0", ""),
             ("1", "", ""),
@@ -399,5 +399,38 @@ fn the_batches_with_few_hits_per_cell_take_the_other_loop() {
             assert!(field(line, "subjects") >= 150, "{line}");
         }
         None => assert!(!avx2, "default with AVX2: no timing line: {}", run.stderr),
+    }
+    // LOSAT_X_BXDEFER=0 (the switch not set otherwise), and LOSAT_X_DEFAULT=0 with LOSAT_X_BXDIAG
+    // set: the fused loop with the AVX2 batch where the CPU has AVX2.
+    for (name, value, named) in [
+        ("LOSAT_X_BXDEFER", "0", false),
+        ("LOSAT_X_DEFAULT", "0", true),
+    ] {
+        let what = format!("{name}={value}");
+        let diag = if named { "1" } else { "" };
+        let run = blastx(
+            &args,
+            &[
+                (name, value),
+                ("LOSAT_X_BXDIAG", diag),
+                ("LOSAT_X_BXDIAGMIN", "0"),
+                ("LOSAT_TIMING", "1"),
+            ],
+        );
+        assert_eq!(run.code, Some(0), "{what}: {}", run.stderr);
+        assert!(run.stdout == reference.stdout, "{what}: report differs");
+        let line = run
+            .stderr
+            .lines()
+            .find(|line| line.starts_with("[TIMING] blastx_diag: "));
+        match line {
+            Some(line) => {
+                assert!(avx2 || named, "{what} without AVX2: {line}");
+                let mode = if avx2 { "mode=avx2 " } else { "mode=per-hit " };
+                assert!(line.contains(mode), "{what}: {line}");
+                assert!(field(line, "subjects") >= 150, "{what}: {line}");
+            }
+            None => assert!(!avx2 && !named, "{what}: no timing line: {}", run.stderr),
+        }
     }
 }

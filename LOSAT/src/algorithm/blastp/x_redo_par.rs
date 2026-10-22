@@ -35,7 +35,7 @@
 //!    (`x_newton_lanes_prefetch_matches`, as the one-thread loop calls it for the next matches);
 //!    then each match runs `postprocess_preliminary_hits` with the arguments of the one-thread loop,
 //!    with per-worker scratch (composition workspace, gapped-alignment scratch, and the
-//!    subject-range SEG cache backed by one `LOSAT_X_SEGSHARE` store for the search);
+//!    subject-range SEG cache backed by one shared store for the search);
 //! 5. the replay, per match in order: the early termination test (`BlastCompo_EarlyTermination`)
 //!    on the heaps of the query's batch; then the match's error, if it has one (the first error of
 //!    a match that the test does not end is the one the one-thread loop reports); then
@@ -174,7 +174,7 @@ use super::hsp::{
 };
 use super::kappa::{
     build_query_workspace, postprocess_preliminary_hits, x_newton_lanes_prefetch_matches,
-    x_seg_share, BlastRedoAlignParams, BlastpKappaQueryWorkspace, BlastpKappaSubjectRangeCache,
+    BlastRedoAlignParams, BlastpKappaQueryWorkspace, BlastpKappaSubjectRangeCache,
     BlastpPostprocessResult, XSharedSubjectRanges,
 };
 use super::x_prelim_compact::{x_expand_hit_list, XPrelimHsp};
@@ -1364,9 +1364,9 @@ where
     // (the initial matrix, kept once for the search) is the same for every query, so it is
     // reported here, before any match, as there.
     (search.build_redo_align_params)(0)?;
-    // EXPERIMENT (LOSAT_X_SEGSHARE): one store of masked subject ranges for the search, as in
-    // the query-parallel redo (`XSharedSubjectRanges`).
-    let shared = (x_seg_share() != 0).then(|| Arc::new(XSharedSubjectRanges::new()));
+    // One store of masked subject ranges for the search, as in the query-parallel redo
+    // (`XSharedSubjectRanges`).
+    let shared = Some(Arc::new(XSharedSubjectRanges::new()));
     let threads = search.threads.max(1);
     let limits = XWindowLimits {
         jobs: x_window_jobs_per_thread().saturating_mul(threads),

@@ -606,7 +606,7 @@ pub(super) struct XScanPlan {
 // ```
 // The six translated frames of one subject and the (frame, chunk, scan range) units in NCBI call
 // order.
-/// EXPERIMENT (LOSAT_X_TBNSSIDE): the part of a scan plan that depends on the
+/// Graduated 2026-10-22 (was `LOSAT_X_TBNSSIDE`): the part of a scan plan that depends on the
 /// subject only.
 pub(super) struct XSubjectPlan {
     pub frames: Vec<QueryFrame>,
@@ -652,8 +652,9 @@ impl Drop for XSubjectPlan {
 // s_BlastSearchEngineCore). The translation depends only on the subject, the genetic code and the
 // lowercase-masking option, so XSubjectSide keeps it for later batches. A reuse of the same value;
 // no value is computed differently.
-/// EXPERIMENT (LOSAT_X_TBNSSIDE): the subject plans of one search, by subject
-/// index.
+/// Graduated 2026-10-22 (was `LOSAT_X_TBNSSIDE`; its rule stays: plans are kept from
+/// `KEEP_FROM_BATCHES` batches on, up to `KEEP_LIMIT`): the subject plans of one search, by
+/// subject index.
 ///
 /// A plan (the six translated frames and their chunks) is a function of the
 /// subject, the genetic code and the lowercase-masking option. The search
@@ -710,13 +711,6 @@ impl XSubjectSide {
     /// median of 1.03 to 1.11 of the time with them. The saving does not start
     /// at this number; below it the search gives that time for the memory.
     pub(super) const KEEP_FROM_BATCHES: usize = 4;
-
-    /// `LOSAT_X_TBNSSIDE` set.
-    pub(super) fn enabled() -> bool {
-        use std::sync::OnceLock;
-        static ON: OnceLock<bool> = OnceLock::new();
-        *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNSSIDE"))
-    }
 
     /// EXPERIMENT (LOSAT_X_TBNKEEPFEW): a switch of the strict set (`utils/xswitch.rs`), on
     /// unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it a search of
@@ -782,8 +776,8 @@ impl XSubjectSide {
     }
 
     /// The subject plans of a search of `batches` query batches, or `None`
-    /// when the search keeps none: `on` is false (`enabled()` is off, or
-    /// `LOSAT_X_TBNKEEPFEW` keeps none, `kept_within_threads`), or there are
+    /// when the search keeps none: `on` is false (`LOSAT_X_TBNKEEPFEW` keeps
+    /// none, `kept_within_threads`), or there are
     /// fewer than `KEEP_FROM_BATCHES` batches. A kept plan is read by
     /// the batches after the first one that reaches its subject. A search of
     /// fewer batches makes its plans per use and drops them after the subject,
@@ -980,8 +974,7 @@ pub(super) fn x_scan_plan(
     x_lookup: &std::sync::OnceLock<
         std::sync::Arc<crate::algorithm::tblastx::lookup::BlastAaLookupTable>,
     >,
-    // EXPERIMENT (LOSAT_X_TBNSSIDE): the search's subject plans and this
-    // subject's index among them.
+    // The search's subject plans and this subject's index among them.
     x_subject: Option<(&XSubjectSide, usize)>,
 ) -> Result<Option<XScanPlan>> {
     // An unknown genetic code is refused before the subject length is looked at.
@@ -992,7 +985,7 @@ pub(super) fn x_scan_plan(
     if subject.len() < word_length * 3 + 2 {
         return Ok(None);
     }
-    // EXPERIMENT (LOSAT_X_TBNSSIDE): everything below that reads the subject.
+    // Everything below that reads the subject.
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:772-775,805-812
     // ```c
     //             BLAST_GetAllTranslations(backup.sequence, eBlastEncodingNcbi2na,
@@ -1070,8 +1063,8 @@ pub(super) fn x_scan_plan(
     //             subject->sequence = translation_buffer + frame_offsets[context] + 1;
     //             subject->length = frame_offsets[context+1] - frame_offsets[context] - 1;
     // ```
-    // Dispatch point: with LOSAT_X_TBNSSIDE the plan is the shared one (made by the first batch
-    // that reaches the subject); otherwise it is made here, as before.
+    // Dispatch point: with the search's subject plans the plan is the shared one (made by the
+    // first batch that reaches the subject); a search of fewer than four batches makes it here.
     let subject_plan = match x_slot {
         Some((side, slot)) => side.plan(slot, x_build_subject)?,
         None => x_build_subject()?,
@@ -2188,7 +2181,7 @@ mod tests {
 
     // No NCBI counterpart: test of the plan cache (one plan, charged once, when batches race); it
     // does not change any value NCBI computes.
-    // LOSAT_X_TBNSSIDE: batches that reach a subject at the same time get one
+    // Subject plans: batches that reach a subject at the same time get one
     // plan. It is made once, and the shared limit is charged for it once.
     #[test]
     fn x_subject_plan_is_made_and_charged_once_when_batches_race() {
@@ -2283,7 +2276,7 @@ mod tests {
 
     // No NCBI counterpart: test of when the plan cache exists (XSubjectSide::for_batches); it does
     // not change any value NCBI computes.
-    // LOSAT_X_TBNSSIDE: a search of fewer than four query batches keeps no
+    // Subject plans: a search of fewer than four query batches keeps no
     // plan and every use makes its own (one batch has no later batch to read a
     // kept plan; two and three give the time it would save for its memory);
     // four or more batches keep the plans. The plan is the same either way.

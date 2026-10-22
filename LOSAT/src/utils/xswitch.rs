@@ -67,7 +67,9 @@ use std::sync::OnceLock;
 /// `LOSAT_X_TBNOIDNEXT` (the threads take the next chunk of subjects when they are free,
 /// `tblastn/x_oid_flow.rs`) and `LOSAT_X_TBNOIDUNITS` (the units of a subject longer than a
 /// chunk's budget on the pool, `tblastn/stage_d_pipeline.rs`) joined the same way, together,
-/// after them.
+/// after them. `LOSAT_X_TBNOIDCHUNK`,
+/// `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDUNITS`, `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`,
+/// `LOSAT_X_SEGSHARE` and `LOSAT_X_DEKKER` graduated on 2026-10-22 (see `GRADUATED`).
 /// `LOSAT_X_LINKSLICES` (the groups of the TBLASTX linking call linked as slices of its one list,
 /// `tblastx/x_link_slices.rs`) was added after the change as a switch that is off unless set and
 /// joined the set once it was verified with it on.
@@ -176,7 +178,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_CTXO1",
     "LOSAT_X_DBIDXREAD",
     "LOSAT_X_DCCSR",
-    "LOSAT_X_DEKKER",
     "LOSAT_X_DIAGLV",
     "LOSAT_X_DISCLUTPAR",
     "LOSAT_X_DPEMASK",
@@ -206,21 +207,15 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_SEEDCOMPACT",
     "LOSAT_X_SEEDRELEASE",
     "LOSAT_X_SEEDUNMAP",
-    "LOSAT_X_SEGSHARE",
     "LOSAT_X_SEGTRIMMEMO",
-    "LOSAT_X_TBNBATCH",
     "LOSAT_X_TBNBATCHRULE",
     "LOSAT_X_TBNFRAMEREUSE",
     "LOSAT_X_TBNHITBF",
     "LOSAT_X_TBNKEEPFEW",
     "LOSAT_X_TBNLINKWIN",
-    "LOSAT_X_TBNOIDCHUNK",
-    "LOSAT_X_TBNOIDNEXT",
-    "LOSAT_X_TBNOIDUNITS",
     "LOSAT_X_TBNOWNPOOLS",
     "LOSAT_X_TBNSCANBF",
     "LOSAT_X_TBNSCANBYTE",
-    "LOSAT_X_TBNSSIDE",
     "LOSAT_X_TBNSTORE",
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXBAND",
@@ -249,6 +244,7 @@ pub(crate) const STRICT_SET: &[&str] = &[
 /// nothing chooses any more.
 pub(crate) const GRADUATED: &[&str] = &[
     "LOSAT_X_AHEAD",
+    "LOSAT_X_DEKKER",
     "LOSAT_X_DPAVX2",
     "LOSAT_X_DPNEON",
     "LOSAT_X_DPW128",
@@ -257,6 +253,12 @@ pub(crate) const GRADUATED: &[&str] = &[
     "LOSAT_X_MBDELAY",
     "LOSAT_X_NEWTONLANES",
     "LOSAT_X_NEWTONLANES8",
+    "LOSAT_X_SEGSHARE",
+    "LOSAT_X_TBNBATCH",
+    "LOSAT_X_TBNOIDCHUNK",
+    "LOSAT_X_TBNOIDNEXT",
+    "LOSAT_X_TBNOIDUNITS",
+    "LOSAT_X_TBNSSIDE",
 ];
 
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that

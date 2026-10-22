@@ -51,7 +51,7 @@ mod stage_d_results;
 mod stage_d_pipeline;
 // NCBI c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-344: each search thread takes the
 // next chunk of subjects when it is free.
-// EXPERIMENT (LOSAT_X_TBNOIDNEXT): the chunks handed out without a wait between entries.
+// Graduated 2026-10-22 (was LOSAT_X_TBNOIDNEXT): the chunks handed out without a wait between entries.
 #[cfg(feature = "parallel")]
 mod x_oid_flow;
 // NCBI c++/src/algo/blast/format/blast_format.cpp:1411-1458:

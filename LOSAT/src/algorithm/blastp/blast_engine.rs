@@ -9737,16 +9737,15 @@ fn run_resolved_in_pool(
         (use_parallel_kappa_match_redo, use_parallel_kappa_redo)
     };
 
-    // EXPERIMENT (LOSAT_X_SEGSHARE): the query-parallel redo and the windows of `x_redo_par` share
-    // the masked ranges; the match-parallel redo shares none, and the one-thread loop shares none.
+    // Graduated 2026-10-22 (was `LOSAT_X_SEGSHARE`): the query-parallel redo and the windows of
+    // `x_redo_par` share the masked ranges; the match-parallel redo shares none, and the
+    // one-thread loop shares none.
     // The serial and the query-parallel redo loops solve the first Newton problems of the next
     // `X_NEWTON_LANES_MATCHES` matches ahead (Newton lanes); the match-parallel redo solves none.
-    if crate::algorithm::blastp::kappa::x_seg_share() != 0 {
-        crate::utils::xreach::x_reach!(
-            "LOSAT_X_SEGSHARE",
-            x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
-        );
-    }
+    crate::utils::xreach::x_reach!(
+        "LOSAT_X_SEGSHARE",
+        x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
+    );
     crate::utils::xreach::x_reach!(
         "LOSAT_X_NEWTONLANES",
         x_redo_par_run || !use_parallel_kappa_match_redo
@@ -9969,11 +9968,10 @@ fn run_resolved_in_pool(
             // Dispatch point: NCBI SEGs the subject range inside the per-match loop (omp for over
             // matches). Here the masked ranges are kept in one store for all queries, as the serial
             // redo already does. Reuse of an identical result only.
-            // EXPERIMENT (LOSAT_X_SEGSHARE): one store of masked subject
-            // ranges for all queries, as in the serial redo below.
-            let x_shared_ranges = (crate::algorithm::blastp::kappa::x_seg_share() != 0).then(|| {
-                std::sync::Arc::new(crate::algorithm::blastp::kappa::XSharedSubjectRanges::new())
-            });
+            // One store of masked subject ranges for all queries, as in the serial redo below.
+            let x_shared_ranges = Some(std::sync::Arc::new(
+                crate::algorithm::blastp::kappa::XSharedSubjectRanges::new(),
+            ));
             // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_kappa.c:3525-3529
             // ```c
             //                 if (BlastCompo_EarlyTermination(
@@ -10033,7 +10031,7 @@ fn run_resolved_in_pool(
                         let mut composition_workspace = BlastCompositionWorkspace::new_blosum62();
                         let mut kappa_preliminary_hits = Vec::new();
                         let mut kappa_gap_scratch = GapAlignScratch::new();
-                        // EXPERIMENT (LOSAT_X_SEGSHARE): see XSharedSubjectRanges.
+                        // See XSharedSubjectRanges.
                         let mut kappa_subject_range_cache =
                             BlastpKappaSubjectRangeCache::x_with_shared(x_shared_ranges.clone());
                         let mut redone_match =

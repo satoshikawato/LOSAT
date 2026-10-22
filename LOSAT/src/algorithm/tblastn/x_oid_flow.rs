@@ -1,4 +1,4 @@
-//! EXPERIMENT (LOSAT_X_TBNOIDNEXT): the chunks of subjects of a TBLASTN search handed to the
+//! Graduated 2026-10-22 (was `LOSAT_X_TBNOIDNEXT`): the chunks of subjects of a TBLASTN search handed to the
 //! threads of the pool one at a time, without a wait between entries, and their lists taken back
 //! in OID order.
 //!
@@ -26,10 +26,11 @@
 //!            != BLAST_SEQSRC_EOF) {
 //! ```
 //! Each NCBI search thread asks the database for the next chunk, under its lock, as soon as it has
-//! searched the subjects of the last one; no thread waits for another. With
-//! `LOSAT_X_TBNOIDCHUNK` alone LOSAT hands the pool one chunk per thread and waits until all of
-//! them are searched before it hands over the next ones, so the threads with short chunks wait
-//! for the longest one. Here the threads take the next chunk when they are free, as NCBI's do.
+//! searched the subjects of the last one; no thread waits for another. LOSAT's pool earlier
+//! (`LOSAT_X_TBNOIDNEXT=0`, graduated 2026-10-22) took a few chunks per thread and waited until
+//! all of them were searched before it handed over the next ones, so the threads with short
+//! chunks waited for the longest one. Here the threads take the next chunk when they are free,
+//! as NCBI's do.
 //!
 //! LOSAT keeps its OID-ordered reduction, the order of the one-thread search: the thread that
 //! owns the search takes back the lists chunk by chunk in OID order and enters them into the
@@ -38,11 +39,11 @@
 //! chunks are taken or waiting beyond it, and a thread waits before a new chunk when that window
 //! is full (no NCBI counterpart: NCBI's threads write their lists into the shared HSP stream at
 //! once; this bound only keeps the memory of the waiting lists bounded). The chunks and the
-//! search of each subject are those of `LOSAT_X_TBNOIDCHUNK`, so the reports are the same.
+//! search of each subject are those of the chunks (`x_oid_chunk_bases`), so the reports are the same.
 //!
 //! The threads start together: each thread's loop and the owner wait until every thread of the
 //! pool has entered its loop before the first chunk is searched (no NCBI counterpart). A search
-//! may run the units of its subject on the pool (`LOSAT_X_TBNOIDUNITS`), and a thread that waits
+//! may run the units of its subject on the pool (a subject longer than a chunk's budget), and a thread that waits
 //! for a unit taken by another thread runs other jobs of the pool meanwhile; were a thread's
 //! loop still queued then, it would start there, on top of the chunk being searched, and could
 //! wait for the window while that chunk is the one the owner waits for. Once every loop runs,
@@ -312,7 +313,7 @@ mod tests {
     }
 
     // No NCBI counterpart: searches that run parts of their work on the pool (as the units of a
-    // long subject with LOSAT_X_TBNOIDUNITS) still give every subject once and in OID order, with
+    // long subject beyond a chunk's budget) still give every subject once and in OID order, with
     // the smallest windows too: a thread waiting for a part runs other jobs of the pool, and the
     // threads start together, so that no loop of the flow is left in the pool to start there.
     #[test]

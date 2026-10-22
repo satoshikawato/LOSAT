@@ -433,7 +433,7 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
 /// double-double arithmetic, and `DoubleDouble::mul` needs the rounding error of one product.
 /// `a.mul_add(b, -product)` gives it exactly; the Dekker path gives the same number
 /// (see the test `x_dekker_product_error_matches_fused_multiply_add`).
-/// EXPERIMENT (LOSAT_X_DEKKER, Wasm only): `a.mul_add(b, -product)` for
+/// Graduated 2026-10-22 (was `LOSAT_X_DEKKER`; Wasm only): `a.mul_add(b, -product)` for
 /// `product == a * b`, i.e. the exact rounding error of the product.  Where
 /// the target has no fused multiply-add instruction (Wasm without relaxed
 /// SIMD) `mul_add` is a library routine; Dekker's product (T. J. Dekker 1971,
@@ -442,14 +442,13 @@ fn erf_impl_ncbi(z: f64, mut invert: bool) -> f64 {
 /// the magnitude test guarantees: for 2^-900 < |product| < 2^900 and
 /// |a|, |b| < 2^900 the four partial products of the 26/27-bit halves are
 /// exact, their smallest is above 2^-1010 and nothing reaches 2^1024.
-/// Without the switch, and on every other target, this is `mul_add`.
+/// On every other target, and outside that magnitude range, this is `mul_add`.
 #[inline(always)]
 fn x_product_error(a: f64, b: f64, product: f64) -> f64 {
     #[cfg(target_arch = "wasm32")]
     {
         let size = product.abs();
-        if x_dekker()
-            && size > X_TWO_POW_M900
+        if size > X_TWO_POW_M900
             && size < X_TWO_POW_900
             && a.abs() < X_TWO_POW_900
             && b.abs() < X_TWO_POW_900
@@ -458,19 +457,6 @@ fn x_product_error(a: f64, b: f64, product: f64) -> f64 {
         }
     }
     a.mul_add(b, -product)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
-// ```c
-//             result *= expl(-z * z) / z;
-// ```
-// No NCBI counterpart: the switch is read once per process (Wasm builds only). It chooses
-// between `mul_add` and Dekker's product inside the double-double emulation of that line.
-#[cfg(target_arch = "wasm32")]
-fn x_dekker() -> bool {
-    use std::sync::OnceLock;
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_DEKKER"))
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/boost_erf.c:143-143
@@ -539,7 +525,7 @@ impl DoubleDouble {
         // ```c
         //             result *= expl(-z * z) / z;
         // ```
-        // Dispatch point of LOSAT_X_DEKKER: the reference path (`mul_add`) is the double-double
+        // Dispatch point of the Wasm Dekker product: the reference path (`mul_add`) is the double-double
         // product that stands in for the long-double operations of this line. Only the way the
         // product's rounding error is obtained changes, not its value.
         let error = x_product_error(self.hi, other.hi, product)

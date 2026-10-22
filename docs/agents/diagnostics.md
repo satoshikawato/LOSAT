@@ -227,15 +227,12 @@ their variables mean
   (`LOSAT_X_REACH`, above, checks that it reaches the reference sides that
   `LOSAT/tests/switch_reach_expected.tsv` requires).
 - `LOSAT_X_<NAME>=0` turns one switch off, to find which path a problem comes from. Single
-  switches off are a diagnostic aid: `TBNSSIDE`
-  and `TBNBATCH` only with 2 or more threads or `TBNSSIDE`; `TBNBATCH` needs
-  `TBNSSIDE`; `BXBATCH` needs `BXPOOL`; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
+  switches off are a diagnostic aid: `BXBATCH` needs `BXPOOL`; `PAIRLUT` acts only while `PAIRPAR` is on; `SEEDBUCKET` acts only
   in the scan loop, which TBLASTX runs where `PAIRPAR` does not take the search;
-  `TBNKEEPFEW` only with `TBNSSIDE` and four or more query batches;
-  `TBNBATCHRULE` only with `TBNBATCH`; `TBNOWNPOOLS` only with `TBNBATCH`
-  and `TBNBATCHRULE`, natively; `TBNXLATESIMD` only
-  on a packed subject (`TBNSTORE`, `-db`) and with AVX2; `TBNOIDNEXT` and `TBNOIDUNITS` act
-  only with `TBNOIDCHUNK`; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
+  `TBNKEEPFEW` only with four or more query batches;
+  `TBNBATCHRULE` only where query batches are searched side by side (2 or more threads, four or
+  more batches); `TBNOWNPOOLS` only with `TBNBATCHRULE`, natively; `TBNXLATESIMD` only
+  on a packed subject (`TBNSTORE`, `-db`) and with AVX2; `BPSUBJRUN` acts only in the parallel `-subject` loop of blastp (2 or
   more threads, several subjects); `BPSEED` acts on the two-hit seed stage only; `BPDIAG` acts only
   in `BPSEED`'s fused loop and batches only with AVX2 (else the per-hit loop); `BPDEFER` acts only
   in `BPDIAG`'s AVX2 batch; `BPGAP` runs the
@@ -250,8 +247,7 @@ their variables mean
   nothing.
 - White space around a value is ignored (`set LOSAT_X_DEFAULT=0 && ...` in cmd.exe stores `0 `).
   Only `0` means off; `00`, `false` or `off` are "any other value".
-- The variables are read once per process (once per Wasm instance), except `TBNBATCH`,
-  which is read once per search or lookup build. The Web
+- The variables are read once per process (once per Wasm instance). The Web
   reactors get an empty WASI environment, so they always run the default.
 - The `...SHADOW` / `...VERIFY` switches run the new and the reference computation side by side
   and stop with an assertion on the first difference. They, the counters, the timing aids and the
@@ -326,7 +322,6 @@ export LOSAT_X_BXSUBJFLOW=1
 export LOSAT_X_CTXO1=1
 export LOSAT_X_DBIDXREAD=1
 export LOSAT_X_DCCSR=1
-export LOSAT_X_DEKKER=1
 export LOSAT_X_DIAGLV=1
 export LOSAT_X_DISCLUTPAR=1
 export LOSAT_X_DPEMASK=1
@@ -356,21 +351,15 @@ export LOSAT_X_SEEDBUCKET=1
 export LOSAT_X_SEEDCOMPACT=1
 export LOSAT_X_SEEDRELEASE=1
 export LOSAT_X_SEEDUNMAP=1
-export LOSAT_X_SEGSHARE=1
 export LOSAT_X_SEGTRIMMEMO=1
-export LOSAT_X_TBNBATCH=1
 export LOSAT_X_TBNBATCHRULE=1
 export LOSAT_X_TBNFRAMEREUSE=1
 export LOSAT_X_TBNHITBF=1
 export LOSAT_X_TBNKEEPFEW=1
 export LOSAT_X_TBNLINKWIN=1
-export LOSAT_X_TBNOIDCHUNK=1
-export LOSAT_X_TBNOIDNEXT=1
-export LOSAT_X_TBNOIDUNITS=1
 export LOSAT_X_TBNOWNPOOLS=1
 export LOSAT_X_TBNSCANBF=1
 export LOSAT_X_TBNSCANBYTE=1
-export LOSAT_X_TBNSSIDE=1
 export LOSAT_X_TBNSTORE=1
 export LOSAT_X_TBNXLATESIMD=1
 export LOSAT_X_TBXBAND=1
@@ -430,7 +419,9 @@ while `LOSAT_X_PAIRPAR` is on.
 and joined the set on 2026-10-13. It changes only which subjects one entry into the tblastn
 search pool takes (2 or more threads, several subjects) and needs no other switch. Since
 2026-10-14 its chunks are bounded by residues, as NCBI's database reader cuts them for its
-search threads.
+search threads. It graduated on 2026-10-22 together with `LOSAT_X_TBNOIDNEXT`,
+`LOSAT_X_TBNOIDUNITS`, `LOSAT_X_TBNSSIDE` and `LOSAT_X_TBNBATCH` (no variable; the rules stay,
+see their entries below).
 
 `LOSAT_X_SEEDRELEASE` was added after the default changed, as a switch that was off unless set,
 and joined the set on 2026-10-13. It lowers the peak memory of TBLASTX further: the tables that
@@ -474,7 +465,9 @@ the units of a subject longer than a chunk's budget (a chromosome) run on the po
 the thread that took it. Neither changes a value or the order in which the results are entered;
 they are timed together because `TBNOIDUNITS` alone was slower on the human genome at 8 and 16
 threads. On main's path before the kept scan state joined the set they cost 5-11 % more CPU time on genomes;
-with it the CPU time is the same.
+with it the CPU time is the same. Both graduated on 2026-10-22 (no variable; the pool takes the
+next chunk when a thread is free, and a subject beyond a chunk's budget runs its units on the
+pool; the entries of chunks and of one subject per thread are gone).
 
 `LOSAT_X_LINKSLICES` was added after the default changed, as a switch that was off unless set, and
 joined the set on 2026-10-15. It lowers the memory of TBLASTX and, at two or more threads, its time:
@@ -514,7 +507,8 @@ kernel bodies x86_64 and wasm32 run. It changed no value and no order of computa
 aarch64 only. It graduated on 2026-10-22 (see its entry below).
 
 `LOSAT_X_TBNBATCHRULE` was added after the default changed, as a switch that was off unless set,
-and joined the set on 2026-10-16. With `LOSAT_X_TBNBATCH` it chooses which tblastn query batches
+and joined the set on 2026-10-16. Where query batches are searched side by side (the rule that
+was `LOSAT_X_TBNBATCH`) it chooses which tblastn query batches
 are searched side by side (the full waves of a small subject set) and which one after another
 with the pool inside each; every batch is searched as before and the reports keep the batch
 order, so no value changes. Timings are in its entry below.
@@ -598,7 +592,7 @@ summed CPU cycles were 0.938 of the run without it. It changes no value and keep
 calls; it acts only where `LOSAT_X_BPDIAG`'s AVX2 batch runs.
 
 `LOSAT_X_TBNOWNPOOLS` was added after the default changed, as a switch that was off unless set,
-and joined the set on 2026-10-17. With `LOSAT_X_TBNBATCH` and `LOSAT_X_TBNBATCHRULE` it searches
+and joined the set on 2026-10-17. With `LOSAT_X_TBNBATCHRULE` it searches
 the tblastn query batches the rule leaves one after another at the same time, each on a search
 pool of its own with its share of the threads; every batch is the same search and the reports
 keep the batch order, so no value changes. Timings are in its entry below.
@@ -609,19 +603,21 @@ What runs per target:
   the `DPW128` kernels), the AVX2 builds of the greedy rows and of the Newton kernels where the CPU has AVX2,
   the delayed megablast lookup fill (`MBDELAY`) with the prefetch instruction.
 - wasm32 (built with simd128): the simd128 X-drop DP (the `DPW128` kernels replace the first kernel),
-  the batched megablast lookup fill (`MBBATCH`) instead of `MBDELAY`, `DEKKER`; everything else is the same Rust as on x86_64
+  the batched megablast lookup fill (`MBBATCH`) instead of `MBDELAY`, the Dekker product in
+  the ErfC emulation (`DEKKER`, graduated); everything else is the same Rust as on x86_64
   without AVX2.
 - aarch64: the NEON X-drop DP (the `DPW128` kernels where the 128-bit kernel would run; no
-  256-bit AVX2 kernel), the batched lookup fill (`MBBATCH`) instead of `MBDELAY`; `DEKKER` does nothing (it
-  is compiled for wasm32 only); the Newton lanes take eight problems per round;
+  256-bit AVX2 kernel), the batched lookup fill (`MBBATCH`) instead of `MBDELAY`; the Dekker product is
+  compiled for wasm32 only; the Newton lanes take eight problems per round;
   everything else as on wasm32.
 - Any other target: no vector X-drop DP is compiled (the scalar port runs), and the Newton lanes stay four wide; otherwise as
   on aarch64.
 - One thread (`-num_threads 1`, a build without the `parallel` feature, wasm32 without
   `wasm-threads`): the scheduling switches (`AHEAD`, `GREEDYSPEC`, `PAIRPAR` for
-  blastn/megablast, `SEGSHARE`, `TBNBATCH`, `TBNOIDCHUNK`, `TBNOIDNEXT`, `TBNOIDUNITS`, `BXPAR`,
-  `BXPOOL`, `BXBATCH`, `BXCHUNK`, `BNSTREAM`) leave the reference code running. The unit paths have no thread-count gate: the tblastn units
-  (with `TBNSSIDE`; only its parallel redo needs a pool) and the TBLASTX `PAIRPAR`
+  blastn/megablast, `BXPAR`,
+  `BXPOOL`, `BXBATCH`, `BXCHUNK`, `BNSTREAM`, and the rules of the graduated `SEGSHARE`,
+  `TBNBATCH`, `TBNOIDCHUNK`, `TBNOIDNEXT`, `TBNOIDUNITS`) leave the reference code running. The unit paths have no thread-count gate: the tblastn units
+  (only its parallel redo needs a pool) and the TBLASTX `PAIRPAR`
   units run in order on the calling thread.
 
 Same values, faster computation:
@@ -794,7 +790,10 @@ Same values, faster computation:
   rounds (2026-10-19): WSSV x PajaWSV n1 0.969 of the time with this switch alone (0.943 with
   `LOSAT_X_BPCOMPOREUSE` as well, n8 0.958), tblastn AP027131 x AP027133 0.994, blastx
   AP027131 x AP027133 0.987, OrthoFinder q0 x Species6 n8 0.995 and n1 1.00 (both switches).
-- `LOSAT_X_DEKKER=1` (Wasm only) ErfC product error by Dekker's product instead of `fma`.
+- DEKKER (graduated 2026-10-22; no variable; platform: wasm32 only) ErfC product error by Dekker's
+  product instead of `fma` (`stats/spouge.rs` `x_product_error`), where the product and the
+  factors are in range (2^-900 < |product| < 2^900, |a|, |b| < 2^900); other targets and values
+  out of range keep `mul_add`.
 - CODONFAST (graduated 2026-10-22; no variable) an unambiguous codon translated by one table read; a
   codon with an ambiguity code still runs the port of `s_CodonToAA`'s loops (`GeneticCode::get`).
 - PURGEFAST (graduated 2026-10-22; no variable; always on) blastn common-endpoint purge without
@@ -873,8 +872,10 @@ Same values, faster computation:
 
 Rebuilding less:
 
-- `LOSAT_X_SEGSHARE=1` blastp with 2+ threads: the subject SEG masks shared by the whole search,
-  as in the one-thread path. Shadow: `LOSAT_X_SEGSHARESHADOW=1`.
+- SEGSHARE (graduated 2026-10-22; no variable, no `LOSAT_X_SEGSHARESHADOW`; conditional: the
+  query-parallel redo and the windows of `x_redo_par`, 2+ threads) blastp: the subject SEG masks
+  shared by the whole search, as in the one-thread path. The one-thread loop and the
+  match-parallel redo keep their own per-search cache (`BlastpKappaSubjectRangeCache::new`).
 - `LOSAT_X_BPCOMPOREUSE=1` (blastp, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` or `LOSAT_X_DEFAULT=0` returns to the previous path) an entry of the subject SEG
   cache also keeps the amino-acid composition of its masked bytes, read once when the entry is
@@ -883,7 +884,7 @@ Rebuilding less:
   bits). A range SEG does not mask (near-identical or not biased) is read as before; a masked
   range whose window the redo skips has its composition read once anyway. Shadow:
   `LOSAT_X_BPCOMPOREUSESHADOW=1` reads the bytes again and stops on a difference (and
-  `LOSAT_X_SEGSHARESHADOW=1` compares the stored composition too). On WSSV x PajaWSV (one thread)
+  the shared store keeps the composition too). On WSSV x PajaWSV (one thread)
   the subject composition was read 9,434 times from 86 different byte strings, all of them cache
   entries (line C, v4-C DECISIONS 25). Each entry holds a pointer and, when the switch is on,
   232 bytes on the heap. Workstation, one core, 8 rounds (2026-10-19): WSSV x PajaWSV n1 0.978
@@ -891,8 +892,11 @@ Rebuilding less:
   unchanged.
 - TBNQSIDE (graduated 2026-10-22; no variable; always on) tblastn: query SEG and lookup table
   once per query set (`XQuerySide`); the per-subject build is gone.
-- `LOSAT_X_TBNSSIDE=1` tblastn: subject six-frame translations once per search of four or more
-  query batches (20,000 query residues per batch), up to 256 MiB of translated residues. A
+- TBNSSIDE (graduated 2026-10-22; no variable; conditional: its rule stays) tblastn: subject
+  six-frame translations once per search of four or more
+  query batches (20,000 query residues per batch), up to 256 MiB of translated residues
+  (`XSubjectSide::KEEP_FROM_BATCHES`, `KEEP_LIMIT`). The batches go to `x_search_batches` at any
+  thread count. A
   search of one to three batches keeps none and translates a subject again for each batch, as
   NCBI does (`blast_engine.c:627-631`): one batch has no later reader, and two or three give
   the time the kept translations would save for their memory. Timed with two and three batches
@@ -900,37 +904,37 @@ Rebuilding less:
   search without them has 115 MiB less (max RSS 218-226 -> 103-113 MiB) and takes a median of
   1.03-1.11 of the time, on one 606 kb genome the same memory and 1.05-1.08 of the time
   (0.01-0.06 s). Four batches at 8 threads gave 1.06 on the 16S set, so the saving does not
-  start at four batches: the number is where the memory is preferred to it. `TBNBATCH` needed
-  the kept translations, so two or three batches with at least one batch per thread are now
-  searched one after another instead of side by side: 1.02-1.07 of the time on the 16S set and
-  1.12-1.24 on the genome (0.04-0.09 s) with one batch per thread, 0.75-0.86 with three
-  batches on two threads. Since `TBNKEEPFEW` (2026-10-19) a search of four or more batches
-  keeps the translations only when they hold no more than the threads have in flight; the
-  batches are laid out as before (`TBNBATCH` reads `TBNSSIDE` and the number of batches, not
-  the kept translations).
-- `LOSAT_X_TBNBATCHRULE=1` tblastn, with `LOSAT_X_TBNBATCH` (speed; in the strict set since
-  2026-10-16, on by default, `=0` turns it off; `tblastn/stage_d_pipeline.rs`
-  `x_batches_side_by_side`): which query batches `TBNBATCH` searches side by side. With `=0`
-  every batch goes side by side once there is one batch per thread (`LOSAT_X_DEFAULT=0` alone
-  turns `TBNBATCH` off too, so nothing goes side by side). By default, only the batches of the
+  start at four batches: the number is where the memory is preferred to it. Side by side
+  (the rule of `TBNBATCH`) needed the kept translations, so two or three batches with at least
+  one batch per thread are searched one after another instead of side by side: 1.02-1.07 of the
+  time on the 16S set and 1.12-1.24 on the genome (0.04-0.09 s) with one batch per thread,
+  0.75-0.86 with three batches on two threads. Since `TBNKEEPFEW` (2026-10-19) a search of four
+  or more batches keeps the translations only when they hold no more than the threads have in
+  flight; the batches are laid out as before (the layout reads the number of batches, not the
+  kept translations).
+- `LOSAT_X_TBNBATCHRULE=1` tblastn, where query batches are searched side by side (speed; in the
+  strict set since 2026-10-16, on by default, `=0` turns it off; `tblastn/stage_d_pipeline.rs`
+  `x_batches_side_by_side`): which query batches go side by side. With `=0`
+  every batch goes side by side once there is one batch per thread. By default, only the batches of the
   full waves (a multiple of the threads) go side by side and the others one after another with the pool inside each, and
   only when the subjects hold at most 24 Mb or there are fewer than two subjects per thread
   (otherwise every batch one after another). The report does not change (every batch is searched
   as before, the reports keep the batch order). With `LOSAT_WASI_THREADS_DEBUG=1` a line
   `[losat-thread-stage] program=tblastn stage=query_batches batches= threads= side_by_side=
-  one_after_another= own_pools=` gives the split (printed whenever `TBNBATCH`'s block runs, with
-  or without the rule; `own_pools` is 0 with `LOSAT_X_TBNOWNPOOLS=0`, without the rule, in
+  one_after_another= own_pools=` gives the split (printed whenever the batches are dispatched on a
+  pool, with or without the rule; `own_pools` is 0 with `LOSAT_X_TBNOWNPOOLS=0`, without the rule, in
   WebAssembly, and where its conditions below are not met). Timed on the workstation
   (perf-si-20261012 session 17, node 1, one hash per
   case; time of each arm / time of main's side by side): 16S (28,036 records, 40.6 Mb) x 10
   batches at 8 threads 0.68 (13.2 -> 8.9 s), 5 batches at 4 threads 0.69 with
-  `LOSAT_X_TBNBATCH=0`; one 0.6 Mb genome x 10 batches at 8 threads 0.77 with the rule (8 side
+  `LOSAT_X_TBNBATCH=0` (the variable of the rule that graduated 2026-10-22); one 0.6 Mb genome x
+  10 batches at 8 threads 0.77 with the rule (8 side
   by side, 2 after), 1.07 with `TBNBATCH=0`; three E. coli genomes (15.7 Mb) x 16 batches at 12
   threads 0.80 with the rule; three fly chromosomes (76.9 Mb) x 16 batches at 16 threads 1.29
   with `TBNBATCH=0` (the rule keeps them side by side), the same bases in 79 pieces 0.95.
   Where all batches are a multiple of the threads and the set is small (0.3-15.7 Mb, one to
   5,000 subjects) side by side took 0.26-0.96 of the time of one after another.
-- `LOSAT_X_TBNOWNPOOLS=1` tblastn, with `LOSAT_X_TBNBATCH` and `LOSAT_X_TBNBATCHRULE` (speed;
+- `LOSAT_X_TBNOWNPOOLS=1` tblastn, with `LOSAT_X_TBNBATCHRULE` (speed;
   in the strict set since 2026-10-17, on by default, `=0` turns it off; `tblastn/stage_d_pipeline.rs`
   `x_batches_on_own_pools`): the query batches `TBNBATCHRULE` leaves one after another (all of
   them when there are fewer batches than threads, else those after the full waves) are searched
@@ -1346,7 +1350,7 @@ Rebuilding less:
   built again from the same inputs, a small cost that grows with the query's length) and its own
   parameters, prefetches the first Newton problems of its own matches with the Newton lanes (one vector
   of four, against the heaps as the window's start left them), and redoes its matches with per-worker
-  scratch and the search's `LOSAT_X_SEGSHARE` store. A
+  scratch and the search's shared SEG store (`SEGSHARE`). A
   query's preliminary list is released after the replay of the window that holds its last match, as the
   one-thread loop releases it (`LOSAT_X_BPPFREE`, `LOSAT_X_BPPCOMPACT`). The early termination test is
   monotone over the replay (once true for a match's E-value, true afterwards), so a match whose test is
@@ -3419,14 +3423,18 @@ Scheduling (each value computed by one thread with the original function; order 
   preliminary stage per (frame, chunk) and redo per match in parallel, one pool for the search. The
   unit-wise stage is the only preliminary stage of a search (at one thread, without a pool, it
   runs the units in order); the serial port `preliminary_protein_hsps_in_ncbi_order` stays for
-  unit tests only. The query batches go to `x_search_batches` at 2 or more threads or with
-  `TBNSSIDE`, and to the one-batch-at-a-time loop at one thread otherwise.
-- `LOSAT_X_TBNBATCH=1` (needs `TBNSSIDE` and four or more query batches, and at least one
-  batch per thread) tblastn query batches searched side by side, appended in input order.
-  The batches share the kept subject translations (`TBNKEEPFEW` keeps them for such a search).
-- `LOSAT_X_TBNOIDCHUNK=1` (in the strict set since 2026-10-13) tblastn with 2+ threads and several
-  subjects: one entry into the search pool takes four chunks of subjects per thread instead of one
-  subject per thread, and each chunk is one task that the pool gives to whichever thread is free;
+  unit tests only. The query batches go to `x_search_batches` at any thread count (since
+  `TBNSSIDE` graduated); the one-batch-at-a-time loop searches a batch that `x_search_batches`
+  did not take (a database whose sequences could not be read).
+- TBNBATCH (graduated 2026-10-22; no variable; conditional: its rule stays) tblastn query batches
+  searched side by side, appended in input order, with two or more threads, four or more query
+  batches and at least one batch per thread (and the rule of `TBNBATCHRULE`). The batches share
+  the kept subject translations (`TBNKEEPFEW` keeps them for such a search).
+- TBNOIDCHUNK (in the strict set from 2026-10-13, graduated 2026-10-22; no variable; conditional:
+  2+ threads and several subjects) tblastn: the subjects are cut into chunks and each chunk is
+  one task that the pool gives to whichever thread is free (originally one entry into the search
+  pool took four chunks per thread instead of one subject per thread; `TBNOIDNEXT` now hands
+  the chunks out without entries);
   inside it the subjects of the chunk are a parallel range, so a thread that finds no chunk left
   takes part of one still being searched. A chunk is cut as NCBI's database reader cuts
   them for its search threads (`seqdbimpl.cpp:684-708` `x_FillSeqBuffer`, `seqdbatlas.hpp:496-501`
@@ -3454,12 +3462,12 @@ Scheduling (each value computed by one thread with the original function; order 
   4-25; the first form, one chunk per thread): medians 1.35 s (55 proteins) and 0.61 s (one
   protein) against 1.25 s and 0.60 s with the hundredth and 2.81 s and 1.50 s without the switch;
   on the fly genome 7.0 s against 26.2 s with the hundredth and 6.8 s without the switch (NCBI
-  `-db` 6.6-7.4 s; on the workstation 16.4 s against 62.1 s, NCBI 16.1 s). Nothing changes at one thread, nor where `TBNBATCH` searches the batches
+  `-db` 6.6-7.4 s; on the workstation 16.4 s against 62.1 s, NCBI 16.1 s). Nothing changes at one thread, nor where the batches are searched
   side by side (each batch on one thread). With `LOSAT_WASI_THREADS_DEBUG=1` the
-  `[losat-thread-activity]` line of the subject stage ends with `pool_entries=` (the entries of
-  one query batch); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.
-- `LOSAT_X_TBNOIDNEXT=1` (in the strict set since 2026-10-15) tblastn with 2+ threads and several
-  subjects, where `TBNOIDCHUNK` makes the chunks: no wait between entries. The threads of the pool
+  `[losat-thread-activity]` line of the subject stage ends with `pool_entries=1` (the search is
+  one entry since `TBNOIDNEXT`); `LOSAT/tests/tblastn_oid_chunk.rs` reads it.
+- TBNOIDNEXT (in the strict set from 2026-10-15, graduated 2026-10-22; no variable; conditional:
+  2+ threads and several subjects) tblastn: no wait between entries. The threads of the pool
   take the next chunk when they are free, as NCBI's search threads ask the database for the next
   chunk (`seqdbimpl.cpp:333-344`), instead of waiting at the end of each entry for its last chunk.
   The thread that owns the search takes the lists back chunk by chunk in OID order and enters them
@@ -3467,22 +3475,22 @@ Scheduling (each value computed by one thread with the original function; order 
   finished (`tblastn/x_oid_flow.rs`). At most `4 * threads` chunks are taken or finished beyond the
   oldest one not taken back; a thread waits before a new chunk when that window is full, so the
   memory of the waiting lists stays bounded. The chunks and the search of each subject are those of
-  `TBNOIDCHUNK`, so the report is the same. `=0` turns it off; with `LOSAT_X_TBNOIDCHUNK=0` (or
-  `LOSAT_X_DEFAULT=0` alone) there are no chunks and it changes nothing. With
+  `TBNOIDCHUNK`, so the report is the same. The entries of chunks that `=0` gave (an entry of four
+  chunks per thread, or of one subject per thread) are gone. With
   `LOSAT_WASI_THREADS_DEBUG=1` the search is one entry (`pool_entries=1`) and the line adds
   `flow_chunks=` and `flow_peak_waiting=` (the most finished chunks that waited at once);
   `LOSAT/tests/tblastn_oid_chunk.rs` reads them.
-- `LOSAT_X_TBNOIDUNITS=1` (in the strict set since 2026-10-15) tblastn with 2+ threads and several
-  subjects, where `TBNOIDCHUNK` makes the chunks (with or without `TBNOIDNEXT`): a subject longer
+- TBNOIDUNITS (in the strict set from 2026-10-15, graduated 2026-10-22; no variable; conditional:
+  2+ threads and several subjects, a subject beyond a chunk's budget) tblastn: a subject longer
   than a chunk's budget (a chunk of its own, such as a chromosome) runs its (frame, chunk) units on
   the pool, as the single subject of a search does, instead of one after another on
   the thread that took it. Threads that have no chunk to search (at the end of an entry, or when no
   chunk is left) take its units; its merge in NCBI order, linking, E-values and reaping run on its
   thread after its last unit, so the report is the same. NCBI's thread searches a subject whole, so
   at 16 and 32 threads the longest chromosome bounds both programs; this goes beyond NCBI. Other
-  subjects keep their units on their thread. With `TBNOIDNEXT` the threads of the flow start
+  subjects keep their units on their thread. The threads of the flow start
   together (each waits until all have entered the flow) so that a thread waiting for a unit can only
-  take units, never a loop of the flow. `=0` turns it off. With `LOSAT_WASI_THREADS_DEBUG=1` each
+  take units, never a loop of the flow. With `LOSAT_WASI_THREADS_DEBUG=1` each
   subject whose units ran on the pool prints a `prelim_units` stage line with
   `parallel_selected=true`; `LOSAT/tests/tblastn_oid_chunk.rs` counts them.
 - `LOSAT_X_TBXNEXT=1` (TBLASTX, speed; in the strict set since 2026-10-17, on by default; acts only
@@ -3686,12 +3694,12 @@ Scheduling (each value computed by one thread with the original function; order 
 - `LOSAT_X_TBNKEEPFEW=1` tblastn (memory; in the strict set from the pull request that added it,
   2026-10-19, with `TBNFRAMEREUSE`; `=0` turns it off; `tblastn/search_seed.rs`
   `XSubjectSide::kept_within_threads`, `tblastn/stage_d_pipeline.rs` `x_searched_side_by_side`): a
-  search of four or more query batches with `TBNSSIDE` that searches its batches one after another
+  search of four or more query batches that searches its batches one after another
   keeps the subjects' six-frame translations (the plans) only when they hold no more than its
   threads could have in flight, the thread count times the plan of the longest subject. One genome
   or a few chromosomes are kept; many subjects are translated again for each batch and dropped
   after the subject, as NCBI does (`blast_engine.c:627-631`). A search that searches batches side
-  by side (`TBNBATCH`; at most 24 Mb of subjects, or fewer than two subjects per thread) or on pools
+  by side (at most 24 Mb of subjects, or fewer than two subjects per thread) or on pools
   of their own (`TBNOWNPOOLS`) keeps them as before: batches searched at the same time share them,
   and the batches after the first ones read them (5,000 fly cDNAs, 7 batches at 4 threads:
   4 side by side, then 3 one after another, took 1.004 of the time without them, 8 pairs). The
@@ -3706,13 +3714,13 @@ Scheduling (each value computed by one thread with the original function; order 
   the zebrafish cDNAs `-db` 361 -> 52 MiB at 1 thread and 390 -> 83 at 8 (NCBI BLAST+ 2.17.0 16
   and 28; the rest is the stored database), `-subject` at 8 417 -> 108 MiB (NCBI `-subject` holds
   every subject, about 800), the 16S set 134 -> 19 and 152 -> 38 MiB (NCBI 9 and 11), the 5,000
-  cDNAs at 8 threads 70 -> 37 MiB (NCBI 16). Before (dev 23db0a4f, `TBNSSIDE=0` against the
+  cDNAs at 8 threads 70 -> 37 MiB (NCBI 16). Before (dev 23db0a4f, `TBNSSIDE=0` (a variable that graduated 2026-10-22) against the
   default, 38 pairs): x0.980-0.994 at 4, 8 and 16 threads on the two large sets, no pair slower.
 - `LOSAT_X_TBNKEEPFEWSHADOW=1` shadow of `LOSAT_X_TBNKEEPFEW` (any value): the plans are kept as
   with `=0`, and every read of a kept plan also makes the plan of that use, as a search that keeps
   none makes it; a frame or a unit that differs panics. One line at exit:
   `[X_SHADOW] TBNKEEPFEW kept_plan_reads_compared= residues_compared=` (nothing compared below
-  four query batches, with `LOSAT_X_TBNSSIDE=0` or `LOSAT_X_DEFAULT=0`, or for
+  four query batches, or for
   plans beyond `KEEP_LIMIT`).
 - `LOSAT_X_TBNLINKWIN=1` tblastn (speed; in the strict set since 2026-10-17, by the Owner's rule of
   that day that a speed-up lands on by default, on the timings below: on by default, `=0` turns it

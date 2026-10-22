@@ -1038,7 +1038,10 @@ const OUTFMT_ROWS: &[(&[&str], &str, Option<&str>, Outfmt)] = {
         (ALL, " 5 std", None, Writes(Xml)),
         (ALL, "9", None, Writes(AsnBinary)),
         (ALL, " 9 std", None, Writes(AsnBinary)),
-        (ALL, "11", None, UNSUPPORTED),
+        // 11 (the BLAST archive, OF8a): BLASTN so far; NCBI ignores a specification after it.
+        (&["blastn"], "11", None, Writes(ArchiveFormat)),
+        (&["blastn"], " 11 qseqid", None, Writes(ArchiveFormat)),
+        (NOT_BLASTN, "11", None, UNSUPPORTED),
         (ALL, "13", Some("o.json"), UNSUPPORTED),
         (ALL, "14", Some("o.xml"), UNSUPPORTED),
         (ALL, "15", None, Writes(JsonS)),

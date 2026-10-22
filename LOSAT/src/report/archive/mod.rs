@@ -39,7 +39,10 @@ use std::ffi::OsStr;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
-use crate::report::diag_log::{DiagLog, Message};
+use crate::blastinput::app::Program;
+use crate::blastinput::fasta_reader::FastaRecord;
+use crate::report::diag_log::{DiagLog, Message, ERROR};
+use options::OptionInputs;
 
 pub use writer::{
     write_archive, write_error_archive, AlignSource, ArchiveOut, BatchArchive, KaBlock,
@@ -102,6 +105,9 @@ struct RunState {
     log: DiagLog,
     /// The `EffectiveSearchSpace` of the last searched batch (`None` before one).
     last_search_space: Option<i64>,
+    /// Whether the diagnostics that are written now are not the archive's (the warnings that
+    /// another format of the same search writes, which a run of the archive alone does not).
+    muted: bool,
 }
 
 #[derive(Default)]
@@ -144,6 +150,47 @@ impl std::fmt::Debug for ArchiveHandle {
 }
 
 impl ArchiveHandle {
+    /// The handle of a run of `inputs.program` that writes the archive (`-outfmt 11`): the
+    /// request from the recorded options, `ARCHIVE_FORMAT` read once. `database` is the
+    /// `-db` argument as typed (`None` for `-subject`); `label` names the program in a refusal.
+    /// Refuses, before anything is written, what LOSAT cannot write: `ARCHIVE_FORMAT=xml`
+    /// (line OF8c) and a `-db` name with a byte outside ASCII.
+    pub fn for_program(
+        inputs: &OptionInputs,
+        database: Option<&str>,
+        label: &str,
+    ) -> anyhow::Result<Self> {
+        let encoding = ArchiveEncoding::from_env();
+        if encoding == ArchiveEncoding::Xml {
+            anyhow::bail!(
+                "ARCHIVE_FORMAT=xml with -outfmt 11 is not supported by LOSAT's {label} yet (it writes ASN.1 text and ASN.1 binary)"
+            );
+        }
+        if let Some(name) = database {
+            if name.bytes().any(|byte| byte >= 0x80) {
+                anyhow::bail!(
+                    "a -db name with a character outside ASCII is not supported by LOSAT's {label} with -outfmt 11"
+                );
+            }
+        }
+        let program = match inputs.program {
+            Program::Blastn => "blastn",
+            Program::Blastp => "blastp",
+            Program::Blastx => "blastx",
+            Program::Tblastn => "tblastn",
+            Program::Tblastx => "tblastx",
+        };
+        Ok(Self::new(
+            encoding,
+            ArchiveRequest {
+                program,
+                service: options::service(inputs.program, &inputs.task),
+                algorithm: options::algorithm_options(inputs),
+                database: database.map(|name| name.as_bytes().to_vec()),
+            },
+        ))
+    }
+
     pub fn new(encoding: ArchiveEncoding, request: ArchiveRequest) -> Self {
         Self(Arc::new(Shared {
             encoding,
@@ -171,7 +218,19 @@ impl ArchiveHandle {
 
     /// Saves the lines that a write to the diagnostics stream completes.
     pub fn feed(&self, bytes: &[u8]) {
-        self.with_state(|state| state.log.feed(bytes));
+        self.with_state(|state| {
+            if !state.muted {
+                state.log.feed(bytes);
+            }
+        });
+    }
+
+    /// While muted, what is written to the diagnostics stream is not saved. The report of a
+    /// format other than the archive is written with the handle muted: a search with several
+    /// formats writes the warnings of the first one once, and the archive of the same search
+    /// alone has none of them.
+    pub fn set_muted(&self, muted: bool) {
+        self.with_state(|state| state.muted = muted);
     }
 
     /// Saves a message (the error lines of an aborted run).
@@ -222,6 +281,63 @@ impl ArchiveHandle {
         inner.scratch = None;
         result
     }
+}
+
+/// The refusal of a title with a byte >= 0x80, which the archive's VisibleString cannot hold
+/// (NCBI writes `#` and posts a diagnostic for each byte, whose text and place LOSAT does not
+/// reproduce). `role` is `query` or `subject`.
+pub fn check_titles(records: &[FastaRecord], role: &str, label: &str) -> anyhow::Result<()> {
+    if let Some(record) = records
+        .iter()
+        .find(|record| record.title.iter().any(|&byte| byte >= 0x80))
+    {
+        anyhow::bail!(
+            "the title of the {role} {} has a character outside ASCII, which is not supported by LOSAT's {label} with -outfmt 11",
+            record.local_id
+        );
+    }
+    Ok(())
+}
+
+/// The error lines of a run that stopped with `error`, when NCBI writes an error archive for
+/// it (`PrintErrorArchive` after its `CATCH_ALL`): the errors of the application's `Run`,
+/// i.e. NCBI's own error texts, one message per diagnostic, severity `eDiag_Error`. LOSAT's own
+/// refusals (and the argument errors raised before the application runs) write none.
+/// `subject_file` is whether the error came from reading the `-subject` file, whose
+/// "Command line argument error" NCBI raises inside `Run`.
+pub fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Message>> {
+    let native = error.downcast_ref::<crate::cli::NativeError>()?;
+    const PREFIXES: [&str; 4] = [
+        "BLAST query error:",
+        "BLAST Database error:",
+        "BLAST engine error:",
+        "BLAST query/options error:",
+    ];
+    let known = PREFIXES
+        .iter()
+        .any(|prefix| native.message.starts_with(prefix))
+        || (subject_file && native.message.starts_with("Command line argument error:"));
+    if !known {
+        return None;
+    }
+    // One diagnostic per `ERR_POST`: the text of an error is one message even when it has
+    // several lines (an exception's chain), and the macro of an invalid input posts the line
+    // "Please refer to the BLAST+ user manual." as a second one.
+    const REFER: &str = "Please refer to the BLAST+ user manual.";
+    let text = native.message.trim_end_matches('\n');
+    let (first, refer) = match text.strip_suffix(REFER) {
+        Some(head) if head.ends_with('\n') => (head, Some(REFER)),
+        _ => (text, None),
+    };
+    Some(
+        std::iter::once(first)
+            .chain(refer)
+            .filter_map(|part| {
+                let text = crate::report::diag_log::sanitize(part.as_bytes());
+                (!text.is_empty()).then_some((ERROR, text))
+            })
+            .collect(),
+    )
 }
 
 /// A diagnostics stream that saves what it writes as the messages of the next archive.

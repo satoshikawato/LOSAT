@@ -19,6 +19,7 @@ use anyhow::Result;
 
 use super::args::BlastnArgs;
 use super::hsp::BlastnHitList;
+use super::pairwise::shown_query_masks;
 use super::scoring::ContextKarlin;
 use crate::blastinput::app::Program;
 use crate::blastinput::fasta_reader::FastaRecord;
@@ -26,12 +27,12 @@ use crate::blastinput::seq_range::Placements;
 use crate::blastinput::value_parsers::{parse_dust_filtering, DustSpec};
 use crate::report::archive::bioseq::BioseqInput;
 use crate::report::archive::masks::{Frame, MaskEntry};
-use crate::report::archive::options::{self, Filter, OptionInputs};
+use crate::report::archive::options::{Filter, OptionInputs};
 use crate::report::archive::{
-    write_archive, AlignSource, ArchiveEncoding, ArchiveHandle, ArchiveOut, ArchiveRequest,
-    BatchArchive, KaBlock,
+    write_archive, AlignSource, ArchiveHandle, ArchiveOut, BatchArchive, KaBlock,
 };
-use crate::report::diag_log::{Message, ERROR};
+#[cfg(test)]
+use crate::report::diag_log::ERROR;
 use crate::report::query_warnings::QueryWarnings;
 use crate::report::record::{HspRecord, QueryNames, RunRecord, SubjectNames, SubjectRecord};
 use crate::report::serial::seqalign::{write_seq_aligns, Segments};
@@ -84,20 +85,8 @@ pub(crate) fn option_inputs(args: &BlastnArgs, dust: Option<&str>) -> OptionInpu
     inputs
 }
 
-/// The refusal of a run that NCBI would write with bytes that LOSAT cannot: a `-db` name
-/// with a byte >= 0x80 (the serial stream replaces it by `#` and posts a diagnostic per byte).
-fn check_database_name(name: &str) -> Result<()> {
-    if name.bytes().any(|byte| byte >= 0x80) {
-        anyhow::bail!(
-            "a -db name with a character outside ASCII is not supported by LOSAT's BLASTN with -outfmt 11"
-        );
-    }
-    Ok(())
-}
-
 /// The handle of a run that writes the archive, or `None` when no requested format is the
-/// archive. Refuses, before anything is written, what LOSAT cannot write: `ARCHIVE_FORMAT=xml`
-/// (OF8c) and a `-db` name outside ASCII.
+/// archive (`ArchiveHandle::for_program`, with BLASTN's recorded options).
 pub(crate) fn handle_for(
     args: &BlastnArgs,
     dust: Option<&str>,
@@ -106,74 +95,15 @@ pub(crate) fn handle_for(
     if !archive_requested {
         return Ok(None);
     }
-    let encoding = ArchiveEncoding::from_env();
-    if encoding == ArchiveEncoding::Xml {
-        anyhow::bail!(
-            "ARCHIVE_FORMAT=xml with -outfmt 11 is not supported by LOSAT's BLASTN yet (it writes ASN.1 text and ASN.1 binary)"
-        );
-    }
-    if let Some(name) = args.db.as_deref() {
-        check_database_name(name)?;
-    }
-    let inputs = option_inputs(args, dust);
-    Ok(Some(ArchiveHandle::new(
-        encoding,
-        ArchiveRequest {
-            program: "blastn",
-            service: options::service(Program::Blastn, &args.task),
-            algorithm: options::algorithm_options(&inputs),
-            database: args.db.as_ref().map(|name| name.as_bytes().to_vec()),
-        },
-    )))
+    ArchiveHandle::for_program(&option_inputs(args, dust), args.db.as_deref(), "BLASTN").map(Some)
 }
 
-/// The refusal of a title with a byte >= 0x80, which the archive's VisibleString cannot hold
-/// (NCBI writes `#` and posts a diagnostic for each byte, whose text and place LOSAT does not
-/// reproduce).
+/// `report::archive::check_titles` for BLASTN's records.
 pub(crate) fn check_titles(records: &[FastaRecord], role: &str) -> Result<()> {
-    if let Some(record) = records
-        .iter()
-        .find(|record| record.title.iter().any(|&byte| byte >= 0x80))
-    {
-        anyhow::bail!(
-            "the title of the {role} {} has a character outside ASCII, which is not supported by LOSAT's BLASTN with -outfmt 11",
-            record.local_id
-        );
-    }
-    Ok(())
+    crate::report::archive::check_titles(records, role, "BLASTN")
 }
 
-/// The error lines of a run that stopped with `error`, when NCBI writes an error archive for
-/// it (`PrintErrorArchive` after its `CATCH_ALL`): the errors of the application's `Run`,
-/// i.e. NCBI's own error texts, one message per line, severity `eDiag_Error`. LOSAT's own
-/// refusals (and the argument errors raised before the application runs) write none.
-/// `subject_file` is whether the error came from reading the `-subject` file, whose
-/// "Command line argument error" NCBI raises inside `Run`.
-pub(crate) fn error_lines(error: &anyhow::Error, subject_file: bool) -> Option<Vec<Message>> {
-    let native = error.downcast_ref::<crate::cli::NativeError>()?;
-    const PREFIXES: [&str; 4] = [
-        "BLAST query error:",
-        "BLAST Database error:",
-        "BLAST engine error:",
-        "BLAST query/options error:",
-    ];
-    let known = PREFIXES
-        .iter()
-        .any(|prefix| native.message.starts_with(prefix))
-        || (subject_file && native.message.starts_with("Command line argument error:"));
-    if !known {
-        return None;
-    }
-    let lines: Vec<Message> = native
-        .message
-        .lines()
-        .filter_map(|line| {
-            let text = crate::report::diag_log::sanitize(line.as_bytes());
-            (!text.is_empty()).then_some((ERROR, text))
-        })
-        .collect();
-    Some(lines)
-}
+pub(crate) use crate::report::archive::error_lines;
 
 /// What the archive of a call needs: the call's queries (one batch, or several when the
 /// reports of every batch are written after the search) and their data.
@@ -359,13 +289,21 @@ pub(crate) fn write_blastn_archives(
             for index in span.clone() {
                 let record = &call.queries[index];
                 let offset = call.query_placements.offset(index);
-                let intervals: Vec<(i32, i32)> = call.query_masks[index]
+                // The results' masks leave out a mask over the whole query (`shown_query_masks`,
+                // as the report's masks); the `LCaseMask` parameters keep every interval of
+                // the query's masks (probe `multi_err`: a query that DUST masks whole).
+                let raw: Vec<(i32, i32)> = call.query_masks[index]
                     .iter()
                     .map(|mask| ((mask.start + offset) as i32, (mask.end + offset) as i32 - 1))
                     .collect();
-                if intervals.is_empty() {
+                if raw.is_empty() {
                     continue;
                 }
+                let shown: Vec<(i32, i32)> =
+                    shown_query_masks(&call.query_masks[index], call.query_lengths[index], offset)
+                        .iter()
+                        .map(|mask| (mask.start as i32, mask.end as i32 - 1))
+                        .collect();
                 // Both strands' contexts record the intervals, and the lower-case masks of
                 // a `-lcase_masking` run are kept for both strands (probes `in_n_dust*`,
                 // `t_n_strandplus_lc`, `m_n_*`).
@@ -379,15 +317,17 @@ pub(crate) fn write_blastn_archives(
                 } else {
                     1
                 };
-                masks.push(MaskEntry {
-                    id: record.local_id.clone(),
-                    frame: Frame::Plus1,
-                    intervals: intervals.clone(),
-                });
+                if !shown.is_empty() {
+                    masks.push(MaskEntry {
+                        id: record.local_id.clone(),
+                        frame: Frame::Plus1,
+                        intervals: shown,
+                    });
+                }
                 lcase_masks.push(MaskEntry {
                     id: record.local_id.clone(),
                     frame: Frame::Plus1,
-                    intervals: intervals
+                    intervals: raw
                         .iter()
                         .flat_map(|&interval| std::iter::repeat_n(interval, times))
                         .collect(),
@@ -434,7 +374,7 @@ pub(crate) fn write_blastn_archives(
 mod tests {
     use super::*;
     use crate::cli::{try_parse_from, Cli, Commands};
-    use crate::report::archive::options::{algorithm_options, ParamValue};
+    use crate::report::archive::options::{self, algorithm_options, ParamValue};
     use crate::report::serial::real::double_to_string_posix;
 
     // The `algorithm-options` that NCBI BLAST+ 2.17.0 wrote in the OF8 design's probes

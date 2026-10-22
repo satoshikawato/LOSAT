@@ -19,7 +19,7 @@ use LOSAT::api::local_blast::{run_local_blastn, FormatOutput, OutputSink, Report
 use LOSAT::blastinput::fasta_reader::ReaderConfig;
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 9] = ["0", "6", "7", "8", "9", "12", "5", "15", "16"];
+const FORMATS: [&str; 10] = ["0", "6", "7", "8", "9", "12", "5", "15", "16", "11"];
 
 /// Three queries against four subjects cut from two genomes. The first query overlaps
 /// two subjects, so `-max_target_seqs 1` removes a subject from its hit list.
@@ -68,10 +68,13 @@ impl Inputs {
     }
 
     fn run(&self, formats: &[&str], extra: &[&str], observe: bool) -> Run {
-        let queries = reader_records(&self.query.0, ReaderConfig::query("BLASTN", false, true));
+        let queries = reader_records(
+            &self.query.0,
+            ReaderConfig::query("BLASTN", false, true).with_defline(true),
+        );
         let subjects = reader_records(
             &self.subject.0,
-            ReaderConfig::subject("BLASTN", false, true),
+            ReaderConfig::subject("BLASTN", false, true).with_defline(true),
         );
         run_formats(formats, observe, |outputs| {
             run_local_blastn(self.args(extra), &queries, &subjects, outputs)
@@ -198,10 +201,13 @@ fn observer_ranges_are_exact_rows_and_sections_of_the_same_hsp() {
 #[test]
 fn unsupported_formats_fail_before_searching() {
     let inputs = Inputs::new();
-    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let queries = reader_records(
+        &inputs.query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
     let subjects = reader_records(
         &inputs.subject.0,
-        ReaderConfig::subject("BLASTN", false, true),
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
     // NCBI ignores a custom specification with outfmt 0 (blast_args.cpp:2845-2851).
     for outfmt in ["10", "6 qseqid", "abc"] {
@@ -238,10 +244,13 @@ fn unsupported_formats_fail_before_searching() {
 #[test]
 fn formats_needing_different_hit_list_sizes_are_refused() {
     let inputs = Inputs::new();
-    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let queries = reader_records(
+        &inputs.query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
     let subjects = reader_records(
         &inputs.subject.0,
-        ReaderConfig::subject("BLASTN", false, true),
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
     let attempt = |formats: &[&str], extra: &[&str]| {
         let mut sinks: Vec<Vec<u8>> = formats.iter().map(|_| Vec::new()).collect();
@@ -322,10 +331,13 @@ fn an_invalid_query_after_the_first_batch_is_reported_with_its_batch() {
         );
         let subject = TempFasta::new("blastn_batches_subject.fna", &[("s", &genome[0..20_000])]);
         let inputs = Inputs { query, subject };
-        let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+        let queries = reader_records(
+            &inputs.query.0,
+            ReaderConfig::query("BLASTN", false, true).with_defline(true),
+        );
         let subjects = reader_records(
             &inputs.subject.0,
-            ReaderConfig::subject("BLASTN", false, true),
+            ReaderConfig::subject("BLASTN", false, true).with_defline(true),
         );
         for outfmt in FORMATS {
             let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
@@ -499,10 +511,13 @@ fn subject_ids_of_subject_titles_follow_get_seq_id_list() {
         query: write("q.fna", b"q1", segment),
         subject: write("s.fna", unknown, &subject_sequence),
     };
-    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let queries = reader_records(
+        &inputs.query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
     let subjects = reader_records(
         &inputs.subject.0,
-        ReaderConfig::subject("BLASTN", false, true),
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
     for outfmt in ["6", "7"] {
         let (mut output, mut diagnostics) = (Vec::new(), Vec::new());
@@ -543,10 +558,13 @@ fn run_local_outputs(
     formats: &[&str],
     extra: &[&str],
 ) -> (Vec<Vec<u8>>, Vec<u8>, anyhow::Result<()>) {
-    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let queries = reader_records(
+        &inputs.query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
     let subjects = reader_records(
         &inputs.subject.0,
-        ReaderConfig::subject("BLASTN", false, true),
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
     let mut sinks: Vec<Vec<u8>> = vec![Vec::new(); formats.len()];
     let mut diagnostics = Vec::new();
@@ -674,8 +692,12 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
     // return the same way, `x_PrintStructuredReport`).
     for (index, outfmt) in FORMATS.into_iter().enumerate() {
         let (cli_output, cli_stderr) = inputs.cli(outfmt, &[]);
-        assert_eq!(run.outputs[index], cli_output, "outfmt {outfmt}");
-        if matches!(outfmt, "5" | "8" | "9" | "12" | "15" | "16") {
+        assert_eq!(
+            String::from_utf8_lossy(&run.outputs[index]),
+            String::from_utf8_lossy(&cli_output),
+            "outfmt {outfmt}"
+        );
+        if matches!(outfmt, "5" | "8" | "9" | "11" | "12" | "15" | "16") {
             let alone = inputs.run(&[outfmt], &[], false);
             assert_eq!(
                 String::from_utf8_lossy(&alone.diagnostics),
@@ -830,10 +852,13 @@ fn intervals_without_letters_are_records_without_residues() {
 #[test]
 fn run_local_rejects_an_unknown_strand() {
     let inputs = Inputs::new();
-    let queries = reader_records(&inputs.query.0, ReaderConfig::query("BLASTN", false, true));
+    let queries = reader_records(
+        &inputs.query.0,
+        ReaderConfig::query("BLASTN", false, true).with_defline(true),
+    );
     let subjects = reader_records(
         &inputs.subject.0,
-        ReaderConfig::subject("BLASTN", false, true),
+        ReaderConfig::subject("BLASTN", false, true).with_defline(true),
     );
     for strand in ["foo", "", "PLUS", "plus "] {
         let (mut sink, mut diagnostics) = (Vec::new(), Vec::new());

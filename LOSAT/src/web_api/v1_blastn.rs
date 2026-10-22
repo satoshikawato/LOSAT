@@ -83,7 +83,10 @@ pub(super) fn run_web_pair(
         BlastnOutputFormat::Tabular => "6".to_string(),
         BlastnOutputFormat::TabularWithComments => "7".to_string(),
         // `v1_output_format` reads 0, 6 and 7 only.
-        BlastnOutputFormat::Seqalign(_) | BlastnOutputFormat::Xml | BlastnOutputFormat::Xml2(_) => {
+        BlastnOutputFormat::Seqalign(_)
+        | BlastnOutputFormat::Xml
+        | BlastnOutputFormat::Xml2(_)
+        | BlastnOutputFormat::Archive => {
             anyhow::bail!("unsupported BLASTN output format")
         }
     };

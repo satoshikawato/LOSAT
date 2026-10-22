@@ -20,7 +20,7 @@ LOSAT/tests/db_search (README.md there says how they were built).
 rewrites the rc, hash and size columns of the manifest (rows outside --program and --only keep theirs;
 the default is every program). It runs NCBI in a cleaned environment (see `check`), because each
 variable and file that is cleaned changes NCBI's result: BLASTDB, NCBI*, BLAST*, BATCH_SIZE, CHUNK_SIZE,
-OLD_FSC, BL2SEQ_LEGACY, and `~/.ncbirc` (HOME is an empty directory).
+ARCHIVE_FORMAT, OLD_FSC, BL2SEQ_LEGACY, and `~/.ncbirc` (HOME is an empty directory).
 
 `check --losat BIN [--threads N] [--program NAME] [--only PREFIX] [--out TSV]` runs LOSAT with `-num_threads N`
 (default 1) in the same cleaned environment (no NCBI*, BLAST*, LOSAT_*, BATCH_SIZE, CHUNK_SIZE, OLD_FSC or
@@ -49,11 +49,12 @@ FROZEN = TESTS / "fixtures" / "db_search"
 COLUMNS = ["row_id", "program", "kind", "db", "query", "extra_args", "outfmt", "rc", "stdout_sha256", "stdout_bytes",
            "stderr_sha256", "covers"]
 PROGRAMS = ("blastp", "blastn", "tblastn", "blastx", "tblastx")
-NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY")
+NCBI_ENV = ("BATCH_SIZE", "CHUNK_SIZE", "OLD_FSC", "BL2SEQ_LEGACY", "ARCHIVE_FORMAT")
 TIMEOUT = 600
 # The `NAME=VALUE` tokens of `extra_args` that are environment variables of both programs: BLASTDB
-# (the directory of a `taxdb.bti`) and the two that cut a query file into batches.
-ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE")
+# (the directory of a `taxdb.bti`), the two that cut a query file into batches, and ARCHIVE_FORMAT
+# (how outfmt 11 writes its archive: unset text, `bin...` binary).
+ENV_NAMES = ("BLASTDB", "BATCH_SIZE", "CHUNK_SIZE", "ARCHIVE_FORMAT")
 
 
 def read_manifest() -> tuple[list[str], list[dict[str, str]]]:

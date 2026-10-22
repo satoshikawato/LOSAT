@@ -5989,6 +5989,11 @@ fn post_process_hits_and_write(
     for (format_index, (format, &output_format)) in
         outputs.formats.iter_mut().zip(output_formats).enumerate()
     {
+        // The warnings that a format other than the archive writes are not the archive's
+        // messages (a search with several formats, `run_local`).
+        if let Some(handle) = report.archive {
+            handle.set_muted(output_format != BlastnOutputFormat::Archive);
+        }
         let mut probe = observer
             .as_deref_mut()
             .map(|observer| FormatProbe::new(observer, format_index));
@@ -6300,6 +6305,9 @@ fn post_process_hits_and_write(
         writer.flush()?;
     }
     // Without an output format the warnings are written all at once.
+    if let Some(handle) = report.archive {
+        handle.set_muted(false);
+    }
     if let Some(before) = warning_lines {
         for query_warnings in before {
             outputs.diagnostics.write_all(query_warnings)?;

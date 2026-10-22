@@ -388,6 +388,7 @@ pub(crate) fn from_bio(
         title,
         sequence,
         warnings,
+        source: Default::default(),
     }
 }
 

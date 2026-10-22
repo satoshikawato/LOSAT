@@ -164,15 +164,13 @@ pub(super) fn x_read_subject_stores<R: std::io::Read>(
 )> {
     use crate::blastinput::seq_range::{record_cut, Placements, RecordPlacement};
     let mut placements = Vec::new();
-    // `FastaRecord::cut` of the record's interval without a copy of the letters: the same
-    // identifiers and title, the interval's letters, no warnings.
+    // The record `cut_subjects` makes, cut in place (`FastaRecord::cut_in_place`). An interval that
+    // starts past the end has stopped the reading before (`read_subjects_map`).
     let mut cut = |mut record: crate::blastinput::fasta_reader::FastaRecord| {
         if let Some(range) = range {
             let length = record.sequence.len();
             let (from, to_exclusive) = record_cut(range, length)?;
-            record.sequence.truncate(to_exclusive);
-            record.sequence.drain(..from);
-            record.warnings = Vec::new();
+            record.cut_in_place(from, to_exclusive);
             placements.push(RecordPlacement {
                 offset: from,
                 length,
@@ -289,9 +287,10 @@ fn x_packed_while_read<R: std::io::Read>(
         let mut letters = 0usize;
         let read =
             crate::blastinput::fasta_reader::read_subjects_map(source, range, warn, |record| {
-                // the reader cuts a record to its interval before it hands it over
+                // the reader cuts a record to its interval before it hands it over; a cut record
+                // keeps the room of its whole letters until it is packed, so that room is counted
                 let record = cut(record)?;
-                letters += record.sequence.len();
+                letters += record.sequence.capacity();
                 batch.push(record);
                 if batch.len() >= X_PACK_BATCH || letters >= X_PACK_BATCH_LETTERS {
                     letters = 0;
@@ -356,5 +355,96 @@ pub fn print_summary() {
             RESOLVED_MADE.load(Ordering::Relaxed),
             PACKED_PLANS.load(Ordering::Relaxed)
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blastinput::fasta_reader::{read_subjects, FastaInputSource, ReaderConfig};
+    use crate::blastinput::seq_range::{cut_subjects, SequenceRange};
+
+    // NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:427-431
+    // ```c
+    //     static void
+    //     s_Ncbi4naToNcbi2na(const string& ncbi4na, size_t base_length, Uint1* ncbi2na)
+    //     {
+    //         ...
+    //         CRandom random(base_length);
+    // ```
+    // NCBI packs the subject it searches, the interval of `-subject_loc`, and seeds the resolution
+    // of its ambiguous bases with the interval's length. With a range the reader packs the records
+    // `cut_subjects` makes (at one thread and on the packing thread): their letters, deflines,
+    // placements and resolved bases; the whole record packed and read in the interval resolves
+    // the ambiguous bases otherwise.
+    #[test]
+    fn a_range_packs_the_records_cut_to_it() {
+        let mut state = 5u64;
+        let mut fasta = Vec::new();
+        for (index, length) in [3_000usize, 2_500, 4_000].into_iter().enumerate() {
+            fasta.extend_from_slice(format!(">s{index} title {index}\n").as_bytes());
+            for _ in 0..length {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                let draw = (state >> 33) as usize;
+                fasta.push(if draw % 8 == 0 {
+                    b"RYKMSWBDHVNrykmswbdhvn"[draw / 8 % 22]
+                } else {
+                    b"ACGTacgt"[draw / 8 % 8]
+                });
+            }
+            fasta.push(b'\n');
+        }
+        let range = SequenceRange {
+            from: 100,
+            to: 2_800,
+        };
+        let config = || ReaderConfig::subject("TBLASTN", false, false);
+        let whole = read_subjects(
+            &mut FastaInputSource::from_bytes(&fasta, config()),
+            Some(&range),
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        let (cut, expected_placements) = cut_subjects(&whole, Some(&range)).unwrap().unwrap();
+        let mut resolved_otherwise = 0;
+        for threads in [1, 2] {
+            let (records, stores, placements) = x_read_subject_stores(
+                &mut FastaInputSource::from_bytes(&fasta, config()),
+                Some(&range),
+                &mut |_| Ok(()),
+                threads,
+            )
+            .unwrap();
+            let stores = stores.expect("every record packed");
+            assert_eq!(placements.0, expected_placements.0, "{threads} threads");
+            assert_eq!(records.len(), cut.len());
+            for (index, ((record, store), cut)) in records.iter().zip(&stores).zip(&cut).enumerate()
+            {
+                assert_eq!(
+                    (&record.local_id, &record.title, record.sequence.is_empty()),
+                    (&cut.local_id, &cut.title, true)
+                );
+                let (mut letters, mut resolved, mut expected) =
+                    (Vec::new(), Vec::new(), Vec::new());
+                store.ascii_into(&mut letters);
+                assert_eq!(letters, cut.sequence, "{threads} threads, record {index}");
+                store.resolved_letters_into(&mut resolved);
+                PackedNucleotide::from_subject_letters(&cut.sequence)
+                    .unwrap()
+                    .resolved_letters_into(&mut expected);
+                assert_eq!(resolved, expected, "{threads} threads, record {index}");
+                let mut whole_resolved = Vec::new();
+                PackedNucleotide::from_subject_letters(&whole[index].sequence)
+                    .unwrap()
+                    .resolved_letters_into(&mut whole_resolved);
+                let offset = placements.offset(index);
+                if whole_resolved[offset..offset + resolved.len()] != resolved[..] {
+                    resolved_otherwise += 1;
+                }
+            }
+        }
+        assert!(resolved_otherwise > 0, "the seed is the interval's length");
     }
 }

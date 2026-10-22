@@ -882,7 +882,7 @@ impl TblastnArgs {
             let (read_subject_records, x_subject_stores, x_placements) = {
                 let mut stderr = std::io::stderr();
                 let mut warn = |message: &[u8]| std::io::Write::write_all(&mut stderr, message);
-                // The stores' own side is recorded where they are read (x_subject_store.rs).
+                // Both sides of the stores are recorded in x_subject_store.rs.
                 if super::x_subject_store::x_tbn_store() {
                     let (records, stores, placements) =
                         super::x_subject_store::x_read_subject_stores(

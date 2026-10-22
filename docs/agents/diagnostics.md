@@ -3864,12 +3864,12 @@ Scheduling (each value computed by one thread with the original function; order 
   46.91 s). Joined the strict set on these timings (no case slower; Owner decision of 2026-10-17 that
   the branch-free scans of blastp / blastx / tblastx join the set once each shows no loss).
 - `LOSAT_X_TBNSTORE=1` tblastn `-subject`: each subject record's letters are packed as soon as the
-  reader has read it, with `-subject_loc` after it is cut in place to its interval (the record
+  reader has read it (`sequence/packed_subject.rs`, the shape of a BLAST database volume: ncbi2na 4
+  bases per byte with the remainder count in the last byte, the runs of letters other than `ACGT`
+  as ncbi4na codes, the lower-case intervals), so the letters of the whole set are never held.
+  With `-subject_loc` a record is first cut in place to its interval, into the record
   `seq_range::cut_subjects` makes, whose length seeds the resolution of ambiguous bases as NCBI's
-  subject set-up does) (`sequence/packed_subject.rs`, the shape of a BLAST database volume:
-  ncbi2na 4 bases per byte with the remainder count in the last byte, the runs of letters other
-  than `ACGT` as ncbi4na codes, the lower-case intervals), so the letters of the whole set are
-  never held; the records keep their deflines. With two or more threads a second
+  subject set-up does; the records keep their deflines. With two or more threads a second
   thread packs the records while the reader reads the next ones (`x_packed_while_read`: batches of
   up to 1,024 records or 4 MiB of letters, handed over one at a time), so the packing does not add
   to the read; the records and their stores are those of the one-thread read, in the same order.

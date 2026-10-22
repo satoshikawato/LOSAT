@@ -1,5 +1,5 @@
 //! TBLASTN subjects held packed (`LOSAT_X_TBNSTORE`, `src/algorithm/tblastn/x_subject_store.rs`,
-//! `src/sequence/packed_subject.rs`), on whole searches.
+//! `src/sequence/packed_subject.rs`), on whole searches and with a subject range.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/api/blast_objmgr_tools.cpp:515-520
 //! ```c
@@ -322,8 +322,9 @@ fn the_report_and_the_messages_are_the_same_with_the_subjects_held_packed() {
 // cut to its interval as it is read and then held packed, and the report and the messages are
 // those of the records cut from the letters (`LOSAT_X_TBNSTORE=0`): tabular and pairwise reports
 // (the frames and coordinates from each record's length and its interval's start), three threads
-// (the packing thread), `-lcase_masking` with an interval that holds lower-case letters, and an
-// interval that starts past the ends (the error, its exit code and the messages before it).
+// (the packing thread), `-lcase_masking` with an interval that holds lower-case letters, an
+// interval without letters in one record (the warning of an empty subject), and an interval that
+// starts past the ends (the error, its exit code and the messages before it).
 // `LOSAT_X_DEFAULT=0` turns the switch off; with it set as well (the reference loops) the subjects
 // are still held packed and the report is the same.
 #[test]
@@ -364,7 +365,26 @@ fn a_subject_range_is_cut_and_held_packed_and_the_reference_loops_read_the_packe
         }
         assert!(!expected.is_empty(), "{ranged:?}: no report");
     }
-    // the pieces hold at most 6,000 letters (the reader drops `-`)
+    // an interval that starts at the end of the shortest piece (the reader drops `-`): a subject
+    // without letters, whose warning the pairwise report writes
+    let shortest = records(&long)
+        .iter()
+        .map(|(_, letters)| letters.bytes().filter(|&letter| letter != b'-').count())
+        .min()
+        .expect("pieces");
+    let empty = format!("{}-6000", shortest + 1);
+    let ranged = ["-outfmt", "0", "-subject_loc", empty.as_str()];
+    let (expected, messages, _) = tblastn(ten, &long, &ranged, &[NO_STORE]);
+    let (report, store_messages, stats) = tblastn(ten, &long, &ranged, &[]);
+    assert!(report == expected);
+    assert_eq!(store_messages, messages);
+    assert_eq!(counter(&stats, "subjects"), 4, "{stats}");
+    assert!(
+        String::from_utf8_lossy(&expected).contains("Subject sequence contains no data")
+            || messages.contains("Subject sequence contains no data"),
+        "no warning of an empty subject"
+    );
+    // the pieces hold at most 6,000 letters
     let past_end = ["-outfmt", "6", "-subject_loc", "6001-7000"];
     let expected = run(ten, &long, &past_end, &[NO_STORE]);
     let output = run(ten, &long, &past_end, &[]);

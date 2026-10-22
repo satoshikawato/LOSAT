@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp-fast's lookup build with `LOSAT_X_BPLKPFLAT` (`src/algorithm/tblastx/lookup/x_clut_par.rs`,
 //! `src/algorithm/blastp/x_query_blocks.rs`) on whole searches.
 //!

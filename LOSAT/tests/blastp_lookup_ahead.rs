@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's block search with `LOSAT_X_BPLKPAHEAD` (`src/algorithm/blastp/blast_engine/
 //! x_lookup_ahead.rs`): the next query block's query frames, lookup table and contexts built during
 //! the block before it, on the search's pool.

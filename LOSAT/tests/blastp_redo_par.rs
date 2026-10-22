@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's composition-based redo with `LOSAT_X_BPREDOPAR` (`src/algorithm/blastp/x_redo_par.rs`)
 //! on whole searches.
 //!

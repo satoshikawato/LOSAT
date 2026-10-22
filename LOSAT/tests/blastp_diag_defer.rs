@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! blastp's two-hit test with `LOSAT_X_BPDEFER` (`src/algorithm/blastp/x_seed_fused.rs`) on whole
 //! searches: the candidates of a lookup cell's AVX2 batches are called after the cell's last batch
 //! of eight instead of at the end of each batch.

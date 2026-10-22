@@ -287,6 +287,7 @@ export LOSAT_X_BPQBLOCK=50000
 export LOSAT_X_BPQBLOCKFMT=1
 export LOSAT_X_BPQBLOCKSA=1
 export LOSAT_X_BPQBLOCKXML=1
+export LOSAT_X_BPREDODBSUBJ=1
 export LOSAT_X_BPREDOFIT=1
 export LOSAT_X_BPREDOLPT=1
 export LOSAT_X_BPREDOPAR=1
@@ -1256,6 +1257,43 @@ Rebuilding less:
   binaries, 1,993 passed); ci_fast all programs with the switch, with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases, 0
   failures each); blastp `-db` fixtures at 1 and 4 threads under the shadow (52 rows, 0 differing, the exit line
   `identical` in every run that ends without an error).
+- `LOSAT_X_BPREDODBSUBJ=1` (BLASTP `-db`, memory; in the strict set from the pull request that added it
+  (perf/bp-redo-db-subjects, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is
+  not set; acts for every task with `-db`) the composition redo reads the subject of each match from the database when
+  it redoes the match, as NCBI does (blast_kappa.c:1381-1385), instead of a copy of every listed subject made before the
+  redo (`blastp/x_redo_subjects.rs`, `blastp/blast_engine/database/x_redo_db_subjects.rs`). Without it
+  `ListedSubjects::read` copies the residues of every subject of the preliminary hit lists, which the redo and the
+  reports read. With it `ListedSubjects::x_list` keeps their ordinal ids and lengths (from the index; the estimate of
+  `LOSAT_X_BPREDOLPT` reads the lengths), every redo path and the first Newton problems of `LOSAT_X_NEWTONLANES` read a
+  match's stored residues with `SeqDb::read_sequence` and drop them after the match (the Newton problems read ahead of
+  the redo and the redo reads again: keeping the reads ahead for the redo raised the maximum resident set; the
+  one-thread loop reads after the early termination test, as NCBI, and after the Newton problems; the parallel paths
+  read the matches they compute ahead of the test's replay), a read that finds a pyrrolysine (O) sets the subject's
+  flag, and after the redo `ListedSubjects::x_read_shown` reads the subjects of the final hit lists again for
+  the reports. Where every report is tabular rows of the default fields or Seq-aligns, which read the letters only to
+  recount the HSPs whose query or subject has a pyrrolysine (O), it keeps the residues of the subjects with an O (read
+  again only where the flag is set: the redo read every final subject) and of the subjects of the HSPs whose query has
+  one; otherwise those of every final subject; those of every listed subject when the reports make records
+  (`LOSAT_X_BPLISTEDLEAN=0`, its shadow mode, ABI v1's titles); the others keep their lengths. The redo reads the same
+  stored residues and the reports the same letters and lengths, so reports do not change. A reader error of the redo's
+  reads is the error of the copy's read, reached in the redo and only for a subject that the redo reads; only a database
+  changed after its preliminary read can fail there. Shadow: `LOSAT_X_BPREDODBSUBJSHADOW=1` (implies the switch) makes
+  the copy too and compares the lengths and every read of the redo and of `x_read_shown` with it (the length and every
+  residue), and checks that no final subject left without residues has an O in it; the first difference prints the line
+  otherwise printed at exit and panics: `[X_SHADOW] BPREDODBSUBJ searches= lengths= reads= residues= identical`.
+  Evidence 2026-10-21 (perf/bp-redo-db-subjects, head 90bb60f8, workstation; the same binary on / off in one job):
+  `blastp -db` UniRef50 q100 at 32 threads (node 1, untimed) peak RssAnon 235 / 289 MiB (max RSS 229 / 280 MiB; NCBI
+  195 MiB), wall 541 / 543 s, the same output (= NCBI); Swiss-Prot q100 peak RssAnon 91.5 / 121.0 MiB at 8 threads and
+  101.4 / 130.1 MiB at 16 (medians of 2 pairs; NCBI 125 and 136 MiB). Instructions (`perf stat` `:u`, 8 threads, on /
+  off) x1.0007 OrthoFinder blastp-fast Species4 x BlastDBSpecies6, x1.0002 Swiss-Prot q100 outfmt 6, x1.0003 the same
+  with outfmt 0, x1.000 `uniref50.04` q100. Timed (8 cores of node 0 with their siblings idle, warmed, order
+  alternated): median ratio of wall time x0.997 (0.991-1.001, 8 pairs) OrthoFinder, x0.995 (0.986-1.083, 10)
+  Swiss-Prot q100, x1.002 (0.973-1.066, 8) `uniref50.04` q100; max RSS 94 / 123 MiB Swiss-Prot q100, 121 / 121 MiB
+  OrthoFinder, 54 / 54 MiB `uniref50.04` q100 (untimed, 3 rounds: 54.6 / 52.8 MiB; keeping the reads ahead of the
+  Newton problems for the redo read 61.9 MiB). Gates: `cargo test` (94 binaries, 2,065 passed); ci_fast all programs
+  with the switch, with `=0` and with `LOSAT_X_DEFAULT=0` (223 cases, 0 failures each); blastp `-db` fixtures at 1 and
+  4 threads under the shadow (59 rows, 0 differing, the exit line `identical` in every run that ends without an
+  error).
 - `LOSAT_X_BPSUBJMETA=1` (BLASTP, speed; in the strict set since 2026-10-17 (perf/perfmb-default-bundle, evidence at the end of this entry): on unless it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set; acts only in the `-subject` block search of `LOSAT_X_BPQBLOCK`, for
   blastp and blastp-fast) the subjects' tabular IDs and titles are made once for all blocks instead of once
   per block (`blastp/blast_engine/x_subject_meta.rs`, exactness argument in its header). Without it each

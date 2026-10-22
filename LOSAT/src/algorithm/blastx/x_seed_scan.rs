@@ -167,6 +167,7 @@ pub fn print_shadow_stats() {
     #[cfg(feature = "parallel")]
     super::super::search::x_subject_flow::x_print_shadow_summary();
     crate::algorithm::blastx::x_db_stream::x_print_shadow_summary();
+    crate::algorithm::blastx::statistics::x_print_eval_empty_summary();
     if let Some(tables) = crate::algorithm::tblastx::lookup::x_bxlut_shadow_tables() {
         eprintln!("[X_SHADOW] BXLUT tables_compared={tables} (lookup tables identical)");
     }

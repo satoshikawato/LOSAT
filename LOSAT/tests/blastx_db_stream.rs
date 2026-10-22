@@ -238,6 +238,54 @@ fn the_shadow_mode_finds_every_read_identical() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+// No NCBI counterpart: LOSAT_X_BXEVALEMPTY returns the empty list of a subject without HSPs at once.
+#[test]
+fn the_empty_evaluation_gives_the_reports_of_the_full_one() {
+    let dir = temp_dir("evalempty");
+    let query = genome_slice(&dir, 10_000);
+    let set = fasta("PemoMJNVA.faa");
+    let db = makedb(&dir, &set, "pemo", "20000");
+    let shadow = [("LOSAT_X_BXEVALEMPTYSHADOW", "1")];
+    for subjects in [["-db", db.as_str()], ["-subject", set.to_str().unwrap()]] {
+        for threads in [1, 4] {
+            let run = |env: &[(&str, &str)]| {
+                let output = losat(env)
+                    .arg("blastx")
+                    .arg("-query")
+                    .arg(&query)
+                    .args(subjects)
+                    .args(["-outfmt", "6", "-num_threads", &threads.to_string()])
+                    .output()
+                    .expect("run LOSAT");
+                assert_eq!(output.status.code(), Some(0), "{subjects:?} {env:?}");
+                (
+                    output.stdout,
+                    String::from_utf8_lossy(&output.stderr).into_owned(),
+                )
+            };
+            let (expected, stderr) = run(&[("LOSAT_X_BXEVALEMPTY", "0")]);
+            assert!(!expected.is_empty() && stderr.is_empty(), "{stderr}");
+            assert!(
+                run(&[]) == (expected.clone(), String::new()),
+                "{subjects:?} at {threads} threads"
+            );
+            let (report, stderr) = run(&shadow);
+            assert!(
+                report == expected,
+                "{subjects:?} at {threads} threads, shadow"
+            );
+            let line = stderr.trim_end();
+            let compared: u64 = line
+                .strip_prefix("[X_SHADOW] BXEVALEMPTY lists_compared=")
+                .and_then(|rest| rest.strip_suffix(" identical"))
+                .and_then(|count| count.parse().ok())
+                .unwrap_or_else(|| panic!("{subjects:?}: {stderr}"));
+            assert!(compared > 0, "{line}");
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 // local_blast.cpp:177-224 (`CheckInternalData`): NCBI does not search a query batch without a
 // valid context, so the sequence file is read by the first batch with one (as
 // `blastx_db_search.rs` `the_sequence_file_is_read_by_the_first_batch_with_a_valid_context`).

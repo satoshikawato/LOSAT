@@ -1389,7 +1389,9 @@ fn compute_subject(
     worker_probe("start", oid);
     let mut containment = Vec::new();
     let encoded = subjects.encoded_with_sentinel(oid);
-    let subject_length = subjects.length(oid);
+    // `subjects.length(oid)` for every kind of subjects: the residues before the sentinel byte (a
+    // database read in blocks then looks the subject up once, LOSAT_X_BXDBSTREAM).
+    let subject_length = encoded.len() - 1;
     // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1451-1455
     // ```c++
     //       if (hit_params->link_hsp_params && !kNucleotide &&

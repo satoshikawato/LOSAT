@@ -298,6 +298,7 @@ export LOSAT_X_BXBATCH=1
 export LOSAT_X_BXCHUNK=64
 export LOSAT_X_BXDBSTREAM=256
 export LOSAT_X_BXDIAG=1
+export LOSAT_X_BXEVALEMPTY=1
 export LOSAT_X_BXFLOW=1
 export LOSAT_X_BXHITBF=1
 export LOSAT_X_BXLAZYCTX=1
@@ -4132,6 +4133,14 @@ Scheduling (each value computed by one thread with the original function; order 
   lengths and read with it (and the check's error with the copy's), stopping at the first difference; at exit
   `[X_SHADOW] BXDBSTREAM blocks= sequences= residues= lengths= reads= identical` (`tests/blastx_db_stream.rs`).
   Measured: (to come).
+- `LOSAT_X_BXEVALEMPTY=1` (BLASTX, speed; in the strict set from the pull request that added it, with
+  `LOSAT_X_BXDBSTREAM`: on unless `=0` or `LOSAT_X_DEFAULT=0`): the gapped evaluation of a subject without
+  preliminary HSPs (`statistics::evaluate_gapped`, which the sink calls for every subject) returns at once the list
+  that both of its ways give for no input (`link_uneven`'s first lines, and its loop: no HSP, best e-value 0), without
+  the Karlin and Gumbel lookups and the two per-context vectors it built first. Most subjects of a database have no
+  HSP: on Swiss-Prot x 201 reads at one thread the evaluation was 2.1 % of the run's user cycles (`perf record`,
+  workstation). Shadow: `LOSAT_X_BXEVALEMPTYSHADOW=1` also evaluates every empty input the full way and stops at a
+  difference; at exit `[X_SHADOW] BXEVALEMPTY lists_compared=N identical` (`tests/blastx_db_stream.rs`).
 - `LOSAT_X_BXDIAG=1` (BLASTX, speed; in the strict set since 2026-10-17, by the Owner's rule of that day
   that a speed-up lands on by default (DEFAULT_ON_POLICY_20261017 D4), with the rule below for few hits
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it

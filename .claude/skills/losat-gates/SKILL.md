@@ -95,7 +95,7 @@ below only when its condition holds:
 
 ## GitHub CI
 
-A PR runs `ci.yml` (`rust` 2.9 min; `fast output regressions` 4.5 min with all programs) and,
-when `web/**` or `LOSAT/src/**` changed, `web.yml` (about 20 min; the `adapter` job reruns V-ABI
-quick). Nightly runs `--all-cases` and the WASI matrix (median 120 min). Do not rerun locally
+A PR runs `ci.yml` (`rust` about 35 min: lint and two cargo-nextest shards; `fast output
+regressions` 4.5 min with all programs) and, when `web/**` or `LOSAT/src/**` changed, `web.yml`
+(about 20 min; the `adapter` job reruns V-ABI quick). Nightly runs `--all-cases` and the WASI matrix (median 120 min). Do not rerun locally
 what CI runs for the same commit.

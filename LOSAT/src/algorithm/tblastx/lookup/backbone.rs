@@ -815,8 +815,9 @@ fn x_context_karlin(
 //    Blast_KarlinBlkCopy(kbp, sbp->kbp_ideal);
 // ```
 // This is prepare_lookup_query with a flag: x_with_karlin = true runs the code of the reference
-// path unchanged (the Karlin computation of `x_context_karlin`); false skips it (for `x_lookup_table_for_profile`
-// and for `x_prepare_blosum62_lookup_query_in_pool`, which computes it on a pool).
+// path unchanged (the Karlin computation of `x_context_karlin`); false skips it (for
+// `x_lookup_table_for_profile` and for `x_prepare_blosum62_lookup_query_in_pool`, which computes it
+// on a pool).
 fn x_prepare_lookup_query(
     queries: &[Vec<QueryFrame>],
     ideal_params: KarlinParams,

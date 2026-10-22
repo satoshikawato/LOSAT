@@ -43,7 +43,6 @@ fn fasta(name: &str) -> PathBuf {
 const OFF: (&str, &str) = ("LOSAT_X_TBNHITBF", "0");
 const SHADOW: (&str, &str) = ("LOSAT_X_TBNHITBFSHADOW", "1");
 const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
-const ON: (&str, &str) = ("LOSAT_X_TBNHITBF", "1");
 /// The `[X_STATS] TBNSCANBF` and `[X_STATS] TBNSCANBYTE` lines: the scan calls of the unit path,
 /// one offset array each.
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
@@ -202,20 +201,15 @@ fn the_shadow_compares_every_offset_array() {
 }
 
 // No NCBI counterpart: where the switch acts. `LOSAT_X_DEFAULT=0` turns the switch off with the
-// rest of the strict set (the unit path itself always runs): no shadow line, the loop before the
-// switch, unless its own variable (`=1`) or the shadow turns it on.
+// rest of the strict set (the unit path itself always runs): the report of the loop before the
+// switch and no shadow line; the shadow variable alone still turns the comparison on.
 #[test]
-fn the_default_off_turns_the_loop_off_unless_its_variable_is_set() {
+fn the_default_off_gives_the_report_of_the_off_switch_and_the_shadow_still_compares() {
     let inputs = Inputs::new("unit");
     let (off, _) = inputs.tblastn(1, &[OFF]);
-    for switches in [&[DEFAULT_OFF][..], &[DEFAULT_OFF, ON][..]] {
-        let (report, stderr) = inputs.tblastn(1, switches);
-        assert_eq!(report, off, "{switches:?}: against =0");
-        assert!(
-            lines(&stderr, "[X_SHADOW] TBNHITBF").is_empty(),
-            "{switches:?}: {stderr}"
-        );
-    }
+    let (report, stderr) = inputs.tblastn(1, &[DEFAULT_OFF]);
+    assert_eq!(report, off, "against =0");
+    assert!(lines(&stderr, "[X_SHADOW] TBNHITBF").is_empty(), "{stderr}");
     let (report, stderr) = inputs.tblastn(1, &[DEFAULT_OFF, SHADOW]);
     assert_eq!(report, off, "the unit path with the shadow");
     assert!(field(&stderr, "[X_SHADOW] TBNHITBF", "arrays_compared") > 0);

@@ -16,9 +16,8 @@ use super::kappa::{
 };
 use super::kappa_heap::{compo_early_termination, CompoHeap, CompoHeapRecord};
 use super::search_gapped::{
-    full_translation_traceback_with_matrix_and_events_with_mask_mode_owned,
-    preliminary_protein_hsps_in_ncbi_order, GappedHsp, PreliminaryProfile, TargetTranslation,
-    TracebackOwnedHsp,
+    full_translation_traceback_with_matrix_and_events_with_mask_mode_owned, GappedHsp,
+    PreliminaryProfile, TargetTranslation, TracebackOwnedHsp,
 };
 use super::stage_d_kappa_params::{local_extension_final_xdrop, local_kappa_redo_params};
 use super::stage_d_linking::{
@@ -512,10 +511,11 @@ fn x_searched_side_by_side(subjects: SubjectLetters<'_>, batches: usize, threads
 // NCBI computes.
 /// EXPERIMENT (LOSAT_X_TBNOWNPOOLS): a switch of the strict set (`utils/xswitch.rs`), on unless
 /// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. It acts only together with
-/// `LOSAT_X_TBNBATCHRULE`, on the batches that are not searched side by side, and only natively: in WebAssembly only the
-/// main thread can start threads (the WASI thread hosts give a thread a `thread-spawn` that
-/// fails, `tests/wasi_thread_host.js` and `web/app/src/infra/reactor/instance.ts`), and each own
-/// pool is built on a thread of its own, so its threads could not start there (os error 6).
+/// `LOSAT_X_TBNBATCHRULE`, on the batches that are not searched side by side, and only natively: in
+/// WebAssembly only the main thread can start threads (the WASI thread hosts give a thread a
+/// `thread-spawn` that fails, `tests/wasi_thread_host.js` and
+/// `web/app/src/infra/reactor/instance.ts`), and each own pool is built on a thread of its own, so
+/// its threads could not start there (os error 6).
 #[cfg(feature = "parallel")]
 fn x_tbn_own_pools() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -572,8 +572,8 @@ fn x_own_pool_threads(threads: usize, pools: usize, index: usize) -> usize {
 
 /// Graduated 2026-10-22 (was `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`): the query batches
 /// `ranges` of `search` (`args.rs`) searched ahead, each with its range, in the order of
-/// `ranges`; `None` when there is no batch to search ahead (the reference loop searches none
-/// either).
+/// `ranges`; `None` when `ranges` is empty; the caller's loop then searches its batches (args.rs
+/// passes none when the database's sequences could not be read).
 ///
 /// NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-289
 /// ```c++
@@ -1791,39 +1791,6 @@ fn x_oid_chunk_end(subjects: SubjectLetters<'_>, begin: usize, bases: u64) -> us
 // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-347
 // ```c++
 //     begin_chunk = * state_obj;
-//
-//     // fill the cache for all sequence in mmaped slice
-//     if (m_NumThreads) {
-//         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
-//         x_FillSeqBuffer(buffer, begin_chunk);
-//         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
-// ...
-//     *state_obj = end_chunk;
-// ```
-// Each NCBI search thread takes the next chunk when it is free. LOSAT's pool takes the chunks
-// from `begin` on (`x_all_chunks`), and each chunk is one task. Scheduling only.
-/// Graduated 2026-10-22 (was `LOSAT_X_TBNOIDCHUNK`): the chunks from `begin` on, at most
-/// `count` of them.
-#[cfg(feature = "parallel")]
-fn x_entry_chunks(
-    subjects: SubjectLetters<'_>,
-    begin: usize,
-    count: usize,
-    bases: u64,
-) -> Vec<std::ops::Range<usize>> {
-    let mut chunks = Vec::new();
-    let mut start = begin;
-    while chunks.len() < count.max(1) && start < subjects.count() {
-        let end = x_oid_chunk_end(subjects, start, bases);
-        chunks.push(start..end);
-        start = end;
-    }
-    chunks
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-347
-// ```c++
-//     begin_chunk = * state_obj;
 // ...
 //         x_FillSeqBuffer(buffer, begin_chunk);
 //         end_chunk = begin_chunk + static_cast<int>(buffer->results.size());
@@ -1831,11 +1798,20 @@ fn x_entry_chunks(
 //     *state_obj = end_chunk;
 // ```
 // The chunks NCBI's threads take one after another, all of them: each starts where the last one
-// ended. Scheduling only.
-/// Graduated 2026-10-22 (was `LOSAT_X_TBNOIDNEXT`): every chunk of the subjects, in OID order.
+// ended. Each NCBI search thread takes the next chunk when it is free; LOSAT's pool takes the
+// chunks and each chunk is one task. Scheduling only.
+/// Graduated 2026-10-22 (was `LOSAT_X_TBNOIDNEXT`, `LOSAT_X_TBNOIDCHUNK`): every chunk of the
+/// subjects, in OID order.
 #[cfg(feature = "parallel")]
 fn x_all_chunks(subjects: SubjectLetters<'_>, bases: u64) -> Vec<std::ops::Range<usize>> {
-    x_entry_chunks(subjects, 0, usize::MAX, bases)
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < subjects.count() {
+        let end = x_oid_chunk_end(subjects, start, bases);
+        chunks.push(start..end);
+        start = end;
+    }
+    chunks
 }
 
 // No NCBI counterpart: NCBI's threads write their lists into the shared HSP stream at once. The
@@ -2347,11 +2323,11 @@ fn run_preliminary_subjects(
     //
     //         if (status == SUBJECT_SPLIT_DONE) break;
     // ```
-    // Graduated 2026-10-22 (was `LOSAT_X_TBNOIDUNITS`): NCBI's thread searches the chunks of its subject one after
-    // another. A subject longer than a chunk's budget, a chunk of its own, runs its (frame, chunk)
-    // units on the pool as the single subject of a search does, so that threads without a chunk
-    // to search take them; its merge, linking and reaping stay on its thread after its last unit.
-    // The other subjects keep `unit_pool`. Scheduling only.
+    // Graduated 2026-10-22 (was `LOSAT_X_TBNOIDUNITS`): NCBI's thread searches the chunks of its
+    // subject one after another. A subject longer than a chunk's budget, a chunk of its own, runs
+    // its (frame, chunk) units on the pool as the single subject of a search does, so that threads
+    // without a chunk to search take them; its merge, linking and reaping stay on its thread after
+    // its last unit. The other subjects keep `unit_pool`. Scheduling only.
     #[cfg(feature = "parallel")]
     let x_units_beyond = x_chunk_bases;
     let x_unit_pool = |subject: SubjectNt<'_>| {
@@ -5853,43 +5829,13 @@ mod tests {
                 "{lengths:?} from {begin}, {bases} bases"
             );
         }
-        // `x_entry_chunks` takes the given number of chunks from `begin`, fewer at the end of the
-        // subjects, and at least one chunk.
+        // `x_all_chunks` takes every chunk from the first subject on, in OID order.
         let subjects = set(&[50, 5, 5, 5, 5, 50, 5]);
         assert_eq!(
-            x_entry_chunks(
-                SubjectLetters::Records(&subject_slices(&subjects)),
-                0,
-                3,
-                12
-            ),
-            [0..1, 1..3, 3..5]
+            x_all_chunks(SubjectLetters::Records(&subject_slices(&subjects)), 12),
+            [0..1, 1..3, 3..5, 5..6, 6..7]
         );
-        assert_eq!(
-            x_entry_chunks(
-                SubjectLetters::Records(&subject_slices(&subjects)),
-                5,
-                3,
-                12
-            ),
-            [5..6, 6..7]
-        );
-        assert_eq!(
-            x_entry_chunks(
-                SubjectLetters::Records(&subject_slices(&subjects)),
-                0,
-                0,
-                12
-            ),
-            [0..1]
-        );
-        assert!(x_entry_chunks(
-            SubjectLetters::Records(&subject_slices(&subjects)),
-            7,
-            3,
-            12
-        )
-        .is_empty());
+        assert!(x_all_chunks(SubjectLetters::Records(&[]), 12).is_empty());
         // 240 subjects of 1,000 bases at 4 threads (tests/tblastn_oid_chunk.rs): 3,751 bases, three
         // subjects per chunk, 80 chunks in all.
         let subjects = set(&[1_000; 240]);
@@ -5919,7 +5865,7 @@ mod tests {
     // thread too, and gives the report of run_local_for_report_threads, with the plans kept (four
     // batches) and without (one, two, three).
     #[test]
-    fn x_search_batches_takes_one_batch_whatever_their_number() {
+    fn x_search_batches_takes_the_batches_whatever_their_number() {
         let queries = vec![b"MKVLAAGIVGLLLAQWERTYHHNDCFPSMKTAYIAKQRQISFVKSHFSRQ".to_vec(); 4];
         let subjects: Vec<Vec<u8>> = (0..2usize)
             .map(|n| {

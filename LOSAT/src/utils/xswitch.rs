@@ -62,8 +62,8 @@ use std::sync::OnceLock;
 /// `LOSAT_X_NEWTONLANES`, `composition_adjustment/x_newton_lanes.rs`; it acts on aarch64 only)
 /// was added after the change as a switch that is off unless set and joined the set once it was
 /// verified on the arm64 runners with it on. `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` (TBLASTN's
-/// kept scan state and table translation) joined the set together the same way and graduated
-/// (left it, with their old code) on 2026-10-22.
+/// kept scan state and table translation) joined the set together the same way. Both graduated
+/// on 2026-10-22: they left `STRICT_SET` and their old code was deleted.
 /// `LOSAT_X_TBNOIDNEXT` (the threads take the next chunk of subjects when they are free,
 /// `tblastn/x_oid_flow.rs`) and `LOSAT_X_TBNOIDUNITS` (the units of a subject longer than a
 /// chunk's budget on the pool, `tblastn/stage_d_pipeline.rs`) joined the same way, together,

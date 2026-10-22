@@ -21,12 +21,12 @@
 //! bases stay within `min(2^30, F) / (4 * threads) + 1`, at least one subject; F is the largest
 //! file of the database, and for `-subject` LOSAT takes ceil(bases / 4), the `.nsq` that
 //! `makeblastdb` writes for the same subjects. LOSAT's pool takes these chunks as NCBI's threads
-//! do: each thread takes the next chunk when it is free (one entry into the pool for the search),
-//! and the units of a subject longer than a chunk's budget go to the pool. The rules change the
-//! schedule and nothing in the report, so the tests compare the report with the one-thread
-//! search, which has no pool and searches the subjects in NCBI's loop order, and read the
-//! `pool_entries` and `flow_chunks` fields of the `[losat-thread-activity]` line and the
-//! `prelim_units` lines (`LOSAT_WASI_THREADS_DEBUG=1`) to check which path ran.
+//! do: each thread takes the next chunk when it is free, and the units of a subject longer than a
+//! chunk's budget go to the pool. The rules change the schedule and nothing in the report, so the
+//! tests compare the report with the one-thread search, which has no pool and searches the
+//! subjects in NCBI's loop order, and read the `flow_chunks` field of the
+//! `[losat-thread-activity]` line and the `prelim_units` lines (`LOSAT_WASI_THREADS_DEBUG=1`) to
+//! check which path ran.
 //!
 //! The fixture suites have no search of many subjects, so the tests cut
 //! `tests/fasta/MelaMJNV.fasta` into subjects of 1,000 bases (240 of them, or 200 with one subject
@@ -199,23 +199,6 @@ fn units_on_the_pool(stderr: &str) -> usize {
         .count()
 }
 
-/// The `pool_entries` field of the one `[losat-thread-activity]` line of the subject stage.
-fn pool_entries(stderr: &str) -> usize {
-    let lines: Vec<_> = stderr
-        .lines()
-        .filter(|line| {
-            line.starts_with("[losat-thread-activity] program=tblastn stage=subject_core ")
-        })
-        .collect();
-    assert_eq!(lines.len(), 1, "one query batch, one line:\n{stderr}");
-    lines[0]
-        .split_whitespace()
-        .find_map(|field| field.strip_prefix("pool_entries="))
-        .unwrap_or_else(|| panic!("no pool_entries in {}", lines[0]))
-        .parse()
-        .expect("number of entries")
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1409-1413
 // ```c
 //     itr = BlastSeqSrcIteratorNewEx(MAX(BlastSeqSrcGetNumSeqs(seq_src)/100,1));
@@ -257,12 +240,34 @@ fn the_report_is_the_one_thread_report() {
 // ...
 //         } while (res.length >= 0 && tot_length >= res.length && vol_oid < m_RestrictEnd);
 // ```
+// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-344
+// ```c++
+//     begin_chunk = * state_obj;
+//
+//     // fill the cache for all sequence in mmaped slice
+//     if (m_NumThreads) {
+//         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
+//         x_FillSeqBuffer(buffer, begin_chunk);
+// ```
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-482
+// ```c
+//     while (TRUE) {
+//         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
+//                                        dbseq_chunk_overlap);
+//
+//         if (status == SUBJECT_SPLIT_DONE) break;
+// ```
 // A subject longer than a chunk's budget is a chunk of its own, wherever it stands; the chunks
-// before and after it are cut short or start anew. With the long subject first, in the middle
-// and last the report at 2, 3 and 8 threads must be the one-thread report. The 248,000 bases
-// give F = 62,000; at 2 threads a chunk may hold 7,751 bases (seven short subjects), so by hand:
+// before and after it are cut short or start anew. The threads take the next chunk when they are
+// free, as NCBI's do, and the lists come back in OID order (`src/algorithm/tblastn/x_oid_flow.rs`).
+// NCBI's thread searches the chunks of its subject one after another; the (frame, chunk) units
+// of the long subject go to the pool. With the long subject first, in the middle and last the
+// report at 2, 3 and 8 threads must be the one-thread report. The 248,000 bases give
+// F = 62,000; at 2 threads a chunk may hold 7,751 bases (seven short subjects), so by hand:
 // first, {long}, 28 chunks of 7 and {4} (30 chunks); in the middle, 14 of 7, {2}, {long}, 14 of
-// 7 and {2} (31 chunks); last, 28 of 7, {4} and {long} (30 chunks).
+// 7 and {2} (31 chunks); last, 28 of 7, {4} and {long} (30 chunks). The long subject (48,000
+// bases; a chunk may hold 7,751, 5,167 and 1,938 bases at 2, 3 and 8 threads) is the only
+// subject that runs its units on the pool.
 #[test]
 fn a_long_subject_first_in_the_middle_or_last_gives_the_one_thread_report() {
     let debug = ("LOSAT_WASI_THREADS_DEBUG", "1");
@@ -287,77 +292,6 @@ fn a_long_subject_first_in_the_middle_or_last_gives_the_one_thread_report() {
                     "{position:?}: {stderr}"
                 );
             }
-        }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:333-344
-// ```c++
-//     begin_chunk = * state_obj;
-//
-//     // fill the cache for all sequence in mmaped slice
-//     if (m_NumThreads) {
-//         SSeqResBuffer * buffer = m_CachedSeqs[cacheID];
-//         x_FillSeqBuffer(buffer, begin_chunk);
-// ```
-// The threads take the next chunk when they are free, as NCBI's do, and the lists come back in
-// OID order
-// (`src/algorithm/tblastn/x_oid_flow.rs`): the search is one entry into the pool and the line
-// names the chunks. The report must be the one-thread report on the 240 pieces and on the sets
-// with one long subject, at 2, 3 and 8 threads.
-#[test]
-fn the_chunks_taken_when_a_thread_is_free_give_the_one_thread_report() {
-    let debug = ("LOSAT_WASI_THREADS_DEBUG", "1");
-    let mut sets = vec![(None, inputs().1.clone())];
-    for position in [Long::First, Long::Middle, Long::Last] {
-        sets.push((Some(position), long_subject_set(position)));
-    }
-    for (position, subjects) in sets {
-        let (expected, _) = tblastn_on(&subjects, 1, &[]);
-        for threads in [2, 3, 8] {
-            let (report, stderr) = tblastn_on(&subjects, threads, &[debug]);
-            assert!(
-                report == expected,
-                "{position:?}: {threads} threads with the flow differ from one thread"
-            );
-            assert_eq!(
-                pool_entries(&stderr),
-                1,
-                "{position:?} at {threads} threads"
-            );
-            assert!(
-                stderr.contains(" flow_chunks="),
-                "{position:?} at {threads} threads: no flow fields"
-            );
-        }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:478-482
-// ```c
-//     while (TRUE) {
-//         status = s_GetNextSubjectChunk(subject, &backup, kNucleotide,
-//                                        dbseq_chunk_overlap);
-//
-//         if (status == SUBJECT_SPLIT_DONE) break;
-// ```
-// NCBI's thread searches the chunks of its subject one after another. The (frame, chunk) units
-// of a subject longer than a chunk's budget go to the pool. The report at 2, 3 and 8
-// threads must be the one-thread report with the long subject first, in the middle and last. Only
-// the long subject (48,000 bases; a chunk may hold 7,751, 5,167 and 1,938 bases at 2, 3 and 8
-// threads) runs its units on the pool.
-#[test]
-fn the_units_of_a_long_subject_on_the_pool_give_the_one_thread_report() {
-    let debug = ("LOSAT_WASI_THREADS_DEBUG", "1");
-    for position in [Long::First, Long::Middle, Long::Last] {
-        let subjects = long_subject_set(position);
-        let (expected, _) = tblastn_on(&subjects, 1, &[]);
-        for threads in [2, 3, 8] {
-            let (report, stderr) = tblastn_on(&subjects, threads, &[debug]);
-            assert!(
-                report == expected,
-                "{position:?}: {threads} threads differ from one thread"
-            );
             assert_eq!(
                 units_on_the_pool(&stderr),
                 1,

@@ -1,6 +1,6 @@
-//! Graduated 2026-10-22 (was `LOSAT_X_TBNOIDNEXT`): the chunks of subjects of a TBLASTN search handed to the
-//! threads of the pool one at a time, without a wait between entries, and their lists taken back
-//! in OID order.
+//! Graduated 2026-10-22 (was `LOSAT_X_TBNOIDNEXT`): the chunks of subjects of a TBLASTN search
+//! handed to the threads of the pool one at a time, without a wait between entries, and their lists
+//! taken back in OID order.
 //!
 //! NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbimpl.cpp:307-344
 //! ```c++
@@ -39,14 +39,15 @@
 //! chunks are taken or waiting beyond it, and a thread waits before a new chunk when that window
 //! is full (no NCBI counterpart: NCBI's threads write their lists into the shared HSP stream at
 //! once; this bound only keeps the memory of the waiting lists bounded). The chunks and the
-//! search of each subject are those of the chunks (`x_oid_chunk_bases`), so the reports are the same.
+//! search of each subject are those of the chunks (`x_oid_chunk_bases`), so the reports are the
+//! same.
 //!
-//! The threads start together: each thread's loop and the owner wait until every thread of the
-//! pool has entered its loop before the first chunk is searched (no NCBI counterpart). A search
-//! may run the units of its subject on the pool (a subject longer than a chunk's budget), and a thread that waits
-//! for a unit taken by another thread runs other jobs of the pool meanwhile; were a thread's
-//! loop still queued then, it would start there, on top of the chunk being searched, and could
-//! wait for the window while that chunk is the one the owner waits for. Once every loop runs,
+//! The threads start together: each thread's loop and the owner wait until every thread of the pool
+//! has entered its loop before the first chunk is searched (no NCBI counterpart). A search may run
+//! the units of its subject on the pool (a subject longer than a chunk's budget), and a thread that
+//! waits for a unit taken by another thread runs other jobs of the pool meanwhile; were a thread's
+//! loop still queued then, it would start there, on top of the chunk being searched, and could wait
+//! for the window while that chunk is the one the owner waits for. Once every loop runs,
 //! only units are left for a waiting thread to take.
 
 use std::collections::BTreeMap;

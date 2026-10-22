@@ -5,9 +5,13 @@ use crate::algorithm::blastp::encoding::{
     encode_protein_query_frame_with_seg, encode_protein_query_frame_with_seg_timed,
 };
 use crate::algorithm::tblastx::blast_aascan::{s_blast_aa_scan_subject_one_range, BlastOffsetPair};
+#[cfg(test)]
 use crate::algorithm::tblastx::lookup::{build_ncbi_lookup, build_ncbi_lookup_for_profile};
-use crate::algorithm::tblastx::translation::{generate_frames, QueryFrame};
+#[cfg(test)]
+use crate::algorithm::tblastx::translation::generate_frames;
+use crate::algorithm::tblastx::translation::QueryFrame;
 use crate::config::ScoringMatrix;
+#[cfg(test)]
 use crate::stats::lookup_protein_params_ungapped;
 use crate::utils::genetic_code::GeneticCode;
 use crate::utils::matrix::ncbistdaa;
@@ -131,6 +135,7 @@ pub(super) fn tblastn_report_mask_intervals(
 // } BlastOffsetPair;
 // NCBI c++/src/algo/blast/core/blast_engine.c:808-812:
 // subject->frame = BLAST_ContextToFrame(eBlastTypeBlastx, context);
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Seed {
     pub frame: i8,
@@ -193,6 +198,7 @@ pub(super) fn unmasked_translated_chunks(frame_length: usize) -> Vec<TranslatedC
 // else { int pick = random.GetRand() % bitcount; /* pick a set bit */ }
 // The uncompressed ncbi4na sequence is retained by SetupSubjects_OMF for
 // traceback reevaluation; these resolved bases are preliminary-search input.
+#[cfg(test)]
 pub(super) fn resolve_local_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
     u32::try_from(subject.len())?;
     let ncbi4na = subject
@@ -368,7 +374,7 @@ pub(super) fn translated_chunk_scan_ranges(
 // ncbi2na encoding (blast_objmgr_tools.cpp:428-473) and preserves ncbi4na for
 // later reevaluation (blast_setup_cxx.cpp:742-745,830-853). The optional
 // lowercase scan ranges follow the local -lcase_masking path above.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn scan_unambiguous_blosum62_words(
     query: &[u8],
     subject: &[u8],
@@ -394,7 +400,7 @@ pub(super) fn scan_unambiguous_blosum62_words(
 // scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
 // The lookup receives all protein contexts before each subject frame scan;
 // scan order must retain the global query offsets from that shared lookup.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn scan_unambiguous_blosum62_words_multi(
     queries: &[&[u8]],
     subject: &[u8],
@@ -420,7 +426,7 @@ pub(super) fn scan_unambiguous_blosum62_words_multi(
 // lookup->threshold = (Int4)opt->threshold;
 // NCBI c++/src/algo/blast/core/blast_engine.c:1318-1334,1429-1432:
 // return word_length * 3 + 2; reject shorter nucleotide subjects.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn scan_unambiguous_protein_words_multi(
     queries: &[&[u8]],
     subject: &[u8],
@@ -454,6 +460,7 @@ pub(super) fn scan_unambiguous_protein_words_multi(
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-493,804-850:
 // WordFinder is called for each available chunk, then HSPListAppend is
 // called once at the end of every subject frame, including empty frames.
+#[cfg(test)]
 pub(super) enum SeedScanEvent<'a> {
     Chunk(&'a QueryFrame, TranslatedChunk, &'a [Seed]),
     FrameEnd(&'a QueryFrame),
@@ -465,6 +472,7 @@ pub(super) enum SeedScanEvent<'a> {
 // NCBI c++/src/algo/blast/core/aa_ungapped.c:492-505:
 // hits = scansub(lookup_wrap, subject, offset_pairs, array_size, scan_range);
 // Deliver one ordered candidate stream at that exact chunk boundary.
+#[cfg(test)]
 pub(super) fn scan_protein_words_by_chunk(
     queries: &[&[u8]],
     subject: &[u8],

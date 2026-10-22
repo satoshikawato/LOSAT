@@ -874,8 +874,8 @@ Rebuilding less:
 
 - SEGSHARE (graduated 2026-10-22; no variable, no `LOSAT_X_SEGSHARESHADOW`; conditional: the
   query-parallel redo and the windows of `x_redo_par`, 2+ threads) blastp: the subject SEG masks
-  shared by the whole search, as in the one-thread path. The one-thread loop and the
-  match-parallel redo keep their own per-search cache (`BlastpKappaSubjectRangeCache::new`).
+  shared by the whole search, as in the one-thread path. The one-thread loop keeps one cache for
+  the search; the match-parallel redo makes one per match (`BlastpKappaSubjectRangeCache::new`).
 - `LOSAT_X_BPCOMPOREUSE=1` (blastp, speed; in the strict set from the pull request that added it,
   2026-10-19; `=0` or `LOSAT_X_DEFAULT=0` returns to the previous path) an entry of the subject SEG
   cache also keeps the amino-acid composition of its masked bytes, read once when the entry is
@@ -3422,8 +3422,8 @@ Scheduling (each value computed by one thread with the original function; order 
 - TBNPAR (graduated 2026-10-22; no variable, no `LOSAT_X_TBNPARSHADOW`; always on) tblastn:
   preliminary stage per (frame, chunk) and redo per match in parallel, one pool for the search. The
   unit-wise stage is the only preliminary stage of a search (at one thread, without a pool, it
-  runs the units in order); the serial port `preliminary_protein_hsps_in_ncbi_order` stays for
-  unit tests only. The query batches go to `x_search_batches` at any thread count (since
+  runs the units in order); the serial port `preliminary_protein_hsps_in_ncbi_order` is a
+  `#[cfg(test)]` harness that no search runs and unit tests check against NCBI traces. The query batches go to `x_search_batches` at any thread count (since
   `TBNSSIDE` graduated); the one-batch-at-a-time loop searches a batch that `x_search_batches`
   did not take (a database whose sequences could not be read).
 - TBNBATCH (graduated 2026-10-22; no variable; conditional: its rule stays) tblastn query batches
@@ -3572,8 +3572,8 @@ Scheduling (each value computed by one thread with the original function; order 
   take the offset step too, on a state per task. The thread that runs the search keeps one set (the
   table and the largest offset-pair and hit buffers) until it ends or its next tblastn search takes
   it over. It acts at every thread count. Test: `tblastn/search_init.rs` (the table kept across
-  units, across the clear and taken over by another query set, against `XTwoHit::reset`, which
-  stays for that test).
+  units, across the clear and taken over by another query set, against a table made afresh for
+  every unit).
 - TBNXLATE (in the strict set from 2026-10-15; graduated 2026-10-22: no variable, no
   `LOSAT_X_TBNXLATESHADOW`, always on) tblastn: the six translated frames of a
   subject are read from tables, as NCBI makes them from the compressed subject
@@ -3816,8 +3816,8 @@ Scheduling (each value computed by one thread with the original function; order 
   backward; see `TBNXLATESIMD`), as NCBI's
   `BLAST_GetAllTranslations` translates the compressed subject, so a thread holds the frames of
   the subject in hand and no letters, resolved bases or reverse complement; the letter-wise
-  reference translation and the serial preliminary stage that read the packed bases as letters
-  went with `TBNXLATE` and `TBNPAR` (2026-10-22); with `-lcase_masking` the stage reads the
+  reference translation went with `TBNXLATE` (2026-10-22), and the serial preliminary stage that
+  read the packed bases as letters is a `#[cfg(test)]` harness since `TBNPAR` (2026-10-22); with `-lcase_masking` the stage reads the
   letters. The redo (composition mode 2),
   its translations and the pairwise rows (outfmt 0) read windows of the subject (`SubjectNt` in
   `packed_subject.rs`: the HSP's codons, or the window around an HSP that NCBI translates), made

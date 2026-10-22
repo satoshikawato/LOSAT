@@ -4,10 +4,11 @@
   once per query set, the scan state kept by a thread across subjects, the six subject frames read
   from codon tables and the table-only / contexts-only lookup builds were already the default and
   now run unconditionally, so neither `=0` nor `LOSAT_X_DEFAULT=0` reaches the previous code. Gone:
-  the serial preliminary stage in the search (it stays as the oracle of unit tests), the
-  per-subject query frames and lookup (`XQuerySide` no longer optional), the fresh diagonal table
-  per subject, the letter-wise subject translation of the search, both shadow comparisons with
-  their `[X_SHADOW]` / `[X_STATS] TBNXLATE` lines, the `resolved_made` counter of
+  the serial preliminary stage in the search (it stays as a `#[cfg(test)]` test harness that unit
+  tests check against NCBI traces; no search runs it, nor the seed chain only it uses),
+  `XTwoHit::reset`, the per-subject query frames and lookup (`XQuerySide` no longer optional), the
+  fresh diagonal table per subject, the letter-wise subject translation of the search, both shadow
+  comparisons with their `[X_SHADOW]` / `[X_STATS] TBNXLATE` lines, the `resolved_made` counter of
   `[X_STATS] TBNSTORE`, the test file `tblastn_subject_translate.rs` and the tests that compared
   with the previous code. Outputs do not change.
 - The variables `LOSAT_X_TBNSSIDE`, `LOSAT_X_TBNBATCH`, `LOSAT_X_TBNOIDCHUNK`,
@@ -17,7 +18,7 @@
   taken by free threads and units of a long subject on the pool at 2+ threads, the shared SEG store
   of the parallel blastp redo, the Dekker product on wasm32) and their `x_reach!` marks. Gone: the
   entries of chunks and of one subject per thread in the tblastn subject loop
-  (`x_chunks_per_entry`, the `pool_entries` counter; the line now prints `pool_entries=1`), the
-  gate that sent a one-thread search to the batch loop only with `TBNSSIDE`, the SEGSHARE shadow
+  (`x_chunks_per_entry`, the `pool_entries` counter; the field is always 1), the gate that left a
+  one-thread search without `TBNSSIDE` to the one-batch-at-a-time loop, the SEGSHARE shadow
   comparison and its counter, and the tests that set the removed variables to `0`. Outputs do not
   change.

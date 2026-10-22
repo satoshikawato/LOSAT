@@ -1,10 +1,14 @@
 //! Internal TBLASTN protein gapped-score boundary.
 //! The public TBLASTN CLI remains unsupported until downstream stages agree.
 
-use super::search_init::{find_protein_init_hsps_by_chunk_with_mask_mode, InitHsp, InitStageEvent};
-use super::search_seed::{
-    encode_tblastn_lookup_query, resolve_local_subject_ncbi2na, Seed, TranslatedChunk,
-};
+use super::search_init::InitHsp;
+#[cfg(test)]
+use super::search_init::{find_protein_init_hsps_by_chunk_with_mask_mode, InitStageEvent};
+#[cfg(test)]
+use super::search_seed::resolve_local_subject_ncbi2na;
+#[cfg(test)]
+use super::search_seed::Seed;
+use super::search_seed::{encode_tblastn_lookup_query, TranslatedChunk};
 use crate::algorithm::blastn::interval_tree::{BlastIntervalTree, IndexMethod, TreeHsp};
 use crate::algorithm::blastp::encoding::encode_protein_query_frame_with_seg;
 use crate::algorithm::blastp::gapalign::{
@@ -62,7 +66,7 @@ pub(super) struct TracebackOwnedHsp {
 // status = s_BlastProtGappedAlignment(...);
 // This internal entry currently covers the pinned BLOSUM62/word-3 score-only
 // profile and preserves the frame-local coordinates returned by GetGappedScore.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn gapped_blosum62_word3_hsps(
     query: &[u8],
     subject: &[u8],
@@ -96,7 +100,7 @@ pub(super) fn gapped_blosum62_word3_hsps(
 // NCBI c++/src/algo/blast/core/blast_itree.c:212-229:
 // s_GetQueryStrandOffset(query_info, context) returns the protein context's
 // query_offset, which is also used by containment and insertion.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn gapped_blosum62_word3_hsps_multi(
     queries: &[&[u8]],
     subject: &[u8],
@@ -125,7 +129,7 @@ pub(super) fn gapped_blosum62_word3_hsps_multi(
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-552,572-586:
 // each GetGappedScore output belongs to the current chunk; backup.offset
 // is applied only after endpoint purge, before Blast_HSPListsMerge.
-#[allow(dead_code)]
+#[cfg(test)]
 fn gapped_blosum62_word3_hsps_multi_chunks(
     queries: &[&[u8]],
     subject: &[u8],
@@ -152,7 +156,7 @@ fn gapped_blosum62_word3_hsps_multi_chunks(
 // NCBI c++/src/algo/blast/core/blast_gapalign.c:3924-3927,4058:
 // cutoff = hit_params->cutoffs[context].cutoff_score;
 // BLAST_GetGappedScore uses gap_align->sbp->matrix for the chosen profile.
-#[allow(dead_code)]
+#[cfg(test)]
 fn gapped_protein_hsps_multi_chunks(
     queries: &[&[u8]],
     subject: &[u8],
@@ -418,8 +422,8 @@ pub(super) struct PreliminaryProfile<'a> {
 // ```
 // Dispatch point: this is the preliminary stage of s_BlastSearchEngineCore for one subject. The
 // (frame, chunk) units run independently and are merged in NCBI order
-// (x_preliminary_protein_hsps_by_unit); `preliminary_protein_hsps_in_ncbi_order` below is the
-// serial port that the unit tests compare with.
+// (x_preliminary_protein_hsps_by_unit). `preliminary_protein_hsps_in_ncbi_order` below is a test
+// harness that unit tests check against NCBI traces; no search runs it.
 /// The preliminary stage of one subject, as independent (frame, chunk) units.
 pub(super) fn preliminary_protein_hsps_for_search(
     queries: &[&[u8]],
@@ -719,6 +723,7 @@ fn x_preliminary_protein_hsps_by_unit(
             scratch,
         }
     };
+    #[cfg(feature = "parallel")]
     let new_state = || state_on(None);
     let run_unit = |state: &mut UnitState<'_>, unit: usize| -> Result<Vec<(usize, GappedHsp)>> {
         let (frame_index, chunk, _) = &plan.subject.units[unit];
@@ -858,6 +863,7 @@ fn x_preliminary_protein_hsps_by_unit(
     Ok(combined)
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PreliminaryEvent {
     Candidates(i8, usize, Vec<Seed>),
@@ -871,7 +877,9 @@ pub(super) enum PreliminaryEvent {
 // NCBI c++/src/algo/blast/core/blast_engine.c:478-586,804-850:
 // s_BlastSearchEngineOneContext handles each chunk's WordFinder, gapped
 // score, purge and merge before Blast_HSPListAppend for that frame.
-#[allow(dead_code)]
+// Test harness (`#[cfg(test)]`): no search runs this serial stage; the unit tests check its
+// output against the NCBI traces stored under docs/evidence.
+#[cfg(test)]
 pub(super) fn preliminary_protein_hsps_in_ncbi_order(
     queries: &[&[u8]],
     subject: &[u8],
@@ -892,7 +900,7 @@ pub(super) fn preliminary_protein_hsps_in_ncbi_order(
 // passed to Blast_HSPListPurgeHSPsWithCommonEndpoints(..., TRUE).
 // The callback is for comparison-only artificial NCBI input states; the
 // ordinary integrated path above passes an identity callback.
-#[allow(dead_code)]
+#[cfg(test)]
 fn preliminary_protein_hsps_with_comparison_input(
     queries: &[&[u8]],
     subject: &[u8],

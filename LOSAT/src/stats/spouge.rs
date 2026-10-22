@@ -525,9 +525,9 @@ impl DoubleDouble {
         // ```c
         //             result *= expl(-z * z) / z;
         // ```
-        // Dispatch point of the Wasm Dekker product: the reference path (`mul_add`) is the double-double
-        // product that stands in for the long-double operations of this line. Only the way the
-        // product's rounding error is obtained changes, not its value.
+        // Dispatch point of the Wasm Dekker product: the reference path (`mul_add`) is the
+        // double-double product that stands in for the long-double operations of this line. Only
+        // the way the product's rounding error is obtained changes, not its value.
         let error = x_product_error(self.hi, other.hi, product)
             + self.hi * other.lo
             + self.lo * other.hi

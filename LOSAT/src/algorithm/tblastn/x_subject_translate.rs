@@ -89,7 +89,7 @@ const X_AMBIGUOUS: u8 = 0x10;
 // value of `A`, `C`, `G`, `T` (either case), the flagged ncbi4na value of a gap or an ambiguous
 // letter, or `X_NOT_A_LETTER`. It is filled from the reference path's own
 // `iupacna_to_ncbi4na`, with the reference path's rule for `U`.
-/// what a subject byte is, in one read.
+/// What a subject byte is, in one read.
 fn x_letter_table() -> &'static [u8; 256] {
     static TABLE: OnceLock<[u8; 256]> = OnceLock::new();
     TABLE.get_or_init(|| {
@@ -140,7 +140,7 @@ fn x_letter_table() -> &'static [u8; 256] {
 // ```
 // One draw per gap or ambiguous letter: two bits of it for a gap or `N`, otherwise the set bit
 // of the ncbi4na value that the draw picks.
-/// the ncbi2na value drawn for a gap or an ambiguous letter
+/// The ncbi2na value drawn for a gap or an ambiguous letter
 /// with the ncbi4na value `mask`.
 fn x_draw_base(mask: u8, random: &mut NcbiRandom) -> u8 {
     if mask == 0 || mask == 0x0F {
@@ -213,7 +213,7 @@ fn x_subject_ncbi2na(subject: &[u8]) -> Result<Vec<u8>> {
     Ok(ncbi2na)
 }
 
-/// the residue (ncbistdaa) of every codon of one genetic code,
+/// The residue (ncbistdaa) of every codon of one genetic code,
 /// by the three ncbi2na values of the plus strand in sequence order.
 // No NCBI counterpart for the type: the two arrays are NCBI's `translation_table` and
 // `translation_table_rc` (see `x_codon_tables`).
@@ -255,7 +255,7 @@ struct XCodonTables {
 // gives for that codon as letters (`GeneticCode::get`, then `aa_char_to_ncbistdaa`, the two
 // calls of `tblastx::translation::codon_to_aa_ncbistdaa`), so a table read returns the
 // reference path's residue. The tables of a genetic code are made once per process.
-/// the two codon tables of the genetic code `db_gencode`.
+/// The two codon tables of the genetic code `db_gencode`.
 fn x_codon_tables(db_gencode: u8) -> Result<&'static XCodonTables> {
     static TABLES: [OnceLock<XCodonTables>; 256] = [const { OnceLock::new() }; 256];
     let cell = &TABLES[db_gencode as usize];
@@ -295,7 +295,7 @@ fn x_codon_tables(db_gencode: u8) -> Result<&'static XCodonTables> {
 // ```
 // The index of three ncbi2na values in a codon table. The values are below 4, so the mask
 // changes nothing; it tells the compiler that the index is below 64.
-/// where a codon is in a table of `XCodonTables`.
+/// Where a codon is in a table of `XCodonTables`.
 #[inline(always)]
 fn x_codon_index(codon: &[u8]) -> usize {
     (((codon[0] as usize) << 4) | ((codon[1] as usize) << 2) | (codon[2] as usize)) & 63
@@ -334,7 +334,7 @@ fn x_codon_index(codon: &[u8]) -> usize {
 // subject and its reverse complement: frame `i + 1` holds the codons of `seq[i..]`, frame
 // `-(i + 1)` those of `revcomp(seq)[i..]`, which are the plus-strand triplets of
 // `seq[..len - i]` counted from its end.
-/// `generate_frames` from ncbi2na values and the codon tables.
+/// The frames `generate_frames` gives, made from ncbi2na values and the codon tables.
 fn x_generate_frames(ncbi2na: &[u8], tables: &XCodonTables) -> Vec<QueryFrame> {
     let seq_len = ncbi2na.len();
     let mut frames = Vec::with_capacity(6);
@@ -376,7 +376,7 @@ fn x_generate_frames(ncbi2na: &[u8], tables: &XCodonTables) -> Vec<QueryFrame> {
 // ```
 // One translated frame: the sentinel, the residues, the sentinel, and the fields that
 // `generate_frames` gives a frame (`translate_sequence` for the bytes and the length).
-/// a frame of `aa_len` residues.
+/// A frame of `aa_len` residues.
 #[inline(always)]
 fn x_frame(
     frame: i8,
@@ -405,10 +405,10 @@ fn x_frame(
 //                                      subject->gen_code_string, &translation_buffer,
 //                                      &frame_offsets, NULL);
 // ```
-// The subject plan as the reference closure of `x_scan_plan` makes it, with the frames from the
-// tables. The chunks and scan ranges of the frames come from the same function as there
+// The subject plan as `x_scan_plan` makes it, with the frames from the tables. The chunks and
+// scan ranges of the frames come from the same function as there
 // (`translated_chunk_scan_ranges`), in the same order.
-/// the plan of one subject from the tables.
+/// The plan of one subject from the tables.
 fn x_table_plan(subject: &[u8], db_gencode: u8, mask_lowercase: bool) -> Result<XSubjectPlan> {
     let tables = x_codon_tables(db_gencode)?;
     let ncbi2na = x_subject_ncbi2na(subject)?;

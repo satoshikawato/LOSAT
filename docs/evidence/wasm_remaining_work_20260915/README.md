@@ -1,6 +1,6 @@
 # docs/evidence/wasm_remaining_work_20260915 (archived)
 
-Wasm remaining work, rounds 01-03 (2026-09-15): H1a serial WASI module reuse, I4 TBLASTX predecessor scanning, adoption, recovery, diagnosis and policy records. Plan: [wasm_remaining_work_implementation_plan_20260915.md](../../wasm_remaining_work_implementation_plan_20260915.md).
+Wasm remaining work, rounds 01-03 (2026-09-15): H1a serial WASI module reuse, I4 TBLASTX predecessor scanning, adoption, recovery, diagnosis and policy records. Plan: [wasm_remaining_work_implementation_plan_20260915.md](../../archive/wasm_remaining_work_implementation_plan_20260915.md).
 
 The files moved to a GitHub release asset on 2026-10-22 (slim-20261022 P2a): no code, test,
 script, CI workflow, or skill read them.

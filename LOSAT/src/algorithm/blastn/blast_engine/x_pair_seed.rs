@@ -704,9 +704,9 @@ fn fold<const PT: bool>(
         let diag = s_ext_start as isize - q_ext_start as isize;
         let (last_hit, _hit_saved) = {
             // EXPERIMENT (LOSAT_X_DIAGLV, `x_diag_lv.rs`): the same decisions without the walk
-            // of a bucket below the bound.
+            // of a bucket below the bound. (A one-hit table keeps no memo, LOSAT_X_DIAGLV2.)
             let (level, _hit_len, hit_saved) = if x_lv {
-                diag_hash.retrieve_below::<true>(
+                diag_hash.retrieve_below::<false>(
                     diag as i32,
                     &x_lv_seeds,
                     s_ext_start + diag_offset as usize,
@@ -802,7 +802,7 @@ fn fold<const PT: bool>(
         // ```
         // (`hit_ready` is still 1 in one-hit mode; the reference keeps this test.)
         if !hit_ready {
-            part::insert::<PT, false, true>(
+            part::insert::<PT, false, false>(
                 diag_hash,
                 out,
                 x_key,
@@ -905,7 +905,7 @@ fn fold<const PT: bool>(
             //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
             //                       hit_ready, s_off_pos, window_size + Delta + 1);
             // ```
-            part::insert::<PT, false, true>(
+            part::insert::<PT, false, false>(
                 diag_hash,
                 out,
                 x_key,
@@ -966,7 +966,7 @@ fn fold<const PT: bool>(
         //                       (hit_ready) ? 0 : s_end_pos - s_off_pos,
         //                       hit_ready, s_off_pos, window_size + Delta + 1);
         // ```
-        part::insert::<PT, false, true>(
+        part::insert::<PT, false, false>(
             diag_hash,
             out,
             x_key,

@@ -7,6 +7,7 @@ pub mod outfmt6;
 pub mod pairwise;
 pub mod query_warnings;
 pub mod record;
+pub mod sam;
 pub mod seqid;
 pub mod serial;
 pub(crate) mod x_pairwise_par;

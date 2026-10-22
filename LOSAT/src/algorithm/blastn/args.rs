@@ -441,6 +441,25 @@ pub struct BlastnArgs {
     /// reads the arguments (`archive::handle_for`).
     #[arg(skip)]
     pub archive: Option<crate::report::archive::ArchiveHandle>,
+
+    /// The command line of the run as the SAM `@PG` line shows it: every argument followed by
+    /// one space, raw bytes (`GetCmdlineArgs`); `None` where there is no command line (the
+    /// library, ABI v1). Set by `run` from the process's arguments.
+    ///
+    /// NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.cpp:878-885
+    /// ```c++
+    /// string
+    /// GetCmdlineArgs(const CNcbiArguments & a)
+    /// {
+    /// 	string cmd = kEmptyStr;
+    /// 	for(unsigned int i=0; i < a.Size(); i++) {
+    /// 		cmd += a[i] + " ";
+    /// 	}
+    /// 	return cmd;
+    /// }
+    /// ```
+    #[arg(skip)]
+    pub command_line: Option<Vec<u8>>,
 }
 
 impl BlastnArgs {

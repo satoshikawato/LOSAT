@@ -52,15 +52,14 @@ use super::super::alignment::{
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     extend_gapped_heuristic_with_traceback_with_scratch,
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:2762-2936 (BLAST_GreedyGappedAlignment)
-    // (the score-only call goes through `x_greedy_prelim`, which calls it when LOSAT_X_GREEDYPRELIM
-    // is off)
+    // (the score-only call goes through `x_greedy_prelim`, on the one-byte copy of the subject)
     greedy_gapped_alignment_with_traceback,
     stats_from_edit_ops,
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_gapalign.h:69-80 (BlastGapAlignStruct)
     GapAlignScratch,
     GreedyAlignScratch,
 };
-// EXPERIMENT (LOSAT_X_GREEDYPRELIM): dispatch of the preliminary greedy alignment
+// No NCBI counterpart: dispatch of the preliminary greedy alignment
 // (NCBI reference: blast_gapalign.c:4019-4025, BLAST_GreedyGappedAlignment with compressed_subject).
 use super::super::alignment::x_greedy_prelim;
 use super::super::archive;
@@ -3070,7 +3069,7 @@ fn scan_subject_disc_words_with_ranges<F>(
 /// Structure to hold ungapped hit data for batch processing
 /// NCBI reference: blast_gapalign.c - init_hsp_array is sorted by score descending
 /// before gapped extension
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct UngappedHit {
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
     // ```c
@@ -3098,6 +3097,84 @@ struct UngappedHit {
     ss: usize,  // subject start in search_seq coordinates
     se: usize,  // subject end in search_seq coordinates
     score: i32, // ungapped score
+}
+
+// No NCBI counterpart: only where LOSAT keeps its buffers (no value changes).
+/// EXPERIMENT (LOSAT_X_BNMAPPED, a switch of the strict set, `utils/xswitch.rs`: on unless it is
+/// `0`, or `LOSAT_X_DEFAULT=0` and it is not set): the large per-subject buffers of BLASTN (the
+/// blocks and sequences read from a database and their BLASTNA letters, `database.rs`; the
+/// ungapped hits of a subject as the seed stages push them, `x_push_ungapped`, and the scratch of
+/// their sort by score, outside the per-query groups of `LOSAT_X_QGROUPPAR` and the merge of the
+/// folded strips, `x_pair_seed_part.rs`) are kept in buffers that glibc maps
+/// from 1 MiB on, so that they are returned when they are dropped instead of staying in the
+/// arena of the worker thread that freed them; the database's buffers and the sort's scratch go
+/// to shared pools (`utils::x_mapped::X_BYTES`, `X_SORT`) when they are done, so that the next
+/// thread that needs one takes it with its pages resident. The hits are not pooled: a thread
+/// keeps its scratch, and with it its hit buffer, from one subject to the next (as NCBI keeps its
+/// `init_hitlist`), so idle hit buffers in a pool only added to what was in use (Sakai x EDL933
+/// `-subject` blastn at 4 threads, max RSS 298-327 MiB with a pool of 64 MiB, 245-264 without,
+/// 238-261 with the switch off).
+fn x_bn_mapped() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_BNMAPPED"))
+}
+
+/// No NCBI counterpart: records for `LOSAT_X_REACH` whether a buffer of `bytes` takes
+/// LOSAT_X_BNMAPPED's own path (mapped, and pooled where it has a pool) or stays as `Vec` keeps
+/// it (below 1 MiB, or not glibc).
+pub(super) fn x_bn_mapped_reach(bytes: usize) {
+    crate::utils::xreach::x_reach!(
+        "LOSAT_X_BNMAPPED",
+        crate::utils::x_mapped::x_is_mapped(bytes)
+    );
+}
+
+/// No NCBI counterpart: EXPERIMENT (LOSAT_X_BNMAPPED) the pool of the scratch of the hits' sort
+/// by score (`x_mapped::x_sort_by_mapped`), whose idle buffers may hold `x_sort_idle_bytes`.
+/// Without it each sort maps its scratch again and touches every page of it (Sakai x EDL933
+/// `-subject` blastn, where the hits of one chunk are sorted at a time: x1.009-1.027 of the time
+/// with the switch off).
+static X_SORT: crate::utils::x_mapped::XPool<UngappedHit> =
+    crate::utils::x_mapped::XPool::new(x_sort_idle_bytes);
+
+/// No NCBI counterpart: the built-in bound of `x_sort_idle_bytes`, in MiB: one scratch of the
+/// largest hit lists measured (Sakai x EDL933 `-subject` blastn sorts 10 lists of 1.0-11.4 MiB;
+/// with 8 each of the 5 above 9 MiB is mapped again, x1.009 of the time).
+const X_SORT_IDLE_MIB: usize = 16;
+
+/// No NCBI counterpart: the idle bound of `X_SORT` (`LOSAT_X_SORTIDLE` MiB, a tuning variable,
+/// 0 to 65,536; built-in `X_SORT_IDLE_MIB`).
+fn x_sort_idle_bytes() -> usize {
+    static IDLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *IDLE.get_or_init(|| crate::utils::x_mapped::x_idle_bytes("LOSAT_X_SORTIDLE", X_SORT_IDLE_MIB))
+}
+
+// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_extend.c:254-268
+// ```c
+//     if (init_hitlist->total >= init_hitlist->allocated) {
+//         Int4 new_size = MAX(100, 2 * init_hitlist->allocated);
+//         ...
+//         init_hsp_array = (BlastInitHSP *)
+//             realloc(init_hitlist->init_hsp_array, sizeof(BlastInitHSP) * new_size);
+// ```
+/// `hits.push(hit)`, growing as `Vec` does; with LOSAT_X_BNMAPPED with the capacity of
+/// `x_mapped::x_reserve_mapped`.
+#[inline(always)]
+fn x_push_ungapped(hits: &mut Vec<UngappedHit>, hit: UngappedHit) {
+    if hits.len() == hits.capacity() {
+        x_grow_ungapped(hits);
+    }
+    hits.push(hit);
+}
+
+#[cold]
+#[inline(never)]
+fn x_grow_ungapped(hits: &mut Vec<UngappedHit>) {
+    if x_bn_mapped() {
+        crate::utils::x_mapped::x_reserve_mapped(hits, 1);
+    } else {
+        hits.reserve(1);
+    }
 }
 
 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_extend.c:271-300
@@ -3957,7 +4034,7 @@ struct SubjectScratch {
     // ```
     // Every look-ahead helper has its own scratch, as each NCBI call has the `gap_align` structure
     // that holds its working memory. A helper never uses the caller's scratch. Reuse only.
-    // EXPERIMENT (LOSAT_X_AHEAD): scratch memory of the look-ahead helpers.
+    // No NCBI counterpart: scratch memory of the look-ahead helpers.
     x_ahead_scratch: Vec<(GapAlignScratch, GreedyAlignScratch)>,
     cutoff_scores: Vec<i32>,
     x_dropoff_scores: Vec<i32>,
@@ -4135,7 +4212,7 @@ struct QueryContext {
 /// The result of the traceback call of NCBI, of the dynamic-programming kind or the greedy
 /// kind, computed before the ordered loop reaches the HSP.
 ///
-/// EXPERIMENT (LOSAT_X_GREEDYSPEC): a traceback computed ahead of the ordered
+/// No NCBI counterpart: a traceback computed ahead of the ordered
 /// loop, by the dynamic-programming kernel or by the greedy one.
 #[derive(PartialEq)]
 enum XSpecTraceback<D, G> {
@@ -4151,7 +4228,7 @@ enum XSpecTraceback<D, G> {
 /// The working memory of one gapped alignment call (the `gap_align` of NCBI, and the greedy aligner's
 /// auxiliary memory), borrowed from the caller or from a helper.
 ///
-/// EXPERIMENT (LOSAT_X_AHEAD): the scratch memory one gapped alignment may use.
+/// No NCBI counterpart: the scratch memory one gapped alignment may use.
 struct XAheadScratch<'a> {
     gap: &'a mut GapAlignScratch,
     greedy: &'a mut GreedyAlignScratch,
@@ -4189,7 +4266,7 @@ struct QueryContextIndex {
     // NCBI finds the context of a query offset by this binary search over the `query_offset` of the
     // contexts. `direct_map` is a table of its answer for every offset. The runs below hold the same
     // answer as intervals: for an offset inside the sequence of context `c` it is `c`, else 0.
-    // EXPERIMENT (LOSAT_X_CTXFAST): what `direct_map` holds, as the list of
+    // No NCBI counterpart: what `direct_map` holds, as the list of
     // its non-zero runs `(start, end, context)` sorted by `start`, plus the
     // length it would have. Four bytes per query base become a few words.
     x_ranges: Vec<(usize, usize, u32)>,
@@ -4200,37 +4277,6 @@ struct QueryContextIndex {
     // `x_o1_shadow` instead, and the table is built to compare with.
     x_o1: Option<x_ctx_o1::CtxO1>,
     x_o1_shadow: Option<x_ctx_o1::CtxO1>,
-}
-
-/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:235-241
-/// ```c
-///     while (b < e - 1) {
-/// 	m = (b + e) / 2;
-/// 	if (A->contexts[m].query_offset > n)
-/// 	    e = m;
-/// 	else
-/// 	    b = m;
-/// ```
-/// Reads the LOSAT_X_CTXFAST / LOSAT_X_CTXSHADOW switches once. The mode chooses which form
-/// answers the context of a query offset: the table of the answers (0), the runs (1), or both
-/// with a comparison (2).
-///
-/// 0 = direct map, 1 = LOSAT_X_CTXFAST (ranges only), 2 = LOSAT_X_CTXSHADOW or
-/// LOSAT_X_CTXO1SHADOW (the table as well, compared on every lookup with the form that answers).
-fn x_ctx_mode() -> u8 {
-    use std::sync::OnceLock;
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_CTXSHADOW").is_some()
-            || std::env::var_os("LOSAT_X_CTXO1SHADOW").is_some()
-        {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_CTXFAST") {
-            1
-        } else {
-            0
-        }
-    })
 }
 
 /// No NCBI counterpart: reads the LOSAT_X_CTXO1 switch once (`x_ctx_o1.rs`).
@@ -4291,22 +4337,24 @@ impl QueryContextIndex {
         // Builds the runs (start, end, context) from the same context offsets and lengths the table is
         // filled from. If two sequences would overlap, the table's "later context wins" rule would not be
         // a list of disjoint runs, so the runs are dropped and the table is used.
-        // EXPERIMENT (LOSAT_X_CTXFAST): the runs the loop below would fill.
+        // No NCBI counterpart: the runs the loop below would fill.
         // Later contexts overwrite earlier ones in `direct_map`, so the list
         // only stands in for it when no two runs overlap; context 0 needs no
         // run because the map starts out as zeros.
-        let mut x_mode = x_ctx_mode();
+        // `x_mode` 1: the runs answer and the table is not built; 0: the table answers (overlapping
+        // runs, or the table that `LOSAT_X_CTXO1SHADOW` compares with).
+        let mut x_mode = 1u8;
         // EXPERIMENT (LOSAT_X_CTXO1): the constant-time form, where the layout allows it. It takes
         // the place of the runs (kept only for the offsets of its crowded blocks) and of the table
-        // (kept only for the shadow (mode 2) to compare with).
+        // (kept only for the shadow `LOSAT_X_CTXO1SHADOW` to compare with).
         let x_o1 = if x_ctx_o1_on() {
             x_ctx_o1::CtxO1::build(contexts, total_len)
         } else {
             None
         };
-        let x_shadow = x_mode == 2;
-        if x_o1.is_some() {
-            x_mode = if x_shadow { 0 } else { 1 };
+        let x_shadow = std::env::var_os("LOSAT_X_CTXO1SHADOW").is_some();
+        if x_o1.is_some() && x_shadow {
+            x_mode = 0;
         }
         let (x_o1, x_o1_shadow) = if x_shadow { (None, x_o1) } else { (x_o1, None) };
         // the runs answer what the form leaves (offsets in a crowded block of `x_ctx_o1.rs`)
@@ -4415,7 +4463,7 @@ impl QueryContextIndex {
     // ...
     // return b;
     // ```
-    // The forms before LOSAT_X_CTXO1 (and its shadow), out of line as `context_for_offset` was.
+    // The forms besides LOSAT_X_CTXO1 (and its shadow), out of line as `context_for_offset` was.
     #[inline(never)]
     fn x_context_for_offset_ref(&self, n: usize) -> usize {
         // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_query_info.c:219-243
@@ -4431,7 +4479,7 @@ impl QueryContextIndex {
         //     }
         //     return b;
         // ```
-        // LOSAT_X_CTXO1 with its shadow (LOSAT_X_CTXO1SHADOW or LOSAT_X_CTXSHADOW): the constant-time
+        // LOSAT_X_CTXO1 with its shadow (LOSAT_X_CTXO1SHADOW): the constant-time
         // form answers every offset the table covers, and `assert!` compares it with the table.
         if let Some(o1) = &self.x_o1_shadow {
             if let Some(context) = o1.get(n) {
@@ -4442,18 +4490,10 @@ impl QueryContextIndex {
                 return context;
             }
         }
-        // Dispatch point of LOSAT_X_CTXFAST / LOSAT_X_CTXSHADOW. The code after this block (the table,
-        // then `bsearch_context_info`) ports `BSearchContextInfo`. With the runs the same context is found
-        // without the table. In mode 2 both are computed and `assert!` compares them.
+        // The code after this block (the table, then `bsearch_context_info`) ports `BSearchContextInfo`.
+        // With the runs the same context is found without the table.
         if n < self.x_total_len {
-            let context = self.x_direct(n);
-            if !self.direct_map.is_empty() {
-                assert!(
-                    context == self.direct_map[n] as usize,
-                    "LOSAT_X_CTXSHADOW: context of offset {n} differs"
-                );
-            }
-            return context;
+            return self.x_direct(n);
         }
         if n < self.direct_map.len() {
             return self.direct_map[n] as usize;
@@ -5198,6 +5238,15 @@ fn update_hitlists_with_subject_hits(
     }
 }
 
+/// The SAM document that a report call adds its queries to (outfmt 17): the stream's, which
+/// the last call writes, or the document of a call of its own (the off path), which the call
+/// writes at its end. NCBI writes the document when its formatter is destroyed.
+struct SamTarget<'a> {
+    document: &'a mut crate::report::sam::SamDocument,
+    /// Whether the call writes the document after adding its queries.
+    finish: bool,
+}
+
 /// What the pairwise report, the hit records and the query warnings need besides the
 /// final hit list.
 struct BlastnReportInputs<'a> {
@@ -5745,6 +5794,7 @@ fn post_process_hits_and_write(
     report: &BlastnReportInputs<'_>,
     unsearched: Vec<bool>,
     query_warnings: &[Vec<u8>],
+    mut sam: Vec<Option<SamTarget<'_>>>,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:183-187
     // ```c
@@ -6117,6 +6167,101 @@ fn post_process_hits_and_write(
                 &|first| archive_first_context(report, query_lengths, first),
                 &mut writer,
             )?;
+        } else if let BlastnOutputFormat::Sam(_) = output_format {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755
+            // ```c++
+            //     if (m_FormatType == CFormattingArgs::eSAM) {
+            //         if (results.HasAlignments()) {
+            //             m_SamFormatter->Print(*results.GetSeqAlign());
+            //         }
+            //         return;
+            //     }
+            // ```
+            // The queries' records are added to the run's document, which NCBI writes when its
+            // formatter is destroyed (`SamDocument::finish`): after the last call, or in a call
+            // that is the run's only one.
+            let target = sam[format_index]
+                .as_mut()
+                .expect("a SAM document is made for outfmt 17");
+            if let Some(warnings) = format_warnings.as_mut() {
+                for q_idx in 0..hit_lists.len() {
+                    warnings.before_query(q_idx, &mut writer)?;
+                }
+            }
+            let names = QueryNames {
+                records: report.queries,
+                searched_lengths: query_lengths,
+                placements: &report.ranges.queries.placements,
+            };
+            match (
+                report.database_ordinals,
+                report.database,
+                report.database_reader,
+            ) {
+                (Some(ordinals), Some(database), Some(reader)) => {
+                    // A database's sequences are searched whole; the lengths come from its
+                    // index (no letters).
+                    let lengths = reader.sam_lengths(ordinals)?;
+                    let cache = database::SamLetterCache::default();
+                    let letters_of = |rank: usize, from: usize, to: usize| {
+                        reader.sam_letters(&cache, ordinals[rank], from, to)
+                    };
+                    super::super::sam::add_blastn_sam(
+                        target.document,
+                        &hit_lists,
+                        &names,
+                        report.queries_before,
+                        SubjectNames::Database {
+                            ordinals,
+                            title: &database.definition,
+                        },
+                        report.ranges.subjects.placements,
+                        &super::super::sam::SubjectLengths {
+                            searched: &|rank| lengths[rank],
+                            whole: &|rank| lengths[rank],
+                        },
+                        &mut super::super::sam::BlastnSamLetters {
+                            queries: report.queries,
+                            query_placements: &report.ranges.queries.placements,
+                            subjects: super::super::sam::SubjectSource::Database(&letters_of),
+                        },
+                    )?;
+                }
+                _ => {
+                    // The records as read with `-subject_loc` (never packed), else the
+                    // searched ones: the letters are asked for in record coordinates.
+                    let whole_records = match report.ranges.subjects.records {
+                        Some(records) => SubjectLetters::new(records, None),
+                        None => report.subjects,
+                    };
+                    super::super::sam::add_blastn_sam(
+                        target.document,
+                        &hit_lists,
+                        &names,
+                        report.queries_before,
+                        SubjectNames::Records(report.subjects.records()),
+                        report.ranges.subjects.placements,
+                        &super::super::sam::SubjectLengths {
+                            searched: &|s_idx| report.subjects.len(s_idx),
+                            whole: &|s_idx| {
+                                report
+                                    .ranges
+                                    .subjects
+                                    .placements
+                                    .length(s_idx, report.subjects.len(s_idx))
+                            },
+                        },
+                        &mut super::super::sam::BlastnSamLetters {
+                            queries: report.queries,
+                            query_placements: &report.ranges.queries.placements,
+                            subjects: super::super::sam::SubjectSource::Records(whole_records),
+                        },
+                    )?;
+                }
+            }
+            if target.finish {
+                target.document.finish(&mut writer)?;
+            }
         } else if output_format.is_structured_xml() {
             // The XML2 / JSON documents of outfmt 15 and 16 take the path of outfmt 5: the same
             // per-query records, written by another writer.
@@ -7068,7 +7213,7 @@ fn cli_output_formats(
 ) -> Result<Vec<BlastnOutputFormat>> {
     let choice = app::parse_formatting_string(outfmt)?;
     app::report_format(&choice, Program::Blastn, out)?
-        .map(BlastnOutputFormat::of)
+        .map(|format| BlastnOutputFormat::of(format, &choice.spec))
         .into_iter()
         .collect()
 }
@@ -7084,7 +7229,7 @@ fn parse_output_formats<'a>(
         .map(|outfmt| {
             let choice = app::parse_formatting_string(outfmt)?;
             match app::report_format(&choice, Program::Blastn, None)? {
-                Some(format) => BlastnOutputFormat::of(format),
+                Some(format) => BlastnOutputFormat::of(format, &choice.spec),
                 None => {
                     app::formatting_handler_check(&choice, Program::Blastn)?;
                     app::xinclude_check(&choice)?;
@@ -7411,9 +7556,6 @@ fn search(
     x_pair_seed::summary();
     // No NCBI counterpart: the summary line of LOSAT_X_DIAGLVSHADOW; nothing without it.
     x_diag_lv::summary();
-    // No NCBI counterpart: the summary lines of LOSAT_X_GREEDYPRELIMSHADOW (and the
-    // LOSAT_X_GREEDYPRELIM counters with LOSAT_X_STATS); nothing without those switches.
-    x_greedy_prelim::summary();
     x_result
 }
 
@@ -8215,6 +8357,7 @@ fn run_in_pool(
                         )
                     };
                     if stream.acting() {
+                        stream.finish_sam(outputs)?;
                         stream.check("before a reader error", before);
                     } else {
                         before(outputs)?;
@@ -8266,6 +8409,7 @@ fn run_in_pool(
                     )
                 };
                 if stream.acting() {
+                    stream.finish_sam(outputs)?;
                     stream.check("before a batch without queries", before);
                 } else {
                     before(outputs)?;
@@ -8347,6 +8491,7 @@ fn run_in_pool(
                     )
                 };
                 if stream.acting() {
+                    stream.finish_sam(outputs)?;
                     stream.check("before a batch of queries without letters", before);
                 } else {
                     before(outputs)?;
@@ -8454,6 +8599,7 @@ fn run_in_pool(
                             )
                         };
                         if stream.acting() {
+                            stream.finish_sam(outputs)?;
                             stream.check("before an error after invalid batches", before);
                         } else {
                             before(outputs)?;
@@ -8585,6 +8731,7 @@ fn run_in_pool(
                         )
                     };
                     if stream.acting() {
+                        stream.finish_sam(outputs)?;
                         stream.check("before a header read error", before);
                     } else {
                         before(outputs)?;
@@ -9313,12 +9460,42 @@ fn write_reports_untimed(
     output_formats: &[BlastnOutputFormat],
     results: BatchResults<'_>,
     epilog: bool,
-    written: x_rpt_stream::Written<'_>,
+    mut written: x_rpt_stream::Written<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     let megablast = args.task == "megablast";
     let config = configure_task(args);
     let mut hit_lists = results.hit_lists;
+    // The SAM documents (outfmt 17), one per SAM format: the stream's, which only its last call
+    // writes (the stream acts for one format), else documents of this call's own, which it
+    // writes at its end (the off path's single call, and the calls that write the document of
+    // the batches before an NCBI error).
+    let mut own_sams: Vec<Option<crate::report::sam::SamDocument>> = Vec::new();
+    let mut sam_targets: Vec<Option<SamTarget<'_>>> = Vec::new();
+    // No SAM format: no target is made (the vectors stay empty and are never indexed).
+    let has_sam = output_formats
+        .iter()
+        .any(|format| format.sam_spec().is_some());
+    match written.sam.take() {
+        Some(document) => sam_targets.push(Some(SamTarget {
+            document,
+            finish: epilog,
+        })),
+        None if !has_sam => {}
+        None => {
+            own_sams.extend(output_formats.iter().map(|format| {
+                format
+                    .sam_spec()
+                    .map(|spec| x_rpt_stream::sam_document(args, spec))
+            }));
+            sam_targets.extend(own_sams.iter_mut().map(|document| {
+                document.as_mut().map(|document| SamTarget {
+                    document,
+                    finish: true,
+                })
+            }));
+        }
+    }
     // A database: the reported sequences, named by rank from here on, with their stored
     // titles, and their stored letters where a report shows them (outfmt 0 and the hit
     // records; `database::reported_subjects`).
@@ -9469,6 +9646,7 @@ fn write_reports_untimed(
         &report_inputs,
         results.unsearched,
         results.warnings,
+        sam_targets,
     )
 }
 
@@ -9665,17 +9843,16 @@ fn search_query_batch(
     //                 score_params, q_start, s_start, FALSE, TRUE,
     //                 fence_hit);
     // ```
-    // Dispatch point of LOSAT_X_GREEDYSPEC. Without it only the dynamic-programming traceback is
-    // scheduled ahead of the ordered loop. With it the greedy traceback of megablast (the call above)
-    // is scheduled too. The ordered loop still tests the tree and adds to it in the NCBI order.
-    // This is scheduling only.
-    // EXPERIMENT (LOSAT_X_GREEDYSPEC): the same scheduling for the greedy
+    // The dynamic-programming traceback and, in a parallel search, the greedy traceback of megablast
+    // (the call above) are scheduled ahead of the ordered loop (the rule of `LOSAT_X_GREEDYSPEC`,
+    // kept as its `x_reach!` key). The ordered loop still tests the tree and adds to it in the NCBI
+    // order. This is scheduling only.
+    // No NCBI counterpart: the same scheduling for the greedy
     // traceback of megablast. A greedy alignment is a function of its
     // arguments only: every cell it reads from its scratch was written
     // earlier in the same call, and a larger `max_dist` left by an earlier
     // call only saves retries.
-    let x_greedy_spec =
-        requested_parallel && !config.use_dp && crate::utils::xswitch::on("LOSAT_X_GREEDYSPEC");
+    let x_greedy_spec = requested_parallel && !config.use_dp;
     let speculative_traceback = requested_parallel
         && (config.use_dp || x_greedy_spec)
         && std::env::var_os("LOSAT_DEBUG_COORDS").is_none()
@@ -9687,7 +9864,7 @@ fn search_query_batch(
     //       if (!BlastIntervalTreeContainsHSP(tree, &tmp_hsp, query_info,
     //                                         hit_options->min_diag_separation))
     // ```
-    // Dispatch point of LOSAT_X_AHEAD for the preliminary loop (above) and the traceback loop
+    // Look-ahead for the preliminary loop (above) and the traceback loop
     // (`Blast_TracebackFromHSPList`, next block). The helper threads only evaluate the alignment call
     // of an index ahead of the loop. The loops, their tree tests and their tree insertions stay on the
     // calling thread in the NCBI order.
@@ -9698,17 +9875,17 @@ fn search_query_batch(
     //           !BlastIntervalTreeContainsHSP(tree, hsp, query_info,
     //                                hit_options->min_diag_separation)) {
     // ```
-    // The same switch for the loop of `Blast_TracebackFromHSPList`.
-    // EXPERIMENT (LOSAT_X_AHEAD[=window]): the other threads of the pool
+    // The same for the loop of `Blast_TracebackFromHSPList`.
+    // No NCBI counterpart: the other threads of the pool
     // evaluate the gapped alignments of the two ordered loops (preliminary
     // and traceback) ahead of the loop; see utils/xahead.rs. Same conditions
     // as the speculative traceback above.
     let x_ahead_window = if speculative_traceback {
-        crate::utils::xahead::window()
+        Some(crate::utils::xahead::WINDOW)
     } else {
         None
     };
-    if x_ahead_window.is_none() && crate::utils::xahead::window().is_some() {
+    if x_ahead_window.is_none() {
         crate::utils::xreach::x_reach!("LOSAT_X_AHEAD", false);
     }
     // Read sequences
@@ -11130,9 +11307,9 @@ fn search_query_batch(
         // ...
         //                          (Boolean) TRUE, FALSE, fence_hit);
         // ```
-        // EXPERIMENT (LOSAT_X_GREEDYPRELIM): the one-byte copy of this subject's packed sequence
+        // No NCBI counterpart: the one-byte copy of this subject's packed sequence
         // that the preliminary greedy alignment reads instead (made on first use, shared by every
-        // chunk and worker of this subject). Off unless the switch is set, the search uses the
+        // chunk and worker of this subject). Off unless the search uses the
         // greedy aligner and this is the preliminary stage.
         let x_prelim_subject = x_greedy_prelim::XPrelimSubject::new(
             !use_dp && prelim_source.is_none(),
@@ -12819,23 +12996,26 @@ fn search_query_batch(
                                 // NCBI architecture: Collect ungapped hit for batch processing
                                 // NCBI reference: blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
                                 // Gapped extension will be done later in score order with containment check
-                                ungapped_hits.push(UngappedHit {
-                                    context_idx: q_idx,
-                                    query_idx: ctx.query_idx,
-                                    query_frame: ctx.frame,
-                                    query_context_offset: ctx.query_offset,
-                                    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
-                                    // ```c
-                                    // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
-                                    // ```
-                                    seed_q_off: q_off - q_context_start,
-                                    seed_s_off: s_off,
-                                    qs,
-                                    qe,
-                                    ss,
-                                    se: ungapped_se,
-                                    score: ungapped_score,
-                                });
+                                x_push_ungapped(
+                                    ungapped_hits,
+                                    UngappedHit {
+                                        context_idx: q_idx,
+                                        query_idx: ctx.query_idx,
+                                        query_frame: ctx.frame,
+                                        query_context_offset: ctx.query_offset,
+                                        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
+                                        // ```c
+                                        // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
+                                        // ```
+                                        seed_q_off: q_off - q_context_start,
+                                        seed_s_off: s_off,
+                                        qs,
+                                        qe,
+                                        ss,
+                                        se: ungapped_se,
+                                        score: ungapped_score,
+                                    },
+                                );
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                                 // ```c
@@ -14079,23 +14259,26 @@ fn search_query_batch(
 
                                 // NCBI architecture: Collect ungapped hit for batch processing
                                 // NCBI reference: blast_gapalign.c:3824 - init_hsp_array is sorted by score DESCENDING
-                                ungapped_hits.push(UngappedHit {
-                                    context_idx: q_idx,
-                                    query_idx: ctx.query_idx,
-                                    query_frame: ctx.frame,
-                                    query_context_offset: ctx.query_offset,
-                                    // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
-                                    // ```c
-                                    // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
-                                    // ```
-                                    seed_q_off: q_off,
-                                    seed_s_off: s_off,
-                                    qs,
-                                    qe,
-                                    ss,
-                                    se: ungapped_se,
-                                    score: ungapped_score,
-                                });
+                                x_push_ungapped(
+                                    ungapped_hits,
+                                    UngappedHit {
+                                        context_idx: q_idx,
+                                        query_idx: ctx.query_idx,
+                                        query_frame: ctx.frame,
+                                        query_context_offset: ctx.query_offset,
+                                        // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_def.h:135-149
+                                        // ```c
+                                        // struct { Uint4 q_off; Uint4 s_off; } qs_offsets;
+                                        // ```
+                                        seed_q_off: q_off,
+                                        seed_s_off: s_off,
+                                        qs,
+                                        qe,
+                                        ss,
+                                        se: ungapped_se,
+                                        score: ungapped_score,
+                                    },
+                                );
 
                                 // NCBI reference: ncbi-blast/c++/src/algo/blast/core/na_ungapped.c:768-772
                                 // ```c
@@ -14216,6 +14399,20 @@ fn search_query_batch(
                 (Some(_), Some(counts)) => {
                     x_qgroup_par::group_in_place(ungapped_hits, |hit| hit.query_idx, counts)
                 }
+                // EXPERIMENT (LOSAT_X_BNMAPPED): `x_mapped::x_sort_by_mapped` is a stable sort
+                // with the same comparator, so the order is that of `sort_by`.
+                _ if x_bn_mapped() => {
+                    x_bn_mapped_reach(
+                        ungapped_hits
+                            .len()
+                            .saturating_mul(std::mem::size_of::<UngappedHit>()),
+                    );
+                    crate::utils::x_mapped::x_sort_by_mapped(
+                        ungapped_hits,
+                        score_compare_ungapped_hits,
+                        &X_SORT,
+                    )
+                }
                 _ => ungapped_hits.sort_by(score_compare_ungapped_hits),
             }
             x_shadow_hits.sort_by(score_compare_ungapped_hits);
@@ -14249,8 +14446,9 @@ fn search_query_batch(
             //       s = subject + s_off/4;
             //       rem = s_off % 4;
             // ```
-            // EXPERIMENT (LOSAT_X_GREEDYPRELIM): the bases of `s_seq_packed` one per byte, for the
-            // greedy calls below; `None` (the packed call as ported) when the switch is off.
+            // No NCBI counterpart: the bases of `s_seq_packed` one per byte, for the
+            // greedy calls below; `None` where no score-only greedy call happens (no ungapped
+            // hits, or the dynamic-programming extension).
             let x_prelim_s = if total_ungapped > 0 {
                 x_prelim_subject.chunk(chunk.offset)
             } else {
@@ -14282,7 +14480,7 @@ fn search_query_batch(
             // aligner call, for the dynamic-programming branch and the greedy branch. The branches below make
             // the same calls on the same arguments, so the closure gives the same value. The tree test and the
             // tree insertion are not part of it.
-            // EXPERIMENT (LOSAT_X_AHEAD): the gapped extension of the loop below
+            // No NCBI counterpart: the gapped extension of the loop below
             // as a function of the hit's index (the two branches of the loop,
             // without their trace logging).
             let x_prelim_extend =
@@ -14320,11 +14518,11 @@ fn search_query_batch(
                         let ungapped_len = uh.qe.saturating_sub(uh.qs);
                         let seed_qs = uh.qs + ungapped_len / 2;
                         let seed_ss = uh.ss + ungapped_len / 2;
-                        // Dispatch point of LOSAT_X_GREEDYPRELIM (`x_prelim_s` = None: as ported).
                         x_greedy_prelim::x_greedy_gapped_alignment_score_only(
-                            x_prelim_s,
+                            x_prelim_s.expect(
+                                "the one-byte copy exists wherever a score-only greedy call runs",
+                            ),
                             q_seq_blastna,
-                            s_seq_packed,
                             s_len,
                             seed_qs,
                             seed_ss,
@@ -14341,12 +14539,12 @@ fn search_query_batch(
             // ```c
             //    for (index=0; index<init_hitlist->total; index++)
             // ```
-            // Dispatch point of LOSAT_X_AHEAD for the preliminary loop. When the conditions below do not hold,
+            // Look-ahead for the preliminary loop. When the conditions below do not hold,
             // `x_ahead` is `None` and the loop runs as ported.
             // Only the caller's own (single-chunk) loop gets helpers; chunk
             // batches already occupy the pool.
             // The preliminary gapped loop over one list of ungapped hits in score order: the
-            // chunk's on the owner (with the helpers of LOSAT_X_AHEAD, whose scratch
+            // chunk's on the owner (with the look-ahead helpers, whose scratch
             // `x_helper_scratch` holds), or one query's (LOSAT_X_QGROUPPAR, no helpers). Returns
             // the alignments run and the hits the tree held.
             let x_prelim_list = |ungapped_hits: &[UngappedHit],
@@ -14418,7 +14616,7 @@ fn search_query_batch(
                             // The owner offers later indexes to the helpers, leaving out the ones the tree already contains.
                             // The tree is only read here. A wrong guess costs time only, because the loop decides each index
                             // itself.
-                            // EXPERIMENT (LOSAT_X_AHEAD): offer the next hits to the helpers,
+                            // No NCBI counterpart: offer the next hits to the helpers,
                             // leaving out those the tree already contains.
                             if let Some(x_ahead) = x_ahead.as_ref() {
                                 x_ahead.announce(idx, x_ungapped.len(), |x_index| {
@@ -14464,6 +14662,9 @@ fn search_query_batch(
                             // }
                             // ```
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:503-507 (traceback uses uncompressed subject)
+                            // The dynamic-programming score-only call below reads the packed subject
+                            // (`s_seq_score`); the greedy one runs on the one-byte copy (`x_prelim_s`),
+                            // NCBI's `compressed_subject = FALSE` form.
                             let s_seq_score = s_seq_packed;
 
                             // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_gapalign.c:3908-3913
@@ -14596,32 +14797,20 @@ fn search_query_batch(
                                 // ...
                                 //             status = s_BlastDynProgNtGappedAlignment(&query_tmp, subject,
                                 // ```
-                                // Dispatch point of LOSAT_X_AHEAD: the value of the aligner call comes from a helper or is
-                                // computed here with `x_prelim_compute`. Without a switch the `else if use_dp` branch and the greedy
-                                // branch below port these calls. LOSAT_X_AHEADSHADOW recomputes a helper's value and `assert!`
-                                // compares them.
-                                // EXPERIMENT (LOSAT_X_AHEAD): the value of the branches
+                                // Look-ahead: the value of the aligner call comes from a helper or is
+                                // computed here with `x_prelim_compute`. Without helpers the `else if use_dp` branch and the greedy
+                                // branch below port these calls.
+                                // No NCBI counterpart: the value of the branches
                                 // below, taken from a helper or evaluated here.
                                 let mut x_scratch = XAheadScratch {
                                     gap: &mut *gap_scratch,
                                     greedy: &mut *greedy_align_scratch,
                                 };
-                                let x_value = match x_ahead.take(
-                                    idx,
-                                    &mut x_scratch,
-                                    &x_prelim_compute,
-                                ) {
-                                    Some(x_value) => {
-                                        if crate::utils::xahead::shadow() {
-                                            assert!(
-                                                x_value == x_prelim_compute(idx, &mut x_scratch),
-                                                "LOSAT_X_AHEADSHADOW: preliminary extension {idx} differs"
-                                            );
-                                        }
-                                        x_value
-                                    }
-                                    None => x_prelim_compute(idx, &mut x_scratch),
-                                };
+                                let x_value =
+                                    match x_ahead.take(idx, &mut x_scratch, &x_prelim_compute) {
+                                        Some(x_value) => x_value,
+                                        None => x_prelim_compute(idx, &mut x_scratch),
+                                    };
                                 match x_value {
                                     Some(x_value) => x_value,
                                     None => continue,
@@ -14732,13 +14921,10 @@ fn search_query_batch(
                                 let seed_qs = uh.qs + ungapped_len / 2;
                                 let seed_ss = uh.ss + ungapped_len / 2;
 
-                                // Dispatch point of LOSAT_X_GREEDYPRELIM (`x_prelim_s` = None: the
-                                // packed call as ported).
                                 let prelim =
                                     match x_greedy_prelim::x_greedy_gapped_alignment_score_only(
-                                        x_prelim_s,
+                                        x_prelim_s.expect("the one-byte copy exists wherever a score-only greedy call runs"),
                                         q_seq_blastna,
-                                        s_seq_score,
                                         subject_len,
                                         seed_qs,
                                         seed_ss,
@@ -15454,7 +15640,7 @@ fn search_query_batch(
         let mut traceback_alignment_lengths: Vec<u32> = Vec::new();
 
         // The traceback loop over one list of kept HSPs: the subject's on the owner (with the
-        // helpers of LOSAT_X_AHEAD, whose scratch `x_helper_scratch` holds, or the speculative
+        // look-ahead helpers, whose scratch `x_helper_scratch` holds, or the speculative
         // batches), or one query's (LOSAT_X_QGROUPPAR, neither). The HSPs go to `hits`.
         let x_trace_list = |prelim_hits: &[PrelimHit],
                             interval_tree: &mut BlastIntervalTree,
@@ -15623,7 +15809,7 @@ fn search_query_batch(
                         //             BLAST_GreedyGappedAlignment(query, adjusted_subject,
                         //                 query_length, adjusted_s_length, gap_align,
                         // ```
-                        // LOSAT_X_GREEDYSPEC: each slot of the batch also has the scratch of the greedy aligner, so that
+                        // Each slot of the batch also has the scratch of the greedy aligner, so that
                         // the greedy traceback call can run on a slot instead of on the ordered loop. Scratch only.
                         .map(|_| {
                             (
@@ -15708,7 +15894,7 @@ fn search_query_batch(
                 // This closure is the part of the loop body that depends on the HSP alone: the start offsets and
                 // the subject range (`prepare_traceback`) and the traceback call, dynamic-programming or greedy.
                 // Index in, value out. The tree test and the tree insertion stay in the ordered loop.
-                // EXPERIMENT (LOSAT_X_AHEAD): the traceback of the loop below as a
+                // No NCBI counterpart: the traceback of the loop below as a
                 // function of the HSP's index (the job of the speculative batch).
                 let x_trace_compute = |x_index: usize, x_scratch: &mut XAheadScratch<'_>| {
                     let p = &prelim_hits[x_index];
@@ -15750,7 +15936,7 @@ fn search_query_batch(
                 // ```c
                 //    for (index=0; index < num_initial_hsps; index++) {
                 // ```
-                // Dispatch point of LOSAT_X_AHEAD for the traceback loop. Without helpers `x_ahead` is `None` and
+                // Look-ahead for the traceback loop. Without helpers `x_ahead` is `None` and
                 // the loop runs as ported.
                 let x_ahead = match x_ahead_window {
                     Some(x_window)
@@ -15799,7 +15985,7 @@ fn search_query_batch(
                             // ```
                             // The owner offers later HSPs to the helpers, leaving out the ones the tree already contains. The
                             // tree is only read here.
-                            // EXPERIMENT (LOSAT_X_AHEAD): offer the next HSPs to the helpers,
+                            // No NCBI counterpart: offer the next HSPs to the helpers,
                             // leaving out those the tree already contains.
                             if let Some(x_ahead) = x_ahead.as_ref() {
                                 x_ahead.announce(prelim_index, prelim_hits.len(), |x_index| {
@@ -15848,7 +16034,7 @@ fn search_query_batch(
                             //                 query_length, adjusted_s_length,
                             //                 fence_hit);
                             // ```
-                            // Dispatch point of LOSAT_X_AHEAD: with helpers the batch below is not used; the tracebacks come
+                            // Look-ahead: with helpers the batch below is not used; the tracebacks come
                             // from `x_ahead.take`. Both ways only compute the traceback call of this loop ahead of its turn.
                             if speculative_traceback
                                 && x_ahead.is_none()
@@ -15918,10 +16104,10 @@ fn search_query_batch(
                                                             //                 score_params, q_start, s_start, FALSE, TRUE,
                                                             //                 fence_hit);
                                                             // ```
-                                                            // LOSAT_X_GREEDYSPEC: the greedy traceback call of the ordered loop, made ahead on this slot's
+                                                            // The greedy traceback call of the ordered loop, made ahead on this slot's
                                                             // scratch. The call depends on its arguments only, so the value is the one the ordered loop would
                                                             // compute.
-                                                            // EXPERIMENT (LOSAT_X_GREEDYSPEC): the call of
+                                                            // No NCBI counterpart: the call of
                                                             // the ordered loop below, on this slot's scratch.
                                                             let result =
                                                                 greedy_gapped_alignment_with_traceback(
@@ -16151,11 +16337,10 @@ fn search_query_batch(
                             //                 query_length, adjusted_s_length,
                             //                 fence_hit);
                             // ```
-                            // Dispatch point of LOSAT_X_AHEAD. This is reached after the tree test said "not contained". The
+                            // Look-ahead. This is reached after the tree test said "not contained". The
                             // value of the traceback call comes from a helper, or the call is made below as before.
-                            // LOSAT_X_AHEADSHADOW recomputes a helper's value and `assert!` compares them.
                             let precomputed = if let Some(x_ahead) = x_ahead.as_ref() {
-                                // EXPERIMENT (LOSAT_X_AHEAD): a helper's value, if one has
+                                // No NCBI counterpart: a helper's value, if one has
                                 // started on this HSP; otherwise it is evaluated below.
                                 let mut x_scratch = XAheadScratch {
                                     gap: &mut *gap_scratch,
@@ -16163,13 +16348,6 @@ fn search_query_batch(
                                 };
                                 let x_taken =
                                     x_ahead.take(prelim_index, &mut x_scratch, &x_trace_compute);
-                                if x_taken.is_some() && crate::utils::xahead::shadow() {
-                                    let x_again = x_trace_compute(prelim_index, &mut x_scratch);
-                                    assert!(
-                                        x_taken.as_ref() == Some(&x_again),
-                                        "LOSAT_X_AHEADSHADOW: traceback {prelim_index} differs"
-                                    );
-                                }
                                 x_taken.flatten()
                             } else if speculative_traceback {
                                 speculative_results[prelim_index % SPECULATIVE_TRACEBACK_BATCH_SIZE]
@@ -16304,9 +16482,9 @@ fn search_query_batch(
                                 //                 score_params, q_start, s_start, FALSE, TRUE,
                                 //                 fence_hit);
                                 // ```
-                                // Dispatch point of LOSAT_X_GREEDYSPEC. The `_` arm is the ported call. The other arm uses the
+                                // The `_` arm is the ported call. The other arm uses the
                                 // value of the same call made ahead on another scratch.
-                                // EXPERIMENT (LOSAT_X_GREEDYSPEC): the same call, already made
+                                // No NCBI counterpart: the same call, already made
                                 // for this HSP on another scratch, or made here.
                                 let x_greedy_result = match precomputed {
                                     Some((_, XSpecTraceback::Greedy(result))) => result,
@@ -19059,12 +19237,26 @@ mod tests {
                 "{outfmt}"
             );
         }
-        for outfmt in ["17", "10"] {
+        for outfmt in ["10"] {
             assert_eq!(
                 cli_output_formats(outfmt, file).unwrap_err().to_string(),
                 format!("output format {outfmt} is not supported by LOSAT's BLASTN")
             );
         }
+        // SAM (OF6) reads its words and ignores the rest and a delimiter.
+        assert_eq!(
+            cli_output_formats("17", file).unwrap(),
+            [BlastnOutputFormat::Sam(
+                crate::report::sam::SamSpec::default()
+            )]
+        );
+        assert_eq!(
+            cli_output_formats(" 17 delim=, SR SQ foo", None).unwrap(),
+            [BlastnOutputFormat::Sam(crate::report::sam::SamSpec {
+                subject_as_reference: true,
+                sequence: true
+            })]
+        );
         assert_eq!(
             cli_output_formats("0 qaccver", None).unwrap(),
             [BlastnOutputFormat::Pairwise]
@@ -19137,8 +19329,14 @@ mod tests {
             ]
         );
         assert_eq!(
-            parse_output_formats(["17"]).unwrap_err().to_string(),
-            "output format 17 is not supported by LOSAT's BLASTN"
+            parse_output_formats(["17", "17 SQ SR"]).unwrap(),
+            [
+                BlastnOutputFormat::Sam(crate::report::sam::SamSpec::default()),
+                BlastnOutputFormat::Sam(crate::report::sam::SamSpec {
+                    subject_as_reference: true,
+                    sequence: true
+                })
+            ]
         );
     }
 }

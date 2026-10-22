@@ -86,7 +86,8 @@ pub(super) fn run_web_pair(
         BlastnOutputFormat::Seqalign(_)
         | BlastnOutputFormat::Xml
         | BlastnOutputFormat::Xml2(_)
-        | BlastnOutputFormat::Archive => {
+        | BlastnOutputFormat::Archive
+        | BlastnOutputFormat::Sam(_) => {
             anyhow::bail!("unsupported BLASTN output format")
         }
     };

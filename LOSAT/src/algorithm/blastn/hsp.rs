@@ -40,6 +40,8 @@ pub enum BlastnOutputFormat {
     Xml2(crate::report::blast_xml2::Xml2Kind),
     /// The BLAST archive (outfmt 11; `report::archive`, through `algorithm::blastn::archive`).
     Archive,
+    /// SAM (outfmt 17; `report::sam`, through `algorithm::blastn::sam`).
+    Sam(crate::report::sam::SamSpec),
 }
 
 impl BlastnOutputFormat {
@@ -70,8 +72,14 @@ impl BlastnOutputFormat {
     ///         /// JSON seq-align
     ///         eJsonSeqalign,
     /// ```
-    pub(crate) fn of(format: ReportFormat) -> anyhow::Result<Self> {
+    ///
+    /// `spec` is the custom specification of the choice (`FormatChoice::spec`), which only
+    /// SAM reads here (`SQ`, `SR`).
+    pub(crate) fn of(format: ReportFormat, spec: &str) -> anyhow::Result<Self> {
         match format {
+            ReportFormat::Sam => Ok(BlastnOutputFormat::Sam(crate::report::sam::SamSpec::parse(
+                spec,
+            ))),
             ReportFormat::Pairwise => Ok(BlastnOutputFormat::Pairwise),
             ReportFormat::Tabular => Ok(BlastnOutputFormat::Tabular),
             ReportFormat::TabularWithComments => Ok(BlastnOutputFormat::TabularWithComments),
@@ -112,7 +120,16 @@ impl BlastnOutputFormat {
                 | BlastnOutputFormat::Xml
                 | BlastnOutputFormat::Xml2(_)
                 | BlastnOutputFormat::Archive
+                | BlastnOutputFormat::Sam(_)
         )
+    }
+
+    /// The SAM document of outfmt 17.
+    pub(crate) fn sam_spec(self) -> Option<crate::report::sam::SamSpec> {
+        match self {
+            BlastnOutputFormat::Sam(spec) => Some(spec),
+            _ => None,
+        }
     }
 
     /// Whether the report is a structured XML / JSON document of the queries' final hit lists:

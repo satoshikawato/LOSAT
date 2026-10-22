@@ -80,9 +80,17 @@ impl<'a> SubjectLetters<'a> {
 
     /// The letters `[from, to)` of subject `index` in upper case (the letters of a report row).
     pub(crate) fn upper_letters(&self, index: usize, from: usize, to: usize) -> Vec<u8> {
+        if self.stores.is_some() {
+            ROWS_MADE.fetch_add(1, Ordering::Relaxed);
+        }
+        self.upper_letters_uncounted(index, from, to)
+    }
+
+    /// `upper_letters` for the SEQ of an outfmt 17 record, which `[X_STATS] BNSTORE rows_made=`
+    /// (the report rows of the other formats) does not count.
+    pub(crate) fn upper_letters_uncounted(&self, index: usize, from: usize, to: usize) -> Vec<u8> {
         match self.stores {
             Some(stores) => {
-                ROWS_MADE.fetch_add(1, Ordering::Relaxed);
                 let mut letters = Vec::new();
                 stores[index].letters_into(from, to, &mut letters);
                 letters

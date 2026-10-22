@@ -40,6 +40,31 @@ def row(case_id: str, output: str, expected: str = FROZEN, program: str = "blast
             "stderr_sha256": "e", "expected_sha256": expected, "expected_source": "gate_a"}
 
 
+class SamClRuleTests(unittest.TestCase):
+    """The one rule of the SAM (outfmt 17) rows: the CL tag of the @PG line is not compared."""
+
+    WITH = b"@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:2.17.0+\tCL:/x/blastn -a \tPN:blastn\nr\t0\n"
+    WITHOUT = b"@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:2.17.0+\tPN:blastn\nr\t0\n"
+
+    def test_a_row_that_differs_in_the_command_line_only_is_equal(self):
+        other = self.WITH.replace(b"/x/blastn -a ", b"losat blastn -b -num_threads 4 ")
+        self.assertEqual(db_fixtures.strip_sam_cl(self.WITH), self.WITHOUT)
+        self.assertEqual(db_fixtures.strip_sam_cl(other), self.WITHOUT)
+        self.assertEqual(db_fixtures.strip_sam_cl(self.WITHOUT), self.WITHOUT)
+
+    def test_any_other_byte_is_compared(self):
+        for old, new in ((b"r\t0", b"r\t1"), (b"LN:3", b"LN:4"), (b"PN:blastn", b"PN:blastx"),
+                         (b"VN:2.17.0+", b"VN:2.17.1+"), (b"@HD", b"@XX")):
+            changed = self.WITH.replace(old, new)
+            self.assertNotEqual(db_fixtures.strip_sam_cl(changed), self.WITHOUT, (old, new))
+
+    def test_the_rule_applies_to_outfmt_17_only(self):
+        for outfmt in ("17", "17 SQ", " 17 SR ", "17 SQ SR"):
+            self.assertTrue(db_fixtures.is_sam_outfmt(outfmt), outfmt)
+        for outfmt in ("0", "6", "5", "16", "7 qseqid", "170", ""):
+            self.assertFalse(db_fixtures.is_sam_outfmt(outfmt), outfmt)
+
+
 class AllowlistTests(unittest.TestCase):
     def test_classify(self):
         listed = allowlist()

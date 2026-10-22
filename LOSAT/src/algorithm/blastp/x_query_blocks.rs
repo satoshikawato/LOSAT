@@ -158,10 +158,11 @@
 //!   the last block's, as for outfmt 5. The refusals before the first byte are those of outfmt 5
 //!   (the same `x_block_xml_run_allowed` and `x_block_xml_subjects_allowed`, and with `-db`
 //!   `x_titles_read_allow_blocks`) and the taxid and taxonomy database ones of the two formats
-//!   (`database::x_titles_taxids_allow_blocks`, which makes both checks in one pass over the
-//!   headers: every sequence's taxid reads, and no set of taxids is built where `taxdb.bti` is not
-//!   found; if `taxdb.bti` is found the taxonomy database opens and every taxid of the database names with a text that can be
-//!   written). The taxonomy database's messages on standard error are written at the first `Hit`
+//!   (`database::x_titles_taxids_allow_blocks`: the titles and the taxid decodes in one pass over the
+//!   headers, so every sequence's taxid reads, and then OF5b's `taxdb_may_refuse`, the one
+//!   implementation of "can a lookup of this database be refused?" (DECISIONS 34 and 38): where
+//!   `taxdb.bti` is not found it is `false` at once; else it answers from the smaller side, one pass
+//!   over the taxonomy database or the database's taxids looked up). The taxonomy database's messages on standard error are written at the first `Hit`
 //!   that needs them (`TaxdbNotes`): the run's `TaxdbRun` (the database opened once, the (volume,
 //!   taxid) lookups already made) lives on the `-db` database, so a block writes the messages
 //!   that no block before it wrote, at the `Hit` that first needs them, which is the place in

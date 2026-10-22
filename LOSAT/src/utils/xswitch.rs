@@ -61,11 +61,9 @@ use std::sync::OnceLock;
 /// verified with it on. `LOSAT_X_NEWTONLANES8` (eight Newton problems per round in the lanes of
 /// `LOSAT_X_NEWTONLANES`, `composition_adjustment/x_newton_lanes.rs`; it acts on aarch64 only)
 /// was added after the change as a switch that is off unless set and joined the set once it was
-/// verified on the arm64 runners with it on. `LOSAT_X_TBNSTATE` (the scan state of TBLASTN's unit
-/// path kept by a thread from one subject to the next, `tblastn/search_gapped.rs`) and
-/// `LOSAT_X_TBNXLATE` (the translated frames of a TBLASTN subject read from tables,
-/// `tblastn/x_subject_translate.rs`) were added after the change as switches that are off unless
-/// set and joined the set together once they were verified and timed with it on.
+/// verified on the arm64 runners with it on. `LOSAT_X_TBNSTATE` and `LOSAT_X_TBNXLATE` (TBLASTN's
+/// kept scan state and table translation) joined the set together the same way and graduated
+/// (left it, with their old code) on 2026-10-22.
 /// `LOSAT_X_TBNOIDNEXT` (the threads take the next chunk of subjects when they are free,
 /// `tblastn/x_oid_flow.rs`) and `LOSAT_X_TBNOIDUNITS` (the units of a subject longer than a
 /// chunk's budget on the pool, `tblastn/stage_d_pipeline.rs`) joined the same way, together,
@@ -187,7 +185,6 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_LINKSLICES",
     "LOSAT_X_LINKSORT",
     "LOSAT_X_LUTARENA",
-    "LOSAT_X_LUTSPLIT",
     "LOSAT_X_MBLUTKEEP",
     "LOSAT_X_MBLUTONCE",
     "LOSAT_X_MBLUTPREFAULT",
@@ -221,14 +218,10 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBNOIDNEXT",
     "LOSAT_X_TBNOIDUNITS",
     "LOSAT_X_TBNOWNPOOLS",
-    "LOSAT_X_TBNPAR",
-    "LOSAT_X_TBNQSIDE",
     "LOSAT_X_TBNSCANBF",
     "LOSAT_X_TBNSCANBYTE",
     "LOSAT_X_TBNSSIDE",
-    "LOSAT_X_TBNSTATE",
     "LOSAT_X_TBNSTORE",
-    "LOSAT_X_TBNXLATE",
     "LOSAT_X_TBNXLATESIMD",
     "LOSAT_X_TBXBAND",
     "LOSAT_X_TBXEXTBATCH",

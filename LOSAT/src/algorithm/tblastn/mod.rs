@@ -12,7 +12,7 @@ mod x_scan_byte;
 // NCBI c++/src/algo/blast/core/blast_util.c:1072,1084-1086:
 // translation_table = s_BlastGetTranslationTable(genetic_code, FALSE);
 // length = BLAST_TranslateCompressedSequence(translation_table, nucl_length, nucl_seq, frame, ...);
-// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the subject frames read from tables.
+// The subject frames read from tables.
 mod x_subject_translate;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the subjects held packed, their letters made when read.
 mod x_subject_store;
@@ -66,8 +66,7 @@ mod seqalign;
 // nucleotide database (`-db`): its sequences, numbers and titles.
 mod database;
 pub use args::{check_options, run_local, ResolvedTblastnArgs, TblastnArgs};
-// EXPERIMENT (LOSAT_X_TBNXLATE / LOSAT_X_TBNXLATESHADOW): the summary lines `main` prints at
-// exit. No NCBI counterpart: it prints counters and changes no value NCBI computes.
+// The summary lines `main` prints at exit (`LOSAT_X_TBNKEEPFEWSHADOW`, `LOSAT_X_TBNXLATESIMD`). No NCBI counterpart: it prints counters and changes no value NCBI computes.
 pub use x_subject_translate::print_summary as x_subject_translate_print_summary;
 // EXPERIMENT (LOSAT_X_TBNSTORE): the summary line `main` prints at exit. No NCBI counterpart: it
 // prints counters and changes no value NCBI computes.

@@ -439,7 +439,7 @@ pub(super) fn find_protein_init_hsps_by_chunk_with_mask_mode(
 // unit. Each unit starts from the state of a fresh table, which is what the offset update at the
 // end of the previous WordFinder call gives (see the comment above), so units can run in any order
 // or at the same time.
-// EXPERIMENT (LOSAT_X_TBNPAR): the two-hit pass of one (frame, chunk) unit on its
+// The two-hit pass of one (frame, chunk) unit on its
 // own diagonal array.  NCBI c++/src/algo/blast/core/blast_extend.c:162-175 ends a
 // WordFinder call with `diag_table->offset += subject_length + window`, which
 // makes every entry of the previous call older than a full window: the first hit
@@ -1521,7 +1521,7 @@ mod tests {
     //             ewp->diag_table->offset += subject_length + ewp->diag_table->window;
     //         }
     // ```
-    // LOSAT_X_TBNSTATE: one table carried through many units with `exit` after each, as NCBI's
+    // The unit path's kept state: one table carried through many units with `exit` after each, as NCBI's
     // thread carries it through its subjects, gives every unit the hits of a cleared table
     // (`reset`): from a new table, across the clear near INT4_MAX / 4, and when `with_table`
     // takes it over for another query set of the same table length. The units are fragments of

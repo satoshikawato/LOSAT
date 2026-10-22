@@ -1550,9 +1550,9 @@ fn search(
         // sequence file failed with its error.
         let mut titles = super::database::DatabaseTitles::new();
         let mut failed: Option<(std::ops::Range<usize>, anyhow::Error)> = None;
-        // EXPERIMENT (LOSAT_X_TBNPAR, LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
-        // loop below searched ahead (`x_search_batches`), each with its range; `None` when
-        // the switches are off. A batch whose range does not match is searched by the loop.
+        // EXPERIMENT (LOSAT_X_TBNSSIDE, LOSAT_X_TBNBATCH): the batches of the
+        // loop below searched ahead (`x_search_batches`), each with its range; `None` for a
+        // one-thread search without LOSAT_X_TBNSSIDE. A batch whose range does not match is searched by the loop.
         // NCBI reference (598d8ae6): c++/src/app/blast/tblastn_app.cpp:275-291
         // ```c
         //             for (; !input->End(); formatter.ResetScopeHistory(), QueryBatchCleanup()) {

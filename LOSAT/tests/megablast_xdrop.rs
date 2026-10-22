@@ -33,7 +33,7 @@ fn megablast_automatic_xdrop_preserves_oracle_scripts() {
     std::fs::create_dir(&directory).unwrap();
     let output = directory.join("output.tsv");
     let cli: LOSAT::cli::Cli = LOSAT::cli::try_parse_from([
-        "LOSAT",
+        "losat",
         "blastn",
         "-query",
         input.to_str().unwrap(),

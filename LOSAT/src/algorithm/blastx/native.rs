@@ -388,9 +388,9 @@ pub fn run(args: &BlastxArgs) -> Result<()> {
     // AIRR rearrangement, FASTA) before its warning. The deferred errors of `resolve` are
     // those of the composition-based statistics handler and of `Validate`, which come later.
     app::formatting_handler_check(&choice, Program::Blastx)?;
-    if args.max_target_seqs.unwrap_or(500) < 5 {
-        stderr.write_all(b"Warning: [blastx] Examining 5 or more matches is recommended\n")?;
-    }
+    // The warnings of the hit list size and of an ignored -num_descriptions
+    // (`blastinput::report_counts`).
+    stderr.write_all(&warnings_of(&args, choice.number))?;
     // NCBI reference (598d8ae6): c++/src/app/blast/blast_app_util.hpp:172-175
     // ```c++
     //     catch (const blast::CInputException& e) {                               \
@@ -1421,4 +1421,16 @@ fn x_flow(
         }
         parsed
     })
+}
+
+/// The formatting handler's warnings of a BLASTX run with output format `outfmt`
+/// (`ReportCounts::warnings`).
+pub(crate) fn warnings_of(args: &BlastxArgs, outfmt: i32) -> Vec<u8> {
+    crate::blastinput::report_counts::report_counts(
+        outfmt,
+        args.max_target_seqs.map(|n| n as usize),
+        args.num_descriptions,
+        args.num_alignments,
+    )
+    .warnings("blastx", outfmt, args.num_descriptions.is_some())
 }

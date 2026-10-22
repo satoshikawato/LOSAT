@@ -98,10 +98,11 @@ static SHADOW_ERRORS: AtomicU64 = AtomicU64::new(0);
 /// a time (`[1]`).
 static PACKED_CODONS: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
 
-/// The summary lines (printed by `main` at exit): the shadow summary, and with LOSAT_X_STATS
-/// the number of subject plans made from the tables.
+/// The summary lines (printed by `main` at exit): the shadow summaries (`LOSAT_X_TBNKEEPFEWSHADOW`
+/// and this one), and with LOSAT_X_STATS the number of subject plans made from the tables.
 // No NCBI counterpart: prints the counters above; it does not change any value NCBI computes.
 pub fn print_summary() {
+    super::search_seed::x_keep_few_print_summary();
     if x_translate() == XTranslate::Shadow {
         let plans = SHADOW_PLANS.load(Ordering::Relaxed);
         let errors = SHADOW_ERRORS.load(Ordering::Relaxed);
@@ -525,12 +526,23 @@ fn x_plan_difference(
             return Some(format!("error \"{tables:#}\" for a plan of the reference"))
         }
     };
+    x_plan_fields_difference(tables, reference)
+}
+
+// No NCBI counterpart: the comparison of two plans of one subject for the shadow modes; it does
+// not change any value NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNXLATESHADOW, LOSAT_X_TBNKEEPFEWSHADOW): what differs between two plans
+/// of one subject, `None` when nothing does.
+pub(super) fn x_plan_fields_difference(
+    tables: &XSubjectPlan,
+    reference: &XSubjectPlan,
+) -> Option<String> {
     // Every field by name, so that a field added to a plan or to a frame has to be compared here.
     let XSubjectPlan { frames, units } = tables;
     let XSubjectPlan {
         frames: reference_frames,
         units: reference_units,
-    } = &**reference;
+    } = reference;
     if frames.len() != reference_frames.len() {
         return Some(format!(
             "{} frames for the reference's {}",
@@ -658,6 +670,79 @@ fn x_frame_capacity(length: usize) -> usize {
     }
 }
 
+// No NCBI counterpart: reads the LOSAT_X_TBNFRAMEREUSE variable once; it does not change any value
+// NCBI computes.
+/// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): a switch of the strict set (`utils/xswitch.rs`), on unless
+/// it is `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it a thread keeps the frames of a
+/// dropped subject plan (`x_reuse_frame`) for the next plan it translates from a packed subject
+/// (`x_frame_buffer`).
+fn x_frame_reuse() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| crate::utils::xswitch::on("LOSAT_X_TBNFRAMEREUSE"))
+}
+
+// No NCBI counterpart for the reuse: NCBI allocates a subject's translation buffer
+// (`BLAST_GetAllTranslations`) and frees it after the subject (blast_engine.c:627-631); here a
+// thread gives the frames of a dropped plan to its next plan. The residues written are the same.
+/// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): the largest frame capacity a thread keeps for its next
+/// plan, and how many frames it keeps (those of one plan). A thread holds at most 1.5 MiB so.
+const X_REUSED_FRAME: usize = 256 << 10;
+const X_REUSED_FRAMES: usize = 6;
+
+thread_local! {
+    /// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): the frames this thread keeps between subject plans.
+    static X_FRAMES: std::cell::RefCell<Vec<Vec<u8>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): a frame of `length` bytes with a sentinel at both ends,
+/// whose other bytes the caller writes, every one of them. With the switch, a frame of at most
+/// `X_REUSED_FRAME` bytes is one this thread kept (`x_reuse_frame`), its bytes not cleared, which
+/// saves the allocation and the zero fill of a new one; otherwise a new zeroed frame of
+/// `x_frame_capacity`.
+fn x_frame_buffer(length: usize) -> Vec<u8> {
+    let kept = if length <= X_REUSED_FRAME && x_frame_reuse() {
+        X_FRAMES.with(|frames| frames.borrow_mut().pop())
+    } else {
+        None
+    };
+    let mut frame = match kept {
+        Some(mut frame) => {
+            if frame.len() >= length {
+                frame.truncate(length);
+            } else {
+                // Grown to the length only, so that it stays a frame the thread keeps.
+                frame.reserve_exact(length - frame.len());
+                frame.resize(length, 0);
+            }
+            frame
+        }
+        None => {
+            let mut frame = Vec::with_capacity(x_frame_capacity(length));
+            frame.resize(length, 0);
+            frame
+        }
+    };
+    frame[0] = SENTINEL_BYTE;
+    frame[length - 1] = SENTINEL_BYTE;
+    frame
+}
+
+/// EXPERIMENT (LOSAT_X_TBNFRAMEREUSE): keeps `frame`, a frame of a dropped subject plan, for
+/// this thread's next `x_frame_buffer`, if the switch is on, its capacity is at most
+/// `X_REUSED_FRAME` and the thread keeps fewer than `X_REUSED_FRAMES`; drops it otherwise.
+pub(super) fn x_reuse_frame(frame: Vec<u8>) {
+    if frame.capacity() == 0 || frame.capacity() > X_REUSED_FRAME || !x_frame_reuse() {
+        return;
+    }
+    // A thread that is ending keeps nothing.
+    let _ = X_FRAMES.try_with(|frames| {
+        let mut frames = frames.borrow_mut();
+        if frames.len() < X_REUSED_FRAMES {
+            frames.push(frame);
+        }
+    });
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_util.c:1080-1090
 // ```c
 //    for (context = 0; context < NUM_FRAMES; ++context) {
@@ -696,14 +781,8 @@ fn x_packed_frames_with(
 ) -> Vec<QueryFrame> {
     let seq_len = store.len();
     let frame_count = (0..3).filter(|&i| i + 3 <= seq_len).count();
-    let empty_frame = |i: usize| {
-        let aa_len = (seq_len - i) / 3;
-        let mut aa_seq = Vec::with_capacity(x_frame_capacity(aa_len + 2));
-        aa_seq.resize(aa_len + 2, 0u8);
-        aa_seq[0] = SENTINEL_BYTE;
-        aa_seq[aa_len + 1] = SENTINEL_BYTE;
-        aa_seq
-    };
+    // x_phase_residues writes every residue (positions 1 to aa_len) of the frames.
+    let empty_frame = |i: usize| x_frame_buffer((seq_len - i) / 3 + 2);
     let mut forward: Vec<Vec<u8>> = (0..frame_count).map(empty_frame).collect();
     let mut reverse: Vec<Vec<u8>> = (0..frame_count).map(empty_frame).collect();
     // codons read by the vector loop, and in all (for `[X_STATS] TBNXLATESIMD`)
@@ -1672,5 +1751,49 @@ mod tests {
         let _ = x_subject_plan(XTranslate::Shadow, &subject, 1, false, || {
             reference_plan(&other, 1, false)
         });
+    }
+
+    // No NCBI counterpart: test of LOSAT_X_TBNFRAMEREUSE; it does not change any value NCBI computes.
+    // The frames of a dropped plan make the next plan of the thread, shorter or longer, without
+    // being cleared, and that plan is still the reference plan of its letters.
+    #[test]
+    fn x_frames_of_a_dropped_plan_make_the_next_plan() {
+        use crate::sequence::packed_subject::PackedNucleotide;
+        let packed = |subject: &[u8], db_gencode| {
+            x_packed_plan(
+                &PackedNucleotide::from_subject_letters(subject).expect("letters"),
+                db_gencode,
+            )
+        };
+        let long = letters(b"ACGTACGTACGTacgtn", 5_000, 7);
+        let first = packed(&long, 1).unwrap();
+        let frames: Vec<*const u8> = first.frames.iter().map(|f| f.aa_seq.as_ptr()).collect();
+        assert_eq!(frames.len(), 6);
+        drop(first);
+        let short = letters(b"ACGT", 1_001, 8);
+        let next = packed(&short, 1);
+        assert_eq!(
+            x_plan_difference(&next, &reference_plan(&short, 1, false)),
+            None
+        );
+        if x_frame_reuse() {
+            assert!(next
+                .as_ref()
+                .unwrap()
+                .frames
+                .iter()
+                .all(|frame| frames.contains(&frame.aa_seq.as_ptr())));
+        }
+        drop(next);
+        let longer = letters(b"ACGTMRSVWYHKDBN-acgtmrsvwyhkdbn", 9_002, 9);
+        assert_eq!(
+            x_plan_difference(&packed(&longer, 4), &reference_plan(&longer, 4, false)),
+            None
+        );
+        // A thread keeps one plan's frames at most.
+        for _ in 0..3 {
+            drop(packed(&short, 1));
+        }
+        assert!(X_FRAMES.with(|kept| kept.borrow().len()) <= X_REUSED_FRAMES);
     }
 }

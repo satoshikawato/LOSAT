@@ -1,8 +1,8 @@
 # BLASTX local CLI on the current branch
 
 ```bash
-LOSAT blastx -query query.fna -subject subject.faa -num_threads 1 -outfmt 0
-LOSAT blastx -query query.fna -subject subject.faa -outfmt "7 std qframe btop stitle" -out results.txt
+losat blastx -query query.fna -subject subject.faa -num_threads 1 -outfmt 0
+losat blastx -query query.fna -subject subject.faa -outfmt "7 std qframe btop stitle" -out results.txt
 ```
 
 The local FASTA path uses the final Rust runtime results for pairwise format 0,

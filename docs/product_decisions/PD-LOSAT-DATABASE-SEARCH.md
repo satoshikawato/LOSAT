@@ -8,7 +8,7 @@
   that version 1.0 left open, the thread count of the parity target, was taken by the
   maintainer on 2026-10-13 (P1.1).
 - Implementation status: stage DB-1 added the database reader (`LOSAT/src/seqdb`). Stage
-  DB-2 added the subcommand `LOSAT makedb` (`LOSAT/src/writedb`, section "What `LOSAT makedb`
+  DB-2 added the subcommand `losat makedb` (`LOSAT/src/writedb`, section "What `losat makedb`
   of stage DB-2 writes and rejects"). Stage DB-3 adds `-db` and `-dbsize` to BLASTP (section
   "What BLASTP `-db` of stage DB-3 does and rejects"). Stage DB-4 adds `-db` and `-dbsize` to
   BLASTN (section "What BLASTN `-db` of stage DB-4 does and rejects"). Stage DB-5 adds `-db`
@@ -43,7 +43,7 @@ Measured on 2026-10-12 with NCBI BLAST+ 2.17.0 (Swiss-Prot, 575,748 proteins; Re
 
 ### P1. Parity target
 
-`LOSAT <program> -db NAME` must give the output of NCBI BLAST+ 2.17.0 `-db NAME` on the same
+`losat <program> -db NAME` must give the output of NCBI BLAST+ 2.17.0 `-db NAME` on the same
 database files, byte for byte, for outfmt 0, 6 and 7. `-db` and `-subject` of one FASTA
 therefore differ exactly as NCBI's do. This replaces the earlier wording "E-values are
 computed with the size of the whole database", which `-subject` already meets.
@@ -69,7 +69,7 @@ the same output at every thread count.
 
 A LOSAT database is an NCBI BLAST database: the volume layout that makeblastdb writes.
 LOSAT reads format versions 4 and 5 directly and writes the version 4 layout with
-`LOSAT makedb`. There is no LOSAT-only format.
+`losat makedb`. There is no LOSAT-only format.
 
 Reasons: the comparison oracle searches the very same files, so ordinal ids, the stored
 2-bit bases and the title are shared by construction; existing databases are usable as they
@@ -78,12 +78,12 @@ are; the writer can be checked byte for byte against `makeblastdb -blastdb_versi
 ### P3. Command-line surface
 
 - `-db`, `-dbsize` and `-searchsp`, under NCBI's names and with NCBI's meaning.
-- A subcommand `LOSAT makedb` with makeblastdb's option names (`-in`, `-dbtype`, `-out`,
+- A subcommand `losat makedb` with makeblastdb's option names (`-in`, `-dbtype`, `-out`,
   `-title`, `-max_file_sz`).
 
 ### P4. Scope of the first release
 
-- Databases without parsed Seq-ids: makeblastdb without `-parse_seqids`, and `LOSAT makedb`.
+- Databases without parsed Seq-ids: makeblastdb without `-parse_seqids`, and `losat makedb`.
 - One database per search.
 - No id or taxonomy filters.
 
@@ -129,9 +129,9 @@ error or a difference that a test records: group alias files (`index.alx`), seve
 in one `-db`, index files cut short, NCBI's threshold of open files and its warning at
 1,024 links, escapes in registry values.
 
-## What `LOSAT makedb` of stage DB-2 writes and rejects
+## What `losat makedb` of stage DB-2 writes and rejects
 
-`LOSAT makedb -in FASTA -dbtype prot|nucl -out NAME [-title T] [-max_file_sz S]` writes the
+`losat makedb -in FASTA -dbtype prot|nucl -out NAME [-title T] [-max_file_sz S]` writes the
 files of `makeblastdb -blastdb_version 4` without `-parse_seqids`: sequence files
 (`.psq`, `.nsq`) and header files (`.phr`, `.nhr`) byte for byte, the index file (`.pin`,
 `.nin`) but for the creation date, and for several volumes the alias file (`.pal`, `.nal`)
@@ -146,12 +146,12 @@ otherwise). The differences are listed below.
 | --- | --- |
 | The JSON metadata file (`.pjs`, `.njs`) | NCBI's search programs do not read it; their output is the same without it. A file of that name left by a replaced database is removed |
 | `-parse_seqids`, `-hash_index`, `-randomize`, `-mask_data`, `-mask_id`, `-mask_desc`, `-gi_mask`, `-gi_mask_name`, `-taxid`, `-taxid_map`, `-oid_masks`, `-metadata_output_prefix`, `-logfile`, `-version`, `-h` | parsed Seq-ids, masks and taxonomy are a second step (P4), the others are not implemented; each is an explicit error that names the option |
-| `-blastdb_version 5` | the LMDB file is not written; version 4 is the default of `LOSAT makedb` (makeblastdb's default is 5) |
+| `-blastdb_version 5` | the LMDB file is not written; version 4 is the default of `losat makedb` (makeblastdb's default is 5) |
 | `-input_type` other than `fasta`, several input files, compressed input (`.gz`, `.bz2`, `.zst`) | one uncompressed FASTA input; `-in -` reads the standard input |
 | NCBI settings that change makeblastdb's messages or stored titles (`DIAG_*`, `NCBI_CONFIG_*`, registry entries outside the accepted list, a non-empty `NCBI_MAKEBLASTDB_DONT_SCAN_BIOSEQ_FOR_CFASTAREADER_USER_OBJECTS`) | as for the search programs: LOSAT refuses to run instead of giving a different result |
 | Replacing a database of the same name whose alias file the reader of stage DB-1 rejects | the files to remove are found by resolving the alias file; LOSAT stops before it removes anything |
 
-### Where `LOSAT makedb` knowingly differs from makeblastdb
+### Where `losat makedb` knowingly differs from makeblastdb
 
 Removal of an existing database and the paths of the output:
 
@@ -166,7 +166,7 @@ Removal of an existing database and the paths of the output:
   file. Other behaviour of makeblastdb is kept: the existing database is removed before the
   input is read, so a failing build also removes it.
 - A volume that an existing alias file names and that is found only through `BLASTDB` or
-  `.ncbirc` is not removed (`LOSAT makedb` does not use the search path of `-db`).
+  `.ncbirc` is not removed (`losat makedb` does not use the search path of `-db`).
 - Directories that makeblastdb creates get mode 0755; LOSAT does the same on Unix only.
 
 Errors that makeblastdb does not detect, or detects elsewhere:
@@ -206,13 +206,13 @@ seconds later than the C library's, and a `TZ` value with a daylight-saving name
 rule follows the United States rules unless `posixrules` says otherwise.
 
 A database of 1,000 volumes or more is not in FASTA order when it is read, with makeblastdb
-and with `LOSAT makedb` alike: NCBI opens volumes in the sorted order of their names, and
+and with `losat makedb` alike: NCBI opens volumes in the sorted order of their names, and
 the names makeblastdb gives then (`db.0010`, `db.00100`, `db.00101`, ...) do not sort by
-number. `LOSAT makedb` writes the same names and LOSAT's reader opens them in NCBI's order.
+number. `losat makedb` writes the same names and LOSAT's reader opens them in NCBI's order.
 
 ## What BLASTP `-db` of stage DB-3 does and rejects
 
-`LOSAT blastp -db NAME` searches a protein database of the reader above and gives the output
+`losat blastp -db NAME` searches a protein database of the reader above and gives the output
 of NCBI BLAST+ 2.17.0 `blastp -db NAME -num_threads 1` for outfmt 0, 6 and 7, the same bytes
 at every `-num_threads` (P1, P1.1). The `-subject` path is unchanged; both paths run the same
 search code with a different subject source.
@@ -261,7 +261,7 @@ LOSAT searches.
 
 ## What BLASTN `-db` of stage DB-4 does and rejects
 
-`LOSAT blastn -db NAME` (megablast, blastn, dc-megablast) searches a nucleotide database of the
+`losat blastn -db NAME` (megablast, blastn, dc-megablast) searches a nucleotide database of the
 reader above and gives the output of NCBI BLAST+ 2.17.0 `blastn -db NAME -num_threads 1` for
 outfmt 0, 6 and 7, the same bytes at every `-num_threads` (P1, P1.1). The `-subject` path is
 unchanged; both paths run the same per-subject search, the same traceback and the same report
@@ -270,7 +270,7 @@ title rules are those of BLASTP's `-db`.
 
 - Bases: the search reads the stored 2-bit bases, and the alignments read the letters rebuilt
   from the 2-bit bases and the stored ambiguity codes, as NCBI's search and traceback do.
-  makeblastdb (and `LOSAT makedb`) draw the 2-bit base of each ambiguous letter from `CRandom`
+  makeblastdb (and `losat makedb`) draw the 2-bit base of each ambiguous letter from `CRandom`
   seeded with the sequence length, as `-subject` draws it at search time (writedb_convert.cpp,
   blast_objmgr_tools.cpp), so `-db` and `-subject` of the same FASTA search the same bases, in
   NCBI and in LOSAT alike, except where the FASTA has hyphens (makeblastdb stores them as `N`,
@@ -312,7 +312,7 @@ Rejected explicitly, besides what BLASTP `-db` and the reader reject (the same r
 
 ## What TBLASTN `-db` of stage DB-5 does and rejects
 
-`LOSAT tblastn -db NAME` searches a nucleotide database of the reader above and gives the output
+`losat tblastn -db NAME` searches a nucleotide database of the reader above and gives the output
 of NCBI BLAST+ 2.17.0 `tblastn -db NAME -num_threads 1` for outfmt 0, 6 and 7, the same bytes at
 every `-num_threads` (P1, P1.1). The `-subject` path is unchanged; both paths run the same
 search, the same traceback and composition-based redo, and the same report writers. The database
@@ -320,7 +320,7 @@ opener, the reader's error texts and the title rules are those of BLASTP's and B
 
 - Bases: the preliminary stage translates the stored 2-bit bases, and the alignments, the
   composition-based redo and the reports read the letters with the stored ambiguity codes, as
-  NCBI's search and traceback do. makeblastdb (and `LOSAT makedb`) draw the 2-bit base of each
+  NCBI's search and traceback do. makeblastdb (and `losat makedb`) draw the 2-bit base of each
   ambiguous letter from `CRandom` seeded with the sequence length, as `-subject` draws it at
   search time, so the bases of `-db` and `-subject` differ only where the FASTA has hyphens
   (stored as `N`, dropped by `-subject`), with `-subject_loc`, or for a database written
@@ -357,7 +357,7 @@ Rejected explicitly, besides what BLASTN `-db` and the reader reject (the same r
 
 ## What BLASTX `-db` of stage DB-5 does and rejects
 
-`LOSAT blastx -db NAME` searches a protein database of the reader above and gives the output of
+`losat blastx -db NAME` searches a protein database of the reader above and gives the output of
 NCBI BLAST+ 2.17.0 `blastx -db NAME -num_threads 1` for outfmt 0, 6 and 7, the same bytes at
 every `-num_threads` (P1, P1.1). The `-subject` path is unchanged; both paths run the same
 search, the same composition-based redo and traceback, and the same report writers. The database
@@ -398,7 +398,7 @@ rejects with `-subject`.
 
 ## What TBLASTX `-db` of stage DB-5 does and rejects
 
-`LOSAT tblastx -db NAME` searches a nucleotide database of the reader above and gives the output
+`losat tblastx -db NAME` searches a nucleotide database of the reader above and gives the output
 of NCBI BLAST+ 2.17.0 `tblastx -db NAME -num_threads 1` for outfmt 0, 6 and 7, the same bytes at
 every `-num_threads` (P1, P1.1). The `-subject` path is unchanged; both paths run the same
 search, the same re-evaluation and linking, and the same report writers. The database opener,
@@ -406,7 +406,7 @@ the reader's error texts and the title rules are those of TBLASTN's `-db`.
 
 - Bases: the seed and ungapped stages translate the stored 2-bit bases, and the ungapped
   re-evaluation, the identities and the reports read the letters with the stored ambiguity codes,
-  as NCBI's search does. makeblastdb (and `LOSAT makedb`) draw the 2-bit base of each ambiguous
+  as NCBI's search does. makeblastdb (and `losat makedb`) draw the 2-bit base of each ambiguous
   letter from `CRandom` seeded with the sequence length, as `-subject` draws it at search time
   (writedb_convert.cpp, blast_objmgr_tools.cpp), so the bases of `-db` and `-subject` differ only
   where the FASTA has hyphens (stored as `N`, dropped by `-subject`), with `-subject_loc`, or for

@@ -26,7 +26,7 @@ rejection: its exit code and the SHA-256 of the stdout, stderr and combined stre
 - freeze-rejections --losat BIN --jobs N: runs LOSAT on every row of kind `losat-rejection`, requires
   the exit code and the message of the rule above, and writes the hashes into the manifests.
 - refresh: rewrites the manifests from their existing hashes and the current row definitions.
-- check --losat BIN --out TSV --jobs N: runs `LOSAT <program> <argv>` on the same rows from
+- check --losat BIN --out TSV --jobs N: runs `losat <program> <argv>` on the same rows from
   LOSAT/ and compares stdout, stderr, the exit code and the combined `2>&1` stream with the
   manifest. One line per row: `same`, `differs` (with the first differing line, when the frozen
   files of --expected are present), `rejects` (LOSAT's explicit "not supported by LOSAT"

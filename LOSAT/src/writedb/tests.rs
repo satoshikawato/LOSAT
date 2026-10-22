@@ -355,7 +355,7 @@ fn replace_bytes(text: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     out
 }
 
-/// `LOSAT makedb` from its arguments to its exit status on the inputs of
+/// `losat makedb` from its arguments to its exit status on the inputs of
 /// `makeblastdb_app_cases.rs`: the files, the log, the messages and the exit
 /// status are makeblastdb's.
 #[test]
@@ -422,7 +422,7 @@ fn makedb_runs_as_makeblastdb_on_edge_inputs() {
     }
 }
 
-/// One run of `LOSAT makedb` for a protein database titled "t": the exit
+/// One run of `losat makedb` for a protein database titled "t": the exit
 /// status, the log and the messages of the standard error stream.
 fn makedb(input: &str, out: &str, max_file_sz: &str, stdin: &[u8]) -> (i32, String, String) {
     let args = MakedbArgs {

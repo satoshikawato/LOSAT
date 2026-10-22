@@ -120,6 +120,30 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def is_sam_outfmt(outfmt: str) -> bool:
+    """Whether `outfmt` (the `-outfmt` argument, a spec included) asks for SAM (17)."""
+    return outfmt.split()[:1] == ["17"]
+
+
+_SAM_PG = b"\n@PG\tID:0\tVN:2.17.0+"
+
+
+def strip_sam_cl(data: bytes) -> bytes:
+    """The SAM document without the CL tag of its @PG line: the bytes from the `\tCL:` that follows
+    `\n@PG\tID:0\tVN:2.17.0+` up to, not including, the first following `\tPN:blastn\n`.
+
+    The one rule that the SAM (outfmt 17) rows of every fixture compare with, on the frozen NCBI bytes and on
+    LOSAT's (DECISIONS 7 of the outfmt line): LOSAT writes its own command line (its program path, the `blastn`
+    sub-command word and the arguments a harness adds, such as `-num_threads N`) where NCBI writes its argv.
+    Every other byte must be equal. A document without the tag (no command line) is returned as it is."""
+    head = data.find(_SAM_PG + b"\tCL:")
+    if head < 0:
+        return data
+    start = head + len(_SAM_PG)
+    end = data.find(b"\tPN:blastn\n", start + len(b"\tCL:"))
+    return data if end < 0 else data[:start] + data[end:]
+
+
 def first_difference(expected: bytes, actual: bytes) -> str:
     for number, (left, right) in enumerate(zip(expected.split(b"\n"), actual.split(b"\n")), 1):
         if left != right:
@@ -184,8 +208,12 @@ def check_row(row: dict[str, str], losat: Path, threads: int, env: dict[str, str
         problems.append("frozen .err does not match the manifest")
     if run.returncode != int(row["rc"]):
         problems.append(f"exit {run.returncode}, expected {row['rc']}: {run.stderr.decode(errors='replace').strip()[:150]!r}")
-    if run.stdout != out:
-        problems.append("stdout " + first_difference(out, run.stdout))
+    # A SAM row differs in the command line of the @PG line only (`strip_sam_cl`).
+    expected_out, observed_out = (out, run.stdout)
+    if is_sam_outfmt(row["outfmt"]):
+        expected_out, observed_out = strip_sam_cl(out), strip_sam_cl(run.stdout)
+    if observed_out != expected_out:
+        problems.append("stdout " + first_difference(expected_out, observed_out))
     if run.stderr != err:
         problems.append("stderr " + first_difference(err, run.stderr))
     return ("differs", "; ".join(problems)) if problems else ("same", "")

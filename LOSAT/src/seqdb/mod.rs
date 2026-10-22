@@ -854,6 +854,25 @@ impl SeqDb {
         self.volumes[volume].check_ambiguity(oid, ordinal)
     }
 
+    /// The length in bases of nucleotide `ordinal`, read from the index and the last byte of
+    /// its packed bases (no letters).
+    pub fn nucleotide_length(&self, ordinal: u32) -> Result<usize, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].nucleotide_length(oid, ordinal)
+    }
+
+    /// The IUPAC letters `[from, to)` of nucleotide `ordinal`: the bases of the range and the
+    /// ambiguity runs that overlap it, read without the rest of the sequence.
+    pub fn nucleotide_iupac_range(
+        &self,
+        ordinal: u32,
+        from: usize,
+        to: usize,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        let (volume, oid) = self.find_volume(ordinal)?;
+        self.volumes[volume].nucleotide_iupac_range(oid, ordinal, from, to)
+    }
+
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:2222-2241
     // ```c++
     //     if (adjust_oids && bdls.NotEmpty() && m_VolStart) {

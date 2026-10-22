@@ -88,6 +88,9 @@ def outfmt0_fixtures() -> list[dict]:
             continue
         argv = run_oracle.search_argv(row)
         outfmt = run_oracle.outfmt(row)
+        # SAM (outfmt 17) is not a format of ABI v1 (DECISIONS 10 of the outfmt line).
+        if run_oracle.is_sam_outfmt(outfmt):
+            continue
         assert argv[-2:] == ["-outfmt", outfmt], row["fixture_id"]
         key = (row["program"], tuple(argv[:-2]))
         search = searches.setdefault(key, {"program": row["program"], "argv": [row["program"], *argv[:-2]],

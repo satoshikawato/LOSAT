@@ -401,6 +401,120 @@ impl Volume {
         self.check_ambiguity_data(amb_start, next, ordinal)
     }
 
+    // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1791-1838
+    // ```c++
+    //         int whole_bytes = int(end_offset - start_offset - 1);
+    //
+    //         char last_char = (*buffer)[whole_bytes];
+    //
+    //         int remainder = last_char & 3;
+    //         length = (whole_bytes * 4) + remainder;
+    // ```
+    /// The packed bytes of nucleotide `oid` (volume-relative) from `skip` bytes in, `count`
+    /// of them, with the offsets of its sequence and its ambiguity data: `(bytes, packed
+    /// start, ambiguity start, next sequence's start)`.
+    fn packed_part(
+        &self,
+        oid: u32,
+        ordinal: u32,
+        skip: u64,
+        count: Option<u64>,
+    ) -> Result<(Vec<u8>, u32, u32, u32), SeqDbError> {
+        self.check_range(oid, oid.saturating_add(1))?;
+        let seq = self.index.sequence_offsets(oid, oid + 1)?;
+        let amb = self.index.ambiguity_offsets(oid, oid + 1)?;
+        let (start, amb_start, next) = (seq[0], amb[0], seq[1]);
+        let file = self.seq_file()?;
+        if !(start < amb_start && amb_start <= next) {
+            return Err(SeqDbError::Format {
+                path: file.path().to_path_buf(),
+                message: format!("sequence {ordinal}: the ambiguity offset lies outside its data"),
+            });
+        }
+        let packed = u64::from(amb_start - start);
+        let from = u64::from(start) + skip.min(packed);
+        let to = match count {
+            Some(count) => (from + count).min(u64::from(amb_start)),
+            None => u64::from(amb_start),
+        };
+        Ok((file.read_range(from, to)?, start, amb_start, next))
+    }
+
+    /// The length in bases of nucleotide `oid` (volume-relative; `ordinal` its database
+    /// ordinal id, for the message), from the last byte of its packed bases only.
+    pub fn nucleotide_length(&self, oid: u32, ordinal: u32) -> Result<usize, SeqDbError> {
+        self.check_range(oid, oid.saturating_add(1))?;
+        let amb = self.index.ambiguity_offsets(oid, oid + 1)?;
+        let seq = self.index.sequence_offsets(oid, oid + 1)?;
+        let (start, amb_start) = (u64::from(seq[0]), u64::from(amb[0]));
+        let file = self.seq_file()?;
+        if amb_start <= start {
+            return Err(SeqDbError::Format {
+                path: file.path().to_path_buf(),
+                message: format!("sequence {ordinal}: the ambiguity offset lies outside its data"),
+            });
+        }
+        let last = file.read_range(amb_start - 1, amb_start)?;
+        let length = (amb_start - start - 1) * 4 + u64::from(last[0] & 3);
+        if length > i32::MAX as u64 {
+            return Err(SeqDbError::Format {
+                path: file.path().to_path_buf(),
+                message: format!(
+                    "sequence {ordinal}: the sequence is longer than a signed 32-bit length"
+                ),
+            });
+        }
+        Ok(length as usize)
+    }
+
+    /// The IUPAC letters `[from, to)` of nucleotide `oid` (volume-relative), as `ordinal`'s
+    /// stored data give them: the 2-bit bases of the range and the ambiguity runs that overlap
+    /// it. Only the bytes of the range and the sequence's ambiguity data are read.
+    pub fn nucleotide_iupac_range(
+        &self,
+        oid: u32,
+        ordinal: u32,
+        from: usize,
+        to: usize,
+    ) -> Result<Vec<u8>, SeqDbError> {
+        let length = self.nucleotide_length(oid, ordinal)?;
+        if from > to || to > length {
+            return Err(SeqDbError::Range(format!(
+                "letters {from}..{to} are outside sequence {ordinal}, which has {length}"
+            )));
+        }
+        let first_byte = (from / 4) as u64;
+        let end_byte = (to as u64).div_ceil(4);
+        let (packed, _, amb_start, next) =
+            self.packed_part(oid, ordinal, first_byte, Some(end_byte - first_byte))?;
+        let mut letters: Vec<u8> = (from..to)
+            .map(|at| {
+                let byte = packed[at / 4 - first_byte as usize];
+                b"ACGT"[usize::from((byte >> (6 - 2 * (at % 4))) & 3)]
+            })
+            .collect();
+        if u64::from(amb_start) < u64::from(next) {
+            let file = self.seq_file()?;
+            let words: Vec<u32> = file
+                .read_range(u64::from(amb_start), u64::from(next))?
+                .chunks_exact(4)
+                .map(|word| u32::from_be_bytes([word[0], word[1], word[2], word[3]]))
+                .collect();
+            let runs = decode_ambiguity_runs(&words).map_err(|message| SeqDbError::Format {
+                path: file.path().to_path_buf(),
+                message: format!("sequence {ordinal}: {message}"),
+            })?;
+            for run in runs {
+                let run_from = (run.offset as usize).max(from);
+                let run_to = (run.offset as usize + run.length as usize).min(to);
+                for at in run_from..run_to.max(run_from) {
+                    letters[at - from] = NCBI4NA_TO_IUPAC[usize::from(run.ncbi4na & 0xF)];
+                }
+            }
+        }
+        Ok(letters)
+    }
+
     /// `check_ambiguity` of the sequence whose ambiguity data are
     /// `amb_start..next` of the sequence file.
     fn check_ambiguity_data(
@@ -604,8 +718,46 @@ pub struct AmbiguityRun {
 // ```
 const NCBINA8_TO_BLASTNA8: [u8; 16] = [15, 0, 1, 6, 2, 4, 9, 13, 3, 8, 5, 12, 7, 11, 10, 14];
 
+/// `NCBI4NA_TO_IUPACNA` (c++/src/algo/blast/core/blast_encoding.c:80-83).
+const NCBI4NA_TO_IUPAC: [u8; 16] = *b"-ACMGRSVTWYHKDBN";
+
 /// Sentinel byte NCBI puts before and after a BLASTNA sequence.
 pub const BLASTNA_SENTINEL: u8 = 15;
+
+/// The ambiguity runs of the ambiguity words of one sequence, in stored order
+/// (`SequenceBlock::ambiguity_runs`); the error is its message.
+fn decode_ambiguity_runs(words: &[u32]) -> Result<Vec<AmbiguityRun>, &'static str> {
+    let mut runs = Vec::new();
+    let Some(&first) = words.first() else {
+        return Ok(runs);
+    };
+    let new_format = first & 0x8000_0000 != 0;
+    let amb_num = (first & 0x7FFF_FFFF) as usize;
+    let words_per_entry = if new_format { 2 } else { 1 };
+    runs.reserve(amb_num.min(words.len()) / words_per_entry);
+    let mut index = 1;
+    // In the new format the loop above advances `i` by two per entry, so
+    // there `amb_num` counts 32-bit words, not entries.
+    while index < amb_num + 1 {
+        if index + words_per_entry > words.len() {
+            return Err("the ambiguity data are shorter than their count");
+        }
+        let word = words[index];
+        let ncbi4na = ((word >> 28) & 0xF) as u8;
+        let (length, offset) = if new_format {
+            (((word >> 16) & 0xFFF) + 1, words[index + 1])
+        } else {
+            (((word >> 24) & 0xF) + 1, word & 0x00FF_FFFF)
+        };
+        runs.push(AmbiguityRun {
+            offset,
+            length,
+            ncbi4na,
+        });
+        index += words_per_entry;
+    }
+    Ok(runs)
+}
 
 impl SequenceBlock {
     /// Sequence type of the block.
@@ -819,37 +971,7 @@ impl SequenceBlock {
     // ambiguity data, where NCBI reads past its vector, is a format error.
     /// The ambiguity runs of nucleotide `i`, in stored order.
     pub fn ambiguity_runs(&self, i: usize) -> Result<Vec<AmbiguityRun>, SeqDbError> {
-        let words = self.ambiguity_words(i);
-        let mut runs = Vec::new();
-        let Some(&first) = words.first() else {
-            return Ok(runs);
-        };
-        let new_format = first & 0x8000_0000 != 0;
-        let amb_num = (first & 0x7FFF_FFFF) as usize;
-        let words_per_entry = if new_format { 2 } else { 1 };
-        runs.reserve(amb_num.min(words.len()) / words_per_entry);
-        let mut index = 1;
-        // In the new format the loop above advances `i` by two per entry, so
-        // there `amb_num` counts 32-bit words, not entries.
-        while index < amb_num + 1 {
-            if index + words_per_entry > words.len() {
-                return Err(self.format(i, "the ambiguity data are shorter than their count"));
-            }
-            let word = words[index];
-            let ncbi4na = ((word >> 28) & 0xF) as u8;
-            let (length, offset) = if new_format {
-                (((word >> 16) & 0xFFF) + 1, words[index + 1])
-            } else {
-                (((word >> 24) & 0xF) + 1, word & 0x00FF_FFFF)
-            };
-            runs.push(AmbiguityRun {
-                offset,
-                length,
-                ncbi4na,
-            });
-            index += words_per_entry;
-        }
-        Ok(runs)
+        decode_ambiguity_runs(&self.ambiguity_words(i)).map_err(|message| self.format(i, message))
     }
 
     // NCBI reference (598d8ae6): c++/src/objtools/blast/seqdb_reader/seqdbvol.cpp:1619-1707

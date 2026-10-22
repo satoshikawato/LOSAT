@@ -119,6 +119,32 @@ pub(super) struct BlastnDatabase {
 }
 
 impl BlastnDatabase {
+    // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:185
+    // ```c++
+    //             "\tLN:" + NStr::UInt8ToString(refseq.GetBioseqLength()));
+    // ```
+    /// The length in bases of each of the database sequences `ordinals` (outfmt 17: the
+    /// Bioseq's length for `@SQ` and the clips of a record), from the index and the last byte
+    /// of each sequence's packed bases; no letters are read.
+    pub(super) fn sam_lengths(&self, ordinals: &[u32]) -> Result<Vec<usize>> {
+        ordinals
+            .iter()
+            .map(|&ordinal| self.db.nucleotide_length(ordinal).map_err(database_error))
+            .collect()
+    }
+
+    // NCBI reference (598d8ae6): c++/src/objtools/format/sam_formatter.cpp:222-234
+    // ```c++
+    //             vect.GetSeqData(tgt_rg.GetFrom(), tgt_rg.GetToOpen(), seq_data);
+    // ```
+    /// The IUPAC letters `[from, to)` of database sequence `ordinal` (outfmt 17 with `SQ`):
+    /// only the bytes of the range and the sequence's ambiguity data are read.
+    pub(super) fn sam_letters(&self, ordinal: u32, from: usize, to: usize) -> Result<Vec<u8>> {
+        self.db
+            .nucleotide_iupac_range(ordinal, from, to)
+            .map_err(database_error)
+    }
+
     // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:191-197
     // ```c++
     //         /*** Initialize the database/subject ***/

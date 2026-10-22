@@ -19,7 +19,57 @@ use LOSAT::api::local_blast::{run_local_blastn, FormatOutput, OutputSink, Report
 use LOSAT::blastinput::fasta_reader::ReaderConfig;
 use LOSAT::cli::{try_parse_from, Cli, Commands};
 
-const FORMATS: [&str; 9] = ["0", "6", "7", "8", "9", "12", "5", "15", "16"];
+const FORMATS: [&str; 11] = [
+    "0", "6", "7", "8", "9", "12", "5", "15", "16", "17", "17 SQ SR",
+];
+
+/// The SAM document without the CL tag of its @PG line: the bytes from the `\tCL:` that follows
+/// `\n@PG\tID:0\tVN:2.17.0+` up to, not including, the first following `\tPN:blastn\n`; a
+/// document without the tag stays as it is (the rule of `db_search_fixtures.py strip_sam_cl`).
+fn without_sam_cl(document: &[u8]) -> Vec<u8> {
+    let find = |haystack: &[u8], needle: &[u8], from: usize| {
+        haystack[from..]
+            .windows(needle.len())
+            .position(|window| window == needle)
+            .map(|at| at + from)
+    };
+    let head: &[u8] = b"\n@PG\tID:0\tVN:2.17.0+";
+    let Some(at) = find(document, &[head, b"\tCL:"].concat(), 0) else {
+        return document.to_vec();
+    };
+    let start = at + head.len();
+    let Some(end) = find(document, b"\tPN:blastn\n", start + 4) else {
+        return document.to_vec();
+    };
+    [&document[..start], &document[end..]].concat()
+}
+
+#[test]
+fn the_sam_cl_rule_hides_the_command_line_and_nothing_else() {
+    let with: &[u8] =
+        b"@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:2.17.0+\tCL:/x/blastn -a \tPN:blastn\nr\t0\n";
+    let without: &[u8] =
+        b"@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:2.17.0+\tPN:blastn\nr\t0\n";
+    let other_cl: &[u8] =
+        b"@HD\tVN:1.2\n@SQ\tSN:Query_1\tLN:3\n@PG\tID:0\tVN:2.17.0+\tCL:losat blastn -b \tPN:blastn\nr\t0\n";
+    assert_eq!(without_sam_cl(with), without);
+    assert_eq!(without_sam_cl(other_cl), without);
+    assert_eq!(without_sam_cl(without), without);
+    // Any other byte is compared: a record, the header, the program name.
+    let changed_record = with
+        .iter()
+        .map(|&b| if b == b'r' { b's' } else { b })
+        .collect::<Vec<u8>>();
+    assert_ne!(without_sam_cl(&changed_record), without);
+    let changed_sq = String::from_utf8(with.to_vec())
+        .unwrap()
+        .replace("LN:3", "LN:4");
+    assert_ne!(without_sam_cl(changed_sq.as_bytes()), without);
+    let changed_pn = String::from_utf8(with.to_vec())
+        .unwrap()
+        .replace("PN:blastn", "PN:blastx");
+    assert_ne!(without_sam_cl(changed_pn.as_bytes()), without);
+}
 
 /// Three queries against four subjects cut from two genomes. The first query overlaps
 /// two subjects, so `-max_target_seqs 1` removes a subject from its hit list.
@@ -98,6 +148,13 @@ impl Inputs {
         assert!(output.status.success(), "CLI failed: {output:?}");
         let bytes = std::fs::read(&out).expect("CLI output");
         let _ = std::fs::remove_file(&out);
+        // A SAM document of the CLI shows its command line in the @PG line, which `run_local`
+        // has not: the one rule of the SAM rows removes the tag (`without_sam_cl`).
+        let bytes = if outfmt.split_whitespace().next() == Some("17") {
+            without_sam_cl(&bytes)
+        } else {
+            bytes
+        };
         (bytes, output.stderr)
     }
 }
@@ -609,7 +666,10 @@ fn records_without_residues_are_kept_with_ncbis_warnings() {
     for (index, outfmt) in FORMATS.into_iter().enumerate() {
         let (cli_output, cli_stderr) = inputs.cli(outfmt, &[]);
         assert_eq!(run.outputs[index], cli_output, "outfmt {outfmt}");
-        if matches!(outfmt, "5" | "8" | "9" | "12" | "15" | "16") {
+        if matches!(
+            outfmt,
+            "5" | "8" | "9" | "12" | "15" | "16" | "17" | "17 SQ SR"
+        ) {
             let alone = inputs.run(&[outfmt], &[], false);
             assert_eq!(
                 String::from_utf8_lossy(&alone.diagnostics),

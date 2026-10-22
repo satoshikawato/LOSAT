@@ -99,7 +99,9 @@ fn main() -> Result<()> {
         //             LOG_POST(Error << "BLAST engine error: " << e.GetMsg());        \
         //             exit_code = BLAST_ENGINE_ERROR;                                 \
         // ```
-        Commands::Blastn(args) => {
+        Commands::Blastn(mut args) => {
+            // The `@PG` line of SAM (outfmt 17) shows the command line.
+            args.command_line = Some(LOSAT::cli::command_line_bytes());
             // NCBI reference: ncbi-blast/c++/src/corelib/ncbiapp.cpp:1031-1044
             // ```c
             //     // Setup some debugging features from environment variables.

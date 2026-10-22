@@ -129,6 +129,7 @@ use anyhow::Result;
 use crate::api::local_blast::{FormatOutput, OutputSink, ReportOutputs};
 use crate::blastinput::seq_range::{next_ranged_batch, Placements, QueryInput};
 use crate::config::NuclScoringSpec;
+use crate::report::sam::SamDocument;
 use crate::stats::NuclValues;
 use crate::utils::dust::MaskedInterval;
 use crate::utils::threading::SearchPool;
@@ -217,12 +218,14 @@ pub(super) struct SubjectCache {
 }
 
 /// What the report calls of a search wrote before a call (`write_reports`): the number of
-/// queries whose reports were written, and the subject values made once. The default is the
-/// off path's single call.
-#[derive(Clone, Copy, Default)]
+/// queries whose reports were written, the subject values made once, and the SAM document that
+/// the calls add to (outfmt 17 writes its document at the end: `SamDocument`). The default is
+/// the off path's single call.
+#[derive(Default)]
 pub(super) struct Written<'a> {
     pub(super) queries: usize,
     pub(super) subjects: Option<&'a SubjectCache>,
+    pub(super) sam: Option<&'a mut SamDocument>,
 }
 
 /// The bytes that the batch writes sent to each format and to standard error, and the
@@ -247,6 +250,9 @@ struct Ready {
 pub(super) struct Stream {
     off: Option<Off>,
     cache: Option<SubjectCache>,
+    /// The SAM document of the run (outfmt 17 joins the streaming: its records are held as
+    /// rendered bytes until the last call, or an NCBI error, writes it).
+    sam: Option<SamDocument>,
     shadow: Option<Shadow>,
     batches: u64,
     queries: usize,
@@ -299,9 +305,17 @@ impl Stream {
             checks: 0,
             compared: 0,
         });
+        // NCBI writes the document when its formatter is destroyed, whatever the number of
+        // batches (`CBlast_SAM_Formatter`): the stream holds it for the calls.
+        let sam = output_formats
+            .iter()
+            .find_map(|format| format.sam_spec())
+            .filter(|_| off.is_none())
+            .map(|spec| sam_document(args, spec));
         Stream {
             off,
             cache,
+            sam,
             shadow,
             batches: 0,
             queries: 0,
@@ -336,6 +350,7 @@ impl Stream {
         let written = Written {
             queries: self.queries,
             subjects: self.cache.as_ref(),
+            sam: self.sam.as_mut(),
         };
         let result = match self.shadow.as_mut() {
             None => write(outputs, written),
@@ -376,6 +391,25 @@ impl Stream {
         }
         self.queries += queries;
         result
+    }
+
+    /// Writes the SAM document of the batches taken so far, if it holds a record: NCBI's
+    /// formatter is destroyed when an error leaves the `try` block that holds it, so the
+    /// records of the batches before the error are written before the error's lines
+    /// (`blastn_app.cpp:186-327`). The off path does the same in its `write_before_failed_batch`
+    /// call.
+    pub(super) fn finish_sam(&mut self, outputs: &mut ReportOutputs<'_>) -> Result<()> {
+        if !self.sam.as_ref().is_some_and(SamDocument::has_records) {
+            return Ok(());
+        }
+        self.write(outputs, 0, true, |outputs, written| {
+            let document = written.sam.expect("the stream holds a SAM document");
+            // One format: more are never streamed (`Off::Outputs`).
+            let mut writer = outputs.formats[0].sink.open()?;
+            document.finish(&mut writer)?;
+            writer.flush()?;
+            Ok(())
+        })
     }
 
     /// The shadow: writes with `write_old` (the off path's call) into memory and compares the
@@ -476,6 +510,16 @@ impl Drop for Stream {
             );
         }
     }
+}
+
+/// The SAM document of an outfmt 17 report with `spec`: `args` give the command line that its
+/// `@PG` line shows (`BlastnArgs::command_line`).
+pub(super) fn sam_document(args: &BlastnArgs, spec: crate::report::sam::SamSpec) -> SamDocument {
+    SamDocument::new(
+        spec,
+        crate::algorithm::blastn::hsp::NCBI_BLASTN_VERSION,
+        args.command_line.clone(),
+    )
 }
 
 /// The query input of the searched queries `searched` (a batch's), numbered from 0 as the batch's

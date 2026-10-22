@@ -52,6 +52,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 ENGINE = REPO / "LOSAT"
+sys.path.insert(0, str(ENGINE / "tests"))
+# The one rule of the SAM rows (outfmt 17): the CL tag of the @PG line is not compared.
+from db_search_fixtures import is_sam_outfmt, strip_sam_cl  # noqa: E402
 MANIFEST = ENGINE / "tests/outfmt0_manifest.tsv"
 HASHES = ("stdout_sha256", "stdout_bytes", "stderr_sha256")
 DEVIATION = "approved_db_gencode_deviation"
@@ -190,7 +193,14 @@ def main() -> int:
         if args.freeze:
             row.update(observed)
         elif any(row.get(key, "") != observed[key] for key in hashes):
-            differing.append(row["fixture_id"])
+            # A SAM row (outfmt 17) may differ in the CL tag of its @PG line (NCBI's argv[0] is the path
+            # of this run's binary): the frozen file and this run are compared without it.
+            frozen = ENGINE / "tests/fixtures/outfmt0" / f"{row['fixture_id']}.out"
+            same_but_cl = (is_sam_outfmt(outfmt(row)) and frozen.exists()
+                           and row.get("stderr_sha256", "") == observed["stderr_sha256"]
+                           and strip_sam_cl(run.stdout) == strip_sam_cl(frozen.read_bytes()))
+            if not same_but_cl:
+                differing.append(row["fixture_id"])
         shown = shlex.join([row["program"], *search_argv(row)])
         records.append([row["fixture_id"], f"{wall:.2f}", *(observed[key] for key in HASHES), shown])
 

@@ -5138,6 +5138,15 @@ fn update_hitlists_with_subject_hits(
     }
 }
 
+/// The SAM document that a report call adds its queries to (outfmt 17): the stream's, which
+/// the last call writes, or the document of a call of its own (the off path), which the call
+/// writes at its end. NCBI writes the document when its formatter is destroyed.
+struct SamTarget<'a> {
+    document: &'a mut crate::report::sam::SamDocument,
+    /// Whether the call writes the document after adding its queries.
+    finish: bool,
+}
+
 /// What the pairwise report, the hit records and the query warnings need besides the
 /// final hit list.
 struct BlastnReportInputs<'a> {
@@ -5628,6 +5637,7 @@ fn post_process_hits_and_write(
     report: &BlastnReportInputs<'_>,
     unsearched: Vec<bool>,
     query_warnings: &[Vec<u8>],
+    mut sam: Vec<Option<SamTarget<'_>>>,
 ) -> Result<()> {
     // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:183-187
     // ```c
@@ -5951,6 +5961,100 @@ fn post_process_hits_and_write(
                 &mut writer,
                 format_warnings.as_mut(),
             )?;
+        } else if let BlastnOutputFormat::Sam(_) = output_format {
+            // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:750-755
+            // ```c++
+            //     if (m_FormatType == CFormattingArgs::eSAM) {
+            //         if (results.HasAlignments()) {
+            //             m_SamFormatter->Print(*results.GetSeqAlign());
+            //         }
+            //         return;
+            //     }
+            // ```
+            // The queries' records are added to the run's document, which NCBI writes when its
+            // formatter is destroyed (`SamDocument::finish`): after the last call, or in a call
+            // that is the run's only one.
+            let target = sam[format_index]
+                .as_mut()
+                .expect("a SAM document is made for outfmt 17");
+            if let Some(warnings) = format_warnings.as_mut() {
+                for q_idx in 0..hit_lists.len() {
+                    warnings.before_query(q_idx, &mut writer)?;
+                }
+            }
+            let names = QueryNames {
+                records: report.queries,
+                searched_lengths: query_lengths,
+                placements: &report.ranges.queries.placements,
+            };
+            match (
+                report.database_ordinals,
+                report.database,
+                report.database_reader,
+            ) {
+                (Some(ordinals), Some(database), Some(reader)) => {
+                    // A database's sequences are searched whole; the lengths come from its
+                    // index (no letters).
+                    let lengths = reader.sam_lengths(ordinals)?;
+                    let letters_of = |rank: usize, from: usize, to: usize| {
+                        reader.sam_letters(ordinals[rank], from, to)
+                    };
+                    super::super::sam::add_blastn_sam(
+                        target.document,
+                        &hit_lists,
+                        &names,
+                        report.queries_before,
+                        SubjectNames::Database {
+                            ordinals,
+                            title: &database.definition,
+                        },
+                        report.ranges.subjects.placements,
+                        &super::super::sam::SubjectLengths {
+                            searched: &|rank| lengths[rank],
+                            whole: &|rank| lengths[rank],
+                        },
+                        &mut super::super::sam::BlastnSamLetters {
+                            queries: report.queries,
+                            query_placements: &report.ranges.queries.placements,
+                            subjects: super::super::sam::SubjectSource::Database(&letters_of),
+                        },
+                    )?;
+                }
+                _ => {
+                    // The records as read with `-subject_loc` (never packed), else the
+                    // searched ones: the letters are asked for in record coordinates.
+                    let whole_records = match report.ranges.subjects.records {
+                        Some(records) => SubjectLetters::new(records, None),
+                        None => report.subjects,
+                    };
+                    super::super::sam::add_blastn_sam(
+                        target.document,
+                        &hit_lists,
+                        &names,
+                        report.queries_before,
+                        SubjectNames::Records(report.subjects.records()),
+                        report.ranges.subjects.placements,
+                        &super::super::sam::SubjectLengths {
+                            searched: &|s_idx| report.subjects.len(s_idx),
+                            whole: &|s_idx| {
+                                report
+                                    .ranges
+                                    .subjects
+                                    .placements
+                                    .length(s_idx, report.subjects.len(s_idx))
+                            },
+                        },
+                        &mut super::super::sam::BlastnSamLetters {
+                            queries: report.queries,
+                            query_placements: &report.ranges.queries.placements,
+                            subjects: super::super::sam::SubjectSource::Records(whole_records),
+                        },
+                    )?;
+                }
+            }
+            if target.finish {
+                target.document.finish(&mut writer)?;
+            }
         } else if output_format.is_structured_xml() {
             // The XML2 / JSON documents of outfmt 15 and 16 take the path of outfmt 5: the same
             // per-query records, written by another writer.
@@ -6793,7 +6897,7 @@ fn cli_output_formats(
 ) -> Result<Vec<BlastnOutputFormat>> {
     let choice = app::parse_formatting_string(outfmt)?;
     app::report_format(&choice, Program::Blastn, out)?
-        .map(BlastnOutputFormat::of)
+        .map(|format| BlastnOutputFormat::of(format, &choice.spec))
         .into_iter()
         .collect()
 }
@@ -6809,7 +6913,7 @@ fn parse_output_formats<'a>(
         .map(|outfmt| {
             let choice = app::parse_formatting_string(outfmt)?;
             match app::report_format(&choice, Program::Blastn, None)? {
-                Some(format) => BlastnOutputFormat::of(format),
+                Some(format) => BlastnOutputFormat::of(format, &choice.spec),
                 None => {
                     app::formatting_handler_check(&choice, Program::Blastn)?;
                     app::xinclude_check(&choice)?;
@@ -7905,6 +8009,7 @@ fn run_in_pool(
                         )
                     };
                     if stream.acting() {
+                        stream.finish_sam(outputs)?;
                         stream.check("before a reader error", before);
                     } else {
                         before(outputs)?;
@@ -7955,6 +8060,7 @@ fn run_in_pool(
                     )
                 };
                 if stream.acting() {
+                    stream.finish_sam(outputs)?;
                     stream.check("before a batch without queries", before);
                 } else {
                     before(outputs)?;
@@ -8035,6 +8141,7 @@ fn run_in_pool(
                     )
                 };
                 if stream.acting() {
+                    stream.finish_sam(outputs)?;
                     stream.check("before a batch of queries without letters", before);
                 } else {
                     before(outputs)?;
@@ -8138,6 +8245,7 @@ fn run_in_pool(
                             )
                         };
                         if stream.acting() {
+                            stream.finish_sam(outputs)?;
                             stream.check("before an error after invalid batches", before);
                         } else {
                             before(outputs)?;
@@ -8271,6 +8379,7 @@ fn run_in_pool(
                         )
                     };
                     if stream.acting() {
+                        stream.finish_sam(outputs)?;
                         stream.check("before a header read error", before);
                     } else {
                         before(outputs)?;
@@ -8983,12 +9092,37 @@ fn write_reports_untimed(
     output_formats: &[BlastnOutputFormat],
     results: BatchResults<'_>,
     epilog: bool,
-    written: x_rpt_stream::Written<'_>,
+    mut written: x_rpt_stream::Written<'_>,
     x_pool: Option<&crate::utils::threading::SearchPool<'_>>,
 ) -> Result<()> {
     let megablast = args.task == "megablast";
     let config = configure_task(args);
     let mut hit_lists = results.hit_lists;
+    // The SAM documents (outfmt 17), one per SAM format: the stream's, which only its last call
+    // writes (the stream acts for one format), else documents of this call's own, which it
+    // writes at its end (the off path's single call, and the calls that write the document of
+    // the batches before an NCBI error).
+    let mut own_sams: Vec<Option<crate::report::sam::SamDocument>> = Vec::new();
+    let mut sam_targets: Vec<Option<SamTarget<'_>>> = Vec::new();
+    match written.sam.take() {
+        Some(document) => sam_targets.push(Some(SamTarget {
+            document,
+            finish: epilog,
+        })),
+        None => {
+            own_sams.extend(output_formats.iter().map(|format| {
+                format
+                    .sam_spec()
+                    .map(|spec| x_rpt_stream::sam_document(args, spec))
+            }));
+            sam_targets.extend(own_sams.iter_mut().map(|document| {
+                document.as_mut().map(|document| SamTarget {
+                    document,
+                    finish: true,
+                })
+            }));
+        }
+    }
     // A database: the reported sequences, named by rank from here on, with their stored
     // titles, and their stored letters where a report shows them (outfmt 0 and the hit
     // records; `database::reported_subjects`).
@@ -9122,6 +9256,7 @@ fn write_reports_untimed(
         &report_inputs,
         results.unsearched,
         results.warnings,
+        sam_targets,
     )
 }
 
@@ -18365,12 +18500,26 @@ mod tests {
         assert!(cli_output_formats("13", Some(std::path::Path::new("-")))
             .unwrap()
             .is_empty());
-        for outfmt in ["13", "17", "10"] {
+        for outfmt in ["13", "10"] {
             assert_eq!(
                 cli_output_formats(outfmt, file).unwrap_err().to_string(),
                 format!("output format {outfmt} is not supported by LOSAT's BLASTN")
             );
         }
+        // SAM (OF6) reads its words and ignores the rest and a delimiter.
+        assert_eq!(
+            cli_output_formats("17", file).unwrap(),
+            [BlastnOutputFormat::Sam(
+                crate::report::sam::SamSpec::default()
+            )]
+        );
+        assert_eq!(
+            cli_output_formats(" 17 delim=, SR SQ foo", None).unwrap(),
+            [BlastnOutputFormat::Sam(crate::report::sam::SamSpec {
+                subject_as_reference: true,
+                sequence: true
+            })]
+        );
         assert_eq!(
             cli_output_formats("0 qaccver", None).unwrap(),
             [BlastnOutputFormat::Pairwise]
@@ -18443,8 +18592,14 @@ mod tests {
             ]
         );
         assert_eq!(
-            parse_output_formats(["17"]).unwrap_err().to_string(),
-            "output format 17 is not supported by LOSAT's BLASTN"
+            parse_output_formats(["17", "17 SQ SR"]).unwrap(),
+            [
+                BlastnOutputFormat::Sam(crate::report::sam::SamSpec::default()),
+                BlastnOutputFormat::Sam(crate::report::sam::SamSpec {
+                    subject_as_reference: true,
+                    sequence: true
+                })
+            ]
         );
     }
 }

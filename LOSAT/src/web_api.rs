@@ -283,6 +283,7 @@ fn parse_blastn_args(
         verbose: false,
         scan_step: 0,
         outfmt: "6".to_string(),
+        command_line: None,
     };
 
     let mut index = 0;

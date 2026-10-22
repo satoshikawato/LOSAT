@@ -63,6 +63,15 @@ B = f"-query {I}/mq.fa -subject {I}/s60k.fa"
 S = f"-query {R}/edl933_2m.fa -subject {I}/sakai_60k.fa"
 A = f"-query {I}/ambiguity_query_c.fa -subject {I}/ambiguity_subject.fa"
 O = "tests/fasta/outfmt0"
+C = "tests/fixtures/tblastx_regression/inputs"
+CT = f"-query {C}/culling_ties_query.fa -subject {C}/culling_ties_subject.fa"
+CM = f"-query {C}/culling_multi_query.fa -subject {C}/culling_multi_subject.fa"
+CTR = f"-query {C}/culling_ties_query.fa -subject {I}/culling_ties_subject_rev.fa"
+CMR = f"-query {C}/culling_multi_query.fa -subject {I}/culling_multi_subject_rev.fa"
+RP = f"-query {I}/rep_query.fa -subject {I}/rep_subject.fa"
+PL = f"-query {I}/pal_query.fa -subject {I}/pal_subject.fa"
+AB = f"-query {I}/culling_abricate_query.fa -subject {I}/culling_abricate_genes.fa -task blastn -dust no" \
+     " -perc_identity 80 -evalue 1E-20 -max_target_seqs 10000"
 DCQ = f"-query {O}/dc_query.fasta -subject {O}/dc_subject.fasta"
 DC = f"{DCQ} -task dc-megablast"
 DVQ = f"-query {O}/dc_div_query.fasta -subject {O}/dc_div_subject.fasta"
@@ -373,6 +382,39 @@ _CASES = [
     # A query longer than 8000 at four threads: the search pool's seed stage (x_pair_seed.rs).
     ("qctx.pairpar", f"-query {I}/qctx_pairpar_query.fa -subject tests/fasta/LC738868.fasta -task blastn -outfmt 6",
      "-num_threads 4"),
+    # O3a (blastn -culling_limit; hspfilter_culling.c): the preliminary writer culls each subject's HSP
+    # list, the culling pipe culls again after the traceback. culling_ties_* / culling_multi_* are the
+    # inputs of tblastx_regression's culling.* cases (tests/fixtures/tblastx_regression/inputs).
+    # Limits 1, 2 and 5 on overlapping HSPs (rep_*); the lowest OID wins among identical subjects, so the
+    # record order decides the kept copy (culling_*_subject_rev.fa are the subjects in reverse order, made
+    # by `generate`); a palindromic query folds both strands into one tree.
+    ("culling.rep_megablast_cl1", f"{RP} -culling_limit 1 -outfmt 6", ""),
+    ("culling.rep_blastn_cl2_fmt0", f"{RP} -task blastn -culling_limit 2 -outfmt 0", ""),
+    ("culling.rep_blastn_cl5", f"{RP} -task blastn -culling_limit 5 -outfmt 6", ""),
+    ("culling.ties_megablast_cl1_fmt7", f"{CT} -culling_limit 1 -outfmt 7", ""),
+    ("culling.ties_rev_megablast_cl1", f"{CTR} -culling_limit 1 -outfmt 6", ""),
+    ("culling.multi_blastn_cl1", f"{CM} -task blastn -culling_limit 1 -outfmt 6", ""),
+    ("culling.multi_rev_blastn_cl1", f"{CMR} -task blastn -culling_limit 1 -outfmt 6", ""),
+    ("culling.pal_blastn_cl1", f"{PL} -task blastn -culling_limit 1 -outfmt 6", ""),
+    # A split query: the 40 queries of mq.fa are cut into chunks of 2000 (the chunks' HSPs are
+    # joined at the edges as without culling; each chunk is culled by itself).
+    ("culling.split_mq_blastn_cl2_c2000", f"{B} -task blastn -culling_limit 2 -outfmt 6", "", "CHUNK_SIZE=2000"),
+    ("culling.split_mq_megablast_cl1_c2000", f"{B} -culling_limit 1 -outfmt 6", "", "CHUNK_SIZE=2000"),
+    # The value is added to 3 in an Int4: 2147483645 wraps to INT_MIN and culls nothing,
+    # 2147483646 is limit 1, 0x2 is limit 2 (CArg_Int8 reads C-style bases).
+    ("culling.wrap_2147483645", f"{CT} -culling_limit 2147483645 -outfmt 6", ""),
+    ("culling.wrap_2147483646", f"{CT} -culling_limit 2147483646 -outfmt 6", ""),
+    ("culling.hex_0x2", f"{CT} -culling_limit 0x2 -outfmt 6", ""),
+    # -max_target_seqs cuts the traceback hit list before the culling pipe: the preliminary cull
+    # removes the other copies first, so -max_target_seqs 1 keeps the first; with 3 and limit 2
+    # the pipe culls what the cut left.
+    ("culling.ties_mts1_cl1", f"{CT} -max_target_seqs 1 -culling_limit 1 -outfmt 6", ""),
+    ("culling.ties_mts3_cl2", f"{CT} -max_target_seqs 3 -culling_limit 2 -outfmt 6", ""),
+    # ABRicate's search (2 subsets of the O3a probe inputs: 4 windows of 50 kb of Sakai with the most
+    # hits of the 340 records of its genes database, and the 33 records they hit; copied from the
+    # probe inputs, not made by `generate`), also with a query split at 20000.
+    ("culling.abricate_cl1", f"{AB} -culling_limit 1 -outfmt 6", ""),
+    ("culling.abricate_cl1_c20000", f"{AB} -culling_limit 1 -outfmt 6", "", "CHUNK_SIZE=20000"),
 ]
 CASES = [(*case, *[""] * (5 - len(case))) for case in _CASES]
 
@@ -406,6 +448,7 @@ def revcomp(seq: str) -> str:
 
 def command_generate(_args) -> int:
     INPUTS.mkdir(parents=True, exist_ok=True)
+    generate_culling_inputs()
     rng = random.Random(20261002)
     edl, sakai = genome("EDL933.fna"), genome("Sakai.fna")
     q3k = edl[1_000_000:1_003_000]
@@ -506,6 +549,17 @@ def generate_e2g_inputs(edl: str, sakai: str) -> None:
         ("q3 third GGGGCCCCAAAATTTTGGGGCCCCAA", window[8000:8300]), ("q4 all N two", "N" * 100),
         ("q5 plain", window[12000:12500])])
     write_fasta(INPUTS / "warn_subject.fa", [("s Sakai window", window)])
+
+
+def generate_culling_inputs() -> None:
+    """The subjects of tblastx_regression's culling_ties and culling_multi inputs in reverse record order
+    (O3a: the order of the subjects decides which of equal HSPs a culling limit keeps)."""
+    for name in ("ties", "multi"):
+        lines = (ENGINE / "tests/fixtures/tblastx_regression/inputs" / f"culling_{name}_subject.fa").read_text().splitlines()
+        starts = [index for index, line in enumerate(lines) if line.startswith(">")] + [len(lines)]
+        records = [lines[a:b] for a, b in zip(starts, starts[1:])]
+        (INPUTS / f"culling_{name}_subject_rev.fa").write_text(
+            "".join(line + "\n" for record in records[::-1] for line in record))
 
 
 def generate_qctx_inputs() -> None:

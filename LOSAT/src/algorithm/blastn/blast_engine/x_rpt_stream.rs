@@ -37,7 +37,9 @@
 //!   by the query's and the
 //!   subject's own range start (`shift_to_records`), and the rows, outfmt 7 headers and outfmt 0
 //!   sections are written query by query from the query's list, record, masks, blocks and search
-//!   space, the subject records and the options. BLASTN has no culling and no cross-query sort.
+//!   space, the subject records and the options. BLASTN has no cross-query sort, and its culling
+//!   (`-culling_limit`, `culling.rs`) is NCBI's pipe, which culls each query's tree on its own and is the first
+//!   step of `finish_query_hit_list`.
 //!   The writers write the queries in order, so the reports of consecutive batches written one
 //!   after the other are the reports of all of them. A query's warnings come before its report
 //!   in both (`QueryWarnings`), with the first format (or all at once without a format).

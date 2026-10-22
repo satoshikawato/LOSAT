@@ -7,7 +7,7 @@ It is intentionally simple and conservative: it flags only *very* long HSPs that
 are unlikely to be legitimate in typical bacterial self-comparisons.
 
 Input:
-  - BLAST+ outfmt 6/7 or LOSAT tblastx tabular output with the 12 standard columns
+  - BLAST+ outfmt 6/7 or losat tblastx tabular output with the 12 standard columns
     (comment lines beginning with '#' are ignored).
 Output:
   - Prints max length, some summary stats, and top-N longest HSPs.

@@ -393,7 +393,7 @@ mod tests {
 
     // ABI v1 is frozen (plan TD-1): its BLASTX `-outfmt` keeps the values and the parser
     // errors of the CLI parser before BLASTX read `-outfmt` as NCBI (dev 0797cc40, whose
-    // `LOSAT blastx -outfmt 5` wrote these lines with exit status 2).
+    // `losat blastx -outfmt 5` wrote these lines with exit status 2).
     #[test]
     fn web_v1_keeps_its_outfmt_values_and_errors() {
         let error = |outfmt: &str| {

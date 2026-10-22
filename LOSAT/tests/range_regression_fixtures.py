@@ -14,7 +14,7 @@ as the first word of `argv`.
 
 - freeze --bin-dir DIR: runs NCBI BLAST+ (comparison oracle only) from LOSAT/ and writes
   <case>.out, <case>.err and the hash columns of manifest.tsv.
-- check --losat LOSAT: runs `LOSAT <argv> <losat_extra>` from LOSAT/ and compares stdout,
+- check --losat LOSAT: runs `losat <argv> <losat_extra>` from LOSAT/ and compares stdout,
   stderr and the exit status with the frozen files.
 
 Usage:
@@ -122,7 +122,7 @@ def command_freeze(args) -> int:
         print(f"{case_id}\texit {result.returncode}\t{result.stdout.count(b'\n')} lines\t{len(result.stderr)} stderr bytes", flush=True)
     with open(MANIFEST, "w", newline="") as handle:
         handle.write(f"# Frozen -query_loc/-subject_loc outputs of {version} (comparison oracle only; see range_regression_fixtures.py).\n")
-        handle.write("# Run from LOSAT/: env <env> <argv> (LOSAT: LOSAT <argv> <losat_extra>). Written by `freeze`; do not edit.\n")
+        handle.write("# Run from LOSAT/: env <env> <argv> (LOSAT: losat <argv> <losat_extra>). Written by `freeze`; do not edit.\n")
         writer = csv.DictWriter(handle, fieldnames=FIELDS, delimiter="\t", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)

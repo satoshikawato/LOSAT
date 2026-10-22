@@ -56,7 +56,7 @@ impl Inputs {
         let query = self.query.0.display().to_string();
         let subject = self.subject.0.display().to_string();
         let mut argv = vec![
-            "LOSAT", "tblastx", "-query", &query, "-subject", &subject, "-outfmt", "6",
+            "losat", "tblastx", "-query", &query, "-subject", &subject, "-outfmt", "6",
         ];
         argv.extend_from_slice(extra);
         let cli: Cli = try_parse_from(argv).expect("tblastx argv");
@@ -77,7 +77,7 @@ impl Inputs {
     /// The CLI output file and standard error of one single-format run.
     fn cli(&self, outfmt: &str, extra: &[&str]) -> (Vec<u8>, Vec<u8>) {
         let out = self.query.0.with_extension(format!("cli{outfmt}.out"));
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
             .arg(&self.query.0)
@@ -247,7 +247,7 @@ fn unsupported_formats_fail_before_searching() {
 fn a_batch_size_that_is_not_an_integer_is_rejected() {
     let inputs = Inputs::new();
     for value in ["abc", " ", "12x"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
             .arg(&inputs.query.0)
@@ -276,7 +276,7 @@ fn a_batch_size_that_is_not_an_integer_is_rejected() {
         (&empty_defline.0, &inputs.subject.0),
         (&inputs.query.0, &empty_defline.0),
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
             .arg(query)
@@ -325,7 +325,7 @@ fn environment_that_ncbi_cannot_convert_or_reports_otherwise_is_rejected() {
             "the environment variable BL2SEQ_LEGACY",
         ),
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
             .arg(&inputs.query.0)
@@ -361,7 +361,7 @@ fn a_standard_output_on_dev_null_is_written() {
             .write(true)
             .open("/dev/null")
             .expect("open /dev/null");
-        let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+        let output = Command::new(env!("CARGO_BIN_EXE_losat"))
             .arg("tblastx")
             .arg("-query")
             .arg(&inputs.query.0)
@@ -385,7 +385,7 @@ fn cli_run(
     extra: &[&str],
     env: &[(&str, &str)],
 ) -> (Option<i32>, Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     command
         .arg("tblastx")
         .arg("-query")

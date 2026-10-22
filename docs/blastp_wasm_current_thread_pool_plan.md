@@ -194,7 +194,7 @@ Focused behavioral validation:
 ```bash
 cd LOSAT
 LOSAT_WASI_THREADS_DEBUG=1 node tests/run_losat_wasi_threads.js \
-  target/wasm32-wasip1-threads/release/LOSAT.wasm \
+  target/wasm32-wasip1-threads/release/losat.wasm \
   blastp -query tests/fasta/WSSV.faa -subject tests/fasta/PajaWSV.faa \
   -out /tmp/losatp.wasm.n8.out -outfmt 6 -num_threads 8
 ```

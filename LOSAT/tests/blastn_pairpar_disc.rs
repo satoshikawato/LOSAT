@@ -53,7 +53,7 @@ fn fasta(name: &str) -> PathBuf {
 /// (`cargo test --all-features`, as in CI) needs that file name as soon as a search has more
 /// than one thread, and it selects nothing. Returns the report and the standard error.
 fn blastn(task_args: &[&str], threads: u32, switches: &[(&str, &str)]) -> (Vec<u8>, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);
@@ -255,7 +255,7 @@ fn two_templates_give_the_same_report() {
 // that the stage refuses a contiguous table with a window).
 #[test]
 fn contiguous_tables_are_not_taken() {
-    let output = Command::new(env!("CARGO_BIN_EXE_LOSAT"))
+    let output = Command::new(env!("CARGO_BIN_EXE_losat"))
         .arg("blastn")
         .arg("-query")
         .arg(fasta("LC738874.fasta"))

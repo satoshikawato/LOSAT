@@ -93,7 +93,7 @@ fn subjects() -> &'static Path {
 /// the batches are short, and the gate would send them to the reference frame loop; the pipe acts
 /// on both, and the unit path is the one long batches take.
 fn tblastx(query: &Path, threads: u32, outfmt: &str, switches: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         if name.to_string_lossy().starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG" {
             command.env_remove(name);

@@ -288,6 +288,7 @@ export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
+export LOSAT_X_BNUNGAPCOUNT=1
 export LOSAT_X_BPCLUT=1
 export LOSAT_X_BPCOMPOREUSE=1
 export LOSAT_X_BPDBCUT=1
@@ -851,6 +852,29 @@ Same values, faster computation:
   31,168 cDNAs against the same subject x0.822 at one thread, x0.939 at 16; blastn of the same x0.949
   / x0.960; max RSS unchanged. `=0` x1.000-1.005 of the binary before (1.6 % more instructions on
   blastn-short: the binary search moved out of line behind the check for this form).
+- `LOSAT_X_BNUNGAPCOUNT=1` (blastn, speed; in the strict set from the pull request that added it,
+  2026-10-22; `=0` or `LOSAT_X_DEFAULT=0` runs the ported loops) the exact ungapped extension
+  (`s_NuclUngappedExtendExact`: blastn-short and other word sizes below 11, and the exact pass after the
+  approximate one reaches the reduced cutoff) with the step count of each direction worked out first:
+  `min(q_off, s_off)` to the left, `min(q_avail, s_avail)` to the right, the C loop conditions on
+  `(s, base)` written as those counts (`blastn/x_ungap_count.rs`, argument in its header). The same
+  steps, tests and results; the ported loops also tested the query offset against both ends (never true
+  within the counts) and bounds-checked the matrix cell, and their two-part loop condition on `(s, base)`
+  cost 0.8 branch misses a call more than the counts (premise probe on bs24: NCBI's loop shape without the
+  extra tests kept the misses, the counted loops dropped them).
+  R8 (`LOSAT_X_CTXFAST` / `CTXO1` era): 167 cycles, 574 instructions and 3.10 branch misses a call
+  against NCBI's 135 / 497 / 2.56. Shadow: `LOSAT_X_BNUNGAPCOUNTSHADOW=1` (implies the switch) runs
+  both loops on every call and stops on the first difference; at exit `[X_SHADOW] BNUNGAPCOUNT
+  compared=N`.
+  Measured 2026-10-22 on the workstation (node 1, one pinned core, HT sibling idle, warmed 3 s; 3 rounds,
+  the arm order reversed every other round; `perf stat` cycles against the binary before, `dev`
+  249c7454; outputs identical in every arm): blastn-short of 30,000 queries of 24 letters against
+  dmel_dna_3M x0.916 (30.00 -> 27.50 s), of 18 to 30 letters x0.920 (33.63 -> 30.96 s): 9 % fewer
+  instructions and 18 % fewer branch misses, about 36 cycles and 96 instructions less a call over R8's
+  220 M calls; blastn and dc-megablast of 31,168 dmel cDNAs against the same subject x0.995 / x1.000,
+  megablast Sakai x MG1655 x0.997; max RSS unchanged. `=0` x1.008-1.010 on blastn-short (8 more
+  instructions a call: the mode check now inlined in front of the ported loops, which were already a
+  call of their own), x0.999-1.003 on the others.
 - `LOSAT_X_LUTARENA=1` protein lookup-table chains carved from one arena per table.
 - `LOSAT_X_MBDELAY=1`, `LOSAT_X_MBBATCH=64` megablast lookup construction touches (prefetches)
   hash cells ahead in batches of 64; same update order.

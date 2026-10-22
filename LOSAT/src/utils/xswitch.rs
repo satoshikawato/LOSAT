@@ -20,6 +20,10 @@
 //! gives the run that those variables gave before the change. The shadow and verify switches, the
 //! counters and the tuning variables are not part of the set and keep "set to any value".
 //!
+//! A switch that graduated has no variable any more, so neither of the two variables reaches its
+//! previous path: an always-on switch lost that code, and a conditional or platform switch
+//! (`GRADUATED`) runs its fallback only where its rule sends the work.
+//!
 //! Every switch of the set gives the reference result by construction, so none of these variables
 //! changes the output.
 //!
@@ -271,6 +275,15 @@ pub(crate) const STRICT_SET: &[&str] = &[
     "LOSAT_X_TBXUNITMASK",
 ];
 
+/// No NCBI counterpart: the conditional and platform switches that left the strict set when they
+/// graduated (on dev at least 7 days and in two full-set platform-checks runs with equal outputs
+/// and no failed test, 2026-10-22), sorted by name. Their variables are gone; their rules (input
+/// sizes, threads, options, memory, CPU) still choose between their own path and the fallback, so
+/// the names stay as the keys of `x_reach!` (`utils/xreach.rs`) and of the rows of
+/// `LOSAT/tests/switch_reach_expected.tsv`. An always-on switch that graduates leaves both lists:
+/// nothing chooses any more.
+pub(crate) const GRADUATED: &[&str] = &[];
+
 /// No NCBI counterpart: the table in the module header, for one variable's value. A value that
 /// is not UTF-8 is "any other value".
 fn state(value: Option<&OsStr>, default_on: bool) -> bool {
@@ -365,6 +378,13 @@ mod tests {
     fn the_strict_set_names_are_distinct_and_sorted() {
         assert!(STRICT_SET.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(STRICT_SET.iter().all(|name| name.starts_with("LOSAT_X_")));
+    }
+
+    #[test]
+    fn the_graduated_names_are_distinct_sorted_and_outside_the_set() {
+        assert!(GRADUATED.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(GRADUATED.iter().all(|name| name.starts_with("LOSAT_X_")));
+        assert!(GRADUATED.iter().all(|name| !STRICT_SET.contains(name)));
     }
 
     /// The block of `docs/agents/diagnostics.md` that writes the set as `export` lines names the

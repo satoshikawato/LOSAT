@@ -178,7 +178,8 @@ the Linux arm64 cell of `platform-checks.yml` (since 2026-10-18, plan v4 D6 (a)(
   (`utils/xreach.rs`, `x_reach!`), whether each took its own path or the reference path while it was on, and
   writes `reach-<pid>-<ns>.tsv` (`switch new ref program`) into the directory at exit; output unchanged.
   `LOSAT/tests/switch_reach_check.py` compares the folded files with `LOSAT/tests/switch_reach_expected.tsv`
-  (one row per switch of the set: class `always`, `platform` or `conditional`; for a conditional switch each
+  (one row per switch of the set and per graduated one, `GRADUATED`: class `always`, `platform` or
+  `conditional`, never `always` for a graduated one; for a conditional switch each
   side `required` or `gap` with the input that would reach it). CI runs the fast regressions with it and the
   check after them. A new switch of the set adds its row; a conditional one also marks its decision points
   and, where cheap, adds a fixture for each side, or writes `gap` with the reason.
@@ -258,9 +259,14 @@ their variables mean
   `LOSAT_X_TBNXLATESHADOW`, which compares only where `TBNPAR` makes the subject plans). A
   shadow compares the kernel the default selects (for `LOSAT_X_DPSHADOW` the 256-bit, `DPW128`
   or base kernel that takes the call).
-- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). The single variables are to be
-  removed once the default has run on every CI environment and through a few releases;
-  `LOSAT_X_DEFAULT` stays. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
+- The names are provisional (`x_` prefixes, `EXPERIMENT` comments). A switch graduates once it has
+  been on `dev` for 7 days and in two full-set platform-checks runs (push to `main`, weekly or
+  dispatch) with equal outputs and no failed test (2026-10-22, replacing "a few releases"): its
+  variable and its `...SHADOW` mode go, an always-on switch loses its previous code, and a
+  conditional or platform switch keeps its rule and its fallback path and moves to `GRADUATED` in
+  `xswitch.rs` (its `x_reach!` marks and its row of `switch_reach_expected.tsv` stay). Neither
+  `LOSAT_X_<NAME>=0` nor `LOSAT_X_DEFAULT=0` reaches a graduated switch's previous path;
+  `LOSAT_X_DEFAULT` stays for the switches of the set. In the descriptions below `LOSAT_X_<NAME>=1` shows the switch, not a
   setting that is needed, and "strict-set candidate" marks the round-5 switches, which are in
   the set.
 

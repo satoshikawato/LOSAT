@@ -1,12 +1,13 @@
-//! Diagnostic (`LOSAT_X_REACH`): which side of each conditional switch of the strict set a run
-//! took.
+//! Diagnostic (`LOSAT_X_REACH`): which side of each conditional switch of the strict set, or of
+//! one that graduated from it, a run took.
 //!
 //! No NCBI counterpart: it records which LOSAT code path ran; it changes no output and computes
 //! no value NCBI computes.
 //!
 //! A conditional switch (class `conditional` in `LOSAT/tests/switch_reach_expected.tsv`) takes
 //! its own path only where a rule holds (input sizes, thread count, options, memory); elsewhere
-//! the reference path runs although the switch is on. With `LOSAT_X_REACH=<directory>` each of
+//! the reference path runs although the switch is on. A graduated switch (`GRADUATED` in
+//! `utils/xswitch.rs`) has no variable and is always on; its rule and its marks stay. With `LOSAT_X_REACH=<directory>` each of
 //! its decision points records the side it took (`x_reach!`), and the run writes one file
 //! `reach-<pid>-<nanoseconds>.tsv` into the directory at its end (`write_report`, called by
 //! `main`). `LOSAT/tests/switch_reach_check.py` folds the files of the CI fixtures and fails
@@ -20,17 +21,21 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
 
-use super::xswitch::STRICT_SET;
+use super::xswitch::{GRADUATED, STRICT_SET};
 
 /// The switch's own path ran.
 const NEW: u8 = 1;
 /// The reference path ran with the switch on (its rule did not hold).
 const REF: u8 = 2;
 
-static SIDES: [AtomicU8; STRICT_SET.len()] = [const { AtomicU8::new(0) }; STRICT_SET.len()];
+/// The switches that can record a side: those of `STRICT_SET`, then those of `GRADUATED`.
+const SWITCHES: usize = STRICT_SET.len() + GRADUATED.len();
 
-/// No NCBI counterpart: the position of `name` in `STRICT_SET`. Evaluated in a constant by
-/// `x_reach!`, so a name outside the set does not compile.
+static SIDES: [AtomicU8; SWITCHES] = [const { AtomicU8::new(0) }; SWITCHES];
+
+/// No NCBI counterpart: the position of `name` in `STRICT_SET`, else `STRICT_SET.len()` plus its
+/// position in `GRADUATED`. Evaluated in a constant by `x_reach!`, so a name outside both lists
+/// does not compile.
 #[doc(hidden)]
 pub const fn index(name: &str) -> usize {
     let mut i = 0;
@@ -40,7 +45,14 @@ pub const fn index(name: &str) -> usize {
         }
         i += 1;
     }
-    panic!("x_reach!: not a switch of the strict set (utils/xswitch.rs STRICT_SET)");
+    let mut g = 0;
+    while g < GRADUATED.len() {
+        if same(GRADUATED[g].as_bytes(), name.as_bytes()) {
+            return STRICT_SET.len() + g;
+        }
+        g += 1;
+    }
+    panic!("x_reach!: not in STRICT_SET or GRADUATED (utils/xswitch.rs)");
 }
 
 const fn same(a: &[u8], b: &[u8]) -> bool {
@@ -81,7 +93,8 @@ pub fn mark(index: usize, own_path: bool) {
     }
 }
 
-/// Records the side a conditional switch of the strict set took, while the switch is on:
+/// Records the side a conditional switch of the strict set (or a graduated one) took, while the
+/// switch is on:
 /// `x_reach!("LOSAT_X_<NAME>", own_path)`, with `own_path` true where the switch's path runs
 /// and false where its rule sends the work to the reference path.
 macro_rules! x_reach {
@@ -101,7 +114,7 @@ pub fn write_report() {
     };
     let program = std::env::args().nth(1).unwrap_or_default();
     let mut text = String::from("switch\tnew\tref\tprogram\n");
-    for (name, sides) in STRICT_SET.iter().zip(SIDES.iter()) {
+    for (name, sides) in STRICT_SET.iter().chain(GRADUATED).zip(SIDES.iter()) {
         let sides = sides.load(Ordering::Relaxed);
         if sides != 0 {
             text.push_str(&format!(
@@ -130,8 +143,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn index_finds_every_name_of_the_set() {
-        for (i, name) in STRICT_SET.iter().enumerate() {
+    fn index_finds_every_name_of_the_set_then_the_graduated_ones() {
+        for (i, name) in STRICT_SET.iter().chain(GRADUATED).enumerate() {
             assert_eq!(index(name), i);
         }
     }

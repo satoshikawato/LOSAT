@@ -243,8 +243,8 @@ their variables mean
   vector alignment only with AVX2, BMI1 and LZCNT (else the reference function); `BPLUT` declines in
   diagnostics mode; `BPQBLOCK` takes the block path only for one `-outfmt 6` report (with
   `BPQBLOCKFMT`, one outfmt 0, 6 or 7 report; with `BPQBLOCKSA`, one outfmt 8, 9 or 12 report; with
-  `BPQBLOCKXML`, one outfmt 5 report; with `BPQBLOCKXML2`, one outfmt 15 or 16 report; with `BPQBLOCKWEB`, also a
-  `run_local` call with several of these reports (not outfmt 15 or 16), the hit records or an observer) with more than
+  `BPQBLOCKXML`, one outfmt 5 report; with `BPQBLOCKXML2`, one outfmt 13, 14, 15 or 16 report; with `BPQBLOCKWEB`, also a
+  `run_local` call with several of these reports (not outfmt 13 to 16), the hit records or an observer) with more than
   one block (see its entry), and
   `BPQBLOCKFMT`, `BPQBLOCKSA`, `BPQBLOCKXML`, `BPQBLOCKXML2` and `BPQBLOCKWEB` act only with `BPQBLOCK`; `BNSTREAM` only in blastn's `-subject` search at 2 or more threads;
   `TBXNEXT` only in TBLASTX's parallel subject loop (2 or more threads, several subjects; native
@@ -2041,7 +2041,7 @@ Rebuilding less:
   batch at a time. Both lookup tables take it: the default one, and the compressed one of `-task blastp-fast`
   (word size 5), whose table each block builds for its own batches and tests for NCBI's overflow banks with
   them. Taken only where a block's report is its rows: one output in tabular format 6 (with
-  `LOSAT_X_BPQBLOCKFMT`, below, also outfmt 0 or 7; `LOSAT_X_BPQBLOCKSA` outfmt 8, 9 or 12; `LOSAT_X_BPQBLOCKXML` outfmt 5; `LOSAT_X_BPQBLOCKXML2` outfmt 15 or 16), no `-query_loc`, every batch read, more than one block, no subject whose tabular ID the reference path rejects, and none of the
+  `LOSAT_X_BPQBLOCKFMT`, below, also outfmt 0 or 7; `LOSAT_X_BPQBLOCKSA` outfmt 8, 9 or 12; `LOSAT_X_BPQBLOCKXML` outfmt 5; `LOSAT_X_BPQBLOCKXML2` outfmt 13, 14, 15 or 16), no `-query_loc`, every batch read, more than one block, no subject whose tabular ID the reference path rejects, and none of the
   reference path's other refusals that come before its rows (a `-window_size` whose diagonal table with all
   queries passes 2^30, a query split that LOSAT rejects, or with the compressed table a query batch whose
   offsets add more than four times NCBI's overflow cells, about 859 million words, counted before the search);
@@ -2109,8 +2109,8 @@ Rebuilding less:
   off 212.9 / 350.6, NCBI 101.0 / 146.7; wall on/off x0.83 at 1 thread, x0.65 at 16; outputs equal NCBI's
   -num_threads 1. The -subject cost of the names check was not measured.
 - `LOSAT_X_BPQBLOCKXML2=1` (BLASTP, speed and memory; in the strict set from the pull request that added it,
-  on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search of `LOSAT_X_BPQBLOCK` also for one outfmt 15
-  (BLAST JSON) or 16 (BLAST XML2) report (`blastp/x_query_blocks.rs`, exactness argument in its header): each
+  on by default; acts only with `LOSAT_X_BPQBLOCK`) the block search of `LOSAT_X_BPQBLOCK` also for one outfmt 13 or 14
+  (side files and a master file) or 15 (BLAST JSON) or 16 (BLAST XML2) report (`blastp/x_query_blocks.rs`, exactness argument in its header): each
   block writes its queries' reports before the next block is searched. NCBI writes one complete document per
   query; the document's start comes with the first report, the end once (a `-subject` run holds each report
   until the next arrives, and the last until the end), JSON joins the reports with `,\n`. What the framing keeps
@@ -2131,7 +2131,9 @@ Rebuilding less:
   for the report, which writes them at the first `Hit` that needs them, in the block that has it).
   Fallbacks to the search of all queries (memory as before): those of `LOSAT_X_BPQBLOCKXML`, and a `-db`
   sequence whose taxid does not read, a taxonomy database that does not open or can refuse the name of a taxid of the
-  database (or of a record), reported or not. Outfmt 13 and 14 (side files and a master file) are not taken.
+  database (or of a record), reported or not. Outfmt 13 and 14 (OF-BPQB3) take blocks too: the n-th report is the side file `<base>_<n>.json` / `.xml` of the run (`Xml2Carry`
+  carries the count) and the last block writes the master; an unopenable side file n stops the run at report n as in the search of
+  all queries (rc 1, side files before n stay, master empty), a write error on it is rc 6 (DECISIONS 35).
   Reports identical; off = `LOSAT_X_BPQBLOCKXML2=0`. Local (WSL, 3000 x 6,600-protein Species6 `-db`, 3 interleaved
   rounds, `/usr/bin/time -v`, machine load 20-70): max RSS at 1 / 4 threads on 25.7 / 37.6 MiB (outfmt 15), 25.8 / 38.5
   (16), off 219.7 / 259.9 and 219.4 / 259.5, outfmt 6 25.2 / 40.1; user time on/off x0.87 (15) at 1 thread; outputs
@@ -2145,7 +2147,7 @@ Rebuilding less:
   2.92 s at one thread); the taxonomy walk adds 0.13 s at one thread and about 0.3 s at 4 over the header pass, where the
   version that looked each taxid up (one binary search each) took 8.46 / 6.38 s. The shape is forced (tiny queries in 2
   blocks); in use a block holds 50,000 query letters or more and the search dominates.
-  In a `run_local` call with several outputs, hit records or an observer (`LOSAT_X_BPQBLOCKWEB`), an outfmt 15 or 16
+  In a `run_local` call with several outputs, hit records or an observer (`LOSAT_X_BPQBLOCKWEB`), an outfmt 13 to 16
   output does not take blocks (the run-level frame and carry were verified for one CLI-style output only): the
   format is recorded for `LOSAT_X_REACH` and the search of all queries runs (Owner-delegated 2026-10-22).
 - `LOSAT_X_BPQBLOCKWEB=1` (BLASTP in `run_local`, the LOSAT Web build's search, speed and memory; in the strict set
@@ -2157,7 +2159,7 @@ Rebuilding less:
   the title and name checks of every kind of report among the outputs run before the first block; the records are
   handed to the caller once, after the last block, each `q_idx` moved by the block's first query; the observer's HSP
   indices are moved past the HSPs of the blocks before. Otherwise, and for the cases `LOSAT_X_BPQBLOCK` leaves to
-  the search of all queries (one block, `-query_loc`, outfmt 15 and 16, ...), the search of all queries, as before:
+  the search of all queries (one block, `-query_loc`, outfmt 13 to 16, ...), the search of all queries, as before:
   the Web searched all queries at once. A run that fails in a later block leaves the outputs of the blocks before
   and hands over no records (the Web host discards a failed run's streams). The CLI (one output, no records, no
   observer) does not change. Outputs,
@@ -2173,10 +2175,11 @@ Rebuilding less:
 - `LOSAT_X_BPQBLOCKFMTSHADOW=1` shadow of the block search (turns `LOSAT_X_BPQBLOCKFMT`, `LOSAT_X_BPQBLOCKSA`,
   `LOSAT_X_BPQBLOCKXML`, `LOSAT_X_BPQBLOCKXML2` and `LOSAT_X_BPQBLOCKWEB` on; any call the block search takes): keeps a copy of the bytes the
   blocks write to each output and to standard error, of the hit records (as `Debug` text) and of each format's observer
-  events with their positions in that format's bytes, then searches all queries again and writes the same into memory;
+  events with their positions in that format's bytes, then searches all queries again and writes the same into memory (the side
+  files of outfmt 13 and 14 into a fresh directory under TMPDIR, each compared with the blocks' as `side file <n>`);
   a difference prints `[X_SHADOW] BPQBLOCKFMT <stream> DIFFERENT at byte N ...` (`output`, `output 1`, ..., `stderr`,
   `hit records`, `observer 0`, ...) and stops the run. One line after the search:
-  `[X_SHADOW] BPQBLOCKFMT blocks= formats= bytes= stderr_bytes= hits= events= identical`. The second search is a search
+  `[X_SHADOW] BPQBLOCKFMT blocks= formats= bytes= stderr_bytes= hits= events= side_files= identical`. The second search is a search
   of its own: it prints its own `LOSAT_TIMING` block and adds to the other switches' counters and shadow lines.
 - `LOSAT_X_PAIRWISEPAR=1` (BLASTN, TBLASTX, BLASTP, speed; in the strict set from the pull request that added it,
   2026-10-19, on by default; acts only with two or more threads on a pool (native, or Wasm with threads)) the pairwise

@@ -22,4 +22,4 @@ echo "78c16ff02f2b826131ee405808588c364ee8a0464c65e17920d4d8e7878d19c5  wasm_fou
 tar -xzf wasm_four_program_20260915.tar.gz
 ```
 
-One file at a time: `git show 249c7454:docs/evidence/wasm_four_program_20260915/<path>`.
+One file at a time: `git show 249c7454:<path>` (`<path>` as in `MANIFEST.tsv`).

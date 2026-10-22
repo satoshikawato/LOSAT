@@ -22,4 +22,4 @@ echo "60bf37de19c650528c85c58722608e898631425b852ee498d4d91ce7d9802a47  wasm_thr
 tar -xzf wasm_threading_20260913.tar.gz
 ```
 
-One file at a time: `git show 249c7454:docs/evidence/wasm_threading_20260913/<path>`.
+One file at a time: `git show 249c7454:<path>` (`<path>` as in `MANIFEST.tsv`).

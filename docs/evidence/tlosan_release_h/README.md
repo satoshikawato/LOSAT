@@ -22,4 +22,4 @@ echo "f14d4e9c7bc06c8623d725f1a3ba44eebd72e9b2bf8fd4bd224af0acf4b16e43  tlosan_r
 tar -xzf tlosan_release_h.tar.gz
 ```
 
-One file at a time: `git show 249c7454:docs/evidence/tlosan_release_h/<path>`.
+One file at a time: `git show 249c7454:<path>` (`<path>` as in `MANIFEST.tsv`).

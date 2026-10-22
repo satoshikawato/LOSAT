@@ -22,4 +22,4 @@ echo "a409d6da4ebbc9d5af0a55196ff5399beffd609690b39a35ed73f4884ebd0323  losat_we
 tar -xzf losat_web_w2.tar.gz
 ```
 
-One file at a time: `git show 249c7454:docs/evidence/losat_web_w2/<path>`.
+One file at a time: `git show 249c7454:<path>` (`<path>` as in `MANIFEST.tsv`).

@@ -389,12 +389,12 @@ pub fn prepare_queries(
     let mut seg_ready: Vec<Option<Vec<(i32, i32)>>> = Vec::new();
     #[cfg(feature = "parallel")]
     if let Some(masker) = seg_masker.as_ref() {
-        if super::runtime::x_bx_parallel()
-            && buffer.len() >= 60_000
-            && !super::runtime::x_inner_serial()
-            && rayon::current_thread_index().is_some()
-            && rayon::current_num_threads() > 1
-        {
+        if super::runtime::x_bx_par_rule(|| {
+            buffer.len() >= 60_000
+                && !super::runtime::x_inner_serial()
+                && rayon::current_thread_index().is_some()
+                && rayon::current_num_threads() > 1
+        }) {
             use rayon::prelude::*;
             let buffer = &buffer;
             // Diagnostic (LOSAT_TIMING): the parallel SEG's wall time for the common line

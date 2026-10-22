@@ -27,7 +27,7 @@ use crate::algorithm::tblastx::constants::{
     GAP_TRIGGER_BIT_SCORE, X_DROP_GAPPED_FINAL, X_DROP_GAPPED_PRELIM, X_DROP_UNGAPPED_BITS,
 };
 use crate::algorithm::tblastx::lookup::compressed::x_clut_direct::{
-    x_bp_build_compressed_lookup, XCompressedLookup, XFlatCompressedLookup,
+    x_bp_build_compressed_lookup, x_bpclut_mode, XCompressedLookup, XFlatCompressedLookup,
 };
 use crate::algorithm::tblastx::lookup::compressed::BlastCompressedAaLookupTable;
 use crate::algorithm::tblastx::lookup::prepare_blosum62_lookup_query_for_word_size;
@@ -5932,7 +5932,14 @@ fn search(
     // no record), or the subject records.
     let subject_source = match database {
         Some(database) => BlastpSubjectSource::Database(database),
-        None => BlastpSubjectSource::Fasta(&subjects.records),
+        None => {
+            // LOSAT_X_DBIDXREAD acts on a database's index files only; the new side is marked
+            // where a volume is opened (`seqdb::Volume::open`).
+            if crate::seqdb::x_dbidxread() != crate::seqdb::XDbIdxRead::Off {
+                crate::utils::xreach::x_reach!("LOSAT_X_DBIDXREAD", false);
+            }
+            BlastpSubjectSource::Fasta(&subjects.records)
+        }
     };
     // NCBI reads the subjects before the queries (`run`); the records are those of NCBI's
     // reader (`fasta_reader`; `run_local`'s callers read them so). The CLI has already
@@ -6099,7 +6106,8 @@ fn search(
     // (`x_block_shown_titles_allowed`), with outfmt 5 only when the names of the database, the
     // queries and the subjects can be written (`x_query_blocks.rs` `x_block_xml_*_allowed`);
     // otherwise the search of all queries below.
-    if let Some((x_kinds, blocks)) = x_query_block_plan(
+    let mut x_formats = Vec::new();
+    let x_plan = x_query_block_plan(
         &args,
         &searched_queries,
         &query_input,
@@ -6108,7 +6116,12 @@ fn search(
         outputs,
         batch_size,
         v1.is_some(),
-    ) {
+        &mut x_formats,
+    );
+    if x_plan.is_none() {
+        super::x_query_blocks::x_reach_block_search(&x_formats, false);
+    }
+    if let Some((x_kinds, blocks)) = x_plan {
         use super::x_query_blocks::{
             XBlockReport, XBlockSink, XCopyWriter, XOffsetObserver, XShadowObserver,
         };
@@ -6150,6 +6163,7 @@ fn search(
                 // name and queries' names (`x_block_xml_run_allowed`); with several outputs, the
                 // checks of every kind of report among them (LOSAT_X_BPQBLOCKWEB).
                 if !x_block_words_fit(&args, &searched_queries, &query_input, batch_size, pool) {
+                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
                     return Ok(false);
                 }
                 let titles_allowed = |x_kind: XBlockReport| match (database, x_kind) {
@@ -6175,6 +6189,7 @@ fn search(
                     .filter(|&(index, x_kind)| !x_kinds[..index].contains(x_kind))
                     .all(|(_, &x_kind)| titles_allowed(x_kind))
                 {
+                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
                     return Ok(false);
                 }
                 // EXPERIMENT (LOSAT_X_BPQBLOCKXML): the XML report's refusals of the database
@@ -6186,8 +6201,10 @@ fn search(
                         pool,
                     )
                 {
+                    super::x_query_blocks::x_reach_block_search(&x_formats, false);
                     return Ok(false);
                 }
+                super::x_query_blocks::x_reach_block_search(&x_formats, true);
                 // EXPERIMENT (LOSAT_X_BPQBLOCK): the subjects encoded once for all blocks
                 // (`x_query_blocks::XBlockSubjects`), on the search's pool.
                 // Diagnostic (LOSAT_TIMING): the blocks' shared subject encoding for the common
@@ -6558,11 +6575,12 @@ fn x_query_block_plan(
     outputs: &ReportOutputs<'_>,
     batch_size: u32,
     v1: bool,
+    x_formats: &mut Vec<super::x_query_blocks::XBlockFormat>,
 ) -> Option<(
     Vec<super::x_query_blocks::XBlockReport>,
     Vec<std::ops::Range<usize>>,
 )> {
-    use super::x_query_blocks::XBlockReport;
+    use super::x_query_blocks::{XBlockFormat, XBlockReport};
     let block_letters = super::x_query_blocks::x_bp_qblock()?;
     if args.query_range.is_some()
         || outputs.formats.is_empty()
@@ -6578,7 +6596,11 @@ fn x_query_block_plan(
     // turn); no `-db` (the records' `s_idx` of a database search rank the subjects that the call's
     // lists name); an observer only with the hit records, which count the HSPs of each block for
     // the observer's indices (`XOffsetObserver`).
-    if (outputs.formats.len() > 1 || outputs.hits.is_some() || outputs.observer.is_some())
+    let x_web = outputs.formats.len() > 1 || outputs.hits.is_some() || outputs.observer.is_some();
+    if x_web {
+        x_formats.push(XBlockFormat::Web);
+    }
+    if x_web
         && (!super::x_query_blocks::x_bp_qblock_web()
             || subject_source.database().is_some()
             || (outputs.observer.is_some() && outputs.hits.is_none())
@@ -6592,11 +6614,12 @@ fn x_query_block_plan(
     }
     // EXPERIMENT (LOSAT_X_BPQBLOCKFMT): outfmt 0 and 7 too. EXPERIMENT (LOSAT_X_BPQBLOCKSA,
     // LOSAT_X_BPQBLOCKXML): outfmt 8, 9, 12 and 5, which `OutputFormat::parse` does not know.
-    let kind_of = |outfmt: &str| match OutputFormat::parse(outfmt) {
+    let mut kind_of = |outfmt: &str| match OutputFormat::parse(outfmt) {
         Ok((OutputFormat::Tabular, _)) => Some(XBlockReport::Tabular),
         Ok((OutputFormat::TabularWithComments, _))
             if super::x_query_blocks::x_bp_qblock_fmt() > 0 =>
         {
+            x_formats.push(XBlockFormat::Fmt);
             Some(XBlockReport::Tabular)
         }
         // ABI v1's outfmt 0 titles of a database are not argued here.
@@ -6604,23 +6627,33 @@ fn x_query_block_plan(
             if super::x_query_blocks::x_bp_qblock_fmt() > 0
                 && !(v1 && subject_source.database().is_some()) =>
         {
+            x_formats.push(XBlockFormat::Fmt);
             Some(XBlockReport::Pairwise)
+        }
+        Ok((OutputFormat::TabularWithComments | OutputFormat::Pairwise, _)) => {
+            x_formats.push(XBlockFormat::Fmt);
+            None
         }
         Err(_)
             if super::x_query_blocks::x_bp_qblock_sa()
                 && blastp_seqalign_format(outfmt).is_some() =>
         {
+            x_formats.push(XBlockFormat::Seqalign);
             Some(XBlockReport::Seqalign)
         }
         Err(_) if super::x_query_blocks::x_bp_qblock_xml() && blastp_is_xml(outfmt) => {
+            x_formats.push(XBlockFormat::Xml);
             Some(XBlockReport::Xml)
         }
         _ => None,
     };
+    // Every output's format switch is recorded (`x_reach_block_search`), also after one refuses.
     let kinds = outputs
         .formats
         .iter()
         .map(|format| kind_of(format.outfmt))
+        .collect::<Vec<_>>()
+        .into_iter()
         .collect::<Option<Vec<_>>>()?;
     let tabular = kinds.contains(&XBlockReport::Tabular);
     match subject_source {
@@ -7413,8 +7446,17 @@ fn blastp_compressed_lookup(
         )
     })?;
     let lookup = match lookup {
-        XCompressedLookup::Reference(lookup) => BlastpRuntimeLookup::Compressed(lookup),
-        XCompressedLookup::Flat(lookup) => BlastpRuntimeLookup::CompressedFlat(lookup),
+        XCompressedLookup::Reference(lookup) => {
+            // The flat build declined (a backbone past its stripes): the reference builder ran.
+            if x_bpclut_mode() == 1 {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
+            }
+            BlastpRuntimeLookup::Compressed(lookup)
+        }
+        XCompressedLookup::Flat(lookup) => {
+            crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", true);
+            BlastpRuntimeLookup::CompressedFlat(lookup)
+        }
     };
     x_flat.finish(&mut contexts, &query, &locations, blastp_parallel_pool);
     Ok((lookup, contexts))
@@ -7659,6 +7701,12 @@ fn run_resolved_in_pool(
     //    (program == eBlastTypeBlastx || program == eBlastTypeTblastx ||
     //     program == eBlastTypeRpsTblastn);
     // ```
+    // Exact blastp (`AaLookupTable`) builds no compressed table: LOSAT_X_BPCLUT does not act.
+    if matches!(args.lookup_table_type, BlastpLookupTableType::AaLookupTable)
+        && x_bpclut_mode() != 0
+    {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPCLUT", false);
+    }
     let (lookup, mut contexts) = match args.lookup_table_type {
         // `blastp_aa_lookup`. EXPERIMENT (LOSAT_X_BPLKPAHEAD): or the table and contexts built
         // ahead of this block by the same call on the block search's spare vectors
@@ -9293,6 +9341,7 @@ fn run_resolved_in_pool(
             // thread and one diagonal table fill per run (`x_subject_runs.rs`).
             let x_subj_run = x_subject_runs::x_bp_subj_run();
             if x_subj_run != x_subject_runs::XSubjRun::Off {
+                crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJRUN", true);
                 x_subject_runs::x_search_subject_runs(
                     pool,
                     &subjects,
@@ -9337,6 +9386,13 @@ fn run_resolved_in_pool(
             }
         }
     } else {
+        #[cfg(all(
+            feature = "parallel",
+            any(not(target_arch = "wasm32"), feature = "wasm-threads")
+        ))]
+        if x_subject_runs::x_bp_subj_run() != x_subject_runs::XSubjRun::Off {
+            crate::utils::xreach::x_reach!("LOSAT_X_BPSUBJRUN", false);
+        }
         let mut scratch =
             BlastpSubjectScratch::new(offset_array_size, diag_array_size, window, total_query_span);
         let mut subject_result = BlastpSubjectResult::new(0);
@@ -9816,6 +9872,13 @@ fn run_resolved_in_pool(
         feature = "parallel",
         any(not(target_arch = "wasm32"), feature = "wasm-threads")
     ))]
+    if x_redo_par_mode != super::x_redo_par::XRedoPar::Off {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPREDOPAR", x_redo_par_on);
+    }
+    #[cfg(all(
+        feature = "parallel",
+        any(not(target_arch = "wasm32"), feature = "wasm-threads")
+    ))]
     let x_redo_par_shadow =
         (x_redo_par_on && x_redo_par_mode == super::x_redo_par::XRedoPar::Shadow).then(|| {
             super::x_redo_par::x_redo_par_shadow_run(
@@ -9855,6 +9918,21 @@ fn run_resolved_in_pool(
         (use_parallel_kappa_match_redo, use_parallel_kappa_redo)
     };
 
+    // EXPERIMENT (LOSAT_X_SEGSHARE, LOSAT_X_NEWTONLANES): the query-parallel redo and the windows of
+    // `x_redo_par` share the masked ranges; the match-parallel redo shares none and solves no
+    // Newton problems ahead, and the one-thread loop shares none.
+    if crate::algorithm::blastp::kappa::x_seg_share() != 0 {
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_SEGSHARE",
+            x_redo_par_run || (!use_parallel_kappa_match_redo && use_parallel_kappa_redo)
+        );
+    }
+    if x_newton_lanes_on {
+        crate::utils::xreach::x_reach!(
+            "LOSAT_X_NEWTONLANES",
+            x_redo_par_run || !use_parallel_kappa_match_redo
+        );
+    }
     if x_redo_par_run {
         #[cfg(all(
             feature = "parallel",
@@ -10640,6 +10718,12 @@ fn run_resolved_in_pool(
     } else {
         database::x_bp_listed_lean()
     };
+    if listed_subjects.is_some()
+        && database.is_some()
+        && database::x_bp_listed_lean() != database::XListedLean::Off
+    {
+        crate::utils::xreach::x_reach!("LOSAT_X_BPLISTEDLEAN", !reports.v1_titles);
+    }
     // EXPERIMENT (LOSAT_X_BPREDODBSUBJ): the residues that the reports read, read from the
     // database again after the redo (`ListedSubjects::x_read_shown`): every listed subject's for
     // the records; where every report is tabular rows of the default fields or Seq-aligns, which

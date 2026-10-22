@@ -49,7 +49,26 @@ pub(crate) fn x_offset_pairs_len(array_size: i32) -> usize {
 /// EXPERIMENT (LOSAT_X_TBXSCANBF): whether `lookup` is scanned by `x_scan_subject_bf`: the switch is
 /// on and fewer than half of the table's backbone cells have their presence bit set.
 pub(crate) fn x_scan_bf_for(lookup: &BlastAaLookupTable) -> bool {
+    let branch_free = x_scan_bf_choice(lookup);
+    x_reach_scan_bf(branch_free);
+    branch_free
+}
+
+// No NCBI counterpart: the choice of `x_scan_bf_for` without the record of `LOSAT_X_REACH`, for
+// the table of the reference frame loop, which that loop records where it scans (`run_impl.rs`).
+/// EXPERIMENT (LOSAT_X_TBXSCANBF): `x_scan_bf_for` without the record of `LOSAT_X_REACH`.
+pub(crate) fn x_scan_bf_choice(lookup: &BlastAaLookupTable) -> bool {
     x_tbx_scan_bf() && x_table_sparse(lookup)
+}
+
+// No NCBI counterpart: records the side the switch took for a table that is scanned
+// (`LOSAT_X_REACH`).
+/// EXPERIMENT (LOSAT_X_TBXSCANBF): with the switch on, records whether the table scanned with
+/// the branch-free loop (`branch_free`) or with NCBI's.
+pub(crate) fn x_reach_scan_bf(branch_free: bool) {
+    if x_tbx_scan_bf() {
+        crate::utils::xreach::x_reach!("LOSAT_X_TBXSCANBF", branch_free);
+    }
 }
 
 // No NCBI counterpart (module text).

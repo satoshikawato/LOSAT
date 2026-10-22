@@ -436,6 +436,45 @@ pub(crate) enum XBlockReport {
     Xml,
 }
 
+// No NCBI counterpart: names which switches decide the block search of a call for `x_reach!`; it
+// does not change any value NCBI computes.
+/// A switch besides LOSAT_X_BPQBLOCK that governs a search whose block plan is made
+/// (`LOSAT_X_REACH`): the format switch of each output (outfmt 6 has none), and for a call of
+/// several outputs, the hit records or an observer the switch of `run_local`. The plan's refusals
+/// before it looks at a call's outputs record none.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum XBlockFormat {
+    /// Outfmt 0 and 7 (LOSAT_X_BPQBLOCKFMT).
+    Fmt,
+    /// Outfmt 8, 9 and 12 (LOSAT_X_BPQBLOCKSA).
+    Seqalign,
+    /// Outfmt 5 (LOSAT_X_BPQBLOCKXML).
+    Xml,
+    /// Several outputs, the hit records or an observer (LOSAT_X_BPQBLOCKWEB).
+    Web,
+}
+
+// No NCBI counterpart: records which side the block-search switches took; it does not change any
+// value NCBI computes.
+/// `LOSAT_X_REACH`: the search took the block search (`own`) or the search of all queries, for
+/// LOSAT_X_BPQBLOCK and each switch of `formats`, each while it is on.
+pub(crate) fn x_reach_block_search(formats: &[XBlockFormat], own: bool) {
+    use crate::utils::xreach::x_reach;
+    if x_bp_qblock().is_none() {
+        return;
+    }
+    x_reach!("LOSAT_X_BPQBLOCK", own);
+    for format in formats {
+        match format {
+            XBlockFormat::Fmt if x_bp_qblock_fmt() > 0 => x_reach!("LOSAT_X_BPQBLOCKFMT", own),
+            XBlockFormat::Seqalign if x_bp_qblock_sa() => x_reach!("LOSAT_X_BPQBLOCKSA", own),
+            XBlockFormat::Xml if x_bp_qblock_xml() => x_reach!("LOSAT_X_BPQBLOCKXML", own),
+            XBlockFormat::Web if x_bp_qblock_web() => x_reach!("LOSAT_X_BPQBLOCKWEB", own),
+            _ => {}
+        }
+    }
+}
+
 // NCBI reference (598d8ae6): c++/src/algo/blast/format/blastxml_format.cpp:725-733
 // ```c++
 //     if( incremental_output && incremental_struct->m_IterationNum == 0) {
@@ -992,6 +1031,9 @@ impl<'a> XLookupFlat<'a> {
         x_for: XLookupFor,
     ) -> (Self, Vec<u8>, Vec<(i32, i32)>, Vec<QueryContext>) {
         let mode = x_lkpflat_mode_for_pool(pool);
+        if x_bplkpflat_mode() != XLkpFlat::Off {
+            crate::utils::xreach::x_reach!("LOSAT_X_BPLKPFLAT", mode != XLkpFlat::Off);
+        }
         let spare = match x_for {
             XLookupFor::Search => x_bp_lookup_spare(pool),
             XLookupFor::QueryChunk => None,

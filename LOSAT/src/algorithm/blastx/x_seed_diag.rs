@@ -292,15 +292,23 @@ pub(crate) fn x_word_finder_diag(
     diagonals: &mut Diagonals,
 ) -> Result<Option<Vec<InitHsp>>> {
     let Lookup::Standard(table) = lookup else {
+        if x_bxdiag_mode() != 2 {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", false);
+        }
         return Ok(None);
     };
     if options.window_size <= 0 {
+        if x_bxdiag_mode() != 2 {
+            crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", false);
+        }
         return Ok(None);
     }
     let mode = x_cell_mode();
     if x_bxdiag_mode() != 2 {
         // EXPERIMENT (LOSAT_X_BXDIAGMIN): a batch with few hits per cell goes to the other loop.
-        if !x_fused_pays(table) {
+        let pays = x_fused_pays(table);
+        crate::utils::xreach::x_reach!("LOSAT_X_BXDIAG", pays);
+        if !pays {
             return Ok(None);
         }
         let (hits, counts) = x_word_finder_fused(

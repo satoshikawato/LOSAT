@@ -217,6 +217,9 @@ pub(crate) fn write<S: QuerySections, W: Write>(
     let pool = match pool {
         Some(pool) if probe.is_none() => pool,
         _ => {
+            if mode() != 0 {
+                crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", false);
+            }
             return write_serial(
                 writer,
                 sections,
@@ -224,9 +227,10 @@ pub(crate) fn write<S: QuerySections, W: Write>(
                 subject_titles,
                 probe,
                 warnings,
-            )
+            );
         }
     };
+    crate::utils::xreach::x_reach!("LOSAT_X_PAIRWISEPAR", true);
     if mode() == 2 {
         let (mut serial, mut parallel) = (Vec::new(), Vec::new());
         write_serial(

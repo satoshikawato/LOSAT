@@ -647,6 +647,9 @@ impl<'a, 'p> XLookupAhead<'a, 'p> {
                 }
                 BlastpLookupTableType::AaLookupTable => x_bp_aa_spares(pool).is_some(),
             };
+        if x_bp_lkp_ahead() != XLkpAhead::Off {
+            crate::utils::xreach::x_reach!("LOSAT_X_BPLKPAHEAD", acts);
+        }
         Self {
             args,
             pool,

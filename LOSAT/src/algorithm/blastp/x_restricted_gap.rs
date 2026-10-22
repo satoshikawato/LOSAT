@@ -322,6 +322,7 @@ pub(super) fn restricted_gapped_align_protein_x(
         } else {
             None
         };
+        crate::utils::xreach::x_reach!("LOSAT_X_BPGAP", fast.is_some());
         if let Some(fast) = fast {
             FAST_CALLS.fetch_add(1, Ordering::Relaxed);
             if mode == XBpGap::Fast {

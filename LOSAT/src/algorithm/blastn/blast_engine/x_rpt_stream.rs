@@ -315,6 +315,9 @@ impl Stream {
             }) => (None, cache, one_batch, sam_despite),
             Err(off) => (Some(off), None, false, None),
         };
+        if mode() != 0 {
+            crate::utils::xreach::x_reach!("LOSAT_X_RPTSTREAM", off.is_none());
+        }
         let shadow = (mode() == 2 && off.is_none()).then(|| Shadow {
             outfmts: outputs
                 .formats

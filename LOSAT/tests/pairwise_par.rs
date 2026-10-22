@@ -1,3 +1,4 @@
+// CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The pairwise reports (outfmt 0) formatted on the search's pool (`LOSAT_X_PAIRWISEPAR`,
 //! `src/report/x_pairwise_par.rs`) on whole searches: BLASTN (the blastn and megablast tasks,
 //! `-subject` and `-db`), TBLASTX (`-subject` and `-db`) and BLASTP (`-subject` and `-db`, in one

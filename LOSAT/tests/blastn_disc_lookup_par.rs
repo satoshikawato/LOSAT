@@ -23,15 +23,18 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), each
-/// `0`, the default before, unless the search sets it: every search here runs as it was written,
-/// with the switches off that it does not name (the default runs in `default_bundle.rs`).
+/// The switches that joined the default set on 2026-10-17 (perf/perfmb-default-bundle), and
+/// `LOSAT_X_DCCSR` (2026-10-21; a one-template table above its size rule is built as CSR, not by
+/// the fill these tests compare), each `0`, the default before, unless the search sets it: every search here
+/// runs as it was written, with the switches off that it does not name (the default runs in
+/// `default_bundle.rs`).
 const PREVIOUS_DEFAULT: &[(&str, &str)] = &[
     ("LOSAT_X_BPDBCUT", "0"),
     ("LOSAT_X_BPLKPAHEAD", "0"),
     ("LOSAT_X_BPREDOLPT", "0"),
     ("LOSAT_X_BPREDOPAR", "0"),
     ("LOSAT_X_BPSUBJMETA", "0"),
+    ("LOSAT_X_DCCSR", "0"),
     ("LOSAT_X_DIAGLV", "0"),
     ("LOSAT_X_PAIRPARDISC", "0"),
     ("LOSAT_X_PAIRPARFOLD", "0"),
@@ -580,6 +583,81 @@ fn dc_megablast_across_chunk_boundaries() {
         assert!(
             chunks > tables,
             "{extra:?}: {chunks} chunks for {tables} tables:\n{stderr}"
+        );
+    }
+}
+
+// LOSAT_X_DCCSR on a table above its size rule: MG1655 (4.6 Mb, one table of about 9.2 million
+// words, more than a quarter of the 4,194,304 cells at word size 11; AP027131's table above has
+// 818,022 words and keeps its chains) against AP027131, dc-megablast with one template, laid out
+// as CSR, built on the pool at 4 threads and by one loop at 1 thread. The chains (`=0`), the CSR
+// (`=1`) and the shadow (both, compared) give the same bytes at 1 and 4 threads; the shadow's
+// line counts CSR tables built on the pool only at 4 threads, and LOSAT_TIMING counts the CSR
+// builds the same way.
+#[test]
+fn dc_megablast_csr_of_a_large_table() {
+    const CSR: (&str, &str) = ("LOSAT_X_DCCSR", "1");
+    let query = fasta("MG1655.fna");
+    let subject_path = fasta("AP027131.fasta");
+    let subject = ["-subject", subject_path.to_str().unwrap()];
+    let extra = &["-task", "dc-megablast"][..];
+    let (expected, expected_stderr) = blastn(&query, &subject, extra, 1, &[]);
+    assert!(!expected.is_empty(), "no hits");
+    let field = |line: &str, name: &str| -> u64 {
+        line.split_whitespace()
+            .find_map(|word| word.strip_prefix(name))
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(|| panic!("no {name} in: {line}"))
+    };
+    for threads in [1, 4] {
+        let (report, stderr) = blastn(&query, &subject, extra, threads, &[CSR]);
+        assert!(report == expected, "threads {threads}: on differs");
+        assert_eq!(stderr, expected_stderr, "threads {threads}");
+        let (report, stderr) = blastn(
+            &query,
+            &subject,
+            extra,
+            threads,
+            &[("LOSAT_X_DCCSRSHADOW", "1")],
+        );
+        assert!(report == expected, "threads {threads}: shadow differs");
+        let line = stderr
+            .lines()
+            .find(|line| line.starts_with("[X_SHADOW] DCCSR "))
+            .unwrap_or_else(|| panic!("no shadow line:\n{stderr}"));
+        assert!(line.ends_with(" diffs=0 identical"), "{line}");
+        let rest: Vec<&str> = stderr.lines().filter(|l| *l != line).collect();
+        assert_eq!(
+            rest,
+            expected_stderr.lines().collect::<Vec<_>>(),
+            "{stderr}"
+        );
+        let tables = field(line, "tables=");
+        assert!(tables > 0, "{line}");
+        let pool = if threads > 1 { tables } else { 0 };
+        assert_eq!(field(line, "pool="), pool, "threads {threads}: {line}");
+        let (report, stderr) = blastn(
+            &query,
+            &subject,
+            extra,
+            threads,
+            &[CSR, ("LOSAT_TIMING", "1")],
+        );
+        assert!(
+            report == expected,
+            "threads {threads}: on with LOSAT_TIMING differs"
+        );
+        let line = stderr
+            .lines()
+            .find(|line| line.starts_with("[TIMING] disc_lookup_csr: "))
+            .unwrap_or_else(|| panic!("no CSR timing line:\n{stderr}"));
+        let builds = field(line, "builds=");
+        assert!(builds > 0, "{line}");
+        let parallel = if threads > 1 { builds } else { 0 };
+        assert_eq!(
+            field(line, "parallel="),
+            parallel,
+            "threads {threads}: {line}"
         );
     }
 }

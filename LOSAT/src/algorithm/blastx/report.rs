@@ -1164,6 +1164,8 @@ pub fn render(
 ) -> Result<()> {
     let shown = ShownSubjects::Fasta { path: subject_path };
     write_prolog(writer, options, subjects, &shown)?;
+    let mut xml2 = super::blast_xml::xml2_kind(options.outfmt)
+        .map(|kind| super::blast_xml::xml2_writer(kind, options, subjects, &shown));
     render_queries(
         writer,
         &mut std::io::stderr().lock(),
@@ -1173,8 +1175,16 @@ pub fn render(
         &shown,
         batches,
         0,
+        xml2.as_mut(),
     )?;
-    write_epilog(writer, options, subjects, &shown, queries.len())
+    write_epilog(
+        writer,
+        options,
+        subjects,
+        &shown,
+        queries.len(),
+        xml2.as_mut(),
+    )
 }
 // NCBI reference (598d8ae6): c++/src/app/blast/blastx_app.cpp:289-290
 // ```c++
@@ -1194,6 +1204,7 @@ pub fn render_queries(
     shown: &ShownSubjects<'_>,
     batches: &mut [BatchResults],
     queries_before: usize,
+    xml2: Option<&mut crate::report::blast_xml2::Xml2Writer>,
 ) -> Result<()> {
     for batch in batches.iter_mut() {
         for lists in &mut batch.queries {
@@ -1217,16 +1228,24 @@ pub fn render_queries(
     //     }
     // ```
     // BLAST XML (outfmt 5): the Iterations of the batch's queries; the header comes with the
-    // first query of the run and the end of the document with the epilog.
+    // first query of the run and the end of the document with the epilog. The XML2 and JSON
+    // documents (outfmt 15 and 16) are the reports of the batch's queries through the run's
+    // writer, whose start comes with the prolog and whose end with the epilog.
     if options.outfmt == 5 {
         return super::blast_xml::write_blastx_xml(
             writer,
+            stderr,
+            &mut crate::report::blast_xml::BlastXmlWriter::new(queries_before),
             options,
             queries,
             subjects,
             shown,
             batches,
-            queries_before,
+        );
+    }
+    if let Some(xml2) = xml2 {
+        return super::blast_xml::write_blastx_xml(
+            writer, stderr, xml2, options, queries, subjects, shown, batches,
         );
     }
     // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:690-698
@@ -1795,6 +1814,7 @@ pub(crate) fn write_epilog(
     subjects: &[FastaRecord],
     shown: &ShownSubjects<'_>,
     queries: usize,
+    xml2: Option<&mut crate::report::blast_xml2::Xml2Writer>,
 ) -> Result<()> {
     if options.outfmt == 0 {
         crate::report::pairwise::write_blastx_epilog(
@@ -1815,7 +1835,12 @@ pub(crate) fn write_epilog(
         //     if (m_FormatType == CFormattingArgs::eXml) {
         //         m_Outfile << m_BlastXMLIncremental->m_SerialXmlEnd << endl;
         // ```
-        super::blast_xml::write_xml_epilog(writer, queries)?;
+        super::blast_xml::write_xml_epilog(writer, queries, None)?;
+    } else if xml2.is_some() {
+        // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2203-2219 and
+        // :2419-2423, :2440-2445: the report a `-subject` run holds back, then the end of the
+        // document.
+        super::blast_xml::write_xml_epilog(writer, queries, xml2)?;
     } else if options.outfmt == 7 {
         writeln!(writer, "# BLAST processed {queries} queries")?;
         // NCBI reference (598d8ae6): c++/src/algo/blast/format/blast_format.cpp:2233-2236

@@ -1,0 +1,208 @@
+BLASTN 2.17.0+
+
+
+Reference: Stephen F. Altschul, Thomas L. Madden, Alejandro A.
+Schaffer, Jinghui Zhang, Zheng Zhang, Webb Miller, and David J.
+Lipman (1997), "Gapped BLAST and PSI-BLAST: a new generation of
+protein database search programs", Nucleic Acids Res. 25:3389-3402.
+
+
+
+Database: User specified sequence set (Input:
+tests/fasta/outfmt0/multi_subject.fasta).
+           6 sequences; 3,360 total letters
+
+
+
+Query= mq1 query matching several subjects
+
+Length=600
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+msB medium homolog of base (6% divergence), reverse complemented      930     0.0  
+msD two copies of a base fragment, one on each strand                 339     2e-96
+msA close homolog of base (1% divergence)                             21.1    0.84 
+
+
+> msB medium homolog of base (6% divergence), reverse complemented
+Length=660
+
+ Score = 930 bits (1030),  Expect = 0.0
+ Identities = 566/600 (94%), Gaps = 0/600 (0%)
+ Strand=Plus/Minus
+
+Query  1    TTCCCCCAGTATCTCGTCCTCGAATGTAGATCGATCTAGCCCTCCAAACTTATACGATGC  60
+            ||||||||||||| ||| | ||||||||||||| |||||||| ||||||||| |||||||
+Sbjct  630  TTCCCCCAGTATCGCGTACACGAATGTAGATCGTTCTAGCCCGCCAAACTTACACGATGC  571
+
+Query  61   TCACTGTCGTACCTAAACGCCTCCGTCGAGCAGAAGCTTGTTTGACAGTTCGCGAGCCTG  120
+            ||  ||||||||||||||||||||||||| ||||||||||||||||||||||||||||||
+Sbjct  570  TCCATGTCGTACCTAAACGCCTCCGTCGAACAGAAGCTTGTTTGACAGTTCGCGAGCCTG  511
+
+Query  121  TATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCAT  180
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  510  TATTGAGGTCGTGTCGTTCTGCGAGGCCGTCTGTAACAGCTCGTTGCAAGAAATGGGCAT  451
+
+Query  181  TCGTGCCTTTCGGCGTTCTTCACTAAGTAGAGAGTGCCATAAGCGCTATCCATCGGGACC  240
+            ||||||||||||||| ||||||||||||| ||||||||||||||||||||||||||||||
+Sbjct  450  TCGTGCCTTTCGGCGCTCTTCACTAAGTAAAGAGTGCCATAAGCGCTATCCATCGGGACC  391
+
+Query  241  GAACCCAATCGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAGCGGGATGC  300
+            |||||| |||||||||||||||||||||||||||||||||||||||||||| ||||||||
+Sbjct  390  GAACCCCATCGCCGAGTCGCACTACTACTACCTGGGATAGCCAGGGATTAAACGGGATGC  331
+
+Query  301  CAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTA  360
+            |||| |||||| ||||||||||||||||||||||||||||||||||| ||||||||||| 
+Sbjct  330  CAGTCCCTACCACATAACCCGAGCTCAATTACCGTCTAGCCTCATCCGTCCGCACCCTTC  271
+
+Query  361  CGGGTCAAATAGCAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGT  420
+            ||||||||| ||||||||||||||||||||||||||||||| ||||||||||||||| ||
+Sbjct  270  CGGGTCAAAAAGCAGCGGAGCGACGTCGGCTAAGCCATAGGCCCAAACCCGGAATATTGT  211
+
+Query  421  TTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGC  480
+            ||||| || |||||||||||||||||||||||| ||||||||| ||||||||||||||||
+Sbjct  210  TTGGGGGCGACGGAGGCCTTAGATAAGTTTGCAATCAGTTGAATACTCTAAAGCCAATGC  151
+
+Query  481  CGCTAGCTTAAGGGCGAAAGTTCGTCGTGGCTGCCGCCGACTCAGTAATATTAAACACGC  540
+            |||||||||||||| | ||| |||||| |||||||||||||||||||||||||||| |||
+Sbjct  150  CGCTAGCTTAAGGGTGCAAGCTCGTCGCGGCTGCCGCCGACTCAGTAATATTAAACGCGC  91
+
+Query  541  ACGGCCAAGACGTGATGTGCGCAGCCTTCGCGAAGCCTAAGGGCGAGAGTCCACATTTTG  600
+            || ||||||||||||||||||||| |||||||||||||||||| | |||||||||| |||
+Sbjct  90   ACCGCCAAGACGTGATGTGCGCAGGCTTCGCGAAGCCTAAGGGAGGGAGTCCACATCTTG  31
+
+
+> msD two copies of a base fragment, one on each strand
+Length=540
+
+ Score = 339 bits (375),  Expect = 2e-96
+ Identities = 195/200 (98%), Gaps = 0/200 (0%)
+ Strand=Plus/Minus
+
+Query  301  CAGTTCCTACCGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTA  360
+            |||||||||| |||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  500  CAGTTCCTACTGCATAACCCGAGCTCAATTACCGTCTAGCCTCATCCCTCCGCACCCTTA  441
+
+Query  361  CGGGTCAAATAGCAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAATATAGT  420
+            |||||||||||| |||||||||||||||||||||||||||||||||||||||| ||||||
+Sbjct  440  CGGGTCAAATAGAAGCGGAGCGACGTCGGCTAAGCCATAGGTCCAAACCCGGAGTATAGT  381
+
+Query  421  TTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGC  480
+            ||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||
+Sbjct  380  TTGGGAGCAACGGAGGCCTTAGATAAGTTTGCAGTCAGTTGAAAACTCTAAAGCCAATGC  321
+
+Query  481  CGCTAGCTTAAGGGCGAAAG  500
+             ||||||||||| |||||||
+Sbjct  320  AGCTAGCTTAAGTGCGAAAG  301
+
+
+ Score = 22.9 bits (24),  Expect = 0.24
+ Identities = 12/12 (100%), Gaps = 0/12 (0%)
+ Strand=Plus/Minus
+
+Query  27  TAGATCGATCTA  38
+           ||||||||||||
+Sbjct  78  TAGATCGATCTA  67
+
+
+> msA close homolog of base (1% divergence)
+Length=700
+
+ Score = 21.1 bits (22),  Expect = 0.84
+ Identities = 11/11 (100%), Gaps = 0/11 (0%)
+ Strand=Plus/Minus
+
+Query  27  TAGATCGATCT  37
+           |||||||||||
+Sbjct  88  TAGATCGATCT  78
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 1912950
+
+
+Query= mq2 query with no significant hit
+
+Length=300
+
+
+***** No hits found *****
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 936936
+
+
+Query= mq3 query matching msF on the minus strand
+
+Length=300
+                                                                      Score     E
+Sequences producing significant alignments:                          (Bits)  Value
+
+msF contains the second query region                                  471     3e-136
+
+
+> msF contains the second query region
+Length=560
+
+ Score = 471 bits (521),  Expect = 3e-136
+ Identities = 283/298 (95%), Gaps = 0/298 (0%)
+ Strand=Plus/Minus
+
+Query  3    TTGTGTTTACGTGTTGACGTCGAGACAAGGGCAACGTGTTACGTGCGCCCGTGACCTGTT  62
+            ||||||||||||||||||||||||||||||||| ||||||||||||||||||||||||||
+Sbjct  428  TTGTGTTTACGTGTTGACGTCGAGACAAGGGCAGCGTGTTACGTGCGCCCGTGACCTGTT  369
+
+Query  63   GGACAGCCTGACGTGGCACTGTTATTCGGAcccccccGTCATTCTCTATAACCAGCCCAG  122
+            ||||||| ||||||||||||||| ||||||| ||||||||||| ||||||||||||||||
+Sbjct  368  GGACAGCTTGACGTGGCACTGTTTTTCGGACGCCCCCGTCATTATCTATAACCAGCCCAG  309
+
+Query  123  TGTATCGCCCCACAGTGGGGTGTTCTCGGGGTTATGGTCAATACTGATATAACAAGAAAG  182
+            | |||||||||||||||||||| ||||||||||||||||||||||||||||||||||| |
+Sbjct  308  TCTATCGCCCCACAGTGGGGTGCTCTCGGGGTTATGGTCAATACTGATATAACAAGAACG  249
+
+Query  183  CAGGCCAAGTCACGAATTTGTCGAGGAGGTTGCCACATGAGATGCGCACAAGTGCCGACA  242
+            ||||||||||  |||||||||| ||||||||||||  ||||||||| |||||||||||||
+Sbjct  248  CAGGCCAAGTACCGAATTTGTCCAGGAGGTTGCCAAGTGAGATGCGTACAAGTGCCGACA  189
+
+Query  243  CCCGGTGGCTGTACCAATACGCAGCCTGCCGACAGTTCTTCAGGAGGTGTAAGATGTT  300
+            ||||||||||||||||||| ||||||||||||||||||||||||||||||||||||||
+Sbjct  188  CCCGGTGGCTGTACCAATAGGCAGCCTGCCGACAGTTCTTCAGGAGGTGTAAGATGTT  131
+
+
+
+Lambda      K        H
+   0.634    0.408    0.912 
+
+Gapped
+Lambda      K        H
+   0.625    0.410    0.780 
+
+Effective search space used: 936936
+
+
+  Database: User specified sequence set (Input:
+tests/fasta/outfmt0/multi_subject.fasta).
+    Posted date:  Unknown
+  Number of letters in database: 3,360
+  Number of sequences in database:  6
+
+
+
+Matrix: blastn matrix 2 -3
+Gap Penalties: Existence: 5, Extension: 2

@@ -111,6 +111,17 @@
     ]
    },
    {
+    "flag": "-strand",
+    "help": "",
+    "takes_value": true,
+    "default": "both",
+    "choices": [
+     "both",
+     "plus",
+     "minus"
+    ]
+   },
+   {
     "flag": "-query_loc",
     "help": "Location on the query sequence in 1-based offsets (Format: start-stop)",
     "takes_value": true

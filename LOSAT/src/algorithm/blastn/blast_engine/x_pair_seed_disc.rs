@@ -71,6 +71,7 @@ use super::{
     Inputs, PartScratch, Seed, StageStats, Stash, StashPath, StripJob, STASH,
 };
 use crate::algorithm::blastn::disc_lookup::{choose_disc_scan_subject, disc_word_scan_subject};
+use crate::algorithm::blastn::lookup::x_dc_csr::{Csr, Ring};
 use crate::algorithm::blastn::lookup::DiscTemplates;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -218,6 +219,10 @@ fn in_scope_array(x: &Inputs<'_>) -> bool {
 /// first-template chain, then its second-template chain, as `on_word` walks them; every pair
 /// through `seed_of_pair`.
 fn scan_strip_disc(x: &Inputs<'_>, disc: &DiscTemplates, job: &StripJob, out: &mut Vec<Seed>) {
+    // EXPERIMENT (LOSAT_X_DCCSR): a table laid out as CSR has no chains to walk.
+    if let Some(csr) = disc.x_csr() {
+        return scan_strip_disc_csr(x, disc, csr, job, out);
+    }
     let two_stage = x.two_stage;
     let s_range = job.s_range;
     let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
@@ -260,6 +265,54 @@ fn scan_strip_disc(x: &Inputs<'_>, disc: &DiscTemplates, job: &StripJob, out: &m
             }
         },
     );
+}
+
+/// EXPERIMENT (LOSAT_X_DCCSR): `scan_strip_disc` over a table laid out as CSR
+/// (`lookup::x_dc_csr`, one template): the same words in the same order, each `RING` words
+/// late through `x_dc_csr::Ring` (whose prefetches bring in the cell's offsets and the ends of
+/// its run), then the same presence test and the cell's run, which lists the chain's offsets in
+/// the chain's order; so the same pairs reach `seed_of_pair` in the same order.
+///
+/// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nascan.c:1406-1418
+/// ```c
+///     while (q_off) {
+///         offset_pairs[i].qs_offsets.q_off   = q_off - 1;
+///         offset_pairs[i++].qs_offsets.s_off = s_off;
+///         q_off = lookup->next_pos[q_off];
+///     }
+/// ```
+#[inline(never)]
+fn scan_strip_disc_csr(
+    x: &Inputs<'_>,
+    disc: &DiscTemplates,
+    csr: &Csr,
+    job: &StripJob,
+    out: &mut Vec<Seed>,
+) {
+    debug_assert!(!disc.two_templates);
+    let two_stage = x.two_stage;
+    let s_range = job.s_range;
+    let kind = choose_disc_scan_subject(disc.template_type, disc.two_templates);
+    let mut emit = |(s_off, index): (i32, u32)| {
+        if !two_stage.has_hits(u64::from(index)) {
+            return;
+        }
+        let kmer_start = s_off as usize;
+        for &q_off_1 in csr.run(index as usize) {
+            seed_of_pair(x, q_off_1 as usize - 1, kmer_start, s_range, out);
+        }
+    };
+    let mut ring: Ring<'_, (i32, u32)> = Ring::new(csr);
+    disc_word_scan_subject(
+        kind,
+        x.search_seq_packed,
+        disc.template_type,
+        disc.second_template_type,
+        disc.template_length as i32,
+        [job.start as i32, job.end as i32],
+        &mut |s_off, index, _index2| ring.push((s_off, index), |w| w.1 as usize, &mut emit),
+    );
+    ring.flush(&mut emit);
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/na_ungapped.c:825-841
@@ -928,14 +981,23 @@ pub(super) fn run(
         return false;
     };
     if !in_scope(x) {
+        if !shadow {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
+        }
         return false;
     }
     let threads = match pool_threads() {
         Some(threads) => threads,
         // the shadow also runs without a pool (strips on this thread)
         None if shadow => 1,
-        None => return false,
+        None => {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", false);
+            return false;
+        }
     };
+    if !shadow {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISC", true);
+    }
     let timing = if shadow { None } else { x.timing };
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
     let t_start = timed.then(std::time::Instant::now);
@@ -1515,14 +1577,23 @@ fn run_array(
         return false;
     };
     if !in_scope_array(x) {
+        if !shadow {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", false);
+        }
         return false;
     }
     let threads = match pool_threads() {
         Some(threads) => threads,
         // the shadow also runs without a pool (strips on this thread)
         None if shadow => 1,
-        None => return false,
+        None => {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", false);
+            return false;
+        }
     };
+    if !shadow {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPARDISCARR", true);
+    }
     let timing = if shadow { None } else { x.timing };
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
     let t_start = timed.then(std::time::Instant::now);
@@ -1840,7 +1911,7 @@ mod tests {
                 masks: masks[c].clone(),
             })
             .collect();
-        let index = QueryContextIndex::new(&contexts);
+        let index = QueryContextIndex::new(&contexts, false);
         Case {
             contexts,
             index,

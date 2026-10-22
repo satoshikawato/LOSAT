@@ -177,7 +177,9 @@ pub(super) fn partition(
         return None;
     }
     let min_len = rule.min_span_threads.div_ceil(threads.max(1) as u64);
-    x_partition(&x_group_spans(contexts, starts), rule.letters, min_len)
+    let parts = x_partition(&x_group_spans(contexts, starts), rule.letters, min_len);
+    crate::utils::xreach::x_reach!("LOSAT_X_TBXQSLICE", parts.is_some());
+    parts
 }
 
 // No NCBI counterpart: the rule alone (module doc), without the conditions of `partition` that

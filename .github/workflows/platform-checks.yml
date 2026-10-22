@@ -13,7 +13,8 @@ name: Platform checks
 #  - compare: the hashes of the platforms of the run must equal each other (no expected hash is
 #    stored; the frozen hashes are checked on Linux x64 by ci.yml);
 #  - tests: cargo test --all-features in both modes, built once per platform, on the platforms other
-#    than Linux x64 (ci.yml runs both modes on Linux x64).
+#    than Linux x64 (ci.yml runs both modes on Linux x64); the reference mode leaves out the test
+#    files whose runs set every LOSAT_* variable themselves (LOSAT/tests/reference_step_targets.sh).
 #
 # Two sets of platforms (job `changes` chooses):
 #  - pull-request (a pull request into main, normally the promotion of dev): outputs on Linux
@@ -44,6 +45,7 @@ on:
       - '.github/workflows/platform-checks.yml'
       - 'LOSAT/tests/platform_checks.py'
       - 'LOSAT/tests/platform_check_cases.json'
+      - 'LOSAT/tests/reference_step_targets.sh'
   schedule:
     - cron: '23 19 * * 0'
   workflow_dispatch:
@@ -138,7 +140,7 @@ jobs:
             else
               # Pattern = the former `pull_request: paths:` list (the `on.push.paths` list above), as
               # anchored extended regular expressions (`**` = .*, `*` = [^/]*).
-              pattern='^(LOSAT/src/.*|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/build\.rs|\.github/workflows/platform-checks\.yml|LOSAT/tests/platform_checks\.py|LOSAT/tests/platform_check_cases\.json)$'
+              pattern='^(LOSAT/src/.*|LOSAT/Cargo\.toml|LOSAT/Cargo\.lock|LOSAT/build\.rs|\.github/workflows/platform-checks\.yml|LOSAT/tests/platform_checks\.py|LOSAT/tests/platform_check_cases\.json|LOSAT/tests/reference_step_targets\.sh)$'
               files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" -q '.[].filename')
               echo "Changed files:"
               printf '%s\n' "$files"
@@ -243,7 +245,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     # Two full cargo test runs in debug. On Windows x64 the default run took 49 min and the
     # reference run did not finish within the former 90 min (2026-10-17, dev with the eight blastp
-    # default switches: their integration tests take 2-6 min each there).
+    # default switches: their integration tests take 2-6 min each there). On 2026-10-18 the job
+    # took 82-130 min, and on macOS x64 it hit this limit; since then the reference run leaves out
+    # the files that would repeat the default run (90 % of its time on Linux x64, 2026-10-21).
     timeout-minutes: 150
     steps:
       - name: Check out without line-ending conversion
@@ -268,9 +272,14 @@ jobs:
           # Optimized test code; the test profile keeps the dev profile's debug assertions
           # and overflow checks (as in ci.yml).
           CARGO_PROFILE_TEST_OPT_LEVEL: '1'
+      # Without the test files marked "CI reference step: skipped": each of their runs sets its own
+      # LOSAT_* variables, so it would repeat the default step (LOSAT/tests/reference_step_targets.sh).
       - name: cargo test --all-features, reference (LOSAT_X_DEFAULT=0)
         if: ${{ !cancelled() }}
-        run: cd LOSAT && cargo test --locked --all-features --no-fail-fast
+        run: |
+          cd LOSAT
+          targets=$(bash tests/reference_step_targets.sh)
+          cargo test --locked --all-features --no-fail-fast $targets
         env:
           LOSAT_X_DEFAULT: '0'
           LOSAT_BLASTX_WORKER_LOG: ${{ runner.temp }}/blastx-worker.log

@@ -52,7 +52,7 @@ LOSAT_X_COMPFAST	blastp,blastx,tblastn	always			Composition adjustment (Newton) 
 LOSAT_X_CTXFAST	blastn	always			Query-offset-to-context by binary search, no per-base table
 LOSAT_X_CTXO1	blastn	always			Constant-time context of a hit's query offset
 LOSAT_X_DBIDXREAD	blastn,blastp,blastx,tblastn,tblastx	conditional	required	required	-db searches only (not -subject)
-LOSAT_X_DCCSR	blastn	conditional	required	gap	dc-megablast one-template table as CSR when positions x 4 >= cells; ref gap: needs two templates (-template_type coding_and_optimal) or a small query
+LOSAT_X_DCCSR	blastn	conditional	required	required	dc-megablast one-template table as CSR when positions x 4 >= cells; ref = two templates or a small query
 LOSAT_X_DEKKER	blastn,blastp,blastx,tblastn,tblastx	platform			wasm32 only
 LOSAT_X_DIAGLV	blastn	conditional	required	required	only the diagonal hash (query block >8000 letters, about >4000 bases); not diagonal array, not scan_range
 LOSAT_X_DISCLUTPAR	blastn	conditional	required	required	-task dc-megablast (or megablast with template options) and a pool of 2+ threads
@@ -110,11 +110,11 @@ LOSAT_X_SEGMEMO	blastp,blastx,tblastn,tblastx	always			SEG entropy memoised per 
 LOSAT_X_SEGSHARE	blastp	conditional	required	required	blastp with 2+ threads
 LOSAT_X_SEGTRIMMEMO	blastx,tblastn	always			SEG trim of candidate segment memoised per thread
 LOSAT_X_TBNBATCH	tblastn	conditional	gap	required	needs TBNSSIDE (4+ query batches) and at least one batch per thread; rule via TBNBATCHRULE; new gap: needs 4+ query batches of 20,000 residues and 4+ batches per thread
-LOSAT_X_TBNBATCHRULE	tblastn	conditional	gap	required	several query batches; full waves of threads side by side; subjects <=24 Mb or <2 per thread; new gap: needs the TBNBATCH input with batches >= threads
+LOSAT_X_TBNBATCHRULE	tblastn	conditional	gap	gap	several query batches; full waves of threads side by side; subjects <=24 Mb or <2 per thread; new gap: needs the TBNBATCH input with batches >= threads; ref gap: needs 4+ batches at 2+ threads with plans that fit and no full wave (batches < threads, or > 24 Mb of many subjects)
 LOSAT_X_TBNEVENTS	tblastn	conditional	gap	gap	acts only in the reference (non-unit) tblastn loop, i.e. when TBNPAR is off; by default the unit path runs, so effectively inactive; new gap: acts only with TBNPAR off; removed by chore/prune-dead-switches; ref gap: acts only with TBNPAR off; removed by chore/prune-dead-switches
 LOSAT_X_TBNFRAMEREUSE	tblastn	always			a dropped plan's frames are reused by the next plan of its thread (rides on TBNKEEPFEW's drops)
 LOSAT_X_TBNHITBF	tblastn	always			Branch-free too-far/overlap outcomes in two-hit loop
-LOSAT_X_TBNKEEPFEW	tblastn	conditional	required	required	4+ query batches with TBNSSIDE searched one after another: plans dropped unless they fit threads x longest plan
+LOSAT_X_TBNKEEPFEW	tblastn	conditional	required	gap	4+ query batches with TBNSSIDE searched one after another: plans dropped unless they fit threads x longest plan; ref gap: needs 4+ batches whose plans are kept (fit threads x longest plan, or batches side by side)
 LOSAT_X_TBNLINKWIN	tblastn	always			Uneven-gap linking tests only admissible candidates of a head set
 LOSAT_X_TBNOIDCHUNK	tblastn	conditional	required	required	2+ threads and several subjects
 LOSAT_X_TBNOIDNEXT	tblastn	conditional	required	required	2+ threads, several subjects, where TBNOIDCHUNK makes chunks
@@ -124,7 +124,7 @@ LOSAT_X_TBNPAR	tblastn	always			Preliminary stage per (frame, chunk) and redo pe
 LOSAT_X_TBNQSIDE	tblastn	always			Query SEG and lookup table once per query set
 LOSAT_X_TBNSCANBF	tblastn	always			Branch-free lookup scan in blocks of 256 words (unit path)
 LOSAT_X_TBNSCANBYTE	tblastn	platform			AVX2 CPUs only (nothing elsewhere); word size 3, 5-bit letters tables
-LOSAT_X_TBNSSIDE	tblastn	conditional	required	required	only searches of 4+ query batches (20,000 residues each); <=256 MiB of translated residues
+LOSAT_X_TBNSSIDE	tblastn	conditional	gap	required	only searches of 4+ query batches (20,000 residues each); <=256 MiB of translated residues; new gap: since TBNKEEPFEW the fixtures' 4+ batch searches drop their plans; needs plans that fit threads x longest plan (e.g. one genome subject, 4+ batches)
 LOSAT_X_TBNSTATE	tblastn	always			Scan state kept per thread across subjects, diagonal offset step instead of clearing
 LOSAT_X_TBNSTORE	tblastn	conditional	required	required	-subject without -subject_loc, no -lcase_masking stage, no non-ncbi4na byte
 LOSAT_X_TBNXLATE	tblastn	always			Six subject frames read from codon tables as NCBI does

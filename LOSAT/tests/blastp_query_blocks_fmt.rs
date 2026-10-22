@@ -1,7 +1,7 @@
 // CI reference step: skipped (each LOSAT run here sets its own LOSAT_* variables; tests/reference_step_targets.sh).
 //! The blastp search in blocks of whole query batches (`LOSAT_X_BPQBLOCK`) for outfmt 0 and 7
 //! with `LOSAT_X_BPQBLOCKFMT`, outfmt 8, 9 and 12 with `LOSAT_X_BPQBLOCKSA`, outfmt 5 with
-//! `LOSAT_X_BPQBLOCKXML`, and outfmt 15 and 16 with `LOSAT_X_BPQBLOCKXML2`
+//! `LOSAT_X_BPQBLOCKXML`, and outfmt 13 to 16 with `LOSAT_X_BPQBLOCKXML2`
 //! (`src/algorithm/blastp/x_query_blocks.rs`) on whole searches.
 //!
 //! The switches are in the strict set (`src/utils/xswitch.rs`): on by default, off with `0` or
@@ -52,7 +52,7 @@ const XML2_OFF: (&str, &str) = ("LOSAT_X_BPQBLOCKXML2", "0");
 fn family_off(spec: &str) -> (&'static str, &'static str) {
     match spec {
         "5" => XML_OFF,
-        "15" | "16" => XML2_OFF,
+        "13" | "14" | "15" | "16" => XML2_OFF,
         "8" | "9" | "12" => SA_OFF,
         _ => FMT_OFF,
     }
@@ -61,6 +61,8 @@ fn family_off(spec: &str) -> (&'static str, &'static str) {
 /// One blastp run.
 struct Run {
     success: bool,
+    /// The exit status (`None` when a signal ended the process).
+    code: Option<i32>,
     stdout: Vec<u8>,
     /// Standard error without the `[TIMING]` and `[X_SHADOW]` lines.
     stderr: String,
@@ -68,6 +70,9 @@ struct Run {
     searches: usize,
     /// The `[X_SHADOW] BPQBLOCKFMT` lines.
     shadow: Vec<String>,
+    /// The `[TIMING] x_bppfree` lines: one per search of a query set, also of a run that failed
+    /// (the `blastp_total` line comes only from a run that ended well).
+    frees: usize,
 }
 
 /// `blastp -query <query> <subject...> -evalue 0.001 -num_threads <threads> <extra...>` with the
@@ -126,6 +131,10 @@ fn blastp(
         .lines()
         .filter(|line| line.starts_with("[TIMING] blastp_total:"))
         .count();
+    let frees = all
+        .lines()
+        .filter(|line| line.starts_with("[TIMING] x_bppfree:"))
+        .count();
     let shadow = all
         .lines()
         .filter(|line| line.starts_with("[X_SHADOW] BPQBLOCKFMT"))
@@ -137,10 +146,12 @@ fn blastp(
         .collect();
     Run {
         success: output.status.success(),
+        code: output.status.code(),
         stdout: output.stdout,
         stderr,
         searches,
         shadow,
+        frees,
     }
 }
 
@@ -1087,6 +1098,10 @@ fn the_frozen_ncbi_rows_of_two_query_batches_are_written_by_two_blocks() {
     let mut rows = 0;
     for line in lines.filter(|line| line.starts_with("db.sa.bpqb.")) {
         let cells: Vec<&str> = line.split('\t').collect();
+        // Outfmt 13 and 14 write side files: `the_frozen_ncbi_rows_of_outfmt_13_and_14_...` below.
+        if matches!(cells[format], "13" | "14") {
+            continue;
+        }
         let row = cells[id];
         let mut expected_err = String::new();
         if let Ok(text) = std::fs::read_to_string(frozen.join(format!("{row}.err"))) {
@@ -1410,5 +1425,615 @@ fn queries_of_an_unsearched_batch_are_written_by_the_block_that_holds_them() {
         }
     }
     std::fs::remove_dir_all(db.parent().unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// ---- outfmt 13 and 14 (OF-BPQB3): side files and a master file ----
+
+/// What a run with `-out` left in its directory: the file name and bytes of every regular file, a
+/// directory as `<directory>` and a link as `-> target` (a link to `/dev/full` must not be read).
+type Files = std::collections::BTreeMap<String, Vec<u8>>;
+
+/// A run of outfmt `spec` (13 or 14) whose `-out` is `<dir>/rep.json` (13) or `<dir>/rep.xml` (14),
+/// in a fresh directory `dir` that `prepare` may fill first; the side files are `dir/rep_<n>.json`
+/// or `.xml` and the master is `dir/rep.json` / `dir/rep.xml`.
+fn files_run(
+    query: &Path,
+    subject: &[&OsStr],
+    threads: u32,
+    vars: &[(&str, &str)],
+    spec: &str,
+    dir: &Path,
+    extra: &[&str],
+    prepare: &dyn Fn(&Path),
+) -> (Run, Files) {
+    let _ = std::fs::remove_dir_all(dir);
+    std::fs::create_dir_all(dir).unwrap();
+    prepare(dir);
+    let extension = if spec == "13" { "json" } else { "xml" };
+    let mut args = outfmt(spec).to_vec();
+    args.extend([
+        OsString::from("-out"),
+        dir.join(format!("rep.{extension}")).into_os_string(),
+    ]);
+    args.extend(extra.iter().map(OsString::from));
+    let run = blastp(query, subject, threads, vars, &os(&args));
+    let mut files = Files::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let kind = entry.path().symlink_metadata().unwrap().file_type();
+        let bytes = if kind.is_symlink() {
+            format!("-> {}", entry.path().read_link().unwrap().display()).into_bytes()
+        } else if kind.is_dir() {
+            b"<directory>".to_vec()
+        } else {
+            std::fs::read(entry.path()).unwrap()
+        };
+        files.insert(name, bytes);
+    }
+    (run, files)
+}
+
+/// Asserts that two runs left the same files, the same status and the same standard error, and
+/// that `first` searched in blocks (more searches) when `blocks` is set, else in one search.
+fn assert_same_files(
+    first: &(Run, Files),
+    reference: &(Run, Files),
+    blocks: Option<bool>,
+    what: &str,
+) {
+    assert_eq!(first.0.code, reference.0.code, "{what}: the status differs");
+    assert_eq!(
+        first.0.stderr, reference.0.stderr,
+        "{what}: standard error differs"
+    );
+    let names = |files: &Files| files.keys().cloned().collect::<Vec<_>>();
+    assert_eq!(
+        names(&first.1),
+        names(&reference.1),
+        "{what}: the files differ"
+    );
+    for (name, bytes) in &first.1 {
+        assert!(
+            *bytes == reference.1[name],
+            "{what}: {name} differs ({} bytes, the reference {})",
+            bytes.len(),
+            reference.1[name].len()
+        );
+    }
+    // The searches of a query set: `blastp_total` lines, or `x_bppfree` lines when the run failed.
+    let searches = |run: &Run| run.searches.max(run.frees);
+    match blocks {
+        Some(true) => assert!(
+            searches(&first.0) > searches(&reference.0),
+            "{what}: {} searches, the reference {}",
+            searches(&first.0),
+            searches(&reference.0)
+        ),
+        Some(false) => assert_eq!(
+            searches(&first.0),
+            searches(&reference.0),
+            "{what}: not in blocks"
+        ),
+        None => {}
+    }
+}
+
+/// `blocks=<n>` and `side_files=<n>` of the one shadow line of `run`, which must end in `identical`.
+fn shadow_blocks_and_side_files(run: &Run, what: &str) -> (usize, usize) {
+    assert_eq!(run.shadow.len(), 1, "{what}: {:?}", run.shadow);
+    let line = &run.shadow[0];
+    assert!(line.ends_with(" identical"), "{what}: {line}");
+    let value = |key: &str| -> usize {
+        line.split_whitespace()
+            .find_map(|word| word.strip_prefix(key))
+            .unwrap_or_else(|| panic!("{what}: no {key} in {line}"))
+            .parse()
+            .unwrap()
+    };
+    (value("blocks="), value("side_files="))
+}
+
+const BLOCK_80: (&str, &str) = ("LOSAT_X_BPQBLOCK", "80");
+const NO_PREPARE: &dyn Fn(&Path) = &|_| {};
+/// The options of the frozen `db.sa.bpqb.*` rows.
+const PAJA_OPTIONS: [&str; 6] = ["-evalue", "0.1", "-max_target_seqs", "2", "-max_hsps", "1"];
+
+fn test_dir(tag: &str) -> PathBuf {
+    let dir =
+        std::env::temp_dir().join(format!("losat-bpqblockfiles-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn paja() -> (PathBuf, PathBuf) {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
+    (root.join("bpqb_q.faa"), root.join("paja"))
+}
+
+// Outfmt 13 and 14 with `-db`: the 30 queries of `bpqb_q.faa` are two NCBI batches, so with
+// `LOSAT_X_BPQBLOCK=80` two blocks (queries 1-26, 27-30) write the master and the 30 side files
+// that the search of all queries writes (`LOSAT_X_BPQBLOCKXML2=0`); the shadow says so, with the
+// side files compared.
+#[test]
+fn outfmt_13_and_14_blocks_write_the_side_files_and_master_of_the_search_of_all_queries() {
+    let (query, db) = paja();
+    let subject = [OsStr::new("-db"), db.as_os_str()];
+    let dir = test_dir("db");
+    for spec in ["13", "14"] {
+        for threads in THREADS {
+            let what = format!("outfmt {spec} threads {threads}");
+            let run = |vars: &[(&str, &str)], at: &str| {
+                files_run(
+                    &query,
+                    &subject,
+                    threads,
+                    vars,
+                    spec,
+                    &dir.join(at),
+                    &PAJA_OPTIONS,
+                    NO_PREPARE,
+                )
+            };
+            let reference = run(&[BLOCK_80, XML2_OFF], "ref");
+            assert!(reference.0.success, "{what}: {}", reference.0.stderr);
+            assert_eq!(
+                reference.1.len(),
+                31,
+                "{what}: the master and 30 side files"
+            );
+            let blocks = run(&[BLOCK_80], "blocks");
+            assert_same_files(&blocks, &reference, Some(true), &what);
+            // The default switch, with `LOSAT_X_DEFAULT=0` (the variable set: on).
+            let shadow = run(&[BLOCK_80, SHADOW], "shadow");
+            assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
+            let (count, sides) = shadow_blocks_and_side_files(&shadow.0, &what);
+            assert_eq!((count, sides), (2, 30), "{what}: blocks and side files");
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// Outfmt 13 and 14 with `-subject` (a FASTA subject file): the last report of a block is held until
+// the next report arrives, which is in the next block, and is written as the next number.
+#[test]
+fn outfmt_13_and_14_with_subject_hold_a_report_across_blocks() {
+    let query = fixture("MeenMJNV.faa");
+    let fasta = fixture("MejoMJNV.faa");
+    let subject = [OsStr::new("-subject"), fasta.as_os_str()];
+    let dir = test_dir("subject");
+    for spec in ["13", "14"] {
+        for threads in THREADS {
+            let what = format!("outfmt {spec} threads {threads}");
+            let run = |vars: &[(&str, &str)], at: &str| {
+                files_run(
+                    &query,
+                    &subject,
+                    threads,
+                    vars,
+                    spec,
+                    &dir.join(at),
+                    &[],
+                    NO_PREPARE,
+                )
+            };
+            let reference = run(&[BATCH, ("LOSAT_X_BPQBLOCK", "1"), XML2_OFF], "ref");
+            assert!(reference.0.success, "{what}: {}", reference.0.stderr);
+            assert!(
+                reference.1.len() > 10,
+                "{what}: {} files",
+                reference.1.len()
+            );
+            let blocks = run(&[BATCH, ("LOSAT_X_BPQBLOCK", "1")], "blocks");
+            assert_same_files(&blocks, &reference, Some(true), &what);
+            let shadow = run(&[BATCH, ("LOSAT_X_BPQBLOCK", "1"), SHADOW], "shadow");
+            assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
+            let (count, sides) = shadow_blocks_and_side_files(&shadow.0, &what);
+            assert!(count >= 2, "{what}: {count} blocks");
+            assert_eq!(sides, reference.1.len() - 1, "{what}: side files");
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// Outfmt 13 and 14 with taxids and a taxonomy database: the names in the side files and the
+// messages on standard error are those of the search of all queries; a database that the search of
+// all queries refuses (9606's name has UTF-8 bytes) leaves the blocks and fails before any file.
+#[test]
+fn outfmt_13_and_14_with_taxids_and_a_taxonomy_database_keep_the_files_and_messages() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let query = manifest_dir.join("tests/db_search/bpqb_q.faa");
+    let db = manifest_dir.join("tests/db_search/paja_taxid");
+    let subject = [OsStr::new("-db"), db.as_os_str()];
+    let dir = test_dir("taxdb");
+    // (taxonomy database variant, whether the search of all queries completes, whether it writes
+    // messages to standard error)
+    let cases = [
+        (None, true, false),
+        (Some("taxdb/good"), true, false),
+        (Some("taxdb/bad_magic"), true, true),
+        (Some("taxdb_xml2/last_10090_past_end"), true, true),
+        (Some("taxdb/high_bytes_utf8"), false, false),
+    ];
+    for spec in ["13", "14"] {
+        for threads in [1, 4] {
+            for (variant, completes, messages) in cases {
+                let what = format!("outfmt {spec}, taxdb {variant:?}, threads {threads}");
+                let blastdb = variant
+                    .map(|variant| manifest_dir.join("tests/seqdb").join(variant))
+                    .map(|path| path.to_str().unwrap().to_string());
+                let mut vars: Vec<(&str, &str)> = vec![BLOCK_80];
+                if let Some(path) = &blastdb {
+                    vars.push(("BLASTDB", path));
+                }
+                let run = |extra_vars: &[(&str, &str)], at: &str| {
+                    let mut all = vars.clone();
+                    all.extend_from_slice(extra_vars);
+                    files_run(
+                        &query,
+                        &subject,
+                        threads,
+                        &all,
+                        spec,
+                        &dir.join(at),
+                        &PAJA_OPTIONS,
+                        NO_PREPARE,
+                    )
+                };
+                let reference = run(&[XML2_OFF], "ref");
+                assert_eq!(
+                    reference.0.success, completes,
+                    "{what}: {}",
+                    reference.0.stderr
+                );
+                assert_eq!(
+                    reference.0.stderr.lines().count() > 1,
+                    messages || !completes,
+                    "{what}: {}",
+                    reference.0.stderr
+                );
+                let blocks = run(&[], "blocks");
+                // The refused database leaves the blocks (the check is made before the first
+                // block), so that no side file is written.
+                assert_same_files(&blocks, &reference, Some(completes), &what);
+                if completes {
+                    assert_eq!(reference.1.len(), 31, "{what}");
+                    let shadow = run(&[SHADOW], "shadow");
+                    assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
+                    let (count, sides) = shadow_blocks_and_side_files(&shadow.0, &what);
+                    assert_eq!((count, sides), (2, 30), "{what}");
+                } else {
+                    assert!(
+                        reference.1.values().all(Vec::is_empty),
+                        "{what}: the refused run wrote a file"
+                    );
+                }
+            }
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// `bpqb_q.faa` with an O letter in queries `with_o` (numbers from 1), whose "O characters
+/// replaced" warning goes to standard error before the query's report.
+fn queries_with_warnings(dir: &Path, with_o: &[usize]) -> PathBuf {
+    let text = std::fs::read_to_string(paja().0).unwrap();
+    let mut out = String::new();
+    let mut number = 0;
+    for record in text.split('>').filter(|record| !record.is_empty()) {
+        number += 1;
+        let (head, body) = record.split_once('\n').unwrap();
+        let body = if with_o.contains(&number) {
+            body.replacen('L', "O", 2)
+        } else {
+            body.to_string()
+        };
+        out.push('>');
+        out.push_str(head);
+        out.push('\n');
+        out.push_str(&body);
+    }
+    write_file(dir, "q_warn.faa", &out)
+}
+
+// A side file that cannot be opened (its name is a directory), in the first block, at the first and
+// last query of the second block and at its middle: NCBI stops at that report with "Cannot open
+// output file" (status 1), the side files before it stay and the master stays empty. The blocks
+// stop at the same report with the same files and the same standard error, where queries after
+// the failing one (and one in the first block) have warnings.
+#[test]
+fn an_unopenable_side_file_stops_the_blocks_where_it_stops_the_search_of_all_queries() {
+    let dir = test_dir("open");
+    let query = queries_with_warnings(&dir, &[5, 29, 30]);
+    let (_, db) = paja();
+    let subject = [OsStr::new("-db"), db.as_os_str()];
+    for spec in ["13", "14"] {
+        let extension = if spec == "13" { "json" } else { "xml" };
+        for threads in THREADS {
+            for n in [1usize, 27, 28, 30] {
+                let what = format!("outfmt {spec}, side file {n}, threads {threads}");
+                let prepare = |at: &Path| {
+                    std::fs::create_dir(at.join(format!("rep_{n}.{extension}"))).unwrap();
+                };
+                let run = |vars: &[(&str, &str)], at: &str| {
+                    files_run(
+                        &query,
+                        &subject,
+                        threads,
+                        vars,
+                        spec,
+                        &dir.join(at),
+                        &PAJA_OPTIONS,
+                        &prepare,
+                    )
+                };
+                let reference = run(&[BLOCK_80, XML2_OFF], "ref");
+                assert_eq!(reference.0.code, Some(1), "{what}: {}", reference.0.stderr);
+                assert!(
+                    reference
+                        .0
+                        .stderr
+                        .contains("Command line argument error: Cannot open output file"),
+                    "{what}: {}",
+                    reference.0.stderr
+                );
+                // The side files before n, the directory and an empty master.
+                assert_eq!(reference.1.len(), n + 1, "{what}");
+                assert!(
+                    reference.1[&format!("rep.{extension}")].is_empty(),
+                    "{what}: the master is not empty"
+                );
+                assert_eq!(
+                    reference.1[&format!("rep_{n}.{extension}")],
+                    b"<directory>",
+                    "{what}"
+                );
+                let blocks = run(&[BLOCK_80], "blocks");
+                // A failure in the first block (26 queries) is reached by its search alone.
+                assert_same_files(&blocks, &reference, (n > 26).then_some(true), &what);
+            }
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// A side file that is a link to `/dev/full`, in the first block and in the second: the write fails
+// after the file was opened. LOSAT stops the run in every program with "BLAST failed to write
+// output" and status 6 (DECISIONS 35: NCBI ignores the error); the blocks do the same at the same
+// report with the same files.
+#[cfg(unix)]
+#[test]
+fn a_side_file_that_cannot_be_written_stops_the_blocks_where_it_stops_the_search_of_all_queries() {
+    let dir = test_dir("full");
+    let query = queries_with_warnings(&dir, &[5, 29, 30]);
+    let (_, db) = paja();
+    let subject = [OsStr::new("-db"), db.as_os_str()];
+    for spec in ["13", "14"] {
+        let extension = if spec == "13" { "json" } else { "xml" };
+        for threads in THREADS {
+            for n in [3usize, 28] {
+                let what = format!("outfmt {spec}, side file {n}, threads {threads}");
+                let prepare = |at: &Path| {
+                    std::os::unix::fs::symlink(
+                        "/dev/full",
+                        at.join(format!("rep_{n}.{extension}")),
+                    )
+                    .unwrap();
+                };
+                let run = |vars: &[(&str, &str)], at: &str| {
+                    files_run(
+                        &query,
+                        &subject,
+                        threads,
+                        vars,
+                        spec,
+                        &dir.join(at),
+                        &PAJA_OPTIONS,
+                        &prepare,
+                    )
+                };
+                let reference = run(&[BLOCK_80, XML2_OFF], "ref");
+                assert_eq!(reference.0.code, Some(6), "{what}: {}", reference.0.stderr);
+                assert!(
+                    reference.0.stderr.contains("BLAST failed to write output"),
+                    "{what}: {}",
+                    reference.0.stderr
+                );
+                assert_eq!(reference.1.len(), n + 1, "{what}");
+                assert!(
+                    reference.1[&format!("rep.{extension}")].is_empty(),
+                    "{what}"
+                );
+                let blocks = run(&[BLOCK_80], "blocks");
+                // A failure in the first block (26 queries) is reached by its search alone.
+                assert_same_files(&blocks, &reference, (n > 26).then_some(true), &what);
+            }
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// Queries without a hit and an empty query file: the blocks write what the search of all queries
+// writes (a side file per query, even one without hits; for an empty query file the plan is not
+// taken and the master lists nothing).
+#[test]
+fn outfmt_13_and_14_without_hits_and_without_queries_are_unchanged() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search");
+    let (_, db) = paja();
+    let subject = [OsStr::new("-db"), db.as_os_str()];
+    let dir = test_dir("nohit");
+    for spec in ["13", "14"] {
+        for name in ["nohit.faa", "empty.faa"] {
+            let query = root.join(name);
+            for threads in THREADS {
+                let what = format!("outfmt {spec}, {name}, threads {threads}");
+                let run = |vars: &[(&str, &str)], at: &str| {
+                    files_run(
+                        &query,
+                        &subject,
+                        threads,
+                        vars,
+                        spec,
+                        &dir.join(at),
+                        &PAJA_OPTIONS,
+                        NO_PREPARE,
+                    )
+                };
+                let reference = run(&[BLOCK_80, XML2_OFF], "ref");
+                let blocks = run(&[BLOCK_80], "blocks");
+                // One block or no query: the search of all queries, in one search.
+                assert_same_files(&blocks, &reference, Some(false), &what);
+                let shadow = run(&[BLOCK_80, SHADOW], "shadow");
+                assert_same_files(&shadow, &reference, None, &format!("{what} shadow"));
+            }
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// The frozen NCBI rows `db.sa.bpqb.{13,14,taxdb.13,taxdb.14}` (`tests/db_search_manifest.tsv`; the
+// last two have a taxonomy database on `BLASTDB`): 30 queries are one block at the default
+// `LOSAT_X_BPQBLOCK`, so with `LOSAT_X_BPQBLOCK=1` the two blocks (one per NCBI batch) must write the
+// master and the 30 side files that NCBI froze, and its standard error, at one and four threads.
+#[test]
+fn the_frozen_ncbi_rows_of_outfmt_13_and_14_are_written_by_two_blocks() {
+    let manifest = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/db_search_manifest.tsv"),
+    )
+    .unwrap();
+    let mut lines = manifest.lines().filter(|line| !line.starts_with('#'));
+    let columns: Vec<&str> = lines.next().unwrap().split('\t').collect();
+    let column = |name: &str| columns.iter().position(|c| *c == name).unwrap();
+    let (id, db, query, extra, format) = (
+        column("row_id"),
+        column("db"),
+        column("query"),
+        column("extra_args"),
+        column("outfmt"),
+    );
+    let frozen = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/db_search");
+    let dir = test_dir("frozen");
+    let mut rows = 0;
+    for line in lines.filter(|line| line.starts_with("db.sa.bpqb.")) {
+        let cells: Vec<&str> = line.split('\t').collect();
+        if !matches!(cells[format], "13" | "14") {
+            continue;
+        }
+        let (row, spec) = (cells[id], cells[format]);
+        let extension = if spec == "13" { "json" } else { "xml" };
+        let expected_err =
+            std::fs::read_to_string(frozen.join(format!("{row}.err"))).unwrap_or_default();
+        let (variables, arguments): (Vec<&str>, Vec<&str>) = cells[extra]
+            .split_whitespace()
+            .partition(|token| token.starts_with("BLASTDB="));
+        // The side files are `<row>.out_<n>.<ext>` next to the master `<row>.out`.
+        let mut expected: Vec<(String, Vec<u8>)> = vec![(
+            format!("{row}.out"),
+            std::fs::read(frozen.join(format!("{row}.out"))).unwrap(),
+        )];
+        for n in 1.. {
+            let name = format!("{row}.out_{n}.{extension}");
+            match std::fs::read(frozen.join(&name)) {
+                Ok(bytes) => expected.push((name, bytes)),
+                Err(_) => break,
+            }
+        }
+        assert_eq!(expected.len(), 31, "{row}");
+        for threads in THREADS {
+            let what = format!("{row} threads {threads}");
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let out = dir.join(format!("{row}.out"));
+            let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
+            for (name, _) in std::env::vars_os() {
+                let text = name.to_string_lossy();
+                if (text.starts_with("LOSAT_") && name != "LOSAT_BLASTX_WORKER_LOG")
+                    || text == "BATCH_SIZE"
+                    || text.starts_with("NCBI")
+                    || text.starts_with("BLAST")
+                {
+                    command.env_remove(name);
+                }
+            }
+            let home =
+                std::env::temp_dir().join(format!("losat-bpqblockfmt-home-{}", std::process::id()));
+            std::fs::create_dir_all(&home).unwrap();
+            command.env("HOME", &home).env("USERPROFILE", &home);
+            if std::env::var_os("LOSAT_BLASTX_WORKER_LOG").is_none() {
+                command.env(
+                    "LOSAT_BLASTX_WORKER_LOG",
+                    std::env::temp_dir().join("losat-bpqblockfmt-worker.log"),
+                );
+            }
+            for variable in &variables {
+                command.env("BLASTDB", variable.trim_start_matches("BLASTDB="));
+            }
+            let output = command
+                .current_dir(env!("CARGO_MANIFEST_DIR"))
+                .arg("blastp")
+                .args(["-db", cells[db], "-query", cells[query]])
+                .args(&arguments)
+                .args(["-outfmt", spec, "-out"])
+                .arg(&out)
+                .args(["-num_threads", &threads.to_string()])
+                .env("LOSAT_TIMING", "1")
+                .env("LOSAT_X_BPQBLOCK", "1")
+                .output()
+                .expect("run LOSAT");
+            let all = String::from_utf8_lossy(&output.stderr).into_owned();
+            let searches = all
+                .lines()
+                .filter(|line| line.starts_with("[TIMING] blastp_total:"))
+                .count();
+            let stderr: String = all
+                .split_inclusive('\n')
+                .filter(|line| !line.starts_with("[TIMING]"))
+                .collect();
+            assert!(output.status.success(), "{what}: {stderr}");
+            assert!(searches >= 2, "{what}: {searches} searches, not in blocks");
+            assert!(output.stdout.is_empty(), "{what}: standard output");
+            assert_eq!(stderr, expected_err, "{what}: standard error differs");
+            for (name, bytes) in &expected {
+                // `<row>.out_<n>.<ext>` is written as `<row>.out_<n>.<ext>` next to `-out`.
+                let written = std::fs::read(dir.join(name)).unwrap_or_default();
+                assert!(written == *bytes, "{what}: {name} differs from NCBI's");
+            }
+        }
+        rows += 1;
+    }
+    assert_eq!(rows, 4);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// The queries are read before the first block, so a side file that has the name of the query file
+// (`rep_1.json` for `-out rep.json`) truncates it only after it was read: the blocks write what the
+// search of all queries writes.
+#[test]
+fn a_side_file_named_like_the_query_file_changes_nothing() {
+    let (query, db) = paja();
+    let subject = [OsStr::new("-db"), db.as_os_str()];
+    let dir = test_dir("alias");
+    let text = std::fs::read(&query).unwrap();
+    let prepare = |at: &Path| std::fs::write(at.join("rep_1.json"), &text).unwrap();
+    let run = |vars: &[(&str, &str)], at: &str| {
+        let at = dir.join(at);
+        let (run, files) = files_run(
+            &at.join("rep_1.json"),
+            &subject,
+            1,
+            vars,
+            "13",
+            &at,
+            &PAJA_OPTIONS,
+            &prepare,
+        );
+        (run, files)
+    };
+    let reference = run(&[BLOCK_80, XML2_OFF], "ref");
+    assert!(reference.0.success, "{}", reference.0.stderr);
+    let blocks = run(&[BLOCK_80], "blocks");
+    assert_same_files(&blocks, &reference, Some(true), "side file 1 is the query");
     std::fs::remove_dir_all(&dir).unwrap();
 }

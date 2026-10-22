@@ -188,6 +188,12 @@ mod x_rpt_stream;
 #[path = "database.rs"]
 mod database;
 
+// NCBI reference: c++/src/algo/blast/core/hspfilter_culling.c (whole file)
+// BLASTN `-culling_limit`: the culling writer of the preliminary stage and the culling pipe of
+// the traceback (a child module, so that it uses the kernel's private types).
+#[path = "culling.rs"]
+mod culling;
+
 // NCBI reference (598d8ae6): c++/src/app/blast/blastn_app.cpp:277-300
 // ```c++
 //         for (; !input.End(); formatter.ResetScopeHistory(), QueryBatchCleanup() ) {
@@ -5159,6 +5165,8 @@ struct BlastnReportInputs<'a> {
     /// the contexts of an invalid query (not searched by NCBI).
     context_karlin: &'a [Option<ContextKarlin>],
     max_target_seqs: Option<usize>,
+    /// `-culling_limit` (0: no culling), read when the hit lists are finished.
+    culling_limit: i32,
     db_num_seqs: usize,
     db_len_total: usize,
     /// The `Database:` lines of a database search's outfmt 0 report.
@@ -5459,7 +5467,25 @@ fn finish_query_hit_list(
     max_hsps_per_subject: usize,
     query_cov_hsp_perc: f64,
     subject_besthit: bool,
+    culling_limit: i32,
 ) {
+    // NCBI's culling pipe is the first thing the traceback does with the consolidated results
+    // (`-culling_limit`; the mask level of 101, the default, is no step).
+    // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:1721-1723,1763-1766
+    // ```c
+    //         /* post-traceback pipes */
+    //         BlastHSPStreamTBackClose(hsp_stream, results);
+    // ...
+    //     	s_FilterBlastResults(results, hit_params->options, query_info, program_number);
+    // ```
+    if culling_limit > 0 {
+        culling::cull_traceback(
+            hit_list,
+            query_len,
+            culling_limit,
+            usize::try_from(get_prelim_hitlist_size(hitlist_size, false, true)).unwrap_or(0),
+        );
+    }
     // NCBI reference: ncbi-blast/c++/src/algo/blast/core/blast_traceback.c:836-867
     // ```c
     // for (subject_index = 0; subject_index < hit_list->hsplist_count; ++subject_index) {
@@ -5659,6 +5685,7 @@ fn post_process_hits_and_write(
                 max_hsps_per_subject,
                 query_cov_hsp_perc,
                 subject_besthit,
+                report.culling_limit,
             );
             drop_hsps_of_score_zero(hit_list);
         }
@@ -8184,6 +8211,7 @@ fn run_in_pool(
                             args.max_hsps_per_subject.unwrap_or(0),
                             args.qcov_hsp_perc.unwrap_or(0.0),
                             args.subject_besthit,
+                            args.culling_limit,
                         );
                     }
                 }
@@ -9011,6 +9039,7 @@ fn write_reports_untimed(
         window_size: config.window_size,
         context_karlin: results.context_karlin,
         max_target_seqs: args.max_target_seqs,
+        culling_limit: args.culling_limit,
         db_num_seqs: subjects.shown.num_seqs,
         db_len_total: subjects.shown.total_letters,
         database: subjects.shown.database.as_ref(),
@@ -17090,6 +17119,74 @@ fn search_query_batch(
     let prelim_lists = match split_prelim_lists {
         Some(lists) => lists,
         None => match subjects {
+            // `-culling_limit`: NCBI's culling writer takes the place of the HSP collector
+            // (`BlastHSPWriter` of `CreateHspWriter`), for a batch and for a query chunk alike
+            // (a chunk's queries are its parts, so the lengths are the chunk's). Chosen once;
+            // the default arms below are unchanged.
+            // NCBI reference: ncbi-blast/c++/src/algo/blast/api/setup_factory.cpp:318-342
+            // ```c
+            //     else if (filt_opts) {
+            //         if (filt_opts->best_hit && (filt_opts->best_hit_stage & ePrelimSearch))
+            //         ...
+            //         else if (filt_opts->culling_opts &&
+            //                  (filt_opts->culling_stage & ePrelimSearch))
+            //         {
+            // ```
+            SubjectSource::Prepared(_) if args.culling_limit > 0 => {
+                let mut writer = culling::PrelimCulling::new(
+                    &query_lengths,
+                    prelim_hitlist_size,
+                    args.culling_limit,
+                );
+                search_subjects(None, &mut |oid, _, prelim| writer.add(oid, prelim));
+                writer.finish()
+            }
+            SubjectSource::Database(database) if args.culling_limit > 0 => {
+                // The same drivers as the default arm below, with the culling writer as the
+                // sink (a second instance of `database::search_blocks`).
+                let mut writer = culling::PrelimCulling::new(
+                    &query_lengths,
+                    prelim_hitlist_size,
+                    args.culling_limit,
+                );
+                if any_valid_context {
+                    database::search_blocks(
+                        database,
+                        parallel_pool,
+                        use_parallel,
+                        &new_scratch,
+                        &|state: &mut (GapAlignScratch, SubjectScratch),
+                          ordinal: u32,
+                          subject: BlastnSubjectRef<'_>| {
+                            let (gap_scratch, subject_scratch) = state;
+                            let mut subject_hits: Option<Vec<BlastnHsp>> = None;
+                            let mut prelim_hits: Vec<PrelimHit> = Vec::new();
+                            process_subject(
+                                ordinal as usize,
+                                subject,
+                                gap_scratch,
+                                subject_scratch,
+                                None,
+                                &mut subject_hits,
+                                &mut prelim_hits,
+                            );
+                            (!prelim_hits.is_empty()).then_some(prelim_hits)
+                        },
+                        &mut |ordinal, prelim_hits| writer.add(ordinal as usize, prelim_hits),
+                        &good_init_extends,
+                    )
+                    .map_err(|error| {
+                        database_search_error(
+                            error,
+                            first_batch,
+                            reborrow_outputs(&mut outputs),
+                            megablast,
+                            &shown,
+                        )
+                    })?;
+                }
+                writer.finish()
+            }
             SubjectSource::Prepared(_) => {
                 let mut collector = PrelimHitCollector::new(queries_ref.len(), prelim_hitlist_size);
                 search_subjects(None, &mut |oid, _, prelim| collector.add(oid, prelim));

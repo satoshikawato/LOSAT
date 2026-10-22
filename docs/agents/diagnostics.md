@@ -844,15 +844,15 @@ Same values, faster computation:
   hash cells ahead in batches of 64; same update order.
 - `LOSAT_X_ENVCACHE=1` blastn debug variables read once instead of per extension.
 - `LOSAT_X_BXLAZYCTX=1` blastx seed context lookup moved after the diagonal test.
-- `LOSAT_X_BXLEAN=1` does not build records nobody reads (candidate copies without an observer,
-  test events); no tree or DP space for a (chunk, subject) without HSPs. The tblastn reference loop
+- `LOSAT_X_BXLEAN=1` does not build records nobody reads (candidate copies without an observer);
+  no tree or DP space for a (chunk, subject) without HSPs. The tblastn reference loop
   (`LOSAT_X_TBNPAR=0`) never collects the test-only comparison events; this has no switch.
 - `LOSAT_X_BXLUT=1` blastx lookup table filled in place from per-cell counts (same append order as
   `s_AddNeighboringWords` and `BlastAaLookupFinalize`), neighbour-word lists memoised per thread
   (`tblastx/lookup/x_lut_direct.rs`). Shadow: `LOSAT_X_BXLUTSHADOW=1` (every table compared field by
   field). Strict-set candidate (S-C, round 5).
 - `LOSAT_X_BXSCAN=1` blastx seed loop reads the scanner's per-thread offset-pair buffer in place instead
-  of a fresh buffer and a copy per subject (`blastx/x_seed_scan.rs`); not in the diagnostic stages, and
+  of a fresh buffer and a copy per subject (`blastx/x_seed_scan.rs`); not in the diagnostic stages
   (BLASTX has no bucketed order: its seed loop is the scan-order one). Shadow: `LOSAT_X_BXSCANSHADOW=1`
   (hit lists and diagonal table). Strict-set candidate (S-C, round 5).
 - `LOSAT_X_SEEDBUCKET=1` (in the strict set since 2026-10-12) TBLASTX two-hit stage: hits buffered
@@ -4214,7 +4214,7 @@ Scheduling (each value computed by one thread with the original function; order 
   per cell: on by default where the cell test is the AVX2 batch (an x86-64 CPU with AVX2), `=0` turns it
   off, and with `LOSAT_X_DEFAULT=0` it is off unless set; set to a value it runs with any cell test; acts
   in the two-hit stage with the standard lookup table,
-  `-word_size 3`, when no diagnostic stage traces the seeds and the diagonal order is the reference's)
+  `-word_size 3`, when no diagnostic stage traces the seeds)
   the subject scan and the two-hit diagonal test in one loop, with the hits of one lookup cell tested in
   batches of eight (`blastx/x_seed_diag.rs`, exactness argument in its header): blastx calls blastp's
   fused scan of `LOSAT_X_BPSEED` with the cell test of `LOSAT_X_BPDIAG` (the AVX2 batch on an x86-64 CPU
@@ -4268,7 +4268,7 @@ Scheduling (each value computed by one thread with the original function; order 
   scan's cell calls against the presence-test loop (word sizes 2-4, subjects across the block edges, letters
   1-27), blastp's batched-scan test, and the blastx direct and fused tests with and without the switch. The
   shadow switches check it (`LOSAT_X_BXSCANSHADOW=1` with it compares the direct loop, `LOSAT_X_BXDIAGSHADOW=1`
-  the fused loop, against `word_finder_plain`): 1,214,400 subject scans (800 fly cDNAs x yeast) and 2,178,834
+  the fused loop, against `word_finder`): 1,214,400 subject scans (800 fly cDNAs x yeast) and 2,178,834
   (a 300-nt piece x the first UniRef50 volume), identical. Measured 2026-10-17 on the workstation (node 1, one
   pinned core per arm with its HT sibling idle, the two arms of a pair at once, swapped every round; `-db`,
   `-evalue 1e-5`, one thread; every output the same bytes in both arms, and NCBI BLAST+ 2.17.0's where timed
@@ -4305,7 +4305,7 @@ Scheduling (each value computed by one thread with the original function; order 
   `LOSAT_X_BXDIAG` keeps its own tests. With `LOSAT_X_BXDIAG=0` 79-81 % of the hits of the three cases
   below are too far, 14.5-17.4 % overlap, 1.2-1.4 % meet a flag-1 cell and 2.1-2.8 % are candidates
   (v4-A10 probe bx1). Shadow: `LOSAT_X_BXSCANSHADOW=1` compares the direct loop that runs, this one where it
-  acts, with `word_finder_plain` on every subject the direct loop scans, and prints `[X_SHADOW] BXHITBF
+  acts, with `word_finder` on every subject the direct loop scans, and prints `[X_SHADOW] BXHITBF
   subjects_compared=N` beside BXSCAN's line (N: the subjects this loop scanned).
   Measured 2026-10-20 on the workstation (node 0: one physical core for 1 thread, 8 physical cores for 8
   threads, HT siblings idle, the booked cores warmed 3 s before every run, arm order reversed every other

@@ -63,14 +63,14 @@
 //! tables), inside the fills:
 //! 115 M demand reads found their line modified in another core (`ocr.demand_data_rd.l3_hit.
 //! snoop_hitm`), against 0.07 M for the serial loop and 0.13 M when one thread ran every worker's
-//! part one after another; with the private copies 0.8 M. The stores of `next_pos` still take
+//! part one after another; with per-thread private copies (a padded fill since removed) 0.8 M. The stores of `next_pos` still take
 //! lines from other cores (each worker writes the offsets of its own words, which interleave
 //! with the other workers'; 32 M such stores in that run), but stores wait in the store buffer;
 //! writing `next_pos` afterwards by spans of offsets removed them and cost more than it saved
 //! (lists of 8 bytes a word and their growth), so it is not done.
 //! Each worker of the read-once fill counts into a private copy of `helper_array` and sets its bits in a
 //! private copy of `pv_array`, each a whole number of 64-byte lines starting on a line boundary
-//! (`Lines`), and at the end of its part adds its own blocks' counters into `helper_array`
+//! (`Lines`), zeroed in its first job, and after its last chunk adds its own blocks' counters into `helper_array`
 //! (`saturating_add`) and ORs its own blocks' presence-vector words into `pv_array`.
 //!
 //! Why the counters and presence bits are the loop's. Counter `h` covers the cells
@@ -576,14 +576,10 @@ impl Private<'_> {
 
 /// No NCBI counterpart (scheduling only): what one fill did. `once`: the read-once fill
 /// (LOSAT_X_MBLUTONCE, `x_mb_lookup_once.rs`) made the table; for `[TIMING] x_mb_lookup_build`'s
-/// `once=` and the shadow's counters. In tests also
-/// `parts_with_values`, the number of parts (owners for the read-once fill) whose private copies
-/// held a non-zero element before their flush.
+/// `once=` and the shadow's counters.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct FillStats {
     pub(super) once: bool,
-    #[cfg(test)]
-    pub(super) parts_with_values: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -859,12 +855,8 @@ fn fill_mode(
     // handed to the owners of their cells (`x_mb_lookup_once.rs`, which counts into private
     // copies); off, the fill of this module.
     if once {
-        let _stats = super::x_mb_lookup_once::fill(parts, words, tables, in_pool, timed, resident);
-        return FillStats {
-            once: true,
-            #[cfg(test)]
-            parts_with_values: _stats.owners_with_values,
-        };
+        let _ = super::x_mb_lookup_once::fill(parts, words, tables, in_pool, timed, resident);
+        return FillStats { once: true };
     }
     fill_with(parts, words, tables, in_pool)
 }
@@ -909,11 +901,7 @@ fn fill_with(parts: usize, words: &Words<'_>, tables: Tables<'_>, in_pool: bool)
             fill_part(part as u8, owner, block_shift, words, shared);
         }
     }
-    FillStats {
-        once: false,
-        #[cfg(test)]
-        parts_with_values: 0,
-    }
+    FillStats { once: false }
 }
 
 /// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_nalookup.c:1081-1091,1104-1106

@@ -2118,7 +2118,7 @@ impl XPairPar {
     // (frame, chunk), run. This is the only part of the seed stage that reads the group tables
     // (`self.groups`: `longest_chain` while the units are listed, the tables in `scan_unit`).
     // `merge_subject` is the second half; the two were one function (`run_subject`) and are
-    // called one after the other at dispatch point 2 of run_impl.rs, where LOSAT_X_SEEDRELEASE
+    // called one after the other at dispatch point 2 of run_impl.rs, where the seed release
     // ends its hold on the group tables between them (x_seed_release.rs).
     /// The units of one subject, run: what `merge_subject` builds `combined_ungapped_hits` from.
     pub(super) fn run_subject_units(

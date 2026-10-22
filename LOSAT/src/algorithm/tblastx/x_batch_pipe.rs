@@ -31,7 +31,7 @@
 //! 2. The loop searches a batch itself when it reaches it, unless the batch before already
 //!    started it. A batch starts the next one at its *seed-stage end*: when the last of its
 //!    subjects has ended its seed stage (`XSeedEnd`, at dispatch point 5 of `process_subject`,
-//!    where LOSAT_X_SEEDRELEASE has freed the batch's lookup and unit tables), if the admission
+//!    where the seed release (`x_seed_release.rs`) has freed the batch's lookup and unit tables), if the admission
 //!    rule lets it. That search is a job of the loop's scope (`rayon::in_place_scope`) and runs
 //!    on the pool like any other.
 //! 3. The loop takes a started batch's result from its slot. Until the slot is filled the loop's
@@ -80,8 +80,7 @@
 //! Off (the loop as before): the switch off; a build without `parallel`, or wasm32 (the loop is
 //! kept there); one thread, or a loop not on a thread of its pool; fewer than two planned
 //! batches; any debugging output of the search (`LOSAT_DEBUG*`, the HSP trace, the diagnostics,
-//! the stage dumps), whose lines would interleave; `LOSAT_X_SEEDRELEASE` off (a batch would keep
-//! its tables while the next one builds its own).
+//! the stage dumps), whose lines would interleave.
 //!
 //! Diagnostics: with `LOSAT_X_STATS`, `[X_STATS] TBXPIPE planned= taken= early= loop= waited=
 //! key_mismatch= max_held_hsps=` at the end of the search (early: started at the batch before's

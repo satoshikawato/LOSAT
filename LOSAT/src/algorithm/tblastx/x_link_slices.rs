@@ -1,23 +1,17 @@
-//! EXPERIMENT (LOSAT_X_LINKSLICES / LOSAT_X_LINKSLICESSHADOW): the groups of a TBLASTX linking
-//! call linked as disjoint sub-slices of the one sorted HSP list. Today's in-place path
-//! (`x_hsp_inplace::link_in_place`) cuts the sorted list into one Vec per group, links each, and
-//! copies the linked groups into a new list of the whole size, so that the list exists twice
-//! while the second one is filled (AP027131 x AP027133, genetic code 4: 49 MiB twice in the first
-//! linking call, the heap peak of the search). With the switch on the groups are linked where
-//! they lie: no cut, no assembly, no second list. The list after the per-group linking is today's
-//! list, record for record, at any number of threads.
+//! The groups of a TBLASTX linking call linked as disjoint sub-slices of the one sorted HSP
+//! list. The first form of the in-place path cut the sorted list into one Vec per group, linked
+//! each, and copied the linked groups into a new list of the whole size, so that the list existed
+//! twice while the second one was filled (AP027131 x AP027133, genetic code 4: 49 MiB twice in
+//! the first linking call, the heap peak of the search). Here the groups are linked where they
+//! lie: no cut, no assembly, no second list. The list after the per-group linking is the
+//! reference's list, record for record, at any number of threads.
 //!
 //! This file is a child module of `sum_stats_linking/linking.rs` (declared there with `#[path]`,
 //! beside `x_hsp_inplace.rs` and `x_link_sort.rs`), so it calls that file's per-group functions
 //! without changing them. `x_hsp_inplace::link_in_place` calls it at its group step; nothing else
-//! does.
-//!
-//! The switch is in the strict set (`utils/xswitch.rs`): it is on unless `LOSAT_X_LINKSLICES` is
-//! `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it off the statements of `link_in_place`
-//! run as before it existed, after one read of `mode()` per linking call.
-//! It acts only where `LOSAT_X_HSPINPLACE` does: the reference body (`LOSAT_X_HSPINPLACE=0`,
-//! `LOSAT_X_DEFAULT=0`, `LOSAT_DIAGNOSTICS`, `LOSAT_DEBUG_CUTOFFS`) has its own group loop and is
-//! not touched.
+//! does. The reference body (`LOSAT_DIAGNOSTICS`, `LOSAT_DEBUG_CUTOFFS`) has its own group loop
+//! (the `current_group.push(hit)` grouping and the `extend` of the linked groups) and is not
+//! touched; the unit tests below compare this file with a copy of that loop.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:522-531
 //! ```c
@@ -50,110 +44,91 @@
 //! `hp_frame_number[frame_index]`), each linked in place, and the array is read back in chain
 //! order: the slices are closer to NCBI than the cut Vecs. NCBI has no second array of the HSPs.
 //!
-//! # Why the list after the per-group linking is today's (each point checked against the code)
+//! # Why the list after the per-group linking is the reference's (each point checked against the code)
 //!
-//! Line numbers are those of this commit.
-//!
-//! 1. The slices are today's groups (same test, same order). Today `groups_off_the_end`
-//!    (`x_hsp_inplace.rs:546-564`) takes its run starts from `group_starts` (`:508-523`), the loop
-//!    it ran in its own body before, a function of the sorted list alone, and cuts the runs off
-//!    the end: for each start s from the last down, `split_off(s)` (`:556`) moves the records s..
-//!    of what is left, in order, into a group; the head is the first group and the group list is
-//!    reversed (`:562`). So group k holds the records at positions [s_k, s_{k+1}) of the sorted
-//!    list, in list order, with s_0 = 0 and the last end at n. `link_groups_as` below calls the
-//!    same `group_starts` on the same sorted list (the reset and the sort before it are
-//!    `link_in_place`'s, unchanged, and run before the dispatch at `x_hsp_inplace.rs:1000`), and
+//! 1. The slices are the reference's groups (same test, same order). The reference body starts
+//!    a group at a record whose `translated_context_group` or sign of `s_frame` differs from the
+//!    record before it, so its group k holds the records at positions [s_k, s_{k+1}) of the
+//!    sorted list, in list order, with s_0 = 0 and the last end at n. `link_groups_as` takes the
+//!    starts s_k from `x_hsp_inplace::group_starts`, the same two tests on the same neighbours of
+//!    the same sorted list (the reset and the sort before it are `link_in_place`'s), and
 //!    `group_slices` splits with `split_at_mut(s)` from the last start down, the head last,
 //!    reversed: slice k is positions [s_k, s_{k+1}) of the same list. The same records in the same
-//!    order; only where they lie differs (the cut moves them into Vecs of their own, a bitwise
-//!    move; the slices leave them in the list).
+//!    order; only where they lie differs (the reference moves them into Vecs of their own, a
+//!    bitwise move; the slices leave them in the list).
 //! 2. A kernel's result depends only on its group's records, the shared arguments and its
-//!    scratch, all the same as today. The arguments: `link_groups_as` builds `GroupArgs` with the
-//!    expressions of `link_in_place` (`x_hsp_inplace.rs:1050-1064`: `legacy_linking_requested()`,
-//!    `link_shadow_enabled()`, `diagnostics_enabled()`, the same references, `MAX(1024,
-//!    hspcnt+5)`), and the scratch with the same `buffer_pools` (`:578-594`). The kernels:
-//!    `link_one_slice` takes the branch of today's `link_one_group` (`:621-658`) on `use_legacy`.
-//!    The default branch calls `link_hsp_group_incremental_slice` (`linking.rs:1394-1438`), the
-//!    statements of today's `link_hsp_group_incremental` (`:1325-1370`) on the slice, which calls
-//!    `link_hsp_group_incr_slice` (`linking_incr.rs:670-725`); today's `link_hsp_group_incr`
-//!    (`:632-653`) now only passes its Vec to that function as a slice and returns the Vec, and
-//!    both reach the one `link_group` (`:947-1776`) through `link_hsp_group_incr_with_slice`
-//!    (`:883-930`), the body of today's `link_hsp_group_incr_with` (the same assertion and choice
-//!    of key; the Vec version, `:841-864`, wraps it for the tests that call it). The body of
-//!    `link_group` is unchanged: only its parameter is a slice (and the first element of its
-//!    returned pair, the same slice), and every operation of the body on `group_hits` (`len`,
-//!    indexing, `iter`) is a slice operation, which a `Vec` reaches through `Deref` on the same
-//!    records. With `LOSAT_LINKING_LEGACY` (or a linking trace) `link_one_slice` passes
-//!    `to_vec()` of the slice, a clone of every record (`UngappedHit` derives `Clone` and every
-//!    field is a plain value: the same bits), to today's `link_hsp_group_ncbi` and writes its
-//!    result back with `clone_from_slice`, record for record.
+//!    scratch, all the same as in the reference. The arguments: `link_groups_as` builds
+//!    `GroupArgs` with the expressions of the reference body (`legacy_linking_requested()`,
+//!    `diagnostics_enabled()`, the same references, `MAX(1024, hspcnt+5)`), and the scratch with
+//!    the same `buffer_pools`. The kernels: `link_one_slice` takes the branch of the reference's
+//!    per-group call on `use_legacy`. The default branch calls
+//!    `link_hsp_group_incremental_slice` (`linking.rs`), the statements of
+//!    `link_hsp_group_incremental` on the slice, which calls `link_hsp_group_incr_slice`
+//!    (`linking_incr.rs`); `link_hsp_group_incr` only passes its Vec to that function as a slice
+//!    and returns the Vec, and both reach the one `link_group`. The body of `link_group` takes a
+//!    slice, and every operation of the body on `group_hits` (`len`, indexing, `iter`) is a slice
+//!    operation, which a `Vec` reaches through `Deref` on the same records. With
+//!    `LOSAT_LINKING_LEGACY` (or a linking trace) `link_one_slice` passes `to_vec()` of the slice,
+//!    a clone of every record (`UngappedHit` derives `Clone` and every field is a plain value:
+//!    the same bits), to `link_hsp_group_ncbi` and writes its result back with
+//!    `clone_from_slice`, record for record.
 //! 3. A kernel writes only fields of its own records and changes no order, so the list after the
-//!    kernels equals today's assembled list record for record. `link_group` reads
-//!    `group_hits.len()` (`linking_incr.rs:959`), `group_hits[0].ctx_idx` (`:977`) and
-//!    `group_hits.iter()` (`:1007`), writes `group_hits[best_i].hsp_link_num` (`:1740`) and five
-//!    fields of `&mut group_hits[cur]` (`:1761-1766`), and returns the slice it was given (`:961`,
-//!    `:1775`); it has no push, removal, swap or sort. The literal port `link_hsp_group_ncbi`
-//!    (`linking.rs:1459-2871`) writes `start_of_chain`, `hsp_link_num`, `ordering_method`,
-//!    `e_value`, `linked_set` and `chain_next_link_id` of `group_hits[i]` by index (`:2483`,
-//!    `:2491`, `:2559`, `:2565`, `:2569`, `:2587`, `:2602`), otherwise only reads the records
-//!    (indexing, `iter`, `&group_hits` to its scan), and returns the Vec it was given (`:1475` for
-//!    an empty group, `:2870`): its result has the group's length and order. This is the finding
-//!    on the literal port; no fallback to the cut is needed for it, and `clone_from_slice`, which
-//!    panics on unequal lengths, puts record i back at position i. Today's assembly concatenates
-//!    the linked groups in group order (`assemble`, `x_hsp_inplace.rs:669-675`; on the pool after
-//!    `sort_by_key` by group index, `:1093`); here the groups are already in group order inside
-//!    the list, and no kernel writes outside its slice (the borrow checker gives each kernel its
+//!    kernels equals the reference's concatenated list record for record. `link_group` reads
+//!    `group_hits.len()`, `group_hits[0].ctx_idx` and `group_hits.iter()`, writes
+//!    `group_hits[best_i].hsp_link_num` and five fields of `&mut group_hits[cur]`, and returns
+//!    the slice it was given; it has no push, removal, swap or sort. The literal port
+//!    `link_hsp_group_ncbi` writes `start_of_chain`, `hsp_link_num`, `ordering_method`,
+//!    `e_value`, `linked_set` and `chain_next_link_id` of `group_hits[i]` by index, otherwise only
+//!    reads the records (indexing, `iter`, `&group_hits` to its scan), and returns the Vec it was
+//!    given: its result has the group's length and order. This is the finding on the literal
+//!    port; `clone_from_slice`, which panics on unequal lengths, puts record i back at position
+//!    i. The reference concatenates the linked groups in group order (on the pool after
+//!    `sort_by_key` by group index); here the groups are already in group order inside the
+//!    list, and no kernel writes outside its slice (the borrow checker gives each kernel its
 //!    slice alone).
-//! 4. The per-thread scratch is cleared or sized per group as today. It is made by
-//!    `buffer_pools` with today's arguments, once per call serially and once per worker thread on
-//!    the pool (a thread-local of this file, made on first use, as today's `POOLS`,
-//!    `x_hsp_inplace.rs:1072`). The incremental kernel does not read it; it reaches the literal
-//!    port only under `LOSAT_LINK_FAST_SHADOW`, and the literal port runs `pool_hsp_links.clear();
-//!    pool_hsp_links.reserve(n)` (`linking.rs:1642-1643`) and `pool_lh_helpers.clear();
-//!    pool_lh_helpers.resize(..)` (`:1750-1751`) for every group before it reads them, so neither
-//!    their contents nor their capacity at entry changes a value.
-//! 5. The final sorts and the replay then get the same list: `link_in_place` passes the result of
-//!    either branch to the same `len <= 1` return and `replay_in_place` (`x_hsp_inplace.rs:1160`,
-//!    `:1163`). The list's capacity may differ from today's (`shrink_to_fit` here, an exact
+//! 4. The per-thread scratch is cleared or sized per group as in the reference. It is made by
+//!    `buffer_pools` with the reference's arguments, once per call serially and once per worker
+//!    thread on the pool (a thread-local of this file, made on first use, as the reference's
+//!    `POOLS`). The incremental kernel does not read it; it reaches the literal port only under
+//!    `LOSAT_LINK_FAST_SHADOW`, and the literal port runs `pool_hsp_links.clear();
+//!    pool_hsp_links.reserve(n)` and `pool_lh_helpers.clear(); pool_lh_helpers.resize(..)` for
+//!    every group before it reads them, so neither their contents nor their capacity at entry
+//!    changes a value.
+//! 5. The final sorts and the replay then get the same list: `link_in_place` passes the result to
+//!    the `len <= 1` return and `replay_in_place`, as the reference body passes its list to its
+//!    own. The list's capacity differs from the reference's (`shrink_to_fit` here, an exact
 //!    `with_capacity` there); nothing reads a capacity.
 //!
 //! The kernels of different groups touch disjoint records and their own scratch, so the order in
 //! which the pool runs them changes nothing: the result does not depend on the number of threads.
-//! The pool is used under today's condition (`allow_parallel && groups > 1` and the `cfg` of
-//! today's per-group linking), so the search uses no more threads than `-num_threads`.
+//! The pool is used under the reference's condition (`allow_parallel && groups > 1` and the `cfg`
+//! of its per-group linking), so the search uses no more threads than `-num_threads`.
 //!
-//! # Shadow and counters
+//! # Counters
 //!
-//! `LOSAT_X_LINKSLICESSHADOW=1` turns the path on and runs every linking call's group step both
-//! ways: today's statements on the list (`link_in_place`'s `else` branch) and the slices on a copy
-//! of the sorted list taken before the cut. The two lists are compared record by record, every
-//! field, `e_value` by bits (`x_hsp_inplace::shadow_compare_as`); the first difference stops the
-//! run with a message that starts with the switch, and the search goes on with today's list.
-//! `main` prints `[X_SHADOW] LINKSLICES linkings= hits_compared=` at exit, and with
-//! `LOSAT_X_STATS` (switch or shadow on) `[X_STATS] LINKSLICES linkings= groups=
-//! parallel_linkings= legacy_fallbacks=` (linking calls linked as slices, their groups, those
-//! linked on the pool, and calls handed back to the cut, which the literal port never needs:
-//! always 0, see item 3). In a shadow run the slices of the copy are counted there too, and the
-//! clock of `LOSAT_TIMING` times today's steps; the copy and its linking fall into
-//! `groups` and `final_sorts`.
+//! With `LOSAT_X_STATS`, `main` prints `[X_STATS] LINKSLICES linkings= groups= parallel_linkings=
+//! legacy_fallbacks=` (linking calls linked as slices, their groups, those linked on the pool,
+//! and calls handed back to a cut, which the literal port never needs: always 0, see item 3).
 //!
 //! # Memory
 //!
-//! Today, at the end of the kernels the linked groups (one Vec each, exactly sized) and the new
+//! In the cut form, at the end of the kernels the linked groups (one Vec each, exactly sized) and the new
 //! list of capacity n are alive together while the list is filled. Here the one list stays,
 //! and the only allocation of the group step is the vector of `starts.len() + 1` slices.
 //!
 //! Measured once on 2026-10-13 (one binary; a loaded machine). massif, AP027131 x AP027133
-//! (genetic code 4, one thread), heap requested: without the switch the peak is 107.3 MiB in the
-//! first linking call (the new list 49.1 MiB and the linked groups 36.8 + 12.3 MiB); with it the
-//! linking call reaches 77.3 MiB at most and the peak of the search is 102.4 MiB at the end of
-//! the seed stage, as without it. Max RSS (medians of three alternating runs): that pair 110 ->
+//! (genetic code 4, one thread), heap requested: with the cut the peak is 107.3 MiB in the
+//! first linking call (the new list 49.1 MiB and the linked groups 36.8 + 12.3 MiB); with the
+//! slices the linking call reaches 77.3 MiB at most and the peak of the search is 102.4 MiB at
+//! the end of the seed stage, as with the cut. Max RSS (medians of three alternating runs): that pair 110 ->
 //! 111 MiB at one thread and 162 -> 163 at eight (its RSS peak is in the seed stage);
 //! NZ_CP006932 against itself (516,395 HSPs in the first linking call) 142 -> 132 MiB at one
 //! thread and 242 -> 222 at eight. `groups` of the first linking call 0.011 -> 0.002 s and
 //! `assemble` 0.010 -> 0.000 s (the pair, one thread).
 
-use super::x_hsp_inplace::{buffer_pools, group_starts, shadow_compare_as, GroupArgs};
+#[cfg(test)]
+use super::x_hsp_inplace::x_assert_same_hits;
+use super::x_hsp_inplace::{buffer_pools, group_starts, GroupArgs};
 use super::{
     diagnostics_enabled, legacy_linking_requested, link_hsp_group_incremental_slice,
     link_hsp_group_ncbi, link_shadow_enabled, BufferPools, KarlinParams, LinkHspCutoffs,
@@ -186,67 +161,26 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::OnceLock;
 
-// No NCBI counterpart: counters for LOSAT_X_STATS and the shadow summary; they do not change any
-// value NCBI computes.
+// No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI computes.
 static LINKINGS: AtomicU64 = AtomicU64::new(0);
 static GROUPS: AtomicU64 = AtomicU64::new(0);
 static PARALLEL_LINKINGS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_LINKINGS: AtomicU64 = AtomicU64::new(0);
-static HITS_COMPARED: AtomicU64 = AtomicU64::new(0);
 
-/// The name the shadow's message starts with.
-const SHADOW_SWITCH: &str = "LOSAT_X_LINKSLICESSHADOW";
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:553-558
-// ```c
-// for (frame_index=0; frame_index<num_query_frames; frame_index++)
-// {
-//    hp_start = s_LinkHSPStructReset(hp_start);
-//    hp_start->next = hp_frame_start[frame_index];
-// ```
-// Dispatch switch, read once: 0 = the statements from before the switch existed, 1 = this path,
-// 2 = both, compared. The shadow is opt-in (set to any value) and wins; the switch is a
-// strict-set switch, read with `xswitch::on`.
-/// 0 = off, 1 = LOSAT_X_LINKSLICES, 2 = LOSAT_X_LINKSLICESSHADOW.
-pub(super) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_LINKSLICESSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_LINKSLICES") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-/// The summary lines (printed by `main` at exit): the shadow summary and the LOSAT_X_STATS
-/// counters, only with the switch or its shadow on.
+/// The summary line (printed by `main` at exit): the LOSAT_X_STATS counters.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
-    let m = mode();
-    if m == 0 {
+    if std::env::var_os("LOSAT_X_STATS").is_none() {
         return;
     }
     let load = |c: &AtomicU64| c.load(AtomicOrdering::Relaxed);
-    if m == 2 {
-        eprintln!(
-            "[X_SHADOW] LINKSLICES linkings={} hits_compared={}",
-            load(&SHADOW_LINKINGS),
-            load(&HITS_COMPARED)
-        );
-    }
-    if std::env::var_os("LOSAT_X_STATS").is_some() {
-        // `legacy_fallbacks` stays 0: the literal port keeps the order and the number of the
-        // records of its group (module doc, item 3), so no call goes back to the cut.
-        eprintln!(
-            "[X_STATS] LINKSLICES linkings={} groups={} parallel_linkings={} legacy_fallbacks=0",
-            load(&LINKINGS),
-            load(&GROUPS),
-            load(&PARALLEL_LINKINGS)
-        );
-    }
+    // `legacy_fallbacks` stays 0: the literal port keeps the order and the number of the
+    // records of its group (module doc, item 3), so no call goes back to a cut.
+    eprintln!(
+        "[X_STATS] LINKSLICES linkings={} groups={} parallel_linkings={} legacy_fallbacks=0",
+        load(&LINKINGS),
+        load(&GROUPS),
+        load(&PARALLEL_LINKINGS)
+    );
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:414-419,553-558
@@ -258,7 +192,7 @@ pub fn print_summary() {
 //    hp_start = s_LinkHSPStructReset(hp_start);
 // ```
 // No computation: the arguments of the linking call that its group step reads, the values
-// `link_in_place` builds today's `GroupArgs` from.
+// `link_in_place` builds `GroupArgs` from.
 /// What `link_in_place` hands the group step besides the sorted list.
 pub(super) struct Call<'a> {
     pub(super) params: &'a KarlinParams,
@@ -316,8 +250,8 @@ fn group_slices<'h>(hits: &'h mut [UngappedHit], starts: &[usize]) -> Vec<&'h mu
 //    hp_frame_start[frame_index]->prev = hp_start;
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
-// One group through today's per-group function with today's arguments, on its records where they
-// lie (module doc, item 2): `x_hsp_inplace::link_one_group` on a slice.
+// One group through the reference's per-group function with the reference's arguments, on its records where they
+// lie (module doc, item 2): the reference body's per-group call, on a slice.
 /// Links one group in place.
 fn link_one_slice(group: &mut [UngappedHit], args: &GroupArgs<'_>, pool: &mut BufferPools) {
     if args.use_legacy {
@@ -357,7 +291,7 @@ fn link_one_slice(group: &mut [UngappedHit], args: &GroupArgs<'_>, pool: &mut Bu
     }
 }
 
-/// The sizes today's scratch is made with (`buffer_pools`).
+/// The sizes the scratch is made with (`buffer_pools`).
 #[derive(Clone, Copy)]
 struct Scratch {
     initial_lh_size: usize,
@@ -375,8 +309,8 @@ struct Scratch {
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // The groups in frame_index order with one scratch, or on the pool with one scratch per worker
-// thread, as today (module doc, items 2 and 4). Each kernel runs once, on its own slice, timed as
-// today's.
+// thread, as the reference body does (module doc, items 2 and 4). Each kernel runs once, on its
+// own slice, timed by the kernel clock.
 /// Links every group; `true` when the pool ran them.
 fn link_slices(
     groups: Vec<&mut [UngappedHit]>,
@@ -440,9 +374,9 @@ fn link_slices(
 //    hp_frame_start[frame_index]->prev = hp_start;
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
-// The group step of `link_in_place` on the sorted list with the switch on (module doc). Returns
+// The group step of `link_in_place` on the sorted list (module doc). Returns
 // the list and its number of groups.
-/// The sorted list with every group linked in place (today's list after `assemble`).
+/// The sorted list with every group linked in place (the reference's list after its concatenation).
 pub(super) fn link_groups(
     hits: Vec<UngappedHit>,
     call: &Call<'_>,
@@ -467,7 +401,7 @@ pub(super) fn link_groups(
 //    number_of_hsps = hp_frame_number[frame_index];
 // ```
 // `link_groups` with the two variables that choose the literal port and size the scratch given
-// (the tests run both ways). The statements of today's group step in their order, with the cut
+// (the tests run both ways). The statements of the reference's group step in their order, with the cut
 // replaced by the slices and the assembly by nothing.
 /// `link_groups` with `legacy_linking_requested()` and `link_shadow_enabled()` given.
 fn link_groups_as(
@@ -536,38 +470,6 @@ fn link_groups_as(
         PARALLEL_LINKINGS.fetch_add(1, AtomicOrdering::Relaxed);
     }
     (hits, group_count)
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1080-1082
-// ```c
-// for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
-//    hsp_list->hsp_array[index] = H->hsp;
-// ```
-// No computation that the search reads: the shadow links `copy` (the sorted list before the cut)
-// as slices with a clock that measures nothing, compares the result with today's list record by
-// record and stops at the first difference. The search continues with today's list.
-/// Shadow check: the slices on `copy` against `today`, the list after today's per-group linking.
-pub(super) fn shadow(copy: Vec<UngappedHit>, today: &[UngappedHit], call: &Call<'_>) {
-    let (linked, _) = link_groups(copy, call, &mut LinkLap::off());
-    shadow_check(&linked, today);
-    SHADOW_LINKINGS.fetch_add(1, AtomicOrdering::Relaxed);
-    HITS_COMPARED.fetch_add(today.len() as u64, AtomicOrdering::Relaxed);
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1080-1082
-// ```c
-// for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
-//    hsp_list->hsp_array[index] = H->hsp;
-// ```
-// No computation: every field of every record, `e_value` by bits, with this switch's name.
-/// The shadow's comparison: `slices` against `today`.
-fn shadow_check(slices: &[UngappedHit], today: &[UngappedHit]) {
-    shadow_compare_as(
-        SHADOW_SWITCH,
-        "the list after the per-group linking (in place: slices; reference: cut and assembled)",
-        slices,
-        today,
-    );
 }
 
 #[cfg(test)]
@@ -756,8 +658,8 @@ mod tests {
             );
             assert_eq!(format!("{a:?}"), format!("{b:?}"), "{label}: HSP {index}");
         }
-        // The shadow's comparison must agree with the one above.
-        shadow_check(actual, expected);
+        // The comparison of `x_assert_same_hits` must agree with the one above.
+        x_assert_same_hits(label, actual, expected);
     }
 
     // No NCBI counterpart: `body` once on the test thread and once inside pools of 1, 2 and 8
@@ -951,7 +853,7 @@ mod tests {
                     }
                 });
             }
-            // The whole linking call: today's path (or the reference body) against the slices
+            // The whole linking call: the reference body against the slices
             // followed by the reference's final sorts and replay.
             for allow_parallel in [false, true] {
                 let call = Call {
@@ -999,7 +901,7 @@ mod tests {
     //    hp_start->next = hp_frame_start[frame_index];
     // ```
     // The edges: an empty list (no group, no kernel), one HSP, one group of many HSPs with the
-    // pool allowed, and a list that arrives with spare capacity (given back, as the cut does).
+    // pool allowed, and a list that arrives with spare capacity (given back, as the reference's cut does).
     #[test]
     fn empty_single_and_one_group_lists() {
         let (params, contexts) = two_query_contexts();
@@ -1057,83 +959,5 @@ mod tests {
         assert!(spare.capacity() > spare.len());
         let (linked, _) = link_groups_as(spare, &call, &mut LinkLap::off(), false, false);
         assert_same_list("spare capacity", &linked, &expected);
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:1080-1082
-    // ```c
-    // for (index = 0, H = first_hsp; index < hsp_list->hspcnt; index++) {
-    //    hsp_list->hsp_array[index] = H->hsp;
-    // ```
-    // The shadow passes today's list and stops on a planted difference (one field, the bits of
-    // an E-value, two records exchanged, a missing record) with its switch's name first; a
-    // passing shadow counts the call and its records.
-    #[test]
-    fn the_shadow_reports_a_planted_difference() {
-        fn panic_text(body: impl FnOnce() + std::panic::UnwindSafe) -> Option<String> {
-            std::panic::catch_unwind(body).err().map(|payload| {
-                payload
-                    .downcast_ref::<String>()
-                    .cloned()
-                    .or_else(|| payload.downcast_ref::<&str>().map(|text| text.to_string()))
-                    .unwrap_or_default()
-            })
-        }
-
-        let (params, contexts) = two_query_contexts();
-        let log_k: Vec<f64> = contexts.iter().map(|c| c.karlin_params.k.ln()).collect();
-        let linking = LinkingParams {
-            subject_len_nucl: 300_000,
-            gap_decay_rate: 0.5,
-            cutoffs: fast_test_cutoffs(),
-        };
-        let call = Call {
-            params: &params,
-            cutoffs: &linking.cutoffs,
-            linking_params: &linking,
-            query_contexts: &contexts,
-            subject_frame_bases: &[0; 6],
-            length_adj_per_context: &[49; 12],
-            eff_searchsp_per_context: &[9_372_428_362; 12],
-            log_k_by_ctx: &log_k,
-            allow_parallel: false,
-        };
-        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
-        let list = sorted(random_hits(&mut rng, 400, 300, 2));
-        let today = reference_groups(&list, &call, false);
-        assert!(today.iter().any(|hit| hit.num > 1 || hit.linked_set));
-
-        let before = (
-            SHADOW_LINKINGS.load(AtomicOrdering::Relaxed),
-            HITS_COMPARED.load(AtomicOrdering::Relaxed),
-        );
-        assert_eq!(
-            panic_text(|| shadow(list.clone(), &today, &call)),
-            None,
-            "today's list passes"
-        );
-        assert!(SHADOW_LINKINGS.load(AtomicOrdering::Relaxed) > before.0);
-        assert!(HITS_COMPARED.load(AtomicOrdering::Relaxed) >= before.1 + 400);
-
-        let plants: [(&str, fn(&mut Vec<UngappedHit>)); 4] = [
-            ("one field", |hits| hits[7].hsp_link_num += 1),
-            ("E-value bits", |hits| {
-                hits[3].e_value = f64::from_bits(hits[3].e_value.to_bits() ^ 1)
-            }),
-            ("two records exchanged", |hits| hits.swap(10, 11)),
-            ("a missing record", |hits| {
-                hits.pop();
-            }),
-        ];
-        for (name, plant) in plants {
-            let mut planted = today.clone();
-            plant(&mut planted);
-            let text = panic_text(|| shadow(list.clone(), &planted, &call))
-                .unwrap_or_else(|| panic!("{name}: no difference reported"));
-            assert!(
-                text.starts_with("LOSAT_X_LINKSLICESSHADOW: "),
-                "{name}: {text}"
-            );
-            assert!(text.contains("differs"), "{name}: {text}");
-        }
     }
 }

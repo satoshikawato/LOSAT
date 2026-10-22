@@ -192,7 +192,7 @@ fn count(line: &str, name: &str) -> u64 {
 }
 
 /// Checks the two linking lines of one run against its `x_subject` line. `timed` says whether
-/// the run's linking calls take the path the timer is in (the default path): then the first
+/// the run's linking calls take the path the timer is in (the in-place path): then the first
 /// call is counted for at least one subject and at most `subjects`, and the second for no more
 /// subjects than the first; otherwise both lines are all zero.
 fn check_link_lines(stderr: &str, subjects: u64, timed: bool, what: &str) {
@@ -309,11 +309,12 @@ fn the_stage_lines_follow_the_old_lines_and_add_up() {
 }
 
 // No NCBI counterpart (a timer). The paths a subject can take all reach the stage lines: the
-// reference frame loop (`LOSAT_X_PAIRPAR=0`), the previous paths (`LOSAT_X_DEFAULT=0`), and
-// several subject records with one too short to search (counted as a subject, all of it in the
-// last stage). The linking lines count the calls of the default linking path, whichever seed
-// stage ran before it, and are all zero on the previous paths, whose linking calls take the
-// reference body. The report does not depend on the timer.
+// reference frame loop (`LOSAT_X_PAIRPAR=0`), `LOSAT_X_DEFAULT=0`, the debugging output
+// `LOSAT_DEBUG_CUTOFFS` (the one path whose linking calls take the reference body, which is not
+// timed), and several subject records with one too short to search (counted as a subject, all of
+// it in the last stage). The linking lines count the calls of the in-place linking path,
+// whichever seed stage ran before it, and are all zero with `LOSAT_DEBUG_CUTOFFS`. The report
+// does not depend on the timer.
 #[test]
 fn every_path_of_a_subject_is_timed_and_the_report_is_the_same() {
     let single = fixture("short_hsp.subject.fna");
@@ -337,6 +338,7 @@ fn every_path_of_a_subject_is_timed_and_the_report_is_the_same() {
             &[][..],
             &[("LOSAT_X_PAIRPAR", "0")][..],
             &[("LOSAT_X_DEFAULT", "0")][..],
+            &[("LOSAT_DEBUG_CUTOFFS", "1")][..],
         ] {
             for threads in THREADS {
                 let what = format!("{subjects} subject(s) {path:?} threads {threads}");
@@ -350,7 +352,7 @@ fn every_path_of_a_subject_is_timed_and_the_report_is_the_same() {
                 let (report, stderr) = tblastx(subject, threads, &variables);
                 assert_eq!(report, expected, "{what}");
                 check_stage_lines(&stderr, subjects, &what);
-                let timed = !path.contains(&("LOSAT_X_DEFAULT", "0"));
+                let timed = !path.contains(&("LOSAT_DEBUG_CUTOFFS", "1"));
                 check_link_lines(&stderr, subjects, timed, &what);
             }
         }

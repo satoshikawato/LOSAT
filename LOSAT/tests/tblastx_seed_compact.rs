@@ -226,17 +226,12 @@ fn the_switch_follows_its_variable_and_the_global_one() {
 // ```
 // The switch with the variables of the paths around it: `LOSAT_X_PAIRPARSHADOW=1` runs the unit
 // path (on the compact lists) and the reference frame loop and compares the subject's combined
-// list, every field; `LOSAT_X_SEEDRELEASE=0` keeps the group tables through the merge;
-// `LOSAT_X_PAIRLUT=0` builds the full table and filters the groups out of it. The report is NCBI's
+// list, every field; `LOSAT_X_PAIRLUT=0` builds the full table and filters the groups out of it. The report is NCBI's
 // in every run and the compact path ran.
 #[test]
 fn the_switch_with_the_shadow_and_the_neighbouring_switches() {
     let expected = ncbi_report();
-    for other in [
-        ("LOSAT_X_PAIRPARSHADOW", "1"),
-        ("LOSAT_X_SEEDRELEASE", "0"),
-        ("LOSAT_X_PAIRLUT", "0"),
-    ] {
+    for other in [("LOSAT_X_PAIRPARSHADOW", "1"), ("LOSAT_X_PAIRLUT", "0")] {
         for threads in THREADS {
             let what = format!("{other:?} threads {threads}");
             let (report, stderr) = pair(threads, &[STATS, other]);

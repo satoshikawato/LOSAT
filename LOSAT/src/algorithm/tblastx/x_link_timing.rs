@@ -29,14 +29,13 @@
 //! `largest_group` and `kernel_max`, which are the largest over the calls (a sum of maxima over
 //! the subjects is no bound on any one call).
 //!
-//! A linking call that takes the reference body instead (`LOSAT_X_HSPINPLACE=0`,
-//! `LOSAT_X_DEFAULT=0`, `LOSAT_DIAGNOSTICS`, `LOSAT_DEBUG_CUTOFFS`) is not timed here: its line
+//! A linking call that takes the reference body instead (`LOSAT_DIAGNOSTICS`,
+//! `LOSAT_DEBUG_CUTOFFS`) is not timed here: its line
 //! shows `calls=0`, and `link1` / `link2` of `x_subject` still give its whole time.
 //!
 //! # How a call learns that it is timed
 //!
-//! The linking function has callers that are not a search's (the shadow's reference call, unit
-//! tests), so its arguments stay as they are. The batch function sets a flag of the calling
+//! The linking function has callers that are not a search's (unit tests), so its arguments stay as they are. The batch function sets a flag of the calling
 //! thread immediately before each of its two calls (`XLinkTimer::arm`), naming the call and the
 //! batch's counters; `LinkLap::start`, the first statement of `link_in_place`, takes the flag;
 //! the batch function clears it after the call (`XLinkTimer::disarm`) in case the call took
@@ -244,9 +243,9 @@ impl LinkLap {
     }
 
     // No NCBI counterpart: a clock that is never read, for callers that are not a timed call (the
-    // tests, and the second run of a linking call's groups under LOSAT_X_LINKSLICESSHADOW,
-    // tblastx/x_link_slices.rs).
+    // tests).
     /// A clock that measures nothing.
+    #[cfg(test)]
     pub(super) fn off() -> Self {
         Self { running: None }
     }

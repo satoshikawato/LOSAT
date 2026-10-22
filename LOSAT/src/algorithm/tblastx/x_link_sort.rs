@@ -1,19 +1,15 @@
-//! EXPERIMENT (LOSAT_X_LINKSORT / LOSAT_X_LINKSORTSHADOW): the index sorts of the TBLASTX HSP
-//! list (`x_hsp_inplace.rs`). With the switch on, the linking call sorts its output order once
-//! where it sorts twice, and an index sort of `PARALLEL_MIN` indices or more runs as a stable
-//! parallel sort when its call may use the search pool. Every sort returns the index order of
-//! today's statements, element for element, at any number of threads.
+//! The index sorts of the TBLASTX HSP list (`x_hsp_inplace.rs`). The linking call sorts its
+//! output order once where the reference sorts twice, and an index sort of `PARALLEL_MIN`
+//! indices or more runs as a stable parallel sort when its call may use the search pool. Every
+//! sort returns the index order of the statements it replaced ("today's": one stable `sort_by`
+//! per sort, `sort_today` below), element for element, at any number of threads.
 //!
 //! This file is a child module of `sum_stats_linking/linking.rs` (declared there with `#[path]`,
 //! beside `x_hsp_inplace.rs`), so it names that file's comparators without changing them.
 //! `x_hsp_inplace.rs` calls it at its two index sort sites (`sort_in_place`,
-//! `replay_in_place_counted`); nothing else does.
-//!
-//! The switch is in the strict set (`utils/xswitch.rs`): it is on unless `LOSAT_X_LINKSORT` is
-//! `0`, or `LOSAT_X_DEFAULT=0` and it is not set. With it off the statements of
-//! `x_hsp_inplace.rs` run as before it existed, after one read of `mode()` per index sort. It
-//! acts only where `LOSAT_X_HSPINPLACE` does: the reference bodies (`LOSAT_X_HSPINPLACE=0`,
-//! `LOSAT_X_DEFAULT=0`) have their own sorts and are not touched.
+//! `replay_in_place_counted`); nothing else does. The reference linking body (`linking.rs`, the
+//! `LOSAT_DEBUG_CUTOFFS` / `LOSAT_DIAGNOSTICS` form) keeps its own two sorts of references; its
+//! first sort goes through `sort_dispatch` and so through this file.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:483-486
 //! ```c
@@ -37,8 +33,8 @@
 //! ```
 //! NCBI sorts with the C library's `qsort`, which is not stable: where its comparator returns 0
 //! the order is the library's. LOSAT's defined behaviour is the stable sorts of its reference
-//! bodies (`ungapped_hit_sort.rs`, `sort_linked_hsp_references` in `linking.rs`), which the
-//! fixtures compare with NCBI's reports. This file reproduces the index order of those stable
+//! forms (`sort_linked_hsp_references` in `linking.rs`, and the index sort of the in-place path),
+//! which the fixtures compare with NCBI's reports. This file reproduces the index order of those stable
 //! sorts and changes no comparator. No NCBI counterpart for a parallel sort or for one sort in
 //! place of two: both are other ways to compute the same order.
 //!
@@ -97,7 +93,7 @@
 //!    `UngappedHit` (`chaining.rs`: `q_idx: u32`, `q_frame`/`s_frame: i8`, the four offsets
 //!    `usize`, `raw_score: i32`); none reads `e_value` or any other float:
 //!    - `rev_compare_hsps_tbx` (`linking.rs`; first sort of the linking call, and the sort of the
-//!      reference linking body when it reaches `sort_dispatch`): `q_idx * 2 + (q_frame < 0)`
+//!      reference linking body, which reaches `sort_dispatch`): `q_idx * 2 + (q_frame < 0)`
 //!      ascending, `s_frame.signum()` ascending, then `q_aa_start`, `q_aa_end`, `s_aa_start`,
 //!      `s_aa_end` descending.
 //!    - `rev_compare_hsps_transl` (`linking.rs`; B): the group ascending, `q_aa_start` and
@@ -157,21 +153,16 @@
 //! hold time of another subject, as `kernels` can.
 //!
 //! `PARALLEL_MIN` is 32,768. Measured on 2026-10-13 at 8 threads (medians of three alternating
-//! runs without and with the switch, a loaded machine): MelaMJNV x PemoMJNVA, whose four longest
+//! runs before and after this file, a loaded machine): MelaMJNV x PemoMJNVA, whose four longest
 //! sorts are of about 34,400 indices, `sort` 0.004 s both ways, so the threshold is not clearly
 //! wrong; AP027131 x AP027133 (338,859 HSPs) `sort` 0.085 to 0.039 s, `final_sorts` 0.067 to
 //! 0.009 s, `reap` 0.073 to 0.045 s; at one thread `final_sorts` 0.060 to 0.035 s (one sort
 //! instead of two; the other sorts are today's statements there). What is left of `sort` and
 //! `reap` includes the move of the records, which stays on one thread.
 //!
-//! # Shadow and counters
+//! # Counters
 //!
-//! `LOSAT_X_LINKSORTSHADOW=1` turns the path on and runs every index sort both ways: this
-//! file's sort on a copy of the index vector and today's statement or statements on the vector
-//! itself. The two must be equal element for element; the first difference stops the run with
-//! the switch, the sort (first, final or dispatch), the length and the position. The search goes
-//! on with today's result. `main` prints `[X_SHADOW] LINKSORT sorts= indices_compared=` at exit,
-//! and with `LOSAT_X_STATS` (switch or shadow on)
+//! With `LOSAT_X_STATS`, `main` prints
 //! `[X_STATS] LINKSORT sorts= indices= parallel_sorts= parallel_indices= composite_sorts=`.
 
 use super::{fwd_compare_hsps_transl, rev_compare_hsps_transl, UngappedHit};
@@ -193,17 +184,13 @@ use super::{fwd_compare_hsps_transl, rev_compare_hsps_transl, UngappedHit};
 use rayon::slice::ParallelSliceMut;
 use std::cmp::Ordering;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::OnceLock;
 
-// No NCBI counterpart: counters for LOSAT_X_STATS and the shadow summary; they do not change any
-// value NCBI computes.
+// No NCBI counterpart: counters for LOSAT_X_STATS; they do not change any value NCBI computes.
 static SORTS: AtomicU64 = AtomicU64::new(0);
 static INDICES: AtomicU64 = AtomicU64::new(0);
 static PARALLEL_SORTS: AtomicU64 = AtomicU64::new(0);
 static PARALLEL_INDICES: AtomicU64 = AtomicU64::new(0);
 static COMPOSITE_SORTS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_SORTS: AtomicU64 = AtomicU64::new(0);
-static SHADOW_INDICES: AtomicU64 = AtomicU64::new(0);
 
 // No NCBI counterpart: NCBI's qsort calls run on the thread of their search. Below this length an
 // index sort stays the serial statement: rayon sorts chunks of 2,000 elements as separate jobs
@@ -226,8 +213,7 @@ pub(super) const PARALLEL_MIN: usize = 32_768;
 //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
 //               ScoreCompareHSPs);
 // ```
-// No computation: names the index sort for the shadow's message and carries what its caller
-// allows.
+// No computation: names the index sort and carries what its caller allows.
 /// Which index sort of `x_hsp_inplace.rs`, with the linking call's `allow_parallel` where there
 /// is one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,64 +228,21 @@ pub(super) enum Site {
     Dispatch,
 }
 
-impl Site {
-    fn name(self) -> &'static str {
-        match self {
-            Site::First(_) => "first",
-            Site::Final(_) => "final",
-            Site::Dispatch => "dispatch",
-        }
-    }
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
-// ```c
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTbx);
-// ```
-// Dispatch switch, read once: 0 = the statements from before the switch existed, 1 = this path,
-// 2 = both, compared. The shadow is opt-in (set to any value) and wins; the switch is a
-// strict-set switch, read with `xswitch::on`.
-/// 0 = off, 1 = LOSAT_X_LINKSORT, 2 = LOSAT_X_LINKSORTSHADOW.
-pub(super) fn mode() -> u8 {
-    static MODE: OnceLock<u8> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if std::env::var_os("LOSAT_X_LINKSORTSHADOW").is_some() {
-            2
-        } else if crate::utils::xswitch::on("LOSAT_X_LINKSORT") {
-            1
-        } else {
-            0
-        }
-    })
-}
-
-/// The summary lines (printed by `main` at exit): the shadow summary and the LOSAT_X_STATS
-/// counters, only with the switch or its shadow on.
+/// The summary line (printed by `main` at exit): the LOSAT_X_STATS counters.
 // No NCBI counterpart: prints counters; it does not change any value NCBI computes.
 pub fn print_summary() {
-    let m = mode();
-    if m == 0 {
+    if std::env::var_os("LOSAT_X_STATS").is_none() {
         return;
     }
     let load = |c: &AtomicU64| c.load(AtomicOrdering::Relaxed);
-    if m == 2 {
-        eprintln!(
-            "[X_SHADOW] LINKSORT sorts={} indices_compared={}",
-            load(&SHADOW_SORTS),
-            load(&SHADOW_INDICES)
-        );
-    }
-    if std::env::var_os("LOSAT_X_STATS").is_some() {
-        eprintln!(
-            "[X_STATS] LINKSORT sorts={} indices={} parallel_sorts={} parallel_indices={} composite_sorts={}",
-            load(&SORTS),
-            load(&INDICES),
-            load(&PARALLEL_SORTS),
-            load(&PARALLEL_INDICES),
-            load(&COMPOSITE_SORTS)
-        );
-    }
+    eprintln!(
+        "[X_STATS] LINKSORT sorts={} indices={} parallel_sorts={} parallel_indices={} composite_sorts={}",
+        load(&SORTS),
+        load(&INDICES),
+        load(&PARALLEL_SORTS),
+        load(&PARALLEL_INDICES),
+        load(&COMPOSITE_SORTS)
+    );
 }
 
 // No NCBI counterpart: counts one index sort of this path for LOSAT_X_STATS.
@@ -351,8 +294,8 @@ fn pool_allowed(site: Site) -> bool {
 //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
 //               ScoreCompareHSPs);
 // ```
-// The statement of `x_hsp_inplace.rs` (and of the reference bodies): a stable sort of the indices
-// with the comparator applied to the records they name.
+// The statement `x_hsp_inplace.rs` had here (and the reference bodies have): a stable sort of the
+// indices with the comparator applied to the records they name.
 /// Today's index sort.
 fn sort_today<C>(indices: &mut [usize], records: &[UngappedHit], compare: C)
 where
@@ -398,38 +341,12 @@ where
 //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_RevCompareHSPsTbx);
 // ```
-// No computation: the shadow compares two index vectors and stops at the first difference.
-/// Shadow check: `new` (this path) against `today`, element for element.
-fn shadow_check(site: Site, new: &[usize], today: &[usize]) {
-    let differs = new
-        .iter()
-        .zip(today)
-        .position(|(lhs, rhs)| lhs != rhs)
-        .or_else(|| (new.len() != today.len()).then(|| new.len().min(today.len())));
-    if let Some(position) = differs {
-        panic!(
-            "LOSAT_X_LINKSORTSHADOW: the {} index sort of {} indices differs at position {position}: this path {:?}, today {:?}",
-            site.name(),
-            today.len(),
-            new.get(position),
-            today.get(position)
-        );
-    }
-    SHADOW_SORTS.fetch_add(1, AtomicOrdering::Relaxed);
-    SHADOW_INDICES.fetch_add(today.len() as u64, AtomicOrdering::Relaxed);
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
-// ```c
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTbx);
-// ```
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
 // ```c
 //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
 //               ScoreCompareHSPs);
 // ```
-// The index sort of `x_hsp_inplace::sort_in_place` with the switch or its shadow on.
+// The index sort of `x_hsp_inplace::sort_in_place`.
 /// Sorts `indices` into the order of today's `sort_by` with `compare` over `records`.
 pub(super) fn sort_indices(
     indices: &mut [usize],
@@ -437,44 +354,8 @@ pub(super) fn sort_indices(
     compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
     site: Site,
 ) {
-    sort_indices_as(
-        indices,
-        records,
-        compare,
-        site,
-        mode() == 2,
-        pool_allowed(site),
-        PARALLEL_MIN,
-    );
-}
-
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
-// ```c
-//    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-//          s_RevCompareHSPsTbx);
-// ```
-// The body of `sort_indices` with its three decisions as arguments (the unit tests set them).
-// With `shadow`, this path sorts a copy and today's statement sorts the vector the caller goes
-// on with.
-fn sort_indices_as(
-    indices: &mut [usize],
-    records: &[UngappedHit],
-    compare: fn(&UngappedHit, &UngappedHit) -> Ordering,
-    site: Site,
-    shadow: bool,
-    on_pool: bool,
-    parallel_min: usize,
-) {
-    if shadow {
-        let mut new = indices.to_vec();
-        let parallel = sort_stable(&mut new, records, compare, on_pool, parallel_min);
-        count(new.len(), parallel, false);
-        sort_today(indices, records, compare);
-        shadow_check(site, &new, indices);
-    } else {
-        let parallel = sort_stable(indices, records, compare, on_pool, parallel_min);
-        count(indices.len(), parallel, false);
-    }
+    let parallel = sort_stable(indices, records, compare, pool_allowed(site), PARALLEL_MIN);
+    count(indices.len(), parallel, false);
 }
 
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:990-994
@@ -485,8 +366,7 @@ fn sort_indices_as(
 //    qsort(link_hsp_array, total_number_of_hsps,sizeof(LinkHSPStruct*),
 //          s_FwdCompareHSPsTransl);
 // ```
-// The two final sorts of `x_hsp_inplace::replay_in_place_counted` with the switch or its shadow
-// on: one stable sort with `s_FwdCompareHSPsTransl`, ties by `s_RevCompareHSPsTransl` (module doc,
+// The two final sorts of `x_hsp_inplace::replay_in_place_counted`: one stable sort with `s_FwdCompareHSPsTransl`, ties by `s_RevCompareHSPsTransl` (module doc,
 // item 1).
 /// Sorts `order` into the order of today's two final sorts over `records`.
 pub(super) fn final_sort(order: &mut [usize], records: &[UngappedHit], site: Site) {
@@ -495,8 +375,6 @@ pub(super) fn final_sort(order: &mut [usize], records: &[UngappedHit], site: Sit
         records,
         rev_compare_hsps_transl,
         fwd_compare_hsps_transl,
-        site,
-        mode() == 2,
         pool_allowed(site),
         PARALLEL_MIN,
     );
@@ -510,16 +388,12 @@ pub(super) fn final_sort(order: &mut [usize], records: &[UngappedHit], site: Sit
 //          s_FwdCompareHSPsTransl);
 // ```
 // The body of `final_sort` for any two comparators: `first` and `second` are today's two sorts
-// in the order they run, so `second` decides and `first` breaks its ties. With `shadow`, this
-// path sorts a copy and today's two statements sort the vector the caller goes on with.
-#[allow(clippy::too_many_arguments)]
+// in the order they run, so `second` decides and `first` breaks its ties.
 fn final_sort_as<B, A>(
     order: &mut [usize],
     records: &[UngappedHit],
     first: B,
     second: A,
-    site: Site,
-    shadow: bool,
     on_pool: bool,
     parallel_min: usize,
 ) where
@@ -527,17 +401,8 @@ fn final_sort_as<B, A>(
     A: Fn(&UngappedHit, &UngappedHit) -> Ordering + Sync,
 {
     let composite = |a: &UngappedHit, b: &UngappedHit| second(a, b).then_with(|| first(a, b));
-    if shadow {
-        let mut new = order.to_vec();
-        let parallel = sort_stable(&mut new, records, composite, on_pool, parallel_min);
-        count(new.len(), parallel, true);
-        sort_today(order, records, &first);
-        sort_today(order, records, &second);
-        shadow_check(site, &new, order);
-    } else {
-        let parallel = sort_stable(order, records, composite, on_pool, parallel_min);
-        count(order.len(), parallel, true);
-    }
+    let parallel = sort_stable(order, records, composite, on_pool, parallel_min);
+    count(order.len(), parallel, true);
 }
 
 #[cfg(test)]
@@ -856,122 +721,10 @@ mod tests {
                     let mut today: Vec<usize> = (0..n).collect();
                     sort_today(&mut today, hits, first);
                     sort_today(&mut today, hits, second);
-                    for (shadow, on_pool) in [(false, false), (false, true), (true, true)] {
+                    for on_pool in [false, true] {
                         let mut order: Vec<usize> = (0..n).collect();
-                        final_sort_as(
-                            &mut order,
-                            hits,
-                            first,
-                            second,
-                            Site::Final(on_pool),
-                            shadow,
-                            on_pool,
-                            *parallel_min,
-                        );
-                        assert_eq!(
-                            order, today,
-                            "{name} n {n} {where_} shadow {shadow} on_pool {on_pool}"
-                        );
-                    }
-                }
-            });
-        }
-    }
-
-    /// The text of a panic raised by `body`, if it panics.
-    fn panic_text(body: impl FnOnce() + std::panic::UnwindSafe) -> Option<String> {
-        std::panic::catch_unwind(body).err().map(|payload| {
-            payload
-                .downcast_ref::<String>()
-                .cloned()
-                .or_else(|| payload.downcast_ref::<&str>().map(|text| text.to_string()))
-                .unwrap_or_default()
-        })
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/link_hsps.c:485-486
-    // ```c
-    //    qsort(link_hsp_array,total_number_of_hsps,sizeof(LinkHSPStruct*),
-    //          s_RevCompareHSPsTbx);
-    // ```
-    // The shadow's comparison passes equal index vectors and stops on a planted difference with
-    // the switch, the sort, the length and the first differing position in its message.
-    #[test]
-    fn the_shadow_check_reports_a_planted_difference() {
-        let today: Vec<usize> = vec![4, 0, 3, 1, 2, 5];
-        for site in [Site::First(true), Site::Final(false), Site::Dispatch] {
-            assert_eq!(panic_text(|| shadow_check(site, &today, &today)), None);
-        }
-        assert_eq!(panic_text(|| shadow_check(Site::Dispatch, &[], &[])), None);
-
-        // Two neighbours exchanged: what a sort that is not stable does to equal HSPs.
-        let mut planted = today.clone();
-        planted.swap(2, 3);
-        for (site, name) in [
-            (Site::First(false), "first"),
-            (Site::Final(true), "final"),
-            (Site::Dispatch, "dispatch"),
-        ] {
-            let text = panic_text(|| shadow_check(site, &planted, &today)).expect("a difference");
-            assert!(text.starts_with("LOSAT_X_LINKSORTSHADOW: "), "{text}");
-            assert!(
-                text.contains(&format!("the {name} index sort of 6 indices")),
-                "{text}"
-            );
-            assert!(text.contains("differs at position 2:"), "{text}");
-            assert!(text.contains("this path Some(1), today Some(3)"), "{text}");
-        }
-
-        // A difference in the last element, and one of length.
-        let mut last = today.clone();
-        last[5] = 6;
-        let text = panic_text(|| shadow_check(Site::Dispatch, &last, &today)).expect("last");
-        assert!(text.contains("differs at position 5:"), "{text}");
-        let text =
-            panic_text(|| shadow_check(Site::Dispatch, &today[..4], &today)).expect("length");
-        assert!(text.contains("differs at position 4:"), "{text}");
-        assert!(text.contains("this path None, today Some(2)"), "{text}");
-    }
-
-    // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_hits.c:1380-1381
-    // ```c
-    //         qsort(hsp_list->hsp_array, hsp_list->hspcnt, sizeof(BlastHSP*),
-    //               ScoreCompareHSPs);
-    // ```
-    // With the shadow on, the caller's vector holds today's order (today's statement sorted it),
-    // on and off the pool, and the sort is counted as compared. The counters are shared by the
-    // tests of this process, so only their growth is checked.
-    #[test]
-    fn a_shadowed_sort_leaves_todays_order_and_counts() {
-        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
-        for (name, compare) in COMPARATORS {
-            let hits = random_hits(&mut rng, 6000, 5);
-            let mut today: Vec<usize> = (0..hits.len()).collect();
-            sort_today(&mut today, &hits, compare);
-            on_and_off_pools(|where_, _| {
-                for on_pool in [false, true] {
-                    let before = (
-                        SORTS.load(AtomicOrdering::Relaxed),
-                        SHADOW_SORTS.load(AtomicOrdering::Relaxed),
-                        SHADOW_INDICES.load(AtomicOrdering::Relaxed),
-                        PARALLEL_SORTS.load(AtomicOrdering::Relaxed),
-                    );
-                    let mut indices: Vec<usize> = (0..hits.len()).collect();
-                    sort_indices_as(
-                        &mut indices,
-                        &hits,
-                        compare,
-                        Site::Dispatch,
-                        true,
-                        on_pool,
-                        0,
-                    );
-                    assert_eq!(indices, today, "{name} {where_} on_pool {on_pool}");
-                    assert!(SORTS.load(AtomicOrdering::Relaxed) > before.0);
-                    assert!(SHADOW_SORTS.load(AtomicOrdering::Relaxed) > before.1);
-                    assert!(SHADOW_INDICES.load(AtomicOrdering::Relaxed) >= before.2 + 6000);
-                    if PARALLEL_BUILD && on_pool {
-                        assert!(PARALLEL_SORTS.load(AtomicOrdering::Relaxed) > before.3);
+                        final_sort_as(&mut order, hits, first, second, on_pool, *parallel_min);
+                        assert_eq!(order, today, "{name} n {n} {where_} on_pool {on_pool}");
                     }
                 }
             });

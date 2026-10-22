@@ -1,14 +1,12 @@
-//! The early release of the TBLASTX seed-stage tables (`LOSAT_X_SEEDRELEASE`,
-//! `src/algorithm/tblastx/x_seed_release.rs`) on whole searches.
+//! The early release of the TBLASTX seed-stage tables
+//! (`src/algorithm/tblastx/x_seed_release.rs`) on whole searches.
 //!
-//! The switch is in the strict set (`src/utils/xswitch.rs`): it is on unless its variable is
-//! `0`, or `LOSAT_X_DEFAULT=0` and its variable is not set. With it on, the unit path of
-//! `LOSAT_X_PAIRPAR` with its group tables is freed when the units of the batch's last subject
-//! have run, before their lists are merged; the batch's lookup table is freed when the last
-//! seed stage has ended; and the worker's diagonal table is either not created (the unit path
-//! takes the batch) or dropped at that point (the reference frame loop ran). Every test reads
-//! the `[X_STATS] SEEDRELEASE` line, which is printed only while the switch is on, to check
-//! which of these happened, not only that the output is equal.
+//! The unit path of `LOSAT_X_PAIRPAR` with its group tables is freed when the units of the
+//! batch's last subject have run, before their lists are merged; the batch's lookup table is
+//! freed when the last seed stage has ended; and the worker's diagonal table is either not
+//! created (the unit path takes the batch) or dropped at that point (the reference frame loop
+//! ran). Every test reads the `[X_STATS] SEEDRELEASE` line to check which of these happened, not
+//! only that the output is equal.
 //!
 //! NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1604-1605
 //! ```c
@@ -27,11 +25,10 @@
 //! expected output (`tests/fixtures/tblastx_link_fast/short_hsp.ncbi_2.17.0.fmt6.out`) was
 //! produced by NCBI BLAST+ 2.17.0.
 //!
-//! The searches with several subject records are compared with the same LOSAT search with the
-//! switch off (`LOSAT_X_SEEDRELEASE=0`), not with an NCBI file: the switch computes nothing, it
-//! only frees memory, so the property under test is that the report does not depend on it. That
-//! those reports equal NCBI's is the business of the fixture suites, which run with the switch
-//! on by default and with it off under `LOSAT_X_DEFAULT=0`.
+//! The searches with several subject records are compared with the same LOSAT search on the
+//! reference frame loop at one thread, not with an NCBI file: the release computes nothing, it
+//! only frees memory, so the property under test is that the report does not depend on the path
+//! or the thread count. That those reports equal NCBI's is the business of the fixture suites.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -42,9 +39,8 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-const SWITCH: (&str, &str) = ("LOSAT_X_SEEDRELEASE", "1");
-const SWITCH_OFF: (&str, &str) = ("LOSAT_X_SEEDRELEASE", "0");
-const DEFAULT_OFF: (&str, &str) = ("LOSAT_X_DEFAULT", "0");
+/// The route to the reference frame loop.
+const FRAME_LOOP: (&str, &str) = ("LOSAT_X_PAIRPAR", "0");
 const STATS: (&str, &str) = ("LOSAT_X_STATS", "1");
 const THREADS: [u32; 2] = [1, 4];
 
@@ -153,8 +149,8 @@ impl Drop for TempFasta {
 // s_BlastCoreAuxStructFree(aux_struct);
 // ```
 // The default search of the fixture pair (no variable for any switch but
-// `LOSAT_X_PAIRPARGATE=0`) runs on the unit path with the switch on: one batch, its unit path released when the units of the only subject have
-// run, its lookup table (a stub) by the only seed stage, and no worker ever holds a diagonal
+// `LOSAT_X_PAIRPARGATE=0`) runs on the unit path: one batch, its unit path released when the
+// units of the only subject have run, its lookup table (a stub) by the only seed stage, and no worker ever holds a diagonal
 // table. The report is NCBI's.
 #[test]
 fn the_unit_path_releases_the_tables_and_holds_no_worker_table() {
@@ -178,25 +174,21 @@ fn the_unit_path_releases_the_tables_and_holds_no_worker_table() {
 // {
 //     BlastExtendWordFree(aux_struct->ewp);
 // ```
-// `LOSAT_X_PAIRPAR=0`, and `LOSAT_X_DEFAULT=0` with the switch set (the run that the variable
-// gave before the switch joined the set), leave the search to the reference frame loop, which
-// needs the worker's diagonal table (NCBI's `ewp`): the worker has it and drops it when the
-// batch's lookup table is released. There is no unit path to release. The report is NCBI's.
+// `LOSAT_X_PAIRPAR=0` leaves the search to the reference frame loop, which needs the worker's
+// diagonal table (NCBI's `ewp`): the worker has it and drops it when the batch's lookup table
+// is released. There is no unit path to release. The report is NCBI's.
 #[test]
 fn the_frame_loop_releases_the_tables_and_its_worker_table() {
     let expected = ncbi_report();
     let subject = fixture("short_hsp.subject.fna");
-    for frame_loop in [&[("LOSAT_X_PAIRPAR", "0")][..], &[DEFAULT_OFF, SWITCH][..]] {
-        for threads in THREADS {
-            let switches = [&[STATS][..], frame_loop].concat();
-            let (report, stderr) = tblastx(&subject, threads, &switches);
-            assert_eq!(report, expected, "{frame_loop:?} threads {threads}");
-            assert_eq!(
-                counters(&stderr),
-                [1, 1, 0, 0, 1],
-                "{frame_loop:?} threads {threads}:\n{stderr}"
-            );
-        }
+    for threads in THREADS {
+        let (report, stderr) = tblastx(&subject, threads, &[STATS, FRAME_LOOP]);
+        assert_eq!(report, expected, "threads {threads}");
+        assert_eq!(
+            counters(&stderr),
+            [1, 1, 0, 0, 1],
+            "threads {threads}:\n{stderr}"
+        );
     }
 }
 
@@ -211,9 +203,9 @@ fn the_frame_loop_releases_the_tables_and_its_worker_table() {
 // builds the full table as well and searches on the unit path alone, so no worker holds one.
 // In both the unit path is released before the merge of its lists (and before the frame loop
 // of the first shadow, which scans with the lookup table). Both shadows end without a
-// difference and the report is NCBI's. No variable names the switch: it is on by default.
+// difference and the report is NCBI's.
 #[test]
-fn the_shadows_of_the_unit_path_run_with_the_switch() {
+fn the_shadows_of_the_unit_path_run_with_the_release() {
     let expected = ncbi_report();
     let subject = fixture("short_hsp.subject.fna");
     for (shadow, expected_counters) in [
@@ -232,32 +224,6 @@ fn the_shadows_of_the_unit_path_run_with_the_switch() {
     }
 }
 
-// NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1604-1605
-// ```c
-// word_params = BlastInitialWordParametersFree(word_params);
-// s_BlastCoreAuxStructFree(aux_struct);
-// ```
-// With `LOSAT_X_SEEDRELEASE=0`, or with `LOSAT_X_DEFAULT=0` and no variable for the switch, the
-// tables live until the batch has been searched, as in NCBI: no SEEDRELEASE line is printed,
-// and the report is NCBI's. `LOSAT_X_SEEDRELEASE=0` wins over the default, and
-// `LOSAT_X_SEEDRELEASE=1` over `LOSAT_X_DEFAULT=0` (the frame-loop test above).
-#[test]
-fn the_switch_follows_its_variable_and_the_global_one() {
-    let expected = ncbi_report();
-    let subject = fixture("short_hsp.subject.fna");
-    for off in [SWITCH_OFF, DEFAULT_OFF] {
-        for threads in THREADS {
-            let (report, stderr) = tblastx(&subject, threads, &[STATS, off]);
-            assert_eq!(report, expected, "{off:?} threads {threads}");
-            assert_eq!(
-                stats_line(&stderr),
-                None,
-                "{off:?} threads {threads}:\n{stderr}"
-            );
-        }
-    }
-}
-
 // NCBI reference (598d8ae6): c++/src/algo/blast/core/blast_engine.c:1429-1432
 // ```c
 // if (seq_arg.seq->length < min_subj_seq_length) {
@@ -269,10 +235,10 @@ fn the_switch_follows_its_variable_and_the_global_one() {
 // searched: its seed stage ends without a scan), as the last record and between the others.
 // With one thread the subjects are searched in order by one worker; with four, by the pool.
 // The lookup table and the unit path are each released once per search, by the stage of the
-// last record that ends, and the report equals the report of the same search with the switch
-// off (see the file header for why this comparison is against LOSAT).
+// last record that ends, and every report equals the report of the same layout on the frame
+// loop at one thread (see the file header for why this comparison is against LOSAT).
 #[test]
-fn several_subjects_with_a_short_one_give_the_report_of_the_search_without_the_switch() {
+fn several_subjects_with_a_short_one_give_one_report_on_every_path() {
     let first = fasta_sequence(&fixture("short_hsp.subject.fna"));
     let second = fasta_sequence(&fixture("short_hsp.query.fna"));
     let third: String = first.chars().rev().collect();
@@ -302,14 +268,12 @@ fn several_subjects_with_a_short_one_give_the_report_of_the_search_without_the_s
     ];
     for (stem, records, serial_worker_tables) in &layouts {
         let subjects = TempFasta::new(stem, records);
-        for path in [&[][..], &[("LOSAT_X_PAIRPAR", "0")][..]] {
+        let (expected, _) = tblastx(&subjects.0, 1, &[STATS, FRAME_LOOP]);
+        assert!(!expected.is_empty(), "{stem}: no hits");
+        for path in [&[][..], &[FRAME_LOOP][..]] {
             let frame_loop = !path.is_empty();
             for threads in THREADS {
                 let what = format!("{stem} {path:?} threads {threads}");
-                let off = [&[SWITCH_OFF, STATS][..], path].concat();
-                let (expected, off_stderr) = tblastx(&subjects.0, threads, &off);
-                assert!(!expected.is_empty(), "{what}: no hits");
-                assert_eq!(stats_line(&off_stderr), None, "{what}:\n{off_stderr}");
                 let switches = [&[STATS][..], path].concat();
                 let (report, stderr) = tblastx(&subjects.0, threads, &switches);
                 assert_eq!(report, expected, "{what}");

@@ -101,11 +101,11 @@ fn without_shadow(stderr: &[u8]) -> Vec<u8> {
 const SUBJECT: &str = "snucl.fna";
 const DB: &str = "db/snucl";
 
-fn mode_args(mode: &str) -> [&'static str; 2] {
+fn mode_args<'a>(mode: &str, db: &'a str) -> [&'a str; 2] {
     if mode == "sub" {
         ["-subject", SUBJECT]
     } else {
-        ["-db", DB]
+        ["-db", db]
     }
 }
 
@@ -117,9 +117,22 @@ fn frozen(name: &str, extension: &str) -> Option<Vec<u8>> {
 /// wrote for `<stem>_<mode>_<tag>`; `query` and `extra` are the case's search, `env` its
 /// environment. The environment variable switches of the streaming are tried too.
 fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], rc: i32) {
+    equals_frozen_in(stem, query, DB, extra, env, rc, &["sub", "db"]);
+}
+
+/// `equals_frozen` for the `modes` given (`sub`: `-subject snucl.fna`; `db`: `-db <db>`).
+fn equals_frozen_in(
+    stem: &str,
+    query: &str,
+    db: &str,
+    extra: &[&str],
+    env: &[(&str, &str)],
+    rc: i32,
+    modes: &[&str],
+) {
     let dir = fixtures();
     for (format, tag) in [("17", "17"), ("17 SQ SR", "17SQSR")] {
-        for mode in ["sub", "db"] {
+        for &mode in modes {
             let name = format!("{stem}_{mode}_{tag}");
             let expected =
                 frozen(&name, "out").unwrap_or_else(|| panic!("{name}: no frozen bytes"));
@@ -129,7 +142,7 @@ fn equals_frozen(stem: &str, query: &str, extra: &[&str], env: &[(&str, &str)], 
                 rc.to_string(),
                 "{name}: the frozen status"
             );
-            let [flag, value] = mode_args(mode);
+            let [flag, value] = mode_args(mode, db);
             for threads in ["1", "4"] {
                 for (switch, shadow) in [
                     (None, false),
@@ -186,6 +199,107 @@ fn a_reader_error_in_the_first_batch_writes_nothing() {
 #[test]
 fn several_batches_write_one_document() {
     equals_frozen("batches", "q_multi3.fna", &[], BATCHES, 0);
+}
+
+/// `db/snucl_bt` is `snucl` and a third subject (`sn3`, random, no hit of any query here) whose stored
+/// title holds the byte 0xE9: NCBI reads no title for a subject without a hit, so a search that no
+/// query hits `sn3` in prints no message and writes the whole document. LOSAT refuses a stored title
+/// outside `' '..'~'` when a report shows it, and its streaming used to stay off for such a database
+/// (`Off::Titles`): outfmt 17 now streams (`sam_despite=titles`), one report call per batch, with the
+/// bytes of NCBI.
+#[test]
+fn a_stored_title_that_no_hit_reads_still_streams_the_document() {
+    equals_frozen_in(
+        "btnohit",
+        "q_multi3.fna",
+        "db/snucl_bt",
+        &[],
+        BATCHES,
+        0,
+        &["db"],
+    );
+    let dir = fixtures();
+    for format in ["17", "17 SQ SR"] {
+        let mut env = BATCHES.to_vec();
+        env.push(("LOSAT_X_STATS", "1"));
+        let output = run_in(
+            &dir,
+            &[
+                "blastn",
+                "-query",
+                "q_multi3.fna",
+                "-db",
+                "db/snucl_bt",
+                "-num_threads",
+                "1",
+                "-outfmt",
+                format,
+            ],
+            &env,
+        );
+        assert!(output.status.success(), "{format}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stats = stderr
+            .lines()
+            .find(|line| line.starts_with("[X_STATS] RPTSTREAM"))
+            .unwrap_or_else(|| panic!("{format}: no RPTSTREAM line in {stderr}"));
+        // Three queries in three batches, each batch written by its own report call; the
+        // switch acts (`off=none`) though the database has a title the reports would refuse.
+        assert!(
+            stats.contains(" batches=3 ")
+                && stats.contains(" off=none ")
+                && stats.contains(" sam_despite=titles"),
+            "{format}: {stats}"
+        );
+    }
+}
+
+/// The stored title of `sn3` is read by the second batch (`q_bt2.fna`: `qn1`, then a part of `sn3`):
+/// LOSAT refuses it there (NCBI prints its `Bad char` messages and writes the document). The first
+/// batch's records are held, not written, so nothing is on standard output; the standard error and
+/// the status are those of the run that makes its reports after the search
+/// (`LOSAT_X_RPTSTREAM=0`), whatever the threads and the shadow.
+#[test]
+fn a_title_refusal_in_a_later_batch_writes_nothing() {
+    let dir = fixtures();
+    for format in ["17", "17 SQ SR"] {
+        for threads in ["1", "4"] {
+            let args = [
+                "blastn",
+                "-query",
+                "q_bt2.fna",
+                "-db",
+                "db/snucl_bt",
+                "-num_threads",
+                threads,
+                "-outfmt",
+                format,
+            ];
+            let mut env = BATCHES.to_vec();
+            env.push(("LOSAT_X_RPTSTREAM", "0"));
+            let off = run_in(&dir, &args, &env);
+            let what = format!("{format} threads {threads}");
+            assert_eq!(off.status.code(), Some(1), "{what}: status");
+            assert!(off.stdout.is_empty(), "{what}: the off path wrote bytes");
+            let message = String::from_utf8_lossy(&off.stderr);
+            assert!(
+                message.contains("database sequence 2 has a stored title"),
+                "{what}: {message}"
+            );
+            for switch in [None, Some(("LOSAT_X_RPTSTREAMSHADOW", "1"))] {
+                let mut env = BATCHES.to_vec();
+                env.extend(switch);
+                let streamed = run_in(&dir, &args, &env);
+                assert_eq!(streamed.status.code(), Some(1), "{what} {switch:?}: status");
+                assert!(streamed.stdout.is_empty(), "{what} {switch:?}: wrote bytes");
+                assert_eq!(
+                    String::from_utf8_lossy(&without_shadow(&streamed.stderr)),
+                    message,
+                    "{what} {switch:?}: stderr"
+                );
+            }
+        }
+    }
 }
 
 /// A batch of records whose `-query_loc` range starts past their end (here the second query, ten
@@ -261,7 +375,7 @@ fn an_empty_query_file_writes_nothing() {
     fs::write(&empty, b"").unwrap();
     for format in ["17", "17 SQ SR"] {
         for mode in ["sub", "db"] {
-            let [flag, value] = mode_args(mode);
+            let [flag, value] = mode_args(mode, DB);
             let output = run_in(
                 &dir,
                 &[
@@ -312,7 +426,7 @@ fn a_file_sink_holds_the_document_of_standard_output() {
     ] {
         for format in ["17", "17 SQ SR"] {
             for mode in ["sub", "db"] {
-                let [flag, value] = mode_args(mode);
+                let [flag, value] = mode_args(mode, DB);
                 let file = scratch.join("report.sam");
                 let mut args = vec!["blastn", "-query", query, flag, value];
                 args.extend_from_slice(extra);

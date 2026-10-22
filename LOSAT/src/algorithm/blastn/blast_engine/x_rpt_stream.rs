@@ -94,6 +94,15 @@
 //! them); `-verbose` and the debug output (`x_debug_output`, the list LOSAT_X_QBATCHPAR uses); and
 //! the refusals above. The command line (`-out` file or standard output) and ABI v1 are streamed.
 //!
+//! Outfmt 17 (SAM) streams also where a stored title or ambiguity data of the database could be
+//! refused in a later batch (`Off::Titles`, `Off::Ambiguity`; `Ready::sam_despite`): the document
+//! is written only by `SamDocument::finish`, which no refusal of LOSAT's follows, and a SAM report
+//! call writes nothing to standard error (`writes_query_warnings`), so a refusal in a later batch
+//! still finds nothing written, as in the one call after the loop (the shadow compares both).
+//! `finish_sam` at NCBI's five error sites writes the document of the batches before as in the off
+//! path. Memory: the records of the batches before are rendered text, and each batch's lists are
+//! dropped, as for any streamed search.
+//!
 //! Memory: a batch's lists, flags, masks, Karlin-Altschul blocks and search spaces are dropped
 //! after its write, and so are its queries' warnings. Kept for the whole search, as without the
 //! switch: one (empty) warnings slot per query, and with `-db` the stored title of every distinct
@@ -184,9 +193,11 @@ pub(super) enum Off {
     SearchSpace,
     /// A subject of the set whose tabular id LOSAT refuses.
     SubjectIds,
-    /// A database whose definition lines do not all read as the reports read them.
+    /// A database whose definition lines do not all read as the reports read them (outfmt 17
+    /// streams all the same).
     Titles,
-    /// A database sequence whose ambiguity data the traceback cannot decode.
+    /// A database sequence whose ambiguity data the traceback cannot decode (outfmt 17 streams
+    /// all the same).
     Ambiguity,
 }
 
@@ -243,6 +254,9 @@ struct Shadow {
 struct Ready {
     cache: Option<SubjectCache>,
     one_batch: bool,
+    /// Outfmt 17 streams although the stored data of a later batch could be refused by LOSAT
+    /// (`Off::Titles` or `Off::Ambiguity`; the module doc has the reason).
+    sam_despite: Option<Off>,
 }
 
 /// The streaming of one search's reports: whether it acts (`off`), what it has written, and the
@@ -254,6 +268,9 @@ pub(super) struct Stream {
     /// rendered bytes until the last call, or an NCBI error, writes it).
     sam: Option<SamDocument>,
     shadow: Option<Shadow>,
+    /// Why the stored data of the database could be refused in a later batch, where outfmt 17
+    /// streams all the same (`Ready::sam_despite`).
+    sam_despite: Option<Off>,
     batches: u64,
     queries: usize,
     one_batch: bool,
@@ -290,9 +307,13 @@ impl Stream {
             pool,
         );
         let check_seconds = started.elapsed().as_secs_f64();
-        let (off, cache, one_batch) = match checked {
-            Ok(Ready { cache, one_batch }) => (None, cache, one_batch),
-            Err(off) => (Some(off), None, false),
+        let (off, cache, one_batch, sam_despite) = match checked {
+            Ok(Ready {
+                cache,
+                one_batch,
+                sam_despite,
+            }) => (None, cache, one_batch, sam_despite),
+            Err(off) => (Some(off), None, false, None),
         };
         let shadow = (mode() == 2 && off.is_none()).then(|| Shadow {
             outfmts: outputs
@@ -317,6 +338,7 @@ impl Stream {
             cache,
             sam,
             shadow,
+            sam_despite,
             batches: 0,
             queries: 0,
             one_batch,
@@ -492,11 +514,12 @@ impl Drop for Stream {
         let off = self.off.map_or("none", Off::name);
         if std::env::var_os("LOSAT_X_STATS").is_some() {
             eprintln!(
-                "[X_STATS] RPTSTREAM batches={} queries={} off={off} one_batch={} check_s={:.4}",
+                "[X_STATS] RPTSTREAM batches={} queries={} off={off} one_batch={} check_s={:.4} sam_despite={}",
                 self.batches,
                 self.queries,
                 u8::from(self.one_batch),
-                self.check_seconds
+                self.check_seconds,
+                self.sam_despite.map_or("none", Off::name)
             );
         }
         if mode() == 2 {
@@ -670,6 +693,7 @@ fn check(
         return Ok(Ready {
             cache: None,
             one_batch: true,
+            sam_despite: None,
         });
     }
     // The scoring of `search_query_batch` (`context_blocks`: `NuclValues::gapped` fails exactly
@@ -739,13 +763,31 @@ fn check(
             Ok(Ready {
                 cache: Some(SubjectCache { ids, titles, masks }),
                 one_batch: false,
+                sam_despite: None,
             })
         }
         SubjectSource::Database(db) => match database::x_streaming_refusal(db, pool) {
+            // Outfmt 17 writes no byte before its end (`SamDocument::finish`, which no refusal of
+            // LOSAT's follows) and nothing to standard error with its report calls (a SAM format
+            // writes no query warnings, `writes_query_warnings`; the shadow compares them), so a
+            // refusal in a later batch (a stored title, ambiguity data) still finds nothing
+            // written, as in the one call after the loop: the stream acts.
+            Some(off @ (Off::Titles | Off::Ambiguity))
+                if output_formats
+                    .iter()
+                    .any(|format| format.sam_spec().is_some()) =>
+            {
+                Ok(Ready {
+                    cache: None,
+                    one_batch: false,
+                    sam_despite: Some(off),
+                })
+            }
             Some(off) => Err(off),
             None => Ok(Ready {
                 cache: None,
                 one_batch: false,
+                sam_despite: None,
             }),
         },
     }

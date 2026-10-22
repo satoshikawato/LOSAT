@@ -174,6 +174,9 @@ fn masks_with_probe<P: Fn() + Sync>(
     mode: u8,
     probe: &P,
 ) -> Vec<Vec<MaskedInterval>> {
+    if mode != 0 {
+        crate::utils::xreach::x_reach!("LOSAT_X_QDUSTPAR", on_pool(pool, seqs.len()));
+    }
     if mode == 0 || !on_pool(pool, seqs.len()) {
         return serial(seqs, level, window, linker);
     }

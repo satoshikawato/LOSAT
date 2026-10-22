@@ -1450,14 +1450,23 @@ pub(super) fn run(
     ) || x.subject_masked
         || !x.one_subject_owner
     {
+        if !shadow {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+        }
         return false;
     }
     let threads = match pool_threads() {
         Some(threads) => threads,
         // the shadow also runs without a pool (strips on this thread)
         None if shadow => 1,
-        None => return false,
+        None => {
+            crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", false);
+            return false;
+        }
     };
+    if !shadow {
+        crate::utils::xreach::x_reach!("LOSAT_X_PAIRPAR", true);
+    }
     let timing = if shadow { None } else { x.timing };
     let timed = timing.is_some() || std::env::var_os("LOSAT_TIMING").is_some();
     let t_start = timed.then(std::time::Instant::now);

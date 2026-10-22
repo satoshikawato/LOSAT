@@ -453,6 +453,9 @@ fn buffer_with_probe<P: Fn() + Sync>(
     mode: u8,
     probe: &P,
 ) -> Vec<u8> {
+    if mode != 0 {
+        crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, query_letters.len()));
+    }
     if mode == 0 || !on_pool(pool, query_letters.len()) {
         return serial_buffer(query_letters, context_offsets, query_concat_length);
     }
@@ -508,6 +511,9 @@ fn blocks_with_probe<P: Fn() + Sync>(
     mode: u8,
     probe: &P,
 ) -> Vec<Option<KarlinParams>> {
+    if mode != 0 {
+        crate::utils::xreach::x_reach!("LOSAT_X_QPREPPAR", on_pool(pool, contexts.len()));
+    }
     if mode == 0 || !on_pool(pool, contexts.len()) {
         return serial_blocks(contexts, spec);
     }

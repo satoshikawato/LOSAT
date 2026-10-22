@@ -30,6 +30,9 @@ pub(crate) mod x_subject_store;
 // NCBI c++/src/algo/blast/api/dust_filter.cpp:92-102,171-180: the DUST masks of a query batch, one
 // fresh masker per query. EXPERIMENT (LOSAT_X_QDUSTPAR): made on the search pool, in query order.
 pub(crate) mod x_query_dust_par;
+// NCBI c++/src/algo/blast/core/na_ungapped.c:149-242 (`s_NuclUngappedExtendExact`). EXPERIMENT
+// (LOSAT_X_BNUNGAPCOUNT): the same loops with their step counts worked out first.
+pub(crate) mod x_ungap_count;
 // NCBI reference: ncbi-blast/c++/include/algo/blast/core/blast_hits.h:125-166
 // ```c
 // typedef struct BlastHSP {
@@ -56,3 +59,6 @@ pub use x_subject_store::print_summary as x_subject_store_print_summary;
 // EXPERIMENT (LOSAT_X_QDUSTPARSHADOW): the summary line `main` prints at exit. No NCBI counterpart:
 // it prints counters and changes no value NCBI computes.
 pub use x_query_dust_par::print_summary as x_query_dust_par_print_summary;
+// EXPERIMENT (LOSAT_X_BNUNGAPCOUNTSHADOW): the summary line `main` prints at exit. No NCBI
+// counterpart: it prints a counter and changes no value NCBI computes.
+pub use x_ungap_count::print_summary as x_ungap_count_print_summary;

@@ -270,6 +270,7 @@ export LOSAT_X_BNDBSTREAM=1
 export LOSAT_X_BNFEWSUBJ=1
 export LOSAT_X_BNSTORE=1
 export LOSAT_X_BNSTREAM=1
+export LOSAT_X_BNUNGAPCOUNT=1
 export LOSAT_X_BPCLUT=1
 export LOSAT_X_BPCOMPOREUSE=1
 export LOSAT_X_BPDBCUT=1
@@ -840,6 +841,19 @@ Same values, faster computation:
   31,168 cDNAs against the same subject x0.822 at one thread, x0.939 at 16; blastn of the same x0.949
   / x0.960; max RSS unchanged. `=0` x1.000-1.005 of the binary before (1.6 % more instructions on
   blastn-short: the binary search moved out of line behind the check for this form).
+- `LOSAT_X_BNUNGAPCOUNT=1` (blastn, speed; in the strict set from the pull request that added it,
+  2026-10-22; `=0` or `LOSAT_X_DEFAULT=0` runs the ported loops) the exact ungapped extension
+  (`s_NuclUngappedExtendExact`: blastn-short and other word sizes below 11, and the exact pass after the
+  approximate one reaches the reduced cutoff) with the step count of each direction worked out first:
+  `min(q_off, s_off)` to the left, `min(q_avail, s_avail)` to the right, the C loop conditions on
+  `(s, base)` written as those counts (`blastn/x_ungap_count.rs`, argument in its header). The same
+  steps, tests and results; the ported loops also tested the query offset against both ends (never true
+  within the counts) and bounds-checked the matrix cell, and their two-part loop condition mispredicted.
+  R8 (`LOSAT_X_CTXFAST` / `CTXO1` era): 167 cycles, 574 instructions and 3.10 branch misses a call
+  against NCBI's 135 / 497 / 2.56. Shadow: `LOSAT_X_BNUNGAPCOUNTSHADOW=1` (implies the switch) runs
+  both loops on every call and stops on the first difference; at exit `[X_SHADOW] BNUNGAPCOUNT
+  compared=N`.
+  Measured: M_TBD
 - `LOSAT_X_LUTARENA=1` protein lookup-table chains carved from one arena per table.
 - `LOSAT_X_MBDELAY=1`, `LOSAT_X_MBBATCH=64` megablast lookup construction touches (prefetches)
   hash cells ahead in batches of 64; same update order.

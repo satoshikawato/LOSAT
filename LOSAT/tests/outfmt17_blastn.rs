@@ -39,7 +39,7 @@ fn temp_dir(stem: &str) -> PathBuf {
 
 /// LOSAT with no `LOSAT_*`, `NCBI*` or `BLAST*` variable of the caller, an empty home, and `env`.
 fn command(env: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_LOSAT"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_losat"));
     for (name, _) in std::env::vars_os() {
         let text = name.to_string_lossy();
         if text.starts_with("LOSAT_") && text != "LOSAT_X_DEFAULT" || text.starts_with("NCBI") {
@@ -358,7 +358,7 @@ fn the_pg_line_shows_the_command_line() {
     let pg = text.lines().find(|line| line.starts_with("@PG")).unwrap();
     let expected = format!(
         "@PG\tID:0\tVN:2.17.0+\tCL:{} blastn -query qnucl_valid.fna -subject {SUBJECT} -outfmt 17 SQ \tPN:blastn",
-        env!("CARGO_BIN_EXE_LOSAT")
+        env!("CARGO_BIN_EXE_losat")
     );
     assert_eq!(pg, expected);
 }
